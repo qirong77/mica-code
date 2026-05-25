@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { systemPrompt } from '../prompts/index';
 import { executeTool, toolDefinitions } from '../tools/index';
-import { contextSizeAtom, estimateContextSize, messagesAtom } from '../store/conversation.js';
+import { messagesAtom } from '../store/conversation.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
@@ -92,7 +92,6 @@ class AgentTurn {
     const finalMessage = await stream.finalMessage();
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
     messagesAtom.set([...messages, finalMessage]);
-    contextSizeAtom.set(estimateContextSize([...messages, finalMessage]));
     appendSystemLog(
       `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
     );
@@ -170,13 +169,6 @@ class AgentTurn {
           });
         }
       }
-
-      const withToolResults = [
-        ...messagesAtom.get(),
-        { role: 'user', content: toolResults } as Anthropic.MessageParam,
-      ];
-      messagesAtom.set(withToolResults);
-      contextSizeAtom.set(estimateContextSize(withToolResults));
     }
 
     if (!hasToolUse) {
@@ -189,7 +181,6 @@ class AgentTurn {
     appendSystemLog('Agent run 开始');
     const updated = [...messagesAtom.get(), { role: 'user', content: userInput } as Anthropic.MessageParam];
     messagesAtom.set(updated);
-    contextSizeAtom.set(estimateContextSize(updated));
     while (true) {
       const result = await this.executeSingleIteration();
       onIteration?.(result);

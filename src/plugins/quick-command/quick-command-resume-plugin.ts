@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
@@ -8,6 +8,7 @@ export type { SessionMeta };
 
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
+const MAX_SESSIONS = 50;
 
 async function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) {
@@ -119,7 +120,21 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       s.id === id ? { ...s, updatedAt: Date.now() } : s,
     );
     const sorted = updated.sort((a, b) => b.updatedAt - a.updatedAt);
-    this.atoms.sessionsIndex.set(sorted);
+    const capped = sorted.slice(0, MAX_SESSIONS);
+
+    if (capped.length < sorted.length) {
+      await this._pruneSessions(sorted.slice(MAX_SESSIONS));
+    }
+
+    this.atoms.sessionsIndex.set(capped);
+  }
+
+  private async _pruneSessions(removed: SessionMeta[]) {
+    await Promise.all(
+      removed.map((s) =>
+        unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {}),
+      ),
+    );
   }
 
   private _showResumeList() {
