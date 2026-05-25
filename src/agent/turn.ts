@@ -108,19 +108,40 @@ class AgentTurn {
         });
       }, 200);
 
+      const SLOW_TOOL_THRESHOLD_MS = 3000;
+      const toolTimers = new Map<string, { name: string; startTime: number; lastLogTime: number }>();
+      const slowToolTimer = setInterval(() => {
+        const now = Date.now();
+        for (const [id, info] of toolTimers) {
+          const elapsed = now - info.startTime;
+          if (elapsed >= SLOW_TOOL_THRESHOLD_MS && now - info.lastLogTime >= SLOW_TOOL_THRESHOLD_MS) {
+            appendSystemLog(`工具 ${info.name} 已执行 ${(elapsed / 1000).toFixed(1)}s`);
+            info.lastLogTime = now;
+          }
+        }
+      }, SLOW_TOOL_THRESHOLD_MS);
+
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       const settled = await Promise.allSettled(
         completedToolUses.map(async (tool) => {
+          const startTime = Date.now();
+          toolTimers.set(tool.id, { name: tool.name, startTime, lastLogTime: 0 });
           const result = await executeTool(tool.name, tool.input, {
             onChunk: (chunk) => {
               this.events.emit('log:chunk', { toolUseId: tool.id, chunk });
             },
           });
+          const elapsed = Date.now() - startTime;
+          toolTimers.delete(tool.id);
+          if (elapsed >= SLOW_TOOL_THRESHOLD_MS) {
+            appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(elapsed / 1000).toFixed(1)}s`);
+          }
           return { tool, result };
         }),
       );
 
       clearInterval(timer);
+      clearInterval(slowToolTimer);
 
       for (let i = 0; i < settled.length; i++) {
         const item = settled[i];
