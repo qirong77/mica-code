@@ -9,8 +9,9 @@ export interface DropdownItem {
   suffix?: { text: string; color?: string };
 }
 
-const MAX_LABEL_COL = 40;
-const MIN_LABEL_COL = 20;
+const MIN_LABEL_COL = 18;
+const GAP = 3;
+const SIDE_MARGIN = 4;
 
 function truncateToWidth(str: string, maxWidth: number): string {
   if (stringWidth(str) <= maxWidth) return str;
@@ -38,8 +39,25 @@ export function CommandDropdown({
 }): React.ReactNode {
   const labelWidth = useMemo(() => {
     if (items.length === 0) return MIN_LABEL_COL;
-    const maxW = Math.max(...items.map((it) => stringWidth(it.label)));
-    return Math.max(MIN_LABEL_COL, Math.min(MAX_LABEL_COL, maxW));
+
+    const maxLabelW = Math.max(...items.map((it) => stringWidth(it.label)));
+    const terminalW = process.stdout.columns || 80;
+    const availableW = terminalW - SIDE_MARGIN;
+
+    const maxRightW = Math.max(
+      ...items.map((it) => {
+        const descW = it.description ? stringWidth(it.description) : 0;
+        const suffixW = it.suffix ? stringWidth(it.suffix.text) + 1 : 0;
+        return descW + suffixW;
+      }),
+    );
+
+    if (maxLabelW + GAP + maxRightW <= availableW) {
+      return Math.max(MIN_LABEL_COL, maxLabelW);
+    }
+
+    const labelBudget = Math.floor(availableW * 0.48);
+    return Math.max(MIN_LABEL_COL, Math.min(labelBudget, maxLabelW));
   }, [items]);
 
   if (items.length === 0) {
@@ -51,7 +69,7 @@ export function CommandDropdown({
   }
 
   return (
-    <Box flexDirection="column" >
+    <Box flexDirection="column" paddingX={Math.floor(SIDE_MARGIN / 2)}>
       {title && (
         <Box paddingBottom={1}>
           <Text dimColor>{title}</Text>
@@ -62,7 +80,7 @@ export function CommandDropdown({
         const displayLabel = truncateToWidth(item.label, labelWidth);
         return (
           <Box key={item.key}>
-            <Box width={labelWidth + 2}>
+            <Box width={labelWidth + GAP}>
               <Text color={isSelected ? 'claude' : 'inactive'}>{displayLabel}</Text>
             </Box>
             <Box>
