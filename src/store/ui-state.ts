@@ -67,6 +67,8 @@ export const terminalInput = {
 
 export const quickCommandsAtom = atom<Command[]>([]);
 
+export const systemLogVisibleAtom = atom(false);
+
 export const session = {
   index: atom<SessionMeta[]>([]),
   currentId: atom<string>(''),

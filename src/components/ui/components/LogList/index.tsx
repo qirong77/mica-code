@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
-import { logTextAtom, toolCallsAtom } from '../../../../store/ui-state.js';
+import { logTextAtom, toolCallsAtom, systemLogVisibleAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
 
 const MIN_LINES = 5;
@@ -65,9 +65,10 @@ export const LogList = React.memo(function LogList(): React.ReactNode {
   const text = useSchedulState(logTextAtom);
   const toolCalls = useSchedulState(toolCallsAtom);
   const systemLines = useSchedulState(systemLogAtom);
+  const systemLogVisible = useSchedulState(systemLogVisibleAtom);
 
   const hasAgentLog = text.length > 0 || toolCalls.length > 0;
-  const hasSystemLog = systemLines.length > 0;
+  const hasSystemLog = systemLogVisible && systemLines.length > 0;
   if (!hasAgentLog && !hasSystemLog) return null;
 
   return (

@@ -12,11 +12,13 @@ import { QuickCommandRewindPlugin } from './plugins/quick-command/quick-command-
 import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.js';
 import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.js';
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
+import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
 
 
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandDebugPlugin());
+await MicaAgent.usePlugin(new QuickCommandLogTogglePlugin());
 await MicaAgent.usePlugin(new QuickCommandLogPlugin());
 await MicaAgent.usePlugin(new QuickCommandStatusPlugin());
 await MicaAgent.usePlugin(new QuickCommandModelPlugin());
