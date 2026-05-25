@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
@@ -8,7 +8,6 @@ export type { SessionMeta };
 
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
-const MAX_SESSIONS = 100;
 
 async function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) {
@@ -120,21 +119,7 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       s.id === id ? { ...s, updatedAt: Date.now() } : s,
     );
     const sorted = updated.sort((a, b) => b.updatedAt - a.updatedAt);
-    const capped = sorted.slice(0, MAX_SESSIONS);
-
-    if (capped.length < sorted.length) {
-      await this._pruneSessions(sorted.slice(MAX_SESSIONS));
-    }
-
-    this.atoms.sessionsIndex.set(capped);
-  }
-
-  private async _pruneSessions(removed: SessionMeta[]) {
-    await Promise.all(
-      removed.map((s) =>
-        unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {}),
-      ),
-    );
+    this.atoms.sessionsIndex.set(sorted);
   }
 
   private _showResumeList() {
@@ -142,20 +127,13 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
     const items: DropdownItem[] = [];
 
-    if (idx.length > 0) {
+    const sorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const s of sorted) {
       items.push({
-        key: '__clear__',
-        label: '清空所有会话',
-        description: '删除本地记录',
+        key: s.id,
+        label: s.title,
+        suffix: { text: formatTime(s.updatedAt) },
       });
-      const sorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
-      for (const s of sorted) {
-        items.push({
-          key: s.id,
-          label: s.title,
-          suffix: { text: formatTime(s.updatedAt) },
-        });
-      }
     }
 
     this.agent.ui.DropDown.atomData.dropdown.set({
@@ -169,37 +147,9 @@ export class QuickCommandResumePlugin extends MicaPlugin {
     const handler = (item: any) => {
       if (!item) return;
       this.agent.ui.DropDown.emitter.off('select', handler);
-      if (item.key === '__clear__') {
-        void this._clearAllSessions();
-      } else {
-        this._switchToSession(item.key);
-      }
+      this._switchToSession(item.key);
     };
     this.agent.ui.DropDown.emitter.on('select', handler);
-  }
-
-  private async _clearAllSessions() {
-    const idx = [...this.atoms.sessionsIndex.get()];
-    if (idx.length === 0) {
-      this.showMessage('没有可清空的会话');
-      return;
-    }
-
-    this._suppressAutoSave = true;
-    if (this._pendingAutoSave) clearTimeout(this._pendingAutoSave);
-
-    await Promise.all(
-      idx.map((s) =>
-        unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {}),
-      ),
-    );
-
-    this._currentSessionId = null;
-    this.atoms.currentSessionId.set('');
-    this.atoms.sessionsIndex.set([]);
-    this._suppressAutoSave = false;
-
-    this.showMessage(`已清空 ${idx.length} 个本地会话`);
   }
 
   private async _switchToSession(sessionId: string) {

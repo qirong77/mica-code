@@ -74,7 +74,7 @@ export function WorkingStatus() {
       </Box>
       <Box flexShrink={0} paddingRight={4}>
         <Text color={C.dim} wrap="wrap">
-          {modelValue} · {effort}{contextSize > 0 ? ` · ${contextSize}KB` : ''}
+          {modelValue} · {effort}{contextSize > 0 ? ` · ${contextSize} tokens` : ''}
         </Text>
       </Box>
     </Box>

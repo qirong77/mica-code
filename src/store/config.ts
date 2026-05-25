@@ -30,7 +30,7 @@ export const api = {
 
 export const model = {
   atom: createPersistedAtom('model', process.env.ANTHROPIC_MODEL || 'deepseek-v4-flash'),
-  maxTokens: atom(Number(process.env.ANTHROPIC_MAX_TOKENS) || 16384),
+  maxTokens: atom(Number(process.env.ANTHROPIC_MAX_TOKENS) || 4096),
   effort: createPersistedAtom('effort', 'low' as EffortLevel),
   options: atom<ModelOption[]>([
     { name: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
