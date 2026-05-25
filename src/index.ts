@@ -9,6 +9,7 @@ import { QuickCommandReviewPlugin } from './plugins/quick-command/quick-command-
 import { QuickCommandRenamePlugin } from './plugins/quick-command/quick-command-rename-plugin.js';
 import { QuickCommandExitPlugin } from './plugins/quick-command/quick-command-exit-plugin.js';
 import { QuickCommandRewindPlugin } from './plugins/quick-command/quick-command-rewind-plugin.js';
+import { QuickCommandClearPlugin } from './plugins/quick-command/quick-command-clear-plugin.js';
 import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.js';
 import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.js';
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
@@ -28,6 +29,7 @@ await MicaAgent.usePlugin(new QuickCommandReviewPlugin());
 await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
 await MicaAgent.usePlugin(new QuickCommandExitPlugin());
 await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
+await MicaAgent.usePlugin(new QuickCommandClearPlugin());
 
 
 MicaAgent.run();
