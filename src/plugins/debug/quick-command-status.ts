@@ -32,7 +32,7 @@ export class QuickCommandStatusPlugin extends MicaPlugin {
           `Messages: ${messages.length}`,
         ];
 
-        this.showMessage(lines.join('\n'), 0);
+        this.showMessage(lines.join('\n'), 5000);
       },
     });
   }

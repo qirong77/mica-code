@@ -23,6 +23,7 @@ export type AgentTurnEvents = {
 
 export interface IterationResult {
   hasToolUse: boolean;
+  wasTruncated: boolean;
   finalMessage: Anthropic.Message;
 }
 
@@ -89,10 +90,11 @@ class AgentTurn {
     });
 
     const finalMessage = await stream.finalMessage();
+    const wasTruncated = finalMessage.stop_reason === 'max_tokens';
     messagesAtom.set([...messages, finalMessage]);
     contextSizeAtom.set(estimateContextSize([...messages, finalMessage]));
     appendSystemLog(
-      `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}`,
+      `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
     );
 
     if (completedToolUses.length > 0) {
@@ -159,7 +161,7 @@ class AgentTurn {
     if (!hasToolUse) {
       this.events.emit('status', { type: 'idle' });
     }
-    return { hasToolUse, finalMessage };
+    return { hasToolUse, wasTruncated, finalMessage };
   }
 
   private async _coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
@@ -170,11 +172,11 @@ class AgentTurn {
     while (true) {
       const result = await this.executeSingleIteration();
       onIteration?.(result);
-      if (!result.hasToolUse) {
+      if (!result.hasToolUse && !result.wasTruncated) {
         appendSystemLog('Agent run 结束（无待执行工具）');
         return;
       }
-      appendSystemLog('继续下一轮迭代（存在工具调用）');
+      appendSystemLog(`继续下一轮迭代（${result.wasTruncated ? '响应被截断' : '存在工具调用'}）`);
     }
   }
 
