@@ -1,14 +1,14 @@
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
 import { session, type DropdownItem, type SessionMeta } from '../../store/ui-state.js';
 
-// Re-export for backward compatibility
 export type { SessionMeta };
 
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
+const MAX_SESSIONS = 100;
 
 async function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) {
@@ -37,9 +37,7 @@ function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-
-
-export class QuickCommandSessionPlugin extends MicaPlugin {
+export class QuickCommandResumePlugin extends MicaPlugin {
   private _currentSessionId: string | null = null;
   private _autoSaveUnsub: (() => void) | null = null;
   private _pendingAutoSave: ReturnType<typeof setTimeout> | null = null;
@@ -60,7 +58,7 @@ export class QuickCommandSessionPlugin extends MicaPlugin {
 
     this.addQuickCommand({
       name: 'resume',
-      description: '保存/恢复对话',
+      description: '恢复历史对话',
       action: () => {
         this._showResumeList();
       },
@@ -72,24 +70,24 @@ export class QuickCommandSessionPlugin extends MicaPlugin {
   private _startAutoSave() {
     this._autoSaveUnsub = this.atoms.messages.listen((messages) => {
       if (this._suppressAutoSave) return;
-      if (!this._currentSessionId || messages.length === 0) return;
+      if (messages.length === 0) return;
+
+      if (!this._currentSessionId) {
+        this._createAutoSession();
+      }
 
       if (this._pendingAutoSave) clearTimeout(this._pendingAutoSave);
       this._pendingAutoSave = setTimeout(() => {
-        this._persistMessages(this._currentSessionId!, messages);
-        this._updateSessionTimestamp(this._currentSessionId!);
+        if (!this._currentSessionId) return;
+        this._persistMessages(this._currentSessionId, messages);
+        this._updateSessionTimestamp(this._currentSessionId);
       }, 500);
     });
   }
 
-  private async _saveSession() {
-    const messages = this.atoms.messages.get();
-    if (messages.length === 0) {
-      this.showMessage('没有对话可保存');
-      return;
-    }
-
+  private _createAutoSession() {
     const now = Date.now();
+    const messages = this.atoms.messages.get();
     const firstUserMsg = messages.find((m) => m.role === 'user');
     const title = firstUserMsg && typeof firstUserMsg.content === 'string'
       ? firstUserMsg.content.slice(0, 60)
@@ -103,14 +101,10 @@ export class QuickCommandSessionPlugin extends MicaPlugin {
       updatedAt: now,
     };
 
-    await this._persistMessages(id, messages);
-
     const idx = [...this.atoms.sessionsIndex.get(), meta];
     this.atoms.sessionsIndex.set(idx);
     this.atoms.currentSessionId.set(id);
     this._currentSessionId = id;
-
-    this.showMessage(`会话已保存: ${title}`);
   }
 
   private async _persistMessages(id: string, messages: readonly any[]) {
@@ -125,15 +119,28 @@ export class QuickCommandSessionPlugin extends MicaPlugin {
     const updated = idx.map((s) =>
       s.id === id ? { ...s, updatedAt: Date.now() } : s,
     );
-    this.atoms.sessionsIndex.set(updated);
+    const sorted = updated.sort((a, b) => b.updatedAt - a.updatedAt);
+    const capped = sorted.slice(0, MAX_SESSIONS);
+
+    if (capped.length < sorted.length) {
+      await this._pruneSessions(sorted.slice(MAX_SESSIONS));
+    }
+
+    this.atoms.sessionsIndex.set(capped);
+  }
+
+  private async _pruneSessions(removed: SessionMeta[]) {
+    await Promise.all(
+      removed.map((s) =>
+        unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {}),
+      ),
+    );
   }
 
   private _showResumeList() {
     const idx = this.atoms.sessionsIndex.get();
 
-    const items: DropdownItem[] = [
-      { key: '__save__', label: '保存当前对话', description: '/session-save' },
-    ];
+    const items: DropdownItem[] = [];
 
     if (idx.length > 0) {
       items.push({
@@ -162,9 +169,7 @@ export class QuickCommandSessionPlugin extends MicaPlugin {
     const handler = (item: any) => {
       if (!item) return;
       this.agent.ui.DropDown.emitter.off('select', handler);
-      if (item.key === '__save__') {
-        this._saveSession();
-      } else if (item.key === '__clear__') {
+      if (item.key === '__clear__') {
         void this._clearAllSessions();
       } else {
         this._switchToSession(item.key);
