@@ -11,7 +11,7 @@ import { MicaPlugin } from '../MicaPlugin';
 export class QuickCommandLogPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
-      name: 'session-export',
+      name: 'debug-session-export',
       description: '导出会话记录到当前路径',
       action: async () => {
         const rawMessages = this.atoms.messages.get();
