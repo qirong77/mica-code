@@ -1,22 +1,28 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
 import { logTextAtom, toolCallsAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
 
-const MAX_LINES = 8;
+const MIN_LINES = 5;
 const MAX_TOOL_CALLS = 3;
+
+function useLogHeight(): number {
+  const { rows } = useTerminalSize();
+  return Math.max(Math.floor(rows / 2), MIN_LINES);
+}
 
 function AgentLogPanel(): React.ReactNode {
   const text = useSchedulState(logTextAtom);
   const toolCalls = useSchedulState(toolCallsAtom);
+  const maxLines = useLogHeight();
 
   if (text.length > 0) {
     const lines = text.split('\n');
-    const display = lines.length > MAX_LINES ? lines.slice(-MAX_LINES).join('\n') : text;
+    const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : text;
 
     return (
-      <Box flexDirection="column" height={MAX_LINES}>
+      <Box flexDirection="column" height={maxLines}>
         <Text dimColor>{display}</Text>
       </Box>
     );
@@ -42,13 +48,14 @@ function AgentLogPanel(): React.ReactNode {
 
 function SystemLogPanel(): React.ReactNode {
   const lines = useSchedulState(systemLogAtom);
+  const maxLines = useLogHeight();
   if (lines.length === 0) return null;
 
   const display =
-    lines.length > MAX_LINES ? lines.slice(-MAX_LINES).join('\n') : lines.join('\n');
+    lines.length > maxLines ? lines.slice(-maxLines).join('\n') : lines.join('\n');
 
   return (
-    <Box flexDirection="column" height={MAX_LINES}>
+    <Box flexDirection="column" height={maxLines}>
       <Text dimColor>{display}</Text>
     </Box>
   );
