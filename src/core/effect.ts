@@ -1,5 +1,5 @@
-import { contextSizeAtom, estimateContextSize, messagesAtom } from "src/store/conversation";
+import { contextSizeAtom, estimateContextSize, messagesAtom } from '../store/conversation.js';
 
 messagesAtom.subscribe((messages) => {
-    contextSizeAtom.set(estimateContextSize([...messages]));
+  contextSizeAtom.set(estimateContextSize([...messages]));
 });

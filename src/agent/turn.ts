@@ -169,6 +169,12 @@ class AgentTurn {
           });
         }
       }
+
+      const withToolResults = [
+        ...messagesAtom.get(),
+        { role: 'user', content: toolResults } as Anthropic.MessageParam,
+      ];
+      messagesAtom.set(withToolResults);
     }
 
     if (!hasToolUse) {

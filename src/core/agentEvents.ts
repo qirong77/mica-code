@@ -8,50 +8,9 @@ import type { WorkingStatus } from '../store/ui-state.js';
 import { ui } from '../components/ui/index.js';
 import { getToolDisplayText } from '../tools/index.js';
 
-function formatStatusLog(status: WorkingStatus): string {
-  switch (status.type) {
-    case 'idle':
-      return '状态：空闲';
-    case 'connecting':
-      return '状态：连接 API';
-    case 'thinking':
-      return '状态：思考中';
-    case 'streaming':
-      return '状态：流式输出';
-    case 'calling_tool':
-      return status.elapsedMs != null
-        ? `状态：执行工具 (${(status.elapsedMs / 1000).toFixed(1)}s)`
-        : '状态：执行工具';
-    case 'completed':
-      return status.elapsedMs != null
-        ? `状态：完成 (${(status.elapsedMs / 1000).toFixed(1)}s)`
-        : '状态：完成';
-    case 'error':
-      return `状态：错误${status.message ? ` — ${status.message}` : ''}`;
-    default:
-      return '状态：未知';
-  }
-}
-
 type StreamingMessage = Anthropic.MessageParam & { status?: 'streaming' };
 
-let initialized = false;
-
-function shouldLogStatus(status: WorkingStatus, prev: WorkingStatus | null): boolean {
-  if (!prev || status.type !== prev.type) return true;
-  if (status.type === 'calling_tool' && prev.type === 'calling_tool') {
-    return prev.elapsedMs == null && status.elapsedMs != null;
-  }
-  if (status.type === 'error' && prev.type === 'error') {
-    return status.message !== prev.message;
-  }
-  return false;
-}
-
 export function setupAgentEvents() {
-  if (initialized) return;
-  initialized = true;
-
   let lastStatus: WorkingStatus | null = null;
   const logBuffers = new Map<string, string[]>();
 
@@ -186,4 +145,40 @@ export function setupAgentEvents() {
     buf.push(chunk);
     logBuffers.set(toolUseId, buf);
   });
+}
+
+function formatStatusLog(status: WorkingStatus): string {
+  switch (status.type) {
+    case 'idle':
+      return '状态：空闲';
+    case 'connecting':
+      return '状态：连接 API';
+    case 'thinking':
+      return '状态：思考中';
+    case 'streaming':
+      return '状态：流式输出';
+    case 'calling_tool':
+      return status.elapsedMs != null
+        ? `状态：执行工具 (${(status.elapsedMs / 1000).toFixed(1)}s)`
+        : '状态：执行工具';
+    case 'completed':
+      return status.elapsedMs != null
+        ? `状态：完成 (${(status.elapsedMs / 1000).toFixed(1)}s)`
+        : '状态：完成';
+    case 'error':
+      return `状态：错误${status.message ? ` — ${status.message}` : ''}`;
+    default:
+      return '状态：未知';
+  }
+}
+
+function shouldLogStatus(status: WorkingStatus, prev: WorkingStatus | null): boolean {
+  if (!prev || status.type !== prev.type) return true;
+  if (status.type === 'calling_tool' && prev.type === 'calling_tool') {
+    return prev.elapsedMs == null && status.elapsedMs != null;
+  }
+  if (status.type === 'error' && prev.type === 'error') {
+    return status.message !== prev.message;
+  }
+  return false;
 }

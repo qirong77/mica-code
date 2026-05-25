@@ -5,7 +5,7 @@ import { model } from '../store/config.js';
 import { session } from '../store/ui-state.js';
 import { MicaPlugin } from '../plugins/MicaPlugin.js';
 import { bootstrap } from '../bootstrap.js';
-
+import './effect.js';
 bootstrap();
 
 const _installedPlugins: MicaPlugin[] = [];
