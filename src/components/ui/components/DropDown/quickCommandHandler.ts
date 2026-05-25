@@ -26,14 +26,15 @@ export function setSelectEmitter(emit: (item: DropdownItem) => void): void {
 // ── 公共 API ──────────────────────────────────────────
 
 /** TerminalInput 在 handleChange 中调用：当输入以 '/' 开头时 */
-export function showQuickCommands(query: string): void {
+export function showQuickCommands(query: string, includeHidden = false): void {
   const commands = quickCommandsAtom.get();
   const filter = query.toLowerCase();
   const items: DropdownItem[] = commands
     .filter(
       (cmd) =>
-        cmd.name.toLowerCase().includes(filter) ||
-        cmd.description.toLowerCase().includes(filter),
+        (includeHidden || !cmd.hidden) &&
+        (cmd.name.toLowerCase().includes(filter) ||
+          cmd.description.toLowerCase().includes(filter)),
     )
     .map((cmd) => ({
       key: cmd.name,

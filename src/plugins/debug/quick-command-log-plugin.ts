@@ -13,6 +13,7 @@ export class QuickCommandLogPlugin extends MicaPlugin {
     this.addQuickCommand({
       name: 'debug-session-export',
       description: '导出会话记录到当前路径',
+      hidden: true,
       action: async () => {
         const rawMessages = this.atoms.messages.get();
         const messages = rawMessages.filter((m: any) => m.status !== 'clear');

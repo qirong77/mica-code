@@ -44,6 +44,7 @@ export interface Command {
   name: string;
   description: string;
   action: (arg?: string) => void;
+  hidden?: boolean;
 }
 
 export const workingStatusAtom = atom<WorkingStatus>({ type: 'idle' });

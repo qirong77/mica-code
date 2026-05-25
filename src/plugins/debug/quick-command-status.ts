@@ -4,8 +4,9 @@ import { api, model } from '../../store/config.js';
 export class QuickCommandStatusPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
-      name: 'status',
+      name: 'debug-status',
       description: '显示当前状态（模型、API 配置等）',
+      hidden: true,
       action: () => {
         const currentModel = this.atoms.model.get();
         const currentEffort = this.atoms.effort.get();
