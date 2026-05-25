@@ -35,7 +35,7 @@ export const model = {
   options: atom<ModelOption[]>([
     { name: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   ]),
-  conextWindowSize: atom('1M'),
+  conextWindowSize: atom(1000000),
   effortOptions: atom<EffortOption[]>([
     { name: 'none', label: 'None' },
     { name: 'low', label: 'Low' },

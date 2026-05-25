@@ -1,5 +1,6 @@
 import { MicaPlugin } from '../MicaPlugin';
 import { api, model } from '../../store/config.js';
+import { getContextUsage, getTotalBilledTokens } from 'src/utils/getContextUsage';
 
 export class QuickCommandStatusPlugin extends MicaPlugin {
   onInstall(): void {
@@ -27,10 +28,12 @@ export class QuickCommandStatusPlugin extends MicaPlugin {
           `Effort: ${currentEffortLabel} (${currentEffort})`,
           `Max Tokens: ${maxTokens}`,
           `Context Window: ${contextWindow}`,
+          `Context Usage: ${getContextUsage(messages)} tokens`,
           `Base URL: ${baseUrl || '(not set)'}`,
           `API Key: ${apiKey || '(not set)'}`,
           `Session ID: ${sessionId}`,
           `Messages: ${messages.length}`,
+          `Total Billed Tokens: ${getTotalBilledTokens(messages)}`,
         ];
 
         this.showMessage(lines.join('\n'), 5000);
