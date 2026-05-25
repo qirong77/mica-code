@@ -1,44 +1,24 @@
-import * as esbuild from 'esbuild';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, copyFileSync, chmodSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const outDir = 'dist';
+const outName = 'mica';
 
-// Bundle dependencies into a single file so `mica` works without node_modules
-// (fixes ERR_MODULE_NOT_FOUND for chalk etc. when installed globally).
-const external = ['react-devtools-core', 'bun:bundle'];
+if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-await esbuild.build({
-  entryPoints: ['./src/index.ts'],
-  bundle: true,
-  platform: 'node',
-  target: 'node18',
-  format: 'esm',
-  // Prefer browser builds (e.g. lru-cache) to avoid Node 19+ APIs like tracingChannel.
-  conditions: ['browser', 'node', 'import', 'default'],
-  mainFields: ['browser', 'module', 'main'],
-  banner: {
-    js: [
-      '#!/usr/bin/env -S node --no-warnings',
-      "import { createRequire } from 'module';",
-      'const require = createRequire(import.meta.url);',
-    ].join('\n'),
-  },
-  outfile: './dist/bin/index.js',
-  external,
-  plugins: [
-    {
-      name: 'bun-bundle-shim',
-      setup(build) {
-        build.onResolve({ filter: /^bun:bundle$/ }, () => {
-          return { path: path.resolve(__dirname, 'bun-bundle-shim.ts') };
-        });
-      },
-    },
-  ],
-  loader: { '.md': 'text', '.json': 'json' },
+const outFile = join(outDir, outName);
+execSync(`bun build --compile ./src/index.ts --outfile ${outFile}`, {
+  stdio: 'inherit',
 });
+console.log(`Built native binary: ${outFile}`);
 
-import { chmodSync } from 'node:fs';
-chmodSync('./dist/bin/index.js', 0o755);
-console.log('Build complete');
+const installDir = resolve(homedir(), '.local/bin');
+if (!existsSync(installDir)) mkdirSync(installDir, { recursive: true });
+
+const targetFile = join(installDir, outName);
+copyFileSync(outFile, targetFile);
+chmodSync(targetFile, 0o755);
+console.log(`Installed to: ${targetFile}`);
+console.log(`Make sure ${installDir} is in your PATH.`);

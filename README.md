@@ -60,24 +60,30 @@ export class MyPlugin extends MicaPlugin {
 }
 ```
 
-## 快速开始
+## 安装
+
+从 [Releases](https://github.com/your-org/micro-claude/releases) 下载对应平台的二进制文件，放到 PATH 中即可：
+
+```bash
+# macOS ARM64
+curl -L https://github.com/your-org/micro-claude/releases/latest/download/mica-darwin-arm64 -o /usr/local/bin/mica
+chmod +x /usr/local/bin/mica
+```
+
+## 开发
 
 ```bash
 # 安装依赖
-npm install
+bun install
 
-# 构建并安装到所有 fnm 已安装的 Node 全局
-npm run build
-```
+# 开发模式（直接运行 TS）
+bun run dev
 
-## 使用
+# 构建原生二进制（发布用）
+bun run build:compile
 
-```bash
-# 开发模式
-npm run dev
-
-# 构建后运行
-mica
+# 构建 bun bundle（本地调试用）
+bun run build
 ```
 
 ### 环境变量
@@ -114,7 +120,7 @@ mica
 
 - [ink](https://github.com/vadimdemedes/ink) — React 驱动的 CLI 渲染
 - [nanostores](https://github.com/nanostores/nanostores) — 轻量状态管理
-- [esbuild](https://esbuild.github.io/) — 构建打包
+- [Bun](https://bun.sh) — 运行时 & 构建工具
 - [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) — API 客户端
 
 ## 许可证
