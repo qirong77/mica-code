@@ -1,7 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { MicaPlugin } from '../MicaPlugin';
 import { getContextUsage } from '../../utils/getContextUsage';
-import { model } from '../../store/config';
 import { getClient } from '../../agent/client';
 
 const CONTEXT_THRESHOLD = 0.4;

@@ -4,7 +4,7 @@ import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
-import { session, type SessionMeta } from '../../store/ui-state.js';
+import { type SessionMeta } from '../../store/ui-state.js';
 
 export type { SessionMeta };
 

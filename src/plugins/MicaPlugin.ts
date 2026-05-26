@@ -4,8 +4,7 @@ import type { IMicaAgent } from '../core/agent';
 import type Anthropic from '@anthropic-ai/sdk';
 import { uuid } from '../utils/uuid';
 import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
-
-// ── 插件可用的 atom 依赖类型 ───────────────────────────
+import type { SessionToolRecord } from '../store/logAtom.js';
 
 export interface PluginAtoms {
   messages: WritableAtom<Anthropic.MessageParam[]>;
@@ -16,6 +15,14 @@ export interface PluginAtoms {
   sessionsIndex: WritableAtom<SessionMeta[]>;
   currentSessionId: WritableAtom<string>;
   sessionSwitch: WritableAtom<string | null>;
+  logText: WritableAtom<string>;
+  sessionToolRecords: WritableAtom<SessionToolRecord[]>;
+  systemLogVisible: WritableAtom<boolean>;
+  maxTokens: WritableAtom<number>;
+  contextWindowSize: ReadableAtom<number>;
+  apiBaseUrl: ReadableAtom<string | undefined>;
+  apiKey: ReadableAtom<string | undefined>;
+  quickCommands: WritableAtom<Command[]>;
 }
 
 // ── 快速命令列表（由插件注册，插件内部闭环） ────────────

@@ -1,5 +1,4 @@
 import { MicaPlugin } from '../MicaPlugin';
-import { systemLogVisibleAtom, quickCommandsAtom } from '../../store/ui-state.js';
 
 export class QuickCommandLogTogglePlugin extends MicaPlugin {
   onInstall(): void {
@@ -8,11 +7,11 @@ export class QuickCommandLogTogglePlugin extends MicaPlugin {
       description: '打开系统日志面板',
       hidden: true,
       action: () => {
-        const visible = systemLogVisibleAtom.get();
-        systemLogVisibleAtom.set(!visible);
+        const visible = this.atoms.systemLogVisible.get();
+        this.atoms.systemLogVisible.set(!visible);
 
-        const commands = quickCommandsAtom.get();
-        quickCommandsAtom.set(
+        const commands = this.atoms.quickCommands.get();
+        this.atoms.quickCommands.set(
           commands.map((cmd) => {
             if (cmd.name === 'debug-log-open' || cmd.name === 'debug-log-close') {
               return {

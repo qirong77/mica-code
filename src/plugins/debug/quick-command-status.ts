@@ -1,5 +1,4 @@
 import { MicaPlugin } from '../MicaPlugin';
-import { api, model } from '../../store/config.js';
 import { getContextUsage, getTotalBilledTokens } from 'src/utils/getContextUsage';
 
 export class QuickCommandStatusPlugin extends MicaPlugin {
@@ -11,10 +10,10 @@ export class QuickCommandStatusPlugin extends MicaPlugin {
       action: () => {
         const currentModel = this.atoms.model.get();
         const currentEffort = this.atoms.effort.get();
-        const maxTokens = model.maxTokens.get();
-        const contextWindow = model.conextWindowSize.get();
-        const baseUrl = api.baseUrl.get();
-        const apiKey = api.apiKey.get();
+        const maxTokens = this.atoms.maxTokens.get();
+        const contextWindow = this.atoms.contextWindowSize.get();
+        const baseUrl = this.atoms.apiBaseUrl.get();
+        const apiKey = this.atoms.apiKey.get();
         const modelOptions = this.atoms.modelOptions.get();
         const effortOptions = this.atoms.effortOptions.get();
         const messages = this.atoms.messages.get();

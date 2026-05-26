@@ -1,5 +1,4 @@
 import { MicaPlugin } from '../MicaPlugin';
-import { sessionToolRecordsAtom } from '../../store/logAtom.js';
 
 const MAX_INPUT_LEN = 80;
 
@@ -16,7 +15,7 @@ export class QuickCommandSessionToolsPlugin extends MicaPlugin {
       description: '列出本轮对话的工具调用及耗时',
       hidden: true,
       action: () => {
-        const records = sessionToolRecordsAtom.get();
+        const records = this.atoms.sessionToolRecords.get();
         if (records.length === 0) {
           this.showMessage('本轮对话暂无工具调用记录');
           return;
