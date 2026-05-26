@@ -30,22 +30,10 @@ export async function executeTool(name: string, input: Record<string, any>, call
   const tool = tools.find((t) => t.name === name);
   if (!tool) return `未知工具: ${name}`;
 
-  try {
-    if (name === 'write_file' || name === 'edit_file') {
-      await backupFile(input.file_path as string);
-    }
-    return await tool.executeTimed(input, callbacks);
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : typeof error === 'string'
-          ? error
-          : JSON.stringify(error);
-    const maxLen = 2000;
-    const truncated = message.length > maxLen ? `${message.slice(0, maxLen)}\n...(截断)` : message;
-    return `工具 ${name} 执行失败：\n${truncated}`;
+  if (name === 'write_file' || name === 'edit_file') {
+    await backupFile(input.file_path as string);
   }
+  return await tool.executeTimed(input, callbacks);
 }
 export function getToolDisplayText(name: string, input: Record<string, any>): string {
   const tool = tools.find((t) => t.name === name);
