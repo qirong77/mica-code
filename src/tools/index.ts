@@ -34,7 +34,7 @@ export async function executeTool(name: string, input: Record<string, any>, call
     if (name === 'write_file' || name === 'edit_file') {
       await backupFile(input.file_path as string);
     }
-    return await tool.execute(input, callbacks);
+    return await tool.executeTimed(input, callbacks);
   } catch (error) {
     const message =
       error instanceof Error
