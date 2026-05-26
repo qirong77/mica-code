@@ -1,6 +1,6 @@
-import { exec } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { MicaPlugin } from '../MicaPlugin';
-import { appendSystemLog } from '../../store/logAtom.js';
+import { logTextAtom } from '../../store/ui-state.js';
 
 export class QuickBashPlugin extends MicaPlugin {
   onInstall(): void {
@@ -13,42 +13,60 @@ export class QuickBashPlugin extends MicaPlugin {
         return;
       }
 
-      appendSystemLog(`! ${command}`);
+      logTextAtom.set(logTextAtom.get() + `$ ${command}\n`);
 
       const msgId = this.showMessage(`执行中: ${command}`, 0);
 
       try {
         const output = await new Promise<string>((resolve, reject) => {
-          exec(command, {
+          const child = spawn(command, {
+            shell: true,
             cwd: process.cwd(),
-            maxBuffer: 1024 * 1024,
             timeout: 30000,
-          }, (error, stdout, stderr) => {
-            if (error) {
-              reject(new Error(stderr || error.message));
-              return;
+          });
+
+          const lines: string[] = [];
+
+          child.stdout.on('data', (data: Buffer) => {
+            const text = data.toString();
+            logTextAtom.set(logTextAtom.get() + text);
+            for (const line of text.split('\n')) {
+              const trimmed = line.trimEnd();
+              if (trimmed) lines.push(trimmed);
             }
-            const trimmed = (stdout + (stderr ? `\n${stderr}` : '')).trim();
-            resolve(trimmed || '(no output)');
+          });
+
+          child.stderr.on('data', (data: Buffer) => {
+            const text = data.toString();
+            logTextAtom.set(logTextAtom.get() + text);
+            for (const line of text.split('\n')) {
+              const trimmed = line.trimEnd();
+              if (trimmed) lines.push(trimmed);
+            }
+          });
+
+          child.on('error', (err) => {
+            reject(err);
+          });
+
+          child.on('close', (code) => {
+            if (code === 0) {
+              resolve(lines.join('\n') || '(no output)');
+            } else {
+              reject(new Error(`命令退出码: ${code}`));
+            }
           });
         });
 
         this.removeMessage(msgId);
 
-        for (const line of output.split('\n')) {
-          appendSystemLog(line);
-        }
-
-        if (output.length > 200) {
-          this.showMessage(`命令完成，输出 ${output.split('\n').length} 行`);
-        } else {
-          this.showMessage(output.slice(0, 200));
-        }
+        const lineCount = output.split('\n').length;
+        this.showMessage(`命令完成，输出 ${lineCount} 行`);
       } catch (err) {
         this.removeMessage(msgId);
         const errMsg = err instanceof Error ? err.message : String(err);
-        appendSystemLog(`[错误] ${errMsg}`);
-        this.showMessage(`命令失败: ${errMsg.slice(0, 200)}`);
+        logTextAtom.set(logTextAtom.get() + `[错误] ${errMsg}\n`);
+        this.showMessage(`命令失败: ${errMsg}`);
       }
     });
   }
