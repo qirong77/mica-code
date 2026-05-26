@@ -2,7 +2,7 @@ import { Box, Text } from '@anthropic/ink';
 import React from 'react';
 import { useSchedulState } from '../../hooks/index.js';
 import { contextSizeAtom } from '../../../../store/conversation.js';
-import { dropdown, workingStatusAtom } from '../../../../store/ui-state.js';
+import { dropdown, workingStatusAtom, thinkingTextAtom, responseTextAtom } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
@@ -21,24 +21,61 @@ function formatElapsed(ms: number): string {
   return `${m}m ${sec}s`;
 }
 
+function estimateTokens(text: string): number {
+  let ascii = 0;
+  let cjk = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (
+      (code >= 0x4E00 && code <= 0x9FFF) ||
+      (code >= 0x3400 && code <= 0x4DBF) ||
+      (code >= 0x20000 && code <= 0x2CEAF) ||
+      (code >= 0xF900 && code <= 0xFAFF) ||
+      (code >= 0x3000 && code <= 0x303F) ||
+      (code >= 0xFF00 && code <= 0xFFEF)
+    ) {
+      cjk++;
+    } else {
+      ascii++;
+    }
+  }
+  return Math.max(1, Math.ceil(ascii / 4 + cjk / 1.5));
+}
+
 export function WorkingStatus() {
   const info = useSchedulState(workingStatusAtom);
   const modelValue = useSchedulState(model.atom);
   const effort = useSchedulState(model.effort);
   const contextSize = useSchedulState(contextSizeAtom);
   const dropdownItems = useSchedulState(dropdown.atom);
+  const thinkingText = useSchedulState(thinkingTextAtom);
+  const responseText = useSchedulState(responseTextAtom);
 
   const hideLeftStatus = dropdownItems.visible && dropdownItems.items.length > 0;
 
   const content = (() => {
     switch (info.type) {
       case 'connecting':
+        return (
+          <Box>
+            <Spin />
+            <Text>connecting</Text>
+          </Box>
+        );
       case 'thinking':
+        return (
+          <Box>
+            <Spin />
+            <Text>thinking</Text>
+            <Text color={C.dim}> · ~{estimateTokens(thinkingText)} tokens</Text>
+          </Box>
+        );
       case 'streaming':
         return (
           <Box>
             <Spin />
-            <Text>{info.type}</Text>
+            <Text>streaming</Text>
+            <Text color={C.dim}> · ~{estimateTokens(responseText)} tokens</Text>
           </Box>
         );
       case 'calling_tool':
