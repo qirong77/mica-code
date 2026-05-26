@@ -1,8 +1,9 @@
+import React from 'react';
 import { type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { IMicaAgent } from '../core/agent';
 import type Anthropic from '@anthropic-ai/sdk';
 import { uuid } from '../utils/uuid';
-import { quickCommandsAtom, type Command, type SessionMeta } from '../store/ui-state.js';
+import { quickCommandsAtom, pluginUIsAtom, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
 
 // ── 插件可用的 atom 依赖类型 ───────────────────────────
 
@@ -29,21 +30,32 @@ export { quickCommandsAtom, type SessionMeta };
  * 通过 `this.atoms` 访问由父组件注入的响应式 atom。
  */
 export abstract class MicaPlugin {
-  /** MicaAgent 实例引用 */
   agent!: IMicaAgent;
 
-  /** 由父组件（MicaAgent）注入的 atom 依赖 */
   atoms!: PluginAtoms;
 
-  /**
-   * 子类实现此方法，在插件安装时执行初始化逻辑。
-   * 此时 `this.agent`、`this.atoms` 均已可用。
-   */
+  private _activeUIId: string | null = null;
+
   abstract onInstall(): void | Promise<void>;
 
-  /** 添加一个快速命令 */
   protected addQuickCommand(command: Command): void {
     quickCommandsAtom.set([...quickCommandsAtom.get(), command]);
+  }
+
+  protected showUI(
+    render: () => React.ReactNode,
+    onInput?: (input: string, key: any) => boolean,
+  ): void {
+    const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
+    this._activeUIId = id;
+    const entry: PluginUI = { id, render, onInput };
+    pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
+  }
+
+  protected hideUI(): void {
+    if (!this._activeUIId) return;
+    pluginUIsAtom.set(pluginUIsAtom.get().filter((u) => u.id !== this._activeUIId));
+    this._activeUIId = null;
   }
 
   /** 显示一条消息（通过 UI 组件事件），默认 3s 后自动清除 */

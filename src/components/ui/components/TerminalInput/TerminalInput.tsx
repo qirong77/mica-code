@@ -5,7 +5,7 @@ import { SimpleTextInput } from "./Input";
 import { C } from "../../data";
 import mitt from 'mitt'
 import { useSchedulState } from '../../hooks';
-import { terminalInput } from '../../../../store/ui-state.js';
+import { terminalInput, pluginUIsAtom } from '../../../../store/ui-state.js';
 import { DropDownUI } from '../DropDown/index.js';
 
 type Events = {
@@ -19,11 +19,17 @@ function TerminalInput() {
   const [prevInputs, setPrevInputs] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const columns = process.stdout.columns - 6;
+  const activePluginUIs = useSchedulState(pluginUIsAtom);
 
-  // 拦截键盘事件：当快捷命令下拉菜单可见时，委托给 DropDown 模块处理
   useInput((_input, key) => {
+    for (const ui of activePluginUIs) {
+      if (ui.onInput?.(_input, key)) {
+        setInput('');
+        setCursorOffset(0);
+        return;
+      }
+    }
     if (DropDownUI.quickCommand.handleKey(key)) {
-      // 事件已被消费，清空本地方便状态
       setInput('');
       setCursorOffset(0);
     }

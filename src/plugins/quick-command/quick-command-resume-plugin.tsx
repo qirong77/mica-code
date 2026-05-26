@@ -1,8 +1,10 @@
+import React from 'react';
+import { Box, Text, stringWidth } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
-import { session, type DropdownItem, type SessionMeta } from '../../store/ui-state.js';
+import { session, type SessionMeta } from '../../store/ui-state.js';
 
 export type { SessionMeta };
 
@@ -35,6 +37,49 @@ function formatTime(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const MIN_LABEL_COL = 18;
+
+function SessionList({
+  sessions,
+  selected,
+}: {
+  sessions: SessionMeta[];
+  selected: number;
+}) {
+  if (sessions.length === 0) {
+    return (
+      <Box paddingX={1}>
+        <Text dimColor>no sessions</Text>
+      </Box>
+    );
+  }
+
+  const labelWidth = Math.max(
+    MIN_LABEL_COL,
+    ...sessions.map((s) => stringWidth(s.title)),
+  );
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Box paddingBottom={1}>
+        <Text dimColor>resume:</Text>
+      </Box>
+      {sessions.map((s, i) => {
+        const displayLabel = s.title.length > labelWidth
+          ? s.title.slice(0, labelWidth - 1) + '…'
+          : s.title.padEnd(labelWidth);
+        return (
+          <Box key={s.id}>
+            <Text color={i === selected ? 'claude' : 'inactive'}>
+              {displayLabel}  {formatTime(s.updatedAt)}
+            </Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
 }
 
 export class QuickCommandResumePlugin extends MicaPlugin {
@@ -139,32 +184,50 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
   private _showResumeList() {
     const idx = this.atoms.sessionsIndex.get();
-
-    const items: DropdownItem[] = [];
-
     const sorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const s of sorted) {
-      items.push({
-        key: s.id,
-        label: s.title,
-        suffix: { text: formatTime(s.updatedAt) },
-      });
+
+    if (sorted.length === 0) {
+      this.showMessage('no sessions');
+      return;
     }
 
-    this.agent.ui.DropDown.atomData.dropdown.set({
-      visible: true,
-      items,
-      selectedIndex: 0,
-      title: 'resume:',
-      emptyMessage: 'no sessions',
-    });
-
-    const handler = (item: any) => {
-      if (!item) return;
-      this.agent.ui.DropDown.emitter.off('select', handler);
-      this._switchToSession(item.key);
+    const ctx = {
+      sessions: sorted,
+      selectedIdx: 0,
+      render: null as any,
+      onInput: null as any,
     };
-    this.agent.ui.DropDown.emitter.on('select', handler);
+
+    ctx.render = () => (
+      <SessionList sessions={ctx.sessions} selected={ctx.selectedIdx} />
+    );
+
+    ctx.onInput = (_input: string, key: any) => {
+      if (key.upArrow) {
+        ctx.selectedIdx =
+          ctx.selectedIdx > 0 ? ctx.selectedIdx - 1 : ctx.sessions.length - 1;
+        this.showUI(ctx.render, ctx.onInput);
+        return true;
+      }
+      if (key.downArrow) {
+        ctx.selectedIdx =
+          ctx.selectedIdx < ctx.sessions.length - 1 ? ctx.selectedIdx + 1 : 0;
+        this.showUI(ctx.render, ctx.onInput);
+        return true;
+      }
+      if (key.return) {
+        this.hideUI();
+        this._switchToSession(ctx.sessions[ctx.selectedIdx]!.id);
+        return true;
+      }
+      if (key.escape) {
+        this.hideUI();
+        return true;
+      }
+      return false;
+    };
+
+    this.showUI(ctx.render, ctx.onInput);
   }
 
   private async _switchToSession(sessionId: string) {

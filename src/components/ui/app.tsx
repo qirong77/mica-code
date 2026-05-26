@@ -7,18 +7,22 @@ import { MessageBarUI } from './components/MessageBar/index.js';
 import { LogListUI } from './components/LogList/index.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
 import { DropDownUI } from './components/DropDown/index.js';
+import { PluginPanel } from './components/PluginPanel/index.js';
 
 export function App(): React.ReactNode {
   return (
     <Box flexDirection="column" height="100%">
       <ConversationUI.renderFn />
       <TerminalInputUI.renderFn />
+
       <WorkingStatusUI.renderFn />
-      <DropDownUI.renderFn />
+      <Box flexDirection="row">
+        <PluginPanel />
+        <DropDownUI.renderFn />
+        <LogListUI.renderFn />
+      </Box>
       <MessageBarUI.renderFn />
-      <LogListUI.renderFn />
       <Box paddingBottom={1} />
     </Box>
   );
 }
-

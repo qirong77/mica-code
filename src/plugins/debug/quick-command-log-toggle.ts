@@ -6,6 +6,7 @@ export class QuickCommandLogTogglePlugin extends MicaPlugin {
     this.addQuickCommand({
       name: 'debug-log-open',
       description: '打开系统日志面板',
+      hidden: true,
       action: () => {
         const visible = systemLogVisibleAtom.get();
         systemLogVisibleAtom.set(!visible);

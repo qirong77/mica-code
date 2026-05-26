@@ -1,5 +1,29 @@
+import React from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { execSync } from 'node:child_process';
 import { MicaPlugin } from '../MicaPlugin';
+
+function ConfirmDialog({
+  title,
+  selected,
+}: {
+  title: string;
+  selected: number;
+}) {
+  const items = ['确认回退', '取消'];
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Box paddingBottom={1}>
+        <Text dimColor>{title}</Text>
+      </Box>
+      {items.map((label, i) => (
+        <Text key={label} color={i === selected ? 'claude' : 'inactive'}>
+          {label}
+        </Text>
+      ))}
+    </Box>
+  );
+}
 
 export class QuickCommandRewindPlugin extends MicaPlugin {
   onInstall(): void {
@@ -32,26 +56,40 @@ export class QuickCommandRewindPlugin extends MicaPlugin {
     const detailParts: string[] = [`将移除 ${removedCount} 条消息`];
     if (hasFileChanges) detailParts.push('并回退工作区代码改动');
 
-    this.agent.ui.DropDown.atomData.dropdown.set({
-      visible: true,
-      items: [
-        { key: 'confirm', label: '确认回退' },
-        { key: 'cancel', label: '取消' },
-      ],
-      selectedIndex: 0,
-      title: `rewind: ${detailParts.join('，')}`,
-      emptyMessage: '',
-    });
+    const title = `rewind: ${detailParts.join('，')}`;
 
-    const handler = (item: any) => {
-      this.agent.ui.DropDown.emitter.off('select', handler);
-      if (!item || item.key === 'cancel') {
-        this.showMessage('已取消');
-        return;
-      }
-      this._doRewind(msgs, cutoff, hasFileChanges);
+    const ctx = {
+      selectedIdx: 0,
+      render: null as any,
+      onInput: null as any,
     };
-    this.agent.ui.DropDown.emitter.on('select', handler);
+
+    ctx.render = () => <ConfirmDialog title={title} selected={ctx.selectedIdx} />;
+
+    ctx.onInput = (_input: string, key: any) => {
+      if (key.upArrow || key.downArrow) {
+        ctx.selectedIdx = ctx.selectedIdx === 0 ? 1 : 0;
+        this.showUI(ctx.render, ctx.onInput);
+        return true;
+      }
+      if (key.return) {
+        this.hideUI();
+        if (ctx.selectedIdx === 1) {
+          this.showMessage('已取消');
+          return true;
+        }
+        this._doRewind(msgs, cutoff, hasFileChanges);
+        return true;
+      }
+      if (key.escape) {
+        this.hideUI();
+        this.showMessage('已取消');
+        return true;
+      }
+      return false;
+    };
+
+    this.showUI(ctx.render, ctx.onInput);
   }
 
   private _doRewind(

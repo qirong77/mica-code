@@ -67,6 +67,14 @@ export const terminalInput = {
 
 export const quickCommandsAtom = atom<Command[]>([]);
 
+export interface PluginUI {
+  id: string;
+  render: () => React.ReactNode;
+  onInput?: (input: string, key: any) => boolean;
+}
+
+export const pluginUIsAtom = atom<PluginUI[]>([]);
+
 export const systemLogVisibleAtom = atom(false);
 
 export const session = {
