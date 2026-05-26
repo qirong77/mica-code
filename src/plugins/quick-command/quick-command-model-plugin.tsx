@@ -5,9 +5,11 @@ import { MicaPlugin } from '../MicaPlugin';
 function ModelList({
   models,
   selected,
+  current,
 }: {
   models: Array<{ name: string; label: string }>;
   selected: number;
+  current: string;
 }) {
   if (models.length === 0) {
     return (
@@ -21,16 +23,25 @@ function ModelList({
       <Box paddingBottom={1}>
         <Text dimColor>select model:</Text>
       </Box>
-      {models.map((m, i) => (
-        <Box key={m.name}>
-          <Text color={i === selected ? 'claude' : 'inactive'}>
-            {m.label}
-          </Text>
-          {m.name === models[selected]?.name && models.length > 1 && (
-            <Text color="#4CAF50"> (active)</Text>
-          )}
-        </Box>
-      ))}
+      {models.map((m, i) => {
+        const isSelected = i === selected;
+        const isActive = m.name === current;
+        return (
+          <Box key={m.name} marginBottom={i < models.length - 1 ? 0 : 0}>
+            <Box flexDirection="row">
+              <Box width={2}>
+                <Text color={isSelected ? 'claude' : 'inactive'}>
+                  {isSelected ? '▶' : ' '}
+                </Text>
+              </Box>
+              <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+                {m.label}
+              </Text>
+              {isActive && <Text color="#4CAF50"> (active)</Text>}
+            </Box>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -51,7 +62,13 @@ export class QuickCommandModelPlugin extends MicaPlugin {
           onInput: null as any,
         };
 
-        ctx.render = () => <ModelList models={ctx.models} selected={ctx.selectedIdx} />;
+        ctx.render = () => (
+          <ModelList
+            models={ctx.models}
+            selected={ctx.selectedIdx}
+            current={currentModel}
+          />
+        );
 
         ctx.onInput = (_input: string, key: any) => {
           if (key.upArrow) {

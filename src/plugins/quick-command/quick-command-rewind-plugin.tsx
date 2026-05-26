@@ -16,11 +16,21 @@ function ConfirmDialog({
       <Box paddingBottom={1}>
         <Text dimColor>{title}</Text>
       </Box>
-      {items.map((label, i) => (
-        <Text key={label} color={i === selected ? 'claude' : 'inactive'}>
-          {label}
-        </Text>
-      ))}
+      {items.map((label, i) => {
+        const isSelected = i === selected;
+        return (
+          <Box key={label} flexDirection="row">
+            <Box width={2}>
+              <Text color={isSelected ? 'claude' : 'inactive'}>
+                {isSelected ? '▶' : ' '}
+              </Text>
+            </Box>
+            <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+              {label}
+            </Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 }

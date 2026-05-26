@@ -24,16 +24,25 @@ function EffortList({
       <Box paddingBottom={1}>
         <Text dimColor>select effort:</Text>
       </Box>
-      {efforts.map((e, i) => (
-        <Box key={e.name}>
-          <Text color={i === selected ? 'claude' : 'inactive'}>
-            {e.label}
-          </Text>
-          {e.name === current && (
-            <Text color="#4CAF50"> (active)</Text>
-          )}
-        </Box>
-      ))}
+      {efforts.map((e, i) => {
+        const isSelected = i === selected;
+        const isActive = e.name === current;
+        return (
+          <Box key={e.name} marginBottom={i < efforts.length - 1 ? 0 : 0}>
+            <Box flexDirection="row">
+              <Box width={2}>
+                <Text color={isSelected ? 'claude' : 'inactive'}>
+                  {isSelected ? '▶' : ' '}
+                </Text>
+              </Box>
+              <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+                {e.label}
+              </Text>
+              {isActive && <Text color="#4CAF50"> (active)</Text>}
+            </Box>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
