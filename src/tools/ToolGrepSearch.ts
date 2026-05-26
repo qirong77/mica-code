@@ -1,6 +1,11 @@
 import { execFileSync } from 'child_process';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
+function truncate(s: string, maxLen = 60): string {
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + '…';
+}
+
 export class ToolGrepSearch extends MicaTool {
   constructor() {
     super('grep_search', '在文件中搜索正则表达式，返回匹配行。', {
@@ -38,5 +43,9 @@ export class ToolGrepSearch extends MicaTool {
   }
   onToolUseDisplayText(input: Record<string, any>): string {
     return `grep_search: pattern="${input.pattern}" in ${input.path || 'current directory'}`;
+  }
+  getSlowText(ms: number, input: Record<string, any>): string {
+    const pattern = truncate(input.pattern as string);
+    return `搜索 "${pattern}" (${(ms / 1000).toFixed(1)}s)`;
   }
 }

@@ -1,6 +1,11 @@
 import { spawn } from 'child_process';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
+function truncate(s: string, maxLen = 60): string {
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + '…';
+}
+
 export class ToolRunShell extends MicaTool {
   constructor() {
     super('run_shell', '执行 shell 命令并返回输出。', {
@@ -58,5 +63,9 @@ export class ToolRunShell extends MicaTool {
 
   onToolUseDisplayText(input: Record<string, any>): string {
     return `run_shell: ${input.command}`;
+  }
+  getSlowText(ms: number, input: Record<string, any>): string {
+    const cmd = truncate(input.command as string);
+    return `执行命令 ${cmd} (${(ms / 1000).toFixed(1)}s)`;
   }
 }

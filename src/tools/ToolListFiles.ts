@@ -25,4 +25,7 @@ export class ToolListFiles extends MicaTool {
   onToolUseDisplayText(input: Record<string, any>): string {
     return `list_files: pattern="${input.pattern}" in ${input.path || 'current directory'}`;
   }
+  getSlowText(ms: number, input: Record<string, any>): string {
+    return `搜索文件 ${input.pattern} (${(ms / 1000).toFixed(1)}s)`;
+  }
 }

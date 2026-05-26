@@ -1,6 +1,12 @@
 import { readFile, writeFile } from 'fs/promises';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
+function truncate(s: unknown, maxLen = 40): string {
+  const str = typeof s === 'string' ? s : String(s ?? '');
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen) + '…';
+}
+
 export class ToolEditFile extends MicaTool {
   constructor() {
     super('edit_file', '通过精确字符串替换编辑文件。', {
@@ -28,5 +34,11 @@ export class ToolEditFile extends MicaTool {
 
   onToolUseDisplayText(input: Record<string, any>): string {
     return `edit_file: ${input.file_path}`;
+  }
+  getSlowText(ms: number, input: Record<string, any>): string {
+    const path = input.file_path as string;
+    const oldStr = truncate(input.old_string);
+    const newStr = truncate(input.new_string);
+    return `编辑 ${path} "${oldStr}" → "${newStr}" (${(ms / 1000).toFixed(1)}s)`;
   }
 }
