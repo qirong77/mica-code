@@ -3,7 +3,7 @@ import { systemPrompt } from '../prompts/index';
 import { executeTool, toolDefinitions } from '../tools/index';
 import { messagesAtom } from '../store/conversation.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
-import { appendSystemLog } from '../store/logAtom.js';
+import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
 import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
@@ -141,6 +141,8 @@ class AgentTurn {
             appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(elapsed / 1000).toFixed(1)}s`);
           }
           this.events.emit('tool:slow', { toolUseId: tool.id, elapsedMs: elapsed });
+          const records = sessionToolRecordsAtom.get();
+          sessionToolRecordsAtom.set([...records, { toolName: tool.name, toolInput: tool.input, elapsedMs: elapsed }]);
           return { tool, result };
         }),
       );
@@ -190,6 +192,7 @@ class AgentTurn {
 
   private async _coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
     appendSystemLog('Agent run 开始');
+    sessionToolRecordsAtom.set([]);
     await clearBackups();
     const updated = [...messagesAtom.get(), { role: 'user', content: userInput } as Anthropic.MessageParam];
     messagesAtom.set(updated);

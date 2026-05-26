@@ -17,3 +17,15 @@ export function appendSystemLog(message: string): void {
 export function clearSystemLog(): void {
   systemLogAtom.set([]);
 }
+
+export interface SessionToolRecord {
+  toolName: string;
+  toolInput: Record<string, any>;
+  elapsedMs: number;
+}
+
+export const sessionToolRecordsAtom = atom<SessionToolRecord[]>([]);
+
+export function clearSessionToolRecords(): void {
+  sessionToolRecordsAtom.set([]);
+}
