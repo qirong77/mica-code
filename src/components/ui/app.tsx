@@ -3,11 +3,10 @@ import { Box } from '@anthropic/ink';
 
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
 import { ConversationUI } from './components/Conversation/index.js';
-import { MessageBarUI } from './components/MessageBar/index.js';
-import { LogListUI } from './components/LogList/index.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
-import { DropDownUI } from './components/DropDown/index.js';
-import { PluginPanel } from './components/PluginPanel/index.js';
+import { BottomPanel } from './components/BottomPanel/index.js';
+import { MessageBar } from './components/MessageBar/index.js';
+
 
 export function App(): React.ReactNode {
   return (
@@ -16,12 +15,8 @@ export function App(): React.ReactNode {
       <TerminalInputUI.renderFn />
 
       <WorkingStatusUI.renderFn />
-      <Box flexDirection="row">
-        <PluginPanel />
-        <DropDownUI.renderFn />
-        <LogListUI.renderFn />
-      </Box>
-      <MessageBarUI.renderFn />
+      <MessageBar/>
+      <BottomPanel />
       <Box paddingBottom={1} />
     </Box>
   );

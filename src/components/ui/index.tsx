@@ -5,10 +5,9 @@ import { App } from './app.js';
 // ── 统一导出所有 UI 组件 ──
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
 import { ConversationUI } from './components/Conversation/index.js';
-import { MessageBarUI } from './components/MessageBar/index.js';
-import { LogListUI } from './components/LogList/index.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
 import { DropDownUI } from './components/DropDown/index.js';
+import { MessageBarAPI } from './components/MessageBar/index.js';
 
 function Root() {
   return <App />;
@@ -29,9 +28,8 @@ function run() {
 export const ui = {
   TerminalInput: TerminalInputUI,
   Conversation: ConversationUI,
-  MessageBar: MessageBarUI,
-  LogList: LogListUI,
   WorkingStatus: WorkingStatusUI,
   DropDown: DropDownUI,
+  MessageBar: MessageBarAPI,
   run,
 };

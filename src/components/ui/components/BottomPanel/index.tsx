@@ -3,6 +3,8 @@ import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
 import { logTextAtom, toolCallsAtom, systemLogVisibleAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
+import { PluginPanel } from '../PluginPanel/index.js';
+import { DropDownUI } from '../DropDown/index.js';
 import { IfComponent } from '../common/IfComponent.js';
 
 const MIN_LINES = 5;
@@ -21,7 +23,6 @@ function AgentLogPanel(): React.ReactNode {
   if (text.length > 0) {
     const lines = text.split('\n');
     const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : text;
-
     return (
       <Box flexDirection="column" height={maxLines}>
         <Text dimColor>{display}</Text>
@@ -32,7 +33,6 @@ function AgentLogPanel(): React.ReactNode {
   if (toolCalls.length > 0) {
     const sorted = [...toolCalls].sort((a, b) => Number(a.completed) - Number(b.completed));
     const displayed = sorted.slice(0, MAX_TOOL_CALLS);
-
     return (
       <Box flexDirection="column">
         {displayed.map((tc) => (
@@ -53,7 +53,6 @@ function SystemLogPanel(): React.ReactNode {
   if (lines.length === 0) return null;
 
   const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : lines.join('\n');
-
   return (
     <Box flexDirection="column" height={maxLines}>
       <Text dimColor>{display}</Text>
@@ -61,28 +60,30 @@ function SystemLogPanel(): React.ReactNode {
   );
 }
 
-export const LogList = React.memo(function LogList(): React.ReactNode {
+export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
   const text = useSchedulState(logTextAtom);
   const toolCalls = useSchedulState(toolCallsAtom);
-  const systemLines = useSchedulState(systemLogAtom);
   const systemLogVisible = useSchedulState(systemLogVisibleAtom);
 
   const hasAgentLog = text.length > 0 || toolCalls.length > 0;
-  const hasSystemLog = systemLogVisible && systemLines.length > 0;
-  if (!hasAgentLog && !hasSystemLog) return null;
+  const hasSystemLog = systemLogVisible;
 
   return (
-    <Box flexDirection="row" width="100%">
-      <Box flexGrow={1} width="50%" paddingRight={1}>
-        <AgentLogPanel />
-      </Box>
-      <IfComponent condition={hasSystemLog}>
-        <Box flexGrow={1} width="50%" paddingLeft={1}>
-          <SystemLogPanel />
+    <Box flexDirection="row">
+      <PluginPanel />
+      <DropDownUI.renderFn />
+      {(hasAgentLog || hasSystemLog) && (
+        <Box flexDirection="row" width="100%">
+          <Box flexGrow={1} width="50%" paddingRight={1}>
+            <AgentLogPanel />
+          </Box>
+          <IfComponent condition={hasSystemLog}>
+            <Box flexGrow={1} width="50%" paddingLeft={1}>
+              <SystemLogPanel />
+            </Box>
+          </IfComponent>
         </Box>
-      </IfComponent>
+      )}
     </Box>
   );
 });
-
-export { AgentLogPanel, SystemLogPanel };

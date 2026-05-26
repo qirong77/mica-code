@@ -6,8 +6,6 @@ import { dropdown, workingStatusAtom } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
-import { DropDownUI } from '../DropDown/index.js';
-
 // ── Types ─────────────────────────────────────────────
 
 

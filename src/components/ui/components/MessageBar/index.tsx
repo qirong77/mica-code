@@ -21,6 +21,12 @@ interface MessageItem {
   text: string;
 }
 
+export const MessageBarAPI = {
+  addMessage: (item: { id: string; text: string }) => emitter.emit('add', item),
+  removeMessage: (id: string) => emitter.emit('remove', id),
+  clearMessages: () => emitter.emit('clear'),
+};
+
 export const MessageBar = React.memo(function MessageBar(): React.ReactNode {
   const [items, setItems] = useState<MessageItem[]>([]);
 
@@ -56,7 +62,7 @@ export const MessageBar = React.memo(function MessageBar(): React.ReactNode {
   if (visible.length === 0) return null;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" paddingX={1} borderBottom={true} borderStyle="dashed" borderColor='ansi:cyan'>
       {visible.map((s) => (
         <Box key={s.id}>
           <Text dimColor>{s.text}</Text>
@@ -65,12 +71,3 @@ export const MessageBar = React.memo(function MessageBar(): React.ReactNode {
     </Box>
   );
 });
-
-// ── 导出对象 ──────────────────────────────────────────
-
-export const MessageBarUI = {
-  renderFn: MessageBar,
-  addMessage: (item: { id: string; text: string }) => emitter.emit('add', item),
-  removeMessage: (id: string) => emitter.emit('remove', id),
-  clearMessages: () => emitter.emit('clear'),
-};

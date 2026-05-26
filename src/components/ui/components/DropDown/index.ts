@@ -1,4 +1,3 @@
-import mitt from 'mitt';
 import type { DropdownItem } from './CommandDropdown.js';
 import { DropDownSelect } from './DropDownSelect.js';
 import { dropdown } from '../../../../store/ui-state.js';
@@ -13,21 +12,20 @@ import {
 
 export type { DropdownItem, DropdownState } from '../../../../store/ui-state.js';
 
-type Events = {
-  /** 选中了下拉项 */
-  select: DropdownItem;
-};
-
-const emitter = mitt<Events>();
-
-// 注入 emitter 到 quickCommandHandler，用于二级菜单选择时通知插件
+const _selectHandlers: Array<(item: DropdownItem) => void> = [];
 setSelectEmitter((item: DropdownItem) => {
-  emitter.emit('select', item);
+  for (const h of _selectHandlers) h(item);
 });
 
 export const DropDownUI = {
   renderFn: DropDownSelect,
-  emitter,
+  onSelect: (cb: (item: DropdownItem) => void) => {
+    _selectHandlers.push(cb);
+    return () => {
+      const idx = _selectHandlers.indexOf(cb);
+      if (idx !== -1) _selectHandlers.splice(idx, 1);
+    };
+  },
   atomData: {
     dropdown: dropdown.atom,
     selection: dropdown.selection,
