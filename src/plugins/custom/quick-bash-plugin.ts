@@ -12,7 +12,7 @@ export class QuickBashPlugin extends MicaPlugin {
         return;
       }
 
-      this.atoms.logText.set(this.atoms.logText.get() + `$ ${command}\n`);
+      this.atoms.thinkingText.set(this.atoms.thinkingText.get() + `$ ${command}\n`);
 
       const msgId = this.showMessage(`执行中: ${command}`, 0);
 
@@ -28,7 +28,7 @@ export class QuickBashPlugin extends MicaPlugin {
 
           child.stdout.on('data', (data: Buffer) => {
             const text = data.toString();
-            this.atoms.logText.set(this.atoms.logText.get() + text);
+            this.atoms.thinkingText.set(this.atoms.thinkingText.get() + text);
             for (const line of text.split('\n')) {
               const trimmed = line.trimEnd();
               if (trimmed) lines.push(trimmed);
@@ -37,7 +37,7 @@ export class QuickBashPlugin extends MicaPlugin {
 
           child.stderr.on('data', (data: Buffer) => {
             const text = data.toString();
-            this.atoms.logText.set(this.atoms.logText.get() + text);
+            this.atoms.thinkingText.set(this.atoms.thinkingText.get() + text);
             for (const line of text.split('\n')) {
               const trimmed = line.trimEnd();
               if (trimmed) lines.push(trimmed);
@@ -64,7 +64,7 @@ export class QuickBashPlugin extends MicaPlugin {
       } catch (err) {
         this.removeMessage(msgId);
         const errMsg = err instanceof Error ? err.message : String(err);
-        this.atoms.logText.set(this.atoms.logText.get() + `[错误] ${errMsg}\n`);
+        this.atoms.thinkingText.set(this.atoms.thinkingText.get() + `[错误] ${errMsg}\n`);
         this.showMessage(`命令失败: ${errMsg}`);
       }
     });

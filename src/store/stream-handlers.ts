@@ -1,45 +1,45 @@
-import { logTextAtom, streamingTextAtom, toolCallsAtom, workingStatusAtom } from './ui-state.js';
+import { thinkingTextAtom, responseTextAtom, toolCallsAtom, workingStatusAtom } from './ui-state.js';
 import type { WorkingStatus } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
 import { getToolDisplayText } from '../tools/index.js';
 import { ui } from '../components/ui/index.js';
 
-const logBuffers = new Map<string, string[]>();
+const toolOutputBuffers = new Map<string, string[]>();
 
-export function flushLogBuffer(toolUseId: string) {
-  const chunks = logBuffers.get(toolUseId);
+export function flushToolOutputBuffer(toolUseId: string) {
+  const chunks = toolOutputBuffers.get(toolUseId);
   if (chunks && chunks.length > 0) {
-    logTextAtom.set(logTextAtom.get() + chunks.join(''));
-    logBuffers.delete(toolUseId);
+    thinkingTextAtom.set(thinkingTextAtom.get() + chunks.join(''));
+    toolOutputBuffers.delete(toolUseId);
   }
 }
 
-export function appendToolLogChunk(toolUseId: string, chunk: string) {
-  const buf = logBuffers.get(toolUseId) || [];
+export function appendToolOutputChunk(toolUseId: string, chunk: string) {
+  const buf = toolOutputBuffers.get(toolUseId) || [];
   buf.push(chunk);
-  logBuffers.set(toolUseId, buf);
+  toolOutputBuffers.set(toolUseId, buf);
 }
 
-export function clearLogBuffers() {
-  logBuffers.clear();
+export function clearToolOutputBuffers() {
+  toolOutputBuffers.clear();
 }
 
 export function onThinkingChunk(chunk: string) {
-  logTextAtom.set(logTextAtom.get() + chunk);
+  thinkingTextAtom.set(thinkingTextAtom.get() + chunk);
   workingStatusAtom.set({ type: 'thinking' });
 }
 
 export function onStreamStart() {
   appendSystemLog('流：开始文本输出');
   toolCallsAtom.set([]);
-  logTextAtom.set('');
-  streamingTextAtom.set('');
-  clearLogBuffers();
+  thinkingTextAtom.set('');
+  responseTextAtom.set('');
+  clearToolOutputBuffers();
 }
 
 export function onStreamChunk(chunk: string) {
   workingStatusAtom.set({ type: 'streaming' });
-  streamingTextAtom.set(streamingTextAtom.get() + chunk);
+  responseTextAtom.set(responseTextAtom.get() + chunk);
 }
 
 export function onStreamEnd() {
@@ -47,10 +47,10 @@ export function onStreamEnd() {
 }
 
 export function onFinalMessage() {
-  streamingTextAtom.set('');
-  logTextAtom.set('');
+  responseTextAtom.set('');
+  thinkingTextAtom.set('');
   toolCallsAtom.set([]);
-  clearLogBuffers();
+  clearToolOutputBuffers();
 }
 
 export function onToolUseStart(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
@@ -73,7 +73,7 @@ export function onToolUseStart(toolUseId: string, toolName: string, toolInput: R
 
 export function onToolUseComplete(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
   appendSystemLog(`工具完成：${toolName}`);
-  flushLogBuffer(toolUseId);
+  flushToolOutputBuffer(toolUseId);
 
   const displayText = getToolDisplayText(toolName, toolInput);
   const existing = toolCallsAtom.get();
@@ -105,9 +105,9 @@ export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null
 
   if (status.type === 'connecting') {
     toolCallsAtom.set([]);
-    logTextAtom.set('');
-    streamingTextAtom.set('');
-    clearLogBuffers();
+    thinkingTextAtom.set('');
+    responseTextAtom.set('');
+    clearToolOutputBuffers();
     ui.MessageBar.clearMessages();
   }
 
@@ -124,7 +124,7 @@ export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null
   }
 
   if (status.type === 'idle') {
-    clearLogBuffers();
+    clearToolOutputBuffers();
   }
 
   workingStatusAtom.set(status);

@@ -13,7 +13,6 @@ export function App(): React.ReactNode {
     <Box flexDirection="column" height="100%">
       <ConversationUI.renderFn />
       <TerminalInputUI.renderFn />
-
       <WorkingStatusUI.renderFn />
       <MessageBar/>
       <BottomPanel />

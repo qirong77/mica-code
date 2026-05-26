@@ -23,7 +23,7 @@ export type AgentTurnEvents = {
     elapsedMs: number;
   };
   status: WorkingStatus;
-  'log:chunk': { toolUseId: string; chunk: string };
+  'tool:output': { toolUseId: string; chunk: string };
   'message:final': Anthropic.Message;
 };
 
@@ -139,7 +139,7 @@ class AgentTurn {
           toolTimers.set(tool.id, { name: tool.name, startTime, lastLogTime: 0 });
           const result = await executeTool(tool.name, tool.input, {
             onChunk: (chunk) => {
-              this.events.emit('log:chunk', { toolUseId: tool.id, chunk });
+              this.events.emit('tool:output', { toolUseId: tool.id, chunk });
             },
           });
           const elapsed = Date.now() - startTime;

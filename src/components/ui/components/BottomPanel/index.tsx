@@ -1,30 +1,31 @@
 import React from 'react';
 import { Box } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
-import { logTextAtom, toolCallsAtom, systemLogVisibleAtom } from '../../../../store/ui-state.js';
+import { thinkingTextAtom, toolCallsAtom, systemLogVisibleAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
 import { PluginPanel } from '../PluginPanel/index.js';
 import { DropDownUI } from '../DropDown/index.js';
 import { IfComponent } from '../common/IfComponent.js';
-import { AgentLogPanel, SystemLogPanel } from '../LogPanels/index.js';
+import { ThinkingPanel, ToolCallPanel, SystemLogPanel } from '../LogPanels/index.js';
 
 export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
-  const text = useSchedulState(logTextAtom);
+  const text = useSchedulState(thinkingTextAtom);
   const toolCalls = useSchedulState(toolCallsAtom);
   const systemLines = useSchedulState(systemLogAtom);
   const systemLogVisible = useSchedulState(systemLogVisibleAtom);
 
-  const hasAgentLog = text.length > 0 || toolCalls.length > 0;
+  const hasAgentContent = text.length > 0 || toolCalls.length > 0;
   const hasSystemLog = systemLogVisible && systemLines.length > 0;
 
   return (
-    <Box flexDirection="row">
+    <Box flexDirection="row" justifyContent="space-between">
       <PluginPanel />
       <DropDownUI.renderFn />
-      <IfComponent condition={hasAgentLog || hasSystemLog}>
+      <IfComponent condition={hasAgentContent || hasSystemLog}>
         <Box flexDirection="row" width="100%">
-          <Box flexGrow={1} width="50%" paddingRight={1}>
-            <AgentLogPanel />
+          <Box flexDirection="column" flexGrow={1} width="50%" paddingRight={1}>
+            <ThinkingPanel />
+            <ToolCallPanel />
           </Box>
           <IfComponent condition={hasSystemLog}>
             <Box flexGrow={1} width="50%" paddingLeft={1}>

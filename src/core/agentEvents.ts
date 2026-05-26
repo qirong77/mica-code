@@ -12,8 +12,8 @@ import {
   onToolUseComplete,
   onToolSlow,
   onStatus,
-  appendToolLogChunk,
-} from '../store/agent-actions.js';
+  appendToolOutputChunk,
+} from '../store/stream-handlers.js';
 
 export function setupAgentEvents() {
   let lastStatus: WorkingStatus | null = null;
@@ -61,7 +61,7 @@ export function setupAgentEvents() {
     lastStatus = status;
   });
 
-  agentTurn.events.on('log:chunk', ({ toolUseId, chunk }) => {
-    appendToolLogChunk(toolUseId, chunk);
+  agentTurn.events.on('tool:output', ({ toolUseId, chunk }) => {
+    appendToolOutputChunk(toolUseId, chunk);
   });
 }

@@ -57,9 +57,9 @@ export const dropdown = {
   cursor: atom(0),
 };
 
-export const logTextAtom = atom('');
+export const thinkingTextAtom = atom('');
 
-export const streamingTextAtom = atom('');
+export const responseTextAtom = atom('');
 
 export const toolCallsAtom = atom<ToolCallData[]>([]);
 

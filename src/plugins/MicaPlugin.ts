@@ -16,7 +16,7 @@ export interface PluginAtoms {
   sessionsIndex: WritableAtom<SessionMeta[]>;
   currentSessionId: WritableAtom<string>;
   sessionSwitch: WritableAtom<string | null>;
-  logText: WritableAtom<string>;
+  thinkingText: WritableAtom<string>;
   sessionToolRecords: WritableAtom<SessionToolRecord[]>;
   systemLogVisible: WritableAtom<boolean>;
   maxTokens: WritableAtom<number>;

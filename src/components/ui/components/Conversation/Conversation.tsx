@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../../data.js';
 import { messagesAtom } from '../../../../store/conversation.js';
-import { streamingTextAtom } from '../../../../store/ui-state.js';
+import { responseTextAtom } from '../../../../store/ui-state.js';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
 import { Markdown } from './Markdown.js';
 
@@ -27,7 +27,7 @@ interface LogItem {
 
 export const Conversation = (): React.ReactNode => {
   const messages = useSchedulState(messagesAtom);
-  const streamingText = useSchedulState(streamingTextAtom);
+  const responseText = useSchedulState(responseTextAtom);
 
   const staticItems = useMemo(
     () =>
@@ -65,9 +65,9 @@ export const Conversation = (): React.ReactNode => {
           </Box>
         );
       })}
-      {streamingText && (
+      {responseText && (
         <Box>
-          <Markdown>{streamingText}</Markdown>
+          <Markdown>{responseText}</Markdown>
         </Box>
       )}
     </Box>
