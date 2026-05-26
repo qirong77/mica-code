@@ -4,7 +4,7 @@ import { setupAgentEvents } from './core/agentEvents.js';
 import { appendSystemLog } from './store/logAtom.js';
 
 export function bootstrap() {
-  ui.TerminalInput.emitter.on('submit', async (text) => {
+  ui.TerminalInput.onSubmit(async (text) => {
     const startTime = Date.now();
     const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
     appendSystemLog(`用户提交：${preview}`);

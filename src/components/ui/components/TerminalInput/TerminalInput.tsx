@@ -139,7 +139,8 @@ function TerminalInput() {
 }
 
 export const TerminalInputUI = {
-  renderFn:TerminalInput,
-  emitter,
+  renderFn: TerminalInput,
+  onSubmit: (cb: (text: string) => void) => emitter.on('submit', cb),
+  offSubmit: (cb: (text: string) => void) => emitter.off('submit', cb),
   atomText: terminalInput.text,
 }

@@ -23,7 +23,7 @@ function run() {
  *
  * 每个 UI 组件遵循统一的导出模式：
  * - renderFn: React 渲染函数
- * - emitter?: mitt 事件发射器（用于外部驱动 UI）
+ * - 语义化方法（如 onSubmit / addMessage / clearMessages）替代裸 emitter
  * - atomData?: nanostores atom（用于暴露响应式数据）
  */
 export const ui = {

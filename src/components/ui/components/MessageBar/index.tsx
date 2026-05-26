@@ -70,5 +70,7 @@ export const MessageBar = React.memo(function MessageBar(): React.ReactNode {
 
 export const MessageBarUI = {
   renderFn: MessageBar,
-  emitter,
+  addMessage: (item: { id: string; text: string }) => emitter.emit('add', item),
+  removeMessage: (id: string) => emitter.emit('remove', id),
+  clearMessages: () => emitter.emit('clear'),
 };

@@ -61,7 +61,7 @@ export abstract class MicaPlugin {
   /** 显示一条消息（通过 UI 组件事件），默认 3s 后自动清除 */
   protected showMessage(text: string, delay: number = 3000): string {
     const msgId = `msg-${uuid()}`;
-    this.agent.ui.MessageBar.emitter.emit('add', { id: msgId, text });
+    this.agent.ui.MessageBar.addMessage({ id: msgId, text });
     if (delay) {
       setTimeout(() => {
         this.removeMessage(msgId);
@@ -72,12 +72,12 @@ export abstract class MicaPlugin {
 
   /** 移除指定 ID 的消息 */
   protected removeMessage(id: string): void {
-    this.agent.ui.MessageBar.emitter.emit('remove', id);
+    this.agent.ui.MessageBar.removeMessage(id);
   }
 
   /** 清除所有消息 */
   protected clearMessages(): void {
-    this.agent.ui.MessageBar.emitter.emit('clear');
+    this.agent.ui.MessageBar.clearMessages();
   }
 
   /** 获取当前消息列表 */

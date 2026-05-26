@@ -118,7 +118,7 @@ export function setupAgentEvents() {
     lastStatus = status;
 
     if (status.type === 'connecting') {
-      ui.MessageBar.emitter.emit('clear');
+      ui.MessageBar.clearMessages();
     }
 
     if (status.type === 'calling_tool') {
