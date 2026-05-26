@@ -43,6 +43,11 @@ export type Middleware = (
   onIteration?: (result: IterationResult) => void,
 ) => Promise<void>;
 
+function hasTextContent(message: Anthropic.Message): boolean {
+  if (typeof message.content === 'string') return true;
+  return message.content.some((block) => block.type === 'text');
+}
+
 class AgentTurn {
   readonly events = mitt<AgentTurnEvents>();
 
@@ -202,6 +207,10 @@ class AgentTurn {
       const result = await this.executeSingleIteration();
       onIteration?.(result);
       if (!result.hasToolUse && !result.wasTruncated) {
+        if (!hasTextContent(result.finalMessage)) {
+          appendSystemLog('Agent run 继续（响应仅含思考块，等待模型输出文本）');
+          continue;
+        }
         appendSystemLog('Agent run 结束（无待执行工具）');
         return;
       }
