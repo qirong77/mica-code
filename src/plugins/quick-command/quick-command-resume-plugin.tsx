@@ -12,6 +12,51 @@ const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
 const MAX_SESSIONS = 50;
 
+function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number } {
+  if (messages.length === 0) return { cleaned: messages, truncated: 0 };
+
+  const cleaned: any[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) {
+      cleaned.push(msg);
+      continue;
+    }
+
+    const toolUseIds: string[] = [];
+    for (const block of msg.content) {
+      if (block.type === 'tool_use' && block.id) toolUseIds.push(block.id);
+    }
+
+    if (toolUseIds.length === 0) {
+      cleaned.push(msg);
+      continue;
+    }
+
+    const nextMsg = messages[i + 1];
+    if (!nextMsg || nextMsg.role !== 'user' || !Array.isArray(nextMsg.content)) {
+      break;
+    }
+
+    const resultIds = new Set<string>();
+    for (const block of nextMsg.content) {
+      if (block.type === 'tool_result' && block.tool_use_id) {
+        resultIds.add(block.tool_use_id);
+      }
+    }
+
+    const allMatched = toolUseIds.every(id => resultIds.has(id));
+    if (!allMatched) break;
+
+    cleaned.push(msg);
+  }
+
+  const truncated = messages.length - cleaned.length;
+  return { cleaned, truncated };
+}
+
 async function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) {
     await mkdir(SESSIONS_DIR, { recursive: true });
@@ -199,7 +244,8 @@ export class QuickCommandResumePlugin extends MicaPlugin {
     await ensureDir();
     const filePath = resolve(SESSIONS_DIR, `${id}.json`);
     const clean = messages.filter((m: any) => m.status !== 'clear');
-    await writeFile(filePath, JSON.stringify(clean, null, 2), 'utf-8');
+    const { cleaned } = validateToolPairs(clean);
+    await writeFile(filePath, JSON.stringify(cleaned, null, 2), 'utf-8');
   }
 
   private async _updateSessionTimestamp(id: string) {
@@ -303,9 +349,16 @@ export class QuickCommandResumePlugin extends MicaPlugin {
     try {
       const raw = await readFile(filePath, 'utf-8');
       const msgs = JSON.parse(raw);
+      const { cleaned, truncated } = validateToolPairs(msgs);
+
+      if (truncated > 0) {
+        this.showMessage(`会话校验: 截断了 ${truncated} 条不完整的消息`);
+        await writeFile(filePath, JSON.stringify(cleaned, null, 2), 'utf-8');
+      }
+
       this._currentSessionId = sessionId;
       this._suppressAutoSave = false;
-      this.atoms.messages.set(msgs);
+      this.atoms.messages.set(cleaned);
       this.atoms.currentSessionId.set(sessionId);
       const meta = this.atoms.sessionsIndex.get().find((s) => s.id === sessionId);
       this.showMessage(`已切换到: ${meta?.title || sessionId}`);

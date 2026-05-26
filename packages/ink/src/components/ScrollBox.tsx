@@ -3,6 +3,9 @@ import type { Except } from 'type-fest';
 import type { DOMElement } from '../core/dom.js';
 import { markDirty, scheduleRenderFrom } from '../core/dom.js';
 import { markCommitStart } from '../core/reconciler.js';
+import type { ClickEvent } from '../core/events/click-event.js';
+import type { FocusEvent } from '../core/events/focus-event.js';
+import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { Styles } from '../core/styles.js';
 import Box from './Box.js';
 
@@ -67,6 +70,17 @@ export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX
    * grows. Unset manually via scrollTo/scrollBy to break the stickiness.
    */
   stickyScroll?: boolean;
+  tabIndex?: number;
+  autoFocus?: boolean;
+  onClick?: (event: ClickEvent) => void;
+  onFocus?: (event: FocusEvent) => void;
+  onFocusCapture?: (event: FocusEvent) => void;
+  onBlur?: (event: FocusEvent) => void;
+  onBlurCapture?: (event: FocusEvent) => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  onKeyDownCapture?: (event: KeyboardEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 };
 
 /**
@@ -79,7 +93,23 @@ export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX
  *
  * Works best inside a fullscreen (constrained-height root) Ink tree.
  */
-function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
+function ScrollBox({
+  children,
+  ref,
+  stickyScroll,
+  tabIndex,
+  autoFocus,
+  onClick,
+  onFocus,
+  onFocusCapture,
+  onBlur,
+  onBlurCapture,
+  onMouseEnter,
+  onMouseLeave,
+  onKeyDown,
+  onKeyDownCapture,
+  ...style
+}: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
   const domRef = useRef<DOMElement>(null);
   // scrollTo/scrollBy bypass React: they mutate scrollTop on the DOM node,
   // mark it dirty, and call the root's throttled scheduleRender directly.
@@ -218,6 +248,17 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
         domRef.current = el;
         if (el) el.scrollTop ??= 0;
       }}
+      tabIndex={tabIndex}
+      autoFocus={autoFocus}
+      onClick={onClick}
+      onFocus={onFocus as unknown as (event: React.FocusEvent<Element, Element>) => void}
+      onFocusCapture={onFocusCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
+      onBlur={onBlur as unknown as (event: React.FocusEvent<Element, Element>) => void}
+      onBlurCapture={onBlurCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onKeyDown={onKeyDown as unknown as (event: React.KeyboardEvent<Element>) => void}
+      onKeyDownCapture={onKeyDownCapture as unknown as (event: React.KeyboardEvent<Element>) => void}
       style={{
         flexWrap: 'nowrap',
         flexDirection: style.flexDirection ?? 'row',
