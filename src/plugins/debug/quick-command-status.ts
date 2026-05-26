@@ -23,20 +23,25 @@ export class QuickCommandStatusPlugin extends MicaPlugin {
         const currentModelLabel = modelOptions.find(m => m.name === currentModel)?.label ?? currentModel;
         const currentEffortLabel = effortOptions.find(e => e.name === currentEffort)?.label ?? currentEffort;
 
-        const lines = [
-          `Model: ${currentModelLabel} (${currentModel})`,
-          `Effort: ${currentEffortLabel} (${currentEffort})`,
-          `Max Tokens: ${maxTokens}`,
-          `Context Window: ${contextWindow}`,
-          `Context Usage: ${getContextUsage(messages)} tokens`,
-          `Base URL: ${baseUrl || '(not set)'}`,
-          `API Key: ${apiKey || '(not set)'}`,
-          `Session ID: ${sessionId}`,
-          `Messages: ${messages.length}`,
-          `Total Billed Tokens: ${getTotalBilledTokens(messages)}`,
+        const entries: [string, string][] = [
+          ['Model', `${currentModelLabel} (${currentModel})`],
+          ['Effort', `${currentEffortLabel} (${currentEffort})`],
+          ['Max Tokens', `${maxTokens}`],
+          ['Context Window', `${contextWindow}`],
+          ['Context Usage', `${getContextUsage(messages)} tokens`],
+          ['Base URL', baseUrl || '(not set)'],
+          ['API Key', apiKey || '(not set)'],
+          ['Session ID', `${sessionId}`],
+          ['Messages', `${messages.length}`],
+          ['Total Billed Tokens', `${getTotalBilledTokens(messages)}`],
         ];
 
-        this.showMessage(lines.join('\n'), 0);
+        const maxLabelWidth = Math.max(...entries.map(([label]) => label.length));
+
+        this.showMessage(
+          entries.map(([label, value]) => `${label.padEnd(maxLabelWidth)} : ${value}`).join('\n'),
+          0,
+        );
       },
     });
   }

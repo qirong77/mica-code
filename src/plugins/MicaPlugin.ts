@@ -3,7 +3,7 @@ import { type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { IMicaAgent } from '../core/agent';
 import type Anthropic from '@anthropic-ai/sdk';
 import { uuid } from '../utils/uuid';
-import { quickCommandsAtom, pluginUIsAtom, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
+import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
 
 // ── 插件可用的 atom 依赖类型 ───────────────────────────
 
@@ -35,7 +35,11 @@ export abstract class MicaPlugin {
   atoms!: PluginAtoms;
 
   private _activeUIId: string | null = null;
-
+  constructor() {
+    dropdown.atom.listen((state) => {
+      if (state.visible) this.hideUI();
+    });
+  }
   abstract onInstall(): void | Promise<void>;
 
   protected addQuickCommand(command: Command): void {
