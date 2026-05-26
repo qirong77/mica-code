@@ -29,18 +29,27 @@ export function setSelectEmitter(emit: (item: DropdownItem) => void): void {
 export function showQuickCommands(query: string, includeHidden = false): void {
   const commands = quickCommandsAtom.get();
   const filter = query.toLowerCase();
-  const items: DropdownItem[] = commands
-    .filter(
-      (cmd) =>
-        (includeHidden || !cmd.hidden) &&
-        (cmd.name.toLowerCase().includes(filter) ||
-          cmd.description.toLowerCase().includes(filter)),
-    )
-    .map((cmd) => ({
-      key: cmd.name,
-      label: `/${cmd.name}`,
-      description: cmd.description,
-    }));
+  const filtered = commands.filter(
+    (cmd) =>
+      (includeHidden || !cmd.hidden) &&
+      (cmd.name.toLowerCase().includes(filter) ||
+        cmd.description.toLowerCase().includes(filter)),
+  );
+
+  filtered.sort((a, b) => {
+    if (filter) {
+      const aPrefix = a.name.toLowerCase().startsWith(filter);
+      const bPrefix = b.name.toLowerCase().startsWith(filter);
+      if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  const items: DropdownItem[] = filtered.map((cmd) => ({
+    key: cmd.name,
+    label: `/${cmd.name}`,
+    description: cmd.description,
+  }));
 
   dropdown.inputValue.set(query);
   dropdown.atom.set({
