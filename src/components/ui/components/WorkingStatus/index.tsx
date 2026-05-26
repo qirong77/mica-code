@@ -45,7 +45,11 @@ export function WorkingStatus() {
         return (
           <Box>
             <Spin />
-            <Text>{info.type}</Text>
+            <Text>
+              {info.toolNames?.length
+                ? info.toolNames.join(', ')
+                : 'calling_tool'}
+            </Text>
             {info.elapsedMs != null && (
               <Text color={C.dim}> ({formatElapsed(info.elapsedMs)})</Text>
             )}

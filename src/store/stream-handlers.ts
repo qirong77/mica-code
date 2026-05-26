@@ -1,22 +1,9 @@
-import { thinkingTextAtom, responseTextAtom, toolCallsAtom, workingStatusAtom } from './ui-state.js';
-import type { WorkingStatus, ToolCallData } from './ui-state.js';
+import { thinkingTextAtom, responseTextAtom, workingStatusAtom } from './ui-state.js';
+import type { WorkingStatus } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
-import { getToolDisplayText } from '../tools/index.js';
 import { ui } from '../components/ui/index.js';
 
 const toolOutputBuffers = new Map<string, string[]>();
-
-function upsertToolCall(id: string, patch: Partial<ToolCallData>, fallback: ToolCallData) {
-  const existing = toolCallsAtom.get();
-  const idx = existing.findIndex((t) => t.id === id);
-  if (idx !== -1) {
-    const updated = [...existing];
-    updated[idx] = { ...updated[idx], ...patch };
-    toolCallsAtom.set(updated);
-  } else {
-    toolCallsAtom.set([...existing, fallback]);
-  }
-}
 
 export function flushToolOutputBuffer(toolUseId: string) {
   const chunks = toolOutputBuffers.get(toolUseId);
@@ -43,7 +30,6 @@ export function onThinkingChunk(chunk: string) {
 
 export function onStreamStart() {
   appendSystemLog('流：开始文本输出');
-  toolCallsAtom.set([]);
   thinkingTextAtom.set('');
   responseTextAtom.set('');
   clearToolOutputBuffers();
@@ -61,33 +47,16 @@ export function onStreamEnd() {
 export function onFinalMessage() {
   responseTextAtom.set('');
   thinkingTextAtom.set('');
-  toolCallsAtom.set([]);
   clearToolOutputBuffers();
 }
 
-export function onToolUseStart(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
-  const displayText = getToolDisplayText(toolName, toolInput);
+export function onToolUseStart(_toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
   appendSystemLog(`工具调用：${toolName}`);
-
-  upsertToolCall(toolUseId, { displayText }, {
-    id: toolUseId, toolName, toolInput, completed: false, displayText,
-  });
 }
 
-export function onToolUseComplete(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
+export function onToolUseComplete(toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
   appendSystemLog(`工具完成：${toolName}`);
   flushToolOutputBuffer(toolUseId);
-
-  const displayText = getToolDisplayText(toolName, toolInput);
-  upsertToolCall(toolUseId, { completed: true, displayText, status: undefined }, {
-    id: toolUseId, toolName, toolInput, completed: true, displayText,
-  });
-}
-
-export function onToolSlow(toolUseId: string, elapsedMs: number) {
-  upsertToolCall(toolUseId, { elapsedMs }, {
-    id: toolUseId, toolName: '', toolInput: {}, completed: false, displayText: '', elapsedMs,
-  });
 }
 
 export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
@@ -96,23 +65,10 @@ export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null
   }
 
   if (status.type === 'connecting') {
-    toolCallsAtom.set([]);
     thinkingTextAtom.set('');
     responseTextAtom.set('');
     clearToolOutputBuffers();
     ui.MessageBar.clearMessages();
-  }
-
-  if (status.type === 'calling_tool') {
-    const calls = toolCallsAtom.get();
-    let changed = false;
-    for (const call of calls) {
-      if (!call.completed && call.status !== 'executing') {
-        call.status = 'executing';
-        changed = true;
-      }
-    }
-    if (changed) toolCallsAtom.set([...calls]);
   }
 
   if (status.type === 'idle') {

@@ -5,7 +5,7 @@ export type WorkingStatus =
   | { type: 'connecting' }
   | { type: 'thinking' }
   | { type: 'streaming' }
-  | { type: 'calling_tool'; elapsedMs?: number }
+  | { type: 'calling_tool'; elapsedMs?: number; toolNames?: string[] }
   | { type: 'completed'; elapsedMs?: number }
   | { type: 'error'; message?: string };
 
@@ -22,16 +22,6 @@ export interface DropdownState {
   selectedIndex: number;
   title?: string;
   emptyMessage?: string;
-}
-
-export interface ToolCallData {
-  id: string;
-  toolName: string;
-  toolInput: Record<string, any>;
-  completed: boolean;
-  displayText: string;
-  status?: 'executing' | 'error';
-  elapsedMs?: number;
 }
 
 export interface SessionMeta {
@@ -60,8 +50,6 @@ export const dropdown = {
 export const thinkingTextAtom = atom('');
 
 export const responseTextAtom = atom('');
-
-export const toolCallsAtom = atom<ToolCallData[]>([]);
 
 export const terminalInput = {
   text: atom(''),

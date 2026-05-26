@@ -4,10 +4,11 @@ const SLOW_TOOL_THRESHOLD_MS = 3000;
 
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;
-  onLongRunning?: (elapsedMs: number) => void;
 }
 
 export abstract class MicaTool {
+  static onSlowTool?: (toolName: string, elapsedMs: number, done?: boolean) => void;
+
   name: string;
   description: string;
   input_schema: any;
@@ -25,12 +26,12 @@ export abstract class MicaTool {
     const startTime = Date.now();
     let timer: ReturnType<typeof setInterval> | null = null;
 
-    if (callbacks?.onLongRunning) {
-      const cb = callbacks.onLongRunning;
+    const slowHandler = MicaTool.onSlowTool;
+    if (slowHandler) {
       timer = setInterval(() => {
         const elapsed = Date.now() - startTime;
         if (elapsed >= SLOW_TOOL_THRESHOLD_MS) {
-          cb(elapsed);
+          slowHandler(this.name, elapsed);
         }
       }, SLOW_TOOL_THRESHOLD_MS);
     }
@@ -41,7 +42,7 @@ export abstract class MicaTool {
       return `工具 ${this.name} 执行失败：\n${formatError(error)}`;
     } finally {
       if (timer) clearInterval(timer);
-      callbacks?.onLongRunning?.(Date.now() - startTime);
+      slowHandler?.(this.name, Date.now() - startTime, true);
     }
   }
 }

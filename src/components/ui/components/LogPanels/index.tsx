@@ -1,11 +1,10 @@
 import React from 'react';
 import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
-import { thinkingTextAtom, toolCallsAtom } from '../../../../store/ui-state.js';
+import { thinkingTextAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
 
 const MIN_LINES = 5;
-const MAX_TOOL_CALLS = 3;
 
 function useLogHeight(): number {
   const { rows } = useTerminalSize();
@@ -24,27 +23,6 @@ export function ThinkingPanel(): React.ReactNode {
   return (
     <Box flexDirection="column" height={maxLines}>
       <Text dimColor>{display}</Text>
-    </Box>
-  );
-}
-
-export function ToolCallPanel(): React.ReactNode {
-  const toolCalls = useSchedulState(toolCallsAtom);
-  if (toolCalls.length === 0) return null;
-
-  const sorted = [...toolCalls].sort((a, b) => Number(a.completed) - Number(b.completed));
-  const displayed = sorted.slice(0, MAX_TOOL_CALLS);
-
-  return (
-    <Box flexDirection="column">
-      {displayed.map((tc) => (
-        <Box key={tc.id}>
-          <Text dimColor>
-            {tc.displayText}
-            {tc.elapsedMs != null && !tc.completed ? ` (${(tc.elapsedMs / 1000).toFixed(1)}s)` : ''}
-          </Text>
-        </Box>
-      ))}
     </Box>
   );
 }

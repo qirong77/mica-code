@@ -10,7 +10,6 @@ import {
   onFinalMessage,
   onToolUseStart,
   onToolUseComplete,
-  onToolSlow,
   onStatus,
   appendToolOutputChunk,
 } from '../store/stream-handlers.js';
@@ -50,10 +49,6 @@ export function setupAgentEvents() {
     } else {
       onToolUseStart(toolUseId, toolName, toolInput);
     }
-  });
-
-  agentTurn.events.on('tool:slow', ({ toolUseId, elapsedMs }) => {
-    onToolSlow(toolUseId, elapsedMs);
   });
 
   agentTurn.events.on('status', (status) => {

@@ -13,7 +13,6 @@ import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.
 import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.js';
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
 import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
-import { QuickCommandSessionToolsPlugin } from './plugins/debug/quick-command-session-tools.js';
 import { QuickBashPlugin } from './plugins/custom/quick-bash-plugin.js';
 
 
@@ -21,7 +20,6 @@ await MicaAgent.usePlugin(new QuickBashPlugin());
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandDebugPlugin());
-await MicaAgent.usePlugin(new QuickCommandSessionToolsPlugin());
 await MicaAgent.usePlugin(new QuickCommandLogTogglePlugin());
 await MicaAgent.usePlugin(new QuickCommandLogPlugin());
 await MicaAgent.usePlugin(new QuickCommandStatusPlugin());

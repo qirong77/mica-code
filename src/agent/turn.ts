@@ -18,10 +18,6 @@ export type AgentTurnEvents = {
     toolInput: Record<string, any>;
     completed: boolean;
   };
-  'tool:slow': {
-    toolUseId: string;
-    elapsedMs: number;
-  };
   status: WorkingStatus;
   'tool:output': { toolUseId: string; chunk: string };
   'message:final': Anthropic.Message;
@@ -110,33 +106,32 @@ class AgentTurn {
 
     if (completedToolUses.length > 0) {
       const toolStartTime = Date.now();
-      this.events.emit('status', { type: 'calling_tool' });
+      const toolNames = completedToolUses.map((t) => t.name);
+      this.events.emit('status', { type: 'calling_tool', toolNames });
 
       const timer = setInterval(() => {
         this.events.emit('status', {
           type: 'calling_tool',
           elapsedMs: Date.now() - toolStartTime,
+          toolNames,
         });
       }, 200);
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       const settled = await Promise.allSettled(
         completedToolUses.map(async (tool) => {
-          let lastElapsed = 0;
+          const startTime = Date.now();
           const result = await executeTool(tool.name, tool.input, {
             onChunk: (chunk) => {
               this.events.emit('tool:output', { toolUseId: tool.id, chunk });
             },
-            onLongRunning: (elapsedMs) => {
-              lastElapsed = elapsedMs;
-              this.events.emit('tool:slow', { toolUseId: tool.id, elapsedMs });
-            },
           });
-          if (lastElapsed >= 3000) {
-            appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(lastElapsed / 1000).toFixed(1)}s`);
+          const elapsed = Date.now() - startTime;
+          if (elapsed >= 3000) {
+            appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(elapsed / 1000).toFixed(1)}s`);
           }
           const records = sessionToolRecordsAtom.get();
-          sessionToolRecordsAtom.set([...records, { toolName: tool.name, toolInput: tool.input, elapsedMs: lastElapsed }]);
+          sessionToolRecordsAtom.set([...records, { toolName: tool.name, toolInput: tool.input, elapsedMs: elapsed }]);
           return { tool, result };
         }),
       );
