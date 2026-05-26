@@ -17,6 +17,7 @@ export interface PluginAtoms {
   currentSessionId: WritableAtom<string>;
   sessionSwitch: WritableAtom<string | null>;
   thinkingText: WritableAtom<string>;
+  responseText: WritableAtom<string>;
   sessionToolRecords: WritableAtom<SessionToolRecord[]>;
   systemLogVisible: WritableAtom<boolean>;
   maxTokens: WritableAtom<number>;
@@ -44,13 +45,38 @@ export abstract class MicaPlugin {
 
   private _activeUIId: string | null = null;
   private _uiAtom: WritableAtom<any> | null = null;
+  private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
 
   constructor() {
     dropdown.atom.listen((state) => {
-      if (state.visible) this.hideUI();
+      if (state.visible) this.reset();
     });
   }
   abstract onInstall(): void | Promise<void>;
+
+  onCleanup(): void {}
+  onSessionSwitch(_newId: string, _oldId: string): void {}
+
+  /** 创建插件自有的 atom，框架会在 reset() 时自动重置为初始值 */
+  protected createState<T>(initial: T): WritableAtom<T> {
+    const a = createAtom<T>(initial);
+    this._ownedAtoms.push({ atom: a, initial });
+    return a;
+  }
+
+  /** 重置所有 createState 创建的 atom 到初始值 */
+  protected resetState(): void {
+    for (const { atom, initial } of this._ownedAtoms) {
+      atom.set(initial);
+    }
+  }
+
+  /** 清理插件：隐藏 UI + 重置状态 + 调用 onCleanup 钩子 */
+  public reset(): void {
+    this.hideUI();
+    this.resetState();
+    this.onCleanup();
+  }
 
   protected addQuickCommand(command: Command): void {
     quickCommandsAtom.set([...quickCommandsAtom.get(), command]);

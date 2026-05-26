@@ -1,8 +1,27 @@
+import React from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { spawn } from 'node:child_process';
 import { MicaPlugin } from '../MicaPlugin';
+import type { WritableAtom } from 'nanostores';
+import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+
+function BashOutput({ atom }: { atom: WritableAtom<string> }) {
+  const text = useSchedulState(atom);
+  if (!text) return null;
+  return React.createElement(Box, { flexDirection: 'column' },
+    React.createElement(Text, null, text),
+  );
+}
 
 export class QuickBashPlugin extends MicaPlugin {
+  private outputAtom!: WritableAtom<string>;
+
   onInstall(): void {
+    this.outputAtom = this.createState('');
+
+    const OutputComponent = () => React.createElement(BashOutput, { atom: this.outputAtom });
+    this.showUISimple(OutputComponent);
+
     this.agent.agentTurn.use(async (userInput, next, onIteration) => {
       if (!userInput.startsWith('!')) return next(userInput, onIteration);
 
@@ -12,7 +31,7 @@ export class QuickBashPlugin extends MicaPlugin {
         return;
       }
 
-      this.atoms.thinkingText.set(this.atoms.thinkingText.get() + `$ ${command}\n`);
+      this.outputAtom.set(this.outputAtom.get() + `$ ${command}\n`);
 
       const msgId = this.showMessage(`执行中: ${command}`, 0);
 
@@ -28,7 +47,7 @@ export class QuickBashPlugin extends MicaPlugin {
 
           child.stdout.on('data', (data: Buffer) => {
             const text = data.toString();
-            this.atoms.thinkingText.set(this.atoms.thinkingText.get() + text);
+            this.outputAtom.set(this.outputAtom.get() + text);
             for (const line of text.split('\n')) {
               const trimmed = line.trimEnd();
               if (trimmed) lines.push(trimmed);
@@ -37,7 +56,7 @@ export class QuickBashPlugin extends MicaPlugin {
 
           child.stderr.on('data', (data: Buffer) => {
             const text = data.toString();
-            this.atoms.thinkingText.set(this.atoms.thinkingText.get() + text);
+            this.outputAtom.set(this.outputAtom.get() + text);
             for (const line of text.split('\n')) {
               const trimmed = line.trimEnd();
               if (trimmed) lines.push(trimmed);
@@ -64,7 +83,7 @@ export class QuickBashPlugin extends MicaPlugin {
       } catch (err) {
         this.removeMessage(msgId);
         const errMsg = err instanceof Error ? err.message : String(err);
-        this.atoms.thinkingText.set(this.atoms.thinkingText.get() + `[错误] ${errMsg}\n`);
+        this.outputAtom.set(this.outputAtom.get() + `[错误] ${errMsg}\n`);
         this.showMessage(`命令失败: ${errMsg}`);
       }
     });
