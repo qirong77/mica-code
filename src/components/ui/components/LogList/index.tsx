@@ -3,6 +3,7 @@ import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
 import { logTextAtom, toolCallsAtom, systemLogVisibleAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
+import { IfComponent } from '../common/IfComponent.js';
 
 const MIN_LINES = 5;
 const MAX_TOOL_CALLS = 3;
@@ -51,8 +52,7 @@ function SystemLogPanel(): React.ReactNode {
   const maxLines = useLogHeight();
   if (lines.length === 0) return null;
 
-  const display =
-    lines.length > maxLines ? lines.slice(-maxLines).join('\n') : lines.join('\n');
+  const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : lines.join('\n');
 
   return (
     <Box flexDirection="column" height={maxLines}>
@@ -76,9 +76,11 @@ export const LogList = React.memo(function LogList(): React.ReactNode {
       <Box flexGrow={1} width="50%" paddingRight={1}>
         <AgentLogPanel />
       </Box>
-      <Box flexGrow={1} width="50%" paddingLeft={1}>
-        <SystemLogPanel />
-      </Box>
+      <IfComponent condition={hasSystemLog}>
+        <Box flexGrow={1} width="50%" paddingLeft={1}>
+          <SystemLogPanel />
+        </Box>
+      </IfComponent>
     </Box>
   );
 });
