@@ -109,9 +109,10 @@ export abstract class MicaPlugin {
     this._uiAtom = null;
   }
 
-  /** 显示一条消息（通过 UI 组件事件），默认 3s 后自动清除 */
-  protected showMessage(text: string, delay: number = 3000): string {
-    const msgId = `msg-${uuid()}`;
+  /** 显示或更新一条消息，默认 3s 后自动清除。传入 id 可更新已有消息 */
+  protected showMessage(text: string, delay: number = 3000, id?: string): string {
+    const msgId = id ?? `msg-${uuid()}`;
+    if (id) this.removeMessage(msgId);
     this.agent.ui.MessageBar.addMessage({ id: msgId, text });
     if (delay) {
       setTimeout(() => {

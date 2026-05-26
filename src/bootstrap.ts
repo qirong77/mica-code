@@ -2,6 +2,7 @@ import { agentTurn } from './agent/turn.js';
 import { ui } from './components/ui/index.js';
 import { setupAgentEvents } from './core/agentEvents.js';
 import { appendSystemLog } from './store/logAtom.js';
+import { formatError } from './utils/formatError';
 
 export function bootstrap() {
   ui.TerminalInput.onSubmit(async (text) => {
@@ -15,7 +16,7 @@ export function bootstrap() {
       agentTurn.events.emit('status', { type: 'completed', elapsedMs: Date.now() - startTime });
       appendSystemLog('Agent 运行完成');
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatError(error);
       agentTurn.events.emit('status', {
         type: 'error',
         message,

@@ -9,8 +9,6 @@ import { bootstrap } from '../bootstrap.js';
 import './effect.js';
 bootstrap();
 
-const _installedPlugins: MicaPlugin[] = [];
-
 export const MicaAgent = {
   agentTurn,
   ui,
@@ -29,13 +27,12 @@ export const MicaAgent = {
       sessionToolRecords: sessionToolRecordsAtom,
       systemLogVisible: systemLogVisibleAtom,
       maxTokens: model.maxTokens,
-      contextWindowSize: model.conextWindowSize,
+      contextWindowSize: model.contextWindowSize,
       apiBaseUrl: api.baseUrl,
       apiKey: api.apiKey,
       quickCommands: quickCommandsAtom,
     };
     await plugin.onInstall();
-    _installedPlugins.push(plugin);
     return plugin;
   },
   run() {

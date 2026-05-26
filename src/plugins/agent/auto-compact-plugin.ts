@@ -28,7 +28,7 @@ export class AutoCompactPlugin extends MicaPlugin {
       }
 
       const contextUsage = getContextUsage(messages);
-      const maxContext = model.conextWindowSize.get();
+      const maxContext = model.contextWindowSize.get();
       const contextRatio = maxContext > 0 ? contextUsage / maxContext : 0;
 
       const timeTriggered = timeSinceLastUser > INACTIVITY_THRESHOLD_MS;

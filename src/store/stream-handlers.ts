@@ -1,10 +1,22 @@
 import { thinkingTextAtom, responseTextAtom, toolCallsAtom, workingStatusAtom } from './ui-state.js';
-import type { WorkingStatus } from './ui-state.js';
+import type { WorkingStatus, ToolCallData } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
 import { getToolDisplayText } from '../tools/index.js';
 import { ui } from '../components/ui/index.js';
 
 const toolOutputBuffers = new Map<string, string[]>();
+
+function upsertToolCall(id: string, patch: Partial<ToolCallData>, fallback: ToolCallData) {
+  const existing = toolCallsAtom.get();
+  const idx = existing.findIndex((t) => t.id === id);
+  if (idx !== -1) {
+    const updated = [...existing];
+    updated[idx] = { ...updated[idx], ...patch };
+    toolCallsAtom.set(updated);
+  } else {
+    toolCallsAtom.set([...existing, fallback]);
+  }
+}
 
 export function flushToolOutputBuffer(toolUseId: string) {
   const chunks = toolOutputBuffers.get(toolUseId);
@@ -55,20 +67,11 @@ export function onFinalMessage() {
 
 export function onToolUseStart(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
   const displayText = getToolDisplayText(toolName, toolInput);
-  const existing = toolCallsAtom.get();
-  const idx = existing.findIndex((t) => t.id === toolUseId);
+  appendSystemLog(`工具调用：${toolName}`);
 
-  if (idx === -1) {
-    appendSystemLog(`工具调用：${toolName}`);
-  }
-
-  if (idx !== -1) {
-    const updated = [...existing];
-    updated[idx] = { ...updated[idx], displayText, status: updated[idx].status };
-    toolCallsAtom.set(updated);
-  } else {
-    toolCallsAtom.set([...existing, { id: toolUseId, toolName, toolInput, completed: false, displayText }]);
-  }
+  upsertToolCall(toolUseId, { displayText }, {
+    id: toolUseId, toolName, toolInput, completed: false, displayText,
+  });
 }
 
 export function onToolUseComplete(toolUseId: string, toolName: string, toolInput: Record<string, any>) {
@@ -76,26 +79,15 @@ export function onToolUseComplete(toolUseId: string, toolName: string, toolInput
   flushToolOutputBuffer(toolUseId);
 
   const displayText = getToolDisplayText(toolName, toolInput);
-  const existing = toolCallsAtom.get();
-  const idx = existing.findIndex((t) => t.id === toolUseId);
-
-  if (idx !== -1) {
-    const updated = [...existing];
-    updated[idx] = { ...updated[idx], completed: true, displayText, status: undefined };
-    toolCallsAtom.set(updated);
-  } else {
-    toolCallsAtom.set([...existing, { id: toolUseId, toolName, toolInput, completed: true, displayText }]);
-  }
+  upsertToolCall(toolUseId, { completed: true, displayText, status: undefined }, {
+    id: toolUseId, toolName, toolInput, completed: true, displayText,
+  });
 }
 
 export function onToolSlow(toolUseId: string, elapsedMs: number) {
-  const existing = toolCallsAtom.get();
-  const idx = existing.findIndex((t) => t.id === toolUseId);
-  if (idx !== -1) {
-    const updated = [...existing];
-    updated[idx] = { ...updated[idx], elapsedMs };
-    toolCallsAtom.set(updated);
-  }
+  upsertToolCall(toolUseId, { elapsedMs }, {
+    id: toolUseId, toolName: '', toolInput: {}, completed: false, displayText: '', elapsedMs,
+  });
 }
 
 export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {

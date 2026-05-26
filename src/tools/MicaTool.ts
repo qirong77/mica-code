@@ -1,3 +1,5 @@
+import { formatError } from '../utils/formatError';
+
 const SLOW_TOOL_THRESHOLD_MS = 3000;
 
 export interface ToolExecuteCallbacks {
@@ -36,15 +38,7 @@ export abstract class MicaTool {
     try {
       return await this.execute(input, callbacks);
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? `${error.name}: ${error.message}`
-          : typeof error === 'string'
-            ? error
-            : JSON.stringify(error);
-      const maxLen = 2000;
-      const truncated = message.length > maxLen ? `${message.slice(0, maxLen)}\n...(截断)` : message;
-      return `工具 ${this.name} 执行失败：\n${truncated}`;
+      return `工具 ${this.name} 执行失败：\n${formatError(error)}`;
     } finally {
       if (timer) clearInterval(timer);
       callbacks?.onLongRunning?.(Date.now() - startTime);
