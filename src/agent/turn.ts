@@ -7,6 +7,7 @@ import { appendSystemLog } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
 import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
+import { clearBackups } from '../utils/fileHistory.js';
 import mitt from 'mitt';
 
 export type AgentTurnEvents = {
@@ -185,6 +186,7 @@ class AgentTurn {
 
   private async _coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
     appendSystemLog('Agent run 开始');
+    await clearBackups();
     const updated = [...messagesAtom.get(), { role: 'user', content: userInput } as Anthropic.MessageParam];
     messagesAtom.set(updated);
     while (true) {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { execSync } from 'node:child_process';
 import { MicaPlugin } from '../MicaPlugin';
+import { hasBackups, rewindFiles } from '../../utils/fileHistory.js';
 
 function ConfirmDialog({
   title,
@@ -56,15 +56,10 @@ export class QuickCommandRewindPlugin extends MicaPlugin {
     }
 
     const removedCount = msgs.length - cutoff;
-
-    let hasFileChanges = false;
-    try {
-      const diff = execSync('git diff --name-only', { encoding: 'utf-8', cwd: process.cwd() });
-      hasFileChanges = diff.trim().length > 0;
-    } catch {}
+    const hasFileChanges = hasBackups();
 
     const detailParts: string[] = [`将移除 ${removedCount} 条消息`];
-    if (hasFileChanges) detailParts.push('并回退工作区代码改动');
+    if (hasFileChanges) detailParts.push('并回退代码改动');
 
     const title = `rewind: ${detailParts.join('，')}`;
 
@@ -111,16 +106,16 @@ export class QuickCommandRewindPlugin extends MicaPlugin {
     this.atoms.messages.set(rewinded);
 
     if (hasFileChanges) {
-      try {
-        execSync('git checkout -- .', { encoding: 'utf-8', cwd: process.cwd() });
-        execSync('git clean -fd', { encoding: 'utf-8', cwd: process.cwd() });
-      } catch {
-        this.showMessage('回退消息成功，但代码回退失败');
-        return;
-      }
+      rewindFiles()
+        .then(() => {
+          this.showMessage(`已回退最近一轮对话及代码改动`);
+        })
+        .catch(() => {
+          this.showMessage('回退消息成功，但代码回退失败');
+        });
+    } else {
+      this.showMessage(`已回退最近一轮对话`);
     }
-
-    this.showMessage(`已回退最近一轮对话${hasFileChanges ? '及代码改动' : ''}`);
   }
 
   private _findLastUserMessageIndex(msgs: readonly any[]): number {

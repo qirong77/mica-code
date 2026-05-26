@@ -9,6 +9,7 @@ import { ToolGrepSearch } from './ToolGrepSearch';
 import { MicaTool } from './MicaTool';
 import { ToolRunShell } from './ToolRunShell';
 import type { ToolExecuteCallbacks } from './MicaTool';
+import { backupFile } from '../utils/fileHistory.js';
 
 const tools: MicaTool[] = [
   new ToolReadFile(),
@@ -30,6 +31,9 @@ export async function executeTool(name: string, input: Record<string, any>, call
   if (!tool) return `未知工具: ${name}`;
 
   try {
+    if (name === 'write_file' || name === 'edit_file') {
+      await backupFile(input.file_path as string);
+    }
     return await tool.execute(input, callbacks);
   } catch (error) {
     const message =
