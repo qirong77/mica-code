@@ -1,11 +1,11 @@
 import { Box, Text } from '@anthropic/ink';
 import React from 'react';
 import { useSchedulState } from '../../hooks/index.js';
-import { contextSizeAtom } from '../../../../store/conversation.js';
 import { dropdown, workingStatusAtom, thinkingTextAtom, responseTextAtom } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
+import { ContextTokens } from '../common/ContextTokens.js';
 // ── Types ─────────────────────────────────────────────
 
 
@@ -46,7 +46,6 @@ export function WorkingStatus() {
   const info = useSchedulState(workingStatusAtom);
   const modelValue = useSchedulState(model.atom);
   const effort = useSchedulState(model.effort);
-  const contextSize = useSchedulState(contextSizeAtom);
   const dropdownItems = useSchedulState(dropdown.atom);
   const thinkingText = useSchedulState(thinkingTextAtom);
   const responseText = useSchedulState(responseTextAtom);
@@ -111,10 +110,11 @@ export function WorkingStatus() {
       <Box flexGrow={1} flexShrink={1}>
         {hideLeftStatus ? null : content}
       </Box>
-      <Box flexShrink={0} paddingRight={4}>
+      <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <Text color={C.dim} wrap="wrap">
-          {modelValue} · {effort}{contextSize > 0 ? ` · ${(contextSize / 1000000).toFixed(2)}M tokens` : ''}
+          {modelValue} · {effort}
         </Text>
+        <ContextTokens />
       </Box>
     </Box>
   );
