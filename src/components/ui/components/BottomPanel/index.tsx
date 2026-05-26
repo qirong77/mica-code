@@ -37,7 +37,10 @@ function AgentLogPanel(): React.ReactNode {
       <Box flexDirection="column">
         {displayed.map((tc) => (
           <Box key={tc.id}>
-            <Text dimColor>{tc.displayText}</Text>
+            <Text dimColor>
+              {tc.displayText}
+              {tc.elapsedMs != null && !tc.completed ? ` (${(tc.elapsedMs / 1000).toFixed(1)}s)` : ''}
+            </Text>
           </Box>
         ))}
       </Box>

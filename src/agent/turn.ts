@@ -18,6 +18,10 @@ export type AgentTurnEvents = {
     toolInput: Record<string, any>;
     completed: boolean;
   };
+  'tool:slow': {
+    toolUseId: string;
+    elapsedMs: number;
+  };
   status: WorkingStatus;
   'log:chunk': { toolUseId: string; chunk: string };
 };
@@ -115,7 +119,7 @@ class AgentTurn {
         for (const [id, info] of toolTimers) {
           const elapsed = now - info.startTime;
           if (elapsed >= SLOW_TOOL_THRESHOLD_MS && now - info.lastLogTime >= SLOW_TOOL_THRESHOLD_MS) {
-            appendSystemLog(`工具 ${info.name} 已执行 ${(elapsed / 1000).toFixed(1)}s`);
+            this.events.emit('tool:slow', { toolUseId: id, elapsedMs: elapsed });
             info.lastLogTime = now;
           }
         }
@@ -136,6 +140,7 @@ class AgentTurn {
           if (elapsed >= SLOW_TOOL_THRESHOLD_MS) {
             appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(elapsed / 1000).toFixed(1)}s`);
           }
+          this.events.emit('tool:slow', { toolUseId: tool.id, elapsedMs: elapsed });
           return { tool, result };
         }),
       );

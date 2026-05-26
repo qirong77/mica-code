@@ -31,6 +31,7 @@ export interface ToolCallData {
   completed: boolean;
   displayText: string;
   status?: 'executing' | 'error';
+  elapsedMs?: number;
 }
 
 export interface SessionMeta {

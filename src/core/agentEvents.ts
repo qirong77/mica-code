@@ -105,8 +105,16 @@ export function setupAgentEvents() {
         { id: toolUseId, toolName, toolInput, completed, displayText },
       ]);
     }
+  });
 
-    // 不在此处设置 workingStatus — 由 status 事件统一管理
+  agentTurn.events.on('tool:slow', ({ toolUseId, elapsedMs }) => {
+    const existing = toolCallsAtom.get();
+    const idx = existing.findIndex((t) => t.id === toolUseId);
+    if (idx !== -1) {
+      const updated = [...existing];
+      updated[idx] = { ...updated[idx], elapsedMs };
+      toolCallsAtom.set(updated);
+    }
   });
 
   agentTurn.events.on('status', (status) => {
