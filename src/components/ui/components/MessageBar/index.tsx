@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
+import { dropdown } from '../../../../store/ui-state.js';
 
 // ── 事件定义 ──────────────────────────────────────────
 
@@ -51,10 +52,15 @@ export const MessageBar = React.memo(function MessageBar(): React.ReactNode {
     emitter.on('remove', onRemove);
     emitter.on('clear', onClear);
 
+    const unsubDropdown = dropdown.atom.subscribe((state) => {
+      if (state.visible) setItems([]);
+    });
+
     return () => {
       emitter.off('add', onAdd);
       emitter.off('remove', onRemove);
       emitter.off('clear', onClear);
+      unsubDropdown();
     };
   }, []);
 

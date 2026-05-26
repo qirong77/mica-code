@@ -36,7 +36,7 @@ export class QuickCommandStatusPlugin extends MicaPlugin {
           `Total Billed Tokens: ${getTotalBilledTokens(messages)}`,
         ];
 
-        this.showMessage(lines.join('\n'), 5000);
+        this.showMessage(lines.join('\n'), 0);
       },
     });
   }
