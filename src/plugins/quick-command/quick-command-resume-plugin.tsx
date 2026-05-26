@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -39,16 +39,36 @@ function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const MIN_LABEL_COL = 18;
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 60) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  if (hours < 24) return `${hours} 小时前`;
+  if (days < 7) return `${days} 天前`;
+  if (days < 30) return `${Math.floor(days / 7)} 周前`;
+  return `${Math.floor(days / 30)} 个月前`;
+}
+
+const MAX_LABEL_WIDTH = 40;
+const PAGE_SIZE = 5;
 
 function SessionList({
   sessions,
   selected,
+  startIndex,
+  total,
 }: {
   sessions: SessionMeta[];
   selected: number;
+  startIndex: number;
+  total: number;
 }) {
-  if (sessions.length === 0) {
+  if (total === 0) {
     return (
       <Box paddingX={1}>
         <Text dimColor>no sessions</Text>
@@ -56,28 +76,51 @@ function SessionList({
     );
   }
 
-  const labelWidth = Math.max(
-    MIN_LABEL_COL,
-    ...sessions.map((s) => stringWidth(s.title)),
-  );
+  const hasAbove = startIndex > 0;
+  const hasBelow = startIndex + sessions.length < total;
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box paddingBottom={1}>
-        <Text dimColor>resume:</Text>
+        <Text dimColor>
+          resume ({selected + startIndex + 1}/{total}):
+        </Text>
       </Box>
+      {hasAbove && (
+        <Box marginBottom={1}>
+          <Text dimColor>  ▲ {startIndex} more</Text>
+        </Box>
+      )}
       {sessions.map((s, i) => {
-        const displayLabel = s.title.length > labelWidth
-          ? s.title.slice(0, labelWidth - 1) + '…'
-          : s.title.padEnd(labelWidth);
+        const truncated = s.title.length > MAX_LABEL_WIDTH
+          ? s.title.slice(0, MAX_LABEL_WIDTH - 1) + '…'
+          : s.title;
+        const isSelected = i === selected;
         return (
-          <Box key={s.id}>
-            <Text color={i === selected ? 'claude' : 'inactive'}>
-              {displayLabel}  {formatTime(s.updatedAt)}
-            </Text>
+          <Box key={s.id} flexDirection="column" marginBottom={i < sessions.length - 1 || hasBelow ? 1 : 0}>
+            <Box flexDirection="row">
+              <Box width={2}>
+                <Text color={isSelected ? 'claude' : 'inactive'}>
+                  {isSelected ? '▶' : ' '}
+                </Text>
+              </Box>
+              <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+                {truncated}
+              </Text>
+            </Box>
+            <Box marginLeft={2}>
+              <Text dimColor>
+                {formatRelativeTime(s.updatedAt)} · {formatTime(s.updatedAt)}
+              </Text>
+            </Box>
           </Box>
         );
       })}
+      {hasBelow && (
+        <Box marginTop={1}>
+          <Text dimColor>  ▼ {total - startIndex - sessions.length} more</Text>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -191,6 +234,13 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       return;
     }
 
+    const getWindow = (sel: number) => {
+      if (sorted.length <= PAGE_SIZE) return { start: 0, sessions: sorted };
+      let start = Math.max(0, sel - Math.floor(PAGE_SIZE / 2));
+      start = Math.min(start, sorted.length - PAGE_SIZE);
+      return { start, sessions: sorted.slice(start, start + PAGE_SIZE) };
+    };
+
     const ctx = {
       sessions: sorted,
       selectedIdx: 0,
@@ -198,9 +248,17 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       onInput: null as any,
     };
 
-    ctx.render = () => (
-      <SessionList sessions={ctx.sessions} selected={ctx.selectedIdx} />
-    );
+    ctx.render = () => {
+      const { start, sessions: visible } = getWindow(ctx.selectedIdx);
+      return (
+        <SessionList
+          sessions={visible}
+          selected={ctx.selectedIdx - start}
+          startIndex={start}
+          total={sorted.length}
+        />
+      );
+    };
 
     ctx.onInput = (_input: string, key: any) => {
       if (key.upArrow) {
