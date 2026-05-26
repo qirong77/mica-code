@@ -10,7 +10,9 @@ export function PluginPanel(): React.ReactNode {
   return (
     <Box flexDirection="column" flexGrow={1}>
       {uis.map((ui) => (
-        <Box key={ui.id}>{ui.render()}</Box>
+        <Box key={ui.id}>
+          <ui.component />
+        </Box>
       ))}
     </Box>
   );

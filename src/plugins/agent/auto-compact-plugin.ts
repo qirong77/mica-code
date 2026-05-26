@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { MicaPlugin } from '../MicaPlugin';
 import { getContextUsage } from '../../utils/getContextUsage';
 import { getClient } from '../../agent/client';
+import { model } from '../../store/config.js';
 
 const CONTEXT_THRESHOLD = 0.4;
 const INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000;

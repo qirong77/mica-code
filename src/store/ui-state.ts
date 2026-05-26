@@ -59,6 +59,8 @@ export const dropdown = {
 
 export const logTextAtom = atom('');
 
+export const streamingTextAtom = atom('');
+
 export const toolCallsAtom = atom<ToolCallData[]>([]);
 
 export const terminalInput = {
@@ -70,7 +72,7 @@ export const quickCommandsAtom = atom<Command[]>([]);
 
 export interface PluginUI {
   id: string;
-  render: () => React.ReactNode;
+  component: React.ComponentType;
   onInput?: (input: string, key: any) => boolean;
 }
 

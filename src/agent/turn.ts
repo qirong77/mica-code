@@ -24,6 +24,7 @@ export type AgentTurnEvents = {
   };
   status: WorkingStatus;
   'log:chunk': { toolUseId: string; chunk: string };
+  'message:final': Anthropic.Message;
 };
 
 export interface IterationResult {
@@ -97,6 +98,7 @@ class AgentTurn {
     const finalMessage = await stream.finalMessage();
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
     messagesAtom.set([...messages, finalMessage]);
+    this.events.emit('message:final', finalMessage);
     appendSystemLog(
       `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
     );

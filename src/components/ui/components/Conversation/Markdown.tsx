@@ -5,6 +5,7 @@ import { Box, Text, Ansi, stringWidth, wrapAnsi, useInput, wrappedRender } from 
 import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
+import type { ChalkInstance } from 'chalk';
 import stripAnsi from 'strip-ansi';
 
 import type { Token, Tokens } from 'marked';
@@ -22,7 +23,7 @@ const theme = {
   inactive: 'rgb(153,153,153)',
 } as const;
 
-function themeChalk(key: keyof typeof theme): chalk.Chalk {
+function themeChalk(key: keyof typeof theme): ChalkInstance {
   const val = theme[key];
   const m = val.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
   if (m) return chalk.rgb(+m[1]!, +m[2]!, +m[3]!);

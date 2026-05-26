@@ -11,6 +11,7 @@ export type { SessionMeta };
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
 const MAX_SESSIONS = 50;
+const PAGE_SIZE = 5;
 
 function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number } {
   if (messages.length === 0) return { cleaned: messages, truncated: 0 };
@@ -99,7 +100,16 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(days / 30)} 个月前`;
 }
 
-const PAGE_SIZE = 5;
+function getWindow(sessions: SessionMeta[], sel: number) {
+  if (sessions.length <= PAGE_SIZE) return { start: 0, sessions };
+  let start = Math.max(0, sel - Math.floor(PAGE_SIZE / 2));
+  start = Math.min(start, sessions.length - PAGE_SIZE);
+  return { start, sessions: sessions.slice(start, start + PAGE_SIZE) };
+}
+
+interface ResumeState {
+  selectedIdx: number;
+}
 
 function SessionList({
   sessions,
@@ -169,6 +179,19 @@ function SessionList({
         </Box>
       )}
     </Box>
+  );
+}
+
+function ResumeSessionList({ state }: { state: ResumeState }) {
+  const sorted = (state as any)._sorted as SessionMeta[];
+  const { start, sessions } = getWindow(sorted, state.selectedIdx);
+  return (
+    <SessionList
+      sessions={sessions}
+      selected={state.selectedIdx - start}
+      startIndex={start}
+      total={sorted.length}
+    />
   );
 }
 
@@ -282,58 +305,34 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       return;
     }
 
-    const getWindow = (sel: number) => {
-      if (sorted.length <= PAGE_SIZE) return { start: 0, sessions: sorted };
-      let start = Math.max(0, sel - Math.floor(PAGE_SIZE / 2));
-      start = Math.min(start, sorted.length - PAGE_SIZE);
-      return { start, sessions: sorted.slice(start, start + PAGE_SIZE) };
-    };
+    interface ResumeStateWithSorted extends ResumeState {
+      _sorted: SessionMeta[];
+    }
 
-    const ctx = {
-      sessions: sorted,
-      selectedIdx: 0,
-      render: null as any,
-      onInput: null as any,
-    };
-
-    ctx.render = () => {
-      const { start, sessions: visible } = getWindow(ctx.selectedIdx);
-      return (
-        <SessionList
-          sessions={visible}
-          selected={ctx.selectedIdx - start}
-          startIndex={start}
-          total={sorted.length}
-        />
-      );
-    };
-
-    ctx.onInput = (_input: string, key: any) => {
-      if (key.upArrow) {
-        ctx.selectedIdx =
-          ctx.selectedIdx > 0 ? ctx.selectedIdx - 1 : ctx.sessions.length - 1;
-        this.showUI(ctx.render, ctx.onInput);
-        return true;
-      }
-      if (key.downArrow) {
-        ctx.selectedIdx =
-          ctx.selectedIdx < ctx.sessions.length - 1 ? ctx.selectedIdx + 1 : 0;
-        this.showUI(ctx.render, ctx.onInput);
-        return true;
-      }
-      if (key.return) {
-        this.hideUI();
-        this._switchToSession(ctx.sessions[ctx.selectedIdx]!.id);
-        return true;
-      }
-      if (key.escape) {
-        this.hideUI();
-        return true;
-      }
-      return false;
-    };
-
-    this.showUI(ctx.render, ctx.onInput);
+    this.showUI<ResumeStateWithSorted>(
+      ResumeSessionList,
+      { selectedIdx: 0, _sorted: sorted },
+      (_input, key, state, setState) => {
+        if (key.upArrow) {
+          setState({ ...state, selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : sorted.length - 1 });
+          return true;
+        }
+        if (key.downArrow) {
+          setState({ ...state, selectedIdx: state.selectedIdx < sorted.length - 1 ? state.selectedIdx + 1 : 0 });
+          return true;
+        }
+        if (key.return) {
+          this.hideUI();
+          this._switchToSession(sorted[state.selectedIdx]!.id);
+          return true;
+        }
+        if (key.escape) {
+          this.hideUI();
+          return true;
+        }
+        return false;
+      },
+    );
   }
 
   private async _switchToSession(sessionId: string) {

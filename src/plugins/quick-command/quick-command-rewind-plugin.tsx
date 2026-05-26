@@ -3,6 +3,10 @@ import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
 import { hasBackups, rewindFiles } from '../../utils/fileHistory.js';
 
+interface RewindState {
+  selectedIdx: number;
+}
+
 function ConfirmDialog({
   title,
   selected,
@@ -35,6 +39,11 @@ function ConfirmDialog({
   );
 }
 
+function RewindDialog({ state }: { state: RewindState }) {
+  const title = (state as any)._title as string ?? '';
+  return <ConfirmDialog title={title} selected={state.selectedIdx} />;
+}
+
 export class QuickCommandRewindPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
@@ -63,38 +72,35 @@ export class QuickCommandRewindPlugin extends MicaPlugin {
 
     const title = `rewind: ${detailParts.join('，')}`;
 
-    const ctx = {
-      selectedIdx: 0,
-      render: null as any,
-      onInput: null as any,
-    };
+    interface RewindStateWithTitle extends RewindState {
+      _title: string;
+    }
 
-    ctx.render = () => <ConfirmDialog title={title} selected={ctx.selectedIdx} />;
-
-    ctx.onInput = (_input: string, key: any) => {
-      if (key.upArrow || key.downArrow) {
-        ctx.selectedIdx = ctx.selectedIdx === 0 ? 1 : 0;
-        this.showUI(ctx.render, ctx.onInput);
-        return true;
-      }
-      if (key.return) {
-        this.hideUI();
-        if (ctx.selectedIdx === 1) {
+    this.showUI<RewindStateWithTitle>(
+      RewindDialog,
+      { selectedIdx: 0, _title: title },
+      (_input, key, state, setState) => {
+        if (key.upArrow || key.downArrow) {
+          setState({ ...state, selectedIdx: state.selectedIdx === 0 ? 1 : 0 });
+          return true;
+        }
+        if (key.return) {
+          this.hideUI();
+          if (state.selectedIdx === 1) {
+            this.showMessage('已取消');
+            return true;
+          }
+          this._doRewind(msgs, cutoff, hasFileChanges);
+          return true;
+        }
+        if (key.escape) {
+          this.hideUI();
           this.showMessage('已取消');
           return true;
         }
-        this._doRewind(msgs, cutoff, hasFileChanges);
-        return true;
-      }
-      if (key.escape) {
-        this.hideUI();
-        this.showMessage('已取消');
-        return true;
-      }
-      return false;
-    };
-
-    this.showUI(ctx.render, ctx.onInput);
+        return false;
+      },
+    );
   }
 
   private _doRewind(

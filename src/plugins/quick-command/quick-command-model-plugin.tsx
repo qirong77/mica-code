@@ -1,13 +1,19 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
+import { model } from '../../store/config.js';
+import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+
+interface ModelState {
+  selectedIdx: number;
+}
 
 function ModelList({
   models,
   selected,
   current,
 }: {
-  models: Array<{ name: string; label: string }>;
+  models: ReadonlyArray<{ name: string; label: string }>;
   selected: number;
   current: string;
 }) {
@@ -27,7 +33,7 @@ function ModelList({
         const isSelected = i === selected;
         const isActive = m.name === current;
         return (
-          <Box key={m.name} marginBottom={i < models.length - 1 ? 0 : 0}>
+          <Box key={m.name}>
             <Box flexDirection="row">
               <Box width={2}>
                 <Text color={isSelected ? 'claude' : 'inactive'}>
@@ -46,6 +52,12 @@ function ModelList({
   );
 }
 
+function ModelSelector({ state }: { state: ModelState }) {
+  const currentModel = useSchedulState(model.atom);
+  const models = useSchedulState(model.options);
+  return <ModelList models={models} selected={state.selectedIdx} current={currentModel} />;
+}
+
 export class QuickCommandModelPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
@@ -55,47 +67,31 @@ export class QuickCommandModelPlugin extends MicaPlugin {
         const currentModel = this.atoms.model.get();
         const models = this.atoms.modelOptions.get();
 
-        const ctx = {
-          models,
-          selectedIdx: Math.max(0, models.findIndex((m) => m.name === currentModel)),
-          render: null as any,
-          onInput: null as any,
-        };
-
-        ctx.render = () => (
-          <ModelList
-            models={ctx.models}
-            selected={ctx.selectedIdx}
-            current={currentModel}
-          />
+        this.showUI<ModelState>(
+          ModelSelector,
+          { selectedIdx: Math.max(0, models.findIndex((m) => m.name === currentModel)) },
+          (_input, key, state, setState) => {
+            if (key.upArrow) {
+              setState({ selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : models.length - 1 });
+              return true;
+            }
+            if (key.downArrow) {
+              setState({ selectedIdx: state.selectedIdx < models.length - 1 ? state.selectedIdx + 1 : 0 });
+              return true;
+            }
+            if (key.return) {
+              const selected = models[state.selectedIdx];
+              if (selected) this.atoms.model.set(selected.name);
+              this.hideUI();
+              return true;
+            }
+            if (key.escape) {
+              this.hideUI();
+              return true;
+            }
+            return false;
+          },
         );
-
-        ctx.onInput = (_input: string, key: any) => {
-          if (key.upArrow) {
-            ctx.selectedIdx =
-              ctx.selectedIdx > 0 ? ctx.selectedIdx - 1 : ctx.models.length - 1;
-            this.showUI(ctx.render, ctx.onInput);
-            return true;
-          }
-          if (key.downArrow) {
-            ctx.selectedIdx =
-              ctx.selectedIdx < ctx.models.length - 1 ? ctx.selectedIdx + 1 : 0;
-            this.showUI(ctx.render, ctx.onInput);
-            return true;
-          }
-          if (key.return) {
-            this.atoms.model.set(ctx.models[ctx.selectedIdx]!.name);
-            this.hideUI();
-            return true;
-          }
-          if (key.escape) {
-            this.hideUI();
-            return true;
-          }
-          return false;
-        };
-
-        this.showUI(ctx.render, ctx.onInput);
       },
     });
   }

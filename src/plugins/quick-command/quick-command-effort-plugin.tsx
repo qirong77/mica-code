@@ -2,13 +2,19 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
 import type { EffortLevel } from '../../store/config.js';
+import { model } from '../../store/config.js';
+import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+
+interface EffortState {
+  selectedIdx: number;
+}
 
 function EffortList({
   efforts,
   selected,
   current,
 }: {
-  efforts: Array<{ name: string; label: string }>;
+  efforts: ReadonlyArray<{ name: string; label: string }>;
   selected: number;
   current: string;
 }) {
@@ -28,7 +34,7 @@ function EffortList({
         const isSelected = i === selected;
         const isActive = e.name === current;
         return (
-          <Box key={e.name} marginBottom={i < efforts.length - 1 ? 0 : 0}>
+          <Box key={e.name}>
             <Box flexDirection="row">
               <Box width={2}>
                 <Text color={isSelected ? 'claude' : 'inactive'}>
@@ -47,6 +53,12 @@ function EffortList({
   );
 }
 
+function EffortSelector({ state }: { state: EffortState }) {
+  const currentEffort = useSchedulState(model.effort);
+  const efforts = useSchedulState(model.effortOptions);
+  return <EffortList efforts={efforts} selected={state.selectedIdx} current={currentEffort} />;
+}
+
 export class QuickCommandEffortPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
@@ -56,47 +68,31 @@ export class QuickCommandEffortPlugin extends MicaPlugin {
         const currentEffort = this.atoms.effort.get();
         const efforts = this.atoms.effortOptions.get();
 
-        const ctx = {
-          efforts,
-          selectedIdx: Math.max(0, efforts.findIndex((e) => e.name === currentEffort)),
-          render: null as any,
-          onInput: null as any,
-        };
-
-        ctx.render = () => (
-          <EffortList
-            efforts={ctx.efforts}
-            selected={ctx.selectedIdx}
-            current={currentEffort}
-          />
+        this.showUI<EffortState>(
+          EffortSelector,
+          { selectedIdx: Math.max(0, efforts.findIndex((e) => e.name === currentEffort)) },
+          (_input, key, state, setState) => {
+            if (key.upArrow) {
+              setState({ selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : efforts.length - 1 });
+              return true;
+            }
+            if (key.downArrow) {
+              setState({ selectedIdx: state.selectedIdx < efforts.length - 1 ? state.selectedIdx + 1 : 0 });
+              return true;
+            }
+            if (key.return) {
+              const selected = efforts[state.selectedIdx];
+              if (selected) this.atoms.effort.set(selected.name as EffortLevel);
+              this.hideUI();
+              return true;
+            }
+            if (key.escape) {
+              this.hideUI();
+              return true;
+            }
+            return false;
+          },
         );
-
-        ctx.onInput = (_input: string, key: any) => {
-          if (key.upArrow) {
-            ctx.selectedIdx =
-              ctx.selectedIdx > 0 ? ctx.selectedIdx - 1 : ctx.efforts.length - 1;
-            this.showUI(ctx.render, ctx.onInput);
-            return true;
-          }
-          if (key.downArrow) {
-            ctx.selectedIdx =
-              ctx.selectedIdx < ctx.efforts.length - 1 ? ctx.selectedIdx + 1 : 0;
-            this.showUI(ctx.render, ctx.onInput);
-            return true;
-          }
-          if (key.return) {
-            this.atoms.effort.set(ctx.efforts[ctx.selectedIdx]!.name as EffortLevel);
-            this.hideUI();
-            return true;
-          }
-          if (key.escape) {
-            this.hideUI();
-            return true;
-          }
-          return false;
-        };
-
-        this.showUI(ctx.render, ctx.onInput);
       },
     });
   }

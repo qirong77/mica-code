@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../../data.js';
 import { messagesAtom } from '../../../../store/conversation.js';
+import { streamingTextAtom } from '../../../../store/ui-state.js';
 import { useSchedulState } from '../../hooks/useSchedulState.js';
 import { Markdown } from './Markdown.js';
 
 interface LogMessage extends Anthropic.MessageParam {
-  status?: 'streaming' | 'clear';
+  status?: 'clear';
 }
 
 function getTextContent(content: Anthropic.MessageParam['content']): string {
@@ -22,26 +23,27 @@ interface LogItem {
   id: string | number;
   role: 'user' | 'assistant';
   text: string;
-  type?: 'clear';
 }
 
 export const Conversation = (): React.ReactNode => {
   const messages = useSchedulState(messagesAtom);
-  const staticItems = messages.flatMap((raw, i): LogItem[] => {
-    const msg = raw as LogMessage;
-    if (msg.status === 'clear') {
-      return [{ id: i, role: 'user', text: '', type: 'clear' }];
-    }
-    const text = getTextContent(msg.content);
-    if (!text) return [];
-    if (msg.role === 'user') {
-      return [{ id: i, role: msg.role, text }];
-    }
-    if (msg.role === 'assistant') {
-      return [{ id: i, role: 'assistant', text }];
-    }
-    return [];
-  }) satisfies LogItem[];
+  const streamingText = useSchedulState(streamingTextAtom);
+
+  const staticItems = useMemo(
+    () =>
+      messages.flatMap((raw, i): LogItem[] => {
+        const msg = raw as LogMessage;
+        if (msg.status === 'clear') return [];
+        const text = getTextContent(msg.content);
+        if (!text) return [];
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          return [{ id: i, role: msg.role, text }];
+        }
+        return [];
+      }),
+    [messages],
+  );
+
   return (
     <Box flexDirection="column">
       {staticItems.map((item: LogItem) => {
@@ -58,11 +60,16 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         return (
-          <Box >
+          <Box key={item.id}>
             <Markdown>{item.text}</Markdown>
           </Box>
         );
       })}
+      {streamingText && (
+        <Box>
+          <Markdown>{streamingText}</Markdown>
+        </Box>
+      )}
     </Box>
   );
 };

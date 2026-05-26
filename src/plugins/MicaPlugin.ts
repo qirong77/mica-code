@@ -1,10 +1,11 @@
 import React from 'react';
-import { type ReadableAtom, type WritableAtom } from 'nanostores';
+import { atom as createAtom, type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { IMicaAgent } from '../core/agent';
 import type Anthropic from '@anthropic-ai/sdk';
 import { uuid } from '../utils/uuid';
 import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
+import { useSchedulState } from '../components/ui/hooks/useSchedulState.js';
 
 export interface PluginAtoms {
   messages: WritableAtom<Anthropic.MessageParam[]>;
@@ -42,6 +43,8 @@ export abstract class MicaPlugin {
   atoms!: PluginAtoms;
 
   private _activeUIId: string | null = null;
+  private _uiAtom: WritableAtom<any> | null = null;
+
   constructor() {
     dropdown.atom.listen((state) => {
       if (state.visible) this.hideUI();
@@ -53,13 +56,49 @@ export abstract class MicaPlugin {
     quickCommandsAtom.set([...quickCommandsAtom.get(), command]);
   }
 
-  protected showUI(
-    render: () => React.ReactNode,
-    onInput?: (input: string, key: any) => boolean,
+  /**
+   * 显示插件 UI（无状态版本，适用于静态展示如 spinner）
+   */
+  protected showUISimple(component: React.ComponentType): void {
+    const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
+    this._activeUIId = id;
+    const entry: PluginUI = { id, component };
+    pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
+  }
+
+  /**
+   * 显示插件 UI，使用 atom 管理状态。
+   * 
+   * @param component - React 组件，接收 `{ state }` prop
+   * @param initialState - 初始状态
+   * @param onInput - 输入回调，接收 (input, key, state, setState)，返回 true 表示已处理
+   */
+  protected showUI<S>(
+    component: React.ComponentType<{ state: S }>,
+    initialState: S,
+    onInput?: (input: string, key: any, state: S, setState: (s: S) => void) => boolean,
   ): void {
     const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
     this._activeUIId = id;
-    const entry: PluginUI = { id, render, onInput };
+
+    if (!this._uiAtom) {
+      this._uiAtom = createAtom<S>(initialState);
+    }
+    this._uiAtom.set(initialState);
+    const uiAtom = this._uiAtom;
+
+    const Wrapper: React.ComponentType = () => {
+      const state = useSchedulState(uiAtom);
+      return React.createElement(component, { state });
+    };
+
+    const entry: PluginUI = {
+      id,
+      component: Wrapper,
+      onInput: onInput
+        ? (input, key) => onInput(input, key, uiAtom.get(), (s) => uiAtom.set(s))
+        : undefined,
+    };
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
   }
 
@@ -67,6 +106,7 @@ export abstract class MicaPlugin {
     if (!this._activeUIId) return;
     pluginUIsAtom.set(pluginUIsAtom.get().filter((u) => u.id !== this._activeUIId));
     this._activeUIId = null;
+    this._uiAtom = null;
   }
 
   /** 显示一条消息（通过 UI 组件事件），默认 3s 后自动清除 */

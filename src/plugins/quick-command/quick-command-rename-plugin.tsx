@@ -4,6 +4,15 @@ import { MicaPlugin } from '../MicaPlugin';
 import { Spin } from '../../components/ui/components/common/Spin.js';
 import { getClient } from '../../agent/client.js';
 
+function RenameSpinner() {
+  return (
+    <Box paddingX={1}>
+      <Spin />
+      <Text dimColor> 正在生成标题...</Text>
+    </Box>
+  );
+}
+
 export class QuickCommandRenamePlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
@@ -28,12 +37,7 @@ export class QuickCommandRenamePlugin extends MicaPlugin {
       return;
     }
 
-    this.showUI(() => (
-      <Box paddingX={1}>
-        <Spin />
-        <Text dimColor> 正在生成标题...</Text>
-      </Box>
-    ));
+    this.showUISimple(RenameSpinner);
 
     try {
       const client = getClient();
