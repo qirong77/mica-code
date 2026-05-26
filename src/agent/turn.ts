@@ -176,9 +176,8 @@ class AgentTurn {
         { role: 'user', content: toolResults } as Anthropic.MessageParam,
       ];
       messagesAtom.set(withToolResults);
-    }
-
-    if (!hasToolUse) {
+      this.events.emit('status', { type: 'idle' });
+    } else {
       this.events.emit('status', { type: 'idle' });
     }
     return { hasToolUse, wasTruncated, finalMessage };

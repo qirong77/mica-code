@@ -106,9 +106,7 @@ export function setupAgentEvents() {
       ]);
     }
 
-    if (!completed) {
-      workingStatusAtom.set({ type: 'calling_tool' });
-    }
+    // 不在此处设置 workingStatus — 由 status 事件统一管理
   });
 
   agentTurn.events.on('status', (status) => {
@@ -118,6 +116,9 @@ export function setupAgentEvents() {
     lastStatus = status;
 
     if (status.type === 'connecting') {
+      toolCallsAtom.set([]);
+      logTextAtom.set('');
+      clearLogBuffers();
       ui.MessageBar.clearMessages();
     }
 
