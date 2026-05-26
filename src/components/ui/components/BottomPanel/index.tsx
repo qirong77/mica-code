@@ -72,7 +72,7 @@ export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
     <Box flexDirection="row">
       <PluginPanel />
       <DropDownUI.renderFn />
-      {(hasAgentLog || hasSystemLog) && (
+      <IfComponent condition={hasAgentLog || hasSystemLog}>
         <Box flexDirection="row" width="100%">
           <Box flexGrow={1} width="50%" paddingRight={1}>
             <AgentLogPanel />
@@ -83,7 +83,7 @@ export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
             </Box>
           </IfComponent>
         </Box>
-      )}
+      </IfComponent>
     </Box>
   );
 });

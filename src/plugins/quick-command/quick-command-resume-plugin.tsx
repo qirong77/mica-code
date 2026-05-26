@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -99,7 +99,6 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(days / 30)} 个月前`;
 }
 
-const MAX_LABEL_WIDTH = 40;
 const PAGE_SIZE = 5;
 
 function SessionList({
@@ -113,6 +112,9 @@ function SessionList({
   startIndex: number;
   total: number;
 }) {
+  const { columns } = useTerminalSize();
+  const maxWidth = Math.max(20, Math.floor(columns * 0.8));
+
   if (total === 0) {
     return (
       <Box paddingX={1}>
@@ -137,8 +139,8 @@ function SessionList({
         </Box>
       )}
       {sessions.map((s, i) => {
-        const truncated = s.title.length > MAX_LABEL_WIDTH
-          ? s.title.slice(0, MAX_LABEL_WIDTH - 1) + '…'
+        const truncated = s.title.length > maxWidth
+          ? s.title.slice(0, maxWidth - 1) + '…'
           : s.title;
         const isSelected = i === selected;
         return (
