@@ -68,7 +68,7 @@ function TerminalInput() {
   const [exitPending, handleExitPress] = useDoublePressExit(isAgentIdle);
 
   useInput((_input, key) => {
-    if (key.ctrl && key.name === 'c') {
+    if (key.ctrl && (_input === '\x03' || _input === '')) {
       if (isAgentRunning) {
         agentTurn.abort();
         setInput('');

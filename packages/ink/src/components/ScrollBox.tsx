@@ -110,7 +110,7 @@ function ScrollBox({
   onKeyDownCapture,
   ...style
 }: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
-  const domRef = useRef<DOMElement>(null);
+  const domRef = useRef<DOMElement | null>(null);
   // scrollTo/scrollBy bypass React: they mutate scrollTop on the DOM node,
   // mark it dirty, and call the root's throttled scheduleRender directly.
   // The Ink renderer reads scrollTop from the node — no React state needed,

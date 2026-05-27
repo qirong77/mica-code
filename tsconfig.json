@@ -7,9 +7,9 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "lib": ["ES2023"],
     "outDir": "dist",
     "rootDir": ".",
-    "baseUrl": ".",
     "paths": {
       "@anthropic/ink": ["./packages/ink/src/index.ts"],
       "@anthropic/ink/*": ["./packages/ink/src/*"]

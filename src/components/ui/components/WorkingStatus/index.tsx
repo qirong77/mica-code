@@ -1,11 +1,17 @@
 import { Box, Text } from '@anthropic/ink';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
-import { dropdown, workingStatusAtom, thinkingTextAtom, responseTextAtom } from '../../../../store/ui-state.js';
+import {
+  dropdown,
+  workingStatusAtom,
+  thinkingTextAtom,
+  responseTextAtom,
+} from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
 import { ContextTokens } from '../common/ContextTokens.js';
+import { IfComponent } from '../common/IfComponent.js';
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -16,18 +22,21 @@ function formatElapsed(ms: number): string {
   return `${m}m ${sec}s`;
 }
 
+function isEndWorkingStatus(type: string) {
+  return type === 'completed' || type === 'error' || type === 'idle';
+}
 function estimateTokens(text: string): number {
   let ascii = 0;
   let cjk = 0;
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
     if (
-      (code >= 0x4E00 && code <= 0x9FFF) ||
-      (code >= 0x3400 && code <= 0x4DBF) ||
-      (code >= 0x20000 && code <= 0x2CEAF) ||
-      (code >= 0xF900 && code <= 0xFAFF) ||
-      (code >= 0x3000 && code <= 0x303F) ||
-      (code >= 0xFF00 && code <= 0xFFEF)
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x20000 && code <= 0x2ceaf) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff00 && code <= 0xffef)
     ) {
       cjk++;
     } else {
@@ -51,11 +60,7 @@ export function WorkingStatus() {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (
-      info.type === 'idle' ||
-      info.type === 'completed' ||
-      info.type === 'error'
-    ) {
+    if (info.type === 'idle' || info.type === 'completed' || info.type === 'error') {
       startRef.current = 0;
       setElapsed(0);
       return;
@@ -71,7 +76,7 @@ export function WorkingStatus() {
 
   const displayElapsed =
     info.type === 'completed' || info.type === 'calling_tool'
-      ? info.elapsedMs ?? elapsed
+      ? (info.elapsedMs ?? elapsed)
       : elapsed;
 
   const elapsedText = displayElapsed > 0 ? formatElapsed(displayElapsed) : '';
@@ -105,11 +110,7 @@ export function WorkingStatus() {
         return (
           <Box>
             <Spin />
-            <Text>
-              {info.toolNames?.length
-                ? info.toolNames.join(', ')
-                : 'calling_tool'}
-            </Text>
+            <Text>{info.toolNames?.length ? info.toolNames.join(', ') : 'calling_tool'}</Text>
             {info.elapsedMs != null && (
               <Text color={C.dim}> ({formatElapsed(info.elapsedMs)})</Text>
             )}
@@ -120,8 +121,7 @@ export function WorkingStatus() {
       case 'completed':
         return (
           <Text color={C.success}>
-            ✓ completed{' '}
-            {info.elapsedMs != null ? formatElapsed(info.elapsedMs) : 'Done'}
+            ✓ completed {info.elapsedMs != null ? formatElapsed(info.elapsedMs) : 'Done'}
           </Text>
         );
       default:
@@ -132,14 +132,16 @@ export function WorkingStatus() {
   return (
     <Box flexDirection="row">
       <Box flexGrow={1} flexShrink={1}>
-        {hideLeftStatus ? null : content}
+        <IfComponent condition={!hideLeftStatus}>{content}</IfComponent>
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <Text color={C.dim} wrap="wrap">
           {modelValue} · {effort}
         </Text>
         <ContextTokens />
-        {elapsedText && <Text color={C.dim}> {elapsedText}</Text>}
+        <IfComponent condition={!isEndWorkingStatus(info.type)}>
+          <Text color={C.dim}> {elapsedText}</Text>
+        </IfComponent>
       </Box>
     </Box>
   );

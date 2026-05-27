@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useIsInsideModal, useModalScrollRef } from './modalContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
+import type { RefObject } from 'react';
 import ScrollBox from '../components/ScrollBox.js';
+import type { ScrollBoxHandle } from '../components/ScrollBox.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import { stringWidth } from '../core/stringWidth.js';
 import { Box, Text } from '../index.js';
@@ -236,7 +238,7 @@ export function Tabs({
           // ModalContext. Keyed by selectedTabIndex → remounts on tab
           // switch, resetting scrollTop to 0 without scrollTo() timing games.
           <Box width={contentWidth} marginTop={hidden ? 0 : 1} flexShrink={0}>
-            <ScrollBox key={selectedTabIndex} ref={modalScrollRef} flexDirection="column" flexShrink={0}>
+            <ScrollBox key={selectedTabIndex} ref={modalScrollRef as React.Ref<ScrollBoxHandle>} flexDirection="column" flexShrink={0}>
               {children}
             </ScrollBox>
           </Box>

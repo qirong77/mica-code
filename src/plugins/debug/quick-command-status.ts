@@ -1,5 +1,5 @@
 import { MicaPlugin } from '../MicaPlugin';
-import { getContextUsage, getTotalBilledTokens } from 'src/utils/getContextUsage';
+import { getContextUsage, getTotalBilledTokens } from '../../utils/getContextUsage';
 
 export class QuickCommandStatusPlugin extends MicaPlugin {
   onInstall(): void {

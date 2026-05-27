@@ -50,12 +50,12 @@ export class AutoCompactPlugin extends MicaPlugin {
         const toKeep = messages.slice(-KEEP_RECENT_COUNT);
         const toCompress = messages.slice(0, -KEEP_RECENT_COUNT);
 
-        const summary = await this.summarizeMessages(toCompress);
+        const summary = await this.summarizeMessages(toCompress as Anthropic.MessageParam[]);
 
-        const compacted: Anthropic.MessageParam[] = [
-          { role: 'user', content: `[对话历史摘要]\n${summary}` },
+        const compacted = [
+          { role: 'user' as const, content: `[对话历史摘要]\n${summary}` },
           ...toKeep,
-        ];
+        ] as Anthropic.MessageParam[];
 
         this.atoms.messages.set(compacted);
         this.removeMessage(msgId);

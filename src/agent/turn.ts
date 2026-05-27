@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { systemPrompt } from '../prompts/index';
 import { executeTool, toolDefinitions } from '../tools/index';
-import { messagesAtom, contextSizeAtom, updateContextSize } from '../store/conversation.js';
+import { messagesAtom, contextSizeAtom, updateContextSize, type ConversationMessage } from '../store/conversation.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
@@ -83,7 +83,7 @@ class AgentTurn {
       model: modelName,
       max_tokens: model.maxTokens.get(),
       system: systemPrompt,
-      messages,
+      messages: messages as Anthropic.MessageParam[],
       thinking:
         effort === 'none'
           ? { type: 'disabled' as const }
@@ -130,9 +130,9 @@ class AgentTurn {
       throw err;
     }
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
-    const updatedMessages = [...messages, finalMessage];
+    const updatedMessages = [...messages, finalMessage as unknown as ConversationMessage];
     messagesAtom.set(updatedMessages);
-    contextSizeAtom.set(updateContextSize(updatedMessages));
+    contextSizeAtom.set(updateContextSize(updatedMessages as ConversationMessage[]));
     this.events.emit('message:final', finalMessage);
     appendSystemLog(
       `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
