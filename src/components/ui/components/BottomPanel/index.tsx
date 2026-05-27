@@ -17,12 +17,12 @@ export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
   const hasSystemLog = systemLogVisible && systemLines.length > 0;
 
   return (
-    <Box flexDirection="row" justifyContent="space-between">
+    <Box flexDirection="row">
       <PluginPanel />
       <DropDownUI.renderFn />
       <IfComponent condition={hasAgentContent || hasSystemLog}>
-        <Box flexDirection="row" width="100%">
-          <Box flexDirection="column" flexGrow={1} width="50%" paddingRight={1}>
+        <Box flexDirection="row" flexGrow={1} flexBasis={0} minWidth={0}>
+          <Box flexDirection="column" flexGrow={1} paddingRight={1}>
             <ThinkingPanel />
           </Box>
           <IfComponent condition={hasSystemLog}>

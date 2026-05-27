@@ -1,12 +1,27 @@
 import { atom } from 'nanostores';
-import type Anthropic from '@anthropic-ai/sdk';
-import { getContextUsage } from '../utils/getContextUsage.js';
+import { getContextUsage, getSingleRequestTotalTokens } from '../utils/getContextUsage.js';
 
-export const messagesAtom = atom<Anthropic.MessageParam[]>([]);
+export interface ConversationMessage {
+  role: string;
+  content: unknown;
+  usage?: {
+    input_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    output_tokens: number;
+  };
+}
 
-export function estimateContextSize(messages: Anthropic.MessageParam[]): number {
-  // @ts-ignore
+export const messagesAtom = atom<ConversationMessage[]>([]);
+
+export function estimateContextSize(messages: ConversationMessage[]): number {
   return getContextUsage(messages);
 }
-// 当前主流的模型（如 Claude 3.5/4 系列默认是 200K（20 万 Token）窗口；GPT-4o 是 128K Token；而 DeepSeek V4 和 Gemini 则是 1M/2M Token 级别）。
+
+export function updateContextSize(messages: ConversationMessage[]): number {
+  const last = [...messages].reverse().find((m) => m.usage);
+  if (!last?.usage) return 0;
+  return getSingleRequestTotalTokens(last.usage);
+}
+
 export const contextSizeAtom = atom<number>(0);

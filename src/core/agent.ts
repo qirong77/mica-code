@@ -6,7 +6,6 @@ import { session, thinkingTextAtom, responseTextAtom, systemLogVisibleAtom, quic
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import { MicaPlugin } from '../plugins/MicaPlugin.js';
 import { bootstrap } from '../bootstrap.js';
-import './effect.js';
 bootstrap();
 
 const _plugins: MicaPlugin[] = [];

@@ -1,14 +1,14 @@
 import React from 'react';
 import { atom as createAtom, type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { IMicaAgent } from '../core/agent';
-import type Anthropic from '@anthropic-ai/sdk';
+import type { ConversationMessage } from '../store/conversation.js';
 import { uuid } from '../utils/uuid';
 import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
 import { useScheduleState } from '../components/ui/hooks/useScheduleState.js';
 
 export interface PluginAtoms {
-  messages: WritableAtom<Anthropic.MessageParam[]>;
+  messages: WritableAtom<ConversationMessage[]>;
   model: WritableAtom<string>;
   effort: WritableAtom<string>;
   modelOptions: ReadableAtom<Array<{ name: string; label: string }>>;

@@ -26,13 +26,9 @@ export abstract class MicaTool {
 
   async executeTimed(input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const startTime = Date.now();
-    let timer: ReturnType<typeof setInterval> | null = null;
 
-    timer = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      if (elapsed >= SLOW_TOOL_THRESHOLD_MS) {
-        this._showSlowMsg(this.getSlowText(elapsed, input));
-      }
+    const slowTimer = setTimeout(() => {
+      this._showSlowMsg(this.getSlowText(Date.now() - startTime, input));
     }, SLOW_TOOL_THRESHOLD_MS);
 
     try {
@@ -40,7 +36,7 @@ export abstract class MicaTool {
     } catch (error) {
       return `工具 ${this.name} 执行失败：\n${formatError(error)}`;
     } finally {
-      clearInterval(timer);
+      clearTimeout(slowTimer);
       this._hideSlowMsg(this.getSlowText(Date.now() - startTime, input));
     }
   }

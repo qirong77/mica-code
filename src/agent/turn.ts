@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { systemPrompt } from '../prompts/index';
 import { executeTool, toolDefinitions } from '../tools/index';
-import { messagesAtom } from '../store/conversation.js';
+import { messagesAtom, contextSizeAtom, updateContextSize } from '../store/conversation.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
@@ -98,7 +98,9 @@ class AgentTurn {
 
     const finalMessage = await stream.finalMessage();
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
-    messagesAtom.set([...messages, finalMessage]);
+    const updatedMessages = [...messages, finalMessage];
+    messagesAtom.set(updatedMessages);
+    contextSizeAtom.set(updateContextSize(updatedMessages));
     this.events.emit('message:final', finalMessage);
     appendSystemLog(
       `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,

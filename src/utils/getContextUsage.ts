@@ -1,17 +1,6 @@
-type ConversationMessage = {
-  role: string;
-  content: unknown;
-  usage?: {
-    input_tokens: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    output_tokens: number;
-  };
-};
+import type { ConversationMessage } from '../store/conversation.js';
 
-// 基础辅助函数：计算单次请求的真实 Token 吞吐量
-// 注意：此逻辑适用于 Anthropic/DeepSeek 格式。若是 OpenAI，需将 cache 相关项从加法中移除。
-function getSingleRequestTotalTokens(
+export function getSingleRequestTotalTokens(
   usage: NonNullable<ConversationMessage["usage"]>
 ): number {
   return (

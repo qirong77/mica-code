@@ -23,19 +23,17 @@ function isRetryable(error: unknown): boolean {
 export class ErrorHandlerPlugin extends MicaPlugin {
   onInstall(): void {
     this.agent.agentTurn.use(async (userInput, next, onIteration) => {
-      let attempt = 0;
-      while (attempt < RETRY_MAX_ATTEMPTS) {
+      for (let attempt = 0; attempt < RETRY_MAX_ATTEMPTS; attempt++) {
         try {
           return await next(userInput, onIteration);
         } catch (error) {
-          attempt++;
-          if (!isRetryable(error) || attempt >= RETRY_MAX_ATTEMPTS) throw error;
-          const delay = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
+          if (!isRetryable(error) || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+          const delay = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt + 1), RETRY_MAX_DELAY_MS);
           let restTime = delay / 1000;
-          const msgId = this.showMessage(`第 ${attempt} 次重试失败，${restTime}s 后重试...`, 0);
+          const msgId = this.showMessage(`第 ${attempt + 1} 次重试失败，${restTime}s 后重试...`, 0);
           const timer = setInterval(() => {
             restTime -= 1;
-            this.showMessage(`第 ${attempt} 次重试失败，${restTime}s 后重试...`, 0, msgId);
+            this.showMessage(`第 ${attempt + 1} 次重试失败，${restTime}s 后重试...`, 0, msgId);
           }, 1000);
           await new Promise((resolve) =>
             setTimeout(() => {

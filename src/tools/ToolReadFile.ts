@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
 export class ToolReadFile extends MicaTool {
@@ -13,7 +13,7 @@ export class ToolReadFile extends MicaTool {
   }
 
   async execute(input: { file_path: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
-    const content = readFileSync(input.file_path, 'utf-8');
+    const content = await readFile(input.file_path, 'utf-8');
     return content
       .split('\n')
       .map((line, i) => `${String(i + 1).padStart(4)} | ${line}`)

@@ -25,7 +25,7 @@ export function DropDownSelect() {
   if (!dropdown.visible) return null;
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexGrow={1} flexBasis={0} minWidth={0}>
       <CommandDropdown
         items={filteredItems}
         selectedIndex={selectedIndex}
