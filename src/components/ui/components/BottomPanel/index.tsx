@@ -20,16 +20,14 @@ export const BottomPanel = React.memo(function BottomPanel(): React.ReactNode {
     <Box flexDirection="row">
       <PluginPanel />
       <DropDownUI.renderFn />
-      <IfComponent condition={hasAgentContent || hasSystemLog}>
-        <Box flexDirection="row" flexGrow={1} flexBasis={0} minWidth={0}>
-          <Box flexDirection="column" flexGrow={1} paddingRight={1}>
-            <ThinkingPanel />
-          </Box>
-          <IfComponent condition={hasSystemLog}>
-            <Box flexGrow={1} width="50%" paddingLeft={1}>
-              <SystemLogPanel />
-            </Box>
-          </IfComponent>
+      <IfComponent condition={hasAgentContent && false/* 暂时隐藏思考面板 */}>
+        <Box flexDirection="column" flexGrow={1} flexBasis={0} minWidth={0} paddingRight={1}>
+          <ThinkingPanel />
+        </Box>
+      </IfComponent>
+      <IfComponent condition={hasSystemLog}>
+        <Box flexGrow={1} flexBasis={0} minWidth={0}  paddingLeft={1}>
+          <SystemLogPanel />
         </Box>
       </IfComponent>
     </Box>
