@@ -55,7 +55,7 @@ class AgentTurn {
 
   async executeSingleIteration(): Promise<IterationResult> {
     const messages = messagesAtom.get();
-    const modelName = model.atom.get();
+    const modelName = model.name.get();
     const effort = model.effort.get();
 
     appendSystemLog(`迭代开始：model=${modelName} effort=${effort}`);
@@ -178,7 +178,7 @@ class AgentTurn {
     return { hasToolUse, wasTruncated, finalMessage };
   }
 
-  private async _coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
+  private async coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
     appendSystemLog('Agent run 开始');
     sessionToolRecordsAtom.set([]);
     await clearBackups();
@@ -200,10 +200,10 @@ class AgentTurn {
   }
 
   async run(userInput: string, onIteration?: (result: IterationResult) => void) {
-    const coreRun: RunFn = this._coreRun.bind(this);
+    const coreRunFn: RunFn = this.coreRun.bind(this);
     const chain = this.middlewares.reduceRight<RunFn>(
       (next, mw) => (input, cb) => mw(input, next, cb),
-      coreRun,
+      coreRunFn,
     );
     return chain(userInput, onIteration);
   }

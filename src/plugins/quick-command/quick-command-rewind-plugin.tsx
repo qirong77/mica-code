@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
-import { hasBackups, rewindFiles } from '../../utils/fileHistory.js';
+import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
 
 interface RewindState {
   selectedIdx: number;
@@ -112,7 +112,7 @@ export class QuickCommandRewindPlugin extends MicaPlugin {
     this.atoms.messages.set(rewinded);
 
     if (hasFileChanges) {
-      rewindFiles()
+      restoreFiles()
         .then(() => {
           this.showMessage(`已回退最近一轮对话及代码改动`);
         })

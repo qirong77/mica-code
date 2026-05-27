@@ -1,14 +1,14 @@
 import { Box } from '@anthropic/ink';
 import React, { useMemo } from 'react';
-import { useSchedulState } from '../../hooks';
+import { useScheduleState } from '../../hooks';
 import { CommandDropdown } from './CommandDropdown';
 import { DropDownUI } from './index.js';
 import { dropdown as dropdownAtoms } from '../../../../store/ui-state.js';
 
 
 export function DropDownSelect() {
-  const dropdown = useSchedulState(DropDownUI.atomData.dropdown);
-  const inputValue = useSchedulState(dropdownAtoms.inputValue);
+  const dropdown = useScheduleState(DropDownUI.atomData.dropdown);
+  const inputValue = useScheduleState(dropdownAtoms.inputValue);
 
   const filteredItems = useMemo(() => {
     if (!dropdown.visible) return dropdown.items;

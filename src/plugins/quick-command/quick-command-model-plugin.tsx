@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
 import { model } from '../../store/config.js';
-import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
 
 interface ModelState {
   selectedIdx: number;
@@ -53,8 +53,8 @@ function ModelList({
 }
 
 function ModelSelector({ state }: { state: ModelState }) {
-  const currentModel = useSchedulState(model.atom);
-  const models = useSchedulState(model.options);
+  const currentModel = useScheduleState(model.name);
+  const models = useScheduleState(model.options);
   return <ModelList models={models} selected={state.selectedIdx} current={currentModel} />;
 }
 

@@ -1,6 +1,6 @@
 import { Box, Text } from '@anthropic/ink';
 import React from 'react';
-import { useSchedulState } from '../../hooks/index.js';
+import { useScheduleState } from '../../hooks/index.js';
 import { dropdown, workingStatusAtom, thinkingTextAtom, responseTextAtom } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
@@ -43,12 +43,12 @@ function estimateTokens(text: string): number {
 }
 
 export function WorkingStatus() {
-  const info = useSchedulState(workingStatusAtom);
-  const modelValue = useSchedulState(model.atom);
-  const effort = useSchedulState(model.effort);
-  const dropdownItems = useSchedulState(dropdown.atom);
-  const thinkingText = useSchedulState(thinkingTextAtom);
-  const responseText = useSchedulState(responseTextAtom);
+  const info = useScheduleState(workingStatusAtom);
+  const modelValue = useScheduleState(model.name);
+  const effort = useScheduleState(model.effort);
+  const dropdownItems = useScheduleState(dropdown.state);
+  const thinkingText = useScheduleState(thinkingTextAtom);
+  const responseText = useScheduleState(responseTextAtom);
 
   const hideLeftStatus = dropdownItems.visible && dropdownItems.items.length > 0;
 
@@ -66,7 +66,7 @@ export function WorkingStatus() {
           <Box>
             <Spin />
             <Text>thinking</Text>
-            <Text color={C.dim}> · ~{estimateTokens(thinkingText)} tokens</Text>
+            <Text color={C.dim}> ↓{estimateTokens(thinkingText)} tokens</Text>
           </Box>
         );
       case 'streaming':

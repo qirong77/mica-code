@@ -3,10 +3,10 @@ import { Box, Text } from '@anthropic/ink';
 import { spawn } from 'node:child_process';
 import { MicaPlugin } from '../MicaPlugin';
 import type { WritableAtom } from 'nanostores';
-import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
 
 function BashOutput({ atom }: { atom: WritableAtom<string> }) {
-  const text = useSchedulState(atom);
+  const text = useScheduleState(atom);
   if (!text) return null;
   return React.createElement(Box, { flexDirection: 'column' },
     React.createElement(Text, null, text),

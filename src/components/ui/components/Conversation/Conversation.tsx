@@ -4,7 +4,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../../data.js';
 import { messagesAtom } from '../../../../store/conversation.js';
 import { responseTextAtom } from '../../../../store/ui-state.js';
-import { useSchedulState } from '../../hooks/useSchedulState.js';
+import { useScheduleState } from '../../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
 
 interface LogMessage extends Anthropic.MessageParam {
@@ -26,8 +26,8 @@ interface LogItem {
 }
 
 export const Conversation = (): React.ReactNode => {
-  const messages = useSchedulState(messagesAtom);
-  const responseText = useSchedulState(responseTextAtom);
+  const messages = useScheduleState(messagesAtom);
+  const responseText = useScheduleState(responseTextAtom);
 
   const staticItems = useMemo(
     () =>

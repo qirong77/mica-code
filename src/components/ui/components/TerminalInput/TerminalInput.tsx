@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { SimpleTextInput } from "./Input";
 import { C } from "../../data";
 import mitt from 'mitt'
-import { useSchedulState } from '../../hooks';
+import { useScheduleState } from '../../hooks';
 import { terminalInput, pluginUIsAtom } from '../../../../store/ui-state.js';
 import { DropDownUI } from '../DropDown/index.js';
 
@@ -19,7 +19,7 @@ function TerminalInput() {
   const [prevInputs, setPrevInputs] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const columns = process.stdout.columns - 6;
-  const activePluginUIs = useSchedulState(pluginUIsAtom);
+  const activePluginUIs = useScheduleState(pluginUIsAtom);
 
   useInput((_input, key) => {
     for (const ui of activePluginUIs) {
@@ -99,7 +99,7 @@ function TerminalInput() {
   }, [historyIndex, prevInputs]);
 
   // 读取 terminalInput.disabled：下拉菜单可见时禁用光标，并阻止历史/提交回调
-  const inputDisabled = useSchedulState(terminalInput.disabled);
+  const inputDisabled = useScheduleState(terminalInput.disabled);
 
   return (
     <Box flexDirection="column" marginTop={1}>

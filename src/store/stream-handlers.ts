@@ -23,43 +23,43 @@ export function clearToolOutputBuffers() {
   toolOutputBuffers.clear();
 }
 
-export function onThinkingChunk(chunk: string) {
+export function handleThinkingChunk(chunk: string) {
   thinkingTextAtom.set(thinkingTextAtom.get() + chunk);
   workingStatusAtom.set({ type: 'thinking' });
 }
 
-export function onStreamStart() {
+export function handleStreamStart() {
   appendSystemLog('流：开始文本输出');
   thinkingTextAtom.set('');
   responseTextAtom.set('');
   clearToolOutputBuffers();
 }
 
-export function onStreamChunk(chunk: string) {
+export function handleStreamChunk(chunk: string) {
   workingStatusAtom.set({ type: 'streaming' });
   responseTextAtom.set(responseTextAtom.get() + chunk);
 }
 
-export function onStreamEnd() {
+export function handleStreamEnd() {
   appendSystemLog('流：消息流结束');
 }
 
-export function onFinalMessage() {
+export function handleFinalMessage() {
   responseTextAtom.set('');
   thinkingTextAtom.set('');
   clearToolOutputBuffers();
 }
 
-export function onToolUseStart(_toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
+export function handleToolUseStart(_toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
   appendSystemLog(`工具调用：${toolName}`);
 }
 
-export function onToolUseComplete(toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
+export function handleToolUseComplete(toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
   appendSystemLog(`工具完成：${toolName}`);
   flushToolOutputBuffer(toolUseId);
 }
 
-export function onStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
+export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
   if (shouldLogStatus(status, lastStatus)) {
     appendSystemLog(formatStatusLog(status));
   }

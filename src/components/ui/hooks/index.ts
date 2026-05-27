@@ -1,1 +1,1 @@
-export { useSchedulState } from './useSchedulState.js';
+export { useScheduleState } from './useScheduleState.js';

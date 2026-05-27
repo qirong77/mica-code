@@ -9,7 +9,7 @@ const backupDir = join(tmpdir(), 'mica-code-backups', sessionId);
 
 const backups = new Map<string, string>();
 
-async function ensureBackupDir() {
+async function ensureBackupDirectory() {
   try {
     await mkdir(backupDir, { recursive: true });
   } catch {}
@@ -23,7 +23,7 @@ export async function backupFile(filePath: string): Promise<void> {
   if (!filePath || backups.has(filePath)) return;
   if (!existsSync(filePath)) return;
 
-  await ensureBackupDir();
+  await ensureBackupDirectory();
   const hash = createHash('sha256').update(filePath).digest('hex').slice(0, 16);
   const backupPath = join(backupDir, hash);
 
@@ -33,7 +33,7 @@ export async function backupFile(filePath: string): Promise<void> {
   } catch {}
 }
 
-export async function rewindFiles(): Promise<void> {
+export async function restoreFiles(): Promise<void> {
   for (const [originalPath, backupPath] of backups) {
     try {
       await mkdir(join(originalPath, '..'), { recursive: true });
@@ -55,7 +55,7 @@ async function cleanup(): Promise<void> {
 }
 
 // Clean stale backup dirs from crashed/old sessions at startup
-async function cleanupStaleDirs(): Promise<void> {
+async function cleanupStaleDirectories(): Promise<void> {
   const parentDir = join(tmpdir(), 'mica-code-backups');
   try {
     const { readdir } = await import('fs/promises');
@@ -67,4 +67,4 @@ async function cleanupStaleDirs(): Promise<void> {
     }
   } catch {}
 }
-cleanupStaleDirs();
+cleanupStaleDirectories();

@@ -27,7 +27,7 @@ export const DropDownUI = {
     };
   },
   atomData: {
-    dropdown: dropdown.atom,
+    dropdown: dropdown.state,
     selection: dropdown.selection,
   },
   /** 快捷命令下拉菜单逻辑（由 TerminalInput 调用） */

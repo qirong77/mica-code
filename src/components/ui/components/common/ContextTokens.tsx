@@ -1,6 +1,6 @@
 import { Text } from '@anthropic/ink';
 import React from 'react';
-import { useSchedulState } from '../../hooks/index.js';
+import { useScheduleState } from '../../hooks/index.js';
 import { contextSizeAtom } from '../../../../store/conversation.js';
 import { model } from '../../../../store/config.js';
 
@@ -23,8 +23,8 @@ function formatTokens(tokens: number): string {
 }
 
 export function ContextTokens() {
-  const contextSize = useSchedulState(contextSizeAtom);
-  const windowSize = useSchedulState(model.contextWindowSize);
+  const contextSize = useScheduleState(contextSizeAtom);
+  const windowSize = useScheduleState(model.contextWindowSize);
 
   if (contextSize <= 0 || windowSize <= 0) return null;
 

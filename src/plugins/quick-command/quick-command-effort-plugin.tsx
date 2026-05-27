@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import { MicaPlugin } from '../MicaPlugin';
 import type { EffortLevel } from '../../store/config.js';
 import { model } from '../../store/config.js';
-import { useSchedulState } from '../../components/ui/hooks/useSchedulState.js';
+import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
 
 interface EffortState {
   selectedIdx: number;
@@ -54,8 +54,8 @@ function EffortList({
 }
 
 function EffortSelector({ state }: { state: EffortState }) {
-  const currentEffort = useSchedulState(model.effort);
-  const efforts = useSchedulState(model.effortOptions);
+  const currentEffort = useScheduleState(model.effort);
+  const efforts = useScheduleState(model.effortOptions);
   return <EffortList efforts={efforts} selected={state.selectedIdx} current={currentEffort} />;
 }
 

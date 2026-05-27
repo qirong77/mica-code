@@ -42,7 +42,7 @@ export const MessageBar = React.memo(function MessageBar() {
     emitter.on('remove', onRemove);
     emitter.on('clear', onClear);
 
-    const unsubDropdown = dropdown.atom.subscribe(state => {
+    const unsubDropdown = dropdown.state.subscribe(state => {
       if (state.visible) setItems([]);
     });
 

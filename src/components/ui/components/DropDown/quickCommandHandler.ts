@@ -4,7 +4,7 @@
  * 由 TerminalInput 调用，负责：
  * - 检测 '/' 输入 → 显示/过滤快捷命令列表
  * - 处理键盘事件（Escape/Tab/↑↓/Enter）当菜单可见时
- * - 管理 dropdown.atom / terminalInput.disabled
+ * - 管理 dropdown.state / terminalInput.disabled
  */
 
 import {
@@ -52,7 +52,7 @@ export function showQuickCommands(query: string, includeHidden = false): void {
   }));
 
   dropdown.inputValue.set(query);
-  dropdown.atom.set({
+  dropdown.state.set({
     visible: true,
     items,
     selectedIndex: 0,
@@ -64,10 +64,10 @@ export function showQuickCommands(query: string, includeHidden = false): void {
 
 /** TerminalInput 在 handleChange 中调用：当输入不再以 '/' 开头 */
 export function hideQuickCommands(): void {
-  const state = dropdown.atom.get();
+  const state = dropdown.state.get();
   if (!state.visible) return;
 
-  dropdown.atom.set({ visible: false, items: [], selectedIndex: 0 });
+  dropdown.state.set({ visible: false, items: [], selectedIndex: 0 });
   dropdown.selection.set(null);
   dropdown.inputValue.set('');
   terminalInput.disabled.set(false);
@@ -85,7 +85,7 @@ export function handleDropdownKey(key: {
   return?: boolean;
   shift?: boolean;
 }): boolean {
-  const state = dropdown.atom.get();
+  const state = dropdown.state.get();
   if (!state.visible || state.items.length === 0) return false;
 
   if (key.escape) {
@@ -119,14 +119,14 @@ export function handleDropdownKey(key: {
 // ── 内部辅助 ──────────────────────────────────────────
 
 function closeAndClear(): void {
-  dropdown.atom.set({ visible: false, items: [], selectedIndex: 0 });
+  dropdown.state.set({ visible: false, items: [], selectedIndex: 0 });
   dropdown.selection.set(null);
   dropdown.inputValue.set('');
   terminalInput.disabled.set(false);
 }
 
 function executeSelected(): void {
-  const state = dropdown.atom.get();
+  const state = dropdown.state.get();
   if (!state.visible || state.items.length === 0) return;
 
   const idx = Math.min(state.selectedIndex, state.items.length - 1);
@@ -137,9 +137,9 @@ function executeSelected(): void {
   const cmd = commands.find((c) => c.name === selected.key);
 
   if (cmd) {
-    const beforeItems = dropdown.atom.get().items;
+    const beforeItems = dropdown.state.get().items;
     cmd.action();
-    const after = dropdown.atom.get();
+    const after = dropdown.state.get();
 
     // 如果 action 没有变更 dropdown 内容（如 /clear），则关闭下拉列表
     if (after.visible && after.items === beforeItems) {
@@ -156,7 +156,7 @@ function executeSelected(): void {
 }
 
 function navigateDropdown(direction: 1 | -1): void {
-  const state = dropdown.atom.get();
+  const state = dropdown.state.get();
   if (!state.visible || state.items.length === 0) return;
 
   const len = state.items.length;
@@ -169,5 +169,5 @@ function navigateDropdown(direction: 1 | -1): void {
         ? state.selectedIndex + 1
         : 0;
 
-  dropdown.atom.set({ ...state, selectedIndex: newIndex });
+  dropdown.state.set({ ...state, selectedIndex: newIndex });
 }

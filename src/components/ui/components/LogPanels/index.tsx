@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text, useTerminalSize } from '@anthropic/ink';
-import { useSchedulState } from '../../hooks/useSchedulState.js';
+import { useScheduleState } from '../../hooks/useScheduleState.js';
 import { thinkingTextAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
 
@@ -12,7 +12,7 @@ function useLogHeight(): number {
 }
 
 export function ThinkingPanel(): React.ReactNode {
-  const text = useSchedulState(thinkingTextAtom);
+  const text = useScheduleState(thinkingTextAtom);
   const maxLines = useLogHeight();
 
   if (text.length === 0) return null;
@@ -28,7 +28,7 @@ export function ThinkingPanel(): React.ReactNode {
 }
 
 export function SystemLogPanel(): React.ReactNode {
-  const lines = useSchedulState(systemLogAtom);
+  const lines = useScheduleState(systemLogAtom);
   const maxLines = useLogHeight();
   if (lines.length === 0) return null;
 

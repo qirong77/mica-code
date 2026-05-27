@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { atom } from 'nanostores';
-import { createPersistedAtom } from './createPersistenceAtom.js';
+import { createPersistedAtom } from './createPersistedAtom.js';
 
 dotenv.config({ override: true });
 
@@ -29,7 +29,7 @@ export const api = {
 };
 
 export const model = {
-  atom: createPersistedAtom('model', process.env.ANTHROPIC_MODEL || 'deepseek-v4-flash'),
+  name: createPersistedAtom('model', process.env.ANTHROPIC_MODEL || 'deepseek-v4-flash'),
   maxTokens: atom(Number(process.env.ANTHROPIC_MAX_TOKENS) || 4096),
   effort: createPersistedAtom('effort', 'low' as EffortLevel),
   options: atom<ModelOption[]>([

@@ -5,7 +5,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { uuid } from '../utils/uuid';
 import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
-import { useSchedulState } from '../components/ui/hooks/useSchedulState.js';
+import { useScheduleState } from '../components/ui/hooks/useScheduleState.js';
 
 export interface PluginAtoms {
   messages: WritableAtom<Anthropic.MessageParam[]>;
@@ -48,7 +48,7 @@ export abstract class MicaPlugin {
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
 
   constructor() {
-    dropdown.atom.listen((state) => {
+    dropdown.state.listen((state) => {
       if (state.visible) this.reset();
     });
   }
@@ -114,7 +114,7 @@ export abstract class MicaPlugin {
     const uiAtom = this._uiAtom;
 
     const Wrapper: React.ComponentType = () => {
-      const state = useSchedulState(uiAtom);
+      const state = useScheduleState(uiAtom);
       return React.createElement(component, { state });
     };
 

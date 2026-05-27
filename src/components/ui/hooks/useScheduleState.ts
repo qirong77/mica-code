@@ -37,7 +37,7 @@ function scheduleFlush(immediate = false) {
   }
 }
 
-export function useSchedulState<T>(atom: ReadableAtom<T>): T {
+export function useScheduleState<T>(atom: ReadableAtom<T>): T {
   const [state, setState] = useState<T>(atom.get());
   const snapRef = useRef(state);
   const stateUpdaterId = useRef(uuid());

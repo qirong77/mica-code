@@ -11,7 +11,7 @@ bootstrap();
 
 const _plugins: MicaPlugin[] = [];
 
-session.switch.listen((newSessionId) => {
+session.switchSignal.listen((newSessionId) => {
   if (!newSessionId) return;
   const oldId = session.currentId.get();
   for (const plugin of _plugins) {
@@ -27,13 +27,13 @@ export const MicaAgent = {
     plugin.agent = MicaAgent;
     plugin.atoms = {
       messages: messagesAtom,
-      model: model.atom,
+      model: model.name,
       effort: model.effort,
       modelOptions: model.options,
       effortOptions: model.effortOptions,
       sessionsIndex: session.index,
       currentSessionId: session.currentId,
-      sessionSwitch: session.switch,
+      sessionSwitch: session.switchSignal,
       thinkingText: thinkingTextAtom,
       responseText: responseTextAtom,
       sessionToolRecords: sessionToolRecordsAtom,

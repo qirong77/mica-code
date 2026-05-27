@@ -41,7 +41,7 @@ export interface Command {
 export const workingStatusAtom = atom<WorkingStatus>({ type: 'idle' });
 
 export const dropdown = {
-  atom: atom<DropdownState>({ visible: false, items: [], selectedIndex: 0 }),
+  state: atom<DropdownState>({ visible: false, items: [], selectedIndex: 0 }),
   selection: atom<DropdownItem | null>(null),
   inputValue: atom(''),
   cursor: atom(0),
@@ -71,5 +71,5 @@ export const systemLogVisibleAtom = atom(false);
 export const session = {
   index: atom<SessionMeta[]>([]),
   currentId: atom<string>(''),
-  switch: atom<string | null>(null),
+  switchSignal: atom<string | null>(null),
 };

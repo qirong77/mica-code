@@ -3,14 +3,14 @@ import { agentTurn } from '../agent/turn.js';
 import { appendSystemLog } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
 import {
-  onThinkingChunk,
-  onStreamStart,
-  onStreamChunk,
-  onStreamEnd,
-  onFinalMessage,
-  onToolUseStart,
-  onToolUseComplete,
-  onStatus,
+  handleThinkingChunk,
+  handleStreamStart,
+  handleStreamChunk,
+  handleStreamEnd,
+  handleFinalMessage,
+  handleToolUseStart,
+  handleToolUseComplete,
+  handleStatus,
   appendToolOutputChunk,
 } from '../store/stream-handlers.js';
 
@@ -23,36 +23,36 @@ export function setupAgentEvents() {
     textStarted = false;
 
     stream.on('thinking', (chunk) => {
-      onThinkingChunk(chunk);
+      handleThinkingChunk(chunk);
     });
 
     stream.on('text', (chunk) => {
       if (!textStarted) {
         textStarted = true;
-        onStreamStart();
+        handleStreamStart();
       }
-      onStreamChunk(chunk);
+      handleStreamChunk(chunk);
     });
 
     stream.on('end', () => {
-      onStreamEnd();
+      handleStreamEnd();
     });
   });
 
   agentTurn.events.on('message:final', () => {
-    onFinalMessage();
+    handleFinalMessage();
   });
 
   agentTurn.events.on('tool:use', ({ toolUseId, toolName, toolInput, completed }) => {
     if (completed) {
-      onToolUseComplete(toolUseId, toolName, toolInput);
+      handleToolUseComplete(toolUseId, toolName, toolInput);
     } else {
-      onToolUseStart(toolUseId, toolName, toolInput);
+      handleToolUseStart(toolUseId, toolName, toolInput);
     }
   });
 
   agentTurn.events.on('status', (status) => {
-    onStatus(status, lastStatus);
+    handleStatus(status, lastStatus);
     lastStatus = status;
   });
 
