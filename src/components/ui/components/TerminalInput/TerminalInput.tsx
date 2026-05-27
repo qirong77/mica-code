@@ -108,11 +108,13 @@ function TerminalInput() {
       if (!value.trim()) return;
 
       if (terminalInput.disabled.get()) return;
-      if (activePluginUIs.length > 0) return;
+      // 仅拦截有 onInput 的交互式插件 UI；showUISimple 等纯展示 UI 不应阻止提交
+      if (activePluginUIs.some((ui) => ui.onInput)) return;
 
       const trimmed = value.trim();
       setPrevInputs(prev => [...prev, trimmed]);
       setHistoryIndex(-1);
+      terminalInput.text.set('');
       setInput('');
       setCursorOffset(0);
       emitter.emit('submit', trimmed);
