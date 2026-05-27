@@ -1,5 +1,6 @@
-import React from 'react';
-import { Box, Text, useTerminalSize } from '@anthropic/ink';
+import React, { useEffect, useRef } from 'react';
+import { Box, Text, useTerminalSize, ScrollBox } from '@anthropic/ink';
+import type { ScrollBoxHandle } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -11,7 +12,6 @@ export type { SessionMeta };
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
 const MAX_SESSIONS = 50;
-const PAGE_SIZE = 5;
 
 function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number } {
   if (messages.length === 0) return { cleaned: messages, truncated: 0 };
@@ -100,13 +100,6 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(days / 30)} 个月前`;
 }
 
-function getWindow(sessions: SessionMeta[], sel: number) {
-  if (sessions.length <= PAGE_SIZE) return { start: 0, sessions };
-  let start = Math.max(0, sel - Math.floor(PAGE_SIZE / 2));
-  start = Math.min(start, sessions.length - PAGE_SIZE);
-  return { start, sessions: sessions.slice(start, start + PAGE_SIZE) };
-}
-
 interface ResumeState {
   selectedIdx: number;
 }
@@ -114,12 +107,10 @@ interface ResumeState {
 function SessionList({
   sessions,
   selected,
-  startIndex,
   total,
 }: {
   sessions: SessionMeta[];
   selected: number;
-  startIndex: number;
   total: number;
 }) {
   const { columns } = useTerminalSize();
@@ -133,32 +124,19 @@ function SessionList({
     );
   }
 
-  const hasAbove = startIndex > 0;
-  const hasBelow = startIndex + sessions.length < total;
-
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text dimColor>
-          resume ({selected + startIndex + 1}/{total}):
-        </Text>
-      </Box>
-      {hasAbove && (
-        <Box marginBottom={1}>
-          <Text dimColor>  ▲ {startIndex} more</Text>
-        </Box>
-      )}
       {sessions.map((s, i) => {
         const truncated = s.title.length > maxWidth
-          ? s.title.slice(0, maxWidth - 1) + '…'
+          ? s.title.slice(0, maxWidth - 1) + '\u2026'
           : s.title;
         const isSelected = i === selected;
         return (
-          <Box key={s.id} flexDirection="column" marginBottom={i < sessions.length - 1 || hasBelow ? 1 : 0}>
+          <Box key={s.id} flexDirection="column" marginBottom={i < sessions.length - 1 ? 1 : 0}>
             <Box flexDirection="row">
               <Box width={2}>
                 <Text color={isSelected ? 'claude' : 'inactive'}>
-                  {isSelected ? '▶' : ' '}
+                  {isSelected ? '\u25B6' : ' '}
                 </Text>
               </Box>
               <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
@@ -167,31 +145,58 @@ function SessionList({
             </Box>
             <Box marginLeft={2}>
               <Text dimColor>
-                {formatRelativeTime(s.updatedAt)} · {formatTime(s.updatedAt)}
+                {formatRelativeTime(s.updatedAt)} \u00B7 {formatTime(s.updatedAt)}
               </Text>
             </Box>
           </Box>
         );
       })}
-      {hasBelow && (
-        <Box marginTop={1}>
-          <Text dimColor>  ▼ {total - startIndex - sessions.length} more</Text>
-        </Box>
-      )}
     </Box>
   );
 }
 
 function ResumeSessionList({ state }: { state: ResumeState }) {
+  const scrollRef = useRef<ScrollBoxHandle>(null);
+  const prevIdxRef = useRef(state.selectedIdx);
   const sorted = (state as any)._sorted as SessionMeta[];
-  const { start, sessions } = getWindow(sorted, state.selectedIdx);
+
+  useEffect(() => {
+    const prev = prevIdxRef.current;
+    const curr = state.selectedIdx;
+    prevIdxRef.current = curr;
+
+    const s = scrollRef.current;
+    if (!s) return;
+
+    const total = sorted.length;
+    const diff = curr - prev;
+
+    if (prev === 0 && curr === total - 1) {
+      s.scrollTo(s.getScrollHeight());
+    } else if (prev === total - 1 && curr === 0) {
+      s.scrollTo(0);
+    } else if (diff > 0) {
+      s.scrollBy(3);
+    } else if (diff < 0) {
+      s.scrollBy(-3);
+    }
+  }, [state.selectedIdx, sorted.length]);
+
   return (
-    <SessionList
-      sessions={sessions}
-      selected={state.selectedIdx - start}
-      startIndex={start}
-      total={sorted.length}
-    />
+    <Box flexDirection="column" paddingX={1}>
+      <Box paddingBottom={1} flexShrink={0}>
+        <Text dimColor>
+          resume ({state.selectedIdx + 1}/{sorted.length}):
+        </Text>
+      </Box>
+      <ScrollBox ref={scrollRef} flexDirection="column" height={15}>
+        <SessionList
+          sessions={sorted}
+          selected={state.selectedIdx}
+          total={sorted.length}
+        />
+      </ScrollBox>
+    </Box>
   );
 }
 

@@ -1,1 +1,3 @@
 - grep 等工具执行过久时，导致卡住
+- 实现 Interrupted （运行过程中ctrl + c）
+- 优化 ctrl + c 退出机制

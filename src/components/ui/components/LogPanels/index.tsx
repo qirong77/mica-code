@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useTerminalSize } from '@anthropic/ink';
+import { Text, ScrollBox, useTerminalSize } from '@anthropic/ink';
 import { useScheduleState } from '../../hooks/useScheduleState.js';
 import { thinkingTextAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';
@@ -17,13 +17,10 @@ export function ThinkingPanel(): React.ReactNode {
 
   if (text.length === 0) return null;
 
-  const lines = text.split('\n');
-  const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : text;
-
   return (
-    <Box flexDirection="column" height={maxLines}>
-      <Text dimColor>{display}</Text>
-    </Box>
+    <ScrollBox stickyScroll flexDirection="column" height={maxLines}>
+      <Text dimColor>{text}</Text>
+    </ScrollBox>
   );
 }
 
@@ -32,10 +29,9 @@ export function SystemLogPanel(): React.ReactNode {
   const maxLines = useLogHeight();
   if (lines.length === 0) return null;
 
-  const display = lines.length > maxLines ? lines.slice(-maxLines).join('\n') : lines.join('\n');
   return (
-    <Box flexDirection="column" height={maxLines}>
-      <Text dimColor>{display}</Text>
-    </Box>
+    <ScrollBox stickyScroll flexDirection="column" height={maxLines}>
+      <Text dimColor>{lines.join('\n')}</Text>
+    </ScrollBox>
   );
 }

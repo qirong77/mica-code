@@ -74,7 +74,7 @@ export function WorkingStatus() {
           <Box>
             <Spin />
             <Text>streaming</Text>
-            <Text color={C.dim}> · ~{estimateTokens(responseText)} tokens</Text>
+            <Text color={C.dim}> ↓{estimateTokens(responseText)} tokens</Text>
           </Box>
         );
       case 'calling_tool':
