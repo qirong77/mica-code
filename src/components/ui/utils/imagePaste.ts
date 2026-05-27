@@ -115,6 +115,7 @@ export function parseImageRefs(text: string): string | Anthropic.ContentBlockPar
       const rawExt = imgPathResolved.toLowerCase().match(/\.(\w+)$/)?.[1] || 'png';
       const mediaType = (rawExt === 'jpg' ? 'image/jpeg' : `image/${rawExt}`) as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
+      blocks.push({ type: 'text', text: full });
       blocks.push({
         type: 'image',
         source: {
