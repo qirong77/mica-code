@@ -51,9 +51,12 @@ export const thinkingTextAtom = atom('');
 
 export const responseTextAtom = atom('');
 
+export const DEFAULT_INPUT_PLACEHOLDER = 'Type something and press Enter...';
+
 export const terminalInput = {
   text: atom(''),
   disabled: atom(false),
+  placeholder: atom(DEFAULT_INPUT_PLACEHOLDER),
 };
 
 export const quickCommandsAtom = atom<Command[]>([]);
@@ -62,6 +65,9 @@ export interface PluginUI {
   id: string;
   component: React.ComponentType;
   onInput?: (input: string, key: any) => boolean;
+  /** 为 true 时，onInput 消费按键后不清空输入框（用于过滤输入等场景） */
+  preserveInput?: boolean;
+  onTextChange?: (text: string) => boolean;
 }
 
 export const pluginUIsAtom = atom<PluginUI[]>([]);

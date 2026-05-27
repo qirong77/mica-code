@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Box, Text, useTerminalSize, ScrollBox } from '@anthropic/ink';
-import type { ScrollBoxHandle } from '@anthropic/ink';
+import { Box, Text, ScrollBox } from '@anthropic/ink';
+import type { DOMElement, ScrollBoxHandle } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -102,24 +102,37 @@ function formatRelativeTime(ts: number): string {
 
 interface ResumeState {
   selectedIdx: number;
+  filterQuery: string;
+  _allSorted: SessionMeta[];
+  _sorted: SessionMeta[];
+}
+
+function filterSessions(sessions: SessionMeta[], query: string): SessionMeta[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return sessions;
+  return sessions.filter((s) => s.title.toLowerCase().includes(q));
+}
+
+function clampSelectedIdx(selectedIdx: number, length: number): number {
+  if (length === 0) return 0;
+  return Math.min(Math.max(0, selectedIdx), length - 1);
 }
 
 function SessionList({
   sessions,
   selected,
   total,
+  itemRefs,
 }: {
   sessions: SessionMeta[];
   selected: number;
   total: number;
+  itemRefs: React.MutableRefObject<(DOMElement | null)[]>;
 }) {
-  const { columns } = useTerminalSize();
-  const maxWidth = Math.max(20, Math.floor(columns * 0.8));
-
   if (total === 0) {
     return (
       <Box paddingX={1}>
-        <Text dimColor>no sessions</Text>
+        <Text dimColor>无匹配会话</Text>
       </Box>
     );
   }
@@ -127,25 +140,28 @@ function SessionList({
   return (
     <Box flexDirection="column" paddingX={1}>
       {sessions.map((s, i) => {
-        const truncated = s.title.length > maxWidth
-          ? s.title.slice(0, maxWidth - 1) + '\u2026'
-          : s.title;
         const isSelected = i === selected;
         return (
-          <Box key={s.id} flexDirection="column" marginBottom={i < sessions.length - 1 ? 1 : 0}>
+          <Box
+            key={s.id}
+            ref={(el) => { itemRefs.current[i] = el; }}
+            flexDirection="column"
+            flexShrink={0}
+            marginBottom={i < sessions.length - 1 ? 1 : 0}
+          >
             <Box flexDirection="row">
               <Box width={2}>
                 <Text color={isSelected ? 'claude' : 'inactive'}>
                   {isSelected ? '\u25B6' : ' '}
                 </Text>
               </Box>
-              <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
-                {truncated}
+              <Text color={isSelected ? 'claude' : undefined} bold={isSelected} wrap="wrap">
+                {s.title}
               </Text>
             </Box>
             <Box marginLeft={2}>
-              <Text dimColor>
-                {formatRelativeTime(s.updatedAt)} \u00B7 {formatTime(s.updatedAt)}
+              <Text color={isSelected ? 'claude' : 'inactive'} dimColor={!isSelected}>
+                {formatRelativeTime(s.updatedAt)}{' · '}{formatTime(s.updatedAt)}
               </Text>
             </Box>
           </Box>
@@ -157,43 +173,38 @@ function SessionList({
 
 function ResumeSessionList({ state }: { state: ResumeState }) {
   const scrollRef = useRef<ScrollBoxHandle>(null);
-  const prevIdxRef = useRef(state.selectedIdx);
-  const sorted = (state as any)._sorted as SessionMeta[];
+  const itemRefs = useRef<(DOMElement | null)[]>([]);
+  const sorted = state._sorted;
+  const total = state._allSorted.length;
+  const filtered = sorted.length;
 
   useEffect(() => {
-    const prev = prevIdxRef.current;
-    const curr = state.selectedIdx;
-    prevIdxRef.current = curr;
+    itemRefs.current.length = sorted.length;
+  }, [sorted.length]);
 
-    const s = scrollRef.current;
-    if (!s) return;
-
-    const total = sorted.length;
-    const diff = curr - prev;
-
-    if (prev === 0 && curr === total - 1) {
-      s.scrollTo(s.getScrollHeight());
-    } else if (prev === total - 1 && curr === 0) {
-      s.scrollTo(0);
-    } else if (diff > 0) {
-      s.scrollBy(3);
-    } else if (diff < 0) {
-      s.scrollBy(-3);
-    }
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    const selectedEl = itemRefs.current[state.selectedIdx];
+    if (!scroll || !selectedEl) return;
+    scroll.scrollToElement(selectedEl);
   }, [state.selectedIdx, sorted.length]);
+
+  const header =
+    state.filterQuery.trim() && filtered !== total
+      ? `resume (${state.selectedIdx + 1}/${filtered}，共 ${total}):`
+      : `resume (${state.selectedIdx + 1}/${filtered}):`;
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box paddingBottom={1} flexShrink={0}>
-        <Text dimColor>
-          resume ({state.selectedIdx + 1}/{sorted.length}):
-        </Text>
+        <Text dimColor>{header}</Text>
       </Box>
       <ScrollBox ref={scrollRef} flexDirection="column" height={15}>
         <SessionList
           sessions={sorted}
           selected={state.selectedIdx}
           total={sorted.length}
+          itemRefs={itemRefs}
         />
       </ScrollBox>
     </Box>
@@ -303,32 +314,52 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
   private _showResumeList() {
     const idx = this.atoms.sessionsIndex.get();
-    const sorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
+    const allSorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
 
-    if (sorted.length === 0) {
+    if (allSorted.length === 0) {
       this.showMessage('no sessions');
       return;
     }
 
-    interface ResumeStateWithSorted extends ResumeState {
-      _sorted: SessionMeta[];
-    }
+    const initialState: ResumeState = {
+      selectedIdx: 0,
+      filterQuery: '',
+      _allSorted: allSorted,
+      _sorted: allSorted,
+    };
 
-    this.showUI<ResumeStateWithSorted>(
+    this.showUI<ResumeState>(
       ResumeSessionList,
-      { selectedIdx: 0, _sorted: sorted },
+      initialState,
       (_input, key, state, setState) => {
+        const list = state._sorted;
+        if (list.length === 0) {
+          if (key.escape) {
+            this.hideUI();
+            return true;
+          }
+          return false;
+        }
+
         if (key.upArrow) {
-          setState({ ...state, selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : sorted.length - 1 });
+          setState({
+            ...state,
+            selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : list.length - 1,
+          });
           return true;
         }
         if (key.downArrow) {
-          setState({ ...state, selectedIdx: state.selectedIdx < sorted.length - 1 ? state.selectedIdx + 1 : 0 });
+          setState({
+            ...state,
+            selectedIdx: state.selectedIdx < list.length - 1 ? state.selectedIdx + 1 : 0,
+          });
           return true;
         }
         if (key.return) {
+          const target = list[state.selectedIdx];
+          if (!target) return true;
           this.hideUI();
-          this._switchToSession(sorted[state.selectedIdx]!.id);
+          this._switchToSession(target.id);
           return true;
         }
         if (key.escape) {
@@ -336,6 +367,19 @@ export class QuickCommandResumePlugin extends MicaPlugin {
           return true;
         }
         return false;
+      },
+      {
+        placeholder: '输入关键词过滤会话，↑↓ 选择，Enter 确认，Esc 取消',
+        preserveInput: true,
+        onTextChange: (text, state, setState) => {
+          const filtered = filterSessions(state._allSorted, text);
+          setState({
+            ...state,
+            filterQuery: text,
+            _sorted: filtered,
+            selectedIdx: clampSelectedIdx(state.selectedIdx, filtered.length),
+          });
+        },
       },
     );
   }

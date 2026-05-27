@@ -61,6 +61,16 @@ function TerminalInput() {
   const columns = process.stdout.columns - 6;
   const activePluginUIs = useScheduleState(pluginUIsAtom);
   const workingStatus = useScheduleState(workingStatusAtom);
+  const placeholder = useScheduleState(terminalInput.placeholder);
+
+  const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
+
+  React.useEffect(() => {
+    return terminalInput.text.listen((text) => {
+      setInput(text);
+      setCursorOffset(text.length);
+    });
+  }, []);
 
   const isAgentRunning = workingStatus.type !== 'idle' && workingStatus.type !== 'completed' && workingStatus.type !== 'error';
   const isAgentIdle = !isAgentRunning;
@@ -79,8 +89,11 @@ function TerminalInput() {
 
     for (const ui of activePluginUIs) {
       if (ui.onInput?.(_input, key)) {
-        setInput('');
-        setCursorOffset(0);
+        if (!ui.preserveInput) {
+          terminalInput.text.set('');
+          setInput('');
+          setCursorOffset(0);
+        }
         return;
       }
     }
@@ -95,6 +108,7 @@ function TerminalInput() {
       if (!value.trim()) return;
 
       if (terminalInput.disabled.get()) return;
+      if (activePluginUIs.length > 0) return;
 
       const trimmed = value.trim();
       setPrevInputs(prev => [...prev, trimmed]);
@@ -103,7 +117,7 @@ function TerminalInput() {
       setCursorOffset(0);
       emitter.emit('submit', trimmed);
     },
-    [],
+    [activePluginUIs],
   );
 
   const onExit = useCallback(() => {
@@ -116,6 +130,11 @@ function TerminalInput() {
 
   const handleChange = useCallback((value: string) => {
     setInput(value);
+    terminalInput.text.set(value);
+
+    for (const ui of activePluginUIs) {
+      if (ui.onTextChange?.(value)) return;
+    }
 
     // 检测 '/' 开头 → 委托给 DropDown 模块显示快捷命令列表
     if (value.startsWith('/') && value.length >= 1) {
@@ -124,11 +143,11 @@ function TerminalInput() {
     } else {
       DropDownUI.quickCommand.hide();
     }
-  }, []);
+  }, [activePluginUIs]);
 
   const onHistoryUp = useCallback(() => {
     // 下拉菜单可见时，↑↓ 由 useInput → handleDropdownKey 处理
-    if (terminalInput.disabled.get()) return;
+    if (terminalInput.disabled.get() || preserveInputOnPluginHandle) return;
     if (prevInputs.length === 0) return;
     const newIndex = historyIndex < prevInputs.length - 1 ? historyIndex + 1 : historyIndex;
     if (newIndex !== historyIndex) {
@@ -137,11 +156,11 @@ function TerminalInput() {
       setInput(val);
       setCursorOffset(val.length);
     }
-  }, [historyIndex, prevInputs]);
+  }, [historyIndex, prevInputs, preserveInputOnPluginHandle]);
 
   const onHistoryDown = useCallback(() => {
     // 下拉菜单可见时，↑↓ 由 useInput → handleDropdownKey 处理
-    if (terminalInput.disabled.get()) return;
+    if (terminalInput.disabled.get() || preserveInputOnPluginHandle) return;
     if (historyIndex > 0) {
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
@@ -153,7 +172,7 @@ function TerminalInput() {
       setInput('');
       setCursorOffset(0);
     }
-  }, [historyIndex, prevInputs]);
+  }, [historyIndex, prevInputs, preserveInputOnPluginHandle]);
 
   // 读取 terminalInput.disabled：下拉菜单可见时禁用光标，并阻止历史/提交回调
   const inputDisabled = useScheduleState(terminalInput.disabled);
@@ -181,7 +200,7 @@ function TerminalInput() {
             onExit={onExit}
             focus={true}
             multiline={true}
-            placeholder="Type something and press Enter..."
+            placeholder={placeholder}
             columns={columns}
             cursorOffset={cursorOffset}
             onChangeCursorOffset={setCursorOffset}

@@ -4,7 +4,16 @@ import { atom as createAtom, type ReadableAtom, type WritableAtom } from 'nanost
 import type { IMicaAgent } from '../core/agent';
 import type { ConversationMessage } from '../store/conversation.js';
 import { uuid } from '../utils/uuid';
-import { quickCommandsAtom, pluginUIsAtom, dropdown, type Command, type SessionMeta, type PluginUI } from '../store/ui-state.js';
+import {
+  quickCommandsAtom,
+  pluginUIsAtom,
+  dropdown,
+  terminalInput,
+  DEFAULT_INPUT_PLACEHOLDER,
+  type Command,
+  type SessionMeta,
+  type PluginUI,
+} from '../store/ui-state.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
 import { useScheduleState } from '../components/ui/hooks/useScheduleState.js';
 
@@ -30,7 +39,7 @@ export interface PluginAtoms {
 
 // ── 快速命令列表（由插件注册，插件内部闭环） ────────────
 
-export { quickCommandsAtom, type SessionMeta };
+export { quickCommandsAtom, type SessionMeta, terminalInput, DEFAULT_INPUT_PLACEHOLDER };
 
 /**
  * MicaPlugin 基类
@@ -76,7 +85,16 @@ export abstract class MicaPlugin {
   public reset(): void {
     this.hideUI();
     this.resetState();
+    this.resetInputPlaceholder();
     this.onCleanup();
+  }
+
+  protected setInputPlaceholder(text: string): void {
+    terminalInput.placeholder.set(text);
+  }
+
+  protected resetInputPlaceholder(): void {
+    terminalInput.placeholder.set(DEFAULT_INPUT_PLACEHOLDER);
   }
 
   protected addQuickCommand(command: Command): void {
@@ -104,6 +122,11 @@ export abstract class MicaPlugin {
     component: React.ComponentType<{ state: S }>,
     initialState: S,
     onInput?: (input: string, key: any, state: S, setState: (s: S) => void) => boolean,
+    options?: {
+      placeholder?: string;
+      preserveInput?: boolean;
+      onTextChange?: (text: string, state: S, setState: (s: S) => void) => void;
+    },
   ): void {
     const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
     this._activeUIId = id;
@@ -125,7 +148,16 @@ export abstract class MicaPlugin {
       onInput: onInput
         ? (input, key) => onInput(input, key, uiAtom.get(), (s) => uiAtom.set(s))
         : undefined,
+      preserveInput: options?.preserveInput,
+      onTextChange: options?.onTextChange
+        ? (text) => {
+            options.onTextChange!(text, uiAtom.get(), (s) => uiAtom.set(s));
+            return true;
+          }
+        : undefined,
     };
+    if (options?.placeholder) this.setInputPlaceholder(options.placeholder);
+    if (options?.preserveInput) terminalInput.text.set('');
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
   }
 
@@ -134,6 +166,8 @@ export abstract class MicaPlugin {
     pluginUIsAtom.set(pluginUIsAtom.get().filter((u) => u.id !== this._activeUIId));
     this._activeUIId = null;
     this._uiAtom = null;
+    this.resetInputPlaceholder();
+    terminalInput.text.set('');
   }
 
   /** 显示或更新一条消息，默认 3s 后自动清除。传入 id 可更新已有消息 */
