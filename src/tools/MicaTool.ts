@@ -1,7 +1,7 @@
 import { formatError } from '../utils/formatError';
 import { MessageBarAPI } from '../components/ui/components/MessageBar/index.js';
 
-const SLOW_TOOL_THRESHOLD_MS = 3000;
+const SLOW_TOOL_THRESHOLD_MS = 5000;
 
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;

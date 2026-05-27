@@ -1,16 +1,11 @@
 import { Box, Text } from '@anthropic/ink';
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { dropdown, workingStatusAtom, thinkingTextAtom, responseTextAtom } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
 import { ContextTokens } from '../common/ContextTokens.js';
-// ── Types ─────────────────────────────────────────────
-
-
-
-// ── 渲染组件 ──────────────────────────────────────────
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -51,6 +46,35 @@ export function WorkingStatus() {
   const responseText = useScheduleState(responseTextAtom);
 
   const hideLeftStatus = dropdownItems.visible && dropdownItems.items.length > 0;
+
+  const startRef = useRef(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (
+      info.type === 'idle' ||
+      info.type === 'completed' ||
+      info.type === 'error'
+    ) {
+      startRef.current = 0;
+      setElapsed(0);
+      return;
+    }
+    if (!startRef.current) {
+      startRef.current = Date.now();
+    }
+    const timer = setInterval(() => {
+      setElapsed(Date.now() - startRef.current);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [info.type]);
+
+  const displayElapsed =
+    info.type === 'completed' || info.type === 'calling_tool'
+      ? info.elapsedMs ?? elapsed
+      : elapsed;
+
+  const elapsedText = displayElapsed > 0 ? formatElapsed(displayElapsed) : '';
 
   const content = (() => {
     switch (info.type) {
@@ -115,6 +139,7 @@ export function WorkingStatus() {
           {modelValue} · {effort}
         </Text>
         <ContextTokens />
+        {elapsedText && <Text color={C.dim}> {elapsedText}</Text>}
       </Box>
     </Box>
   );

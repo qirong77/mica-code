@@ -1,4 +1,4 @@
-import { wrappedRender as render } from '@anthropic/ink';
+import { createRoot } from '@anthropic/ink';
 import React from 'react';
 import { App } from './app.js';
 
@@ -13,8 +13,9 @@ function Root() {
   return <App />;
 }
 
-function run() {
-  render(<Root />);
+async function run() {
+  const root = await createRoot({ exitOnCtrlC: false });
+  root.render(<Root />);
 }
 
 /**

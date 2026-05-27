@@ -5,13 +5,53 @@ import { SimpleTextInput } from "./Input";
 import { C } from "../../data";
 import mitt from 'mitt'
 import { useScheduleState } from '../../hooks';
-import { terminalInput, pluginUIsAtom } from '../../../../store/ui-state.js';
+import { terminalInput, pluginUIsAtom, workingStatusAtom } from '../../../../store/ui-state.js';
+import { agentTurn } from '../../../../agent/turn.js';
 import { DropDownUI } from '../DropDown/index.js';
 
 type Events = {
   submit: string
 }
 const emitter = mitt<Events>()
+
+const DOUBLE_PRESS_TIMEOUT_MS = 800
+
+function useDoublePressExit(isIdle: boolean): [boolean, () => void] {
+  const [pending, setPending] = useState(false);
+  const lastPressRef = React.useRef(0);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const handlePress = useCallback(() => {
+    if (!isIdle) return;
+
+    const now = Date.now();
+    const timeSince = now - lastPressRef.current;
+    const isDouble = timeSince <= DOUBLE_PRESS_TIMEOUT_MS && timeoutRef.current !== undefined;
+
+    if (isDouble) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = undefined;
+      setPending(false);
+      process.exit(0);
+    } else {
+      setPending(true);
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        setPending(false);
+        timeoutRef.current = undefined;
+      }, DOUBLE_PRESS_TIMEOUT_MS);
+    }
+    lastPressRef.current = now;
+  }, [isIdle]);
+
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return [pending, handlePress];
+}
 
 function TerminalInput() {
   const [input, setInput] = useState(terminalInput.text.get());
@@ -20,8 +60,23 @@ function TerminalInput() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const columns = process.stdout.columns - 6;
   const activePluginUIs = useScheduleState(pluginUIsAtom);
+  const workingStatus = useScheduleState(workingStatusAtom);
+
+  const isAgentRunning = workingStatus.type !== 'idle' && workingStatus.type !== 'completed' && workingStatus.type !== 'error';
+  const isAgentIdle = !isAgentRunning;
+
+  const [exitPending, handleExitPress] = useDoublePressExit(isAgentIdle);
 
   useInput((_input, key) => {
+    if (key.ctrl && key.name === 'c') {
+      if (isAgentRunning) {
+        agentTurn.abort();
+        setInput('');
+        setCursorOffset(0);
+        return;
+      }
+    }
+
     for (const ui of activePluginUIs) {
       if (ui.onInput?.(_input, key)) {
         setInput('');
@@ -39,8 +94,6 @@ function TerminalInput() {
     (value: string) => {
       if (!value.trim()) return;
 
-      // 下拉菜单可见时的 Enter/Tab/Escape 由 useInput → handleDropdownKey 处理，
-      // 但 SimpleTextInput 也会触发 onSubmit，这里需要防御
       if (terminalInput.disabled.get()) return;
 
       const trimmed = value.trim();
@@ -54,8 +107,12 @@ function TerminalInput() {
   );
 
   const onExit = useCallback(() => {
-    process.exit(0);
-  }, []);
+    if (isAgentRunning) {
+      agentTurn.abort();
+      return;
+    }
+    handleExitPress();
+  }, [isAgentRunning, handleExitPress]);
 
   const handleChange = useCallback((value: string) => {
     setInput(value);
@@ -134,6 +191,11 @@ function TerminalInput() {
           />
         </Box>
       </Box>
+      {exitPending && (
+        <Box>
+          <Text color={C.dim}>Press Ctrl+C again to exit</Text>
+        </Box>
+      )}
     </Box>
   );
 }

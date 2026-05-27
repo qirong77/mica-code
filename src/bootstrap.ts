@@ -21,8 +21,14 @@ export function bootstrap() {
     try {
       agentTurn.events.emit('status', { type: 'connecting' });
       await agentTurn.run(text);
-      agentTurn.events.emit('status', { type: 'completed', elapsedMs: Date.now() - startTime });
-      appendSystemLog('Agent 运行完成');
+      if (!agentTurn.isAborted) {
+        agentTurn.events.emit('status', { type: 'completed', elapsedMs: Date.now() - startTime });
+        appendSystemLog('Agent 运行完成');
+      } else {
+        const id = `agent-interrupted-${Date.now()}`;
+        ui.MessageBar.addMessage({ id, text: 'Agent 已被中断' });
+        setTimeout(() => ui.MessageBar.removeMessage(id), 3000);
+      }
     } catch (error) {
       const message = formatError(error);
       agentTurn.events.emit('status', {

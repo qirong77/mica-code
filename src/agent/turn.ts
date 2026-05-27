@@ -48,6 +48,18 @@ class AgentTurn {
   readonly events = mitt<AgentTurnEvents>();
 
   private middlewares: Middleware[] = [];
+  private abortController: AbortController | null = null;
+  private _aborted = false;
+
+  abort() {
+    this._aborted = true;
+    this.abortController?.abort();
+    this.abortController = null;
+  }
+
+  get isAborted() {
+    return this._aborted;
+  }
 
   use(middleware: Middleware) {
     this.middlewares.push(middleware);
@@ -58,8 +70,14 @@ class AgentTurn {
     const modelName = model.name.get();
     const effort = model.effort.get();
 
+    if (this._aborted) {
+      throw new Error('ABORT');
+    }
+
     appendSystemLog(`迭代开始：model=${modelName} effort=${effort}`);
     this.events.emit('status', { type: 'connecting' });
+
+    this.abortController = new AbortController();
 
     const stream = getClient().messages.stream({
       model: modelName,
@@ -73,6 +91,12 @@ class AgentTurn {
       output_config: effort !== 'none' ? { effort } : undefined,
       tools: toolDefinitions,
     }) as MessageStream<null>;
+
+    const abortSignal = this.abortController.signal;
+
+    abortSignal.addEventListener('abort', () => {
+      stream.controller.abort();
+    }, { once: true });
 
     this.events.emit('stream:create', stream);
 
@@ -96,7 +120,15 @@ class AgentTurn {
       }
     });
 
-    const finalMessage = await stream.finalMessage();
+    let finalMessage: Anthropic.Message;
+    try {
+      finalMessage = await stream.finalMessage();
+    } catch (err) {
+      if (abortSignal.aborted) {
+        throw new Error('ABORT');
+      }
+      throw err;
+    }
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
     const updatedMessages = [...messages, finalMessage];
     messagesAtom.set(updatedMessages);
@@ -122,6 +154,7 @@ class AgentTurn {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       const settled = await Promise.allSettled(
         completedToolUses.map(async (tool) => {
+          if (abortSignal.aborted) throw new Error('ABORT');
           const startTime = Date.now();
           const result = await executeTool(tool.name, tool.input, {
             onChunk: (chunk) => {
@@ -181,23 +214,38 @@ class AgentTurn {
   }
 
   private async coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
+    this._aborted = false;
     appendSystemLog('Agent run 开始');
     sessionToolRecordsAtom.set([]);
     await clearBackups();
     const updated = [...messagesAtom.get(), { role: 'user', content: userInput } as Anthropic.MessageParam];
     messagesAtom.set(updated);
     while (true) {
-      const result = await this.executeSingleIteration();
-      onIteration?.(result);
-      if (!result.hasToolUse && !result.wasTruncated) {
-        if (!hasTextContent(result.finalMessage)) {
-          appendSystemLog('Agent run 继续（响应仅含思考块，等待模型输出文本）');
-          continue;
-        }
-        appendSystemLog('Agent run 结束（无待执行工具）');
+      if (this._aborted) {
+        appendSystemLog('Agent run 被用户中断');
+        this.events.emit('status', { type: 'idle' });
         return;
       }
-      appendSystemLog(`继续下一轮迭代（${result.wasTruncated ? '响应被截断' : '存在工具调用'}）`);
+      try {
+        const result = await this.executeSingleIteration();
+        onIteration?.(result);
+        if (!result.hasToolUse && !result.wasTruncated) {
+          if (!hasTextContent(result.finalMessage)) {
+            appendSystemLog('Agent run 继续（响应仅含思考块，等待模型输出文本）');
+            continue;
+          }
+          appendSystemLog('Agent run 结束（无待执行工具）');
+          return;
+        }
+        appendSystemLog(`继续下一轮迭代（${result.wasTruncated ? '响应被截断' : '存在工具调用'}）`);
+      } catch (err) {
+        if (err instanceof Error && err.message === 'ABORT') {
+          appendSystemLog('Agent run 被用户中断');
+          this.events.emit('status', { type: 'idle' });
+          return;
+        }
+        throw err;
+      }
     }
   }
 

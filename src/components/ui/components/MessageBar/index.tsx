@@ -42,8 +42,10 @@ export const MessageBar = React.memo(function MessageBar() {
     emitter.on('remove', onRemove);
     emitter.on('clear', onClear);
 
+    let prevVisible = false;
     const unsubDropdown = dropdown.state.subscribe(state => {
-      if (state.visible) setItems([]);
+      if (state.visible && !prevVisible) setItems([]);
+      prevVisible = state.visible;
     });
 
     return () => {
