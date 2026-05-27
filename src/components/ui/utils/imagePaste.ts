@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const TEMP_IMAGE_DIR = resolve(homedir(), '.mica', 'tmp-images');
+const IMAGES_DIR = resolve(homedir(), '.mica', 'images');
 
 export interface ImageData {
   base64: string;
@@ -59,6 +60,29 @@ close access fp`,
   }
 }
 
+export function saveClipboardImage(): string | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    if (!existsSync(IMAGES_DIR)) {
+      mkdirSync(IMAGES_DIR, { recursive: true });
+    }
+    const filename = `image-${randomUUID()}.png`;
+    const filePath = resolve(IMAGES_DIR, filename);
+
+    execFileSync('osascript', [
+      '-e',
+      `set png_data to (the clipboard as «class PNGf»)
+set fp to open for access POSIX file "${filePath}" with write permission
+write png_data to fp
+close access fp`,
+    ], { stdio: 'ignore', timeout: 5000 });
+
+    return `~/.mica/images/${filename}`;
+  } catch {
+    return null;
+  }
+}
+
 export function saveImage(base64: string, mediaType: string): string {
   ensureTempDir();
   const ext = mediaType.split('/')[1] || 'png';
@@ -85,7 +109,7 @@ export function parseImageRefs(text: string): string | Anthropic.ContentBlockPar
 
     try {
       const imgPathResolved = imgPath.startsWith('~')
-        ? resolve(homedir(), imgPath.slice(1))
+        ? resolve(homedir(), imgPath.slice(2))
         : imgPath;
       const buffer = readFileSync(imgPathResolved);
       const rawExt = imgPathResolved.toLowerCase().match(/\.(\w+)$/)?.[1] || 'png';

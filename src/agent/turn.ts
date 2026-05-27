@@ -9,6 +9,7 @@ import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
 import { clearBackups } from '../utils/fileHistory.js';
 import mitt from 'mitt';
+import { parseImageRefs } from '../components/ui/utils/imagePaste.js';
 
 export type AgentTurnEvents = {
   'stream:create': MessageStream<null>;
@@ -218,7 +219,8 @@ class AgentTurn {
     appendSystemLog('Agent run 开始');
     sessionToolRecordsAtom.set([]);
     await clearBackups();
-    const updated = [...messagesAtom.get(), { role: 'user', content: userInput } as Anthropic.MessageParam];
+    const userContent = parseImageRefs(userInput);
+    const updated = [...messagesAtom.get(), { role: 'user', content: userContent } as Anthropic.MessageParam];
     messagesAtom.set(updated);
     while (true) {
       if (this._aborted) {

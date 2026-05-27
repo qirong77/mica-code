@@ -8,6 +8,8 @@ import { useScheduleState } from '../../hooks';
 import { terminalInput, pluginUIsAtom, workingStatusAtom } from '../../../../store/ui-state.js';
 import { agentTurn } from '../../../../agent/turn.js';
 import { DropDownUI } from '../DropDown/index.js';
+import { saveClipboardImage } from '../../utils/imagePaste.js';
+import { appendSystemLog } from "../../../../store/logAtom";
 
 type Events = {
   submit: string
@@ -77,12 +79,45 @@ function TerminalInput() {
 
   const [exitPending, handleExitPress] = useDoublePressExit(isAgentIdle);
 
-  useInput((_input, key) => {
+  useInput((_input, key, event) => {
     if (key.ctrl && (_input === '\x03' || _input === '')) {
       if (isAgentRunning) {
         agentTurn.abort();
         setInput('');
         setCursorOffset(0);
+        return;
+      }
+    }
+
+    // Bracket paste detection: Cmd+V / Ctrl+V with image on clipboard
+    // sends empty bracketed paste sequence → isPasted=true, input=""
+    if (event?.keypress?.isPasted) {
+      console.log('[imagePaste] paste event:', { isPasted: true, inputLen: _input.length, hasKeypress: !!event?.keypress });
+      if (_input.length === 0) {
+        console.log('[imagePaste] empty paste detected, checking clipboard...');
+        const imagePath = saveClipboardImage();
+        console.log('[imagePaste] saveClipboardImage result:', imagePath);
+        if (imagePath) {
+          const ref = `[Image](${imagePath})`;
+          const newText = input.slice(0, cursorOffset) + ref + input.slice(cursorOffset);
+          setInput(newText);
+          setCursorOffset(cursorOffset + ref.length);
+          terminalInput.text.set(newText);
+          return;
+        }
+      }
+    }
+
+    if ((key.ctrl || key.meta) && (_input === '\x16' || _input === 'v')) {
+      appendSystemLog('[imagePaste] Ctrl+V/Meta+V detected:', { _input, ctrl: key.ctrl, meta: key.meta });
+      const imagePath = saveClipboardImage();
+      appendSystemLog('[imagePaste] saveClipboardImage result:', imagePath);
+      if (imagePath) {
+        const ref = `[Image](${imagePath})`;
+        const newText = input.slice(0, cursorOffset) + ref + input.slice(cursorOffset);
+        setInput(newText);
+        setCursorOffset(cursorOffset + ref.length);
+        terminalInput.text.set(newText);
         return;
       }
     }
