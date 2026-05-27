@@ -10,8 +10,6 @@ export function ThinkingPanel(): React.ReactNode {
   const text = useScheduleState(thinkingTextAtom);
   const { rows } = useTerminalSize();
   const maxLines = Math.max(Math.floor(rows / 2), MIN_LINES);
-  if (text.length === 0) return null;
-
   return (
     <ScrollBox stickyScroll flexDirection="column" height={maxLines}>
       <Text dimColor>{text}</Text>
@@ -23,8 +21,6 @@ export function SystemLogPanel(): React.ReactNode {
   const lines = useScheduleState(systemLogAtom);
   const { rows } = useTerminalSize();
   const maxLines = Math.max(Math.floor(rows / 2), MIN_LINES);
-  if (lines.length === 0) return null;
-
   return (
     <ScrollBox stickyScroll flexDirection="column" height={maxLines}>
       <Text dimColor>{lines.join('\n')}</Text>
