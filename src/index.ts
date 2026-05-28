@@ -14,6 +14,7 @@ import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.j
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
 import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
 import { QuickBashPlugin } from './plugins/custom/quick-bash-plugin.js';
+import { terminalInput } from './store/ui-state.js';
 
 
 await MicaAgent.usePlugin(new QuickBashPlugin());
@@ -32,4 +33,27 @@ await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
 await MicaAgent.usePlugin(new QuickCommandClearPlugin());
 
 
+const printPrompt = getPrintPrompt();
+if (printPrompt) {
+  terminalInput.disabled.set(true);
+}
+
 MicaAgent.run();
+
+if (printPrompt) {
+  MicaAgent.ui.TerminalInput.submit(printPrompt);
+}
+
+function getPrintPrompt(): string | undefined {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-p' || args[i] === '--print') {
+      const prompt = args[i + 1];
+      if (!prompt) {
+        process.stderr.write('Usage: mica -p "your prompt"\n');
+        process.exit(1);
+      }
+      return prompt;
+    }
+  }
+}

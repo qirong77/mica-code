@@ -261,4 +261,5 @@ export const TerminalInputUI = {
   onSubmit: (cb: (text: string) => void) => emitter.on('submit', cb),
   offSubmit: (cb: (text: string) => void) => emitter.off('submit', cb),
   atomText: terminalInput.text,
+  submit: (text: string) => emitter.emit('submit', text),
 }

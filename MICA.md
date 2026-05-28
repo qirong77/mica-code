@@ -1,1 +1,2 @@
 - 禁止使用 console.log
+- 禁止使用 process.stderr.write 等 API，终端所有的渲染都必须可控
