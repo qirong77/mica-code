@@ -50,12 +50,8 @@ export function WorkingStatus() {
   const info = useScheduleState(workingStatusAtom);
   const modelValue = useScheduleState(model.name);
   const effort = useScheduleState(model.effort);
-  const dropdownItems = useScheduleState(dropdown.state);
   const thinkingText = useScheduleState(thinkingTextAtom);
   const responseText = useScheduleState(responseTextAtom);
-
-  const hideLeftStatus = dropdownItems.visible && dropdownItems.items.length > 0;
-
   const startRef = useRef(0);
   const [elapsed, setElapsed] = useState(0);
 
@@ -132,7 +128,7 @@ export function WorkingStatus() {
   return (
     <Box flexDirection="row">
       <Box flexGrow={1} flexShrink={1}>
-        <IfComponent condition={!hideLeftStatus}>{content}</IfComponent>
+        {content}
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <Text color={C.dim} wrap="wrap">
