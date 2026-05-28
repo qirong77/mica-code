@@ -1,11 +1,10 @@
+type PromptSection =
+    | 'system'
+    | 'project-instructions'
+    | 'context'
+    | 'system-reminder'
+const DEFAULT_SYSTEM_PROMPT = /* markdown */`
 你是 Mica Code，一个轻量级编程辅助工具（CLI）。你的职责是协助用户完成软件工程相关的任务，包括编写代码、调试问题、解释代码、重构、文件操作等。
-
-# 环境信息
-
-- 当前工作目录: {{cwd}}
-- 当前日期: {{date}}
-- 操作系统: {{platform}}
-- Shell: {{shell}}
 
 # 核心原则
 
@@ -40,7 +39,7 @@
 - **read_file**: 读取文件内容，返回带行号的文本。
 - **write_file**: 写入文件，不存在则创建，存在则覆盖。
 - **edit_file**: 通过精确字符串替换来编辑文件。需要提供 file_path、old_string 和 new_string。
-- **list_files**: 按 glob 模式列出文件（如 `**/*.ts`）。
+- **list_files**: 按 glob 模式列出文件（如 \`**/*.ts\`）。
 - **grep_search**: 在文件中搜索正则表达式，返回匹配行。
 - **run_shell**: 执行 shell 命令并返回输出。尽量用专用工具代替 Shell 命令。超时默认 30 秒。
 
@@ -53,7 +52,7 @@
 # 回复风格
 
 - 回复应简短、直接。不要使用表情符号。
-- 引用具体函数或代码时，使用 `文件路径:行号` 格式，方便用户定位。
+- 引用具体函数或代码时，使用 \`文件路径:行号\` 格式，方便用户定位。
 - 在代码中默认不写注释。不写多段文档字符串或多行注释块——最多一行短注释。
 - 回复应与任务匹配：简单问题直接回答，不要加一堆标题和章节。
 
@@ -63,3 +62,32 @@
 - edit_file 适用于局部修改，write_file 适用于创建新文件或完全重写。
 - 修改文件后，运行相关测试（如果存在）验证改动。
 - 不要创建用户未要求的计划、决策或分析文档。根据对话上下文工作，不需要中间文件。
+
+`
+class SystemPromptBuilder {
+    private _prompt = '';
+
+    constructor() {
+        const envInfo = [
+            `# 环境信息`,
+            `- 当前工作目录: ${process.cwd()}`,
+            `- 当前日期: ${new Date().toLocaleDateString()}`,
+            `- 操作系统: ${process.platform}`,
+            `- Shell: ${process.env.SHELL || 'unknown'}`,
+        ].join('\n');
+        
+        this._prompt = `<system>\n${DEFAULT_SYSTEM_PROMPT}\n</system>\n\n<context>\n${envInfo}\n</context>`;
+    }
+
+    append(type: PromptSection, content: string) {
+        this._prompt += `\n\n<${type}>\n${content}\n</${type}>`;
+        return this;
+    }
+
+    get prompt() {
+        return this._prompt;
+    }
+}
+
+export { SystemPromptBuilder, DEFAULT_SYSTEM_PROMPT };
+export type { PromptSection };

@@ -1,20 +1,14 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import template from './system.md';
+import { SystemPromptBuilder } from './buildSystemPrompt';
 
-const systemContent = template
-  .replace('{{cwd}}', process.cwd())
-  .replace('{{date}}', new Date().toLocaleDateString())
-  .replace('{{platform}}', process.platform)
-  .replace('{{shell}}', process.env.SHELL || 'unknown');
+const builder = new SystemPromptBuilder();
 
 const micaMdPath = join(process.cwd(), 'MICA.md');
 const micaMdContent = existsSync(micaMdPath) ? readFileSync(micaMdPath, 'utf-8') : null;
 
-let systemPrompt = `<system>\n${systemContent}\n</system>`;
-
 if (micaMdContent) {
-  systemPrompt += `\n\n<project-instructions>\n${micaMdContent}\n</project-instructions>`;
+  builder.append('project-instructions', micaMdContent);
 }
 
-export { systemPrompt };
+export const systemPrompt = builder.prompt;
