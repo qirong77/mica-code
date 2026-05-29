@@ -33,7 +33,7 @@ export class ToolEditFile extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `edit_file: ${input.file_path}`;
+    return `edit ${input.file_path}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     const path = input.file_path as string;

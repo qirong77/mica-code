@@ -18,6 +18,7 @@ export type AgentTurnEvents = {
     toolName: string;
     toolInput: Record<string, any>;
     completed: boolean;
+    elapsedMs?: number;
   };
   status: WorkingStatus;
   'tool:output': { toolUseId: string; chunk: string };
@@ -163,12 +164,9 @@ class AgentTurn {
             },
           });
           const elapsed = Date.now() - startTime;
-          if (elapsed >= 3000) {
-            appendSystemLog(`工具 ${tool.name} 执行完成，耗时 ${(elapsed / 1000).toFixed(1)}s`);
-          }
           const records = sessionToolRecordsAtom.get();
           sessionToolRecordsAtom.set([...records, { toolName: tool.name, toolInput: tool.input, elapsedMs: elapsed }]);
-          return { tool, result };
+          return { tool, result, elapsed };
         }),
       );
 
@@ -192,6 +190,7 @@ class AgentTurn {
           toolName: tool.name,
           toolInput: tool.input,
           completed: true,
+          elapsedMs: item.status === 'fulfilled' ? item.value.elapsed : undefined,
         });
 
         if (item.status === 'rejected') {

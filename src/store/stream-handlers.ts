@@ -2,6 +2,7 @@ import { thinkingTextAtom, responseTextAtom, workingStatusAtom } from './ui-stat
 import type { WorkingStatus } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
 import { ui } from '../components/ui/index.js';
+import { getToolDisplayText } from '../tools/index.js';
 
 const toolOutputBuffers = new Map<string, string[]>();
 
@@ -29,7 +30,6 @@ export function handleThinkingChunk(chunk: string) {
 }
 
 export function handleStreamStart() {
-  appendSystemLog('流：开始文本输出');
   thinkingTextAtom.set('');
   responseTextAtom.set('');
   clearToolOutputBuffers();
@@ -40,23 +40,22 @@ export function handleStreamChunk(chunk: string) {
   responseTextAtom.set(responseTextAtom.get() + chunk);
 }
 
-export function handleStreamEnd() {
-  appendSystemLog('流：消息流结束');
-}
-
 export function handleFinalMessage() {
   responseTextAtom.set('');
   thinkingTextAtom.set('');
   clearToolOutputBuffers();
 }
 
-export function handleToolUseStart(_toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
-  appendSystemLog(`工具调用：${toolName}`);
+export function handleToolUseStart(_toolUseId: string, _toolName: string, _toolInput: Record<string, any>) {
 }
 
-export function handleToolUseComplete(toolUseId: string, toolName: string, _toolInput: Record<string, any>) {
-  appendSystemLog(`工具完成：${toolName}`);
+export function handleToolUseComplete(toolUseId: string, toolName: string, toolInput: Record<string, any>, elapsedMs: number) {
   flushToolOutputBuffer(toolUseId);
+  const display = getToolDisplayText(toolName, toolInput);
+  const elapsed = elapsedMs >= 1000
+    ? `${(elapsedMs / 1000).toFixed(1)}s`
+    : `${elapsedMs}ms`;
+  appendSystemLog(`${display} · ${elapsed}`);
 }
 
 export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
@@ -80,22 +79,21 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
 
 function formatStatusLog(status: WorkingStatus): string {
   switch (status.type) {
-    case 'idle': return '状态：空闲';
-    case 'connecting': return '状态：连接 API';
-    case 'thinking': return '状态：思考中';
-    case 'streaming': return '状态：流式输出';
+    case 'connecting': return '连接 API';
+    case 'thinking': return '思考中';
+    case 'streaming': return '流式输出';
     case 'calling_tool':
       return status.elapsedMs != null
-        ? `状态：执行工具 (${(status.elapsedMs / 1000).toFixed(1)}s)`
-        : '状态：执行工具';
+        ? `执行工具 (${(status.elapsedMs / 1000).toFixed(1)}s)`
+        : '执行工具';
     case 'completed':
       return status.elapsedMs != null
-        ? `状态：完成 (${(status.elapsedMs / 1000).toFixed(1)}s)`
-        : '状态：完成';
+        ? `完成 (${(status.elapsedMs / 1000).toFixed(1)}s)`
+        : '完成';
     case 'error':
-      return `状态：错误${status.message ? ` — ${status.message}` : ''}`;
+      return status.message ? `错误 — ${status.message}` : '错误';
     default:
-      return '状态：未知';
+      return '未知';
   }
 }
 

@@ -62,7 +62,7 @@ export class ToolRunShell extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `run_shell: ${input.command}`;
+    return `$ ${truncate(input.command as string, 80)}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     const cmd = truncate(input.command as string);

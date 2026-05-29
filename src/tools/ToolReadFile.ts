@@ -20,7 +20,7 @@ export class ToolReadFile extends MicaTool {
       .join('\n');
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `read_file: ${input.file_path}`;
+    return `read ${input.file_path}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     return `读取文件 ${input.file_path} (${(ms / 1000).toFixed(1)}s)`;

@@ -23,7 +23,7 @@ export class ToolListFiles extends MicaTool {
     return files.slice(0, 200).join('\n');
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `list_files: pattern="${input.pattern}" in ${input.path || 'current directory'}`;
+    return `list ${input.pattern} in ${input.path || '.'}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     return `搜索文件 ${input.pattern} (${(ms / 1000).toFixed(1)}s)`;

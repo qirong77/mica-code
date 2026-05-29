@@ -21,7 +21,10 @@ export class ToolWriteFile extends MicaTool {
     return `写入成功: ${input.file_path}`;
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `write_file: ${input.file_path}`;
+    const path = input.file_path as string;
+    const len = typeof input.content === 'string' ? input.content.length : 0;
+    const sizeHint = len > 0 ? ` (${len}B)` : '';
+    return `write ${path}${sizeHint}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     const path = input.file_path as string;

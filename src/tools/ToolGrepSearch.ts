@@ -65,7 +65,10 @@ export class ToolGrepSearch extends MicaTool {
     });
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `grep_search: pattern="${input.pattern}" in ${input.path || 'current directory'}`;
+    const pattern = truncate(input.pattern as string);
+    const p = input.path ? input.path : '.';
+    const inc = input.include ? ` [${input.include}]` : '';
+    return `grep "${pattern}" ${p}${inc}`;
   }
   getSlowText(ms: number, input: Record<string, any>): string {
     const pattern = truncate(input.pattern as string);

@@ -143,7 +143,7 @@ export class ToolWebFetch extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `web_fetch: ${input.url}`;
+    return `fetch ${input.url}`;
   }
 
   getSlowText(ms: number, input: Record<string, any>): string {
