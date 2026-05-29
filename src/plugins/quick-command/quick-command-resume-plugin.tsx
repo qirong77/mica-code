@@ -11,7 +11,7 @@ export type { SessionMeta };
 
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
-const MAX_SESSIONS = 50;
+const MAX_SESSIONS = 1000;
 
 function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number } {
   if (messages.length === 0) return { cleaned: messages, truncated: 0 };
