@@ -230,6 +230,10 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       this._switchToSession(sessionId);
     });
 
+    this.atoms.currentSessionId.listen((id) => {
+      if (!id) this._currentSessionId = null;
+    });
+
     this.addQuickCommand({
       name: 'resume',
       description: '恢复历史对话',
@@ -385,6 +389,7 @@ export class QuickCommandResumePlugin extends MicaPlugin {
   }
 
   private async _switchToSession(sessionId: string) {
+    this._currentSessionId = sessionId;
     this._suppressAutoSave = true;
     if (this._pendingAutoSave) clearTimeout(this._pendingAutoSave);
 
@@ -406,7 +411,6 @@ export class QuickCommandResumePlugin extends MicaPlugin {
         await writeFile(filePath, JSON.stringify(cleaned, null, 2), 'utf-8');
       }
 
-      this._currentSessionId = sessionId;
       this._suppressAutoSave = false;
       this.atoms.messages.set(cleaned);
       this.atoms.currentSessionId.set(sessionId);

@@ -5,6 +5,7 @@ import { ToolWriteFile } from './ToolWriteFile';
 import { ToolEditFile } from './ToolEditFile';
 import { ToolListFiles } from './ToolListFiles';
 import { ToolGrepSearch } from './ToolGrepSearch';
+import { ToolWebFetch } from './ToolWebFetch';
 
 import { MicaTool } from './MicaTool';
 import { ToolRunShell } from './ToolRunShell';
@@ -18,6 +19,7 @@ const tools: MicaTool[] = [
   new ToolListFiles(),
   new ToolGrepSearch(),
   new ToolRunShell(),
+  new ToolWebFetch(),
 ];
 
 export const toolDefinitions: Anthropic.Tool[] = tools.map((t) => ({
