@@ -14,10 +14,12 @@ import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.j
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
 import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
 import { QuickBashPlugin } from './plugins/custom/quick-bash-plugin.js';
+import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { terminalInput } from './store/ui-state.js';
 
 
 await MicaAgent.usePlugin(new QuickBashPlugin());
+await MicaAgent.usePlugin(new QuickCommandInitPlugin());
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandDebugPlugin());

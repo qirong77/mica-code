@@ -155,7 +155,7 @@ function SessionList({
                   {isSelected ? '\u25B6' : ' '}
                 </Text>
               </Box>
-              <Text color={isSelected ? 'claude' : undefined} bold={isSelected} wrap="wrap">
+              <Text color={isSelected ? 'claude' : undefined}  wrap="wrap">
                 {s.title}
               </Text>
             </Box>
