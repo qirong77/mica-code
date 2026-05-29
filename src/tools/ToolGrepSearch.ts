@@ -6,7 +6,8 @@ function truncate(s: string, maxLen = 60): string {
   return s.slice(0, maxLen) + '…';
 }
 
-const DEFAULT_EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build'];
+const GREP_TIMEOUT_MS = 20_000;
+const DEFAULT_HEAD_LIMIT = 200;
 
 export class ToolGrepSearch extends MicaTool {
   constructor() {
@@ -16,27 +17,52 @@ export class ToolGrepSearch extends MicaTool {
         pattern: { type: 'string', description: '正则表达式' },
         path: { type: 'string', description: '搜索目录或文件' },
         include: { type: 'string', description: '文件过滤，如 *.ts' },
+        head_limit: {
+          type: 'number',
+          description: `限制返回行数，默认 ${DEFAULT_HEAD_LIMIT}。传 0 表示不限制。`,
+        },
+        offset: {
+          type: 'number',
+          description: '跳过前 N 行后再应用 head_limit，用于翻页。默认 0。',
+        },
       },
       required: ['pattern'],
     });
   }
 
-  async execute(input: { pattern: string; path?: string; include?: string }, callbacks?: ToolExecuteCallbacks): Promise<string> {
-    const args = ['--line-number', '--color=never', '-r'];
-    for (const dir of DEFAULT_EXCLUDE_DIRS) {
-      args.push(`--exclude-dir=${dir}`);
+  async execute(
+    input: { pattern: string; path?: string; include?: string; head_limit?: number; offset?: number },
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
+    const headLimit = input.head_limit ?? DEFAULT_HEAD_LIMIT;
+    const skipOffset = input.offset ?? 0;
+    const args = ['--line-number', '--color=never', '--no-config'];
+
+    if (input.include) args.push('--glob', input.include);
+
+    if (input.pattern.startsWith('-')) {
+      args.push('-e', input.pattern);
+    } else {
+      args.push(input.pattern);
     }
-    if (input.include) args.push(`--include=${input.include}`);
-    args.push(input.pattern);
     args.push(input.path || '.');
 
     return new Promise((resolve, reject) => {
-      const child = spawn('grep', args, {
+      const child = spawn('rg', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       let output = '';
       let errorOutput = '';
+      let killed = false;
+
+      const timer = setTimeout(() => {
+        killed = true;
+        child.kill('SIGTERM');
+        setTimeout(() => {
+          if (!child.killed) child.kill('SIGKILL');
+        }, 5000);
+      }, GREP_TIMEOUT_MS);
 
       child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
@@ -49,9 +75,31 @@ export class ToolGrepSearch extends MicaTool {
       });
 
       child.on('close', (code) => {
+        clearTimeout(timer);
+        if (killed) {
+          const lines = output.trim().split('\n').filter(Boolean);
+          if (lines.length > 0) {
+            resolve(lines.slice(skipOffset, skipOffset + (headLimit || Infinity)).join('\n') +
+              `\n\n[搜索超时（${GREP_TIMEOUT_MS / 1000}s），仅返回部分结果，共 ${lines.length} 行]`);
+          } else {
+            resolve(`搜索超时（${GREP_TIMEOUT_MS / 1000}s），未找到匹配内容。请缩小搜索范围或指定更具体的路径。`);
+          }
+          return;
+        }
+
         if (code === 0) {
           const lines = output.trim().split('\n').filter(Boolean);
-          resolve(lines.slice(0, 100).join('\n'));
+          if (headLimit === 0) {
+            resolve(lines.slice(skipOffset).join('\n'));
+          } else {
+            const sliced = lines.slice(skipOffset, skipOffset + headLimit);
+            let result = sliced.join('\n');
+            const totalAfterSkip = lines.length - skipOffset;
+            if (totalAfterSkip > headLimit) {
+              result += `\n\n[显示第 ${skipOffset + 1}-${skipOffset + sliced.length} 行，共 ${lines.length} 行，可调整 offset 翻页]`;
+            }
+            resolve(result);
+          }
         } else if (code === 1) {
           resolve('没有匹配的内容。');
         } else {
@@ -60,6 +108,7 @@ export class ToolGrepSearch extends MicaTool {
       });
 
       child.on('error', (error) => {
+        clearTimeout(timer);
         reject(new Error(`grep_search 执行失败：\n${error.message}`));
       });
     });

@@ -1,0 +1,253 @@
+# Code Agent 工具设计的防御性编程：从 Grep 和 ReadFile 说起
+
+让 LLM 调用本地工具看起来很简单——接收参数、执行、返回结果。但当你把这些工具放到用户的生产环境中运行时，你很快就会撞上一系列真实问题：
+
+- Grep 在 `node_modules` 里搜了 10 秒，卡死整个会话
+- ReadFile 读了一个 5MB 的打包产物，直接撑爆上下文窗口
+- 系统 grep 根本不理会 `.gitignore`，把 `.git` 目录也翻了一遍
+
+这篇文章通过对比 claude-code 和 mica-code 两个项目中两个最常用的工具——Grep 和 ReadFile，拆解生产级工具需要哪些防御层。
+
+---
+
+## 一个没有防御的 ReadFile 长什么样
+
+```typescript
+// 只做了两件事：读文件，加行号
+async execute(input: { file_path: string }): Promise<string> {
+  const content = await readFile(input.file_path, 'utf-8');
+  return content
+    .split('\n')
+    .map((line, i) => `${String(i + 1).padStart(4)} | ${line}`)
+    .join('\n');
+}
+```
+
+寥寥几行代码，干净、清晰。但它隐含着几个危险假设：
+
+1. 文件是文本文件（而不是二进制）
+2. 文件大小在合理范围内
+3. 读完的内容可以直接塞回 LLM 上下文
+
+当 LLM 说"让我看看 dist/bundle.min.js 里这个函数怎么实现的"，它真的会去读。如果 `bundle.min.js` 是 3MB 的打包产物，这段代码会：
+
+- 把 3MB 全部加载到 Node 进程内存
+- 逐行加上行号（3MB 的 minified JS 可能只有几十行，但单行极长）
+- 把整个 `content` 作为 tool_result 发送给 LLM
+- LLM 收到 ~700k token 的无效内容，上下文瞬间爆炸
+
+## claude-code 怎么做：多层守卫，逐级拦截
+
+claude-code 的 FileReadTool 在真正读取字节之前，设了多道关卡。
+
+### 第一关：validateInput — 零 I/O 的静态校验
+
+```typescript
+// 步骤 1: 二进制扩展名检测，纯字符串操作，无需 fs
+const ext = path.extname(fullFilePath).toLowerCase()
+if (hasBinaryExtension(fullFilePath) && !isPDFExtension(ext) && !isImage(ext)) {
+  return { result: false, message: 'This tool cannot read binary files.' }
+}
+
+// 步骤 2: 阻止设备文件（/dev/zero, /dev/random 等会让进程挂死）
+if (isBlockedDevicePath(fullFilePath)) {
+  return { result: false, message: 'Cannot read device files.' }
+}
+
+// 步骤 3: UNC 路径安全检查（防止 NTLM 凭据泄露）
+if (fullFilePath.startsWith('\\\\') || fullFilePath.startsWith('//')) {
+  return { result: true } // 继续走权限系统，但不做 fs 操作
+}
+```
+
+所有校验在 `fs.stat` 之前完成。如果路径本身就能判定不合理，没必要发起 I/O。
+
+### 第二关：call — 大小和内容双重限制
+
+```typescript
+// 256KB 硬限制，先 stat 再决定是否读
+const maxSizeBytes = 256 * 1024
+if (stats.size > maxSizeBytes) {
+  throw new FileTooLargeError(stats.size, maxSizeBytes)
+}
+
+// 读完之后做 token 计数（分三级：字节估算 → 粗略估算 → API 精确计数）
+await validateContentTokens(content, ext, maxTokens) // maxTokens = 25000
+```
+
+256KB 的限制意味着任何构建产物、日志文件、数据库 dump 在第一关就被拦截。Token 计数则防止高密度文本（如 minified JSON）绕过字节限制。
+
+### 第三关：双路径读取 — 大文件不加载到内存
+
+```typescript
+if (stats.size < 10 * 1024 * 1024) {
+  // 快路径：<10MB 直接 readFile，一次内存操作
+  return readFileInRangeFast(text, offset, maxLines)
+}
+// 慢路径：流式读取，不在目标行范围内的内容直接丢弃
+return readFileInRangeStreaming(filePath, offset, maxLines)
+```
+
+即使 256KB 的限制被放宽，流式路径确保物理上不可能把整个文件加载到内存。流式扫描时只保留 `[offset, offset+limit]` 范围内的行，其余只计数后丢弃。
+
+### 第四关：去重缓存 — 相同内容不重复发送
+
+```typescript
+const existingState = readFileState.get(fullFilePath)
+if (existingState && !existingState.isPartialView) {
+  if (offset === existingState.offset && limit === existingState.limit) {
+    const mtimeMs = await getFileModificationTimeAsync(fullFilePath)
+    if (mtimeMs === existingState.timestamp) {
+      return { data: { type: 'file_unchanged', file: { filePath } } }
+    }
+  }
+}
+```
+
+claude-code 的遥测数据显示约 18% 的 Read 调用是同一文件同一范围的重复读取。返回一个"文件未变更"的 stub 而非完整内容，避免浪费上下文窗口。
+
+---
+
+## 一个没有防御的 Grep 长什么样
+
+```typescript
+const DEFAULT_EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build']
+
+for (const dir of DEFAULT_EXCLUDE_DIRS) {
+  args.push(`--exclude-dir=${dir}`)
+}
+
+const child = spawn('grep', args, { stdio: ['ignore', 'pipe', 'pipe'] })
+```
+
+看似合理——硬编码了几个常见排除目录。但它有两个深层问题：
+
+1. **`--exclude-dir=dist` 的语义和用户意图冲突**：如果 LLM 传了 `path: "dist/"` 作为搜索目录，`grep --exclude-dir=dist -r pattern dist/` 的意思是在 `dist/` 目录内搜索，但排除其中名为 `dist` 的子目录。根目录 `dist/` 本身不会被排除，搜索照常进行。
+
+2. **系统 grep 不尊重 `.gitignore`**：`.git` 被排除了，但 `node_modules` 在 `--exclude-dir` 中的行为取决于 grep 版本和路径匹配方式。更麻烦的是，`.terraform`、`__pycache__`、`.next` 等数千种可能的构建目录都不在排除列表中。
+
+## claude-code 怎么做：信任工具而非穷举规则
+
+### 换工具：ripgrep 替代 grep
+
+claude-code 不直接调用系统 grep，而是使用 vendored 的 ripgrep：
+
+```typescript
+// ripgrep 三种获取模式：系统安装 → vendored binary → 内嵌到 bun binary
+const getRipgrepConfig = memoize(() => {
+  if (userWantsSystemRipgrep) {
+    const { cmd } = findExecutable('rg', [])
+    if (cmd !== 'rg') return { mode: 'system', command: 'rg', args: [] }
+  }
+  if (isInBundledMode()) {
+    return { mode: 'embedded', command: process.execPath, argv0: 'rg' }
+  }
+  return { mode: 'builtin', command: path.resolve(rgRoot, 'rg'), args: [] }
+})
+```
+
+ripgrep 有两个关键优势：
+- **默认尊重 `.gitignore`**：不需要显式排除 `node_modules`、`dist`、`build`，只要在 `.gitignore` 里的目录都不会被搜索。即使 `.gitignore` 不在仓库根目录，ripgrep 也会遍历父目录寻找。
+- **并行搜索**：对大型仓库的性能差距是数量级的。
+
+### 分层排除策略
+
+```typescript
+const args = ['--hidden']
+
+// 第一层：VCS 元数据目录（.git, .svn, .hg 等）
+// 必须显式排除，因为 .gitignore 不排除 .git 自身
+for (const dir of VCS_DIRECTORIES_TO_EXCLUDE) {
+  args.push('--glob', `!${dir}`)
+}
+
+// 第二层：权限系统配置的忽略模式
+// 用户可以通过权限规则动态添加
+const ignorePatterns = getFileReadIgnorePatterns(appState.toolPermissionContext)
+for (const pattern of ignorePatterns) {
+  args.push('--glob', `!**/${pattern}`)
+}
+
+// 第三层：插件孤立的版本目录
+for (const exclusion of await getGlobExclusionsForPluginCache(absolutePath)) {
+  args.push('--glob', exclusion)
+}
+```
+
+用 `--glob !pattern` 而非 `--exclude-dir` 是因为 glob 匹配更精确，不会受搜索 root path 的影响。
+
+### 额外的防御
+
+```typescript
+// 1. 限制行长度，防止 minified 文件充满单行输出
+args.push('--max-columns', '500')
+
+// 2. 超时保护 + 递进 kill 策略
+const timeout = getPlatform() === 'wsl' ? 60_000 : 20_000
+// 先发 SIGTERM，5 秒后未退出则 SIGKILL（进程可能卡在不可中断 I/O）
+
+// 3. 默认结果上限
+const DEFAULT_HEAD_LIMIT = 250
+
+// 4. 路径转相对路径，节省 token
+const relativeMatches = finalMatches.map(toRelativePath)
+```
+
+---
+
+## 系统化对比
+
+| 防护层 | mica-code ReadFile | claude-code ReadFile | mica-code Grep | claude-code Grep |
+|--------|-------------------|---------------------|----------------|-----------------|
+| 文件大小限制 | 无 | 256KB | — | — |
+| Token 限制 | 无 | 25000 | — | — |
+| 二进制检测 | 无 | 扩展名 + 内容 | — | — |
+| 设备文件阻止 | 无 | /dev/zero 等 | — | — |
+| 流式读取 | 无 | <10MB 快路径 / 流式 | — | — |
+| 去重缓存 | 无 | mtime + offset | — | — |
+| 分页支持 | 无 | offset + limit | — | offset + head_limit |
+| 搜索引擎 | — | — | 系统 grep | ripgrep |
+| .gitignore 尊重 | — | — | 无 | 内置 |
+| 排除机制 | — | — | 硬编码 --exclude-dir | .gitignore + 权限系统 |
+| 超时保护 | — | — | 无 | 20s + SIGKILL |
+| 行长度限制 | — | — | 无 | max-columns 500 |
+| 结果限制 | — | — | 100 行 | 250 + 分页 |
+
+---
+
+## 设计原则
+
+从这些对比中可以看出几条通用的工具设计原则：
+
+### 1. 在 I/O 之前做静态校验
+
+二进制扩展名检测、设备文件路径匹配、UNC 路径检查都是纯字符串操作。在这阶段拒绝可以避免无意义的文件系统调用，也能防止 NTLM 凭据泄露这类安全问题。
+
+### 2. 多层限制，逐级收紧
+
+不是"要么全读要么不读"。是：
+
+```
+文件大小 > 256KB？→ 直接拒绝
+手动设置了 offset/limit？→ 放行但流式只读目标范围
+读完了 > 25000 token？→ 拒绝
+同上文件同范围？→ 返回缓存 stub
+```
+
+每通过一层就收紧一层，但始终给合法用例留通道。
+
+### 3. 信任工具而非穷举
+
+ripgrep 尊重 `.gitignore`，所以不需要维护一个不断膨胀的排除目录列表。`__pycache__`、`.terraform`、`.next`、`target/release` 都自动跳过，无论你知不知道它们的存在。
+
+### 4. 始终设超时
+
+搜索可能卡在挂载的网络文件系统、损坏的磁盘块、无限循环的符号链接。超时不是优化，是安全机制。
+
+### 5. 上下文预算就是金钱
+
+每个字节的 tool_result 都会变成 LLM 的输入 token。路径转相对路径、去重缓存、结果截断都不是性能优化——是在省钱。
+
+---
+
+底线：给 LLM 写工具时，默认它会在最坏的情况下调用你的工具。不是在 3 个源文件的 demo 项目里，而是在 2000 个文件的 monorepo 里，在 `/dev` 目录下，在一个 50MB 的 JSON 文件上。防御性设计不是过度工程——是基本要求。

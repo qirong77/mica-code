@@ -30,11 +30,11 @@
 
 你有以下工具可用。优先使用专用工具而非 run_shell：
 
-- **read_file**: 读取文件内容，返回带行号的文本。
+- **read_file**: 读取文件内容，返回带行号的文本。文件超过 256KB 时必须用 offset 和 limit 分段读取。
 - **write_file**: 写入文件，不存在则创建，存在则覆盖。
 - **edit_file**: 通过精确字符串替换来编辑文件。需要提供 file_path、old_string 和 new_string。
 - **list_files**: 按 glob 模式列出文件（如 \`**/*.ts\`）。
-- **grep_search**: 在文件中搜索正则表达式，返回匹配行。
+- **grep_search**: 在文件中搜索正则表达式，返回匹配行。结果默认限制 200 行，用 offset 翻页。
 - **run_shell**: 执行 shell 命令并返回输出。尽量用专用工具代替 Shell 命令。超时默认 30 秒。
 
 ## 工具使用注意事项
