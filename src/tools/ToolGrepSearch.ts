@@ -1,10 +1,12 @@
-import { execFileSync } from 'child_process';
+import { spawn } from 'child_process';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
 function truncate(s: string, maxLen = 60): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + '…';
 }
+
+const DEFAULT_EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build'];
 
 export class ToolGrepSearch extends MicaTool {
   constructor() {
@@ -19,27 +21,48 @@ export class ToolGrepSearch extends MicaTool {
     });
   }
 
-  async execute(input: { pattern: string; path?: string; include?: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: { pattern: string; path?: string; include?: string }, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const args = ['--line-number', '--color=never', '-r'];
+    for (const dir of DEFAULT_EXCLUDE_DIRS) {
+      args.push(`--exclude-dir=${dir}`);
+    }
     if (input.include) args.push(`--include=${input.include}`);
     args.push(input.pattern);
     args.push(input.path || '.');
-    try {
-      const result = execFileSync('grep', args, {
-        encoding: 'utf-8',
-        maxBuffer: 1024 * 1024,
-        timeout: 10000,
-      });
-      const lines = result.trim().split('\n').filter(Boolean);
-      return lines.slice(0, 100).join('\n');
-    } catch (error: any) {
-      if (typeof error?.code === 'number' && error.code === 1) return '没有匹配的内容。';
 
-      const stderr = error?.stderr ? String(error.stderr).trim() : '';
-      const message = error?.message ? String(error.message).trim() : String(error);
-      const details = stderr ? `${message}\n${stderr}` : message;
-      throw new Error(`grep_search 执行失败：\n${details}`);
-    }
+    return new Promise((resolve, reject) => {
+      const child = spawn('grep', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let output = '';
+      let errorOutput = '';
+
+      child.stdout.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        output += chunk;
+        callbacks?.onChunk?.(chunk);
+      });
+
+      child.stderr.on('data', (data: Buffer) => {
+        errorOutput += data.toString();
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          const lines = output.trim().split('\n').filter(Boolean);
+          resolve(lines.slice(0, 100).join('\n'));
+        } else if (code === 1) {
+          resolve('没有匹配的内容。');
+        } else {
+          reject(new Error(`grep_search 执行失败：\n${errorOutput || output}`));
+        }
+      });
+
+      child.on('error', (error) => {
+        reject(new Error(`grep_search 执行失败：\n${error.message}`));
+      });
+    });
   }
   onToolUseDisplayText(input: Record<string, any>): string {
     return `grep_search: pattern="${input.pattern}" in ${input.path || 'current directory'}`;

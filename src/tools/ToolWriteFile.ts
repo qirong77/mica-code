@@ -1,4 +1,4 @@
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
@@ -16,8 +16,8 @@ export class ToolWriteFile extends MicaTool {
 
   async execute(input: { file_path: string; content: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
     const dir = dirname(input.file_path);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(input.file_path, input.content);
+    await mkdir(dir, { recursive: true });
+    await writeFile(input.file_path, input.content);
     return `写入成功: ${input.file_path}`;
   }
   onToolUseDisplayText(input: Record<string, any>): string {

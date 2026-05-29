@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box } from '@anthropic/ink';
+import { Box, useTerminalTitle } from '@anthropic/ink';
 
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
 import { ConversationUI } from './components/Conversation/index.js';
@@ -9,6 +9,8 @@ import { MessageBar } from './components/MessageBar/index.js';
 
 
 export function App(): React.ReactNode {
+  useTerminalTitle('* Mica Code');
+
   return (
     <Box flexDirection="column" height="100%">
       <ConversationUI.renderFn />
