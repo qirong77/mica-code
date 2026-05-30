@@ -44,6 +44,7 @@ MICA.md                   # Project instructions, hot-reloadable (injected into 
 ### Key Patterns
 
 - **Plugin registration**: `MicaAgent.usePlugin()` in `src/index.ts`. Each plugin extends `MicaPlugin` and implements `onInstall()`.
+- **Plugin UI**: Never call `showUI()` / `showUISimple()` in `onInstall()`. Always call lazily — only when there's actual content to display. `MicaPlugin._installed` is `false` during `onInstall`; calling `showUI`/`showUISimple` before it's `true` triggers a `console.error` warning. When content is gone, call `hideUI()` to clean up.
 - **Middleware chain**: Registered via `agentTurn.use()` (order matters: first registered = outermost). Currently `AutoCompactPlugin` → `ErrorHandlerPlugin`.
 - **State management**: All cross-component state uses nanostores atoms. Ink components subscribe via `useScheduleState()`. Do not use React useState/context for shared state.
 - **Rendering**: All terminal output goes through Ink components. No `console.log` (except fatal boot errors via `console.error`). No `process.stderr.write`.

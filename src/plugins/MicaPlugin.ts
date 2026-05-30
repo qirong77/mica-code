@@ -53,6 +53,8 @@ export abstract class MicaPlugin {
 
   atoms!: PluginAtoms;
 
+  _installed = false;
+
   private _activeUIId: string | null = null;
   private _uiAtom: WritableAtom<any> | null = null;
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
@@ -101,6 +103,9 @@ export abstract class MicaPlugin {
    * 显示插件 UI（无状态版本，适用于静态展示如 spinner）
    */
   protected showUISimple(component: React.ComponentType): void {
+    if (!this._installed) {
+      console.error(`[${this.constructor.name}] showUISimple called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
+    }
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
     const entry: PluginUI = { id, component };
@@ -124,6 +129,9 @@ export abstract class MicaPlugin {
       onTextChange?: (text: string, state: S, setState: (s: S) => void) => void;
     },
   ): void {
+    if (!this._installed) {
+      console.error(`[${this.constructor.name}] showUI called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
+    }
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
 

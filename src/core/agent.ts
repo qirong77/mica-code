@@ -45,6 +45,7 @@ export const MicaAgent = {
     };
     _plugins.push(plugin);
     await plugin.onInstall();
+    plugin._installed = true;
     return plugin;
   },
   run() {
