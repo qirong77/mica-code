@@ -109,9 +109,9 @@ function TerminalInput() {
     }
 
     if ((key.ctrl || key.meta) && (_input === '\x16' || _input === 'v')) {
-      appendSystemLog('[imagePaste] Ctrl+V/Meta+V detected:', { _input, ctrl: key.ctrl, meta: key.meta });
+      appendSystemLog(`[imagePaste] Ctrl+V/Meta+V detected: ${JSON.stringify({ _input, ctrl: key.ctrl, meta: key.meta })}`);
       const imagePath = saveClipboardImage();
-      appendSystemLog('[imagePaste] saveClipboardImage result:', imagePath);
+      appendSystemLog(`[imagePaste] saveClipboardImage result: ${imagePath}`);
       if (imagePath) {
         const ref = `[Image](${imagePath})`;
         const newText = input.slice(0, cursorOffset) + ref + input.slice(cursorOffset);
