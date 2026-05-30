@@ -15,12 +15,10 @@ function BashOutput({ atom }: { atom: WritableAtom<string> }) {
 
 export class QuickBashPlugin extends MicaPlugin {
   private outputAtom!: WritableAtom<string>;
+  private uiShown = false;
 
   onInstall(): void {
     this.outputAtom = this.createState('');
-
-    const OutputComponent = () => React.createElement(BashOutput, { atom: this.outputAtom });
-    this.showUISimple(OutputComponent);
 
     this.agent.agentTurn.use(async (userInput, next, onIteration) => {
       if (!userInput.startsWith('!')) return next(userInput, onIteration);
@@ -29,6 +27,20 @@ export class QuickBashPlugin extends MicaPlugin {
       if (!command) {
         this.showMessage('请输入要执行的命令');
         return;
+      }
+
+      if (command === 'clear') {
+        this.outputAtom.set('');
+        this.hideUI();
+        this.uiShown = false;
+        this.showMessage('输出已清除');
+        return;
+      }
+
+      const OutputComponent = () => React.createElement(BashOutput, { atom: this.outputAtom });
+      if (!this.uiShown) {
+        this.showUISimple(OutputComponent);
+        this.uiShown = true;
       }
 
       this.outputAtom.set(this.outputAtom.get() + `$ ${command}\n`);

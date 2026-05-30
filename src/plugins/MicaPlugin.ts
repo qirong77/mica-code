@@ -57,11 +57,7 @@ export abstract class MicaPlugin {
   private _uiAtom: WritableAtom<any> | null = null;
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
 
-  constructor() {
-    dropdown.state.listen((state) => {
-      if (state.visible) this.reset();
-    });
-  }
+  constructor() { }
   abstract onInstall(): void | Promise<void>;
 
   onCleanup(): void {}
@@ -105,7 +101,7 @@ export abstract class MicaPlugin {
    * 显示插件 UI（无状态版本，适用于静态展示如 spinner）
    */
   protected showUISimple(component: React.ComponentType): void {
-    const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
+    const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
     const entry: PluginUI = { id, component };
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
@@ -128,7 +124,7 @@ export abstract class MicaPlugin {
       onTextChange?: (text: string, state: S, setState: (s: S) => void) => void;
     },
   ): void {
-    const id = this._activeUIId ?? `plugin-ui-${uuid()}`;
+    const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
 
     if (!this._uiAtom) {
