@@ -18,6 +18,7 @@ Mica is a lightweight, plugin-based code agent CLI using **Bun** + **TypeScript*
 ### Project Structure
 
 ```
+claude-code-main          # A production-ready code agent project to learn from
 src/
 ├── index.ts              # Entry: registers plugins, calls MicaAgent.run()
 ├── bootstrap.ts          # Wires TerminalInput.onSubmit → agentTurn.run()
