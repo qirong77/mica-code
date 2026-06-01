@@ -30,6 +30,7 @@ export interface SessionMeta {
   title: string;
   createdAt: number;
   updatedAt: number;
+  projectPath?: string;
 }
 
 export interface Command {

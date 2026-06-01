@@ -3,7 +3,7 @@ import { Box, Text, ScrollBox } from '@anthropic/ink';
 import type { DOMElement, ScrollBoxHandle } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { MicaPlugin } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
 
@@ -48,7 +48,7 @@ function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number
       }
     }
 
-    const allMatched = toolUseIds.every(id => resultIds.has(id));
+    const allMatched = toolUseIds.every((id) => resultIds.has(id));
     if (!allMatched) break;
 
     cleaned.push(msg);
@@ -100,6 +100,11 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(days / 30)} 个月前`;
 }
 
+function shortPath(p: string): string {
+  if (!p) return '—';
+  return basename(p);
+}
+
 interface ResumeState {
   selectedIdx: number;
   filterQuery: string;
@@ -141,27 +146,31 @@ function SessionList({
     <Box flexDirection="column" paddingX={1}>
       {sessions.map((s, i) => {
         const isSelected = i === selected;
+        const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
         return (
           <Box
             key={s.id}
-            ref={(el) => { itemRefs.current[i] = el; }}
-            flexDirection="column"
+            ref={(el) => {
+              itemRefs.current[i] = el;
+            }}
+            flexDirection="row"
             flexShrink={0}
             marginBottom={i < sessions.length - 1 ? 1 : 0}
           >
-            <Box flexDirection="row">
-              <Box width={2}>
-                <Text color={isSelected ? 'claude' : 'inactive'}>
-                  {isSelected ? '\u25B6' : ' '}
-                </Text>
-              </Box>
-              <Text color={isSelected ? 'claude' : undefined}  wrap="wrap">
-                {s.title}
+            <Box width={2} flexShrink={0}>
+              <Text color={isSelected ? 'claude' : 'inactive'}>{isSelected ? '\u25B6' : ' '}</Text>
+            </Box>
+            <Box flexGrow={1} flexShrink={1} marginRight={2}>
+              <Text color={isSelected ? 'claude' : undefined} wrap="wrap">
+                {titleText}
               </Text>
             </Box>
-            <Box marginLeft={2}>
-              <Text color={isSelected ? 'claude' : 'inactive'} dimColor={!isSelected}>
-                {formatRelativeTime(s.updatedAt)}{' · '}{formatTime(s.updatedAt)}
+            <Box width={50} flexShrink={0} alignItems="flex-end">
+              <Text  dimColor={!isSelected} color={isSelected ? 'claude' : 'inactive'}>
+                {formatRelativeTime(s.updatedAt)}
+              </Text>
+              <Text dimColor={!isSelected} color={isSelected ? 'claude' : 'inactive'}>
+               {'  '} {shortPath(s.projectPath || '')}
               </Text>
             </Box>
           </Box>
@@ -267,9 +276,10 @@ export class QuickCommandResumePlugin extends MicaPlugin {
     const now = Date.now();
     const messages = this.atoms.messages.get();
     const firstUserMsg = messages.find((m) => m.role === 'user');
-    const title = firstUserMsg && typeof firstUserMsg.content === 'string'
-      ? firstUserMsg.content.slice(0, 60)
-      : 'untitled';
+    const title =
+      firstUserMsg && typeof firstUserMsg.content === 'string'
+        ? firstUserMsg.content.slice(0, 60)
+        : 'untitled';
 
     const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
     const meta: SessionMeta = {
@@ -277,6 +287,7 @@ export class QuickCommandResumePlugin extends MicaPlugin {
       title,
       createdAt: now,
       updatedAt: now,
+      projectPath: process.cwd(),
     };
 
     const idx = [...this.atoms.sessionsIndex.get(), meta];
@@ -295,9 +306,7 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
   private async _updateSessionTimestamp(id: string) {
     const idx = this.atoms.sessionsIndex.get();
-    const updated = idx.map((s) =>
-      s.id === id ? { ...s, updatedAt: Date.now() } : s,
-    );
+    const updated = idx.map((s) => (s.id === id ? { ...s, updatedAt: Date.now() } : s));
     const sorted = updated.sort((a, b) => b.updatedAt - a.updatedAt);
     const capped = sorted.slice(0, MAX_SESSIONS);
 
@@ -310,15 +319,19 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
   private async _pruneSessions(removed: SessionMeta[]) {
     await Promise.all(
-      removed.map((s) =>
-        unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {}),
-      ),
+      removed.map((s) => unlink(resolve(SESSIONS_DIR, `${s.id}.json`)).catch(() => {})),
     );
   }
 
   private _showResumeList() {
     const idx = this.atoms.sessionsIndex.get();
-    const allSorted = [...idx].sort((a, b) => b.updatedAt - a.updatedAt);
+    const currentCwd = process.cwd();
+    const allSorted = [...idx].sort((a, b) => {
+      const aSame = a.projectPath === currentCwd ? 0 : 1;
+      const bSame = b.projectPath === currentCwd ? 0 : 1;
+      if (aSame !== bSame) return aSame - bSame;
+      return b.updatedAt - a.updatedAt;
+    });
 
     if (allSorted.length === 0) {
       this.showMessage('no sessions');
@@ -395,7 +408,10 @@ export class QuickCommandResumePlugin extends MicaPlugin {
 
     const currentMessages = this.atoms.messages.get();
     if (currentMessages.length > 0) {
-      this.atoms.messages.set([...currentMessages, { role: 'user', content: '清空', status: 'clear' } as any]);
+      this.atoms.messages.set([
+        ...currentMessages,
+        { role: 'user', content: '清空', status: 'clear' } as any,
+      ]);
       await new Promise((r) => setTimeout(r, 16));
       this.atoms.messages.set([]);
     }
