@@ -83,7 +83,7 @@ class AgentTurn {
     this.abortController = new AbortController();
 
     const planReminder = planModeAtom.get()
-      ? '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改。\n</system-reminder>'
+      ? '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改等编辑操作。（除非用户明确提成执行你给出的规划，你才可以执行代码修改等编辑操作）\n</system-reminder>'
       : '';
 
     const stream = getClient().messages.stream({
