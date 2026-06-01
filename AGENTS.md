@@ -36,9 +36,9 @@ src/
 ├── tools/                # Agent-callable tools (MicaTool subclass per tool)
 ├── store/                # nanostores atoms: config, conversation, ui-state, log, stream-handlers
 ├── components/ui/        # Ink-based React terminal UI (app, conversation, input, dropdown, etc.)
-└── prompts/              # System prompt builder: system.md + MICA.md (project instructions)
+└── prompts/              # System prompt builder: system.md + AGENTS.md (project instructions)
 packages/ink/             # Custom Ink fork — terminal rendering library
-MICA.md                   # Project instructions, hot-reloadable (injected into system prompt at startup)
+AGENTS.md                   # Project instructions, hot-reloadable (injected into system prompt at startup)
 ```
 
 ### Key Patterns
@@ -49,7 +49,7 @@ MICA.md                   # Project instructions, hot-reloadable (injected into 
 - **State management**: All cross-component state uses nanostores atoms. Ink components subscribe via `useScheduleState()`. Do not use React useState/context for shared state.
 - **Rendering**: All terminal output goes through Ink components. No `console.log` (except fatal boot errors via `console.error`). No `process.stderr.write`.
 - **Config persistence**: `createPersistedAtom()` in `src/store/config.ts` saves model/effort choices to disk.
-- **Project instructions**: Edit `MICA.md` to change agent behavior — it's read at startup and injected into the system prompt via `<project-instructions>` tag.
+- **Project instructions**: Edit `AGENTS.md` to change agent behavior — it's read at startup and injected into the system prompt via `<project-instructions>` tag.
 
 ### Data Flow
 
