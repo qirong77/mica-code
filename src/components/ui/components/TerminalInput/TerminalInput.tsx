@@ -5,11 +5,12 @@ import { SimpleTextInput } from "./Input";
 import { C } from "../../data";
 import mitt from 'mitt'
 import { useScheduleState } from '../../hooks';
-import { terminalInput, pluginUIsAtom, workingStatusAtom } from '../../../../store/ui-state.js';
+import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom } from '../../../../store/ui-state.js';
 import { agentTurn } from '../../../../agent/turn.js';
 import { DropDownUI } from '../DropDown/index.js';
 import { saveClipboardImage } from '../../utils/imagePaste.js';
 import { appendSystemLog } from "../../../../store/logAtom";
+import { MessageBarAPI } from '../MessageBar/index.js';
 
 type Events = {
   submit: string
@@ -64,6 +65,7 @@ function TerminalInput() {
   const activePluginUIs = useScheduleState(pluginUIsAtom);
   const workingStatus = useScheduleState(workingStatusAtom);
   const placeholder = useScheduleState(terminalInput.placeholder);
+  const planMode = useScheduleState(planModeAtom);
 
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
 
@@ -80,6 +82,15 @@ function TerminalInput() {
   const [exitPending, handleExitPress] = useDoublePressExit(isAgentIdle);
 
   useInput((_input, key, event) => {
+    if (key.tab && key.shift) {
+      const next = !planModeAtom.get();
+      planModeAtom.set(next);
+      const id = `plan-mode-${Date.now()}`;
+      MessageBarAPI.addMessage({ id, text: next ? 'Plan mode 已激活 — 仅分析规划，不执行代码修改' : 'Plan mode 已关闭' });
+      setTimeout(() => MessageBarAPI.removeMessage(id), 3000);
+      return;
+    }
+
     if (key.ctrl && (_input === '\x03' || _input === '')) {
       if (isAgentRunning) {
         agentTurn.abort();
@@ -227,7 +238,7 @@ function TerminalInput() {
         width="100%"
       >
         <Box marginLeft={1} marginRight={1}>
-          <Text bold color={C.primary}>{'❯'}</Text>
+          <Text bold color={planMode ? C.planMode : C.primary}>{'❯'}</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <SimpleTextInput

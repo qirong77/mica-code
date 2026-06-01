@@ -1,4 +1,5 @@
 import { atom } from 'nanostores';
+import { createPersistedAtom } from './createPersistedAtom';
 
 export type WorkingStatus =
   | { type: 'idle' }
@@ -52,6 +53,8 @@ export const thinkingTextAtom = atom('');
 export const responseTextAtom = atom('');
 
 export const DEFAULT_INPUT_PLACEHOLDER = 'Type something and press Enter...';
+
+export const planModeAtom = createPersistedAtom('planMode', false); // atom(false);
 
 export const terminalInput = {
   text: atom(''),

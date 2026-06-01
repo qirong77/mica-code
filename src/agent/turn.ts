@@ -5,6 +5,7 @@ import { messagesAtom, contextSizeAtom, updateContextSize, type ConversationMess
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
+import { planModeAtom } from '../store/ui-state.js';
 import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
 import { clearBackups } from '../utils/fileHistory.js';
@@ -81,10 +82,14 @@ class AgentTurn {
 
     this.abortController = new AbortController();
 
+    const planReminder = planModeAtom.get()
+      ? '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改。\n</system-reminder>'
+      : '';
+
     const stream = getClient().messages.stream({
       model: modelName,
       max_tokens: model.maxTokens.get(),
-      system: systemPrompt,
+      system: systemPrompt + planReminder,
       messages: messages as Anthropic.MessageParam[],
       thinking:
         effort === 'none'

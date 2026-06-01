@@ -680,6 +680,10 @@ function buildTextHandler({
         break;
       }
       if (key.tab) {
+        if (key.shift) {
+          nextCursor = cursor;
+          break;
+        }
         nextCursor = cursor.insert('    ');
         break;
       }
