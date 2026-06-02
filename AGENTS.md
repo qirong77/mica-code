@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun run format` — Format all files with prettier
 - `bun run format:check` — Check formatting
 
+所有改动必须通过 `npx tsc --noEmit` 无 TS 报错。
+
 ## Architecture Overview
 
 Mica is a lightweight, plugin-based code agent CLI using **Bun** + **TypeScript** + **React** (custom fork of Ink at `packages/ink/`, imported as `@anthropic/ink`) + **Anthropic SDK**.
