@@ -5,7 +5,7 @@ import { getClient } from '../../agent/client';
 import { model } from '../../store/config.js';
 
 const CONTEXT_THRESHOLD = 0.4; // 40% — 留余量给压缩请求/响应和后续对话
-const INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000;
+const INACTIVITY_THRESHOLD_MS = 45 * 60 * 1000;
 const KEEP_RECENT_COUNT = 6; // 保留最近 N 条保持上下文连贯，其余压缩为摘要
 const MIN_MESSAGES_TO_COMPACT = 8; // 消息太少时压缩无意义
 const SUMMARY_MAX_TOKENS = 2048;
