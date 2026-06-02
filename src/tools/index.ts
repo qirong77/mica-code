@@ -9,6 +9,7 @@ import { ToolWebFetch } from './ToolWebFetch';
 
 import { MicaTool } from './MicaTool';
 import { ToolRunShell } from './ToolRunShell';
+import { ToolSkill } from './ToolSkill';
 import type { ToolExecuteCallbacks } from './MicaTool';
 import { backupFile } from '../utils/fileHistory.js';
 
@@ -20,6 +21,7 @@ const builtinTools: MicaTool[] = [
   new ToolGrepSearch(),
   new ToolRunShell(),
   new ToolWebFetch(),
+  new ToolSkill(),
 ];
 
 let mcpTools: MicaTool[] = [];

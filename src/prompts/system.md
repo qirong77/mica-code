@@ -36,6 +36,7 @@
 - **list_files**: 按 glob 模式列出文件（如 \`**/*.ts\`）。
 - **grep_search**: 在文件中搜索正则表达式，返回匹配行。结果默认限制 200 行，用 offset 翻页。
 - **run_shell**: 执行 shell 命令并返回输出。尽量用专用工具代替 Shell 命令。超时默认 30 秒。
+- **Skill**: 调用 skill。传入 skill 名称，可选参数 args。skill 提供了特定领域的专业能力和知识。
 
 ## 工具使用注意事项
 
