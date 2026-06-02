@@ -36,28 +36,14 @@ export interface PluginAtoms {
   quickCommands: WritableAtom<Command[]>;
 }
 
-// ── 快速命令列表（由插件注册，插件内部闭环） ────────────
-
 export { quickCommandsAtom, type SessionMeta, terminalInput, DEFAULT_INPUT_PLACEHOLDER };
 
-/**
- * MicaPlugin 基类
- *
- * 所有插件应继承此类，通过 `this.agent` 访问 MicaAgent 实例，
- * 通过 `this.agent.ui` 访问 UI 组件对象（消息、思考文本、工具调用、下拉菜单等）。
- * 通过 `this.atoms` 访问由父组件注入的响应式 atom。
- */
 export abstract class MicaPlugin {
   agent!: IMicaAgent;
-
   atoms!: PluginAtoms;
-
   _installed = false;
 
-  private _activeUIId: string | null = null;
-  private _uiAtom: WritableAtom<any> | null = null;
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
-  private _dropdownUnsubscribe: (() => void) | null = null;
 
   constructor() { }
   abstract onInstall(): void | Promise<void>;
@@ -65,25 +51,68 @@ export abstract class MicaPlugin {
   onCleanup(): void {}
   onSessionSwitch(_newId: string, _oldId: string): void {}
 
-  /** 创建插件自有的 atom，框架会在 reset() 时自动重置为初始值 */
   protected createState<T>(initial: T): WritableAtom<T> {
     const a = createAtom<T>(initial);
     this._ownedAtoms.push({ atom: a, initial });
     return a;
   }
 
-  /** 重置所有 createState 创建的 atom 到初始值 */
   protected resetState(): void {
     for (const { atom, initial } of this._ownedAtoms) {
       atom.set(initial);
     }
   }
 
+  public reset(): void {
+    this.resetState();
+    this.onCleanup();
+  }
+
+  protected addQuickCommand(command: Command): void {
+    quickCommandsAtom.set([...quickCommandsAtom.get(), command]);
+  }
+
+  protected showMessage(text: string, delay: number = 3000, id?: string): string {
+    const msgId = id ?? `msg-${uuid()}`;
+    if (id) this.removeMessage(msgId);
+    this.agent.ui.MessageBar.addMessage({ id: msgId, text });
+    if (delay) {
+      setTimeout(() => {
+        this.removeMessage(msgId);
+      }, delay);
+    }
+    return msgId;
+  }
+
+  protected removeMessage(id: string): void {
+    this.agent.ui.MessageBar.removeMessage(id);
+  }
+
+  protected clearMessages(): void {
+    this.agent.ui.MessageBar.clearMessages();
+  }
+
+  protected get messages(): ConversationMessage[] {
+    return this.atoms.messages.get();
+  }
+
+  protected onMessagesChange(cb: (messages: ConversationMessage[]) => void): () => void {
+    return this.atoms.messages.listen((msgs) => cb([...msgs]));
+  }
+}
+
+// ── UIPanelPlugin: 支持交互式 UI 面板的插件基类 ──
+
+export abstract class UIPanelPlugin extends MicaPlugin {
+  private _activeUIId: string | null = null;
+  private _uiAtom: WritableAtom<any> | null = null;
+  private _dropdownUnsubscribe: (() => void) | null = null;
+
   private _watchDropdownReset(): void {
     if (this._dropdownUnsubscribe) return;
     this._dropdownUnsubscribe = dropdown.state.listen((s) => {
       if (s.visible) {
-        this.reset();
+        this.resetUI();
       }
     });
   }
@@ -95,14 +124,6 @@ export abstract class MicaPlugin {
     }
   }
 
-  /** 清理插件：隐藏 UI + 重置状态 + 调用 onCleanup 钩子 */
-  public reset(): void {
-    this.hideUI();
-    this.resetState();
-    this.resetInputPlaceholder();
-    this.onCleanup();
-  }
-
   protected setInputPlaceholder(text: string): void {
     terminalInput.placeholder.set(text);
   }
@@ -111,16 +132,19 @@ export abstract class MicaPlugin {
     terminalInput.placeholder.set(DEFAULT_INPUT_PLACEHOLDER);
   }
 
-  protected addQuickCommand(command: Command): void {
-    quickCommandsAtom.set([...quickCommandsAtom.get(), command]);
+  reset(): void {
+    this.hideUI();
+    super.reset();
   }
 
-  /**
-   * 显示插件 UI（无状态版本，适用于静态展示如 spinner）
-   */
+  private resetUI(): void {
+    this.hideUI();
+    this.resetInputPlaceholder();
+  }
+
   protected showUISimple(component: React.ComponentType): void {
     if (!this._installed) {
-      console.error(`[${this.constructor.name}] showUISimple called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
+      console.error(`[${this.constructor.name}] showUISimple called before onInstall completed`);
     }
     this._watchDropdownReset();
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
@@ -129,13 +153,6 @@ export abstract class MicaPlugin {
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
   }
 
-  /**
-   * 显示插件 UI，使用 atom 管理状态。
-   * 
-   * @param component - React 组件，接收 `{ state }` prop
-   * @param initialState - 初始状态
-   * @param onInput - 输入回调，接收 (input, key, state, setState)，返回 true 表示已处理
-   */
   protected showUI<S>(
     component: React.ComponentType<{ state: S }>,
     initialState: S,
@@ -147,7 +164,7 @@ export abstract class MicaPlugin {
     },
   ): void {
     if (!this._installed) {
-      console.error(`[${this.constructor.name}] showUI called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
+      console.error(`[${this.constructor.name}] showUI called before onInstall completed`);
     }
     this._watchDropdownReset();
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
@@ -191,38 +208,5 @@ export abstract class MicaPlugin {
     this._uiAtom = null;
     this.resetInputPlaceholder();
     terminalInput.text.set('');
-  }
-
-  /** 显示或更新一条消息，默认 3s 后自动清除。传入 id 可更新已有消息 */
-  protected showMessage(text: string, delay: number = 3000, id?: string): string {
-    const msgId = id ?? `msg-${uuid()}`;
-    if (id) this.removeMessage(msgId);
-    this.agent.ui.MessageBar.addMessage({ id: msgId, text });
-    if (delay) {
-      setTimeout(() => {
-        this.removeMessage(msgId);
-      }, delay);
-    }
-    return msgId;
-  }
-
-  /** 移除指定 ID 的消息 */
-  protected removeMessage(id: string): void {
-    this.agent.ui.MessageBar.removeMessage(id);
-  }
-
-  /** 清除所有消息 */
-  protected clearMessages(): void {
-    this.agent.ui.MessageBar.clearMessages();
-  }
-
-  /** 获取当前消息列表 */
-  protected get messages(): ConversationMessage[] {
-    return this.atoms.messages.get();
-  }
-
-  /** 监听消息变更 */
-  protected onMessagesChange(cb: (messages: ConversationMessage[]) => void): () => void {
-    return this.atoms.messages.listen((msgs) => cb([...msgs]));
   }
 }

@@ -1,5 +1,5 @@
 import mitt from 'mitt';
-import { ConversationStore } from './conversation-store.js';
+import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { IterationRunner } from './iteration-runner.js';
 import { AgentRunLoop } from './run-loop.js';
@@ -7,25 +7,30 @@ import type { AgentTurnEvents, IterationResult, Middleware, RunFn } from './type
 
 export type { AgentTurnEvents, IterationResult, RunFn, Middleware } from './types.js';
 
-class AgentTurn {
+export class AgentTurn {
   readonly events = mitt<AgentTurnEvents>();
+  readonly session = new AgentSession();
 
   private middlewares: Middleware[] = [];
   private abortController: AbortController | null = null;
   private _aborted = false;
+  private toolExecutor: ToolExecutor;
+  private iterationRunner: IterationRunner;
+  private runLoop: AgentRunLoop;
 
-  private conversation = new ConversationStore();
-  private toolExecutor = new ToolExecutor({
-    onToolUse: (payload) => this.events.emit('tool:use', payload),
-    onToolOutput: (payload) => this.events.emit('tool:output', payload),
-    onStatus: (status) => this.events.emit('status', status),
-  });
-  private iterationRunner = new IterationRunner(
-    this.conversation,
-    this.toolExecutor,
-    this.events.emit.bind(this.events),
-  );
-  private runLoop = new AgentRunLoop(this.conversation);
+  constructor() {
+    this.toolExecutor = new ToolExecutor({
+      onToolUse: (payload) => this.events.emit('tool:use', payload),
+      onToolOutput: (payload) => this.events.emit('tool:output', payload),
+      onStatus: (status) => this.events.emit('status', status),
+    });
+    this.iterationRunner = new IterationRunner(
+      this.session,
+      this.toolExecutor,
+      this.events.emit.bind(this.events),
+    );
+    this.runLoop = new AgentRunLoop(this.session);
+  }
 
   abort() {
     this._aborted = true;

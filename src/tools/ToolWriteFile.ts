@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { backupFile } from '../utils/fileHistory.js';
 
 export class ToolWriteFile extends MicaTool {
   constructor() {
@@ -15,6 +16,7 @@ export class ToolWriteFile extends MicaTool {
   }
 
   async execute(input: { file_path: string; content: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+    await backupFile(input.file_path);
     const dir = dirname(input.file_path);
     await mkdir(dir, { recursive: true });
     await writeFile(input.file_path, input.content);

@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'fs/promises';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { backupFile } from '../utils/fileHistory.js';
 
 function truncate(s: unknown, maxLen = 40): string {
   const str = typeof s === 'string' ? s : String(s ?? '');
@@ -25,6 +26,7 @@ export class ToolEditFile extends MicaTool {
     old_string: string;
     new_string: string;
   }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+    await backupFile(input.file_path);
     const content = await readFile(input.file_path, 'utf-8');
     if (!content.includes(input.old_string)) return `未找到匹配文本`;
     const newContent = content.replace(input.old_string, input.new_string);

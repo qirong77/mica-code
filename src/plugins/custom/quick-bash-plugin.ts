@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { spawn } from 'node:child_process';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import type { WritableAtom } from 'nanostores';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
 
@@ -13,7 +13,7 @@ function BashOutput({ atom }: { atom: WritableAtom<string> }) {
   );
 }
 
-export class QuickBashPlugin extends MicaPlugin {
+export class QuickBashPlugin extends UIPanelPlugin {
   private outputAtom!: WritableAtom<string>;
   private uiShown = false;
 

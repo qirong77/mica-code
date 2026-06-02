@@ -23,7 +23,8 @@ export class AutoCompactPlugin extends MicaPlugin {
 
       if (this.isCompressing) return next(userInput, onIteration);
 
-      const messages = this.atoms.messages.get();
+      const session = this.agent.agentTurn.session;
+      const messages = session.getMessages();
       if (messages.length < MIN_MESSAGES_TO_COMPACT) {
         return next(userInput, onIteration);
       }
@@ -58,7 +59,7 @@ export class AutoCompactPlugin extends MicaPlugin {
           ...toKeep,
         ];
 
-        this.atoms.messages.set(compacted);
+        session.replaceMessages(compacted);
         this.removeMessage(msgId);
 
         const newUsage = getContextUsage(compacted);

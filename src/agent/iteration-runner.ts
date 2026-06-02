@@ -1,47 +1,54 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { systemPrompt } from '../prompts/index';
+import { systemPrompt, planModePrompt } from '../prompts/index';
 import { getToolDefinitions } from '../tools/index';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog } from '../store/logAtom.js';
 import { planModeAtom } from '../store/ui-state.js';
 import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
-import { ConversationStore } from './conversation-store.js';
+import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { toMessageParams } from '../store/conversation.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
 
-const PLAN_REMINDER =
-  '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改等编辑操作。（除非用户明确提成执行你给出的规划，你才可以执行代码修改等编辑操作）\n</system-reminder>';
+let _iterationId = 0;
 
-const normalPrompt = systemPrompt;
-const planModePrompt = systemPrompt + PLAN_REMINDER;
-
-let cachedSystemPrompt = normalPrompt;
+let cachedSystemPrompt = systemPrompt;
 
 planModeAtom.listen((plan) => {
-  cachedSystemPrompt = plan ? planModePrompt : normalPrompt;
+  cachedSystemPrompt = plan ? planModePrompt : systemPrompt;
 });
 
+export type SystemPromptProvider = () => string;
+
 export class IterationRunner {
+  private getSystemPrompt: SystemPromptProvider;
+  private getAnthropicClient: () => Anthropic;
+
   constructor(
-    private conversation: ConversationStore,
+    private session: AgentSession,
     private toolExecutor: ToolExecutor,
     private emit: AgentTurnEmitter['emit'],
-  ) {}
+    systemPromptProvider?: SystemPromptProvider,
+    clientProvider?: () => Anthropic,
+  ) {
+    this.getSystemPrompt = systemPromptProvider ?? (() => cachedSystemPrompt);
+    this.getAnthropicClient = clientProvider ?? getClient;
+  }
 
   async run(abortSignal: AbortSignal): Promise<IterationResult> {
-    const messages = this.conversation.getMessages();
+    const iterationId = ++_iterationId;
+    const messages = this.session.getMessages();
     const modelName = model.name.get();
     const effort = model.effort.get();
 
-    appendSystemLog(`迭代开始：model=${modelName} effort=${effort}`);
+    appendSystemLog(`迭代 #${iterationId} 开始：model=${modelName} effort=${effort}`);
     this.emit('status', { type: 'connecting' });
 
-    const stream = getClient().messages.stream({
+    const stream = this.getAnthropicClient().messages.stream({
       model: modelName,
       max_tokens: model.maxTokens.get(),
-      system: cachedSystemPrompt,
+      system: this.getSystemPrompt(),
       messages: toMessageParams(messages),
       thinking:
         effort === 'none'
@@ -59,7 +66,7 @@ export class IterationRunner {
       { once: true },
     );
 
-    this.emit('stream:create', stream);
+    this.emit('stream:create', { stream, iterationId });
 
     let hasToolUse = false;
     const completedToolUses: CompletedToolUse[] = [];
@@ -77,6 +84,7 @@ export class IterationRunner {
           toolName: tool.name,
           toolInput: tool.input,
           completed: false,
+          iterationId,
         });
       }
     });
@@ -92,18 +100,18 @@ export class IterationRunner {
     }
 
     const wasTruncated = finalMessage.stop_reason === 'max_tokens';
-    this.conversation.appendAssistant(finalMessage);
-    this.emit('message:final', finalMessage);
+    this.session.appendAssistant(finalMessage);
+    this.emit('message:final', { message: finalMessage, iterationId });
     appendSystemLog(
-      `迭代响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
+      `迭代 #${iterationId} 响应：${completedToolUses.length > 0 ? `${completedToolUses.length} 个工具调用` : '无工具调用'}${wasTruncated ? ' [因 max_tokens 截断]' : ''}`,
     );
 
     if (completedToolUses.length > 0) {
-      const toolResults = await this.toolExecutor.execute(completedToolUses, abortSignal);
-      this.conversation.appendToolResults(toolResults);
+      const toolResults = await this.toolExecutor.execute(completedToolUses, abortSignal, iterationId);
+      this.session.appendToolResults(toolResults);
     }
 
     this.emit('status', { type: 'idle' });
-    return { hasToolUse, wasTruncated, finalMessage };
+    return { hasToolUse, wasTruncated, finalMessage, iterationId };
   }
 }

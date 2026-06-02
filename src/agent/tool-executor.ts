@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { executeTool } from '../tools/index.js';
-import { sessionToolRecordsAtom } from '../store/logAtom.js';
+import { AgentSession } from './agent-session.js';
 import type { WorkingStatus } from '../store/ui-state.js';
 import type { CompletedToolUse } from './types.js';
 
@@ -16,12 +16,15 @@ export type ToolExecutorCallbacks = {
   onStatus: (status: WorkingStatus) => void;
 };
 
+const sessionForRecords = new AgentSession();
+
 export class ToolExecutor {
   constructor(private callbacks: ToolExecutorCallbacks) {}
 
   async execute(
     tools: CompletedToolUse[],
     abortSignal: AbortSignal,
+    iterationId?: number,
   ): Promise<Anthropic.ToolResultBlockParam[]> {
     if (tools.length === 0) return [];
 
@@ -47,11 +50,11 @@ export class ToolExecutor {
           },
         });
         const elapsed = Date.now() - startTime;
-        const records = sessionToolRecordsAtom.get();
-        sessionToolRecordsAtom.set([
-          ...records,
-          { toolName: tool.name, toolInput: tool.input, elapsedMs: elapsed },
-        ]);
+        sessionForRecords.addToolRecord({
+          toolName: tool.name,
+          toolInput: tool.input,
+          elapsedMs: elapsed,
+        });
         return { tool, result, elapsed };
       }),
     );

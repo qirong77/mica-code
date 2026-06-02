@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import type { EffortLevel } from '../../store/config.js';
 import { model } from '../../store/config.js';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
@@ -59,7 +59,7 @@ function EffortSelector({ state }: { state: EffortState }) {
   return <EffortList efforts={efforts} selected={state.selectedIdx} current={currentEffort} />;
 }
 
-export class QuickCommandEffortPlugin extends MicaPlugin {
+export class QuickCommandEffortPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'effort',

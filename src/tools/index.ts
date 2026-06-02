@@ -11,7 +11,6 @@ import { MicaTool } from './MicaTool';
 import { ToolRunShell } from './ToolRunShell';
 import { ToolSkill } from './ToolSkill';
 import type { ToolExecuteCallbacks } from './MicaTool';
-import { backupFile } from '../utils/fileHistory.js';
 
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),
@@ -49,10 +48,6 @@ export function getToolDefinitions(): Anthropic.Tool[] {
 export async function executeTool(name: string, input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
   const tool = getAllTools().find((t) => t.name === name);
   if (!tool) return `未知工具: ${name}`;
-
-  if (name === 'write_file' || name === 'edit_file') {
-    await backupFile(input.file_path as string);
-  }
   return await tool.executeTimed(input, callbacks);
 }
 

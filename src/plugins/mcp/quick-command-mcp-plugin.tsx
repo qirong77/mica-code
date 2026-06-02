@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
 import { reconnectMcpServer } from '../../mcp/index.js';
@@ -123,7 +123,7 @@ function McpPanel({ state }: { state: PanelState }) {
   );
 }
 
-export class QuickCommandMcpPlugin extends MicaPlugin {
+export class QuickCommandMcpPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'mcp',

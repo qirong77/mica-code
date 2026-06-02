@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import { model } from '../../store/config.js';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
 
@@ -58,7 +58,7 @@ function ModelSelector({ state }: { state: ModelState }) {
   return <ModelList models={models} selected={state.selectedIdx} current={currentModel} />;
 }
 
-export class QuickCommandModelPlugin extends MicaPlugin {
+export class QuickCommandModelPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'model',

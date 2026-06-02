@@ -1,6 +1,6 @@
-import type { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { agentTurn } from '../agent/turn.js';
 import type { WorkingStatus } from '../store/ui-state.js';
+import type { StreamCreatePayload } from '../agent/types.js';
 import {
   handleThinkingChunk,
   handleStreamStart,
@@ -16,14 +16,15 @@ export function setupAgentEvents() {
   let lastStatus: WorkingStatus | null = null;
   let textStarted = false;
 
-  agentTurn.events.on('stream:create', (stream: MessageStream<null>) => {
+  agentTurn.events.on('stream:create', (payload: StreamCreatePayload) => {
     textStarted = false;
+    const stream = payload.stream;
 
-    stream.on('thinking', (chunk) => {
+    stream.on('thinking', (chunk: string) => {
       handleThinkingChunk(chunk);
     });
 
-    stream.on('text', (chunk) => {
+    stream.on('text', (chunk: string) => {
       if (!textStarted) {
         textStarted = true;
         handleStreamStart();

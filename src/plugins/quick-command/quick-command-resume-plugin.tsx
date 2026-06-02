@@ -4,7 +4,7 @@ import type { DOMElement, ScrollBoxHandle } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
 
 export type { SessionMeta };
@@ -220,7 +220,7 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
   );
 }
 
-export class QuickCommandResumePlugin extends MicaPlugin {
+export class QuickCommandResumePlugin extends UIPanelPlugin {
   private _currentSessionId: string | null = null;
   private _autoSaveUnsub: (() => void) | null = null;
   private _pendingAutoSave: ReturnType<typeof setTimeout> | null = null;

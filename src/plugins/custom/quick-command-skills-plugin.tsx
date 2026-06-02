@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, Text } from '@anthropic/ink'
-import { MicaPlugin } from '../MicaPlugin'
+import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'
 
@@ -144,7 +144,7 @@ function SkillsPanel({ state }: { state: PanelState }) {
   )
 }
 
-export class QuickCommandSkillsPlugin extends MicaPlugin {
+export class QuickCommandSkillsPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'skills',

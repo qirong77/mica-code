@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
 
 interface RewindState {
@@ -44,7 +44,7 @@ function RewindDialog({ state }: { state: RewindState }) {
   return <ConfirmDialog title={title} selected={state.selectedIdx} />;
 }
 
-export class QuickCommandRewindPlugin extends MicaPlugin {
+export class QuickCommandRewindPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'rewind',

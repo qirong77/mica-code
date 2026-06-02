@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
-import { clearBackups } from '../utils/fileHistory.js';
+import { appendSystemLog } from '../store/logAtom.js';
+import { cleanBackups } from './run-loop-side-effects.js';
 import { parseImageRefs } from '../components/ui/utils/imagePaste.js';
-import { ConversationStore } from './conversation-store.js';
+import { AgentSession } from './agent-session.js';
 import type { IterationResult } from './types.js';
 
 function hasTextContent(message: Anthropic.Message): boolean {
@@ -17,7 +17,7 @@ export type RunLoopControl = {
 };
 
 export class AgentRunLoop {
-  constructor(private conversation: ConversationStore) {}
+  constructor(private session: AgentSession) {}
 
   async run(
     userInput: string,
@@ -25,11 +25,11 @@ export class AgentRunLoop {
     onIteration?: (result: IterationResult) => void,
   ): Promise<void> {
     appendSystemLog('Agent run 开始');
-    sessionToolRecordsAtom.set([]);
-    await clearBackups();
+    this.session.clearToolRecords();
+    await cleanBackups();
 
     const userContent = parseImageRefs(userInput);
-    this.conversation.appendUser(userContent);
+    this.session.appendUser(userContent);
 
     while (true) {
       if (control.isAborted()) {

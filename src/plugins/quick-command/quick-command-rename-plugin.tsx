@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { MicaPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin';
 import { Spin } from '../../components/ui/components/common/Spin.js';
 import { getClient } from '../../agent/client.js';
 
@@ -13,7 +13,7 @@ function RenameSpinner() {
   );
 }
 
-export class QuickCommandRenamePlugin extends MicaPlugin {
+export class QuickCommandRenamePlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'rename',
