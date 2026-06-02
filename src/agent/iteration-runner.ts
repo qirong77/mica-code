@@ -8,7 +8,20 @@ import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
 import { ConversationStore } from './conversation-store.js';
 import { ToolExecutor } from './tool-executor.js';
+import { toMessageParams } from '../store/conversation.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
+
+const PLAN_REMINDER =
+  '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改等编辑操作。（除非用户明确提成执行你给出的规划，你才可以执行代码修改等编辑操作）\n</system-reminder>';
+
+const normalPrompt = systemPrompt;
+const planModePrompt = systemPrompt + PLAN_REMINDER;
+
+let cachedSystemPrompt = normalPrompt;
+
+planModeAtom.listen((plan) => {
+  cachedSystemPrompt = plan ? planModePrompt : normalPrompt;
+});
 
 export class IterationRunner {
   constructor(
@@ -25,15 +38,11 @@ export class IterationRunner {
     appendSystemLog(`迭代开始：model=${modelName} effort=${effort}`);
     this.emit('status', { type: 'connecting' });
 
-    const planReminder = planModeAtom.get()
-      ? '\n\n<system-reminder>\n当前处于 plan mode，仅分析规划，不要执行代码修改等编辑操作。（除非用户明确提成执行你给出的规划，你才可以执行代码修改等编辑操作）\n</system-reminder>'
-      : '';
-
     const stream = getClient().messages.stream({
       model: modelName,
       max_tokens: model.maxTokens.get(),
-      system: systemPrompt + planReminder,
-      messages: messages as Anthropic.MessageParam[],
+      system: cachedSystemPrompt,
+      messages: toMessageParams(messages),
       thinking:
         effort === 'none'
           ? { type: 'disabled' as const }

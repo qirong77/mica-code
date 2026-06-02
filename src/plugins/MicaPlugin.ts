@@ -1,5 +1,4 @@
 import React from 'react';
-import type Anthropic from '@anthropic-ai/sdk';
 import { atom as createAtom, type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { IMicaAgent } from '../core/agent';
 import type { ConversationMessage } from '../store/conversation.js';
@@ -198,12 +197,12 @@ export abstract class MicaPlugin {
   }
 
   /** 获取当前消息列表 */
-  protected get messages(): Anthropic.MessageParam[] {
-    return this.atoms.messages.get() as unknown as Anthropic.MessageParam[];
+  protected get messages(): ConversationMessage[] {
+    return this.atoms.messages.get();
   }
 
   /** 监听消息变更 */
-  protected onMessagesChange(cb: (messages: Anthropic.MessageParam[]) => void): () => void {
-    return this.atoms.messages.listen((messages) => cb([...messages] as unknown as Anthropic.MessageParam[]));
+  protected onMessagesChange(cb: (messages: ConversationMessage[]) => void): () => void {
+    return this.atoms.messages.listen((msgs) => cb([...msgs]));
   }
 }

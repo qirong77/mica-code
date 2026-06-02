@@ -3,11 +3,12 @@ import { MicaPlugin } from '../MicaPlugin';
 import { getContextUsage } from '../../utils/getContextUsage';
 import { getClient } from '../../agent/client';
 import { model } from '../../store/config.js';
+import { toMessageParams, type ConversationMessage } from '../../store/conversation.js';
 
-const CONTEXT_THRESHOLD = 0.4; // 40% — 留余量给压缩请求/响应和后续对话
+const CONTEXT_THRESHOLD = 0.4;
 const INACTIVITY_THRESHOLD_MS = 45 * 60 * 1000;
-const KEEP_RECENT_COUNT = 6; // 保留最近 N 条保持上下文连贯，其余压缩为摘要
-const MIN_MESSAGES_TO_COMPACT = 8; // 消息太少时压缩无意义
+const KEEP_RECENT_COUNT = 6;
+const MIN_MESSAGES_TO_COMPACT = 8;
 const SUMMARY_MAX_TOKENS = 2048;
 
 export class AutoCompactPlugin extends MicaPlugin {
@@ -18,7 +19,7 @@ export class AutoCompactPlugin extends MicaPlugin {
     this.agent.agentTurn.use(async (userInput, next, onIteration) => {
       const now = Date.now();
       const timeSinceLastUser = now - this.lastUserMessageTime;
-      this.lastUserMessageTime = now; // 先更新时间戳：用上一轮的间隔判断触发，本次立即更新供下一轮使用
+      this.lastUserMessageTime = now;
 
       if (this.isCompressing) return next(userInput, onIteration);
 
@@ -34,7 +35,6 @@ export class AutoCompactPlugin extends MicaPlugin {
       const timeTriggered = timeSinceLastUser > INACTIVITY_THRESHOLD_MS;
       const contextTriggered = contextRatio > CONTEXT_THRESHOLD;
 
-      // 双重触发：上下文占比超阈值 或 长时间无对话（恢复会话时主动压缩）
       if (!timeTriggered && !contextTriggered) {
         return next(userInput, onIteration);
       }
@@ -51,13 +51,12 @@ export class AutoCompactPlugin extends MicaPlugin {
         const toKeep = messages.slice(-KEEP_RECENT_COUNT);
         const toCompress = messages.slice(0, -KEEP_RECENT_COUNT);
 
-        // 将旧消息压缩为一条 user 摘要，拼接最近消息保留上下文连贯
-        const summary = await this.summarizeMessages(toCompress as Anthropic.MessageParam[]);
+        const summary = await this.summarizeMessages(toMessageParams(toCompress));
 
-        const compacted = [
-          { role: 'user' as const, content: `[对话历史摘要]\n${summary}` },
+        const compacted: ConversationMessage[] = [
+          { role: 'user', content: `[对话历史摘要]\n${summary}` },
           ...toKeep,
-        ] as Anthropic.MessageParam[];
+        ];
 
         this.atoms.messages.set(compacted);
         this.removeMessage(msgId);
