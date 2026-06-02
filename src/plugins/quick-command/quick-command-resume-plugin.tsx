@@ -413,7 +413,7 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
         { role: 'user', content: '清空', status: 'clear' } as any,
       ]);
       await new Promise((r) => setTimeout(r, 16));
-      this.atoms.messages.set([]);
+      this.agent.agentTurn.session.replaceMessages([]);
     }
 
     const filePath = resolve(SESSIONS_DIR, `${sessionId}.json`);
@@ -428,7 +428,7 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
       }
 
       this._suppressAutoSave = false;
-      this.atoms.messages.set(cleaned);
+      this.agent.agentTurn.session.replaceMessages(cleaned);
       this.atoms.currentSessionId.set(sessionId);
       const meta = this.atoms.sessionsIndex.get().find((s) => s.id === sessionId);
       this.showMessage(`已切换到: ${meta?.title || sessionId}`);

@@ -7,7 +7,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun run dev` — Run in development mode (executes TS directly)
 - `bun run build` — Build bundle with `bun build` (not compile)
 - `bun run build:compile` — Build native binary via `bun build --compile` (see `scripts/build.mjs`)
-- `bun test` — Run tests with vitest
 - `bun run format` — Format all files with prettier
 - `bun run format:check` — Check formatting
 
@@ -18,7 +17,7 @@ Mica is a lightweight, plugin-based code agent CLI using **Bun** + **TypeScript*
 ### Project Structure
 
 ```
-claude-code-main          # A production-ready code agent project to learn from
+claude-code-main          # 只读参考项目，不可修改、不可运行其测试
 src/
 ├── index.ts              # Entry: registers plugins, calls MicaAgent.run()
 ├── bootstrap.ts          # Wires TerminalInput.onSubmit → agentTurn.run()

@@ -46,4 +46,12 @@ export type RunFn = (
   onIteration?: (result: IterationResult) => void,
 ) => Promise<void>;
 
-export type Middleware = RunFn;
+export type Middleware = (
+  userInput: string,
+  next: RunFn,
+  onIteration?: (result: IterationResult) => void,
+) => Promise<void>;
+
+export type AgentTurnEmitter = {
+  emit<K extends keyof AgentTurnEvents>(type: K, event: AgentTurnEvents[K]): void;
+};

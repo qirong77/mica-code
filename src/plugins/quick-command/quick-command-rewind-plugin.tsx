@@ -109,7 +109,7 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
     hasFileChanges: boolean,
   ) {
     const rewinded = originalMsgs.slice(0, cutoff);
-    this.atoms.messages.set(rewinded);
+    this.agent.agentTurn.session.replaceMessages(rewinded);
 
     if (hasFileChanges) {
       restoreFiles()
