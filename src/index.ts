@@ -15,6 +15,7 @@ import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js'
 import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
 import { QuickBashPlugin } from './plugins/custom/quick-bash-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
+import { QuickCommandMcpPlugin } from './plugins/mcp/quick-command-mcp-plugin.js';
 import { terminalInput } from './store/ui-state.js';
 
 
@@ -33,6 +34,7 @@ await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
 await MicaAgent.usePlugin(new QuickCommandExitPlugin());
 await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
 await MicaAgent.usePlugin(new QuickCommandClearPlugin());
+await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
 
 
 const printPrompt = getPrintPrompt();

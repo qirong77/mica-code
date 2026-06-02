@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { systemPrompt } from '../prompts/index';
-import { executeTool, toolDefinitions } from '../tools/index';
+import { executeTool, getToolDefinitions } from '../tools/index';
 import { messagesAtom, contextSizeAtom, updateContextSize, type ConversationMessage } from '../store/conversation.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog, sessionToolRecordsAtom } from '../store/logAtom.js';
@@ -96,7 +96,7 @@ class AgentTurn {
           ? { type: 'disabled' as const }
           : { type: 'enabled' as const, budget_tokens: EFFORT_TOKENS[effort] },
       output_config: effort !== 'none' ? { effort } : undefined,
-      tools: toolDefinitions,
+      tools: getToolDefinitions(),
     }) as MessageStream<null>;
 
     const abortSignal = this.abortController.signal;

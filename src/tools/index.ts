@@ -12,7 +12,7 @@ import { ToolRunShell } from './ToolRunShell';
 import type { ToolExecuteCallbacks } from './MicaTool';
 import { backupFile } from '../utils/fileHistory.js';
 
-const tools: MicaTool[] = [
+const builtinTools: MicaTool[] = [
   new ToolReadFile(),
   new ToolWriteFile(),
   new ToolEditFile(),
@@ -22,14 +22,30 @@ const tools: MicaTool[] = [
   new ToolWebFetch(),
 ];
 
-export const toolDefinitions: Anthropic.Tool[] = tools.map((t) => ({
-  name: t.name,
-  description: t.description,
-  input_schema: t.input_schema,
-}));
+let mcpTools: MicaTool[] = [];
+
+export function registerMcpTools(tools: MicaTool[]): void {
+  mcpTools = tools;
+}
+
+export function unregisterMcpTools(): void {
+  mcpTools = [];
+}
+
+function getAllTools(): MicaTool[] {
+  return [...builtinTools, ...mcpTools];
+}
+
+export function getToolDefinitions(): Anthropic.Tool[] {
+  return getAllTools().map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema,
+  }));
+}
 
 export async function executeTool(name: string, input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
-  const tool = tools.find((t) => t.name === name);
+  const tool = getAllTools().find((t) => t.name === name);
   if (!tool) return `未知工具: ${name}`;
 
   if (name === 'write_file' || name === 'edit_file') {
@@ -37,8 +53,9 @@ export async function executeTool(name: string, input: Record<string, any>, call
   }
   return await tool.executeTimed(input, callbacks);
 }
+
 export function getToolDisplayText(name: string, input: Record<string, any>): string {
-  const tool = tools.find((t) => t.name === name);
+  const tool = getAllTools().find((t) => t.name === name);
   if (!tool) return `未知工具: ${name}`;
   try {
     return tool.onToolUseDisplayText(input);
