@@ -3,6 +3,7 @@ type PromptSection =
     | 'project-instructions'
     | 'context'
     | 'system-reminder'
+    | 'skills'
 const DEFAULT_SYSTEM_PROMPT = /* markdown */`
 
 `
