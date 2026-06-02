@@ -57,6 +57,7 @@ export abstract class MicaPlugin {
   private _activeUIId: string | null = null;
   private _uiAtom: WritableAtom<any> | null = null;
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
+  private _dropdownUnsubscribe: (() => void) | null = null;
 
   constructor() { }
   abstract onInstall(): void | Promise<void>;
@@ -75,6 +76,22 @@ export abstract class MicaPlugin {
   protected resetState(): void {
     for (const { atom, initial } of this._ownedAtoms) {
       atom.set(initial);
+    }
+  }
+
+  private _watchDropdownReset(): void {
+    if (this._dropdownUnsubscribe) return;
+    this._dropdownUnsubscribe = dropdown.state.listen((s) => {
+      if (s.visible) {
+        this.reset();
+      }
+    });
+  }
+
+  private _unwatchDropdownReset(): void {
+    if (this._dropdownUnsubscribe) {
+      this._dropdownUnsubscribe();
+      this._dropdownUnsubscribe = null;
     }
   }
 
@@ -105,6 +122,7 @@ export abstract class MicaPlugin {
     if (!this._installed) {
       console.error(`[${this.constructor.name}] showUISimple called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
     }
+    this._watchDropdownReset();
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
     const entry: PluginUI = { id, component };
@@ -131,6 +149,7 @@ export abstract class MicaPlugin {
     if (!this._installed) {
       console.error(`[${this.constructor.name}] showUI called before onInstall completed — UI will never be shown. Did you mean to call it lazily?`);
     }
+    this._watchDropdownReset();
     const id = this._activeUIId ?? `plugin-ui-${this.constructor.name}-${uuid()}`;
     this._activeUIId = id;
 
@@ -166,6 +185,7 @@ export abstract class MicaPlugin {
 
   protected hideUI(): void {
     if (!this._activeUIId) return;
+    this._unwatchDropdownReset();
     pluginUIsAtom.set(pluginUIsAtom.get().filter((u) => u.id !== this._activeUIId));
     this._activeUIId = null;
     this._uiAtom = null;
