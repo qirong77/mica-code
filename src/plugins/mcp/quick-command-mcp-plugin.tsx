@@ -17,44 +17,107 @@ function statusColor(status: McpServerStatus['status']) {
   return '#FFC107';
 }
 
-function McpStatusList({ state }: { state: { servers: McpServerStatus[] } }) {
-  const servers = state.servers;
+interface PanelState {
+  view: 'list' | 'detail';
+  selectedIdx: number;
+  detailServerIdx: number;
+}
 
+function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; selectedIdx: number }) {
   if (servers.length === 0) {
+    return <Text dimColor>  no servers configured</Text>;
+  }
+
+  return (
+    <Box flexDirection="column">
+      {servers.map((s, i) => {
+        const isSelected = i === selectedIdx;
+        return (
+          <Box key={s.name} flexDirection="row">
+            <Box width={2}>
+              <Text color={isSelected ? 'claude' : undefined}>
+                {isSelected ? '▶' : ' '}
+              </Text>
+            </Box>
+            <Box width={4}>
+              <Text color={statusColor(s.status)}>{STATUS_ICON[s.status]}</Text>
+            </Box>
+            <Box width={16}>
+              <Text bold={isSelected}>{s.name}</Text>
+            </Box>
+            <Text dimColor>{s.url}</Text>
+            {s.status === 'connected' && (
+              <Text color="#4CAF50">  {s.toolCount} tools</Text>
+            )}
+            {s.status === 'failed' && s.error && (
+              <Text color="#F44336">  {s.error.slice(0, 50)}</Text>
+            )}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+function ToolDetail({ server }: { server: McpServerStatus }) {
+  if (server.tools.length === 0) {
     return (
-      <Box flexDirection="column" paddingX={1}>
+      <Box flexDirection="column">
         <Box paddingBottom={1}>
-          <Text bold>MCP Servers</Text>
+          <Text bold>{server.name} — </Text>
+          <Text dimColor>{server.url}</Text>
         </Box>
-        <Text dimColor>no servers configured</Text>
+        <Text dimColor>  no tools available</Text>
       </Box>
     );
   }
+
+  return (
+    <Box flexDirection="column">
+      <Box paddingBottom={1}>
+        <Text bold>{server.name} — </Text>
+        <Text dimColor>{server.url}</Text>
+        <Text color="#4CAF50">  {server.tools.length} tools</Text>
+      </Box>
+      {server.tools.map((t) => (
+        <Box key={t.name} flexDirection="row" paddingLeft={2}>
+          <Box width={3}>
+            <Text dimColor>•</Text>
+          </Box>
+          <Box width={30}>
+            <Text>{t.name}</Text>
+          </Box>
+          <Text dimColor>{t.description.slice(0, 80)}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function McpPanel({ state }: { state: PanelState }) {
+  const servers = mcpServersAtom.get();
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box paddingBottom={1}>
         <Text bold>MCP Servers</Text>
       </Box>
-      {servers.map((s) => (
-        <Box key={s.name} flexDirection="row">
-          <Box width={4}>
-            <Text color={statusColor(s.status)}>{STATUS_ICON[s.status]}</Text>
-          </Box>
-          <Box width={16}>
-            <Text>{s.name}</Text>
-          </Box>
-          <Text dimColor>{s.url}</Text>
-          {s.status === 'connected' && (
-            <Text color="#4CAF50">  {s.toolCount} tools</Text>
-          )}
-          {s.status === 'failed' && s.error && (
-            <Text color="#F44336">  {s.error.slice(0, 50)}</Text>
-          )}
-        </Box>
-      ))}
+
+      {state.view === 'list' && (
+        <ServerList servers={servers} selectedIdx={state.selectedIdx} />
+      )}
+
+      {state.view === 'detail' && (
+        <ToolDetail server={servers[state.detailServerIdx]} />
+      )}
+
       <Box paddingTop={1}>
-        <Text dimColor>/mcp reconnect &lt;name&gt; to reconnect</Text>
+        {state.view === 'list' && (
+          <Text dimColor>↑↓ navigate  ↵ tools  esc close</Text>
+        )}
+        {state.view === 'detail' && (
+          <Text dimColor>esc back</Text>
+        )}
       </Box>
     </Box>
   );
@@ -78,21 +141,52 @@ export class QuickCommandMcpPlugin extends MicaPlugin {
           return;
         }
 
-        this._showStatus();
+        this._showPanel();
       },
     });
   }
 
-  private _showStatus() {
+  private _showPanel() {
     const servers = mcpServersAtom.get();
-    this.showUI<{ servers: McpServerStatus[] }>(
-      McpStatusList,
-      { servers },
-      (_input, key) => {
-        if (key.escape || key.return) {
+
+    this.showUI<PanelState>(
+      McpPanel,
+      { view: 'list', selectedIdx: 0, detailServerIdx: 0 },
+      (_input, key, state, setState) => {
+        if (key.escape) {
+          if (state.view === 'detail') {
+            setState({ ...state, view: 'list' });
+            return true;
+          }
           this.hideUI();
           return true;
         }
+
+        if (state.view === 'list') {
+          if (key.upArrow) {
+            setState({
+              ...state,
+              selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : servers.length - 1,
+            });
+            return true;
+          }
+          if (key.downArrow) {
+            setState({
+              ...state,
+              selectedIdx: state.selectedIdx < servers.length - 1 ? state.selectedIdx + 1 : 0,
+            });
+            return true;
+          }
+          if (key.return) {
+            setState({
+              view: 'detail',
+              selectedIdx: 0,
+              detailServerIdx: state.selectedIdx,
+            });
+            return true;
+          }
+        }
+
         return false;
       },
     );

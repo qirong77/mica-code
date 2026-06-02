@@ -8,6 +8,7 @@ export interface McpServerStatus {
   url: string;
   status: 'connecting' | 'connected' | 'failed';
   toolCount: number;
+  tools: Array<{ name: string; description: string }>;
   error?: string;
 }
 
@@ -40,7 +41,7 @@ export async function connectToServer(
   const existing = connections.get(name);
   if (existing) return existing;
 
-  updateServerStatus({ name, url: config.url, status: 'connecting', toolCount: 0 });
+  updateServerStatus({ name, url: config.url, status: 'connecting', toolCount: 0, tools: [] });
 
   const transport = new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: config.headers
@@ -66,11 +67,16 @@ export async function connectToServer(
 }
 
 export function markServerFailed(name: string, url: string, error: string) {
-  updateServerStatus({ name, url, status: 'failed', toolCount: 0, error });
+  updateServerStatus({ name, url, status: 'failed', toolCount: 0, tools: [], error });
 }
 
-export function markServerConnected(name: string, url: string, toolCount: number) {
-  updateServerStatus({ name, url, status: 'connected', toolCount });
+export function markServerConnected(
+  name: string,
+  url: string,
+  toolCount: number,
+  tools: Array<{ name: string; description: string }>,
+) {
+  updateServerStatus({ name, url, status: 'connected', toolCount, tools });
 }
 
 export async function disconnectServer(name: string): Promise<void> {
