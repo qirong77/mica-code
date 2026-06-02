@@ -30,9 +30,7 @@ interface ApiModelListResponse {
   object: string;
 }
 
-const MODEL_OPTIONS_FALLBACK: ModelOption[] = [
-  { name: 'Sonnet 4.6', label: 'Sonnet 4.6' },
-];
+const MODEL_OPTIONS_FALLBACK: ModelOption[] = [{ name: 'Sonnet 4.6', label: 'Sonnet 4.6' }];
 
 export interface EffortOption {
   name: EffortLevel;
@@ -61,7 +59,7 @@ export const model = {
 };
 
 export async function fetchModelOptions(): Promise<void> {
-  const baseUrl = api.baseUrl.get();
+  let baseUrl = api.baseUrl.get();
   if (!baseUrl) {
     model.options.set(MODEL_OPTIONS_FALLBACK);
     return;
@@ -69,10 +67,18 @@ export async function fetchModelOptions(): Promise<void> {
 
   model.optionsLoading.set(true);
   model.optionsError.set(null);
-
   try {
-    const url = `${baseUrl.replace(/\/$/, '')}/v1/models`;
-    const res = await fetch(url);
+    if (baseUrl.includes('deepseek.com')) {
+      baseUrl = 'https://api.deepseek.com/models';
+    } else {
+      baseUrl = `${baseUrl.replace(/\/$/, '')}/models`;
+    }
+    const apiKey = api.apiKey.get();
+    const res = await fetch(baseUrl, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -80,7 +86,6 @@ export async function fetchModelOptions(): Promise<void> {
     if (!json.data || !Array.isArray(json.data)) {
       throw new Error('invalid response format');
     }
-
     const options: ModelOption[] = json.data
       .filter((m) => m.id)
       .map((m) => ({ name: m.id, label: m.id }));
