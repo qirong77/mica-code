@@ -1,11 +1,19 @@
 import mitt from 'mitt';
+import Anthropic from '@anthropic-ai/sdk';
+import { appendSystemLog } from '../store/logAtom.js';
+import { clearBackups } from '../utils/fileHistory.js';
+import { parseImageRefs } from '../components/ui/utils/imagePaste.js';
 import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { IterationRunner } from './iteration-runner.js';
-import { AgentRunLoop } from './run-loop.js';
 import type { AgentTurnEvents, IterationResult, Middleware, RunFn } from './types.js';
 
 export type { AgentTurnEvents, IterationResult, RunFn, Middleware } from './types.js';
+
+function hasTextContent(message: Anthropic.Message): boolean {
+  if (typeof message.content === 'string') return true;
+  return message.content.some((block) => block.type === 'text');
+}
 
 export class AgentTurn {
   readonly events = mitt<AgentTurnEvents>();
@@ -16,7 +24,6 @@ export class AgentTurn {
   private _aborted = false;
   private toolExecutor: ToolExecutor;
   private iterationRunner: IterationRunner;
-  private runLoop: AgentRunLoop;
 
   constructor() {
     this.toolExecutor = new ToolExecutor({
@@ -29,7 +36,6 @@ export class AgentTurn {
       this.toolExecutor,
       this.events.emit.bind(this.events),
     );
-    this.runLoop = new AgentRunLoop(this.session);
   }
 
   abort() {
@@ -47,24 +53,49 @@ export class AgentTurn {
   }
 
   async executeSingleIteration(): Promise<IterationResult> {
-    if (this._aborted) {
-      throw new Error('ABORT');
-    }
+    if (this._aborted) throw new Error('ABORT');
     this.abortController = new AbortController();
     return this.iterationRunner.run(this.abortController.signal);
   }
 
   private async coreRun(userInput: string, onIteration?: (result: IterationResult) => void) {
     this._aborted = false;
-    await this.runLoop.run(
-      userInput,
-      {
-        runIteration: () => this.executeSingleIteration(),
-        isAborted: () => this._aborted,
-        onAborted: () => this.events.emit('status', { type: 'idle' }),
-      },
-      onIteration,
-    );
+    appendSystemLog('Agent run 开始');
+    this.session.clearToolRecords();
+    await clearBackups();
+
+    const userContent = parseImageRefs(userInput);
+    this.session.appendUser(userContent);
+
+    while (true) {
+      if (this._aborted) {
+        appendSystemLog('Agent run 被用户中断');
+        this.events.emit('status', { type: 'idle' });
+        return;
+      }
+
+      try {
+        const result = await this.executeSingleIteration();
+        onIteration?.(result);
+
+        if (!result.hasToolUse && !result.wasTruncated) {
+          if (!hasTextContent(result.finalMessage)) {
+            appendSystemLog('Agent run 继续（响应仅含思考块，等待模型输出文本）');
+            continue;
+          }
+          appendSystemLog('Agent run 结束（无待执行工具）');
+          return;
+        }
+        appendSystemLog(`继续下一轮迭代（${result.wasTruncated ? '响应被截断' : '存在工具调用'}）`);
+      } catch (err) {
+        if (err instanceof Error && err.message === 'ABORT') {
+          appendSystemLog('Agent run 被用户中断');
+          this.events.emit('status', { type: 'idle' });
+          return;
+        }
+        throw err;
+      }
+    }
   }
 
   async run(userInput: string, onIteration?: (result: IterationResult) => void) {
