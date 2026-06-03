@@ -3,8 +3,11 @@ import { join } from 'path'
 import { homedir } from 'os'
 import type { Skill } from './types'
 
-function getUserSkillsDir(): string {
-  return join(homedir(), '.mica', 'skills')
+function getUserSkillsDirs(): string[] {
+  return [
+    join(homedir(), '.mica', 'skills'),
+    join(homedir(), '.claude', 'skills'),
+  ]
 }
 
 function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; content: string } {
@@ -105,22 +108,29 @@ let _loadedSkills: Skill[] | null = null
 export function getLoadedSkills(): Skill[] {
   if (_loadedSkills === null) {
     _loadedSkills = []
-    const skillsDir = getUserSkillsDir()
-    if (!existsSync(skillsDir) || !statSync(skillsDir).isDirectory()) {
-      return _loadedSkills
-    }
+    const seen = new Set<string>()
 
-    try {
-      const entries = readdirSync(skillsDir)
-      for (const entry of entries) {
-        const fullPath = join(skillsDir, entry)
-        if (statSync(fullPath).isDirectory()) {
-          const skill = loadSkillFromDir(fullPath, entry)
-          if (skill) _loadedSkills.push(skill)
-        }
+    for (const skillsDir of getUserSkillsDirs()) {
+      if (!existsSync(skillsDir) || !statSync(skillsDir).isDirectory()) {
+        continue
       }
-    } catch {
-      // silently skip
+
+      try {
+        const entries = readdirSync(skillsDir)
+        for (const entry of entries) {
+          if (seen.has(entry)) continue
+          const fullPath = join(skillsDir, entry)
+          if (statSync(fullPath).isDirectory()) {
+            const skill = loadSkillFromDir(fullPath, entry)
+            if (skill) {
+              _loadedSkills.push(skill)
+              seen.add(entry)
+            }
+          }
+        }
+      } catch {
+        // silently skip
+      }
     }
   }
   return _loadedSkills
