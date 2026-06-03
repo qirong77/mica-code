@@ -8,7 +8,6 @@ import { getClient } from './client.js';
 import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { toMessageParams } from '../store/conversation.js';
-import { RawStreamProcessor } from './raw-stream-processor.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
 
 let _iterationId = 0;
@@ -45,44 +44,38 @@ export class IterationRunner {
     appendSystemLog(`迭代 #${iterationId} 开始：model=${modelName} effort=${effort}`);
     this.emit('status', { type: 'connecting' });
 
-    const streamResult = await this.getAnthropicClient().messages.create(
-      {
-        model: modelName,
-        max_tokens: model.maxTokens.get(),
-        system: this.getSystemPrompt(),
-        messages: toMessageParams(messages),
-        thinking:
-          effort === 'none'
-            ? { type: 'disabled' as const }
-            : { type: 'enabled' as const, budget_tokens: EFFORT_TOKENS[effort] },
-        output_config: effort !== 'none' ? { effort } : undefined,
-        tools: getToolDefinitions(),
-        stream: true,
-      },
-    );
-
-    const rawStream = await streamResult;
-    const processor = new RawStreamProcessor(rawStream.controller);
+    const stream = this.getAnthropicClient().messages.stream({
+      model: modelName,
+      max_tokens: model.maxTokens.get(),
+      system: this.getSystemPrompt(),
+      messages: toMessageParams(messages),
+      thinking:
+        effort === 'none'
+          ? { type: 'disabled' as const }
+          : { type: 'enabled' as const, budget_tokens: EFFORT_TOKENS[effort] },
+      output_config: effort !== 'none' ? { effort } : undefined,
+      tools: getToolDefinitions(),
+    });
 
     abortSignal.addEventListener(
       'abort',
       () => {
-        rawStream.controller.abort();
+        stream.controller.abort();
       },
       { once: true },
     );
 
-    this.emit('stream:create', { stream: processor, iterationId });
+    this.emit('stream:create', { stream, iterationId });
 
     let hasToolUse = false;
     const completedToolUses: CompletedToolUse[] = [];
-    processor.on('contentBlock', (content: any) => {
-      if (content.type === 'tool_use') {
+    stream.on('contentBlock', (block: any) => {
+      if (block.type === 'tool_use') {
         hasToolUse = true;
         const tool: CompletedToolUse = {
-          id: content.id,
-          name: content.name,
-          input: content.input as Record<string, any>,
+          id: block.id,
+          name: block.name,
+          input: block.input as Record<string, any>,
         };
         completedToolUses.push(tool);
         this.emit('tool:use', {
@@ -97,8 +90,7 @@ export class IterationRunner {
 
     let finalMessage: Anthropic.Message;
     try {
-      await processor.process(rawStream);
-      finalMessage = await processor.finalMessage();
+      finalMessage = await stream.finalMessage();
     } catch (err) {
       if (abortSignal.aborted) {
         throw new Error('ABORT');
