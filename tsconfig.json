@@ -11,8 +11,8 @@
     "outDir": "dist",
     "rootDir": ".",
     "paths": {
-      "@anthropic/ink": ["./packages/ink/src/index.ts"],
-      "@anthropic/ink/*": ["./packages/ink/src/*"]
+      "@anthropic/ink": ["packages/@anthropic/ink/src/index.ts"],
+      "@anthropic/ink/*": ["packages/@anthropic/ink/src/*"]
     }
   },
   "include": ["src", "packages"]

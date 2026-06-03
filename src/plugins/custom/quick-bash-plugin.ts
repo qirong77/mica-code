@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '../../../packages/@anthropic/ink/src';
 import { spawn } from 'node:child_process';
 import { UIPanelPlugin } from '../MicaPlugin';
 import type { WritableAtom } from 'nanostores';

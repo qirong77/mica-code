@@ -1,8 +1,8 @@
-import { useContext } from 'react'
-import AppContext from '../components/AppContext.js'
+import {useContext} from 'react';
+import AppContext from '../components/AppContext.js';
 
 /**
- * `useApp` is a React hook, which exposes a method to manually exit the app (unmount).
- */
-const useApp = () => useContext(AppContext)
-export default useApp
+A React hook that returns app lifecycle methods like `exit()` and `waitUntilRenderFlush()`.
+*/
+const useApp = () => useContext(AppContext);
+export default useApp;

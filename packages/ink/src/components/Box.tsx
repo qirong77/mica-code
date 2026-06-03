@@ -1,118 +1,117 @@
-import React, { type PropsWithChildren, type Ref } from 'react';
-import type { Except } from 'type-fest';
-import type { DOMElement } from '../core/dom.js';
-import type { ClickEvent } from '../core/events/click-event.js';
-import type { FocusEvent } from '../core/events/focus-event.js';
-import type { KeyboardEvent } from '../core/events/keyboard-event.js';
-import type { Styles } from '../core/styles.js';
-import * as warn from '../core/warn.js';
+import React, {forwardRef, useContext, type PropsWithChildren} from 'react';
+import {type Except} from 'type-fest';
+import {type Styles} from '../styles.js';
+import {type DOMElement} from '../dom.js';
+import {accessibilityContext} from './AccessibilityContext.js';
+import {backgroundContext} from './BackgroundContext.js';
 
 export type Props = Except<Styles, 'textWrap'> & {
-  ref?: Ref<DOMElement>;
-  /**
-   * Tab order index. Nodes with `tabIndex >= 0` participate in
-   * Tab/Shift+Tab cycling; `-1` means programmatically focusable only.
-   */
-  tabIndex?: number;
-  /**
-   * Focus this element when it mounts. Like the HTML `autofocus`
-   * attribute — the FocusManager calls `focus(node)` during the
-   * reconciler's `commitMount` phase.
-   */
-  autoFocus?: boolean;
-  /**
-   * Fired on left-button click (press + release without drag). Only works
-   * inside `<AlternateScreen>` where mouse tracking is enabled — no-op
-   * otherwise. The event bubbles from the deepest hit Box up through
-   * ancestors; call `event.stopImmediatePropagation()` to stop bubbling.
-   */
-  onClick?: (event: ClickEvent) => void;
-  onFocus?: (event: FocusEvent) => void;
-  onFocusCapture?: (event: FocusEvent) => void;
-  onBlur?: (event: FocusEvent) => void;
-  onBlurCapture?: (event: FocusEvent) => void;
-  onKeyDown?: (event: KeyboardEvent) => void;
-  onKeyDownCapture?: (event: KeyboardEvent) => void;
-  /**
-   * Fired when the mouse moves into this Box's rendered rect. Like DOM
-   * `mouseenter`, does NOT bubble — moving between children does not
-   * re-fire on the parent. Only works inside `<AlternateScreen>` where
-   * mode-1003 mouse tracking is enabled.
-   */
-  onMouseEnter?: () => void;
-  /** Fired when the mouse moves out of this Box's rendered rect. */
-  onMouseLeave?: () => void;
+	/**
+	A label for the element for screen readers.
+	*/
+	readonly 'aria-label'?: string;
+
+	/**
+	Hide the element from screen readers.
+	*/
+	readonly 'aria-hidden'?: boolean;
+
+	/**
+	The role of the element.
+	*/
+	readonly 'aria-role'?:
+		| 'button'
+		| 'checkbox'
+		| 'combobox'
+		| 'list'
+		| 'listbox'
+		| 'listitem'
+		| 'menu'
+		| 'menuitem'
+		| 'option'
+		| 'progressbar'
+		| 'radio'
+		| 'radiogroup'
+		| 'tab'
+		| 'tablist'
+		| 'table'
+		| 'textbox'
+		| 'timer'
+		| 'toolbar';
+
+	/**
+	The state of the element.
+	*/
+	readonly 'aria-state'?: {
+		readonly busy?: boolean;
+		readonly checked?: boolean;
+		readonly disabled?: boolean;
+		readonly expanded?: boolean;
+		readonly multiline?: boolean;
+		readonly multiselectable?: boolean;
+		readonly readonly?: boolean;
+		readonly required?: boolean;
+		readonly selected?: boolean;
+	};
 };
 
 /**
- * `<Box>` is an essential Ink component to build your layout. It's like `<div style="display: flex">` in the browser.
- */
-function Box({
-  children,
-  flexWrap = 'nowrap',
-  flexDirection = 'row',
-  flexGrow = 0,
-  flexShrink = 1,
-  ref,
-  tabIndex,
-  autoFocus,
-  onClick,
-  onFocus,
-  onFocusCapture,
-  onBlur,
-  onBlurCapture,
-  onMouseEnter,
-  onMouseLeave,
-  onKeyDown,
-  onKeyDownCapture,
-  ...style
-}: PropsWithChildren<Props>): React.ReactNode {
-  // Warn if spacing values are not integers to prevent fractional layout dimensions
-  warn.ifNotInteger(style.margin, 'margin');
-  warn.ifNotInteger(style.marginX, 'marginX');
-  warn.ifNotInteger(style.marginY, 'marginY');
-  warn.ifNotInteger(style.marginTop, 'marginTop');
-  warn.ifNotInteger(style.marginBottom, 'marginBottom');
-  warn.ifNotInteger(style.marginLeft, 'marginLeft');
-  warn.ifNotInteger(style.marginRight, 'marginRight');
-  warn.ifNotInteger(style.padding, 'padding');
-  warn.ifNotInteger(style.paddingX, 'paddingX');
-  warn.ifNotInteger(style.paddingY, 'paddingY');
-  warn.ifNotInteger(style.paddingTop, 'paddingTop');
-  warn.ifNotInteger(style.paddingBottom, 'paddingBottom');
-  warn.ifNotInteger(style.paddingLeft, 'paddingLeft');
-  warn.ifNotInteger(style.paddingRight, 'paddingRight');
-  warn.ifNotInteger(style.gap, 'gap');
-  warn.ifNotInteger(style.columnGap, 'columnGap');
-  warn.ifNotInteger(style.rowGap, 'rowGap');
+`<Box>` is an essential Ink component to build your layout. It's like `<div style="display: flex">` in the browser.
+*/
+const Box = forwardRef<DOMElement, PropsWithChildren<Props>>(
+	(
+		{
+			children,
+			backgroundColor,
+			'aria-label': ariaLabel,
+			'aria-hidden': ariaHidden,
+			'aria-role': role,
+			'aria-state': ariaState,
+			...style
+		},
+		ref,
+	) => {
+		const {isScreenReaderEnabled} = useContext(accessibilityContext);
+		const label = ariaLabel ? <ink-text>{ariaLabel}</ink-text> : undefined;
+		if (isScreenReaderEnabled && ariaHidden) {
+			return null;
+		}
 
-  return (
-    <ink-box
-      ref={ref}
-      tabIndex={tabIndex}
-      autoFocus={autoFocus}
-      onClick={onClick}
-      onFocus={onFocus as unknown as (event: React.FocusEvent<Element, Element>) => void}
-      onFocusCapture={onFocusCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
-      onBlur={onBlur as unknown as (event: React.FocusEvent<Element, Element>) => void}
-      onBlurCapture={onBlurCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      onKeyDown={onKeyDown as unknown as (event: React.KeyboardEvent<Element>) => void}
-      onKeyDownCapture={onKeyDownCapture as unknown as (event: React.KeyboardEvent<Element>) => void}
-      style={{
-        flexWrap,
-        flexDirection,
-        flexGrow,
-        flexShrink,
-        ...style,
-        overflowX: style.overflowX ?? style.overflow ?? 'visible',
-        overflowY: style.overflowY ?? style.overflow ?? 'visible',
-      }}
-    >
-      {children}
-    </ink-box>
-  );
-}
+		const boxElement = (
+			<ink-box
+				ref={ref}
+				style={{
+					flexWrap: 'nowrap',
+					flexDirection: 'row',
+					flexGrow: 0,
+					flexShrink: 1,
+					...style,
+					backgroundColor,
+					overflowX: style.overflowX ?? style.overflow ?? 'visible',
+					overflowY: style.overflowY ?? style.overflow ?? 'visible',
+				}}
+				internal_accessibility={{
+					role,
+					state: ariaState,
+				}}
+			>
+				{isScreenReaderEnabled && label ? label : children}
+			</ink-box>
+		);
+
+		// If this Box has a background color, provide it to children via context
+		if (backgroundColor) {
+			return (
+				<backgroundContext.Provider value={backgroundColor}>
+					{boxElement}
+				</backgroundContext.Provider>
+			);
+		}
+
+		return boxElement;
+	},
+);
+
+Box.displayName = 'Box';
 
 export default Box;

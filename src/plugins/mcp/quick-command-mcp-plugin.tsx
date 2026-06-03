@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '../../../packages/@anthropic/ink/src';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';

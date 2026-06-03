@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "@anthropic/ink";
+import { Box, Text, useInput } from "../../../../../packages/@anthropic/ink/src";
 import React from "react";
 import { useCallback, useState } from "react";
 import { SimpleTextInput } from "./Input";

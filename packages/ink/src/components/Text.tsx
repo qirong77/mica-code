@@ -1,141 +1,145 @@
-import type { ReactNode } from 'react';
-import React from 'react';
-import type { Color, Styles, TextStyles } from '../core/styles.js';
+import React, {useContext, type ReactNode} from 'react';
+import chalk, {type ForegroundColorName} from 'chalk';
+import {type LiteralUnion} from 'type-fest';
+import colorize from '../colorize.js';
+import {type Styles} from '../styles.js';
+import {accessibilityContext} from './AccessibilityContext.js';
+import {backgroundContext} from './BackgroundContext.js';
 
-type BaseProps = {
-  /**
-   * Change text color. Accepts a raw color value (rgb, hex, ansi).
-   */
-  readonly color?: Color;
+export type Props = {
+	/**
+	A label for the element for screen readers.
+	*/
+	readonly 'aria-label'?: string;
 
-  /**
-   * Same as `color`, but for background.
-   */
-  readonly backgroundColor?: Color;
+	/**
+	Hide the element from screen readers.
+	*/
+	readonly 'aria-hidden'?: boolean;
 
-  /**
-   * Make the text italic.
-   */
-  readonly italic?: boolean;
+	/**
+	Change text color. Ink uses Chalk under the hood, so all its functionality is supported.
+	*/
+	readonly color?: LiteralUnion<ForegroundColorName, string>;
 
-  /**
-   * Make the text underlined.
-   */
-  readonly underline?: boolean;
+	/**
+	Same as `color`, but for the background.
+	*/
+	readonly backgroundColor?: LiteralUnion<ForegroundColorName, string>;
 
-  /**
-   * Make the text crossed with a line.
-   */
-  readonly strikethrough?: boolean;
+	/**
+	Dim the color (make it less bright).
+	*/
+	readonly dimColor?: boolean;
 
-  /**
-   * Inverse background and foreground colors.
-   */
-  readonly inverse?: boolean;
+	/**
+	Make the text bold.
+	*/
+	readonly bold?: boolean;
 
-  /**
-   * This property tells Ink to wrap or truncate text if its width is larger than container.
-   * If `wrap` is passed (by default), Ink will wrap text and split it into multiple lines.
-   * If `truncate-*` is passed, Ink will truncate text instead, which will result in one line of text with the rest cut off.
-   */
-  readonly wrap?: Styles['textWrap'];
+	/**
+	Make the text italic.
+	*/
+	readonly italic?: boolean;
 
-  readonly children?: ReactNode;
+	/**
+	Make the text underlined.
+	*/
+	readonly underline?: boolean;
+
+	/**
+	Make the text crossed out with a line.
+	*/
+	readonly strikethrough?: boolean;
+
+	/**
+	Inverse background and foreground colors.
+	*/
+	readonly inverse?: boolean;
+
+	/**
+	This property tells Ink to wrap or truncate text if its width is larger than the container. If `wrap` is passed (the default), Ink will wrap text and split it into multiple lines. If `hard` is passed, Ink will fill each line to the full column width, breaking words as necessary. If `truncate-*` is passed, Ink will truncate text instead, resulting in one line of text with the rest cut off.
+	*/
+	readonly wrap?: Styles['textWrap'];
+
+	readonly children?: ReactNode;
 };
 
 /**
- * Bold and dim are mutually exclusive in terminals.
- * This type ensures you can use one or the other, but not both.
- */
-type WeightProps = { bold?: never; dim?: never } | { bold: boolean; dim?: never } | { dim: boolean; bold?: never };
-
-export type Props = BaseProps & WeightProps;
-
-const memoizedStylesForWrap: Record<NonNullable<Styles['textWrap']>, Styles> = {
-  wrap: {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'wrap',
-  },
-  'wrap-trim': {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'wrap-trim',
-  },
-  end: {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'end',
-  },
-  middle: {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'middle',
-  },
-  'truncate-end': {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'truncate-end',
-  },
-  truncate: {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'truncate',
-  },
-  'truncate-middle': {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'truncate-middle',
-  },
-  'truncate-start': {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexDirection: 'row',
-    textWrap: 'truncate-start',
-  },
-} as const;
-
-/**
- * This component can display text, and change its style to make it colorful, bold, underline, italic or strikethrough.
- */
+This component can display text and change its style to make it bold, underlined, italic, or strikethrough.
+*/
 export default function Text({
-  color,
-  backgroundColor,
-  bold,
-  dim,
-  italic = false,
-  underline = false,
-  strikethrough = false,
-  inverse = false,
-  wrap = 'wrap',
-  children,
-}: Props): React.ReactNode {
-  if (children === undefined || children === null) {
-    return null;
-  }
+	color,
+	backgroundColor,
+	dimColor = false,
+	bold = false,
+	italic = false,
+	underline = false,
+	strikethrough = false,
+	inverse = false,
+	wrap = 'wrap',
+	children,
+	'aria-label': ariaLabel,
+	'aria-hidden': ariaHidden = false,
+}: Props) {
+	const {isScreenReaderEnabled} = useContext(accessibilityContext);
+	const inheritedBackgroundColor = useContext(backgroundContext);
+	const childrenOrAriaLabel =
+		isScreenReaderEnabled && ariaLabel ? ariaLabel : children;
 
-  // Build textStyles object with only the properties that are set
-  const textStyles: TextStyles = {
-    ...(color && { color }),
-    ...(backgroundColor && { backgroundColor }),
-    ...(dim && { dim }),
-    ...(bold && { bold }),
-    ...(italic && { italic }),
-    ...(underline && { underline }),
-    ...(strikethrough && { strikethrough }),
-    ...(inverse && { inverse }),
-  };
+	if (childrenOrAriaLabel === undefined || childrenOrAriaLabel === null) {
+		return null;
+	}
 
-  return (
-    <ink-text style={memoizedStylesForWrap[wrap]} textStyles={textStyles}>
-      {children}
-    </ink-text>
-  );
+	const transform = (children: string): string => {
+		if (dimColor) {
+			children = chalk.dim(children);
+		}
+
+		if (color) {
+			children = colorize(children, color, 'foreground');
+		}
+
+		// Use explicit backgroundColor if provided, otherwise use inherited from parent Box
+		const effectiveBackgroundColor =
+			backgroundColor ?? inheritedBackgroundColor;
+		if (effectiveBackgroundColor) {
+			children = colorize(children, effectiveBackgroundColor, 'background');
+		}
+
+		if (bold) {
+			children = chalk.bold(children);
+		}
+
+		if (italic) {
+			children = chalk.italic(children);
+		}
+
+		if (underline) {
+			children = chalk.underline(children);
+		}
+
+		if (strikethrough) {
+			children = chalk.strikethrough(children);
+		}
+
+		if (inverse) {
+			children = chalk.inverse(children);
+		}
+
+		return children;
+	};
+
+	if (isScreenReaderEnabled && ariaHidden) {
+		return null;
+	}
+
+	return (
+		<ink-text
+			style={{flexGrow: 0, flexShrink: 1, flexDirection: 'row', textWrap: wrap}}
+			internal_transform={transform}
+		>
+			{childrenOrAriaLabel}
+		</ink-text>
+	);
 }

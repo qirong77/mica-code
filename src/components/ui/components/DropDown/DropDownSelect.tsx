@@ -1,4 +1,4 @@
-import { Box } from '@anthropic/ink';
+import { Box } from '../../../../../packages/@anthropic/ink/src';
 import React, { useMemo } from 'react';
 import { useScheduleState } from '../../hooks';
 import { CommandDropdown } from './CommandDropdown';

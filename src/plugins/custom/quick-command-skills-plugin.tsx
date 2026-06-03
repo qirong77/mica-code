@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '../../../packages/@anthropic/ink/src'
 import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'

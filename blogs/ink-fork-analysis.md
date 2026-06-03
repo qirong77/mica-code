@@ -2,7 +2,7 @@
 
 > 作为一个前端开发，你可能觉得"在终端里渲染 React 组件"就是把 JSX 转成字符串然后 `console.log`。直到你发现**终端不是浏览器**——它没有 CSS、没有 DOM、没有 `requestAnimationFrame`、甚至没有"像素"的概念。
 
-mica-code 的终端 UI 基于开源 [ink](https://github.com/vadimdemedes/ink) 库，但我们 fork 了一个自己的版本（`packages/ink/`，以 `@anthropic/ink` 发布）。这篇文章从前端工程师的视角出发，逐层解释我们为什么 fork，以及我们在每一层做了什么优化。
+mica-code 的终端 UI 基于开源 [ink](https://github.com/vadimdemedes/ink) 库，但我们 fork 了一个自己的版本（`@anthropic/ink`）。这篇文章从前端工程师的视角出发，逐层解释我们为什么 fork，以及我们在每一层做了什么优化。
 
 本文假设你熟悉 React 的基本概念（组件、JSX、虚拟 DOM、state 更新），但对终端工作原理不熟悉。先讲终端基础，再讲每一层优化。
 

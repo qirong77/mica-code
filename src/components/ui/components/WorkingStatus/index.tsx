@@ -1,4 +1,4 @@
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '../../../../../packages/@anthropic/ink/src/index.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import {

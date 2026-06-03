@@ -1,4 +1,4 @@
-import { createRoot } from '@anthropic/ink';
+import { createRoot } from '../../../packages/@anthropic/ink/src/index.js';
 import React from 'react';
 import { App } from './app.js';
 

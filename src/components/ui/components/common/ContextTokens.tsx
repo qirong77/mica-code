@@ -1,4 +1,4 @@
-import { Text } from '@anthropic/ink';
+import { Text } from '../../../../../packages/@anthropic/ink/src/index.js';
 import React from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { contextSizeAtom } from '../../../../store/conversation.js';

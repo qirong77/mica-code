@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, useTerminalTitle } from '@anthropic/ink';
+import { Box, useTerminalTitle } from '../../../packages/@anthropic/ink/src/index.js';
 
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
 import { ConversationUI } from './components/Conversation/index.js';

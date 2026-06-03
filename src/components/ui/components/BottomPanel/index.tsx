@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box } from '@anthropic/ink';
+import { Box } from '../../../../../packages/@anthropic/ink/src/index.js';
 import { useScheduleState } from '../../hooks/useScheduleState.js';
 import {  systemLogVisibleAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';

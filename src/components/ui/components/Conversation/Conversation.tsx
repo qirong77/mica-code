@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '../../../../../packages/@anthropic/ink/src/index.js';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../../data.js';
 import { messagesAtom } from '../../../../store/conversation.js';

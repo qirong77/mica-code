@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '../../../../../packages/@anthropic/ink/src';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 

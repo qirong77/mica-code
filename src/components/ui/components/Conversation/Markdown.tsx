@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Ansi, stringWidth, wrapAnsi, useInput, wrappedRender } from '@anthropic/ink';
+import { Box, Text, Ansi, stringWidth, wrapAnsi, useInput, wrappedRender } from '../../../../../packages/@anthropic/ink/src';
 import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
