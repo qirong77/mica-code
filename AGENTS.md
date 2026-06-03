@@ -68,3 +68,15 @@ AGENTS.md                   # Project instructions, hot-reloadable (injected int
 ### Environment Variables
 
 See `.env.example`. Key vars: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (defaults to DeepSeek endpoint), `ANTHROPIC_MODEL`, `ANTHROPIC_MAX_TOKENS`.
+
+## Blog 记录
+
+`blogs/` 目录用于记录 mica-code 的开发过程，主题是"从 0 到 1 开发一个 code agent"。
+
+完成一个有价值的任务后，如果涉及以下情况，可以询问用户是否需要写一篇 Blog 记录：
+- 设计了一个值得复用的模式或架构决策（如中间件链、插件生命周期）
+- 解决了一个非显而易见的 bug 或技术难题
+- 引入了新的子系统或模块（如 MCP 集成、Skills 机制）
+- 对某个核心流程做了较大重构
+
+询问时一句话即可，例如："这个改动涉及 XX 设计，要不要写篇 Blog 记录一下？"。不要主动帮写，等用户确认后再动手。
