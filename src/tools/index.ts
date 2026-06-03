@@ -48,6 +48,12 @@ export function getToolDefinitions(): Anthropic.Tool[] {
 export async function executeTool(name: string, input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
   const tool = getAllTools().find((t) => t.name === name);
   if (!tool) return `未知工具: ${name}`;
+
+  const validation = tool.validateInput(input);
+  if (!validation.valid) {
+    return `工具 ${name} 输入校验失败：${validation.message}`;
+  }
+
   return await tool.executeTimed(input, callbacks);
 }
 

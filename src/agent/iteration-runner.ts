@@ -4,11 +4,11 @@ import { getToolDefinitions } from '../tools/index';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog } from '../store/logAtom.js';
 import { planModeAtom } from '../store/ui-state.js';
-import { MessageStream } from '@anthropic-ai/sdk/lib/MessageStream.mjs';
 import { getClient } from './client.js';
 import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { toMessageParams } from '../store/conversation.js';
+import { RawStreamProcessor } from './raw-stream-processor.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
 
 let _iterationId = 0;
@@ -45,32 +45,38 @@ export class IterationRunner {
     appendSystemLog(`迭代 #${iterationId} 开始：model=${modelName} effort=${effort}`);
     this.emit('status', { type: 'connecting' });
 
-    const stream = this.getAnthropicClient().messages.stream({
-      model: modelName,
-      max_tokens: model.maxTokens.get(),
-      system: this.getSystemPrompt(),
-      messages: toMessageParams(messages),
-      thinking:
-        effort === 'none'
-          ? { type: 'disabled' as const }
-          : { type: 'enabled' as const, budget_tokens: EFFORT_TOKENS[effort] },
-      output_config: effort !== 'none' ? { effort } : undefined,
-      tools: getToolDefinitions(),
-    }) as MessageStream<null>;
+    const streamResult = await this.getAnthropicClient().messages.create(
+      {
+        model: modelName,
+        max_tokens: model.maxTokens.get(),
+        system: this.getSystemPrompt(),
+        messages: toMessageParams(messages),
+        thinking:
+          effort === 'none'
+            ? { type: 'disabled' as const }
+            : { type: 'enabled' as const, budget_tokens: EFFORT_TOKENS[effort] },
+        output_config: effort !== 'none' ? { effort } : undefined,
+        tools: getToolDefinitions(),
+        stream: true,
+      },
+    );
+
+    const rawStream = await streamResult;
+    const processor = new RawStreamProcessor(rawStream.controller);
 
     abortSignal.addEventListener(
       'abort',
       () => {
-        stream.controller.abort();
+        rawStream.controller.abort();
       },
       { once: true },
     );
 
-    this.emit('stream:create', { stream, iterationId });
+    this.emit('stream:create', { stream: processor, iterationId });
 
     let hasToolUse = false;
     const completedToolUses: CompletedToolUse[] = [];
-    stream.on('contentBlock', (content) => {
+    processor.on('contentBlock', (content: any) => {
       if (content.type === 'tool_use') {
         hasToolUse = true;
         const tool: CompletedToolUse = {
@@ -91,7 +97,8 @@ export class IterationRunner {
 
     let finalMessage: Anthropic.Message;
     try {
-      finalMessage = await stream.finalMessage();
+      await processor.process(rawStream);
+      finalMessage = await processor.finalMessage();
     } catch (err) {
       if (abortSignal.aborted) {
         throw new Error('ABORT');

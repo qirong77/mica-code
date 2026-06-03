@@ -1,0 +1,1 @@
+npx skills add https://github.com/nashsu/llm_wiki_skill.git --skill llm-wiki -g -y  
