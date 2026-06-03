@@ -3,6 +3,7 @@ import { Box, Text } from '@anthropic/ink'
 import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'
+import { Markdown } from '../../components/ui/components/Conversation/Markdown'
 
 interface PanelState {
   view: 'list' | 'detail'
@@ -97,17 +98,7 @@ function SkillDetail({ skill }: { skill: Skill }) {
         </Text>
       </Box>
       <Box paddingLeft={2}>
-        {skill.content
-          .split('\n')
-          .slice(0, maxPreviewLines)
-          .map((line, i) => (
-            <Text key={i} dimColor>
-              {line || ' '}
-            </Text>
-          ))}
-        {skill.content.split('\n').length > maxPreviewLines && (
-          <Text dimColor>…</Text>
-        )}
+        <Markdown>{skill.content}</Markdown>
       </Box>
     </Box>
   )
