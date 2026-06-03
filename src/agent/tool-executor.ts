@@ -1,8 +1,10 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { executeTool } from '../tools/index.js';
-import { AgentSession } from './agent-session.js';
+import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/ui-state.js';
 import type { CompletedToolUse } from './types.js';
+
+const MAX_TOOL_RECORDS = 100;
 
 export type ToolExecutorCallbacks = {
   onToolUse: (payload: {
@@ -15,8 +17,6 @@ export type ToolExecutorCallbacks = {
   onToolOutput: (payload: { toolUseId: string; chunk: string }) => void;
   onStatus: (status: WorkingStatus) => void;
 };
-
-const sessionForRecords = new AgentSession();
 
 export class ToolExecutor {
   constructor(private callbacks: ToolExecutorCallbacks) {}
@@ -50,11 +50,11 @@ export class ToolExecutor {
           },
         });
         const elapsed = Date.now() - startTime;
-        sessionForRecords.addToolRecord({
-          toolName: tool.name,
-          toolInput: tool.input,
-          elapsedMs: elapsed,
-        });
+        const records = sessionToolRecordsAtom.get();
+        const next = [...records, { toolName: tool.name, toolInput: tool.input, elapsedMs: elapsed }];
+        sessionToolRecordsAtom.set(
+          next.length > MAX_TOOL_RECORDS ? next.slice(-MAX_TOOL_RECORDS) : next,
+        );
         return { tool, result, elapsed };
       }),
     );
