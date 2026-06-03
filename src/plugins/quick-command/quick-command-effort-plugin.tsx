@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '../../../packages/@anthropic/ink/src';
+import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import type { EffortLevel } from '../../store/config.js';
 import { model } from '../../store/config.js';

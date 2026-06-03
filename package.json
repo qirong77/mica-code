@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "packages/*/*"],
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

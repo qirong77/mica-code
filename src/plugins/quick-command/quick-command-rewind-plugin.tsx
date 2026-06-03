@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '../../../packages/@anthropic/ink/src';
+import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
 

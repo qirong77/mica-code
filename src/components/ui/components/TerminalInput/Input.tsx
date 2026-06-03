@@ -22,7 +22,7 @@ import {
   useTerminalFocus,
   stringWidth,
   wrapAnsi,
-} from '../../../../../packages/@anthropic/ink/src';
+} from '@anthropic/ink';
 
 // =============================================================================
 // 2. 工具函数 — grapheme 分段

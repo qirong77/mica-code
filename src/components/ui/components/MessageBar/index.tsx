@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Text } from '../../../../../packages/@anthropic/ink/src/index.js';
+import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
 import { dropdown } from '../../../../store/ui-state.js';
 

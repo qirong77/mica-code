@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, ScrollBox, useTerminalSize } from '../../../../../packages/@anthropic/ink/src/index.js';
+import { Text, ScrollBox, useTerminalSize } from '@anthropic/ink';
 import { useScheduleState } from '../../hooks/useScheduleState.js';
 import { thinkingTextAtom } from '../../../../store/ui-state.js';
 import { systemLogAtom } from '../../../../store/logAtom.js';

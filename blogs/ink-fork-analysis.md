@@ -54,11 +54,11 @@ rootNode.yogaNode.calculateLayout(terminalColumns)
 
 这会遍历整棵 Yoga 节点树，根据 Flexbox 规则（`flexDirection`、`flexGrow`、`alignItems` 等）计算出每个节点的位置 (`left`, `top`) 和尺寸 (`width`, `height`)。
 
-**关键差异**：开源 ink 使用 Facebook 的 Yoga WASM 二进制（通过 `yoga-layout` npm 包）。我们的 fork 删除了这个依赖，用了一个自研的纯 TypeScript 实现（`yoga-layout/index.ts`，约 2500 行）。为什么？
+**关键差异**：开源 ink 使用 Facebook 的 Yoga WASM 二进制（通过 `yoga-layout` npm 包）。我们的 fork 删除了这个依赖，用了一个纯 TypeScript 实现（`yoga-layout/index.ts`，约 2500 行）。为什么？
 
 - **启动速度**：省去 WASM 加载时间（实测约 8-15ms）
-- **性能可控**：自研实现针对 ink 的实际使用场景做了大量裁剪和优化——只实现 ink 真正用到的 Flexbox 子集，删掉了 `aspect-ratio`、`box-sizing: content-box`、RTL 等不需要的特性
-- **缓存机制**：自研实现添加了多层布局缓存（单槽 `_hasL`、多槽 `_cIn/_cOut`、flex-basis 缓存 `_fbBasis`），脏节点传播时可以跳过大量干净的子树。500 个消息的 ScrollBox + 一个脏叶子节点，重新布局从 76k 次 `layoutNode` 调用降至 4k 次
+- **性能可控**：实现针对 ink 的实际使用场景做了大量裁剪和优化——只实现 ink 真正用到的 Flexbox 子集，删掉了 `aspect-ratio`、`box-sizing: content-box`、RTL 等不需要的特性
+- **缓存机制**：实现添加了多层布局缓存（单槽 `_hasL`、多槽 `_cIn/_cOut`、flex-basis 缓存 `_fbBasis`），脏节点传播时可以跳过大量干净的子树。500 个消息的 ScrollBox + 一个脏叶子节点，重新布局从 76k 次 `layoutNode` 调用降至 4k 次
 
 **类比前端**：就像你 fork 了 `postcss` 然后移除所有不用的插件，加了自己的缓存层——体积更小、跑得更快。
 

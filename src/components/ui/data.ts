@@ -1,4 +1,4 @@
-import type { Key } from '../../../packages/@anthropic/ink/src/index.js';
+import type { Key } from '@anthropic/ink';
 import type React from 'react';
 
 // ── Theme ───────────────────────────────────────────────

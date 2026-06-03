@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Box, Text, ScrollBox } from '../../../packages/@anthropic/ink/src';
-import type { DOMElement, ScrollBoxHandle } from '../../../packages/@anthropic/ink/src';
+import { Box, Text, ScrollBox } from '@anthropic/ink';
+import type { DOMElement, ScrollBoxHandle } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';

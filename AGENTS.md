@@ -5,8 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 - `bun run dev` — Run in development mode (executes TS directly)
-- `bun run build` — Build bundle with `bun build` (not compile)
-- `bun run build:compile` — Build native binary via `bun build --compile` (see `scripts/build.mjs`)
+- `bun run build` — Build native binary via `bun build --compile` (see `scripts/build.mjs`)
 - `bun run format` — Format all files with prettier
 - `bun run format:check` — Check formatting
 
@@ -14,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-Mica is a lightweight, plugin-based code agent CLI using **Bun** + **TypeScript** + **React** (custom fork of Ink at `packages/ink/`, imported as `@anthropic/ink`) + **Anthropic SDK**.
+Mica is a lightweight, plugin-based code agent CLI using **Bun** + **TypeScript** + **React** (custom fork of Ink at `packages/@anthropic/ink/`, imported as `@anthropic/ink`) + **Anthropic SDK**.
 
 ### Project Structure
 
@@ -39,7 +38,9 @@ src/
 ├── store/                # nanostores atoms: config, conversation, ui-state, log, stream-handlers
 ├── components/ui/        # Ink-based React terminal UI (app, conversation, input, dropdown, etc.)
 └── prompts/              # System prompt builder: system.md + AGENTS.md (project instructions)
-packages/ink/             # Custom Ink fork — terminal rendering library
+packages/
+├── @anthropic/ink/       # Custom Ink fork — terminal rendering library (workspace dependency)
+└── ink/                  # Reference-only Ink source, not part of the build
 AGENTS.md                   # Project instructions, hot-reloadable (injected into system prompt at startup)
 ```
 
@@ -52,6 +53,9 @@ AGENTS.md                   # Project instructions, hot-reloadable (injected int
 - **Rendering**: All terminal output goes through Ink components. No `console.log` (except fatal boot errors via `console.error`). No `process.stderr.write`.
 - **Config persistence**: `createPersistedAtom()` in `src/store/config.ts` saves model/effort choices to disk.
 - **Project instructions**: Edit `AGENTS.md` to change agent behavior — it's read at startup and injected into the system prompt via `<project-instructions>` tag.
+- **Ink imports**: All `src/` imports from Ink use `@anthropic/ink` (tsconfig paths alias). Never use relative paths to `packages/@anthropic/ink/`. `packages/ink/` is a reference copy only — not included in build or type-check.
+- **Workspaces**: `packages/@anthropic/ink` is a nested workspace package. `package.json` uses `"workspaces": ["packages/*", "packages/*/*"]` to capture both unscoped and scoped packages.
+- **tsconfig include**: Only `src` and `packages/@anthropic/ink` — `packages/ink` is excluded to avoid type errors from its test files.
 
 ### Data Flow
 

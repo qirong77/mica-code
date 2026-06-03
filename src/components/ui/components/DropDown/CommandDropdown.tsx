@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Text, type Color, stringWidth } from '../../../../../packages/@anthropic/ink/src/index.js';
+import { Box, Text, type Color, stringWidth } from '@anthropic/ink';
 import { C } from '../../data.js';
 
 export interface DropdownItem {

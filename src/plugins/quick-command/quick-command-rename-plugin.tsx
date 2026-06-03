@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '../../../packages/@anthropic/ink/src';
+import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { Spin } from '../../components/ui/components/common/Spin.js';
 import { getClient } from '../../agent/client.js';
