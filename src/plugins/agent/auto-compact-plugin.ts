@@ -1,8 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import type { WritableAtom } from 'nanostores';
 import { MicaPlugin } from '../MicaPlugin';
-import { getContextUsage } from '../../utils/getContextUsage';
+import { getTotalBilledTokens } from '../../utils/getContextUsage';
 import { getClient } from '../../agent/client';
 import { model } from '../../store/config.js';
+import { createPersistedAtom } from '../../store/createPersistedAtom';
+import { session } from '../../store/ui-state';
 import { toMessageParams, type ConversationMessage } from '../../store/conversation.js';
 
 const CONTEXT_THRESHOLD = 0.4;
@@ -11,15 +14,39 @@ const KEEP_RECENT_COUNT = 6;
 const MIN_MESSAGES_TO_COMPACT = 8;
 const SUMMARY_MAX_TOKENS = 8192;
 
+const sessionTimeAtoms = new Map<string, WritableAtom<number>>();
+
+function getSessionTimeAtom(sessionId: string): WritableAtom<number> {
+  let atom = sessionTimeAtoms.get(sessionId);
+  if (!atom) {
+    atom = createPersistedAtom(`compact_lastUserTime_${sessionId}`, 0);
+    sessionTimeAtoms.set(sessionId, atom);
+  }
+  return atom;
+}
+
 export class AutoCompactPlugin extends MicaPlugin {
-  private lastUserMessageTime = Date.now();
+  private lastUserMessageTimeAtom: WritableAtom<number> | null = null;
   private isCompressing = false;
 
   onInstall(): void {
+    const sid = session.currentId.get();
+    if (sid) {
+      this.lastUserMessageTimeAtom = getSessionTimeAtom(sid);
+    }
+
+    session.currentId.subscribe((newId) => {
+      if (newId && !this.lastUserMessageTimeAtom) {
+        this.lastUserMessageTimeAtom = getSessionTimeAtom(newId);
+      }
+    });
+
     this.agent.agentTurn.use(async (userInput, next, onIteration) => {
+      const timeAtom = this.lastUserMessageTimeAtom;
       const now = Date.now();
-      const timeSinceLastUser = now - this.lastUserMessageTime;
-      this.lastUserMessageTime = now;
+      const lastTime = timeAtom?.get() ?? 0;
+      const timeSinceLastUser = lastTime > 0 ? now - lastTime : 0;
+      if (timeAtom) timeAtom.set(now);
 
       if (this.isCompressing) return next(userInput, onIteration);
 
@@ -29,7 +56,7 @@ export class AutoCompactPlugin extends MicaPlugin {
         return next(userInput, onIteration);
       }
 
-      const contextUsage = getContextUsage(messages);
+      const contextUsage = getTotalBilledTokens(messages);
       const maxContext = model.contextWindowSize.get();
       const contextRatio = maxContext > 0 ? contextUsage / maxContext : 0;
 
@@ -65,7 +92,7 @@ export class AutoCompactPlugin extends MicaPlugin {
         session.replaceMessages(compacted);
         this.removeMessage(msgId);
 
-        const newUsage = getContextUsage(compacted);
+        const newUsage = getTotalBilledTokens(compacted);
         const newRatio = maxContext > 0 ? (newUsage / maxContext * 100).toFixed(1) : '?';
         this.showMessage(
           `压缩完成：${toCompress.length} 条消息 → 1 条摘要，上下文使用 ${newRatio}%`,
