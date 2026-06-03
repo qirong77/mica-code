@@ -30,7 +30,7 @@ interface ApiModelListResponse {
   object: string;
 }
 
-const MODEL_OPTIONS_FALLBACK: ModelOption[] = [{ name: 'Sonnet 4.6', label: 'Sonnet 4.6' }];
+const MODEL_OPTIONS_FALLBACK: ModelOption[] = [{ name: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' }];
 
 export interface EffortOption {
   name: EffortLevel;
