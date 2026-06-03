@@ -24,101 +24,104 @@ mica-code 的终端 UI 基于开源 [ink](https://github.com/vadimdemedes/ink) �
 
 ---
 
-## 第一章：整个渲染流水线（端到端概览）
+## 第一章：从 setState 到屏幕上的字符
 
-在深入每一层优化之前，先理解从 React 状态变化到终端显示字符的全过程。
+在你深入后面的优化章节之前，先把整个流程串起来：当你调用 `setState({ text: 'hello' })` 之后，终端怎么知道要在哪个位置显示什么文字？
 
-### 1.1 React 状态变化 → reconciler
+### 1.1 React 算完谁变了，通知 ink
 
-当你调用 `setState`，React 的 reconciler（和 React DOM 用的是同一个 `react-reconciler`）计算哪些 Fiber 节点需要更新。然后调用 ink 自定义的 host config：
-
-```typescript
-// 不是 document.createElement，而是 createNode('ink-box')
-createInstance('ink-box', props, root, hostContext)
-// 不是 element.appendChild，而是 appendChildNode(parent, child)
-appendChild(parentNode, childNode)
-// 不是 element.setAttribute，而是 setAttribute(node, key, value)
-commitUpdate(node, oldProps, newProps)
-```
-
-这个 host config 把 React 的更新操作"翻译"成对虚拟终端树的操作。虚拟终端树由 `DOMElement` 节点组成——和浏览器的 DOM 类似，但每个节点附带了 Yoga 布局信息。
-
-### 1.2 布局计算（Yoga Flexbox）
-
-Reconciler 的 `resetAfterCommit` 钩子触发布局计算。调用 `rootNode.onComputeLayout()`，它内部执行：
+`setState` 触发后，React 的核心引擎（reconciler）开始计算哪些组件需要更新。这个 reconciler 和浏览器里的 React DOM 用的是同一个 `react-reconciler` 包，但它不操作真实的 DOM，而是调用 ink 提供的一套"翻译函数"：
 
 ```typescript
-rootNode.yogaNode.setWidth(terminalColumns)
-rootNode.yogaNode.calculateLayout(terminalColumns)
+// 浏览器里：document.createElement('div')
+// ink 里：createInstance('ink-box', props, root, hostContext)
+
+// 浏览器里：parent.appendChild(child)
+// ink 里：appendChild(parentNode, childNode)
+
+// 浏览器里：element.setAttribute('title', 'hello')
+// ink 里：commitUpdate(node, oldProps, newProps)
 ```
 
-这会遍历整棵 Yoga 节点树，根据 Flexbox 规则（`flexDirection`、`flexGrow`、`alignItems` 等）计算出每个节点的位置 (`left`, `top`) 和尺寸 (`width`, `height`)。
+这套函数叫做 host config。它把 React 的"增删改查"操作翻译成对一棵虚拟终端树的操作。这棵树由 `DOMElement` 节点组成——你可以把它理解成浏览器 DOM 的终端版本，每个节点附带布局信息。
 
-**关键差异**：开源 ink 使用 Facebook 的 Yoga WASM 二进制（通过 `yoga-layout` npm 包）。我们的 fork 删除了这个依赖，用了一个纯 TypeScript 实现（`yoga-layout/index.ts`，约 2500 行）。为什么？
+### 1.2 算出每个组件放在哪、占多大
 
-- **启动速度**：省去 WASM 加载时间（实测约 8-15ms）
-- **性能可控**：实现针对 ink 的实际使用场景做了大量裁剪和优化——只实现 ink 真正用到的 Flexbox 子集，删掉了 `aspect-ratio`、`box-sizing: content-box`、RTL 等不需要的特性
-- **缓存机制**：实现添加了多层布局缓存（单槽 `_hasL`、多槽 `_cIn/_cOut`、flex-basis 缓存 `_fbBasis`），脏节点传播时可以跳过大量干净的子树。500 个消息的 ScrollBox + 一个脏叶子节点，重新布局从 76k 次 `layoutNode` 调用降至 4k 次
+React 更新完虚拟树后，`resetAfterCommit` 钩子触发布局计算。ink 用 Yoga（Facebook 的 Flexbox 引擎）来算位置和尺寸：
 
-**类比前端**：就像你 fork 了 `postcss` 然后移除所有不用的插件，加了自己的缓存层——体积更小、跑得更快。
+```typescript
+rootNode.yogaNode.setWidth(terminalColumns)     // 告诉 Yoga 终端有多宽
+rootNode.yogaNode.calculateLayout(terminalColumns) // 开算
+```
 
-### 1.3 渲染到 Screen Buffer
+Yoga 会遍历整棵节点树，根据 Flexbox 规则（`flexDirection`、`flexGrow`、`alignItems` 等）算出每个节点的 `left`、`top`、`width`、`height`。
 
-布局计算完成后，`onRender` 被调度执行。核心流程：
+**Fork 的 Yoga 和开源有什么不同？**
+
+开源 ink 用 Facebook 的 Yoga，但它是以 WASM 二进制文件的形式加载的。Fork 删掉了这个依赖，用了一个纯 TypeScript 实现（`yoga-layout/index.ts`，约 2500 行）。
+
+为什么要自己写？
+
+- **启动更快**：省去 WASM 加载时间，实测约 8-15ms
+- **只保留需要的功能**：Fork 的 Yoga 只实现了 ink 真正用到的 Flexbox 子集，删掉了 `aspect-ratio`、`box-sizing: content-box`、RTL（从右到左的文字排版）等用不上的特性
+- **加了多层缓存**：引入了单槽缓存 `_hasL`、多槽缓存 `_cIn/_cOut`、flex-basis 缓存 `_fbBasis`。遇到脏节点时，大量干净的子树可以跳过。实测效果：500 条消息的 ScrollBox 里只有一个叶子节点变了，重新布局的调用次数从 76000 次降到了 4000 次
+
+### 1.3 把组件"画"到 Screen Buffer 上
+
+布局算完了，该"画"了。`onRender` 被触发，遍历整棵虚拟终端树，把每个节点的文字、样式、位置转化成对 Screen Buffer 的写入操作：
 
 ```
 renderNodeToOutput(rootNode, output, { prevScreen })
-  → 遍历虚拟终端树
-  → 每个 Text 组件转换为一串 cell 写入操作
-  → 每个 Box 组件可能触发 blit（重用缓存）、clear（擦除旧区域）
-  → 所有操作收集在 Output 的操作队列里
-  → output.get() 将所有操作应用到 Screen buffer
+  → 遇到 Text 组件：算它能铺满几个 cell，把字符和样式写进对应 cell
+  → 遇到 Box 组件：如果没变，直接 blit（从缓存拷贝一块连续内存）
+                   如果变了或删了，擦除旧区域，写入新内容
+  → 所有操作收集到 Output 队列里
+  → output.get() 把队列里的所有操作合起来，一次性应用到 Screen Buffer
 ```
 
-**Screen buffer** 是这章最核心的概念。它是渲染的"目标画布"——一个二维数组，每个元素代表一个 cell 的最终状态。后续的 diff、选择、高亮都在这块 buffer 上操作。
+**Screen Buffer 就是渲染的"画布"**。它是一个二维数组，每个元素代表一个 cell 的最终状态——包含显示什么字符、什么颜色、是否粗体等。后面的 diff（对比新旧两帧）、文本选择、搜索高亮，都是在这块 buffer 上操作的。
 
-### 1.4 Diff 计算
+### 1.4 对比新旧两帧，找出真正变了的部分
 
-拿到当前帧的 Screen buffer 后，`log-update.ts` 对比上一帧的 buffer：
+拿到当前帧的 Screen Buffer 后，和上一帧做逐 cell 对比：
 
 ```typescript
 diffEach(prev.screen, next.screen, (x, y, removed, added) => {
-  // 对每个变化的 cell，生成一个 Patch
-  // Patch 可以是：移动光标、切换样式、写字符、清屏...
+  // 对每个变化的 cell，生成一个操作指令（Patch）
+  // Patch 类型：移动光标到 (x,y)、切换样式、写一个字符、清除区域...
 })
 ```
 
-结果是一个 `Patch[]` 数组——最小化的终端操作序列。
+结果是一个 `Patch[]` 数组——只包含"真正变了"的 cell，不是全部 cell。
 
-### 1.5 写入终端
+### 1.5 把操作指令序列化成 ANSI 字节流，写入终端
 
-`optimize()` 合并连续的同类型 Patch（例如两个相邻的 `cursorMove` 合并为一个），然后 `writeDiffToTerminal()` 把所有 Patch 序列化为 ANSI 字节流写入 `stdout`：
+`Patch[]` 还不能直接送进终端。先做一轮合并优化（两个连续的"移动光标"合成一个），然后序列化成 ANSI 转义序列字符串，写入 `stdout`：
 
 ```typescript
-let buffer = BSU   // 开始同步更新（后面会解释）
+let buffer = BSU   // 告诉终端："先别急着显示，后面还有"
 for (const patch of optimized) {
-  buffer += serializePatch(patch)
+  buffer += serializePatch(patch)  // 每个 Patch → 一段 ANSI 序列
 }
-buffer += ESU      // 结束同步更新
+buffer += ESU      // "好了，现在一起显示出来"
 terminal.stdout.write(buffer)
 ```
 
-终端收到字节流后解析执行——移动光标、设置颜色、写字符——屏幕上就出现了更新后的 UI。
+终端收到这串字节流后，解析执行——移动光标到指定位置、切换颜色、写字符——屏幕上的 UI 就更新了。
 
-### 1.6 缓冲区交换
+### 1.6 双缓冲：画和看分开
 
-最后一步，双缓冲 swap：
+最后一步，交换前后帧：
 
 ```typescript
-this.backFrame = this.frontFrame
-this.frontFrame = frame   // frame 是本帧的渲染结果
+this.backFrame = this.frontFrame    // 把"当前正在显示的"存起来
+this.frontFrame = frame             // 把"刚画好的"设为当前帧
 ```
 
-`frontFrame` 是"当前显示在屏幕上的那一帧"，`backFrame` 是下一帧复用内存的备用 buffer。下一帧渲染时：
-- `backFrame` 被 `resetScreen()` 清零，用于承载新的渲染结果
-- `frontFrame`（即上一帧的结果）作为 diff 的参考
+- `frontFrame`：当前显示在屏幕上的那一帧。下一轮 diff 时用它做参考。
+- `backFrame`：备用 buffer。下一帧渲染前先用 `resetScreen()` 清零，然后承载新的渲染结果，画完后 swap 变成 frontFrame。
 
-**类比前端**：这是图形学中的经典"双缓冲"（double buffering）——一个 buffer 显示，一个 buffer 绘制，交替使用避免撕裂。
+这种"画完再换"的策略叫做双缓冲。如果直接在屏幕上画（一边擦一边写），用户会看到画面中间状态——这就是闪烁的来源之一。
 
 
 ---
@@ -161,65 +164,128 @@ const cells64 = new BigInt64Array(cells.buffer)
 cells64.fill(0n, 0, size)  // 整个 buffer 一键清零
 ```
 
-**类比前端**：就像你从 `Array<{x: number, y: number}>` 换成 `Float32Array`（WebGL 里的 `gl.bufferData`），把大量小对象压缩成连续内存块，CPU 缓存友好、GC 友好。
+这意味着同样的数据量，从几千个分散在堆上的小对象变成了一块连续的 ArrayBuffer。CPU 缓存可以一次加载一整行的 cell 数据，而不是跳来跳去地加载零散对象。GC 也不需要扫描任何东西——TypedArray 里的整数不算 GC 根对象。
 
-### 2.3 CharPool：字符串驻留
+### 2.3 CharPool：终端里的"字符去重器"
 
-`'H'` 这个字符在聊天界面可能出现几百次。与其创建几百个同样的字符串，不如只存一个索引：
+CharPool 解决了什么问题？
+
+Screen Buffer 里每个 cell 都存一个字符。比如聊天界面里有 500 条消息，每条消息开头都是 "bot> "，那么字符 `b`、`o`、`t`、`>`、空格各自出现了几百次。如果每个 cell 都存一个独立的 JavaScript 字符串对象，内存里就有几百个内容一模一样的字符串对象。
+
+更关键的是——当你对比新旧两帧的 cell 时，你需要判断"这一格的内容是不是变了"。如果 cell 里存的是字符串，对比就是 `str1 === str2`，这是一个引用比较（O(1)，但前提是同一对象）或者值比较（O(n)）。无论如何，这意味着你操作的是堆上分配的、带 GC 开销的对象。
+
+CharPool 的思路很简单：把所有唯一字符收集到一个池子里，cell 里只存这个字符在池子里的编号（一个整数）。`'H'` 出现几百次，池子里只存一次，几百个 cell 存的都是同一个编号 `3`。
+
+具体实现：
 
 ```typescript
 class CharPool {
   private strings: string[] = [' ', '']  // 索引 0: 空格, 索引 1: 空字符串
-  private ascii: Int32Array  // ASCII 快速路径
+  private ascii: Int32Array               // ASCII 快速路径
 
   intern(char: string): number {
+    // 单字符走 ASCII 快速路径
     if (char.length === 1) {
       const code = char.charCodeAt(0)
-      if (code < 128) return this.ascii[code]  // 直接 Int32Array 查表
+      if (code < 128) return this.ascii[code]  // 直接 Int32Array 查表，O(1)
     }
+    // 多字符（emoji、中文等）走哈希表
     return this.stringMap.get(char) ?? this.insert(char)
   }
 }
 ```
 
-**类比前端**：这是经典的字符串驻留（string interning）模式——和 V8 内部对字符串的处理方式一样。数字比较比字符串比较快 10 倍以上。
+两条路径：
 
-### 2.4 StylePool：样式驻留 + ANSI 过渡缓存
+1. **ASCII 单字符（a-z、0-9、标点等）**：直接用字符的 ASCII 码做下标，在 `Int32Array` 里查。0-127 一共 128 个位置，直接映射，不需要哈希计算。这是热路径——终端里绝大多数内容都是 ASCII。
 
-这是最精妙的部分。问题背景：
+2. **多字节字符（中文、emoji、连字等）**：走哈希表 `stringMap`，第一次出现时插入池子，后续直接用已有的编号。
 
-在终端里从"红色加粗"切换到"蓝色"需要发出 `\x1b[0m\x1b[34m`（先重置红和粗，再设蓝）。每帧有几千个 cell 可能发生样式切换，每次都计算这个过渡字符串 = 巨大的重复计算。
+回头看 Screen Buffer 的数据结构，现在理解了 cell 存整数的原因：`word0: charId` 存的就是 CharPool 里这个字符的编号。对比两个 cell 是否内容一致，变成了对比两个 Int32 整数——CPU 的一条指令就能完成。
 
-StylePool 做了两件事：
+**为什么需要这个设计？**
 
-**① 样式驻留**：把一组样式（如 `[红色, 加粗]`）转成一个整数 ID。
+不是因为字符串对象本身占多大内存（V8 对小字符串有优化），而是因为：
+
+- **对比速度**：整数比较是 CPU 原生指令，不需要走 V8 的字符串比较逻辑
+- **GC 友好**：Screen Buffer 本身是 TypedArray，里面的整数不产生 GC 压力。池子里的字符串只在插入新字符时才产生对象，稳态下零分配
+- **内存紧凑**：一个 cell 只需要一个 Int32 存字符 + 一个 Int32 存样式和链接信息。全部 cell 是一块连续的 ArrayBuffer，CPU 缓存命中率高
+
+### 2.4 StylePool：样式 ID 化 + 切换路径缓存
+
+StylePool 解决的是终端渲染里一个很具体但很容易被忽略的性能问题：每次 cell 样式变化时，需要计算"从旧样式切换到新样式要发什么 ANSI 序列"。
+
+**先理解问题本身**
+
+终端没有 CSS 的"设置一个新属性自动覆盖旧属性"机制。它是状态机——你发出一个指令切换到某个状态，后续所有字符就在那个状态下显示，直到你发出重置或切换指令。
+
+举个例子：一个 cell 现在是"红色加粗"，你想把它变成"蓝色"（不加粗）。
+
+你需要发出的 ANSI 序列不是"设蓝色"这么简单，而是：先重置所有样式（关掉红色和粗体），再开启蓝色。也就是 `\x1b[0m\x1b[34m`。
+
+但如果直接从"红色加粗"变到"红色加粗加下划线"呢？那就只需要 `\x1b[4m`——开下划线就行，红色和粗体不用动。
+
+看出来了吗？从样式 A 变到样式 B 需要的序列，取决于 A 和 B 的差异——你需要关掉 A 有但 B 没有的东西，再开启 B 有但 A 没有的东西。这个计算叫 `diffAnsiCodes(A, B)`，需要遍历两组 ANSI 码、分拣出哪些要关、哪些要开，然后合并成一段字符串。
+
+每帧里有几千个 cell 在 diff 时可能发生样式切换。其中大部分切换是重复的——"红色加粗→蓝色"可能出现几十次。每次都重新算一遍 `diffAnsiCodes`，白白浪费 CPU。
+
+**StylePool 做了两件事来解决这个问题**
+
+**第一件事：样式 ID 化**
+
+把"一组 ANSI 码"（比如红色 + 粗体 = `[{code: '\x1b[31m'}, {code: '\x1b[1m'}]`）压缩成一个整数 ID：
 
 ```typescript
 class StylePool {
   intern(styles: AnsiCode[]): number {
-    const key = styles.map(s => s.code).join('\0')
+    const key = styles.map(s => s.code).join('\0')  // 把各 ANSI 码拼成唯一字符串
     return this.ids.get(key) ?? this.insert(key, styles)
   }
 }
 ```
 
-**② ANSI 过渡缓存**：从 style 42 切换到 style 99 需要的序列预先算好并缓存。
+这和 CharPool 的思路一样——相同的样式组合只存一份，后续用 ID 引用。但 StylePool 的 ID 不只是为了省内存，更是为第二件事铺路。
+
+**第二件事：样式切换缓存**
+
+既然每个样式都是整数 ID，那么"从样式 42 变到样式 99"就可以用 `42 × 0x100000 + 99` 打包成唯一 key，用于查找缓存的切换序列：
 
 ```typescript
 transition(fromId: number, toId: number): string {
-  const key = fromId * 0x100000 + toId    // 把两个 ID 打包成唯一 key
+  const key = (fromId << 20) | toId       // 把两个 ID 打成一个 32 位整数
   let str = this.transitionCache.get(key)
   if (str === undefined) {
+    // 第一次遇到这个切换组合：计算差异并缓存结果
     str = ansiCodesToString(diffAnsiCodes(this.get(fromId), this.get(toId)))
     this.transitionCache.set(key, str)
   }
-  return str   // 后续调用直接拿缓存字符串，零计算
+  return str   // 后续调用直接拿缓存好的 ANSI 字符串
 }
 ```
 
-**类比前端**：这就像 CSS-in-JS 库（styled-components, Emotion）把样式规则 hash 成一个类名并缓存对应的 CSS 文本。但 fork 更进一步——它不仅缓存"这个样式长什么样"，还缓存了"从样式 A 变到样式 B 需要发出的指令序列"。
+第一次从样式 A 切换到样式 B：正常计算 `diffAnsiCodes`，结果存入缓存。
 
-总结：Screen buffer 的三个池（CharPool、HyperlinkPool、StylePool）协作——char 是数字索引、hyperlink 是数字索引、style 也是数字索引。比较两个 cell 是否相同变成了比较 2 个 Int32，而不是比较 3 个字符串 + 1 个 AnsiCode 数组。
+第二次及之后：直接用缓存的字符串。零计算。
+
+**为什么这很重要？**
+
+一个典型的渲染场景：80 列 × 24 行 = 1920 个 cell。diff 阶段判断出其中有 200 个 cell 的样式变了。这 200 个切换可能只有 5-10 种不同的"从哪到哪"组合（比如大部分是"普通→红色"，少数是"红色→蓝色"）。
+
+没有 StylePool：200 次 `diffAnsiCodes` 调用，每次都要遍历 ANSI 码数组、做集合差运算、拼接字符串。虽然单次很快，但加起来浪费不少 CPU 时间，而且产生大量临时字符串对象给 GC 压力。
+
+有 StylePool：5-10 次 `diffAnsiCodes` 调用（每种组合算一次），其余 190+ 次都是哈希表查缓存。而且返回的是同一个字符串引用，不需要反复分配内存。
+
+**三个池子的协作**
+
+现在回头看 Screen Buffer 的 Packed Int32Array 结构，就能理解它的精妙之处了：
+
+```
+一个 cell = 两个 Int32
+  word0: charId       ← 从 CharPool 查这个编号对应的字符
+  word1: styleId<<17 | hyperlinkId<<2 | width  ← StylePool ID + 链接池 ID + 宽度
+```
+
+三个池子 —— CharPool、HyperlinkPool、StylePool —— 把 cell 的语义信息（字符、样式、链接）全部压成了整数。对比两个 cell 是否相同，不再是比较 3 个字符串 + 1 个数组，而是比较 2 个 Int32。两行 CPU 指令，一条比较 word0，一条比较 word1。这就是为什么 diff 能快到一个数量级以上。
 
 
 ---
