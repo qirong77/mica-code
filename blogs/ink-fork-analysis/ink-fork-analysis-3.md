@@ -15,23 +15,18 @@
 
 ### 6.1 捕获与冒泡
 
-和浏览器一样，事件分为三个阶段：
+和浏览器一样，事件按三阶段传播：
 
 ```
-         root
-          |   ^  ← 冒泡阶段（从 target 向上）
-          v   |
-    parent     |
-      |  ^     |
-      v  |     |
-    target  ———    ← 目标阶段
-
-    捕获阶段（从 root 向下）
-    ↑         |
-    └─────────┘
+捕获阶段（root → target）  →  目标阶段  →  冒泡阶段（target → root）
 ```
 
-`Dispatcher.collectListeners()` 从 target 走到 root，收集沿途的捕获处理器（unshift 到列表头）和冒泡处理器（push 到列表尾），形成完整的处理链。
+`Dispatcher.collectListeners()` 从 target 沿虚拟终端树走到 root，沿途收集两类处理器：
+
+- 捕获处理器：用 `unshift` 插入列表头部（先遇到的后执行——root 的捕获处理器最先触发）
+- 冒泡处理器：用 `push` 追加到列表尾部（后遇到的先执行——target 的冒泡处理器最先触发）
+
+最终形成一个有序的处理器列表，Dispatcher 按顺序逐个调用。任何处理器调用 `stopPropagation()` 就中断后续执行。
 
 ### 6.2 事件优先级映射到 React 调度
 
@@ -65,11 +60,25 @@ fork 支持终端特有的事件：
 
 ### 6.4 复合键绑定系统
 
-fork 实现了一套完整的 Keybinding 系统，支持：
-- **复合键**：`Ctrl+Shift+K`、`Cmd+Enter`
-- **和弦**：`Ctrl+K` 然后 `Ctrl+B`（像 Vim 那样）
-- **冲突解析**：同一个键在不同上下文（context）里可以绑定不同行为
-- **显示文本生成**：把绑定转成人类可读的快捷键提示（如 `^K ^B`）
+Fork 实现了一套完整的键盘快捷键系统。它的核心数据结构是一个 **trie（前缀树）**：
+
+```typescript
+// 每个节点表示一个按键组合，children 指向后续按键（用于和弦）
+type KeyNode = {
+  action?: () => void          // 叶节点：绑定的行为
+  label?: string               // 快捷键提示文本
+  context?: string[]           // 生效的上下文（如 'chat-input', 'scroll-box'）
+  children: Map<string, KeyNode>
+}
+```
+
+**普通快捷键**如 `Ctrl+K` 只有一层：按下 `Ctrl+K`，直接匹配叶节点，触发 action。
+
+**和弦**（chord）如 `Ctrl+K` 然后 `Ctrl+B` 是两层：按下 `Ctrl+K` 后并不立即触发，而是进入一个"等待第二键"的超时窗口。如果在超时内收到 `Ctrl+B`，走到叶节点触发；如果超时或收到其他键，取消并回退。
+
+**冲突解析**：同一个按键可以在不同上下文中绑定不同行为。比如 `Enter` 在聊天输入框里是"发送消息"，在 ScrollBox 里是"无操作"。Dispatcher 根据当前焦点组件的 context 标签过滤匹配的 KeyNode。
+
+**显示文本生成**：把绑定转成人类可读的快捷键提示——`Ctrl+K, Ctrl+B` 显示为 `^K ^B`。
 
 
 ---
@@ -98,18 +107,23 @@ type SelectionState = {
 
 选中区域的高亮不是简单的 SGR 7 inverse（反转色）。SGR 7 会交换前景色和背景色，导致语法高亮的每个 token 变成不同背景色——视觉效果碎片化。
 
-Fork 使用 `StylePool.withSelectionBg()`：替换 cell 的背景色为统一的选取色（如蓝色），但保留前景色。这模拟了浏览器和原生终端（iTerm2、Terminal.app）的选择效果。
+Fork 使用 StylePool（第二篇介绍过的 ANSI 样式缓存层）的 `withSelectionBg` 方法：替换 cell 的背景色为统一的选取色，但保留前景色不变。这模拟了浏览器和 iTerm2 等终端的选择效果：
 
 ```typescript
 withSelectionBg(baseId: number): number {
-  // 保留前景色、粗体、斜体，替换背景色为选取色
-  const kept = this.get(baseId).filter(
-    c => c.endCode !== '\x1b[49m' && c.endCode !== '\x1b[27m'
+  // StylePool 内部：每个样式组合存储为一个整数 ID
+  // baseId 是原样式的 ID，get(baseId) 返回它的 ANSI 编码列表
+  const entries = this.get(baseId)
+  const kept = entries.filter(
+    c => c.endCode !== '\x1b[49m'   // 去掉旧的背景色重置
+      && c.endCode !== '\x1b[27m'   // 去掉旧的 reverse 重置
   )
-  kept.push(selectionBgColor)
-  return this.intern(kept)
+  kept.push(selectionBgColor)        // 追加统一的选取背景色
+  return this.intern(kept)           // intern：查找或创建新样式 ID
 }
 ```
+
+结果：被选中的文本保持原来的前景色（语法高亮），但背景色统一替换为蓝色选取色。
 
 ### 7.3 软换行处理
 
@@ -126,9 +140,21 @@ screen.softWrap = new Int32Array(height)
 
 `getSelectedText()` 读取选中文本时，检查 softWrap 数组决定是否拼接行。
 
-### 7.4 独立渲染匹配搜索结果
+### 7.4 搜索高亮与选区高亮的两层叠加
 
-搜索结果的高亮通过 `renderToScreen()` 实现——把一条消息**独立渲染**到一个隔离的 Screen buffer，然后扫描 buffer 查找查询词位置，最后把位置映射回主 screen 做高亮叠加。这是搜索高亮与选区高亮的两层叠加机制。
+搜索结果的高亮不能直接在主 screen buffer 上做字符串搜索。原因有两个：
+
+1. **Screen buffer 里是渲染后的字符**，一个中文字符可能占 2 个 cell（等宽字体），直接做字符串匹配会错位
+2. **ANSI 样式和字符混在一起**，搜索"hello"可能在两个不同颜色的 token 里各匹配半段
+
+Fork 的做法是**独立重渲染**：
+
+1. 把目标消息组件**单独渲染**到一个隔离的 Screen buffer（重置所有样式为纯文本）
+2. 在这个干净的 buffer 上做精确的字符串匹配，找到所有匹配位置
+3. 把匹配位置**映射回**主 screen buffer 的坐标（处理软换行、ScrollBox 偏移、多 cell 字符）
+4. 在对应 cell 上叠加搜索高亮样式（通常用黄色背景）
+
+主 screen buffer 上最终有两层高亮：选区高亮（7.2）和搜索高亮同时存在。两者不冲突——搜索高亮覆盖匹配词，选区高亮覆盖用户拖选的范围，视觉效果叠加。
 
 
 ---
@@ -140,19 +166,22 @@ ScrollBox 是 fork 中最复杂的组件。它实现了一个类似 `overflow: s
 
 ### 8.1 虚拟滚动
 
-不是从 React 层面做虚拟化（只渲染可见项目），而是在布局和渲染层做裁剪：
+在浏览器里做虚拟滚动，常见做法是**React 层面的虚拟化**——只渲染视口内可见的列表项，上面的用占位 div 撑开高度。但 ink 不走这条路，而是在**布局和渲染层做裁剪**：
 
-1. Yoga 布局计算所有子节点的完整尺寸（包括不可见部分）
-2. `renderNodeToOutput()` 根据 `scrollTop` 和 viewport 尺寸裁剪可见区域
-3. 子节点通过 blit 缓存，避免未变区域的重复渲染
+1. Yoga 布局计算所有子节点的完整尺寸（包括不可见部分），每个节点知道自己在哪、占多大
+2. `renderNodeToOutput()` 在遍历子节点时，检查节点是否落在 `[scrollTop, scrollTop + viewportHeight]` 范围内
+3. 落在范围外的节点直接跳过——不写 Screen Buffer，不占渲染时间
+4. 落在范围内的节点正常渲染，未变的通过 blit 缓存命中来跳过重复工作
 
 ```typescript
 // 每个 DOMElement 维护自己的滚动状态
-scrollTop?: number         // 当前滚动偏移（行数）
-scrollHeight?: number      // 内容总高度
+scrollTop?: number             // 当前滚动偏移（行数）
+scrollHeight?: number          // 内容总高度
 scrollViewportHeight?: number  // 可见区域高度
-stickyScroll?: boolean     // 是否自动追底（如 streaming 文本）
+stickyScroll?: boolean         // 是否自动追底
 ```
+
+为什么选择渲染层裁剪而不是 React 虚拟化？因为 Yoga 需要知道所有子节点的尺寸才能正确计算 Flexbox 布局——如果只渲染可见项，Yoga 拿不到隐藏项的真实尺寸，布局会错。
 
 ### 8.2 粘性滚动（Sticky Scroll）
 
@@ -169,22 +198,30 @@ if (stickyScroll && scrollTop >= maxScroll - 1) {
 
 ### 8.3 惯性滚动与平滑 drain
 
-鼠标滚轮的每个 tick 产生一个 delta。Fork 不是直接把 delta 加到 scrollTop（会导致一跳一跳的），而是**累积到 `pendingScrollDelta`**，每帧 drain 一部分（约 3/4），产生自然的减速效果。
+鼠标滚轮事件以离散的 tick 到达。如果直接把每个 tick 的 delta 加到 `scrollTop`，滚动会一跳一跳的——终端只有字符格，最小移动单位是 1 行，delta < 1 的 tick 被吞掉，累积效果不平滑。
+
+Fork 的做法是**累积 + 逐帧排泄（drain）**：
+
+1. 每个滚轮事件把 delta 累加到 `pendingScrollDelta`
+2. 每帧从 `pendingScrollDelta` 中取出一部分（约 3/4），加到 `scrollTop`
+3. 剩余的留在 `pendingScrollDelta` 里，下帧继续取
 
 ```typescript
-// 每帧：
+// 每帧执行：
 const step = Math.max(4, Math.ceil(pendingScrollDelta * 3 / 4))
 scrollTop += step
 pendingScrollDelta -= step
 
 if (pendingScrollDelta === 0) {
-  // 停止 drain，不再调度额外帧
+  // 排泄干净，停止调度额外帧
 } else {
-  // 还有剩余，调度下一帧继续 drain
+  // 还有余量，调度下一帧继续 drain
 }
 ```
 
-**类比前端**：这就是 CSS `scroll-behavior: smooth` + `ease-out` 缓动在终端的手动实现。
+`Math.max(4, ...)` 是为了保证即使 delta 很小（比如 1），每帧也至少移动 4 行——否则滚动会卡住不动。3/4 的比例产生递减序列（类似 ease-out 缓动函数），越接近终点越慢。
+
+**类比前端**：CSS `scroll-behavior: smooth` + `cubic-bezier(0, 0, 0.2, 1)` ease-out 在手写实现。
 
 
 ---
