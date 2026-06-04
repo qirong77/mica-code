@@ -17,6 +17,7 @@ function extractToolInfo(tools: MicaTool[], serverName: string) {
   return tools.map((t) => ({
     name: t.name.startsWith(prefix) ? t.name.slice(prefix.length) : t.name,
     description: t.description,
+    inputSchema: t.input_schema as Record<string, unknown>,
   }));
 }
 

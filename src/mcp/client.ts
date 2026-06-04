@@ -3,12 +3,18 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpHttpServerConfig } from './config.js';
 
+export interface McpToolInfo {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
 export interface McpServerStatus {
   name: string;
   url: string;
   status: 'connecting' | 'connected' | 'failed';
   toolCount: number;
-  tools: Array<{ name: string; description: string }>;
+  tools: McpToolInfo[];
   error?: string;
 }
 
@@ -74,7 +80,7 @@ export function markServerConnected(
   name: string,
   url: string,
   toolCount: number,
-  tools: Array<{ name: string; description: string }>,
+  tools: McpToolInfo[],
 ) {
   updateServerStatus({ name, url, status: 'connected', toolCount, tools });
 }

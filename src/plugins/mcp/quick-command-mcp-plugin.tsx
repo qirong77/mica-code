@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
-import { mcpServersAtom, type McpServerStatus } from '../../mcp/client.js';
+import { mcpServersAtom, type McpServerStatus, type McpToolInfo } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
 import { reconnectMcpServer } from '../../mcp/index.js';
 
@@ -17,10 +17,22 @@ function statusColor(status: McpServerStatus['status']) {
   return '#FFC107';
 }
 
+function typeColor(type: string) {
+  if (type === 'string') return '#FFC107';
+  if (type === 'number' || type === 'integer') return '#4FC3F7';
+  if (type === 'boolean') return '#CE93D8';
+  if (type === 'object') return '#81C784';
+  if (type === 'array') return '#FF8A65';
+  return undefined;
+}
+
+type ViewState =
+  | { view: 'list'; selectedIdx: number }
+  | { view: 'tools'; serverIdx: number; selectedIdx: number }
+  | { view: 'toolDetail'; serverIdx: number; toolIdx: number };
+
 interface PanelState {
-  view: 'list' | 'detail';
-  selectedIdx: number;
-  detailServerIdx: number;
+  state: ViewState;
 }
 
 function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; selectedIdx: number }) {
@@ -59,7 +71,13 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
   );
 }
 
-function ToolDetail({ server }: { server: McpServerStatus }) {
+function ToolList({
+  server,
+  selectedIdx,
+}: {
+  server: McpServerStatus;
+  selectedIdx: number;
+}) {
   if (server.tools.length === 0) {
     return (
       <Box flexDirection="column">
@@ -79,23 +97,100 @@ function ToolDetail({ server }: { server: McpServerStatus }) {
         <Text dimColor>{server.url}</Text>
         <Text color="#4CAF50">  {server.tools.length} tools</Text>
       </Box>
-      {server.tools.map((t) => (
-        <Box key={t.name} flexDirection="row" paddingLeft={2}>
-          <Box width={3}>
-            <Text dimColor>•</Text>
+      {server.tools.map((t, i) => {
+        const isSelected = i === selectedIdx;
+        return (
+          <Box key={t.name} flexDirection="row" paddingLeft={1}>
+            <Box width={2}>
+              <Text color={isSelected ? 'claude' : undefined}>
+                {isSelected ? '▶' : ' '}
+              </Text>
+            </Box>
+            <Box width={30}>
+              <Text bold={isSelected}>{t.name}</Text>
+            </Box>
+            <Text dimColor>{t.description.slice(0, 80)}</Text>
           </Box>
-          <Box width={30}>
-            <Text>{t.name}</Text>
-          </Box>
-          <Text dimColor>{t.description.slice(0, 80)}</Text>
-        </Box>
-      ))}
+        );
+      })}
     </Box>
   );
 }
 
-function McpPanel({ state }: { state: PanelState }) {
+function ToolDetail({ tool, serverName }: { tool: McpToolInfo; serverName: string }) {
+  const schema = tool.inputSchema as {
+    type?: string;
+    properties?: Record<string, { type?: string; description?: string }>;
+    required?: string[];
+  };
+  const properties = schema.properties || {};
+  const required = schema.required || [];
+  const propKeys = Object.keys(properties);
+
+  return (
+    <Box flexDirection="column">
+      <Box paddingBottom={1}>
+        <Text bold>{serverName} / {tool.name}</Text>
+      </Box>
+      {tool.description && (
+        <Box paddingBottom={1}>
+          <Text dimColor>{tool.description}</Text>
+        </Box>
+      )}
+
+      {propKeys.length > 0 && (
+        <Box flexDirection="column" paddingBottom={1}>
+          <Box paddingBottom={1}>
+            <Text bold>参数:</Text>
+          </Box>
+          {propKeys.map((key) => {
+            const prop = properties[key];
+            const isRequired = required.includes(key);
+            const typeName = prop.type || 'any';
+            return (
+              <Box key={key} flexDirection="row" paddingLeft={2}>
+                <Box width={4}>
+                  {isRequired ? (
+                    <Text color="#F44336">*</Text>
+                  ) : (
+                    <Text>{' '}</Text>
+                  )}
+                </Box>
+                <Box width={20}>
+                  <Text>{key}</Text>
+                </Box>
+                <Box width={10}>
+                  <Text color={typeColor(typeName)}>{typeName}</Text>
+                </Box>
+                {prop.description && (
+                  <Text dimColor>{prop.description.slice(0, 60)}</Text>
+                )}
+              </Box>
+            );
+          })}
+          <Box paddingLeft={4} paddingTop={1}>
+            <Text dimColor>* 必需参数</Text>
+          </Box>
+        </Box>
+      )}
+
+      {propKeys.length === 0 && (
+        <Text dimColor>  无参数</Text>
+      )}
+
+      {schema.type && schema.type !== 'object' && (
+        <Box paddingTop={1}>
+          <Text>输入类型: </Text>
+          <Text color={typeColor(schema.type)}>{schema.type}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function McpPanel({ state: panelState }: { state: PanelState }) {
   const servers = mcpServersAtom.get();
+  const s = panelState.state;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -103,19 +198,29 @@ function McpPanel({ state }: { state: PanelState }) {
         <Text bold>MCP Servers</Text>
       </Box>
 
-      {state.view === 'list' && (
-        <ServerList servers={servers} selectedIdx={state.selectedIdx} />
+      {s.view === 'list' && (
+        <ServerList servers={servers} selectedIdx={s.selectedIdx} />
       )}
 
-      {state.view === 'detail' && (
-        <ToolDetail server={servers[state.detailServerIdx]} />
+      {s.view === 'tools' && (
+        <ToolList server={servers[s.serverIdx]} selectedIdx={s.selectedIdx} />
+      )}
+
+      {s.view === 'toolDetail' && (
+        <ToolDetail
+          tool={servers[s.serverIdx].tools[s.toolIdx]}
+          serverName={servers[s.serverIdx].name}
+        />
       )}
 
       <Box paddingTop={1}>
-        {state.view === 'list' && (
+        {s.view === 'list' && (
           <Text dimColor>↑↓ navigate  ↵ tools  esc close</Text>
         )}
-        {state.view === 'detail' && (
+        {s.view === 'tools' && (
+          <Text dimColor>↑↓ navigate  ↵ details  esc back</Text>
+        )}
+        {s.view === 'toolDetail' && (
           <Text dimColor>esc back</Text>
         )}
       </Box>
@@ -151,37 +256,89 @@ export class QuickCommandMcpPlugin extends UIPanelPlugin {
 
     this.showUI<PanelState>(
       McpPanel,
-      { view: 'list', selectedIdx: 0, detailServerIdx: 0 },
+      { state: { view: 'list', selectedIdx: 0 } },
       (_input, key, state, setState) => {
+        const s = state.state;
+
         if (key.escape) {
-          if (state.view === 'detail') {
-            setState({ ...state, view: 'list' });
+          if (s.view === 'toolDetail') {
+            setState({
+              state: {
+                view: 'tools',
+                serverIdx: s.serverIdx,
+                selectedIdx: s.toolIdx,
+              },
+            });
+            return true;
+          }
+          if (s.view === 'tools') {
+            setState({ state: { view: 'list', selectedIdx: s.serverIdx } });
             return true;
           }
           this.hideUI();
           return true;
         }
 
-        if (state.view === 'list') {
+        if (s.view === 'list') {
           if (key.upArrow) {
             setState({
-              ...state,
-              selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : servers.length - 1,
+              state: {
+                view: 'list',
+                selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : servers.length - 1,
+              },
             });
             return true;
           }
           if (key.downArrow) {
             setState({
-              ...state,
-              selectedIdx: state.selectedIdx < servers.length - 1 ? state.selectedIdx + 1 : 0,
+              state: {
+                view: 'list',
+                selectedIdx: s.selectedIdx < servers.length - 1 ? s.selectedIdx + 1 : 0,
+              },
             });
             return true;
           }
           if (key.return) {
             setState({
-              view: 'detail',
-              selectedIdx: 0,
-              detailServerIdx: state.selectedIdx,
+              state: {
+                view: 'tools',
+                serverIdx: s.selectedIdx,
+                selectedIdx: 0,
+              },
+            });
+            return true;
+          }
+        }
+
+        if (s.view === 'tools') {
+          const tools = servers[s.serverIdx].tools;
+          if (key.upArrow) {
+            setState({
+              state: {
+                view: 'tools',
+                serverIdx: s.serverIdx,
+                selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : tools.length - 1,
+              },
+            });
+            return true;
+          }
+          if (key.downArrow) {
+            setState({
+              state: {
+                view: 'tools',
+                serverIdx: s.serverIdx,
+                selectedIdx: s.selectedIdx < tools.length - 1 ? s.selectedIdx + 1 : 0,
+              },
+            });
+            return true;
+          }
+          if (key.return) {
+            setState({
+              state: {
+                view: 'toolDetail',
+                serverIdx: s.serverIdx,
+                toolIdx: s.selectedIdx,
+              },
             });
             return true;
           }
