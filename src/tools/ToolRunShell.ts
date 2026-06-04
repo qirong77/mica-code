@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
-function truncate(s: string, maxLen = 60): string {
+function truncate(s: string, maxLen = 200): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + '…';
 }
