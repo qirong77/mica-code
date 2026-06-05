@@ -1,10 +1,12 @@
 import React from 'react';
-import { Box, Text, useTerminalSize } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus, type McpToolInfo } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
 import { reconnectMcpServer } from '../../mcp/index.js';
+import { Dialog, SelectList, KeyHints, DetailView } from '../../components/ui/primitives/index.js';
 import { C } from '../../components/ui/data.js';
+import type { SelectItem } from '../../components/ui/primitives/index.js';
 
 const STATUS_ICON: Record<McpServerStatus['status'], string> = {
   connecting: '○',
@@ -34,28 +36,23 @@ type ViewState =
 
 interface PanelState {
   state: ViewState;
+  _servers: McpServerStatus[];
 }
 
 function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; selectedIdx: number }) {
-  if (servers.length === 0) {
-    return <Text dimColor>  no servers configured</Text>;
-  }
-
-  const nameMax = Math.max(...servers.map((s) => s.name.length))
-  const urlMax = Math.max(...servers.map((s) => s.url.length))
-  const configMax = Math.max(...servers.map((s) => s.configPath.length))
+  const nameMax = Math.max(...servers.map((s) => s.name.length));
+  const urlMax = Math.max(...servers.map((s) => s.url.length));
+  const configMax = Math.max(...servers.map((s) => s.configPath.length));
 
   return (
-    <Box flexDirection="column">
-      {servers.map((s, i) => {
-        const isSelected = i === selectedIdx;
+    <SelectList
+      items={servers.map((s) => ({ key: s.name, label: s.name }))}
+      selectedIdx={selectedIdx}
+      empty={<Text dimColor>  no servers configured</Text>}
+      renderItem={(item, isSelected) => {
+        const s = servers.find((x) => x.name === item.key)!;
         return (
-          <Box key={s.name} flexDirection="row">
-            <Box width={2}>
-              <Text color={isSelected ? C.accent : undefined}>
-                {isSelected ? '\u25B6' : ' '}
-              </Text>
-            </Box>
+          <Box flexDirection="row">
             <Box width={4}>
               <Text color={statusColor(s.status)}>{STATUS_ICON[s.status]}</Text>
             </Box>
@@ -82,8 +79,8 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
             )}
           </Box>
         );
-      })}
-    </Box>
+      }}
+    />
   );
 }
 
@@ -94,18 +91,6 @@ function ToolList({
   server: McpServerStatus;
   selectedIdx: number;
 }) {
-  if (server.tools.length === 0) {
-    return (
-      <Box flexDirection="column">
-        <Box paddingBottom={1}>
-          <Text bold>{server.name} — </Text>
-          <Text dimColor>{server.url}</Text>
-        </Box>
-        <Text dimColor>  no tools available</Text>
-      </Box>
-    );
-  }
-
   return (
     <Box flexDirection="column">
       <Box paddingBottom={1}>
@@ -113,22 +98,22 @@ function ToolList({
         <Text dimColor>{server.url}</Text>
         <Text color={C.success}>  {server.tools.length} tools</Text>
       </Box>
-      {server.tools.map((t, i) => {
-        const isSelected = i === selectedIdx;
-        return (
-          <Box key={t.name} flexDirection="row" paddingLeft={1}>
-            <Box width={2}>
-              <Text color={isSelected ? C.accent : undefined}>
-                {isSelected ? '\u25B6' : ' '}
-              </Text>
+      <SelectList
+        items={server.tools.map((t) => ({ key: t.name, label: t.name }))}
+        selectedIdx={selectedIdx}
+        empty={<Text dimColor>  no tools available</Text>}
+        renderItem={(item, isSelected) => {
+          const t = server.tools.find((x) => x.name === item.key)!;
+          return (
+            <Box flexDirection="row">
+              <Box width={30}>
+                <Text bold={isSelected}>{t.name}</Text>
+              </Box>
+              <Text dimColor>{t.description.slice(0, 80)}</Text>
             </Box>
-            <Box width={30}>
-              <Text bold={isSelected}>{t.name}</Text>
-            </Box>
-            <Text dimColor>{t.description.slice(0, 80)}</Text>
-          </Box>
-        );
-      })}
+          );
+        }}
+      />
     </Box>
   );
 }
@@ -144,10 +129,7 @@ function ToolDetail({ tool, serverName }: { tool: McpToolInfo; serverName: strin
   const propKeys = Object.keys(properties);
 
   return (
-    <Box flexDirection="column">
-      <Box paddingBottom={1}>
-        <Text bold>{serverName} / {tool.name}</Text>
-      </Box>
+    <DetailView header={<Text bold>{serverName} / {tool.name}</Text>}>
       {tool.description && (
         <Box paddingBottom={1}>
           <Text dimColor>{tool.description}</Text>
@@ -200,48 +182,31 @@ function ToolDetail({ tool, serverName }: { tool: McpToolInfo; serverName: strin
           <Text color={typeColor(schema.type)}>{schema.type}</Text>
         </Box>
       )}
-    </Box>
+    </DetailView>
   );
 }
 
 function McpPanel({ state: panelState }: { state: PanelState }) {
-  const servers = mcpServersAtom.get();
+  const servers = panelState._servers;
   const s = panelState.state;
 
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text bold>MCP Servers</Text>
-      </Box>
-
-      {s.view === 'list' && (
+  if (s.view === 'list') {
+    return (
+      <Dialog title="MCP Servers" footer={<KeyHints hints={['↑↓ navigate', '↵ tools', 'esc close']} />}>
         <ServerList servers={servers} selectedIdx={s.selectedIdx} />
-      )}
+      </Dialog>
+    );
+  }
 
-      {s.view === 'tools' && (
+  if (s.view === 'tools') {
+    return (
+      <Dialog title={`${servers[s.serverIdx].name} tools`} footer={<KeyHints hints={['↑↓ navigate', '↵ details', 'esc back']} />}>
         <ToolList server={servers[s.serverIdx]} selectedIdx={s.selectedIdx} />
-      )}
+      </Dialog>
+    );
+  }
 
-      {s.view === 'toolDetail' && (
-        <ToolDetail
-          tool={servers[s.serverIdx].tools[s.toolIdx]}
-          serverName={servers[s.serverIdx].name}
-        />
-      )}
-
-      <Box paddingTop={1}>
-        {s.view === 'list' && (
-          <Text dimColor>↑↓ navigate  ↵ tools  esc close</Text>
-        )}
-        {s.view === 'tools' && (
-          <Text dimColor>↑↓ navigate  ↵ details  esc back</Text>
-        )}
-        {s.view === 'toolDetail' && (
-          <Text dimColor>esc back</Text>
-        )}
-      </Box>
-    </Box>
-  );
+  return <ToolDetail tool={servers[s.serverIdx].tools[s.toolIdx]} serverName={servers[s.serverIdx].name} />;
 }
 
 export class QuickCommandMcpPlugin extends UIPanelPlugin {
@@ -272,23 +237,21 @@ export class QuickCommandMcpPlugin extends UIPanelPlugin {
 
     this.showUI<PanelState>(
       McpPanel,
-      { state: { view: 'list', selectedIdx: 0 } },
+      { state: { view: 'list', selectedIdx: 0 }, _servers: servers },
       (_input, key, state, setState) => {
         const s = state.state;
+        const servers = state._servers;
 
         if (key.escape) {
           if (s.view === 'toolDetail') {
             setState({
-              state: {
-                view: 'tools',
-                serverIdx: s.serverIdx,
-                selectedIdx: s.toolIdx,
-              },
+              state: { view: 'tools', serverIdx: s.serverIdx, selectedIdx: s.toolIdx },
+              _servers: servers,
             });
             return true;
           }
           if (s.view === 'tools') {
-            setState({ state: { view: 'list', selectedIdx: s.serverIdx } });
+            setState({ state: { view: 'list', selectedIdx: s.serverIdx }, _servers: servers });
             return true;
           }
           this.hideUI();
@@ -298,29 +261,22 @@ export class QuickCommandMcpPlugin extends UIPanelPlugin {
         if (s.view === 'list') {
           if (key.upArrow) {
             setState({
-              state: {
-                view: 'list',
-                selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : servers.length - 1,
-              },
+              state: { view: 'list', selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : servers.length - 1 },
+              _servers: servers,
             });
             return true;
           }
           if (key.downArrow) {
             setState({
-              state: {
-                view: 'list',
-                selectedIdx: s.selectedIdx < servers.length - 1 ? s.selectedIdx + 1 : 0,
-              },
+              state: { view: 'list', selectedIdx: s.selectedIdx < servers.length - 1 ? s.selectedIdx + 1 : 0 },
+              _servers: servers,
             });
             return true;
           }
           if (key.return) {
             setState({
-              state: {
-                view: 'tools',
-                serverIdx: s.selectedIdx,
-                selectedIdx: 0,
-              },
+              state: { view: 'tools', serverIdx: s.selectedIdx, selectedIdx: 0 },
+              _servers: servers,
             });
             return true;
           }
@@ -330,31 +286,22 @@ export class QuickCommandMcpPlugin extends UIPanelPlugin {
           const tools = servers[s.serverIdx].tools;
           if (key.upArrow) {
             setState({
-              state: {
-                view: 'tools',
-                serverIdx: s.serverIdx,
-                selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : tools.length - 1,
-              },
+              state: { view: 'tools', serverIdx: s.serverIdx, selectedIdx: s.selectedIdx > 0 ? s.selectedIdx - 1 : tools.length - 1 },
+              _servers: servers,
             });
             return true;
           }
           if (key.downArrow) {
             setState({
-              state: {
-                view: 'tools',
-                serverIdx: s.serverIdx,
-                selectedIdx: s.selectedIdx < tools.length - 1 ? s.selectedIdx + 1 : 0,
-              },
+              state: { view: 'tools', serverIdx: s.serverIdx, selectedIdx: s.selectedIdx < tools.length - 1 ? s.selectedIdx + 1 : 0 },
+              _servers: servers,
             });
             return true;
           }
           if (key.return) {
             setState({
-              state: {
-                view: 'toolDetail',
-                serverIdx: s.serverIdx,
-                toolIdx: s.selectedIdx,
-              },
+              state: { view: 'toolDetail', serverIdx: s.serverIdx, toolIdx: s.selectedIdx },
+              _servers: servers,
             });
             return true;
           }

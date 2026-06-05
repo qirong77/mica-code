@@ -1,63 +1,32 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import type { EffortLevel } from '../../store/config.js';
 import { model } from '../../store/config.js';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
+import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 import { C } from '../../components/ui/data.js';
+import type { SelectItem } from '../../components/ui/primitives/index.js';
 
 interface EffortState {
   selectedIdx: number;
 }
 
-function EffortList({
-  efforts,
-  selected,
-  current,
-}: {
-  efforts: ReadonlyArray<{ name: string; label: string }>;
-  selected: number;
-  current: string;
-}) {
-  if (efforts.length === 0) {
-    return (
-      <Box paddingX={1}>
-        <Text dimColor>no efforts available</Text>
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text dimColor>select effort:</Text>
-      </Box>
-      {efforts.map((e, i) => {
-        const isSelected = i === selected;
-        const isActive = e.name === current;
-        return (
-          <Box key={e.name}>
-            <Box flexDirection="row">
-              <Box width={2}>
-                <Text color={isSelected ? C.accent : C.dim}>
-                  {isSelected ? '\u25B6' : ' '}
-                </Text>
-              </Box>
-              <Text color={isSelected ? C.accent : undefined} bold={isSelected}>
-                {e.label}
-              </Text>
-              {isActive && <Text color={C.success}> (active)</Text>}
-            </Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
 function EffortSelector({ state }: { state: EffortState }) {
   const currentEffort = useScheduleState(model.effort);
   const efforts = useScheduleState(model.effortOptions);
-  return <EffortList efforts={efforts} selected={state.selectedIdx} current={currentEffort} />;
+
+  const items: SelectItem[] = efforts.map((e) => ({
+    key: e.name,
+    label: e.label,
+    suffix: e.name === currentEffort ? <Text color={C.success}> (active)</Text> : null,
+  }));
+
+  return (
+    <Dialog title="select effort" footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
+      <SelectList items={items} selectedIdx={state.selectedIdx} />
+    </Dialog>
+  );
 }
 
 export class QuickCommandEffortPlugin extends UIPanelPlugin {

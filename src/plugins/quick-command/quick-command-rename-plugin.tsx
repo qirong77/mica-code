@@ -3,13 +3,16 @@ import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { Spin } from '../../components/ui/components/common/Spin.js';
 import { getClient } from '../../agent/client.js';
+import { Dialog } from '../../components/ui/primitives/index.js';
 
 function RenameSpinner() {
   return (
-    <Box paddingX={1}>
-      <Spin />
-      <Text dimColor> 正在生成标题...</Text>
-    </Box>
+    <Dialog title="正在生成标题...">
+      <Box>
+        <Spin />
+        <Text dimColor> 请稍候...</Text>
+      </Box>
+    </Dialog>
   );
 }
 

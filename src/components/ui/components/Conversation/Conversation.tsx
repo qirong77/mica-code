@@ -65,11 +65,9 @@ export const Conversation = (): React.ReactNode => {
           </Box>
         );
       })}
-      {responseText && (
-        <Box>
-          <Markdown>{responseText}</Markdown>
-        </Box>
-      )}
+      <Box>
+        <Markdown>{responseText}</Markdown>
+      </Box>
     </Box>
   );
 };

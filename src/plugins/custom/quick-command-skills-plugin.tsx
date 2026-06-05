@@ -1,10 +1,10 @@
 import React from 'react'
-import { Box, Text, useTerminalSize } from '@anthropic/ink'
+import { Box, Text } from '@anthropic/ink'
 import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'
 import { Markdown } from '../../components/ui/components/Conversation/Markdown'
-import { C } from '../../components/ui/data.js'
+import { Dialog, SelectList, KeyHints, DetailView } from '../../components/ui/primitives/index.js'
 
 interface PanelState {
   view: 'list' | 'detail'
@@ -12,73 +12,65 @@ interface PanelState {
   detailSkillIdx: number
 }
 
-function SkillList({
-  skills,
-  selectedIdx,
-}: {
-  skills: Skill[]
-  selectedIdx: number
-}) {
-  if (skills.length === 0) {
+function SkillsPanel({ state }: { state: PanelState }) {
+  const skills = reloadSkills()
+
+  if (state.view === 'list') {
+    const nameMax = Math.max(...skills.map((s) => s.name.length)) + 1
+    const descMax = Math.max(...skills.map((s) => Math.min(s.description.length, 36))) + 2
+    const pathMax = Math.max(...skills.map((s) => s.baseDir.length))
+
     return (
-      <Box flexDirection="column">
-        <Text dimColor>  no skills installed</Text>
-        <Box paddingTop={1}>
-          <Text dimColor>  install path: ~/.mica/skills/&lt;name&gt;/SKILL.md</Text>
-        </Box>
-      </Box>
+      <Dialog
+        title={`Skills (${skills.length} installed)`}
+        footer={<KeyHints hints={['↑↓ navigate', '↵ detail', 'esc close']} />}
+      >
+        <SelectList
+          items={skills.map((s) => ({ key: s.name, label: s.name }))}
+          selectedIdx={state.selectedIdx}
+          empty={
+            <Box flexDirection="column">
+              <Text dimColor>  no skills installed</Text>
+              <Box paddingTop={1}>
+                <Text dimColor>  install path: ~/.mica/skills/&lt;name&gt;/SKILL.md</Text>
+              </Box>
+            </Box>
+          }
+          renderItem={(item, isSelected) => {
+            const s = skills.find((x) => x.name === item.key)!
+            return (
+              <Box flexDirection="row">
+                <Box width={nameMax}>
+                  <Text bold={isSelected}>/{s.name}</Text>
+                </Box>
+                <Box width={2}>
+                  <Text>{' '}</Text>
+                </Box>
+                <Box width={descMax}>
+                  <Text dimColor>
+                    {s.description.slice(0, 36)}
+                    {s.description.length > 36 ? '…' : ''}
+                  </Text>
+                </Box>
+                <Box width={2}>
+                  <Text>{' '}</Text>
+                </Box>
+                <Box width={pathMax}>
+                  <Text dimColor>{s.baseDir}</Text>
+                </Box>
+              </Box>
+            )
+          }}
+        />
+      </Dialog>
     )
   }
 
-  const nameMax = Math.max(...skills.map((s) => s.name.length)) + 1
-  const descMax = Math.max(...skills.map((s) => Math.min(s.description.length, 36))) + 2
-  const pathMax = Math.max(...skills.map((s) => s.baseDir.length))
+  const skill = skills[state.detailSkillIdx]
+  if (!skill) return null
 
   return (
-    <Box flexDirection="column">
-      {skills.map((s, i) => {
-        const isSelected = i === selectedIdx
-        return (
-          <Box key={s.name} flexDirection="row">
-            <Box width={2}>
-              <Text color={isSelected ? C.accent : undefined}>
-                {isSelected ? '\u25B6' : ' '}
-              </Text>
-            </Box>
-            <Box width={nameMax}>
-              <Text bold={isSelected}>/{s.name}</Text>
-            </Box>
-            <Box width={2}>
-              <Text>{' '}</Text>
-            </Box>
-            <Box width={descMax}>
-              <Text dimColor>
-                {s.description.slice(0, 36)}
-                {s.description.length > 36 ? '…' : ''}
-              </Text>
-            </Box>
-            <Box width={2}>
-              <Text>{' '}</Text>
-            </Box>
-            <Box width={pathMax}>
-              <Text dimColor>{s.baseDir}</Text>
-            </Box>
-          </Box>
-        )
-      })}
-    </Box>
-  )
-}
-
-function SkillDetail({ skill }: { skill: Skill }) {
-  const maxPreviewLines = 20
-
-  return (
-    <Box flexDirection="column">
-      <Box paddingBottom={1}>
-        <Text bold>/{skill.name}</Text>
-      </Box>
-
+    <DetailView header={<Text bold>/{skill.name}</Text>}>
       <Box paddingBottom={1}>
         <Text>{skill.description}</Text>
       </Box>
@@ -109,45 +101,12 @@ function SkillDetail({ skill }: { skill: Skill }) {
       </Box>
 
       <Box paddingTop={1}>
-        <Text bold dimColor>
-          preview:
-        </Text>
+        <Text bold dimColor>preview:</Text>
       </Box>
       <Box paddingLeft={2}>
         <Markdown>{skill.content}</Markdown>
       </Box>
-    </Box>
-  )
-}
-
-function SkillsPanel({ state }: { state: PanelState }) {
-  const skills = reloadSkills()
-
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text bold>
-          Skills ({skills.length} installed)
-        </Text>
-      </Box>
-
-      {state.view === 'list' && (
-        <SkillList skills={skills} selectedIdx={state.selectedIdx} />
-      )}
-
-      {state.view === 'detail' && skills[state.detailSkillIdx] && (
-        <SkillDetail skill={skills[state.detailSkillIdx]} />
-      )}
-
-      <Box paddingTop={1}>
-        {state.view === 'list' && (
-          <Text dimColor>
-            ↑↓ navigate  ↵ detail  esc close
-          </Text>
-        )}
-        {state.view === 'detail' && <Text dimColor>esc back</Text>}
-      </Box>
-    </Box>
+    </DetailView>
   )
 }
 
@@ -160,11 +119,7 @@ export class QuickCommandSkillsPlugin extends UIPanelPlugin {
         const skills = reloadSkills()
         this.showUI<PanelState>(
           SkillsPanel,
-          {
-            view: 'list',
-            selectedIdx: skills.length > 0 ? 0 : 0,
-            detailSkillIdx: 0,
-          },
+          { view: 'list', selectedIdx: skills.length > 0 ? 0 : 0, detailSkillIdx: 0 },
           (_input, key, state, setState) => {
             const currentSkills = reloadSkills()
 

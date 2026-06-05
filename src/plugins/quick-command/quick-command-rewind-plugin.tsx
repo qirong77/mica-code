@@ -2,47 +2,24 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
-import { C } from '../../components/ui/data.js';
+import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 
 interface RewindState {
   selectedIdx: number;
-}
-
-function ConfirmDialog({
-  title,
-  selected,
-}: {
-  title: string;
-  selected: number;
-}) {
-  const items = ['确认回退', '取消'];
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text dimColor>{title}</Text>
-      </Box>
-      {items.map((label, i) => {
-        const isSelected = i === selected;
-        return (
-          <Box key={label} flexDirection="row">
-            <Box width={2}>
-              <Text color={isSelected ? C.accent : C.dim}>
-                {isSelected ? '\u25B6' : ' '}
-              </Text>
-            </Box>
-            <Text color={isSelected ? C.accent : undefined} bold={isSelected}>
-              {label}
-            </Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
+  _title: string;
 }
 
 function RewindDialog({ state }: { state: RewindState }) {
-  const title = (state as any)._title as string ?? '';
-  return <ConfirmDialog title={title} selected={state.selectedIdx} />;
+  const items = [
+    { key: 'confirm', label: '确认回退' },
+    { key: 'cancel', label: '取消' },
+  ];
+
+  return (
+    <Dialog title={state._title} footer={<KeyHints hints={['↑↓ navigate', '↵ confirm', 'esc cancel']} />}>
+      <SelectList items={items} selectedIdx={state.selectedIdx} />
+    </Dialog>
+  );
 }
 
 export class QuickCommandRewindPlugin extends UIPanelPlugin {
@@ -73,11 +50,7 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
 
     const title = `rewind: ${detailParts.join('，')}`;
 
-    interface RewindStateWithTitle extends RewindState {
-      _title: string;
-    }
-
-    this.showUI<RewindStateWithTitle>(
+    this.showUI<RewindState>(
       RewindDialog,
       { selectedIdx: 0, _title: title },
       (_input, key, state, setState) => {

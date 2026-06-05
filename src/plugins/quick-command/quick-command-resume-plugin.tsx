@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
+import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 import { C } from '../../components/ui/data.js';
 
 export type { SessionMeta };
@@ -80,12 +81,6 @@ async function saveIndex(index: SessionMeta[]) {
   await writeFile(INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const seconds = Math.floor(diff / 1000);
@@ -124,63 +119,6 @@ function clampSelectedIdx(selectedIdx: number, length: number): number {
   return Math.min(Math.max(0, selectedIdx), length - 1);
 }
 
-function SessionList({
-  sessions,
-  selected,
-  total,
-  itemRefs,
-}: {
-  sessions: SessionMeta[];
-  selected: number;
-  total: number;
-  itemRefs: React.MutableRefObject<(DOMElement | null)[]>;
-}) {
-  if (total === 0) {
-    return (
-      <Box paddingX={1}>
-        <Text dimColor>无匹配会话</Text>
-      </Box>
-    );
-  }
-
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      {sessions.map((s, i) => {
-        const isSelected = i === selected;
-        const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
-        return (
-          <Box
-            key={s.id}
-            ref={(el) => {
-              itemRefs.current[i] = el;
-            }}
-            flexDirection="row"
-            flexShrink={0}
-            marginBottom={i < sessions.length - 1 ? 1 : 0}
-          >
-            <Box width={2} flexShrink={0}>
-              <Text color={isSelected ? C.accent : C.dim}>{isSelected ? '\u25B6' : ' '}</Text>
-            </Box>
-            <Box flexGrow={1} flexShrink={1} marginRight={2}>
-              <Text color={isSelected ? C.accent : undefined} wrap="wrap">
-                {titleText}
-              </Text>
-            </Box>
-            <Box width={50} flexShrink={0} alignItems="flex-end">
-              <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                {formatRelativeTime(s.updatedAt)}
-              </Text>
-              <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-               {'  '} {shortPath(s.projectPath || '')}
-              </Text>
-            </Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
 function ResumeSessionList({ state }: { state: ResumeState }) {
   const scrollRef = useRef<ScrollBoxHandle>(null);
   const itemRefs = useRef<(DOMElement | null)[]>([]);
@@ -205,19 +143,47 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
       : `resume (${state.selectedIdx + 1}/${filtered}):`;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1} flexShrink={0}>
-        <Text dimColor>{header}</Text>
-      </Box>
+    <Dialog
+      title={header}
+      footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel', 'type to filter']} />}
+    >
       <ScrollBox ref={scrollRef} flexDirection="column" height={15}>
-        <SessionList
-          sessions={sorted}
-          selected={state.selectedIdx}
-          total={sorted.length}
-          itemRefs={itemRefs}
+        <SelectList
+          items={sorted.map((s) => ({ key: s.id, label: s.title }))}
+          selectedIdx={state.selectedIdx}
+          empty={<Text dimColor>无匹配会话</Text>}
+          renderItem={(item, isSelected) => {
+            const s = sorted.find((x) => x.id === item.key)!;
+            const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
+            return (
+              <Box
+                key={item.key}
+                ref={(el) => {
+                  const idx = sorted.findIndex((x) => x.id === item.key);
+                  if (idx >= 0) itemRefs.current[idx] = el;
+                }}
+                flexDirection="row"
+                flexGrow={1}
+              >
+                <Box flexGrow={1} flexShrink={1} marginRight={2}>
+                  <Text color={isSelected ? C.accent : undefined} wrap="wrap">
+                    {titleText}
+                  </Text>
+                </Box>
+                <Box width={50} flexShrink={0} alignItems="flex-end">
+                  <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
+                    {formatRelativeTime(s.updatedAt)}
+                  </Text>
+                  <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
+                   {'  '} {shortPath(s.projectPath || '')}
+                  </Text>
+                </Box>
+              </Box>
+            );
+          }}
         />
       </ScrollBox>
-    </Box>
+    </Dialog>
   );
 }
 
