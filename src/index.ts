@@ -1,6 +1,6 @@
 
 import { MicaAgent } from './core/agent.js';
-import { fetchModelOptions } from './store/config.js';
+import { updateModelOptions } from './store/updateModelOptions.js';
 import { ErrorHandlerPlugin } from './plugins/agent/error-handler-plugin.js';
 import { AutoCompactPlugin } from './plugins/agent/auto-compact-plugin.js';
 import { QuickCommandModelPlugin } from './plugins/quick-command/quick-command-model-plugin.js';
@@ -22,7 +22,7 @@ import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-
 import { QuickCommandMcpPlugin } from './plugins/mcp/quick-command-mcp-plugin.js';
 import { terminalInput } from './store/ui-state.js';
 
-await fetchModelOptions();
+await updateModelOptions();
 
 await MicaAgent.usePlugin(new QuickBashPlugin());
 await MicaAgent.usePlugin(new QuickCommandInitPlugin());
