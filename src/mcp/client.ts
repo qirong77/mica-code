@@ -25,6 +25,7 @@ export const mcpServersAtom = atom<McpServerStatus[]>([]);
 export interface ConnectedMcpServer {
   name: string;
   client: Client;
+  config: McpHttpServerConfig;
   cleanup: () => Promise<void>;
 }
 
@@ -69,7 +70,7 @@ export async function connectToServer(
     await client.close();
   };
 
-  const server: ConnectedMcpServer = { name, client, cleanup };
+  const server: ConnectedMcpServer = { name, client, config, cleanup };
   connections.set(name, server);
   return server;
 }

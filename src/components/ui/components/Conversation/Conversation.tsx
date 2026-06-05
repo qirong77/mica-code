@@ -49,7 +49,7 @@ export const Conversation = (): React.ReactNode => {
       {staticItems.map((item: LogItem) => {
         if (item.role === 'user') {
           return (
-            <Box key={item.id} paddingX={1} paddingY={1} flexDirection="row">
+            <Box key={item.id} paddingY={1} flexDirection="row">
               <Text color={C.primary}>{'\u258c'}</Text>
               <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
                 <Text bold color={C.primary}>

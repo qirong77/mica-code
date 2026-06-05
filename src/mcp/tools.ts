@@ -1,6 +1,6 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { MicaTool, type ToolExecuteCallbacks } from '../tools/MicaTool';
-import { connections } from './client.js';
+import { connections, connectToServer } from './client.js';
 import type { ConnectedMcpServer } from './client.js';
 
 type TextContent = { type: 'text'; text: string };
@@ -58,6 +58,25 @@ export async function callMcpTool(
     throw new Error(`MCP 服务器 "${serverName}" 未连接`);
   }
 
+  try {
+    return await doCallMcpTool(server, toolName, args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Session not found')) {
+      connections.delete(serverName);
+      await server.cleanup();
+      const reconnected = await connectToServer(serverName, server.config);
+      return await doCallMcpTool(reconnected, toolName, args);
+    }
+    throw error;
+  }
+}
+
+async function doCallMcpTool(
+  server: ConnectedMcpServer,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   const result = await server.client.callTool(
     { name: toolName, arguments: args },
     CallToolResultSchema,
