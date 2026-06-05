@@ -9,6 +9,7 @@ import {
   sessionToolRecordsAtom,
   type SessionToolRecord,
 } from '../store/logAtom.js';
+import { repairSessionMessages } from '../utils/repair.js';
 
 const MAX_TOOL_RECORDS = 100;
 
@@ -35,8 +36,9 @@ export class AgentSession {
   }
 
   replaceMessages(messages: ConversationMessage[]): void {
-    messagesAtom.set(messages);
-    contextSizeAtom.set(updateContextSize(messages));
+    const { cleaned } = repairSessionMessages(messages);
+    messagesAtom.set(cleaned);
+    contextSizeAtom.set(updateContextSize(cleaned));
   }
 
   addToolRecord(record: SessionToolRecord): void {

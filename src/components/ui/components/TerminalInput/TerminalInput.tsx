@@ -133,8 +133,10 @@ function TerminalInput() {
       }
     }
 
+    let pluginHandled = false;
     for (const ui of activePluginUIs) {
       if (ui.onInput?.(_input, key)) {
+        pluginHandled = true;
         if (!ui.preserveInput) {
           terminalInput.text.set('');
           setInput('');
@@ -143,6 +145,28 @@ function TerminalInput() {
         return;
       }
     }
+
+    // 交互式插件（非 preserveInput）未消费的按键 → 关闭插件
+    if (!pluginHandled) {
+      const interactivePlugins = activePluginUIs.filter((ui) => ui.onInput && !ui.preserveInput);
+      if (interactivePlugins.length > 0) {
+        // 仅修饰键不关闭
+        if (!key.ctrl && !key.meta && _input) {
+          pluginUIsAtom.set(activePluginUIs.filter((ui) => !ui.onInput || ui.preserveInput));
+          if (_input === '/') {
+            setInput('/');
+            setCursorOffset(1);
+            terminalInput.text.set('/');
+          } else {
+            setInput('');
+            setCursorOffset(0);
+            terminalInput.text.set('');
+          }
+          return;
+        }
+      }
+    }
+
     if (DropDownUI.quickCommand.handleKey(key)) {
       setInput('');
       setCursorOffset(0);

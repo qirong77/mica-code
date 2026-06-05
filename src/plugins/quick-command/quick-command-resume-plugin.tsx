@@ -8,57 +8,13 @@ import { UIPanelPlugin } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
 import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 import { C } from '../../components/ui/data.js';
+import { repairSessionMessages } from '../../utils/repair.js';
 
 export type { SessionMeta };
 
 const SESSIONS_DIR = resolve(process.env.HOME || '~', '.mica', 'sessions');
 const INDEX_PATH = resolve(SESSIONS_DIR, 'index.json');
 const MAX_SESSIONS = 1000;
-
-function validateToolPairs(messages: any[]): { cleaned: any[]; truncated: number } {
-  if (messages.length === 0) return { cleaned: messages, truncated: 0 };
-
-  const cleaned: any[] = [];
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-
-    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) {
-      cleaned.push(msg);
-      continue;
-    }
-
-    const toolUseIds: string[] = [];
-    for (const block of msg.content) {
-      if (block.type === 'tool_use' && block.id) toolUseIds.push(block.id);
-    }
-
-    if (toolUseIds.length === 0) {
-      cleaned.push(msg);
-      continue;
-    }
-
-    const nextMsg = messages[i + 1];
-    if (!nextMsg || nextMsg.role !== 'user' || !Array.isArray(nextMsg.content)) {
-      break;
-    }
-
-    const resultIds = new Set<string>();
-    for (const block of nextMsg.content) {
-      if (block.type === 'tool_result' && block.tool_use_id) {
-        resultIds.add(block.tool_use_id);
-      }
-    }
-
-    const allMatched = toolUseIds.every((id) => resultIds.has(id));
-    if (!allMatched) break;
-
-    cleaned.push(msg);
-  }
-
-  const truncated = messages.length - cleaned.length;
-  return { cleaned, truncated };
-}
 
 async function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) {
@@ -267,7 +223,7 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
     await ensureDir();
     const filePath = resolve(SESSIONS_DIR, `${id}.json`);
     const clean = messages.filter((m: any) => m.status !== 'clear');
-    const { cleaned } = validateToolPairs(clean);
+    const { cleaned } = repairSessionMessages(clean as any);
     await writeFile(filePath, JSON.stringify(cleaned, null, 2), 'utf-8');
   }
 
@@ -387,7 +343,7 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
     try {
       const raw = await readFile(filePath, 'utf-8');
       const msgs = JSON.parse(raw);
-      const { cleaned, truncated } = validateToolPairs(msgs);
+      const { cleaned, truncated } = repairSessionMessages(msgs as any);
 
       if (truncated > 0) {
         this.showMessage(`会话校验: 截断了 ${truncated} 条不完整的消息`);
