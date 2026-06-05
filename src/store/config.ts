@@ -43,7 +43,7 @@ export const api = {
 };
 
 export const model = {
-  name: createPersistedAtom('model', process.env.ANTHROPIC_MODEL || 'kimi-k2.5-external'),
+  name: createPersistedAtom('model', process.env.ANTHROPIC_MODEL),
   maxTokens: atom(Number(process.env.ANTHROPIC_MAX_TOKENS) || 4096),
   effort: createPersistedAtom('effort', 'low' as EffortLevel),
   options: atom<ModelOption[]>(MODEL_OPTIONS_FALLBACK),
@@ -57,6 +57,17 @@ export const model = {
     { name: 'high', label: 'High' },
   ]),
 };
+/* 
+export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic
+export ANTHROPIC_AUTH_TOKEN=${YOUR_MOONSHOT_API_KEY}
+export ANTHROPIC_MODEL=kimi-k2.5
+export ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k2.5
+export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.5
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.5
+export CLAUDE_CODE_SUBAGENT_MODEL=kimi-k2.5
+export ENABLE_TOOL_SEARCH=false
+claude
+*/
 
 export async function fetchModelOptions(): Promise<void> {
   let baseUrl = api.baseUrl.get();
@@ -70,6 +81,8 @@ export async function fetchModelOptions(): Promise<void> {
   try {
     if (baseUrl.includes('deepseek.com')) {
       baseUrl = 'https://api.deepseek.com/models';
+    } else if (baseUrl.includes('moonshot.cn')) {
+      baseUrl = 'https://api.moonshot.cn/v1/models';
     } else {
       baseUrl = `${baseUrl.replace(/\/$/, '')}/models`;
     }
