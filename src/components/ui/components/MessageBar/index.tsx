@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
 import { dropdown } from '../../../../store/ui-state.js';
+import { C } from '../../data.js';
 
 type Events = {
   add: { id: string; text: string };
@@ -60,7 +61,7 @@ export const MessageBar = React.memo(function MessageBar() {
   if (visible.length === 0) return null;
 
   return (
-    <Box flexDirection="column" paddingX={1} borderBottom borderStyle="dashed" borderColor="ansi:cyan">
+    <Box flexDirection="column" paddingX={1} borderBottom borderStyle="dashed" borderColor={C.border}>
       {visible.map(s => (
         <Box key={s.id}>
           <Text dimColor>{s.text}</Text>

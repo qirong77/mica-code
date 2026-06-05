@@ -4,6 +4,7 @@ import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'
 import { Markdown } from '../../components/ui/components/Conversation/Markdown'
+import { C } from '../../components/ui/data.js'
 
 interface PanelState {
   view: 'list' | 'detail'
@@ -40,8 +41,8 @@ function SkillList({
         return (
           <Box key={s.name} flexDirection="row">
             <Box width={2}>
-              <Text color={isSelected ? 'claude' : undefined}>
-                {isSelected ? '▶' : ' '}
+              <Text color={isSelected ? C.accent : undefined}>
+                {isSelected ? '\u25B6' : ' '}
               </Text>
             </Box>
             <Box width={nameMax}>

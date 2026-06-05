@@ -4,12 +4,17 @@ import type React from 'react';
 // ── Theme ───────────────────────────────────────────────
 
 export const C = {
+  accent: '#D77757',
   primary: '#D77757',
   planMode: '#4A90D9',
   success: '#4CAF50',
   error: '#F44336',
+  warning: '#FFD600',
+  info: '#26C6DA',
   cyan: '#26C6DA',
   dim: '#7b7b7b',
+  textSecondary: '#7b7b7b',
+  border: '#26C6DA',
 } as const;
 
 // ── Quick commands ──────────────────────────────────────

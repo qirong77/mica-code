@@ -4,12 +4,17 @@ import { spawn } from 'node:child_process';
 import { UIPanelPlugin } from '../MicaPlugin';
 import type { WritableAtom } from 'nanostores';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
+import { Panel, StatusRow } from '../../components/ui/primitives/index.js';
 
 function BashOutput({ atom }: { atom: WritableAtom<string> }) {
   const text = useScheduleState(atom);
   if (!text) return null;
-  return React.createElement(Box, { flexDirection: 'column' },
-    React.createElement(Text, null, text),
+  return React.createElement(
+    Panel,
+    { header: 'Bash' },
+    React.createElement(Box, { flexDirection: 'column' },
+      React.createElement(Text, null, text),
+    ),
   );
 }
 

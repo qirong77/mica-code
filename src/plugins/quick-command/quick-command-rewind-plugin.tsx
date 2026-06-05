@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
+import { C } from '../../components/ui/data.js';
 
 interface RewindState {
   selectedIdx: number;
@@ -25,11 +26,11 @@ function ConfirmDialog({
         return (
           <Box key={label} flexDirection="row">
             <Box width={2}>
-              <Text color={isSelected ? 'claude' : 'inactive'}>
-                {isSelected ? '▶' : ' '}
+              <Text color={isSelected ? C.accent : C.dim}>
+                {isSelected ? '\u25B6' : ' '}
               </Text>
             </Box>
-            <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+            <Text color={isSelected ? C.accent : undefined} bold={isSelected}>
               {label}
             </Text>
           </Box>

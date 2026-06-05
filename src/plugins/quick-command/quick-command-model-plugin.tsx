@@ -3,6 +3,8 @@ import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { model } from '../../store/config.js';
 import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
+import { Panel, StatusRow } from '../../components/ui/primitives/index.js';
+import { C } from '../../components/ui/data.js';
 
 interface ModelState {
   selectedIdx: number;
@@ -18,37 +20,30 @@ function ModelList({
   current: string;
 }) {
   if (models.length === 0) {
-    return (
-      <Box paddingX={1}>
-        <Text dimColor>no models available</Text>
-      </Box>
-    );
+    return <StatusRow type="info">no models available</StatusRow>;
   }
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text dimColor>select model:</Text>
-      </Box>
-      {models.map((m, i) => {
-        const isSelected = i === selected;
-        const isActive = m.name === current;
-        return (
-          <Box key={m.name}>
-            <Box flexDirection="row">
+    <Panel header="Model">
+      <Box flexDirection="column">
+        {models.map((m, i) => {
+          const isSelected = i === selected;
+          const isActive = m.name === current;
+          return (
+            <Box key={m.name} flexDirection="row">
               <Box width={2}>
-                <Text color={isSelected ? 'claude' : 'inactive'}>
-                  {isSelected ? '▶' : ' '}
+                <Text color={isSelected ? C.accent : undefined}>
+                  {isSelected ? '\u25B6' : ' '}
                 </Text>
               </Box>
-              <Text color={isSelected ? 'claude' : undefined} bold={isSelected}>
+              <Text color={isSelected ? C.accent : undefined} bold={isSelected}>
                 {m.label}
               </Text>
-              {isActive && <Text color="#4CAF50"> (active)</Text>}
+              {isActive && <Text color={C.success}> (active)</Text>}
             </Box>
-          </Box>
-        );
-      })}
-    </Box>
+          );
+        })}
+      </Box>
+    </Panel>
   );
 }
 

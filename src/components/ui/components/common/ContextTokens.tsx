@@ -3,11 +3,11 @@ import React from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { contextSizeAtom } from '../../../../store/conversation.js';
 import { model } from '../../../../store/config.js';
+import { C } from '../../data.js';
 
 const THRESHOLDS = [0.1, 0.3, 0.5, 0.8] as const;
 
-// 5档颜色：dim -> 青色 -> 黄色 -> 橙色 -> 红色
-const COLORS = ['#7b7b7b', '#26C6DA', '#FFD600', '#FF9800', '#F44336'] as const;
+const COLORS = [C.dim, C.info, C.warning, '#FF9800', C.error] as const;
 
 function getColorIndex(ratio: number): number {
   for (let i = THRESHOLDS.length - 1; i >= 0; i--) {

@@ -81,10 +81,10 @@ export function CommandDropdown({
         return (
           <Box key={item.key}>
             <Box width={labelWidth + GAP}>
-              <Text color={isSelected ? 'claude' : 'inactive'}>{displayLabel}</Text>
+              <Text color={isSelected ? C.accent : C.dim}>{displayLabel}</Text>
             </Box>
             <Box>
-              {item.description && <Text color={isSelected ? 'claude' : 'inactive'}>{item.description}</Text>}
+              {item.description && <Text color={isSelected ? C.accent : C.dim}>{item.description}</Text>}
               {item.suffix && (
                 <Text color={(item.suffix.color ?? C.success) as Color}>{item.suffix.text}</Text>
               )}

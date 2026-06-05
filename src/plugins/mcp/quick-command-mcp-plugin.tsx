@@ -4,6 +4,7 @@ import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus, type McpToolInfo } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
 import { reconnectMcpServer } from '../../mcp/index.js';
+import { C } from '../../components/ui/data.js';
 
 const STATUS_ICON: Record<McpServerStatus['status'], string> = {
   connecting: '○',
@@ -12,9 +13,9 @@ const STATUS_ICON: Record<McpServerStatus['status'], string> = {
 };
 
 function statusColor(status: McpServerStatus['status']) {
-  if (status === 'connected') return '#4CAF50';
-  if (status === 'failed') return '#F44336';
-  return '#FFC107';
+  if (status === 'connected') return C.success;
+  if (status === 'failed') return C.error;
+  return C.warning;
 }
 
 function typeColor(type: string) {
@@ -51,8 +52,8 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
         return (
           <Box key={s.name} flexDirection="row">
             <Box width={2}>
-              <Text color={isSelected ? 'claude' : undefined}>
-                {isSelected ? '▶' : ' '}
+              <Text color={isSelected ? C.accent : undefined}>
+                {isSelected ? '\u25B6' : ' '}
               </Text>
             </Box>
             <Box width={4}>
@@ -74,10 +75,10 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
               <Text dimColor>{s.configPath}</Text>
             </Box>
             {s.status === 'connected' && (
-              <Text color="#4CAF50">  {s.toolCount} tools</Text>
+              <Text color={C.success}>  {s.toolCount} tools</Text>
             )}
             {s.status === 'failed' && s.error && (
-              <Text color="#F44336">  {s.error.slice(0, 50)}</Text>
+              <Text color={C.error}>  {s.error.slice(0, 50)}</Text>
             )}
           </Box>
         );
@@ -110,15 +111,15 @@ function ToolList({
       <Box paddingBottom={1}>
         <Text bold>{server.name} — </Text>
         <Text dimColor>{server.url}</Text>
-        <Text color="#4CAF50">  {server.tools.length} tools</Text>
+        <Text color={C.success}>  {server.tools.length} tools</Text>
       </Box>
       {server.tools.map((t, i) => {
         const isSelected = i === selectedIdx;
         return (
           <Box key={t.name} flexDirection="row" paddingLeft={1}>
             <Box width={2}>
-              <Text color={isSelected ? 'claude' : undefined}>
-                {isSelected ? '▶' : ' '}
+              <Text color={isSelected ? C.accent : undefined}>
+                {isSelected ? '\u25B6' : ' '}
               </Text>
             </Box>
             <Box width={30}>
@@ -166,7 +167,7 @@ function ToolDetail({ tool, serverName }: { tool: McpToolInfo; serverName: strin
               <Box key={key} flexDirection="row" paddingLeft={2}>
                 <Box width={4}>
                   {isRequired ? (
-                    <Text color="#F44336">*</Text>
+                    <Text color={C.error}>*</Text>
                   ) : (
                     <Text>{' '}</Text>
                   )}

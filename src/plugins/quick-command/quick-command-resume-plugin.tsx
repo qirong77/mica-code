@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
+import { C } from '../../components/ui/data.js';
 
 export type { SessionMeta };
 
@@ -158,18 +159,18 @@ function SessionList({
             marginBottom={i < sessions.length - 1 ? 1 : 0}
           >
             <Box width={2} flexShrink={0}>
-              <Text color={isSelected ? 'claude' : 'inactive'}>{isSelected ? '\u25B6' : ' '}</Text>
+              <Text color={isSelected ? C.accent : C.dim}>{isSelected ? '\u25B6' : ' '}</Text>
             </Box>
             <Box flexGrow={1} flexShrink={1} marginRight={2}>
-              <Text color={isSelected ? 'claude' : undefined} wrap="wrap">
+              <Text color={isSelected ? C.accent : undefined} wrap="wrap">
                 {titleText}
               </Text>
             </Box>
             <Box width={50} flexShrink={0} alignItems="flex-end">
-              <Text  dimColor={!isSelected} color={isSelected ? 'claude' : 'inactive'}>
+              <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
                 {formatRelativeTime(s.updatedAt)}
               </Text>
-              <Text dimColor={!isSelected} color={isSelected ? 'claude' : 'inactive'}>
+              <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
                {'  '} {shortPath(s.projectPath || '')}
               </Text>
             </Box>
