@@ -11,7 +11,7 @@ export interface McpConfig {
   mcpServers?: Record<string, McpHttpServerConfig>;
 }
 
-const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
+export const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
 
 export async function loadMcpConfig(): Promise<Record<string, McpHttpServerConfig>> {
   try {

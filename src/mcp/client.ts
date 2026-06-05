@@ -2,6 +2,7 @@ import { atom } from 'nanostores';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpHttpServerConfig } from './config.js';
+import { CONFIG_PATH } from './config.js';
 
 export interface McpToolInfo {
   name: string;
@@ -12,6 +13,7 @@ export interface McpToolInfo {
 export interface McpServerStatus {
   name: string;
   url: string;
+  configPath: string;
   status: 'connecting' | 'connected' | 'failed';
   toolCount: number;
   tools: McpToolInfo[];
@@ -47,7 +49,7 @@ export async function connectToServer(
   const existing = connections.get(name);
   if (existing) return existing;
 
-  updateServerStatus({ name, url: config.url, status: 'connecting', toolCount: 0, tools: [] });
+  updateServerStatus({ name, url: config.url, configPath: CONFIG_PATH, status: 'connecting', toolCount: 0, tools: [] });
 
   const transport = new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: config.headers
@@ -73,7 +75,7 @@ export async function connectToServer(
 }
 
 export function markServerFailed(name: string, url: string, error: string) {
-  updateServerStatus({ name, url, status: 'failed', toolCount: 0, tools: [], error });
+  updateServerStatus({ name, url, configPath: CONFIG_PATH, status: 'failed', toolCount: 0, tools: [], error });
 }
 
 export function markServerConnected(
@@ -82,7 +84,7 @@ export function markServerConnected(
   toolCount: number,
   tools: McpToolInfo[],
 ) {
-  updateServerStatus({ name, url, status: 'connected', toolCount, tools });
+  updateServerStatus({ name, url, configPath: CONFIG_PATH, status: 'connected', toolCount, tools });
 }
 
 export async function disconnectServer(name: string): Promise<void> {

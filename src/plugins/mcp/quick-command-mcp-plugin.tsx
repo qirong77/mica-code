@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus, type McpToolInfo } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
@@ -40,6 +40,10 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
     return <Text dimColor>  no servers configured</Text>;
   }
 
+  const nameMax = Math.max(...servers.map((s) => s.name.length))
+  const urlMax = Math.max(...servers.map((s) => s.url.length))
+  const configMax = Math.max(...servers.map((s) => s.configPath.length))
+
   return (
     <Box flexDirection="column">
       {servers.map((s, i) => {
@@ -54,10 +58,21 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
             <Box width={4}>
               <Text color={statusColor(s.status)}>{STATUS_ICON[s.status]}</Text>
             </Box>
-            <Box width={16}>
+            <Box width={nameMax + 2}>
               <Text bold={isSelected}>{s.name}</Text>
             </Box>
-            <Text dimColor>{s.url}</Text>
+            <Box width={2}>
+              <Text>{' '}</Text>
+            </Box>
+            <Box width={urlMax}>
+              <Text dimColor>{s.url}</Text>
+            </Box>
+            <Box width={2}>
+              <Text>{' '}</Text>
+            </Box>
+            <Box width={configMax}>
+              <Text dimColor>{s.configPath}</Text>
+            </Box>
             {s.status === 'connected' && (
               <Text color="#4CAF50">  {s.toolCount} tools</Text>
             )}

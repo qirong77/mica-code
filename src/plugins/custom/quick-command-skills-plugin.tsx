@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text, useTerminalSize } from '@anthropic/ink'
 import { UIPanelPlugin } from '../MicaPlugin'
 import { reloadSkills } from '../../skills/loadSkills'
 import type { Skill } from '../../skills/types'
@@ -29,6 +29,10 @@ function SkillList({
     )
   }
 
+  const nameMax = Math.max(...skills.map((s) => s.name.length)) + 1
+  const descMax = Math.max(...skills.map((s) => Math.min(s.description.length, 36))) + 2
+  const pathMax = Math.max(...skills.map((s) => s.baseDir.length))
+
   return (
     <Box flexDirection="column">
       {skills.map((s, i) => {
@@ -40,13 +44,24 @@ function SkillList({
                 {isSelected ? '▶' : ' '}
               </Text>
             </Box>
-            <Box width={30}>
+            <Box width={nameMax}>
               <Text bold={isSelected}>/{s.name}</Text>
             </Box>
-            <Text dimColor>
-              {s.description.slice(0, 60)}
-              {s.description.length > 60 ? '…' : ''}
-            </Text>
+            <Box width={2}>
+              <Text>{' '}</Text>
+            </Box>
+            <Box width={descMax}>
+              <Text dimColor>
+                {s.description.slice(0, 36)}
+                {s.description.length > 36 ? '…' : ''}
+              </Text>
+            </Box>
+            <Box width={2}>
+              <Text>{' '}</Text>
+            </Box>
+            <Box width={pathMax}>
+              <Text dimColor>{s.baseDir}</Text>
+            </Box>
           </Box>
         )
       })}
