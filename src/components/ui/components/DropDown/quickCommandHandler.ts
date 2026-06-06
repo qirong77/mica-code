@@ -138,7 +138,9 @@ function executeSelected(): void {
 
   if (cmd) {
     const beforeItems = dropdown.state.get().items;
-    cmd.action();
+    const raw = dropdown.inputValue.get();
+    const remainder = raw.slice(cmd.name.length).trim();
+    cmd.action(remainder || undefined);
     const after = dropdown.state.get();
 
     // 如果 action 没有变更 dropdown 内容（如 /clear），则关闭下拉列表

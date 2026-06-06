@@ -20,11 +20,30 @@ export class QuickCommandRenamePlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'rename',
-      description: 'AI 生成会话标题',
-      action: () => {
-        this._generateTitle();
+      description: 'AI 生成会话标题（可带参数直接指定标题）',
+      action: (arg?: string) => {
+        if (arg && arg.trim()) {
+          this._setTitle(arg.trim());
+        } else {
+          this._generateTitle();
+        }
       },
     });
+  }
+
+  private _setTitle(title: string) {
+    const currentId = this.atoms.currentSessionId.get();
+    if (!currentId) {
+      this.showMessage('没有活跃的会话');
+      return;
+    }
+
+    const idx = this.atoms.sessionsIndex.get();
+    const updated = idx.map((s) =>
+      s.id === currentId ? { ...s, title, updatedAt: Date.now() } : s,
+    );
+    this.atoms.sessionsIndex.set(updated);
+    this.showMessage(`标题已更新: ${title}`);
   }
 
   private async _generateTitle() {

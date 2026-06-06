@@ -61,18 +61,19 @@ export abstract class MicaTool {
   }
 
   private _showSlowMsg(text: string) {
+    const id = `slow-${this.name}`;
     if (this._slowMsgId) {
       MessageBarAPI.removeMessage(this._slowMsgId);
     }
-    this._slowMsgId = `slow-${this.name}-${Date.now()}`;
-    MessageBarAPI.addMessage({ id: this._slowMsgId, text });
+    this._slowMsgId = id;
+    MessageBarAPI.addMessage({ id, text });
   }
 
   private _hideSlowMsg(text: string) {
+    const id = `slow-${this.name}`;
     if (this._slowMsgId) {
       MessageBarAPI.removeMessage(this._slowMsgId);
     }
-    const id = `slow-${this.name}-done`;
     MessageBarAPI.addMessage({ id, text });
     setTimeout(() => MessageBarAPI.removeMessage(id), 3000);
     this._slowMsgId = null;
