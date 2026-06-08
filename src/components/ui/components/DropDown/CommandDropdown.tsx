@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Box, Text, type Color, stringWidth } from '@anthropic/ink';
-import { SelectList } from '../../primitives/index.js';
+import { Dialog, KeyHints, SelectList } from '../../primitives/index.js';
 import type { SelectItem } from '../../primitives/index.js';
 import type { DropdownItem } from '../../../../store/ui-state.js';
 import { C } from '../../data.js';
@@ -96,6 +96,7 @@ export function CommandDropdown({
 
   return (
     <Box paddingX={Math.floor(SIDE_MARGIN / 2)}>
+    <Dialog title="" footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
       <SelectList
         items={selectItems}
         selectedIdx={selectedIndex}
@@ -106,6 +107,8 @@ export function CommandDropdown({
         marker=""
         renderItem={renderItem}
       />
+    </Dialog>
+
     </Box>
   );
 }

@@ -92,29 +92,29 @@ function ToolList({
   selectedIdx: number;
 }) {
   return (
-    <Box flexDirection="column">
-      <Box paddingBottom={1}>
-        <Text bold>{server.name} — </Text>
-        <Text dimColor>{server.url}</Text>
-        <Text color={C.success}>  {server.tools.length} tools</Text>
-      </Box>
-      <SelectList
-        items={server.tools.map((t) => ({ key: t.name, label: t.name }))}
-        selectedIdx={selectedIdx}
-        empty={<Text dimColor>  no tools available</Text>}
-        renderItem={(item, isSelected) => {
-          const t = server.tools.find((x) => x.name === item.key)!;
-          return (
-            <Box flexDirection="row">
-              <Box width={30}>
-                <Text bold={isSelected}>{t.name}</Text>
-              </Box>
-              <Text dimColor>{t.description.slice(0, 80)}</Text>
+    <SelectList
+      title={
+        <Text>
+          <Text bold>{server.name} — </Text>
+          <Text dimColor>{server.url}</Text>
+          <Text color={C.success}>  {server.tools.length} tools</Text>
+        </Text>
+      }
+      items={server.tools.map((t) => ({ key: t.name, label: t.name }))}
+      selectedIdx={selectedIdx}
+      empty={<Text dimColor>  no tools available</Text>}
+      renderItem={(item, isSelected) => {
+        const t = server.tools.find((x) => x.name === item.key)!;
+        return (
+          <Box flexDirection="row">
+            <Box width={30}>
+              <Text bold={isSelected}>{t.name}</Text>
             </Box>
-          );
-        }}
-      />
-    </Box>
+            <Text dimColor>{t.description.slice(0, 80)}</Text>
+          </Box>
+        );
+      }}
+    />
   );
 }
 

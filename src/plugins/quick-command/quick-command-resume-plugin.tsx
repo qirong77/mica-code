@@ -113,7 +113,6 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
             const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
             return (
               <Box
-                key={item.key}
                 ref={(el) => {
                   const idx = sorted.findIndex((x) => x.id === item.key);
                   if (idx >= 0) itemRefs.current[idx] = el;

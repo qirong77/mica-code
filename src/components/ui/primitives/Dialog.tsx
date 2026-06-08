@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { IfComponent } from '../components/common/IfComponent';
 
 export interface DialogProps {
   title: string;
@@ -10,9 +11,12 @@ export interface DialogProps {
 export function Dialog({ title, children, footer }: DialogProps): React.ReactNode {
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box paddingBottom={1}>
-        <Text dimColor>{title}</Text>
-      </Box>
+      <IfComponent condition={!!title}>
+        <Box paddingBottom={1}>
+          <Text dimColor>{title}</Text>
+        </Box>
+      </IfComponent>
+
       {children}
       {footer}
     </Box>
