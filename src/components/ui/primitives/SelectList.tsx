@@ -6,12 +6,14 @@ import { C } from '../data.js';
 export interface SelectItem {
   key: string;
   label: React.ReactNode;
+  description?: string;
   suffix?: React.ReactNode;
 }
 
 export interface SelectListProps<T extends SelectItem> {
   items: T[];
   selectedIdx: number;
+  title?: React.ReactNode;
   empty?: React.ReactNode;
   itemGap?: number;
   markerWidth?: number;
@@ -59,6 +61,7 @@ function renderItems<T extends SelectItem>(
 export function SelectList<T extends SelectItem>({
   items,
   selectedIdx,
+  title,
   empty = <Text dimColor>no items</Text>,
   itemGap = 1,
   markerWidth = 2,
@@ -70,15 +73,52 @@ export function SelectList<T extends SelectItem>({
     return <>{empty}</>;
   }
 
-  if (items.length <= maxVisibleItems) {
-    return (
+  const body =
+    items.length <= maxVisibleItems ? (
       <Box flexDirection="column">
         {renderItems(items, selectedIdx, itemGap, markerWidth, marker, renderItem)}
       </Box>
+    ) : (
+      <ScrollBody
+        items={items}
+        selectedIdx={selectedIdx}
+        maxVisibleItems={maxVisibleItems}
+        itemGap={itemGap}
+        markerWidth={markerWidth}
+        marker={marker}
+        renderItem={renderItem}
+      />
     );
-  }
 
-  // scrollHeight tracks the full list; viewport clips to maxVisibleItems
+  if (!title) return body;
+
+  return (
+    <Box flexDirection="column">
+      <Box paddingBottom={1}>
+        {typeof title === 'string' ? <Text dimColor>{title}</Text> : title}
+      </Box>
+      {body}
+    </Box>
+  );
+}
+
+function ScrollBody<T extends SelectItem>({
+  items,
+  selectedIdx,
+  maxVisibleItems,
+  itemGap,
+  markerWidth,
+  marker,
+  renderItem,
+}: {
+  items: T[];
+  selectedIdx: number;
+  maxVisibleItems: number;
+  itemGap: number;
+  markerWidth: number;
+  marker: string;
+  renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
+}) {
   const visibleRows = maxVisibleItems + (maxVisibleItems - 1) * itemGap;
   const scrollRef = useRef<ScrollBoxHandle>(null);
 
@@ -96,11 +136,7 @@ export function SelectList<T extends SelectItem>({
   }, [selectedIdx, itemGap, visibleRows]);
 
   return (
-    <ScrollBox
-      ref={scrollRef}
-      height={visibleRows}
-      flexDirection="column"
-    >
+    <ScrollBox ref={scrollRef} height={visibleRows} flexDirection="column">
       {renderItems(items, selectedIdx, itemGap, markerWidth, marker, renderItem)}
     </ScrollBox>
   );

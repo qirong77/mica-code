@@ -1,4 +1,4 @@
-import type { DropdownItem } from './CommandDropdown.js';
+import type { DropdownItem } from '../../../../store/ui-state.js';
 import { DropDownSelect } from './DropDownSelect.js';
 import { dropdown } from '../../../../store/ui-state.js';
 import {

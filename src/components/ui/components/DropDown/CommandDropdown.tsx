@@ -1,13 +1,9 @@
 import React, { useMemo } from 'react';
 import { Box, Text, type Color, stringWidth } from '@anthropic/ink';
+import { SelectList } from '../../primitives/index.js';
+import type { SelectItem } from '../../primitives/index.js';
+import type { DropdownItem } from '../../../../store/ui-state.js';
 import { C } from '../../data.js';
-
-export interface DropdownItem {
-  key: string;
-  label: string;
-  description?: string;
-  suffix?: { text: string; color?: string };
-}
 
 const MIN_LABEL_COL = 18;
 const GAP = 3;
@@ -26,18 +22,8 @@ function truncateToWidth(str: string, maxWidth: number): string {
   return result;
 }
 
-export function CommandDropdown({
-  items,
-  selectedIndex,
-  title,
-  emptyMessage = 'no matching items',
-}: {
-  items: DropdownItem[];
-  selectedIndex: number;
-  title?: string;
-  emptyMessage?: string;
-}): React.ReactNode {
-  const labelWidth = useMemo(() => {
+function useLabelWidth(items: DropdownItem[]): number {
+  return useMemo(() => {
     if (items.length === 0) return MIN_LABEL_COL;
 
     const maxLabelW = Math.max(...items.map((it) => stringWidth(it.label)));
@@ -59,39 +45,67 @@ export function CommandDropdown({
     const labelBudget = Math.floor(availableW * 0.48);
     return Math.max(MIN_LABEL_COL, Math.min(labelBudget, maxLabelW));
   }, [items]);
+}
 
-  if (items.length === 0) {
+export function CommandDropdown({
+  items,
+  selectedIndex,
+  title,
+  emptyMessage = 'no matching items',
+}: {
+  items: DropdownItem[];
+  selectedIndex: number;
+  title?: string;
+  emptyMessage?: string;
+}): React.ReactNode {
+  const labelWidth = useLabelWidth(items);
+
+  const selectItems: SelectItem[] = useMemo(
+    () =>
+      items.map((it) => ({
+        key: it.key,
+        label: it.label,
+        description: it.description,
+        suffix: it.suffix ? it.suffix.text : undefined,
+      })),
+    [items],
+  );
+
+  const renderItem = (item: SelectItem, isSelected: boolean) => {
+    const orig = items.find((it) => it.key === item.key);
     return (
-      <Box paddingX={1}>
-        <Text dimColor>{emptyMessage}</Text>
+      <Box flexDirection="row">
+        <Box width={labelWidth + GAP}>
+          <Text color={isSelected ? C.accent : C.dim}>
+            {truncateToWidth(orig?.label ?? '', labelWidth)}
+          </Text>
+        </Box>
+        <Box>
+          {orig?.description && (
+            <Text color={isSelected ? C.accent : C.dim}>{orig.description}</Text>
+          )}
+          {orig?.suffix && (
+            <Text color={(orig.suffix.color ?? C.success) as Color}>
+              {orig.suffix.text}
+            </Text>
+          )}
+        </Box>
       </Box>
     );
-  }
+  };
 
   return (
-    <Box flexDirection="column" paddingX={Math.floor(SIDE_MARGIN / 2)}>
-      {title && (
-        <Box paddingBottom={1}>
-          <Text dimColor>{title}</Text>
-        </Box>
-      )}
-      {items.map((item, i) => {
-        const isSelected = i === selectedIndex;
-        const displayLabel = truncateToWidth(item.label, labelWidth);
-        return (
-          <Box key={item.key}>
-            <Box width={labelWidth + GAP}>
-              <Text color={isSelected ? C.accent : C.dim}>{displayLabel}</Text>
-            </Box>
-            <Box>
-              {item.description && <Text color={isSelected ? C.accent : C.dim}>{item.description}</Text>}
-              {item.suffix && (
-                <Text color={(item.suffix.color ?? C.success) as Color}>{item.suffix.text}</Text>
-              )}
-            </Box>
-          </Box>
-        );
-      })}
+    <Box paddingX={Math.floor(SIDE_MARGIN / 2)}>
+      <SelectList
+        items={selectItems}
+        selectedIdx={selectedIndex}
+        title={title}
+        empty={<Text dimColor>{emptyMessage}</Text>}
+        itemGap={0}
+        markerWidth={0}
+        marker=""
+        renderItem={renderItem}
+      />
     </Box>
   );
 }
