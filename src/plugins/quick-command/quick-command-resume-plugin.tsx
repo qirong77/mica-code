@@ -96,20 +96,17 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
         empty={<Text dimColor>无匹配会话</Text>}
         renderItem={(item, isSelected) => {
           const s = sorted.find((x) => x.id === item.key)!;
-          const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
+          const titleText = s.title.length > 80 ? s.title.slice(0, 80) + '...' : s.title;
           return (
             <Box flexDirection="row" flexGrow={1}>
               <Box flexGrow={1} flexShrink={1} marginRight={2}>
-                <Text color={isSelected ? C.accent : undefined} wrap="wrap">
+                <Text color={isSelected ? C.accent : undefined}>
                   {titleText}
                 </Text>
               </Box>
-              <Box width={50} flexShrink={0} alignItems="flex-end">
+              <Box flexShrink={0}>
                 <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                  {formatRelativeTime(s.updatedAt)}
-                </Text>
-                <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                 {'  '} {shortPath(s.projectPath || '')}
+                  {formatRelativeTime(s.updatedAt)}  {shortPath(s.projectPath || '')}
                 </Text>
               </Box>
             </Box>
