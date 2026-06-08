@@ -43,7 +43,7 @@ export const api = {
 };
 
 export const model = {
-  name: createPersistedAtom('model', process.env.ANTHROPIC_MODEL),
+  name: createPersistedAtom('model', process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6'),
   maxTokens: atom(Number(process.env.ANTHROPIC_MAX_TOKENS) || 4096),
   effort: createPersistedAtom('effort', 'low' as EffortLevel),
   options: atom<ModelOption[]>(MODEL_OPTIONS_FALLBACK),

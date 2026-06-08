@@ -1173,7 +1173,8 @@ export function diff(
       { x, y },
       removed ? { ...removed } : undefined,
       added ? { ...added } : undefined,
-    ])
+    ]);
+    return false;
   })
   return output
 }
