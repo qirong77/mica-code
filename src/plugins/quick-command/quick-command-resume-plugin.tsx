@@ -1,6 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { Box, Text, ScrollBox } from '@anthropic/ink';
-import type { DOMElement, ScrollBoxHandle } from '@anthropic/ink';
+import React from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -76,22 +75,9 @@ function clampSelectedIdx(selectedIdx: number, length: number): number {
 }
 
 function ResumeSessionList({ state }: { state: ResumeState }) {
-  const scrollRef = useRef<ScrollBoxHandle>(null);
-  const itemRefs = useRef<(DOMElement | null)[]>([]);
   const sorted = state._sorted;
   const total = state._allSorted.length;
   const filtered = sorted.length;
-
-  useEffect(() => {
-    itemRefs.current.length = sorted.length;
-  }, [sorted.length]);
-
-  useEffect(() => {
-    const scroll = scrollRef.current;
-    const selectedEl = itemRefs.current[state.selectedIdx];
-    if (!scroll || !selectedEl) return;
-    scroll.scrollToElement(selectedEl);
-  }, [state.selectedIdx, sorted.length]);
 
   const header =
     state.filterQuery.trim() && filtered !== total
@@ -103,41 +89,33 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
       title={header}
       footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel', 'type to filter']} />}
     >
-      <ScrollBox ref={scrollRef} flexDirection="column" height={15}>
-        <SelectList
-          items={sorted.map((s) => ({ key: s.id, label: s.title }))}
-          selectedIdx={state.selectedIdx}
-          empty={<Text dimColor>无匹配会话</Text>}
-          renderItem={(item, isSelected) => {
-            const s = sorted.find((x) => x.id === item.key)!;
-            const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
-            return (
-              <Box
-                ref={(el) => {
-                  const idx = sorted.findIndex((x) => x.id === item.key);
-                  if (idx >= 0) itemRefs.current[idx] = el;
-                }}
-                flexDirection="row"
-                flexGrow={1}
-              >
-                <Box flexGrow={1} flexShrink={1} marginRight={2}>
-                  <Text color={isSelected ? C.accent : undefined} wrap="wrap">
-                    {titleText}
-                  </Text>
-                </Box>
-                <Box width={50} flexShrink={0} alignItems="flex-end">
-                  <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                    {formatRelativeTime(s.updatedAt)}
-                  </Text>
-                  <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                   {'  '} {shortPath(s.projectPath || '')}
-                  </Text>
-                </Box>
+      <SelectList
+        items={sorted.map((s) => ({ key: s.id, label: s.title }))}
+        selectedIdx={state.selectedIdx}
+        maxVisibleItems={15}
+        empty={<Text dimColor>无匹配会话</Text>}
+        renderItem={(item, isSelected) => {
+          const s = sorted.find((x) => x.id === item.key)!;
+          const titleText = s.title.length > 110 ? s.title.slice(0, 110) + '...' : s.title;
+          return (
+            <Box flexDirection="row" flexGrow={1}>
+              <Box flexGrow={1} flexShrink={1} marginRight={2}>
+                <Text color={isSelected ? C.accent : undefined} wrap="wrap">
+                  {titleText}
+                </Text>
               </Box>
-            );
-          }}
-        />
-      </ScrollBox>
+              <Box width={50} flexShrink={0} alignItems="flex-end">
+                <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
+                  {formatRelativeTime(s.updatedAt)}
+                </Text>
+                <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
+                 {'  '} {shortPath(s.projectPath || '')}
+                </Text>
+              </Box>
+            </Box>
+          );
+        }}
+      />
     </Dialog>
   );
 }
