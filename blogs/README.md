@@ -92,6 +92,7 @@ Blog 01 在 1.4 开头加了归属说明。Blog 02 和 03 在导语末尾补了�
 - [【03】Code Agent 从零到一：事件、选择与虚拟滚动](./3.ink-output-control.md)
 - [【04】Code Agent 从零到一：对话压缩策略的演进](./4.compact-strategy.md)
 - [【05】Code Agent 从零到一：工具设计的防御性编程](./5.tool-optimization.md)
+- [【06】Code Agent 从零到一：claude-code 文件级记忆系统设计](./6.memory-system-design.md)
 
 ---
 

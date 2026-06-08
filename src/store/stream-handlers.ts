@@ -67,7 +67,6 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
     thinkingTextAtom.set('');
     responseTextAtom.set('');
     clearToolOutputBuffers();
-    ui.MessageBar.clearMessages();
   }
 
   if (status.type === 'idle') {
