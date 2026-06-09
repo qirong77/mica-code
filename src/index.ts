@@ -1,4 +1,3 @@
-
 import { MicaAgent } from './core/agent.js';
 import { updateModelOptions } from './store/updateModelOptions.js';
 import { ErrorHandlerPlugin } from './plugins/agent/error-handler-plugin.js';
@@ -20,6 +19,7 @@ import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
 import { QuickCommandMcpPlugin } from './plugins/mcp/quick-command-mcp-plugin.js';
+import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/quick-command-git-change-context-plugin.js';
 import { terminalInput } from './store/ui-state.js';
 
 await updateModelOptions();
@@ -43,7 +43,7 @@ await MicaAgent.usePlugin(new QuickCommandClearPlugin());
 await MicaAgent.usePlugin(new QuickCommandDeletePlugin());
 await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
-
+await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
 
 const printPrompt = getPrintPrompt();
 if (printPrompt) {
