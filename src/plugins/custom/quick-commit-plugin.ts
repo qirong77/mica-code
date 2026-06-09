@@ -26,6 +26,8 @@ const COMMIT_PROMPT = `<role>
 4. 生成中文 commit message，格式: <prefix>: <description>
 5. description 简洁清楚，控制在 50 字内，emoji 只出现在前缀部分，末尾不再重复
 6. 执行 git add . && git commit -m "生成的message"
+7. 提交成功后，运行 git rev-parse --abbrev-ref @{u} 2>/dev/null 检查当前分支是否已关联远程分支
+8. 如果有远程分支，执行 git push；如果未关联，不推送，告知用户通过 git push -u origin <branch> 手动推送
 </rules>
 
 <example>
@@ -36,7 +38,9 @@ diff --stat 显示 src/auth/login.ts、src/auth/types.ts 为新增文件。
 生成的 commit message:
 feat: ✨ 新增用户登录接口及类型定义
 
-执行: git add . && git commit -m "feat: ✨ 新增用户登录接口及类型定义"
+执行 git add . && git commit -m "feat: ✨ 新增用户登录接口及类型定义"
+
+提交成功后，检测到远程分支 origin/main 存在，执行 git push 推送。
 </example>
 
 现在请按以上规则执行提交。`;
