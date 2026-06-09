@@ -1,7 +1,10 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import { MicaPlugin } from '../MicaPlugin';
+import { createSubAgent } from '../../agent/subagent.js';
 
-const COMMIT_PROMPT = `<role>
+const COMMIT_SYSTEM_PROMPT = `<role>
 你是一个 Git 提交助手，负责分析当前工作区的变更并生成规范的 commit message 后执行提交。
+只做好这一件事，不要做任何无关操作。
 </role>
 
 <context>
@@ -31,9 +34,9 @@ const COMMIT_PROMPT = `<role>
 </rules>
 
 <example>
-用户执行 /commit，当前变更为新增了一个用户登录接口和对应的类型定义文件。
+用户发起提交请求，当前变更为新增了一个用户登录接口和对应的类型定义文件。
 
-diff --stat 显示 src/auth/login.ts、src/auth/types.ts 为新增文件。
+git diff --stat 显示 src/auth/login.ts、src/auth/types.ts 为新增文件。
 
 生成的 commit message:
 feat: ✨ 新增用户登录接口及类型定义
@@ -45,14 +48,41 @@ feat: ✨ 新增用户登录接口及类型定义
 
 现在请按以上规则执行提交。`;
 
+const COMMIT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'run_shell',
+    description: '执行 shell 命令并返回输出。',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: '要执行的命令' },
+      },
+      required: ['command'],
+    },
+  },
+];
+
+const runCommit = createSubAgent({
+  systemPrompt: COMMIT_SYSTEM_PROMPT,
+  tools: COMMIT_TOOLS,
+});
+
 export class QuickCommitPlugin extends MicaPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'commit',
       description: '根据当前变更生成 commit message 并提交',
       action: () => {
-        this.agent.ui.TerminalInput.submit(COMMIT_PROMPT);
-        this.showMessage('正在分析变更并提交...');
+        const msgId = this.showMessage('正在分析变更并提交...', 0);
+        runCommit([{ role: 'user', content: '请执行 git 提交。' }])
+          .then((result) => {
+            this.removeMessage(msgId);
+            this.showMessage(result.text || '提交完成', 5000);
+          })
+          .catch((err) => {
+            this.removeMessage(msgId);
+            this.showMessage(`提交失败: ${err instanceof Error ? err.message : String(err)}`, 5000);
+          });
       },
     });
   }

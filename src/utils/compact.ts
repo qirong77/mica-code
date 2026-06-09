@@ -1,6 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { getClient } from '../agent/client';
-import { model } from '../store/config.js';
+import { createSubAgent } from '../agent/subagent.js';
 import { toMessageParams, type ConversationMessage } from '../store/conversation.js';
 
 const COMPACT_PROMPT = `CRITICAL: 只输出纯文本，不要调用任何工具。
@@ -64,7 +63,6 @@ const COMPACT_PROMPT = `CRITICAL: 只输出纯文本，不要调用任何工具�
 
 export const KEEP_RECENT_COUNT = 6;
 export const MIN_MESSAGES_TO_COMPACT = 8;
-export const SUMMARY_MAX_TOKENS = 8192;
 
 function formatCompactSummary(raw: string): string {
   let result = raw.replace(/<analysis>[\s\S]*?<\/analysis>/g, '');
@@ -78,25 +76,19 @@ function formatCompactSummary(raw: string): string {
 }
 
 // 调用大模型对指定消息列表做摘要
+const summarizeSubAgent = createSubAgent({
+  systemPrompt: '你是一个擅长总结技术对话的助手。',
+  maxTokens: 8192,
+});
+
 export async function summarizeMessages(messages: Anthropic.MessageParam[]): Promise<string> {
-  const modelName = model.name.get();
-  const client = getClient();
+  const result = await summarizeSubAgent([
+    ...messages,
+    { role: 'user', content: COMPACT_PROMPT },
+  ]);
 
-  const response = await client.messages.create({
-    model: modelName,
-    max_tokens: SUMMARY_MAX_TOKENS,
-    system: '你是一个擅长总结技术对话的助手。',
-    messages: [
-      ...messages,
-      { role: 'user', content: COMPACT_PROMPT },
-    ],
-  });
-
-  const textBlock = response.content.find((b) => b.type === 'text');
-  const raw = textBlock?.text;
-  if (!raw) return '[压缩失败]';
-
-  return formatCompactSummary(raw);
+  if (!result.text) return '[压缩失败]';
+  return formatCompactSummary(result.text);
 }
 
 // 压缩整段对话：旧消息 → 摘要，保留最近 N 条
