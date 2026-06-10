@@ -8,6 +8,7 @@ import { ConversationUI } from './components/Conversation/index.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
 import { DropDownUI } from './components/DropDown/index.js';
 import { MessageBarAPI } from './components/MessageBar/index.js';
+import { AgentTurnLogUI } from './components/AgentTurnLog/index.js';
 
 function Root() {
   return <App />;
@@ -32,5 +33,6 @@ export const ui = {
   WorkingStatus: WorkingStatusUI,
   DropDown: DropDownUI,
   MessageBar: MessageBarAPI,
+  AgentTurnLog: AgentTurnLogUI,
   run,
 };
