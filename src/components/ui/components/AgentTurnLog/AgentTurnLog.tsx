@@ -49,8 +49,7 @@ export function AgentTurnLog() {
       {thinkingLines.length > 0 && (
         <Box
           flexDirection="column"
-          borderLeft
-          borderStyle="single"
+
         >
           {thinkingLines.map((line, i) => (
             <Text key={i} dimColor>
