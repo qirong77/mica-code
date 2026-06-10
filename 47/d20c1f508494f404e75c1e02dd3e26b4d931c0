@@ -1,0 +1,14 @@
+src/components/ui/primitives/SelectList.tsx
+  h_a456b67147438e 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "47d20c1f508494f404e75c1e02dd3e26b4d931c0",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
