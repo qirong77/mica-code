@@ -125,8 +125,5 @@ export class ToolGrepSearch extends MicaTool {
     const inc = input.include ? ` [${input.include}]` : '';
     return `grep "${pattern}" ${p}${inc}`;
   }
-  getSlowText(ms: number, input: Record<string, any>): string {
-    const pattern = truncate(input.pattern as string);
-    return `搜索 "${pattern}" (${(ms / 1000).toFixed(1)}s)`;
-  }
+  
 }

@@ -70,7 +70,5 @@ export class ToolReadFile extends MicaTool {
     if (input.limit) parts.push(`+${input.limit}行`);
     return `read ${parts.join(' ')}`;
   }
-  getSlowText(ms: number, input: Record<string, any>): string {
-    return `读取文件 ${input.file_path} (${(ms / 1000).toFixed(1)}s)`;
-  }
+  
 }

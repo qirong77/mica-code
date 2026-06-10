@@ -132,8 +132,5 @@ export class ToolRunShell extends MicaTool {
     return `$ ${cmd}`;
   }
 
-  getSlowText(ms: number, input: Record<string, any>): string {
-    const cmd = truncate(input.command as string);
-    return `执行命令 ${cmd} (${(ms / 1000).toFixed(1)}s)`;
-  }
+  
 }

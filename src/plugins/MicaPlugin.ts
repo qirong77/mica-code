@@ -28,7 +28,6 @@ export interface PluginAtoms {
   thinkingText: WritableAtom<string>;
   responseText: WritableAtom<string>;
   sessionToolRecords: WritableAtom<SessionToolRecord[]>;
-  systemLogVisible: WritableAtom<boolean>;
   maxTokens: WritableAtom<number>;
   contextWindowSize: ReadableAtom<number>;
   apiBaseUrl: ReadableAtom<string | undefined>;

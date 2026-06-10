@@ -77,8 +77,6 @@ export interface PluginUI {
 
 export const pluginUIsAtom = atom<PluginUI[]>([]);
 
-export const systemLogVisibleAtom = atom(false);
-
 export const inputBottomDistanceAtom = atom(0);
 
 export const session = {

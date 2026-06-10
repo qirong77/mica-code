@@ -11,12 +11,20 @@ interface LogMessage extends Anthropic.MessageParam {
   status?: 'clear';
 }
 
+const MAX_USER_LINES = 10;
+
 function getTextContent(content: Anthropic.MessageParam['content']): string {
   if (typeof content === 'string') return content;
   return content
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
+}
+
+function truncateLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  if (lines.length <= maxLines) return text;
+  return lines.slice(0, maxLines).join('\n') + '…';
 }
 
 interface LogItem {
@@ -53,7 +61,7 @@ export const Conversation = (): React.ReactNode => {
               <Text color={C.primary}>{'\u258c'}</Text>
               <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
                 <Text bold color={C.primary}>
-                  {item.text}
+                  {truncateLines(item.text, MAX_USER_LINES)}
                 </Text>
               </Box>
             </Box>

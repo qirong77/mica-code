@@ -43,9 +43,7 @@ class McpProxyTool extends MicaTool {
     }
   }
 
-  getSlowText(elapsedMs: number, input: Record<string, any>): string {
-    return `⏳ MCP 工具 ${this.toolName} 执行中 (${this.serverName}) ...`;
-  }
+  
 }
 
 export async function callMcpTool(

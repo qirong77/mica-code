@@ -13,9 +13,9 @@ import { QuickCommandClearPlugin } from './plugins/quick-command/quick-command-c
 import { QuickCommandDeletePlugin } from './plugins/quick-command/quick-command-delete-plugin.js';
 import { QuickCommandStarPlugin } from './plugins/quick-command/quick-command-star-plugin.js';
 import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.js';
-import { QuickCommandStatusPlugin } from './plugins/debug/quick-command-status.js';
+import { QuickCommandStatusPlugin } from './plugins/quick-command/quick-command-status.js';
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
-import { QuickCommandLogTogglePlugin } from './plugins/debug/quick-command-log-toggle.js';
+
 import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
@@ -31,7 +31,6 @@ await MicaAgent.usePlugin(new QuickCommandSkillsPlugin());
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandDebugPlugin());
-await MicaAgent.usePlugin(new QuickCommandLogTogglePlugin());
 await MicaAgent.usePlugin(new QuickCommandLogPlugin());
 await MicaAgent.usePlugin(new QuickCommandStatusPlugin());
 await MicaAgent.usePlugin(new QuickCommandModelPlugin());

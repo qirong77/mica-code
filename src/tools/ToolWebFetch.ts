@@ -151,11 +151,6 @@ export class ToolWebFetch extends MicaTool {
     return `fetch ${input.url}`;
   }
 
-  getSlowText(ms: number, input: Record<string, any>): string {
-    const host = this._hostname(input.url as string);
-    return `抓取 ${host || input.url} (${(ms / 1000).toFixed(1)}s)`;
-  }
-
   private _validateUrl(url: string): void {
     if (url.length > MAX_URL_LENGTH) {
       throw new Error(`URL 超过 ${MAX_URL_LENGTH} 字符限制`);
@@ -178,14 +173,6 @@ export class ToolWebFetch extends MicaTool {
 
     if (parsed.hostname.split('.').length < 2) {
       throw new Error('无效域名');
-    }
-  }
-
-  private _hostname(url: string): string {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return '';
     }
   }
 

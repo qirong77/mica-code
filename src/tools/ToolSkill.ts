@@ -71,7 +71,5 @@ export class ToolSkill extends MicaTool {
     return `调用 skill: ${input.skill}`
   }
 
-  getSlowText(_elapsedMs: number, input: Record<string, any>): string {
-    return `正在执行 skill: ${input.skill}...`
-  }
+  
 }
