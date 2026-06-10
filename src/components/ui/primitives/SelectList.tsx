@@ -5,7 +5,7 @@ import { C } from '../data.js';
 import { useScheduleState } from '../hooks/index.js';
 import { inputBottomDistanceAtom } from '../../../store/ui-state.js';
 
-const DEFAULT_OVERHEAD = 10;
+const DEFAULT_OVERHEAD = 6;
 
 export interface SelectItem {
   key: string;
