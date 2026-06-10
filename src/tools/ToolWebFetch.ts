@@ -75,7 +75,7 @@ export class ToolWebFetch extends MicaTool {
 
   async execute(
     input: { url: string; prompt?: string },
-    _callbacks?: ToolExecuteCallbacks,
+    callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
     const { url, prompt = '' } = input;
     this._validateUrl(url);
@@ -97,9 +97,13 @@ export class ToolWebFetch extends MicaTool {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
+    const onAbort = () => controller.abort();
+    callbacks?.signal?.addEventListener('abort', onAbort, { once: true });
+
     try {
       const result = await this._fetchWithRedirects(url, controller.signal);
       clearTimeout(timeout);
+      callbacks?.signal?.removeEventListener('abort', onAbort);
 
       if (result.type === 'redirect') {
         return `检测到跨域重定向。请用以下 URL 重新请求：\n原始: ${result.originalUrl}\n重定向: ${result.redirectUrl}`;
@@ -135,6 +139,7 @@ export class ToolWebFetch extends MicaTool {
       );
     } catch (error: any) {
       clearTimeout(timeout);
+      callbacks?.signal?.removeEventListener('abort', onAbort);
       if (error.name === 'AbortError') {
         return `请求超时: ${url}`;
       }

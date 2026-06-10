@@ -97,16 +97,18 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
         renderItem={(item, isSelected) => {
           const s = sorted.find((x) => x.id === item.key)!;
           const titleText = s.title.length > 80 ? s.title.slice(0, 80) + '...' : s.title;
+          const star = s.starred ? ' ⭐️' : '';
           return (
             <Box flexDirection="row" flexGrow={1}>
               <Box flexGrow={1} flexShrink={1} marginRight={2}>
                 <Text color={isSelected ? C.accent : undefined}>
+                  {star}
                   {titleText}
                 </Text>
               </Box>
               <Box flexShrink={0}>
                 <Text dimColor={!isSelected} color={isSelected ? C.accent : C.dim}>
-                  {formatRelativeTime(s.updatedAt)}  {shortPath(s.projectPath || '')}
+                  {formatRelativeTime(s.updatedAt)} {shortPath(s.projectPath || '')}
                 </Text>
               </Box>
             </Box>
@@ -224,6 +226,7 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
     const idx = this.atoms.sessionsIndex.get();
     const currentCwd = process.cwd();
     const allSorted = [...idx].sort((a, b) => {
+      if (a.starred !== b.starred) return a.starred ? -1 : 1;
       const aSame = a.projectPath === currentCwd ? 0 : 1;
       const bSame = b.projectPath === currentCwd ? 0 : 1;
       if (aSame !== bSame) return aSame - bSame;

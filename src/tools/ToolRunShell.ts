@@ -28,6 +28,17 @@ export class ToolRunShell extends MicaTool {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
+      const abortHandler = () => {
+        if (!child.killed) {
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (!child.killed) child.kill('SIGKILL');
+          }, 5000);
+        }
+      };
+
+      callbacks?.signal?.addEventListener('abort', abortHandler, { once: true });
+
       let output = '';
 
       child.stdout.on('data', (data: Buffer) => {
@@ -43,6 +54,7 @@ export class ToolRunShell extends MicaTool {
       });
 
       child.on('close', (code) => {
+        callbacks?.signal?.removeEventListener('abort', abortHandler);
         const msg = output || '(no output)';
         if (code !== 0 && code !== null) {
           resolve(`(退出码: ${code})\n${msg}`);
@@ -52,6 +64,7 @@ export class ToolRunShell extends MicaTool {
       });
 
       child.on('error', (error) => {
+        callbacks?.signal?.removeEventListener('abort', abortHandler);
         if (output) {
           resolve(`(错误: ${error.message})\n${output}`);
         } else {

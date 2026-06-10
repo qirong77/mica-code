@@ -31,6 +31,7 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
   projectPath?: string;
+  starred?: boolean;
 }
 
 export interface Command {

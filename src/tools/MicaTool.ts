@@ -5,6 +5,7 @@ const SLOW_TOOL_THRESHOLD_MS = 5000;
 
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface ValidationResult {

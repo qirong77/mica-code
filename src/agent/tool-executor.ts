@@ -48,6 +48,7 @@ export class ToolExecutor {
           onChunk: (chunk) => {
             this.callbacks.onToolOutput({ toolUseId: tool.id, chunk });
           },
+          signal: abortSignal,
         });
         const elapsed = Date.now() - startTime;
         const records = sessionToolRecordsAtom.get();

@@ -56,13 +56,17 @@ export class ToolGrepSearch extends MicaTool {
       let errorOutput = '';
       let killed = false;
 
-      const timer = setTimeout(() => {
+      const killChild = () => {
         killed = true;
         child.kill('SIGTERM');
         setTimeout(() => {
           if (!child.killed) child.kill('SIGKILL');
         }, 5000);
-      }, GREP_TIMEOUT_MS);
+      };
+
+      callbacks?.signal?.addEventListener('abort', killChild, { once: true });
+
+      const timer = setTimeout(killChild, GREP_TIMEOUT_MS);
 
       child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
@@ -76,6 +80,7 @@ export class ToolGrepSearch extends MicaTool {
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        callbacks?.signal?.removeEventListener('abort', killChild);
         if (killed) {
           const lines = output.trim().split('\n').filter(Boolean);
           if (lines.length > 0) {
@@ -109,6 +114,7 @@ export class ToolGrepSearch extends MicaTool {
 
       child.on('error', (error) => {
         clearTimeout(timer);
+        callbacks?.signal?.removeEventListener('abort', killChild);
         reject(new Error(`grep_search 执行失败：\n${error.message}`));
       });
     });
