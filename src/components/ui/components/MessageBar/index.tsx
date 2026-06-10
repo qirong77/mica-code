@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
-import { dropdown } from '../../../../store/ui-state.js';
+import { dropdown, inputBottomDistanceAtom } from '../../../../store/ui-state.js';
+import { useScheduleState } from '../../hooks/index.js';
 import { C } from '../../data.js';
 
 type Events = {
@@ -12,8 +13,7 @@ type Events = {
 
 const emitter = mitt<Events>();
 
-const MAX_VISIBLE = 10;
-const MAX_BUFFER = MAX_VISIBLE * 2;
+const MIN_VISIBLE = 3;
 
 interface MessageItem {
   id: string;
@@ -28,12 +28,22 @@ export const MessageBarAPI = {
 
 export const MessageBar = React.memo(function MessageBar() {
   const [items, setItems] = useState<MessageItem[]>([]);
+  const bottomDistance = useScheduleState(inputBottomDistanceAtom);
+
+  const maxVisible = useMemo(() => {
+    const reserved = 4;
+    return Math.max(MIN_VISIBLE, bottomDistance - reserved);
+  }, [bottomDistance]);
+
+  const maxBuffer = maxVisible * 2;
+  const maxBufferRef = useRef(maxBuffer);
+  maxBufferRef.current = maxBuffer;
 
   useEffect(() => {
     const onAdd = (item: MessageItem) => {
       setItems(prev => {
         const next = [...prev, item];
-        return next.length > MAX_BUFFER ? next.slice(-MAX_BUFFER) : next;
+        return next.length > maxBufferRef.current ? next.slice(-maxBufferRef.current) : next;
       });
     };
     const onRemove = (id: string) => setItems(prev => prev.filter(s => s.id !== id));
@@ -57,7 +67,7 @@ export const MessageBar = React.memo(function MessageBar() {
     };
   }, []);
 
-  const visible = useMemo(() => items.slice(-MAX_VISIBLE), [items]);
+  const visible = useMemo(() => items.slice(-maxVisible), [items, maxVisible]);
   if (visible.length === 0) return null;
 
   return (

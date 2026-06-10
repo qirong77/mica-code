@@ -1,16 +1,17 @@
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput, useTerminalSize } from '@anthropic/ink';
 import React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { SimpleTextInput } from "./Input";
 import { C } from "../../data";
 import mitt from 'mitt'
 import { useScheduleState } from '../../hooks';
-import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom } from '../../../../store/ui-state.js';
+import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom, inputBottomDistanceAtom } from '../../../../store/ui-state.js';
 import { agentTurn } from '../../../../agent/turn.js';
 import { DropDownUI } from '../DropDown/index.js';
 import { saveClipboardImage } from '../../utils/imagePaste.js';
 import { appendSystemLog } from "../../../../store/logAtom";
 import { MessageBarAPI } from '../MessageBar/index.js';
+import type { DOMElement } from '@anthropic/ink';
 
 type Events = {
   submit: string
@@ -56,6 +57,11 @@ function useDoublePressExit(isIdle: boolean): [boolean, () => void] {
   return [pending, handlePress];
 }
 
+interface YogaNodeLike {
+  getComputedTop(): number;
+  getComputedHeight(): number;
+}
+
 function TerminalInput() {
   const [input, setInput] = useState(terminalInput.text.get());
   const [cursorOffset, setCursorOffset] = useState(0);
@@ -66,6 +72,30 @@ function TerminalInput() {
   const workingStatus = useScheduleState(workingStatusAtom);
   const placeholder = useScheduleState(terminalInput.placeholder);
   const planMode = useScheduleState(planModeAtom);
+  const terminalSize = useTerminalSize();
+  const inputBoxRef = useRef<DOMElement | null>(null);
+  const setInputBoxRef = useCallback((el: DOMElement | null) => {
+    inputBoxRef.current = el;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = inputBoxRef.current;
+    if (!el?.yogaNode || !terminalSize) return;
+
+    const yoga = el.yogaNode as unknown as YogaNodeLike;
+    let absoluteTop = yoga.getComputedTop();
+    let parent: DOMElement | undefined = el.parentNode;
+    while (parent) {
+      if (parent.yogaNode) {
+        absoluteTop += (parent.yogaNode as unknown as YogaNodeLike).getComputedTop();
+      }
+      parent = parent.parentNode;
+    }
+
+    const bottom = absoluteTop + yoga.getComputedHeight();
+    const distance = Math.max(0, terminalSize.rows - bottom);
+    inputBottomDistanceAtom.set(distance);
+  });
 
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
 
@@ -250,7 +280,7 @@ function TerminalInput() {
   const inputDisabled = useScheduleState(terminalInput.disabled);
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
       <Box
         flexDirection="row"
         alignItems="flex-start"

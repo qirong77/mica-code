@@ -1,7 +1,11 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { Box, Text, ScrollBox } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@anthropic/ink';
 import { C } from '../data.js';
+import { useScheduleState } from '../hooks/index.js';
+import { inputBottomDistanceAtom } from '../../../store/ui-state.js';
+
+const DEFAULT_OVERHEAD = 10;
 
 export interface SelectItem {
   key: string;
@@ -19,6 +23,7 @@ export interface SelectListProps<T extends SelectItem> {
   markerWidth?: number;
   marker?: string;
   maxVisibleItems?: number;
+  heightEveryRow?: number;
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
 }
 
@@ -66,9 +71,17 @@ export function SelectList<T extends SelectItem>({
   itemGap = 1,
   markerWidth = 2,
   marker = '\u25B6',
-  maxVisibleItems = 5,
+  maxVisibleItems: explicitMax,
+  heightEveryRow = 1,
   renderItem,
 }: SelectListProps<T>): React.ReactNode {
+  const bottomDistance = useScheduleState(inputBottomDistanceAtom);
+
+  const maxVisibleItems = useMemo(() => {
+    if (explicitMax !== undefined) return explicitMax;
+    if (bottomDistance <= 0) return 5;
+    return Math.max(3, Math.floor((bottomDistance - DEFAULT_OVERHEAD) / heightEveryRow));
+  }, [explicitMax, bottomDistance, heightEveryRow]);
   if (items.length === 0) {
     return <>{empty}</>;
   }

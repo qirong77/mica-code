@@ -79,6 +79,8 @@ export const pluginUIsAtom = atom<PluginUI[]>([]);
 
 export const systemLogVisibleAtom = atom(false);
 
+export const inputBottomDistanceAtom = atom(0);
+
 export const session = {
   index: atom<SessionMeta[]>([]),
   currentId: atom<string>(''),

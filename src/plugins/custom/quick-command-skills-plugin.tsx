@@ -28,6 +28,7 @@ function SkillsPanel({ state }: { state: PanelState }) {
         <SelectList
           items={skills.map((s) => ({ key: s.name, label: s.name }))}
           selectedIdx={state.selectedIdx}
+          heightEveryRow={1}
           empty={
             <Box flexDirection="column">
               <Text dimColor>  no skills installed</Text>

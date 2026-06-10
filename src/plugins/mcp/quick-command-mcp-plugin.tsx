@@ -48,6 +48,7 @@ function ServerList({ servers, selectedIdx }: { servers: McpServerStatus[]; sele
     <SelectList
       items={servers.map((s) => ({ key: s.name, label: s.name }))}
       selectedIdx={selectedIdx}
+      heightEveryRow={1}
       empty={<Text dimColor>  no servers configured</Text>}
       renderItem={(item, isSelected) => {
         const s = servers.find((x) => x.name === item.key)!;
@@ -102,6 +103,7 @@ function ToolList({
       }
       items={server.tools.map((t) => ({ key: t.name, label: t.name }))}
       selectedIdx={selectedIdx}
+      heightEveryRow={1}
       empty={<Text dimColor>  no tools available</Text>}
       renderItem={(item, isSelected) => {
         const t = server.tools.find((x) => x.name === item.key)!;

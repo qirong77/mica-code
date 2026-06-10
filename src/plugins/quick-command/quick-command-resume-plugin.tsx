@@ -92,12 +92,12 @@ function ResumeSessionList({ state }: { state: ResumeState }) {
       <SelectList
         items={sorted.map((s) => ({ key: s.id, label: s.title }))}
         selectedIdx={state.selectedIdx}
-        maxVisibleItems={15}
+        heightEveryRow={2}
         empty={<Text dimColor>无匹配会话</Text>}
         renderItem={(item, isSelected) => {
           const s = sorted.find((x) => x.id === item.key)!;
           const titleText = s.title.length > 80 ? s.title.slice(0, 80) + '...' : s.title;
-          const star = s.starred ? ' ⭐️' : '';
+          const star = s.starred ? ' ⭐️ ' : '';
           return (
             <Box flexDirection="row" flexGrow={1}>
               <Box flexGrow={1} flexShrink={1} marginRight={2}>

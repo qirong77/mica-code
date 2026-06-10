@@ -105,6 +105,7 @@ export function CommandDropdown({
         itemGap={0}
         markerWidth={0}
         marker=""
+        heightEveryRow={1}
         renderItem={renderItem}
       />
     </Dialog>

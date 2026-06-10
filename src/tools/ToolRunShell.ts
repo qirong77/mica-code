@@ -1,9 +1,18 @@
 import { spawn } from 'child_process';
+import { openSync, closeSync } from 'fs';
+import { mkdir } from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
+import crypto from 'crypto';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 
 function truncate(s: string, maxLen = 200): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + '…';
+}
+
+function taskId(): string {
+  return crypto.randomBytes(6).toString('hex');
 }
 
 export class ToolRunShell extends MicaTool {
@@ -13,12 +22,29 @@ export class ToolRunShell extends MicaTool {
       properties: {
         command: { type: 'string', description: '要执行的命令' },
         timeout: { type: 'number', description: '超时毫秒，默认 30000' },
+        run_in_background: {
+          type: 'boolean',
+          description: '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。输出写入临时文件，后续用 read_file 查看。',
+        },
       },
       required: ['command'],
     });
   }
 
-  async execute(input: { command: string; timeout?: number }, callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(
+    input: { command: string; timeout?: number; run_in_background?: boolean },
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
+    if (input.run_in_background) {
+      return this.executeBackground(input);
+    }
+    return this.executeForeground(input, callbacks);
+  }
+
+  private async executeForeground(
+    input: { command: string; timeout?: number },
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
     const timeout = input.timeout || 30000;
 
     return new Promise((resolve) => {
@@ -74,9 +100,38 @@ export class ToolRunShell extends MicaTool {
     });
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
-    return `$ ${truncate(input.command as string, 80)}`;
+  private async executeBackground(input: { command: string }): Promise<string> {
+    const id = taskId();
+    const outputDir = path.join(tmpdir(), 'mica-tasks');
+    const outputPath = path.join(outputDir, `${id}.out`);
+
+    await mkdir(outputDir, { recursive: true });
+
+    const fd = openSync(outputPath, 'w');
+    const child = spawn(input.command, {
+      shell: true,
+      detached: true,
+      stdio: ['ignore', fd, fd],
+    });
+    closeSync(fd);
+
+    child.unref();
+
+    return [
+      `命令已在后台启动 (id: ${id})`,
+      `输出文件: ${outputPath}`,
+      `如需查看结果，用 read_file 读取输出文件。命令完成后再读一次获取最终输出。`,
+    ].join('\n');
   }
+
+  onToolUseDisplayText(input: Record<string, any>): string {
+    const cmd = truncate(input.command as string, 80);
+    if (input.run_in_background) {
+      return `$ ${cmd} [后台]`;
+    }
+    return `$ ${cmd}`;
+  }
+
   getSlowText(ms: number, input: Record<string, any>): string {
     const cmd = truncate(input.command as string);
     return `执行命令 ${cmd} (${(ms / 1000).toFixed(1)}s)`;
