@@ -15,7 +15,6 @@ import { QuickCommandStarPlugin } from './plugins/quick-command/quick-command-st
 import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.js';
 import { QuickCommandStatusPlugin } from './plugins/quick-command/quick-command-status.js';
 import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
-
 import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
