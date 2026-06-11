@@ -1,0 +1,14 @@
+src/bootstrap.ts
+  h_a456b67147438e 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "4d1ffc28b3fb18c00fffd1f67ca88354846cdad4",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
