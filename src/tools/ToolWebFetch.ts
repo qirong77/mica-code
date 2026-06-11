@@ -1,6 +1,7 @@
 import { LRUCache } from 'lru-cache';
 import TurndownService from 'turndown';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { truncateDisplayText } from '../utils/display.js';
 
 const MAX_URL_LENGTH = 2000;
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
@@ -148,7 +149,7 @@ export class ToolWebFetch extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `fetch ${input.url}`;
+    return `fetch ${truncateDisplayText(input.url as string, 6)}`;
   }
 
   private _validateUrl(url: string): void {

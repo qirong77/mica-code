@@ -1,4 +1,9 @@
-import { thinkingTextAtom, responseTextAtom, workingStatusAtom } from './ui-state.js';
+import {
+  thinkingTextAtom,
+  responseTextAtom,
+  workingStatusAtom,
+  activeToolsAtom,
+} from './ui-state.js';
 import type { WorkingStatus } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
 import { ui } from '../components/ui/index.js';
@@ -18,6 +23,11 @@ export function appendToolOutputChunk(toolUseId: string, chunk: string) {
   const buf = toolOutputBuffers.get(toolUseId) || [];
   buf.push(chunk);
   toolOutputBuffers.set(toolUseId, buf);
+
+  const tools = activeToolsAtom.get();
+  activeToolsAtom.set(
+    tools.map((t) => (t.toolUseId === toolUseId ? { ...t, output: t.output + chunk } : t)),
+  );
 }
 
 export function clearToolOutputBuffers() {
@@ -33,6 +43,7 @@ export function handleStreamStart() {
   thinkingTextAtom.set('');
   responseTextAtom.set('');
   clearToolOutputBuffers();
+  activeToolsAtom.set([]);
 }
 
 export function handleStreamChunk(chunk: string) {
@@ -46,16 +57,51 @@ export function handleFinalMessage() {
   clearToolOutputBuffers();
 }
 
-export function handleToolUseStart(_toolUseId: string, _toolName: string, _toolInput: Record<string, any>) {
+function safeDisplayText(toolName: string, input: Record<string, any>): string {
+  try {
+    return getToolDisplayText(toolName, input);
+  } catch {
+    return toolName;
+  }
 }
 
-export function handleToolUseComplete(toolUseId: string, toolName: string, toolInput: Record<string, any>, elapsedMs: number) {
+export function handleToolUseStart(
+  toolUseId: string,
+  toolName: string,
+  toolInput: Record<string, any>,
+) {
+  const displayText = safeDisplayText(toolName, toolInput);
+  const tools = activeToolsAtom.get();
+  activeToolsAtom.set([
+    ...tools,
+    {
+      toolUseId,
+      toolName,
+      displayText,
+      completed: false,
+      output: '',
+      startTime: Date.now(),
+    },
+  ]);
+}
+
+export function handleToolUseComplete(
+  toolUseId: string,
+  toolName: string,
+  toolInput: Record<string, any>,
+  elapsedMs: number,
+) {
   flushToolOutputBuffer(toolUseId);
-  const display = getToolDisplayText(toolName, toolInput);
-  const elapsed = elapsedMs >= 1000
-    ? `${(elapsedMs / 1000).toFixed(1)}s`
-    : `${elapsedMs}ms`;
+  const display = safeDisplayText(toolName, toolInput);
+  const elapsed = elapsedMs >= 1000 ? `${(elapsedMs / 1000).toFixed(1)}s` : `${elapsedMs}ms`;
   appendSystemLog(`${display} · ${elapsed}`);
+
+  const tools = activeToolsAtom.get();
+  activeToolsAtom.set(
+    tools.map((t) =>
+      t.toolUseId === toolUseId ? { ...t, completed: true, elapsedMs, displayText: display } : t,
+    ),
+  );
 }
 
 export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
@@ -67,10 +113,12 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
     thinkingTextAtom.set('');
     responseTextAtom.set('');
     clearToolOutputBuffers();
+    activeToolsAtom.set([]);
   }
 
   if (status.type === 'idle') {
     clearToolOutputBuffers();
+    activeToolsAtom.set([]);
   }
 
   workingStatusAtom.set(status);
@@ -78,17 +126,18 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
 
 function formatStatusLog(status: WorkingStatus): string {
   switch (status.type) {
-    case 'connecting': return '连接 API';
-    case 'thinking': return '思考中';
-    case 'streaming': return '流式输出';
+    case 'connecting':
+      return '连接 API';
+    case 'thinking':
+      return '思考中';
+    case 'streaming':
+      return '流式输出';
     case 'calling_tool':
       return status.elapsedMs != null
         ? `执行工具 (${(status.elapsedMs / 1000).toFixed(1)}s)`
         : '执行工具';
     case 'completed':
-      return status.elapsedMs != null
-        ? `完成 (${(status.elapsedMs / 1000).toFixed(1)}s)`
-        : '完成';
+      return status.elapsedMs != null ? `完成 (${(status.elapsedMs / 1000).toFixed(1)}s)` : '完成';
     case 'error':
       return status.message ? `错误 — ${status.message}` : '错误';
     default:

@@ -1,5 +1,6 @@
 import { glob } from 'glob';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { truncateDisplayText } from '../utils/display.js';
 
 export class ToolListFiles extends MicaTool {
   constructor() {
@@ -23,7 +24,7 @@ export class ToolListFiles extends MicaTool {
     return files.slice(0, 200).join('\n');
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `list ${input.pattern} in ${input.path || '.'}`;
+    return `list ${truncateDisplayText(input.pattern as string, 10)} in ${input.path || '.'}`;
   }
   
 }

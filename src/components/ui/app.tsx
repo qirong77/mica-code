@@ -19,8 +19,8 @@ export function App(): React.ReactNode {
       <TerminalInputUI.renderFn />
       <WorkingStatusUI.renderFn />
       <MessageBar/>
-            <AgentTurnLogUI.renderFn />
-      <Box flexGrow={1}>
+      <Box flexGrow={1} flexDirection="column">
+        <AgentTurnLogUI.renderFn />
         <BottomPanel />
       </Box>
       <Box paddingBottom={1} />

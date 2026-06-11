@@ -1,5 +1,6 @@
 import { stat, readFile } from 'fs/promises';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { truncateDisplayText } from '../utils/display.js';
 
 const MAX_SIZE_BYTES = 256 * 1024;
 
@@ -65,7 +66,8 @@ export class ToolReadFile extends MicaTool {
     return result;
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    const parts = [input.file_path as string];
+    const filePath = truncateDisplayText(input.file_path as string, 5); // "read " prefix
+    const parts = [filePath];
     if (input.offset) parts.push(`:${input.offset}`);
     if (input.limit) parts.push(`+${input.limit}行`);
     return `read ${parts.join(' ')}`;

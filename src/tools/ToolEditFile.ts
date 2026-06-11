@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'fs/promises';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 import { backupFile } from '../utils/fileHistory.js';
+import { truncateDisplayText } from '../utils/display.js';
 
 export class ToolEditFile extends MicaTool {
   constructor() {
@@ -29,7 +30,7 @@ export class ToolEditFile extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    return `edit ${input.file_path}`;
+    return `edit ${truncateDisplayText(input.file_path as string, 5)}`;
   }
   
 }

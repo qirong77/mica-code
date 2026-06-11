@@ -2,6 +2,7 @@ import { writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
 import { backupFile } from '../utils/fileHistory.js';
+import { truncateDisplayText } from '../utils/display.js';
 
 export class ToolWriteFile extends MicaTool {
   constructor() {
@@ -26,10 +27,10 @@ export class ToolWriteFile extends MicaTool {
     return `写入成功: ${input.file_path}`;
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    const path = input.file_path as string;
+    const filePath = truncateDisplayText(input.file_path as string, 6); // "write " prefix
     const len = typeof input.content === 'string' ? input.content.length : 0;
     const sizeHint = len > 0 ? ` (${len}B)` : '';
-    return `write ${path}${sizeHint}`;
+    return `write ${filePath}${sizeHint}`;
   }
   
 }

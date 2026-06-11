@@ -1,10 +1,6 @@
 import { spawn } from 'child_process';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
-
-function truncate(s: string, maxLen = 60): string {
-  if (s.length <= maxLen) return s;
-  return s.slice(0, maxLen) + '…';
-}
+import { truncateDisplayText } from '../utils/display.js';
 
 const GREP_TIMEOUT_MS = 20_000;
 const DEFAULT_HEAD_LIMIT = 200;
@@ -120,8 +116,8 @@ export class ToolGrepSearch extends MicaTool {
     });
   }
   onToolUseDisplayText(input: Record<string, any>): string {
-    const pattern = truncate(input.pattern as string);
-    const p = input.path ? input.path : '.';
+    const pattern = truncateDisplayText(input.pattern as string, 10); // grep "…" prefix ~8chars
+    const p = input.path ? truncateDisplayText(input.path as string, 0) : '.';
     const inc = input.include ? ` [${input.include}]` : '';
     return `grep "${pattern}" ${p}${inc}`;
   }

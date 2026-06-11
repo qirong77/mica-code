@@ -10,6 +10,18 @@ export type WorkingStatus =
   | { type: 'completed'; elapsedMs?: number }
   | { type: 'error'; message?: string };
 
+export interface ActiveTool {
+  toolUseId: string;
+  toolName: string;
+  displayText: string;
+  completed: boolean;
+  output: string;
+  elapsedMs?: number;
+  startTime: number;
+}
+
+export const activeToolsAtom = atom<ActiveTool[]>([]);
+
 export interface DropdownItem {
   key: string;
   label: string;

@@ -5,11 +5,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
-
-function truncate(s: string, maxLen = 200): string {
-  if (s.length <= maxLen) return s;
-  return s.slice(0, maxLen) + '…';
-}
+import { truncateDisplayText } from '../utils/display.js';
 
 function taskId(): string {
   return crypto.randomBytes(6).toString('hex');
@@ -125,11 +121,13 @@ export class ToolRunShell extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    const cmd = truncate(input.command as string, 80);
+    const cmd = (input.command ?? '') as string;
+    // "$ " prefix + " [后台]" suffix 大约占 10 个额外字符
+    const truncated = truncateDisplayText(cmd.trim(), 10);
     if (input.run_in_background) {
-      return `$ ${cmd} [后台]`;
+      return `$ ${truncated} [后台]`;
     }
-    return `$ ${cmd}`;
+    return `$ ${truncated}`;
   }
 
   
