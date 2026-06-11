@@ -6,12 +6,16 @@ import {
   workingStatusAtom,
   activeToolsAtom,
   pluginUIsAtom,
+  inputBottomDistanceAtom,
   dropdown,
 } from '../../../../store/ui-state.js';
 import type { ActiveTool } from '../../../../store/ui-state.js';
 import { C } from '../../data.js';
+import { useSpinner } from '../common/Spin.js';
+import { formatElapsed } from '../../../../utils/format.js';
 
 const MAX_TOOL_OUTPUT_LINES = 500;
+const RESERVED_LINES = 4;
 
 const TOOL_ICONS: Record<string, string> = {
   read_file: '📖',
@@ -24,26 +28,8 @@ const TOOL_ICONS: Record<string, string> = {
   Skill: '🔧',
 };
 
-const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
 function toolIcon(name: string): string {
   return TOOL_ICONS[name] || '⚙️';
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function useSpinner(): number {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setFrame((f) => (f + 1) % SPINNER.length);
-    }, 80);
-    return () => clearInterval(timer);
-  }, []);
-  return frame;
 }
 
 function useNow(interval = 100): number {
@@ -57,11 +43,11 @@ function useNow(interval = 100): number {
 
 function ActiveToolLine({
   tool,
-  spinnerFrame,
+  spinner,
   now,
 }: {
   tool: ActiveTool;
-  spinnerFrame: number;
+  spinner: string;
   now: number;
 }) {
   const icon = toolIcon(tool.toolName);
@@ -80,7 +66,7 @@ function ActiveToolLine({
   const elapsed = formatElapsed(now - tool.startTime);
   return (
     <Box flexDirection="row">
-      <Text color={C.info}>{SPINNER[spinnerFrame]} </Text>
+      <Text color={C.info}>{spinner} </Text>
       <Text dimColor>{icon} </Text>
       <Text dimColor>{tool.displayText}</Text>
       <Text color={C.dim}> {elapsed}</Text>
@@ -93,16 +79,19 @@ export function AgentTurnLog() {
   const status = useScheduleState(workingStatusAtom);
   const activeTools = useScheduleState(activeToolsAtom);
   const pluginUIs = useScheduleState(pluginUIsAtom);
+  const bottomDistance = useScheduleState(inputBottomDistanceAtom);
   const dropdownState = useScheduleState(dropdown.state);
 
-  const spinnerFrame = useSpinner();
+  const spinner = useSpinner();
   const now = useNow(100);
+
+  const viewportHeight = Math.max(2, bottomDistance - RESERVED_LINES);
 
   if (pluginUIs.length > 0 || dropdownState.visible) return null;
   if (status.type === 'idle' && thinkingText.length === 0 && activeTools.length === 0) return null;
 
   return (
-    <ScrollBox flexGrow={1} stickyScroll flexDirection="column">
+    <ScrollBox height={viewportHeight} stickyScroll flexDirection="column">
       {thinkingText.length > 0 && (
         <Box flexDirection="column">
           {thinkingText.split('\n').map((line, i) => (
@@ -125,7 +114,7 @@ export function AgentTurnLog() {
 
         return (
           <Box key={tool.toolUseId} flexDirection="column">
-            <ActiveToolLine tool={tool} spinnerFrame={spinnerFrame} now={now} />
+            <ActiveToolLine tool={tool} spinner={spinner} now={now} />
             {capped.length > 0 && (
               <Box flexDirection="column">
                 {capped.map((line, i) => (

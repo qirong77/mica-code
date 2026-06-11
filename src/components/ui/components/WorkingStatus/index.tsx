@@ -12,15 +12,7 @@ import { C } from '../../data.js';
 import { Spin } from '../common/Spin.js';
 import { ContextTokens } from '../common/ContextTokens.js';
 import { IfComponent } from '../common/IfComponent.js';
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = (ms / 1000).toFixed(1);
-  if (ms < 60000) return `${s}s`;
-  const m = Math.floor(ms / 60000);
-  const sec = ((ms % 60000) / 1000).toFixed(0);
-  return `${m}m ${sec}s`;
-}
+import { formatElapsed } from '../../../../utils/format.js';
 
 function isEndWorkingStatus(type: string) {
   return type === 'completed' || type === 'error' || type === 'idle';
