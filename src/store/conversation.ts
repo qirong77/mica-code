@@ -27,3 +27,20 @@ export function updateContextSize(messages: ConversationMessage[]): number {
 }
 
 export const contextSizeAtom = atom<number>(0)
+
+function calcCacheHitRate(usage: Anthropic.Usage): number {
+  const input = (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0)
+  if (input === 0) return 0
+  return (usage.cache_read_input_tokens ?? 0) / input
+}
+
+export function updateCacheUsage(messages: ConversationMessage[]): void {
+  const last = [...messages].reverse().find((m) => isAssistantMessage(m) && m.usage)
+  if (!last || !isAssistantMessage(last) || !last.usage) {
+    cacheHitRateAtom.set(0)
+    return
+  }
+  cacheHitRateAtom.set(calcCacheHitRate(last.usage))
+}
+
+export const cacheHitRateAtom = atom<number>(0)

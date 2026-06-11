@@ -3,6 +3,7 @@ import {
   messagesAtom,
   contextSizeAtom,
   updateContextSize,
+  updateCacheUsage,
   type ConversationMessage,
 } from '../store/conversation.js';
 import {
@@ -22,6 +23,7 @@ export class AgentSession {
     const updated = [...messagesAtom.get(), message];
     messagesAtom.set(updated);
     contextSizeAtom.set(updateContextSize(updated));
+    updateCacheUsage(updated);
   }
 
   appendToolResults(toolResults: Anthropic.ToolResultBlockParam[]): void {
@@ -39,6 +41,7 @@ export class AgentSession {
     const { cleaned } = repairSessionMessages(messages);
     messagesAtom.set(cleaned);
     contextSizeAtom.set(updateContextSize(cleaned));
+    updateCacheUsage(cleaned);
   }
 
   addToolRecord(record: SessionToolRecord): void {
