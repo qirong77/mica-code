@@ -1,0 +1,14 @@
+src/components/ui/components/WorkingStatus/index.tsx
+  h_a456b67147438e 173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "38f70faa3dc47d4645c0112aa7a78435f2a6f5f8",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
