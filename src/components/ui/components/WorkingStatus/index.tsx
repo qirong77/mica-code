@@ -170,7 +170,7 @@ export function WorkingStatus() {
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <StatusInfo />
         <IfComponent condition={!isEndWorkingStatus(info.type)}>
-          <Text color={C.dim}>_{elapsedText}</Text>
+          <Text color={C.dim}> {elapsedText}</Text>
         </IfComponent>
       </Box>
     </Box>
