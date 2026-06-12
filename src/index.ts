@@ -10,6 +10,10 @@ import { BuiltinCommandsPlugin } from './plugins/quick-command/builtin-commands-
 import { QuickCommandResumePlugin } from './plugins/quick-command/quick-command-resume-plugin.js';
 import { QuickCommandRenamePlugin } from './plugins/quick-command/quick-command-rename-plugin.js';
 import { QuickCommandRewindPlugin } from './plugins/quick-command/quick-command-rewind-plugin.js';
+import { QuickCommandStarPlugin } from './plugins/quick-command/quick-command-star-plugin.js';
+import { QuickCommandDeletePlugin } from './plugins/quick-command/quick-command-delete-plugin.js';
+import { QuickCommandCompactPlugin } from './plugins/quick-command/quick-command-compact-plugin.js';
+import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/quick-command-git-change-context-plugin.js';
 import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
@@ -29,6 +33,10 @@ await MicaAgent.usePlugin(new QuickCommandEffortPlugin());
 await MicaAgent.usePlugin(new QuickCommandResumePlugin());
 await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
 await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
+await MicaAgent.usePlugin(new QuickCommandStarPlugin());
+await MicaAgent.usePlugin(new QuickCommandDeletePlugin());
+await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
+await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
 await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
 
 const printPrompt = getPrintPrompt();
