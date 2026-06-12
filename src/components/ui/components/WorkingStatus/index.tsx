@@ -6,6 +6,7 @@ import {
   workingStatusAtom,
   thinkingTextAtom,
   responseTextAtom,
+  terminalInput,
 } from '../../../../store/ui-state.js';
 import { model } from '../../../../store/config.js';
 import { contextSizeAtom, cacheHitRateAtom } from '../../../../store/conversation.js';
@@ -105,6 +106,19 @@ export function WorkingStatus() {
       setElapsed(Date.now() - startRef.current);
     }, 100);
     return () => clearInterval(timer);
+  }, [info.type]);
+
+  useEffect(() => {
+    if (info.type !== 'completed') return;
+
+    const unsub = terminalInput.text.listen((text) => {
+      if (text.length > 0) {
+        workingStatusAtom.set({ type: 'idle' });
+        unsub();
+      }
+    });
+
+    return unsub;
   }, [info.type]);
 
   const displayElapsed =
