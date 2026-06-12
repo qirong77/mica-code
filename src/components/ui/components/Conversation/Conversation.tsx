@@ -79,3 +79,5 @@ export const Conversation = (): React.ReactNode => {
     </Box>
   );
 };
+
+export const ConversationUI = { renderFn: Conversation };

@@ -4,11 +4,11 @@ import { App } from './app.js';
 
 // ── 统一导出所有 UI 组件 ──
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
-import { ConversationUI } from './components/Conversation/index.js';
+import { ConversationUI } from './components/Conversation/Conversation.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
 import { DropDownUI } from './components/DropDown/index.js';
 import { MessageBarAPI } from './components/MessageBar/index.js';
-import { AgentTurnLogUI } from './components/AgentTurnLog/index.js';
+import { AgentTurnLogUI } from './components/AgentTurnLog/AgentTurnLog.js';
 
 function Root() {
   return <App />;

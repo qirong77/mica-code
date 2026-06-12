@@ -1,7 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { createSubAgent } from '../../agent/subagent.js';
-import { pushLog, clearLog, LogView } from '../../components/ui/components/LogView/index.js';
+import {
+  pushLog,
+  clearLog,
+  LogView,
+} from '../../components/ui/components/LogView/LogViewComponent.js';
 import { C } from '../../components/ui/data.js';
 
 const INIT_PROMPT = `请分析当前代码库并创建或更新 AGENTS.md 文件。AGENTS.md 会在每次 Mica Code 会话启动时注入 system prompt，因此内容必须简洁——只包含 AI 不知道会犯错的指令，同时包含足够的项目上下文让 AI 能高效工作。
@@ -114,7 +118,10 @@ export class QuickCommandInitPlugin extends UIPanelPlugin {
             setTimeout(() => this.hideUI(), 3000);
           })
           .catch((err) => {
-            pushLog({ text: `分析失败: ${err instanceof Error ? err.message : String(err)}`, color: C.error });
+            pushLog({
+              text: `分析失败: ${err instanceof Error ? err.message : String(err)}`,
+              color: C.error,
+            });
             setTimeout(() => this.hideUI(), 4000);
           });
       },

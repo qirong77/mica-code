@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import { writeFile, readFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import { UIPanelPlugin } from '../MicaPlugin';
+import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
 import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 import { C } from '../../components/ui/data.js';
@@ -257,33 +257,19 @@ export class QuickCommandResumePlugin extends UIPanelPlugin {
           }
           return false;
         }
-
-        if (key.upArrow) {
-          setState({
-            ...state,
-            selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : list.length - 1,
-          });
-          return true;
-        }
-        if (key.downArrow) {
-          setState({
-            ...state,
-            selectedIdx: state.selectedIdx < list.length - 1 ? state.selectedIdx + 1 : 0,
-          });
-          return true;
-        }
-        if (key.return) {
-          const target = list[state.selectedIdx];
-          if (!target) return true;
-          this.hideUI();
-          this._switchToSession(target.id);
-          return true;
-        }
-        if (key.escape) {
-          this.hideUI();
-          return true;
-        }
-        return false;
+        return handleListKeys(
+          key,
+          state,
+          setState,
+          list.length,
+          (idx) => {
+            const target = list[idx];
+            if (!target) return;
+            this.hideUI();
+            this._switchToSession(target.id);
+          },
+          () => this.hideUI(),
+        );
       },
       {
         placeholder: '输入关键词过滤会话，↑↓ 选择，Enter 确认，Esc 取消',

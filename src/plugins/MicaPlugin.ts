@@ -44,7 +44,7 @@ export abstract class MicaPlugin {
 
   private _ownedAtoms: Array<{ atom: WritableAtom<any>; initial: any }> = [];
 
-  constructor() { }
+  constructor() {}
   abstract onInstall(): void | Promise<void>;
 
   onCleanup(): void {}
@@ -102,6 +102,33 @@ export abstract class MicaPlugin {
 
 // ── UIPanelPlugin: 支持交互式 UI 面板的插件基类 ──
 
+export function handleListKeys<T extends { selectedIdx: number }>(
+  key: any,
+  state: T,
+  setState: (s: T) => void,
+  length: number,
+  onSelect: (idx: number) => void,
+  onCancel: () => void,
+): boolean {
+  if (key.upArrow) {
+    setState({ ...state, selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : length - 1 });
+    return true;
+  }
+  if (key.downArrow) {
+    setState({ ...state, selectedIdx: state.selectedIdx < length - 1 ? state.selectedIdx + 1 : 0 });
+    return true;
+  }
+  if (key.return) {
+    onSelect(state.selectedIdx);
+    return true;
+  }
+  if (key.escape) {
+    onCancel();
+    return true;
+  }
+  return false;
+}
+
 export abstract class UIPanelPlugin extends MicaPlugin {
   private _activeUIId: string | null = null;
   private _uiAtom: WritableAtom<any> | null = null;
@@ -152,7 +179,7 @@ export abstract class UIPanelPlugin extends MicaPlugin {
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
   }
 
-  protected showUI<S>(
+  showUI<S>(
     component: React.ComponentType<{ state: S }>,
     initialState: S,
     onInput?: (input: string, key: any, state: S, setState: (s: S) => void) => boolean,
@@ -199,7 +226,7 @@ export abstract class UIPanelPlugin extends MicaPlugin {
     pluginUIsAtom.set([...pluginUIsAtom.get().filter((u) => u.id !== id), entry]);
   }
 
-  protected hideUI(): void {
+  hideUI(): void {
     if (!this._activeUIId) return;
     this._unwatchDropdownReset();
     pluginUIsAtom.set(pluginUIsAtom.get().filter((u) => u.id !== this._activeUIId));

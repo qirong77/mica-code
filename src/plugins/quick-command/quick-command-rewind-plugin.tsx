@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { UIPanelPlugin } from '../MicaPlugin';
+import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
 import { hasBackups, listBackedUpFiles, restoreFiles } from '../../utils/fileHistory.js';
 import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 
@@ -35,7 +35,10 @@ function RewindDialog({ state }: { state: RewindState }) {
   ];
 
   return (
-    <Dialog title={state._title} footer={<KeyHints hints={['↑↓ navigate', '↵ confirm', 'esc cancel']} />}>
+    <Dialog
+      title={state._title}
+      footer={<KeyHints hints={['↑↓ navigate', '↵ confirm', 'esc cancel']} />}
+    >
       <Box flexDirection="column" paddingBottom={1}>
         <Box>
           <Text>将回退到对话：</Text>
@@ -45,7 +48,10 @@ function RewindDialog({ state }: { state: RewindState }) {
           <Box flexDirection="column" paddingTop={1}>
             <Text dimColor>受影响的文件：</Text>
             {state.affectedFiles.map((f, i) => (
-              <Text key={i} dimColor>  {f}</Text>
+              <Text key={i} dimColor>
+                {' '}
+                {f}
+              </Text>
             ))}
           </Box>
         )}
@@ -93,35 +99,29 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
     this.showUI<RewindState>(
       RewindDialog,
       { selectedIdx: 0, _title: title, lastUserText: userText, affectedFiles },
-      (_input, key, state, setState) => {
-        if (key.upArrow || key.downArrow) {
-          setState({ ...state, selectedIdx: state.selectedIdx === 0 ? 1 : 0 });
-          return true;
-        }
-        if (key.return) {
-          this.hideUI();
-          if (state.selectedIdx === 1) {
+      (_input, key, state, setState) =>
+        handleListKeys(
+          key,
+          state,
+          setState,
+          2,
+          (idx) => {
+            this.hideUI();
+            if (idx === 1) {
+              this.showMessage('已取消');
+              return;
+            }
+            this._doRewind(msgs, cutoff, affectedFiles.length > 0);
+          },
+          () => {
+            this.hideUI();
             this.showMessage('已取消');
-            return true;
-          }
-          this._doRewind(msgs, cutoff, affectedFiles.length > 0);
-          return true;
-        }
-        if (key.escape) {
-          this.hideUI();
-          this.showMessage('已取消');
-          return true;
-        }
-        return false;
-      },
+          },
+        ),
     );
   }
 
-  private _doRewind(
-    originalMsgs: readonly any[],
-    cutoff: number,
-    hasFileChanges: boolean,
-  ) {
+  private _doRewind(originalMsgs: readonly any[], cutoff: number, hasFileChanges: boolean) {
     const rewinded = originalMsgs.slice(0, cutoff);
     this.agent.agentTurn.session.replaceMessages(rewinded);
 

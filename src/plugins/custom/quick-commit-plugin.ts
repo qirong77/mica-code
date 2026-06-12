@@ -3,7 +3,11 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { UIPanelPlugin } from '../MicaPlugin';
 import { getClient } from '../../agent/client.js';
 import { model } from '../../store/config.js';
-import { pushLog, clearLog, LogView } from '../../components/ui/components/LogView/index.js';
+import {
+  pushLog,
+  clearLog,
+  LogView,
+} from '../../components/ui/components/LogView/LogViewComponent.js';
 import { C } from '../../components/ui/data.js';
 
 const COMMIT_PROMPT = `根据以下 git diff 信息生成一条简洁的 commit message。
@@ -77,7 +81,9 @@ export class QuickCommitPlugin extends UIPanelPlugin {
             output_config: effort !== 'none' ? { effort } : undefined,
           });
 
-          const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+          const textBlock = response.content.find(
+            (b): b is Anthropic.TextBlock => b.type === 'text',
+          );
           const message = textBlock?.text?.trim() || 'chore: 更新代码 🔧';
           pushLog({ text: `commit: ${message}`, color: C.info });
 
@@ -95,7 +101,10 @@ export class QuickCommitPlugin extends UIPanelPlugin {
 
           setTimeout(() => this.hideUI(), 5000);
         } catch (err) {
-          pushLog({ text: `提交失败: ${err instanceof Error ? err.message : String(err)}`, color: C.error });
+          pushLog({
+            text: `提交失败: ${err instanceof Error ? err.message : String(err)}`,
+            color: C.error,
+          });
           setTimeout(() => this.hideUI(), 4000);
         }
       },

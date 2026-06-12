@@ -2,12 +2,11 @@ import React from 'react';
 import { Box, useTerminalTitle } from '@anthropic/ink';
 
 import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
-import { ConversationUI } from './components/Conversation/index.js';
+import { ConversationUI } from './components/Conversation/Conversation.js';
 import { WorkingStatusUI } from './components/WorkingStatus/index.js';
 import { BottomPanel } from './components/BottomPanel/index.js';
 import { MessageBar } from './components/MessageBar/index.js';
-import { AgentTurnLogUI } from './components/AgentTurnLog/index.js';
-
+import { AgentTurnLogUI } from './components/AgentTurnLog/AgentTurnLog.js';
 
 export function App(): React.ReactNode {
   useTerminalTitle('* Mica Code');
@@ -18,7 +17,7 @@ export function App(): React.ReactNode {
 
       <TerminalInputUI.renderFn />
       <WorkingStatusUI.renderFn />
-      <MessageBar/>
+      <MessageBar />
       <AgentTurnLogUI.renderFn />
       <Box flexGrow={1}>
         <BottomPanel />

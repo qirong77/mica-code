@@ -2,24 +2,18 @@ import { MicaAgent } from './core/agent.js';
 import { updateModelOptions } from './store/updateModelOptions.js';
 import { ErrorHandlerPlugin } from './plugins/agent/error-handler-plugin.js';
 import { AutoCompactPlugin } from './plugins/agent/auto-compact-plugin.js';
-import { QuickCommandModelPlugin } from './plugins/quick-command/quick-command-model-plugin.js';
-import { QuickCommandEffortPlugin } from './plugins/quick-command/quick-command-effort-plugin.js';
+import {
+  QuickCommandModelPlugin,
+  QuickCommandEffortPlugin,
+} from './plugins/quick-command/quick-command-select-plugin.js';
+import { BuiltinCommandsPlugin } from './plugins/quick-command/builtin-commands-plugin.js';
 import { QuickCommandResumePlugin } from './plugins/quick-command/quick-command-resume-plugin.js';
 import { QuickCommandRenamePlugin } from './plugins/quick-command/quick-command-rename-plugin.js';
-import { QuickCommandExitPlugin } from './plugins/quick-command/quick-command-exit-plugin.js';
 import { QuickCommandRewindPlugin } from './plugins/quick-command/quick-command-rewind-plugin.js';
-import { QuickCommandCompactPlugin } from './plugins/quick-command/quick-command-compact-plugin.js';
-import { QuickCommandClearPlugin } from './plugins/quick-command/quick-command-clear-plugin.js';
-import { QuickCommandDeletePlugin } from './plugins/quick-command/quick-command-delete-plugin.js';
-import { QuickCommandStarPlugin } from './plugins/quick-command/quick-command-star-plugin.js';
-import { QuickCommandLogPlugin } from './plugins/debug/quick-command-log-plugin.js';
-import { QuickCommandStatusPlugin } from './plugins/quick-command/quick-command-status.js';
-import { QuickCommandDebugPlugin } from './plugins/debug/quick-command-debug.js';
 import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
 import { QuickCommandMcpPlugin } from './plugins/mcp/quick-command-mcp-plugin.js';
-import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/quick-command-git-change-context-plugin.js';
 import { terminalInput } from './store/ui-state.js';
 
 await updateModelOptions();
@@ -29,21 +23,13 @@ await MicaAgent.usePlugin(new QuickCommandInitPlugin());
 await MicaAgent.usePlugin(new QuickCommandSkillsPlugin());
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
-await MicaAgent.usePlugin(new QuickCommandDebugPlugin());
-await MicaAgent.usePlugin(new QuickCommandLogPlugin());
-await MicaAgent.usePlugin(new QuickCommandStatusPlugin());
+await MicaAgent.usePlugin(new BuiltinCommandsPlugin());
 await MicaAgent.usePlugin(new QuickCommandModelPlugin());
 await MicaAgent.usePlugin(new QuickCommandEffortPlugin());
 await MicaAgent.usePlugin(new QuickCommandResumePlugin());
 await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
-await MicaAgent.usePlugin(new QuickCommandExitPlugin());
 await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
-await MicaAgent.usePlugin(new QuickCommandClearPlugin());
-await MicaAgent.usePlugin(new QuickCommandDeletePlugin());
-await MicaAgent.usePlugin(new QuickCommandStarPlugin());
-await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
-await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
 
 const printPrompt = getPrintPrompt();
 if (printPrompt) {

@@ -74,6 +74,8 @@ function ActiveToolLine({
   );
 }
 
+export const AgentTurnLogUI = { renderFn: AgentTurnLog };
+
 export function AgentTurnLog() {
   const thinkingText = useScheduleState(thinkingTextAtom);
   const status = useScheduleState(workingStatusAtom);
@@ -104,9 +106,7 @@ export function AgentTurnLog() {
 
       {activeTools.map((tool) => {
         const outputLines =
-          tool.toolName === 'run_shell' && tool.output
-            ? tool.output.split('\n')
-            : [];
+          tool.toolName === 'run_shell' && tool.output ? tool.output.split('\n') : [];
         const capped =
           outputLines.length > MAX_TOOL_OUTPUT_LINES
             ? outputLines.slice(-MAX_TOOL_OUTPUT_LINES)

@@ -2,7 +2,12 @@ import { agentTurn } from '../agent/turn.js';
 import { ui } from '../components/ui/index.js';
 import { messagesAtom } from '../store/conversation.js';
 import { model, api } from '../store/config.js';
-import { session, thinkingTextAtom, responseTextAtom, quickCommandsAtom } from '../store/ui-state.js';
+import {
+  session,
+  thinkingTextAtom,
+  responseTextAtom,
+  quickCommandsAtom,
+} from '../store/ui-state.js';
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import { MicaPlugin } from '../plugins/MicaPlugin.js';
 import { bootstrap } from '../bootstrap.js';
