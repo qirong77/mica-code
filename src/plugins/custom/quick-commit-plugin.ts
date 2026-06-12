@@ -1,88 +1,103 @@
+import { execSync } from 'child_process';
 import type Anthropic from '@anthropic-ai/sdk';
-import { MicaPlugin } from '../MicaPlugin';
-import { createSubAgent } from '../../agent/subagent.js';
+import { UIPanelPlugin } from '../MicaPlugin';
+import { getClient } from '../../agent/client.js';
+import { model } from '../../store/config.js';
+import { pushLog, clearLog, LogView } from '../../components/ui/components/LogView/index.js';
+import { C } from '../../components/ui/data.js';
 
-const COMMIT_SYSTEM_PROMPT = `<role>
-你是一个 Git 提交助手，负责分析当前工作区的变更并生成规范的 commit message 后执行提交。
-只做好这一件事，不要做任何无关操作。
-</role>
+const COMMIT_PROMPT = `根据以下 git diff 信息生成一条简洁的 commit message。
 
-<context>
-- 当前处于 git 仓库根目录，直接执行 git 命令即可
-- 变更可能涉及多个文件，需要整体理解后给出一个涵盖所有变更的 commit message
-- 如果工作区没有任何变更，直接告知用户并退出，不要强行提交
-</context>
+格式: <prefix>: <description> <emoji>
 
-<rules>
-1. 先运行 git diff --stat 和 git status --short 了解变更范围和文件列表
-2. 对于新增/修改的核心文件，必要时运行 git diff -- <file> 了解具体改动
-3. 根据变更性质选择前缀：
+| 前缀     | emoji | 适用场景                     |
+|----------|-------|---------------------------|
+| feat     | ✨     | 新功能、新模块、新接口         |
+| fix      | 🐛     | bug 修复                    |
+| refactor | ♻️     | 重构代码，不改变外部行为       |
+| chore    | 🔧     | 构建/配置/依赖/脚本等杂项     |
 
-| 前缀       | emoji | 适用场景                           |
-|------------|-------|----------------------------------|
-| feat       | ✨     | 新功能、新模块、新接口               |
-| fix        | 🐛     | bug 修复                          |
-| merge      | 🔀     | 合并分支、解决冲突                  |
-| refactor   | ♻️     | 重构代码，不改变外部行为             |
-| chore      | 🔧     | 构建/配置/依赖/脚本等杂项变更        |
+description 简洁清楚，控制在 50 字内。
+只输出 commit message 本身，不要其他内容。`;
 
-4. 生成中文 commit message，格式: <prefix>: <description>
-5. description 简洁清楚，控制在 50 字内，emoji 只出现在前缀部分，末尾不再重复
-6. 执行 git add . && git commit -m "生成的message"
-7. 提交成功后，运行 git rev-parse --abbrev-ref @{u} 2>/dev/null 检查当前分支是否已关联远程分支
-8. 如果有远程分支，执行 git push；如果未关联，不推送，告知用户通过 git push -u origin <branch> 手动推送
-</rules>
+function git(args: string, tolerateError = false): string {
+  try {
+    return execSync(`git ${args}`, { encoding: 'utf-8', cwd: process.cwd() }).trim();
+  } catch (e) {
+    if (tolerateError) return '';
+    throw e;
+  }
+}
 
-<example>
-用户发起提交请求，当前变更为新增了一个用户登录接口和对应的类型定义文件。
-
-git diff --stat 显示 src/auth/login.ts、src/auth/types.ts 为新增文件。
-
-生成的 commit message:
-feat: ✨ 新增用户登录接口及类型定义
-
-执行 git add . && git commit -m "feat: ✨ 新增用户登录接口及类型定义"
-
-提交成功后，检测到远程分支 origin/main 存在，执行 git push 推送。
-</example>
-
-现在请按以上规则执行提交。`;
-
-const COMMIT_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'run_shell',
-    description: '执行 shell 命令并返回输出。',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        command: { type: 'string', description: '要执行的命令' },
-      },
-      required: ['command'],
-    },
-  },
-];
-
-const runCommit = createSubAgent({
-  systemPrompt: COMMIT_SYSTEM_PROMPT,
-  tools: COMMIT_TOOLS,
-});
-
-export class QuickCommitPlugin extends MicaPlugin {
+export class QuickCommitPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'commit',
       description: '根据当前变更生成 commit message 并提交',
-      action: () => {
-        const msgId = this.showMessage('正在分析变更并提交...', 0);
-        runCommit([{ role: 'user', content: '请执行 git 提交。' }])
-          .then((result) => {
-            this.removeMessage(msgId);
-            this.showMessage(result.text || '提交完成', 5000);
-          })
-          .catch((err) => {
-            this.removeMessage(msgId);
-            this.showMessage(`提交失败: ${err instanceof Error ? err.message : String(err)}`, 5000);
+      action: async () => {
+        clearLog();
+        this.showUISimple(LogView);
+
+        try {
+          pushLog('正在分析变更...');
+
+          const diffStat = git('diff --stat', true);
+          const status = git('status --short', true);
+
+          if (!status && !git('diff --cached --stat', true)) {
+            pushLog({ text: '工作区没有变更可提交', color: C.warning });
+            setTimeout(() => this.hideUI(), 2000);
+            return;
+          }
+
+          if (diffStat) {
+            for (const line of diffStat.split('\n').filter(Boolean)) {
+              pushLog({ text: line, dimColor: true });
+            }
+          }
+
+          const diff = git('diff', true);
+          pushLog('正在生成 commit message...');
+
+          const client = getClient();
+          const modelName = model.name.get();
+          const effort = model.effort.get();
+
+          const response = await client.messages.create({
+            model: modelName,
+            max_tokens: 256,
+            system: COMMIT_PROMPT,
+            messages: [
+              {
+                role: 'user',
+                content: `## 变更文件\n${diffStat || status}\n\n## diff\n${diff.slice(0, 4000)}`,
+              },
+            ],
+            thinking: { type: 'disabled' },
+            output_config: effort !== 'none' ? { effort } : undefined,
           });
+
+          const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+          const message = textBlock?.text?.trim() || 'chore: 更新代码 🔧';
+          pushLog({ text: `commit: ${message}`, color: C.info });
+
+          pushLog('正在提交...');
+          git(`add -A`);
+          git(`commit -m "${message.replace(/"/g, '\\"')}"`);
+
+          const upstream = git('rev-parse --abbrev-ref @{u}', true);
+          if (upstream) {
+            git('push');
+            pushLog({ text: '已提交并推送', color: C.success });
+          } else {
+            pushLog({ text: '已提交（未关联远程分支，请手动推送）', color: C.success });
+          }
+
+          setTimeout(() => this.hideUI(), 3000);
+        } catch (err) {
+          pushLog({ text: `提交失败: ${err instanceof Error ? err.message : String(err)}`, color: C.error });
+          setTimeout(() => this.hideUI(), 4000);
+        }
       },
     });
   }

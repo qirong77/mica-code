@@ -1,4 +1,8 @@
-import { MicaPlugin } from '../MicaPlugin';
+import type Anthropic from '@anthropic-ai/sdk';
+import { UIPanelPlugin } from '../MicaPlugin';
+import { createSubAgent } from '../../agent/subagent.js';
+import { pushLog, clearLog, LogView } from '../../components/ui/components/LogView/index.js';
+import { C } from '../../components/ui/data.js';
 
 const INIT_PROMPT = `请分析当前代码库并创建或更新 AGENTS.md 文件。AGENTS.md 会在每次 Mica Code 会话启动时注入 system prompt，因此内容必须简洁——只包含 AI 不知道会犯错的指令，同时包含足够的项目上下文让 AI 能高效工作。
 
@@ -34,14 +38,85 @@ const INIT_PROMPT = `请分析当前代码库并创建或更新 AGENTS.md 文件
 - AGENTS.md 在启动时自动注入 system prompt，编辑此文件直接影响 agent 行为
 \`\`\``;
 
-export class QuickCommandInitPlugin extends MicaPlugin {
+const INIT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'read_file',
+    description: '读取文件内容',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        file_path: { type: 'string', description: '文件路径' },
+      },
+      required: ['file_path'],
+    },
+  },
+  {
+    name: 'list_files',
+    description: '列出文件',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        pattern: { type: 'string', description: 'glob 模式' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'run_shell',
+    description: '执行 shell 命令',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: '要执行的命令' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'grep_search',
+    description: '在文件中搜索',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        pattern: { type: 'string', description: '搜索模式' },
+        include: { type: 'string', description: '文件过滤' },
+        path: { type: 'string', description: '搜索路径' },
+      },
+      required: ['pattern'],
+    },
+  },
+];
+
+const runInit = createSubAgent({
+  systemPrompt: INIT_PROMPT,
+  tools: INIT_TOOLS,
+  maxTokens: 8192,
+});
+
+export class QuickCommandInitPlugin extends UIPanelPlugin {
   onInstall(): void {
     this.addQuickCommand({
       name: 'init',
       description: '分析代码库并创建/更新 AGENTS.md 文件',
       action: () => {
-        this.agent.ui.TerminalInput.submit(INIT_PROMPT);
-        this.showMessage('正在分析代码库...');
+        clearLog();
+        this.showUISimple(LogView);
+
+        pushLog('正在分析代码库...');
+
+        runInit([{ role: 'user', content: '请分析当前代码库并创建或更新 AGENTS.md。' }])
+          .then((result) => {
+            const lines = result.text.split('\n').filter(Boolean);
+            for (const line of lines) {
+              pushLog({ text: line, dimColor: true });
+            }
+            pushLog({ text: 'AGENTS.md 已更新', color: C.success });
+            setTimeout(() => this.hideUI(), 3000);
+          })
+          .catch((err) => {
+            pushLog({ text: `分析失败: ${err instanceof Error ? err.message : String(err)}`, color: C.error });
+            setTimeout(() => this.hideUI(), 4000);
+          });
       },
     });
   }
