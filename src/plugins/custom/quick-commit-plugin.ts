@@ -93,7 +93,7 @@ export class QuickCommitPlugin extends UIPanelPlugin {
             pushLog({ text: '已提交（未关联远程分支，请手动推送）', color: C.success });
           }
 
-          setTimeout(() => this.hideUI(), 3000);
+          setTimeout(() => this.hideUI(), 5000);
         } catch (err) {
           pushLog({ text: `提交失败: ${err instanceof Error ? err.message : String(err)}`, color: C.error });
           setTimeout(() => this.hideUI(), 4000);
