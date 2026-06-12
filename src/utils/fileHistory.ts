@@ -19,6 +19,10 @@ export function hasBackups(): boolean {
   return backups.size > 0;
 }
 
+export function listBackedUpFiles(): string[] {
+  return Array.from(backups.keys());
+}
+
 export async function backupFile(filePath: string): Promise<void> {
   if (!filePath || backups.has(filePath)) return;
   if (!existsSync(filePath)) return;

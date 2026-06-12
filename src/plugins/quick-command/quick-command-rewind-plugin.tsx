@@ -1,12 +1,31 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
-import { hasBackups, restoreFiles } from '../../utils/fileHistory.js';
+import { hasBackups, listBackedUpFiles, restoreFiles } from '../../utils/fileHistory.js';
 import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
 
 interface RewindState {
   selectedIdx: number;
   _title: string;
+  lastUserText: string;
+  affectedFiles: string[];
+}
+
+function extractUserText(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max) + '...';
 }
 
 function RewindDialog({ state }: { state: RewindState }) {
@@ -17,6 +36,20 @@ function RewindDialog({ state }: { state: RewindState }) {
 
   return (
     <Dialog title={state._title} footer={<KeyHints hints={['↑↓ navigate', '↵ confirm', 'esc cancel']} />}>
+      <Box flexDirection="column" paddingBottom={1}>
+        <Box>
+          <Text>将回退到对话：</Text>
+          <Text bold>{state.lastUserText}</Text>
+        </Box>
+        {state.affectedFiles.length > 0 && (
+          <Box flexDirection="column" paddingTop={1}>
+            <Text dimColor>受影响的文件：</Text>
+            {state.affectedFiles.map((f, i) => (
+              <Text key={i} dimColor>  {f}</Text>
+            ))}
+          </Box>
+        )}
+      </Box>
       <SelectList items={items} selectedIdx={state.selectedIdx} />
     </Dialog>
   );
@@ -42,17 +75,24 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
       return;
     }
 
-    const removedCount = msgs.length - cutoff;
-    const hasFileChanges = hasBackups();
+    const lastMsg = msgs[cutoff];
+    const userText = truncate(extractUserText(lastMsg.content), 60);
 
-    const detailParts: string[] = [`将移除 ${removedCount} 条消息`];
-    if (hasFileChanges) detailParts.push('并回退代码改动');
+    const removedCount = msgs.length - cutoff;
+    const backedUpFiles = hasBackups() ? listBackedUpFiles() : [];
+    const affectedFiles = backedUpFiles.map((f) => {
+      const parts = f.split('/');
+      return parts.length > 3 ? '../' + parts.slice(-3).join('/') : f;
+    });
+
+    const detailParts: string[] = [`移除 ${removedCount} 条消息`];
+    if (affectedFiles.length > 0) detailParts.push(`回退 ${affectedFiles.length} 个文件`);
 
     const title = `rewind: ${detailParts.join('，')}`;
 
     this.showUI<RewindState>(
       RewindDialog,
-      { selectedIdx: 0, _title: title },
+      { selectedIdx: 0, _title: title, lastUserText: userText, affectedFiles },
       (_input, key, state, setState) => {
         if (key.upArrow || key.downArrow) {
           setState({ ...state, selectedIdx: state.selectedIdx === 0 ? 1 : 0 });
@@ -64,7 +104,7 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
             this.showMessage('已取消');
             return true;
           }
-          this._doRewind(msgs, cutoff, hasFileChanges);
+          this._doRewind(msgs, cutoff, affectedFiles.length > 0);
           return true;
         }
         if (key.escape) {
@@ -101,7 +141,7 @@ export class QuickCommandRewindPlugin extends UIPanelPlugin {
   private _findLastUserMessageIndex(msgs: readonly any[]): number {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
-      if (m.role === 'user' && typeof m.content === 'string') {
+      if (m.role === 'user' && (typeof m.content === 'string' || Array.isArray(m.content))) {
         return i;
       }
     }

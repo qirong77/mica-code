@@ -63,7 +63,7 @@ export async function connectToServer(
     { capabilities: {} },
   );
 
-  await client.connect(transport);
+  await client.connect(transport, { timeout: 15_000 });
 
   const cleanup = async () => {
     connections.delete(name);

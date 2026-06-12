@@ -105,6 +105,7 @@ export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<M
   const result = await server.client.request(
     { method: 'tools/list' },
     ListToolsResultSchema,
+    { timeout: 15_000 },
   );
 
   return result.tools.map((tool) => {
