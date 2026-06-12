@@ -1,0 +1,14 @@
+src/plugins/debug/debugExportLogPlugin.ts
+  h_a456b67147438e 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a244c66b0bcd7a6b4d60b5f0059b6a1d80c0c7fd",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
