@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { backupFile } from '../utils/fileHistory.js';
 import { truncateDisplayText } from '../utils/display.js';
 

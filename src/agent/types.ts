@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { WorkingStatus } from '../store/ui-state.js';
+import type { WorkingStatus } from '../store/uiState.js';
 
 export interface StreamCreatePayload {
   stream: any;

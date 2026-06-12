@@ -1,8 +1,8 @@
 import React from 'react';
 import { atom as createAtom, type ReadableAtom, type WritableAtom } from 'nanostores';
-import type { IMicaAgent } from '../core/agent';
+import type { IMicaAgent } from '../core/agent.js';
 import type { ConversationMessage } from '../store/conversation.js';
-import { uuid } from '../utils/uuid';
+import { uuid } from '../utils/uuid.js';
 import {
   quickCommandsAtom,
   pluginUIsAtom,
@@ -12,7 +12,7 @@ import {
   type Command,
   type SessionMeta,
   type PluginUI,
-} from '../store/ui-state.js';
+} from '../store/uiState.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
 import { useScheduleState } from '../components/hooks/useScheduleState.js';
 

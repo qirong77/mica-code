@@ -4,7 +4,7 @@ import { mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import crypto from 'crypto';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from '../utils/display.js';
 
 function taskId(): string {

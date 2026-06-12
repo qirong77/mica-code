@@ -19,7 +19,7 @@ export const C = {
 
 // ── Quick commands ──────────────────────────────────────
 
-export type { Command } from '../store/ui-state.js';
+export type { Command } from '../store/uiState.js';
 
 // ── Input reducer types (shared with plugins) ──────────
 

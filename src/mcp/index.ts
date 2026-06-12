@@ -1,4 +1,4 @@
-import { appendSystemLog } from '../store/logAtom';
+import { appendSystemLog } from '../store/logAtom.js';
 import {
   connectToServer,
   disconnectAll,

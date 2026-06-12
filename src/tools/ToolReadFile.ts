@@ -1,5 +1,5 @@
 import { stat, readFile } from 'fs/promises';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from '../utils/display.js';
 
 const MAX_SIZE_BYTES = 256 * 1024;

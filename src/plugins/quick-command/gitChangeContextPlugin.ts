@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { MicaPlugin } from '../MicaPlugin';
+import { MicaPlugin } from '../MicaPlugin.js';
 
 const MAX_DIFF_BYTES = 80_000;
 

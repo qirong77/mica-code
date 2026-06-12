@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { Skill } from './types'
+import type { Skill } from './types.js'
 
 function getUserSkillsDirs(): string[] {
   return [

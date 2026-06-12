@@ -1,5 +1,5 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { MicaTool, type ToolExecuteCallbacks } from '../tools/MicaTool';
+import { MicaTool, type ToolExecuteCallbacks } from '../tools/MicaTool.js';
 import { connections, connectToServer } from './client.js';
 import type { ConnectedMcpServer } from './client.js';
 

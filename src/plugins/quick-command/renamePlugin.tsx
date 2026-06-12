@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { UIPanelPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin.js';
 import { Spin } from '../../components/primitives/Spin.js';
 import { getClient } from '../../agent/client.js';
 import { Dialog } from '../../components/primitives/index.js';

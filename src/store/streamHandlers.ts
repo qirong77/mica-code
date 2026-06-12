@@ -3,8 +3,8 @@ import {
   responseTextAtom,
   workingStatusAtom,
   activeToolsAtom,
-} from './ui-state.js';
-import type { WorkingStatus } from './ui-state.js';
+} from './uiState.js';
+import type { WorkingStatus } from './uiState.js';
 import { appendSystemLog } from './logAtom.js';
 import { ui } from '../components/index.js';
 import { getToolDisplayText } from '../tools/index.js';

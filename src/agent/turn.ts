@@ -3,9 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { appendSystemLog } from '../store/logAtom.js';
 import { clearBackups } from '../utils/fileHistory.js';
 import { parseImageRefs } from '../components/utils/imagePaste.js';
-import { AgentSession } from './agent-session.js';
-import { ToolExecutor } from './tool-executor.js';
-import { IterationRunner } from './iteration-runner.js';
+import { AgentSession } from './agentSession.js';
+import { ToolExecutor } from './toolExecutor.js';
+import { IterationRunner } from './iterationRunner.js';
 import type { AgentTurnEvents, IterationResult, Middleware, RunFn } from './types.js';
 import type { ConversationMessage } from '../store/conversation.js';
 

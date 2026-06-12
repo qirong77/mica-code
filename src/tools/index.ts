@@ -1,16 +1,16 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
-import { ToolReadFile } from './ToolReadFile';
-import { ToolWriteFile } from './ToolWriteFile';
-import { ToolEditFile } from './ToolEditFile';
-import { ToolListFiles } from './ToolListFiles';
-import { ToolGrepSearch } from './ToolGrepSearch';
-import { ToolWebFetch } from './ToolWebFetch';
+import { ToolReadFile } from './ToolReadFile.js';
+import { ToolWriteFile } from './ToolWriteFile.js';
+import { ToolEditFile } from './ToolEditFile.js';
+import { ToolListFiles } from './ToolListFiles.js';
+import { ToolGrepSearch } from './ToolGrepSearch.js';
+import { ToolWebFetch } from './ToolWebFetch.js';
 
-import { MicaTool } from './MicaTool';
-import { ToolRunShell } from './ToolRunShell';
-import { ToolSkill } from './ToolSkill';
-import type { ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool } from './MicaTool.js';
+import { ToolRunShell } from './ToolRunShell.js';
+import { ToolSkill } from './ToolSkill.js';
+import type { ToolExecuteCallbacks } from './MicaTool.js';
 
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),

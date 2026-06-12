@@ -8,8 +8,8 @@ import {
   pluginUIsAtom,
   inputBottomDistanceAtom,
   dropdown,
-} from '../../store/ui-state.js';
-import type { ActiveTool } from '../../store/ui-state.js';
+} from '../../store/uiState.js';
+import type { ActiveTool } from '../../store/uiState.js';
 import { C } from '../data.js';
 import { useSpinner } from '../primitives/Spin.js';
 import { formatElapsed } from '../../utils/format.js';

@@ -1,5 +1,5 @@
 import { glob } from 'glob';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from '../utils/display.js';
 
 export class ToolListFiles extends MicaTool {

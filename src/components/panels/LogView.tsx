@@ -2,7 +2,7 @@ import React from 'react';
 import { atom } from 'nanostores';
 import { Box, Text, ScrollBox } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
-import { inputBottomDistanceAtom } from '../../store/ui-state.js';
+import { inputBottomDistanceAtom } from '../../store/uiState.js';
 
 export interface LogEntry {
   text: string;

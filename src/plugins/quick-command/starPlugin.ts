@@ -1,4 +1,4 @@
-import { MicaPlugin } from '../MicaPlugin';
+import { MicaPlugin } from '../MicaPlugin.js';
 
 export class QuickCommandStarPlugin extends MicaPlugin {
   onInstall(): void {

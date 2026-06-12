@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, Text, type Color, stringWidth } from '@anthropic/ink';
 import { Dialog, KeyHints, SelectList } from '../primitives/index.js';
 import type { SelectItem } from '../primitives/index.js';
-import type { DropdownItem } from '../../store/ui-state.js';
+import type { DropdownItem } from '../../store/uiState.js';
 import { C } from '../data.js';
 
 const MIN_LABEL_COL = 18;

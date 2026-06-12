@@ -1,5 +1,5 @@
 import { atom } from 'nanostores';
-import { createPersistedAtom } from './createPersistedAtom';
+import { createPersistedAtom } from './createPersistedAtom.js';
 
 export { session, type SessionMeta } from './ui/session.js';
 export {

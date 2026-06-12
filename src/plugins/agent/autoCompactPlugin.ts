@@ -1,10 +1,10 @@
 import type { WritableAtom } from 'nanostores';
-import { MicaPlugin } from '../MicaPlugin';
-import { getContextUsage } from '../../utils/getContextUsage';
-import { compactMessages, KEEP_RECENT_COUNT, MIN_MESSAGES_TO_COMPACT, trySessionMemoryCompact } from '../../utils/compact';
+import { MicaPlugin } from '../MicaPlugin.js';
+import { getContextUsage } from '../../utils/getContextUsage.js';
+import { compactMessages, KEEP_RECENT_COUNT, MIN_MESSAGES_TO_COMPACT, trySessionMemoryCompact } from '../../utils/compact.js';
 import { model } from '../../store/config.js';
-import { createPersistedAtom } from '../../store/createPersistedAtom';
-import { session } from '../../store/ui-state';
+import { createPersistedAtom } from '../../store/createPersistedAtom.js';
+import { session } from '../../store/uiState.js';
 
 const CONTEXT_THRESHOLD = 0.4;
 const INACTIVITY_THRESHOLD_MS = 45 * 60 * 1000;

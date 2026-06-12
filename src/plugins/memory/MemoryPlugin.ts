@@ -3,11 +3,11 @@ import { getMemoryDir, readMemoryIndex, ensureMemoryDir, getSessionMemoryPath, r
 import { buildMemorySystemPrompt } from './memoryTypes.js';
 import { truncateEntrypointContent } from './memoryTruncate.js';
 import { scanMemoryFiles, formatMemoryManifest } from './memoryScan.js';
-import { createForkedAgent } from '../../agent/forked-agent.js';
+import { createForkedAgent } from '../../agent/forkedAgent.js';
 import { getSystemPrompt } from '../../prompts/index.js';
 import type { ConversationMessage } from '../../store/conversation.js';
-import { session } from '../../store/ui-state.js';
-import { getContextUsage } from '../../utils/getContextUsage';
+import { session } from '../../store/uiState.js';
+import { getContextUsage } from '../../utils/getContextUsage.js';
 
 const EXTRACT_MIN_MESSAGES_SINCE = 10;
 const EXTRACT_MIN_TOKENS_SINCE = 5_000;

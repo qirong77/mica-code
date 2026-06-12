@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
-import { dropdown, inputBottomDistanceAtom } from '../../store/ui-state.js';
+import { dropdown, inputBottomDistanceAtom } from '../../store/uiState.js';
 import { useScheduleState } from '../hooks/index.js';
 
 type Events = {

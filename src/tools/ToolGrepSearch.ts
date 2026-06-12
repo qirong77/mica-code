@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from '../utils/display.js';
 
 const GREP_TIMEOUT_MS = 20_000;

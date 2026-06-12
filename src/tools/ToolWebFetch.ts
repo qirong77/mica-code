@@ -1,6 +1,6 @@
 import { LRUCache } from 'lru-cache';
 import TurndownService from 'turndown';
-import { MicaTool, ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from '../utils/display.js';
 
 const MAX_URL_LENGTH = 2000;

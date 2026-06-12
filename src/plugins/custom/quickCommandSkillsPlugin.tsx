@@ -1,8 +1,8 @@
 import React from 'react'
 import { Box, Text } from '@anthropic/ink'
-import { UIPanelPlugin } from '../MicaPlugin'
-import { reloadSkills } from '../../skills/loadSkills'
-import type { Skill } from '../../skills/types'
+import { UIPanelPlugin } from '../MicaPlugin.js'
+import { reloadSkills } from '../../skills/loadSkills.js'
+import type { Skill } from '../../skills/types.js'
 import { Markdown } from '../../components/conversation/Markdown.js'
 import { Dialog, SelectList, KeyHints, DetailView } from '../../components/primitives/index.js'
 

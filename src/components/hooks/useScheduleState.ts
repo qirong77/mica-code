@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReadableAtom } from 'nanostores';
-import { uuid } from '../../utils/uuid';
+import { uuid } from '../../utils/uuid.js';
 
 const THROTTLE_INTERVAL = 16;
 let lastFlushTime = 0;

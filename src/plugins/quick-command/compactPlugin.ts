@@ -1,7 +1,7 @@
-import { MicaPlugin } from '../MicaPlugin';
-import { getContextUsage } from '../../utils/getContextUsage';
-import { compactMessages, MIN_MESSAGES_TO_COMPACT } from '../../utils/compact';
-import { model } from '../../store/config';
+import { MicaPlugin } from '../MicaPlugin.js';
+import { getContextUsage } from '../../utils/getContextUsage.js';
+import { compactMessages, MIN_MESSAGES_TO_COMPACT } from '../../utils/compact.js';
+import { model } from '../../store/config.js';
 
 export class QuickCommandCompactPlugin extends MicaPlugin {
   onInstall(): void {

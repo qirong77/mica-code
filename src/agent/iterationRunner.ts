@@ -1,12 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getSystemPrompt, getPlanModePrompt } from '../prompts/index';
-import { getToolDefinitions } from '../tools/index';
+import { getSystemPrompt, getPlanModePrompt } from '../prompts/index.js';
+import { getToolDefinitions } from '../tools/index.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog } from '../store/logAtom.js';
-import { planModeAtom } from '../store/ui-state.js';
+import { planModeAtom } from '../store/uiState.js';
 import { getClient } from './client.js';
-import { AgentSession } from './agent-session.js';
-import { ToolExecutor } from './tool-executor.js';
+import { AgentSession } from './agentSession.js';
+import { ToolExecutor } from './toolExecutor.js';
 import { toMessageParams } from '../store/conversation.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
 

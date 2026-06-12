@@ -3,7 +3,7 @@ import { Box, Text, ScrollBox } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@anthropic/ink';
 import { C } from '../data.js';
 import { useScheduleState } from '../hooks/index.js';
-import { inputBottomDistanceAtom } from '../../store/ui-state.js';
+import { inputBottomDistanceAtom } from '../../store/uiState.js';
 
 const DEFAULT_OVERHEAD = 6;
 

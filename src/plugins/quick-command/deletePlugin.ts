@@ -1,4 +1,4 @@
-import { MicaPlugin } from '../MicaPlugin';
+import { MicaPlugin } from '../MicaPlugin.js';
 
 export class QuickCommandDeletePlugin extends MicaPlugin {
   onInstall(): void {

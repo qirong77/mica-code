@@ -12,7 +12,7 @@ import {
   dropdown,
   terminalInput,
   type DropdownItem,
-} from '../../store/ui-state.js';
+} from '../../store/uiState.js';
 
 // ── Emitter ref（由 index.ts 注入，避免循环引用）─────────
 

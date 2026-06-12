@@ -7,7 +7,7 @@ import {
   thinkingTextAtom,
   responseTextAtom,
   quickCommandsAtom,
-} from '../store/ui-state.js';
+} from '../store/uiState.js';
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import { MicaPlugin } from '../plugins/MicaPlugin.js';
 import { bootstrap } from '../bootstrap.js';

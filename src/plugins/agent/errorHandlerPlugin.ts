@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { MicaPlugin } from '../MicaPlugin';
+import { MicaPlugin } from '../MicaPlugin.js';
 
 const RETRY_MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;

@@ -7,7 +7,7 @@ import {
   thinkingTextAtom,
   responseTextAtom,
   terminalInput,
-} from '../../store/ui-state.js';
+} from '../../store/uiState.js';
 import { model } from '../../store/config.js';
 import { contextSizeAtom, cacheHitRateAtom } from '../../store/conversation.js';
 import { C } from '../data.js';

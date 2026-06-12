@@ -2,8 +2,8 @@ import { agentTurn } from './agent/turn.js';
 import { ui } from './components/index.js';
 import { setupAgentEvents } from './core/agentEvents.js';
 import { appendSystemLog } from './store/logAtom.js';
-import { workingStatusAtom, pendingInputAtom } from './store/ui-state.js';
-import { formatError } from './utils/formatError';
+import { workingStatusAtom, pendingInputAtom } from './store/uiState.js';
+import { formatError } from './utils/formatError.js';
 
 async function processInput(text: string): Promise<void> {
   const startTime = Date.now();

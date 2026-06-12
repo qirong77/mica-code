@@ -1,6 +1,6 @@
 import { execSync } from 'child_process';
 import type Anthropic from '@anthropic-ai/sdk';
-import { UIPanelPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin.js';
 import { getClient } from '../../agent/client.js';
 import { model } from '../../store/config.js';
 import {

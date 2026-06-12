@@ -1,4 +1,4 @@
-import { formatError } from '../utils/formatError';
+import { formatError } from '../utils/formatError.js';
 
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;

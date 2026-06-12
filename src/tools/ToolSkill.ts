@@ -1,6 +1,6 @@
-import { MicaTool, type ToolExecuteCallbacks } from './MicaTool'
-import { getLoadedSkills } from '../skills/loadSkills'
-import type { Skill } from '../skills/types'
+import { MicaTool, type ToolExecuteCallbacks } from './MicaTool.js'
+import { getLoadedSkills } from '../skills/loadSkills.js'
+import type { Skill } from '../skills/types.js'
 
 function findSkill(name: string): Skill | undefined {
   return getLoadedSkills().find(

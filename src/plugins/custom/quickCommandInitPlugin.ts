@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { UIPanelPlugin } from '../MicaPlugin';
+import { UIPanelPlugin } from '../MicaPlugin.js';
 import { createSubAgent } from '../../agent/subagent.js';
 import {
   pushLog,

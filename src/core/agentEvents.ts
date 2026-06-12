@@ -1,5 +1,5 @@
 import { agentTurn } from '../agent/turn.js';
-import type { WorkingStatus } from '../store/ui-state.js';
+import type { WorkingStatus } from '../store/uiState.js';
 import type { StreamCreatePayload } from '../agent/types.js';
 import {
   handleThinkingChunk,
@@ -10,7 +10,7 @@ import {
   handleToolUseComplete,
   handleStatus,
   appendToolOutputChunk,
-} from '../store/stream-handlers.js';
+} from '../store/streamHandlers.js';
 
 export function setupAgentEvents() {
   let lastStatus: WorkingStatus | null = null;

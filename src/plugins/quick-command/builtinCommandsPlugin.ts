@@ -1,8 +1,8 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { MicaPlugin } from '../MicaPlugin';
-import { getContextUsage, getTotalBilledTokens } from '../../utils/getContextUsage';
-import { systemLogAtom, sessionToolRecordsAtom } from '../../store/logAtom';
+import { MicaPlugin } from '../MicaPlugin.js';
+import { getContextUsage, getTotalBilledTokens } from '../../utils/getContextUsage.js';
+import { systemLogAtom, sessionToolRecordsAtom } from '../../store/logAtom.js';
 
 export class BuiltinCommandsPlugin extends MicaPlugin {
   onInstall(): void {

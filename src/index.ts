@@ -1,26 +1,26 @@
 import { MicaAgent } from './core/agent.js';
 import { updateModelOptions } from './store/updateModelOptions.js';
-import { ErrorHandlerPlugin } from './plugins/agent/error-handler-plugin.js';
-import { AutoCompactPlugin } from './plugins/agent/auto-compact-plugin.js';
+import { ErrorHandlerPlugin } from './plugins/agent/errorHandlerPlugin.js';
+import { AutoCompactPlugin } from './plugins/agent/autoCompactPlugin.js';
 import { MemoryPlugin, injectMemorySystemPrompt } from './plugins/memory/MemoryPlugin.js';
 import { promptBuilder } from './prompts/index.js';
 import {
   QuickCommandModelPlugin,
   QuickCommandEffortPlugin,
-} from './plugins/quick-command/quick-command-select-plugin.js';
-import { BuiltinCommandsPlugin } from './plugins/quick-command/builtin-commands-plugin.js';
-import { QuickCommandResumePlugin } from './plugins/quick-command/quick-command-resume-plugin.js';
-import { QuickCommandRenamePlugin } from './plugins/quick-command/quick-command-rename-plugin.js';
-import { QuickCommandRewindPlugin } from './plugins/quick-command/quick-command-rewind-plugin.js';
-import { QuickCommandStarPlugin } from './plugins/quick-command/quick-command-star-plugin.js';
-import { QuickCommandDeletePlugin } from './plugins/quick-command/quick-command-delete-plugin.js';
-import { QuickCommandCompactPlugin } from './plugins/quick-command/quick-command-compact-plugin.js';
-import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/quick-command-git-change-context-plugin.js';
-import { QuickCommitPlugin } from './plugins/custom/quick-commit-plugin.js';
-import { QuickCommandInitPlugin } from './plugins/custom/quick-command-init-plugin.js';
-import { QuickCommandSkillsPlugin } from './plugins/custom/quick-command-skills-plugin.js';
-import { QuickCommandMcpPlugin } from './plugins/mcp/quick-command-mcp-plugin.js';
-import { terminalInput } from './store/ui-state.js';
+} from './plugins/quick-command/selectPlugin.js';
+import { BuiltinCommandsPlugin } from './plugins/quick-command/builtinCommandsPlugin.js';
+import { QuickCommandResumePlugin } from './plugins/quick-command/resumePlugin.js';
+import { QuickCommandRenamePlugin } from './plugins/quick-command/renamePlugin.js';
+import { QuickCommandRewindPlugin } from './plugins/quick-command/rewindPlugin.js';
+import { QuickCommandStarPlugin } from './plugins/quick-command/starPlugin.js';
+import { QuickCommandDeletePlugin } from './plugins/quick-command/deletePlugin.js';
+import { QuickCommandCompactPlugin } from './plugins/quick-command/compactPlugin.js';
+import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/gitChangeContextPlugin.js';
+import { QuickCommitPlugin } from './plugins/custom/quickCommitPlugin.js';
+import { QuickCommandInitPlugin } from './plugins/custom/quickCommandInitPlugin.js';
+import { QuickCommandSkillsPlugin } from './plugins/custom/quickCommandSkillsPlugin.js';
+import { QuickCommandMcpPlugin } from './plugins/mcp/quickCommandMcpPlugin.js';
+import { terminalInput } from './store/uiState.js';
 
 await updateModelOptions();
 

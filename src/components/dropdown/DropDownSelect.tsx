@@ -1,9 +1,9 @@
 import { Box } from '@anthropic/ink';
 import React, { useMemo } from 'react';
-import { useScheduleState } from '../hooks';
-import { CommandDropdown } from './CommandDropdown';
+import { useScheduleState } from '../hooks/index.js';
+import { CommandDropdown } from './CommandDropdown.js';
 import { DropDownUI } from './index.js';
-import { dropdown as dropdownAtoms } from '../../store/ui-state.js';
+import { dropdown as dropdownAtoms } from '../../store/uiState.js';
 
 
 export function DropDownSelect() {

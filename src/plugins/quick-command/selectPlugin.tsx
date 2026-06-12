@@ -1,13 +1,13 @@
 import React from 'react';
 import { Text } from '@anthropic/ink';
-import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
+import { UIPanelPlugin, handleListKeys } from '../MicaPlugin.js';
 import { model } from '../../store/config.js';
 import { useScheduleState } from '../../components/hooks/useScheduleState.js';
 import { Dialog, SelectList, KeyHints, StatusRow } from '../../components/primitives/index.js';
 import { C } from '../../components/data.js';
 import type { SelectItem } from '../../components/primitives/index.js';
 
-import type { Command } from '../../store/ui-state.js';
+import type { Command } from '../../store/uiState.js';
 
 interface SelectState {
   selectedIdx: number;

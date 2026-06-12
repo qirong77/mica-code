@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../data.js';
 import { messagesAtom } from '../../store/conversation.js';
-import { responseTextAtom, pendingInputAtom } from '../../store/ui-state.js';
+import { responseTextAtom, pendingInputAtom } from '../../store/uiState.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
 

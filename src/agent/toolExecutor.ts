@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { executeTool } from '../tools/index.js';
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
-import type { WorkingStatus } from '../store/ui-state.js';
+import type { WorkingStatus } from '../store/uiState.js';
 import type { CompletedToolUse } from './types.js';
 
 const MAX_TOOL_RECORDS = 100;
