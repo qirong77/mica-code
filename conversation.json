@@ -1,0 +1,68 @@
+[
+  {
+    "role": "user",
+    "content": "你好"
+  },
+  {
+    "role": "user",
+    "content": "你好"
+  },
+  {
+    "id": "92d37618-c992-41b2-95b7-e71ee90d0b23",
+    "type": "message",
+    "role": "assistant",
+    "model": "deepseek-v4-pro",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "The user said \"你好\" (hello). This is a simple greeting. I should respond briefly and naturally.",
+        "signature": "92d37618-c992-41b2-95b7-e71ee90d0b23"
+      },
+      {
+        "type": "text",
+        "text": "你好。有什么需要帮忙的？"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 8,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 10752,
+      "output_tokens": 30,
+      "service_tier": "standard"
+    },
+    "parsed_output": null
+  },
+  {
+    "role": "user",
+    "content": "你是什么模型"
+  },
+  {
+    "id": "f6f2558f-aa29-4e36-9570-1e932a257af9",
+    "type": "message",
+    "role": "assistant",
+    "model": "deepseek-v4-pro",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "The user is asking what model I am. This is a simple question - I'm Mica Code, a lightweight programming assistant CLI tool. I should answer directly based on the system prompt information provided to me.\n\nLooking at the system prompt, I'm described as \"Mica Code，一个轻量级编程辅助工具（CLI）\" - I'm a code agent CLI. The project uses Anthropic SDK, and the model configuration is in environment variables like `ANTHROPIC_MODEL`. \n\nI should be straightforward - I don't know exactly which underlying model is configured since it depends on the environment variables. I can check the config to find out.",
+        "signature": "f6f2558f-aa29-4e36-9570-1e932a257af9"
+      },
+      {
+        "type": "text",
+        "text": "我是 Mica Code，一个轻量级编程辅助工具。底层模型取决于你环境变量中配置的 `ANTHROPIC_MODEL`。要我帮你查一下当前配置的具体模型吗？"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 22,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 10752,
+      "output_tokens": 176,
+      "service_tier": "standard"
+    },
+    "parsed_output": null
+  }
+]

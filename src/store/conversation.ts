@@ -35,6 +35,7 @@ function calcCacheHitRate(usage: Anthropic.Usage): number {
 }
 
 export function updateCacheUsage(messages: ConversationMessage[]): void {
+
   const last = [...messages].reverse().find((m) => isAssistantMessage(m) && m.usage)
   if (!last || !isAssistantMessage(last) || !last.usage) {
     cacheHitRateAtom.set(0)
