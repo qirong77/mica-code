@@ -1,0 +1,14 @@
+src/components/ui/components/Conversation/Conversation.tsx
+  h_a456b67147438e 6,39,80-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8dc31d7f91e1902dc16156ec7f59fb449195b090",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
