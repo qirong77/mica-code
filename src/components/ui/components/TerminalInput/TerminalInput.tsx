@@ -20,6 +20,46 @@ const emitter = mitt<Events>()
 
 const DOUBLE_PRESS_TIMEOUT_MS = 800
 
+function useDoublePressAbort(
+  isRunning: boolean,
+  onAbort: () => void,
+): [boolean, () => void] {
+  const [pending, setPending] = useState(false);
+  const lastPressRef = React.useRef(0);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const handlePress = useCallback(() => {
+    if (!isRunning) return;
+
+    const now = Date.now();
+    const timeSince = now - lastPressRef.current;
+    const isDouble = timeSince <= DOUBLE_PRESS_TIMEOUT_MS && timeoutRef.current !== undefined;
+
+    if (isDouble) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = undefined;
+      setPending(false);
+      onAbort();
+    } else {
+      setPending(true);
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        setPending(false);
+        timeoutRef.current = undefined;
+      }, DOUBLE_PRESS_TIMEOUT_MS);
+    }
+    lastPressRef.current = now;
+  }, [isRunning, onAbort]);
+
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return [pending, handlePress];
+}
+
 function useDoublePressExit(isIdle: boolean): [boolean, () => void] {
   const [pending, setPending] = useState(false);
   const lastPressRef = React.useRef(0);
@@ -111,7 +151,21 @@ function TerminalInput() {
 
   const [exitPending, handleExitPress] = useDoublePressExit(isAgentIdle);
 
+  const onAbort = useCallback(() => {
+    agentTurn.abort();
+    setInput('');
+    setCursorOffset(0);
+    terminalInput.text.set('');
+  }, []);
+
+  const [abortPending, handleAbortPress] = useDoublePressAbort(isAgentRunning, onAbort);
+
   useInput((_input, key, event) => {
+    if (key.escape) {
+      handleAbortPress();
+      return;
+    }
+
     if (key.tab && key.shift) {
       const next = !planModeAtom.get();
       planModeAtom.set(next);
@@ -315,6 +369,11 @@ function TerminalInput() {
       {exitPending && (
         <Box>
           <Text color={C.dim}>Press Ctrl+C again to exit</Text>
+        </Box>
+      )}
+      {abortPending && (
+        <Box>
+          <Text color={C.dim}>Press Esc again to stop agent</Text>
         </Box>
       )}
     </Box>

@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../../data.js';
 import { messagesAtom } from '../../../../store/conversation.js';
-import { responseTextAtom } from '../../../../store/ui-state.js';
+import { responseTextAtom, pendingInputAtom } from '../../../../store/ui-state.js';
 import { useScheduleState } from '../../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
 
@@ -36,6 +36,7 @@ interface LogItem {
 export const Conversation = (): React.ReactNode => {
   const messages = useScheduleState(messagesAtom);
   const responseText = useScheduleState(responseTextAtom);
+  const pendingInput = useScheduleState(pendingInputAtom);
 
   const staticItems = useMemo(
     () =>
@@ -76,6 +77,14 @@ export const Conversation = (): React.ReactNode => {
       <Box>
         <Markdown>{responseText}</Markdown>
       </Box>
+      {pendingInput && (
+        <Box paddingY={1} flexDirection="row">
+          <Text color={C.dim}>{'\u258c'}</Text>
+          <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
+            <Text color={C.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}{'（等待当前 agent 执行完成后发送）'}</Text>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 };
