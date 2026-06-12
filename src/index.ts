@@ -20,6 +20,7 @@ import { QuickCommitPlugin } from './plugins/custom/quickCommitPlugin.js';
 import { QuickCommandInitPlugin } from './plugins/custom/quickCommandInitPlugin.js';
 import { QuickCommandSkillsPlugin } from './plugins/custom/quickCommandSkillsPlugin.js';
 import { QuickCommandMcpPlugin } from './plugins/mcp/quickCommandMcpPlugin.js';
+import { DebugExportLogPlugin } from './plugins/debug/debugExportLogPlugin.js';
 import { terminalInput } from './store/uiState.js';
 
 await updateModelOptions();
@@ -44,6 +45,7 @@ await MicaAgent.usePlugin(new QuickCommandDeletePlugin());
 await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
 await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
+await MicaAgent.usePlugin(new DebugExportLogPlugin());
 
 const printPrompt = getPrintPrompt();
 if (printPrompt) {
