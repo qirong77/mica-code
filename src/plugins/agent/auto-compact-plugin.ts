@@ -1,7 +1,7 @@
 import type { WritableAtom } from 'nanostores';
 import { MicaPlugin } from '../MicaPlugin';
 import { getContextUsage } from '../../utils/getContextUsage';
-import { compactMessages, KEEP_RECENT_COUNT, MIN_MESSAGES_TO_COMPACT } from '../../utils/compact';
+import { compactMessages, KEEP_RECENT_COUNT, MIN_MESSAGES_TO_COMPACT, trySessionMemoryCompact } from '../../utils/compact';
 import { model } from '../../store/config.js';
 import { createPersistedAtom } from '../../store/createPersistedAtom';
 import { session } from '../../store/ui-state';
@@ -71,16 +71,29 @@ export class AutoCompactPlugin extends MicaPlugin {
       const msgId = this.showMessage(`${triggerReason}，正在压缩对话历史...`, 0);
 
       try {
-        const { compacted, toCompressCount } = await compactMessages(messages);
-        sess.replaceMessages(compacted);
-        this.removeMessage(msgId);
+        const sid = session.currentId.get();
+        const smResult = sid ? await trySessionMemoryCompact(sid, messages) : null;
 
-        const newUsage = getContextUsage(compacted);
-        const newRatio = maxContext > 0 ? (newUsage / maxContext * 100).toFixed(1) : '?';
-        this.showMessage(
-          `压缩完成：${toCompressCount} 条消息 → 1 条摘要，上下文使用 ${newRatio}%`,
-          5000,
-        );
+        if (smResult) {
+          sess.replaceMessages(smResult);
+          this.removeMessage(msgId);
+          const newUsage = getContextUsage(smResult);
+          const newRatio = maxContext > 0 ? (newUsage / maxContext * 100).toFixed(1) : '?';
+          this.showMessage(
+            `压缩完成（会话记忆）：上下文使用 ${newRatio}%`,
+            5000,
+          );
+        } else {
+          const { compacted, toCompressCount } = await compactMessages(messages);
+          sess.replaceMessages(compacted);
+          this.removeMessage(msgId);
+          const newUsage = getContextUsage(compacted);
+          const newRatio = maxContext > 0 ? (newUsage / maxContext * 100).toFixed(1) : '?';
+          this.showMessage(
+            `压缩完成：${toCompressCount} 条消息 → 1 条摘要，上下文使用 ${newRatio}%`,
+            5000,
+          );
+        }
       } catch {
         this.removeMessage(msgId);
         this.showMessage('压缩失败，继续正常对话', 3000);

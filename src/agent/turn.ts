@@ -7,6 +7,7 @@ import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { IterationRunner } from './iteration-runner.js';
 import type { AgentTurnEvents, IterationResult, Middleware, RunFn } from './types.js';
+import type { ConversationMessage } from '../store/conversation.js';
 
 export type { AgentTurnEvents, IterationResult, RunFn, Middleware } from './types.js';
 
@@ -24,6 +25,7 @@ export class AgentTurn {
   private _aborted = false;
   private toolExecutor: ToolExecutor;
   private iterationRunner: IterationRunner;
+  private _onIterationComplete: Array<(messages: ConversationMessage[]) => void> = [];
 
   constructor() {
     this.toolExecutor = new ToolExecutor({
@@ -52,6 +54,20 @@ export class AgentTurn {
     this.middlewares.push(middleware);
   }
 
+  onIterationComplete(cb: (messages: ConversationMessage[]) => void): () => void {
+    this._onIterationComplete.push(cb);
+    return () => {
+      this._onIterationComplete = this._onIterationComplete.filter(c => c !== cb);
+    };
+  }
+
+  private _notifyIterationComplete(): void {
+    const msgs = this.session.getMessages();
+    for (const cb of this._onIterationComplete) {
+      try { cb(msgs); } catch { /* silence plugin errors */ }
+    }
+  }
+
   async executeSingleIteration(): Promise<IterationResult> {
     if (this._aborted) throw new Error('ABORT');
     this.abortController = new AbortController();
@@ -77,6 +93,7 @@ export class AgentTurn {
       try {
         const result = await this.executeSingleIteration();
         onIteration?.(result);
+        this._notifyIterationComplete();
 
         if (!result.hasToolUse && !result.wasTruncated) {
           if (!hasTextContent(result.finalMessage)) {

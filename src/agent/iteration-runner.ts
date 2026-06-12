@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { systemPrompt, planModePrompt } from '../prompts/index';
+import { getSystemPrompt, getPlanModePrompt } from '../prompts/index';
 import { getToolDefinitions } from '../tools/index';
 import { EFFORT_TOKENS, model } from '../store/config.js';
 import { appendSystemLog } from '../store/logAtom.js';
@@ -11,12 +11,6 @@ import { toMessageParams } from '../store/conversation.js';
 import type { AgentTurnEmitter, CompletedToolUse, IterationResult } from './types.js';
 
 let _iterationId = 0;
-
-let cachedSystemPrompt = systemPrompt;
-
-planModeAtom.listen((plan) => {
-  cachedSystemPrompt = plan ? planModePrompt : systemPrompt;
-});
 
 export type SystemPromptProvider = () => string;
 
@@ -31,7 +25,9 @@ export class IterationRunner {
     systemPromptProvider?: SystemPromptProvider,
     clientProvider?: () => Anthropic,
   ) {
-    this.getSystemPrompt = systemPromptProvider ?? (() => cachedSystemPrompt);
+    this.getSystemPrompt = systemPromptProvider ?? (() => {
+      return planModeAtom.get() ? getPlanModePrompt() : getSystemPrompt();
+    });
     this.getAnthropicClient = clientProvider ?? getClient;
   }
 

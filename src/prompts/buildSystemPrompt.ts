@@ -4,6 +4,7 @@ type PromptSection =
     | 'context'
     | 'system-reminder'
     | 'skills'
+    | 'memory'
 const DEFAULT_SYSTEM_PROMPT = /* markdown */`
 
 `

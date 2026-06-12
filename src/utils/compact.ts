@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { createSubAgent } from '../agent/subagent.js';
 import { toMessageParams, type ConversationMessage } from '../store/conversation.js';
+import { readSessionMemory } from '../plugins/memory/memoryPaths.js';
 
 const COMPACT_PROMPT = `CRITICAL: 只输出纯文本，不要调用任何工具。
 
@@ -109,4 +110,25 @@ export async function compactMessages(
   ];
 
   return { compacted, toCompressCount: toCompress.length };
+}
+
+// 尝试使用会话记忆进行压缩，替代模型摘要
+export async function trySessionMemoryCompact(
+  sessionId: string,
+  messages: ConversationMessage[],
+): Promise<ConversationMessage[] | null> {
+  const sessionMemory = readSessionMemory(sessionId);
+  if (!sessionMemory || !sessionMemory.trim()) return null;
+
+  const toKeep = messages.slice(-KEEP_RECENT_COUNT);
+
+  const summaryMessage =
+    `以下是之前对话的会话记忆摘要，对话因上下文超限被压缩。请基于此摘要和后续保留的消息继续工作，不要询问摘要中已涵盖的问题。\n\n${sessionMemory}`;
+
+  const compacted: ConversationMessage[] = [
+    { role: 'user', content: summaryMessage },
+    ...toKeep,
+  ];
+
+  return compacted;
 }

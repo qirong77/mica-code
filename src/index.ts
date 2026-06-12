@@ -2,6 +2,8 @@ import { MicaAgent } from './core/agent.js';
 import { updateModelOptions } from './store/updateModelOptions.js';
 import { ErrorHandlerPlugin } from './plugins/agent/error-handler-plugin.js';
 import { AutoCompactPlugin } from './plugins/agent/auto-compact-plugin.js';
+import { MemoryPlugin, injectMemorySystemPrompt } from './plugins/memory/MemoryPlugin.js';
+import { promptBuilder } from './prompts/index.js';
 import {
   QuickCommandModelPlugin,
   QuickCommandEffortPlugin,
@@ -22,11 +24,15 @@ import { terminalInput } from './store/ui-state.js';
 
 await updateModelOptions();
 
+// 在注册任何插件之前注入记忆系统 prompt
+injectMemorySystemPrompt(promptBuilder);
+
 await MicaAgent.usePlugin(new QuickCommitPlugin());
 await MicaAgent.usePlugin(new QuickCommandInitPlugin());
 await MicaAgent.usePlugin(new QuickCommandSkillsPlugin());
 await MicaAgent.usePlugin(new ErrorHandlerPlugin());
 await MicaAgent.usePlugin(new AutoCompactPlugin());
+await MicaAgent.usePlugin(new MemoryPlugin());
 await MicaAgent.usePlugin(new BuiltinCommandsPlugin());
 await MicaAgent.usePlugin(new QuickCommandModelPlugin());
 await MicaAgent.usePlugin(new QuickCommandEffortPlugin());
