@@ -1,0 +1,14 @@
+src/components/ui/components/LogView/LogViewComponent.tsx
+  h_a456b67147438e 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "69bcfc3052e74391f439a49584b45811473c8148",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
