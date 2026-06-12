@@ -24,7 +24,7 @@ export function LogView() {
   return (
     <ScrollBox height={viewportHeight} stickyScroll flexDirection="column" paddingLeft={1}>
       {lines.map((line, i) => (
-        <Text key={i} color={line.color as any} dimColor={line.dimColor} bold={line.bold}>
+        <Text key={i} color={line.color as any} dimColor={true} bold={line.bold}>
           {line.text}
         </Text>
       ))}
