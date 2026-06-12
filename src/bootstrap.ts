@@ -1,5 +1,5 @@
 import { agentTurn } from './agent/turn.js';
-import { ui } from './components/ui/index.js';
+import { ui } from './components/index.js';
 import { setupAgentEvents } from './core/agentEvents.js';
 import { appendSystemLog } from './store/logAtom.js';
 import { workingStatusAtom, pendingInputAtom } from './store/ui-state.js';

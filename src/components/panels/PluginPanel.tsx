@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box } from '@anthropic/ink';
-import { useScheduleState } from '../../hooks';
-import { pluginUIsAtom } from '../../../../store/ui-state.js';
+import { useScheduleState } from '../hooks';
+import { pluginUIsAtom } from '../../store/ui-state.js';
 
 export function PluginPanel(): React.ReactNode {
   const uis = useScheduleState(pluginUIsAtom);

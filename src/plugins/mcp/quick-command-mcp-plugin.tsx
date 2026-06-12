@@ -4,9 +4,9 @@ import { UIPanelPlugin } from '../MicaPlugin';
 import { mcpServersAtom, type McpServerStatus, type McpToolInfo } from '../../mcp/client.js';
 import { loadMcpConfig } from '../../mcp/config.js';
 import { reconnectMcpServer } from '../../mcp/index.js';
-import { Dialog, SelectList, KeyHints, DetailView } from '../../components/ui/primitives/index.js';
-import { C } from '../../components/ui/data.js';
-import type { SelectItem } from '../../components/ui/primitives/index.js';
+import { Dialog, SelectList, KeyHints, DetailView } from '../../components/primitives/index.js';
+import { C } from '../../components/data.js';
+import type { SelectItem } from '../../components/primitives/index.js';
 
 const STATUS_ICON: Record<McpServerStatus['status'], string> = {
   connecting: '○',

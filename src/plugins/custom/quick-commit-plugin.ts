@@ -7,8 +7,8 @@ import {
   pushLog,
   clearLog,
   LogView,
-} from '../../components/ui/components/LogView/LogViewComponent.js';
-import { C } from '../../components/ui/data.js';
+} from '../../components/panels/LogView.js';
+import { C } from '../../components/data.js';
 
 const COMMIT_PROMPT = `根据以下 git diff 信息生成一条简洁的 commit message。
 

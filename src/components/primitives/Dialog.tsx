@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { IfComponent } from '../components/common/IfComponent';
+import { IfComponent } from './IfComponent.js';
 
 export interface DialogProps {
   title: string;

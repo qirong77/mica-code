@@ -3,12 +3,12 @@ import React from 'react';
 import { App } from './app.js';
 
 // ── 统一导出所有 UI 组件 ──
-import { TerminalInputUI } from './components/TerminalInput/TerminalInput.js';
-import { ConversationUI } from './components/Conversation/Conversation.js';
-import { WorkingStatusUI } from './components/WorkingStatus/index.js';
-import { DropDownUI } from './components/DropDown/index.js';
-import { MessageBarAPI } from './components/MessageBar/index.js';
-import { AgentTurnLogUI } from './components/AgentTurnLog/AgentTurnLog.js';
+import { TerminalInputUI } from './input/TerminalInput.js';
+import { ConversationUI } from './conversation/Conversation.js';
+import { WorkingStatusUI } from './panels/WorkingStatus.js';
+import { DropDownUI } from './dropdown/index.js';
+import { MessageBarAPI } from './panels/MessageBar.js';
+import { AgentTurnLogUI } from './panels/AgentTurnLog.js';
 
 function Root() {
   return <App />;

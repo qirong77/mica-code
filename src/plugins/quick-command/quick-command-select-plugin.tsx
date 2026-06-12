@@ -2,10 +2,10 @@ import React from 'react';
 import { Text } from '@anthropic/ink';
 import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
 import { model } from '../../store/config.js';
-import { useScheduleState } from '../../components/ui/hooks/useScheduleState.js';
-import { Dialog, SelectList, KeyHints, StatusRow } from '../../components/ui/primitives/index.js';
-import { C } from '../../components/ui/data.js';
-import type { SelectItem } from '../../components/ui/primitives/index.js';
+import { useScheduleState } from '../../components/hooks/useScheduleState.js';
+import { Dialog, SelectList, KeyHints, StatusRow } from '../../components/primitives/index.js';
+import { C } from '../../components/data.js';
+import type { SelectItem } from '../../components/primitives/index.js';
 
 import type { Command } from '../../store/ui-state.js';
 

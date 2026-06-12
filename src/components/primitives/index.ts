@@ -18,3 +18,7 @@ export type { DialogProps } from './Dialog.js';
 
 export { DetailView } from './DetailView.js';
 export type { DetailViewProps } from './DetailView.js';
+
+export { Spin, useSpinner } from './Spin.js';
+
+export { IfComponent } from './IfComponent.js';

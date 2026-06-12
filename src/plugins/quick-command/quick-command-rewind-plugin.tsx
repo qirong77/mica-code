@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
 import { hasBackups, listBackedUpFiles, restoreFiles } from '../../utils/fileHistory.js';
-import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
+import { Dialog, SelectList, KeyHints } from '../../components/primitives/index.js';
 
 interface RewindState {
   selectedIdx: number;

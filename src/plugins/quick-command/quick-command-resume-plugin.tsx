@@ -5,8 +5,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { UIPanelPlugin, handleListKeys } from '../MicaPlugin';
 import { type SessionMeta } from '../../store/ui-state.js';
-import { Dialog, SelectList, KeyHints } from '../../components/ui/primitives/index.js';
-import { C } from '../../components/ui/data.js';
+import { Dialog, SelectList, KeyHints } from '../../components/primitives/index.js';
+import { C } from '../../components/data.js';
 import { repairSessionMessages } from '../../utils/repair.js';
 
 export type { SessionMeta };

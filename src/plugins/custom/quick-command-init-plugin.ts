@@ -5,8 +5,8 @@ import {
   pushLog,
   clearLog,
   LogView,
-} from '../../components/ui/components/LogView/LogViewComponent.js';
-import { C } from '../../components/ui/data.js';
+} from '../../components/panels/LogView.js';
+import { C } from '../../components/data.js';
 
 const INIT_PROMPT = `请分析当前代码库并创建或更新 AGENTS.md 文件。AGENTS.md 会在每次 Mica Code 会话启动时注入 system prompt，因此内容必须简洁——只包含 AI 不知道会犯错的指令，同时包含足够的项目上下文让 AI 能高效工作。
 

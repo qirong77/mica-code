@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, ScrollBox } from '@anthropic/ink';
-import { useScheduleState } from '../../hooks/index.js';
+import { useScheduleState } from '../hooks/index.js';
 import {
   thinkingTextAtom,
   workingStatusAtom,
@@ -8,11 +8,11 @@ import {
   pluginUIsAtom,
   inputBottomDistanceAtom,
   dropdown,
-} from '../../../../store/ui-state.js';
-import type { ActiveTool } from '../../../../store/ui-state.js';
-import { C } from '../../data.js';
-import { useSpinner } from '../common/Spin.js';
-import { formatElapsed } from '../../../../utils/format.js';
+} from '../../store/ui-state.js';
+import type { ActiveTool } from '../../store/ui-state.js';
+import { C } from '../data.js';
+import { useSpinner } from '../primitives/Spin.js';
+import { formatElapsed } from '../../utils/format.js';
 
 const MAX_TOOL_OUTPUT_LINES = 500;
 const RESERVED_LINES = 4;

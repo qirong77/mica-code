@@ -1,6 +1,6 @@
-import type { DropdownItem } from '../../../../store/ui-state.js';
+import type { DropdownItem } from '../../store/ui-state.js';
 import { DropDownSelect } from './DropDownSelect.js';
-import { dropdown } from '../../../../store/ui-state.js';
+import { dropdown } from '../../store/ui-state.js';
 import {
   showQuickCommands,
   hideQuickCommands,
@@ -10,7 +10,7 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
-export type { DropdownItem, DropdownState } from '../../../../store/ui-state.js';
+export type { DropdownItem, DropdownState } from '../../store/ui-state.js';
 
 const _selectHandlers: Array<(item: DropdownItem) => void> = [];
 setSelectEmitter((item: DropdownItem) => {

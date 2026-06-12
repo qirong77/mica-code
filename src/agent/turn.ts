@@ -2,7 +2,7 @@ import mitt from 'mitt';
 import Anthropic from '@anthropic-ai/sdk';
 import { appendSystemLog } from '../store/logAtom.js';
 import { clearBackups } from '../utils/fileHistory.js';
-import { parseImageRefs } from '../components/ui/utils/imagePaste.js';
+import { parseImageRefs } from '../components/utils/imagePaste.js';
 import { AgentSession } from './agent-session.js';
 import { ToolExecutor } from './tool-executor.js';
 import { IterationRunner } from './iteration-runner.js';

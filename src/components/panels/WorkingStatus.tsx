@@ -1,19 +1,19 @@
 import { Box, Text } from '@anthropic/ink';
 import React, { useEffect, useRef, useState } from 'react';
-import { useScheduleState } from '../../hooks/index.js';
+import { useScheduleState } from '../hooks/index.js';
 import {
   dropdown,
   workingStatusAtom,
   thinkingTextAtom,
   responseTextAtom,
   terminalInput,
-} from '../../../../store/ui-state.js';
-import { model } from '../../../../store/config.js';
-import { contextSizeAtom, cacheHitRateAtom } from '../../../../store/conversation.js';
-import { C } from '../../data.js';
-import { Spin } from '../common/Spin.js';
-import { IfComponent } from '../common/IfComponent.js';
-import { formatElapsed } from '../../../../utils/format.js';
+} from '../../store/ui-state.js';
+import { model } from '../../store/config.js';
+import { contextSizeAtom, cacheHitRateAtom } from '../../store/conversation.js';
+import { C } from '../data.js';
+import { Spin } from '../primitives/Spin.js';
+import { IfComponent } from '../primitives/IfComponent.js';
+import { formatElapsed } from '../../utils/format.js';
 
 const CTX_THRESHOLDS = [0.1, 0.3, 0.5, 0.8] as const;
 const CTX_COLORS = [C.dim, C.info, C.warning, '#FF9800', C.error] as const;

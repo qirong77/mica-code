@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { UIPanelPlugin } from '../MicaPlugin';
-import { Spin } from '../../components/ui/components/common/Spin.js';
+import { Spin } from '../../components/primitives/Spin.js';
 import { getClient } from '../../agent/client.js';
-import { Dialog } from '../../components/ui/primitives/index.js';
+import { Dialog } from '../../components/primitives/index.js';
 
 function RenameSpinner() {
   return (

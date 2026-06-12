@@ -1,5 +1,5 @@
 import { agentTurn } from '../agent/turn.js';
-import { ui } from '../components/ui/index.js';
+import { ui } from '../components/index.js';
 import { messagesAtom } from '../store/conversation.js';
 import { model, api } from '../store/config.js';
 import {

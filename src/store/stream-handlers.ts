@@ -6,7 +6,7 @@ import {
 } from './ui-state.js';
 import type { WorkingStatus } from './ui-state.js';
 import { appendSystemLog } from './logAtom.js';
-import { ui } from '../components/ui/index.js';
+import { ui } from '../components/index.js';
 import { getToolDisplayText } from '../tools/index.js';
 
 const toolOutputBuffers = new Map<string, string[]>();

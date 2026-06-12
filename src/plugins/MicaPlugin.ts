@@ -14,7 +14,7 @@ import {
   type PluginUI,
 } from '../store/ui-state.js';
 import type { SessionToolRecord } from '../store/logAtom.js';
-import { useScheduleState } from '../components/ui/hooks/useScheduleState.js';
+import { useScheduleState } from '../components/hooks/useScheduleState.js';
 
 export interface PluginAtoms {
   messages: WritableAtom<ConversationMessage[]>;

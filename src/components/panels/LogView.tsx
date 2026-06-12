@@ -1,8 +1,8 @@
 import React from 'react';
 import { atom } from 'nanostores';
 import { Box, Text, ScrollBox } from '@anthropic/ink';
-import { useScheduleState } from '../../hooks/index.js';
-import { inputBottomDistanceAtom } from '../../../../store/ui-state.js';
+import { useScheduleState } from '../hooks/index.js';
+import { inputBottomDistanceAtom } from '../../store/ui-state.js';
 
 export interface LogEntry {
   text: string;
@@ -12,12 +12,12 @@ export interface LogEntry {
 }
 
 const logAtom = atom<LogEntry[]>([]);
-const RESERVED_LINES = 4;
+const RESERVED_LINES = 2;
 
 export function LogView() {
   const bottomDistance = useScheduleState(inputBottomDistanceAtom);
   const lines = useScheduleState(logAtom);
-  const viewportHeight = Math.max(2, (bottomDistance as number) - RESERVED_LINES);
+  const viewportHeight = Math.max(5, (bottomDistance as number) - RESERVED_LINES);
 
   if (lines.length === 0) return null;
 

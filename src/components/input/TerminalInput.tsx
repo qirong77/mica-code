@@ -2,15 +2,15 @@ import { Box, Text, useInput, useTerminalSize } from '@anthropic/ink';
 import React from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { SimpleTextInput } from "./Input";
-import { C } from "../../data";
+import { C } from "../data";
 import mitt from 'mitt'
-import { useScheduleState } from '../../hooks';
-import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom, inputBottomDistanceAtom } from '../../../../store/ui-state.js';
-import { agentTurn } from '../../../../agent/turn.js';
-import { DropDownUI } from '../DropDown/index.js';
-import { saveClipboardImage } from '../../utils/imagePaste.js';
-import { appendSystemLog } from "../../../../store/logAtom";
-import { MessageBarAPI } from '../MessageBar/index.js';
+import { useScheduleState } from '../hooks';
+import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom, inputBottomDistanceAtom } from '../../store/ui-state.js';
+import { agentTurn } from '../../agent/turn.js';
+import { DropDownUI } from '../dropdown/index.js';
+import { saveClipboardImage } from '../utils/imagePaste.js';
+import { appendSystemLog } from "../../store/logAtom";
+import { MessageBarAPI } from '../panels/MessageBar.js';
 import type { DOMElement } from '@anthropic/ink';
 
 type Events = {
