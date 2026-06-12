@@ -1,0 +1,14 @@
+src/plugins/custom/quick-commit-plugin.ts
+  h_a456b67147438e 26,29-30,54,57,63-72,76-83,85-93,95-114,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "743fbead911167a689920fc0b10ca2ee3cadc2e3",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
