@@ -37,6 +37,12 @@ function getAllTools(): MicaTool[] {
   return [...builtinTools, ...mcpTools];
 }
 
+function findTool(name: string): MicaTool | undefined {
+  const exact = getAllTools().find((t) => t.name === name);
+  if (exact) return exact;
+  return getAllTools().find((t) => t.name.endsWith(`__${name}`));
+}
+
 export function getToolDefinitions(): Anthropic.Tool[] {
   return getAllTools().map((t) => ({
     name: t.name,
@@ -46,7 +52,7 @@ export function getToolDefinitions(): Anthropic.Tool[] {
 }
 
 export async function executeTool(name: string, input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
-  const tool = getAllTools().find((t) => t.name === name);
+  const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
 
   const validation = tool.validateInput(input);
@@ -58,7 +64,7 @@ export async function executeTool(name: string, input: Record<string, any>, call
 }
 
 export function getToolDisplayText(name: string, input: Record<string, any>): string {
-  const tool = getAllTools().find((t) => t.name === name);
+  const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
   try {
     return tool.onToolUseDisplayText(input);

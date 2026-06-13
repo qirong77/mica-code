@@ -194,7 +194,9 @@ function TerminalInput() {
   const onExit = useCallback(() => {
     if (isAgentRunning) {
       agentTurn.abort();
+      return;
     }
+    process.exit(0);
   }, [isAgentRunning]);
 
   const handleChange = useCallback((value: string) => {

@@ -27,7 +27,7 @@ class McpProxyTool extends MicaTool {
   }
 
   onToolUseDisplayText(input: Record<string, any>): string {
-    const serverLabel = `[${this.serverName}]`;
+    const serverLabel = `🔌 [${this.serverName}]`;
     const shortName = this.toolName;
     try {
       const keys = Object.keys(input);
