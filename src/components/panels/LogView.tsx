@@ -24,8 +24,6 @@ export function LogView() {
     Math.ceil(rows / 2),
   );
 
-  if (lines.length === 0) return null;
-
   return (
     <ScrollBox height={viewportHeight} stickyScroll flexDirection="column">
       {lines.map((line, i) => (
