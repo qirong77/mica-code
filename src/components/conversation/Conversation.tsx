@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type Anthropic from '@anthropic-ai/sdk';
 import { C } from '../data.js';
@@ -6,6 +6,17 @@ import { messagesAtom } from '../../store/conversation.js';
 import { responseTextAtom, pendingInputAtom } from '../../store/uiState.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
+
+function useDots(delay = 500): string {
+  const [dots, setDots] = useState('');
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDots((d) => (d.length >= 3 ? '' : d + '.'));
+    }, delay);
+    return () => clearInterval(timer);
+  }, [delay]);
+  return dots;
+}
 
 interface LogMessage extends Anthropic.MessageParam {
   status?: 'clear';
@@ -37,6 +48,7 @@ export const Conversation = (): React.ReactNode => {
   const messages = useScheduleState(messagesAtom);
   const responseText = useScheduleState(responseTextAtom);
   const pendingInput = useScheduleState(pendingInputAtom);
+  const dots = useDots();
 
   const staticItems = useMemo(
     () =>
@@ -81,7 +93,7 @@ export const Conversation = (): React.ReactNode => {
         <Box paddingY={1} flexDirection="row">
           <Text color={C.dim}>{'\u258c'}</Text>
           <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
-            <Text color={C.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}{'（等待当前 agent 执行完成后发送）'}</Text>
+            <Text color={C.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}{'（等待当前 agent 执行完成后发送'}{dots}{'）'}</Text>
           </Box>
         </Box>
       )}
