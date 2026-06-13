@@ -31,7 +31,7 @@ const defaultProviderConfig: ProviderFile = {
       models_url: 'https://api.deepseek.com/models',
       api_key: '',
       api_key_env_name: 'DEEPSEEK_API_KEY',
-      api_base_env_name: '',
+      api_base_env_name: 'DEEPSEEK_BASE_URL',
     },
     claude: {
       name: 'Claude',
