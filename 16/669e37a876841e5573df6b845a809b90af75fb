@@ -1,0 +1,16 @@
+src/plugins/quick-command/providerPlugin.ts
+  h_a456b67147438e 1-27
+src/store/providerConfig.ts
+  h_a456b67147438e 1-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "16669e37a876841e5573df6b845a809b90af75fb",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
