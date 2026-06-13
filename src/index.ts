@@ -16,7 +16,6 @@ import { QuickCommandResumePlugin } from './plugins/quick-command/resumePlugin.j
 import { QuickCommandRenamePlugin } from './plugins/quick-command/renamePlugin.js';
 import { QuickCommandRewindPlugin } from './plugins/quick-command/rewindPlugin.js';
 import { QuickCommandStarPlugin } from './plugins/quick-command/starPlugin.js';
-import { QuickCommandDeletePlugin } from './plugins/quick-command/deletePlugin.js';
 import { QuickCommandCompactPlugin } from './plugins/quick-command/compactPlugin.js';
 import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/gitChangeContextPlugin.js';
 import { QuickCommitPlugin } from './plugins/custom/quickCommitPlugin.js';
@@ -46,7 +45,6 @@ await MicaAgent.usePlugin(new QuickCommandResumePlugin());
 await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
 await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
 await MicaAgent.usePlugin(new QuickCommandStarPlugin());
-await MicaAgent.usePlugin(new QuickCommandDeletePlugin());
 await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
 await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
 await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
