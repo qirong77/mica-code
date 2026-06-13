@@ -9,8 +9,12 @@ import {
 import { fetchToolsForServer } from './tools.js';
 import { registerMcpTools, unregisterMcpTools } from '../tools/index.js';
 import { loadMcpConfig } from './config.js';
-import type { McpHttpServerConfig } from './config.js';
+import type { McpServerConfig } from './config.js';
 import type { MicaTool } from '../tools/MicaTool.js';
+
+function configLabel(config: McpServerConfig): string {
+  return 'url' in config ? config.url : `${config.command} ${(config.args ?? []).join(' ')}`;
+}
 
 function extractToolInfo(tools: MicaTool[], serverName: string) {
   const prefix = `mcp__${serverName}__`;
@@ -36,15 +40,15 @@ export async function initMcp(): Promise<void> {
 
   for (const [name, config] of entries) {
     try {
-      appendSystemLog(`MCP: 连接 ${name} (${config.url})`);
+      appendSystemLog(`MCP: 连接 ${name} (${configLabel(config)})`);
       const server = await connectToServer(name, config);
       const tools = await fetchToolsForServer(server);
-      markServerConnected(name, config.url, tools.length, extractToolInfo(tools, name));
+      markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
       appendSystemLog(`MCP: ${name} 已连接，注册了 ${tools.length} 个工具`);
       allTools.push(...tools);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      markServerFailed(name, config.url, message);
+      markServerFailed(name, configLabel(config), message);
       appendSystemLog(`MCP: ${name} 连接失败 - ${message}`);
     }
   }
@@ -55,7 +59,7 @@ export async function initMcp(): Promise<void> {
   }
 }
 
-export async function reconnectMcpServer(name: string, config: McpHttpServerConfig): Promise<string> {
+export async function reconnectMcpServer(name: string, config: McpServerConfig): Promise<string> {
   const existing = connections.get(name);
   if (existing) {
     await existing.cleanup();
@@ -64,7 +68,7 @@ export async function reconnectMcpServer(name: string, config: McpHttpServerConf
   try {
     const connected = await connectToServer(name, config);
     const tools = await fetchToolsForServer(connected);
-    markServerConnected(name, config.url, tools.length, extractToolInfo(tools, name));
+    markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
 
     const allTools = [...tools];
     for (const [n, s] of connections) {
@@ -80,7 +84,7 @@ export async function reconnectMcpServer(name: string, config: McpHttpServerConf
     return `已重连 ${name}，注册了 ${tools.length} 个工具`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    markServerFailed(name, config.url, message);
+    markServerFailed(name, configLabel(config), message);
     return `${name} 重连失败: ${message}`;
   }
 }

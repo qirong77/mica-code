@@ -53,9 +53,37 @@ export class DebugExportLogPlugin extends MicaPlugin {
       lines.push('');
     }
     if (toolRecords.length > 0) {
-      lines.push('=== Tool Execution Records ===');
-      for (const rec of toolRecords) {
-        lines.push(`[${rec.elapsedMs}ms] ${rec.toolName}(${JSON.stringify(rec.toolInput)})`);
+      const mcpRecords = toolRecords.filter((r) => r.toolName.startsWith('mcp__'));
+      const skillRecords = toolRecords.filter((r) => r.toolName === 'Skill');
+      const otherRecords = toolRecords.filter(
+        (r) => r.toolName !== 'Skill' && !r.toolName.startsWith('mcp__'),
+      );
+
+      if (mcpRecords.length > 0) {
+        lines.push('=== MCP Tool Calls ===');
+        for (const rec of mcpRecords) {
+          const parts = rec.toolName.split('__');
+          const server = parts[1] ?? '?';
+          const tool = parts.slice(2).join('__');
+          lines.push(`[${rec.elapsedMs}ms] ${server}/${tool}(${JSON.stringify(rec.toolInput)})`);
+        }
+        lines.push('');
+      }
+
+      if (skillRecords.length > 0) {
+        lines.push('=== Skill Calls ===');
+        for (const rec of skillRecords) {
+          lines.push(`[${rec.elapsedMs}ms] ${rec.toolInput.skill}${rec.toolInput.args ? ` args: ${rec.toolInput.args}` : ''}`);
+        }
+        lines.push('');
+      }
+
+      if (otherRecords.length > 0) {
+        lines.push('=== Other Tool Execution Records ===');
+        for (const rec of otherRecords) {
+          lines.push(`[${rec.elapsedMs}ms] ${rec.toolName}(${JSON.stringify(rec.toolInput)})`);
+        }
+        lines.push('');
       }
     }
     if (lines.length === 0) return;

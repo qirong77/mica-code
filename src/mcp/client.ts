@@ -1,7 +1,8 @@
 import { atom } from 'nanostores';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { McpHttpServerConfig } from './config.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { McpServerConfig } from './config.js';
 import { CONFIG_PATH } from './config.js';
 
 export interface McpToolInfo {
@@ -25,7 +26,7 @@ export const mcpServersAtom = atom<McpServerStatus[]>([]);
 export interface ConnectedMcpServer {
   name: string;
   client: Client;
-  config: McpHttpServerConfig;
+  config: McpServerConfig;
   cleanup: () => Promise<void>;
 }
 
@@ -45,18 +46,25 @@ function updateServerStatus(update: McpServerStatus) {
 
 export async function connectToServer(
   name: string,
-  config: McpHttpServerConfig,
+  config: McpServerConfig,
 ): Promise<ConnectedMcpServer> {
   const existing = connections.get(name);
   if (existing) return existing;
 
-  updateServerStatus({ name, url: config.url, configPath: CONFIG_PATH, status: 'connecting', toolCount: 0, tools: [] });
+  const serverUrl = 'url' in config ? config.url : config.command;
+  updateServerStatus({ name, url: serverUrl, configPath: CONFIG_PATH, status: 'connecting', toolCount: 0, tools: [] });
 
-  const transport = new StreamableHTTPClientTransport(new URL(config.url), {
-    requestInit: config.headers
-      ? { headers: config.headers as Record<string, string> }
-      : undefined,
-  });
+  const transport = 'url' in config
+    ? new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: config.headers
+          ? { headers: config.headers as Record<string, string> }
+          : undefined,
+      })
+    : new StdioClientTransport({
+        command: config.command,
+        args: config.args ?? [],
+        env: config.env as Record<string, string> | undefined,
+      });
 
   const client = new Client(
     { name: 'mica', version: '0.1.0' },

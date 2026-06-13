@@ -1,6 +1,6 @@
 import React from 'react';
 import { atom } from 'nanostores';
-import { Box, Text, ScrollBox } from '@anthropic/ink';
+import { Box, Text, ScrollBox, useTerminalSize } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
 import { inputBottomDistanceAtom } from '../../store/uiState.js';
 
@@ -17,7 +17,12 @@ const RESERVED_LINES = 2;
 export function LogView() {
   const bottomDistance = useScheduleState(inputBottomDistanceAtom);
   const lines = useScheduleState(logAtom);
-  const viewportHeight = Math.max(5, (bottomDistance as number) - RESERVED_LINES);
+  const { columns, rows } = useTerminalSize();
+  const viewportHeight = Math.max(
+    5,
+    (bottomDistance as number) - RESERVED_LINES,
+    Math.ceil(rows / 2),
+  );
 
   if (lines.length === 0) return null;
 
@@ -33,10 +38,7 @@ export function LogView() {
 }
 
 export function pushLog(entry: LogEntry | string) {
-  logAtom.set([
-    ...logAtom.get(),
-    typeof entry === 'string' ? { text: entry } : entry,
-  ]);
+  logAtom.set([...logAtom.get(), typeof entry === 'string' ? { text: entry } : entry]);
 }
 
 export function clearLog() {

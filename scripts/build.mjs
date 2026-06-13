@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, copyFileSync, chmodSync, appendFileSync, readFil
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
+console.log('Running prebuild codegraph validation...\n');
+execSync('bun run src/prebuild.ts', { stdio: 'inherit' });
+
 const outDir = 'dist';
 const outName = 'mica';
 
