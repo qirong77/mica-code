@@ -1,0 +1,14 @@
+src/store/providerConfig.ts
+  h_a456b67147438e 14-15,33-34,41-42,49-50,69-83,94-98,108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6391a9fa54276bd0ad3058127447fbac056c9900",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
