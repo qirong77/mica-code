@@ -1,25 +1,7 @@
-import { model, api, MODEL_OPTIONS_FALLBACK } from './config.js';
+import { model, MODEL_OPTIONS_FALLBACK } from './config.js';
 import type { ModelOption, ApiModelListResponse } from './config.js';
 
-/* TODO: 兼容 claude 的环境变量
-export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic
-export ANTHROPIC_AUTH_TOKEN=${YOUR_MOONSHOT_API_KEY}
-export ANTHROPIC_MODEL=kimi-k2.5
-export ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k2.5
-export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.5
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.5
-export CLAUDE_CODE_SUBAGENT_MODEL=kimi-k2.5
-export ENABLE_TOOL_SEARCH=false
-*/
-
-
-function resolveModelsUrl(baseUrl: string): string {
-  if (baseUrl.includes('deepseek.com')) return 'https://api.deepseek.com/models';
-  if (baseUrl.includes('moonshot.cn')) return 'https://api.moonshot.cn/v1/models';
-  return `${baseUrl.replace(/\/$/, '')}/models`;
-}
-
-async function fetchModelList(url: string, apiKey: string | undefined): Promise<ModelOption[]> {
+async function fetchModelList(url: string, apiKey: string): Promise<ModelOption[]> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -33,7 +15,11 @@ async function fetchModelList(url: string, apiKey: string | undefined): Promise<
 }
 
 function applyModelOptions(options: ModelOption[]): void {
-  if (options.length === 0) return;
+  if (options.length === 0) {
+    model.options.set(MODEL_OPTIONS_FALLBACK);
+    model.name.set(MODEL_OPTIONS_FALLBACK[0].name);
+    return;
+  }
   model.options.set(options);
 
   const current = model.name.get();
@@ -42,17 +28,8 @@ function applyModelOptions(options: ModelOption[]): void {
   }
 }
 
-function applyFallbackOptions(error: string): void {
-  model.optionsError.set(error);
-  const envModel = process.env.ANTHROPIC_MODEL;
-  model.options.set(
-    envModel ? [{ name: envModel, label: envModel }] : MODEL_OPTIONS_FALLBACK,
-  );
-}
-
-export async function updateModelOptions(): Promise<void> {
-  const baseUrl = api.baseUrl.get();
-  if (!baseUrl) {
+export async function updateModelOptions(modelsUrl: string | undefined, apiKey: string): Promise<void> {
+  if (!modelsUrl || !apiKey) {
     model.options.set(MODEL_OPTIONS_FALLBACK);
     return;
   }
@@ -61,11 +38,11 @@ export async function updateModelOptions(): Promise<void> {
   model.optionsError.set(null);
 
   try {
-    const url = resolveModelsUrl(baseUrl);
-    const options = await fetchModelList(url, api.apiKey.get());
+    const options = await fetchModelList(modelsUrl, apiKey);
     applyModelOptions(options);
   } catch (err) {
-    applyFallbackOptions(err instanceof Error ? err.message : String(err));
+    model.optionsError.set(err instanceof Error ? err.message : String(err));
+    model.options.set(MODEL_OPTIONS_FALLBACK);
   } finally {
     model.optionsLoading.set(false);
   }

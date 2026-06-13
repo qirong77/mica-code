@@ -13,7 +13,7 @@ interface SelectState {
   selectedIdx: number;
 }
 
-type SelectOptionConfig = {
+export type SelectOptionConfig = {
   name: string;
   description: string;
   title: string;
@@ -23,7 +23,7 @@ type SelectOptionConfig = {
   emptyMessage?: string;
 };
 
-function createSelectCommand(plugin: UIPanelPlugin, config: SelectOptionConfig): Command {
+export function createSelectCommand(plugin: UIPanelPlugin, config: SelectOptionConfig): Command {
   return {
     name: config.name,
     description: config.description,

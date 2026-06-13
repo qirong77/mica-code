@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { api } from '../store/config.js';
+import { PROVIDER_PATH } from '../store/providerConfig.js';
 
 let _client: Anthropic | null = null;
 
@@ -8,7 +9,7 @@ export function getClient(): Anthropic {
 
   const apiKey = api.apiKey.get();
   if (!apiKey) {
-    console.error('缺少环境变量 ANTHROPIC_API_KEY');
+    console.error(`缺少 API Key 配置，请设置 ${PROVIDER_PATH} 中的 api_key`);
     process.exit(1);
   }
 
@@ -17,4 +18,8 @@ export function getClient(): Anthropic {
     baseURL: api.baseUrl.get(),
   });
   return _client;
+}
+
+export function resetClient(): void {
+  _client = null;
 }
