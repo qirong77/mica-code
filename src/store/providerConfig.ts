@@ -11,6 +11,8 @@ export interface ProviderConfig {
   api_base: string;
   models_url: string;
   api_key: string;
+  api_key_env_name: string;
+  api_base_env_name: string;
 }
 
 interface ProviderFile {
@@ -28,18 +30,24 @@ const defaultProviderConfig: ProviderFile = {
       api_base: 'https://api.deepseek.com/anthropic',
       models_url: 'https://api.deepseek.com/models',
       api_key: '',
+      api_key_env_name: 'DEEPSEEK_API_KEY',
+      api_base_env_name: '',
     },
     claude: {
       name: 'Claude',
       api_base: 'https://api.anthropic.com',
       models_url: '',
       api_key: '',
+      api_key_env_name: 'ANTHROPIC_API_KEY',
+      api_base_env_name: 'ANTHROPIC_BASE_URL',
     },
     kimi: {
       name: 'Kimi',
       api_base: 'https://api.moonshot.cn/anthropic',
       models_url: 'https://api.moonshot.cn/v1/models',
       api_key: '',
+      api_key_env_name: 'MOONSHOT_API_KEY',
+      api_base_env_name: '',
     },
   },
 };
@@ -58,6 +66,21 @@ function writeProviderConfig(config: ProviderFile): void {
   writeFileSync(PROVIDER_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }
 
+function applyEnvFallback(config: ProviderFile): boolean {
+  let changed = false;
+  for (const provider of Object.values(config.providers)) {
+    if (provider.api_key_env_name && !provider.api_key && process.env[provider.api_key_env_name]) {
+      provider.api_key = process.env[provider.api_key_env_name]!;
+      changed = true;
+    }
+    if (provider.api_base_env_name && !provider.api_base && process.env[provider.api_base_env_name]) {
+      provider.api_base = process.env[provider.api_base_env_name]!;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function loadProviderConfig(): ProviderFile {
   if (_config) return _config;
 
@@ -68,6 +91,11 @@ function loadProviderConfig(): ProviderFile {
         throw new Error('invalid provider.json structure');
       }
       _config = parsed as ProviderFile;
+      if (applyEnvFallback(_config)) {
+        try {
+          writeProviderConfig(_config);
+        } catch {}
+      }
       return _config;
     }
   } catch (err) {
@@ -77,6 +105,7 @@ function loadProviderConfig(): ProviderFile {
   }
 
   _config = structuredClone(defaultProviderConfig);
+  applyEnvFallback(_config);
   try {
     writeProviderConfig(_config);
   } catch (err) {
