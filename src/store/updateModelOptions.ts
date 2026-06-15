@@ -45,7 +45,13 @@ export async function updateModelOptions(
   modelsUrl: string | undefined,
   apiKey: string,
   authType: 'bearer' | 'x-api-key' = 'bearer',
+  customModels?: ModelOption[],
 ): Promise<UpdateModelOptionsResult> {
+  if (customModels && customModels.length > 0) {
+    applyModelOptions(customModels);
+    return { error: null, options: customModels };
+  }
+
   if (!modelsUrl) {
     model.optionsLoading.set(false);
     return setModelOptionsError('当前 provider 未配置 models_url');

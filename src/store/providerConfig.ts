@@ -1,4 +1,4 @@
-import { api } from './config.js';
+import { api, type ModelOption } from './config.js';
 import { updateModelOptions } from './updateModelOptions.js';
 import { resetClient } from '../agent/client.js';
 import { appendSystemLog } from './logAtom.js';
@@ -12,6 +12,7 @@ export interface ProviderConfig {
   api_key_env_name: string;
   api_base_env_name: string;
   models_auth_header: 'bearer' | 'x-api-key';
+  models?: ModelOption[];
 }
 
 interface ProviderFile {
@@ -80,6 +81,20 @@ function normalizeProvider(providerId: string, rawProvider: unknown): ProviderCo
       ? authHeader
       : base?.models_auth_header ?? 'bearer';
 
+  let models: ModelOption[] | undefined;
+  const rawModels = rawProvider.models;
+  if (Array.isArray(rawModels) && rawModels.length > 0) {
+    models = rawModels.map((m: unknown) => {
+      if (typeof m === 'string') return { name: m, label: m };
+      if (typeof m === 'object' && m !== null && 'name' in (m as Record<string, unknown>)) {
+        const obj = m as Record<string, unknown>;
+        return { name: String(obj.name), label: String(obj.label ?? obj.name) };
+      }
+      return null;
+    }).filter((m): m is ModelOption => m !== null);
+    if (models.length === 0) models = undefined;
+  }
+
   return {
     name: readString('name', providerId),
     api_base: readString('api_base'),
@@ -88,6 +103,7 @@ function normalizeProvider(providerId: string, rawProvider: unknown): ProviderCo
     api_key_env_name: readString('api_key_env_name'),
     api_base_env_name: readString('api_base_env_name'),
     models_auth_header: modelsAuthHeader,
+    models,
   };
 }
 
@@ -233,6 +249,7 @@ export async function switchProvider(
     provider.models_url || undefined,
     provider.api_key,
     provider.models_auth_header,
+    provider.models,
   );
 
   return {
@@ -242,7 +259,7 @@ export async function switchProvider(
   };
 }
 
-export function initProvider(): { modelsUrl: string | undefined; modelsAuthHeader: 'bearer' | 'x-api-key' } {
+export function initProvider(): { modelsUrl: string | undefined; modelsAuthHeader: 'bearer' | 'x-api-key'; customModels?: ModelOption[] } {
   const config = loadProviderConfig();
   const rawProvider = config.providers[config.current];
   if (!rawProvider) {
@@ -257,5 +274,6 @@ export function initProvider(): { modelsUrl: string | undefined; modelsAuthHeade
   return {
     modelsUrl: provider.models_url || undefined,
     modelsAuthHeader: provider.models_auth_header,
+    customModels: provider.models,
   };
 }

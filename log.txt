@@ -1,0 +1,28 @@
+=== System Logs ===
+[15:48:05] MCP: 正在连接 3 个服务器...
+[15:48:05] MCP: 连接 Cooper (http://127.0.0.1:28582/v1/hub/cooper_mcp)
+[15:48:07] MCP: Cooper 已连接，注册了 26 个工具
+[15:48:07] MCP: 连接 mock-mcp-server (http://mock.xiaojukeji.com/mcp)
+[15:48:07] MCP: mock-mcp-server 已连接，注册了 6 个工具
+[15:48:07] MCP: 连接 codegraph (codegraph serve --mcp --path /Users/qironglin/Desktop/VsGo-Projects/mica-code)
+[15:48:07] MCP: codegraph 已连接，注册了 4 个工具
+[15:48:07] MCP: 共注册 36 个 MCP 工具
+[15:48:26] 用户提交：你好
+[15:48:26] 连接 API
+[15:48:26] Agent run 开始
+[15:48:26] 迭代 #1 开始：model=gpt-5.4 effort=low
+[15:48:31] 迭代 #1 响应：无工具调用
+[15:48:31] 未知
+[15:48:31] Agent run 结束（无待执行工具）
+[15:48:31] 完成 (5.6s)
+[15:48:31] Agent 运行完成
+[15:48:36] 用户提交：你是什么模型？
+[15:48:36] 连接 API
+[15:48:36] Agent run 开始
+[15:48:36] 迭代 #2 开始：model=gpt-5.4 effort=low
+[15:48:42] 迭代 #2 响应：无工具调用
+[15:48:42] 未知
+[15:48:42] Agent run 结束（无待执行工具）
+[15:48:42] 完成 (6.5s)
+[15:48:42] Agent 运行完成
+

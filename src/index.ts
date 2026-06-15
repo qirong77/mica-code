@@ -30,6 +30,7 @@ const modelOptionsResult = await updateModelOptions(
   providerInfo.modelsUrl,
   api.apiKey.get() ?? '',
   providerInfo.modelsAuthHeader,
+  providerInfo.customModels,
 );
 
 // 在注册任何插件之前注入记忆系统 prompt
