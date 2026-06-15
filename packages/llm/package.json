@@ -1,0 +1,5 @@
+{
+  "name": "@mica/llm",
+  "private": true,
+  "type": "module"
+}

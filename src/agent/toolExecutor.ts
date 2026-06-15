@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { ToolResultBlockParam } from '@mica/llm';
 import { executeTool } from '../tools/index.js';
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/uiState.js';
@@ -25,7 +25,7 @@ export class ToolExecutor {
     tools: CompletedToolUse[],
     abortSignal: AbortSignal,
     iterationId?: number,
-  ): Promise<Anthropic.ToolResultBlockParam[]> {
+  ): Promise<ToolResultBlockParam[]> {
     if (tools.length === 0) return [];
 
     const toolStartTime = Date.now();
@@ -62,7 +62,7 @@ export class ToolExecutor {
 
     clearInterval(timer);
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    const toolResults: ToolResultBlockParam[] = [];
     for (let i = 0; i < settled.length; i++) {
       const item = settled[i];
       const tool = tools[i];

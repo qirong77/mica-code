@@ -1,7 +1,7 @@
 import { isAssistantMessage, type ConversationMessage } from '../store/conversation.js'
-import type Anthropic from '@anthropic-ai/sdk'
+import type { Usage } from '@mica/llm'
 
-export function getSingleRequestTotalTokens(usage: Anthropic.Usage): number {
+export function getSingleRequestTotalTokens(usage: Usage): number {
   return (
     (usage.input_tokens ?? 0) +
     (usage.cache_creation_input_tokens ?? 0) +

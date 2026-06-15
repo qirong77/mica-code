@@ -1,10 +1,10 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, TextBlock, ToolResultBlockParam, Usage } from '@mica/llm';
 import { getClient } from './client.js';
 import { model, EFFORT_TOKENS } from '../store/config.js';
 import { getToolDefinitions, executeTool } from '../tools/index.js';
 
 export interface ForkedAgentParams {
-  promptMessages: Anthropic.MessageParam[];
+  promptMessages: MessageParam[];
   systemPrompt: string;
   allowedTools?: string[] | null;
   maxTurns?: number;
@@ -14,14 +14,9 @@ export interface ForkedAgentParams {
 }
 
 export interface ForkedAgentResult {
-  messages: Anthropic.MessageParam[];
+  messages: MessageParam[];
   text: string;
-  totalUsage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_read_input_tokens: number;
-    cache_creation_input_tokens: number;
-  };
+  totalUsage: Required<Usage>;
   turnCount: number;
 }
 
@@ -49,9 +44,9 @@ export async function runForkedAgent(params: ForkedAgentParams): Promise<ForkedA
     ? allTools.filter(t => allowedTools.includes(t.name))
     : allTools;
 
-  const messages: Anthropic.MessageParam[] = [...promptMessages];
+  const messages: MessageParam[] = [...promptMessages];
 
-  const totalUsage = {
+  const totalUsage: Required<Usage> = {
     input_tokens: 0,
     output_tokens: 0,
     cache_read_input_tokens: 0,
@@ -92,12 +87,12 @@ export async function runForkedAgent(params: ForkedAgentParams): Promise<ForkedA
     if (toolUses.length === 0) {
       finalText = response.content
         .filter(block => block.type === 'text')
-        .map(b => (b as Anthropic.TextBlock).text)
+        .map(b => (b as TextBlock).text)
         .join('\n');
       break;
     }
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    const toolResults: ToolResultBlockParam[] = [];
     for (const block of toolUses) {
       if (signal?.aborted) {
         toolResults.push({

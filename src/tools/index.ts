@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { Tool } from '@mica/llm';
 
 import { ToolReadFile } from './ToolReadFile.js';
 import { ToolWriteFile } from './ToolWriteFile.js';
@@ -45,7 +45,7 @@ function findTool(name: string): MicaTool | undefined {
   return getAllTools().find((t) => t.name.endsWith(`__${name}`));
 }
 
-export function getToolDefinitions(): Anthropic.Tool[] {
+export function getToolDefinitions(): Tool[] {
   return getAllTools().map((t) => ({
     name: t.name,
     description: t.description,

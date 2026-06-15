@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { Message, MessageParam, ToolResultBlockParam } from '@mica/llm';
 import {
   messagesAtom,
   contextSizeAtom,
@@ -15,18 +15,18 @@ import { repairSessionMessages } from '../utils/repair.js';
 const MAX_TOOL_RECORDS = 100;
 
 export class AgentSession {
-  appendUser(content: Anthropic.MessageParam['content']): void {
+  appendUser(content: MessageParam['content']): void {
     messagesAtom.set([...messagesAtom.get(), { role: 'user', content }]);
   }
 
-  appendAssistant(message: Anthropic.Message): void {
+  appendAssistant(message: Message): void {
     const updated = [...messagesAtom.get(), message];
     messagesAtom.set(updated);
     contextSizeAtom.set(updateContextSize(updated));
     updateCacheUsage(updated);
   }
 
-  appendToolResults(toolResults: Anthropic.ToolResultBlockParam[]): void {
+  appendToolResults(toolResults: ToolResultBlockParam[]): void {
     messagesAtom.set([
       ...messagesAtom.get(),
       { role: 'user', content: toolResults },

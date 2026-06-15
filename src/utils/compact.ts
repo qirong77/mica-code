@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam } from '@mica/llm';
 import { createSubAgent } from '../agent/subagent.js';
 import { toMessageParams, type ConversationMessage } from '../store/conversation.js';
 import { readSessionMemory } from '../plugins/memory/memoryPaths.js';
@@ -82,7 +82,7 @@ const summarizeSubAgent = createSubAgent({
   maxTokens: 8192,
 });
 
-export async function summarizeMessages(messages: Anthropic.MessageParam[]): Promise<string> {
+export async function summarizeMessages(messages: MessageParam[]): Promise<string> {
   const result = await summarizeSubAgent([
     ...messages,
     { role: 'user', content: COMPACT_PROMPT },

@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { LlmClient, Message } from '@mica/llm';
 import { getSystemPrompt } from '../prompts/index.js';
 import { getToolDefinitions } from '../tools/index.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';
@@ -15,17 +15,17 @@ export type SystemPromptProvider = () => string;
 
 export class IterationRunner {
   private getSystemPrompt: SystemPromptProvider;
-  private getAnthropicClient: () => Anthropic;
+  private getLlmClient: () => LlmClient;
 
   constructor(
     private session: AgentSession,
     private toolExecutor: ToolExecutor,
     private emit: AgentTurnEmitter['emit'],
     systemPromptProvider?: SystemPromptProvider,
-    clientProvider?: () => Anthropic,
+    clientProvider?: () => LlmClient,
   ) {
     this.getSystemPrompt = systemPromptProvider ?? (() => getSystemPrompt());
-    this.getAnthropicClient = clientProvider ?? getClient;
+    this.getLlmClient = clientProvider ?? getClient;
   }
 
   async run(abortSignal: AbortSignal): Promise<IterationResult> {
@@ -37,7 +37,7 @@ export class IterationRunner {
     appendSystemLog(`迭代 #${iterationId} 开始：model=${modelName} effort=${effort}`);
     this.emit('status', { type: 'connecting' });
 
-    const stream = this.getAnthropicClient().messages.stream({
+    const stream = this.getLlmClient().messages.stream({
       model: modelName,
       max_tokens: model.maxTokens.get(),
       system: this.getSystemPrompt(),
@@ -81,7 +81,7 @@ export class IterationRunner {
       }
     });
 
-    let finalMessage: Anthropic.Message;
+    let finalMessage: Message;
     try {
       finalMessage = await stream.finalMessage();
     } catch (err) {

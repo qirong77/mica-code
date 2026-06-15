@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { Tool } from '@mica/llm';
 import { UIPanelPlugin } from '../MicaPlugin.js';
 import { createSubAgent } from '../../agent/subagent.js';
 import {
@@ -42,7 +42,7 @@ const INIT_PROMPT = `请分析当前代码库并创建或更新 AGENTS.md 文件
 - AGENTS.md 在启动时自动注入 system prompt，编辑此文件直接影响 agent 行为
 \`\`\``;
 
-const INIT_TOOLS: Anthropic.Tool[] = [
+const INIT_TOOLS: Tool[] = [
   {
     name: 'read_file',
     description: '读取文件内容',

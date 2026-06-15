@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { createClient, type LlmClient } from '@mica/llm';
 import { api } from '../store/config.js';
 
-let _client: Anthropic | null = null;
+let _client: LlmClient | null = null;
 
-export function getClient(): Anthropic {
+export function getClient(): LlmClient {
   if (_client) return _client;
 
   const apiKey = api.apiKey.get();
@@ -13,9 +13,9 @@ export function getClient(): Anthropic {
     );
   }
 
-  _client = new Anthropic({
+  _client = createClient({
     apiKey,
-    baseURL: api.baseUrl.get(),
+    baseURL: api.baseUrl.get() || undefined,
   });
   return _client;
 }

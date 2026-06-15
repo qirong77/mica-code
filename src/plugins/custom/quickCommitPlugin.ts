@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import type Anthropic from '@anthropic-ai/sdk';
+import type { TextBlock } from '@mica/llm';
 import { UIPanelPlugin } from '../MicaPlugin.js';
 import { getClient } from '../../agent/client.js';
 import { model } from '../../store/config.js';
@@ -134,9 +134,7 @@ export class QuickCommitPlugin extends UIPanelPlugin {
             output_config: effort !== 'none' ? { effort } : undefined,
           });
 
-          const textBlock = response.content.find(
-            (b): b is Anthropic.TextBlock => b.type === 'text',
-          );
+          const textBlock = response.content.find((b): b is TextBlock => b.type === 'text');
           const message = textBlock?.text?.trim() || 'chore: 更新代码 🔧';
           pushLog({ text: `commit: ${message}`, color: C.info });
 

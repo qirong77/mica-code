@@ -1,8 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { Message, MessageStream } from '@mica/llm';
 import type { WorkingStatus } from '../store/uiState.js';
 
 export interface StreamCreatePayload {
-  stream: any;
+  stream: MessageStream;
   iterationId: number;
 }
 
@@ -16,7 +16,7 @@ export interface ToolUsePayload {
 }
 
 export interface MessageFinalPayload {
-  message: Anthropic.Message;
+  message: Message;
   iterationId: number;
 }
 
@@ -31,7 +31,7 @@ export type AgentTurnEvents = {
 export interface IterationResult {
   hasToolUse: boolean;
   wasTruncated: boolean;
-  finalMessage: Anthropic.Message;
+  finalMessage: Message;
   iterationId: number;
 }
 

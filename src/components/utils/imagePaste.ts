@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type { ContentBlockParam, ImageBlockParam, TextBlock } from '@mica/llm';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -94,8 +94,8 @@ export function saveImage(base64: string, mediaType: string): string {
 
 const IMAGE_REF_RE = /\[Image\]\(([^)]+)\)/g;
 
-export function parseImageRefs(text: string): string | Anthropic.ContentBlockParam[] {
-  const blocks: Anthropic.ContentBlockParam[] = [];
+export function parseImageRefs(text: string): string | ContentBlockParam[] {
+  const blocks: ContentBlockParam[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -123,7 +123,7 @@ export function parseImageRefs(text: string): string | Anthropic.ContentBlockPar
           media_type: mediaType,
           data: buffer.toString('base64'),
         },
-      } as Anthropic.ImageBlockParam);
+      } as ImageBlockParam);
     } catch {
       blocks.push({ type: 'text', text: full });
     }
@@ -137,7 +137,7 @@ export function parseImageRefs(text: string): string | Anthropic.ContentBlockPar
 
   if (blocks.length === 0) return text;
   // If only text blocks and just one, return plain string
-  if (blocks.length === 1 && blocks[0]!.type === 'text') return (blocks[0] as Anthropic.TextBlockParam).text!;
+  if (blocks.length === 1 && blocks[0]!.type === 'text') return (blocks[0] as TextBlock).text;
   return blocks;
 }
 

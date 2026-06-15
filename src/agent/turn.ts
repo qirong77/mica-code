@@ -1,5 +1,5 @@
 import mitt from 'mitt';
-import Anthropic from '@anthropic-ai/sdk';
+import type { Message } from '@mica/llm';
 import { appendSystemLog } from '../store/logAtom.js';
 import { clearBackups } from '../utils/fileHistory.js';
 import { parseImageRefs } from '../components/utils/imagePaste.js';
@@ -11,8 +11,7 @@ import type { ConversationMessage } from '../store/conversation.js';
 
 export type { AgentTurnEvents, IterationResult, RunFn, Middleware } from './types.js';
 
-function hasTextContent(message: Anthropic.Message): boolean {
-  if (typeof message.content === 'string') return true;
+function hasTextContent(message: Message): boolean {
   return message.content.some((block) => block.type === 'text');
 }
 

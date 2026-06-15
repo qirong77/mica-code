@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import type Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, TextBlock } from '@mica/llm';
 import { C } from '../data.js';
 import { messagesAtom } from '../../store/conversation.js';
 import { responseTextAtom, pendingInputAtom } from '../../store/uiState.js';
@@ -18,16 +18,16 @@ function useDots(delay = 500): string {
   return dots;
 }
 
-interface LogMessage extends Anthropic.MessageParam {
+interface LogMessage extends MessageParam {
   status?: 'clear';
 }
 
 const MAX_USER_LINES = 10;
 
-function getTextContent(content: Anthropic.MessageParam['content']): string {
+function getTextContent(content: MessageParam['content']): string {
   if (typeof content === 'string') return content;
   return content
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .filter((block): block is TextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
 }

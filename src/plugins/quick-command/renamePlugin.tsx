@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
+import type { TextBlock } from '@mica/llm';
 import { UIPanelPlugin } from '../MicaPlugin.js';
 import { Spin } from '../../components/primitives/Spin.js';
 import { getClient } from '../../agent/client.js';
@@ -80,7 +81,7 @@ export class QuickCommandRenamePlugin extends UIPanelPlugin {
       });
 
       const title =
-        (res.content[0]?.type === 'text' ? res.content[0].text.trim() : '') ||
+        ((res.content[0] as TextBlock | undefined)?.type === 'text' ? (res.content[0] as TextBlock).text.trim() : '') ||
         '未命名会话';
 
       const idx = this.atoms.sessionsIndex.get();

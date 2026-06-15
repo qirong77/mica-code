@@ -27,7 +27,7 @@ interface ProviderFileInput {
 const defaultProviders: Record<string, ProviderConfig> = {
   deepseek: {
     name: 'DeepSeek',
-    api_base: 'https://api.deepseek.com/anthropic',
+    api_base: 'https://api.deepseek.com',
     models_url: 'https://api.deepseek.com/models',
     api_key: '',
     api_key_env_name: 'DEEPSEEK_API_KEY',
@@ -36,7 +36,7 @@ const defaultProviders: Record<string, ProviderConfig> = {
   },
   claude: {
     name: 'Claude',
-    api_base: 'https://api.anthropic.com',
+    api_base: 'https://api.anthropic.com/v1',
     models_url: 'https://api.anthropic.com/v1/models',
     api_key: '',
     api_key_env_name: 'ANTHROPIC_API_KEY',
@@ -45,8 +45,8 @@ const defaultProviders: Record<string, ProviderConfig> = {
   },
   kimi: {
     name: 'Kimi',
-    api_base: 'https://api.moonshot.cn/anthropic',
-    models_url: 'https://api.moonshot.cn/v1/models',
+    api_base: 'https://api.moonshot.ai/v1',
+    models_url: 'https://api.moonshot.ai/v1/models',
     api_key: '',
     api_key_env_name: 'MOONSHOT_API_KEY',
     api_base_env_name: '',
@@ -179,19 +179,12 @@ function resolveProvider(provider: ProviderConfig): ProviderConfig {
       ? process.env[provider.api_base_env_name]
       : undefined;
 
-  const fallbackApiKey = process.env.ANTHROPIC_API_KEY;
-  const fallbackApiBase = process.env.ANTHROPIC_BASE_URL;
-
   if (apiKeyFromProviderEnv) {
     resolved.api_key = apiKeyFromProviderEnv;
-  } else if (!resolved.api_key && fallbackApiKey) {
-    resolved.api_key = fallbackApiKey;
   }
 
   if (apiBaseFromProviderEnv) {
     resolved.api_base = apiBaseFromProviderEnv;
-  } else if (fallbackApiBase) {
-    resolved.api_base = fallbackApiBase;
   }
 
   return resolved;

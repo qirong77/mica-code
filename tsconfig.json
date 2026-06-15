@@ -11,9 +11,11 @@
     "outDir": "dist",
     "rootDir": ".",
     "paths": {
+      "@mica/llm": ["./packages/llm/src/index.ts"],
+      "@mica/llm/*": ["./packages/llm/src/*"],
       "@anthropic/ink": ["./packages/@anthropic/ink/src/index.ts"],
       "@anthropic/ink/*": ["./packages/@anthropic/ink/src/*"]
     }
   },
-  "include": ["src", "packages/@anthropic/ink"]
+  "include": ["src", "packages/@anthropic/ink", "packages/llm"]
 }

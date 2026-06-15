@@ -1,18 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { MicaPlugin } from '../MicaPlugin.js';
+import { getClient } from '../../agent/client.js';
 
 const RETRY_MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 30_000;
 
 function isRetryable(error: unknown): boolean {
-  if (error instanceof Anthropic.RateLimitError) return true;
-  if (error instanceof Anthropic.APIConnectionError) return true;
-  if (error instanceof Anthropic.APIConnectionTimeoutError) return true;
-  if (error instanceof Anthropic.InternalServerError) return true;
-  if (error instanceof Anthropic.APIUserAbortError) return false;
   if (error instanceof Error && error.message === 'ABORT') return false;
-  return false;
+  return getClient().isRetryableError(error);
 }
 
 export class ErrorHandlerPlugin extends MicaPlugin {

@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, TextBlock, Tool, ToolResultBlockParam } from '@mica/llm';
 import { getClient } from './client.js';
 import { model, EFFORT_TOKENS } from '../store/config.js';
 import { executeTool } from '../tools/index.js';
@@ -7,7 +7,7 @@ export interface SubAgentOptions {
   /** 自定义 system prompt */
   systemPrompt: string;
   /** 可用工具定义，默认不传工具 */
-  tools?: Anthropic.Tool[];
+  tools?: Tool[];
   /** 是否关闭 thinking，默认关闭 */
   thinkingDisabled?: boolean;
   /** max_tokens，默认 4096 */
@@ -16,7 +16,7 @@ export interface SubAgentOptions {
 
 export interface SubAgentResult {
   text: string;
-  messages: Anthropic.MessageParam[];
+  messages: MessageParam[];
 }
 
 /**
@@ -32,13 +32,13 @@ export function createSubAgent(options: SubAgentOptions) {
   } = options;
 
   return async function run(
-    userMessages: Anthropic.MessageParam[],
+    userMessages: MessageParam[],
   ): Promise<SubAgentResult> {
     const client = getClient();
     const modelName = model.name.get();
     const effort = model.effort.get();
 
-    const messages: Anthropic.MessageParam[] = [...userMessages];
+    const messages: MessageParam[] = [...userMessages];
 
     while (true) {
       const response = await client.messages.create({
@@ -53,7 +53,7 @@ export function createSubAgent(options: SubAgentOptions) {
         tools: tools.length > 0 ? tools : undefined,
       });
 
-      const assistantBlock: Anthropic.MessageParam = {
+      const assistantBlock: MessageParam = {
         role: 'assistant' as const,
         content: response.content,
       };
@@ -63,11 +63,11 @@ export function createSubAgent(options: SubAgentOptions) {
 
       if (toolUses.length === 0) {
         const textBlocks = response.content.filter((block) => block.type === 'text');
-        const text = textBlocks.map((b) => (b as Anthropic.TextBlock).text).join('\n');
+        const text = textBlocks.map((b) => (b as TextBlock).text).join('\n');
         return { text, messages };
       }
 
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      const toolResults: ToolResultBlockParam[] = [];
       for (const block of toolUses) {
         const result = await executeTool(block.name, block.input as Record<string, any>);
         toolResults.push({
