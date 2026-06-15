@@ -1,0 +1,71 @@
+src/llm/types.ts
+  c1707326ebb8f413 1-108
+src/llm/index.ts
+  c1707326ebb8f413 1-2
+src/llm/client.ts
+  c1707326ebb8f413 1-425
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "19f89f06ecb30720e8917d283a6e104cf913b22c",
+  "prompts": {
+    "0c145ae41b236317": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca6d-fa18-73e1-9030-cea4a95a4cab",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 24,
+      "total_deletions": 16,
+      "accepted_lines": 0,
+      "overriden_lines": 7
+    },
+    "544ea6ba7f366fe4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca50-7bd5-7921-bdc5-8e3689365fb8",
+        "model": "gpt-5.4"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 1118,
+      "total_deletions": 19,
+      "accepted_lines": 951,
+      "overriden_lines": 17
+    },
+    "c1707326ebb8f413": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca9f-c877-7471-becf-8bafcec812af",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 604,
+      "total_deletions": 69,
+      "accepted_lines": 535,
+      "overriden_lines": 0
+    },
+    "d91df64a521356c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca8f-5e2a-7d50-b938-2484dad8e0a0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 1374,
+      "total_deletions": 356,
+      "accepted_lines": 264,
+      "overriden_lines": 69
+    }
+  },
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
