@@ -122,7 +122,7 @@ export class ToolWebFetch extends MicaTool {
       }
 
       if (content.length > MAX_MARKDOWN_LENGTH) {
-        content = content.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[内容已截断]';
+        content = content.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[内容已截断(web_fetch_tool)]';
       }
 
       urlCache.set(url, { bytes, code: status, codeText: statusText, content, contentType }, {

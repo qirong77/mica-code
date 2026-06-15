@@ -2,7 +2,7 @@ import React from 'react';
 import { atom } from 'nanostores';
 import { Box, Text, ScrollBox, useTerminalSize } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
-import { inputBottomDistanceAtom } from '../../store/uiState.js';
+import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
 
 export interface LogEntry {
   text: string;
@@ -12,18 +12,10 @@ export interface LogEntry {
 }
 
 const logAtom = atom<LogEntry[]>([]);
-const RESERVED_LINES = 2;
 
 export function LogView() {
-  const bottomDistance = useScheduleState(inputBottomDistanceAtom);
   const lines = useScheduleState(logAtom);
-  const { columns, rows } = useTerminalSize();
-  const viewportHeight = Math.max(
-    5,
-    (bottomDistance as number) - RESERVED_LINES,
-    Math.ceil(rows / 2),
-  );
-
+  const viewportHeight = useLogViewHeight();
   return (
     <ScrollBox height={viewportHeight} stickyScroll flexDirection="column">
       {lines.map((line, i) => (

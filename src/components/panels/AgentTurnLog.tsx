@@ -13,9 +13,10 @@ import type { ActiveTool } from '../../store/uiState.js';
 import { C } from '../data.js';
 import { useSpinner } from '../primitives/Spin.js';
 import { formatElapsed } from '../../utils/format.js';
+import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
 
 const MAX_TOOL_OUTPUT_LINES = 500;
-const RESERVED_LINES = 4;
+
 
 const TOOL_ICONS: Record<string, string> = {
   read_file: '📖',
@@ -87,8 +88,7 @@ export function AgentTurnLog() {
   const spinner = useSpinner();
   const now = useNow(100);
 
-  const viewportHeight = Math.max(2, bottomDistance - RESERVED_LINES);
-
+  const viewportHeight = useLogViewHeight()
   if (pluginUIs.length > 0 || dropdownState.visible) return null;
   if (status.type === 'idle' && thinkingText.length === 0 && activeTools.length === 0) return null;
 
