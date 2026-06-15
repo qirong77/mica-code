@@ -1,10 +1,13 @@
 import { model, MODEL_OPTIONS_FALLBACK } from './config.js';
 import type { ModelOption, ApiModelListResponse } from './config.js';
 
-async function fetchModelList(url: string, apiKey: string): Promise<ModelOption[]> {
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
+async function fetchModelList(url: string, apiKey: string, authType: 'bearer' | 'x-api-key' = 'bearer'): Promise<ModelOption[]> {
+  const headers: Record<string, string> =
+    authType === 'x-api-key'
+      ? { 'x-api-key': apiKey }
+      : { Authorization: `Bearer ${apiKey}` };
+
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = (await res.json()) as ApiModelListResponse;
@@ -28,7 +31,7 @@ function applyModelOptions(options: ModelOption[]): void {
   }
 }
 
-export async function updateModelOptions(modelsUrl: string | undefined, apiKey: string): Promise<void> {
+export async function updateModelOptions(modelsUrl: string | undefined, apiKey: string, authType: 'bearer' | 'x-api-key' = 'bearer'): Promise<void> {
   if (!modelsUrl || !apiKey) {
     model.options.set(MODEL_OPTIONS_FALLBACK);
     return;
@@ -38,7 +41,7 @@ export async function updateModelOptions(modelsUrl: string | undefined, apiKey: 
   model.optionsError.set(null);
 
   try {
-    const options = await fetchModelList(modelsUrl, apiKey);
+    const options = await fetchModelList(modelsUrl, apiKey, authType);
     applyModelOptions(options);
   } catch (err) {
     model.optionsError.set(err instanceof Error ? err.message : String(err));

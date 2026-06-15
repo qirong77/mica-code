@@ -1,9 +1,8 @@
-import type { WritableAtom } from 'nanostores';
+import { atom, type WritableAtom } from 'nanostores';
 import { MicaPlugin } from '../MicaPlugin.js';
 import { getContextUsage } from '../../utils/getContextUsage.js';
 import { compactMessages, KEEP_RECENT_COUNT, MIN_MESSAGES_TO_COMPACT, trySessionMemoryCompact } from '../../utils/compact.js';
 import { model } from '../../store/config.js';
-import { createPersistedAtom } from '../../store/createPersistedAtom.js';
 import { session } from '../../store/uiState.js';
 
 const CONTEXT_THRESHOLD = 0.4;
@@ -12,12 +11,12 @@ const INACTIVITY_THRESHOLD_MS = 45 * 60 * 1000;
 const sessionTimeAtoms = new Map<string, WritableAtom<number>>();
 
 function getSessionTimeAtom(sessionId: string): WritableAtom<number> {
-  let atom = sessionTimeAtoms.get(sessionId);
-  if (!atom) {
-    atom = createPersistedAtom(`compact_lastUserTime_${sessionId}`, 0);
-    sessionTimeAtoms.set(sessionId, atom);
+  let atom_ = sessionTimeAtoms.get(sessionId);
+  if (!atom_) {
+    atom_ = atom(0);
+    sessionTimeAtoms.set(sessionId, atom_);
   }
-  return atom;
+  return atom_;
 }
 
 export class AutoCompactPlugin extends MicaPlugin {

@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { api } from '../store/config.js';
-import { PROVIDER_PATH } from '../store/providerConfig.js';
 
 let _client: Anthropic | null = null;
 
@@ -9,7 +8,7 @@ export function getClient(): Anthropic {
 
   const apiKey = api.apiKey.get();
   if (!apiKey) {
-    console.error(`缺少 API Key 配置，请设置 ${PROVIDER_PATH} 中的 api_key`);
+    console.error('缺少 API Key 配置，请设置 ~/.mica/config.json 中 providers 的 api_key');
     process.exit(1);
   }
 

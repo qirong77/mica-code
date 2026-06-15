@@ -25,8 +25,8 @@ import { QuickCommandMcpPlugin } from './plugins/mcp/quickCommandMcpPlugin.js';
 import { DebugExportLogPlugin } from './plugins/debug/debugExportLogPlugin.js';
 import { terminalInput } from './store/uiState.js';
 
-const modelsUrl = initProvider();
-await updateModelOptions(modelsUrl, api.apiKey.get() ?? '');
+const providerInfo = initProvider();
+await updateModelOptions(providerInfo.modelsUrl, api.apiKey.get() ?? '', providerInfo.modelsAuthHeader);
 
 // 在注册任何插件之前注入记忆系统 prompt
 injectMemorySystemPrompt(promptBuilder);

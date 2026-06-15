@@ -10,20 +10,20 @@ interface PersistedData {
   [key: string]: unknown;
 }
 
-let loadedData: PersistedData | null = null;
-
-function loadAllSync(): PersistedData {
-  if (loadedData) return loadedData;
+function readConfigFile(): PersistedData {
   try {
     if (existsSync(CONFIG_PATH)) {
-      loadedData = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    } else {
-      loadedData = {};
+      return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     }
   } catch {
-    loadedData = {};
+    // fall through
   }
-  return loadedData!;
+  return {};
+}
+
+export function readConfig<T>(key: string, defaultValue: T): T {
+  const data = readConfigFile();
+  return key in data ? (data[key] as T) : defaultValue;
 }
 
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,9 +37,8 @@ function scheduleSave() {
     pendingData = null;
     try {
       await mkdir(resolve(homedir(), '.mica'), { recursive: true });
-      const existing = loadAllSync();
+      const existing = readConfigFile();
       const merged = { ...existing, ...data };
-      loadedData = merged;
       await writeFile(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8');
     } catch {
       // silent
@@ -47,16 +46,19 @@ function scheduleSave() {
   }, 500);
 }
 
+export function writeConfig(key: string, value: unknown): void {
+  if (!pendingData) pendingData = {};
+  pendingData[key] = value;
+  scheduleSave();
+}
+
 export function createPersistedAtom<T>(key: string, defaultValue: T): WritableAtom<T> {
-  const data = loadAllSync();
-  const initialValue = key in data ? (data[key] as T) : defaultValue;
+  const initialValue = readConfig(key, defaultValue);
   const store = atom<T>(initialValue);
 
   onMount(store, () => {
     return store.subscribe((value) => {
-      if (!pendingData) pendingData = {};
-      pendingData[key] = value;
-      scheduleSave();
+      writeConfig(key, value);
     });
   });
 

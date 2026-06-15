@@ -4,7 +4,6 @@ import {
   getProviderList,
   getCurrentProvider,
   switchProvider,
-  PROVIDER_PATH,
 } from '../../store/providerConfig.js';
 
 export class QuickCommandProviderPlugin extends UIPanelPlugin {
@@ -13,7 +12,7 @@ export class QuickCommandProviderPlugin extends UIPanelPlugin {
       createSelectCommand(this, {
         name: 'provider',
         description: '切换 AI 服务提供商',
-        title: `select provider ( ${PROVIDER_PATH} )`,
+        title: 'select provider ( ~/.mica/config.json )',
         getCurrent: () => getCurrentProvider(),
         getOptions: () => getProviderList(),
         onSelect: async (v) => {
