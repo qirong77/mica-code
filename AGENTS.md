@@ -49,7 +49,7 @@ src/
 ├── tools/                # Agent-callable tools (MicaTool subclass per tool)
 │   ├── MicaTool.ts       # Abstract base with validateInput, executeTimed, onToolUseDisplayText
 │   ├── ToolReadFile.ts, ToolWriteFile.ts, ToolEditFile.ts, ToolListFiles.ts
-│   ├── ToolGrepSearch.ts, ToolRunShell.ts, ToolWebFetch.ts, ToolSkill.ts
+│   ├── ToolGrepSearch.ts, ToolRunShell.ts, ToolWebFetch.ts, ToolWebSearch.ts, ToolSkill.ts
 │   └── index.ts          # Tool registry: builtin + MCP tools, findTool, executeTool, getToolDefinitions
 ├── mcp/                  # Model Context Protocol integration
 │   ├── config.ts         # Reads ~/.mica/config.json for MCP server definitions

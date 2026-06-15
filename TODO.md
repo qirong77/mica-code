@@ -40,20 +40,6 @@
 - `codegraph/src/mcp/tools.ts` — 新增 `codegraph_init` 工具定义和处理逻辑
 - `src/prompts/system.md` 或 `AGENTS.md` — 加入 codegraph 使用指引
 
-## 添加 web_search 工具
-
-### 背景
-当前只有 `ToolWebFetch` 能抓取单个已知 URL，但缺少搜索能力——模型无法自动发现新信息源，限制了实时信息获取。
-
-### 目标
-新增 `ToolWebSearch`，支持通过搜索引擎 API（Bing Search API / SerpAPI 等）执行网络搜索，返回搜索结果的标题、链接、摘要。
-
-### 改动范围
-- `src/tools/ToolWebSearch.ts` — 新建工具，继承 `MicaTool`，调用搜索引擎 API
-- `src/tools/index.ts` — 注册 `ToolWebSearch`
-- 需要选择搜索引擎后端并配置 API key 环境变量
-- 可选：在 system prompt 中引导模型先搜索发现 URL，再用 `web_fetch` 抓取详情
-
-
 ## 大文件
+使用 write 工具的时候，遇到 maxtoken的问题无法输出
 ## 启动校验

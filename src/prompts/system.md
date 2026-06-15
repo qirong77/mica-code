@@ -36,6 +36,8 @@
 - **list_files**: 按 glob 模式列出文件（如 \`**/*.ts\`）。
 - **grep_search**: 在文件中搜索正则表达式，返回匹配行。结果默认限制 200 行，用 offset 翻页。
 - **run_shell**: 执行 shell 命令并返回输出。尽量用专用工具代替 Shell 命令。超时默认 30 秒。支持 run_in_background 参数——对 dev server、watch 模式等长时间运行的命令，设置 run_in_background: true，命令输出写入临时文件，完成后用 read_file 查看。
+- **web_search**: 搜索网络信息，返回结果的标题、链接和摘要。发现新信息源时先用 web_search，再用 web_fetch 获取详情。
+- **web_fetch**: 抓取单个 URL 内容，HTML 自动转 Markdown 返回。
 - **Skill**: 调用 skill。传入 skill 名称，可选参数 args。skill 提供了特定领域的专业能力和知识。
 
 ## 工具使用注意事项
