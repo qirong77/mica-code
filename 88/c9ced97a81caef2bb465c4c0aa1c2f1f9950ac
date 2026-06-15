@@ -1,0 +1,41 @@
+ping/index.ts
+  h_a456b67147438e 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "88c9ced97a81caef2bb465c4c0aa1c2f1f9950ac",
+  "prompts": {
+    "75409e1038d2d436": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ec9ec-a210-7ca1-98e6-39987050dd59",
+        "model": "gpt-5.4"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "e2cab736c23dbcc9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ec9e3-abc3-79f2-ae9a-6dbf4bf09c2a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 257,
+      "total_deletions": 0,
+      "accepted_lines": 202,
+      "overriden_lines": 42
+    }
+  },
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
