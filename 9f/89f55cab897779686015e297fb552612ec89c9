@@ -1,0 +1,14 @@
+src/components/hooks/useLogViewHeight.ts
+  h_a456b67147438e 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "9f89f55cab897779686015e297fb552612ec89c9",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
