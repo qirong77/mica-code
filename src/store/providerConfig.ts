@@ -66,19 +66,15 @@ function writeProviderConfig(config: ProviderFile): void {
   writeFileSync(PROVIDER_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-function applyEnvFallback(config: ProviderFile): boolean {
-  let changed = false;
-  for (const provider of Object.values(config.providers)) {
-    if (provider.api_key_env_name && !provider.api_key && process.env[provider.api_key_env_name]) {
-      provider.api_key = process.env[provider.api_key_env_name]!;
-      changed = true;
-    }
-    if (provider.api_base_env_name && !provider.api_base && process.env[provider.api_base_env_name]) {
-      provider.api_base = process.env[provider.api_base_env_name]!;
-      changed = true;
-    }
+function resolveProvider(provider: ProviderConfig): ProviderConfig {
+  const resolved: ProviderConfig = { ...provider };
+  if (provider.api_key_env_name && process.env[provider.api_key_env_name]) {
+    resolved.api_key = process.env[provider.api_key_env_name]!;
   }
-  return changed;
+  if (provider.api_base_env_name && process.env[provider.api_base_env_name]) {
+    resolved.api_base = process.env[provider.api_base_env_name]!;
+  }
+  return resolved;
 }
 
 function loadProviderConfig(): ProviderFile {
@@ -91,11 +87,6 @@ function loadProviderConfig(): ProviderFile {
         throw new Error('invalid provider.json structure');
       }
       _config = parsed as ProviderFile;
-      if (applyEnvFallback(_config)) {
-        try {
-          writeProviderConfig(_config);
-        } catch {}
-      }
       return _config;
     }
   } catch (err) {
@@ -105,7 +96,6 @@ function loadProviderConfig(): ProviderFile {
   }
 
   _config = structuredClone(defaultProviderConfig);
-  applyEnvFallback(_config);
   try {
     writeProviderConfig(_config);
   } catch (err) {
@@ -149,8 +139,8 @@ export async function switchProvider(
   providerId: string,
 ): Promise<{ error: string | null; provider?: ProviderConfig }> {
   const config = loadProviderConfig();
-  const provider = config.providers[providerId];
-  if (!provider) return { error: `unknown provider: ${providerId}` };
+  const rawProvider = config.providers[providerId];
+  if (!rawProvider) return { error: `unknown provider: ${providerId}` };
 
   config.current = providerId;
   const saveError = saveProviderConfig(config);
@@ -158,6 +148,7 @@ export async function switchProvider(
     return { error: `failed to save provider config: ${saveError}` };
   }
 
+  const provider = resolveProvider(rawProvider);
   applyProvider(provider);
   resetClient();
   await updateModelOptions(provider.models_url || undefined, provider.api_key);
@@ -166,15 +157,16 @@ export async function switchProvider(
 }
 
 export function initProvider(): string | undefined {
-  if (!existsSync(PROVIDER_PATH)) {
-    ensureMicaDir();
-    writeFileSync(PROVIDER_PATH, JSON.stringify(defaultProviderConfig, null, 2), 'utf-8');
+  const config = loadProviderConfig();
+  const rawProvider = config.providers[config.current];
+  if (!rawProvider) {
+    appendSystemLog(
+      `Provider "${config.current}" not found in config. Available: ${Object.keys(config.providers).join(', ')}`,
+    );
+    return undefined;
   }
 
-  const config = loadProviderConfig();
-  const provider = config.providers[config.current];
-  if (!provider) return undefined;
-
+  const provider = resolveProvider(rawProvider);
   applyProvider(provider);
   return provider.models_url || undefined;
 }
