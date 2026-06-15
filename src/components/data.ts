@@ -6,7 +6,6 @@ import type React from 'react';
 export const C = {
   accent: '#D77757',
   primary: '#D77757',
-  planMode: '#4A90D9',
   success: '#4CAF50',
   error: '#F44336',
   warning: '#FFD600',

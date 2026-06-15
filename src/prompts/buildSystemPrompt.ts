@@ -27,11 +27,6 @@ class SystemPromptBuilder {
         this._prompt += `\n\n<${type}>\n${content}\n</${type}>`;
         return this;
     }
-
-    withReminder(reminder: string): string {
-        return this._prompt + `\n\n<system-reminder>\n${reminder}\n</system-reminder>`;
-    }
-
     get prompt() {
         return this._prompt;
     }

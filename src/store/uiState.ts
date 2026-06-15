@@ -1,5 +1,4 @@
 import { atom } from 'nanostores';
-import { createPersistedAtom } from './createPersistedAtom.js';
 
 export { session, type SessionMeta } from './ui/session.js';
 export {
@@ -72,9 +71,6 @@ export type LogEntry = ThinkingEntry | ToolEntry;
 export const logEntriesAtom = atom<LogEntry[]>([]);
 
 export const responseTextAtom = atom('');
-
-export const planModeAtom = createPersistedAtom('planMode', false);
-
 export const quickCommandsAtom = atom<Command[]>([]);
 
 export const pluginUIsAtom = atom<PluginUI[]>([]);

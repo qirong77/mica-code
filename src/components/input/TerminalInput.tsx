@@ -5,12 +5,11 @@ import { SimpleTextInput } from "./Input.js";
 import { C } from "../data.js";
 import mitt from 'mitt'
 import { useScheduleState } from '../hooks/index.js';
-import { terminalInput, pluginUIsAtom, workingStatusAtom, planModeAtom, inputBottomDistanceAtom } from '../../store/uiState.js';
+import { terminalInput, pluginUIsAtom, workingStatusAtom, inputBottomDistanceAtom } from '../../store/uiState.js';
 import { agentTurn } from '../../agent/turn.js';
 import { DropDownUI } from '../dropdown/index.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
 import { appendSystemLog } from "../../store/logAtom.js";
-import { MessageBarAPI } from '../panels/MessageBar.js';
 import type { DOMElement } from '@anthropic/ink';
 
 type Events = {
@@ -32,7 +31,6 @@ function TerminalInput() {
   const activePluginUIs = useScheduleState(pluginUIsAtom);
   const workingStatus = useScheduleState(workingStatusAtom);
   const placeholder = useScheduleState(terminalInput.placeholder);
-  const planMode = useScheduleState(planModeAtom);
   const terminalSize = useTerminalSize();
   const inputBoxRef = useRef<DOMElement | null>(null);
   const setInputBoxRef = useCallback((el: DOMElement | null) => {
@@ -70,15 +68,6 @@ function TerminalInput() {
   const isAgentRunning = workingStatus.type !== 'idle' && workingStatus.type !== 'completed' && workingStatus.type !== 'error';
 
   useInput((_input, key, event) => {
-    if (key.tab && key.shift) {
-      const next = !planModeAtom.get();
-      planModeAtom.set(next);
-      const id = `plan-mode-${Date.now()}`;
-      MessageBarAPI.addMessage({ id, text: next ? 'Plan mode 已激活 — 仅分析规划，不执行代码修改' : 'Plan mode 已关闭' });
-      setTimeout(() => MessageBarAPI.removeMessage(id), 3000);
-      return;
-    }
-
     if (key.ctrl && (_input === '\x03' || _input === '')) {
       if (isAgentRunning) {
         agentTurn.abort();
@@ -261,7 +250,7 @@ function TerminalInput() {
         width="100%"
       >
         <Box marginLeft={1} marginRight={1}>
-          <Text bold color={planMode ? C.planMode : C.primary}>{'❯'}</Text>
+          <Text bold color={C.primary}>{'❯'}</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <SimpleTextInput
