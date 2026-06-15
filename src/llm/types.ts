@@ -1,3 +1,11 @@
+import type {
+  ChatCompletionContentPartImage,
+  ChatCompletionContentPartText,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionToolMessageParam,
+} from 'openai/resources/chat/completions';
+
 export interface TextBlock {
   type: 'text';
   text: string;
@@ -54,6 +62,14 @@ export interface Tool {
   description: string;
   input_schema: Record<string, any>;
 }
+
+export type {
+  ChatCompletionContentPartImage,
+  ChatCompletionContentPartText,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionToolMessageParam,
+};
 
 export interface MessageCreateParams {
   model: string;

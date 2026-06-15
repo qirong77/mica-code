@@ -1,5 +1,9 @@
 import type {
   AssistantContentBlock,
+  ChatCompletionContentPartImage,
+  ChatCompletionContentPartText,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
   ContentBlockParam,
   ImageBlockParam,
   LlmClient,
@@ -15,51 +19,13 @@ import type {
   ToolUseBlock,
   Usage,
 } from './types.js';
-
-type ChatCompletionRequestMessage =
-  | { role: 'system'; content: string }
-  | { role: 'user'; content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> }
-  | { role: 'assistant'; content?: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
-  | { role: 'tool'; tool_call_id: string; content: string };
-
-interface OpenAIChatCompletionChunk {
-  choices?: Array<{
-    delta?: {
-      content?: string;
-      tool_calls?: Array<{
-        index: number;
-        id?: string;
-        type?: 'function';
-        function?: { name?: string; arguments?: string };
-      }>;
-    };
-    finish_reason?: 'stop' | 'length' | 'tool_calls' | null;
-  }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
-}
-
-interface OpenAIChatCompletionResponse {
-  choices: Array<{
-    message: {
-      content?: string | null;
-      tool_calls?: Array<{
-        id: string;
-        type: 'function';
-        function: { name: string; arguments: string };
-      }>;
-    };
-    finish_reason?: 'stop' | 'length' | 'tool_calls' | null;
-  }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
-}
+import type {
+  ChatCompletion,
+  ChatCompletionChunk,
+  ChatCompletionCreateParamsBase,
+  ChatCompletionMessageFunctionToolCall,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions';
 
 class LlmApiError extends Error {
   constructor(
@@ -100,12 +66,14 @@ function toDataUrl(image: ImageBlockParam['source']): string {
   return `data:${image.media_type};base64,${image.data}`;
 }
 
-function convertUserContent(content: MessageParam['content']): ChatCompletionRequestMessage[] {
+function convertUserContent(content: MessageParam['content']): ChatCompletionMessageParam[] {
   if (typeof content === 'string') {
     return [{ role: 'user', content }];
   }
 
-  const toolResults = content.filter((block): block is ToolResultBlockParam => block.type === 'tool_result');
+  const toolResults = content.filter(
+    (block): block is ToolResultBlockParam => block.type === 'tool_result',
+  );
   if (toolResults.length > 0 && toolResults.length === content.length) {
     return toolResults.map((block) => ({
       role: 'tool',
@@ -115,8 +83,11 @@ function convertUserContent(content: MessageParam['content']): ChatCompletionReq
   }
 
   const contentParts = content
-    .filter((block): block is Exclude<ContentBlockParam, ToolResultBlockParam> => block.type !== 'tool_result')
-    .map((block) => {
+    .filter(
+      (block): block is Exclude<ContentBlockParam, ToolResultBlockParam> =>
+        block.type !== 'tool_result',
+    )
+    .map((block): ChatCompletionContentPartText | ChatCompletionContentPartImage => {
       if (block.type === 'text') {
         return { type: 'text' as const, text: block.text };
       }
@@ -133,7 +104,7 @@ function convertUserContent(content: MessageParam['content']): ChatCompletionReq
   return [{ role: 'user', content: contentParts }];
 }
 
-function convertAssistantContent(content: AssistantContentBlock[]): ChatCompletionRequestMessage {
+function convertAssistantContent(content: AssistantContentBlock[]): ChatCompletionMessageParam {
   const text = content
     .filter((block): block is TextBlock => block.type === 'text')
     .map((block) => block.text)
@@ -156,8 +127,8 @@ function convertAssistantContent(content: AssistantContentBlock[]): ChatCompleti
   };
 }
 
-function convertMessages(messages: MessageParam[], system?: string): ChatCompletionRequestMessage[] {
-  const result: ChatCompletionRequestMessage[] = [];
+function convertMessages(messages: MessageParam[], system?: string): ChatCompletionMessageParam[] {
+  const result: ChatCompletionMessageParam[] = [];
   if (system) {
     result.push({ role: 'system', content: system });
   }
@@ -174,7 +145,7 @@ function convertMessages(messages: MessageParam[], system?: string): ChatComplet
   return result;
 }
 
-function convertTools(tools?: Tool[]) {
+function convertTools(tools?: Tool[]): ChatCompletionTool[] | undefined {
   if (!tools || tools.length === 0) return undefined;
   return tools.map((tool) => ({
     type: 'function' as const,
@@ -186,7 +157,12 @@ function convertTools(tools?: Tool[]) {
   }));
 }
 
-function mapStopReason(reason: 'stop' | 'length' | 'tool_calls' | null | undefined): Message['stop_reason'] {
+function mapStopReason(
+  reason:
+    | ChatCompletion.Choice['finish_reason']
+    | ChatCompletionChunk.Choice['finish_reason']
+    | undefined,
+): Message['stop_reason'] {
   switch (reason) {
     case 'length':
       return 'max_tokens';
@@ -207,13 +183,20 @@ function parseToolArguments(input: string | undefined): Record<string, any> {
   }
 }
 
-function buildMessageFromResponse(response: OpenAIChatCompletionResponse): Message {
+function isFunctionToolCall(
+  call: ChatCompletionMessageToolCall,
+): call is ChatCompletionMessageFunctionToolCall {
+  return call.type === 'function';
+}
+
+function buildMessageFromResponse(response: ChatCompletion): Message {
   const choice = response.choices[0];
   const content: AssistantContentBlock[] = [];
   if (choice?.message.content) {
     content.push({ type: 'text', text: choice.message.content });
   }
   for (const call of choice?.message.tool_calls ?? []) {
+    if (!isFunctionToolCall(call)) continue;
     content.push({
       type: 'tool_use',
       id: call.id,
@@ -242,7 +225,7 @@ function buildMessageFromResponse(response: OpenAIChatCompletionResponse): Messa
 async function parseError(response: Response): Promise<never> {
   let message = `HTTP ${response.status}`;
   try {
-    const json = await response.json() as { error?: { message?: string } };
+    const json = (await response.json()) as { error?: { message?: string } };
     if (json.error?.message) {
       message = json.error.message;
     }
@@ -252,7 +235,10 @@ async function parseError(response: Response): Promise<never> {
   throw new LlmApiError(message, response.status);
 }
 
-function buildPayload(params: MessageCreateParams, stream: boolean) {
+function buildPayload(
+  params: MessageCreateParams,
+  stream: boolean,
+): ChatCompletionCreateParamsBase {
   return {
     model: params.model,
     messages: convertMessages(params.messages, params.system),
@@ -304,7 +290,11 @@ async function readSseLines(
 export function createClient(config: LlmClientConfig): LlmClient {
   const baseURL = config.baseURL?.replace(/\/$/, '') || 'https://api.openai.com/v1';
 
-  async function request(params: MessageCreateParams, stream: boolean, signal?: AbortSignal): Promise<Response> {
+  async function request(
+    params: MessageCreateParams,
+    stream: boolean,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     return fetch(`${baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -324,12 +314,12 @@ export function createClient(config: LlmClientConfig): LlmClient {
         if (!response.ok) {
           await parseError(response);
         }
-        const json = await response.json() as OpenAIChatCompletionResponse;
+        const json = (await response.json()) as ChatCompletion;
         return buildMessageFromResponse(json);
       },
 
       stream(params: MessageCreateParams): MessageStream {
-        let finishReason: 'stop' | 'length' | 'tool_calls' | null | undefined;
+        let finishReason: ChatCompletionChunk.Choice['finish_reason'] | undefined;
         let usage: Usage | undefined;
         let text = '';
         const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
@@ -352,7 +342,7 @@ export function createClient(config: LlmClientConfig): LlmClient {
               response,
               (data) => {
                 if (data === '[DONE]') return;
-                const chunk = JSON.parse(data) as OpenAIChatCompletionChunk;
+                const chunk = JSON.parse(data) as ChatCompletionChunk;
                 if (chunk.usage) {
                   usage = {
                     input_tokens: chunk.usage.prompt_tokens,
@@ -374,10 +364,15 @@ export function createClient(config: LlmClientConfig): LlmClient {
                 }
 
                 for (const toolCallDelta of choice.delta?.tool_calls ?? []) {
-                  const current = toolCalls.get(toolCallDelta.index) ?? { id: '', name: '', arguments: '' };
+                  const current = toolCalls.get(toolCallDelta.index) ?? {
+                    id: '',
+                    name: '',
+                    arguments: '',
+                  };
                   if (toolCallDelta.id) current.id = toolCallDelta.id;
                   if (toolCallDelta.function?.name) current.name = toolCallDelta.function.name;
-                  if (toolCallDelta.function?.arguments) current.arguments += toolCallDelta.function.arguments;
+                  if (toolCallDelta.function?.arguments)
+                    current.arguments += toolCallDelta.function.arguments;
                   toolCalls.set(toolCallDelta.index, current);
                 }
               },
@@ -388,7 +383,9 @@ export function createClient(config: LlmClientConfig): LlmClient {
             if (text) {
               content.push({ type: 'text', text });
             }
-            for (const toolCall of [...toolCalls.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1])) {
+            for (const toolCall of [...toolCalls.entries()]
+              .sort((a, b) => a[0] - b[0])
+              .map((entry) => entry[1])) {
               const block: ToolUseBlock = {
                 type: 'tool_use',
                 id: toolCall.id,
