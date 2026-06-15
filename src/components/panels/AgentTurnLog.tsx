@@ -5,7 +5,6 @@ import {
   logEntriesAtom,
   workingStatusAtom,
   pluginUIsAtom,
-  inputBottomDistanceAtom,
   dropdown,
 } from '../../store/uiState.js';
 import type { LogEntry } from '../../store/uiState.js';
@@ -62,7 +61,6 @@ export function AgentTurnLog() {
   const entries = useScheduleState(logEntriesAtom);
   const status = useScheduleState(workingStatusAtom);
   const pluginUIs = useScheduleState(pluginUIsAtom);
-  const bottomDistance = useScheduleState(inputBottomDistanceAtom);
   const dropdownState = useScheduleState(dropdown.state);
 
   const spinner = useSpinner();

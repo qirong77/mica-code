@@ -148,6 +148,11 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
     entryIdCounter = 0;
   }
 
+  if (status.type === 'completed') {
+    logEntriesAtom.set([]);
+    entryIdCounter = 0;
+  }
+
   if (status.type === 'idle') {
     clearToolOutputBuffers();
   }

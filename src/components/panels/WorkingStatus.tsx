@@ -39,7 +39,7 @@ function StatusInfo() {
   const cacheHitRate = useScheduleState(cacheHitRateAtom);
 
   const tokenStr = formatTokens(contextSize);
-  const cachePct = (cacheHitRate * 100).toFixed(0);
+  const cachePct = ((1 - cacheHitRate) * 100).toFixed(0);
 
   if (contextSize <= 0 || windowSize <= 0) {
     return (
