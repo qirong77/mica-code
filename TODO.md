@@ -1,24 +1,5 @@
 # TODO
 
-## 接入 Vercel AI SDK 优化 provider 体系
-
-### 背景
-当前 `src/agent/client.ts` 直接使用 `@anthropic-ai/sdk`，供应商受限于 Anthropic Messages API 格式，只能支持 DeepSeek、Kimi、OpenRouter 等提供了 `/anthropic` 兼容端点的厂商（共约 5 个）。
-
-### 目标
-用 `ai` (Vercel AI SDK) 替换原生 Anthropic SDK，统一抽象层，扩展供应商支持到 20+。
-
-### 改动范围
-
-- **`src/agent/client.ts`**: 将 `new Anthropic({ apiKey, baseURL })` 替换为 `createAnthropic({ apiKey, baseURL })` 等 provider 工厂
-- **`src/store/providerConfig.ts`**: `ProviderConfig` 需加 `npm` / `type` 字段区分 provider adapter（如 `@ai-sdk/anthropic`、`@ai-sdk/openai`、`@ai-sdk/google` 等）
-- **`src/agent/turn.ts`**: 消息格式和 tool calling 需改为 AI SDK 的 `generateText` / `streamText` 接口
-- **依赖**: 新增 `ai`、`@ai-sdk/anthropic`、`@ai-sdk/openai` 等
-
-### 参考
-- opencode-dev 的 `packages/opencode/src/provider/provider.ts` — provider 管理和 model 加载
-- opencode-dev 的 `packages/opencode/src/session/llm/ai-sdk.ts` — AI SDK 调用封装
-
 ## codegraph 自动建索引
 
 ### 背景
@@ -42,4 +23,3 @@
 
 ## 大文件
 使用 write 工具的时候，遇到 maxtoken的问题无法输出
-## 启动校验

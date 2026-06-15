@@ -1,4 +1,4 @@
-import type { ContentBlockParam, ImageBlockParam, TextBlock } from '@mica/llm';
+import type { ContentBlockParam, ImageBlockParam, TextBlock } from '../../types.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';

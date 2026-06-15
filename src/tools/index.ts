@@ -1,4 +1,4 @@
-import type { Tool } from '@mica/llm';
+import type { Tool } from '../types.js';
 
 import { ToolReadFile } from './ToolReadFile.js';
 import { ToolWriteFile } from './ToolWriteFile.js';

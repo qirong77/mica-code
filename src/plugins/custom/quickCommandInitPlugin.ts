@@ -1,4 +1,4 @@
-import type { Tool } from '@mica/llm';
+import type { Tool } from '../../types.js';
 import { UIPanelPlugin } from '../MicaPlugin.js';
 import { createSubAgent } from '../../agent/subagent.js';
 import {

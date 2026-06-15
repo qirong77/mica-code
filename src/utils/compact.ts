@@ -1,4 +1,4 @@
-import type { MessageParam } from '@mica/llm';
+import type { MessageParam } from '../types.js';
 import { createSubAgent } from '../agent/subagent.js';
 import { toMessageParams, type ConversationMessage } from '../store/conversation.js';
 import { readSessionMemory } from '../plugins/memory/memoryPaths.js';

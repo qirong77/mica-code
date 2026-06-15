@@ -1,4 +1,4 @@
-import type { Message, MessageParam, ToolResultBlockParam } from '@mica/llm';
+import type { Message, MessageParam, ToolResultBlockParam } from '../types.js';
 import {
   messagesAtom,
   contextSizeAtom,
@@ -23,7 +23,7 @@ export class AgentSession {
     const updated = [...messagesAtom.get(), message];
     messagesAtom.set(updated);
     contextSizeAtom.set(updateContextSize(updated));
-    updateCacheUsage(updated);
+    updateCacheUsage();
   }
 
   appendToolResults(toolResults: ToolResultBlockParam[]): void {
@@ -41,7 +41,7 @@ export class AgentSession {
     const { cleaned } = repairSessionMessages(messages);
     messagesAtom.set(cleaned);
     contextSizeAtom.set(updateContextSize(cleaned));
-    updateCacheUsage(cleaned);
+    updateCacheUsage();
   }
 
   addToolRecord(record: SessionToolRecord): void {

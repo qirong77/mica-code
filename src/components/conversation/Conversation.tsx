@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import type { MessageParam, TextBlock } from '@mica/llm';
+import type { MessageParam, TextBlock } from '../../types.js';
 import { C } from '../data.js';
 import { messagesAtom } from '../../store/conversation.js';
 import { responseTextAtom, pendingInputAtom } from '../../store/uiState.js';

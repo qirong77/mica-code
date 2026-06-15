@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import type { TextBlock } from '@mica/llm';
+import type { TextBlock } from '../../types.js';
 import { UIPanelPlugin } from '../MicaPlugin.js';
 import { getClient } from '../../agent/client.js';
 import { model } from '../../store/config.js';

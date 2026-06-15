@@ -1,4 +1,4 @@
-import type { LlmClient, Message } from '@mica/llm';
+import type { LlmClient, Message } from '../types.js';
 import { getSystemPrompt } from '../prompts/index.js';
 import { getToolDefinitions } from '../tools/index.js';
 import { EFFORT_TOKENS, model } from '../store/config.js';

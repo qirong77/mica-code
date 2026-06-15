@@ -1,4 +1,4 @@
-import type { MessageParam, TextBlock, Tool, ToolResultBlockParam } from '@mica/llm';
+import type { MessageParam, TextBlock, Tool, ToolResultBlockParam } from '../types.js';
 import { getClient } from './client.js';
 import { model, EFFORT_TOKENS } from '../store/config.js';
 import { executeTool } from '../tools/index.js';

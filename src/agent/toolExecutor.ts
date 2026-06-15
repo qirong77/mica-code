@@ -1,4 +1,4 @@
-import type { ToolResultBlockParam } from '@mica/llm';
+import type { ToolResultBlockParam } from '../types.js';
 import { executeTool } from '../tools/index.js';
 import { sessionToolRecordsAtom } from '../store/logAtom.js';
 import type { WorkingStatus } from '../store/uiState.js';

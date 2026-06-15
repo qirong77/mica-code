@@ -1,4 +1,4 @@
-import type { MessageParam, TextBlock, ToolResultBlockParam, Usage } from '@mica/llm';
+import type { MessageParam, TextBlock, ToolResultBlockParam, Usage } from '../types.js';
 import { getClient } from './client.js';
 import { model, EFFORT_TOKENS } from '../store/config.js';
 import { getToolDefinitions, executeTool } from '../tools/index.js';
@@ -47,10 +47,9 @@ export async function runForkedAgent(params: ForkedAgentParams): Promise<ForkedA
   const messages: MessageParam[] = [...promptMessages];
 
   const totalUsage: Required<Usage> = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_creation_input_tokens: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
   };
 
   let turnCount = 0;
@@ -74,10 +73,9 @@ export async function runForkedAgent(params: ForkedAgentParams): Promise<ForkedA
     });
 
     if (response.usage) {
-      totalUsage.input_tokens += response.usage.input_tokens ?? 0;
-      totalUsage.output_tokens += response.usage.output_tokens ?? 0;
-      totalUsage.cache_read_input_tokens += response.usage.cache_read_input_tokens ?? 0;
-      totalUsage.cache_creation_input_tokens += response.usage.cache_creation_input_tokens ?? 0;
+      totalUsage.prompt_tokens += response.usage.prompt_tokens ?? 0;
+      totalUsage.completion_tokens += response.usage.completion_tokens ?? 0;
+      totalUsage.total_tokens += response.usage.total_tokens ?? 0;
     }
 
     messages.push({ role: 'assistant' as const, content: response.content });

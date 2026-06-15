@@ -1,4 +1,4 @@
-import type { Message, MessageStream } from '@mica/llm';
+import type { Message, MessageStream } from '../types.js';
 import type { WorkingStatus } from '../store/uiState.js';
 
 export interface StreamCreatePayload {

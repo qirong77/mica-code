@@ -1,5 +1,5 @@
 import mitt from 'mitt';
-import type { Message } from '@mica/llm';
+import type { Message } from '../types.js';
 import { appendSystemLog } from '../store/logAtom.js';
 import { clearBackups } from '../utils/fileHistory.js';
 import { parseImageRefs } from '../components/utils/imagePaste.js';

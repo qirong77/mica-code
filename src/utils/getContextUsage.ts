@@ -1,13 +1,8 @@
 import { isAssistantMessage, type ConversationMessage } from '../store/conversation.js'
-import type { Usage } from '@mica/llm'
+import type { Usage } from '../types.js'
 
 export function getSingleRequestTotalTokens(usage: Usage): number {
-  return (
-    (usage.input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.output_tokens ?? 0)
-  )
+  return usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0)
 }
 
 // 当前上下文占用的 token 估算值，取最近一条 assistant 消息的 usage
