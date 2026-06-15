@@ -2,7 +2,7 @@ import { api } from './config.js';
 import { updateModelOptions } from './updateModelOptions.js';
 import { resetClient } from '../agent/client.js';
 import { appendSystemLog } from './logAtom.js';
-import { readConfig, writeConfig } from './createPersistedAtom.js';
+import { readConfig, writeConfigEntriesSync } from './createPersistedAtom.js';
 
 export interface ProviderConfig {
   name: string;
@@ -17,6 +17,11 @@ export interface ProviderConfig {
 interface ProviderFile {
   current: string;
   providers: Record<string, ProviderConfig>;
+}
+
+interface ProviderFileInput {
+  current?: unknown;
+  providers?: unknown;
 }
 
 const defaultProviders: Record<string, ProviderConfig> = {
@@ -49,36 +54,112 @@ const defaultProviders: Record<string, ProviderConfig> = {
   },
 };
 
+const DEFAULT_PROVIDER_ID = 'kimi';
+
 let _config: ProviderFile | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeProvider(providerId: string, rawProvider: unknown): ProviderConfig | null {
+  if (!isRecord(rawProvider)) return null;
+
+  const base = defaultProviders[providerId];
+  const readString = (key: keyof ProviderConfig, fallback = ''): string => {
+    const value = rawProvider[key];
+    if (typeof value === 'string') return value;
+    if (base && typeof base[key] === 'string') return base[key] as string;
+    if (key === 'name') return providerId;
+    return fallback;
+  };
+
+  const authHeader = rawProvider.models_auth_header;
+  const modelsAuthHeader =
+    authHeader === 'bearer' || authHeader === 'x-api-key'
+      ? authHeader
+      : base?.models_auth_header ?? 'bearer';
+
+  return {
+    name: readString('name', providerId),
+    api_base: readString('api_base'),
+    models_url: readString('models_url'),
+    api_key: readString('api_key'),
+    api_key_env_name: readString('api_key_env_name'),
+    api_base_env_name: readString('api_base_env_name'),
+    models_auth_header: modelsAuthHeader,
+  };
+}
+
+function normalizeProviders(rawProviders: unknown): Record<string, ProviderConfig> {
+  const providers: Record<string, ProviderConfig> = {};
+
+  for (const [providerId, provider] of Object.entries(defaultProviders)) {
+    providers[providerId] = { ...provider };
+  }
+
+  if (!isRecord(rawProviders)) {
+    return providers;
+  }
+
+  for (const [providerId, rawProvider] of Object.entries(rawProviders)) {
+    const normalized = normalizeProvider(providerId, rawProvider);
+    if (normalized) {
+      providers[providerId] = normalized;
+    }
+  }
+
+  return providers;
+}
+
+function normalizeProviderFile(rawConfig: ProviderFileInput | null): ProviderFile {
+  const providers = normalizeProviders(rawConfig?.providers);
+  const current =
+    typeof rawConfig?.current === 'string' && providers[rawConfig.current]
+      ? rawConfig.current
+      : providers[DEFAULT_PROVIDER_ID]
+        ? DEFAULT_PROVIDER_ID
+        : Object.keys(providers)[0] ?? DEFAULT_PROVIDER_ID;
+
+  return { current, providers };
+}
 
 function loadProviderConfig(): ProviderFile {
   if (_config) return _config;
 
-  const providers = readConfig<Record<string, ProviderConfig>>('providers', {});
-  const current = readConfig<string>('currentProvider', '');
+  const rawConfig: ProviderFileInput = {
+    current: readConfig<unknown>('currentProvider', null),
+    providers: readConfig<unknown>('providers', null),
+  };
 
-  if (current && Object.keys(providers).length > 0) {
-    _config = { current, providers };
-    return _config;
+  _config = normalizeProviderFile(rawConfig);
+
+  const shouldPersist =
+    typeof rawConfig.current !== 'string' ||
+    !isRecord(rawConfig.providers) ||
+    JSON.stringify(rawConfig.providers) !== JSON.stringify(_config.providers) ||
+    rawConfig.current !== _config.current;
+
+  if (shouldPersist) {
+    const saveError = saveProviderConfig(_config);
+    if (saveError) {
+      appendSystemLog(`Failed to persist provider config: ${saveError}`);
+    }
   }
 
-  _config = { current: 'kimi', providers: { ...defaultProviders } };
-  try {
-    writeConfig('currentProvider', _config.current);
-    writeConfig('providers', _config.providers);
-  } catch (err) {
-    appendSystemLog(
-      `Failed to write default provider config: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
   return _config;
 }
 
 function saveProviderConfig(config: ProviderFile): string | null {
-  _config = config;
   try {
-    writeConfig('currentProvider', config.current);
-    writeConfig('providers', config.providers);
+    writeConfigEntriesSync({
+      currentProvider: config.current,
+      providers: config.providers,
+    });
+    _config = {
+      current: config.current,
+      providers: config.providers,
+    };
     return null;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -89,15 +170,30 @@ function saveProviderConfig(config: ProviderFile): string | null {
 
 function resolveProvider(provider: ProviderConfig): ProviderConfig {
   const resolved: ProviderConfig = { ...provider };
-  if (provider.api_key_env_name && process.env[provider.api_key_env_name]) {
-    resolved.api_key = process.env[provider.api_key_env_name]!;
+  const apiKeyFromProviderEnv =
+    provider.api_key_env_name && process.env[provider.api_key_env_name]
+      ? process.env[provider.api_key_env_name]
+      : undefined;
+  const apiBaseFromProviderEnv =
+    provider.api_base_env_name && process.env[provider.api_base_env_name]
+      ? process.env[provider.api_base_env_name]
+      : undefined;
+
+  const fallbackApiKey = process.env.ANTHROPIC_API_KEY;
+  const fallbackApiBase = process.env.ANTHROPIC_BASE_URL;
+
+  if (apiKeyFromProviderEnv) {
+    resolved.api_key = apiKeyFromProviderEnv;
+  } else if (!resolved.api_key && fallbackApiKey) {
+    resolved.api_key = fallbackApiKey;
   }
-  if (provider.api_base_env_name && process.env[provider.api_base_env_name]) {
-    resolved.api_base = process.env[provider.api_base_env_name]!;
+
+  if (apiBaseFromProviderEnv) {
+    resolved.api_base = apiBaseFromProviderEnv;
+  } else if (fallbackApiBase) {
+    resolved.api_base = fallbackApiBase;
   }
-  if (!resolved.models_auth_header) {
-    resolved.models_auth_header = 'bearer';
-  }
+
   return resolved;
 }
 
@@ -108,9 +204,9 @@ function applyProvider(provider: ProviderConfig): void {
 
 export function getProviderList(): Array<{ name: string; label: string }> {
   const config = loadProviderConfig();
-  return Object.entries(config.providers).map(([id, p]) => ({
+  return Object.entries(config.providers).map(([id, provider]) => ({
     name: id,
-    label: p.name,
+    label: provider.name,
   }));
 }
 
@@ -120,13 +216,18 @@ export function getCurrentProvider(): string {
 
 export async function switchProvider(
   providerId: string,
-): Promise<{ error: string | null; provider?: ProviderConfig }> {
+): Promise<{ error: string | null; provider?: ProviderConfig; modelOptionsError?: string | null }> {
   const config = loadProviderConfig();
   const rawProvider = config.providers[providerId];
-  if (!rawProvider) return { error: `unknown provider: ${providerId}` };
+  if (!rawProvider) {
+    return { error: `unknown provider: ${providerId}` };
+  }
 
-  config.current = providerId;
-  const saveError = saveProviderConfig(config);
+  const nextConfig: ProviderFile = {
+    current: providerId,
+    providers: config.providers,
+  };
+  const saveError = saveProviderConfig(nextConfig);
   if (saveError) {
     return { error: `failed to save provider config: ${saveError}` };
   }
@@ -134,9 +235,18 @@ export async function switchProvider(
   const provider = resolveProvider(rawProvider);
   applyProvider(provider);
   resetClient();
-  await updateModelOptions(provider.models_url || undefined, provider.api_key, provider.models_auth_header);
 
-  return { error: null, provider };
+  const updateResult = await updateModelOptions(
+    provider.models_url || undefined,
+    provider.api_key,
+    provider.models_auth_header,
+  );
+
+  return {
+    error: null,
+    provider,
+    modelOptionsError: updateResult.error,
+  };
 }
 
 export function initProvider(): { modelsUrl: string | undefined; modelsAuthHeader: 'bearer' | 'x-api-key' } {
@@ -151,5 +261,8 @@ export function initProvider(): { modelsUrl: string | undefined; modelsAuthHeade
 
   const provider = resolveProvider(rawProvider);
   applyProvider(provider);
-  return { modelsUrl: provider.models_url || undefined, modelsAuthHeader: provider.models_auth_header };
+  return {
+    modelsUrl: provider.models_url || undefined,
+    modelsAuthHeader: provider.models_auth_header,
+  };
 }

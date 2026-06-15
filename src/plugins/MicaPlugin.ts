@@ -21,6 +21,7 @@ export interface PluginAtoms {
   model: WritableAtom<string>;
   effort: WritableAtom<string>;
   modelOptions: ReadableAtom<Array<{ name: string; label: string }>>;
+  modelOptionsError: ReadableAtom<string | null>;
   effortOptions: ReadableAtom<Array<{ name: string; label: string }>>;
   sessionsIndex: WritableAtom<SessionMeta[]>;
   currentSessionId: WritableAtom<string>;

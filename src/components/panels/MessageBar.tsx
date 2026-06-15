@@ -11,6 +11,13 @@ type Events = {
 };
 
 const emitter = mitt<Events>();
+type PendingEvent =
+  | { type: 'add'; item: MessageItem }
+  | { type: 'remove'; id: string }
+  | { type: 'clear' };
+
+let isMounted = false;
+let pendingEvents: PendingEvent[] = [];
 
 const MIN_VISIBLE = 3;
 
@@ -20,9 +27,27 @@ interface MessageItem {
 }
 
 export const MessageBarAPI = {
-  addMessage: (item: MessageItem) => emitter.emit('add', item),
-  removeMessage: (id: string) => emitter.emit('remove', id),
-  clearMessages: () => emitter.emit('clear'),
+  addMessage: (item: MessageItem) => {
+    if (!isMounted) {
+      pendingEvents.push({ type: 'add', item });
+      return;
+    }
+    emitter.emit('add', item);
+  },
+  removeMessage: (id: string) => {
+    if (!isMounted) {
+      pendingEvents.push({ type: 'remove', id });
+      return;
+    }
+    emitter.emit('remove', id);
+  },
+  clearMessages: () => {
+    if (!isMounted) {
+      pendingEvents.push({ type: 'clear' });
+      return;
+    }
+    emitter.emit('clear');
+  },
 };
 
 export const MessageBar = React.memo(function MessageBar() {
@@ -51,6 +76,15 @@ export const MessageBar = React.memo(function MessageBar() {
     emitter.on('add', onAdd);
     emitter.on('remove', onRemove);
     emitter.on('clear', onClear);
+    isMounted = true;
+    if (pendingEvents.length > 0) {
+      for (const event of pendingEvents) {
+        if (event.type === 'add') onAdd(event.item);
+        if (event.type === 'remove') onRemove(event.id);
+        if (event.type === 'clear') onClear();
+      }
+      pendingEvents = [];
+    }
 
     let prevVisible = false;
     const unsubDropdown = dropdown.state.subscribe(state => {
@@ -63,6 +97,7 @@ export const MessageBar = React.memo(function MessageBar() {
       emitter.off('remove', onRemove);
       emitter.off('clear', onClear);
       unsubDropdown();
+      isMounted = false;
     };
   }, []);
 

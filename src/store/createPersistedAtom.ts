@@ -1,6 +1,6 @@
 import { atom, onMount, type WritableAtom } from 'nanostores';
 import { writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -19,6 +19,13 @@ function readConfigFile(): PersistedData {
     // fall through
   }
   return {};
+}
+
+export function writeConfigEntriesSync(data: PersistedData): void {
+  mkdirSync(resolve(homedir(), '.mica'), { recursive: true });
+  const existing = readConfigFile();
+  const merged = { ...existing, ...data };
+  writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8');
 }
 
 export function readConfig<T>(key: string, defaultValue: T): T {

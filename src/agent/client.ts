@@ -8,8 +8,9 @@ export function getClient(): Anthropic {
 
   const apiKey = api.apiKey.get();
   if (!apiKey) {
-    console.error('缺少 API Key 配置，请设置 ~/.mica/config.json 中 providers 的 api_key');
-    process.exit(1);
+    throw new Error(
+      '缺少 API Key 配置，请在 ~/.mica/config.json 的 providers 中设置当前 provider 的 api_key，或配置对应环境变量',
+    );
   }
 
   _client = new Anthropic({

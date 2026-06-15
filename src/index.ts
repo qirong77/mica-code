@@ -26,7 +26,11 @@ import { DebugExportLogPlugin } from './plugins/debug/debugExportLogPlugin.js';
 import { terminalInput } from './store/uiState.js';
 
 const providerInfo = initProvider();
-await updateModelOptions(providerInfo.modelsUrl, api.apiKey.get() ?? '', providerInfo.modelsAuthHeader);
+const modelOptionsResult = await updateModelOptions(
+  providerInfo.modelsUrl,
+  api.apiKey.get() ?? '',
+  providerInfo.modelsAuthHeader,
+);
 
 // 在注册任何插件之前注入记忆系统 prompt
 injectMemorySystemPrompt(promptBuilder);
@@ -56,6 +60,13 @@ if (printPrompt) {
 }
 
 MicaAgent.run();
+
+if (modelOptionsResult.error) {
+  MicaAgent.ui.MessageBar.addMessage({
+    id: 'startup-model-options-error',
+    text: modelOptionsResult.error,
+  });
+}
 
 if (printPrompt) {
   MicaAgent.ui.TerminalInput.submit(printPrompt);

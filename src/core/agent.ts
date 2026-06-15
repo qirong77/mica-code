@@ -35,6 +35,7 @@ export const MicaAgent = {
       model: model.name,
       effort: model.effort,
       modelOptions: model.options,
+      modelOptionsError: model.optionsError,
       effortOptions: model.effortOptions,
       sessionsIndex: session.index,
       currentSessionId: session.currentId,

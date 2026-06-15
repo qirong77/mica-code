@@ -91,7 +91,7 @@ export class QuickCommandModelPlugin extends UIPanelPlugin {
         getCurrent: () => this.atoms.model.get(),
         getOptions: () => this.atoms.modelOptions.get(),
         onSelect: (v) => this.atoms.model.set(v),
-        emptyMessage: 'no models available',
+        emptyMessage: this.atoms.modelOptionsError.get() ?? 'no models available',
       }),
     );
   }

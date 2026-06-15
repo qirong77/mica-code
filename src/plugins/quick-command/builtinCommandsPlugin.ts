@@ -33,6 +33,7 @@ export class BuiltinCommandsPlugin extends MicaPlugin {
         const baseUrl = this.atoms.apiBaseUrl.get();
         const apiKey = this.atoms.apiKey.get();
         const modelOptions = this.atoms.modelOptions.get();
+        const modelOptionsError = this.atoms.modelOptionsError.get();
         const effortOptions = this.atoms.effortOptions.get();
         const messages = this.atoms.messages.get();
         const sessionId = this.atoms.currentSessionId.get();
@@ -50,6 +51,7 @@ export class BuiltinCommandsPlugin extends MicaPlugin {
           ['Context Usage', `${getContextUsage(messages)} tokens`],
           ['Base URL', baseUrl || '(not set)'],
           ['API Key', apiKey || '(not set)'],
+          ['Model Options Error', modelOptionsError || '(none)'],
           ['Session ID', `${sessionId}`],
           ['Messages', `${messages.length}`],
           ['Total Billed Tokens', `${getTotalBilledTokens(messages)}`],

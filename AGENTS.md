@@ -61,7 +61,7 @@ src/
 │   └── loadSkills.ts     # Parses SKILL.md frontmatter, loads skill directories
 ├── store/                # nanostores atoms: config, conversation, ui-state, log, stream-handlers
 │   ├── config.ts         # Model config (name, maxTokens, effort), API config, effort tokens table
-│   ├── providerConfig.ts # Multi-provider support: ~/.mica/provider.json (DeepSeek, Claude, Kimi)
+│   ├── providerConfig.ts # Multi-provider support in ~/.mica/config.json (DeepSeek, Claude, Kimi)
 │   ├── uiState.ts        # WorkingStatus, ActiveTool, Command, PluginUI, planMode, pendingInput
 │   ├── ui/               # terminal.ts (input/dropdown atoms), session.ts (session index/switching)
 │   ├── conversation.ts   # messagesAtom, contextSizeAtom, cacheHitRateAtom, toMessageParams
@@ -106,7 +106,7 @@ AGENTS.md                   # Project instructions, injected into system prompt 
 
 ### Provider System
 
-Multi-provider support via `~/.mica/provider.json`. Currently supports DeepSeek, Claude, and Kimi.
+Multi-provider support via `~/.mica/config.json` (`currentProvider` + `providers`). Currently supports DeepSeek, Claude, and Kimi.
 
 - `initProvider()` in `src/store/providerConfig.ts` loads the current provider and sets `api.baseUrl` / `api.apiKey`.
 - Provider switching via `/provider` quick command → calls `switchProvider()` which resets the Anthropic client and refetches models.
@@ -192,7 +192,7 @@ Full list of `/` commands registered by plugins:
 
 See `.env.example`. Key vars: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (defaults to DeepSeek endpoint), `ANTHROPIC_MODEL`, `ANTHROPIC_MAX_TOKENS`.
 
-Provider system in `~/.mica/provider.json` also supports per-provider env var fallback (e.g., `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`).
+Provider system in `~/.mica/config.json` also supports per-provider env var fallback (e.g., `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`).
 
 ### CLI Arguments
 

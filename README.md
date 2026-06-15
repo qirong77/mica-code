@@ -26,7 +26,7 @@ bun run dev -- -p "你的问题"
 
 ## Provider 配置
 
-Mica 支持多 AI 服务提供商切换。配置文件位于 `~/.mica/provider.json`，首次启动自动生成。内置 DeepSeek、Claude、Kimi 三个提供商，可通过对应的环境变量配置 API Key：
+Mica 支持多 AI 服务提供商切换。配置位于 `~/.mica/config.json` 的 `currentProvider` 和 `providers` 字段，首次启动自动生成。内置 DeepSeek、Claude、Kimi 三个提供商，可通过对应的环境变量配置 API Key：
 
 | 提供商 | API Key 环境变量 |
 |--------|-----------------|

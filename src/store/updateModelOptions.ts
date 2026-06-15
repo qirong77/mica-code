@@ -1,5 +1,10 @@
-import { model, MODEL_OPTIONS_FALLBACK } from './config.js';
+import { model } from './config.js';
 import type { ModelOption, ApiModelListResponse } from './config.js';
+
+export interface UpdateModelOptionsResult {
+  error: string | null;
+  options: ModelOption[];
+}
 
 async function fetchModelList(url: string, apiKey: string, authType: 'bearer' | 'x-api-key' = 'bearer'): Promise<ModelOption[]> {
   const headers: Record<string, string> =
@@ -19,8 +24,7 @@ async function fetchModelList(url: string, apiKey: string, authType: 'bearer' | 
 
 function applyModelOptions(options: ModelOption[]): void {
   if (options.length === 0) {
-    model.options.set(MODEL_OPTIONS_FALLBACK);
-    model.name.set(MODEL_OPTIONS_FALLBACK[0].name);
+    model.options.set([]);
     return;
   }
   model.options.set(options);
@@ -31,10 +35,27 @@ function applyModelOptions(options: ModelOption[]): void {
   }
 }
 
-export async function updateModelOptions(modelsUrl: string | undefined, apiKey: string, authType: 'bearer' | 'x-api-key' = 'bearer'): Promise<void> {
-  if (!modelsUrl || !apiKey) {
-    model.options.set(MODEL_OPTIONS_FALLBACK);
-    return;
+function setModelOptionsError(message: string): UpdateModelOptionsResult {
+  model.optionsError.set(message);
+  model.options.set([]);
+  return { error: message, options: [] };
+}
+
+export async function updateModelOptions(
+  modelsUrl: string | undefined,
+  apiKey: string,
+  authType: 'bearer' | 'x-api-key' = 'bearer',
+): Promise<UpdateModelOptionsResult> {
+  if (!modelsUrl) {
+    model.optionsLoading.set(false);
+    return setModelOptionsError('当前 provider 未配置 models_url');
+  }
+
+  if (!apiKey) {
+    model.optionsLoading.set(false);
+    return setModelOptionsError(
+      '当前 provider 未配置 API Key，请在 ~/.mica/config.json 的 providers 中设置 api_key，或配置对应环境变量',
+    );
   }
 
   model.optionsLoading.set(true);
@@ -42,10 +63,15 @@ export async function updateModelOptions(modelsUrl: string | undefined, apiKey: 
 
   try {
     const options = await fetchModelList(modelsUrl, apiKey, authType);
+    if (options.length === 0) {
+      return setModelOptionsError('当前 provider 返回了空模型列表');
+    }
     applyModelOptions(options);
+    return { error: null, options };
   } catch (err) {
-    model.optionsError.set(err instanceof Error ? err.message : String(err));
-    model.options.set(MODEL_OPTIONS_FALLBACK);
+    return setModelOptionsError(
+      `获取模型列表失败: ${err instanceof Error ? err.message : String(err)}`,
+    );
   } finally {
     model.optionsLoading.set(false);
   }
