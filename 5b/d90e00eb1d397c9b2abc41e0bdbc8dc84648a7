@@ -1,0 +1,18 @@
+test/ToolWebSearch.test.ts
+  h_a456b67147438e 1-4
+src/tools/ToolWebSearch.ts
+  h_a456b67147438e 1-137
+TODO.md
+  h_a456b67147438e 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5bd90e00eb1d397c9b2abc41e0bdbc8dc84648a7",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
