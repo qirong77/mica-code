@@ -1,0 +1,20 @@
+src/components/hooks/useLogViewHeight.ts
+  h_a456b67147438e 1-15
+src/tools/ToolWebFetch.ts
+  h_a456b67147438e 125
+src/components/panels/AgentTurnLog.tsx
+  h_a456b67147438e 16,19,91
+src/components/panels/LogView.tsx
+  h_a456b67147438e 5,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "996625815382159488407ad618dcfa15ed032c15",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
