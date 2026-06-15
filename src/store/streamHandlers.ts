@@ -3,6 +3,7 @@ import {
   responseTextAtom,
   workingStatusAtom,
   activeToolsAtom,
+  logEntriesAtom,
 } from './uiState.js';
 import type { WorkingStatus } from './uiState.js';
 import { appendSystemLog } from './logAtom.js';
@@ -10,6 +11,29 @@ import { ui } from '../components/index.js';
 import { getToolDisplayText } from '../tools/index.js';
 
 const toolOutputBuffers = new Map<string, string[]>();
+
+let entryIdCounter = 0;
+
+function nextEntryId(): number {
+  return ++entryIdCounter;
+}
+
+function appendToLastThinkingEntry(text: string) {
+  const entries = logEntriesAtom.get();
+  const last = entries[entries.length - 1];
+  if (last?.type === 'thinking') {
+    logEntriesAtom.set([...entries.slice(0, -1), { ...last, text: last.text + text }]);
+  } else {
+    logEntriesAtom.set([...entries, { type: 'thinking', id: nextEntryId(), text }]);
+  }
+}
+
+function updateToolEntry(toolUseId: string, update: Partial<{ completed: boolean; elapsedMs: number; displayText: string; output: string }>) {
+  const entries = logEntriesAtom.get();
+  logEntriesAtom.set(
+    entries.map((e) => (e.type === 'tool' && e.toolUseId === toolUseId ? { ...e, ...update } : e)),
+  );
+}
 
 export function flushToolOutputBuffer(toolUseId: string) {
   const chunks = toolOutputBuffers.get(toolUseId);
@@ -25,9 +49,15 @@ export function appendToolOutputChunk(toolUseId: string, chunk: string) {
   toolOutputBuffers.set(toolUseId, buf);
 
   const tools = activeToolsAtom.get();
-  activeToolsAtom.set(
-    tools.map((t) => (t.toolUseId === toolUseId ? { ...t, output: t.output + chunk } : t)),
+  const updated = tools.map((t) =>
+    t.toolUseId === toolUseId ? { ...t, output: t.output + chunk } : t,
   );
+  activeToolsAtom.set(updated);
+
+  const tool = updated.find((t) => t.toolUseId === toolUseId);
+  if (tool) {
+    updateToolEntry(toolUseId, { output: tool.output });
+  }
 }
 
 export function clearToolOutputBuffers() {
@@ -36,6 +66,7 @@ export function clearToolOutputBuffers() {
 
 export function handleThinkingChunk(chunk: string) {
   thinkingTextAtom.set(thinkingTextAtom.get() + chunk);
+  appendToLastThinkingEntry(chunk);
   workingStatusAtom.set({ type: 'thinking' });
 }
 
@@ -71,17 +102,15 @@ export function handleToolUseStart(
   toolInput: Record<string, any>,
 ) {
   const displayText = safeDisplayText(toolName, toolInput);
+  const now = Date.now();
   const tools = activeToolsAtom.get();
   activeToolsAtom.set([
     ...tools,
-    {
-      toolUseId,
-      toolName,
-      displayText,
-      completed: false,
-      output: '',
-      startTime: Date.now(),
-    },
+    { toolUseId, toolName, displayText, completed: false, output: '', startTime: now },
+  ]);
+  logEntriesAtom.set([
+    ...logEntriesAtom.get(),
+    { type: 'tool', toolUseId, toolName, displayText, completed: false, output: '', startTime: now },
   ]);
 }
 
@@ -102,6 +131,7 @@ export function handleToolUseComplete(
       t.toolUseId === toolUseId ? { ...t, completed: true, elapsedMs, displayText: display } : t,
     ),
   );
+  updateToolEntry(toolUseId, { completed: true, elapsedMs, displayText: display });
 }
 
 export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | null) {
@@ -114,11 +144,12 @@ export function handleStatus(status: WorkingStatus, lastStatus: WorkingStatus | 
     responseTextAtom.set('');
     clearToolOutputBuffers();
     activeToolsAtom.set([]);
+    logEntriesAtom.set([]);
+    entryIdCounter = 0;
   }
 
   if (status.type === 'idle') {
     clearToolOutputBuffers();
-    activeToolsAtom.set([]);
   }
 
   workingStatusAtom.set(status);

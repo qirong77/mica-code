@@ -50,6 +50,27 @@ export const activeToolsAtom = atom<ActiveTool[]>([]);
 
 export const thinkingTextAtom = atom('');
 
+export interface ThinkingEntry {
+  type: 'thinking';
+  id: number;
+  text: string;
+}
+
+export interface ToolEntry {
+  type: 'tool';
+  toolUseId: string;
+  toolName: string;
+  displayText: string;
+  completed: boolean;
+  output: string;
+  startTime: number;
+  elapsedMs?: number;
+}
+
+export type LogEntry = ThinkingEntry | ToolEntry;
+
+export const logEntriesAtom = atom<LogEntry[]>([]);
+
 export const responseTextAtom = atom('');
 
 export const planModeAtom = createPersistedAtom('planMode', false);

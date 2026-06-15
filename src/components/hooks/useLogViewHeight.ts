@@ -9,7 +9,7 @@ export function useLogViewHeight() {
   const viewportHeight = Math.max(
     5,
     (bottomDistance as number) - RESERVED_LINES,
-    Math.ceil(rows / 2),
+    Math.ceil(rows / 3,
   );
   return viewportHeight;
 }
