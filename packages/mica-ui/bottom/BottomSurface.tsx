@@ -13,11 +13,11 @@ export function BottomSurface(): React.ReactNode {
   const logItems = useScheduleState(agentTurnLogItems);
   const status = useScheduleState(workingStatus);
 
-  if (status.type === 'error') {
-    return <AgentTurnLog />;
-  }
   if (dropdown.visible) {
     return <DropDownUI.renderFn />;
+  }
+  if (status.type === 'error') {
+    return <AgentTurnLog />;
   }
   if (plugins.length > 0) {
     return <PluginPanel />;

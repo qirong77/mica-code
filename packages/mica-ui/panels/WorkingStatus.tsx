@@ -140,7 +140,7 @@ export function WorkingStatus() {
           </Box>
         );
       case 'error':
-        return <Text color={themeColors.error}>✗ {info.message}</Text>;
+        return <Text color={themeColors.error}>✗ error</Text>;
       case 'completed':
         return (
           <Text color={themeColors.success}>
