@@ -1,6 +1,6 @@
 import mitt from 'mitt';
-import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/OpenAIClient.js';
-import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/providers/OpenAIClient.js';
+import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
 import type { EffortOption, ProviderDefinition } from '../store/index.js';
 import { getConfig } from '../store/index.js';
@@ -237,10 +237,10 @@ export class AgentRuntime {
     this.client.onUsage = (usage) => {
       this.events.emit('usage', usage);
       logRuntime('agent', 'usage', {
-        input: usage.tokens.input,
-        output: usage.tokens.output,
-        total: usage.tokens.total,
-        cacheHitRate: usage.prompt_cache.hit_rate,
+        input: usage.inputTokens,
+        output: usage.outputTokens,
+        total: usage.totalTokens,
+        cacheHitRate: usage.cacheHitRate,
       });
     };
   }

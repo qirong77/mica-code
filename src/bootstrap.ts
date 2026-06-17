@@ -4,11 +4,11 @@ import {
   createErrorLogItem,
   createThinkingLogItem,
   createToolCallLogItem,
-} from '../packages/agent/AgentTurnLogItems.js';
+} from '../packages/agent/ui/AgentTurnLogItems.js';
 import { getToolDisplayText } from '../packages/tools/index.js';
 import type { SessionController } from './session/SessionController.js';
 import { clearRuntimeLogs, logRuntime } from './logger.js';
-import type { AgentQueryContent } from '../packages/agent/IAgent.js';
+import type { AgentQueryContent } from '../packages/agent/core/Agent.js';
 
 type BootstrapOptions = {
   agent: AgentRuntime;
@@ -133,11 +133,11 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
     );
   });
   agent.events.on('usage', (usage) => {
-    micaUI.panels.contextSize.set(usage.tokens.input + usage.tokens.output);
-    micaUI.panels.cacheHitRate.set(usage.prompt_cache.hit_rate);
+    micaUI.panels.contextSize.set(usage.totalTokens);
+    micaUI.panels.cacheHitRate.set(usage.cacheHitRate);
     logRuntime('runtime', 'usage:displayed', {
-      context: usage.tokens.input + usage.tokens.output,
-      cacheHitRate: usage.prompt_cache.hit_rate,
+      context: usage.totalTokens,
+      cacheHitRate: usage.cacheHitRate,
     });
   });
 

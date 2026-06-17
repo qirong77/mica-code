@@ -25,7 +25,7 @@
 import React from 'react';
 import { wrappedRender, Box, Text } from '@anthropic/ink';
 import { micaUI, App } from '../index.js';
-import { createThinkingLogItem, createToolCallLogItem } from '../../agent/AgentTurnLogItems.js';
+import { createThinkingLogItem, createToolCallLogItem } from '../../agent/ui/AgentTurnLogItems.js';
 
 const colors = micaUI.theme.colors;
 

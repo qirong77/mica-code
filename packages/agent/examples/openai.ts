@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 dotenv.config({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../.env'),
 });
-import { OpenAIClient } from '../OpenAIClient.js';
+import { OpenAIClient } from '../providers/OpenAIClient.js';
 import { writeFileSync } from 'fs';
 
 const client = new OpenAIClient(process.env.OPENAI_MODEL!);
@@ -36,11 +36,11 @@ writeFileSync(
 
 const total = client.usageHistory.reduce(
   (acc, r) => {
-    acc.input += r.tokens.input;
-    acc.cachedInput += r.tokens.cached_input;
-    acc.uncachedInput += r.tokens.uncached_input;
-    acc.output += r.tokens.output;
-    acc.total += r.tokens.total;
+    acc.input += r.inputTokens;
+    acc.cachedInput += r.cachedInputTokens;
+    acc.uncachedInput += r.uncachedInputTokens;
+    acc.output += r.outputTokens;
+    acc.total += r.totalTokens;
     return acc;
   },
   {

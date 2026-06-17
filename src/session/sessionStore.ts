@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
-import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { EffortOption } from '../store/index.js';
 
 export type PersistedRuntimeSnapshot = {

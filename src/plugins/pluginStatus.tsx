@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import { Dialog, KeyHints } from '../../packages/mica-ui/primitives/index.js';
 import { themeColors } from '../../packages/mica-ui/theme.js';
-import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { logRuntime } from '../logger.js';
 
@@ -32,7 +32,7 @@ export function registerStatusPlugin(agent: AgentRuntime) {
           ['Effort', provider.supportsEffort !== false ? effort : 'none'],
           ['Provider', provider.name ?? provider.id],
           ['Context', formatContextUsage(contextTokens, contextWindowSize)],
-          ['Total tokens', formatTokenValue(lastUsage?.tokens.total)],
+          ['Total tokens', formatTokenValue(readTotalTokens(lastUsage))],
           ['Cached tokens', formatCachedTokens(lastUsage)],
         ]),
       );
@@ -102,11 +102,22 @@ function formatContextUsage(contextTokens: number, contextWindowSize: number): s
 
 function formatCachedTokens(lastUsage: AgentUsageRecord | undefined): string {
   if (!lastUsage) return '-';
-  const cachedTokens = lastUsage.prompt_cache.cached_tokens;
-  const hitRate = lastUsage.prompt_cache.hit_rate;
+  const legacy = lastUsage as AgentUsageRecord & {
+    prompt_cache?: { cached_tokens?: number; hit_rate?: number };
+  };
+  const cachedTokens = lastUsage.cachedInputTokens ?? legacy.prompt_cache?.cached_tokens;
+  const hitRate = lastUsage.cacheHitRate ?? legacy.prompt_cache?.hit_rate;
   if (!Number.isFinite(cachedTokens) || cachedTokens < 0) return '-';
   if (!Number.isFinite(hitRate) || hitRate < 0) return formatTokens(cachedTokens);
   return `${formatTokens(cachedTokens)} (${(hitRate * 100).toFixed(0)}%)`;
+}
+
+function readTotalTokens(lastUsage: AgentUsageRecord | undefined): number | undefined {
+  if (!lastUsage) return undefined;
+  const legacy = lastUsage as AgentUsageRecord & {
+    tokens?: { total?: number };
+  };
+  return lastUsage.totalTokens ?? legacy.tokens?.total;
 }
 
 function formatStatusList(entries: Array<[string, string]>) {

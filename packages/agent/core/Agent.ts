@@ -1,35 +1,27 @@
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types.js';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/types.js';
 
 export type AgentQueryContent = string | MicaUiContentBlockParam[];
 
 export type AgentUsageRecord = {
-  turn_id: number;
-  request_index: number;
-  message_count: number;
+  provider: string;
+  turnId: number;
+  requestIndex: number;
+  messageCount: number;
   model?: string;
-  usage: Record<string, any>;
-  tokens: {
-    input: number;
-    cached_input: number;
-    uncached_input: number;
-    output: number;
-    total: number;
-  };
-  prompt_cache: {
-    prompt_tokens: number;
-    cached_tokens: number;
-    uncached_tokens: number;
-    hit_rate: number;
-    hit_rate_percent: string;
-  };
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens?: number;
+  cacheHitRate: number;
 };
 
-export type AgentCallbacks<TUsage extends AgentUsageRecord = AgentUsageRecord> = {
+export type AgentCallbacks = {
   onText?: (text: string) => void;
   onThinking?: (thinking: string) => void;
   onToolCall?: (name: string, args: string, id?: string) => void;
   onToolResult?: (name: string, result: string, id?: string) => void;
-  onUsage?: (usage: TUsage) => void;
+  onUsage?: (usage: AgentUsageRecord) => void;
 };
 
 export type AgentQueryOptions = {
@@ -49,7 +41,7 @@ export interface IAgent<
   TOptions = unknown,
   TMessage = unknown,
   TUsage extends AgentUsageRecord = AgentUsageRecord,
-> extends AgentCallbacks<TUsage> {
+> extends AgentCallbacks {
   model: string;
   messages: TMessage[];
   usageHistory: TUsage[];
@@ -77,7 +69,7 @@ export abstract class BaseAgent<
   onThinking: ((thinking: string) => void) | undefined;
   onToolCall: ((name: string, args: string, id?: string) => void) | undefined;
   onToolResult: ((name: string, result: string, id?: string) => void) | undefined;
-  onUsage: ((usage: TUsage) => void) | undefined;
+  onUsage: ((usage: AgentUsageRecord) => void) | undefined;
 
   abstract configure(options: TOptions): void;
   abstract reset(): void;

@@ -1,5 +1,5 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { updateConfig } from '../store/index.js';
 import {
@@ -72,8 +72,8 @@ export class SessionController {
     micaUI.terminalInput.clearText();
 
     if (lastUsage) {
-      micaUI.panels.contextSize.set(lastUsage.tokens.input + lastUsage.tokens.output);
-      micaUI.panels.cacheHitRate.set(lastUsage.prompt_cache.hit_rate);
+      micaUI.panels.contextSize.set(readContextTokens(lastUsage));
+      micaUI.panels.cacheHitRate.set(readCacheHitRate(lastUsage));
     } else {
       micaUI.panels.contextSize.set(0);
       micaUI.panels.cacheHitRate.set(0);
@@ -90,6 +90,20 @@ function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSn
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
   };
+}
+
+function readContextTokens(usage: AgentUsageRecord): number {
+  const legacy = usage as AgentUsageRecord & {
+    tokens?: { input?: number; output?: number; total?: number };
+  };
+  return usage.totalTokens ?? legacy.tokens?.total ?? (legacy.tokens?.input ?? 0) + (legacy.tokens?.output ?? 0);
+}
+
+function readCacheHitRate(usage: AgentUsageRecord): number {
+  const legacy = usage as AgentUsageRecord & {
+    prompt_cache?: { hit_rate?: number };
+  };
+  return usage.cacheHitRate ?? legacy.prompt_cache?.hit_rate ?? 0;
 }
 
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {

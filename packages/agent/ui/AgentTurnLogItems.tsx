@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { themeColors } from '../mica-ui/theme.js';
-import type { MicaUiAgentTurnLogItem } from '../mica-ui/types.js';
-import { useSpinner } from '../mica-ui/primitives/Spin.js';
+import { themeColors } from '../../mica-ui/theme.js';
+import type { MicaUiAgentTurnLogItem } from '../../mica-ui/types.js';
+import { useSpinner } from '../../mica-ui/primitives/Spin.js';
 
 const MAX_RUN_SHELL_LOG_LINES = 10;
 const TOOL_ICONS: Record<string, string> = {

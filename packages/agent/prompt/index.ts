@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getLoadedSkills } from '../../src/skills/loadSkills';
-import type { Skill } from '../../src/skills/types';
+import { getLoadedSkills } from '../../../src/skills/loadSkills';
+import type { Skill } from '../../../src/skills/types';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
 type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';

@@ -1,14 +1,14 @@
 import { OpenAI } from 'openai';
-import { executeTool, getToolDefinitions } from '../tools';
+import { executeTool, getToolDefinitions } from '../../tools';
 import {
   BaseAgent,
   type AgentQueryContent,
   type AgentQueryOptions,
   type AgentSnapshot,
   type AgentUsageRecord,
-} from './IAgent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types';
-import { buildSystemPrompt } from './prompt';
+} from '../core/Agent';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/types';
+import { buildSystemPrompt } from '../prompt';
 
 export type OpenAIClientOptions = {
   model: string;
@@ -19,7 +19,14 @@ export type OpenAIClientOptions = {
   systemPrompt?: string;
 };
 
-export type UsageRecord = AgentUsageRecord;
+export type OpenAIUsageRecord = AgentUsageRecord & {
+  provider: 'openai';
+  rawUsage: Record<string, unknown>;
+  promptTokens: number;
+  uncachedInputTokens: number;
+};
+
+export type UsageRecord = OpenAIUsageRecord;
 
 const MAX_HISTORICAL_TOOL_RESULT_LENGTH = 12_000;
 
@@ -90,7 +97,7 @@ export class OpenAIClient extends BaseAgent<
     this.messages = snapshot.messages.filter((message) => message.role !== 'system');
     this.usageHistory = snapshot.usageHistory;
     this.lastUsage = snapshot.lastUsage;
-    this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turn_id), 0);
+    this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
   }
   toConversationMessages(): MicaUiConversationMessage[] {
     return this.messages.flatMap((message) => {
@@ -255,26 +262,20 @@ export class OpenAIClient extends BaseAgent<
     const outputTokens = usage.completion_tokens ?? 0;
     const totalTokens = usage.total_tokens ?? promptTokens + outputTokens;
     const hitRate = promptTokens > 0 ? cachedTokens / promptTokens : 0;
-    const record: UsageRecord = {
-      turn_id: metadata.turnId,
-      request_index: metadata.requestIndex,
-      message_count: metadata.messageCount,
+    const record: OpenAIUsageRecord = {
+      provider: 'openai',
+      turnId: metadata.turnId,
+      requestIndex: metadata.requestIndex,
+      messageCount: metadata.messageCount,
       model: metadata.model,
-      usage,
-      tokens: {
-        input: promptTokens,
-        cached_input: cachedTokens,
-        uncached_input: uncachedTokens,
-        output: outputTokens,
-        total: totalTokens,
-      },
-      prompt_cache: {
-        prompt_tokens: promptTokens,
-        cached_tokens: cachedTokens,
-        uncached_tokens: uncachedTokens,
-        hit_rate: hitRate,
-        hit_rate_percent: `${(hitRate * 100).toFixed(2)}%`,
-      },
+      inputTokens: promptTokens,
+      outputTokens,
+      totalTokens,
+      cachedInputTokens: cachedTokens,
+      cacheHitRate: hitRate,
+      rawUsage: usage,
+      promptTokens,
+      uncachedInputTokens: uncachedTokens,
     };
 
     this.lastUsage = record;
