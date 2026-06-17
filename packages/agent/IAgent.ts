@@ -1,5 +1,7 @@
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types.js';
 
+export type AgentQueryContent = string | MicaUiContentBlockParam[];
+
 export type AgentUsageRecord = {
   turn_id: number;
   request_index: number;
@@ -55,7 +57,7 @@ export interface IAgent<
 
   configure(options: TOptions): void;
   reset(): void;
-  query(question: string, options?: AgentQueryOptions): Promise<string>;
+  query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   toConversationMessages(): MicaUiConversationMessage[];
   getSnapshot(): AgentSnapshot<TMessage, TUsage>;
   loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
@@ -79,7 +81,7 @@ export abstract class BaseAgent<
 
   abstract configure(options: TOptions): void;
   abstract reset(): void;
-  abstract query(question: string, options?: AgentQueryOptions): Promise<string>;
+  abstract query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   abstract toConversationMessages(): MicaUiConversationMessage[];
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 

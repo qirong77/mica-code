@@ -1,6 +1,6 @@
 import mitt from 'mitt';
 import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/OpenAIClient.js';
-import type { AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/IAgent.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
 import type { EffortOption, ProviderDefinition } from '../store/index.js';
 import { getConfig } from '../store/index.js';
@@ -147,14 +147,15 @@ export class AgentRuntime {
     return this.client?.toConversationMessages() ?? [];
   }
 
-  async run(question: string): Promise<{ runId: number; text: string }> {
+  async run(question: AgentQueryContent): Promise<{ runId: number; text: string }> {
     const runId = ++this.runId;
     const startedAt = Date.now();
+    const questionText = contentToText(question);
     logRuntime('agent', 'run:start', {
       runId,
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
-      chars: question.length,
+      chars: questionText.length,
     });
 
     if (!this.client || !this.isConfigured) {
@@ -269,4 +270,12 @@ export class AgentRuntime {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
+}
+
+function contentToText(content: AgentQueryContent): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
 }

@@ -1,6 +1,12 @@
 import { OpenAI } from 'openai';
 import { executeTool, getToolDefinitions } from '../tools';
-import { BaseAgent, type AgentQueryOptions, type AgentSnapshot, type AgentUsageRecord } from './IAgent';
+import {
+  BaseAgent,
+  type AgentQueryContent,
+  type AgentQueryOptions,
+  type AgentSnapshot,
+  type AgentUsageRecord,
+} from './IAgent';
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types';
 import { buildSystemPrompt } from './prompt';
 
@@ -105,13 +111,13 @@ export class OpenAIClient extends BaseAgent<
       },
     }));
   }
-  async query(question: string, options?: AgentQueryOptions): Promise<string> {
+  async query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string> {
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: this.systemPrompt ?? buildSystemPrompt() },
       ...compactHistoricalToolResults(this.messages),
-      { role: 'user', content: question },
+      { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
 
     while (true) {
@@ -282,6 +288,25 @@ export function createSubAgent(options: OpenAIClientOptions): OpenAIClient {
     ...options,
     effort: 'none',
     tools: false,
+  });
+}
+
+function micaContentToOpenAIContent(
+  content: AgentQueryContent,
+): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
+  if (typeof content === 'string') return content;
+
+  return content.map((part) => {
+    if (part.type === 'text') {
+      return { type: 'text', text: part.text };
+    }
+
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${part.source.media_type};base64,${part.source.data}`,
+      },
+    };
   });
 }
 

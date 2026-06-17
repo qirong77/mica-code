@@ -1,4 +1,4 @@
-import { micaUI } from '../packages/mica-ui/index.js';
+import { micaUI, parseImageRefs } from '../packages/mica-ui/index.js';
 import { AgentAbortError, type AgentRuntime, type AgentRuntimeStatus } from './agent/AgentRuntime.js';
 import {
   createErrorLogItem,
@@ -8,6 +8,7 @@ import {
 import { getToolDisplayText } from '../packages/tools/index.js';
 import type { SessionController } from './session/SessionController.js';
 import { clearRuntimeLogs, logRuntime } from './logger.js';
+import type { AgentQueryContent } from '../packages/agent/IAgent.js';
 
 type BootstrapOptions = {
   agent: AgentRuntime;
@@ -222,6 +223,7 @@ async function submit(rawText: string, agent: AgentRuntime, sessionController: S
 async function runTurn(text: string, agent: AgentRuntime, sessionController: SessionController) {
   running = true;
   const startedAt = Date.now();
+  const content = parseImageRefs(text) as AgentQueryContent;
   let runId: number | null = null;
   logRuntime('runtime', 'turn:start', { chars: text.length });
   let hasError = false;
@@ -231,13 +233,13 @@ async function runTurn(text: string, agent: AgentRuntime, sessionController: Ses
   activeToolCalls.clear();
   micaUI.panels.thinkingText.set('');
   micaUI.terminalInput.clearText();
-  micaUI.conversation.appendUserMessage(text);
+  micaUI.conversation.appendUserMessage(content);
   micaUI.conversation.clearResponseText();
   micaUI.panels.clearLogEntries();
   micaUI.panels.status.connecting();
 
   try {
-    const result = await agent.run(text);
+    const result = await agent.run(content);
     runId = result.runId;
     const finalText = result.text;
     if (!agent.isCurrent(runId)) return;
