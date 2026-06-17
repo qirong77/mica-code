@@ -177,6 +177,12 @@ function TerminalInput() {
       return;
     }
 
+    if (DropDownUI.quickCommand.handleKey(key)) {
+      setLocalText('');
+      setCursorOffset(0);
+      return;
+    }
+
     if (key.escape) {
       if (activePluginUIs.filter((x) => x.onInput).length === 0) {
         setLocalText('');
@@ -184,11 +190,6 @@ function TerminalInput() {
         input.text.set('');
       }
       return;
-    }
-
-    if (DropDownUI.quickCommand.handleKey(key)) {
-      setLocalText('');
-      setCursorOffset(0);
     }
   });
 
