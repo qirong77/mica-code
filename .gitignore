@@ -6,3 +6,5 @@ dist/
 .codegraph
 .backups
 temp/
+conversation.json
+log.text
