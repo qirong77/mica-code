@@ -2,7 +2,7 @@
   "provider": "deepseek",
   "model": "deepseek-v4-pro",
   "effort": "low",
-  "contextWindowSize": 1000000,
+  "contextWindowSize": 256000,
   "providers": [
     {
       "id": "deepseek",
@@ -14,17 +14,12 @@
       "effort": "low",
       "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
       "contextWindowSize": 1000000
-    },
-    {
-      "id": "krill",
-      "name": "Krill",
-      "api_base": "https://api.krill-ai.com/codex/v1",
-      "api_key": "",
-      "model": "gpt-5.4",
-      "effort": "medium",
-      "models": ["gpt-5.4"],
-      "contextWindowSize": 256000
     }
   ],
-  "mcpServers": {}
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    }
+  }
 }
