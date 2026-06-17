@@ -125,6 +125,7 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
   });
 
   micaUI.panels.setOnAbortAgent(() => {
+    if (!running) return;
     logRuntime('runtime', 'abort:requested', undefined, 'warn');
     agent.abort();
     running = false;
