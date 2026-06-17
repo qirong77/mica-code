@@ -6,6 +6,7 @@ import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/
 import type { SelectItem } from '../../packages/mica-ui/primitives/index.js';
 import { themeColors } from '../../packages/mica-ui/theme.js';
 import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
+import { logRuntime } from '../logger.js';
 
 export type SelectOption = {
   name: string;
@@ -22,6 +23,12 @@ export type SelectCommandConfig = {
 };
 
 export function showSelectCommand(config: SelectCommandConfig) {
+  logRuntime('plugin.select', 'opened', {
+    id: config.id,
+    title: config.title,
+    current: config.current,
+    options: config.options.length,
+  });
   const initialIndex = Math.max(
     0,
     config.options.findIndex((option) => option.name === config.current),
@@ -29,12 +36,18 @@ export function showSelectCommand(config: SelectCommandConfig) {
   const selectedIdx = atom(initialIndex);
 
   function hide() {
+    logRuntime('plugin.select', 'closed', { id: config.id, title: config.title });
     micaUI.panels.clearPluginUIs();
   }
 
   function selectCurrent() {
     const selected = config.options[selectedIdx.get()];
-    if (selected) config.onSelect(selected.name);
+    if (selected) {
+      logRuntime('plugin.select', 'selected', { id: config.id, title: config.title, value: selected.name });
+      config.onSelect(selected.name);
+    } else {
+      logRuntime('plugin.select', 'select:empty', { id: config.id, title: config.title }, 'warn');
+    }
     hide();
   }
 

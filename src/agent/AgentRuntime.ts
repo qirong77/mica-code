@@ -4,6 +4,7 @@ import type { AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/age
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
 import type { EffortOption, ProviderDefinition } from '../store/index.js';
 import { getConfig } from '../store/index.js';
+import { logRuntime } from '../logger.js';
 
 export type AgentRuntimeStatus =
   | { type: 'connecting' }
@@ -46,6 +47,11 @@ export class AgentRuntime {
   constructor() {
     this.currentConfig = this.readConfig();
     this.recreateClient();
+    logRuntime('agent', 'initialized', {
+      provider: this.currentConfig.provider.id,
+      model: this.currentConfig.model,
+      configured: this.isConfigured,
+    });
   }
 
   get config() {
@@ -76,16 +82,24 @@ export class AgentRuntime {
     this.currentConfig = this.readConfig();
     this.recreateClient();
     if (resetSession) this.clearSession();
+    logRuntime('agent', 'config:reloaded', {
+      provider: this.currentConfig.provider.id,
+      model: this.currentConfig.model,
+      resetSession,
+      configured: this.isConfigured,
+    });
   }
 
   abort() {
     this.runId++;
+    logRuntime('agent', 'abort', { runId: this.runId }, 'warn');
     this.events.emit('status', { type: 'error', message: '已中止当前 agent' });
   }
 
   clearSession() {
     this.runId++;
     this.client?.reset();
+    logRuntime('agent', 'session:cleared', { runId: this.runId });
   }
 
   getSnapshot(): AgentRuntimeSnapshot {
@@ -109,6 +123,11 @@ export class AgentRuntime {
       lastUsage: snapshot.lastUsage,
       conversationMessages: [],
     });
+    logRuntime('agent', 'snapshot:loaded', {
+      provider: snapshot.providerId,
+      model: snapshot.model,
+      messages: snapshot.messages.length,
+    });
   }
 
   toConversationMessages(): MicaUiConversationMessage[] {
@@ -118,10 +137,17 @@ export class AgentRuntime {
   async run(question: string): Promise<{ runId: number; text: string }> {
     const runId = ++this.runId;
     const startedAt = Date.now();
+    logRuntime('agent', 'run:start', {
+      runId,
+      provider: this.currentConfig.provider.id,
+      model: this.currentConfig.model,
+      chars: question.length,
+    });
 
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       this.events.emit('status', { type: 'error', message });
+      logRuntime('agent', 'run:not_configured', { runId, provider: this.currentConfig.provider.id }, 'error');
       throw new Error(message);
     }
 
@@ -133,11 +159,17 @@ export class AgentRuntime {
           type: 'completed',
           elapsedMs: Date.now() - startedAt,
         });
+        logRuntime('agent', 'run:completed', {
+          runId,
+          elapsedMs: Date.now() - startedAt,
+          chars: text.length,
+        });
       }
       return { runId, text };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.isCurrent(runId)) this.events.emit('status', { type: 'error', message });
+      logRuntime('agent', 'run:error', { runId, message }, 'error');
       throw error;
     }
   }
@@ -149,9 +181,15 @@ export class AgentRuntime {
   private recreateClient() {
     if (!this.currentConfig.provider.api_key) {
       this.client = null;
+      logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
       return;
     }
     this.client = new OpenAIClient(this.clientOptions());
+    logRuntime('agent', 'client:created', {
+      provider: this.currentConfig.provider.id,
+      model: this.currentConfig.model,
+      effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+    });
     this.client.onText = (text) => {
       this.events.emit('status', { type: 'streaming' });
       this.events.emit('text', text);
@@ -163,12 +201,20 @@ export class AgentRuntime {
     this.client.onToolCall = (name, args, id) => {
       this.events.emit('status', { type: 'calling_tool', toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
+      logRuntime('agent.tool', 'call', { name, id, argsChars: args.length });
     };
     this.client.onToolResult = (name, result, id) => {
       this.events.emit('toolResult', { name, result, id });
+      logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
     };
     this.client.onUsage = (usage) => {
       this.events.emit('usage', usage);
+      logRuntime('agent', 'usage', {
+        input: usage.tokens.input,
+        output: usage.tokens.output,
+        total: usage.tokens.total,
+        cacheHitRate: usage.prompt_cache.hit_rate,
+      });
     };
   }
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { logRuntime } from '../logger.js';
 
 const MAX_TOTAL_DIFF_CHARS = 18_000;
 const MAX_DIFF_CHARS_PER_FILE = 3_000;
@@ -25,6 +26,7 @@ export function registerCommitPlugin(agent: AgentRuntime) {
     name: 'commit',
     description: '分析当前 git 变化，生成提交信息，提交并推送',
     action: () => {
+      logRuntime('plugin.commit', 'requested');
       void runCommit(agent);
     },
   } satisfies Parameters<typeof micaUI.dropdown.setQuickCommands>[0][number];
@@ -32,44 +34,57 @@ export function registerCommitPlugin(agent: AgentRuntime) {
 
 async function runCommit(agent: AgentRuntime) {
   try {
+    logRuntime('plugin.commit', 'start');
     showTemporaryMessage('commit: 正在分析 git 变化...');
 
     const status = git(['status', '--porcelain=v1']);
+    logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
     if (!status.trim()) {
+      logRuntime('plugin.commit', 'status:empty');
       showTemporaryMessage('commit: 没有可提交的变化');
       return;
     }
     if (hasUnmergedFiles(status)) {
+      logRuntime('plugin.commit', 'blocked:unmerged_files', undefined, 'warn');
       showTemporaryMessage('commit: 存在未解决冲突，请先处理');
       return;
     }
 
     const summary = buildChangeSummary(status);
+    logRuntime('plugin.commit', 'summary:built', { chars: summary.length });
     const commitMessage = await generateCommitMessage(agent, summary);
+    logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
     showTemporaryMessage(`commit: ${firstLine(commitMessage)}`);
     git(['add', '-A']);
+    logRuntime('plugin.commit', 'git:add_done');
 
     const stagedStatus = git(['diff', '--cached', '--name-only']);
     if (!stagedStatus.trim()) {
+      logRuntime('plugin.commit', 'blocked:no_staged_changes', undefined, 'warn');
       showTemporaryMessage('commit: git add 后没有 staged 变化');
       return;
     }
+    logRuntime('plugin.commit', 'staged:ready', { files: stagedStatus.trim().split('\n').filter(Boolean).length });
 
     commitWithMessage(commitMessage);
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
+    logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
     showTemporaryMessage(`commit: 已提交 ${commitHash}，正在 push...`);
     pushCurrentBranch();
     showTemporaryMessage(`commit: 已提交并推送 ${commitHash}`);
+    logRuntime('plugin.commit', 'push:done', { commit: commitHash });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logRuntime('plugin.commit', 'error', { message }, 'error');
     showTemporaryMessage(`commit failed: ${message}`);
   }
 }
 
 function buildChangeSummary(status: string) {
   const changedFiles = parsePorcelainStatus(status);
+  logRuntime('plugin.commit', 'changes:parsed', { files: changedFiles.length });
   const stat = safeGit(['diff', '--stat']) || safeGit(['diff', '--cached', '--stat']);
   const nameStatus = [safeGit(['diff', '--name-status']), safeGit(['diff', '--cached', '--name-status'])]
     .filter(Boolean)
@@ -96,6 +111,7 @@ function buildChangeSummary(status: string) {
 }
 
 async function generateCommitMessage(agent: AgentRuntime, summary: string) {
+  logRuntime('plugin.commit', 'message:generate_start', { summaryChars: summary.length });
   const subAgent = agent.createSubAgent({
     systemPrompt: [
       'You write concise git commit messages.',
@@ -141,10 +157,12 @@ function buildDiffSamples(files: Array<{ status: string; path: string }>) {
     const sample = truncate(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
     sections.push(`--- ${file.path}\n${sample}`);
     remaining -= sample.length;
+    logRuntime('plugin.commit', 'diff:sampled', { file: file.path, chars: sample.length });
   }
 
   if (remaining <= 0) {
     sections.push('[diff sample budget exhausted]');
+    logRuntime('plugin.commit', 'diff:budget_exhausted', undefined, 'warn');
   }
 
   return sections.join('\n\n');
@@ -206,6 +224,7 @@ function commitWithMessage(message: string) {
   const messagePath = join(dir, 'message.txt');
   try {
     writeFileSync(messagePath, `${message.trim()}\n`, 'utf-8');
+    logRuntime('plugin.commit', 'git:commit_start', { firstLine: firstLine(message) });
     git(['commit', '-F', messagePath], 120_000);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -215,11 +234,13 @@ function commitWithMessage(message: string) {
 function pushCurrentBranch() {
   const upstream = safeGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
   if (upstream.trim()) {
+    logRuntime('plugin.commit', 'push:start', { upstream: upstream.trim() });
     git(['push'], 120_000);
     return;
   }
 
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  logRuntime('plugin.commit', 'push:start', { branch, setUpstream: true });
   git(['push', '-u', 'origin', branch], 120_000);
 }
 

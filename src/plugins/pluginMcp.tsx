@@ -9,6 +9,7 @@ import { showMessage } from '../bootstrap.js';
 import { mcpServersAtom, type McpServerStatus } from '../mcp/client.js';
 import { loadMcpConfig } from '../mcp/config.js';
 import { reconnectMcpServer } from '../mcp/index.js';
+import { logRuntime } from '../logger.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }
@@ -49,17 +50,21 @@ export function registerMcpPlugin() {
       if (trimmed?.startsWith('reconnect ')) {
         const serverName = trimmed.slice('reconnect '.length).trim();
         if (!serverName) {
+          logRuntime('plugin.mcp', 'reconnect:missing_server', undefined, 'warn');
           showMessage('用法: /mcp reconnect <server>');
           return;
         }
+        logRuntime('plugin.mcp', 'reconnect:requested', { server: serverName });
         void reconnectServer(serverName);
         return;
       }
 
+      logRuntime('plugin.mcp', 'opened', { servers: mcpServersAtom.get().length });
       const panelState = atom<McpState>({ view: 'list', selectedIdx: 0 });
 
       function hide() {
         micaUI.panels.clearPluginUIs();
+        logRuntime('plugin.mcp', 'closed');
       }
 
       function McpPanel() {
@@ -201,6 +206,10 @@ export function registerMcpPlugin() {
 
             if (key.escape) {
               if (state.view === 'detail') {
+                logRuntime('plugin.mcp', 'view:tools', {
+                  server: servers[state.serverIdx]?.name,
+                  from: 'detail',
+                });
                 panelState.set({
                   view: 'tools',
                   serverIdx: state.serverIdx,
@@ -209,6 +218,10 @@ export function registerMcpPlugin() {
                 return true;
               }
               if (state.view === 'tools') {
+                logRuntime('plugin.mcp', 'view:list', {
+                  server: servers[state.serverIdx]?.name,
+                  from: 'tools',
+                });
                 panelState.set({ view: 'list', selectedIdx: state.serverIdx });
                 return true;
               }
@@ -233,6 +246,10 @@ export function registerMcpPlugin() {
                 return true;
               }
               if (key.return) {
+                logRuntime('plugin.mcp', 'view:tools', {
+                  server: servers[state.selectedIdx]?.name,
+                  tools: servers[state.selectedIdx]?.tools.length ?? 0,
+                });
                 panelState.set({
                   view: 'tools',
                   serverIdx: state.selectedIdx,
@@ -263,6 +280,10 @@ export function registerMcpPlugin() {
                 return true;
               }
               if (key.return) {
+                logRuntime('plugin.mcp', 'view:detail', {
+                  server: servers[state.serverIdx]?.name,
+                  tool: servers[state.serverIdx]?.tools[state.selectedIdx]?.name,
+                });
                 panelState.set({
                   view: 'detail',
                   serverIdx: state.serverIdx,
@@ -281,11 +302,21 @@ export function registerMcpPlugin() {
 }
 
 async function reconnectServer(name: string) {
+  logRuntime('plugin.mcp', 'reconnect:start', { server: name });
   const config = await loadMcpConfig();
   const server = config[name];
   if (!server) {
+    logRuntime('plugin.mcp', 'reconnect:not_found', { server: name }, 'error');
     showMessage(`未找到 MCP 配置: ${name}`, 4000);
     return;
   }
-  showMessage(await reconnectMcpServer(name, server), 4000);
+  try {
+    const message = await reconnectMcpServer(name, server);
+    showMessage(message, 4000);
+    logRuntime('plugin.mcp', 'reconnect:done', { server: name, message });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logRuntime('plugin.mcp', 'reconnect:error', { server: name, message }, 'error');
+    showMessage(`MCP reconnect failed: ${message}`, 4000);
+  }
 }

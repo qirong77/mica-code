@@ -7,6 +7,7 @@ import {
 } from '../packages/agent/AgentTurnLogItems.js';
 import { getToolDisplayText } from '../packages/tools/index.js';
 import type { SessionController } from './session/SessionController.js';
+import { logRuntime } from './logger.js';
 
 type BootstrapOptions = {
   agent: AgentRuntime;
@@ -25,6 +26,7 @@ const activeToolCalls = new Map<string, { id: string; startTime: number; display
 
 export function reportRuntimeError(error: unknown, title = '运行错误') {
   const message = error instanceof Error ? error.message : String(error);
+  logRuntime('runtime', 'error', { title, message }, 'error');
   micaUI.conversation.clearResponseText();
   micaUI.panels.status.error(message);
   micaUI.panels.setAgentTurnLogItems([
@@ -38,6 +40,7 @@ export function reportRuntimeError(error: unknown, title = '运行错误') {
 
 export function bootstrap({ agent, sessionController, onConfigChanged }: BootstrapOptions) {
   syncModelDisplay(agent);
+  logRuntime('runtime', 'bootstrap');
 
   agent.events.on('status', (status) => {
     applyStatus(status);
@@ -71,6 +74,7 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
       startTime: Date.now(),
       displayText,
     });
+    logRuntime('runtime.tool', 'ui:add', { name, id: toolKey });
     micaUI.panels.appendAgentTurnLogItem(
       createToolCallLogItem({
         id: toolLogId,
@@ -89,6 +93,12 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
     const startTime = activeTool?.startTime ?? Date.now();
     const displayText = activeTool?.displayText ?? `${name} result`;
     if (toolKey) activeToolCalls.delete(toolKey);
+    logRuntime('runtime.tool', 'ui:complete', {
+      name,
+      id: toolKey,
+      elapsedMs: Date.now() - startTime,
+      resultChars: result.length,
+    });
     micaUI.panels.replaceAgentTurnLogItem(
       createToolCallLogItem({
         id: toolLogId,
@@ -104,6 +114,10 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
   agent.events.on('usage', (usage) => {
     micaUI.panels.contextSize.set(usage.tokens.input + usage.tokens.output);
     micaUI.panels.cacheHitRate.set(usage.prompt_cache.hit_rate);
+    logRuntime('runtime', 'usage:displayed', {
+      context: usage.tokens.input + usage.tokens.output,
+      cacheHitRate: usage.prompt_cache.hit_rate,
+    });
   });
 
   micaUI.terminalInput.onSubmit((text) => {
@@ -111,6 +125,7 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
   });
 
   micaUI.panels.setOnAbortAgent(() => {
+    logRuntime('runtime', 'abort:requested', undefined, 'warn');
     agent.abort();
     running = false;
     responseBuffer = '';
@@ -124,9 +139,14 @@ export function syncModelDisplay(agent: AgentRuntime) {
   micaUI.panels.modelDisplay.name.set(agent.config.model);
   micaUI.panels.modelDisplay.effort.set(agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none');
   micaUI.panels.modelDisplay.contextWindowSize.set(agent.config.provider.contextWindowSize);
+  logRuntime('runtime', 'model:display_synced', {
+    model: agent.config.model,
+    effort: agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none',
+  });
 }
 
 export function clearUI(agent: AgentRuntime, sessionController?: SessionController) {
+  logRuntime('runtime', 'ui:clear');
   running = false;
   pendingInput = null;
   responseBuffer = '';
@@ -156,9 +176,11 @@ export function isAgentRunning() {
 async function submit(rawText: string, agent: AgentRuntime, sessionController: SessionController) {
   const text = rawText.trim();
   if (!text) return;
+  logRuntime('runtime', 'submit', { chars: text.length, running });
 
   if (running) {
     pendingInput = text;
+    logRuntime('runtime', 'submit:queued', { chars: text.length });
     micaUI.conversation.setPendingInput(text);
     showMessage('消息已排队，将在当前任务完成后发送');
     micaUI.terminalInput.clearText();
@@ -176,6 +198,8 @@ async function submit(rawText: string, agent: AgentRuntime, sessionController: S
 
 async function runTurn(text: string, agent: AgentRuntime, sessionController: SessionController) {
   running = true;
+  const startedAt = Date.now();
+  logRuntime('runtime', 'turn:start', { chars: text.length });
   let hasError = false;
   responseBuffer = '';
   thinkingBuffer = '';
@@ -195,6 +219,7 @@ async function runTurn(text: string, agent: AgentRuntime, sessionController: Ses
     ]);
     micaUI.conversation.clearResponseText();
     sessionController.saveCurrent();
+    logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
   } catch (error) {
     hasError = true;
     reportRuntimeError(error, '请求失败');
@@ -202,6 +227,7 @@ async function runTurn(text: string, agent: AgentRuntime, sessionController: Ses
     endThinkingSegment();
     if (!hasError) micaUI.panels.clearAgentTurnLogItems();
     running = false;
+    logRuntime('runtime', 'turn:finish', { elapsedMs: Date.now() - startedAt, hasError });
   }
 }
 

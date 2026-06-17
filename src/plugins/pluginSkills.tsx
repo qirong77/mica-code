@@ -6,6 +6,7 @@ import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
 import { Markdown } from '../../packages/mica-ui/conversation/Markdown.js';
 import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
 import { getLoadedSkills, reloadSkills } from '../skills/loadSkills.js';
+import { logRuntime } from '../logger.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }
@@ -21,6 +22,7 @@ export function registerSkillsPlugin() {
     description: '列出已安装的 skills',
     action: () => {
       const skills = reloadSkills();
+      logRuntime('plugin.skills', 'opened', { skills: skills.length });
       const panelState = atom<SkillsState>({
         view: 'list',
         selectedIdx: skills.length > 0 ? 0 : 0,
@@ -28,6 +30,7 @@ export function registerSkillsPlugin() {
 
       function hide() {
         micaUI.panels.clearPluginUIs();
+        logRuntime('plugin.skills', 'closed');
       }
 
       function SkillsPanel() {
@@ -127,6 +130,9 @@ export function registerSkillsPlugin() {
 
             if (key.escape) {
               if (state.view === 'detail') {
+                logRuntime('plugin.skills', 'view:list', {
+                  skill: currentSkills[state.detailSkillIdx]?.name,
+                });
                 panelState.set({
                   view: 'list',
                   selectedIdx: state.detailSkillIdx,
@@ -157,6 +163,9 @@ export function registerSkillsPlugin() {
             }
 
             if (key.return) {
+              logRuntime('plugin.skills', 'view:detail', {
+                skill: currentSkills[state.selectedIdx]?.name,
+              });
               panelState.set({
                 view: 'detail',
                 selectedIdx: 0,

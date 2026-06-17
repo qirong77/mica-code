@@ -5,6 +5,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../bootstrap.js';
 import { CONFIG_PATH, getConfig, loadProviderModels, updateConfig } from '../store/index.js';
 import { showSelectCommand } from './selectCommand.js';
+import { logRuntime } from '../logger.js';
 
 export function registerProviderPlugin(agent: AgentRuntime) {
   return {
@@ -12,6 +13,10 @@ export function registerProviderPlugin(agent: AgentRuntime) {
     description: '切换 AI 服务提供商',
     action: () => {
       const config = getConfig();
+      logRuntime('plugin.provider', 'opened', {
+        current: config.provider,
+        providers: config.providers.length,
+      });
       showSelectCommand({
         id: 'select-provider',
         title: 'select provider' + ' (' + CONFIG_PATH + ')',
@@ -26,10 +31,15 @@ export function registerProviderPlugin(agent: AgentRuntime) {
           ),
         })),
         onSelect: (providerId) => {
-          if (providerId === getConfig().provider) return;
+          if (providerId === getConfig().provider) {
+            logRuntime('plugin.provider', 'selected_current', { provider: providerId });
+            return;
+          }
+          logRuntime('plugin.provider', 'selected', { from: getConfig().provider, to: providerId });
           const next = updateConfig((config) => {
             const provider = config.providers.find((item) => item.id === providerId);
             if (!provider) {
+              logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
               throw new Error(`Provider not found: ${providerId}`);
             }
             return {
@@ -42,14 +52,26 @@ export function registerProviderPlugin(agent: AgentRuntime) {
           });
           const provider = next.providers.find((item) => item.id === providerId);
           if (provider?.get_model_url && !provider.models?.length) {
+            logRuntime('plugin.provider', 'models:load:start', { provider: providerId });
             void loadProviderModels(providerId).then(() => {
               agent.reloadConfig(false);
               syncModelDisplay(agent);
+              logRuntime('plugin.provider', 'models:load:done', { provider: providerId });
+            }).catch((error) => {
+              logRuntime('plugin.provider', 'models:load:error', {
+                provider: providerId,
+                error: error instanceof Error ? error.message : String(error),
+              }, 'error');
             });
           }
           agent.reloadConfig();
           syncModelDisplay(agent);
           showMessage(`Provider: ${next.provider}`, 3000);
+          logRuntime('plugin.provider', 'applied', {
+            provider: next.provider,
+            model: next.model,
+            effort: next.effort,
+          });
         },
       });
     },

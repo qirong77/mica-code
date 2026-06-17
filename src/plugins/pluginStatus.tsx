@@ -3,7 +3,9 @@ import { Box, Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import { Dialog, KeyHints } from '../../packages/mica-ui/primitives/index.js';
 import { themeColors } from '../../packages/mica-ui/theme.js';
+import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { logRuntime } from '../logger.js';
 
 export function registerStatusPlugin(agent: AgentRuntime) {
   return {
@@ -16,17 +18,22 @@ export function registerStatusPlugin(agent: AgentRuntime) {
 
       const contextTokens = micaUI.panels.contextSize.get();
       const contextWindowSize = micaUI.panels.modelDisplay.contextWindowSize.get();
-      const cacheHitRate = micaUI.panels.cacheHitRate.get();
+      logRuntime('plugin.status', 'opened', {
+        provider: provider.id,
+        model,
+        effort: provider.supportsEffort !== false ? effort : 'none',
+        messages: snapshot.messages.length,
+        contextTokens,
+        hasLastUsage: Boolean(lastUsage),
+      });
       showStatusPanel(
         formatStatusList([
           ['Model', model],
           ['Effort', provider.supportsEffort !== false ? effort : 'none'],
           ['Provider', provider.name ?? provider.id],
           ['Context', formatContextUsage(contextTokens, contextWindowSize)],
-          ['Cache', formatCacheHitRate(cacheHitRate)],
-          ['Last In', formatTokenValue(lastUsage?.tokens.input)],
-          ['Last Out', formatTokenValue(lastUsage?.tokens.output)],
-          ['Last Total', formatTokenValue(lastUsage?.tokens.total)],
+          ['Total tokens', formatTokenValue(lastUsage?.tokens.total)],
+          ['Cached tokens', formatCachedTokens(lastUsage)],
         ]),
       );
     },
@@ -40,6 +47,7 @@ function showStatusPanel(text: string) {
   function hide() {
     const nextPanels = micaUI.panels.pluginUIs.get().filter((panel) => panel.id !== panelId);
     micaUI.panels.setPluginUIs(nextPanels);
+    logRuntime('plugin.status', 'closed');
   }
 
   function StatusPanel() {
@@ -92,9 +100,13 @@ function formatContextUsage(contextTokens: number, contextWindowSize: number): s
   return `${formatTokens(contextTokens)} / ${formatTokens(contextWindowSize)} (${usagePct}%)`;
 }
 
-function formatCacheHitRate(cacheHitRate: number): string {
-  if (!Number.isFinite(cacheHitRate) || cacheHitRate < 0) return '-';
-  return `${(cacheHitRate * 100).toFixed(0)}%`;
+function formatCachedTokens(lastUsage: AgentUsageRecord | undefined): string {
+  if (!lastUsage) return '-';
+  const cachedTokens = lastUsage.prompt_cache.cached_tokens;
+  const hitRate = lastUsage.prompt_cache.hit_rate;
+  if (!Number.isFinite(cachedTokens) || cachedTokens < 0) return '-';
+  if (!Number.isFinite(hitRate) || hitRate < 0) return formatTokens(cachedTokens);
+  return `${formatTokens(cachedTokens)} (${(hitRate * 100).toFixed(0)}%)`;
 }
 
 function formatStatusList(entries: Array<[string, string]>) {
