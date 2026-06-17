@@ -3,7 +3,7 @@ import { logRuntime } from '../logger.js';
 import { showMessage } from './uiBridge.js';
 
 export class MessageQueue {
-  private pendingInput: string | null = null;
+  private pendingInputs: string[] = [];
   private running = false;
 
   get isRunning() {
@@ -19,22 +19,22 @@ export class MessageQueue {
   }
 
   clear() {
-    this.pendingInput = null;
+    this.pendingInputs = [];
     this.running = false;
+    micaUI.conversation.clearPendingInput();
   }
 
   enqueue(text: string) {
-    this.pendingInput = text;
-    logRuntime('runtime', 'submit:queued', { chars: text.length });
-    micaUI.conversation.setPendingInput(text);
+    this.pendingInputs.push(text);
+    logRuntime('runtime', 'submit:queued', { chars: text.length, queued: this.pendingInputs.length });
+    micaUI.conversation.setPendingInputs(this.pendingInputs);
     showMessage('消息已排队，将在当前任务完成后发送');
     micaUI.terminalInput.clearText();
   }
 
   takePending(): string | null {
-    const next = this.pendingInput;
-    this.pendingInput = null;
-    if (next) micaUI.conversation.clearPendingInput();
+    const next = this.pendingInputs.shift() ?? null;
+    micaUI.conversation.setPendingInputs(this.pendingInputs);
     return next;
   }
 }

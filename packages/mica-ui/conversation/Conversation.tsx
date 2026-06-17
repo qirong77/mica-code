@@ -46,7 +46,7 @@ export const Conversation = (): React.ReactNode => {
   const { colors } = micaUI.theme;
   const messages = useScheduleState(micaUI.conversation.messages);
   const responseText = useScheduleState(micaUI.conversation.responseText);
-  const pendingInput = useScheduleState(micaUI.conversation.pendingInput);
+  const pendingInputs = useScheduleState(micaUI.conversation.pendingInputs);
   const dots = useDots();
 
   const staticItems = useMemo(
@@ -88,19 +88,18 @@ export const Conversation = (): React.ReactNode => {
       <Box>
         <Markdown>{responseText}</Markdown>
       </Box>
-      {pendingInput && (
-        <Box paddingY={1} flexDirection="row">
+      {pendingInputs.map((pendingInput, index) => (
+        <Box key={`pending-${index}`} paddingY={1} flexDirection="row">
           <Text color={colors.dim}>{'\u258c'}</Text>
-          <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
+          <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="column">
+            <Text color={colors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
             <Text color={colors.dim}>
-              {truncateLines(pendingInput, MAX_USER_LINES)}
-              {'（等待当前 agent 执行完成后发送'}
+              {'等待当前 agent 执行完成后发送'}
               {dots}
-              {'）'}
             </Text>
           </Box>
         </Box>
-      )}
+      ))}
     </Box>
   );
 };
