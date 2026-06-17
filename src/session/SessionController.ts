@@ -62,8 +62,10 @@ export class SessionController {
     micaUI.conversation.setMessages(this.agent.toConversationMessages());
     micaUI.conversation.clearResponseText();
     micaUI.conversation.clearPendingInput();
+    micaUI.panels.thinkingText.set('');
     micaUI.panels.clearLogEntries();
     micaUI.panels.clearAgentTurnLogItems();
+    micaUI.panels.clearLog();
     micaUI.panels.clearPluginUIs();
     micaUI.messageBar.clearMessages();
     micaUI.panels.status.idle();

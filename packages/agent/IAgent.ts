@@ -30,6 +30,11 @@ export type AgentCallbacks<TUsage extends AgentUsageRecord = AgentUsageRecord> =
   onUsage?: (usage: TUsage) => void;
 };
 
+export type AgentQueryOptions = {
+  signal?: AbortSignal;
+  shouldContinue?: () => boolean;
+};
+
 export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = AgentUsageRecord> = {
   model: string;
   messages: TMessage[];
@@ -50,7 +55,7 @@ export interface IAgent<
 
   configure(options: TOptions): void;
   reset(): void;
-  query(question: string): Promise<string>;
+  query(question: string, options?: AgentQueryOptions): Promise<string>;
   toConversationMessages(): MicaUiConversationMessage[];
   getSnapshot(): AgentSnapshot<TMessage, TUsage>;
   loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
@@ -74,7 +79,7 @@ export abstract class BaseAgent<
 
   abstract configure(options: TOptions): void;
   abstract reset(): void;
-  abstract query(question: string): Promise<string>;
+  abstract query(question: string, options?: AgentQueryOptions): Promise<string>;
   abstract toConversationMessages(): MicaUiConversationMessage[];
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 

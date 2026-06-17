@@ -1,6 +1,6 @@
 import { OpenAI } from 'openai';
 import { executeTool, getToolDefinitions } from '../tools';
-import { BaseAgent, type AgentSnapshot, type AgentUsageRecord } from './IAgent';
+import { BaseAgent, type AgentQueryOptions, type AgentSnapshot, type AgentUsageRecord } from './IAgent';
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types';
 import { buildSystemPrompt } from './prompt';
 
@@ -16,6 +16,18 @@ export type OpenAIClientOptions = {
 export type UsageRecord = AgentUsageRecord;
 
 const MAX_HISTORICAL_TOOL_RESULT_LENGTH = 12_000;
+
+function abortError(): Error {
+  const error = new Error('Agent query aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfQueryStopped(options?: AgentQueryOptions): void {
+  if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
+    throw abortError();
+  }
+}
 
 function getClient(options: OpenAIClientOptions) {
   return new OpenAI({
@@ -93,7 +105,7 @@ export class OpenAIClient extends BaseAgent<
       },
     }));
   }
-  async query(question: string): Promise<string> {
+  async query(question: string, options?: AgentQueryOptions): Promise<string> {
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -103,27 +115,32 @@ export class OpenAIClient extends BaseAgent<
     ];
 
     while (true) {
+      throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await getClient(this).chat.completions.create({
-        model: this.model,
-        messages,
-        ...(this.tools
-          ? {
-              tools: this.openaiTools,
-              tool_choice: 'auto' as const,
-            }
-          : {}),
-        ...(this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort as any } : {}),
-        stream: true,
-        stream_options: {
-          include_usage: true,
+      const stream = await getClient(this).chat.completions.create(
+        {
+          model: this.model,
+          messages,
+          ...(this.tools
+            ? {
+                tools: this.openaiTools,
+                tool_choice: 'auto' as const,
+              }
+            : {}),
+          ...(this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort as any } : {}),
+          stream: true,
+          stream_options: {
+            include_usage: true,
+          },
         },
-      });
+        { signal: options?.signal },
+      );
 
       let content = '';
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
 
       for await (const chunk of stream) {
+        throwIfQueryStopped(options);
         if (chunk.usage) {
           this.recordUsage(chunk.usage, {
             model: chunk.model,
@@ -138,10 +155,12 @@ export class OpenAIClient extends BaseAgent<
           if (!delta) continue;
           if (typeof delta.content === 'string' && delta.content) {
             content += delta.content;
+            throwIfQueryStopped(options);
             this.onText?.(delta.content);
           }
           const reasoning = (delta as any).reasoning_content;
           if (typeof reasoning === 'string' && reasoning) {
+            throwIfQueryStopped(options);
             this.onThinking?.(reasoning);
           }
           if (delta.tool_calls) {
@@ -187,14 +206,18 @@ export class OpenAIClient extends BaseAgent<
       if (message.tool_calls && message.tool_calls.length > 0) {
         messages.push(message);
         for (const tc of message.tool_calls) {
+          throwIfQueryStopped(options);
           if (tc.type !== 'function') continue;
           this.onToolCall?.(tc.function.name, tc.function.arguments, tc.id);
           let result: string;
           try {
-            result = await executeTool(tc.function.name, JSON.parse(tc.function.arguments));
+            result = await executeTool(tc.function.name, JSON.parse(tc.function.arguments), {
+              signal: options?.signal,
+            });
           } catch (e) {
             result = `工具执行失败: ${e instanceof Error ? e.message : String(e)}`;
           }
+          throwIfQueryStopped(options);
           this.onToolResult?.(tc.function.name, result, tc.id);
           messages.push({
             role: 'tool',

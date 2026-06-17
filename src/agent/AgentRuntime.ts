@@ -7,6 +7,7 @@ import { getConfig } from '../store/index.js';
 import { logRuntime } from '../logger.js';
 
 export type AgentRuntimeStatus =
+  | { type: 'idle' }
   | { type: 'connecting' }
   | { type: 'thinking' }
   | { type: 'streaming' }
@@ -38,10 +39,18 @@ type AgentRuntimeConfig = {
   effort: EffortOption;
 };
 
+export class AgentAbortError extends Error {
+  constructor(readonly runId: number) {
+    super('Agent run aborted');
+    this.name = 'AgentAbortError';
+  }
+}
+
 export class AgentRuntime {
   readonly events = mitt<AgentRuntimeEvents>();
   private client: IAgent<OpenAIClientOptions> | null = null;
   private runId = 0;
+  private activeAbortController: AbortController | null = null;
   private currentConfig: AgentRuntimeConfig;
 
   constructor() {
@@ -92,12 +101,16 @@ export class AgentRuntime {
 
   abort() {
     this.runId++;
+    this.activeAbortController?.abort();
+    this.activeAbortController = null;
     logRuntime('agent', 'abort', { runId: this.runId }, 'warn');
-    this.events.emit('status', { type: 'error', message: '已中止当前 agent' });
+    this.events.emit('status', { type: 'idle' });
   }
 
   clearSession() {
     this.runId++;
+    this.activeAbortController?.abort();
+    this.activeAbortController = null;
     this.client?.reset();
     logRuntime('agent', 'session:cleared', { runId: this.runId });
   }
@@ -151,9 +164,14 @@ export class AgentRuntime {
       throw new Error(message);
     }
 
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
     this.events.emit('status', { type: 'connecting' });
     try {
-      const text = await this.client.query(question);
+      const text = await this.client.query(question, {
+        signal: abortController.signal,
+        shouldContinue: () => this.isCurrent(runId),
+      });
       if (this.isCurrent(runId)) {
         this.events.emit('status', {
           type: 'completed',
@@ -167,10 +185,18 @@ export class AgentRuntime {
       }
       return { runId, text };
     } catch (error) {
+      if (!this.isCurrent(runId) || isAbortError(error)) {
+        logRuntime('agent', 'run:aborted', { runId }, 'warn');
+        throw new AgentAbortError(runId);
+      }
       const message = error instanceof Error ? error.message : String(error);
       if (this.isCurrent(runId)) this.events.emit('status', { type: 'error', message });
       logRuntime('agent', 'run:error', { runId, message }, 'error');
       throw error;
+    } finally {
+      if (this.activeAbortController === abortController) {
+        this.activeAbortController = null;
+      }
     }
   }
 
@@ -239,4 +265,8 @@ export class AgentRuntime {
       effort: config.effort,
     };
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
 }

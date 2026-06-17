@@ -179,7 +179,6 @@ function TerminalInput() {
 
     if (key.escape) {
       if (activePluginUIs.filter((x) => x.onInput).length === 0) {
-        abortAgent();
         setLocalText('');
         setCursorOffset(0);
         input.text.set('');
