@@ -91,11 +91,12 @@ export const Conversation = (): React.ReactNode => {
       {pendingInputs.map((pendingInput, index) => (
         <Box key={`pending-${index}`} paddingY={1} flexDirection="row">
           <Text color={colors.dim}>{'\u258c'}</Text>
-          <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="column">
+          <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="row">
             <Text color={colors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
             <Text color={colors.dim}>
-              {'等待当前 agent 执行完成后发送'}
+              {'（等待当前 agent 执行完成后发送'}
               {dots}
+              {'）'}
             </Text>
           </Box>
         </Box>
