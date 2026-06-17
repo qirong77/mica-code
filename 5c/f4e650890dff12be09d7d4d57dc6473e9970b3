@@ -1,0 +1,14 @@
+packages/tools/utils/display.ts
+  h_a456b67147438e 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5cf4e650890dff12be09d7d4d57dc6473e9970b3",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
