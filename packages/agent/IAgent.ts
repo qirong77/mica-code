@@ -1,7 +1,4 @@
-import type {
-  MicaUiConversationMessage,
-  MicaUiContentBlockParam,
-} from "../mica-ui/types.js";
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types.js';
 
 export type AgentUsageRecord = {
   turn_id: number;
@@ -25,19 +22,15 @@ export type AgentUsageRecord = {
   };
 };
 
-export type AgentCallbacks<TUsage extends AgentUsageRecord = AgentUsageRecord> =
-  {
-    onText?: (text: string) => void;
-    onThinking?: (thinking: string) => void;
-    onToolCall?: (name: string, args: string, id?: string) => void;
-    onToolResult?: (name: string, result: string, id?: string) => void;
-    onUsage?: (usage: TUsage) => void;
-  };
+export type AgentCallbacks<TUsage extends AgentUsageRecord = AgentUsageRecord> = {
+  onText?: (text: string) => void;
+  onThinking?: (thinking: string) => void;
+  onToolCall?: (name: string, args: string, id?: string) => void;
+  onToolResult?: (name: string, result: string, id?: string) => void;
+  onUsage?: (usage: TUsage) => void;
+};
 
-export type AgentSnapshot<
-  TMessage = unknown,
-  TUsage extends AgentUsageRecord = AgentUsageRecord,
-> = {
+export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = AgentUsageRecord> = {
   model: string;
   messages: TMessage[];
   usageHistory: TUsage[];
@@ -76,9 +69,7 @@ export abstract class BaseAgent<
   onText: ((text: string) => void) | undefined;
   onThinking: ((thinking: string) => void) | undefined;
   onToolCall: ((name: string, args: string, id?: string) => void) | undefined;
-  onToolResult:
-    | ((name: string, result: string, id?: string) => void)
-    | undefined;
+  onToolResult: ((name: string, result: string, id?: string) => void) | undefined;
   onUsage: ((usage: TUsage) => void) | undefined;
 
   abstract configure(options: TOptions): void;
@@ -97,18 +88,15 @@ export abstract class BaseAgent<
     };
   }
 
-  protected textMessage(
-    role: "user" | "assistant",
-    text: string,
-  ): MicaUiConversationMessage | null {
+  protected textMessage(role: 'user' | 'assistant', text: string): MicaUiConversationMessage | null {
     if (!text) return null;
-    return { role, content: [{ type: "text", text }] };
+    return { role, content: [{ type: 'text', text }] };
   }
 
   protected contentBlocksToText(blocks: MicaUiContentBlockParam[]): string {
     return blocks
-      .filter((block) => block.type === "text")
+      .filter((block) => block.type === 'text')
       .map((block) => block.text)
-      .join("\n");
+      .join('\n');
   }
 }

@@ -1,26 +1,24 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import type { Skill } from "./types.js";
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import type { Skill } from './types.js';
 
 function getUserSkillsDirs(): string[] {
-  return [join(homedir(), ".mica", "skills")];
+  return [join(homedir(), '.mica', 'skills')];
 }
 
-function parseFrontmatter(
-  raw: string,
-): { frontmatter: Record<string, unknown>; content: string } {
+function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; content: string } {
   const trimmed = raw.trimStart();
-  if (!trimmed.startsWith("---")) {
+  if (!trimmed.startsWith('---')) {
     return { frontmatter: {}, content: raw };
   }
 
-  const secondNewline = trimmed.indexOf("\n", 3);
+  const secondNewline = trimmed.indexOf('\n', 3);
   if (secondNewline === -1) {
     return { frontmatter: {}, content: raw };
   }
 
-  const endMarker = trimmed.indexOf("\n---", secondNewline);
+  const endMarker = trimmed.indexOf('\n---', secondNewline);
   if (endMarker === -1) {
     return { frontmatter: {}, content: raw };
   }
@@ -29,11 +27,11 @@ function parseFrontmatter(
   const body = trimmed.slice(endMarker + 4).trimStart();
   const frontmatter: Record<string, unknown> = {};
 
-  let currentKey = "";
+  let currentKey = '';
   let currentList: string[] = [];
   let inList = false;
 
-  for (const rawLine of fmText.split("\n")) {
+  for (const rawLine of fmText.split('\n')) {
     const line = rawLine.trim();
     if (!line) continue;
 
@@ -58,18 +56,18 @@ function parseFrontmatter(
     currentKey = kvMatch[1];
     const value = kvMatch[2].trim();
 
-    if (value === "") {
+    if (value === '') {
       frontmatter[currentKey] = value;
       currentList = [];
       continue;
     }
 
-    if (value === "true") {
+    if (value === 'true') {
       frontmatter[currentKey] = true;
       continue;
     }
 
-    if (value === "false") {
+    if (value === 'false') {
       frontmatter[currentKey] = false;
       continue;
     }
@@ -86,18 +84,18 @@ function parseFrontmatter(
 }
 
 function loadSkillFromDir(skillDir: string, name: string): Skill | null {
-  const skillFilePath = join(skillDir, "SKILL.md");
+  const skillFilePath = join(skillDir, 'SKILL.md');
   if (!existsSync(skillFilePath)) return null;
 
   try {
-    const raw = readFileSync(skillFilePath, "utf-8");
+    const raw = readFileSync(skillFilePath, 'utf-8');
     const { frontmatter, content } = parseFrontmatter(raw);
 
     return {
       name: String(frontmatter.name || name),
       description: String(frontmatter.description || name),
       whenToUse: frontmatter.when_to_use as string | undefined,
-      argumentHint: frontmatter["argument-hint"] as string | undefined,
+      argumentHint: frontmatter['argument-hint'] as string | undefined,
       content,
       baseDir: skillDir,
     };

@@ -161,11 +161,11 @@ function formatToken(
 ): string {
   switch (token.type) {
     case 'blockquote': {
-      const inner = (token.tokens ?? []).map(t => formatToken(t, 0, null, null, highlight)).join('');
+      const inner = (token.tokens ?? []).map((t) => formatToken(t, 0, null, null, highlight)).join('');
       const bar = chalk.dim(BLOCKQUOTE_BAR);
       return inner
         .split(EOL)
-        .map(line => (stripAnsi(line).trim() ? `${bar} ${chalk.italic(line)}` : line))
+        .map((line) => (stripAnsi(line).trim() ? `${bar} ${chalk.italic(line)}` : line))
         .join(EOL);
     }
     case 'code': {
@@ -180,26 +180,26 @@ function formatToken(
       return themeChalk('permission')(token.text);
     }
     case 'em':
-      return chalk.italic((token.tokens ?? []).map(t => formatToken(t, 0, null, parent, highlight)).join(''));
+      return chalk.italic((token.tokens ?? []).map((t) => formatToken(t, 0, null, parent, highlight)).join(''));
     case 'strong':
-      return chalk.bold((token.tokens ?? []).map(t => formatToken(t, 0, null, parent, highlight)).join(''));
+      return chalk.bold((token.tokens ?? []).map((t) => formatToken(t, 0, null, parent, highlight)).join(''));
     case 'heading':
       switch (token.depth) {
         case 1:
           return (
             chalk.bold.italic.underline(
-              (token.tokens ?? []).map(t => formatToken(t, 0, null, null, highlight)).join(''),
+              (token.tokens ?? []).map((t) => formatToken(t, 0, null, null, highlight)).join(''),
             ) +
             EOL +
             EOL
           );
         case 2:
           return (
-            chalk.bold((token.tokens ?? []).map(t => formatToken(t, 0, null, null, highlight)).join('')) + EOL + EOL
+            chalk.bold((token.tokens ?? []).map((t) => formatToken(t, 0, null, null, highlight)).join('')) + EOL + EOL
           );
         default:
           return (
-            chalk.bold((token.tokens ?? []).map(t => formatToken(t, 0, null, null, highlight)).join('')) + EOL + EOL
+            chalk.bold((token.tokens ?? []).map((t) => formatToken(t, 0, null, null, highlight)).join('')) + EOL + EOL
           );
       }
     case 'hr':
@@ -210,7 +210,7 @@ function formatToken(
       if (token.href.startsWith('mailto:')) {
         return token.href.replace(/^mailto:/, '');
       }
-      const linkText = (token.tokens ?? []).map(t => formatToken(t, 0, null, token, highlight)).join('');
+      const linkText = (token.tokens ?? []).map((t) => formatToken(t, 0, null, token, highlight)).join('');
       const plainLinkText = stripAnsi(linkText);
       if (plainLinkText && plainLinkText !== token.href) {
         return createHyperlink(token.href, linkText);
@@ -226,10 +226,10 @@ function formatToken(
     }
     case 'list_item':
       return (token.tokens ?? [])
-        .map(t => `${'  '.repeat(listDepth)}${formatToken(t, listDepth + 1, orderedListNumber, token, highlight)}`)
+        .map((t) => `${'  '.repeat(listDepth)}${formatToken(t, listDepth + 1, orderedListNumber, token, highlight)}`)
         .join('');
     case 'paragraph':
-      return (token.tokens ?? []).map(t => formatToken(t, 0, null, null, highlight)).join('') + EOL;
+      return (token.tokens ?? []).map((t) => formatToken(t, 0, null, null, highlight)).join('') + EOL;
     case 'space':
       return EOL;
     case 'br':
@@ -237,14 +237,14 @@ function formatToken(
     case 'text':
       if (parent?.type === 'link') return token.text;
       if (parent?.type === 'list_item') {
-        return `${orderedListNumber === null ? '-' : getListNumber(listDepth, orderedListNumber) + '.'} ${token.tokens ? token.tokens.map(t => formatToken(t, listDepth, orderedListNumber, token, highlight)).join('') : linkifyIssueReferences(token.text)}${EOL}`;
+        return `${orderedListNumber === null ? '-' : getListNumber(listDepth, orderedListNumber) + '.'} ${token.tokens ? token.tokens.map((t) => formatToken(t, listDepth, orderedListNumber, token, highlight)).join('') : linkifyIssueReferences(token.text)}${EOL}`;
       }
       return linkifyIssueReferences(token.text);
     case 'table': {
       const tableToken = token as Tokens.Table;
 
       function getDisplayText(tokens: Token[] | undefined): string {
-        return stripAnsi(tokens?.map(t => formatToken(t, 0, null, null, highlight)).join('') ?? '');
+        return stripAnsi(tokens?.map((t) => formatToken(t, 0, null, null, highlight)).join('') ?? '');
       }
 
       const columnWidths = tableToken.header.map((header, index) => {
@@ -258,7 +258,7 @@ function formatToken(
 
       let tableOutput = '| ';
       tableToken.header.forEach((header, index) => {
-        const content = header.tokens?.map(t => formatToken(t, 0, null, null, highlight)).join('') ?? '';
+        const content = header.tokens?.map((t) => formatToken(t, 0, null, null, highlight)).join('') ?? '';
         const displayText = getDisplayText(header.tokens);
         const width = columnWidths[index]!;
         const align = tableToken.align?.[index];
@@ -267,15 +267,15 @@ function formatToken(
       tableOutput = tableOutput.trimEnd() + EOL;
 
       tableOutput += '|';
-      columnWidths.forEach(width => {
+      columnWidths.forEach((width) => {
         tableOutput += '-'.repeat(width + 2) + '|';
       });
       tableOutput += EOL;
 
-      tableToken.rows.forEach(row => {
+      tableToken.rows.forEach((row) => {
         tableOutput += '| ';
         row.forEach((cell, index) => {
-          const content = cell.tokens?.map(t => formatToken(t, 0, null, null, highlight)).join('') ?? '';
+          const content = cell.tokens?.map((t) => formatToken(t, 0, null, null, highlight)).join('') ?? '';
           const displayText = getDisplayText(cell.tokens);
           const width = columnWidths[index]!;
           const align = tableToken.align?.[index];
@@ -337,7 +337,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
   function formatCell(tokens: Token[] | undefined): string {
     const cached = formatCache.get(tokens);
     if (cached !== undefined) return cached;
-    const result = tokens?.map(t => formatToken(t, 0, null, null, highlight)).join('') ?? '';
+    const result = tokens?.map((t) => formatToken(t, 0, null, null, highlight)).join('') ?? '';
     formatCache.set(tokens, result);
     return result;
   }
@@ -352,9 +352,9 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
 
   function getMinWidth(tokens: Token[] | undefined): number {
     const text = getPlainText(tokens);
-    const words = text.split(/\s+/).filter(w => w.length > 0);
+    const words = text.split(/\s+/).filter((w) => w.length > 0);
     if (words.length === 0) return MIN_COLUMN_WIDTH;
-    return Math.max(...words.map(w => stringWidth(w)), MIN_COLUMN_WIDTH);
+    return Math.max(...words.map((w) => stringWidth(w)), MIN_COLUMN_WIDTH);
   }
 
   function getIdealWidth(tokens: Token[] | undefined): number {
@@ -402,7 +402,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
   } else {
     needsHardWrap = true;
     const scaleFactor = availableWidth / totalMin;
-    columnWidths = minWidths.map(w => Math.max(Math.floor(w * scaleFactor), MIN_COLUMN_WIDTH));
+    columnWidths = minWidths.map((w) => Math.max(Math.floor(w * scaleFactor), MIN_COLUMN_WIDTH));
   }
 
   const wrapCache = new Map<Token[] | undefined, string[]>();
@@ -430,8 +430,8 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
 
   function renderRowLines(cells: Array<{ tokens?: Token[] }>, isHeader: boolean): string[] {
     const cellLines = cells.map((cell, colIndex) => getWrappedLines(cell.tokens, colIndex));
-    const maxLines = Math.max(...cellLines.map(lines => lines.length), 1);
-    const verticalOffsets = cellLines.map(lines => Math.floor((maxLines - lines.length) / 2));
+    const maxLines = Math.max(...cellLines.map((lines) => lines.length), 1);
+    const verticalOffsets = cellLines.map((lines) => Math.floor((maxLines - lines.length) / 2));
 
     const result: string[] = [];
     for (let lineIdx = 0; lineIdx < maxLines; lineIdx++) {
@@ -466,7 +466,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
 
   function renderVerticalFormat(): string {
     const lines: string[] = [];
-    const headers = token.header.map(h => getPlainText(h.tokens));
+    const headers = token.header.map((h) => getPlainText(h.tokens));
     const separatorWidth = Math.min(terminalWidth - 1, 40);
     const separator = '\u2500'.repeat(separatorWidth);
     const wrapIndent = '  ';
@@ -490,7 +490,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
         } else {
           const remainingText = firstPassLines
             .slice(1)
-            .map(l => l.trim())
+            .map((l) => l.trim())
             .join(' ');
           const rewrapped = wrapText(remainingText, subsequentLineWidth);
           wrappedValue = [firstLine, ...rewrapped];
@@ -524,7 +524,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
   });
   tableLines.push(renderBorderLine('bottom'));
 
-  const maxLineWidth = Math.max(...tableLines.map(line => stringWidth(stripAnsi(line))));
+  const maxLineWidth = Math.max(...tableLines.map((line) => stringWidth(stripAnsi(line))));
   if (maxLineWidth > terminalWidth - SAFETY_MARGIN) {
     return <Ansi>{renderVerticalFormat()}</Ansi>;
   }

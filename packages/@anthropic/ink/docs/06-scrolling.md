@@ -5,24 +5,24 @@
 A scrollable container with imperative scroll API, viewport culling, and sticky scroll support.
 
 ```tsx
-import { ScrollBox } from '@anthropic/ink'
-import type { ScrollBoxHandle } from '@anthropic/ink'
+import { ScrollBox } from '@anthropic/ink';
+import type { ScrollBoxHandle } from '@anthropic/ink';
 
 function MessageList({ messages }) {
-  const scrollRef = useRef<ScrollBoxHandle>(null)
+  const scrollRef = useRef<ScrollBoxHandle>(null);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    scrollRef.current?.scrollToBottom()
-  }, [messages.length])
+    scrollRef.current?.scrollToBottom();
+  }, [messages.length]);
 
   return (
     <ScrollBox ref={scrollRef} stickyScroll flexDirection="column" height={20}>
-      {messages.map(msg => (
+      {messages.map((msg) => (
         <Text key={msg.id}>{msg.text}</Text>
       ))}
     </ScrollBox>
-  )
+  );
 }
 ```
 
@@ -30,38 +30,38 @@ function MessageList({ messages }) {
 
 ScrollBox accepts all Box layout props except `textWrap`, `overflow`, `overflowX`, `overflowY` (these are managed internally):
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `ref` | `Ref<ScrollBoxHandle>` | - | Imperative handle |
-| `stickyScroll` | `boolean` | `false` | Auto-follow new content |
-| *(layout props)* | `Styles` | - | Width, height, padding, etc. |
+| Prop             | Type                   | Default | Description                  |
+| ---------------- | ---------------------- | ------- | ---------------------------- |
+| `ref`            | `Ref<ScrollBoxHandle>` | -       | Imperative handle            |
+| `stickyScroll`   | `boolean`              | `false` | Auto-follow new content      |
+| _(layout props)_ | `Styles`               | -       | Width, height, padding, etc. |
 
 ### ScrollBoxHandle (Imperative API)
 
 ```ts
 interface ScrollBoxHandle {
   // Absolute positioning
-  scrollTo(y: number): void
-  scrollToElement(el: DOMElement, offset?: number): void
-  scrollToBottom(): void
+  scrollTo(y: number): void;
+  scrollToElement(el: DOMElement, offset?: number): void;
+  scrollToBottom(): void;
 
   // Relative positioning
-  scrollBy(dy: number): void
+  scrollBy(dy: number): void;
 
   // Query state
-  getScrollTop(): number
-  getPendingDelta(): number
-  getScrollHeight(): number
-  getFreshScrollHeight(): number
-  getViewportHeight(): number
-  getViewportTop(): number
-  isSticky(): boolean
+  getScrollTop(): number;
+  getPendingDelta(): number;
+  getScrollHeight(): number;
+  getFreshScrollHeight(): number;
+  getViewportHeight(): number;
+  getViewportTop(): number;
+  isSticky(): boolean;
 
   // Events
-  subscribe(listener: () => void): () => void
+  subscribe(listener: () => void): () => void;
 
   // Virtual scroll support
-  setClampBounds(min?: number, max?: number): void
+  setClampBounds(min?: number, max?: number): void;
 }
 ```
 
@@ -72,7 +72,7 @@ interface ScrollBoxHandle {
 Jump to an absolute position. Breaks sticky scroll.
 
 ```tsx
-scrollRef.current?.scrollTo(0)  // Scroll to top
+scrollRef.current?.scrollTo(0); // Scroll to top
 ```
 
 #### `scrollBy(dy)`
@@ -80,8 +80,8 @@ scrollRef.current?.scrollTo(0)  // Scroll to top
 Scroll by a relative amount. Accumulates deltas for smooth scrolling.
 
 ```tsx
-scrollRef.current?.scrollBy(3)   // Scroll down 3 rows
-scrollRef.current?.scrollBy(-5)  // Scroll up 5 rows
+scrollRef.current?.scrollBy(3); // Scroll down 3 rows
+scrollRef.current?.scrollBy(-5); // Scroll up 5 rows
 ```
 
 #### `scrollToElement(el, offset?)`
@@ -89,8 +89,8 @@ scrollRef.current?.scrollBy(-5)  // Scroll up 5 rows
 Scroll so a specific DOM element is at the viewport top. More reliable than `scrollTo` because it reads the element's position at render time (avoids stale layout values).
 
 ```tsx
-const elementRef = useRef<DOMElement>(null)
-scrollRef.current?.scrollToElement(elementRef.current!, 2)
+const elementRef = useRef<DOMElement>(null);
+scrollRef.current?.scrollToElement(elementRef.current!, 2);
 ```
 
 #### `scrollToBottom()`
@@ -98,7 +98,7 @@ scrollRef.current?.scrollToElement(elementRef.current!, 2)
 Pin scroll to bottom. Enables sticky mode.
 
 ```tsx
-scrollRef.current?.scrollToBottom()
+scrollRef.current?.scrollToBottom();
 ```
 
 #### `isSticky()`
@@ -118,9 +118,9 @@ Subscribe to imperative scroll changes. Returns unsubscribe function.
 ```tsx
 useEffect(() => {
   return scrollRef.current?.subscribe(() => {
-    console.log('Scroll position changed')
-  })
-}, [])
+    console.log('Scroll position changed');
+  });
+}, []);
 ```
 
 ### Sticky Scroll
@@ -148,10 +148,10 @@ ScrollBox only renders children that intersect the visible viewport. Children ou
 For very large lists, use `setClampBounds` in combination with a virtual scrolling hook:
 
 ```tsx
-const scrollRef = useRef<ScrollBoxHandle>(null)
+const scrollRef = useRef<ScrollBoxHandle>(null);
 
 // After computing visible range
-scrollRef.current?.setClampBounds(firstVisibleRow, lastVisibleRow)
+scrollRef.current?.setClampBounds(firstVisibleRow, lastVisibleRow);
 ```
 
 This prevents burst `scrollTo` calls from showing blank space beyond mounted content.
@@ -159,6 +159,7 @@ This prevents burst `scrollTo` calls from showing blank space beyond mounted con
 ### Scroll Events
 
 ScrollBox bypasses React state for scroll operations. Instead:
+
 1. `scrollTo`/`scrollBy` mutate `scrollTop` directly on the DOM node
 2. The node is marked dirty
 3. A microtask-deferred render fires to coalesce multiple scroll events

@@ -1,9 +1,5 @@
 import mitt from 'mitt';
-import {
-  createSubAgent,
-  OpenAIClient,
-  type OpenAIClientOptions,
-} from '../../packages/agent/OpenAIClient.js';
+import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/OpenAIClient.js';
 import type { AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/IAgent.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
 import type { EffortOption, ProviderDefinition } from '../store/index.js';
@@ -97,8 +93,7 @@ export class AgentRuntime {
     return {
       providerId: this.currentConfig.provider.id,
       model: this.currentConfig.model,
-      effort:
-        this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+      effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
@@ -182,8 +177,7 @@ export class AgentRuntime {
       apiKey: this.currentConfig.provider.api_key,
       baseURL: this.currentConfig.provider.api_base,
       model: this.currentConfig.model,
-      effort:
-        this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+      effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
     };
   }
 

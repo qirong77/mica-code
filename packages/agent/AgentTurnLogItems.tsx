@@ -21,7 +21,9 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
   function ThinkingLogItem() {
     return (
       <Box>
-        <Text dimColor wrap="wrap">{text}</Text>
+        <Text dimColor wrap="wrap">
+          {text}
+        </Text>
       </Box>
     );
   }
@@ -49,7 +51,8 @@ export function createToolCallLogItem({
     const spinner = useSpinner();
     const now = useNow();
     const outputLines = toolName === 'run_shell' && output ? output.replace(/\n$/, '').split('\n') : [];
-    const capped = outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
+    const capped =
+      outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
     const elapsed = elapsedMs ?? Math.max(0, now - startTime);
     return (
       <Box flexDirection="column">
@@ -69,7 +72,12 @@ export function createToolCallLogItem({
         )}
         {capped.length > 0 ? (
           <Box flexDirection="column">
-            {capped.map((line, i) => <Text key={i} dimColor>{'  │ '}{line}</Text>)}
+            {capped.map((line, i) => (
+              <Text key={i} dimColor>
+                {'  │ '}
+                {line}
+              </Text>
+            ))}
           </Box>
         ) : null}
       </Box>
@@ -88,21 +96,29 @@ export function createErrorLogItem({
   error: unknown;
 }): MicaUiAgentTurnLogItem {
   const message = error instanceof Error ? error.message : String(error);
-  const stackLines = error instanceof Error && error.stack
-    ? error.stack.split('\n').slice(1, 12)
-    : [];
+  const stackLines = error instanceof Error && error.stack ? error.stack.split('\n').slice(1, 12) : [];
 
   function ErrorLogItem() {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row">
           <Text color={themeColors.error}> ✗ </Text>
-          <Text color={themeColors.error} bold>{title}</Text>
+          <Text color={themeColors.error} bold>
+            {title}
+          </Text>
         </Box>
-        <Text color={themeColors.error} wrap="wrap">  {message}</Text>
+        <Text color={themeColors.error} wrap="wrap">
+          {' '}
+          {message}
+        </Text>
         {stackLines.length > 0 ? (
           <Box flexDirection="column">
-            {stackLines.map((line, i) => <Text key={i} dimColor wrap="wrap">{'  │ '}{line.trim()}</Text>)}
+            {stackLines.map((line, i) => (
+              <Text key={i} dimColor wrap="wrap">
+                {'  │ '}
+                {line.trim()}
+              </Text>
+            ))}
           </Box>
         ) : null}
       </Box>

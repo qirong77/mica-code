@@ -557,7 +557,7 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
   // Mode-1003 no-button motion is also excluded — passive cursor drift is
   // not engagement (would suppress idle notifications + defer housekeeping).
   if (
-    items.some(i => i.kind === 'key' || (i.kind === 'mouse' && !((i.button & 0x20) !== 0 && (i.button & 0x03) === 3)))
+    items.some((i) => i.kind === 'key' || (i.kind === 'mouse' && !((i.button & 0x20) !== 0 && (i.button & 0x03) === 3)))
   ) {
     defaultCallbacks.updateLastInteractionTime();
   }

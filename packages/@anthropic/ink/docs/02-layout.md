@@ -7,12 +7,12 @@ Ink uses [Yoga](https://yogalayout.com/) (Facebook's cross-platform layout engin
 `Box` is the fundamental layout primitive. It is the terminal equivalent of `<div style="display: flex">`.
 
 ```tsx
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '@anthropic/ink';
 
 <Box flexDirection="row" gap={1}>
   <Text>Left</Text>
   <Text>Right</Text>
-</Box>
+</Box>;
 ```
 
 ### Box Props (Styles)
@@ -168,10 +168,10 @@ Control individual sides and colors:
 ```tsx
 <Box
   borderStyle="single"
-  borderTop={false}           // Hide top border
-  borderBottom={true}         // Show bottom border
-  borderColor="rgb(255,0,0)"  // Red border
-  borderDimColor={true}       // Dim the border
+  borderTop={false} // Hide top border
+  borderBottom={true} // Show bottom border
+  borderColor="rgb(255,0,0)" // Red border
+  borderDimColor={true} // Dim the border
 >
   ...
 </Box>
@@ -192,10 +192,7 @@ Per-side colors:
 Border text (labels in the border):
 
 ```tsx
-<Box
-  borderStyle="round"
-  borderText={{ title: "My Panel", align: "left" }}
-/>
+<Box borderStyle="round" borderText={{ title: 'My Panel', align: 'left' }} />
 ```
 
 #### Background
@@ -296,13 +293,7 @@ Inserts line breaks.
 ### Bordered panel with title
 
 ```tsx
-<Box
-  flexDirection="column"
-  borderStyle="round"
-  borderColor="rgb(87,105,247)"
-  padding={1}
-  width={60}
->
+<Box flexDirection="column" borderStyle="round" borderColor="rgb(87,105,247)" padding={1} width={60}>
   <Text bold>Panel Title</Text>
   <Text>Panel content goes here.</Text>
 </Box>
@@ -313,22 +304,22 @@ Inserts line breaks.
 Wraps a region to exclude it from text selection in alt-screen mode. A convenience wrapper around `Box` with `noSelect` set.
 
 ```tsx
-import { NoSelect } from '@anthropic/ink'
+import { NoSelect } from '@anthropic/ink';
 
 <Box flexDirection="row">
   <NoSelect>
     <Text dimColor>1 │ </Text>
   </NoSelect>
   <Text>selectable code here</Text>
-</Box>
+</Box>;
 ```
 
 ### Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `children` | `ReactNode` | - | Content |
-| `fromLeftEdge` | `boolean` | `false` | Extend exclusion from column 0 to box's right edge |
+| Prop           | Type        | Default | Description                                        |
+| -------------- | ----------- | ------- | -------------------------------------------------- |
+| `children`     | `ReactNode` | -       | Content                                            |
+| `fromLeftEdge` | `boolean`   | `false` | Extend exclusion from column 0 to box's right edge |
 
 Accepts all `BoxProps` except `noSelect`.
 

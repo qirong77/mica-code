@@ -1,12 +1,12 @@
-import { micaUI } from "../packages/mica-ui/index.js";
-import type { AgentRuntime, AgentRuntimeStatus } from "./agent/AgentRuntime.js";
+import { micaUI } from '../packages/mica-ui/index.js';
+import type { AgentRuntime, AgentRuntimeStatus } from './agent/AgentRuntime.js';
 import {
   createErrorLogItem,
   createThinkingLogItem,
   createToolCallLogItem,
-} from "../packages/agent/AgentTurnLogItems.js";
-import { getToolDisplayText } from "../packages/tools/index.js";
-import type { SessionController } from "./session/SessionController.js";
+} from '../packages/agent/AgentTurnLogItems.js';
+import { getToolDisplayText } from '../packages/tools/index.js';
+import type { SessionController } from './session/SessionController.js';
 
 type BootstrapOptions = {
   agent: AgentRuntime;
@@ -18,15 +18,12 @@ let toolId = 0;
 let thinkingId = 0;
 let pendingInput: string | null = null;
 let running = false;
-let responseBuffer = "";
-let thinkingBuffer = "";
+let responseBuffer = '';
+let thinkingBuffer = '';
 let activeThinkingId: string | null = null;
-const activeToolCalls = new Map<
-  string,
-  { id: string; startTime: number; displayText: string }
->();
+const activeToolCalls = new Map<string, { id: string; startTime: number; displayText: string }>();
 
-export function reportRuntimeError(error: unknown, title = "运行错误") {
+export function reportRuntimeError(error: unknown, title = '运行错误') {
   const message = error instanceof Error ? error.message : String(error);
   micaUI.conversation.clearResponseText();
   micaUI.panels.status.error(message);
@@ -39,32 +36,26 @@ export function reportRuntimeError(error: unknown, title = "运行错误") {
   ]);
 }
 
-export function bootstrap({
-  agent,
-  sessionController,
-  onConfigChanged,
-}: BootstrapOptions) {
+export function bootstrap({ agent, sessionController, onConfigChanged }: BootstrapOptions) {
   syncModelDisplay(agent);
 
-  agent.events.on("status", (status) => {
+  agent.events.on('status', (status) => {
     applyStatus(status);
   });
-  agent.events.on("text", (text) => {
+  agent.events.on('text', (text) => {
     endThinkingSegment();
     responseBuffer += text;
     micaUI.conversation.setResponseText(responseBuffer);
   });
-  agent.events.on("thinking", (text) => {
+  agent.events.on('thinking', (text) => {
     if (!activeThinkingId) {
       activeThinkingId = `thinking-${++thinkingId}`;
-      thinkingBuffer = "";
+      thinkingBuffer = '';
     }
     thinkingBuffer += text;
-    micaUI.panels.replaceAgentTurnLogItem(
-      createThinkingLogItem(activeThinkingId, thinkingBuffer),
-    );
+    micaUI.panels.replaceAgentTurnLogItem(createThinkingLogItem(activeThinkingId, thinkingBuffer));
   });
-  agent.events.on("toolCall", ({ name, args, id }) => {
+  agent.events.on('toolCall', ({ name, args, id }) => {
     endThinkingSegment();
     const toolKey = id ?? `${name}-${toolId + 1}`;
     const toolLogId = `tool-${++toolId}`;
@@ -90,7 +81,7 @@ export function bootstrap({
       }),
     );
   });
-  agent.events.on("toolResult", ({ name, result, id }) => {
+  agent.events.on('toolResult', ({ name, result, id }) => {
     endThinkingSegment();
     const toolKey = id ?? findFirstActiveToolKey(name);
     const activeTool = toolKey ? activeToolCalls.get(toolKey) : undefined;
@@ -110,7 +101,7 @@ export function bootstrap({
       }),
     );
   });
-  agent.events.on("usage", (usage) => {
+  agent.events.on('usage', (usage) => {
     micaUI.panels.contextSize.set(usage.tokens.input + usage.tokens.output);
     micaUI.panels.cacheHitRate.set(usage.prompt_cache.hit_rate);
   });
@@ -122,7 +113,7 @@ export function bootstrap({
   micaUI.panels.setOnAbortAgent(() => {
     agent.abort();
     running = false;
-    responseBuffer = "";
+    responseBuffer = '';
     micaUI.conversation.clearResponseText();
   });
 
@@ -131,22 +122,15 @@ export function bootstrap({
 
 export function syncModelDisplay(agent: AgentRuntime) {
   micaUI.panels.modelDisplay.name.set(agent.config.model);
-  micaUI.panels.modelDisplay.effort.set(
-    agent.config.provider.supportsEffort !== false ? agent.config.effort : "none",
-  );
-  micaUI.panels.modelDisplay.contextWindowSize.set(
-    agent.config.provider.contextWindowSize,
-  );
+  micaUI.panels.modelDisplay.effort.set(agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none');
+  micaUI.panels.modelDisplay.contextWindowSize.set(agent.config.provider.contextWindowSize);
 }
 
-export function clearUI(
-  agent: AgentRuntime,
-  sessionController?: SessionController,
-) {
+export function clearUI(agent: AgentRuntime, sessionController?: SessionController) {
   running = false;
   pendingInput = null;
-  responseBuffer = "";
-  thinkingBuffer = "";
+  responseBuffer = '';
+  thinkingBuffer = '';
   activeThinkingId = null;
   activeToolCalls.clear();
   toolId = 0;
@@ -169,18 +153,14 @@ export function isAgentRunning() {
   return running;
 }
 
-async function submit(
-  rawText: string,
-  agent: AgentRuntime,
-  sessionController: SessionController,
-) {
+async function submit(rawText: string, agent: AgentRuntime, sessionController: SessionController) {
   const text = rawText.trim();
   if (!text) return;
 
   if (running) {
     pendingInput = text;
     micaUI.conversation.setPendingInput(text);
-    showMessage("消息已排队，将在当前任务完成后发送");
+    showMessage('消息已排队，将在当前任务完成后发送');
     micaUI.terminalInput.clearText();
     return;
   }
@@ -194,15 +174,11 @@ async function submit(
   }
 }
 
-async function runTurn(
-  text: string,
-  agent: AgentRuntime,
-  sessionController: SessionController,
-) {
+async function runTurn(text: string, agent: AgentRuntime, sessionController: SessionController) {
   running = true;
   let hasError = false;
-  responseBuffer = "";
-  thinkingBuffer = "";
+  responseBuffer = '';
+  thinkingBuffer = '';
   activeThinkingId = null;
   activeToolCalls.clear();
   micaUI.terminalInput.clearText();
@@ -215,13 +191,13 @@ async function runTurn(
     const { runId, text: finalText } = await agent.run(text);
     if (!agent.isCurrent(runId)) return;
     micaUI.conversation.appendAssistantMessage([
-      { type: "text", text: finalText || responseBuffer || "(empty response)" },
+      { type: 'text', text: finalText || responseBuffer || '(empty response)' },
     ]);
     micaUI.conversation.clearResponseText();
     sessionController.saveCurrent();
   } catch (error) {
     hasError = true;
-    reportRuntimeError(error, "请求失败");
+    reportRuntimeError(error, '请求失败');
   } finally {
     endThinkingSegment();
     if (!hasError) micaUI.panels.clearAgentTurnLogItems();
@@ -230,7 +206,7 @@ async function runTurn(
 }
 
 function endThinkingSegment() {
-  thinkingBuffer = "";
+  thinkingBuffer = '';
   activeThinkingId = null;
 }
 
@@ -243,22 +219,22 @@ function findFirstActiveToolKey(toolName: string): string | undefined {
 
 function applyStatus(status: AgentRuntimeStatus) {
   switch (status.type) {
-    case "connecting":
+    case 'connecting':
       micaUI.panels.status.connecting();
       break;
-    case "thinking":
+    case 'thinking':
       micaUI.panels.status.thinking();
       break;
-    case "streaming":
+    case 'streaming':
       micaUI.panels.status.streaming();
       break;
-    case "calling_tool":
+    case 'calling_tool':
       micaUI.panels.status.callingTool(status.toolNames);
       break;
-    case "completed":
+    case 'completed':
       micaUI.panels.status.completed(status.elapsedMs);
       break;
-    case "error":
+    case 'error':
       micaUI.panels.status.error(status.message);
       break;
   }

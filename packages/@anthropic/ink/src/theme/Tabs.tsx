@@ -84,15 +84,15 @@ export function Tabs({
   navFromContent = false,
 }: TabsProps): React.ReactNode {
   const { columns: terminalWidth } = useTerminalSize();
-  const tabs = children.map(child => [child.props.id ?? child.props.title, child.props.title]);
-  const defaultTabIndex = defaultTab ? tabs.findIndex(tab => defaultTab === tab[0]) : 0;
+  const tabs = children.map((child) => [child.props.id ?? child.props.title, child.props.title]);
+  const defaultTabIndex = defaultTab ? tabs.findIndex((tab) => defaultTab === tab[0]) : 0;
 
   // Support both controlled and uncontrolled modes
   const isControlled = controlledSelectedTab !== undefined;
   const [internalSelectedTab, setInternalSelectedTab] = useState(defaultTabIndex !== -1 ? defaultTabIndex : 0);
 
   // In controlled mode, find the index of the controlled tab
-  const controlledTabIndex = isControlled ? tabs.findIndex(tab => tab[0] === controlledSelectedTab) : -1;
+  const controlledTabIndex = isControlled ? tabs.findIndex((tab) => tab[0] === controlledSelectedTab) : -1;
   const selectedTabIndex = isControlled ? (controlledTabIndex !== -1 ? controlledTabIndex : 0) : internalSelectedTab;
 
   const modalScrollRef = useModalScrollRef();
@@ -110,8 +110,8 @@ export function Tabs({
   // pressing down on a legacy tab would strand the user with nav disabled.
   const [optInCount, setOptInCount] = useState(0);
   const registerOptIn = useCallback(() => {
-    setOptInCount(n => n + 1);
-    return () => setOptInCount(n => n - 1);
+    setOptInCount((n) => n + 1);
+    return () => setOptInCount((n) => n - 1);
   }, []);
   const optedIn = optInCount > 0;
 
@@ -238,7 +238,12 @@ export function Tabs({
           // ModalContext. Keyed by selectedTabIndex → remounts on tab
           // switch, resetting scrollTop to 0 without scrollTo() timing games.
           <Box width={contentWidth} marginTop={hidden ? 0 : 1} flexShrink={0}>
-            <ScrollBox key={selectedTabIndex} ref={modalScrollRef as React.Ref<ScrollBoxHandle>} flexDirection="column" flexShrink={0}>
+            <ScrollBox
+              key={selectedTabIndex}
+              ref={modalScrollRef as React.Ref<ScrollBoxHandle>}
+              flexDirection="column"
+              flexShrink={0}
+            >
               {children}
             </ScrollBox>
           </Box>

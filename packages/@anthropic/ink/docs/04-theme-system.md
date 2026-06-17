@@ -7,54 +7,54 @@ The theme system provides consistent, accessible color palettes across the appli
 Wraps the application to provide theme context.
 
 ```tsx
-import { ThemeProvider } from '@anthropic/ink'
+import { ThemeProvider } from '@anthropic/ink';
 
 function App() {
   return (
     <ThemeProvider initialState="dark" onThemeSave={(setting) => saveConfig(setting)}>
       <MyComponent />
     </ThemeProvider>
-  )
+  );
 }
 ```
 
 ### Props
 
-| Prop | Type | Description |
-|------|------|-------------|
-| `children` | `ReactNode` | Child components |
-| `initialState` | `ThemeSetting` | Initial theme (default: loads from config) |
-| `onThemeSave` | `(setting: ThemeSetting) => void` | Called when theme is saved |
+| Prop           | Type                              | Description                                |
+| -------------- | --------------------------------- | ------------------------------------------ |
+| `children`     | `ReactNode`                       | Child components                           |
+| `initialState` | `ThemeSetting`                    | Initial theme (default: loads from config) |
+| `onThemeSave`  | `(setting: ThemeSetting) => void` | Called when theme is saved                 |
 
 ### Theme Configuration Injection
 
 Before mounting, inject config persistence callbacks:
 
 ```tsx
-import { setThemeConfigCallbacks } from '@anthropic/ink'
+import { setThemeConfigCallbacks } from '@anthropic/ink';
 
 setThemeConfigCallbacks({
   loadTheme: () => configStore.get('theme', 'dark'),
   saveTheme: (setting) => configStore.set('theme', setting),
-})
+});
 ```
 
 ## Theme Settings
 
 ```ts
-type ThemeSetting = 'auto' | 'dark' | 'light' | 'light-daltonized' | 'dark-daltonized' | 'light-ansi' | 'dark-ansi'
-type ThemeName = 'dark' | 'light' | 'light-daltonized' | 'dark-daltonized' | 'light-ansi' | 'dark-ansi'
+type ThemeSetting = 'auto' | 'dark' | 'light' | 'light-daltonized' | 'dark-daltonized' | 'light-ansi' | 'dark-ansi';
+type ThemeName = 'dark' | 'light' | 'light-daltonized' | 'dark-daltonized' | 'light-ansi' | 'dark-ansi';
 ```
 
-| Theme | Description |
-|-------|-------------|
-| `dark` | Dark theme with RGB colors (default) |
-| `light` | Light theme with RGB colors |
-| `dark-daltonized` | Colorblind-accessible dark theme |
-| `light-daltonized` | Colorblind-accessible light theme |
-| `dark-ansi` | Dark theme using only 16 ANSI colors |
-| `light-ansi` | Light theme using only 16 ANSI colors |
-| `auto` | Follows terminal's dark/light mode (resolved at runtime) |
+| Theme              | Description                                              |
+| ------------------ | -------------------------------------------------------- |
+| `dark`             | Dark theme with RGB colors (default)                     |
+| `light`            | Light theme with RGB colors                              |
+| `dark-daltonized`  | Colorblind-accessible dark theme                         |
+| `light-daltonized` | Colorblind-accessible light theme                        |
+| `dark-ansi`        | Dark theme using only 16 ANSI colors                     |
+| `light-ansi`       | Light theme using only 16 ANSI colors                    |
+| `auto`             | Follows terminal's dark/light mode (resolved at runtime) |
 
 ## Theme Hooks
 
@@ -63,7 +63,7 @@ type ThemeName = 'dark' | 'light' | 'light-daltonized' | 'dark-daltonized' | 'li
 Returns the resolved theme name and setter.
 
 ```tsx
-const [currentTheme, setTheme] = useTheme()
+const [currentTheme, setTheme] = useTheme();
 // currentTheme: ThemeName (never 'auto')
 // setTheme: (setting: ThemeSetting) => void
 ```
@@ -73,7 +73,7 @@ const [currentTheme, setTheme] = useTheme()
 Returns the raw setting (may be `'auto'`).
 
 ```tsx
-const setting = useThemeSetting()  // 'auto' | 'dark' | ...
+const setting = useThemeSetting(); // 'auto' | 'dark' | ...
 ```
 
 ### `usePreviewTheme()`
@@ -81,16 +81,16 @@ const setting = useThemeSetting()  // 'auto' | 'dark' | ...
 Returns preview controls for a theme picker UI.
 
 ```tsx
-const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme()
+const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
 
 // Show preview
-setPreviewTheme('light')
+setPreviewTheme('light');
 
 // User confirms
-savePreview()
+savePreview();
 
 // User cancels
-cancelPreview()
+cancelPreview();
 ```
 
 ## Theme Color Palette
@@ -99,68 +99,68 @@ Every theme defines these semantic color keys:
 
 ### Brand & Identity
 
-| Key | Purpose |
-|-----|---------|
-| `claude` | Brand orange |
-| `claudeShimmer` | Lighter brand orange (animated) |
-| `permission` | Permission/blue |
-| `permissionShimmer` | Lighter permission blue |
-| `autoAccept` | Electric violet |
-| `planMode` | Teal/sage |
-| `ide` | Muted blue |
+| Key                 | Purpose                         |
+| ------------------- | ------------------------------- |
+| `claude`            | Brand orange                    |
+| `claudeShimmer`     | Lighter brand orange (animated) |
+| `permission`        | Permission/blue                 |
+| `permissionShimmer` | Lighter permission blue         |
+| `autoAccept`        | Electric violet                 |
+| `planMode`          | Teal/sage                       |
+| `ide`               | Muted blue                      |
 
 ### Semantic Colors
 
-| Key | Purpose |
-|-----|---------|
-| `text` | Primary text color |
-| `inverseText` | Text on inverse backgrounds |
-| `inactive` | Dimmed/disabled elements |
-| `inactiveShimmer` | Lighter inactive |
-| `subtle` | Very subtle text |
-| `suggestion` | Interactive/accent |
-| `background` | General background accent |
-| `success` | Positive/success |
-| `error` | Negative/error |
-| `warning` | Caution/warning |
-| `warningShimmer` | Lighter warning |
-| `merged` | Merged state |
+| Key               | Purpose                     |
+| ----------------- | --------------------------- |
+| `text`            | Primary text color          |
+| `inverseText`     | Text on inverse backgrounds |
+| `inactive`        | Dimmed/disabled elements    |
+| `inactiveShimmer` | Lighter inactive            |
+| `subtle`          | Very subtle text            |
+| `suggestion`      | Interactive/accent          |
+| `background`      | General background accent   |
+| `success`         | Positive/success            |
+| `error`           | Negative/error              |
+| `warning`         | Caution/warning             |
+| `warningShimmer`  | Lighter warning             |
+| `merged`          | Merged state                |
 
 ### Diff Colors
 
-| Key | Purpose |
-|-----|---------|
-| `diffAdded` | Added lines background |
-| `diffRemoved` | Removed lines background |
-| `diffAddedDimmed` | Dimmed added |
-| `diffRemovedDimmed` | Dimmed removed |
-| `diffAddedWord` | Word-level added |
-| `diffRemovedWord` | Word-level removed |
+| Key                 | Purpose                  |
+| ------------------- | ------------------------ |
+| `diffAdded`         | Added lines background   |
+| `diffRemoved`       | Removed lines background |
+| `diffAddedDimmed`   | Dimmed added             |
+| `diffRemovedDimmed` | Dimmed removed           |
+| `diffAddedWord`     | Word-level added         |
+| `diffRemovedWord`   | Word-level removed       |
 
 ### UI Colors
 
-| Key | Purpose |
-|-----|---------|
-| `promptBorder` | Input prompt border |
-| `promptBorderShimmer` | Lighter prompt border |
-| `bashBorder` | Shell block border |
-| `selectionBg` | Text selection highlight background |
-| `userMessageBackground` | User message background |
-| `userMessageBackgroundHover` | User message hover |
-| `messageActionsBackground` | Action buttons background |
+| Key                          | Purpose                             |
+| ---------------------------- | ----------------------------------- |
+| `promptBorder`               | Input prompt border                 |
+| `promptBorderShimmer`        | Lighter prompt border               |
+| `bashBorder`                 | Shell block border                  |
+| `selectionBg`                | Text selection highlight background |
+| `userMessageBackground`      | User message background             |
+| `userMessageBackgroundHover` | User message hover                  |
+| `messageActionsBackground`   | Action buttons background           |
 
 ### Agent Colors
 
-| Key | Purpose |
-|-----|---------|
-| `red_FOR_SUBAGENTS_ONLY` | Agent color assignment |
-| `blue_FOR_SUBAGENTS_ONLY` | Agent color assignment |
-| `green_FOR_SUBAGENTS_ONLY` | Agent color assignment |
+| Key                         | Purpose                |
+| --------------------------- | ---------------------- |
+| `red_FOR_SUBAGENTS_ONLY`    | Agent color assignment |
+| `blue_FOR_SUBAGENTS_ONLY`   | Agent color assignment |
+| `green_FOR_SUBAGENTS_ONLY`  | Agent color assignment |
 | `yellow_FOR_SUBAGENTS_ONLY` | Agent color assignment |
 | `purple_FOR_SUBAGENTS_ONLY` | Agent color assignment |
 | `orange_FOR_SUBAGENTS_ONLY` | Agent color assignment |
-| `pink_FOR_SUBAGENTS_ONLY` | Agent color assignment |
-| `cyan_FOR_SUBAGENTS_ONLY` | Agent color assignment |
+| `pink_FOR_SUBAGENTS_ONLY`   | Agent color assignment |
+| `cyan_FOR_SUBAGENTS_ONLY`   | Agent color assignment |
 
 ## Using Theme Colors in Components
 
@@ -185,11 +185,11 @@ Every theme defines these semantic color keys:
 ### color() Utility
 
 ```tsx
-import { color, useTheme } from '@anthropic/ink'
+import { color, useTheme } from '@anthropic/ink';
 
 function MyComponent() {
-  const [themeName] = useTheme()
-  const paint = color('success', themeName)
+  const [themeName] = useTheme();
+  const paint = color('success', themeName);
   // paint('text') returns ANSI-colored string
 }
 ```

@@ -9,16 +9,16 @@
  */
 
 // Segmenters for Unicode text processing (lazily initialized)
-let graphemeSegmenter: Intl.Segmenter | null = null
-let wordSegmenter: Intl.Segmenter | null = null
+let graphemeSegmenter: Intl.Segmenter | null = null;
+let wordSegmenter: Intl.Segmenter | null = null;
 
 export function getGraphemeSegmenter(): Intl.Segmenter {
   if (!graphemeSegmenter) {
     graphemeSegmenter = new Intl.Segmenter(undefined, {
       granularity: 'grapheme',
-    })
+    });
   }
-  return graphemeSegmenter
+  return graphemeSegmenter;
 }
 
 /**
@@ -26,10 +26,10 @@ export function getGraphemeSegmenter(): Intl.Segmenter {
  * Returns '' for empty strings.
  */
 export function firstGrapheme(text: string): string {
-  if (!text) return ''
-  const segments = getGraphemeSegmenter().segment(text)
-  const first = segments[Symbol.iterator]().next().value
-  return first?.segment ?? ''
+  if (!text) return '';
+  const segments = getGraphemeSegmenter().segment(text);
+  const first = segments[Symbol.iterator]().next().value;
+  return first?.segment ?? '';
 }
 
 /**
@@ -37,17 +37,17 @@ export function firstGrapheme(text: string): string {
  * Returns '' for empty strings.
  */
 export function lastGrapheme(text: string): string {
-  if (!text) return ''
-  let last = ''
+  if (!text) return '';
+  let last = '';
   for (const { segment } of getGraphemeSegmenter().segment(text)) {
-    last = segment
+    last = segment;
   }
-  return last
+  return last;
 }
 
 export function getWordSegmenter(): Intl.Segmenter {
   if (!wordSegmenter) {
-    wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
+    wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
   }
-  return wordSegmenter
+  return wordSegmenter;
 }

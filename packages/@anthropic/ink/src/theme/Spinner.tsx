@@ -11,7 +11,7 @@ export function Spinner(): React.ReactNode {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setFrame(f => (f + 1) % FRAMES.length);
+      setFrame((f) => (f + 1) % FRAMES.length);
     }, 80);
     return () => clearInterval(timer);
   }, []);

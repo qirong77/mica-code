@@ -21,7 +21,8 @@ export class ToolRunShell extends MicaTool {
         timeout: { type: 'number', description: '超时毫秒，默认 30000' },
         run_in_background: {
           type: 'boolean',
-          description: '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。输出写入临时文件，后续用 read_file 查看。',
+          description:
+            '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。输出写入临时文件，后续用 read_file 查看。',
         },
       },
       required: ['command'],
@@ -159,6 +160,4 @@ export class ToolRunShell extends MicaTool {
     }
     return `$ ${truncated}`;
   }
-
-  
 }

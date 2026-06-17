@@ -1,15 +1,8 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
-import type { AgentUsageRecord } from "../../packages/agent/IAgent.js";
-import type { EffortOption } from "../store/index.js";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, resolve } from 'node:path';
+import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { EffortOption } from '../store/index.js';
 
 export type PersistedRuntimeSnapshot = {
   providerId: string;
@@ -39,13 +32,13 @@ export type SessionSummary = {
   model: string;
 };
 
-const SESSION_DIR = resolve(homedir(), ".mica", "sessions");
+const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
 
 export class SessionStore {
   list(limit = 20): SessionSummary[] {
     ensureSessionDir();
     return readdirSync(SESSION_DIR)
-      .filter((file) => file.endsWith(".json"))
+      .filter((file) => file.endsWith('.json'))
       .map((file) => this.read(resolve(SESSION_DIR, file)))
       .filter((session): session is PersistedSession => Boolean(session))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -70,14 +63,14 @@ export class SessionStore {
     ensureSessionDir();
     const path = sessionPath(session.id);
     const tmpPath = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, "utf-8");
+    writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, 'utf-8');
     renameSync(tmpPath, path);
   }
 
   private read(path: string): PersistedSession | null {
     try {
       if (!existsSync(path)) return null;
-      const data = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+      const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
       return parseSession(data);
     } catch {
       return null;
@@ -88,8 +81,8 @@ export class SessionStore {
 export function createSessionId(date = new Date()): string {
   const stamp = date
     .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${suffix}`;
 }
@@ -104,22 +97,15 @@ function sessionPath(id: string): string {
 
 function sanitizeSessionId(id: string): string | null {
   const safe = basename(id.trim());
-  return /^[a-zA-Z0-9_.-]+$/.test(safe) ? safe.replace(/\.json$/, "") : null;
+  return /^[a-zA-Z0-9_.-]+$/.test(safe) ? safe.replace(/\.json$/, '') : null;
 }
 
 function parseSession(value: unknown): PersistedSession | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== 'object') return null;
   const session = value as Partial<PersistedSession>;
   if (session.version !== 1) return null;
-  if (
-    !session.id ||
-    !session.title ||
-    !session.createdAt ||
-    !session.updatedAt ||
-    !session.cwd
-  )
-    return null;
-  if (!session.snapshot || typeof session.snapshot !== "object") return null;
+  if (!session.id || !session.title || !session.createdAt || !session.updatedAt || !session.cwd) return null;
+  if (!session.snapshot || typeof session.snapshot !== 'object') return null;
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
   return session as PersistedSession;

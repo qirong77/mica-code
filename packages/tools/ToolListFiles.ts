@@ -27,5 +27,4 @@ export class ToolListFiles extends MicaTool {
   onToolUseDisplayText(input: Record<string, any>): string {
     return `list ${truncateDisplayText(input.pattern as string, 10)} in ${input.path || '.'}`;
   }
-  
 }

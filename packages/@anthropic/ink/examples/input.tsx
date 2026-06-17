@@ -59,9 +59,7 @@ class WrappedLine {
 class MeasuredText {
   private _wrappedLines: WrappedLine[] | undefined;
   private _graphemeBoundaries: number[] | undefined;
-  private _wordBoundariesCache:
-    | Array<{ start: number; end: number; isWordLike: boolean }>
-    | undefined;
+  private _wordBoundariesCache: Array<{ start: number; end: number; isWordLike: boolean }> | undefined;
   private navigationCache = new Map<string, number>();
 
   constructor(
@@ -121,39 +119,25 @@ class MeasuredText {
       if (text.length === 0) {
         lastNewLinePos = this.text.indexOf('\n', lastNewLinePos + 1);
         if (lastNewLinePos !== -1) {
-          wrappedLines.push(
-            new WrappedLine(text, lastNewLinePos, isPrecededByNewlineFn(lastNewLinePos), true),
-          );
+          wrappedLines.push(new WrappedLine(text, lastNewLinePos, isPrecededByNewlineFn(lastNewLinePos), true));
         } else {
-          wrappedLines.push(
-            new WrappedLine(
-              text,
-              this.text.length,
-              isPrecededByNewlineFn(this.text.length),
-              false,
-            ),
-          );
+          wrappedLines.push(new WrappedLine(text, this.text.length, isPrecededByNewlineFn(this.text.length), false));
         }
       } else {
         const startOffset = this.text.indexOf(text, searchOffset);
         if (startOffset === -1) throw new Error('Failed to find wrapped line in text');
         searchOffset = startOffset + text.length;
         const potentialNewlinePos = startOffset + text.length;
-        const endsWithNewline =
-          potentialNewlinePos < this.text.length && this.text[potentialNewlinePos] === '\n';
+        const endsWithNewline = potentialNewlinePos < this.text.length && this.text[potentialNewlinePos] === '\n';
         if (endsWithNewline) lastNewLinePos = potentialNewlinePos;
-        wrappedLines.push(
-          new WrappedLine(text, startOffset, isPrecededByNewlineFn(startOffset), endsWithNewline),
-        );
+        wrappedLines.push(new WrappedLine(text, startOffset, isPrecededByNewlineFn(startOffset), endsWithNewline));
       }
     }
     return wrappedLines;
   }
 
   getWrappedText(): string[] {
-    return this.wrappedLines.map(line =>
-      line.isPrecededByNewline ? line.text : line.text.trimStart(),
-    );
+    return this.wrappedLines.map((line) => (line.isPrecededByNewline ? line.text : line.text.trimStart()));
   }
 
   get lineCount(): number {
@@ -161,9 +145,7 @@ class MeasuredText {
   }
 
   getLineLength(line: number): number {
-    return stringWidth(
-      this.wrappedLines[Math.max(0, Math.min(line, this.wrappedLines.length - 1))]!.text,
-    );
+    return stringWidth(this.wrappedLines[Math.max(0, Math.min(line, this.wrappedLines.length - 1))]!.text);
   }
 
   nextOffset(offset: number): number {
@@ -289,8 +271,7 @@ class MeasuredText {
   }
 
   getOffsetFromPosition(position: { line: number; column: number }): number {
-    const wrappedLine =
-      this.wrappedLines[Math.max(0, Math.min(position.line, this.wrappedLines.length - 1))]!;
+    const wrappedLine = this.wrappedLines[Math.max(0, Math.min(position.line, this.wrappedLines.length - 1))]!;
     if (wrappedLine.text.length === 0 && wrappedLine.endsWithNewline) {
       return wrappedLine.startOffset;
     }
@@ -368,10 +349,7 @@ class Cursor {
 
   right(): Cursor {
     if (this.offset >= this.text.length) return this;
-    return new Cursor(
-      this.measuredText,
-      Math.min(this.measuredText.nextOffset(this.offset), this.text.length),
-    );
+    return new Cursor(this.measuredText, Math.min(this.measuredText.nextOffset(this.offset), this.text.length));
   }
 
   up(): Cursor {
@@ -381,10 +359,7 @@ class Cursor {
     if (!prevLine) return this;
     const prevWidth = stringWidth(prevLine);
     const col = column > prevWidth ? prevWidth : column;
-    return new Cursor(
-      this.measuredText,
-      this.measuredText.getOffsetFromPosition({ line: line - 1, column: col }),
-    );
+    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line: line - 1, column: col }));
   }
 
   down(): Cursor {
@@ -394,24 +369,15 @@ class Cursor {
     if (!nextLine) return this;
     const nextWidth = stringWidth(nextLine);
     const col = column > nextWidth ? nextWidth : column;
-    return new Cursor(
-      this.measuredText,
-      this.measuredText.getOffsetFromPosition({ line: line + 1, column: col }),
-    );
+    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line: line + 1, column: col }));
   }
 
   startOfLine(): Cursor {
     const { line, column } = this.getPosition();
     if (column === 0 && line > 0) {
-      return new Cursor(
-        this.measuredText,
-        this.measuredText.getOffsetFromPosition({ line: line - 1, column: 0 }),
-      );
+      return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line: line - 1, column: 0 }));
     }
-    return new Cursor(
-      this.measuredText,
-      this.measuredText.getOffsetFromPosition({ line, column: 0 }),
-    );
+    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line, column: 0 }));
   }
 
   endOfLine(): Cursor {
@@ -427,14 +393,11 @@ class Cursor {
     for (const b of boundaries) {
       if (!b.isWordLike) continue;
       if (b.start < this.offset) {
-        if (this.offset > b.start && this.offset <= b.end)
-          return new Cursor(this.measuredText, b.start);
+        if (this.offset > b.start && this.offset <= b.end) return new Cursor(this.measuredText, b.start);
         prevWordStart = b.start;
       }
     }
-    return prevWordStart !== null
-      ? new Cursor(this.measuredText, prevWordStart)
-      : new Cursor(this.measuredText, 0);
+    return prevWordStart !== null ? new Cursor(this.measuredText, prevWordStart) : new Cursor(this.measuredText, 0);
   }
 
   nextWord(): Cursor {
@@ -659,9 +622,7 @@ function buildTextHandler({
         break;
       }
       if (key.backspace) {
-        nextCursor = key.meta || key.ctrl
-          ? cursor.deleteWordBefore().cursor
-          : cursor.backspace();
+        nextCursor = key.meta || key.ctrl ? cursor.deleteWordBefore().cursor : cursor.backspace();
         break;
       }
       if (key.delete) {
@@ -704,18 +665,42 @@ function buildTextHandler({
       // Ctrl key sequences
       if (key.ctrl) {
         switch (input) {
-          case 'a': nextCursor = cursor.startOfLine(); break;
-          case 'b': nextCursor = cursor.left(); break;
-          case 'd': nextCursor = cursor.del(); break;
-          case 'e': nextCursor = cursor.endOfLine(); break;
-          case 'f': nextCursor = cursor.right(); break;
-          case 'h': nextCursor = cursor.backspace(); break;
-          case 'k': nextCursor = cursor.deleteToLineEnd().cursor; break;
-          case 'n': nextCursor = downOrHistoryDown(); break;
-          case 'p': nextCursor = upOrHistoryUp(); break;
-          case 'u': nextCursor = cursor.deleteToLineStart().cursor; break;
-          case 'w': nextCursor = cursor.deleteWordBefore().cursor; break;
-          default: nextCursor = cursor; break;
+          case 'a':
+            nextCursor = cursor.startOfLine();
+            break;
+          case 'b':
+            nextCursor = cursor.left();
+            break;
+          case 'd':
+            nextCursor = cursor.del();
+            break;
+          case 'e':
+            nextCursor = cursor.endOfLine();
+            break;
+          case 'f':
+            nextCursor = cursor.right();
+            break;
+          case 'h':
+            nextCursor = cursor.backspace();
+            break;
+          case 'k':
+            nextCursor = cursor.deleteToLineEnd().cursor;
+            break;
+          case 'n':
+            nextCursor = downOrHistoryDown();
+            break;
+          case 'p':
+            nextCursor = upOrHistoryUp();
+            break;
+          case 'u':
+            nextCursor = cursor.deleteToLineStart().cursor;
+            break;
+          case 'w':
+            nextCursor = cursor.deleteWordBefore().cursor;
+            break;
+          default:
+            nextCursor = cursor;
+            break;
         }
         break;
       }
@@ -723,10 +708,18 @@ function buildTextHandler({
       // Meta key sequences
       if (key.meta) {
         switch (input) {
-          case 'b': nextCursor = cursor.prevWord(); break;
-          case 'f': nextCursor = cursor.nextWord(); break;
-          case 'd': nextCursor = cursor.deleteWordAfter(); break;
-          default: nextCursor = cursor; break;
+          case 'b':
+            nextCursor = cursor.prevWord();
+            break;
+          case 'f':
+            nextCursor = cursor.nextWord();
+            break;
+          case 'd':
+            nextCursor = cursor.deleteWordAfter();
+            break;
+          default:
+            nextCursor = cursor;
+            break;
         }
         break;
       }
@@ -845,21 +838,18 @@ function InputDemo(): React.ReactNode {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const columns = process.stdout.columns - 6;
 
-  const onSubmit = useCallback(
-    (value: string) => {
-      if (value.trim()) {
-        const trimmed = value.trim();
-        console.log(`You typed: ${trimmed}`);
-        setPrevInputs(prev => [...prev, trimmed]);
-        setHistoryIndex(-1);
-        setInput('');
-        setCursorOffset(0);
-        setSubmittedMessage(trimmed);
-        setTimeout(() => setSubmittedMessage(''), 2000);
-      }
-    },
-    [],
-  );
+  const onSubmit = useCallback((value: string) => {
+    if (value.trim()) {
+      const trimmed = value.trim();
+      console.log(`You typed: ${trimmed}`);
+      setPrevInputs((prev) => [...prev, trimmed]);
+      setHistoryIndex(-1);
+      setInput('');
+      setCursorOffset(0);
+      setSubmittedMessage(trimmed);
+      setTimeout(() => setSubmittedMessage(''), 2000);
+    }
+  }, []);
 
   const onExit = useCallback(() => {
     process.exit(0);
@@ -936,9 +926,7 @@ function InputDemo(): React.ReactNode {
 
       {/* Bottom bar with hints */}
       <Box marginLeft={2} marginTop={1}>
-        <Text dimColor>
-          Enter=submit · Esc=clear · ↑↓=history · Ctrl+C=exit
-        </Text>
+        <Text dimColor>Enter=submit · Esc=clear · ↑↓=history · Ctrl+C=exit</Text>
       </Box>
     </Box>
   );

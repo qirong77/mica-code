@@ -8,7 +8,11 @@ export function PluginPanel(): React.ReactNode {
   if (pluginPanels.length === 0) return null;
   return (
     <Box flexDirection="column" flexGrow={1} flexBasis={0} minWidth={0}>
-      {pluginPanels.map((pluginPanel) => <Box key={pluginPanel.id}><pluginPanel.component /></Box>)}
+      {pluginPanels.map((pluginPanel) => (
+        <Box key={pluginPanel.id}>
+          <pluginPanel.component />
+        </Box>
+      ))}
     </Box>
   );
 }

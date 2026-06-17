@@ -81,8 +81,10 @@ export class ToolGrepSearch extends MicaTool {
         if (killed) {
           const lines = output.trim().split('\n').filter(Boolean);
           if (lines.length > 0) {
-            resolve(lines.slice(skipOffset, skipOffset + (headLimit || Infinity)).join('\n') +
-              `\n\n[搜索超时（${GREP_TIMEOUT_MS / 1000}s），仅返回部分结果，共 ${lines.length} 行]`);
+            resolve(
+              lines.slice(skipOffset, skipOffset + (headLimit || Infinity)).join('\n') +
+                `\n\n[搜索超时（${GREP_TIMEOUT_MS / 1000}s），仅返回部分结果，共 ${lines.length} 行]`,
+            );
           } else {
             resolve(`搜索超时（${GREP_TIMEOUT_MS / 1000}s），未找到匹配内容。请缩小搜索范围或指定更具体的路径。`);
           }
@@ -122,5 +124,4 @@ export class ToolGrepSearch extends MicaTool {
     const inc = input.include ? ` [${input.include}]` : '';
     return `grep "${pattern}" ${p}${inc}`;
   }
-  
 }

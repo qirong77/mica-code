@@ -5,21 +5,21 @@
  * to adjust rendering when inside a FullscreenLayout modal slot.
  */
 
-import { createContext, type RefObject, useContext } from 'react'
-import type { ScrollBoxHandle } from '../components/ScrollBox.js'
+import { createContext, type RefObject, useContext } from 'react';
+import type { ScrollBoxHandle } from '../components/ScrollBox.js';
 
 type ModalCtx = {
-  rows: number
-  columns: number
-  scrollRef: RefObject<ScrollBoxHandle | null> | null
-}
+  rows: number;
+  columns: number;
+  scrollRef: RefObject<ScrollBoxHandle | null> | null;
+};
 
-export const ModalContext = createContext<ModalCtx | null>(null)
+export const ModalContext = createContext<ModalCtx | null>(null);
 
 export function useIsInsideModal(): boolean {
-  return useContext(ModalContext) !== null
+  return useContext(ModalContext) !== null;
 }
 
 export function useModalScrollRef(): RefObject<ScrollBoxHandle | null> | null {
-  return useContext(ModalContext)?.scrollRef ?? null
+  return useContext(ModalContext)?.scrollRef ?? null;
 }

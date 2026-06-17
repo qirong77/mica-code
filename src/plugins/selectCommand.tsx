@@ -22,7 +22,10 @@ export type SelectCommandConfig = {
 };
 
 export function showSelectCommand(config: SelectCommandConfig) {
-  const initialIndex = Math.max(0, config.options.findIndex((option) => option.name === config.current));
+  const initialIndex = Math.max(
+    0,
+    config.options.findIndex((option) => option.name === config.current),
+  );
   const selectedIdx = atom(initialIndex);
 
   function hide() {
@@ -55,27 +58,29 @@ export function showSelectCommand(config: SelectCommandConfig) {
     );
   }
 
-  micaUI.panels.setPluginUIs([{
-    id: config.id,
-    component: SelectorPanel,
-    onInput: (_input, key) => {
-      if (key.escape) {
-        hide();
-        return true;
-      }
-      if (key.return || key.tab) {
-        selectCurrent();
-        return true;
-      }
-      if (key.upArrow || key.downArrow) {
-        const direction = key.upArrow ? -1 : 1;
-        const len = config.options.length;
-        if (len > 0) {
-          selectedIdx.set((selectedIdx.get() + direction + len) % len);
+  micaUI.panels.setPluginUIs([
+    {
+      id: config.id,
+      component: SelectorPanel,
+      onInput: (_input, key) => {
+        if (key.escape) {
+          hide();
+          return true;
         }
-        return true;
-      }
-      return false;
+        if (key.return || key.tab) {
+          selectCurrent();
+          return true;
+        }
+        if (key.upArrow || key.downArrow) {
+          const direction = key.upArrow ? -1 : 1;
+          const len = config.options.length;
+          if (len > 0) {
+            selectedIdx.set((selectedIdx.get() + direction + len) % len);
+          }
+          return true;
+        }
+        return false;
+      },
     },
-  }]);
+  ]);
 }

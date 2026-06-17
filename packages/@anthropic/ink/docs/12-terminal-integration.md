@@ -7,31 +7,33 @@ This chapter covers terminal-specific features: alternate screen, mouse tracking
 Enter a fullscreen alternate screen buffer (like vim, less, htop).
 
 ```tsx
-import { AlternateScreen } from '@anthropic/ink'
+import { AlternateScreen } from '@anthropic/ink';
 
 <AlternateScreen mouseTracking={true}>
   <Box flexDirection="column" height="100%">
     <Text>Fullscreen content</Text>
   </Box>
-</AlternateScreen>
+</AlternateScreen>;
 ```
 
 ### Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `children` | `ReactNode` | - | Content |
-| `mouseTracking` | `boolean` | `true` | Enable SGR mouse tracking |
+| Prop            | Type        | Default | Description               |
+| --------------- | ----------- | ------- | ------------------------- |
+| `children`      | `ReactNode` | -       | Content                   |
+| `mouseTracking` | `boolean`   | `true`  | Enable SGR mouse tracking |
 
 ### Behavior
 
 On mount:
+
 1. Enters DEC 1049 alternate screen buffer
 2. Hides cursor
 3. Enables mouse tracking (if `mouseTracking=true`)
 4. Constrains rendering height to terminal rows
 
 On unmount:
+
 1. Exits alternate screen buffer
 2. Shows cursor
 3. Disables mouse tracking
@@ -40,6 +42,7 @@ On unmount:
 ### Mouse Tracking Modes
 
 When enabled:
+
 - **Mode 1003** -- Button press/release + motion (hover)
 - **Mode 1006** -- SGR extended mouse format (coordinates > 223)
 - **Wheel events** -- Scroll up/down
@@ -50,9 +53,9 @@ The Ink instance supports pausing for an external editor:
 
 ```ts
 // Pause Ink, run external command, resume
-ink.enterAlternateScreen()  // Save state
+ink.enterAlternateScreen(); // Save state
 // ... external editor runs ...
-ink.reassertTerminalModes()  // Restore on resume
+ink.reassertTerminalModes(); // Restore on resume
 ```
 
 This is triggered by Ctrl+Z (SIGTSTP) and SIGCONT.
@@ -62,10 +65,12 @@ This is triggered by Ctrl+Z (SIGTSTP) and SIGCONT.
 ### Click Events
 
 ```tsx
-<Box onClick={(event) => {
-  console.log(`Clicked at col=${event.x}, row=${event.y}`)
-  event.stopImmediatePropagation()
-}}>
+<Box
+  onClick={(event) => {
+    console.log(`Clicked at col=${event.x}, row=${event.y}`);
+    event.stopImmediatePropagation();
+  }}
+>
   <Text>Clickable area</Text>
 </Box>
 ```
@@ -82,10 +87,7 @@ onMultiClick: (col: number, row: number, count: 2 | 3) => void
 ### Hover Events
 
 ```tsx
-<Box
-  onMouseEnter={() => setHovered(true)}
-  onMouseLeave={() => setHovered(false)}
->
+<Box onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
   <Text>{hovered ? 'Hovered!' : 'Hover me'}</Text>
 </Box>
 ```
@@ -106,23 +108,23 @@ onSelectionDrag: (col: number, row: number) => void
 ### OSC 52 Clipboard
 
 ```tsx
-import { setClipboard } from '@anthropic/ink'
+import { setClipboard } from '@anthropic/ink';
 
-await setClipboard('Copied text')
+await setClipboard('Copied text');
 ```
 
 ### Copy Selection
 
 ```tsx
-const { copySelection } = useSelection()
-const text = copySelection()  // Copies to clipboard and clears highlight
+const { copySelection } = useSelection();
+const text = copySelection(); // Copies to clipboard and clears highlight
 ```
 
 ### Copy Without Clear
 
 ```tsx
-const { copySelectionNoClear } = useSelection()
-const text = copySelectionNoClear()  // Copies but keeps highlight
+const { copySelectionNoClear } = useSelection();
+const text = copySelectionNoClear(); // Copies but keeps highlight
 ```
 
 ## Terminal Notifications
@@ -130,36 +132,36 @@ const text = copySelectionNoClear()  // Copies but keeps highlight
 Send desktop notifications from the terminal.
 
 ```tsx
-import { useTerminalNotification } from '@anthropic/ink'
+import { useTerminalNotification } from '@anthropic/ink';
 
 function MyComponent() {
-  const { notifyBell, progress } = useTerminalNotification()
+  const { notifyBell, progress } = useTerminalNotification();
 
   // Terminal bell (audible/system notification)
-  notifyBell()
+  notifyBell();
 
   // Progress bar in terminal title/tab
-  progress('running', 65)    // 65% complete
-  progress('completed')       // Done
-  progress('error')           // Error state
-  progress('indeterminate')   // Unknown progress
-  progress(null)              // Clear
+  progress('running', 65); // 65% complete
+  progress('completed'); // Done
+  progress('error'); // Error state
+  progress('indeterminate'); // Unknown progress
+  progress(null); // Clear
 }
 ```
 
 ### Terminal-Specific Notifications
 
 ```tsx
-const { notifyITerm2, notifyKitty, notifyGhostty } = useTerminalNotification()
+const { notifyITerm2, notifyKitty, notifyGhostty } = useTerminalNotification();
 
 // iTerm2
-notifyITerm2({ message: 'Build complete', title: 'My App' })
+notifyITerm2({ message: 'Build complete', title: 'My App' });
 
 // Kitty
-notifyKitty({ message: 'Build complete', title: 'My App', id: 1 })
+notifyKitty({ message: 'Build complete', title: 'My App', id: 1 });
 
 // Ghostty
-notifyGhostty({ message: 'Build complete', title: 'My App' })
+notifyGhostty({ message: 'Build complete', title: 'My App' });
 ```
 
 ## Terminal Queries
@@ -169,27 +171,27 @@ notifyGhostty({ message: 'Build complete', title: 'My App' })
 Used for auto-theme detection:
 
 ```ts
-import { getTerminalBackground } from '@anthropic/ink'
-const bg = await getTerminalBackground()
+import { getTerminalBackground } from '@anthropic/ink';
+const bg = await getTerminalBackground();
 // e.g., 'rgb:0000/0000/0000' (dark) or 'rgb:ffff/ffff/ffff' (light)
 ```
 
 ### Terminal Version (XTVERSION)
 
 ```ts
-import { isXtermJs, setXtversionName, getXtversionName } from '@anthropic/ink'
+import { isXtermJs, setXtversionName, getXtversionName } from '@anthropic/ink';
 ```
 
 ### Feature Detection
 
 ```ts
-import { supportsHyperlinks } from '@anthropic/ink'
+import { supportsHyperlinks } from '@anthropic/ink';
 
 if (supportsHyperlinks()) {
   // OSC 8 hyperlinks supported
 }
 
-import { supportsExtendedKeys } from '@anthropic/ink'
+import { supportsExtendedKeys } from '@anthropic/ink';
 
 if (supportsExtendedKeys()) {
   // Kitty keyboard protocol / modifyOtherKeys available
@@ -201,20 +203,20 @@ if (supportsExtendedKeys()) {
 Track terminal window focus/unfocus:
 
 ```tsx
-import { useTerminalFocus } from '@anthropic/ink'
+import { useTerminalFocus } from '@anthropic/ink';
 
-const isFocused = useTerminalFocus()
+const isFocused = useTerminalFocus();
 ```
 
 Low-level API:
 
 ```ts
-import { getTerminalFocused, subscribeTerminalFocus } from '@anthropic/ink'
+import { getTerminalFocused, subscribeTerminalFocus } from '@anthropic/ink';
 
-getTerminalFocused()  // boolean
+getTerminalFocused(); // boolean
 subscribeTerminalFocus((focused: boolean) => {
   // Called on focus change
-})
+});
 ```
 
 Uses DECSET 1004 focus reporting.
@@ -224,15 +226,15 @@ Uses DECSET 1004 focus reporting.
 Set the terminal window title:
 
 ```tsx
-import { useTerminalTitle } from '@anthropic/ink'
+import { useTerminalTitle } from '@anthropic/ink';
 
-useTerminalTitle('My App - Dashboard')
+useTerminalTitle('My App - Dashboard');
 ```
 
 Clear:
 
 ```tsx
-useTerminalTitle(null)
+useTerminalTitle(null);
 ```
 
 ## Terminal I/O Sequences
@@ -242,11 +244,7 @@ Low-level ANSI sequence constants for advanced use.
 ### Cursor Control
 
 ```ts
-import {
-  SHOW_CURSOR,
-  HIDE_CURSOR,
-  CURSOR_HOME,
-} from '@anthropic/ink'
+import { SHOW_CURSOR, HIDE_CURSOR, CURSOR_HOME } from '@anthropic/ink';
 
 // cursorPosition(row, col) -- Move cursor to absolute position
 // cursorMove(dx, dy) -- Move cursor relative
@@ -255,20 +253,13 @@ import {
 ### Screen Control
 
 ```ts
-import {
-  ENTER_ALT_SCREEN,
-  EXIT_ALT_SCREEN,
-  ERASE_SCREEN,
-} from '@anthropic/ink'
+import { ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, ERASE_SCREEN } from '@anthropic/ink';
 ```
 
 ### Mouse Control
 
 ```ts
-import {
-  ENABLE_MOUSE_TRACKING,
-  DISABLE_MOUSE_TRACKING,
-} from '@anthropic/ink'
+import { ENABLE_MOUSE_TRACKING, DISABLE_MOUSE_TRACKING } from '@anthropic/ink';
 ```
 
 ### Keyboard Protocols
@@ -279,18 +270,13 @@ import {
   DISABLE_KITTY_KEYBOARD,
   ENABLE_MODIFY_OTHER_KEYS,
   DISABLE_MODIFY_OTHER_KEYS,
-} from '@anthropic/ink'
+} from '@anthropic/ink';
 ```
 
 ### Clipboard & Tab Status
 
 ```ts
-import {
-  CLEAR_ITERM2_PROGRESS,
-  CLEAR_TAB_STATUS,
-  CLEAR_TERMINAL_TITLE,
-  wrapForMultiplexer,
-} from '@anthropic/ink'
+import { CLEAR_ITERM2_PROGRESS, CLEAR_TAB_STATUS, CLEAR_TERMINAL_TITLE, wrapForMultiplexer } from '@anthropic/ink';
 ```
 
 `wrapForMultiplexer` wraps OSC sequences for tmux compatibility.
@@ -299,22 +285,23 @@ import {
 
 ### Supported Terminals
 
-| Terminal | Features |
-|----------|----------|
-| iTerm2 | Full support (hyperlinks, notifications, progress) |
-| Kitty | Full support (keyboard protocol, notifications) |
-| Ghostty | Full support |
-| WezTerm | Full support |
-| Alacritty | Most features |
-| Windows Terminal | Most features |
-| Apple Terminal | 256-color fallback |
-| xterm.js (VS Code) | Detected and special-cased |
-| tmux | Wrapped sequences via `wrapForMultiplexer` |
-| Screen | Basic support |
+| Terminal           | Features                                           |
+| ------------------ | -------------------------------------------------- |
+| iTerm2             | Full support (hyperlinks, notifications, progress) |
+| Kitty              | Full support (keyboard protocol, notifications)    |
+| Ghostty            | Full support                                       |
+| WezTerm            | Full support                                       |
+| Alacritty          | Most features                                      |
+| Windows Terminal   | Most features                                      |
+| Apple Terminal     | 256-color fallback                                 |
+| xterm.js (VS Code) | Detected and special-cased                         |
+| tmux               | Wrapped sequences via `wrapForMultiplexer`         |
+| Screen             | Basic support                                      |
 
 ### Feature Degradation
 
 The framework gracefully degrades:
+
 - No true color → Falls back to ANSI 16-color themes
 - No OSC 52 → Clipboard operations silently fail
 - No mouse tracking → Click/hover events are no-ops
@@ -324,7 +311,7 @@ The framework gracefully degrades:
 ### Synchronized Output
 
 ```ts
-import { isSynchronizedOutputSupported } from '@anthropic/ink'
+import { isSynchronizedOutputSupported } from '@anthropic/ink';
 
 if (isSynchronizedOutputSupported()) {
   // BSU/ESU for tear-free rendering
@@ -343,13 +330,13 @@ Uses DECSET 2004 to distinguish paste events from rapid typing. Automatically en
 
 ```ts
 type SelectionState = {
-  anchor: Point | null        // Drag start
-  focus: Point | null         // Current position
-  isDragging: boolean
-  anchorSpan: { lo: Point; hi: Point; kind: 'word' | 'line' } | null
-  scrolledOffAbove: string[]  // Text scrolled out above
-  scrolledOffBelow: string[]  // Text scrolled out below
-}
+  anchor: Point | null; // Drag start
+  focus: Point | null; // Current position
+  isDragging: boolean;
+  anchorSpan: { lo: Point; hi: Point; kind: 'word' | 'line' } | null;
+  scrolledOffAbove: string[]; // Text scrolled out above
+  scrolledOffBelow: string[]; // Text scrolled out below
+};
 ```
 
 ### Selection Operations
@@ -376,6 +363,7 @@ Exclude areas from selection (gutters, line numbers):
 ### Soft-Wrap Awareness
 
 Selection correctly handles text that was wrapped across multiple rows:
+
 - Wrapped lines are joined when copied
 - Trailing whitespace is trimmed
 - The `softWrap` bitmap tracks which rows are continuations

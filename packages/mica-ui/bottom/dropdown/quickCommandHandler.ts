@@ -12,7 +12,8 @@ export function showQuickCommands(query: string, includeHidden = false): void {
   const commands = quickCommands.get();
   const filter = query.toLowerCase();
   const filtered = commands.filter(
-    (cmd) => (includeHidden || !cmd.hidden) &&
+    (cmd) =>
+      (includeHidden || !cmd.hidden) &&
       (cmd.name.toLowerCase().includes(filter) || cmd.description.toLowerCase().includes(filter)),
   );
   filtered.sort((a, b) => {
@@ -24,7 +25,13 @@ export function showQuickCommands(query: string, includeHidden = false): void {
     return a.name.localeCompare(b.name);
   });
 
-  state.set({ visible: true, items: filtered.map((cmd) => ({ key: cmd.name, label: `/${cmd.name}`, description: cmd.description })), selectedIndex: 0, title: '', emptyMessage: 'no matching commands' });
+  state.set({
+    visible: true,
+    items: filtered.map((cmd) => ({ key: cmd.name, label: `/${cmd.name}`, description: cmd.description })),
+    selectedIndex: 0,
+    title: '',
+    emptyMessage: 'no matching commands',
+  });
   inputValue.set(query);
   inputDisabled.set(true);
 }
@@ -38,14 +45,36 @@ export function hideQuickCommands(): void {
   inputDisabled.set(false);
 }
 
-export function handleDropdownKey(key: { escape?: boolean; tab?: boolean; upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean }): boolean {
+export function handleDropdownKey(key: {
+  escape?: boolean;
+  tab?: boolean;
+  upArrow?: boolean;
+  downArrow?: boolean;
+  return?: boolean;
+  shift?: boolean;
+}): boolean {
   const s = state.get();
   if (!s.visible || s.items.length === 0) return false;
-  if (key.escape) { closeAndClear(); return true; }
-  if (key.tab) { executeSelected(); return true; }
-  if (key.return && !key.shift) { executeSelected(); return true; }
-  if (key.upArrow) { navigateDropdown(-1); return true; }
-  if (key.downArrow) { navigateDropdown(1); return true; }
+  if (key.escape) {
+    closeAndClear();
+    return true;
+  }
+  if (key.tab) {
+    executeSelected();
+    return true;
+  }
+  if (key.return && !key.shift) {
+    executeSelected();
+    return true;
+  }
+  if (key.upArrow) {
+    navigateDropdown(-1);
+    return true;
+  }
+  if (key.downArrow) {
+    navigateDropdown(1);
+    return true;
+  }
   return false;
 }
 
@@ -80,8 +109,13 @@ function navigateDropdown(direction: 1 | -1): void {
   const s = state.get();
   if (!s.visible || s.items.length === 0) return;
   const len = s.items.length;
-  const newIndex = direction === -1
-    ? s.selectedIndex > 0 ? s.selectedIndex - 1 : len - 1
-    : s.selectedIndex < len - 1 ? s.selectedIndex + 1 : 0;
+  const newIndex =
+    direction === -1
+      ? s.selectedIndex > 0
+        ? s.selectedIndex - 1
+        : len - 1
+      : s.selectedIndex < len - 1
+        ? s.selectedIndex + 1
+        : 0;
   state.set({ ...s, selectedIndex: newIndex });
 }

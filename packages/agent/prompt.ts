@@ -26,7 +26,7 @@ class SystemPromptBuilder {
     const projectInstructions =
       options.projectInstructions === undefined
         ? readOptionalText(PROJECT_INSTRUCTIONS_PATH)
-        : options.projectInstructions ?? undefined;
+        : (options.projectInstructions ?? undefined);
     if (projectInstructions) {
       this.append('project-instructions', projectInstructions);
     }
@@ -69,9 +69,7 @@ export function buildSystemPrompt(): string {
   return new SystemPromptBuilder().value;
 }
 
-export function buildSystemPromptForTest(
-  options: BuildSystemPromptOptions,
-): string {
+export function buildSystemPromptForTest(options: BuildSystemPromptOptions): string {
   return new SystemPromptBuilder(options).value;
 }
 

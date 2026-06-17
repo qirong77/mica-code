@@ -12,15 +12,16 @@ Access app-level operations.
 
 ```ts
 function useApp(): {
-  exit: (error?: Error) => void
-}
+  exit: (error?: Error) => void;
+};
 ```
 
 Example:
+
 ```tsx
-const { exit } = useApp()
+const { exit } = useApp();
 // Gracefully unmount and exit
-exit()
+exit();
 ```
 
 ### `useStdin()`
@@ -29,13 +30,13 @@ Access the stdin stream and raw mode control.
 
 ```ts
 function useStdin(): {
-  stdin: NodeJS.ReadStream
-  isRawModeSupported: boolean
-  setRawMode: (enabled: boolean) => void
-  internal_exitOnCtrlC: boolean
-  internal_eventEmitter: EventEmitter | undefined
-  internal_querier: TerminalQuerier | null
-}
+  stdin: NodeJS.ReadStream;
+  isRawModeSupported: boolean;
+  setRawMode: (enabled: boolean) => void;
+  internal_exitOnCtrlC: boolean;
+  internal_eventEmitter: EventEmitter | undefined;
+  internal_querier: TerminalQuerier | null;
+};
 ```
 
 > Prefer `useInput` for keyboard handling.
@@ -51,8 +52,8 @@ Handle keyboard input. See [Chapter 7](./07-user-input.md) for full details.
 ```ts
 function useInput(
   handler: (input: string, key: Key, event: InputEvent) => void,
-  options?: { isActive?: boolean }
-): void
+  options?: { isActive?: boolean },
+): void;
 ```
 
 ---
@@ -65,9 +66,9 @@ Get current terminal dimensions.
 
 ```ts
 function useTerminalSize(): {
-  columns: number
-  rows: number
-}
+  columns: number;
+  rows: number;
+};
 ```
 
 Throws if used outside `<App>`.
@@ -77,7 +78,7 @@ Throws if used outside `<App>`.
 Track whether the terminal window is focused.
 
 ```ts
-function useTerminalFocus(): boolean
+function useTerminalFocus(): boolean;
 ```
 
 Uses DECSET 1004 focus reporting. Returns `true` when focused.
@@ -87,7 +88,7 @@ Uses DECSET 1004 focus reporting. Returns `true` when focused.
 Set the terminal window title.
 
 ```ts
-function useTerminalTitle(title: string | null): void
+function useTerminalTitle(title: string | null): void;
 ```
 
 Pass `null` to clear the title.
@@ -97,13 +98,11 @@ Pass `null` to clear the title.
 Track element visibility in the terminal viewport.
 
 ```ts
-function useTerminalViewport(): [
-  ref: (element: DOMElement | null) => void,
-  entry: { isVisible: boolean }
-]
+function useTerminalViewport(): [ref: (element: DOMElement | null) => void, entry: { isVisible: boolean }];
 ```
 
 Example:
+
 ```tsx
 const [viewportRef, { isVisible }] = useTerminalViewport()
 
@@ -117,8 +116,8 @@ const [viewportRef, { isVisible }] = useTerminalViewport()
 Set tab status indicator in terminal tab bar (OSC 21337).
 
 ```ts
-type TabStatusKind = 'idle' | 'busy' | 'waiting'
-function useTabStatus(kind: TabStatusKind | null): void
+type TabStatusKind = 'idle' | 'busy' | 'waiting';
+function useTabStatus(kind: TabStatusKind | null): void;
 ```
 
 ### `useTerminalNotification()`
@@ -127,12 +126,12 @@ Send terminal notifications (iTerm2, Kitty, Ghostty, bell).
 
 ```ts
 function useTerminalNotification(): {
-  notifyITerm2: (opts: { message: string; title?: string }) => void
-  notifyKitty: (opts: { message: string; title: string; id: number }) => void
-  notifyGhostty: (opts: { message: string; title: string }) => void
-  notifyBell: () => void
-  progress: (state: Progress['state'] | null, percentage?: number) => void
-}
+  notifyITerm2: (opts: { message: string; title?: string }) => void;
+  notifyKitty: (opts: { message: string; title: string; id: number }) => void;
+  notifyGhostty: (opts: { message: string; title: string }) => void;
+  notifyBell: () => void;
+  progress: (state: Progress['state'] | null, percentage?: number) => void;
+};
 ```
 
 Requires `TerminalWriteProvider` in the tree.
@@ -148,7 +147,7 @@ Progress states: `'running'`, `'completed'`, `'error'`, `'indeterminate'`, `null
 Clock-backed interval timer.
 
 ```ts
-function useInterval(callback: () => void, intervalMs: number | null): void
+function useInterval(callback: () => void, intervalMs: number | null): void;
 ```
 
 Pass `null` to pause. Shares the application clock for efficient batching.
@@ -158,7 +157,7 @@ Pass `null` to pause. Shares the application clock for efficient batching.
 Returns the current clock time, updating at the given interval.
 
 ```ts
-function useAnimationTimer(intervalMs: number): number
+function useAnimationTimer(intervalMs: number): number;
 ```
 
 Subscribes as non-keepAlive -- won't keep the clock running on its own.
@@ -169,16 +168,16 @@ Synchronized animation hook that pauses when offscreen.
 
 ```ts
 function useAnimationFrame(
-  intervalMs?: number | null,  // default 16
-): [ref: (element: DOMElement | null) => void, time: number]
+  intervalMs?: number | null, // default 16
+): [ref: (element: DOMElement | null) => void, time: number];
 ```
 
 Returns a ref callback (attach to animated element) and the current animation time. All instances share the same clock. Pass `null` to pause.
 
 ```tsx
-const [ref, time] = useAnimationFrame(120)
-const frame = Math.floor(time / 120) % FRAMES.length
-return <Box ref={ref}>{FRAMES[frame]}</Box>
+const [ref, time] = useAnimationFrame(120);
+const frame = Math.floor(time / 120) % FRAMES.length;
+return <Box ref={ref}>{FRAMES[frame]}</Box>;
 ```
 
 ### `useTimeout(delayMs, resetTrigger?)`
@@ -186,7 +185,7 @@ return <Box ref={ref}>{FRAMES[frame]}</Box>
 One-shot timer.
 
 ```ts
-function useTimeout(delay: number, resetTrigger?: number): boolean
+function useTimeout(delay: number, resetTrigger?: number): boolean;
 ```
 
 Returns `true` when the timeout has elapsed. Change `resetTrigger` to restart.
@@ -196,15 +195,16 @@ Returns `true` when the timeout has elapsed. Change `resetTrigger` to restart.
 Ensure a value is displayed for at least `minMs` milliseconds.
 
 ```ts
-function useMinDisplayTime<T>(value: T, minMs: number): T
+function useMinDisplayTime<T>(value: T, minMs: number): T;
 ```
 
 Holds the previous value until `minMs` has elapsed, then switches to the new value.
 
 Example:
+
 ```tsx
 // Keep showing "Loading" for at least 300ms to prevent flash
-const displayValue = useMinDisplayTime(isLoading ? 'loading' : 'done', 300)
+const displayValue = useMinDisplayTime(isLoading ? 'loading' : 'done', 300);
 ```
 
 ---
@@ -216,27 +216,28 @@ const displayValue = useMinDisplayTime(isLoading ? 'loading' : 'done', 300)
 Detect double-press (double-click equivalent for keyboard).
 
 ```ts
-export const DOUBLE_PRESS_TIMEOUT_MS = 800
+export const DOUBLE_PRESS_TIMEOUT_MS = 800;
 
 function useDoublePress(
   setPending: (pending: boolean) => void,
   onDoublePress: () => void,
-  onFirstPress?: () => void
-): () => void  // Returns the press handler
+  onFirstPress?: () => void,
+): () => void; // Returns the press handler
 ```
 
 Example:
+
 ```tsx
-const [pendingExit, setPendingExit] = useState(false)
+const [pendingExit, setPendingExit] = useState(false);
 const handlePress = useDoublePress(
   setPendingExit,
-  () => exit(),       // Double press
-  () => {},           // First press
-)
+  () => exit(), // Double press
+  () => {}, // First press
+);
 
 useInput((input, key) => {
-  if (key.escape) handlePress()
-})
+  if (key.escape) handlePress();
+});
 ```
 
 ### `useExitOnCtrlCD(options?)`
@@ -245,26 +246,29 @@ Handle Ctrl+C / Ctrl+D with double-press confirmation.
 
 ```ts
 type ExitState = {
-  pending: boolean
-  keyName: 'Ctrl-C' | 'Ctrl-D' | null
-}
+  pending: boolean;
+  keyName: 'Ctrl-C' | 'Ctrl-D' | null;
+};
 
 function useExitOnCtrlCDWithKeybindings(
   onExit?: () => void,
   onInterrupt?: () => boolean,
-  isActive?: boolean
-): ExitState
+  isActive?: boolean,
+): ExitState;
 ```
 
 Example:
+
 ```tsx
 const exitState = useExitOnCtrlCDWithKeybindings(
   () => exit(),
-  () => { /* return true to prevent exit */ }
-)
+  () => {
+    /* return true to prevent exit */
+  },
+);
 
 if (exitState.pending) {
-  return <Text>Press {exitState.keyName} again to exit</Text>
+  return <Text>Press {exitState.keyName} again to exit</Text>;
 }
 ```
 
@@ -278,18 +282,18 @@ Text selection operations.
 
 ```ts
 function useSelection(): {
-  copySelection: () => string
-  copySelectionNoClear: () => string
-  clearSelection: () => void
-  hasSelection: () => boolean
-  getState: () => SelectionState | null
-  subscribe: (cb: () => void) => () => void
-  shiftAnchor: (dRow: number, minRow: number, maxRow: number) => void
-  shiftSelection: (dRow: number, minRow: number, maxRow: number) => void
-  moveFocus: (move: FocusMove) => void
-  captureScrolledRows: (firstRow: number, lastRow: number, side: 'above' | 'below') => void
-  setSelectionBgColor: (color: string) => void
-}
+  copySelection: () => string;
+  copySelectionNoClear: () => string;
+  clearSelection: () => void;
+  hasSelection: () => boolean;
+  getState: () => SelectionState | null;
+  subscribe: (cb: () => void) => () => void;
+  shiftAnchor: (dRow: number, minRow: number, maxRow: number) => void;
+  shiftSelection: (dRow: number, minRow: number, maxRow: number) => void;
+  moveFocus: (move: FocusMove) => void;
+  captureScrolledRows: (firstRow: number, lastRow: number, side: 'above' | 'below') => void;
+  setSelectionBgColor: (color: string) => void;
+};
 ```
 
 ### `useHasSelection()`
@@ -297,7 +301,7 @@ function useSelection(): {
 Reactive boolean for selection state.
 
 ```ts
-function useHasSelection(): boolean
+function useHasSelection(): boolean;
 ```
 
 Re-renders when selection is created or cleared.
@@ -312,10 +316,10 @@ Set and manage search highlighting.
 
 ```ts
 function useSearchHighlight(): {
-  setQuery: (query: string) => void
-  scanElement: (el: DOMElement) => MatchPosition[]
-  setPositions: (state: { positions: MatchPosition[]; rowOffset: number; currentIdx: number } | null) => void
-}
+  setQuery: (query: string) => void;
+  scanElement: (el: DOMElement) => MatchPosition[];
+  setPositions: (state: { positions: MatchPosition[]; rowOffset: number; currentIdx: number } | null) => void;
+};
 ```
 
 ### `useSearchInput(options)`
@@ -324,24 +328,24 @@ Search input handler with cursor management.
 
 ```ts
 type UseSearchInputOptions = {
-  isActive: boolean
-  onExit: () => void
-  onCancel?: () => void
-  onExitUp?: () => void
-  columns?: number
-  passthroughCtrlKeys?: string[]
-  initialQuery?: string
-  backspaceExitsOnEmpty?: boolean
-}
+  isActive: boolean;
+  onExit: () => void;
+  onCancel?: () => void;
+  onExitUp?: () => void;
+  columns?: number;
+  passthroughCtrlKeys?: string[];
+  initialQuery?: string;
+  backspaceExitsOnEmpty?: boolean;
+};
 
 type UseSearchInputReturn = {
-  query: string
-  setQuery: (q: string) => void
-  cursorOffset: number
-  handleKeyDown: (e: KeyboardEvent) => void
-}
+  query: string;
+  setQuery: (q: string) => void;
+  cursorOffset: number;
+  handleKeyDown: (e: KeyboardEvent) => void;
+};
 
-function useSearchInput(options: UseSearchInputOptions): UseSearchInputReturn
+function useSearchInput(options: UseSearchInputOptions): UseSearchInputReturn;
 ```
 
 ---
@@ -353,24 +357,21 @@ function useSearchInput(options: UseSearchInputOptions): UseSearchInputReturn
 Park the terminal cursor at a specific position for IME and accessibility.
 
 ```ts
-function useDeclaredCursor({
-  line: number,
-  column: number,
-  active: boolean
-}): (element: DOMElement | null) => void
+function useDeclaredCursor({ line: number, column: number, active: boolean }): (element: DOMElement | null) => void;
 ```
 
 Returns a ref callback. Position is relative to the ref'd element.
 
 Example:
+
 ```tsx
 const cursorRef = useDeclaredCursor({
   line: 0,
   column: cursorPosition,
   active: isFocused,
-})
+});
 
-return <Box ref={cursorRef}>...</Box>
+return <Box ref={cursorRef}>...</Box>;
 ```
 
 ---
@@ -382,9 +383,9 @@ return <Box ref={cursorRef}>...</Box>
 Set tab status indicator (OSC 21337) for terminal tab bars.
 
 ```ts
-type TabStatusKind = 'idle' | 'busy' | 'waiting'
+type TabStatusKind = 'idle' | 'busy' | 'waiting';
 
-function useTabStatus(kind: TabStatusKind | null): void
+function useTabStatus(kind: TabStatusKind | null): void;
 ```
 
 Pass `null` to clear.
@@ -398,10 +399,7 @@ Pass `null` to clear.
 Track element visibility within the terminal viewport.
 
 ```ts
-function useTerminalViewport(): [
-  ref: (element: DOMElement | null) => void,
-  entry: { isVisible: boolean }
-]
+function useTerminalViewport(): [ref: (element: DOMElement | null) => void, entry: { isVisible: boolean }];
 ```
 
 Returns a ref callback and visibility state.

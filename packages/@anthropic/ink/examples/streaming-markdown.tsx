@@ -1,5 +1,5 @@
 // import { Box, Text, useInput, render as wrappedRender } from 'ink';
-import { Box, Text, useInput,  wrappedRender } from '../src';
+import { Box, Text, useInput, wrappedRender } from '../src';
 
 import React, { useState, useEffect, useRef } from 'react';
 
@@ -175,7 +175,7 @@ export function StreamingDemo({ speed = 80 }: StreamingDemoProps): React.ReactNo
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
-      setVisibleCount(prev => {
+      setVisibleCount((prev) => {
         if (prev >= lines.current.length) {
           if (intervalRef.current) clearInterval(intervalRef.current);
           setFinished(true);
@@ -208,12 +208,8 @@ export function StreamingDemo({ speed = 80 }: StreamingDemoProps): React.ReactNo
           <LineRenderer line={line} />
         </Box>
       ))}
-      {!finished && (
-        <Text dimColor>▊ 正在输出... (按 Esc 跳过)</Text>
-      )}
-      {finished && (
-        <Text dimColor>✓ 输出完成 (按 Enter 退出)</Text>
-      )}
+      {!finished && <Text dimColor>▊ 正在输出... (按 Esc 跳过)</Text>}
+      {finished && <Text dimColor>✓ 输出完成 (按 Enter 退出)</Text>}
     </Box>
   );
 }
@@ -221,9 +217,17 @@ export function StreamingDemo({ speed = 80 }: StreamingDemoProps): React.ReactNo
 function LineRenderer({ line }: { line: ParsedLine }): React.ReactNode {
   switch (line.type) {
     case 'h1':
-      return <Text bold color="#D77757">{line.text}</Text>;
+      return (
+        <Text bold color="#D77757">
+          {line.text}
+        </Text>
+      );
     case 'h2':
-      return <Text bold color="#5769F7">{line.text}</Text>;
+      return (
+        <Text bold color="#5769F7">
+          {line.text}
+        </Text>
+      );
     case 'h3':
       return <Text bold>{cleanText(line.text)}</Text>;
     case 'code':
@@ -246,4 +250,4 @@ function LineRenderer({ line }: { line: ParsedLine }): React.ReactNode {
       return <Text>{line.text}</Text>;
   }
 }
-wrappedRender(<StreamingDemo/>)
+wrappedRender(<StreamingDemo />);

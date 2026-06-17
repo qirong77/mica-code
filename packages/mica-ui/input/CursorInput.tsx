@@ -1,16 +1,7 @@
 #!/usr/bin/env bun
 
 import React, { useCallback } from 'react';
-import {
-  Ansi,
-  Box,
-  Text,
-  useInput,
-  useDeclaredCursor,
-  useTerminalFocus,
-  stringWidth,
-  wrapAnsi,
-} from '@anthropic/ink';
+import { Ansi, Box, Text, useInput, useDeclaredCursor, useTerminalFocus, stringWidth, wrapAnsi } from '@anthropic/ink';
 
 let _graphemeSegmenter: Intl.Segmenter | null = null;
 function getGraphemeSegmenter(): Intl.Segmenter {
@@ -109,12 +100,12 @@ class MeasuredText {
   }
 
   getWrappedText(): string[] {
-    return this.wrappedLines.map(line =>
-      line.isPrecededByNewline ? line.text : line.text.trimStart(),
-    );
+    return this.wrappedLines.map((line) => (line.isPrecededByNewline ? line.text : line.text.trimStart()));
   }
 
-  get lineCount(): number { return this.wrappedLines.length; }
+  get lineCount(): number {
+    return this.wrappedLines.length;
+  }
 
   getLineLength(line: number): number {
     return stringWidth(this.wrappedLines[Math.max(0, Math.min(line, this.wrappedLines.length - 1))]!.text);
@@ -125,11 +116,15 @@ class MeasuredText {
     const cached = this.navigationCache.get(key);
     if (cached !== undefined) return cached;
     const boundaries = this.getGraphemeBoundaries();
-    let lo = 0, hi = boundaries.length - 1, result = this.text.length;
+    let lo = 0,
+      hi = boundaries.length - 1,
+      result = this.text.length;
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2);
-      if (boundaries[mid]! > offset) { result = boundaries[mid]!; hi = mid - 1; }
-      else lo = mid + 1;
+      if (boundaries[mid]! > offset) {
+        result = boundaries[mid]!;
+        hi = mid - 1;
+      } else lo = mid + 1;
     }
     this.navigationCache.set(key, result);
     return result;
@@ -141,11 +136,15 @@ class MeasuredText {
     const cached = this.navigationCache.get(key);
     if (cached !== undefined) return cached;
     const boundaries = this.getGraphemeBoundaries();
-    let lo = 0, hi = boundaries.length - 1, result = 0;
+    let lo = 0,
+      hi = boundaries.length - 1,
+      result = 0;
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2);
-      if (boundaries[mid]! < offset) { result = boundaries[mid]!; lo = mid + 1; }
-      else hi = mid - 1;
+      if (boundaries[mid]! < offset) {
+        result = boundaries[mid]!;
+        lo = mid + 1;
+      } else hi = mid - 1;
     }
     this.navigationCache.set(key, result);
     return result;
@@ -155,7 +154,8 @@ class MeasuredText {
     if (offset <= 0) return 0;
     if (offset >= this.text.length) return this.text.length;
     const boundaries = this.getGraphemeBoundaries();
-    let lo = 0, hi = boundaries.length - 1;
+    let lo = 0,
+      hi = boundaries.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
       if (boundaries[mid]! <= offset) lo = mid;
@@ -174,7 +174,8 @@ class MeasuredText {
     if (targetWidth <= 0) return 0;
     if (!text) return 0;
     if (text === this.text) return this.offsetAtDisplayWidth(targetWidth);
-    let currentWidth = 0, currentOffset = 0;
+    let currentWidth = 0,
+      currentOffset = 0;
     for (const { segment, index } of getGraphemeSegmenter().segment(text)) {
       const sw = stringWidth(segment);
       if (currentWidth + sw > targetWidth) break;
@@ -189,7 +190,8 @@ class MeasuredText {
     let currentWidth = 0;
     const boundaries = this.getGraphemeBoundaries();
     for (let i = 0; i < boundaries.length - 1; i++) {
-      const start = boundaries[i]!, end = boundaries[i + 1]!;
+      const start = boundaries[i]!,
+        end = boundaries[i + 1]!;
       const segment = this.text.substring(start, end);
       const sw = stringWidth(segment);
       if (currentWidth + sw > targetWidth) return start;
@@ -201,7 +203,8 @@ class MeasuredText {
   getPositionFromOffset(offset: number): { line: number; column: number } {
     const lines = this.wrappedLines;
     for (let line = 0; line < lines.length; line++) {
-      const currentLine = lines[line]!, nextLine = lines[line + 1];
+      const currentLine = lines[line]!,
+        nextLine = lines[line + 1];
       if (offset >= currentLine.startOffset && (!nextLine || offset < nextLine.startOffset)) {
         const stringPosInLine = offset - currentLine.startOffset;
         let displayColumn: number;
@@ -210,7 +213,8 @@ class MeasuredText {
         } else {
           const leadingWs = currentLine.text.length - currentLine.text.trimStart().length;
           if (stringPosInLine < leadingWs) displayColumn = 0;
-          else displayColumn = this.stringIndexToDisplayWidth(currentLine.text.trimStart(), stringPosInLine - leadingWs);
+          else
+            displayColumn = this.stringIndexToDisplayWidth(currentLine.text.trimStart(), stringPosInLine - leadingWs);
         }
         return { line, column: Math.max(0, displayColumn) };
       }
@@ -222,7 +226,9 @@ class MeasuredText {
   getOffsetFromPosition(position: { line: number; column: number }): number {
     const wrappedLine = this.wrappedLines[Math.max(0, Math.min(position.line, this.wrappedLines.length - 1))]!;
     if (wrappedLine.text.length === 0 && wrappedLine.endsWithNewline) return wrappedLine.startOffset;
-    const leadingWs = wrappedLine.isPrecededByNewline ? 0 : wrappedLine.text.length - wrappedLine.text.trimStart().length;
+    const leadingWs = wrappedLine.isPrecededByNewline
+      ? 0
+      : wrappedLine.text.length - wrappedLine.text.trimStart().length;
     const displayColumnWithLeading = position.column + leadingWs;
     const stringIndex = this.displayWidthToStringIndex(wrappedLine.text, displayColumnWithLeading);
     const offset = wrappedLine.startOffset + stringIndex;
@@ -256,16 +262,34 @@ class Cursor {
     return new Cursor(new MeasuredText(text, columns - 1), offset);
   }
 
-  get text(): string { return this.measuredText.text; }
-  private get columns(): number { return this.measuredText.columns + 1; }
+  get text(): string {
+    return this.measuredText.text;
+  }
+  private get columns(): number {
+    return this.measuredText.columns + 1;
+  }
 
-  getPosition(): { line: number; column: number } { return this.measuredText.getPositionFromOffset(this.offset); }
-  isAtStart(): boolean { return this.offset === 0; }
-  isAtEnd(): boolean { return this.offset >= this.text.length; }
-  equals(other: Cursor): boolean { return this.offset === other.offset && this.measuredText === other.measuredText; }
+  getPosition(): { line: number; column: number } {
+    return this.measuredText.getPositionFromOffset(this.offset);
+  }
+  isAtStart(): boolean {
+    return this.offset === 0;
+  }
+  isAtEnd(): boolean {
+    return this.offset >= this.text.length;
+  }
+  equals(other: Cursor): boolean {
+    return this.offset === other.offset && this.measuredText === other.measuredText;
+  }
 
-  left(): Cursor { return this.offset === 0 ? this : new Cursor(this.measuredText, this.measuredText.prevOffset(this.offset)); }
-  right(): Cursor { return this.offset >= this.text.length ? this : new Cursor(this.measuredText, Math.min(this.measuredText.nextOffset(this.offset), this.text.length)); }
+  left(): Cursor {
+    return this.offset === 0 ? this : new Cursor(this.measuredText, this.measuredText.prevOffset(this.offset));
+  }
+  right(): Cursor {
+    return this.offset >= this.text.length
+      ? this
+      : new Cursor(this.measuredText, Math.min(this.measuredText.nextOffset(this.offset), this.text.length));
+  }
 
   up(): Cursor {
     const { line, column } = this.getPosition();
@@ -273,7 +297,10 @@ class Cursor {
     const prevLine = this.measuredText.getWrappedText()[line - 1];
     if (!prevLine) return this;
     const prevWidth = stringWidth(prevLine);
-    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line: line - 1, column: column > prevWidth ? prevWidth : column }));
+    return new Cursor(
+      this.measuredText,
+      this.measuredText.getOffsetFromPosition({ line: line - 1, column: column > prevWidth ? prevWidth : column }),
+    );
   }
 
   down(): Cursor {
@@ -282,7 +309,10 @@ class Cursor {
     const nextLine = this.measuredText.getWrappedText()[line + 1];
     if (!nextLine) return this;
     const nextWidth = stringWidth(nextLine);
-    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line: line + 1, column: column > nextWidth ? nextWidth : column }));
+    return new Cursor(
+      this.measuredText,
+      this.measuredText.getOffsetFromPosition({ line: line + 1, column: column > nextWidth ? nextWidth : column }),
+    );
   }
 
   startOfLine(): Cursor {
@@ -294,7 +324,10 @@ class Cursor {
 
   endOfLine(): Cursor {
     const { line } = this.getPosition();
-    return new Cursor(this.measuredText, this.measuredText.getOffsetFromPosition({ line, column: this.measuredText.getLineLength(line) }));
+    return new Cursor(
+      this.measuredText,
+      this.measuredText.getOffsetFromPosition({ line, column: this.measuredText.getLineLength(line) }),
+    );
   }
 
   prevWord(): Cursor {
@@ -322,8 +355,12 @@ class Cursor {
     return Cursor.fromText(newText, this.columns, this.offset + insertString.normalize('NFC').length);
   }
 
-  del(): Cursor { return this.isAtEnd() ? this : this.modifyText(this.right()); }
-  backspace(): Cursor { return this.isAtStart() ? this : this.left().modifyText(this); }
+  del(): Cursor {
+    return this.isAtEnd() ? this : this.modifyText(this.right());
+  }
+  backspace(): Cursor {
+    return this.isAtStart() ? this : this.left().modifyText(this);
+  }
 
   private modifyText(end: Cursor, insertString: string = ''): Cursor {
     const newText = this.text.slice(0, this.offset) + insertString + this.text.slice(end.offset);
@@ -331,7 +368,8 @@ class Cursor {
   }
 
   deleteToLineStart(): { cursor: Cursor; killed: string } {
-    if (this.offset > 0 && this.text[this.offset - 1] === '\n') return { cursor: this.left().modifyText(this), killed: '\n' };
+    if (this.offset > 0 && this.text[this.offset - 1] === '\n')
+      return { cursor: this.left().modifyText(this), killed: '\n' };
     const startCursor = this.startOfLine();
     return { cursor: startCursor.modifyText(this), killed: this.text.slice(startCursor.offset, this.offset) };
   }
@@ -349,97 +387,241 @@ class Cursor {
     return { cursor: new Cursor(this.measuredText, target).modifyText(this), killed };
   }
 
-  deleteWordAfter(): Cursor { return this.isAtEnd() ? this : this.modifyText(new Cursor(this.measuredText, this.nextWord().offset)); }
+  deleteWordAfter(): Cursor {
+    return this.isAtEnd() ? this : this.modifyText(new Cursor(this.measuredText, this.nextWord().offset));
+  }
 
   render(cursorChar: string, invert: (text: string) => string, maxVisibleLines?: number): string {
     const { line, column } = this.getPosition();
     const allLines = this.measuredText.getWrappedText();
     const startLine = this.measuredText.getViewportStartLine(maxVisibleLines, this.offset);
-    const endLine = maxVisibleLines !== undefined && maxVisibleLines > 0 ? Math.min(allLines.length, startLine + maxVisibleLines) : allLines.length;
-    return allLines.slice(startLine, endLine).map((text, i) => {
-      const currentLine = i + startLine;
-      let beforeCursor = '', atCursor = cursorChar, afterCursor = '', currentWidth = 0, cursorFound = false;
-      if (line !== currentLine) return text.trimEnd();
-      for (const { segment } of getGraphemeSegmenter().segment(text)) {
-        if (cursorFound) { afterCursor += segment; continue; }
-        const nextWidth = currentWidth + stringWidth(segment);
-        if (nextWidth > column) { atCursor = segment; cursorFound = true; }
-        else { currentWidth = nextWidth; beforeCursor += segment; }
-      }
-      return beforeCursor + (cursorChar ? invert(atCursor) : atCursor) + afterCursor.trimEnd();
-    }).join('\n');
+    const endLine =
+      maxVisibleLines !== undefined && maxVisibleLines > 0
+        ? Math.min(allLines.length, startLine + maxVisibleLines)
+        : allLines.length;
+    return allLines
+      .slice(startLine, endLine)
+      .map((text, i) => {
+        const currentLine = i + startLine;
+        let beforeCursor = '',
+          atCursor = cursorChar,
+          afterCursor = '',
+          currentWidth = 0,
+          cursorFound = false;
+        if (line !== currentLine) return text.trimEnd();
+        for (const { segment } of getGraphemeSegmenter().segment(text)) {
+          if (cursorFound) {
+            afterCursor += segment;
+            continue;
+          }
+          const nextWidth = currentWidth + stringWidth(segment);
+          if (nextWidth > column) {
+            atCursor = segment;
+            cursorFound = true;
+          } else {
+            currentWidth = nextWidth;
+            beforeCursor += segment;
+          }
+        }
+        return beforeCursor + (cursorChar ? invert(atCursor) : atCursor) + afterCursor.trimEnd();
+      })
+      .join('\n');
   }
 }
 
 function buildTextHandler({
-  value, onChange, onSubmit, onExit, onHistoryUp, onHistoryDown,
-  multiline, cursorChar, invert, columns, externalOffset, onOffsetChange, maxVisibleLines, disableCursorMovementForUpDownKeys,
+  value,
+  onChange,
+  onSubmit,
+  onExit,
+  onHistoryUp,
+  onHistoryDown,
+  multiline,
+  cursorChar,
+  invert,
+  columns,
+  externalOffset,
+  onOffsetChange,
+  maxVisibleLines,
+  disableCursorMovementForUpDownKeys,
 }: {
-  value: string; onChange: (value: string) => void; onSubmit?: (value: string) => void; onExit?: () => void;
-  onHistoryUp?: () => void; onHistoryDown?: () => void; multiline: boolean; cursorChar: string;
-  invert: (text: string) => string; columns: number; externalOffset: number; onOffsetChange: (offset: number) => void;
-  maxVisibleLines?: number; disableCursorMovementForUpDownKeys: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit?: (value: string) => void;
+  onExit?: () => void;
+  onHistoryUp?: () => void;
+  onHistoryDown?: () => void;
+  multiline: boolean;
+  cursorChar: string;
+  invert: (text: string) => string;
+  columns: number;
+  externalOffset: number;
+  onOffsetChange: (offset: number) => void;
+  maxVisibleLines?: number;
+  disableCursorMovementForUpDownKeys: boolean;
 }): { onInput: (input: string, key: any) => void; renderedValue: string; cursorLine: number; cursorColumn: number } {
   const offset = externalOffset;
   const setOffset = onOffsetChange;
   const cursor = Cursor.fromText(value, columns, offset);
 
   function handleEnter(key: any) {
-    if (multiline && cursor.offset > 0 && cursor.text[cursor.offset - 1] === '\\') return cursor.backspace().insert('\n');
+    if (multiline && cursor.offset > 0 && cursor.text[cursor.offset - 1] === '\\')
+      return cursor.backspace().insert('\n');
     if (key.meta || key.shift) return cursor.insert('\n');
     onSubmit?.(value);
   }
 
   function upOrHistoryUp() {
-    if (disableCursorMovementForUpDownKeys) { onHistoryUp?.(); return cursor; }
+    if (disableCursorMovementForUpDownKeys) {
+      onHistoryUp?.();
+      return cursor;
+    }
     const cursorUp = cursor.up();
     if (!cursorUp.equals(cursor)) return cursorUp;
-    if (multiline) { const c = cursor.up(); if (!c.equals(cursor)) return c; }
+    if (multiline) {
+      const c = cursor.up();
+      if (!c.equals(cursor)) return c;
+    }
     onHistoryUp?.();
     return cursor;
   }
 
   function downOrHistoryDown() {
-    if (disableCursorMovementForUpDownKeys) { onHistoryDown?.(); return cursor; }
+    if (disableCursorMovementForUpDownKeys) {
+      onHistoryDown?.();
+      return cursor;
+    }
     const cursorDown = cursor.down();
     if (!cursorDown.equals(cursor)) return cursorDown;
-    if (multiline) { const c = cursor.down(); if (!c.equals(cursor)) return c; }
+    if (multiline) {
+      const c = cursor.down();
+      if (!c.equals(cursor)) return c;
+    }
     onHistoryDown?.();
     return cursor;
   }
 
   function onInput(input: string, key: any): void {
-    if (key.ctrl && input === 'c') { if (value) { onChange(''); setOffset(0); } else onExit?.(); return; }
+    if (key.ctrl && input === 'c') {
+      if (value) {
+        onChange('');
+        setOffset(0);
+      } else onExit?.();
+      return;
+    }
     let nextCursor: Cursor | void;
     while (true) {
-      if (key.escape) { nextCursor = cursor; break; }
-      if (key.leftArrow && (key.ctrl || key.meta)) { nextCursor = cursor.prevWord(); break; }
-      if (key.rightArrow && (key.ctrl || key.meta)) { nextCursor = cursor.nextWord(); break; }
-      if (key.backspace) { nextCursor = key.meta || key.ctrl ? cursor.deleteWordBefore().cursor : cursor.backspace(); break; }
-      if (key.delete) { nextCursor = key.meta ? cursor.deleteToLineEnd().cursor : cursor.del(); break; }
-      if (key.home) { nextCursor = cursor.startOfLine(); break; }
-      if (key.end) { nextCursor = cursor.endOfLine(); break; }
-      if (key.return) { nextCursor = handleEnter(key); break; }
-      if (key.tab) { if (key.shift) { nextCursor = cursor; break; } nextCursor = cursor.insert('    '); break; }
-      if (key.upArrow && !key.shift) { nextCursor = upOrHistoryUp(); break; }
-      if (key.downArrow && !key.shift) { nextCursor = downOrHistoryDown(); break; }
-      if (key.leftArrow) { nextCursor = cursor.left(); break; }
-      if (key.rightArrow) { nextCursor = cursor.right(); break; }
+      if (key.escape) {
+        nextCursor = cursor;
+        break;
+      }
+      if (key.leftArrow && (key.ctrl || key.meta)) {
+        nextCursor = cursor.prevWord();
+        break;
+      }
+      if (key.rightArrow && (key.ctrl || key.meta)) {
+        nextCursor = cursor.nextWord();
+        break;
+      }
+      if (key.backspace) {
+        nextCursor = key.meta || key.ctrl ? cursor.deleteWordBefore().cursor : cursor.backspace();
+        break;
+      }
+      if (key.delete) {
+        nextCursor = key.meta ? cursor.deleteToLineEnd().cursor : cursor.del();
+        break;
+      }
+      if (key.home) {
+        nextCursor = cursor.startOfLine();
+        break;
+      }
+      if (key.end) {
+        nextCursor = cursor.endOfLine();
+        break;
+      }
+      if (key.return) {
+        nextCursor = handleEnter(key);
+        break;
+      }
+      if (key.tab) {
+        if (key.shift) {
+          nextCursor = cursor;
+          break;
+        }
+        nextCursor = cursor.insert('    ');
+        break;
+      }
+      if (key.upArrow && !key.shift) {
+        nextCursor = upOrHistoryUp();
+        break;
+      }
+      if (key.downArrow && !key.shift) {
+        nextCursor = downOrHistoryDown();
+        break;
+      }
+      if (key.leftArrow) {
+        nextCursor = cursor.left();
+        break;
+      }
+      if (key.rightArrow) {
+        nextCursor = cursor.right();
+        break;
+      }
       if (key.ctrl) {
         switch (input) {
-          case 'a': nextCursor = cursor.startOfLine(); break; case 'b': nextCursor = cursor.left(); break;
-          case 'd': nextCursor = cursor.del(); break; case 'e': nextCursor = cursor.endOfLine(); break;
-          case 'f': nextCursor = cursor.right(); break; case 'h': nextCursor = cursor.backspace(); break;
-          case 'k': nextCursor = cursor.deleteToLineEnd().cursor; break; case 'n': nextCursor = downOrHistoryDown(); break;
-          case 'p': nextCursor = upOrHistoryUp(); break; case 'u': nextCursor = cursor.deleteToLineStart().cursor; break;
-          case 'w': nextCursor = cursor.deleteWordBefore().cursor; break; default: nextCursor = cursor; break;
+          case 'a':
+            nextCursor = cursor.startOfLine();
+            break;
+          case 'b':
+            nextCursor = cursor.left();
+            break;
+          case 'd':
+            nextCursor = cursor.del();
+            break;
+          case 'e':
+            nextCursor = cursor.endOfLine();
+            break;
+          case 'f':
+            nextCursor = cursor.right();
+            break;
+          case 'h':
+            nextCursor = cursor.backspace();
+            break;
+          case 'k':
+            nextCursor = cursor.deleteToLineEnd().cursor;
+            break;
+          case 'n':
+            nextCursor = downOrHistoryDown();
+            break;
+          case 'p':
+            nextCursor = upOrHistoryUp();
+            break;
+          case 'u':
+            nextCursor = cursor.deleteToLineStart().cursor;
+            break;
+          case 'w':
+            nextCursor = cursor.deleteWordBefore().cursor;
+            break;
+          default:
+            nextCursor = cursor;
+            break;
         }
         break;
       }
       if (key.meta) {
         switch (input) {
-          case 'b': nextCursor = cursor.prevWord(); break; case 'f': nextCursor = cursor.nextWord(); break;
-          case 'd': nextCursor = cursor.deleteWordAfter(); break; default: nextCursor = cursor; break;
+          case 'b':
+            nextCursor = cursor.prevWord();
+            break;
+          case 'f':
+            nextCursor = cursor.nextWord();
+            break;
+          case 'd':
+            nextCursor = cursor.deleteWordAfter();
+            break;
+          default:
+            nextCursor = cursor;
+            break;
         }
         break;
       }

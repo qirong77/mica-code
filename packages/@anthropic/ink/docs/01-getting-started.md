@@ -19,16 +19,16 @@
 
 ### Key Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `chalk` | ANSI color generation |
-| `cli-boxes` | Border style definitions |
-| `get-east-asian-width` | CJK character width measurement |
-| `wrap-ansi` | ANSI-aware word wrapping |
-| `bidi-js` | Bidirectional text support |
-| `lodash-es` | Utility functions (throttle, noop) |
-| `signal-exit` | Process exit handler cleanup |
-| `emoji-regex` | Emoji width handling |
+| Package                | Purpose                            |
+| ---------------------- | ---------------------------------- |
+| `chalk`                | ANSI color generation              |
+| `cli-boxes`            | Border style definitions           |
+| `get-east-asian-width` | CJK character width measurement    |
+| `wrap-ansi`            | ANSI-aware word wrapping           |
+| `bidi-js`              | Bidirectional text support         |
+| `lodash-es`            | Utility functions (throttle, noop) |
+| `signal-exit`          | Process exit handler cleanup       |
+| `emoji-regex`          | Emoji width handling               |
 
 ## Basic Rendering
 
@@ -37,21 +37,23 @@
 The primary entry point. Renders a React element tree to the terminal.
 
 ```tsx
-import { render } from '@anthropic/ink'
-import { Box, Text } from '@anthropic/ink'
+import { render } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 
 const { unmount, rerender, waitUntilExit } = await render(
   <Box>
     <Text>Hello, World!</Text>
-  </Box>
-)
+  </Box>,
+);
 ```
 
 **Parameters:**
+
 - `node` -- `ReactNode` to render
 - `options` -- `RenderOptions | NodeJS.WriteStream` (optional)
 
 **Returns:** `Promise<Instance>` with:
+
 - `rerender(node)` -- Replace the root node
 - `unmount()` -- Unmount and clean up
 - `waitUntilExit()` -- `Promise<void>` that resolves on unmount
@@ -62,9 +64,9 @@ const { unmount, rerender, waitUntilExit } = await render(
 Synchronous version of render. Same API, returns `Instance` directly (no Promise).
 
 ```tsx
-import { renderSync } from '@anthropic/ink'
+import { renderSync } from '@anthropic/ink';
 
-const instance = renderSync(<App />)
+const instance = renderSync(<App />);
 // instance.rerender, instance.unmount, etc.
 ```
 
@@ -73,21 +75,22 @@ const instance = renderSync(<App />)
 Creates a managed Ink root without immediately rendering. Similar to `react-dom`'s `createRoot`.
 
 ```tsx
-import { createRoot } from '@anthropic/ink'
+import { createRoot } from '@anthropic/ink';
 
-const root = await createRoot({ exitOnCtrlC: false })
+const root = await createRoot({ exitOnCtrlC: false });
 
 // Later, render into it
-root.render(<App />)
+root.render(<App />);
 
 // You can re-render into the same root
-root.render(<DifferentApp />)
+root.render(<DifferentApp />);
 
 // Clean up
-root.unmount()
+root.unmount();
 ```
 
 **Returns:** `Promise<Root>` with:
+
 - `render(node)` -- Mount or update the tree
 - `unmount()` -- Unmount
 - `waitUntilExit()` -- `Promise<void>`
@@ -97,23 +100,23 @@ root.unmount()
 ```ts
 type RenderOptions = {
   /** Output stream. Default: process.stdout */
-  stdout?: NodeJS.WriteStream
+  stdout?: NodeJS.WriteStream;
 
   /** Input stream. Default: process.stdin */
-  stdin?: NodeJS.ReadStream
+  stdin?: NodeJS.ReadStream;
 
   /** Error stream. Default: process.stderr */
-  stderr?: NodeJS.WriteStream
+  stderr?: NodeJS.WriteStream;
 
   /** Handle Ctrl+C to exit. Default: true */
-  exitOnCtrlC?: boolean
+  exitOnCtrlC?: boolean;
 
   /** Patch console methods to prevent Ink output mixing. Default: true */
-  patchConsole?: boolean
+  patchConsole?: boolean;
 
   /** Called after each frame render with timing info. */
-  onFrame?: (event: FrameEvent) => void
-}
+  onFrame?: (event: FrameEvent) => void;
+};
 ```
 
 ## Basic Concepts
@@ -124,7 +127,9 @@ Ink renders React components to a terminal using a custom reconciler. The tree s
 
 ```tsx
 <Box flexDirection="column">
-  <Text bold color="green">Header</Text>
+  <Text bold color="green">
+    Header
+  </Text>
   <Box flexDirection="row" gap={1}>
     <Text>Left</Text>
     <Text>Right</Text>
@@ -148,22 +153,22 @@ Import everything from the package root:
 
 ```tsx
 // Core rendering
-import { render, createRoot, renderSync } from '@anthropic/ink'
+import { render, createRoot, renderSync } from '@anthropic/ink';
 
 // Components (base, no theme)
-import { BaseBox, BaseText, ScrollBox, Button, Link, Newline, Spacer } from '@anthropic/ink'
+import { BaseBox, BaseText, ScrollBox, Button, Link, Newline, Spacer } from '@anthropic/ink';
 
 // Theme-aware components (recommended)
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '@anthropic/ink';
 
 // Hooks
-import { useApp, useInput, useTerminalSize, useInterval } from '@anthropic/ink'
+import { useApp, useInput, useTerminalSize, useInterval } from '@anthropic/ink';
 
 // Theme
-import { ThemeProvider, useTheme, color } from '@anthropic/ink'
+import { ThemeProvider, useTheme, color } from '@anthropic/ink';
 
 // Keybindings
-import { useKeybinding, KeybindingProvider } from '@anthropic/ink'
+import { useKeybinding, KeybindingProvider } from '@anthropic/ink';
 ```
 
 ### Naming Convention: Base vs Theme-aware

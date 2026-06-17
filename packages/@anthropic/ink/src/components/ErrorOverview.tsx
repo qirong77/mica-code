@@ -105,7 +105,7 @@ export default function ErrorOverview({ error }: Props) {
           {error.stack
             .split('\n')
             .slice(1)
-            .map(line => {
+            .map((line) => {
               const parsedLine = getStackUtils().parseLine(line);
 
               // If the line from the stack cannot be parsed, we print out the unparsed line.

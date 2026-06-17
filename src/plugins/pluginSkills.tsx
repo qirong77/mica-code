@@ -1,15 +1,15 @@
-import React from "react";
-import { Box, Text } from "@anthropic/ink";
-import { atom } from "nanostores";
-import { micaUI } from "../../packages/mica-ui/index.js";
-import { useScheduleState } from "../../packages/mica-ui/hooks/index.js";
-import { Markdown } from "../../packages/mica-ui/conversation/Markdown.js";
-import { Dialog, KeyHints, SelectList } from "../../packages/mica-ui/primitives/index.js";
-import { getLoadedSkills, reloadSkills } from "../skills/loadSkills.js";
+import React from 'react';
+import { Box, Text } from '@anthropic/ink';
+import { atom } from 'nanostores';
+import { micaUI } from '../../packages/mica-ui/index.js';
+import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
+import { Markdown } from '../../packages/mica-ui/conversation/Markdown.js';
+import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
+import { getLoadedSkills, reloadSkills } from '../skills/loadSkills.js';
 
 type SkillsState =
-  | { view: "list"; selectedIdx: number }
-  | { view: "detail"; selectedIdx: number; detailSkillIdx: number };
+  | { view: 'list'; selectedIdx: number }
+  | { view: 'detail'; selectedIdx: number; detailSkillIdx: number };
 
 function widthOrDefault(values: number[], fallback: number) {
   return values.length > 0 ? Math.max(...values) : fallback;
@@ -17,12 +17,12 @@ function widthOrDefault(values: number[], fallback: number) {
 
 export function registerSkillsPlugin() {
   return {
-    name: "skills",
-    description: "列出已安装的 skills",
+    name: 'skills',
+    description: '列出已安装的 skills',
     action: () => {
       const skills = reloadSkills();
       const panelState = atom<SkillsState>({
-        view: "list",
+        view: 'list',
         selectedIdx: skills.length > 0 ? 0 : 0,
       });
 
@@ -34,7 +34,7 @@ export function registerSkillsPlugin() {
         const state = useScheduleState(panelState);
         const currentSkills = getLoadedSkills();
 
-        if (state.view === "list") {
+        if (state.view === 'list') {
           const nameWidth = widthOrDefault(
             currentSkills.map((skill) => skill.name.length + 2),
             16,
@@ -47,7 +47,7 @@ export function registerSkillsPlugin() {
           return (
             <Dialog
               title={`skills (${currentSkills.length})`}
-              footer={<KeyHints hints={["↑↓ navigate", "↵ detail", "esc close"]} />}
+              footer={<KeyHints hints={['↑↓ navigate', '↵ detail', 'esc close']} />}
             >
               <SelectList
                 items={currentSkills.map((skill) => ({
@@ -72,7 +72,7 @@ export function registerSkillsPlugin() {
                       <Box width={descWidth}>
                         <Text dimColor>
                           {skill.description.slice(0, 36)}
-                          {skill.description.length > 36 ? "..." : ""}
+                          {skill.description.length > 36 ? '...' : ''}
                         </Text>
                       </Box>
                     </Box>
@@ -87,7 +87,7 @@ export function registerSkillsPlugin() {
         if (!skill) return null;
 
         return (
-          <Dialog title={`/${skill.name}`} footer={<KeyHints hints={["esc back"]} />}>
+          <Dialog title={`/${skill.name}`} footer={<KeyHints hints={['esc back']} />}>
             <Box flexDirection="column">
               <Box paddingBottom={1}>
                 <Text>{skill.description}</Text>
@@ -119,16 +119,16 @@ export function registerSkillsPlugin() {
 
       micaUI.panels.setPluginUIs([
         {
-          id: "skills-panel",
+          id: 'skills-panel',
           component: SkillsPanel,
           onInput: (_input, key) => {
             const currentSkills = getLoadedSkills();
             const state = panelState.get();
 
             if (key.escape) {
-              if (state.view === "detail") {
+              if (state.view === 'detail') {
                 panelState.set({
-                  view: "list",
+                  view: 'list',
                   selectedIdx: state.detailSkillIdx,
                 });
                 return true;
@@ -137,34 +137,28 @@ export function registerSkillsPlugin() {
               return true;
             }
 
-            if (state.view !== "list") return false;
+            if (state.view !== 'list') return false;
             if (currentSkills.length === 0) return true;
 
             if (key.upArrow) {
               panelState.set({
-                view: "list",
-                selectedIdx:
-                  state.selectedIdx > 0
-                    ? state.selectedIdx - 1
-                    : currentSkills.length - 1,
+                view: 'list',
+                selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : currentSkills.length - 1,
               });
               return true;
             }
 
             if (key.downArrow) {
               panelState.set({
-                view: "list",
-                selectedIdx:
-                  state.selectedIdx < currentSkills.length - 1
-                    ? state.selectedIdx + 1
-                    : 0,
+                view: 'list',
+                selectedIdx: state.selectedIdx < currentSkills.length - 1 ? state.selectedIdx + 1 : 0,
               });
               return true;
             }
 
             if (key.return) {
               panelState.set({
-                view: "detail",
+                view: 'detail',
                 selectedIdx: 0,
                 detailSkillIdx: state.selectedIdx,
               });

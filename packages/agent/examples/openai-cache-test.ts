@@ -4,9 +4,9 @@ import {
   randomUserPrefixScenario,
   runComparison,
   stableSystemScenario,
-} from "./openai-cache-tests/shared";
+} from './openai-cache-tests/shared';
 
-await runComparison("OpenAI prompt cache comparison matrix", [
+await runComparison('OpenAI prompt cache comparison matrix', [
   stableSystemScenario(),
   randomSystemPrefixScenario(),
   randomSystemSuffixScenario(),

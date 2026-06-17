@@ -23,7 +23,11 @@ export const modelDisplay = {
 };
 
 const _uiLog = atom<MicaUiUILogEntry[]>([]);
-export const uiLog = _uiLog as { get(): MicaUiUILogEntry[]; set(v: MicaUiUILogEntry[]): void; subscribe(cb: (v: MicaUiUILogEntry[]) => void): () => void };
+export const uiLog = _uiLog as {
+  get(): MicaUiUILogEntry[];
+  set(v: MicaUiUILogEntry[]): void;
+  subscribe(cb: (v: MicaUiUILogEntry[]) => void): () => void;
+};
 
 export function pushLog(entry: MicaUiUILogEntry | string): void {
   _uiLog.set([..._uiLog.get(), typeof entry === 'string' ? { text: entry } : entry]);
@@ -42,7 +46,8 @@ export const status = {
   connecting: () => setWorkingStatus({ type: 'connecting' }),
   thinking: () => setWorkingStatus({ type: 'thinking' }),
   streaming: () => setWorkingStatus({ type: 'streaming' }),
-  callingTool: (toolNames?: string[], elapsedMs?: number) => setWorkingStatus({ type: 'calling_tool', toolNames, elapsedMs }),
+  callingTool: (toolNames?: string[], elapsedMs?: number) =>
+    setWorkingStatus({ type: 'calling_tool', toolNames, elapsedMs }),
   completed: (elapsedMs?: number) => setWorkingStatus({ type: 'completed', elapsedMs }),
   error: (message?: string) => setWorkingStatus({ type: 'error', message }),
 };
@@ -82,11 +87,7 @@ export function replaceAgentTurnLogItem(item: MicaUiAgentTurnLogItem): void {
   if (index === -1) {
     agentTurnLogItems.set([...items, item]);
   } else {
-    agentTurnLogItems.set([
-      ...items.slice(0, index),
-      item,
-      ...items.slice(index + 1),
-    ]);
+    agentTurnLogItems.set([...items.slice(0, index), item, ...items.slice(index + 1)]);
   }
 }
 

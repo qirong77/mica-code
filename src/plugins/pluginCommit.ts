@@ -71,10 +71,7 @@ async function runCommit(agent: AgentRuntime) {
 function buildChangeSummary(status: string) {
   const changedFiles = parsePorcelainStatus(status);
   const stat = safeGit(['diff', '--stat']) || safeGit(['diff', '--cached', '--stat']);
-  const nameStatus = [
-    safeGit(['diff', '--name-status']),
-    safeGit(['diff', '--cached', '--name-status']),
-  ]
+  const nameStatus = [safeGit(['diff', '--name-status']), safeGit(['diff', '--cached', '--name-status'])]
     .filter(Boolean)
     .join('\n')
     .trim();

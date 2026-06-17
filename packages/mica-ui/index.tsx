@@ -67,7 +67,20 @@ export { useLogViewHeight } from './hooks/useLogViewHeight.js';
 export { parseImageRefs } from './utils/imagePaste.js';
 export { themeColors, C } from './theme.js';
 
-export type { MicaUiWorkingStatus, MicaUiLogEntry, MicaUiThinkingEntry, MicaUiToolEntry,
-  MicaUiDropdownItem, MicaUiDropdownState, MicaUiPluginUI, MicaUiCommand,
-  MicaUiConversationMessage, MicaUiUILogEntry, MicaUiTextBlock, MicaUiImageBlockParam,
-  MicaUiContentBlockParam, MicaUiMessageParam, MicaUiAgentTurnLogItem } from './types.js';
+export type {
+  MicaUiWorkingStatus,
+  MicaUiLogEntry,
+  MicaUiThinkingEntry,
+  MicaUiToolEntry,
+  MicaUiDropdownItem,
+  MicaUiDropdownState,
+  MicaUiPluginUI,
+  MicaUiCommand,
+  MicaUiConversationMessage,
+  MicaUiUILogEntry,
+  MicaUiTextBlock,
+  MicaUiImageBlockParam,
+  MicaUiContentBlockParam,
+  MicaUiMessageParam,
+  MicaUiAgentTurnLogItem,
+} from './types.js';

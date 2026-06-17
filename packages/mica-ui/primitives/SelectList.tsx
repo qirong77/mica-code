@@ -23,7 +23,11 @@ export interface SelectListProps<T extends SelectItem> {
 }
 
 function renderItems<T extends SelectItem>(
-  items: T[], selectedIdx: number, itemGap: number, markerWidth: number, marker: string,
+  items: T[],
+  selectedIdx: number,
+  itemGap: number,
+  markerWidth: number,
+  marker: string,
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode,
 ) {
   return items.map((item, i) => {
@@ -33,10 +37,18 @@ function renderItems<T extends SelectItem>(
         <Box width={markerWidth} flexShrink={0}>
           <Text color={isSelected ? themeColors.accent : themeColors.dim}>{isSelected ? marker : ' '}</Text>
         </Box>
-        {renderItem ? renderItem(item, isSelected) : (
+        {renderItem ? (
+          renderItem(item, isSelected)
+        ) : (
           <Box flexDirection="row">
-            <Text color={isSelected ? themeColors.accent : undefined} bold={isSelected}>{item.label}</Text>
-            {item.suffix ? <Text dimColor={!isSelected} color={isSelected ? themeColors.accent : undefined}>{item.suffix}</Text> : null}
+            <Text color={isSelected ? themeColors.accent : undefined} bold={isSelected}>
+              {item.label}
+            </Text>
+            {item.suffix ? (
+              <Text dimColor={!isSelected} color={isSelected ? themeColors.accent : undefined}>
+                {item.suffix}
+              </Text>
+            ) : null}
           </Box>
         )}
       </Box>
@@ -45,18 +57,32 @@ function renderItems<T extends SelectItem>(
 }
 
 export function SelectList<T extends SelectItem>({
-  items, selectedIdx, title, empty = <Text dimColor>no items</Text>,
-  itemGap = 1, markerWidth = 2, marker = '\u25B6', maxVisibleItems = 5,
+  items,
+  selectedIdx,
+  title,
+  empty = <Text dimColor>no items</Text>,
+  itemGap = 1,
+  markerWidth = 2,
+  marker = '\u25B6',
+  maxVisibleItems = 5,
   renderItem,
 }: SelectListProps<T>): React.ReactNode {
   if (items.length === 0) return <>{empty}</>;
 
-  const body = items.length <= maxVisibleItems ? (
-    <Box flexDirection="column">{renderItems(items, selectedIdx, itemGap, markerWidth, marker, renderItem)}</Box>
-  ) : (
-    <ScrollBody items={items} selectedIdx={selectedIdx} maxVisibleItems={maxVisibleItems}
-      itemGap={itemGap} markerWidth={markerWidth} marker={marker} renderItem={renderItem} />
-  );
+  const body =
+    items.length <= maxVisibleItems ? (
+      <Box flexDirection="column">{renderItems(items, selectedIdx, itemGap, markerWidth, marker, renderItem)}</Box>
+    ) : (
+      <ScrollBody
+        items={items}
+        selectedIdx={selectedIdx}
+        maxVisibleItems={maxVisibleItems}
+        itemGap={itemGap}
+        markerWidth={markerWidth}
+        marker={marker}
+        renderItem={renderItem}
+      />
+    );
 
   if (!title) return body;
   return (
@@ -68,9 +94,20 @@ export function SelectList<T extends SelectItem>({
 }
 
 function ScrollBody<T extends SelectItem>({
-  items, selectedIdx, maxVisibleItems, itemGap, markerWidth, marker, renderItem,
+  items,
+  selectedIdx,
+  maxVisibleItems,
+  itemGap,
+  markerWidth,
+  marker,
+  renderItem,
 }: {
-  items: T[]; selectedIdx: number; maxVisibleItems: number; itemGap: number; markerWidth: number; marker: string;
+  items: T[];
+  selectedIdx: number;
+  maxVisibleItems: number;
+  itemGap: number;
+  markerWidth: number;
+  marker: string;
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
 }) {
   const visibleRows = maxVisibleItems + (maxVisibleItems - 1) * itemGap;

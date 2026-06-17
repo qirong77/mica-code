@@ -82,8 +82,7 @@ export async function loadProviderModels(providerId: string): Promise<string[]> 
           }
         : item,
     );
-    const current =
-      config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
+    const current = config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
     return {
       ...config,
       providers,
@@ -94,9 +93,7 @@ export async function loadProviderModels(providerId: string): Promise<string[]> 
 }
 
 export async function loadMissingProviderModels() {
-  const providers = getConfig().providers.filter(
-    (provider) => provider.get_model_url && !provider.models?.length,
-  );
+  const providers = getConfig().providers.filter((provider) => provider.get_model_url && !provider.models?.length);
   await Promise.all(
     providers.map(async (provider) => {
       try {
@@ -135,10 +132,7 @@ function parseModelIds(payload: unknown): string[] {
 
 function isModelListResponse(payload: unknown): payload is { data: unknown[] } {
   return Boolean(
-    payload &&
-    typeof payload === 'object' &&
-    'data' in payload &&
-    Array.isArray((payload as { data?: unknown }).data),
+    payload && typeof payload === 'object' && 'data' in payload && Array.isArray((payload as { data?: unknown }).data),
   );
 }
 

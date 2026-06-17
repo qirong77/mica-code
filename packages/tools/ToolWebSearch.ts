@@ -27,16 +27,8 @@ const resultCache = new LRUCache<string, SearchResult[]>({
   ttl: CACHE_TTL_MS,
 });
 
-function buildResponseText(
-  engine: string,
-  query: string,
-  results: SearchResult[],
-  extras: string[],
-): string {
-  const lines: string[] = [
-    `Search results for "${query}" (${results.length} results via ${engine}):`,
-    '',
-  ];
+function buildResponseText(engine: string, query: string, results: SearchResult[], extras: string[]): string {
+  const lines: string[] = [`Search results for "${query}" (${results.length} results via ${engine}):`, ''];
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -64,14 +56,18 @@ export class ToolWebSearch extends MicaTool {
   }
 
   constructor() {
-    super('web_search', '搜索网络信息，返回结果标题、链接和摘要。用于查询最新信息、官方文档、API/模型/provider 行为、价格、版本、法规或任何可能变化的事实。先用 web_search 发现 URL，再用 web_fetch 获取完整内容。', {
-      type: 'object' as const,
-      properties: {
-        query: { type: 'string', description: '搜索查询' },
-        count: { type: 'number', description: `返回结果数量（默认 ${DEFAULT_COUNT}，最大 ${MAX_RESULTS}）` },
+    super(
+      'web_search',
+      '搜索网络信息，返回结果标题、链接和摘要。用于查询最新信息、官方文档、API/模型/provider 行为、价格、版本、法规或任何可能变化的事实。先用 web_search 发现 URL，再用 web_fetch 获取完整内容。',
+      {
+        type: 'object' as const,
+        properties: {
+          query: { type: 'string', description: '搜索查询' },
+          count: { type: 'number', description: `返回结果数量（默认 ${DEFAULT_COUNT}，最大 ${MAX_RESULTS}）` },
+        },
+        required: ['query'],
       },
-      required: ['query'],
-    });
+    );
   }
 
   async execute(input: Record<string, any>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
@@ -134,5 +130,4 @@ export class ToolWebSearch extends MicaTool {
 
     return buildResponseText('Serper', query, results, extras);
   }
-
 }

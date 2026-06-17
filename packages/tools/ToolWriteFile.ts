@@ -33,5 +33,4 @@ export class ToolWriteFile extends MicaTool {
     const sizeHint = len > 0 ? ` (${len}B)` : '';
     return `write ${filePath}${sizeHint}`;
   }
-  
 }

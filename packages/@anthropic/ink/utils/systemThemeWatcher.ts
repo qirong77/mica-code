@@ -1,4 +1,4 @@
-import type { SystemTheme } from '../src/theme/systemTheme.js'
+import type { SystemTheme } from '../src/theme/systemTheme.js';
 
 /**
  * Watch for live terminal theme changes via OSC 11 polling.
@@ -8,5 +8,5 @@ export function watchSystemTheme(
   _querier: unknown,
   _setTheme: React.Dispatch<React.SetStateAction<SystemTheme>>,
 ): () => void {
-  return () => {}
+  return () => {};
 }

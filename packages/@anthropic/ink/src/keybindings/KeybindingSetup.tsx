@@ -142,7 +142,7 @@ export function KeybindingSetup({
     void initWatcher?.();
 
     // Subscribe to changes
-    const unsubscribe = subscribeToChanges(result => {
+    const unsubscribe = subscribeToChanges((result) => {
       // Any callback invocation is a reload since initial load happens
       // synchronously in useState, not via this subscription
       setIsReload(true);

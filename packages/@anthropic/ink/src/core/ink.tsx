@@ -1119,7 +1119,7 @@ export default class Ink {
     if (text) {
       // Raw OSC 52, or DCS-passthrough-wrapped OSC 52 inside tmux (tmux
       // drops it silently unless allow-passthrough is on — no regression).
-      void setClipboard(text).then(raw => {
+      void setClipboard(text).then((raw) => {
         if (raw) this.options.stdout.write(raw);
       });
     }
@@ -1201,7 +1201,7 @@ export default class Ink {
         `el=${width}x${height}@(${elLeft},${elTop}) n=${positions.length} ` +
         `[${positions
           .slice(0, 10)
-          .map(p => `${p.row}:${p.col}`)
+          .map((p) => `${p.row}:${p.col}`)
           .join(',')}` +
         `${positions.length > 10 ? ',…' : ''}]`,
     );
@@ -1484,7 +1484,7 @@ export default class Ink {
     this.logger.debug(
       `[stdin] suspendStdin: removing ${readableListeners.length} readable listener(s), wasRawMode=${(stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw ?? false}`,
     );
-    readableListeners.forEach(listener => {
+    readableListeners.forEach((listener) => {
       this.stdinListeners.push({
         event: 'readable',
         listener: listener as (...args: unknown[]) => void,

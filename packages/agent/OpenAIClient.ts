@@ -68,9 +68,7 @@ export class OpenAIClient extends BaseAgent<
     this.lastUsage = undefined;
     this.turnId = 0;
   }
-  loadSnapshot(
-    snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, UsageRecord>,
-  ) {
+  loadSnapshot(snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, UsageRecord>) {
     this.messages = snapshot.messages.filter((message) => message.role !== 'system');
     this.usageHistory = snapshot.usageHistory;
     this.lastUsage = snapshot.lastUsage;
@@ -123,10 +121,7 @@ export class OpenAIClient extends BaseAgent<
       });
 
       let content = '';
-      const toolCallsMap = new Map<
-        number,
-        { id: string; function: { name: string; arguments: string } }
-      >();
+      const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
 
       for await (const chunk of stream) {
         if (chunk.usage) {

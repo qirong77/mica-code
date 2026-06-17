@@ -12,7 +12,9 @@ export function Dialog({ title, children, footer }: DialogProps): React.ReactNod
   return (
     <Box flexDirection="column" paddingX={1}>
       <IfComponent condition={!!title}>
-        <Box paddingBottom={1}><Text dimColor>{title}</Text></Box>
+        <Box paddingBottom={1}>
+          <Text dimColor>{title}</Text>
+        </Box>
       </IfComponent>
       {children}
       {footer}

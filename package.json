@@ -10,7 +10,10 @@
     "prebuild": "bun run src/prebuild.ts",
     "format": "prettier --write ."
   },
-  "workspaces": ["packages/*", "packages/*/*"],
+  "workspaces": [
+    "packages/*",
+    "packages/*/*"
+  ],
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
     "@anthropic/ink": "workspace:*",

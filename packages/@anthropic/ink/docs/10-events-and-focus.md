@@ -10,7 +10,7 @@ All events extend the base `Event` class:
 
 ```ts
 class Event {
-  stopImmediatePropagation(): void
+  stopImmediatePropagation(): void;
 }
 ```
 
@@ -20,9 +20,9 @@ Emitted for every keystroke or input action.
 
 ```ts
 class InputEvent extends Event {
-  readonly input: string     // Character(s) entered
-  readonly key: Key          // Parsed key metadata
-  readonly keypress: ParsedKey  // Raw keypress data
+  readonly input: string; // Character(s) entered
+  readonly key: Key; // Parsed key metadata
+  readonly keypress: ParsedKey; // Raw keypress data
 }
 ```
 
@@ -32,7 +32,7 @@ DOM-like keyboard event for focused elements.
 
 ```ts
 class KeyboardEvent extends Event {
-  readonly key: Key
+  readonly key: Key;
 }
 ```
 
@@ -44,8 +44,8 @@ Mouse click event (alt-screen only).
 
 ```ts
 class ClickEvent extends Event {
-  readonly x: number  // Column (0-indexed)
-  readonly y: number  // Row (0-indexed)
+  readonly x: number; // Column (0-indexed)
+  readonly y: number; // Row (0-indexed)
 }
 ```
 
@@ -57,7 +57,7 @@ Focus change event.
 
 ```ts
 class FocusEvent extends Event {
-  readonly relatedTarget: DOMElement | null
+  readonly relatedTarget: DOMElement | null;
 }
 ```
 
@@ -67,7 +67,7 @@ Terminal window focus change.
 
 ```ts
 class TerminalFocusEvent extends Event {
-  readonly type: 'terminalfocus' | 'terminalblur'
+  readonly type: 'terminalfocus' | 'terminalblur';
 }
 ```
 
@@ -95,18 +95,18 @@ stdin data → parse-keypress → InputEvent
 <Box
   onKeyDownCapture={(e) => {
     // Capture phase: fires top-down
-    console.log('Parent captures key')
+    console.log('Parent captures key');
   }}
   onKeyDown={(e) => {
     // Bubble phase: fires bottom-up
-    console.log('Parent receives bubbled key')
+    console.log('Parent receives bubbled key');
   }}
 >
   <Box
     onKeyDown={(e) => {
       // Target: fires first in bubble phase
-      console.log('Child handles key')
-      e.stopImmediatePropagation()  // Stop here
+      console.log('Child handles key');
+      e.stopImmediatePropagation(); // Stop here
     }}
   >
     <Text>Focus here</Text>
@@ -116,10 +116,10 @@ stdin data → parse-keypress → InputEvent
 
 ### Event Propagation Methods
 
-| Method | Effect |
-|--------|--------|
-| `event.stopImmediatePropagation()` | Stop all subsequent handlers |
-| `event.preventDefault()` | Not supported in terminal context |
+| Method                             | Effect                            |
+| ---------------------------------- | --------------------------------- |
+| `event.stopImmediatePropagation()` | Stop all subsequent handlers      |
+| `event.preventDefault()`           | Not supported in terminal context |
 
 ## FocusManager
 
@@ -136,19 +136,19 @@ DOM-like focus management system.
 
 ```ts
 class FocusManager {
-  activeElement: DOMElement | null
+  activeElement: DOMElement | null;
 
-  focus(node: DOMElement): void
-  blur(): void
-  focusNext(root: DOMElement): void     // Tab
-  focusPrevious(root: DOMElement): void  // Shift+Tab
+  focus(node: DOMElement): void;
+  blur(): void;
+  focusNext(root: DOMElement): void; // Tab
+  focusPrevious(root: DOMElement): void; // Shift+Tab
 
-  handleNodeRemoved(node: DOMElement, root: DOMElement): void
-  handleAutoFocus(node: DOMElement): void
-  handleClickFocus(node: DOMElement): void
+  handleNodeRemoved(node: DOMElement, root: DOMElement): void;
+  handleAutoFocus(node: DOMElement): void;
+  handleClickFocus(node: DOMElement): void;
 
-  enable(): void
-  disable(): void
+  enable(): void;
+  disable(): void;
 }
 ```
 
@@ -222,10 +222,10 @@ Custom event emitter for internal use:
 
 ```ts
 class EventEmitter {
-  on(event: string, handler: Function): void
-  off(event: string, handler: Function): void
-  emit(event: string, ...args: any[]): void
-  removeListener(event: string, handler: Function): void
+  on(event: string, handler: Function): void;
+  off(event: string, handler: Function): void;
+  emit(event: string, ...args: any[]): void;
+  removeListener(event: string, handler: Function): void;
 }
 ```
 

@@ -1,10 +1,7 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../bootstrap.js';
-import {
-  getConfig,
-  updateConfig,
-} from '../store/index.js';
+import { getConfig, updateConfig } from '../store/index.js';
 import { showSelectCommand } from './selectCommand.js';
 
 export function registerModelPlugin(agent: AgentRuntime) {

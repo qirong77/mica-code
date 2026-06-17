@@ -12,12 +12,8 @@ describe('buildSystemPrompt', () => {
       skills: [],
     });
 
-    expect(prompt.indexOf('<system>')).toBeLessThan(
-      prompt.indexOf('<project-instructions>'),
-    );
-    expect(prompt.indexOf('<project-instructions>')).toBeLessThan(
-      prompt.indexOf('<context>'),
-    );
+    expect(prompt.indexOf('<system>')).toBeLessThan(prompt.indexOf('<project-instructions>'));
+    expect(prompt.indexOf('<project-instructions>')).toBeLessThan(prompt.indexOf('<context>'));
     expect(prompt.trim().endsWith('</context>')).toBe(true);
   });
 
@@ -61,8 +57,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('- review: Review code changes');
     expect(prompt).toContain('when_to_use: When the user asks for a review');
     expect(prompt).toContain('argument_hint: [path]');
-    expect(prompt).not.toContain(
-      'Full skill instructions should not be injected eagerly.',
-    );
+    expect(prompt).not.toContain('Full skill instructions should not be injected eagerly.');
   });
 });

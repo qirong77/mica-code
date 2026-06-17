@@ -104,7 +104,7 @@ export function FuzzyPicker<T>({
   const compact = columns < 120;
 
   const step = (delta: 1 | -1) => {
-    setFocusedIndex(i => clamp(i + delta, 0, items.length - 1));
+    setFocusedIndex((i) => clamp(i + delta, 0, items.length - 1));
   };
 
   // onKeyDown fires after useSearchInput's useInput, so onExit must be a
@@ -160,7 +160,7 @@ export function FuzzyPicker<T>({
   }, [query]);
 
   useEffect(() => {
-    setFocusedIndex(i => clamp(i, 0, items.length - 1));
+    setFocusedIndex((i) => clamp(i, 0, items.length - 1));
   }, [items.length]);
 
   const focused = items[focusedIndex];

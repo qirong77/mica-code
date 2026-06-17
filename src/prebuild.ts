@@ -1,1 +1,1 @@
-console.log("Skipping TypeScript validation during prebuild.");
+console.log('Skipping TypeScript validation during prebuild.');

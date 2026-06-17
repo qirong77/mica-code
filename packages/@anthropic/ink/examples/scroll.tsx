@@ -21,10 +21,13 @@ function LogPanel({
 }) {
   const scrollRef = useRef<ScrollBoxHandle>(null);
 
-  useInput((_input, key) => {
-    if (key.wheelUp) scrollRef.current?.scrollBy(-3);
-    if (key.wheelDown) scrollRef.current?.scrollBy(3);
-  }, { isActive: isFocused });
+  useInput(
+    (_input, key) => {
+      if (key.wheelUp) scrollRef.current?.scrollBy(-3);
+      if (key.wheelDown) scrollRef.current?.scrollBy(3);
+    },
+    { isActive: isFocused },
+  );
 
   useEffect(() => {
     if (!isFocused) return;
@@ -88,25 +91,28 @@ function App() {
   useEffect(() => {
     if (paused) return;
     const id = setInterval(() => {
-      setCounter(n => {
+      setCounter((n) => {
         const next = n + 1;
         const now = new Date().toISOString().slice(11, 23);
         const types = ['INFO ', 'WARN ', 'DEBUG', 'ERROR'];
-        const type = types[next % 47 % 4]!;
-        setMessages(prev => [...prev.slice(-500), `[${now}] ${type}  Log entry #${next}`]);
+        const type = types[(next % 47) % 4]!;
+        setMessages((prev) => [...prev.slice(-500), `[${now}] ${type}  Log entry #${next}`]);
         return next;
       });
     }, 200);
     return () => clearInterval(id);
   }, [paused]);
 
-  const logMessages = messages.filter(m => m.includes('INFO ') || m.includes('WARN '));
-  const errorMessages = messages.filter(m => m.includes('ERROR'));
-  const debugMessages = messages.filter(m => m.includes('DEBUG'));
+  const logMessages = messages.filter((m) => m.includes('INFO ') || m.includes('WARN '));
+  const errorMessages = messages.filter((m) => m.includes('ERROR'));
+  const debugMessages = messages.filter((m) => m.includes('DEBUG'));
 
   useInput((input, key, event) => {
     if (key.escape) process.exit(0);
-    if (input === ' ') { setPaused(p => !p); return; }
+    if (input === ' ') {
+      setPaused((p) => !p);
+      return;
+    }
     if (key.tab) {
       event.stopImmediatePropagation();
       const order: PanelId[] = ['log', 'errors', 'debug'];
@@ -122,9 +128,7 @@ function App() {
         <Text dimColor> — click or hover a panel to focus · mouse wheel to scroll</Text>
       </Box>
       <Box paddingX={1} paddingY={0} flexShrink={0}>
-        <Text dimColor>
-          Tab=switch panel · Space=pause {paused ? '[PAUSED]' : '[LIVE]'} · Esc=exit
-        </Text>
+        <Text dimColor>Tab=switch panel · Space=pause {paused ? '[PAUSED]' : '[LIVE]'} · Esc=exit</Text>
       </Box>
 
       <Box flexDirection="row" flexGrow={1} gap={1} paddingX={1}>

@@ -28,7 +28,9 @@ function TerminalInput() {
   const placeholder = useScheduleState(input.placeholder);
   const terminalSize = useTerminalSize();
   const inputBoxRef = useRef<DOMElement | null>(null);
-  const setInputBoxRef = useCallback((el: DOMElement | null) => { inputBoxRef.current = el; }, []);
+  const setInputBoxRef = useCallback((el: DOMElement | null) => {
+    inputBoxRef.current = el;
+  }, []);
   const exitConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitConfirmExpiresAtRef = useRef(0);
   const exitConfirmMessageIdRef = useRef<string | null>(null);
@@ -78,21 +80,24 @@ function TerminalInput() {
 
   const isAgentRunning = status.type !== 'idle' && status.type !== 'completed' && status.type !== 'error';
 
-  const armExitConfirmation = useCallback((text: string) => {
-    clearExitConfirmation();
-    const id = `exit-confirm-${Date.now()}`;
-    exitConfirmExpiresAtRef.current = Date.now() + EXIT_CONFIRM_TIMEOUT_MS;
-    exitConfirmMessageIdRef.current = id;
-    MessageBarAPI.addMessage({ id, text });
-    exitConfirmTimerRef.current = setTimeout(() => {
-      if (exitConfirmMessageIdRef.current === id) {
-        MessageBarAPI.removeMessage(id);
-        exitConfirmMessageIdRef.current = null;
-      }
-      exitConfirmTimerRef.current = null;
-      exitConfirmExpiresAtRef.current = 0;
-    }, EXIT_CONFIRM_TIMEOUT_MS);
-  }, [clearExitConfirmation]);
+  const armExitConfirmation = useCallback(
+    (text: string) => {
+      clearExitConfirmation();
+      const id = `exit-confirm-${Date.now()}`;
+      exitConfirmExpiresAtRef.current = Date.now() + EXIT_CONFIRM_TIMEOUT_MS;
+      exitConfirmMessageIdRef.current = id;
+      MessageBarAPI.addMessage({ id, text });
+      exitConfirmTimerRef.current = setTimeout(() => {
+        if (exitConfirmMessageIdRef.current === id) {
+          MessageBarAPI.removeMessage(id);
+          exitConfirmMessageIdRef.current = null;
+        }
+        exitConfirmTimerRef.current = null;
+        exitConfirmExpiresAtRef.current = 0;
+      }, EXIT_CONFIRM_TIMEOUT_MS);
+    },
+    [clearExitConfirmation],
+  );
 
   const handleCtrlC = useCallback(() => {
     const now = Date.now();
@@ -148,7 +153,11 @@ function TerminalInput() {
 
     for (const ui of activePluginUIs) {
       if (ui.onInput?.(_input, key)) {
-        if (!ui.preserveInput) { input.text.set(''); setLocalText(''); setCursorOffset(0); }
+        if (!ui.preserveInput) {
+          input.text.set('');
+          setLocalText('');
+          setCursorOffset(0);
+        }
         return;
       }
     }
@@ -156,41 +165,64 @@ function TerminalInput() {
     const interactivePlugins = activePluginUIs.filter((x) => x.onInput && !x.preserveInput);
     if (interactivePlugins.length > 0 && !key.ctrl && !key.meta && _input) {
       setPluginUIs(activePluginUIs.filter((x) => !x.onInput || x.preserveInput));
-      if (_input === '/') { setLocalText('/'); setCursorOffset(1); input.text.set('/'); }
-      else { setLocalText(''); setCursorOffset(0); input.text.set(''); }
+      if (_input === '/') {
+        setLocalText('/');
+        setCursorOffset(1);
+        input.text.set('/');
+      } else {
+        setLocalText('');
+        setCursorOffset(0);
+        input.text.set('');
+      }
       return;
     }
 
     if (key.escape) {
-      if (activePluginUIs.filter((x) => x.onInput).length === 0) { abortAgent(); setLocalText(''); setCursorOffset(0); input.text.set(''); }
+      if (activePluginUIs.filter((x) => x.onInput).length === 0) {
+        abortAgent();
+        setLocalText('');
+        setCursorOffset(0);
+        input.text.set('');
+      }
       return;
     }
 
-    if (DropDownUI.quickCommand.handleKey(key)) { setLocalText(''); setCursorOffset(0); }
+    if (DropDownUI.quickCommand.handleKey(key)) {
+      setLocalText('');
+      setCursorOffset(0);
+    }
   });
 
-  const onSubmit = useCallback((value: string) => {
-    if (!value.trim() || input.disabled.get() || activePluginUIs.some((x) => x.onInput)) return;
-    const trimmed = value.trim();
-    setPrevInputs((prev) => [...prev, trimmed]);
-    setHistoryIndex(-1);
-    input.text.set('');
-    setLocalText('');
-    setCursorOffset(0);
-    input.submit(trimmed);
-  }, [activePluginUIs]);
+  const onSubmit = useCallback(
+    (value: string) => {
+      if (!value.trim() || input.disabled.get() || activePluginUIs.some((x) => x.onInput)) return;
+      const trimmed = value.trim();
+      setPrevInputs((prev) => [...prev, trimmed]);
+      setHistoryIndex(-1);
+      input.text.set('');
+      setLocalText('');
+      setCursorOffset(0);
+      input.submit(trimmed);
+    },
+    [activePluginUIs],
+  );
 
   const onExit = useCallback(() => {
     handleCtrlC();
   }, [handleCtrlC]);
 
-  const handleChange = useCallback((value: string) => {
-    setLocalText(value);
-    input.text.set(value);
-    for (const ui of activePluginUIs) { if (ui.onTextChange?.(value)) return; }
-    if (value.startsWith('/') && value.length >= 1) DropDownUI.quickCommand.show(value.slice(1));
-    else DropDownUI.quickCommand.hide();
-  }, [activePluginUIs]);
+  const handleChange = useCallback(
+    (value: string) => {
+      setLocalText(value);
+      input.text.set(value);
+      for (const ui of activePluginUIs) {
+        if (ui.onTextChange?.(value)) return;
+      }
+      if (value.startsWith('/') && value.length >= 1) DropDownUI.quickCommand.show(value.slice(1));
+      else DropDownUI.quickCommand.hide();
+    },
+    [activePluginUIs],
+  );
 
   const onHistoryUp = useCallback(() => {
     if (input.disabled.get() || preserveInputOnPluginHandle) return;
@@ -223,9 +255,21 @@ function TerminalInput() {
 
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
-      <Box flexDirection="row" alignItems="flex-start" justifyContent="flex-start" borderColor={themeColors.borderInput} borderStyle="round" borderLeft={false} borderRight={false} borderBottom width="100%">
+      <Box
+        flexDirection="row"
+        alignItems="flex-start"
+        justifyContent="flex-start"
+        borderColor={themeColors.borderInput}
+        borderStyle="round"
+        borderLeft={false}
+        borderRight={false}
+        borderBottom
+        width="100%"
+      >
         <Box marginLeft={1} marginRight={1}>
-          <Text bold color={themeColors.primary}>{'❯'}</Text>
+          <Text bold color={themeColors.primary}>
+            {'❯'}
+          </Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <SimpleTextInput

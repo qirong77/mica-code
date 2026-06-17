@@ -1,9 +1,9 @@
-import { atom } from "nanostores";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { McpServerConfig } from "./config.js";
-import { MCP_CONFIG_PATH } from "./config.js";
+import { atom } from 'nanostores';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { McpServerConfig } from './config.js';
+import { MCP_CONFIG_PATH } from './config.js';
 
 export interface McpToolInfo {
   name: string;
@@ -15,7 +15,7 @@ export interface McpServerStatus {
   name: string;
   url: string;
   configPath: string;
-  status: "connecting" | "connected" | "failed";
+  status: 'connecting' | 'connected' | 'failed';
   toolCount: number;
   tools: McpToolInfo[];
   error?: string;
@@ -44,15 +44,10 @@ function updateServerStatus(update: McpServerStatus) {
 }
 
 function getConfigLabel(config: McpServerConfig): string {
-  return "url" in config
-    ? config.url
-    : `${config.command} ${(config.args ?? []).join(" ")}`.trim();
+  return 'url' in config ? config.url : `${config.command} ${(config.args ?? []).join(' ')}`.trim();
 }
 
-export async function connectToServer(
-  name: string,
-  config: McpServerConfig,
-): Promise<ConnectedMcpServer> {
+export async function connectToServer(name: string, config: McpServerConfig): Promise<ConnectedMcpServer> {
   const existing = connections.get(name);
   if (existing) return existing;
 
@@ -60,17 +55,15 @@ export async function connectToServer(
     name,
     url: getConfigLabel(config),
     configPath: MCP_CONFIG_PATH,
-    status: "connecting",
+    status: 'connecting',
     toolCount: 0,
     tools: [],
   });
 
   const transport =
-    "url" in config
+    'url' in config
       ? new StreamableHTTPClientTransport(new URL(config.url), {
-          requestInit: config.headers
-            ? { headers: config.headers as Record<string, string> }
-            : undefined,
+          requestInit: config.headers ? { headers: config.headers as Record<string, string> } : undefined,
         })
       : new StdioClientTransport({
           command: config.command,
@@ -78,10 +71,7 @@ export async function connectToServer(
           env: config.env,
         });
 
-  const client = new Client(
-    { name: "mica-code", version: "0.1.0" },
-    { capabilities: {} },
-  );
+  const client = new Client({ name: 'mica-code', version: '0.1.0' }, { capabilities: {} });
   await client.connect(transport, { timeout: 15_000 });
 
   const server: ConnectedMcpServer = {
@@ -98,17 +88,12 @@ export async function connectToServer(
   return server;
 }
 
-export function markServerConnected(
-  name: string,
-  url: string,
-  toolCount: number,
-  tools: McpToolInfo[],
-) {
+export function markServerConnected(name: string, url: string, toolCount: number, tools: McpToolInfo[]) {
   updateServerStatus({
     name,
     url,
     configPath: MCP_CONFIG_PATH,
-    status: "connected",
+    status: 'connected',
     toolCount,
     tools,
   });
@@ -119,7 +104,7 @@ export function markServerFailed(name: string, url: string, error: string) {
     name,
     url,
     configPath: MCP_CONFIG_PATH,
-    status: "failed",
+    status: 'failed',
     toolCount: 0,
     tools: [],
     error,

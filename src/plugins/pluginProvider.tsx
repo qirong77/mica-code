@@ -1,25 +1,20 @@
-import React from "react";
-import { Text } from "@anthropic/ink";
-import { micaUI } from "../../packages/mica-ui/index.js";
-import type { AgentRuntime } from "../agent/AgentRuntime.js";
-import { showMessage, syncModelDisplay } from "../bootstrap.js";
-import {
-  CONFIG_PATH,
-  getConfig,
-  loadProviderModels,
-  updateConfig,
-} from "../store/index.js";
-import { showSelectCommand } from "./selectCommand.js";
+import React from 'react';
+import { Text } from '@anthropic/ink';
+import { micaUI } from '../../packages/mica-ui/index.js';
+import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { showMessage, syncModelDisplay } from '../bootstrap.js';
+import { CONFIG_PATH, getConfig, loadProviderModels, updateConfig } from '../store/index.js';
+import { showSelectCommand } from './selectCommand.js';
 
 export function registerProviderPlugin(agent: AgentRuntime) {
   return {
-    name: "provider",
-    description: "切换 AI 服务提供商",
+    name: 'provider',
+    description: '切换 AI 服务提供商',
     action: () => {
       const config = getConfig();
       showSelectCommand({
-        id: "select-provider",
-        title: "select provider" + " (" + CONFIG_PATH + ")",
+        id: 'select-provider',
+        title: 'select provider' + ' (' + CONFIG_PATH + ')',
         current: config.provider,
         options: config.providers.map((provider) => ({
           name: provider.id,
@@ -41,7 +36,7 @@ export function registerProviderPlugin(agent: AgentRuntime) {
               ...config,
               provider: provider.id,
               model: provider.models?.[0] || provider.model,
-              effort: provider.supportsEffort === false ? "none" : provider.effort,
+              effort: provider.supportsEffort === false ? 'none' : provider.effort,
               contextWindowSize: provider.contextWindowSize,
             };
           });

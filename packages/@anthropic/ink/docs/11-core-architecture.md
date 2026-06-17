@@ -34,7 +34,7 @@ Each render cycle (`onRender`) follows these phases:
 ### Frame Timing
 
 ```ts
-const FRAME_INTERVAL_MS = 16  // ~60fps cap
+const FRAME_INTERVAL_MS = 16; // ~60fps cap
 ```
 
 Renders are throttled. Multiple state updates in one frame are batched.
@@ -54,54 +54,54 @@ After rendering, they are swapped. This prevents partial updates from being visi
 
 ```ts
 type ElementNames =
-  | 'ink-root'        // Root container
-  | 'ink-box'         // Box component
-  | 'ink-text'        // Text component
+  | 'ink-root' // Root container
+  | 'ink-box' // Box component
+  | 'ink-text' // Text component
   | 'ink-virtual-text' // Intermediate text wrapper
-  | 'ink-link'        // Link component
-  | 'ink-raw-ansi'    // Raw ANSI content
+  | 'ink-link' // Link component
+  | 'ink-raw-ansi'; // Raw ANSI content
 ```
 
 ### DOMElement
 
 ```ts
 type DOMElement = {
-  nodeName: ElementNames
-  attributes: Record<string, unknown>
-  childNodes: DOMNode[]      // DOMElement | TextNode
-  yogaNode?: LayoutNode      // Yoga layout node
-  textStyles?: TextStyles    // Inherited text styles
+  nodeName: ElementNames;
+  attributes: Record<string, unknown>;
+  childNodes: DOMNode[]; // DOMElement | TextNode
+  yogaNode?: LayoutNode; // Yoga layout node
+  textStyles?: TextStyles; // Inherited text styles
 
   // Scroll state
-  scrollTop?: number
-  scrollHeight?: number
-  scrollViewportHeight?: number
-  scrollViewportTop?: number
-  stickyScroll?: boolean
-  pendingScrollDelta?: number
-  scrollAnchor?: { el: DOMElement; offset: number }
+  scrollTop?: number;
+  scrollHeight?: number;
+  scrollViewportHeight?: number;
+  scrollViewportTop?: number;
+  stickyScroll?: boolean;
+  pendingScrollDelta?: number;
+  scrollAnchor?: { el: DOMElement; offset: number };
 
   // Dirty tracking
-  dirty: boolean
+  dirty: boolean;
 
   // Event handlers (stored separately)
-  onClick?: (event: ClickEvent) => void
-  onFocus?: (event: FocusEvent) => void
-  onBlur?: (event: FocusEvent) => void
-  onKeyDown?: (event: KeyboardEvent) => void
-  onMouseEnter?: () => void
-  onMouseLeave?: () => void
-}
+  onClick?: (event: ClickEvent) => void;
+  onFocus?: (event: FocusEvent) => void;
+  onBlur?: (event: FocusEvent) => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+};
 ```
 
 ### TextNode
 
 ```ts
 type TextNode = {
-  nodeName: '#text'
-  nodeValue: string
-  yogaNode?: LayoutNode
-}
+  nodeName: '#text';
+  nodeValue: string;
+  yogaNode?: LayoutNode;
+};
 ```
 
 ### DOM Operations
@@ -134,28 +134,28 @@ The screen buffer uses packed `Int32Array` storage for memory efficiency:
 
 ```ts
 type Screen = {
-  width: number
-  height: number
-  cells: Int32Array        // 2 Int32s per cell: [charId, packed_style_hyperlink_width]
-  cells64: BigInt64Array   // For bulk fill operations
-  charPool: CharPool       // String interning
-  stylePool: StylePool     // ANSI code interning
-  hyperlinkPool: HyperlinkPool
-  emptyStyleId: number
-  damage: Rectangle | undefined  // Bounding box of changed cells
-  noSelect: Uint8Array     // Per-cell no-select bitmap
-  softWrap: Int32Array     // Per-row soft-wrap markers
-}
+  width: number;
+  height: number;
+  cells: Int32Array; // 2 Int32s per cell: [charId, packed_style_hyperlink_width]
+  cells64: BigInt64Array; // For bulk fill operations
+  charPool: CharPool; // String interning
+  stylePool: StylePool; // ANSI code interning
+  hyperlinkPool: HyperlinkPool;
+  emptyStyleId: number;
+  damage: Rectangle | undefined; // Bounding box of changed cells
+  noSelect: Uint8Array; // Per-cell no-select bitmap
+  softWrap: Int32Array; // Per-row soft-wrap markers
+};
 ```
 
 ### Cell Width
 
 ```ts
 enum CellWidth {
-  Narrow = 0,       // Regular character (1 column)
-  Wide = 1,         // CJK/emoji (2 columns)
-  SpacerTail = 2,   // Right half of wide character
-  SpacerHead = 3,   // Soft-wrapped wide character
+  Narrow = 0, // Regular character (1 column)
+  Wide = 1, // CJK/emoji (2 columns)
+  SpacerTail = 2, // Right half of wide character
+  SpacerHead = 3, // Soft-wrapped wide character
 }
 ```
 
@@ -165,11 +165,11 @@ ANSI style codes are interned for efficiency:
 
 ```ts
 class StylePool {
-  intern(codes: AnsiCode[]): number    // Returns compact ID
-  get(id: number): AnsiCode[]
-  transition(from: number, to: number): string  // Cached ANSI transition
-  withInverse(id: number): number     // Selection overlay
-  setSelectionBg(bg: AnsiCode): void  // Theme-aware selection bg
+  intern(codes: AnsiCode[]): number; // Returns compact ID
+  get(id: number): AnsiCode[];
+  transition(from: number, to: number): string; // Cached ANSI transition
+  withInverse(id: number): number; // Selection overlay
+  setSelectionBg(bg: AnsiCode): void; // Theme-aware selection bg
 }
 ```
 
@@ -200,15 +200,60 @@ Ink wraps Facebook's Yoga layout engine for Flexbox computation:
 
 ```ts
 // Layout node types
-enum LayoutDisplay { Flex, None }
-enum LayoutPositionType { Absolute, Relative }
-enum LayoutOverflow { Visible, Hidden, Scroll }
-enum LayoutFlexDirection { Row, Column, RowReverse, ColumnReverse }
-enum LayoutWrap { NoWrap, Wrap, WrapReverse }
-enum LayoutAlign { FlexStart, Center, FlexEnd, Stretch }
-enum LayoutJustify { FlexStart, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly }
-enum LayoutEdge { Top, Bottom, Left, Right, Start, End, Horizontal, Vertical, All }
-enum LayoutGutter { Column, Row, All }
+enum LayoutDisplay {
+  Flex,
+  None,
+}
+enum LayoutPositionType {
+  Absolute,
+  Relative,
+}
+enum LayoutOverflow {
+  Visible,
+  Hidden,
+  Scroll,
+}
+enum LayoutFlexDirection {
+  Row,
+  Column,
+  RowReverse,
+  ColumnReverse,
+}
+enum LayoutWrap {
+  NoWrap,
+  Wrap,
+  WrapReverse,
+}
+enum LayoutAlign {
+  FlexStart,
+  Center,
+  FlexEnd,
+  Stretch,
+}
+enum LayoutJustify {
+  FlexStart,
+  Center,
+  FlexEnd,
+  SpaceBetween,
+  SpaceAround,
+  SpaceEvenly,
+}
+enum LayoutEdge {
+  Top,
+  Bottom,
+  Left,
+  Right,
+  Start,
+  End,
+  Horizontal,
+  Vertical,
+  All,
+}
+enum LayoutGutter {
+  Column,
+  Row,
+  All,
+}
 ```
 
 ### Style Application
@@ -216,7 +261,7 @@ enum LayoutGutter { Column, Row, All }
 Styles from React props are applied to Yoga nodes during the commit phase:
 
 ```ts
-function styles(node: LayoutNode, style: Styles, resolvedStyle?: Styles): void
+function styles(node: LayoutNode, style: Styles, resolvedStyle?: Styles): void;
 ```
 
 This function maps each CSS-like prop to the corresponding Yoga setter.
@@ -227,8 +272,8 @@ Intermediate rendering target before screen diff:
 
 ```ts
 class Output {
-  write(text: string, x: number, y: number, styles: TextStyles): void
-  wrap(width: number, textWrap: TextWrap): void
+  write(text: string, x: number, y: number, styles: TextStyles): void;
+  wrap(width: number, textWrap: TextWrap): void;
 }
 ```
 
@@ -245,16 +290,16 @@ Custom React reconciler that bridges React and the Ink DOM:
 
 ### Host Config Methods
 
-| Method | Purpose |
-|--------|---------|
-| `createInstance` | Create `ink-box`, `ink-text`, etc. |
-| `createTextInstance` | Create `#text` node |
-| `appendChildNode` | Add child to parent |
-| `removeChildNode` | Remove child from parent |
-| `insertBefore` | Insert child before sibling |
-| `commitUpdate` | Update element attributes/styles |
-| `commitTextUpdate` | Update text content |
-| `getPublicInstance` | Return DOMElement for refs |
+| Method               | Purpose                            |
+| -------------------- | ---------------------------------- |
+| `createInstance`     | Create `ink-box`, `ink-text`, etc. |
+| `createTextInstance` | Create `#text` node                |
+| `appendChildNode`    | Add child to parent                |
+| `removeChildNode`    | Remove child from parent           |
+| `insertBefore`       | Insert child before sibling        |
+| `commitUpdate`       | Update element attributes/styles   |
+| `commitTextUpdate`   | Update text content                |
+| `getPublicInstance`  | Return DOMElement for refs         |
 
 ## Performance Optimizations
 
@@ -272,22 +317,22 @@ Debug instrumentation for render performance:
 
 ```ts
 type FrameEvent = {
-  durationMs: number
+  durationMs: number;
   phases: {
-    renderer: number    // Yoga + renderNodeToOutput
-    diff: number        // Screen diff
-    optimize: number    // Patch optimization
-    write: number       // Terminal write
-    patches: number     // Number of ANSI patches
-    yoga: number        // Yoga layout time
-    commit: number      // React commit time
-    yogaVisited: number // Yoga nodes visited
-    yogaMeasured: number // Yoga nodes measured
-    yogaCacheHits: number // Cached measurements
-    yogaLive: number    // Active Yoga nodes
-  }
-  flickers: FlickerReason[]
-}
+    renderer: number; // Yoga + renderNodeToOutput
+    diff: number; // Screen diff
+    optimize: number; // Patch optimization
+    write: number; // Terminal write
+    patches: number; // Number of ANSI patches
+    yoga: number; // Yoga layout time
+    commit: number; // React commit time
+    yogaVisited: number; // Yoga nodes visited
+    yogaMeasured: number; // Yoga nodes measured
+    yogaCacheHits: number; // Cached measurements
+    yogaLive: number; // Active Yoga nodes
+  };
+  flickers: FlickerReason[];
+};
 ```
 
 Enable with `onFrame` in RenderOptions:
@@ -295,7 +340,7 @@ Enable with `onFrame` in RenderOptions:
 ```tsx
 render(<App />, {
   onFrame: (event) => {
-    console.log(`Frame: ${event.durationMs}ms`)
-  }
-})
+    console.log(`Frame: ${event.durationMs}ms`);
+  },
+});
 ```

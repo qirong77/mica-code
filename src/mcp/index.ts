@@ -1,19 +1,11 @@
-import { registerMcpTools, unregisterMcpTools } from "../../packages/tools/index.js";
-import type { MicaTool } from "../../packages/tools/MicaTool.js";
-import {
-  connectToServer,
-  connections,
-  disconnectAll,
-  markServerConnected,
-  markServerFailed,
-} from "./client.js";
-import { loadMcpConfig, type McpServerConfig } from "./config.js";
-import { fetchToolsForServer } from "./tools.js";
+import { registerMcpTools, unregisterMcpTools } from '../../packages/tools/index.js';
+import type { MicaTool } from '../../packages/tools/MicaTool.js';
+import { connectToServer, connections, disconnectAll, markServerConnected, markServerFailed } from './client.js';
+import { loadMcpConfig, type McpServerConfig } from './config.js';
+import { fetchToolsForServer } from './tools.js';
 
 function configLabel(config: McpServerConfig): string {
-  return "url" in config
-    ? config.url
-    : `${config.command} ${(config.args ?? []).join(" ")}`.trim();
+  return 'url' in config ? config.url : `${config.command} ${(config.args ?? []).join(' ')}`.trim();
 }
 
 function extractToolInfo(tools: MicaTool[], serverName: string) {
@@ -39,12 +31,7 @@ export async function initMcp(): Promise<void> {
     try {
       const server = await connectToServer(name, config);
       const tools = await fetchToolsForServer(server);
-      markServerConnected(
-        name,
-        configLabel(config),
-        tools.length,
-        extractToolInfo(tools, name),
-      );
+      markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
       allTools.push(...tools);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -55,22 +42,14 @@ export async function initMcp(): Promise<void> {
   registerMcpTools(allTools);
 }
 
-export async function reconnectMcpServer(
-  name: string,
-  config: McpServerConfig,
-): Promise<string> {
+export async function reconnectMcpServer(name: string, config: McpServerConfig): Promise<string> {
   const existing = connections.get(name);
   if (existing) await existing.cleanup();
 
   try {
     const server = await connectToServer(name, config);
     const tools = await fetchToolsForServer(server);
-    markServerConnected(
-      name,
-      configLabel(config),
-      tools.length,
-      extractToolInfo(tools, name),
-    );
+    markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
 
     const allTools: MicaTool[] = [...tools];
     for (const [serverName, connected] of connections) {

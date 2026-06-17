@@ -55,9 +55,7 @@ export class ToolReadFile extends MicaTool {
     const end = input.limit !== undefined ? start + input.limit : allLines.length;
     const lines = allLines.slice(start, end);
 
-    const result = lines
-      .map((line, i) => `${String(start + i + 1).padStart(4)} | ${line}`)
-      .join('\n');
+    const result = lines.map((line, i) => `${String(start + i + 1).padStart(4)} | ${line}`).join('\n');
 
     if (input.offset !== undefined || input.limit !== undefined) {
       const header = `[第 ${start + 1}-${start + lines.length} 行，共 ${allLines.length} 行]`;
@@ -73,5 +71,4 @@ export class ToolReadFile extends MicaTool {
     if (input.limit) parts.push(`+${input.limit}行`);
     return `read ${parts.join(' ')}`;
   }
-  
 }

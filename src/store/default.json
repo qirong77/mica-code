@@ -12,10 +12,7 @@
       "api_key": "",
       "model": "deepseek-v4-pro",
       "effort": "low",
-      "models": [
-        "deepseek-v4-flash",
-        "deepseek-v4-pro"
-      ],
+      "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
       "contextWindowSize": 1000000
     },
     {
@@ -25,12 +22,9 @@
       "api_key": "",
       "model": "gpt-5.4",
       "effort": "medium",
-      "models": [
-        "gpt-5.4"
-      ],
+      "models": ["gpt-5.4"],
       "contextWindowSize": 256000
     }
   ],
-  "mcpServers": {
-  }
+  "mcpServers": {}
 }

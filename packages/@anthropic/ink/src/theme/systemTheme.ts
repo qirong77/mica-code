@@ -7,22 +7,22 @@
  * Vendored from src/utils/systemTheme.ts for package independence.
  */
 
-export type SystemTheme = 'dark' | 'light'
+export type SystemTheme = 'dark' | 'light';
 
-let cachedSystemTheme: SystemTheme | undefined
+let cachedSystemTheme: SystemTheme | undefined;
 
 /**
  * Detect theme from $COLORFGBG environment variable (set by some terminals).
  */
 function detectFromColorFgBg(): SystemTheme | undefined {
-  const colorFgBg = process.env.COLORFGBG
-  if (!colorFgBg) return undefined
-  const parts = colorFgBg.split(';')
-  if (parts.length < 2) return undefined
-  const bg = parseInt(parts[parts.length - 1]!, 10)
+  const colorFgBg = process.env.COLORFGBG;
+  if (!colorFgBg) return undefined;
+  const parts = colorFgBg.split(';');
+  if (parts.length < 2) return undefined;
+  const bg = parseInt(parts[parts.length - 1]!, 10);
   // Standard ANSI color indices: 0-7 are dark, 8-15 are bright/light
-  if (isNaN(bg)) return undefined
-  return bg >= 8 ? 'light' : 'dark'
+  if (isNaN(bg)) return undefined;
+  return bg >= 8 ? 'light' : 'dark';
 }
 
 /**
@@ -30,11 +30,11 @@ function detectFromColorFgBg(): SystemTheme | undefined {
  */
 export function getSystemThemeName(): SystemTheme {
   if (cachedSystemTheme === undefined) {
-    cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
+    cachedSystemTheme = detectFromColorFgBg() ?? 'dark';
   }
-  return cachedSystemTheme
+  return cachedSystemTheme;
 }
 
 export function setCachedSystemTheme(theme: SystemTheme): void {
-  cachedSystemTheme = theme
+  cachedSystemTheme = theme;
 }

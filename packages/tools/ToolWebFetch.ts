@@ -75,24 +75,13 @@ export class ToolWebFetch extends MicaTool {
     });
   }
 
-  async execute(
-    input: { url: string; prompt?: string },
-    callbacks?: ToolExecuteCallbacks,
-  ): Promise<string> {
+  async execute(input: { url: string; prompt?: string }, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const { url, prompt = '' } = input;
     this._validateUrl(url);
 
     const cached = urlCache.get(url);
     if (cached) {
-      return buildResponseText(
-        cached.code,
-        cached.codeText,
-        cached.content,
-        cached.bytes,
-        url,
-        0,
-        prompt,
-      );
+      return buildResponseText(cached.code, cached.codeText, cached.content, cached.bytes, url, 0, prompt);
     }
 
     const start = Date.now();
@@ -126,19 +115,15 @@ export class ToolWebFetch extends MicaTool {
         content = content.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[内容已截断(web_fetch_tool)]';
       }
 
-      urlCache.set(url, { bytes, code: status, codeText: statusText, content, contentType }, {
-        size: Math.max(1, Buffer.byteLength(content)),
-      });
-
-      return buildResponseText(
-        status,
-        statusText,
-        content,
-        bytes,
+      urlCache.set(
         url,
-        Date.now() - start,
-        prompt,
+        { bytes, code: status, codeText: statusText, content, contentType },
+        {
+          size: Math.max(1, Buffer.byteLength(content)),
+        },
       );
+
+      return buildResponseText(status, statusText, content, bytes, url, Date.now() - start, prompt);
     } catch (error: any) {
       clearTimeout(timeout);
       callbacks?.signal?.removeEventListener('abort', onAbort);
@@ -199,7 +184,7 @@ export class ToolWebFetch extends MicaTool {
     const response = await fetch(targetUrl, {
       signal,
       redirect: 'manual',
-      headers: { 'Accept': 'text/html,text/markdown,text/plain,*/*' },
+      headers: { Accept: 'text/html,text/markdown,text/plain,*/*' },
     });
 
     if (isRedirectStatus(response.status)) {

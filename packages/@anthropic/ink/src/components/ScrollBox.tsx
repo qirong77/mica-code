@@ -184,7 +184,7 @@ function ScrollBox({
         el.stickyScroll = true;
         markDirty(el);
         notify();
-        forceRender(n => n + 1);
+        forceRender((n) => n + 1);
       },
       getScrollTop() {
         return domRef.current?.scrollTop ?? 0;
@@ -244,7 +244,7 @@ function ScrollBox({
   // commit, which is too late for the first frame.
   return (
     <ink-box
-      ref={el => {
+      ref={(el) => {
         domRef.current = el;
         if (el) el.scrollTop ??= 0;
       }}

@@ -53,7 +53,11 @@ export function getToolDefinitions(): Tool[] {
   }));
 }
 
-export async function executeTool(name: string, input: Record<string, any>, callbacks?: ToolExecuteCallbacks): Promise<string> {
+export async function executeTool(
+  name: string,
+  input: Record<string, any>,
+  callbacks?: ToolExecuteCallbacks,
+): Promise<string> {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
 

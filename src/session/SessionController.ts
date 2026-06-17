@@ -1,21 +1,16 @@
-import { micaUI } from "../../packages/mica-ui/index.js";
-import type { AgentUsageRecord } from "../../packages/agent/IAgent.js";
-import type {
-  AgentRuntime,
-  AgentRuntimeSnapshot,
-} from "../agent/AgentRuntime.js";
-import { updateConfig } from "../store/index.js";
+import { micaUI } from '../../packages/mica-ui/index.js';
+import type { AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import { updateConfig } from '../store/index.js';
 import {
   createSessionId,
   SessionStore,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type SessionSummary,
-} from "./sessionStore.js";
+} from './sessionStore.js';
 
-export type ResumeSessionResult =
-  | { ok: true; session: PersistedSession }
-  | { ok: false; message: string };
+export type ResumeSessionResult = { ok: true; session: PersistedSession } | { ok: false; message: string };
 
 export class SessionController {
   private currentSessionId = createSessionId();
@@ -75,9 +70,7 @@ export class SessionController {
     micaUI.terminalInput.clearText();
 
     if (lastUsage) {
-      micaUI.panels.contextSize.set(
-        lastUsage.tokens.input + lastUsage.tokens.output,
-      );
+      micaUI.panels.contextSize.set(lastUsage.tokens.input + lastUsage.tokens.output);
       micaUI.panels.cacheHitRate.set(lastUsage.prompt_cache.hit_rate);
     } else {
       micaUI.panels.contextSize.set(0);
@@ -86,9 +79,7 @@ export class SessionController {
   }
 }
 
-function toPersistedSnapshot(
-  snapshot: AgentRuntimeSnapshot,
-): PersistedRuntimeSnapshot {
+function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
     model: snapshot.model,
@@ -99,9 +90,7 @@ function toPersistedSnapshot(
   };
 }
 
-function fromPersistedSnapshot(
-  snapshot: PersistedRuntimeSnapshot,
-): AgentRuntimeSnapshot {
+function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
     model: snapshot.model,
@@ -122,30 +111,24 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
       ...config,
       provider: provider.id,
       model: snapshot.model || provider.model,
-      effort: provider.supportsEffort === false ? "none" : snapshot.effort,
+      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
       contextWindowSize: provider.contextWindowSize,
     };
   });
 }
 
-function deriveTitle(
-  messages: ReturnType<AgentRuntime["toConversationMessages"]>,
-): string {
-  const firstUserMessage = messages.find((message) => message.role === "user");
-  const text = firstUserMessage ? contentToText(firstUserMessage.content) : "";
-  const title = text.replace(/\s+/g, " ").trim();
-  if (!title) return "Untitled session";
+function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']>): string {
+  const firstUserMessage = messages.find((message) => message.role === 'user');
+  const text = firstUserMessage ? contentToText(firstUserMessage.content) : '';
+  const title = text.replace(/\s+/g, ' ').trim();
+  if (!title) return 'Untitled session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
 }
 
-function contentToText(
-  content: ReturnType<
-    AgentRuntime["toConversationMessages"]
-  >[number]["content"],
-): string {
-  if (typeof content === "string") return content;
+function contentToText(content: ReturnType<AgentRuntime['toConversationMessages']>[number]['content']): string {
+  if (typeof content === 'string') return content;
   return content
-    .filter((block) => block.type === "text")
+    .filter((block) => block.type === 'text')
     .map((block) => block.text)
-    .join("\n");
+    .join('\n');
 }

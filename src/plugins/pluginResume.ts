@@ -1,19 +1,16 @@
-import { micaUI } from "../../packages/mica-ui/index.js";
-import type { AgentRuntime } from "../agent/AgentRuntime.js";
-import { isAgentRunning, showMessage, syncModelDisplay } from "../bootstrap.js";
-import type { SessionController } from "../session/SessionController.js";
-import { showSelectCommand } from "./selectCommand.js";
+import { micaUI } from '../../packages/mica-ui/index.js';
+import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { isAgentRunning, showMessage, syncModelDisplay } from '../bootstrap.js';
+import type { SessionController } from '../session/SessionController.js';
+import { showSelectCommand } from './selectCommand.js';
 
-export function registerResumePlugin(
-  agent: AgentRuntime,
-  sessionController: SessionController,
-) {
+export function registerResumePlugin(agent: AgentRuntime, sessionController: SessionController) {
   return {
-    name: "resume",
-    description: "恢复之前的会话",
+    name: 'resume',
+    description: '恢复之前的会话',
     action: (arg) => {
       if (isAgentRunning()) {
-        showMessage("Agent is running; wait or abort before resuming");
+        showMessage('Agent is running; wait or abort before resuming');
         return;
       }
 
@@ -28,29 +25,22 @@ export function registerResumePlugin(
   } satisfies Parameters<typeof micaUI.dropdown.setQuickCommands>[0][number];
 }
 
-function showResumeSelector(
-  agent: AgentRuntime,
-  sessionController: SessionController,
-) {
+function showResumeSelector(agent: AgentRuntime, sessionController: SessionController) {
   const sessions = sessionController.list(20);
   showSelectCommand({
-    id: "select-session",
-    title: "resume session",
-    current: "",
+    id: 'select-session',
+    title: 'resume session',
+    current: '',
     options: sessions.map((session) => ({
       name: session.id,
       label: `${session.title}  ${formatSessionMeta(session.updatedAt, session.model)}`,
     })),
-    emptyMessage: "no saved sessions",
+    emptyMessage: 'no saved sessions',
     onSelect: (id) => resumeSession(agent, sessionController, id),
   });
 }
 
-function resumeSession(
-  agent: AgentRuntime,
-  sessionController: SessionController,
-  id: string,
-) {
+function resumeSession(agent: AgentRuntime, sessionController: SessionController, id: string) {
   const result = sessionController.resume(id);
   if (!result.ok) {
     showMessage(result.message, 5000);
@@ -65,10 +55,10 @@ function formatSessionMeta(updatedAt: string, model: string): string {
   const timestamp = Number.isNaN(date.getTime())
     ? updatedAt
     : date.toLocaleString(undefined, {
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
       });
   return `[${timestamp} ${model}]`;
 }

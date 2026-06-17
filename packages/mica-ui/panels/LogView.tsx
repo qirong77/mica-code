@@ -10,7 +10,9 @@ export function LogView() {
   return (
     <ScrollBox height={viewportHeight} stickyScroll flexDirection="column">
       {lines.map((line, i) => (
-        <Text key={i} color={line.color as any} dimColor={true} bold={line.bold}>{line.text}</Text>
+        <Text key={i} color={line.color as any} dimColor={true} bold={line.bold}>
+          {line.text}
+        </Text>
       ))}
     </ScrollBox>
   );

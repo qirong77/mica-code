@@ -38,12 +38,26 @@ micaUI.dropdown.setQuickCommands([
   { name: 'demo', description: '重新播放完整 UI 流程', action: () => startDemo() },
   { name: 'clear', description: '清空对话、日志和插件面板', action: () => resetDemo() },
   { name: 'plugin', description: '显示一个插件面板', action: () => showPluginPanel(3500) },
-  { name: 'message', description: '显示一条 message bar 提示', action: () => showMessage('MessageBar: background task finished') },
-  { name: 'error', description: '切换到 error 状态', action: () => micaUI.panels.status.error('Example error from /error') },
-  { name: 'help', description: '显示可用命令', action: () => showMessage('Commands: /demo /clear /plugin /message /error /help') },
+  {
+    name: 'message',
+    description: '显示一条 message bar 提示',
+    action: () => showMessage('MessageBar: background task finished'),
+  },
+  {
+    name: 'error',
+    description: '切换到 error 状态',
+    action: () => micaUI.panels.status.error('Example error from /error'),
+  },
+  {
+    name: 'help',
+    description: '显示可用命令',
+    action: () => showMessage('Commands: /demo /clear /plugin /message /error /help'),
+  },
 ]);
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 let toolId = 0;
 let demoRunId = 0;
@@ -69,13 +83,15 @@ function resetDemo() {
 
 function addTool(name: string, displayText: string, durationMs: number, output = '') {
   const id = `tool-${++toolId}`;
-  micaUI.panels.appendAgentTurnLogItem(createToolCallLogItem({
-    id,
-    toolName: name,
-    displayText,
-    output,
-    elapsedMs: durationMs,
-  }));
+  micaUI.panels.appendAgentTurnLogItem(
+    createToolCallLogItem({
+      id,
+      toolName: name,
+      displayText,
+      output,
+      elapsedMs: durationMs,
+    }),
+  );
 }
 
 function addThinking(text: string) {
@@ -87,9 +103,9 @@ async function showPluginPanel(durationMs = 2500) {
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text color={colors.info}>┌ Plugin Panel ─────────────────────────────</Text>
-        <Text color={colors.dim}>  Plugin: project-inspector</Text>
-        <Text color={colors.dim}>  Task: indexing workspace symbols</Text>
-        <Text color={colors.dim}>  Progress: ████████░░ 80%</Text>
+        <Text color={colors.dim}> Plugin: project-inspector</Text>
+        <Text color={colors.dim}> Task: indexing workspace symbols</Text>
+        <Text color={colors.dim}> Progress: ████████░░ 80%</Text>
         <Text color={colors.info}>└───────────────────────────────────────────</Text>
       </Box>
     );
@@ -115,7 +131,10 @@ async function startDemo() {
     {
       role: 'assistant',
       content: [
-        { type: 'text', text: '可以。这个示例会依次演示状态栏、日志、工具调用、插件面板、消息条、Markdown 流式输出和快捷命令。' },
+        {
+          type: 'text',
+          text: '可以。这个示例会依次演示状态栏、日志、工具调用、插件面板、消息条、Markdown 流式输出和快捷命令。',
+        },
       ],
     },
   ]);
@@ -195,7 +214,10 @@ async function startDemo() {
     {
       role: 'assistant',
       content: [
-        { type: 'text', text: '可以。这个示例会依次演示状态栏、日志、工具调用、插件面板、消息条、Markdown 流式输出和快捷命令。' },
+        {
+          type: 'text',
+          text: '可以。这个示例会依次演示状态栏、日志、工具调用、插件面板、消息条、Markdown 流式输出和快捷命令。',
+        },
       ],
     },
     { role: 'assistant', content: [{ type: 'text', text: response }] },
@@ -210,9 +232,7 @@ micaUI.terminalInput.onSubmit(async (text) => {
   if (!trimmed) return;
 
   micaUI.panels.status.thinking();
-  micaUI.panels.setAgentTurnLogItems([
-    createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`),
-  ]);
+  micaUI.panels.setAgentTurnLogItems([createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`)]);
   micaUI.conversation.appendUserMessage(trimmed);
   micaUI.conversation.setResponseText('');
   await sleep(500);

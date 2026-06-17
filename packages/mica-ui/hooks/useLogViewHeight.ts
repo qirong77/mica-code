@@ -6,20 +6,14 @@ import { inputBottomDistance } from '../input/data.js';
 const MIN_LOG_VIEW_HEIGHT = 5;
 const BELOW_INPUT_RESERVED_LINES = 2;
 
-export function getLogViewHeight(
-  rows: number,
-  bottomDistance: number,
-): number {
+export function getLogViewHeight(rows: number, bottomDistance: number): number {
   const fallbackHeight = Math.ceil(rows / 3);
 
   if (bottomDistance <= 0) {
     return Math.max(MIN_LOG_VIEW_HEIGHT, fallbackHeight);
   }
 
-  return Math.max(
-    MIN_LOG_VIEW_HEIGHT,
-    bottomDistance - BELOW_INPUT_RESERVED_LINES,
-  );
+  return Math.max(MIN_LOG_VIEW_HEIGHT, bottomDistance - BELOW_INPUT_RESERVED_LINES);
 }
 
 /**

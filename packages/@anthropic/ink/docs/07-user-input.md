@@ -5,7 +5,7 @@
 The primary hook for handling keyboard input.
 
 ```tsx
-import { useInput } from '@anthropic/ink'
+import { useInput } from '@anthropic/ink';
 
 function MyComponent() {
   useInput((input, key, event) => {
@@ -24,9 +24,9 @@ function MyComponent() {
     if (key.shift && input === 'Tab') {
       // Shift+Tab
     }
-  })
+  });
 
-  return <Text>Press keys...</Text>
+  return <Text>Press keys...</Text>;
 }
 ```
 
@@ -35,8 +35,8 @@ function MyComponent() {
 ```ts
 function useInput(
   handler: (input: string, key: Key, event: InputEvent) => void,
-  options?: { isActive?: boolean }
-): void
+  options?: { isActive?: boolean },
+): void;
 ```
 
 ### Parameters
@@ -47,35 +47,35 @@ function useInput(
 
 ### Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `isActive` | `boolean` | `true` | Enable/disable input handling |
+| Option     | Type      | Default | Description                   |
+| ---------- | --------- | ------- | ----------------------------- |
+| `isActive` | `boolean` | `true`  | Enable/disable input handling |
 
 ### Key Object
 
 ```ts
 type Key = {
-  upArrow: boolean
-  downArrow: boolean
-  leftArrow: boolean
-  rightArrow: boolean
-  pageDown: boolean
-  pageUp: boolean
-  wheelUp: boolean       // Mouse wheel in alt-screen
-  wheelDown: boolean      // Mouse wheel in alt-screen
-  home: boolean
-  end: boolean
-  return: boolean
-  escape: boolean
-  ctrl: boolean
-  shift: boolean
-  fn: boolean
-  tab: boolean
-  backspace: boolean
-  delete: boolean
-  meta: boolean           // Alt / Option
-  super: boolean          // Cmd (macOS) / Win key
-}
+  upArrow: boolean;
+  downArrow: boolean;
+  leftArrow: boolean;
+  rightArrow: boolean;
+  pageDown: boolean;
+  pageUp: boolean;
+  wheelUp: boolean; // Mouse wheel in alt-screen
+  wheelDown: boolean; // Mouse wheel in alt-screen
+  home: boolean;
+  end: boolean;
+  return: boolean;
+  escape: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  fn: boolean;
+  tab: boolean;
+  backspace: boolean;
+  delete: boolean;
+  meta: boolean; // Alt / Option
+  super: boolean; // Cmd (macOS) / Win key
+};
 ```
 
 ### Event Propagation
@@ -86,14 +86,14 @@ Multiple `useInput` handlers form a chain. Call `event.stopImmediatePropagation(
 useInput((input, key, event) => {
   if (input === 'j') {
     // Consumed by this handler
-    event.stopImmediatePropagation()
+    event.stopImmediatePropagation();
   }
   // Other handlers won't see 'j'
-})
+});
 
 useInput((input, key) => {
   // This won't fire for 'j'
-})
+});
 ```
 
 ### Raw Mode
@@ -101,6 +101,7 @@ useInput((input, key) => {
 `useInput` automatically enables raw mode on stdin when active. Raw mode is reference-counted -- it stays enabled as long as any hook has `isActive: true`.
 
 In raw mode:
+
 - Keystrokes don't echo
 - Ctrl+C is not sent as signal (app must handle it)
 - Line buffering is disabled
@@ -109,9 +110,9 @@ In raw mode:
 
 ```ts
 class InputEvent extends Event {
-  readonly input: string
-  readonly key: Key
-  readonly keypress: ParsedKey  // Raw parsed keypress data
+  readonly input: string;
+  readonly key: Key;
+  readonly keypress: ParsedKey; // Raw parsed keypress data
 }
 ```
 
@@ -121,7 +122,7 @@ DOM-like keyboard event dispatched to focused elements:
 
 ```ts
 class KeyboardEvent extends Event {
-  readonly key: Key
+  readonly key: Key;
 }
 ```
 
@@ -133,7 +134,7 @@ Used with `Box`'s `onKeyDown` and `onKeyDownCapture` props:
   autoFocus
   onKeyDown={(event) => {
     if (event.key.return) {
-      handleSubmit()
+      handleSubmit();
     }
   }}
 >
@@ -146,20 +147,25 @@ Used with `Box`'s `onKeyDown` and `onKeyDownCapture` props:
 Ink supports multiple keyboard protocols:
 
 ### Standard Escape Sequences
+
 - Arrow keys, function keys, Home/End, Page Up/Down
 - Ctrl+letter combinations
 - Shift, Alt, Meta modifiers
 
 ### Kitty Keyboard Protocol (CSI u)
+
 Extended key reporting with full modifier support:
+
 - Distinguishes Ctrl+Shift+A from Ctrl+A
 - Reports Super (Cmd/Win) key
 - Sends key release events
 
 ### xterm modifyOtherKeys
+
 Alternative extended key reporting for xterm-compatible terminals.
 
 ### Application Keypad Mode
+
 Numpad keys mapped to their digit characters.
 
 ## Paste Detection
@@ -170,12 +176,12 @@ When `Bracketed Paste` mode is enabled (DECSET 2004), pasted text is delivered a
 useInput((input, key, event) => {
   if (event.keypress.paste) {
     // User pasted text -- handle as a batch
-    handlePaste(input)
+    handlePaste(input);
   } else {
     // Regular keypress
-    handleKey(input, key)
+    handleKey(input, key);
   }
-})
+});
 ```
 
 ## Mouse Events (Alt-Screen Only)
@@ -187,8 +193,8 @@ In alternate screen mode, mouse events are parsed and dispatched:
 ```tsx
 <Box
   onClick={(event) => {
-    console.log(`Clicked at (${event.x}, ${event.y})`)
-    event.stopImmediatePropagation()
+    console.log(`Clicked at (${event.x}, ${event.y})`);
+    event.stopImmediatePropagation();
   }}
 >
   <Text>Click me</Text>
@@ -198,10 +204,7 @@ In alternate screen mode, mouse events are parsed and dispatched:
 ### Hover Events
 
 ```tsx
-<Box
-  onMouseEnter={() => setHovered(true)}
-  onMouseLeave={() => setHovered(false)}
->
+<Box onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
   <Text>{hovered ? 'Hovered!' : 'Hover me'}</Text>
 </Box>
 ```
@@ -214,9 +217,9 @@ Mouse wheel events arrive as `Key.wheelUp`/`Key.wheelDown`:
 
 ```tsx
 useInput((input, key) => {
-  if (key.wheelUp) scrollUp()
-  if (key.wheelDown) scrollDown()
-})
+  if (key.wheelUp) scrollUp();
+  if (key.wheelDown) scrollDown();
+});
 ```
 
 ## useStdin
@@ -224,16 +227,16 @@ useInput((input, key) => {
 Lower-level access to the stdin stream.
 
 ```tsx
-import { useStdin } from '@anthropic/ink'
+import { useStdin } from '@anthropic/ink';
 
 const {
-  stdin,                    // Raw stdin stream
-  setRawMode,               // (enabled: boolean) => void
-  isRawModeSupported,       // boolean
-  internal_exitOnCtrlC,     // boolean
-  internal_eventEmitter,    // EventEmitter | undefined
-  internal_querier,         // Terminal querier
-} = useStdin()
+  stdin, // Raw stdin stream
+  setRawMode, // (enabled: boolean) => void
+  isRawModeSupported, // boolean
+  internal_exitOnCtrlC, // boolean
+  internal_eventEmitter, // EventEmitter | undefined
+  internal_querier, // Terminal querier
+} = useStdin();
 ```
 
 > **Prefer `useInput` for keyboard handling.** `useStdin` is for advanced use cases like terminal querying or custom event handling.
@@ -243,7 +246,7 @@ const {
 Interactive button that responds to keyboard and mouse:
 
 ```tsx
-import { Button } from '@anthropic/ink'
+import { Button } from '@anthropic/ink';
 
 <Button onAction={() => handleClick()} tabIndex={0} autoFocus>
   {(state) => (
@@ -251,17 +254,17 @@ import { Button } from '@anthropic/ink'
       {state.focused ? '> Click Me' : '  Click Me'}
     </Text>
   )}
-</Button>
+</Button>;
 ```
 
 Button receives a render prop with state:
 
 ```ts
 type ButtonState = {
-  focused: boolean    // Has keyboard focus
-  hovered: boolean    // Mouse is over it (alt-screen)
-  active: boolean     // True for 100ms after activation (flash effect)
-}
+  focused: boolean; // Has keyboard focus
+  hovered: boolean; // Mouse is over it (alt-screen)
+  active: boolean; // True for 100ms after activation (flash effect)
+};
 ```
 
 Activation triggers: Enter key, Space key, or mouse click.

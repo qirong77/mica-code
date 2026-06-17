@@ -53,7 +53,7 @@ export function useScheduleState<T>(atom: Readable<T>): T {
   const stateUpdaterId = useRef(uuid());
   useEffect(() => {
     const id = stateUpdaterId.current;
-            setState(snapRef.current);
+    setState(snapRef.current);
     const unsub = atom.subscribe((newState) => {
       snapRef.current = newState;
       pendingUpdaters[id] = () => {

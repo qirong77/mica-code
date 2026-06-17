@@ -128,7 +128,7 @@ function parseToSpans(input: string): Span[] {
     }
 
     if (action.type === 'text') {
-      const text = action.graphemes.map(g => g.value).join('');
+      const text = action.graphemes.map((g) => g.value).join('');
       if (!text) continue;
 
       const props = textStyleToSpanProps(action.style);

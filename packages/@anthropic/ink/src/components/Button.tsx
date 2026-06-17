@@ -58,7 +58,7 @@ function Button({ onAction, tabIndex = 0, autoFocus, children, ref, ...style }: 
         setIsActive(true);
         onAction();
         if (activeTimer.current) clearTimeout(activeTimer.current);
-        activeTimer.current = setTimeout(setter => setter(false), 100, setIsActive);
+        activeTimer.current = setTimeout((setter) => setter(false), 100, setIsActive);
       }
     },
     [onAction],

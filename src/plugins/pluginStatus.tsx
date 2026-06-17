@@ -17,16 +17,18 @@ export function registerStatusPlugin(agent: AgentRuntime) {
       const contextTokens = micaUI.panels.contextSize.get();
       const contextWindowSize = micaUI.panels.modelDisplay.contextWindowSize.get();
       const cacheHitRate = micaUI.panels.cacheHitRate.get();
-      showStatusPanel(formatStatusList([
-        ['Model', model],
-        ['Effort', provider.supportsEffort !== false ? effort : 'none'],
-        ['Provider', provider.name ?? provider.id],
-        ['Context', formatContextUsage(contextTokens, contextWindowSize)],
-        ['Cache', formatCacheHitRate(cacheHitRate)],
-        ['Last In', formatTokenValue(lastUsage?.tokens.input)],
-        ['Last Out', formatTokenValue(lastUsage?.tokens.output)],
-        ['Last Total', formatTokenValue(lastUsage?.tokens.total)],
-      ]));
+      showStatusPanel(
+        formatStatusList([
+          ['Model', model],
+          ['Effort', provider.supportsEffort !== false ? effort : 'none'],
+          ['Provider', provider.name ?? provider.id],
+          ['Context', formatContextUsage(contextTokens, contextWindowSize)],
+          ['Cache', formatCacheHitRate(cacheHitRate)],
+          ['Last In', formatTokenValue(lastUsage?.tokens.input)],
+          ['Last Out', formatTokenValue(lastUsage?.tokens.output)],
+          ['Last Total', formatTokenValue(lastUsage?.tokens.total)],
+        ]),
+      );
     },
   } satisfies Parameters<typeof micaUI.dropdown.setQuickCommands>[0][number];
 }

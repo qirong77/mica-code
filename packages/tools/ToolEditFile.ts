@@ -16,11 +16,14 @@ export class ToolEditFile extends MicaTool {
     });
   }
 
-  async execute(input: {
-    file_path: string;
-    old_string: string;
-    new_string: string;
-  }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(
+    input: {
+      file_path: string;
+      old_string: string;
+      new_string: string;
+    },
+    _callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
     const content = await readFile(input.file_path, 'utf-8');
     if (!content.includes(input.old_string)) return `未找到匹配文本`;
     const newContent = content.replace(input.old_string, input.new_string);
@@ -31,5 +34,4 @@ export class ToolEditFile extends MicaTool {
   onToolUseDisplayText(input: Record<string, any>): string {
     return `edit ${truncateDisplayText(input.file_path as string, 5)}`;
   }
-  
 }
