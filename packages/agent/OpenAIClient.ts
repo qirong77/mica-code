@@ -1,21 +1,16 @@
-import { OpenAI } from "openai";
-import { executeTool, getToolDefinitions } from "../tools";
-import {
-  BaseAgent,
-  type AgentSnapshot,
-  type AgentUsageRecord,
-} from "./IAgent";
-import type {
-  MicaUiConversationMessage,
-  MicaUiContentBlockParam,
-} from "../mica-ui/types";
-import { buildSystemPrompt } from "./prompt";
+import { OpenAI } from 'openai';
+import { executeTool, getToolDefinitions } from '../tools';
+import { BaseAgent, type AgentSnapshot, type AgentUsageRecord } from './IAgent';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../mica-ui/types';
+import { buildSystemPrompt } from './prompt';
 
 export type OpenAIClientOptions = {
   model: string;
   apiKey?: string;
   baseURL?: string;
   effort?: string;
+  tools?: boolean;
+  systemPrompt?: string;
 };
 
 export type UsageRecord = AgentUsageRecord;
@@ -42,9 +37,12 @@ export class OpenAIClient extends BaseAgent<
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: string | undefined;
+  tools: boolean;
+  systemPrompt: string | undefined;
   constructor(options: string | OpenAIClientOptions) {
     super();
-    if (typeof options === "string") {
+    this.tools = true;
+    if (typeof options === 'string') {
       this.model = options;
       this.apiKey = process.env.OPENAI_API_KEY;
       return;
@@ -53,12 +51,16 @@ export class OpenAIClient extends BaseAgent<
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
     this.effort = options.effort;
+    this.tools = options.tools ?? true;
+    this.systemPrompt = options.systemPrompt;
   }
   configure(options: OpenAIClientOptions) {
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
     this.effort = options.effort;
+    this.tools = options.tools ?? true;
+    this.systemPrompt = options.systemPrompt;
   }
   reset() {
     this.messages = [];
@@ -67,24 +69,16 @@ export class OpenAIClient extends BaseAgent<
     this.turnId = 0;
   }
   loadSnapshot(
-    snapshot: AgentSnapshot<
-      OpenAI.Chat.Completions.ChatCompletionMessageParam,
-      UsageRecord
-    >,
+    snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, UsageRecord>,
   ) {
-    this.messages = snapshot.messages.filter(
-      (message) => message.role !== "system",
-    );
+    this.messages = snapshot.messages.filter((message) => message.role !== 'system');
     this.usageHistory = snapshot.usageHistory;
     this.lastUsage = snapshot.lastUsage;
-    this.turnId = this.usageHistory.reduce(
-      (max, usage) => Math.max(max, usage.turn_id),
-      0,
-    );
+    this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turn_id), 0);
   }
   toConversationMessages(): MicaUiConversationMessage[] {
     return this.messages.flatMap((message) => {
-      if (message.role !== "user" && message.role !== "assistant") return [];
+      if (message.role !== 'user' && message.role !== 'assistant') return [];
       const content = openAIContentToMicaContent(message.content);
       if (!content) return [];
       return [{ role: message.role, content }];
@@ -93,7 +87,7 @@ export class OpenAIClient extends BaseAgent<
   private get openaiTools() {
     const defs = getToolDefinitions();
     return defs.map((t) => ({
-      type: "function" as const,
+      type: 'function' as const,
       function: {
         name: t.name,
         description: t.description,
@@ -105,9 +99,9 @@ export class OpenAIClient extends BaseAgent<
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: buildSystemPrompt() },
+      { role: 'system', content: this.systemPrompt ?? buildSystemPrompt() },
       ...compactHistoricalToolResults(this.messages),
-      { role: "user", content: question },
+      { role: 'user', content: question },
     ];
 
     while (true) {
@@ -115,18 +109,20 @@ export class OpenAIClient extends BaseAgent<
       const stream = await getClient(this).chat.completions.create({
         model: this.model,
         messages,
-        tools: this.openaiTools,
-        tool_choice: "auto" as const,
-        ...(this.effort && this.effort !== "none"
-          ? { reasoning_effort: this.effort as any }
+        ...(this.tools
+          ? {
+              tools: this.openaiTools,
+              tool_choice: 'auto' as const,
+            }
           : {}),
+        ...(this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort as any } : {}),
         stream: true,
         stream_options: {
           include_usage: true,
         },
       });
 
-      let content = "";
+      let content = '';
       const toolCallsMap = new Map<
         number,
         { id: string; function: { name: string; arguments: string } }
@@ -145,29 +141,28 @@ export class OpenAIClient extends BaseAgent<
         for (const choice of choices) {
           const delta = choice?.delta;
           if (!delta) continue;
-          if (typeof delta.content === "string" && delta.content) {
+          if (typeof delta.content === 'string' && delta.content) {
             content += delta.content;
             this.onText?.(delta.content);
           }
           const reasoning = (delta as any).reasoning_content;
-          if (typeof reasoning === "string" && reasoning) {
+          if (typeof reasoning === 'string' && reasoning) {
             this.onThinking?.(reasoning);
           }
           if (delta.tool_calls) {
             for (const tc of delta.tool_calls) {
-              const toolCallIndex = typeof tc.index === "number" ? tc.index : 0;
+              const toolCallIndex = typeof tc.index === 'number' ? tc.index : 0;
               let existing = toolCallsMap.get(toolCallIndex);
               if (!existing) {
                 existing = {
-                  id: tc.id || "",
-                  function: { name: "", arguments: "" },
+                  id: tc.id || '',
+                  function: { name: '', arguments: '' },
                 };
                 toolCallsMap.set(toolCallIndex, existing);
               }
               if (tc.id) existing.id = tc.id;
               if (tc.function?.name) existing.function.name += tc.function.name;
-              if (tc.function?.arguments)
-                existing.function.arguments += tc.function.arguments;
+              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
             }
           }
         }
@@ -179,7 +174,7 @@ export class OpenAIClient extends BaseAgent<
               .filter((tc) => tc.id && tc.function.name)
               .map((tc) => ({
                 id: tc.id,
-                type: "function" as const,
+                type: 'function' as const,
                 function: {
                   name: tc.function.name,
                   arguments: tc.function.arguments,
@@ -188,7 +183,7 @@ export class OpenAIClient extends BaseAgent<
           : undefined;
 
       const message: OpenAI.Chat.Completions.ChatCompletionMessage = {
-        role: "assistant",
+        role: 'assistant',
         content: content || null,
         refusal: null,
         tool_calls: toolCalls,
@@ -197,20 +192,17 @@ export class OpenAIClient extends BaseAgent<
       if (message.tool_calls && message.tool_calls.length > 0) {
         messages.push(message);
         for (const tc of message.tool_calls) {
-          if (tc.type !== "function") continue;
+          if (tc.type !== 'function') continue;
           this.onToolCall?.(tc.function.name, tc.function.arguments, tc.id);
           let result: string;
           try {
-            result = await executeTool(
-              tc.function.name,
-              JSON.parse(tc.function.arguments),
-            );
+            result = await executeTool(tc.function.name, JSON.parse(tc.function.arguments));
           } catch (e) {
             result = `工具执行失败: ${e instanceof Error ? e.message : String(e)}`;
           }
           this.onToolResult?.(tc.function.name, result, tc.id);
           messages.push({
-            role: "tool",
+            role: 'tool',
             tool_call_id: tc.id,
             content: result,
           });
@@ -218,8 +210,8 @@ export class OpenAIClient extends BaseAgent<
       }
       if (!message.tool_calls || message.tool_calls.length === 0) {
         messages.push(message);
-        this.messages = messages.filter((message) => message.role !== "system");
-        return message.content || "";
+        this.messages = messages.filter((message) => message.role !== 'system');
+        return message.content || '';
       }
     }
   }
@@ -267,12 +259,20 @@ export class OpenAIClient extends BaseAgent<
   }
 }
 
+export function createSubAgent(options: OpenAIClientOptions): OpenAIClient {
+  return new OpenAIClient({
+    ...options,
+    effort: 'none',
+    tools: false,
+  });
+}
+
 function compactHistoricalToolResults(
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return messages.map((message) => {
-    if (message.role !== "tool") return message;
-    if (typeof message.content !== "string") return message;
+    if (message.role !== 'tool') return message;
+    if (typeof message.content !== 'string') return message;
     if (message.content.length <= MAX_HISTORICAL_TOOL_RESULT_LENGTH) {
       return message;
     }
@@ -283,48 +283,40 @@ function compactHistoricalToolResults(
       ...message,
       content: [
         head,
-        "",
+        '',
         `[历史工具结果已压缩，省略 ${omitted} 字符。如需完整内容，请重新读取对应文件或重新运行相关工具。]`,
-      ].join("\n"),
+      ].join('\n'),
     };
   });
 }
 
 function openAIContentToMicaContent(
-  content:
-    | OpenAI.Chat.Completions.ChatCompletionMessageParam["content"]
-    | null
-    | undefined,
+  content: OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] | null | undefined,
 ): string | MicaUiContentBlockParam[] | null {
   if (!content) return null;
-  if (typeof content === "string") return content;
+  if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return String(content);
 
   const blocks: MicaUiContentBlockParam[] = [];
   const fallbackText: string[] = [];
 
   for (const part of content) {
-    if (!part || typeof part !== "object") continue;
-    if (
-      "type" in part &&
-      part.type === "text" &&
-      "text" in part &&
-      typeof part.text === "string"
-    ) {
-      blocks.push({ type: "text", text: part.text });
+    if (!part || typeof part !== 'object') continue;
+    if ('type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string') {
+      blocks.push({ type: 'text', text: part.text });
       continue;
     }
-    if ("type" in part && part.type === "image_url") {
-      fallbackText.push("[Image]");
+    if ('type' in part && part.type === 'image_url') {
+      fallbackText.push('[Image]');
       continue;
     }
-    if ("type" in part && typeof part.type === "string") {
+    if ('type' in part && typeof part.type === 'string') {
       fallbackText.push(`[${part.type}]`);
     }
   }
 
   if (fallbackText.length > 0) {
-    blocks.push({ type: "text", text: fallbackText.join("\n") });
+    blocks.push({ type: 'text', text: fallbackText.join('\n') });
   }
   return blocks.length > 0 ? blocks : null;
 }

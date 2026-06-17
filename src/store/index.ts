@@ -1,10 +1,10 @@
-import { atom } from "nanostores";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import defaultConfig from './default.json'
-import { homedir } from "node:os";
-export const CONFIG_PATH = resolve(homedir(),'.mica', "config.json");
-export const EFFORT_OPTIONS = ["none", "low", "medium", "high"] as const;
+import { atom } from 'nanostores';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import defaultConfig from './default.json';
+import { homedir } from 'node:os';
+export const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
+export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number];
 
@@ -33,21 +33,19 @@ const configAtom = atom<IMicaConfig>(readConfig());
 
 export function readConfig(): IMicaConfig {
   if (!existsSync(CONFIG_PATH)) {
-    writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf-8");
+    writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
   }
-  return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as IMicaConfig;
+  return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as IMicaConfig;
 }
 
 export function getConfig() {
   return configAtom.get();
 }
 
-export function updateConfig(
-  updater: (config: IMicaConfig) => IMicaConfig,
-): IMicaConfig {
+export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
   return next;
 }
 
@@ -58,28 +56,38 @@ export async function loadProviderModels(providerId: string): Promise<string[]> 
   }
 
   const response = await fetch(provider.get_model_url, {
-    headers: provider.api_key
-      ? { Authorization: `Bearer ${provider.api_key}` }
-      : undefined,
+    headers: provider.api_key ? { Authorization: `Bearer ${provider.api_key}` } : undefined,
   });
-  const data = (await response.json()) as unknown;
-  if (!Array.isArray(data)) {
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `Failed to fetch models for provider ${provider.id}: ${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  const models = parseModelIds(payload);
+  if (!models.length) {
     throw new Error(`Invalid model list for provider ${provider.id}`);
   }
 
-  const models = data.filter((item): item is string => typeof item === "string");
   updateConfig((config) => {
     const providers = config.providers.map((item) =>
-      item.id === providerId ? { ...item, models } : item,
+      item.id === providerId
+        ? {
+            ...item,
+            models,
+            model: models.includes(item.model) ? item.model : (models[0] ?? item.model),
+          }
+        : item,
     );
-    const current = config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
+    const current =
+      config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
     return {
       ...config,
       providers,
-      model:
-        current && !models.includes(config.model)
-          ? models[0] || current.model
-          : config.model,
+      model: current && !models.includes(config.model) ? models[0] || current.model : config.model,
     };
   });
   return models;
@@ -103,7 +111,43 @@ export async function loadMissingProviderModels() {
 function requireProvider(config: IMicaConfig, providerId: string): ProviderDefinition {
   const provider = config.providers.find((item) => item.id === providerId);
   if (!provider) {
-    throw new Error(`Provider not found: ${providerId || "(empty)"}`);
+    throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
   return provider;
+}
+
+function parseModelIds(payload: unknown): string[] {
+  if (!isModelListResponse(payload)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      payload.data.flatMap((item) => {
+        if (isModelObject(item)) {
+          return item.id;
+        }
+        return [];
+      }),
+    ),
+  ];
+}
+
+function isModelListResponse(payload: unknown): payload is { data: unknown[] } {
+  return Boolean(
+    payload &&
+    typeof payload === 'object' &&
+    'data' in payload &&
+    Array.isArray((payload as { data?: unknown }).data),
+  );
+}
+
+function isModelObject(item: unknown): item is { id: string } {
+  return Boolean(
+    item &&
+    typeof item === 'object' &&
+    'id' in item &&
+    typeof (item as { id?: unknown }).id === 'string' &&
+    (item as { id: string }).id.length > 0,
+  );
 }

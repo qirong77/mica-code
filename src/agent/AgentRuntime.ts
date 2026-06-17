@@ -1,27 +1,21 @@
-import mitt from "mitt";
+import mitt from 'mitt';
 import {
+  createSubAgent,
   OpenAIClient,
   type OpenAIClientOptions,
-} from "../../packages/agent/OpenAIClient.js";
-import type {
-  AgentSnapshot,
-  IAgent,
-  AgentUsageRecord,
-} from "../../packages/agent/IAgent.js";
-import type { MicaUiConversationMessage } from "../../packages/mica-ui/types.js";
-import type {
-  EffortOption,
-  ProviderDefinition,
-} from "../store/index.js";
-import { getConfig } from "../store/index.js";
+} from '../../packages/agent/OpenAIClient.js';
+import type { AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/IAgent.js';
+import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
+import type { EffortOption, ProviderDefinition } from '../store/index.js';
+import { getConfig } from '../store/index.js';
 
 export type AgentRuntimeStatus =
-  | { type: "connecting" }
-  | { type: "thinking" }
-  | { type: "streaming" }
-  | { type: "calling_tool"; toolNames?: string[] }
-  | { type: "completed"; elapsedMs?: number }
-  | { type: "error"; message: string };
+  | { type: 'connecting' }
+  | { type: 'thinking' }
+  | { type: 'streaming' }
+  | { type: 'calling_tool'; toolNames?: string[] }
+  | { type: 'completed'; elapsedMs?: number }
+  | { type: 'error'; message: string };
 
 export type AgentRuntimeEvents = {
   text: string;
@@ -36,7 +30,7 @@ export type AgentRuntimeSnapshot = {
   providerId: string;
   model: string;
   effort: EffortOption;
-  messages: AgentSnapshot<unknown, AgentUsageRecord>["messages"];
+  messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
 };
@@ -70,6 +64,18 @@ export class AgentRuntime {
     return Boolean(this.currentConfig.provider.api_key);
   }
 
+  createSubAgent(options: Partial<OpenAIClientOptions> = {}) {
+    if (!this.isConfigured) {
+      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
+      throw new Error(message);
+    }
+    return createSubAgent({
+      ...this.clientOptions(),
+      ...options,
+      effort: 'none',
+    });
+  }
+
   reloadConfig(resetSession = true) {
     this.currentConfig = this.readConfig();
     this.recreateClient();
@@ -78,7 +84,7 @@ export class AgentRuntime {
 
   abort() {
     this.runId++;
-    this.events.emit("status", { type: "error", message: "已中止当前 agent" });
+    this.events.emit('status', { type: 'error', message: '已中止当前 agent' });
   }
 
   clearSession() {
@@ -91,9 +97,8 @@ export class AgentRuntime {
     return {
       providerId: this.currentConfig.provider.id,
       model: this.currentConfig.model,
-      effort: this.currentConfig.provider.supportsEffort !== false
-        ? this.currentConfig.effort
-        : "none",
+      effort:
+        this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
@@ -121,24 +126,23 @@ export class AgentRuntime {
 
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
-      this.events.emit("status", { type: "error", message });
+      this.events.emit('status', { type: 'error', message });
       throw new Error(message);
     }
 
-    this.events.emit("status", { type: "connecting" });
+    this.events.emit('status', { type: 'connecting' });
     try {
       const text = await this.client.query(question);
       if (this.isCurrent(runId)) {
-        this.events.emit("status", {
-          type: "completed",
+        this.events.emit('status', {
+          type: 'completed',
           elapsedMs: Date.now() - startedAt,
         });
       }
       return { runId, text };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.isCurrent(runId))
-        this.events.emit("status", { type: "error", message });
+      if (this.isCurrent(runId)) this.events.emit('status', { type: 'error', message });
       throw error;
     }
   }
@@ -154,22 +158,22 @@ export class AgentRuntime {
     }
     this.client = new OpenAIClient(this.clientOptions());
     this.client.onText = (text) => {
-      this.events.emit("status", { type: "streaming" });
-      this.events.emit("text", text);
+      this.events.emit('status', { type: 'streaming' });
+      this.events.emit('text', text);
     };
     this.client.onThinking = (thinking) => {
-      this.events.emit("status", { type: "thinking" });
-      this.events.emit("thinking", thinking);
+      this.events.emit('status', { type: 'thinking' });
+      this.events.emit('thinking', thinking);
     };
     this.client.onToolCall = (name, args, id) => {
-      this.events.emit("status", { type: "calling_tool", toolNames: [name] });
-      this.events.emit("toolCall", { name, args, id });
+      this.events.emit('status', { type: 'calling_tool', toolNames: [name] });
+      this.events.emit('toolCall', { name, args, id });
     };
     this.client.onToolResult = (name, result, id) => {
-      this.events.emit("toolResult", { name, result, id });
+      this.events.emit('toolResult', { name, result, id });
     };
     this.client.onUsage = (usage) => {
-      this.events.emit("usage", usage);
+      this.events.emit('usage', usage);
     };
   }
 
@@ -178,9 +182,8 @@ export class AgentRuntime {
       apiKey: this.currentConfig.provider.api_key,
       baseURL: this.currentConfig.provider.api_base,
       model: this.currentConfig.model,
-      effort: this.currentConfig.provider.supportsEffort !== false
-        ? this.currentConfig.effort
-        : "none",
+      effort:
+        this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
     };
   }
 
@@ -188,7 +191,7 @@ export class AgentRuntime {
     const config = getConfig();
     const provider = config.providers.find((item) => item.id === config.provider);
     if (!provider) {
-      throw new Error(`Provider not found: ${config.provider || "(empty)"}`);
+      throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
     }
     return {
       provider,

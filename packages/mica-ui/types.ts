@@ -37,7 +37,7 @@ export type MicaUiWorkingStatus =
 export interface MicaUiCommand {
   name: string;
   description: string;
-  action: (arg?: string) => void;
+  action: (arg?: string) => void | Promise<void>;
   hidden?: boolean;
 }
 
@@ -91,7 +91,12 @@ export interface MicaUiToolEntry {
 export type MicaUiLogEntry = MicaUiThinkingEntry | MicaUiToolEntry;
 
 export type MicaUiConversationMessage =
-  | { role: 'assistant'; content: string | MicaUiContentBlockParam[]; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }; stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' }
+  | {
+      role: 'assistant';
+      content: string | MicaUiContentBlockParam[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'error';
+    }
   | { role: 'user'; content: string | MicaUiContentBlockParam[] };
 
 export interface MicaUiUILogEntry {

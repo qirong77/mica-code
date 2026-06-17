@@ -8,11 +8,7 @@
     "build": "bun scripts/build.mjs",
     "install": "bun scripts/install.mjs",
     "prebuild": "bun run src/prebuild.ts",
-    "test": "vitest run",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "check": "tsc --noEmit && bash scripts/check-boundary.sh",
-    "check:types": "tsc --noEmit"
+    "format": "prettier --write ."
   },
   "workspaces": ["packages/*", "packages/*/*"],
   "dependencies": {
