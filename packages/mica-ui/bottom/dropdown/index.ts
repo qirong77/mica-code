@@ -1,6 +1,6 @@
 import type { MicaUiDropdownItem } from '../../types.js';
 import { DropDownSelect } from './DropDownSelect.js';
-import { state, selection } from './data.js';
+import { state, selection } from './state.js';
 import { showQuickCommands, hideQuickCommands, handleDropdownKey, setSelectEmitter } from './quickCommandHandler.js';
 
 const _selectHandlers: Array<(item: MicaUiDropdownItem) => void> = [];

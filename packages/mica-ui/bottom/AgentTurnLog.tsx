@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, ScrollBox } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
-import { agentTurnLogItems, workingStatus } from '../panels/data.js';
+import { agentTurnLogItems, workingStatus } from '../panels/state.js';
 import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
 
 export function AgentTurnLog(): React.ReactNode {

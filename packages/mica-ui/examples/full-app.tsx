@@ -163,7 +163,7 @@ async function startDemo() {
   if (!isCurrent()) return;
 
   micaUI.panels.status.callingTool(['read_file', 'grep_search', 'run_shell'], 1800);
-  addTool('read_file', 'read_file packages/mica-ui/index.tsx', 820);
+  addTool('read_file', 'read_file packages/mica-ui/api.ts', 820);
   await sleep(500);
   addTool('grep_search', 'grep_search "micaUI" packages/mica-ui', 640);
   await sleep(500);

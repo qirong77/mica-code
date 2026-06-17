@@ -1,9 +1,9 @@
 import { themeColors } from './theme.js';
-import * as conv from './conversation/data.js';
-import * as input from './input/data.js';
-import * as dropdown from './bottom/dropdown/data.js';
-import * as panels from './panels/data.js';
-import { pushLog, clearLog, setOnAbortAgent, abortAgent } from './panels/data.js';
+import * as conv from './conversation/state.js';
+import * as input from './input/state.js';
+import * as dropdown from './bottom/dropdown/state.js';
+import * as panels from './panels/state.js';
+import { pushLog, clearLog, setOnAbortAgent, abortAgent } from './panels/state.js';
 import { MessageBarAPI } from './panels/MessageBar.js';
 import { DropDownUI } from './bottom/dropdown/index.js';
 import { TerminalInputUI } from './input/TerminalInput.js';
@@ -51,7 +51,7 @@ export const micaUI = {
   theme: { colors: themeColors },
 };
 
-export { App } from './panels/App.js';
+export { App } from './app/App.js';
 export { Conversation, ConversationUI } from './conversation/Conversation.js';
 export { Markdown } from './conversation/Markdown.js';
 export { TerminalInputUI } from './input/TerminalInput.js';

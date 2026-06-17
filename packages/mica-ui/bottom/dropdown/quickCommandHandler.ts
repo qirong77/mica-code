@@ -1,5 +1,5 @@
-import { quickCommands, state, selection, inputValue } from './data.js';
-import { disabled as inputDisabled } from '../../input/data.js';
+import { quickCommands, state, selection, inputValue } from './state.js';
+import { disabled as inputDisabled } from '../../input/state.js';
 import type { MicaUiDropdownItem } from '../../types.js';
 
 let _emitSelect: ((item: MicaUiDropdownItem) => void) | null = null;

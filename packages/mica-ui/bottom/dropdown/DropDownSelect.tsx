@@ -2,9 +2,9 @@ import { Box } from '@anthropic/ink';
 import React, { useMemo } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { CommandDropdown } from './CommandDropdown.js';
-import { inputValue } from './data.js';
+import { inputValue } from './state.js';
 import { DropDownUI } from './index.js';
-import { inputBottomDistance } from '../../input/data.js';
+import { inputBottomDistance } from '../../input/state.js';
 
 const DEFAULT_OVERHEAD = 6;
 

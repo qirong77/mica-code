@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
-import { pluginUIs, agentTurnLogItems, workingStatus } from '../panels/data.js';
-import { state as dropdownState } from './dropdown/data.js';
+import { pluginUIs, agentTurnLogItems, workingStatus } from '../panels/state.js';
+import { state as dropdownState } from './dropdown/state.js';
 import { DropDownUI } from './dropdown/index.js';
 import { PluginPanel } from './PluginPanel.js';
 import { AgentTurnLog } from './AgentTurnLog.js';

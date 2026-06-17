@@ -1,7 +1,7 @@
 import { useTerminalSize } from '@anthropic/ink';
 import React from 'react';
 import { useScheduleState } from './useScheduleState';
-import { inputBottomDistance } from '../input/data.js';
+import { inputBottomDistance } from '../input/state.js';
 
 const MIN_LOG_VIEW_HEIGHT = 5;
 const BELOW_INPUT_RESERVED_LINES = 2;

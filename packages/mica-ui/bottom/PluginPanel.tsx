@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
-import { pluginUIs } from '../panels/data.js';
+import { pluginUIs } from '../panels/state.js';
 
 export function PluginPanel(): React.ReactNode {
   const pluginPanels = useScheduleState(pluginUIs);

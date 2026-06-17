@@ -1,9 +1,9 @@
 import { Box, Text } from '@anthropic/ink';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../hooks/index.js';
-import { workingStatus, thinkingText, modelDisplay, contextSize, cacheHitRate, status } from './data.js';
-import { responseText as convResponseText } from '../conversation/data.js';
-import { text as inputText } from '../input/data.js';
+import { workingStatus, thinkingText, modelDisplay, contextSize, cacheHitRate, status } from './state.js';
+import { responseText as convResponseText } from '../conversation/state.js';
+import { text as inputText } from '../input/state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { IfComponent } from '../primitives/IfComponent.js';

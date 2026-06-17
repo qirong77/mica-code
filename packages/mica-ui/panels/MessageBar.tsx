@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import mitt from 'mitt';
-import { state as dropdownState } from '../bottom/dropdown/data.js';
-import { inputBottomDistance } from '../input/data.js';
+import { state as dropdownState } from '../bottom/dropdown/state.js';
+import { inputBottomDistance } from '../input/state.js';
 
 type Events = { add: { id: string; text: string }; remove: string; clear: void };
 const emitter = mitt<Events>();

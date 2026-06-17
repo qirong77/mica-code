@@ -2,9 +2,9 @@ import React from 'react';
 import { Box, useTerminalTitle } from '@anthropic/ink';
 import { ConversationUI } from '../conversation/Conversation.js';
 import { TerminalInputUI } from '../input/TerminalInput.js';
-import { WorkingStatusUI } from './WorkingStatus.js';
+import { WorkingStatusUI } from '../panels/WorkingStatus.js';
 import { BottomSurface } from '../bottom/BottomSurface.js';
-import { MessageBar } from './MessageBar.js';
+import { MessageBar } from '../panels/MessageBar.js';
 
 export function App(): React.ReactNode {
   useTerminalTitle('* Mica Code');
