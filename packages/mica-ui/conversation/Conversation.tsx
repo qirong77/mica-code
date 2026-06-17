@@ -66,10 +66,11 @@ export const Conversation = (): React.ReactNode => {
 
   return (
     <Box flexDirection="column">
-      {staticItems.map((item: LogItem) => {
+      {staticItems.map((item: LogItem, index) => {
+        const isLast = index === staticItems.length - 1 && !responseText;
         if (item.role === 'user') {
           return (
-            <Box key={item.id} paddingY={1} flexDirection="row">
+            <Box key={item.id} paddingY={1} paddingBottom={isLast ? 0 : 1} flexDirection="row">
               <Text color={colors.primary}>{'\u258c'}</Text>
               <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
                 <Text bold color={colors.primary}>
