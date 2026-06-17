@@ -32,21 +32,39 @@ export function registerCommitPlugin(agent: AgentRuntime) {
   } satisfies Parameters<typeof micaUI.dropdown.setQuickCommands>[0][number];
 }
 
+const STATUS_ID = 'commit-status';
+
+function setStatusMessage(text: string) {
+  micaUI.messageBar.removeMessage(STATUS_ID);
+  micaUI.messageBar.addMessage({ id: STATUS_ID, text });
+}
+
+function clearStatusMessage() {
+  setTimeout(() => micaUI.messageBar.removeMessage(STATUS_ID), 5000);
+}
+
+function showTerminalMessage(text: string) {
+  micaUI.messageBar.removeMessage(STATUS_ID);
+  const id = `commit-msg-${Date.now()}`;
+  micaUI.messageBar.addMessage({ id, text });
+  setTimeout(() => micaUI.messageBar.removeMessage(id), 5000);
+}
+
 async function runCommit(agent: AgentRuntime) {
   try {
     logRuntime('plugin.commit', 'start');
-    showTemporaryMessage('commit: 正在分析 git 变化...');
+    setStatusMessage('commit: 正在分析 git 变化...');
 
     const status = git(['status', '--porcelain=v1']);
     logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
     if (!status.trim()) {
       logRuntime('plugin.commit', 'status:empty');
-      showTemporaryMessage('commit: 没有可提交的变化');
+      showTerminalMessage('commit: 没有可提交的变化');
       return;
     }
     if (hasUnmergedFiles(status)) {
       logRuntime('plugin.commit', 'blocked:unmerged_files', undefined, 'warn');
-      showTemporaryMessage('commit: 存在未解决冲突，请先处理');
+      showTerminalMessage('commit: 存在未解决冲突，请先处理');
       return;
     }
 
@@ -55,14 +73,14 @@ async function runCommit(agent: AgentRuntime) {
     const commitMessage = await generateCommitMessage(agent, summary);
     logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
-    showTemporaryMessage(`commit: ${firstLine(commitMessage)}`);
+    setStatusMessage(`commit: ${firstLine(commitMessage)}`);
     git(['add', '-A']);
     logRuntime('plugin.commit', 'git:add_done');
 
     const stagedStatus = git(['diff', '--cached', '--name-only']);
     if (!stagedStatus.trim()) {
       logRuntime('plugin.commit', 'blocked:no_staged_changes', undefined, 'warn');
-      showTemporaryMessage('commit: git add 后没有 staged 变化');
+      showTerminalMessage('commit: git add 后没有 staged 变化');
       return;
     }
     logRuntime('plugin.commit', 'staged:ready', { files: stagedStatus.trim().split('\n').filter(Boolean).length });
@@ -71,14 +89,15 @@ async function runCommit(agent: AgentRuntime) {
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
     logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
-    showTemporaryMessage(`commit: 已提交 ${commitHash}，正在 push...`);
+    setStatusMessage(`commit: 已提交 ${commitHash}，正在 push...`);
     pushCurrentBranch();
-    showTemporaryMessage(`commit: 已提交并推送 ${commitHash}`);
+    setStatusMessage(`commit: 已提交并推送 ${commitHash}`);
+    clearStatusMessage();
     logRuntime('plugin.commit', 'push:done', { commit: commitHash });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logRuntime('plugin.commit', 'error', { message }, 'error');
-    showTemporaryMessage(`commit failed: ${message}`);
+    showTerminalMessage(`commit failed: ${message}`);
   }
 }
 
@@ -295,8 +314,4 @@ function firstLine(text: string) {
   );
 }
 
-function showTemporaryMessage(text: string) {
-  const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  micaUI.messageBar.addMessage({ id, text });
-  setTimeout(() => micaUI.messageBar.removeMessage(id), 5000);
-}
+
