@@ -138,6 +138,7 @@ function useNow(interval = 100): number {
 }
 
 function toolIcon(name: string): string {
+  if (name.startsWith('mcp__')) return '🔌';
   return TOOL_ICONS[name] || '⚙️';
 }
 
