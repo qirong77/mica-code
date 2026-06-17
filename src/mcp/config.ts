@@ -5,6 +5,8 @@ export interface McpStdioServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  stderr?: string;
+  cwd?: string;
 }
 
 export interface McpHttpServerConfig {

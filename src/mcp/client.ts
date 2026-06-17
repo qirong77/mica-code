@@ -1,3 +1,4 @@
+import type { IOType } from 'node:child_process';
 import { atom } from 'nanostores';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -69,6 +70,8 @@ export async function connectToServer(name: string, config: McpServerConfig): Pr
           command: config.command,
           args: config.args ?? [],
           env: config.env,
+          stderr: (config.stderr ?? 'pipe') as IOType,
+          cwd: config.cwd,
         });
 
   const client = new Client({ name: 'mica-code', version: '0.1.0' }, { capabilities: {} });
