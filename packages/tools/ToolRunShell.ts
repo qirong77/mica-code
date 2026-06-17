@@ -45,24 +45,43 @@ export class ToolRunShell extends MicaTool {
     const timeout = input.timeout || 30000;
 
     return new Promise((resolve) => {
+      let output = '';
+      let settled = false;
+      let timedOut = false;
+      let forceKillTimer: NodeJS.Timeout | undefined;
+
       const child = spawn(input.command, {
         shell: true,
-        timeout,
+        detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
-      const abortHandler = () => {
-        if (!child.killed) {
-          child.kill('SIGTERM');
-          setTimeout(() => {
-            if (!child.killed) child.kill('SIGKILL');
-          }, 5000);
+      const killChild = (signal: NodeJS.Signals) => {
+        if (child.pid === undefined) return;
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          child.kill(signal);
         }
+      };
+
+      const abortHandler = () => {
+        killChild('SIGTERM');
+        forceKillTimer = setTimeout(() => {
+          killChild('SIGKILL');
+        }, 5000);
       };
 
       callbacks?.signal?.addEventListener('abort', abortHandler, { once: true });
 
-      let output = '';
+      const timer = setTimeout(() => {
+        timedOut = true;
+        callbacks?.onChunk?.(`\n[命令超时（${timeout}ms），正在终止进程]\n`);
+        killChild('SIGTERM');
+        forceKillTimer = setTimeout(() => {
+          killChild('SIGKILL');
+        }, 5000);
+      }, timeout);
 
       child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
@@ -77,9 +96,15 @@ export class ToolRunShell extends MicaTool {
       });
 
       child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         callbacks?.signal?.removeEventListener('abort', abortHandler);
         const msg = output || '(no output)';
-        if (code !== 0 && code !== null) {
+        if (timedOut) {
+          resolve(`(超时: ${timeout}ms)\n${msg}`);
+        } else if (code !== 0 && code !== null) {
           resolve(`(退出码: ${code})\n${msg}`);
         } else {
           resolve(msg);
@@ -87,6 +112,10 @@ export class ToolRunShell extends MicaTool {
       });
 
       child.on('error', (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         callbacks?.signal?.removeEventListener('abort', abortHandler);
         if (output) {
           resolve(`(错误: ${error.message})\n${output}`);

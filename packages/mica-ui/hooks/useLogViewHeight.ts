@@ -42,5 +42,5 @@ export function useLogViewHeight() {
     stableHeightRef.current = nextHeight;
   }
 
-  return stableHeightRef.current;
+  return stableHeightRef.current - 3;
 }

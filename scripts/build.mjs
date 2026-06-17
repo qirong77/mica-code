@@ -15,5 +15,3 @@ execSync(`bun build --compile ./src/index.ts --outfile ${outFile}`, {
   stdio: "inherit",
 });
 console.log(`Built native binary: ${outFile}`);
-
-execSync("bun scripts/install.mjs", { stdio: "inherit" });
