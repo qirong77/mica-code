@@ -73,10 +73,10 @@ export class SessionController {
 
     if (lastUsage) {
       micaUI.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUI.panels.cacheHitRate.set(readCacheHitRate(lastUsage));
+      micaUI.panels.paidTokenRate.set(readPaidTokenRate(lastUsage));
     } else {
       micaUI.panels.contextSize.set(0);
-      micaUI.panels.cacheHitRate.set(0);
+      micaUI.panels.paidTokenRate.set(0);
     }
   }
 }
@@ -93,17 +93,11 @@ function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSn
 }
 
 function readContextTokens(usage: AgentUsageRecord): number {
-  const legacy = usage as AgentUsageRecord & {
-    tokens?: { input?: number; output?: number; total?: number };
-  };
-  return usage.totalTokens ?? legacy.tokens?.total ?? (legacy.tokens?.input ?? 0) + (legacy.tokens?.output ?? 0);
+  return usage.totalTokens;
 }
 
-function readCacheHitRate(usage: AgentUsageRecord): number {
-  const legacy = usage as AgentUsageRecord & {
-    prompt_cache?: { hit_rate?: number };
-  };
-  return usage.cacheHitRate ?? legacy.prompt_cache?.hit_rate ?? 0;
+function readPaidTokenRate(usage: AgentUsageRecord): number {
+  return usage.paidTokenRate ?? 0;
 }
 
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {

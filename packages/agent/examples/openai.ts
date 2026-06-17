@@ -37,44 +37,21 @@ writeFileSync(
 const total = client.usageHistory.reduce(
   (acc, r) => {
     acc.input += r.inputTokens;
-    acc.cachedInput += r.cachedInputTokens;
-    acc.uncachedInput += r.uncachedInputTokens;
     acc.output += r.outputTokens;
     acc.total += r.totalTokens;
+    acc.paidWeighted += r.paidTokenRate * r.totalTokens;
     return acc;
   },
   {
     input: 0,
-    cachedInput: 0,
-    uncachedInput: 0,
     output: 0,
     total: 0,
+    paidWeighted: 0,
   },
 );
-const cacheHitRate = total.input > 0 ? total.cachedInput / total.input : 0;
+const paidTokenRate = total.total > 0 ? total.paidWeighted / total.total : 0;
 console.log(`\n--- Token Summary ---`);
 console.log(`Input tokens:      ${total.input}`);
-console.log(`  uncached input:  ${total.uncachedInput}`);
-console.log(`  cached input:    ${total.cachedInput}`);
 console.log(`Output tokens:     ${total.output}`);
 console.log(`Total tokens:      ${total.total}`);
-console.log(`Cache hit rate:    ${(cacheHitRate * 100).toFixed(2)}%`);
-
-const inputPer1M = Number(process.env.OPENAI_INPUT_PRICE_PER_1M);
-const cachedInputPer1M = Number(process.env.OPENAI_CACHED_INPUT_PRICE_PER_1M);
-const outputPer1M = Number(process.env.OPENAI_OUTPUT_PRICE_PER_1M);
-
-if (
-  process.env.OPENAI_INPUT_PRICE_PER_1M !== undefined &&
-  process.env.OPENAI_CACHED_INPUT_PRICE_PER_1M !== undefined &&
-  process.env.OPENAI_OUTPUT_PRICE_PER_1M !== undefined &&
-  Number.isFinite(inputPer1M) &&
-  Number.isFinite(cachedInputPer1M) &&
-  Number.isFinite(outputPer1M)
-) {
-  const estimatedCost =
-    (total.uncachedInput / 1_000_000) * inputPer1M +
-    (total.cachedInput / 1_000_000) * cachedInputPer1M +
-    (total.output / 1_000_000) * outputPer1M;
-  console.log(`Estimated cost:    $${estimatedCost.toFixed(6)}`);
-}
+console.log(`Paid token rate:   ${(paidTokenRate * 100).toFixed(2)}%`);

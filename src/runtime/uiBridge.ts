@@ -56,7 +56,7 @@ export function clearUI(agent: AgentRuntime, sessionController?: SessionControll
   micaUI.panels.clearPluginUIs();
   micaUI.messageBar.clearMessages();
   micaUI.panels.contextSize.set(0);
-  micaUI.panels.cacheHitRate.set(0);
+  micaUI.panels.paidTokenRate.set(0);
   micaUI.panels.status.idle();
   micaUI.terminalInput.clearText();
 }

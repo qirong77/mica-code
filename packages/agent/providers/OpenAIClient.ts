@@ -23,7 +23,6 @@ export type OpenAIUsageRecord = AgentUsageRecord & {
   provider: 'openai';
   rawUsage: Record<string, unknown>;
   promptTokens: number;
-  uncachedInputTokens: number;
 };
 
 export type UsageRecord = OpenAIUsageRecord;
@@ -258,10 +257,9 @@ export class OpenAIClient extends BaseAgent<
   ): void {
     const promptTokens = usage.prompt_tokens ?? 0;
     const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
-    const uncachedTokens = Math.max(0, promptTokens - cachedTokens);
     const outputTokens = usage.completion_tokens ?? 0;
     const totalTokens = usage.total_tokens ?? promptTokens + outputTokens;
-    const hitRate = promptTokens > 0 ? cachedTokens / promptTokens : 0;
+    const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
     const record: OpenAIUsageRecord = {
       provider: 'openai',
       turnId: metadata.turnId,
@@ -271,11 +269,9 @@ export class OpenAIClient extends BaseAgent<
       inputTokens: promptTokens,
       outputTokens,
       totalTokens,
-      cachedInputTokens: cachedTokens,
-      cacheHitRate: hitRate,
+      paidTokenRate,
       rawUsage: usage,
       promptTokens,
-      uncachedInputTokens: uncachedTokens,
     };
 
     this.lastUsage = record;

@@ -33,7 +33,7 @@ export function registerStatusPlugin(agent: AgentRuntime) {
           ['Provider', provider.name ?? provider.id],
           ['Context', formatContextUsage(contextTokens, contextWindowSize)],
           ['Total tokens', formatTokenValue(readTotalTokens(lastUsage))],
-          ['Cached tokens', formatCachedTokens(lastUsage)],
+          ['Paid token rate', formatPaidTokenRate(lastUsage)],
         ]),
       );
     },
@@ -100,24 +100,16 @@ function formatContextUsage(contextTokens: number, contextWindowSize: number): s
   return `${formatTokens(contextTokens)} / ${formatTokens(contextWindowSize)} (${usagePct}%)`;
 }
 
-function formatCachedTokens(lastUsage: AgentUsageRecord | undefined): string {
+function formatPaidTokenRate(lastUsage: AgentUsageRecord | undefined): string {
   if (!lastUsage) return '-';
-  const legacy = lastUsage as AgentUsageRecord & {
-    prompt_cache?: { cached_tokens?: number; hit_rate?: number };
-  };
-  const cachedTokens = lastUsage.cachedInputTokens ?? legacy.prompt_cache?.cached_tokens;
-  const hitRate = lastUsage.cacheHitRate ?? legacy.prompt_cache?.hit_rate;
-  if (!Number.isFinite(cachedTokens) || cachedTokens < 0) return '-';
-  if (!Number.isFinite(hitRate) || hitRate < 0) return formatTokens(cachedTokens);
-  return `${formatTokens(cachedTokens)} (${(hitRate * 100).toFixed(0)}%)`;
+  const paidTokenRate = lastUsage.paidTokenRate;
+  if (!Number.isFinite(paidTokenRate) || paidTokenRate < 0) return '-';
+  return `${(paidTokenRate * 100).toFixed(0)}%`;
 }
 
 function readTotalTokens(lastUsage: AgentUsageRecord | undefined): number | undefined {
   if (!lastUsage) return undefined;
-  const legacy = lastUsage as AgentUsageRecord & {
-    tokens?: { total?: number };
-  };
-  return lastUsage.totalTokens ?? legacy.tokens?.total;
+  return lastUsage.totalTokens;
 }
 
 function formatStatusList(entries: Array<[string, string]>) {

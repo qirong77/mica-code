@@ -43,10 +43,10 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
   agent.events.on('toolResult', (toolResult) => toolLogs.completeToolCall(toolResult));
   agent.events.on('usage', (usage) => {
     micaUI.panels.contextSize.set(usage.totalTokens);
-    micaUI.panels.cacheHitRate.set(usage.cacheHitRate);
+    micaUI.panels.paidTokenRate.set(usage.paidTokenRate);
     logRuntime('runtime', 'usage:displayed', {
       context: usage.totalTokens,
-      cacheHitRate: usage.cacheHitRate,
+      paidTokenRate: usage.paidTokenRate,
     });
   });
 

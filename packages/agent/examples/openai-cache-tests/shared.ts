@@ -113,18 +113,15 @@ export function formatUsage(usage: UsageLike | undefined): string {
 
   const promptTokens = usage.prompt_tokens ?? 0;
   const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
-  const uncachedTokens = Math.max(0, promptTokens - cachedTokens);
   const completionTokens = usage.completion_tokens ?? 0;
   const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
-  const hitRate = promptTokens > 0 ? cachedTokens / promptTokens : 0;
+  const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
 
   return [
     `prompt tokens:   ${promptTokens}`,
-    `cached tokens:   ${cachedTokens}`,
-    `uncached tokens: ${uncachedTokens}`,
     `output tokens:   ${completionTokens}`,
     `total tokens:    ${totalTokens}`,
-    `cache hit rate:  ${(hitRate * 100).toFixed(2)}%`,
+    `paid token rate: ${(paidTokenRate * 100).toFixed(2)}%`,
   ].join('\n');
 }
 
@@ -132,11 +129,13 @@ export function formatSummary(results: CacheResult[]): string {
   if (results.length === 0) return 'No cache results collected.';
 
   const rows = results.map(({ scenario, iteration, usage }) => {
-    const promptTokens = usage?.prompt_tokens ?? 0;
     const cachedTokens = usage?.prompt_tokens_details?.cached_tokens ?? 0;
-    const hitRate = promptTokens > 0 ? cachedTokens / promptTokens : 0;
+    const promptTokens = usage?.prompt_tokens ?? 0;
+    const completionTokens = usage?.completion_tokens ?? 0;
+    const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
+    const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
 
-    return `${scenario.padEnd(22)} #${String(iteration).padStart(2)}  prompt=${String(promptTokens).padStart(5)}  cached=${String(cachedTokens).padStart(5)}  hit=${(hitRate * 100).toFixed(2).padStart(6)}%`;
+    return `${scenario.padEnd(22)} #${String(iteration).padStart(2)}  total=${String(totalTokens).padStart(5)}  paid=${(paidTokenRate * 100).toFixed(2).padStart(6)}%`;
   });
 
   return ['Summary:', ...rows].join('\n');

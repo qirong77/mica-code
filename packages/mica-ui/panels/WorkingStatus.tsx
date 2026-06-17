@@ -1,7 +1,7 @@
 import { Box, Text } from '@anthropic/ink';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../hooks/index.js';
-import { workingStatus, thinkingText, modelDisplay, contextSize, cacheHitRate, status } from './state.js';
+import { workingStatus, thinkingText, modelDisplay, contextSize, paidTokenRate, status } from './state.js';
 import { responseText as convResponseText } from '../conversation/state.js';
 import { text as inputText } from '../input/state.js';
 import { themeColors } from '../theme.js';
@@ -36,9 +36,9 @@ function StatusInfo() {
   const effortLevel = useScheduleState(modelDisplay.effort);
   const contextTokens = useScheduleState(contextSize);
   const windowSize = useScheduleState(modelDisplay.contextWindowSize);
-  const hitRate = useScheduleState(cacheHitRate);
+  const paidRate = useScheduleState(paidTokenRate);
   const tokenStr = formatTokens(contextTokens);
-  const cachePct = (hitRate * 100).toFixed(0);
+  const paidPct = (paidRate * 100).toFixed(0);
   const modelText = `${modelValue}_${effortLevel}`;
   if (contextTokens <= 0 || windowSize <= 0)
     return (
@@ -50,7 +50,7 @@ function StatusInfo() {
     <Text wrap="wrap">
       <Text color={themeColors.dim}>{modelText}</Text>{' '}
       <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens / windowSize)]}>
-        {tokenStr} ({cachePct}% token cached)
+        {tokenStr} ({paidPct}% token paid)
       </Text>
     </Text>
   );

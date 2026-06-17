@@ -240,7 +240,7 @@ export class AgentRuntime {
         input: usage.inputTokens,
         output: usage.outputTokens,
         total: usage.totalTokens,
-        cacheHitRate: usage.cacheHitRate,
+        paidTokenRate: usage.paidTokenRate,
       });
     };
   }

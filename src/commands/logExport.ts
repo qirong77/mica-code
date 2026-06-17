@@ -123,7 +123,6 @@ function compactUsage(u: AgentUsageRecord) {
     inputTokens: u.inputTokens,
     outputTokens: u.outputTokens,
     totalTokens: u.totalTokens,
-    cachedInputTokens: u.cachedInputTokens,
-    cacheHitRate: u.cacheHitRate,
+    paidTokenRate: u.paidTokenRate,
   };
 }

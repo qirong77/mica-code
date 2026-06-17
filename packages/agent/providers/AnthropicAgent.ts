@@ -287,7 +287,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
     const effectiveInputTokens = inputTokens + cacheWriteInputTokens + cachedInputTokens;
     const outputTokens = usage.output_tokens ?? 0;
     const totalTokens = effectiveInputTokens + outputTokens;
-    const cacheHitRate = effectiveInputTokens > 0 ? cachedInputTokens / effectiveInputTokens : 0;
+    const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedInputTokens) / totalTokens : 0;
 
     const record: AnthropicUsageRecord = {
       provider: 'anthropic',
@@ -298,9 +298,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       inputTokens: effectiveInputTokens,
       outputTokens,
       totalTokens,
-      cachedInputTokens,
-      cacheWriteInputTokens,
-      cacheHitRate,
+      paidTokenRate,
       rawUsage: usage,
     };
 

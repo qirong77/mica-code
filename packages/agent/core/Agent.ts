@@ -11,9 +11,7 @@ export type AgentUsageRecord = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  cachedInputTokens: number;
-  cacheWriteInputTokens?: number;
-  cacheHitRate: number;
+  paidTokenRate: number;
 };
 
 export type AgentCallbacks = {

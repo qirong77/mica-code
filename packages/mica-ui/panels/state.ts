@@ -14,7 +14,7 @@ export const logEntries = atom<MicaUiLogEntry[]>([]);
 export const agentTurnLogItems = atom<MicaUiAgentTurnLogItem[]>([]);
 export const pluginUIs = atom<MicaUiPluginUI[]>([]);
 export const contextSize = atom(0);
-export const cacheHitRate = atom(0);
+export const paidTokenRate = atom(0);
 
 export const modelDisplay = {
   name: atom('claude-sonnet-4-6'),
