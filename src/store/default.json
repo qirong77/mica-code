@@ -1,0 +1,36 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "effort": "low",
+  "contextWindowSize": 1000000,
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "api_base": "https://api.deepseek.com",
+      "get_model_url": "https://api.deepseek.com/models",
+      "api_key": "",
+      "model": "deepseek-v4-pro",
+      "effort": "low",
+      "models": [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro"
+      ],
+      "contextWindowSize": 1000000
+    },
+    {
+      "id": "krill",
+      "name": "Krill",
+      "api_base": "https://api.krill-ai.com/codex/v1",
+      "api_key": "",
+      "model": "gpt-5.4",
+      "effort": "medium",
+      "models": [
+        "gpt-5.4"
+      ],
+      "contextWindowSize": 256000
+    }
+  ],
+  "mcpServers": {
+  }
+}

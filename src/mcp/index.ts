@@ -1,87 +1,88 @@
-import { appendSystemLog } from '../store/logAtom.js';
+import { registerMcpTools, unregisterMcpTools } from "../../packages/tools/index.js";
+import type { MicaTool } from "../../packages/tools/MicaTool.js";
 import {
   connectToServer,
+  connections,
   disconnectAll,
   markServerConnected,
   markServerFailed,
-  connections,
-} from './client.js';
-import { fetchToolsForServer } from './tools.js';
-import { registerMcpTools, unregisterMcpTools } from '../tools/index.js';
-import { loadMcpConfig } from './config.js';
-import type { McpServerConfig } from './config.js';
-import type { MicaTool } from '../tools/MicaTool.js';
+} from "./client.js";
+import { loadMcpConfig, type McpServerConfig } from "./config.js";
+import { fetchToolsForServer } from "./tools.js";
 
 function configLabel(config: McpServerConfig): string {
-  return 'url' in config ? config.url : `${config.command} ${(config.args ?? []).join(' ')}`;
+  return "url" in config
+    ? config.url
+    : `${config.command} ${(config.args ?? []).join(" ")}`.trim();
 }
 
 function extractToolInfo(tools: MicaTool[], serverName: string) {
   const prefix = `mcp__${serverName}__`;
-  return tools.map((t) => ({
-    name: t.name.startsWith(prefix) ? t.name.slice(prefix.length) : t.name,
-    description: t.description,
-    inputSchema: t.input_schema as Record<string, unknown>,
+  return tools.map((tool) => ({
+    name: tool.name.startsWith(prefix) ? tool.name.slice(prefix.length) : tool.name,
+    description: tool.description,
+    inputSchema: tool.input_schema as Record<string, unknown>,
   }));
 }
 
 export async function initMcp(): Promise<void> {
   const configs = await loadMcpConfig();
   const entries = Object.entries(configs);
-
   if (entries.length === 0) {
-    appendSystemLog('MCP: 未配置 MCP 服务器');
+    unregisterMcpTools();
     return;
   }
-
-  appendSystemLog(`MCP: 正在连接 ${entries.length} 个服务器...`);
 
   const allTools: MicaTool[] = [];
 
   for (const [name, config] of entries) {
     try {
-      appendSystemLog(`MCP: 连接 ${name} (${configLabel(config)})`);
       const server = await connectToServer(name, config);
       const tools = await fetchToolsForServer(server);
-      markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
-      appendSystemLog(`MCP: ${name} 已连接，注册了 ${tools.length} 个工具`);
+      markServerConnected(
+        name,
+        configLabel(config),
+        tools.length,
+        extractToolInfo(tools, name),
+      );
       allTools.push(...tools);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       markServerFailed(name, configLabel(config), message);
-      appendSystemLog(`MCP: ${name} 连接失败 - ${message}`);
     }
   }
 
-  if (allTools.length > 0) {
-    registerMcpTools(allTools);
-    appendSystemLog(`MCP: 共注册 ${allTools.length} 个 MCP 工具`);
-  }
+  registerMcpTools(allTools);
 }
 
-export async function reconnectMcpServer(name: string, config: McpServerConfig): Promise<string> {
+export async function reconnectMcpServer(
+  name: string,
+  config: McpServerConfig,
+): Promise<string> {
   const existing = connections.get(name);
-  if (existing) {
-    await existing.cleanup();
-  }
+  if (existing) await existing.cleanup();
 
   try {
-    const connected = await connectToServer(name, config);
-    const tools = await fetchToolsForServer(connected);
-    markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
+    const server = await connectToServer(name, config);
+    const tools = await fetchToolsForServer(server);
+    markServerConnected(
+      name,
+      configLabel(config),
+      tools.length,
+      extractToolInfo(tools, name),
+    );
 
-    const allTools = [...tools];
-    for (const [n, s] of connections) {
-      if (n !== name) {
-        try {
-          const existingTools = await fetchToolsForServer(s);
-          allTools.push(...existingTools);
-        } catch {}
+    const allTools: MicaTool[] = [...tools];
+    for (const [serverName, connected] of connections) {
+      if (serverName === name) continue;
+      try {
+        allTools.push(...(await fetchToolsForServer(connected)));
+      } catch {
+        // Keep other connections untouched if refresh fails.
       }
     }
     registerMcpTools(allTools);
-
-    return `已重连 ${name}，注册了 ${tools.length} 个工具`;
+    return `已重连 ${name}，注册 ${tools.length} 个工具`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     markServerFailed(name, configLabel(config), message);

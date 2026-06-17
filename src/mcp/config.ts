@@ -1,6 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { readFile } from "node:fs/promises";
+import { CONFIG_PATH as MICA_CONFIG_PATH } from "../store/index.js";
 
 export interface McpStdioServerConfig {
   command: string;
@@ -10,21 +9,22 @@ export interface McpStdioServerConfig {
 
 export interface McpHttpServerConfig {
   url: string;
+  type?: "http";
   headers?: Record<string, string>;
 }
 
 export type McpServerConfig = McpHttpServerConfig | McpStdioServerConfig;
 
-export interface McpConfig {
+type McpConfig = {
   mcpServers?: Record<string, McpServerConfig>;
-}
+};
 
-export const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
+export const MCP_CONFIG_PATH = MICA_CONFIG_PATH;
 
 export async function loadMcpConfig(): Promise<Record<string, McpServerConfig>> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
-    const parsed: McpConfig = JSON.parse(raw);
+    const raw = await readFile(MCP_CONFIG_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as McpConfig;
     return parsed.mcpServers ?? {};
   } catch {
     return {};

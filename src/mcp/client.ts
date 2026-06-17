@@ -1,9 +1,9 @@
-import { atom } from 'nanostores';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { McpServerConfig } from './config.js';
-import { CONFIG_PATH } from './config.js';
+import { atom } from "nanostores";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { McpServerConfig } from "./config.js";
+import { MCP_CONFIG_PATH } from "./config.js";
 
 export interface McpToolInfo {
   name: string;
@@ -15,13 +15,11 @@ export interface McpServerStatus {
   name: string;
   url: string;
   configPath: string;
-  status: 'connecting' | 'connected' | 'failed';
+  status: "connecting" | "connected" | "failed";
   toolCount: number;
   tools: McpToolInfo[];
   error?: string;
 }
-
-export const mcpServersAtom = atom<McpServerStatus[]>([]);
 
 export interface ConnectedMcpServer {
   name: string;
@@ -30,18 +28,25 @@ export interface ConnectedMcpServer {
   cleanup: () => Promise<void>;
 }
 
+export const mcpServersAtom = atom<McpServerStatus[]>([]);
 export const connections = new Map<string, ConnectedMcpServer>();
 
 function updateServerStatus(update: McpServerStatus) {
   const current = mcpServersAtom.get();
-  const idx = current.findIndex((s) => s.name === update.name);
+  const idx = current.findIndex((server) => server.name === update.name);
   if (idx === -1) {
     mcpServersAtom.set([...current, update]);
-  } else {
-    const next = [...current];
-    next[idx] = update;
-    mcpServersAtom.set(next);
+    return;
   }
+  const next = [...current];
+  next[idx] = update;
+  mcpServersAtom.set(next);
+}
+
+function getConfigLabel(config: McpServerConfig): string {
+  return "url" in config
+    ? config.url
+    : `${config.command} ${(config.args ?? []).join(" ")}`.trim();
 }
 
 export async function connectToServer(
@@ -51,40 +56,46 @@ export async function connectToServer(
   const existing = connections.get(name);
   if (existing) return existing;
 
-  const serverUrl = 'url' in config ? config.url : config.command;
-  updateServerStatus({ name, url: serverUrl, configPath: CONFIG_PATH, status: 'connecting', toolCount: 0, tools: [] });
+  updateServerStatus({
+    name,
+    url: getConfigLabel(config),
+    configPath: MCP_CONFIG_PATH,
+    status: "connecting",
+    toolCount: 0,
+    tools: [],
+  });
 
-  const transport = 'url' in config
-    ? new StreamableHTTPClientTransport(new URL(config.url), {
-        requestInit: config.headers
-          ? { headers: config.headers as Record<string, string> }
-          : undefined,
-      })
-    : new StdioClientTransport({
-        command: config.command,
-        args: config.args ?? [],
-        env: config.env as Record<string, string> | undefined,
-      });
+  const transport =
+    "url" in config
+      ? new StreamableHTTPClientTransport(new URL(config.url), {
+          requestInit: config.headers
+            ? { headers: config.headers as Record<string, string> }
+            : undefined,
+        })
+      : new StdioClientTransport({
+          command: config.command,
+          args: config.args ?? [],
+          env: config.env,
+        });
 
   const client = new Client(
-    { name: 'mica', version: '0.1.0' },
+    { name: "mica-code", version: "0.1.0" },
     { capabilities: {} },
   );
-
   await client.connect(transport, { timeout: 15_000 });
 
-  const cleanup = async () => {
-    connections.delete(name);
-    await client.close();
+  const server: ConnectedMcpServer = {
+    name,
+    client,
+    config,
+    cleanup: async () => {
+      connections.delete(name);
+      await client.close();
+    },
   };
 
-  const server: ConnectedMcpServer = { name, client, config, cleanup };
   connections.set(name, server);
   return server;
-}
-
-export function markServerFailed(name: string, url: string, error: string) {
-  updateServerStatus({ name, url, configPath: CONFIG_PATH, status: 'failed', toolCount: 0, tools: [], error });
 }
 
 export function markServerConnected(
@@ -93,16 +104,29 @@ export function markServerConnected(
   toolCount: number,
   tools: McpToolInfo[],
 ) {
-  updateServerStatus({ name, url, configPath: CONFIG_PATH, status: 'connected', toolCount, tools });
+  updateServerStatus({
+    name,
+    url,
+    configPath: MCP_CONFIG_PATH,
+    status: "connected",
+    toolCount,
+    tools,
+  });
 }
 
-export async function disconnectServer(name: string): Promise<void> {
-  const server = connections.get(name);
-  if (!server) return;
-  await server.cleanup();
+export function markServerFailed(name: string, url: string, error: string) {
+  updateServerStatus({
+    name,
+    url,
+    configPath: MCP_CONFIG_PATH,
+    status: "failed",
+    toolCount: 0,
+    tools: [],
+    error,
+  });
 }
 
 export async function disconnectAll(): Promise<void> {
-  await Promise.all([...connections.values()].map((s) => s.cleanup()));
+  await Promise.all([...connections.values()].map((server) => server.cleanup()));
   mcpServersAtom.set([]);
 }

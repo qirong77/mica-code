@@ -1,88 +1,62 @@
-import { MicaAgent } from './core/agent.js';
-import { updateModelOptions } from './store/updateModelOptions.js';
-import { initProvider } from './store/providerConfig.js';
-import { api } from './store/config.js';
-import { ErrorHandlerPlugin } from './plugins/agent/errorHandlerPlugin.js';
-import { AutoCompactPlugin } from './plugins/agent/autoCompactPlugin.js';
-import { MemoryPlugin, injectMemorySystemPrompt } from './plugins/memory/MemoryPlugin.js';
-import { promptBuilder } from './prompts/index.js';
+#!/usr/bin/env bun
+
+import dotenv from "dotenv";
+import React from "react";
+import { resolve } from "node:path";
+import { wrappedRender } from "@anthropic/ink";
+import { micaUI, App } from "../packages/mica-ui/index.js";
+import { AgentRuntime } from "./agent/AgentRuntime.js";
+import { initMcp } from "./mcp/index.js";
 import {
-  QuickCommandModelPlugin,
-  QuickCommandEffortPlugin,
-} from './plugins/quick-command/selectPlugin.js';
-import { QuickCommandProviderPlugin } from './plugins/quick-command/providerPlugin.js';
-import { BuiltinCommandsPlugin } from './plugins/quick-command/builtinCommandsPlugin.js';
-import { QuickCommandResumePlugin } from './plugins/quick-command/resumePlugin.js';
-import { QuickCommandRenamePlugin } from './plugins/quick-command/renamePlugin.js';
-import { QuickCommandRewindPlugin } from './plugins/quick-command/rewindPlugin.js';
-import { QuickCommandStarPlugin } from './plugins/quick-command/starPlugin.js';
-import { QuickCommandCompactPlugin } from './plugins/quick-command/compactPlugin.js';
-import { QuickCommandGitChangeContextPlugin } from './plugins/quick-command/gitChangeContextPlugin.js';
-import { QuickCommitPlugin } from './plugins/custom/quickCommitPlugin.js';
-import { QuickCommandInitPlugin } from './plugins/custom/quickCommandInitPlugin.js';
-import { QuickCommandSkillsPlugin } from './plugins/custom/quickCommandSkillsPlugin.js';
-import { QuickCommandMcpPlugin } from './plugins/mcp/quickCommandMcpPlugin.js';
-import { DebugExportLogPlugin } from './plugins/debug/debugExportLogPlugin.js';
-import { terminalInput } from './store/uiState.js';
+  bootstrap,
+  reportRuntimeError,
+  syncModelDisplay,
+} from "./bootstrap.js";
+import { registerCommands } from "./plugins/index.js";
+import { SessionController } from "./session/SessionController.js";
+import { loadMissingProviderModels } from "./store/index.js";
 
-const providerInfo = initProvider();
-const modelOptionsResult = await updateModelOptions(
-  providerInfo.modelsUrl,
-  api.apiKey.get() ?? '',
-  providerInfo.modelsAuthHeader,
-  providerInfo.customModels,
-);
+process.on("uncaughtException", (error) => {
+  reportRuntimeError(error, "未捕获异常");
+});
 
-// 在注册任何插件之前注入记忆系统 prompt
-injectMemorySystemPrompt(promptBuilder);
+process.on("unhandledRejection", (error) => {
+  reportRuntimeError(error, "未处理的异步错误");
+});
 
-await MicaAgent.usePlugin(new QuickCommitPlugin());
-await MicaAgent.usePlugin(new QuickCommandInitPlugin());
-await MicaAgent.usePlugin(new QuickCommandSkillsPlugin());
-await MicaAgent.usePlugin(new ErrorHandlerPlugin());
-await MicaAgent.usePlugin(new AutoCompactPlugin());
-await MicaAgent.usePlugin(new MemoryPlugin());
-await MicaAgent.usePlugin(new BuiltinCommandsPlugin());
-await MicaAgent.usePlugin(new QuickCommandProviderPlugin());
-await MicaAgent.usePlugin(new QuickCommandModelPlugin());
-await MicaAgent.usePlugin(new QuickCommandEffortPlugin());
-await MicaAgent.usePlugin(new QuickCommandResumePlugin());
-await MicaAgent.usePlugin(new QuickCommandRenamePlugin());
-await MicaAgent.usePlugin(new QuickCommandRewindPlugin());
-await MicaAgent.usePlugin(new QuickCommandStarPlugin());
-await MicaAgent.usePlugin(new QuickCommandCompactPlugin());
-await MicaAgent.usePlugin(new QuickCommandGitChangeContextPlugin());
-await MicaAgent.usePlugin(new QuickCommandMcpPlugin());
-await MicaAgent.usePlugin(new DebugExportLogPlugin());
+dotenv.config({ path: resolve(process.cwd(), ".env") });
+dotenv.config({ path: resolve(process.cwd(), "packages/agent/.env") });
 
-const printPrompt = getPrintPrompt();
-if (printPrompt) {
-  terminalInput.disabled.set(true);
-}
+const app = await wrappedRender(React.createElement(App), {
+  exitOnCtrlC: false,
+});
 
-MicaAgent.run();
+try {
+  const agent = new AgentRuntime();
+  const sessionController = new SessionController(agent);
 
-if (modelOptionsResult.error) {
-  MicaAgent.ui.MessageBar.addMessage({
-    id: 'startup-model-options-error',
-    text: modelOptionsResult.error,
+  registerCommands({ agent, sessionController });
+  bootstrap({
+    agent,
+    sessionController,
+    onConfigChanged: () => syncModelDisplay(agent),
   });
+
+  void loadMissingProviderModels().then(() => {
+    agent.reloadConfig(false);
+    syncModelDisplay(agent);
+  });
+  micaUI.terminalInput.setPlaceholder(
+    "Type a message to start a conversation",
+  );
+  void initMcp().catch((error) => {
+    reportRuntimeError(error, "MCP 初始化失败");
+  });
+} catch (error) {
+  micaUI.terminalInput.setPlaceholder(
+    "Fix the startup error and restart Mica Code",
+  );
+  reportRuntimeError(error, "启动失败");
 }
 
-if (printPrompt) {
-  MicaAgent.ui.TerminalInput.submit(printPrompt);
-}
-
-function getPrintPrompt(): string | undefined {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '-p' || args[i] === '--print') {
-      const prompt = args[i + 1];
-      if (!prompt) {
-        process.stderr.write('Usage: mica -p "your prompt"\n');
-        process.exit(1);
-      }
-      return prompt;
-    }
-  }
-}
+await app.waitUntilExit();

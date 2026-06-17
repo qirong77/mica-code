@@ -85,16 +85,10 @@ Blog 01 在 1.4 开头加了归属说明。Blog 02 和 03 在导语末尾补了�
 
 ---
 
-## 文章列表
+## 文章列表（当前共 2 篇）
 
-- [【01】Code Agent 从零到一：ink 渲染管线全景](./1.ink-render-pipeline.md)
-- [【02】Code Agent 从零到一：Packed Buffer、缓存与闪烁消除](./2.ink-yoga-layout.md)
-- [【03】Code Agent 从零到一：事件、选择与虚拟滚动](./3.ink-output-control.md)
-- [【04】Code Agent 从零到一：对话压缩策略的演进](./4.compact-strategy.md)
 - [【05】Code Agent 从零到一：工具设计的防御性编程](./5.tool-optimization.md)
-- [【06】Code Agent 从零到一：claude-code 文件级记忆系统设计](./6.memory-system-design.md)
 - [【07】Code Agent 从零到一：后台命令执行与自动终止](./7.background-task.md)
-- [【08】Code Agent 从零到一：记忆系统的设计与实现](./8.memory-system-implementation.md)
 
 ---
 

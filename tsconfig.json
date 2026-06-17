@@ -1,19 +1,11 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "lib": ["ES2023"],
-    "outDir": "dist",
-    "rootDir": ".",
-    "paths": {
-      "@anthropic/ink": ["./packages/@anthropic/ink/src/index.ts"],
-      "@anthropic/ink/*": ["./packages/@anthropic/ink/src/*"]
-    }
-  },
-  "include": ["src", "packages/@anthropic/ink"]
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "src",
+    "packages/agent",
+    "packages/tools",
+    "packages/mica-ui",
+    "packages/@anthropic/ink/src"
+  ],
+  "exclude": ["**/dist", "**/node_modules", "packages/@anthropic/ink/examples"]
 }

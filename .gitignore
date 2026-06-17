@@ -2,8 +2,7 @@ node_modules/
 dist/
 .env
 .DS_Store
-claude-code-main
 .claude
-packages/ink
-interview
 .codegraph
+.backups
+temp/
