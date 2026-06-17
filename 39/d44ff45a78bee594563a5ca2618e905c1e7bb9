@@ -1,0 +1,14 @@
+packages/mica-ui/hooks/useLogViewHeight.ts
+  h_a456b67147438e 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "39d44ff45a78bee594563a5ca2618e905c1e7bb9",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
