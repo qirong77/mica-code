@@ -5,7 +5,7 @@ import { micaUI } from '../../packages/mica-ui/index.js';
 import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
 import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
 import { themeColors } from '../../packages/mica-ui/theme.js';
-import { showMessage } from '../bootstrap.js';
+import { showMessage } from '../app/bootstrap.js';
 import { mcpServersAtom, type McpServerStatus } from '../mcp/client.js';
 import { loadMcpConfig } from '../mcp/config.js';
 import { reconnectMcpServer } from '../mcp/index.js';

@@ -1,7 +1,7 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { clearUI, showMessage } from '../bootstrap.js';
+import { clearUI, showMessage } from '../app/bootstrap.js';
 import { logRuntime } from '../logger.js';
 
 export function registerClearPlugin(agent: AgentRuntime, sessionController: SessionController) {

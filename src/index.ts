@@ -7,10 +7,10 @@ import { wrappedRender } from '@anthropic/ink';
 import { micaUI, App } from '../packages/mica-ui/index.js';
 import { AgentRuntime } from './agent/AgentRuntime.js';
 import { initMcp } from './mcp/index.js';
-import { bootstrap, reportRuntimeError, syncModelDisplay } from './bootstrap.js';
-import { registerCommands } from './plugins/index.js';
+import { bootstrap, reportRuntimeError, syncModelDisplay } from './app/bootstrap.js';
+import { registerCommands } from './commands/index.js';
 import { SessionController } from './session/SessionController.js';
-import { loadMissingProviderModels } from './store/index.js';
+import { loadMissingProviderModels } from './config/index.js';
 
 process.on('uncaughtException', (error) => {
   reportRuntimeError(error, '未捕获异常');

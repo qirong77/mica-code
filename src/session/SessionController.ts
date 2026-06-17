@@ -1,7 +1,7 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-import { updateConfig } from '../store/index.js';
+import { updateConfig } from '../config/index.js';
 import {
   createSessionId,
   SessionStore,

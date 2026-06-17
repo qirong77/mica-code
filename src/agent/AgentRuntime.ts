@@ -2,8 +2,8 @@ import mitt from 'mitt';
 import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/providers/OpenAIClient.js';
 import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
-import type { EffortOption, ProviderDefinition } from '../store/index.js';
-import { getConfig } from '../store/index.js';
+import type { EffortOption, ProviderDefinition } from '../config/index.js';
+import { getConfig } from '../config/index.js';
 import { logRuntime } from '../logger.js';
 
 export type AgentRuntimeStatus =

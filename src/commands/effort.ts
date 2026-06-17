@@ -1,8 +1,8 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 
-import { showMessage, syncModelDisplay } from '../bootstrap.js';
-import { EFFORT_OPTIONS, updateConfig } from '../store/index.js';
+import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
+import { EFFORT_OPTIONS, updateConfig } from '../config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { logRuntime } from '../logger.js';
 

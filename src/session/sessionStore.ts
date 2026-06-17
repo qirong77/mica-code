@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
-import type { EffortOption } from '../store/index.js';
+import type { EffortOption } from '../config/index.js';
 
 export type PersistedRuntimeSnapshot = {
   providerId: string;

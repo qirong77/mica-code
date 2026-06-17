@@ -1,16 +1,16 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import { registerClearPlugin } from './pluginClear.js';
-import { registerProviderPlugin } from './pluginProvider.js';
-import { registerModelPlugin } from './pluginModel.js';
-import { registerEffortPlugin } from './pluginEffort.js';
-import { registerStatusPlugin } from './pluginStatus.js';
-import { registerMcpPlugin } from './pluginMcp.js';
-import { registerResumePlugin } from './pluginResume.js';
-import { registerSkillsPlugin } from './pluginSkills.js';
-import { registerGitDiffContextPlugin } from './pluginGitDiffContext.js';
-import { registerCommitPlugin } from './pluginCommit.js';
-import { closeLogsPanel, registerLogsPlugin } from './pluginLogs.js';
+import { registerClearPlugin } from './clear.js';
+import { registerProviderPlugin } from './provider.js';
+import { registerModelPlugin } from './model.js';
+import { registerEffortPlugin } from './effort.js';
+import { registerStatusPlugin } from './status.js';
+import { registerMcpPlugin } from './mcp.js';
+import { registerResumePlugin } from './resume.js';
+import { registerSkillsPlugin } from './skills.js';
+import { registerGitDiffContextPlugin } from './gitDiffContext.js';
+import { registerCommitPlugin } from './commit.js';
+import { closeLogsPanel, registerLogsPlugin } from './logs.js';
 import type { SessionController } from '../session/SessionController.js';
 import { logRuntime } from '../logger.js';
 
