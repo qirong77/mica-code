@@ -38,7 +38,7 @@ function StatusInfo() {
   const windowSize = useScheduleState(modelDisplay.contextWindowSize);
   const hitRate = useScheduleState(cacheHitRate);
   const tokenStr = formatTokens(contextTokens);
-  const cachePct = ((1 - hitRate) * 100).toFixed(0);
+  const cachePct = (hitRate * 100).toFixed(0);
   const modelText = `${modelValue}_${effortLevel}`;
   if (contextTokens <= 0 || windowSize <= 0)
     return (
