@@ -6,8 +6,8 @@
     "dev": "bun run src/index.ts",
     "ui": "bun run src/components/ui/examples/ui.tsx",
     "build": "bun scripts/build.mjs",
-    "install": "bun scripts/install.mjs",
     "prebuild": "bun run src/prebuild.ts",
+    "postbuild": "bun scripts/install.mjs",
     "format": "prettier --write ."
   },
   "workspaces": [
