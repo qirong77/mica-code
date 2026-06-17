@@ -9,7 +9,7 @@ import { Spin } from '../primitives/Spin.js';
 import { IfComponent } from '../primitives/IfComponent.js';
 import { formatElapsed } from '../utils/format.js';
 
-const CTX_THRESHOLDS = [0.1, 0.3, 0.5, 0.8] as const;
+const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
 const CONTEXT_USAGE_COLORS = [
   themeColors.dim,
   themeColors.info,
@@ -47,8 +47,11 @@ function StatusInfo() {
       </Text>
     );
   return (
-    <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens / windowSize)]} wrap="wrap">
-      {modelText} {tokenStr} ({cachePct}% token cached)
+    <Text wrap="wrap">
+      <Text color={themeColors.dim}>{modelText}</Text>{' '}
+      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens / windowSize)]}>
+        {tokenStr} ({cachePct}% token cached)
+      </Text>
     </Text>
   );
 }
