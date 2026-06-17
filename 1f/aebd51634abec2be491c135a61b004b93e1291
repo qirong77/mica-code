@@ -1,0 +1,23 @@
+src/commands/status.tsx
+  9a3e41ca03b69d24 36,103,105-107,112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1faebd51634abec2be491c135a61b004b93e1291",
+  "prompts": {
+    "9a3e41ca03b69d24": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed4ee-0293-75b3-9de3-67b86b00e8d3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 24,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
