@@ -1,0 +1,23 @@
+src/commands/commit.ts
+  624db6b52e9757c8 49-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d5938033794489ce92bbdb12ae6e9288b4c5a2a0",
+  "prompts": {
+    "624db6b52e9757c8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed4a7-9e56-70f0-8f4b-d6309b9b1b2f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 5629,
+      "overriden_lines": 9
+    }
+  }
+}
