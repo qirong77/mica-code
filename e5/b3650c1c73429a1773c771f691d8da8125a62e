@@ -1,0 +1,44 @@
+src/plugins/pluginStatus.tsx
+  71a28f51791f64cf 8,21-28,50
+  2a27e91dd0549e0b 6,35-36,103-109
+src/plugins/pluginLogs.tsx
+  h_a456b67147438e 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e5b3650c1c73429a1773c771f691d8da8125a62e",
+  "prompts": {
+    "2a27e91dd0549e0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed410-f5d5-7cf3-b38f-27125b7d3bc9",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 5,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    },
+    "71a28f51791f64cf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed40e-5b25-7050-b929-551707883a31",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 0,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
