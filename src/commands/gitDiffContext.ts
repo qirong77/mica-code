@@ -36,7 +36,7 @@ export function registerGitDiffContextPlugin() {
           return;
         }
 
-        const message = `Here is the git diff between the current branch \`${branch}\` and \`master\`:\n\n\`\`\`diff\n${diff}\n\`\`\``;
+        const message = `Give me a summery. Here is the git diff between the current branch \`${branch}\` and \`master\`:\n\n\`\`\`diff\n${diff}\n\`\`\``;
         micaUI.terminalInput.submit(message);
         logRuntime('plugin.git-diff-context', 'submitted', { branch, chars: message.length });
       } catch (error) {
