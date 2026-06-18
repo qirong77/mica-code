@@ -90,10 +90,10 @@ async function runCommit(agent: AgentRuntime) {
     logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
     setStatusMessage(`commit: 已提交 ${commitHash}，正在 push...`);
-    pushCurrentBranch();
-    setStatusMessage(`commit: 已提交并推送 ${commitHash}`);
+    const pushed = pushCurrentBranch();
+    setStatusMessage(pushed ? `commit: 已提交并推送 ${commitHash}` : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`);
     clearStatusMessage();
-    logRuntime('plugin.commit', 'push:done', { commit: commitHash });
+    logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', { commit: commitHash });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logRuntime('plugin.commit', 'error', { message }, 'error');
@@ -251,16 +251,23 @@ function commitWithMessage(message: string) {
 }
 
 function pushCurrentBranch() {
-  const upstream = safeGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
-  if (upstream.trim()) {
-    logRuntime('plugin.commit', 'push:start', { upstream: upstream.trim() });
+  const upstream = safeGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim();
+  if (upstream) {
+    logRuntime('plugin.commit', 'push:start', { upstream });
     git(['push'], 120_000);
-    return;
+    return true;
   }
 
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-  logRuntime('plugin.commit', 'push:start', { branch, setUpstream: true });
-  git(['push', '-u', 'origin', branch], 120_000);
+  const remoteBranch = safeGit(['ls-remote', '--heads', 'origin', branch]).trim();
+  if (!remoteBranch) {
+    logRuntime('plugin.commit', 'push:skip_no_remote_branch', { branch }, 'warn');
+    return false;
+  }
+
+  logRuntime('plugin.commit', 'push:start', { branch, remote: 'origin' });
+  git(['push', 'origin', branch], 120_000);
+  return true;
 }
 
 function git(args: string[], timeout = 30_000) {
