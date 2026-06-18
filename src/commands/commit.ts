@@ -313,5 +313,3 @@ function firstLine(text: string) {
       ?.trim() || '(empty)'
   );
 }
-
-

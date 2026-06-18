@@ -30,9 +30,20 @@ export type AnthropicAgentOptions = {
   systemPrompt?: string;
 };
 
+type AnthropicMergedUsage = {
+  input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+  rawEvents: {
+    messageStart?: Usage;
+    messageDeltas: MessageDeltaUsage[];
+  };
+};
+
 export type AnthropicUsageRecord = AgentUsageRecord & {
   provider: 'anthropic';
-  rawUsage: Usage | MessageDeltaUsage;
+  rawUsage: AnthropicMergedUsage;
 };
 
 type AnthropicToolUse = Pick<ToolUseBlock, 'id' | 'name' | 'input' | 'type'>;
@@ -168,15 +179,17 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       let content = '';
       const contentBlocks = new Map<number, ContentBlock>();
       const toolInputJson = new Map<number, string>();
+      const usageMetadata = {
+        model: this.model,
+        turnId,
+        requestIndex,
+        messageCount: messages.length,
+      };
+      const usageAccumulator = createUsageAccumulator();
 
       for await (const event of stream) {
         throwIfQueryStopped(options);
-        this.handleUsageEvent(event, {
-          model: this.model,
-          turnId,
-          requestIndex,
-          messageCount: messages.length,
-        });
+        collectUsageEvent(usageAccumulator, event);
 
         if (event.type === 'content_block_start') {
           contentBlocks.set(event.index, event.content_block);
@@ -197,6 +210,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
           toolInputJson.set(event.index, `${toolInputJson.get(event.index) ?? ''}${delta.partial_json}`);
         }
       }
+      this.recordUsage(usageAccumulator, usageMetadata);
 
       const toolUses = Array.from(contentBlocks.entries())
         .filter((entry): entry is [number, ToolUseBlock] => entry[1].type === 'tool_use')
@@ -254,26 +268,8 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
     return { type: 'enabled' as const, budget_tokens };
   }
 
-  private handleUsageEvent(
-    event: RawMessageStreamEvent,
-    metadata: {
-      model: string;
-      turnId: number;
-      requestIndex: number;
-      messageCount: number;
-    },
-  ) {
-    if (event.type === 'message_start') {
-      this.recordUsage(event.message.usage, metadata);
-      return;
-    }
-    if (event.type === 'message_delta') {
-      this.recordUsage(event.usage, metadata);
-    }
-  }
-
   private recordUsage(
-    usage: Usage | MessageDeltaUsage,
+    usage: AnthropicMergedUsage,
     metadata: {
       model: string;
       turnId: number;
@@ -281,11 +277,11 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       messageCount: number;
     },
   ) {
-    const inputTokens = usage.input_tokens ?? 0;
-    const cacheWriteInputTokens = usage.cache_creation_input_tokens ?? 0;
-    const cachedInputTokens = usage.cache_read_input_tokens ?? 0;
+    const inputTokens = usage.input_tokens;
+    const cacheWriteInputTokens = usage.cache_creation_input_tokens;
+    const cachedInputTokens = usage.cache_read_input_tokens;
     const effectiveInputTokens = inputTokens + cacheWriteInputTokens + cachedInputTokens;
-    const outputTokens = usage.output_tokens ?? 0;
+    const outputTokens = usage.output_tokens;
     const totalTokens = effectiveInputTokens + outputTokens;
     const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedInputTokens) / totalTokens : 0;
 
@@ -315,6 +311,44 @@ export function createAnthropicSubAgent(options: AnthropicAgentOptions): Anthrop
     effort: 'none',
     tools: false,
   });
+}
+
+function createUsageAccumulator(): AnthropicMergedUsage {
+  return {
+    input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    output_tokens: 0,
+    rawEvents: {
+      messageDeltas: [],
+    },
+  };
+}
+
+function collectUsageEvent(accumulator: AnthropicMergedUsage, event: RawMessageStreamEvent): void {
+  if (event.type === 'message_start') {
+    accumulator.rawEvents.messageStart = event.message.usage;
+    mergeAnthropicUsage(accumulator, event.message.usage);
+    return;
+  }
+
+  if (event.type === 'message_delta') {
+    accumulator.rawEvents.messageDeltas.push(event.usage);
+    mergeAnthropicUsage(accumulator, event.usage);
+  }
+}
+
+function mergeAnthropicUsage(accumulator: AnthropicMergedUsage, usage: Usage | MessageDeltaUsage): void {
+  accumulator.input_tokens = Math.max(accumulator.input_tokens, usage.input_tokens ?? 0);
+  accumulator.cache_creation_input_tokens = Math.max(
+    accumulator.cache_creation_input_tokens,
+    usage.cache_creation_input_tokens ?? 0,
+  );
+  accumulator.cache_read_input_tokens = Math.max(
+    accumulator.cache_read_input_tokens,
+    usage.cache_read_input_tokens ?? 0,
+  );
+  accumulator.output_tokens = Math.max(accumulator.output_tokens, usage.output_tokens ?? 0);
 }
 
 function micaContentToAnthropicContent(content: AgentQueryContent): MessageParam['content'] {
