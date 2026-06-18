@@ -267,6 +267,7 @@ export class OpenAIClient extends BaseAgent<
       messageCount: metadata.messageCount,
       model: metadata.model,
       inputTokens: promptTokens,
+      cachedInputTokens: cachedTokens,
       outputTokens,
       totalTokens,
       paidTokenRate,

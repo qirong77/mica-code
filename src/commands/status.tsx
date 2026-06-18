@@ -14,7 +14,8 @@ export function registerStatusPlugin(agent: AgentRuntime) {
     action: () => {
       const { provider, model, effort } = agent.config;
       const snapshot = agent.getSnapshot();
-      const lastUsage = snapshot.lastUsage;
+      const usageTotals = summarizeUsage(snapshot.usageHistory);
+      const latestUsage = snapshot.lastUsage;
 
       const contextTokens = micaUI.panels.contextSize.get();
       const contextWindowSize = micaUI.panels.modelDisplay.contextWindowSize.get();
@@ -24,7 +25,7 @@ export function registerStatusPlugin(agent: AgentRuntime) {
         effort: provider.supportsEffort !== false ? effort : 'none',
         messages: snapshot.messages.length,
         contextTokens,
-        hasLastUsage: Boolean(lastUsage),
+        usageRecords: snapshot.usageHistory.length,
       });
       showStatusPanel(
         formatStatusList([
@@ -32,8 +33,10 @@ export function registerStatusPlugin(agent: AgentRuntime) {
           ['Effort', provider.supportsEffort !== false ? effort : 'none'],
           ['Provider', provider.name ?? provider.id],
           ['Context', formatContextUsage(contextTokens, contextWindowSize)],
-          ['Total tokens', formatTokenValue(readTotalTokens(lastUsage))],
-          ['Paid token rate', formatPaidTokenRate(lastUsage)],
+          ['Total input tokens', formatTokenValue(usageTotals.inputTokens, usageTotals.records)],
+          ['Total output tokens', formatTokenValue(usageTotals.outputTokens, usageTotals.records)],
+          ['Latest input cached', formatUsageCachedTokenValue(latestUsage)],
+          ['Total input cached', formatTotalsCachedTokenValue(usageTotals)],
         ]),
       );
     },
@@ -89,8 +92,8 @@ function formatTokens(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
-function formatTokenValue(tokens: number | undefined): string {
-  if (tokens == null) return '-';
+function formatTokenValue(tokens: number, records: number): string {
+  if (records === 0) return '-';
   return formatTokens(tokens);
 }
 
@@ -100,16 +103,41 @@ function formatContextUsage(contextTokens: number, contextWindowSize: number): s
   return `${formatTokens(contextTokens)} / ${formatTokens(contextWindowSize)} (${usagePct}%)`;
 }
 
-function formatPaidTokenRate(lastUsage: AgentUsageRecord | undefined): string {
-  if (!lastUsage) return '-';
-  const paidTokenRate = lastUsage.paidTokenRate;
-  if (!Number.isFinite(paidTokenRate) || paidTokenRate < 0) return '-';
-  return `${(paidTokenRate * 100).toFixed(0)}%`;
+function formatUsageCachedTokenValue(usage: AgentUsageRecord | undefined): string {
+  if (!usage) return '-';
+  const cachedInputTokens = usage.cachedInputTokens ?? 0;
+  const cacheRate = usage.inputTokens > 0 ? cachedInputTokens / usage.inputTokens : 0;
+  return `${formatTokens(cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
 }
 
-function readTotalTokens(lastUsage: AgentUsageRecord | undefined): number | undefined {
-  if (!lastUsage) return undefined;
-  return lastUsage.totalTokens;
+function formatTotalsCachedTokenValue(usageTotals: UsageTotals): string {
+  if (usageTotals.records === 0) return '-';
+  const cacheRate = usageTotals.inputTokens > 0 ? usageTotals.cachedInputTokens / usageTotals.inputTokens : 0;
+  return `${formatTokens(usageTotals.cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
+}
+
+type UsageTotals = {
+  records: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+};
+
+function summarizeUsage(usageHistory: AgentUsageRecord[]): UsageTotals {
+  return usageHistory.reduce<UsageTotals>(
+    (totals, usage) => ({
+      records: totals.records + 1,
+      inputTokens: totals.inputTokens + usage.inputTokens,
+      outputTokens: totals.outputTokens + usage.outputTokens,
+      cachedInputTokens: totals.cachedInputTokens + (usage.cachedInputTokens ?? 0),
+    }),
+    {
+      records: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+    },
+  );
 }
 
 function formatStatusList(entries: Array<[string, string]>) {

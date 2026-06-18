@@ -238,6 +238,7 @@ export class AgentRuntime {
       this.events.emit('usage', usage);
       logRuntime('agent', 'usage', {
         input: usage.inputTokens,
+        cachedInput: usage.cachedInputTokens ?? 0,
         output: usage.outputTokens,
         total: usage.totalTokens,
         paidTokenRate: usage.paidTokenRate,

@@ -121,6 +121,7 @@ function compactUsage(u: AgentUsageRecord) {
     requestIndex: u.requestIndex,
     messageCount: u.messageCount,
     inputTokens: u.inputTokens,
+    cachedInputTokens: u.cachedInputTokens ?? 0,
     outputTokens: u.outputTokens,
     totalTokens: u.totalTokens,
     paidTokenRate: u.paidTokenRate,

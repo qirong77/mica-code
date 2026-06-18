@@ -42,10 +42,13 @@ export function bootstrap({ agent, sessionController, onConfigChanged }: Bootstr
   agent.events.on('toolCall', (toolCall) => toolLogs.addToolCall(toolCall));
   agent.events.on('toolResult', (toolResult) => toolLogs.completeToolCall(toolResult));
   agent.events.on('usage', (usage) => {
+    const cachedTokenRate = readCachedTokenRate(usage);
     micaUI.panels.contextSize.set(usage.totalTokens);
-    micaUI.panels.paidTokenRate.set(usage.paidTokenRate);
+    micaUI.panels.cachedTokenRate.set(cachedTokenRate);
     logRuntime('runtime', 'usage:displayed', {
       context: usage.totalTokens,
+      cachedInputTokens: usage.cachedInputTokens ?? 0,
+      cachedTokenRate,
       paidTokenRate: usage.paidTokenRate,
     });
   });
@@ -76,3 +79,8 @@ export function isAgentRunning() {
 }
 
 export { reportRuntimeError, showMessage, syncModelDisplay };
+
+function readCachedTokenRate(usage: { inputTokens: number; cachedInputTokens?: number }): number {
+  if (usage.inputTokens <= 0) return 0;
+  return Math.max(0, (usage.cachedInputTokens ?? 0) / usage.inputTokens);
+}

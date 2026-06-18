@@ -9,6 +9,7 @@ export type AgentUsageRecord = {
   messageCount: number;
   model?: string;
   inputTokens: number;
+  cachedInputTokens?: number;
   outputTokens: number;
   totalTokens: number;
   paidTokenRate: number;

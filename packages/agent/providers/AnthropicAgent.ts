@@ -296,6 +296,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       messageCount: metadata.messageCount,
       model: metadata.model,
       inputTokens: effectiveInputTokens,
+      cachedInputTokens,
       outputTokens,
       totalTokens,
       paidTokenRate,

@@ -73,10 +73,10 @@ export class SessionController {
 
     if (lastUsage) {
       micaUI.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUI.panels.paidTokenRate.set(readPaidTokenRate(lastUsage));
+      micaUI.panels.cachedTokenRate.set(readCachedTokenRate(lastUsage));
     } else {
       micaUI.panels.contextSize.set(0);
-      micaUI.panels.paidTokenRate.set(0);
+      micaUI.panels.cachedTokenRate.set(0);
     }
   }
 }
@@ -96,8 +96,9 @@ function readContextTokens(usage: AgentUsageRecord): number {
   return usage.totalTokens;
 }
 
-function readPaidTokenRate(usage: AgentUsageRecord): number {
-  return usage.paidTokenRate ?? 0;
+function readCachedTokenRate(usage: AgentUsageRecord): number {
+  if (usage.inputTokens <= 0) return 0;
+  return Math.max(0, (usage.cachedInputTokens ?? 0) / usage.inputTokens);
 }
 
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {
