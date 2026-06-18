@@ -11,6 +11,7 @@ import { bootstrap, reportRuntimeError, syncModelDisplay } from './app/bootstrap
 import { registerCommands } from './commands/index.js';
 import { SessionController } from './session/SessionController.js';
 import { loadMissingProviderModels } from './config/index.js';
+import { AgentRegistry } from './agents/agentRegistry.js';
 
 process.on('uncaughtException', (error) => {
   reportRuntimeError(error, '未捕获异常');
@@ -26,9 +27,12 @@ dotenv.config({ path: resolve(process.cwd(), 'packages/agent/.env') });
 const app = await wrappedRender(React.createElement(App), {
   exitOnCtrlC: false,
 });
+let agentRegistry: AgentRegistry | null = null;
 
 try {
   const agent = new AgentRuntime();
+  agentRegistry = new AgentRegistry(agent);
+  agentRegistry.start();
   const sessionController = new SessionController(agent);
 
   registerCommands({ agent, sessionController });
@@ -52,3 +56,4 @@ try {
 }
 
 await app.waitUntilExit();
+agentRegistry?.stop();

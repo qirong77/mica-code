@@ -11,6 +11,7 @@ import { registerSkillsPlugin } from './skills.js';
 import { registerGitDiffContextPlugin } from './gitDiffContext.js';
 import { registerCommitPlugin } from './commit.js';
 import { registerLogExportPlugin } from './logExport.js';
+import { registerAgentsPlugin } from './agents.js';
 import { closeLogsPanel, registerLogsPlugin } from './logs.js';
 import type { SessionController } from '../session/SessionController.js';
 import { logRuntime } from '../logger.js';
@@ -35,6 +36,7 @@ export function registerCommands({
     registerGitDiffContextPlugin(),
     registerCommitPlugin(agent),
     registerLogExportPlugin(agent, sessionController),
+    registerAgentsPlugin(),
   ];
 
   micaUI.dropdown.setQuickCommands(
