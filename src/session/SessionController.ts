@@ -73,7 +73,7 @@ export class SessionController {
 
     if (lastUsage) {
       micaUI.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUI.panels.cachedTokenRate.set(readCachedTokenRate(lastUsage));
+      micaUI.panels.cachedTokenRate.set(readTotalCachedTokenRate(this.agent));
     } else {
       micaUI.panels.contextSize.set(0);
       micaUI.panels.cachedTokenRate.set(0);
@@ -96,9 +96,12 @@ function readContextTokens(usage: AgentUsageRecord): number {
   return usage.totalTokens;
 }
 
-function readCachedTokenRate(usage: AgentUsageRecord): number {
-  if (usage.inputTokens <= 0) return 0;
-  return Math.max(0, (usage.cachedInputTokens ?? 0) / usage.inputTokens);
+function readTotalCachedTokenRate(agent: AgentRuntime): number {
+  const snapshot = agent.getSnapshot();
+  const totalInput = snapshot.usageHistory.reduce((sum, u) => sum + u.inputTokens, 0);
+  const totalCached = snapshot.usageHistory.reduce((sum, u) => sum + (u.cachedInputTokens ?? 0), 0);
+  if (totalInput <= 0) return 0;
+  return Math.max(0, totalCached / totalInput);
 }
 
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {
