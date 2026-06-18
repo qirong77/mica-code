@@ -1,0 +1,14 @@
+packages/mica-ui/conversation/Conversation.tsx
+  h_a456b67147438e 76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e7c84f892f544e8e06004f79f69ac480eb6aaa6a",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
