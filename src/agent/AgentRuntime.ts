@@ -1,4 +1,5 @@
 import mitt from 'mitt';
+import type { OpenAI } from 'openai';
 import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/providers/OpenAIClient.js';
 import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/core/Agent.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
@@ -125,6 +126,20 @@ export class AgentRuntime {
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
     };
+  }
+
+  preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string) {
+    if (!this.client) return;
+    const questionText = contentToText(question).trim();
+    if (!questionText) return;
+    const messages = [...(this.client.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[])];
+    messages.push({ role: 'user', content: questionText });
+    const answer = partialAnswer?.trim();
+    if (answer) {
+      messages.push({ role: 'assistant', content: answer });
+    }
+    this.client.messages = messages as typeof this.client.messages;
+    logRuntime('agent', 'turn:preserved_aborted', { messages: messages.length, hasPartialAnswer: Boolean(answer) }, 'warn');
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {

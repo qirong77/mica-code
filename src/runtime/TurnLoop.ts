@@ -81,6 +81,9 @@ export class TurnLoop {
     } catch (error) {
       if (error instanceof AgentAbortError) {
         runId = error.runId;
+        this.agent.preserveAbortedTurn(content, this.responseBuffer);
+        this.sessionController.saveCurrent();
+        logRuntime('runtime', 'turn:aborted_saved', { runId, chars: this.responseBuffer.length }, 'warn');
         return;
       }
       hasError = true;
