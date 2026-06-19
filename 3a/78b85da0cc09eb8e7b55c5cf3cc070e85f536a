@@ -1,0 +1,74 @@
+packages/mica-builtin-commands/provider.tsx
+  f8eb251ea34c107d 41
+  bbd5bc57553e5502 8-9,11-15,20-21,47-88,90-106,108-117
+  2a5833213fe27f3a 118
+  f820ea93812438cc 89,107
+packages/mica-builtin-commands/logs.tsx
+  2a5833213fe27f3a 17
+  bbd5bc57553e5502 6-7,16,18-31,35-41
+packages/mica-builtin-commands/effort.ts
+  bbd5bc57553e5502 7-8,10-14,19-20,22-23,28,40-73,75-80
+  f820ea93812438cc 34,74
+  2a5833213fe27f3a 81
+src/plugins/commands/index.ts
+  bbd5bc57553e5502 2,4,9,19,42,45,66-72,89-91,94-97,131-142,145-147,152-157,164-166,170-176,182-221,243-291,300-307,312-319,349-356,408-410,441-466,469-471,496-499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3a78b85da0cc09eb8e7b55c5cf3cc070e85f536a",
+  "prompts": {
+    "2a5833213fe27f3a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edf30-d5ed-7482-adcf-6ac87e5ab115",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 11581,
+      "overriden_lines": 61
+    },
+    "bbd5bc57553e5502": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ee006-5b69-7a70-9711-731ae1777511",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 448,
+      "total_deletions": 107,
+      "accepted_lines": 424,
+      "overriden_lines": 0
+    },
+    "f820ea93812438cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ee04e-2056-7eb0-bd7e-532d54306ea8",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "f8eb251ea34c107d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ee04f-bcab-7c43-a9b9-2da546c56042",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
