@@ -1,5 +1,4 @@
-import { registerMcpTools, unregisterMcpTools } from '../../packages/tools/index.js';
-import type { MicaTool } from '../../packages/tools/MicaTool.js';
+import { micaTools, type MicaTool } from '../mica-tools/index.js';
 import { connectToServer, connections, disconnectAll, markServerConnected, markServerFailed } from './client.js';
 import { loadMcpConfig, type McpServerConfig } from './config.js';
 import { fetchToolsForServer } from './tools.js';
@@ -21,7 +20,7 @@ export async function initMcp(): Promise<void> {
   const configs = await loadMcpConfig();
   const entries = Object.entries(configs);
   if (entries.length === 0) {
-    unregisterMcpTools();
+    micaTools.unregisterMcp();
     return;
   }
 
@@ -39,7 +38,7 @@ export async function initMcp(): Promise<void> {
     }
   }
 
-  registerMcpTools(allTools);
+  micaTools.registerMcp(allTools);
 }
 
 export async function reconnectMcpServer(name: string, config: McpServerConfig): Promise<string> {
@@ -60,7 +59,7 @@ export async function reconnectMcpServer(name: string, config: McpServerConfig):
         // Keep other connections untouched if refresh fails.
       }
     }
-    registerMcpTools(allTools);
+    micaTools.registerMcp(allTools);
     return `已重连 ${name}，注册 ${tools.length} 个工具`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -70,6 +69,18 @@ export async function reconnectMcpServer(name: string, config: McpServerConfig):
 }
 
 export async function shutdownMcp(): Promise<void> {
-  unregisterMcpTools();
+  micaTools.unregisterMcp();
   await disconnectAll();
 }
+
+export const micaMcp = {
+  init: initMcp,
+  reconnectServer: reconnectMcpServer,
+  shutdown: shutdownMcp,
+  loadConfig: loadMcpConfig,
+};
+
+export { mcpServersAtom } from './client.js';
+export { loadMcpConfig, MCP_CONFIG_PATH } from './config.js';
+export type { McpServerStatus } from './client.js';
+export type { McpServerConfig, McpHttpServerConfig, McpStdioServerConfig } from './config.js';

@@ -2,7 +2,7 @@ import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 
 import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
-import { EFFORT_OPTIONS, updateConfig } from '../config/index.js';
+import { micaConfig } from '../../packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { logRuntime } from '../logger.js';
 
@@ -19,7 +19,7 @@ export function registerEffortPlugin(agent: AgentRuntime) {
         id: 'select-effort',
         title: 'select effort',
         current: agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none',
-        options: EFFORT_OPTIONS.map((effort) => ({
+        options: micaConfig.effortOptions.map((effort) => ({
           name: effort,
           label: effort,
         })),
@@ -29,12 +29,12 @@ export function registerEffortPlugin(agent: AgentRuntime) {
             to: effort,
             provider: agent.config.provider.id,
           });
-          updateConfig((config) => ({
+          micaConfig.update((config) => ({
             ...config,
             effort:
               config.providers.find((item) => item.id === config.provider)?.supportsEffort === false
                 ? 'none'
-                : (effort as (typeof EFFORT_OPTIONS)[number]),
+                : (effort as (typeof micaConfig.effortOptions)[number]),
           }));
           agent.reloadConfig();
           syncModelDisplay(agent);

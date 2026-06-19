@@ -2,10 +2,10 @@ import React from 'react';
 import { Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
-import type { SelectItem } from '../../packages/mica-ui/primitives/index.js';
-import { themeColors } from '../../packages/mica-ui/theme.js';
-import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
+import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
+import type { SelectItem } from '../../packages/mica-ui/index.js';
+import { themeColors } from '../../packages/mica-ui/index.js';
+import { useScheduleState } from '../../packages/mica-ui/index.js';
 import { logRuntime } from '../logger.js';
 
 export type SelectOption = {

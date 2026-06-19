@@ -1,6 +1,6 @@
 // prompt 缓存策略对比实验
 // 核心结论：前缀稳定 = 缓存命中；前缀插入随机内容 = 缓存失效。
-// 运行：bun run packages/agent/examples/openai-cache-tests/index.ts
+// 运行：bun run packages/mica-agent/examples/openai-cache-tests/index.ts
 
 import dotenv from 'dotenv';
 import { randomUUID } from 'crypto';

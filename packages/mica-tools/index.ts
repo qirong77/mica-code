@@ -79,3 +79,15 @@ export function getToolDisplayText(name: string, input: Record<string, any>): st
     return `工具 ${name} onToolUseDisplayText 执行失败：\n${message}`;
   }
 }
+
+export const micaTools = {
+  registerMcp: registerMcpTools,
+  unregisterMcp: unregisterMcpTools,
+  getDefinitions: getToolDefinitions,
+  execute: executeTool,
+  getDisplayText: getToolDisplayText,
+};
+
+export { MicaTool } from './MicaTool.js';
+export type { ToolExecuteCallbacks } from './MicaTool.js';
+export type { Tool } from './types.js';

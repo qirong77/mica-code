@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints } from '../../packages/mica-ui/primitives/index.js';
-import { themeColors } from '../../packages/mica-ui/theme.js';
-import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
+import { Dialog, KeyHints } from '../../packages/mica-ui/index.js';
+import { themeColors } from '../../packages/mica-ui/index.js';
+import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { logRuntime } from '../logger.js';
 

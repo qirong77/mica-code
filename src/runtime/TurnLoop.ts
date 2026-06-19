@@ -1,5 +1,5 @@
 import { micaUI, parseImageRefs } from '../../packages/mica-ui/index.js';
-import type { AgentQueryContent } from '../../packages/agent/core/Agent.js';
+import type { AgentQueryContent } from '../../packages/mica-agent/index.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import { logRuntime } from '../logger.js';

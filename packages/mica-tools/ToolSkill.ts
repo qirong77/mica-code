@@ -1,9 +1,8 @@
 import { MicaTool, type ToolExecuteCallbacks } from './MicaTool';
-import { getLoadedSkills } from '../../src/skills/loadSkills';
-import type { Skill } from '../../src/skills/types';
+import { micaSkills, type Skill } from '../mica-skills/index.js';
 
 function findSkill(name: string): Skill | undefined {
-  return getLoadedSkills().find((skill) => skill.name === name || skill.name === name.replace(/^\//, ''));
+  return micaSkills.getLoaded().find((skill) => skill.name === name || skill.name === name.replace(/^\//, ''));
 }
 
 function substituteArgs(content: string, args: string | undefined, skill: Skill): string {
@@ -54,7 +53,7 @@ export class ToolSkill extends MicaTool {
 
     const skill = findSkill(skillName);
     if (!skill) {
-      const available = getLoadedSkills()
+      const available = micaSkills.getLoaded()
         .map((entry) => entry.name)
         .join(', ');
       return `未知 skill: ${skillName}\n可用的 skills: ${available || '无'}`;

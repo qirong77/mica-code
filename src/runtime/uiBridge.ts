@@ -1,5 +1,5 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { createErrorLogItem } from '../../packages/agent/ui/AgentTurnLogItems.js';
+import { createErrorLogItem } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime, AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import { clearRuntimeLogs, logRuntime } from '../logger.js';

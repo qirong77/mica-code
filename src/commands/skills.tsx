@@ -2,10 +2,10 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
-import { Markdown } from '../../packages/mica-ui/conversation/Markdown.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
-import { getLoadedSkills, reloadSkills } from '../skills/loadSkills.js';
+import { useScheduleState } from '../../packages/mica-ui/index.js';
+import { Markdown } from '../../packages/mica-ui/index.js';
+import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
+import { micaSkills } from '../../packages/mica-skills/index.js';
 import { logRuntime } from '../logger.js';
 
 type SkillsState =
@@ -21,7 +21,7 @@ export function registerSkillsPlugin() {
     name: 'skills',
     description: '列出已安装的 skills',
     action: () => {
-      const skills = reloadSkills();
+      const skills = micaSkills.reload();
       logRuntime('plugin.skills', 'opened', { skills: skills.length });
       const panelState = atom<SkillsState>({
         view: 'list',
@@ -35,7 +35,7 @@ export function registerSkillsPlugin() {
 
       function SkillsPanel() {
         const state = useScheduleState(panelState);
-        const currentSkills = getLoadedSkills();
+        const currentSkills = micaSkills.getLoaded();
 
         if (state.view === 'list') {
           const nameWidth = widthOrDefault(
@@ -125,7 +125,7 @@ export function registerSkillsPlugin() {
           id: 'skills-panel',
           component: SkillsPanel,
           onInput: (_input, key) => {
-            const currentSkills = getLoadedSkills();
+            const currentSkills = micaSkills.getLoaded();
             const state = panelState.get();
 
             if (key.escape) {

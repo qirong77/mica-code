@@ -1,8 +1,9 @@
 import { atom } from 'nanostores';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import defaultConfig from './default.json';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { dirname, resolve } from 'node:path';
+import defaultConfig from './default.json';
+
 export const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
 export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
 
@@ -31,10 +32,18 @@ export interface IMicaConfig {
 
 const configAtom = atom<IMicaConfig>(readConfig());
 
+export const micaConfig = {
+  path: CONFIG_PATH,
+  effortOptions: EFFORT_OPTIONS,
+  read: readConfig,
+  get: getConfig,
+  update: updateConfig,
+  loadProviderModels,
+  loadMissingProviderModels,
+};
+
 export function readConfig(): IMicaConfig {
-  if (!existsSync(CONFIG_PATH)) {
-    writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
-  }
+  ensureConfigFile();
   return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as IMicaConfig;
 }
 
@@ -45,6 +54,7 @@ export function getConfig() {
 export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);
+  ensureConfigDir();
   writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
   return next;
 }
@@ -105,6 +115,16 @@ export async function loadMissingProviderModels() {
   );
 }
 
+function ensureConfigFile() {
+  if (existsSync(CONFIG_PATH)) return;
+  ensureConfigDir();
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
+}
+
+function ensureConfigDir() {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+}
+
 function requireProvider(config: IMicaConfig, providerId: string): ProviderDefinition {
   const provider = config.providers.find((item) => item.id === providerId);
   if (!provider) {
@@ -139,9 +159,9 @@ function isModelListResponse(payload: unknown): payload is { data: unknown[] } {
 function isModelObject(item: unknown): item is { id: string } {
   return Boolean(
     item &&
-    typeof item === 'object' &&
-    'id' in item &&
-    typeof (item as { id?: unknown }).id === 'string' &&
-    (item as { id: string }).id.length > 0,
+      typeof item === 'object' &&
+      'id' in item &&
+      typeof (item as { id?: unknown }).id === 'string' &&
+      (item as { id: string }).id.length > 0,
   );
 }

@@ -53,7 +53,7 @@ bunx tsc --noEmit
 Prompt 测试：
 
 ```bash
-bun test packages/agent/prompt/index.test.ts
+bun test packages/mica-agent/prompt/index.test.ts
 ```
 
 ## 配置
@@ -74,7 +74,7 @@ src/config/default.json
 
 ```text
 .env
-packages/agent/.env
+packages/mica-agent/.env
 ```
 
 一个典型 provider 配置如下：
@@ -145,8 +145,8 @@ TerminalInput
   -> src/app/bootstrap.ts
   -> src/runtime/TurnLoop.ts
   -> src/agent/AgentRuntime.ts
-  -> packages/agent/providers/*
-  -> packages/tools/*
+  -> packages/mica-agent/providers/*
+  -> packages/mica-tools/*
   -> src/session/SessionController.ts
   -> packages/mica-ui/*
 ```
@@ -164,7 +164,7 @@ TerminalInput
 
 ## 核心设计边界
 
-- `packages/agent` 不依赖 UI、session、commands，只负责 provider adapter、prompt 和公共 agent 接口。
+- `packages/mica-agent` 不依赖 UI、session、commands，只负责 provider adapter、prompt 和公共 agent 接口。
 - `packages/mica-ui` 不依赖 agent 业务逻辑，只负责终端 UI 状态、组件和交互呈现。
 - `src/runtime` 是应用核心运行时，负责 turn 生命周期。
 - `src/commands` 是用户命令入口，不直接承载长期业务状态。
@@ -195,7 +195,7 @@ bunx tsc --noEmit
 如果改动涉及 prompt：
 
 ```bash
-bun test packages/agent/prompt/index.test.ts
+bun test packages/mica-agent/prompt/index.test.ts
 ```
 
 格式化：

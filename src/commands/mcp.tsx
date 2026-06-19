@@ -2,13 +2,11 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/primitives/index.js';
-import { themeColors } from '../../packages/mica-ui/theme.js';
+import { useScheduleState } from '../../packages/mica-ui/index.js';
+import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
+import { themeColors } from '../../packages/mica-ui/index.js';
 import { showMessage } from '../app/bootstrap.js';
-import { mcpServersAtom, type McpServerStatus } from '../mcp/client.js';
-import { loadMcpConfig } from '../mcp/config.js';
-import { reconnectMcpServer } from '../mcp/index.js';
+import { micaMcp, mcpServersAtom, type McpServerStatus } from '../../packages/mica-mcp/index.js';
 import { logRuntime } from '../logger.js';
 
 type McpState =
@@ -303,7 +301,7 @@ export function registerMcpPlugin() {
 
 async function reconnectServer(name: string) {
   logRuntime('plugin.mcp', 'reconnect:start', { server: name });
-  const config = await loadMcpConfig();
+  const config = await micaMcp.loadConfig();
   const server = config[name];
   if (!server) {
     logRuntime('plugin.mcp', 'reconnect:not_found', { server: name }, 'error');
@@ -311,7 +309,7 @@ async function reconnectServer(name: string) {
     return;
   }
   try {
-    const message = await reconnectMcpServer(name, server);
+    const message = await micaMcp.reconnectServer(name, server);
     showMessage(message, 4000);
     logRuntime('plugin.mcp', 'reconnect:done', { server: name, message });
   } catch (error) {

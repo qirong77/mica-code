@@ -1,5 +1,5 @@
 import { OpenAI } from 'openai';
-import { executeTool, getToolDefinitions } from '../../tools';
+import { micaTools } from '../../mica-tools/index.js';
 import {
   BaseAgent,
   type AgentQueryContent,
@@ -7,7 +7,7 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/types';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
 
 export type OpenAIClientOptions = {
@@ -107,7 +107,7 @@ export class OpenAIClient extends BaseAgent<
     });
   }
   private get openaiTools() {
-    const defs = getToolDefinitions();
+    const defs = micaTools.getDefinitions();
     return defs.map((t) => ({
       type: 'function' as const,
       function: {
@@ -223,7 +223,7 @@ export class OpenAIClient extends BaseAgent<
           this.onToolCall?.(tc.function.name, tc.function.arguments, tc.id);
           let result: string;
           try {
-            result = await executeTool(tc.function.name, JSON.parse(tc.function.arguments), {
+            result = await micaTools.execute(tc.function.name, JSON.parse(tc.function.arguments), {
               signal: options?.signal,
             });
           } catch (e) {

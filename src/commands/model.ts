@@ -1,7 +1,7 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
-import { getConfig, updateConfig } from '../config/index.js';
+import { micaConfig } from '../../packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { logRuntime } from '../logger.js';
 
@@ -20,7 +20,7 @@ export function registerModelPlugin(agent: AgentRuntime) {
 }
 
 async function showModelSelector(agent: AgentRuntime) {
-  const config = getConfig();
+  const config = micaConfig.get();
   const provider = config.providers.find((item) => item.id === config.provider);
   if (!provider) {
     logRuntime('plugin.model', 'provider:not_found', { provider: config.provider }, 'error');
@@ -40,7 +40,7 @@ async function showModelSelector(agent: AgentRuntime) {
     emptyMessage: 'no models available',
     onSelect: (model) => {
       logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: provider.id });
-      updateConfig((config) => ({ ...config, model }));
+      micaConfig.update((config) => ({ ...config, model }));
       agent.reloadConfig();
       syncModelDisplay(agent);
       showMessage(`Model: ${model}`);

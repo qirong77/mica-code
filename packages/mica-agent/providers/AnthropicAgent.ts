@@ -9,7 +9,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
-import { executeTool, getToolDefinitions } from '../../tools';
+import { micaTools } from '../../mica-tools/index.js';
 import {
   BaseAgent,
   type AgentQueryContent,
@@ -17,7 +17,7 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/types';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
 
 export type AnthropicAgentOptions = {
@@ -140,7 +140,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
   }
 
   private get anthropicTools(): Tool[] {
-    return getToolDefinitions().map((tool) => ({
+    return micaTools.getDefinitions().map((tool) => ({
       name: tool.name,
       description: tool.description,
       input_schema: tool.input_schema as Tool.InputSchema,
@@ -240,7 +240,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
         let result: string;
         let isError = false;
         try {
-          result = await executeTool(toolUse.name, toolUse.input ?? {}, {
+          result = await micaTools.execute(toolUse.name, toolUse.input ?? {}, {
             signal: options?.signal,
           });
         } catch (error) {

@@ -1,5 +1,5 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { MicaTool, type ToolExecuteCallbacks } from '../../packages/tools/MicaTool.js';
+import { MicaTool, type ToolExecuteCallbacks } from '../mica-tools/index.js';
 import { connectToServer, connections, type ConnectedMcpServer } from './client.js';
 
 type TextContent = { type: 'text'; text: string };

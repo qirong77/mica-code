@@ -1,5 +1,15 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["src", "packages/agent", "packages/tools", "packages/mica-ui", "packages/@anthropic/ink/src"],
+  "include": [
+    "src",
+    "packages/mica-agent",
+    "packages/mica-tools",
+    "packages/mica-ui",
+    "packages/mica-config",
+    "packages/mica-session",
+    "packages/mica-skills",
+    "packages/mica-mcp",
+    "packages/@anthropic/ink/src"
+  ],
   "exclude": ["**/dist", "**/node_modules", "packages/@anthropic/ink/examples"]
 }

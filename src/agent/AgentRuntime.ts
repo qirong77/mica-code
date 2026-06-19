@@ -1,10 +1,8 @@
 import mitt from 'mitt';
 import type { OpenAI } from 'openai';
-import { createSubAgent, OpenAIClient, type OpenAIClientOptions } from '../../packages/agent/providers/OpenAIClient.js';
-import type { AgentQueryContent, AgentSnapshot, IAgent, AgentUsageRecord } from '../../packages/agent/core/Agent.js';
-import type { MicaUiConversationMessage } from '../../packages/mica-ui/types.js';
-import type { EffortOption, ProviderDefinition } from '../config/index.js';
-import { getConfig } from '../config/index.js';
+import { createSubAgent, OpenAIClient, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '../../packages/mica-agent/index.js';
+import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js';
+import { micaConfig, type EffortOption, type ProviderDefinition } from '../../packages/mica-config/index.js';
 import { logRuntime } from '../logger.js';
 
 export type AgentRuntimeStatus =
@@ -271,7 +269,7 @@ export class AgentRuntime {
   }
 
   private readConfig(): AgentRuntimeConfig {
-    const config = getConfig();
+    const config = micaConfig.get();
     const provider = config.providers.find((item) => item.id === config.provider);
     if (!provider) {
       throw new Error(`Provider not found: ${config.provider || '(empty)'}`);

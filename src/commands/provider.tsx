@@ -3,7 +3,7 @@ import { Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
-import { CONFIG_PATH, getConfig, loadProviderModels, updateConfig } from '../config/index.js';
+import { micaConfig } from '../../packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { logRuntime } from '../logger.js';
 
@@ -12,14 +12,14 @@ export function registerProviderPlugin(agent: AgentRuntime) {
     name: 'provider',
     description: '切换 AI 服务提供商',
     action: () => {
-      const config = getConfig();
+      const config = micaConfig.get();
       logRuntime('plugin.provider', 'opened', {
         current: config.provider,
         providers: config.providers.length,
       });
       showSelectCommand({
         id: 'select-provider',
-        title: 'select provider' + ' (' + CONFIG_PATH + ')',
+        title: 'select provider' + ' (' + micaConfig.path + ')',
         current: config.provider,
         options: config.providers.map((provider) => ({
           name: provider.id,
@@ -31,12 +31,12 @@ export function registerProviderPlugin(agent: AgentRuntime) {
           ),
         })),
         onSelect: (providerId) => {
-          if (providerId === getConfig().provider) {
+          if (providerId === micaConfig.get().provider) {
             logRuntime('plugin.provider', 'selected_current', { provider: providerId });
             return;
           }
-          logRuntime('plugin.provider', 'selected', { from: getConfig().provider, to: providerId });
-          const next = updateConfig((config) => {
+          logRuntime('plugin.provider', 'selected', { from: micaConfig.get().provider, to: providerId });
+          const next = micaConfig.update((config) => {
             const provider = config.providers.find((item) => item.id === providerId);
             if (!provider) {
               logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
@@ -53,7 +53,7 @@ export function registerProviderPlugin(agent: AgentRuntime) {
           const provider = next.providers.find((item) => item.id === providerId);
           if (provider?.get_model_url && !provider.models?.length) {
             logRuntime('plugin.provider', 'models:load:start', { provider: providerId });
-            void loadProviderModels(providerId).then(() => {
+            void micaConfig.loadProviderModels(providerId).then(() => {
               agent.reloadConfig(false);
               syncModelDisplay(agent);
               logRuntime('plugin.provider', 'models:load:done', { provider: providerId });

@@ -2,8 +2,8 @@ import { micaUI } from '../../packages/mica-ui/index.js';
 import {
   createThinkingLogItem,
   createToolCallLogItem,
-} from '../../packages/agent/ui/AgentTurnLogItems.js';
-import { getToolDisplayText } from '../../packages/tools/index.js';
+} from '../../packages/mica-agent/index.js';
+import { micaTools } from '../../packages/mica-tools/index.js';
 import { logRuntime } from '../logger.js';
 
 type ActiveToolCall = { id: string; startTime: number; displayText: string };
@@ -99,7 +99,7 @@ export class ToolLogController {
 
   private getToolDisplayText(name: string, args: string) {
     try {
-      return getToolDisplayText(name, JSON.parse(args));
+      return micaTools.getDisplayText(name, JSON.parse(args));
     } catch {
       return `${name} ${args}`;
     }

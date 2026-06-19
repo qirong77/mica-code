@@ -1,24 +1,55 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
-import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-import { updateConfig } from '../config/index.js';
+import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
+import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js';
+import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import { micaConfig } from '../../packages/mica-config/index.js';
 import {
   createSessionId,
   SessionStore,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
+  type SessionStoreLike,
   type SessionSummary,
-} from './sessionStore.js';
+} from '../../packages/mica-session/index.js';
 
 export type ResumeSessionResult = { ok: true; session: PersistedSession } | { ok: false; message: string };
 
+export type SessionAgentAdapter = {
+  getSnapshot(): AgentRuntimeSnapshot;
+  loadSnapshot(snapshot: AgentRuntimeSnapshot): void;
+  reloadConfig(resetSession?: boolean): void;
+  toConversationMessages(): MicaUiConversationMessage[];
+};
+
+export type SessionConfigAdapter = {
+  apply(snapshot: PersistedRuntimeSnapshot): void;
+};
+
+export type SessionUiAdapter = {
+  restore(agent: SessionAgentAdapter, lastUsage: AgentUsageRecord | undefined): void;
+};
+
+export type SessionControllerOptions = {
+  agent: SessionAgentAdapter;
+  store?: SessionStoreLike;
+  config?: SessionConfigAdapter;
+  ui?: SessionUiAdapter;
+};
+
 export class SessionController {
   private currentSessionId = createSessionId();
+  private readonly agent: SessionAgentAdapter;
+  private readonly store: SessionStoreLike;
+  private readonly config: SessionConfigAdapter;
+  private readonly ui: SessionUiAdapter;
 
-  constructor(
-    private readonly agent: AgentRuntime,
-    private readonly store = new SessionStore(),
-  ) {}
+  constructor(agentOrOptions: SessionAgentAdapter | SessionControllerOptions, store?: SessionStoreLike) {
+    const options = isSessionControllerOptions(agentOrOptions) ? agentOrOptions : { agent: agentOrOptions, store };
+    this.agent = options.agent;
+    this.store = options.store ?? new SessionStore();
+    this.config = options.config ?? defaultSessionConfigAdapter;
+    this.ui = options.ui ?? defaultSessionUiAdapter;
+  }
 
   list(limit = 20): SessionSummary[] {
     return this.store.list(limit);
@@ -50,16 +81,22 @@ export class SessionController {
     const session = this.store.load(id);
     if (!session) return { ok: false, message: `Session not found: ${id}` };
 
-    applySessionConfig(session.snapshot);
+    this.config.apply(session.snapshot);
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot));
     this.currentSessionId = session.id;
-    this.restoreUiFromAgent(session.snapshot.lastUsage);
+    this.ui.restore(this.agent, session.snapshot.lastUsage);
     return { ok: true, session };
   }
+}
 
-  private restoreUiFromAgent(lastUsage: AgentUsageRecord | undefined): void {
-    micaUI.conversation.setMessages(this.agent.toConversationMessages());
+const defaultSessionConfigAdapter: SessionConfigAdapter = {
+  apply: applySessionConfig,
+};
+
+const defaultSessionUiAdapter: SessionUiAdapter = {
+  restore(agent, lastUsage) {
+    micaUI.conversation.setMessages(agent.toConversationMessages());
     micaUI.conversation.clearResponseText();
     micaUI.conversation.clearPendingInput();
     micaUI.panels.thinkingText.set('');
@@ -73,12 +110,16 @@ export class SessionController {
 
     if (lastUsage) {
       micaUI.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUI.panels.cachedTokenRate.set(readTotalCachedTokenRate(this.agent));
+      micaUI.panels.cachedTokenRate.set(readTotalCachedTokenRate(agent));
     } else {
       micaUI.panels.contextSize.set(0);
       micaUI.panels.cachedTokenRate.set(0);
     }
-  }
+  },
+};
+
+function isSessionControllerOptions(value: SessionAgentAdapter | SessionControllerOptions): value is SessionControllerOptions {
+  return Boolean(value && typeof value === 'object' && 'agent' in value);
 }
 
 function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSnapshot {
@@ -96,7 +137,7 @@ function readContextTokens(usage: AgentUsageRecord): number {
   return usage.totalTokens;
 }
 
-function readTotalCachedTokenRate(agent: AgentRuntime): number {
+function readTotalCachedTokenRate(agent: SessionAgentAdapter): number {
   const snapshot = agent.getSnapshot();
   const totalInput = snapshot.usageHistory.reduce((sum, u) => sum + u.inputTokens, 0);
   const totalCached = snapshot.usageHistory.reduce((sum, u) => sum + (u.cachedInputTokens ?? 0), 0);
@@ -116,7 +157,7 @@ function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntime
 }
 
 function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
-  return updateConfig((config) => {
+  micaConfig.update((config) => {
     const provider = config.providers.find((item) => item.id === snapshot.providerId);
     if (!provider) {
       throw new Error(`Provider not found: ${snapshot.providerId}`);
@@ -131,7 +172,7 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
   });
 }
 
-function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']>): string {
+function deriveTitle(messages: MicaUiConversationMessage[]): string {
   const firstUserMessage = messages.find((message) => message.role === 'user');
   const text = firstUserMessage ? contentToText(firstUserMessage.content) : '';
   const title = text.replace(/\s+/g, ' ').trim();
@@ -139,7 +180,7 @@ function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
 }
 
-function contentToText(content: ReturnType<AgentRuntime['toConversationMessages']>[number]['content']): string {
+function contentToText(content: MicaUiConversationMessage['content']): string {
   if (typeof content === 'string') return content;
   return content
     .filter((block) => block.type === 'text')

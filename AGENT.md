@@ -23,12 +23,12 @@
   - `session/`：会话保存、恢复与快照管理。
   - `skills/`：skills 加载。
   - `logger.ts`：运行时日志状态与格式化。
-- `packages/agent/`
+- `packages/mica-agent/`
   - `core/`：agent 公共类型和 base class。
   - `providers/`：OpenAI-compatible、Anthropic 等 provider 实现。
   - `prompt/`：系统 prompt 构建和 prompt 测试。
   - `ui/`：agent turn log UI item factory。
-- `packages/tools/`
+- `packages/mica-tools/`
   - 内置工具定义与执行框架，包括 read/write/edit/list/grep/run_shell/web/skill。
 - `packages/mica-ui/`
   - 基于 Ink 的终端 UI 组件、状态面板、输入框、对话视图。
@@ -41,7 +41,7 @@
 2. 创建 `AgentRuntime`，由它持有当前 provider client。
 3. 创建 `SessionController` 管理当前会话快照。
 4. `src/commands/index.ts` 注册快捷命令。
-5. `src/mcp/index.ts` 初始化 MCP，并把远端工具注册到 `packages/tools`。
+5. `packages/mica-mcp/index.ts` 初始化 MCP，并把远端工具注册到 `packages/mica-tools`。
 6. `src/app/bootstrap.ts` 创建 `TurnLoop`、`MessageQueue`、`ToolLogController`，并订阅 agent/UI 事件。
 7. 用户输入进入 `TurnLoop`，完成一轮 agent 调用、流式 UI 更新、工具日志、会话保存。
 
@@ -51,13 +51,13 @@
 - 默认配置来源：`src/config/default.json`。
 - 启动时会读取：
   - 当前工作目录下的 `.env`
-  - `packages/agent/.env`
+  - `packages/mica-agent/.env`
 - 修改配置时优先复用 `src/config/index.ts` 的 `getConfig`、`updateConfig`、`loadProviderModels` 等能力。
 - 会话数据当前保存到 `~/.mica/sessions`。
 
 ## 架构原则
 
-- `packages/agent` 不依赖 UI、session、commands；它只负责 provider adapter、prompt 和公共 agent 接口。
+- `packages/mica-agent` 不依赖 UI、session、commands；它只负责 provider adapter、prompt 和公共 agent 接口。
 - `packages/mica-ui` 不依赖 agent 业务逻辑；它只负责终端 UI 状态、组件和交互呈现。
 - `src/runtime` 是核心应用运行时，负责 turn 生命周期；新增 memory、todo、compact 等能力优先通过 runtime hook 接入。
 - `src/commands` 只负责用户命令入口和 UI 面板，不直接承载长期业务状态。
@@ -128,9 +128,9 @@
 
 ## 工具层约定
 
-- 内置工具统一在 `packages/tools/index.ts` 注册。
+- 内置工具统一在 `packages/mica-tools/index.ts` 注册。
 - 新增工具时优先复用 `MicaTool` 抽象与现有 display/validation 约定。
-- MCP 工具通过 `src/mcp/index.ts` 动态汇总并注册，不要绕开现有注册入口。
+- MCP 工具通过 `packages/mica-mcp/index.ts` 动态汇总并注册，不要绕开现有注册入口。
 - 能用专用工具完成的事情，不要退化成 shell 文件操作。
 
 ## UI 与交互约定
@@ -147,11 +147,11 @@
 - 构建：`bun scripts/build.mjs`
 - 格式化：`bunx prettier --write .`
 - 类型校验：`bunx tsc --noEmit`
-- Prompt 测试：`bun test packages/agent/prompt/index.test.ts`
+- Prompt 测试：`bun test packages/mica-agent/prompt/index.test.ts`
 
 ## 提交前验证
 
 - 修改完成后，至少执行与改动范围匹配的验证。
 - 本仓库的最低要求是执行 TypeScript 校验：`bunx tsc --noEmit`。
-- 如果改动涉及 prompt，运行 `bun test packages/agent/prompt/index.test.ts`。
+- 如果改动涉及 prompt，运行 `bun test packages/mica-agent/prompt/index.test.ts`。
 - 如果改动涉及构建、工具或 UI，尽量补充运行对应测试、示例或构建命令。

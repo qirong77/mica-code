@@ -6,11 +6,11 @@ import { resolve } from 'node:path';
 import { wrappedRender } from '@anthropic/ink';
 import { micaUI, App } from '../packages/mica-ui/index.js';
 import { AgentRuntime } from './agent/AgentRuntime.js';
-import { initMcp } from './mcp/index.js';
+import { micaMcp } from '../packages/mica-mcp/index.js';
 import { bootstrap, reportRuntimeError, syncModelDisplay } from './app/bootstrap.js';
 import { registerCommands } from './commands/index.js';
 import { SessionController } from './session/SessionController.js';
-import { loadMissingProviderModels } from './config/index.js';
+import { micaConfig } from '../packages/mica-config/index.js';
 import { AgentRegistry } from './agents/agentRegistry.js';
 
 process.on('uncaughtException', (error) => {
@@ -22,7 +22,7 @@ process.on('unhandledRejection', (error) => {
 });
 
 dotenv.config({ path: resolve(process.cwd(), '.env') });
-dotenv.config({ path: resolve(process.cwd(), 'packages/agent/.env') });
+dotenv.config({ path: resolve(process.cwd(), 'packages/mica-agent/.env') });
 
 const app = await wrappedRender(React.createElement(App), {
   exitOnCtrlC: false,
@@ -42,12 +42,12 @@ try {
     onConfigChanged: () => syncModelDisplay(agent),
   });
 
-  void loadMissingProviderModels().then(() => {
+  void micaConfig.loadMissingProviderModels().then(() => {
     agent.reloadConfig(false);
     syncModelDisplay(agent);
   });
   micaUI.terminalInput.setPlaceholder('Type a message to start a conversation');
-  void initMcp().catch((error) => {
+  void micaMcp.init().catch((error) => {
     reportRuntimeError(error, 'MCP 初始化失败');
   });
 } catch (error) {

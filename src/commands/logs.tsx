@@ -2,9 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { Box, ScrollBox, Text } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '../../packages/@anthropic/ink/src/components/ScrollBox.js';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/hooks/index.js';
-import { Dialog, KeyHints } from '../../packages/mica-ui/primitives/index.js';
-import { themeColors } from '../../packages/mica-ui/theme.js';
+import { useScheduleState } from '../../packages/mica-ui/index.js';
+import { Dialog, KeyHints } from '../../packages/mica-ui/index.js';
+import { themeColors } from '../../packages/mica-ui/index.js';
 import { formatLogEntry, logRuntime, runtimeLogs, type RuntimeLogEntry } from '../logger.js';
 
 const PANEL_ID = 'logs-panel';

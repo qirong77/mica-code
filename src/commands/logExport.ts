@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
+import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import { logRuntime } from '../logger.js';

@@ -89,9 +89,11 @@ async function runCommit(agent: AgentRuntime) {
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
     logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
-    setStatusMessage(`commit: 已提交 ${commitHash}，正在 push...`);
+    setStatusMessage(`commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`);
     const pushed = pushCurrentBranch();
-    setStatusMessage(pushed ? `commit: 已提交并推送 ${commitHash}` : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`);
+    setStatusMessage(
+      pushed ? `commit: 已提交并推送 ${commitHash}` : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
+    );
     clearStatusMessage();
     logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', { commit: commitHash });
   } catch (error) {

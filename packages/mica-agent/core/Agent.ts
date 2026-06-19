@@ -1,4 +1,4 @@
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/types.js';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/index.js';
 
 export type AgentQueryContent = string | MicaUiContentBlockParam[];
 

@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
-import type { AgentUsageRecord } from '../../packages/agent/core/Agent.js';
-import type { EffortOption } from '../config/index.js';
+import type { AgentUsageRecord } from '../mica-agent/index.js';
+import type { EffortOption } from '../mica-config/index.js';
 
 export type PersistedRuntimeSnapshot = {
   providerId: string;
@@ -32,9 +32,21 @@ export type SessionSummary = {
   model: string;
 };
 
-const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
+export type SessionStoreLike = {
+  list(limit?: number): SessionSummary[];
+  load(id: string): PersistedSession | null;
+  save(session: PersistedSession): void;
+};
 
-export class SessionStore {
+export const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
+
+export const micaSessionStore = {
+  dir: SESSION_DIR,
+  createId: createSessionId,
+  create: () => new SessionStore(),
+};
+
+export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {
     ensureSessionDir();
     return readdirSync(SESSION_DIR)

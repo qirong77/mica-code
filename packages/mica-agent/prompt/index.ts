@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getLoadedSkills } from '../../../src/skills/loadSkills';
-import type { Skill } from '../../../src/skills/types';
+import { micaSkills, type Skill } from '../../mica-skills/index.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
 type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';
@@ -31,7 +30,7 @@ class SystemPromptBuilder {
       this.append('project-instructions', projectInstructions);
     }
 
-    const skills = options.skills ?? getLoadedSkills();
+    const skills = options.skills ?? micaSkills.getLoaded();
     if (skills.length > 0) {
       const listing = skills
         .map((skill) =>
