@@ -92,7 +92,9 @@ async function runCommit(agent: AgentRuntime) {
     setStatusMessage(`commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`);
     const pushed = pushCurrentBranch();
     setStatusMessage(
-      pushed ? `commit: 已提交并推送 ${commitHash}` : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
+      pushed
+        ? `commit: 已提交并推送 ${commitHash}(${commitMessage})`
+        : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
     );
     clearStatusMessage();
     logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', { commit: commitHash });
