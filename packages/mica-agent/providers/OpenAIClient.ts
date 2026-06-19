@@ -41,6 +41,10 @@ function throwIfQueryStopped(options?: AgentQueryOptions): void {
   }
 }
 
+function hasVisibleTextSuffix(text: string): boolean {
+  return text.length > 0 && !text.endsWith('\n\n');
+}
+
 function getClient(options: OpenAIClientOptions) {
   return new OpenAI({
     apiKey: options.apiKey,
@@ -125,6 +129,8 @@ export class OpenAIClient extends BaseAgent<
       ...compactHistoricalToolResults(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
+    let hasStreamedText = false;
+    let streamTextEndsWithBlankLine = false;
 
     while (true) {
       throwIfQueryStopped(options);
@@ -149,6 +155,8 @@ export class OpenAIClient extends BaseAgent<
       );
 
       let content = '';
+      const contentSeparator: string = requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
+      let emittedContentSeparator = false;
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
 
       for await (const chunk of stream) {
@@ -166,9 +174,13 @@ export class OpenAIClient extends BaseAgent<
           const delta = choice?.delta;
           if (!delta) continue;
           if (typeof delta.content === 'string' && delta.content) {
-            content += delta.content;
+            const textDelta: string = contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
+            emittedContentSeparator = true;
+            content += textDelta;
+            hasStreamedText = true;
+            streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
             throwIfQueryStopped(options);
-            this.onText?.(delta.content);
+            this.onText?.(textDelta);
           }
           const reasoning = (delta as any).reasoning_content;
           if (typeof reasoning === 'string' && reasoning) {
@@ -216,6 +228,12 @@ export class OpenAIClient extends BaseAgent<
       };
 
       if (message.tool_calls && message.tool_calls.length > 0) {
+        if (hasVisibleTextSuffix(content)) {
+          content += '\n\n';
+          message.content = content;
+          streamTextEndsWithBlankLine = true;
+          this.onText?.('\n\n');
+        }
         messages.push(message);
         for (const tc of message.tool_calls) {
           throwIfQueryStopped(options);
