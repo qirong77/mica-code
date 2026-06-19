@@ -1,4 +1,4 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { registerClearPlugin } from './clear.js';
 import { registerProviderPlugin } from './provider.js';
@@ -14,7 +14,7 @@ import { registerLogExportPlugin } from './logExport.js';
 import { registerAgentsPlugin } from './agents.js';
 import { closeLogsPanel, registerLogsPlugin } from './logs.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export function registerCommands({
   agent,

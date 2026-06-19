@@ -25,7 +25,7 @@
 import React from 'react';
 import { wrappedRender, Box, Text } from '@anthropic/ink';
 import { micaUI } from '../index.js';
-import { micaAgent } from '../../mica-agent/index.js';
+import { micaAgent } from '@packages/mica-agent/index.js';
 
 const colors = micaUI.theme.colors;
 

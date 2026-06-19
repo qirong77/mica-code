@@ -1,7 +1,7 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 import { MessageQueue } from '../runtime/MessageQueue.js';
 import { ToolLogController } from '../runtime/ToolLogController.js';
 import { TurnLoop } from '../runtime/TurnLoop.js';

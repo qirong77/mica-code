@@ -1,4 +1,4 @@
-import { micaTools, type MicaTool } from '../mica-tools/index.js';
+import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
 import { connectToServer, connections, disconnectAll, markServerConnected, markServerFailed } from './client.js';
 import { loadMcpConfig, type McpServerConfig } from './config.js';
 import { fetchToolsForServer } from './tools.js';

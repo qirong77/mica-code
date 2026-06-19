@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { micaSkills, type Skill } from '../../mica-skills/index.js';
+import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
 type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';

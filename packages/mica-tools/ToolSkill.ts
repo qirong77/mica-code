@@ -1,5 +1,5 @@
 import { MicaTool, type ToolExecuteCallbacks } from './MicaTool';
-import { micaSkills, type Skill } from '../mica-skills/index.js';
+import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 
 function findSkill(name: string): Skill | undefined {
   return micaSkills.getLoaded().find((skill) => skill.name === name || skill.name === name.replace(/^\//, ''));

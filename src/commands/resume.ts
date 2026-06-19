@@ -1,9 +1,9 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { isAgentRunning, showMessage, syncModelDisplay } from '../app/bootstrap.js';
 import type { SessionController } from '../session/SessionController.js';
 import { showSelectCommand } from './selectCommand.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export function registerResumePlugin(agent: AgentRuntime, sessionController: SessionController) {
   return {

@@ -1,10 +1,10 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import { showMessage } from '../app/bootstrap.js';
-import { micaMcp, type McpServerStatus } from '../../packages/mica-mcp/index.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }

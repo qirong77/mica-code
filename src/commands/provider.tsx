@@ -1,11 +1,11 @@
 import React from 'react';
 import { Text } from '@anthropic/ink';
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
-import { micaConfig } from '../../packages/mica-config/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export function registerProviderPlugin(agent: AgentRuntime) {
   return {

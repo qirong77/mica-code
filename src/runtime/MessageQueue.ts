@@ -1,5 +1,5 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 import { showMessage } from './uiBridge.js';
 
 export class MessageQueue {

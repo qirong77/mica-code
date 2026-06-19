@@ -11,6 +11,9 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@packages/*": ["./packages/*"]
+    },
     "types": ["node", "bun"]
   }
 }

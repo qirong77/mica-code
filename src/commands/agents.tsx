@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { micaUI } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import { listRunningAgents, type RunningAgentRecord } from '../agents/agentRegistry.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export function registerAgentsPlugin() {
   return {

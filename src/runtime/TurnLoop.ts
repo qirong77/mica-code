@@ -1,8 +1,8 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentQueryContent } from '../../packages/mica-agent/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
+import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 import { MessageQueue } from './MessageQueue.js';
 import { ToolLogController } from './ToolLogController.js';
 import { reportRuntimeError } from './uiBridge.js';

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { micaConfig } from '../mica-config/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 
 export interface McpStdioServerConfig {
   command: string;

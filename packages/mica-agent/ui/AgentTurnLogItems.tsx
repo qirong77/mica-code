@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { micaUI, type MicaUiAgentTurnLogItem } from '../../mica-ui/index.js';
+import { micaUI, type MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
 
 const MAX_RUN_SHELL_LOG_LINES = 10;
 const TOOL_ICONS: Record<string, string> = {

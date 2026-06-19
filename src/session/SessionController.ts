@@ -1,15 +1,15 @@
-import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
-import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-import { micaConfig } from '../../packages/mica-config/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import {
   micaSession,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type SessionStoreLike,
   type SessionSummary,
-} from '../../packages/mica-session/index.js';
+} from '@packages/mica-session/index.js';
 
 export type ResumeSessionResult = { ok: true; session: PersistedSession } | { ok: false; message: string };
 

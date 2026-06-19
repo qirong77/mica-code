@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { micaUI } from '../../packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export function registerStatusPlugin(agent: AgentRuntime) {
   return {

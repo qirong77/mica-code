@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
-import type { AgentUsageRecord } from '../mica-agent/index.js';
-import type { EffortOption } from '../mica-config/index.js';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { EffortOption } from '@packages/mica-config/index.js';
 
 export type PersistedRuntimeSnapshot = {
   providerId: string;

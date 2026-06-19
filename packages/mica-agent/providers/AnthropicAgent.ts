@@ -9,7 +9,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
-import { micaTools } from '../../mica-tools/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import {
   BaseAgent,
   type AgentQueryContent,
@@ -17,7 +17,7 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '../../mica-ui/index.js';
+import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
 
 export type AnthropicAgentOptions = {

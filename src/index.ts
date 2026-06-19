@@ -4,13 +4,13 @@ import dotenv from 'dotenv';
 import React from 'react';
 import { resolve } from 'node:path';
 import { wrappedRender } from '@anthropic/ink';
-import { micaUI } from '../packages/mica-ui/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
 import { AgentRuntime } from './agent/AgentRuntime.js';
-import { micaMcp } from '../packages/mica-mcp/index.js';
+import { micaMcp } from '@packages/mica-mcp/index.js';
 import { bootstrap, reportRuntimeError, syncModelDisplay } from './app/bootstrap.js';
 import { registerCommands } from './commands/index.js';
 import { SessionController } from './session/SessionController.js';
-import { micaConfig } from '../packages/mica-config/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { AgentRegistry } from './agents/agentRegistry.js';
 
 process.on('uncaughtException', (error) => {

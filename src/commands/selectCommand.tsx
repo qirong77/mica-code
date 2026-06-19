@@ -1,9 +1,9 @@
 import React from 'react';
 import { Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
-import { micaUI } from '../../packages/mica-ui/index.js';
-import type { SelectItem } from '../../packages/mica-ui/index.js';
-import { logRuntime } from '../../packages/mica-logger/index.js';
+import { micaUI } from '@packages/mica-ui/index.js';
+import type { SelectItem } from '@packages/mica-ui/index.js';
+import { logRuntime } from '@packages/mica-logger/index.js';
 
 export type SelectOption = {
   name: string;
