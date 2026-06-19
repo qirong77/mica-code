@@ -19,6 +19,7 @@ import {
 } from '../core/Agent';
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
+import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
 
 export type AnthropicAgentOptions = {
   model: string;
@@ -86,6 +87,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
   effort: AnthropicAgentOptions['effort'];
   tools: boolean;
   systemPrompt: string | undefined;
+  readonly historyNormalizer = new AnthropicHistoryNormalizer();
 
   constructor(options: string | AnthropicAgentOptions) {
     super();

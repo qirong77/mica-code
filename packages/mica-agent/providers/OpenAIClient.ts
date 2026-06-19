@@ -9,6 +9,7 @@ import {
 } from '../core/Agent';
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
+import { OpenAIHistoryNormalizer } from './OpenAIHistoryNormalizer.js';
 
 export type OpenAIClientOptions = {
   model: string;
@@ -67,6 +68,7 @@ export class OpenAIClient extends BaseAgent<
   effort: string | undefined;
   tools: boolean;
   systemPrompt: string | undefined;
+  readonly historyNormalizer = new OpenAIHistoryNormalizer();
   constructor(options: string | OpenAIClientOptions) {
     super();
     this.tools = true;

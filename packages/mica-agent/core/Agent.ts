@@ -1,4 +1,5 @@
 import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
+import type { ConversationItem, ProviderHistoryNormalizer } from './Conversation.js';
 
 export type AgentQueryContent = string | MicaUiContentBlockParam[];
 
@@ -50,6 +51,8 @@ export interface IAgent<
   reset(): void;
   query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   toConversationMessages(): MicaUiConversationMessage[];
+  toConversationItems(): ConversationItem[];
+  loadConversationItems(items: ConversationItem[]): void;
   getSnapshot(): AgentSnapshot<TMessage, TUsage>;
   loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 }
@@ -74,7 +77,16 @@ export abstract class BaseAgent<
   abstract reset(): void;
   abstract query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   abstract toConversationMessages(): MicaUiConversationMessage[];
+  abstract get historyNormalizer(): ProviderHistoryNormalizer<TMessage>;
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
+
+  toConversationItems(): ConversationItem[] {
+    return this.historyNormalizer.normalize(this.messages);
+  }
+
+  loadConversationItems(items: ConversationItem[]): void {
+    this.messages = this.historyNormalizer.denormalize(items);
+  }
 
   getSnapshot(): AgentSnapshot<TMessage, TUsage> {
     return {
