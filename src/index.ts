@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import React from 'react';
 import { resolve } from 'node:path';
 import { wrappedRender } from '@anthropic/ink';
-import { micaUI, App } from '../packages/mica-ui/index.js';
+import { micaUI } from '../packages/mica-ui/index.js';
 import { AgentRuntime } from './agent/AgentRuntime.js';
 import { micaMcp } from '../packages/mica-mcp/index.js';
 import { bootstrap, reportRuntimeError, syncModelDisplay } from './app/bootstrap.js';
@@ -24,7 +24,7 @@ process.on('unhandledRejection', (error) => {
 dotenv.config({ path: resolve(process.cwd(), '.env') });
 dotenv.config({ path: resolve(process.cwd(), 'packages/mica-agent/.env') });
 
-const app = await wrappedRender(React.createElement(App), {
+const app = await wrappedRender(React.createElement(micaUI.App), {
   exitOnCtrlC: false,
 });
 let agentRegistry: AgentRegistry | null = null;

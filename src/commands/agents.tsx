@@ -1,8 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints } from '../../packages/mica-ui/index.js';
-import { themeColors } from '../../packages/mica-ui/index.js';
 import { listRunningAgents, type RunningAgentRecord } from '../agents/agentRegistry.js';
 import { logRuntime } from '../logger.js';
 
@@ -30,25 +28,25 @@ function showAgentsPanel(agents: RunningAgentRecord[]) {
 
   function AgentsPanel() {
     return (
-      <Dialog title="agents" footer={<KeyHints hints={['esc exit', 'type to close']} />}>
+      <micaUI.Dialog title="agents" footer={<micaUI.KeyHints hints={['esc exit', 'type to close']} />}>
         <Box flexDirection="column">
           {agents.length === 0 ? (
-            <Text color={themeColors.dim}>No running agents</Text>
+            <Text color={micaUI.theme.colors.dim}>No running agents</Text>
           ) : (
             agents.map((agent) => (
               <Box key={agent.id} flexDirection="column" paddingBottom={1}>
-                <Text color={agent.pid === process.pid ? themeColors.accent : undefined}>
+                <Text color={agent.pid === process.pid ? micaUI.theme.colors.accent : undefined}>
                   {agent.pid === process.pid ? '● ' : '○ '}
                   {agent.cwd}
                 </Text>
-                <Text color={themeColors.dim}>
+                <Text color={micaUI.theme.colors.dim}>
                   pid {agent.pid} · {agent.providerName}/{agent.model} · {agent.status} · updated {formatRelativeTime(agent.updatedAt)}
                 </Text>
               </Box>
             ))
           )}
         </Box>
-      </Dialog>
+      </micaUI.Dialog>
     );
   }
 

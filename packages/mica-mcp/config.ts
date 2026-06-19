@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { CONFIG_PATH as MICA_CONFIG_PATH } from '../mica-config/index.js';
+import { micaConfig } from '../mica-config/index.js';
 
 export interface McpStdioServerConfig {
   command: string;
@@ -21,7 +21,7 @@ type McpConfig = {
   mcpServers?: Record<string, McpServerConfig>;
 };
 
-export const MCP_CONFIG_PATH = MICA_CONFIG_PATH;
+export const MCP_CONFIG_PATH = micaConfig.path;
 
 export async function loadMcpConfig(): Promise<Record<string, McpServerConfig>> {
   try {

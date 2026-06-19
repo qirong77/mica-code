@@ -5,5 +5,4 @@ export const micaSkills = {
   reload: reloadSkills,
 };
 
-export { getLoadedSkills, reloadSkills } from './loadSkills.js';
 export type { Skill } from './types.js';

@@ -1,6 +1,6 @@
 import mitt from 'mitt';
 import type { OpenAI } from 'openai';
-import { createSubAgent, OpenAIClient, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '../../packages/mica-agent/index.js';
+import { micaAgent, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '../../packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js';
 import { micaConfig, type EffortOption, type ProviderDefinition } from '../../packages/mica-config/index.js';
 import { logRuntime } from '../logger.js';
@@ -79,7 +79,7 @@ export class AgentRuntime {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       throw new Error(message);
     }
-    return createSubAgent({
+    return micaAgent.createSubAgent({
       ...this.clientOptions(),
       ...options,
       effort: 'none',
@@ -224,7 +224,7 @@ export class AgentRuntime {
       logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
       return;
     }
-    this.client = new OpenAIClient(this.clientOptions());
+    this.client = new micaAgent.OpenAIClient(this.clientOptions());
     logRuntime('agent', 'client:created', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,

@@ -295,7 +295,7 @@ class Cursor {
     const { line, column } = this.getPosition();
     if (line === 0) return this;
     const prevLine = this.measuredText.getWrappedText()[line - 1];
-    if (!prevLine) return this;
+    if (prevLine === undefined) return this;
     const prevWidth = stringWidth(prevLine);
     return new Cursor(
       this.measuredText,
@@ -307,7 +307,7 @@ class Cursor {
     const { line, column } = this.getPosition();
     if (line >= this.measuredText.lineCount - 1) return this;
     const nextLine = this.measuredText.getWrappedText()[line + 1];
-    if (!nextLine) return this;
+    if (nextLine === undefined) return this;
     const nextWidth = stringWidth(nextLine);
     return new Cursor(
       this.measuredText,

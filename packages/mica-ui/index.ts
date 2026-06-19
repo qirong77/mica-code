@@ -1,14 +1,50 @@
-import { themeColors } from './theme.js';
+import { themeColors, C } from './theme.js';
 import * as conv from './conversation/state.js';
 import * as input from './input/state.js';
 import * as dropdown from './bottom/dropdown/state.js';
 import * as panels from './panels/state.js';
 import { pushLog, clearLog, setOnAbortAgent, abortAgent } from './panels/state.js';
-import { MessageBarAPI } from './panels/MessageBar.js';
+import { MessageBar, MessageBarAPI } from './panels/MessageBar.js';
 import { DropDownUI } from './bottom/dropdown/index.js';
 import { TerminalInputUI } from './input/TerminalInput.js';
+import { App } from './app/App.js';
+import { Conversation, ConversationUI } from './conversation/Conversation.js';
+import { Markdown } from './conversation/Markdown.js';
+import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
+import { LogView } from './panels/LogView.js';
+import { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
+import { PluginPanel } from './bottom/PluginPanel.js';
+import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
+import { useScheduleState } from './hooks/index.js';
+import { useLogViewHeight } from './hooks/useLogViewHeight.js';
+import { Dialog, KeyHints, SelectList, Spin, useSpinner } from './primitives/index.js';
+import { parseImageRefs } from './utils/imagePaste.js';
 
 export const micaUI = {
+  App,
+  Conversation,
+  ConversationUI,
+  Markdown,
+  TerminalInputUI,
+  WorkingStatus,
+  WorkingStatusUI,
+  LogView,
+  AgentTurnLog,
+  AgentTurnLogUI,
+  MessageBar,
+  PluginPanel,
+  BottomSurface,
+  BottomSurfaceUI,
+  DropDownUI,
+  useScheduleState,
+  useLogViewHeight,
+  Dialog,
+  KeyHints,
+  SelectList,
+  Spin,
+  useSpinner,
+  parseImageRefs,
+  C,
   conversation: conv,
   terminalInput: {
     ...input,
@@ -51,24 +87,7 @@ export const micaUI = {
   theme: { colors: themeColors },
 };
 
-export { App } from './app/App.js';
-export { Conversation, ConversationUI } from './conversation/Conversation.js';
-export { Markdown } from './conversation/Markdown.js';
-export { TerminalInputUI } from './input/TerminalInput.js';
-export { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
-export { LogView } from './panels/LogView.js';
-export { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
-export { MessageBar, MessageBarAPI } from './panels/MessageBar.js';
-export { PluginPanel } from './bottom/PluginPanel.js';
-export { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
-export { DropDownUI } from './bottom/dropdown/index.js';
-export { useScheduleState } from './hooks/index.js';
-export { useLogViewHeight } from './hooks/useLogViewHeight.js';
-export { Dialog, KeyHints, SelectList, Spin, useSpinner } from './primitives/index.js';
 export type { SelectItem } from './primitives/index.js';
-export { parseImageRefs } from './utils/imagePaste.js';
-export { themeColors, C } from './theme.js';
-
 export type {
   MicaUiWorkingStatus,
   MicaUiLogEntry,

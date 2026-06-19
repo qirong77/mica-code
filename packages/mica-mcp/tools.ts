@@ -1,11 +1,11 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { MicaTool, type ToolExecuteCallbacks } from '../mica-tools/index.js';
+import { micaTools, type ToolExecuteCallbacks } from '../mica-tools/index.js';
 import { connectToServer, connections, type ConnectedMcpServer } from './client.js';
 
 type TextContent = { type: 'text'; text: string };
 type ContentItem = TextContent | { type: 'image' | 'audio' | 'resource' | 'resource_link' };
 
-class McpProxyTool extends MicaTool {
+class McpProxyTool extends micaTools.MicaTool {
   constructor(
     name: string,
     description: string,
@@ -32,7 +32,7 @@ class McpProxyTool extends MicaTool {
   }
 }
 
-export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<MicaTool[]> {
+export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<InstanceType<typeof micaTools.MicaTool>[]> {
   const result = await server.client.request({ method: 'tools/list' }, ListToolsResultSchema, { timeout: 15_000 });
 
   return result.tools.map(

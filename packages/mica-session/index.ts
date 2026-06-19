@@ -1,9 +1,5 @@
-import { createSessionId, SessionStore } from './sessionStore.js';
+import { micaSessionStore } from './sessionStore.js';
 
-export const micaSession = {
-  createStore: () => new SessionStore(),
-  createId: createSessionId,
-};
+export const micaSession = micaSessionStore;
 
-export { createSessionId, SessionStore, SESSION_DIR } from './sessionStore.js';
 export type { PersistedRuntimeSnapshot, PersistedSession, SessionStoreLike, SessionSummary } from './sessionStore.js';

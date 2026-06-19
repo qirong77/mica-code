@@ -40,12 +40,6 @@ export type SessionStoreLike = {
 
 export const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
 
-export const micaSessionStore = {
-  dir: SESSION_DIR,
-  createId: createSessionId,
-  create: () => new SessionStore(),
-};
-
 export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {
     ensureSessionDir();
@@ -90,6 +84,13 @@ export class SessionStore implements SessionStoreLike {
   }
 }
 
+export const micaSessionStore = {
+  dir: SESSION_DIR,
+  createStore: createSessionStore,
+  createId: createSessionId,
+  SessionStore,
+};
+
 export function createSessionId(date = new Date()): string {
   const stamp = date
     .toISOString()
@@ -97,6 +98,10 @@ export function createSessionId(date = new Date()): string {
     .replace(/\.\d{3}Z$/, 'Z');
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${suffix}`;
+}
+
+function createSessionStore(): SessionStore {
+  return new SessionStore();
 }
 
 function ensureSessionDir() {

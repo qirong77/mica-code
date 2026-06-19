@@ -2,11 +2,8 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
-import { themeColors } from '../../packages/mica-ui/index.js';
 import { showMessage } from '../app/bootstrap.js';
-import { micaMcp, mcpServersAtom, type McpServerStatus } from '../../packages/mica-mcp/index.js';
+import { micaMcp, type McpServerStatus } from '../../packages/mica-mcp/index.js';
 import { logRuntime } from '../logger.js';
 
 type McpState =
@@ -21,9 +18,9 @@ const STATUS_ICON: Record<McpServerStatus['status'], string> = {
 };
 
 function statusColor(status: McpServerStatus['status']) {
-  if (status === 'connected') return themeColors.success;
-  if (status === 'failed') return themeColors.error;
-  return themeColors.primary;
+  if (status === 'connected') return micaUI.theme.colors.success;
+  if (status === 'failed') return micaUI.theme.colors.error;
+  return micaUI.theme.colors.primary;
 }
 
 function typeColor(type: string) {
@@ -57,7 +54,7 @@ export function registerMcpPlugin() {
         return;
       }
 
-      logRuntime('plugin.mcp', 'opened', { servers: mcpServersAtom.get().length });
+      logRuntime('plugin.mcp', 'opened', { servers: micaMcp.servers.get().length });
       const panelState = atom<McpState>({ view: 'list', selectedIdx: 0 });
 
       function hide() {
@@ -66,8 +63,8 @@ export function registerMcpPlugin() {
       }
 
       function McpPanel() {
-        const state = useScheduleState(panelState);
-        const servers = useScheduleState(mcpServersAtom);
+        const state = micaUI.useScheduleState(panelState);
+        const servers = micaUI.useScheduleState(micaMcp.servers);
 
         if (state.view === 'list') {
           const nameWidth = widthOrDefault(
@@ -76,11 +73,11 @@ export function registerMcpPlugin() {
           );
 
           return (
-            <Dialog
+            <micaUI.Dialog
               title={`mcp (${servers.length})`}
-              footer={<KeyHints hints={['↑↓ navigate', '↵ tools', 'esc close']} />}
+              footer={<micaUI.KeyHints hints={['↑↓ navigate', '↵ tools', 'esc close']} />}
             >
-              <SelectList
+              <micaUI.SelectList
                 items={servers.map((server) => ({ key: server.name, label: server.name }))}
                 selectedIdx={state.selectedIdx}
                 empty={<Text dimColor>no mcp servers configured</Text>}
@@ -97,27 +94,27 @@ export function registerMcpPlugin() {
                       </Box>
                       <Text dimColor>{server.url}</Text>
                       {server.status === 'connected' ? (
-                        <Text color={themeColors.success}>{`  ${server.toolCount} tools`}</Text>
+                        <Text color={micaUI.theme.colors.success}>{`  ${server.toolCount} tools`}</Text>
                       ) : null}
                       {server.status === 'failed' && server.error ? (
-                        <Text color={themeColors.error}>{`  ${server.error.slice(0, 40)}`}</Text>
+                        <Text color={micaUI.theme.colors.error}>{`  ${server.error.slice(0, 40)}`}</Text>
                       ) : null}
                     </Box>
                   );
                 }}
               />
-            </Dialog>
+            </micaUI.Dialog>
           );
         }
 
         if (state.view === 'tools') {
           const server = servers[state.serverIdx];
           return (
-            <Dialog
+            <micaUI.Dialog
               title={`${server?.name ?? 'mcp'} tools`}
-              footer={<KeyHints hints={['↑↓ navigate', '↵ detail', 'esc back']} />}
+              footer={<micaUI.KeyHints hints={['↑↓ navigate', '↵ detail', 'esc back']} />}
             >
-              <SelectList
+              <micaUI.SelectList
                 items={(server?.tools ?? []).map((tool) => ({
                   key: tool.name,
                   label: tool.name,
@@ -137,7 +134,7 @@ export function registerMcpPlugin() {
                   );
                 }}
               />
-            </Dialog>
+            </micaUI.Dialog>
           );
         }
 
@@ -152,7 +149,7 @@ export function registerMcpPlugin() {
         const required = schema.required ?? [];
 
         return (
-          <Dialog title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`} footer={<KeyHints hints={['esc back']} />}>
+          <micaUI.Dialog title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`} footer={<micaUI.KeyHints hints={['esc back']} />}>
             <Box flexDirection="column">
               {tool?.description ? (
                 <Box paddingBottom={1}>
@@ -169,7 +166,7 @@ export function registerMcpPlugin() {
                   {Object.entries(properties).map(([name, prop]) => (
                     <Box key={name} flexDirection="row">
                       <Box width={4}>
-                        <Text color={required.includes(name) ? themeColors.error : themeColors.dim}>
+                        <Text color={required.includes(name) ? micaUI.theme.colors.error : micaUI.theme.colors.dim}>
                           {required.includes(name) ? '*' : ' '}
                         </Text>
                       </Box>
@@ -190,7 +187,7 @@ export function registerMcpPlugin() {
                 </Box>
               ) : null}
             </Box>
-          </Dialog>
+          </micaUI.Dialog>
         );
       }
 
@@ -200,7 +197,7 @@ export function registerMcpPlugin() {
           component: McpPanel,
           onInput: (_input, key) => {
             const state = panelState.get();
-            const servers = mcpServersAtom.get();
+            const servers = micaMcp.servers.get();
 
             if (key.escape) {
               if (state.view === 'detail') {

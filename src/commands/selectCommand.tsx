@@ -2,10 +2,7 @@ import React from 'react';
 import { Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
 import type { SelectItem } from '../../packages/mica-ui/index.js';
-import { themeColors } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/index.js';
 import { logRuntime } from '../logger.js';
 
 export type SelectOption = {
@@ -52,22 +49,22 @@ export function showSelectCommand(config: SelectCommandConfig) {
   }
 
   function SelectorPanel() {
-    const currentIdx = useScheduleState(selectedIdx);
+    const currentIdx = micaUI.useScheduleState(selectedIdx);
     const items: SelectItem[] = config.options.map((option) => ({
       key: option.name,
       label: option.label,
-      suffix: option.name === config.current ? <Text color={themeColors.success}> (active)</Text> : undefined,
+      suffix: option.name === config.current ? <Text color={micaUI.theme.colors.success}> (active)</Text> : undefined,
     }));
 
     return (
-      <Dialog title={config.title} footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
-        <SelectList
+      <micaUI.Dialog title={config.title} footer={<micaUI.KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
+        <micaUI.SelectList
           items={items}
           selectedIdx={currentIdx}
           empty={<Text dimColor>{config.emptyMessage ?? 'no options'}</Text>}
           itemGap={1}
         />
-      </Dialog>
+      </micaUI.Dialog>
     );
   }
 

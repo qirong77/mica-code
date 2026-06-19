@@ -24,8 +24,8 @@
 
 import React from 'react';
 import { wrappedRender, Box, Text } from '@anthropic/ink';
-import { micaUI, App } from '../index.js';
-import { createThinkingLogItem, createToolCallLogItem } from '../../mica-agent/index.js';
+import { micaUI } from '../index.js';
+import { micaAgent } from '../../mica-agent/index.js';
 
 const colors = micaUI.theme.colors;
 
@@ -84,7 +84,7 @@ function resetDemo() {
 function addTool(name: string, displayText: string, durationMs: number, output = '') {
   const id = `tool-${++toolId}`;
   micaUI.panels.appendAgentTurnLogItem(
-    createToolCallLogItem({
+    micaAgent.createToolCallLogItem({
       id,
       toolName: name,
       displayText,
@@ -95,7 +95,7 @@ function addTool(name: string, displayText: string, durationMs: number, output =
 }
 
 function addThinking(text: string) {
-  micaUI.panels.appendAgentTurnLogItem(createThinkingLogItem(`thinking-${Date.now()}-${Math.random()}`, text));
+  micaUI.panels.appendAgentTurnLogItem(micaAgent.createThinkingLogItem(`thinking-${Date.now()}-${Math.random()}`, text));
 }
 
 async function showPluginPanel(durationMs = 2500) {
@@ -232,7 +232,7 @@ micaUI.terminalInput.onSubmit(async (text) => {
   if (!trimmed) return;
 
   micaUI.panels.status.thinking();
-  micaUI.panels.setAgentTurnLogItems([createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`)]);
+  micaUI.panels.setAgentTurnLogItems([micaAgent.createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`)]);
   micaUI.conversation.appendUserMessage(trimmed);
   micaUI.conversation.setResponseText('');
   await sleep(500);
@@ -252,5 +252,5 @@ setTimeout(() => {
   startDemo();
 }, 300);
 
-const instance = await wrappedRender(<App />);
+const instance = await wrappedRender(<micaUI.App />);
 await instance.waitUntilExit();

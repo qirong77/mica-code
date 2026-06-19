@@ -4,8 +4,7 @@ import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js'
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { micaConfig } from '../../packages/mica-config/index.js';
 import {
-  createSessionId,
-  SessionStore,
+  micaSession,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type SessionStoreLike,
@@ -37,7 +36,7 @@ export type SessionControllerOptions = {
 };
 
 export class SessionController {
-  private currentSessionId = createSessionId();
+  private currentSessionId = micaSession.createId();
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
   private readonly config: SessionConfigAdapter;
@@ -46,7 +45,7 @@ export class SessionController {
   constructor(agentOrOptions: SessionAgentAdapter | SessionControllerOptions, store?: SessionStoreLike) {
     const options = isSessionControllerOptions(agentOrOptions) ? agentOrOptions : { agent: agentOrOptions, store };
     this.agent = options.agent;
-    this.store = options.store ?? new SessionStore();
+    this.store = options.store ?? micaSession.createStore();
     this.config = options.config ?? defaultSessionConfigAdapter;
     this.ui = options.ui ?? defaultSessionUiAdapter;
   }
@@ -56,7 +55,7 @@ export class SessionController {
   }
 
   startNewSession(): void {
-    this.currentSessionId = createSessionId();
+    this.currentSessionId = micaSession.createId();
   }
 
   saveCurrent(): void {

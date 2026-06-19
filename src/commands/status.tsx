@@ -1,8 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints } from '../../packages/mica-ui/index.js';
-import { themeColors } from '../../packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { logRuntime } from '../logger.js';
@@ -56,15 +54,15 @@ function showStatusPanel(text: string) {
 
   function StatusPanel() {
     return (
-      <Dialog title="status" footer={<KeyHints hints={['esc exit', 'type to close']} />}>
+      <micaUI.Dialog title="status" footer={<micaUI.KeyHints hints={['esc exit', 'type to close']} />}>
         <Box flexDirection="column">
           {text.split('\n').map((line, index) => (
-            <Text key={`${index}:${line}`} color={themeColors.dim}>
+            <Text key={`${index}:${line}`} color={micaUI.theme.colors.dim}>
               {line}
             </Text>
           ))}
         </Box>
-      </Dialog>
+      </micaUI.Dialog>
     );
   }
 

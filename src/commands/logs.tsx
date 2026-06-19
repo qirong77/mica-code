@@ -2,9 +2,6 @@ import React, { useEffect, useRef } from 'react';
 import { Box, ScrollBox, Text } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '../../packages/@anthropic/ink/src/components/ScrollBox.js';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints } from '../../packages/mica-ui/index.js';
-import { themeColors } from '../../packages/mica-ui/index.js';
 import { formatLogEntry, logRuntime, runtimeLogs, type RuntimeLogEntry } from '../logger.js';
 
 const PANEL_ID = 'logs-panel';
@@ -28,7 +25,7 @@ function showLogsPanel() {
   previousPlaceholder ??= micaUI.terminalInput.placeholder.get();
 
   function LogsPanel() {
-    const logs = useScheduleState(runtimeLogs);
+    const logs = micaUI.useScheduleState(runtimeLogs);
     const scrollRef = useRef<ScrollBoxHandle | null>(null);
 
     useEffect(() => {
@@ -43,7 +40,7 @@ function showLogsPanel() {
     }, [logs.length]);
 
     return (
-      <Dialog title={`logs (${logs.length})`} footer={<KeyHints hints={['↑↓ scroll', 'esc close']} />}>
+      <micaUI.Dialog title={`logs (${logs.length})`} footer={<micaUI.KeyHints hints={['↑↓ scroll', 'esc close']} />}>
         <ScrollBox ref={scrollRef} height={18} flexDirection="column">
           {logs.length === 0 ? (
             <Text dimColor>no logs</Text>
@@ -57,7 +54,7 @@ function showLogsPanel() {
             </Box>
           )}
         </ScrollBox>
-      </Dialog>
+      </micaUI.Dialog>
     );
   }
 
@@ -106,8 +103,8 @@ function restorePlaceholder() {
 }
 
 function getLogColor(entry: RuntimeLogEntry) {
-  if (entry.level === 'error') return themeColors.error;
-  if (entry.level === 'warn') return themeColors.warning;
-  if (entry.level === 'debug') return themeColors.dim;
+  if (entry.level === 'error') return micaUI.theme.colors.error;
+  if (entry.level === 'warn') return micaUI.theme.colors.warning;
+  if (entry.level === 'debug') return micaUI.theme.colors.dim;
   return undefined;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { themeColors, useSpinner, type MicaUiAgentTurnLogItem } from '../../mica-ui/index.js';
+import { micaUI, type MicaUiAgentTurnLogItem } from '../../mica-ui/index.js';
 
 const MAX_RUN_SHELL_LOG_LINES = 10;
 const TOOL_ICONS: Record<string, string> = {
@@ -46,7 +46,7 @@ export function createToolCallLogItem({
   elapsedMs?: number;
 }): MicaUiAgentTurnLogItem {
   function ToolCallLogItem() {
-    const spinner = useSpinner();
+    const spinner = micaUI.useSpinner();
     const now = useNow();
     const outputLines = toolName === 'run_shell' && output ? output.replace(/\n$/, '').split('\n') : [];
     const capped =
@@ -100,12 +100,12 @@ export function createErrorLogItem({
     return (
       <Box flexDirection="column">
         <Box flexDirection="row">
-          <Text color={themeColors.error}> ✗ </Text>
-          <Text color={themeColors.error} bold>
+          <Text color={micaUI.theme.colors.error}> ✗ </Text>
+          <Text color={micaUI.theme.colors.error} bold>
             {title}
           </Text>
         </Box>
-        <Text color={themeColors.error} wrap="wrap">
+        <Text color={micaUI.theme.colors.error} wrap="wrap">
           {' '}
           {message}
         </Text>

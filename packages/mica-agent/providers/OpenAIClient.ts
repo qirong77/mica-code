@@ -299,6 +299,10 @@ export class OpenAIClient extends BaseAgent<
   }
 }
 
+export function createOpenAIClient(options: OpenAIClientOptions): OpenAIClient {
+  return new OpenAIClient(options);
+}
+
 export function createSubAgent(options: OpenAIClientOptions): OpenAIClient {
   return new OpenAIClient({
     ...options,

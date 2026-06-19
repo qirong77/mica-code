@@ -2,9 +2,6 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { useScheduleState } from '../../packages/mica-ui/index.js';
-import { Markdown } from '../../packages/mica-ui/index.js';
-import { Dialog, KeyHints, SelectList } from '../../packages/mica-ui/index.js';
 import { micaSkills } from '../../packages/mica-skills/index.js';
 import { logRuntime } from '../logger.js';
 
@@ -34,7 +31,7 @@ export function registerSkillsPlugin() {
       }
 
       function SkillsPanel() {
-        const state = useScheduleState(panelState);
+        const state = micaUI.useScheduleState(panelState);
         const currentSkills = micaSkills.getLoaded();
 
         if (state.view === 'list') {
@@ -48,11 +45,11 @@ export function registerSkillsPlugin() {
           );
 
           return (
-            <Dialog
+            <micaUI.Dialog
               title={`skills (${currentSkills.length})`}
-              footer={<KeyHints hints={['↑↓ navigate', '↵ detail', 'esc close']} />}
+              footer={<micaUI.KeyHints hints={['↑↓ navigate', '↵ detail', 'esc close']} />}
             >
-              <SelectList
+              <micaUI.SelectList
                 items={currentSkills.map((skill) => ({
                   key: skill.name,
                   label: skill.name,
@@ -82,7 +79,7 @@ export function registerSkillsPlugin() {
                   );
                 }}
               />
-            </Dialog>
+            </micaUI.Dialog>
           );
         }
 
@@ -90,7 +87,7 @@ export function registerSkillsPlugin() {
         if (!skill) return null;
 
         return (
-          <Dialog title={`/${skill.name}`} footer={<KeyHints hints={['esc back']} />}>
+          <micaUI.Dialog title={`/${skill.name}`} footer={<micaUI.KeyHints hints={['esc back']} />}>
             <Box flexDirection="column">
               <Box paddingBottom={1}>
                 <Text>{skill.description}</Text>
@@ -113,10 +110,10 @@ export function registerSkillsPlugin() {
               </Box>
               <Box flexDirection="column">
                 <Text dimColor>preview</Text>
-                <Markdown>{skill.content}</Markdown>
+                <micaUI.Markdown>{skill.content}</micaUI.Markdown>
               </Box>
             </Box>
-          </Dialog>
+          </micaUI.Dialog>
         );
       }
 

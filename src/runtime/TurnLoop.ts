@@ -1,4 +1,4 @@
-import { micaUI, parseImageRefs } from '../../packages/mica-ui/index.js';
+import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentQueryContent } from '../../packages/mica-agent/index.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
@@ -54,7 +54,7 @@ export class TurnLoop {
   private async runTurn(text: string) {
     this.queue.startRun();
     const startedAt = Date.now();
-    const content = parseImageRefs(text) as AgentQueryContent;
+    const content = micaUI.parseImageRefs(text) as AgentQueryContent;
     let runId: number | null = null;
     let hasError = false;
 
