@@ -32,6 +32,7 @@ export function registerStatusPlugin(agent: AgentRuntime) {
           ['Model', model],
           ['Effort', provider.supportsEffort !== false ? effort : 'none'],
           ['Provider', provider.name ?? provider.id],
+          ['Cwd', process.cwd()],
           ['Context', formatContextUsage(contextTokens, contextWindowSize)],
           ['Total input tokens', formatTokenValue(usageTotals.inputTokens, usageTotals.records)],
           ['Total output tokens', formatTokenValue(usageTotals.outputTokens, usageTotals.records)],
