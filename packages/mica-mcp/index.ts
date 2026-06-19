@@ -3,9 +3,13 @@ import { loadMcpConfig, MCP_CONFIG_PATH } from './config.js';
 import { initMcp, reconnectMcpServer, shutdownMcp } from './service.js';
 
 export const micaMcp = {
+  /** 初始化 MCP 服务连接，并把可用远端工具注册到工具系统。 */
   init: initMcp,
+  /** 重新连接指定 MCP 服务，常用于配置变更或连接异常后的恢复。 */
   reconnectServer: reconnectMcpServer,
+  /** 关闭所有 MCP 连接并清理已注册的远端工具。 */
   shutdown: shutdownMcp,
+  /** 从本地配置文件读取 MCP server 定义。 */
   loadConfig: loadMcpConfig,
   servers: mcpServersAtom,
   configPath: MCP_CONFIG_PATH,
