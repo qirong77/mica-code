@@ -73,7 +73,9 @@ export const Conversation = (): React.ReactNode => {
             <Box key={item.id} paddingY={1} paddingBottom={isLast ? 0 : 1} flexDirection="row">
               <Text color={colors.primary}>{'\u258c'}</Text>
               <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
-                <Text color={colors.primary}>{truncateLines(item.text, MAX_USER_LINES)}</Text>
+                <Text color={colors.primary} bold>
+                  {truncateLines(item.text, MAX_USER_LINES)}
+                </Text>
               </Box>
             </Box>
           );
