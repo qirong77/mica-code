@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Box, Text, ScrollBox } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
+import { useBottomPanelHeight } from '../hooks/useLogViewHeight.js';
 
 export interface SelectItem {
   key: string;
@@ -19,6 +20,8 @@ export interface SelectListProps<T extends SelectItem> {
   markerWidth?: number;
   marker?: string;
   maxVisibleItems?: number;
+  adaptiveHeight?: boolean;
+  reservedRows?: number;
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
 }
 
@@ -65,18 +68,24 @@ export function SelectList<T extends SelectItem>({
   markerWidth = 2,
   marker = '\u25B6',
   maxVisibleItems = 5,
+  adaptiveHeight = true,
+  reservedRows = title ? 1 : 0,
   renderItem,
 }: SelectListProps<T>): React.ReactNode {
+  const panelHeight = useBottomPanelHeight(reservedRows);
+  const adaptiveVisibleItems = Math.max(1, Math.floor((panelHeight + itemGap) / (1 + itemGap)));
+  const visibleItemLimit = adaptiveHeight ? Math.max(maxVisibleItems, adaptiveVisibleItems) : maxVisibleItems;
+
   if (items.length === 0) return <>{empty}</>;
 
   const body =
-    items.length <= maxVisibleItems ? (
+    items.length <= visibleItemLimit ? (
       <Box flexDirection="column">{renderItems(items, selectedIdx, itemGap, markerWidth, marker, renderItem)}</Box>
     ) : (
       <ScrollBody
         items={items}
         selectedIdx={selectedIdx}
-        maxVisibleItems={maxVisibleItems}
+        visibleItems={visibleItemLimit}
         itemGap={itemGap}
         markerWidth={markerWidth}
         marker={marker}
@@ -96,7 +105,7 @@ export function SelectList<T extends SelectItem>({
 function ScrollBody<T extends SelectItem>({
   items,
   selectedIdx,
-  maxVisibleItems,
+  visibleItems,
   itemGap,
   markerWidth,
   marker,
@@ -104,13 +113,13 @@ function ScrollBody<T extends SelectItem>({
 }: {
   items: T[];
   selectedIdx: number;
-  maxVisibleItems: number;
+  visibleItems: number;
   itemGap: number;
   markerWidth: number;
   marker: string;
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
 }) {
-  const visibleRows = maxVisibleItems + (maxVisibleItems - 1) * itemGap;
+  const visibleRows = visibleItems + (visibleItems - 1) * itemGap;
   const scrollRef = useRef<ScrollBoxHandle>(null);
   useEffect(() => {
     const s = scrollRef.current;
