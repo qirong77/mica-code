@@ -1,0 +1,14 @@
+AGENT.md
+  h_a456b67147438e 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d0c8df8c5867acb3da71826df2645fabe9df9542",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
