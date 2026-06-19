@@ -66,6 +66,35 @@ controller 主动释放控制权，返回自己的 local agent。
 
 被控 agent 原终端或另一个授权终端强制夺回控制权。
 
+### IPC（进程间通信）
+
+IPC 是 Inter-Process Communication 的缩写，指同一台机器上不同进程之间交换数据的机制。在这个方案中，两个 Mica CLI 进程之间通过 **Unix Socket** 建立 IPC 通道，Terminal A 的 IPC Client 连接到 Terminal B 的 IPC Server，在这条通道上双向传输数据。
+
+可以把 IPC 理解为「电话线」—— 它解决的是两个进程怎么连上、怎么传输字节流的问题。
+
+### RPC（远程过程调用）
+
+RPC 是 Remote Procedure Call 的缩写，是一种让调用方像调用本地函数一样调用远程进程上方法的协议。在这个方案中，IPC 通道之上运行 **JSON-RPC** 协议，定义了请求/响应的标准格式（方法名、参数、返回值、错误码等），让 Terminal A 能够以结构化的方式调用 Terminal B 的能力——比如发送消息、订阅事件流、查询状态快照。
+
+可以把 RPC 理解为「电话里说什么语言、按什么格式对话」—— 它解决的是数据怎么组织、怎么路由到正确的处理函数的问题。
+
+### 两者关系
+
+```text
+Terminal A                          Terminal B
+┌──────────────┐                   ┌──────────────┐
+│ 业务层       │ ←── RPC 调用 ───→ │ 业务层       │
+│ (RemoteRuntimeClient)            │ (RuntimeController)
+├──────────────┤                   ├──────────────┤
+│ JSON-RPC     │ ←── 协议层 ────→ │ JSON-RPC     │
+├──────────────┤                   ├──────────────┤
+│ Unix Socket  │ ←── 传输层 ────→ │ Unix Socket  │
+└──────────────┘                   └──────────────┘
+         └────── IPC 通道 ───────────┘
+```
+
+IPC 是底层传输通道（Unix Socket），RPC 是上层调用协议（JSON-RPC）。IPC 负责把字节送到对端，RPC 负责把字节解析成有意义的方法调用和返回值。
+
 ---
 
 ## 用户可见效果
