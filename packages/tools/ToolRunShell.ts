@@ -7,6 +7,23 @@ import crypto from 'crypto';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
+import { finalizeTextOutput } from './utils/outputLimits.js';
+
+const MAX_SHELL_OUTPUT_CHARS = 60_000;
+const MAX_STREAM_CHARS = 120_000;
+
+function largeOutputHint(command: string): string | null {
+  const trimmed = command.trim();
+  if (/\bcat\s+/.test(trimmed)) return '检测到 cat 命令。读取大文件时建议改用 read_file 的 offset/limit。';
+  if (/\bls\s+(-[^\n]*R|[^\n]*-[^\n]*R)/.test(trimmed)) return '检测到递归 ls。建议用 list_files 并缩小 pattern/path。';
+  if (/\bfind\s+\.?(\s|$)/.test(trimmed) && !/\|\s*(head|grep|rg|sed)\b/.test(trimmed)) {
+    return '检测到可能产生大量输出的 find。建议加更具体条件或 pipe 到 head/grep。';
+  }
+  if (/\b(grep|rg)\b/.test(trimmed) && /\s(-R|--recursive)\b/.test(trimmed) && !/\|\s*head\b/.test(trimmed)) {
+    return '检测到递归搜索命令。建议使用 grep_search 工具或限制输出。';
+  }
+  return null;
+}
 
 function taskId(): string {
   return crypto.randomBytes(6).toString('hex');
@@ -84,16 +101,23 @@ export class ToolRunShell extends MicaTool {
         }, 5000);
       }, timeout);
 
+      const hint = largeOutputHint(input.command);
+      if (hint) callbacks?.onChunk?.(`[提示] ${hint}\n`);
+
       child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
-        output += chunk;
-        callbacks?.onChunk?.(chunk);
+        if (output.length < MAX_STREAM_CHARS) {
+          output += chunk;
+          callbacks?.onChunk?.(chunk);
+        }
       });
 
       child.stderr.on('data', (data: Buffer) => {
         const chunk = data.toString();
-        output += chunk;
-        callbacks?.onChunk?.(chunk);
+        if (output.length < MAX_STREAM_CHARS) {
+          output += chunk;
+          callbacks?.onChunk?.(chunk);
+        }
       });
 
       child.on('close', (code) => {
@@ -102,7 +126,9 @@ export class ToolRunShell extends MicaTool {
         clearTimeout(timer);
         if (forceKillTimer) clearTimeout(forceKillTimer);
         callbacks?.signal?.removeEventListener('abort', abortHandler);
-        const msg = output || '(no output)';
+        const truncated = finalizeTextOutput(output, { maxChars: MAX_SHELL_OUTPUT_CHARS, label: '命令输出' });
+        const hintText = largeOutputHint(input.command);
+        const msg = [hintText ? `[提示] ${hintText}` : undefined, truncated].filter(Boolean).join('\n');
         if (timedOut) {
           resolve(`(超时: ${timeout}ms)\n${msg}`);
         } else if (code !== 0 && code !== null) {

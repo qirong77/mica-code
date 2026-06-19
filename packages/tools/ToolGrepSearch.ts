@@ -2,7 +2,10 @@ import { spawn } from 'child_process';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
+import { finalizeTextOutput } from './utils/outputLimits.js';
 
+const MAX_GREP_OUTPUT_CHARS = 40_000;
+const MAX_CAPTURE_CHARS = 120_000;
 const GREP_TIMEOUT_MS = 20_000;
 const DEFAULT_HEAD_LIMIT = 200;
 
@@ -33,7 +36,23 @@ export class ToolGrepSearch extends MicaTool {
   ): Promise<string> {
     const headLimit = input.head_limit ?? DEFAULT_HEAD_LIMIT;
     const skipOffset = input.offset ?? 0;
-    const args = ['--line-number', '--color=never', '--no-config'];
+    const args = [
+      '--line-number',
+      '--color=never',
+      '--no-config',
+      '--glob',
+      '!node_modules/**',
+      '--glob',
+      '!.git/**',
+      '--glob',
+      '!dist/**',
+      '--glob',
+      '!build/**',
+      '--glob',
+      '!coverage/**',
+      '--glob',
+      '!.next/**',
+    ];
 
     if (input.include) args.push('--glob', input.include);
 
@@ -67,8 +86,10 @@ export class ToolGrepSearch extends MicaTool {
 
       child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
-        output += chunk;
-        callbacks?.onChunk?.(chunk);
+        if (output.length < MAX_CAPTURE_CHARS) {
+          output += chunk;
+          callbacks?.onChunk?.(chunk);
+        }
       });
 
       child.stderr.on('data', (data: Buffer) => {
@@ -82,8 +103,10 @@ export class ToolGrepSearch extends MicaTool {
           const lines = output.trim().split('\n').filter(Boolean);
           if (lines.length > 0) {
             resolve(
-              lines.slice(skipOffset, skipOffset + (headLimit || Infinity)).join('\n') +
-                `\n\n[搜索超时（${GREP_TIMEOUT_MS / 1000}s），仅返回部分结果，共 ${lines.length} 行]`,
+              finalizeTextOutput(lines.slice(skipOffset, skipOffset + (headLimit || Infinity)).join('\n'), {
+                maxChars: MAX_GREP_OUTPUT_CHARS,
+                label: '搜索结果',
+              }) + `\n\n[搜索超时（${GREP_TIMEOUT_MS / 1000}s），仅返回部分结果，共 ${lines.length} 行]`,
             );
           } else {
             resolve(`搜索超时（${GREP_TIMEOUT_MS / 1000}s），未找到匹配内容。请缩小搜索范围或指定更具体的路径。`);
@@ -94,10 +117,10 @@ export class ToolGrepSearch extends MicaTool {
         if (code === 0) {
           const lines = output.trim().split('\n').filter(Boolean);
           if (headLimit === 0) {
-            resolve(lines.slice(skipOffset).join('\n'));
+            resolve(finalizeTextOutput(lines.slice(skipOffset).join('\n'), { maxChars: MAX_GREP_OUTPUT_CHARS, label: '搜索结果' }));
           } else {
             const sliced = lines.slice(skipOffset, skipOffset + headLimit);
-            let result = sliced.join('\n');
+            let result = finalizeTextOutput(sliced.join('\n'), { maxChars: MAX_GREP_OUTPUT_CHARS, label: '搜索结果' });
             const totalAfterSkip = lines.length - skipOffset;
             if (totalAfterSkip > headLimit) {
               result += `\n\n[显示第 ${skipOffset + 1}-${skipOffset + sliced.length} 行，共 ${lines.length} 行，可调整 offset 翻页]`;
