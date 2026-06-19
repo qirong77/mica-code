@@ -90,11 +90,13 @@ export class AgentIpcServer {
         return { detached: true };
       }
       case 'submit': {
-        const submitParams = params as { text: string };
+        const submitParams = params as { text: string; controllerAgentId: string; controllerPid: number };
+        this.assertController(submitParams);
         return this.options.runtime.submit(submitParams.text);
       }
       case 'abort': {
-        const abortParams = params as { reason?: string } | undefined;
+        const abortParams = params as { reason?: string; controllerAgentId: string; controllerPid: number };
+        this.assertController(abortParams);
         return this.options.runtime.abort(abortParams?.reason);
       }
       default:
@@ -126,5 +128,15 @@ export class AgentIpcServer {
       mode: params.mode,
       snapshot: this.options.runtime.getSnapshot(),
     };
+  }
+
+  private assertController(params: { controllerAgentId?: string; controllerPid?: number }): void {
+    const state = this.control.getState();
+    if (state.mode !== 'remote-controlled') {
+      throw new Error('Agent is not remote-controlled');
+    }
+    if (state.controllerAgentId !== params.controllerAgentId || state.controllerPid !== params.controllerPid) {
+      throw new Error('Controller does not own this agent');
+    }
   }
 }

@@ -1,5 +1,4 @@
 import { micaUi } from '@packages/mica-ui/index.js';
-import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
@@ -52,7 +51,7 @@ export class ToolLogController {
     }
     this.thinkingBuffer += text;
     this.sink.setThinkingText(this.thinkingBuffer);
-    this.sink.replaceAgentTurnLogItem(micaAgent.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
+    this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
   }
 
   addToolCall({ name, args, id }: { name: string; args: string; id?: string }) {
@@ -69,7 +68,7 @@ export class ToolLogController {
 
     micaLogger.logRuntime('runtime.tool', 'ui:add', { name, id: toolKey });
     this.sink.appendAgentTurnLogItem(
-      micaAgent.createToolCallLogItem({
+      micaUi.createToolCallLogItem({
         id: toolLogId,
         toolName: name,
         displayText,
@@ -96,7 +95,7 @@ export class ToolLogController {
     });
 
     this.sink.replaceAgentTurnLogItem(
-      micaAgent.createToolCallLogItem({
+      micaUi.createToolCallLogItem({
         id: toolLogId,
         toolName: name,
         displayText,

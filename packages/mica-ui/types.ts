@@ -31,6 +31,7 @@ export type MicaUiWorkingStatus =
   | { type: 'thinking' }
   | { type: 'streaming' }
   | { type: 'calling_tool'; elapsedMs?: number; toolNames?: string[] }
+  | { type: 'plugin_task'; text: string; level?: 'info' | 'warn' | 'error' }
   | { type: 'completed'; elapsedMs?: number }
   | { type: 'error'; message?: string };
 
@@ -112,7 +113,7 @@ export interface MicaUiAgentStatusItem {
   title: string;
   providerName: string;
   model: string;
-  status: string;
+  status: MicaUiWorkingStatus;
   current: boolean;
   updatedAt: string;
 }

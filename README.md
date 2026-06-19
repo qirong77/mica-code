@@ -12,7 +12,7 @@ Mica Code 是一个轻量级 CLI code agent。它基于 Bun、TypeScript、React
 - 工具系统：内置文件读写、精确编辑、搜索、shell、web search/fetch、skill 等工具。
 - MCP 支持：读取 MCP 配置，连接远端 MCP server，并把远端工具注册进统一工具系统。
 - 会话恢复：会话快照保存到本地，可通过 `/resume` 恢复。
-- 快捷命令：支持 provider、model、effort、status、logs、mcp、skills、commit、resume、clear 等命令。
+- 快捷命令：支持 provider、model、effort、status、log、agents、rewind、mcp、skills、commit、resume、clear 等命令。
 - 多模态输入：支持文本和图片引用输入。
 - 插件化拆分：命令、配置、runtime、session、MCP、skills、tools、UI 等能力逐步拆到 workspace package 中。
 
@@ -111,7 +111,9 @@ packages/mica-agent/.env
 - `/model`：切换模型。
 - `/effort`：切换推理努力等级。
 - `/status`：查看当前 provider、model、上下文和 token 状态。
-- `/logs`：查看运行时日志。
+- `/log`：查看运行时日志；`/log export` 导出当前对话与日志。
+- `/agents clear`：清除非当前且空闲的 agent。
+- `/rewind`：确认后回退到上一轮对话之前的对话与文件状态。
 - `/mcp`：查看 MCP 服务器和工具，支持 reconnect。
 - `/skills`：查看已加载 skills。
 - `/commit`：分析当前 git diff，生成提交信息并提交推送。
@@ -129,7 +131,7 @@ src/
   session/              应用侧会话控制
 
 packages/
-  mica-agent/           agent 公共类型、provider adapter、prompt 和 turn log UI item
+  mica-agent/           agent 公共类型、provider adapter、prompt 和历史消息归一化
   mica-builtin-commands/内置命令实现
   mica-commands/        命令注册、执行和命令面板抽象
   mica-common/          跨包公共类型和工具函数
@@ -157,8 +159,8 @@ scripts/                构建和安装脚本
 ```text
 Terminal UI
   -> src/index.ts
-  -> src/app/bootstrap.ts
-  -> src/runtime/TurnLoop.ts
+  -> src/app/Application.ts
+  -> src/app/adapters/LocalRuntimeController.ts
   -> src/agent/AgentRuntime.ts
   -> packages/mica-agent/providers/*
   -> packages/mica-tools/* + packages/mica-mcp/*
@@ -169,8 +171,8 @@ Terminal UI
 一次 turn 的主要步骤：
 
 1. UI 提交用户输入。
-2. `MessageQueue` 判断运行中输入是否需要排队。
-3. `TurnLoop` 解析文本和图片引用，追加用户消息。
+2. `LocalRuntimeController` 解析命令；运行中普通输入由 `MessageQueuePlugin` 排队。
+3. `LocalRuntimeController` 解析文本和图片引用，追加用户消息。
 4. `AgentRuntime` 调用当前 provider client。
 5. provider 流式返回 text、thinking、tool call、usage 等事件。
 6. `ToolLogController` 更新 thinking/tool 日志。
@@ -181,7 +183,7 @@ Terminal UI
 
 - `packages/mica-agent` 不依赖 UI、session、commands；只负责 provider adapter、prompt 和公共 agent 接口。
 - `packages/mica-ui` 不依赖 agent 业务逻辑；只负责终端 UI 状态、组件和交互呈现。
-- `src/runtime` 是当前应用核心运行时，负责 turn 生命周期和 UI/agent/session 编排。
+- `src/app/adapters/LocalRuntimeController.ts` 是当前应用核心运行时，负责 turn 生命周期和 UI/agent/session 编排；`src/runtime` 保留 UI bridge 与工具日志等运行时辅助。
 - `packages/mica-runtime` 承载可复用 runtime 抽象，便于后续 hook、context、multi-agent 等能力下沉。
 - `src/plugins` 负责把 package 级能力接入当前 CLI 应用，避免继续堆进入口文件。
 - `src/session` 和 `packages/mica-session` 负责会话/快照持久化，不负责 provider 调用。

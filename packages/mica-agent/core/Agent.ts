@@ -1,7 +1,5 @@
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import type { ConversationItem, ProviderHistoryNormalizer } from './Conversation.js';
-
-export type AgentQueryContent = string | MicaUiContentBlockParam[];
+import type { AgentContentBlockParam, AgentConversationMessage, AgentQueryContent } from './Content.js';
 
 export type AgentUsageRecord = {
   provider: string;
@@ -34,7 +32,7 @@ export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = 
   messages: TMessage[];
   usageHistory: TUsage[];
   lastUsage: TUsage | undefined;
-  conversationMessages: MicaUiConversationMessage[];
+  conversationMessages: AgentConversationMessage[];
 };
 
 export interface IAgent<
@@ -50,7 +48,7 @@ export interface IAgent<
   configure(options: TOptions): void;
   reset(): void;
   query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
-  toConversationMessages(): MicaUiConversationMessage[];
+  toConversationMessages(): AgentConversationMessage[];
   toConversationItems(): ConversationItem[];
   loadConversationItems(items: ConversationItem[]): void;
   getSnapshot(): AgentSnapshot<TMessage, TUsage>;
@@ -76,7 +74,7 @@ export abstract class BaseAgent<
   abstract configure(options: TOptions): void;
   abstract reset(): void;
   abstract query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
-  abstract toConversationMessages(): MicaUiConversationMessage[];
+  abstract toConversationMessages(): AgentConversationMessage[];
   abstract get historyNormalizer(): ProviderHistoryNormalizer<TMessage>;
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 
@@ -98,15 +96,17 @@ export abstract class BaseAgent<
     };
   }
 
-  protected textMessage(role: 'user' | 'assistant', text: string): MicaUiConversationMessage | null {
+  protected textMessage(role: 'user' | 'assistant', text: string): AgentConversationMessage | null {
     if (!text) return null;
     return { role, content: [{ type: 'text', text }] };
   }
 
-  protected contentBlocksToText(blocks: MicaUiContentBlockParam[]): string {
+  protected contentBlocksToText(blocks: AgentContentBlockParam[]): string {
     return blocks
       .filter((block) => block.type === 'text')
       .map((block) => block.text)
       .join('\n');
   }
 }
+
+export type { AgentContentBlockParam, AgentConversationMessage, AgentQueryContent } from './Content.js';

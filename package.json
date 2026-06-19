@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "ui": "bun run src/components/ui/examples/ui.tsx",
-    "build": "bun scripts/build.mjs",
-    "prebuild": "bun run src/prebuild.ts",
+    "build": "MICA_PREBUILD_DONE=1 bun scripts/build.mjs",
+    "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test packages/mica-agent/prompt/index.test.ts packages/mica-tools/MicaTool.test.ts src/runtime/RewindCheckpointManager.test.ts",
     "format": "prettier --write ."
   },
   "workspaces": [

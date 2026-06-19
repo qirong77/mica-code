@@ -4,7 +4,6 @@ import { AnthropicAgent } from './providers/AnthropicAgent.js';
 import { AnthropicHistoryNormalizer } from './providers/AnthropicHistoryNormalizer.js';
 import { BaseAgent } from './core/Agent.js';
 import { buildSystemPrompt, buildSystemPromptForTest } from './prompt/index.js';
-import { createErrorLogItem, createThinkingLogItem, createToolCallLogItem } from './ui/AgentTurnLogItems.js';
 
 export const micaAgent = {
   /** 创建支持工具调用和流式事件的 OpenAI-compatible agent。 */
@@ -20,15 +19,11 @@ export const micaAgent = {
   buildSystemPrompt,
   /** 构建可注入固定参数的系统提示词，供 prompt 单测使用。 */
   buildSystemPromptForTest,
-  /** 创建 agent 错误日志 UI item。 */
-  createErrorLogItem,
-  /** 创建 agent thinking 流式日志 UI item。 */
-  createThinkingLogItem,
-  /** 创建 agent 工具调用日志 UI item。 */
-  createToolCallLogItem,
 };
 
 export type {
+  AgentContentBlockParam,
+  AgentConversationMessage,
   AgentQueryContent,
   AgentQueryOptions,
   AgentSnapshot,

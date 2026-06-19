@@ -11,6 +11,10 @@ export class MessageQueueService {
     return this.items.shift() ?? null;
   }
 
+  removeLast(): RuntimeInput | null {
+    return this.items.pop() ?? null;
+  }
+
   clear(): void {
     this.items.length = 0;
   }

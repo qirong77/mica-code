@@ -1,5 +1,4 @@
 import { micaUi } from '@packages/mica-ui/index.js';
-import { micaAgent } from '@packages/mica-agent/index.js';
 import type { AgentRuntime, AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
@@ -11,7 +10,7 @@ export function reportRuntimeError(error: unknown, title = '运行错误') {
   micaUi.panels.thinkingText.set('');
   micaUi.panels.status.error(message);
   micaUi.panels.setAgentTurnLogItems([
-    micaAgent.createErrorLogItem({
+    micaUi.createErrorLogItem({
       id: `error-${Date.now()}`,
       title,
       error,

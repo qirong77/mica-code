@@ -1,11 +1,12 @@
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
-import { micaUi } from '@packages/mica-ui/index.js';
+import { micaUi, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import type { AgentRuntime } from '../../agent/AgentRuntime.js';
+import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
 import { clearUI, showMessage as showGlobalMessage, syncModelDisplay } from '../../runtime/uiBridge.js';
 import { getActiveApplication } from '../../app/Application.js';
+import type { ApplicationContext } from '../../app/ApplicationContext.js';
 import type {
   CommandAgent,
   CommandRuntimeServices,
@@ -15,6 +16,7 @@ import { micaContext } from '@packages/mica-context/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'logs', 'status', 'agents', 'new', 'fork']);
 
 export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
   constructor(
@@ -37,10 +39,10 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
         description: command.description,
         hidden: command.hidden,
         scope: 'local-only',
-        allowDuringTurn: true,
+        allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name),
         pluginId: ctx.pluginId,
         async handler(_commandCtx, args) {
-          if (command.name !== 'logs') micaBuiltinCommands.closeLogsPanel();
+          if (command.name !== 'log' && command.name !== 'logs') micaBuiltinCommands.closeLogsPanel();
           micaLogger.logRuntime('plugin', 'action:start', { name: command.name, arg: args });
           try {
             await command.action(args || undefined);
@@ -61,7 +63,13 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
         description: command.description ?? '',
         hidden: command.hidden,
         action: (arg?: string) => {
-          void ctx.commands.execute(`/${command.name}${arg ? ` ${arg}` : ''}`, {});
+          const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
+          const runtime = getActiveApplication()?.activeContext?.runtime;
+          if (runtime) {
+            void runtime.submit(text, { source: 'command' });
+            return;
+          }
+          void ctx.commands.execute(text, {});
         },
       })),
     );
@@ -78,17 +86,19 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
   return [
     micaBuiltinCommands.createClearCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createResumeCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createProviderCommand(activeAgent, services),
-    micaBuiltinCommands.createModelCommand(activeAgent, services),
-    micaBuiltinCommands.createEffortCommand(activeAgent, services),
+    micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
+    micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
+    micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createStatusCommand(activeAgent),
     micaBuiltinCommands.createNewCommand(services),
-    micaBuiltinCommands.createLogsCommand(),
+    micaBuiltinCommands.createForkCommand(services),
+    micaBuiltinCommands.createRewindCommand(services),
+    micaBuiltinCommands.createLogCommand(activeAgent, services),
+    micaBuiltinCommands.createLogsCommand(activeAgent, services),
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createGitDiffContextCommand(services),
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
-    micaBuiltinCommands.createLogExportCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createAgentsCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
   ];
@@ -118,12 +128,32 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       }
       showGlobalMessage(text, ttl);
     },
+    setPluginStatus(agent, text, options = {}) {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) return;
+      const target = resolveCommandAgent(agent);
+      const status: MicaUiWorkingStatus = { type: 'plugin_task', text, level: options.level };
+      setAgentWorkingStatus(context, target, status, options.ownerSessionId);
+    },
+    clearPluginStatus(agent, ownerSessionId) {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) return;
+      setAgentWorkingStatus(context, resolveCommandAgent(agent), { type: 'idle' }, ownerSessionId);
+    },
     syncModelDisplay(_agent) {
       const session = getActiveApplication()?.activeContext?.agentSessions.current();
-      syncModelDisplay(session?.agent ?? (_agent as AgentRuntime));
+      const target = _agent as AgentRuntime;
+      if (session && target instanceof AgentRuntime && session.agent !== target) return;
+      syncModelDisplay(session?.agent ?? target);
     },
     isAgentRunning() {
       return getActiveApplication()?.activeContext?.runtime.getStatus().running ?? false;
+    },
+    isAgentBusy(agent) {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) return false;
+      const target = agent ? resolveCommandAgent(agent) : context.agentSessions.current().agent;
+      return context.runtime.isAgentBusy(target);
     },
     getCurrentAgentSessionId() {
       return getActiveApplication()?.activeContext?.agentSessions.current().id;
@@ -131,13 +161,63 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
     getCurrentAgent() {
       return getActiveApplication()?.activeContext?.agentSessions.current().agent;
     },
+    getCurrentSessionController() {
+      return getActiveApplication()?.activeContext?.agentSessions.current().sessionController;
+    },
     listRunningAgents() {
       return getActiveApplication()?.activeContext?.agentSessions.list() ?? [];
+    },
+    clearIdleAgents() {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) return { cleared: [], remaining: [] };
+      const result = context.agentSessions.clearIdleSessions();
+      context.uiBridge.syncAgentStatusItems();
+      return result;
     },
     newAgentSession() {
       const session = getActiveApplication()?.activeContext?.agentSessions.createSession();
       if (!session) throw new Error('Application is not ready');
       return session;
+    },
+    forkCurrentAgent() {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) throw new Error('Application is not ready');
+
+      const sourceSession = context.agentSessions.current();
+      const sourceWasRunning = sourceSession.agent.isRunning;
+      const historyConversationCount = sourceSession.agent.toConversationMessages().length;
+      const uiConversationCount = sourceSession.uiState.conversationMessages.length;
+      const sourceSnapshot = sourceSession.agent.getForkSnapshot({
+        dropLastUserMessageAndAfter: sourceWasRunning && uiConversationCount <= historyConversationCount,
+      });
+      const created = context.agentSessions.createSession();
+      const targetSession = context.agentSessions.findById(created.id);
+      if (!targetSession) throw new Error(`Forked agent session not found: ${created.id}`);
+
+      targetSession.agent.loadSnapshot(sourceSnapshot);
+      targetSession.sessionController.saveCurrent();
+      targetSession.uiState = normalizeUiState({
+        ...targetSession.uiState,
+        conversationMessages: targetSession.agent.toConversationMessages(),
+        responseText: '',
+        pendingInputs: [],
+        messageBarMessages: [],
+        logEntries: [],
+        agentTurnLogItems: [],
+        uiLog: [],
+        thinkingText: '',
+        pluginUIs: [],
+        workingStatus: { type: 'idle' },
+        contextSize: sourceSnapshot.lastUsage?.totalTokens ?? 0,
+        cachedTokenRate: readCachedTokenRate(sourceSnapshot.usageHistory),
+      });
+      const record = context.agentSessions.list().find((agent) => agent.id === created.id) ?? created;
+      micaLogger.logRuntime('plugin.fork', 'snapshot:loaded', {
+        id: created.id,
+        messages: sourceSnapshot.messages.length,
+        sourceWasRunning,
+      });
+      return { ...record, sourceWasRunning };
     },
     switchAgentSession(id) {
       const app = getActiveApplication();
@@ -160,6 +240,55 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       if (!session) return;
       session.uiState = normalizeUiState(captureSessionUi());
     },
+    getRewindPreview() {
+      const runtime = getActiveApplication()?.activeContext?.runtime;
+      if (!runtime) return { ok: false, message: 'rewind: Application is not ready' };
+      return runtime.getRewindPreview();
+    },
+    applyRewind(id) {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) throw new Error('Application is not ready');
+      const result = context.runtime.applyRewind(id);
+      const session = context.agentSessions.current();
+      const snapshot = session.agent.getSnapshot();
+      session.uiState = normalizeUiState({
+        ...session.uiState,
+        conversationMessages: session.agent.toConversationMessages(),
+        responseText: '',
+        pendingInputs: [],
+        messageBarMessages: [],
+        logEntries: [],
+        agentTurnLogItems: [],
+        thinkingText: '',
+        pluginUIs: [],
+        workingStatus: { type: 'idle' },
+        contextSize: snapshot.lastUsage?.totalTokens ?? 0,
+        cachedTokenRate: readCachedTokenRate(snapshot.usageHistory),
+      });
+      restoreSessionUi(session.agent, session.uiState);
+      syncModelDisplay(session.agent);
+      session.sessionController.saveCurrent({ allowEmpty: true });
+      context.uiBridge.syncAgentStatusItems();
+      return result;
+    },
+    async runExclusiveTask(agent, options, task) {
+      const context = getActiveApplication()?.activeContext;
+      if (!context) return task();
+      const target = resolveCommandAgent(agent);
+      const release = context.runtime.beginExclusiveTask(target, options.statusText);
+      const status: MicaUiWorkingStatus = {
+        type: 'plugin_task',
+        text: options.statusText,
+        level: options.level,
+      };
+      setAgentWorkingStatus(context, target, status, options.ownerSessionId);
+      try {
+        return await task();
+      } finally {
+        release();
+        setAgentWorkingStatus(context, target, { type: 'idle' }, options.ownerSessionId);
+      }
+    },
     async compact(agent, sessionController, ownerSessionId) {
       const context = getActiveApplication()?.activeContext;
       const ownerSession = ownerSessionId
@@ -168,10 +297,26 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       const concreteAgent = ownerSession?.agent ?? (agent as AgentRuntime);
       const concreteSessionController = ownerSession?.sessionController ?? (sessionController as SessionController);
       const snapshot = concreteAgent.getSnapshot();
+      if (context) {
+        setAgentWorkingStatus(
+          context,
+          concreteAgent,
+          { type: 'plugin_task', text: 'compact: building transcript' },
+          ownerSession?.id,
+        );
+      }
       const service = new micaContext.CompactionService();
       const result = await service.compact({
         messages: snapshot.messages,
         summarize: async (transcript) => {
+          if (context) {
+            setAgentWorkingStatus(
+              context,
+              concreteAgent,
+              { type: 'plugin_task', text: 'compact: summarizing context' },
+              ownerSession?.id,
+            );
+          }
           const subAgent = concreteAgent.createSubAgent({
             systemPrompt: [
               'You create compact checkpoints for coding-agent conversations.',
@@ -201,6 +346,14 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         },
       });
 
+      if (context) {
+        setAgentWorkingStatus(
+          context,
+          concreteAgent,
+          { type: 'plugin_task', text: 'compact: applying checkpoint' },
+          ownerSession?.id,
+        );
+      }
       concreteAgent.loadSnapshot({
         ...snapshot,
         messages: result.messages,
@@ -252,6 +405,9 @@ function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     get currentRunId() {
       return current().currentRunId;
     },
+    get isRunning() {
+      return current().isRunning;
+    },
     reloadConfig(resetClient?: boolean) {
       current().reloadConfig(resetClient);
     },
@@ -282,9 +438,37 @@ function createActiveSessionControllerProxy(fallback: SessionController): Comman
   };
 }
 
+function resolveCommandAgent(agent: CommandAgent): AgentRuntime {
+  if (agent instanceof AgentRuntime) return agent;
+  const current = getActiveApplication()?.activeContext?.agentSessions.current().agent;
+  if (current) return current;
+  return agent as AgentRuntime;
+}
+
+function setAgentWorkingStatus(
+  context: ApplicationContext,
+  agent: AgentRuntime,
+  status: MicaUiWorkingStatus,
+  ownerSessionId?: string,
+): void {
+  const session = ownerSessionId
+    ? context.agentSessions.findById(ownerSessionId)
+    : context.agentSessions.findByAgent(agent);
+  const targetSession = session ?? context.agentSessions.current();
+  const targetAgent = session?.agent ?? agent;
+  context.agentSessions.setStatusForAgent(targetAgent, status);
+  targetSession.uiState = normalizeUiState({ ...targetSession.uiState, workingStatus: status });
+  if (context.agentSessions.current().id === targetSession.id) {
+    micaUi.panels.setWorkingStatus(status);
+  }
+  context.uiBridge.syncAgentStatusItems();
+}
+
 function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): void {
   const snapshot = agent.getSnapshot();
-  micaUi.conversation.setMessages(uiState.conversationMessages.length > 0 ? uiState.conversationMessages : agent.toConversationMessages());
+  micaUi.conversation.setMessages(
+    uiState.conversationMessages.length > 0 ? uiState.conversationMessages : agent.toConversationMessages(),
+  );
   micaUi.conversation.setResponseText(uiState.responseText);
   micaUi.conversation.setPendingInputs(uiState.pendingInputs);
   micaUi.panels.thinkingText.set(uiState.thinkingText);
@@ -307,6 +491,12 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
     micaUi.panels.contextSize.set(0);
     micaUi.panels.cachedTokenRate.set(0);
   }
+}
+
+function readCachedTokenRate(usageHistory: ReturnType<AgentRuntime['getSnapshot']>['usageHistory']): number {
+  const totalInput = usageHistory.reduce((sum, usage) => sum + usage.inputTokens, 0);
+  const totalCached = usageHistory.reduce((sum, usage) => sum + (usage.cachedInputTokens ?? 0), 0);
+  return totalInput > 0 ? Math.max(0, totalCached / totalInput) : 0;
 }
 
 function formatError(error: unknown) {

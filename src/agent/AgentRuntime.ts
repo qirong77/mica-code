@@ -50,6 +50,7 @@ export class AgentRuntime {
   private client: IAgent<OpenAIClientOptions> | null = null;
   private runId = 0;
   private activeAbortController: AbortController | null = null;
+  private activeRunUsageStartIndex: number | null = null;
   private currentConfig: AgentRuntimeConfig;
 
   constructor() {
@@ -74,6 +75,10 @@ export class AgentRuntime {
     return Boolean(this.currentConfig.provider.api_key);
   }
 
+  get isRunning() {
+    return this.activeAbortController !== null;
+  }
+
   createSubAgent(options: Partial<OpenAIClientOptions> = {}) {
     if (!this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
@@ -87,9 +92,25 @@ export class AgentRuntime {
   }
 
   reloadConfig(resetSession = true) {
+    if (this.isRunning) {
+      throw new Error('Cannot reload config while agent is running');
+    }
+    const previousSnapshot = !resetSession ? this.client?.getSnapshot() : null;
+    if (resetSession) {
+      this.runId++;
+    }
     this.currentConfig = this.readConfig();
     this.recreateClient();
-    if (resetSession) this.clearSession();
+    if (!resetSession && previousSnapshot && this.client) {
+      this.client.loadSnapshot({
+        ...previousSnapshot,
+        model: this.currentConfig.model,
+      });
+    }
+    if (resetSession) {
+      this.client?.reset();
+      this.events.emit('status', { type: 'idle' });
+    }
     micaLogger.logRuntime('agent', 'config:reloaded', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
@@ -127,12 +148,26 @@ export class AgentRuntime {
     };
   }
 
+  getForkSnapshot(options: { dropLastUserMessageAndAfter?: boolean } = {}): AgentRuntimeSnapshot {
+    const snapshot = this.getSnapshot();
+    const usageHistory =
+      this.isRunning && this.activeRunUsageStartIndex !== null
+        ? snapshot.usageHistory.slice(0, this.activeRunUsageStartIndex)
+        : snapshot.usageHistory;
+    return {
+      ...snapshot,
+      messages: options.dropLastUserMessageAndAfter
+        ? dropLastUserMessageAndAfter(snapshot.messages)
+        : snapshot.messages,
+      usageHistory,
+      lastUsage: usageHistory.at(-1),
+    };
+  }
+
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string) {
     if (!this.client) return;
-    const questionText = contentToText(question).trim();
-    if (!questionText) return;
     const messages = [...(this.client.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[])];
-    messages.push({ role: 'user', content: questionText });
+    messages.push({ role: 'user', content: toOpenAIUserContent(question) });
     const answer = partialAnswer?.trim();
     if (answer) {
       messages.push({ role: 'assistant', content: answer });
@@ -142,7 +177,12 @@ export class AgentRuntime {
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {
+    if (this.isRunning) {
+      throw new Error('Cannot load snapshot while agent is running');
+    }
     this.runId++;
+    this.currentConfig = this.configFromSnapshot(snapshot);
+    this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,
       messages: snapshot.messages,
@@ -181,6 +221,7 @@ export class AgentRuntime {
 
     const abortController = new AbortController();
     this.activeAbortController = abortController;
+    this.activeRunUsageStartIndex = this.client.usageHistory.length;
     this.events.emit('status', { type: 'connecting' });
     try {
       const text = await this.client.query(question, {
@@ -211,6 +252,9 @@ export class AgentRuntime {
     } finally {
       if (this.activeAbortController === abortController) {
         this.activeAbortController = null;
+      }
+      if (this.activeAbortController === null) {
+        this.activeRunUsageStartIndex = null;
       }
     }
   }
@@ -281,6 +325,19 @@ export class AgentRuntime {
       effort: config.effort,
     };
   }
+
+  private configFromSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeConfig {
+    const config = micaConfig.get();
+    const provider = config.providers.find((item) => item.id === snapshot.providerId);
+    if (!provider) {
+      throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
+    }
+    return {
+      provider,
+      model: snapshot.model || provider.model,
+      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
+    };
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -293,4 +350,27 @@ function contentToText(content: AgentQueryContent): string {
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
+}
+
+function toOpenAIUserContent(content: AgentQueryContent): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
+  if (typeof content === 'string') return content;
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${part.source.media_type};base64,${part.source.data}`,
+      },
+    };
+  });
+}
+
+function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message && typeof message === 'object' && 'role' in message && message.role === 'user') {
+      return messages.slice(0, index);
+    }
+  }
+  return messages;
 }

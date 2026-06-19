@@ -16,7 +16,7 @@ export type SelectCommandConfig = {
   current: string;
   options: SelectOption[];
   emptyMessage?: string;
-  onSelect: (name: string) => void;
+  onSelect: (name: string) => void | Promise<void>;
 };
 
 export function showSelectCommand(config: SelectCommandConfig) {
@@ -31,6 +31,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
     config.options.findIndex((option) => option.name === config.current),
   );
   const selectedIdx = atom(initialIndex);
+  const applying = atom(false);
 
   function hide() {
     micaLogger.logRuntime('plugin.select', 'closed', { id: config.id, title: config.title });
@@ -38,18 +39,37 @@ export function showSelectCommand(config: SelectCommandConfig) {
   }
 
   function selectCurrent() {
+    if (applying.get()) return;
     const selected = config.options[selectedIdx.get()];
     if (selected) {
       micaLogger.logRuntime('plugin.select', 'selected', { id: config.id, title: config.title, value: selected.name });
-      config.onSelect(selected.name);
+      applying.set(true);
+      void Promise.resolve(config.onSelect(selected.name))
+        .catch((error) => {
+          micaLogger.logRuntime(
+            'plugin.select',
+            'select:error',
+            {
+              id: config.id,
+              title: config.title,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'error',
+          );
+        })
+        .finally(() => {
+          applying.set(false);
+          hide();
+        });
     } else {
       micaLogger.logRuntime('plugin.select', 'select:empty', { id: config.id, title: config.title }, 'warn');
+      hide();
     }
-    hide();
   }
 
   function SelectorPanel() {
     const currentIdx = micaUi.useScheduleState(selectedIdx);
+    const isApplying = micaUi.useScheduleState(applying);
     const items: SelectItem[] = config.options.map((option) => ({
       key: option.name,
       label: option.label,
@@ -57,7 +77,10 @@ export function showSelectCommand(config: SelectCommandConfig) {
     }));
 
     return (
-      <micaUi.Dialog title={config.title} footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
+      <micaUi.Dialog
+        title={isApplying ? `${config.title} (applying...)` : config.title}
+        footer={<micaUi.KeyHints hints={isApplying ? ['applying'] : ['↑↓ navigate', '↵ select', 'esc cancel']} />}
+      >
         <micaUi.SelectList
           items={items}
           selectedIdx={currentIdx}
@@ -73,6 +96,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
       id: config.id,
       component: SelectorPanel,
       onInput: (_input, key) => {
+        if (applying.get()) return true;
         if (key.escape) {
           hide();
           return true;

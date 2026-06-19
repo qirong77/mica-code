@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from './services.js';
-import type { CommandSessionController } from './services.js';
 import type { CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 
@@ -14,70 +13,68 @@ interface TurnData {
   messages: unknown[];
 }
 
-export function createLogExportCommand(
-  agent: CommandAgent,
-  sessionController: CommandSessionController,
-  services: CommandRuntimeServices,
-) {
+export function exportCurrentLog(agent: CommandAgent, services: CommandRuntimeServices): void {
+  micaLogger.logRuntime('plugin.log', 'export:requested');
+
+  const snapshot = agent.getSnapshot();
+  const rawMessages = snapshot.messages;
+  const usageHistory = snapshot.usageHistory;
+
+  if (rawMessages.length === 0) {
+    services.showMessage('log export: 当前会话为空，无内容可导出', 4000);
+    micaLogger.logRuntime('plugin.log', 'export:empty');
+    return;
+  }
+
+  const turns = buildTurns(rawMessages, usageHistory);
+
+  const conversationData = {
+    exportedAt: new Date().toISOString(),
+    provider: snapshot.providerId,
+    effort: snapshot.effort,
+    totalMessages: rawMessages.length,
+    totalTurns: turns.length,
+    turns: turns.map((t) => ({
+      turnIndex: t.turnIndex,
+      model: t.model,
+      usage: t.usageRecords.map(compactUsage),
+      messages: t.messages,
+    })),
+  };
+
+  const logEntries = micaUi.panels.logEntries.get();
+  const logData = {
+    exportedAt: new Date().toISOString(),
+    entries: logEntries.map((entry) => {
+      if (entry.type === 'thinking') {
+        return { type: 'thinking', text: entry.text };
+      }
+      return {
+        type: 'tool',
+        toolName: entry.toolName,
+        displayText: entry.displayText,
+        output: entry.output,
+        completed: entry.completed,
+      };
+    }),
+  };
+
+  const cwd = process.cwd();
+  writeFileSync(resolve(cwd, 'conversation.json'), `${JSON.stringify(conversationData, null, 2)}\n`, 'utf-8');
+  writeFileSync(resolve(cwd, 'log.text'), `${JSON.stringify(logData, null, 2)}\n`, 'utf-8');
+
+  services.showMessage(`log export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) -> conversation.json, log.text`, 6000);
+
+  micaLogger.logRuntime('plugin.log', 'export:done', { messages: rawMessages.length, turns: turns.length });
+}
+
+export function createLogExportCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
     name: 'log-export',
     description: '导出当前对话记录为 JSON 文件',
+    hidden: true,
     action: () => {
-      micaLogger.logRuntime('plugin.log-export', 'requested');
-
-      const snapshot = agent.getSnapshot();
-      const rawMessages = snapshot.messages;
-      const usageHistory = snapshot.usageHistory;
-
-      if (rawMessages.length === 0) {
-        services.showMessage('log-export: 当前会话为空，无内容可导出', 4000);
-        micaLogger.logRuntime('plugin.log-export', 'empty');
-        return;
-      }
-
-      const turns = buildTurns(rawMessages, usageHistory);
-
-      const conversationData = {
-        exportedAt: new Date().toISOString(),
-        provider: snapshot.providerId,
-        effort: snapshot.effort,
-        totalMessages: rawMessages.length,
-        totalTurns: turns.length,
-        turns: turns.map((t) => ({
-          turnIndex: t.turnIndex,
-          model: t.model,
-          usage: t.usageRecords.map(compactUsage),
-          messages: t.messages,
-        })),
-      };
-
-      const logEntries = micaUi.panels.logEntries.get();
-      const logData = {
-        exportedAt: new Date().toISOString(),
-        entries: logEntries.map((entry) => {
-          if (entry.type === 'thinking') {
-            return { type: 'thinking', text: entry.text };
-          }
-          return {
-            type: 'tool',
-            toolName: entry.toolName,
-            displayText: entry.displayText,
-            output: entry.output,
-            completed: entry.completed,
-          };
-        }),
-      };
-
-      const cwd = process.cwd();
-      writeFileSync(resolve(cwd, 'conversation.json'), `${JSON.stringify(conversationData, null, 2)}\n`, 'utf-8');
-      writeFileSync(resolve(cwd, 'log.text'), `${JSON.stringify(logData, null, 2)}\n`, 'utf-8');
-
-      services.showMessage(
-        `log-export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) → conversation.json, log.text`,
-        6000,
-      );
-
-      micaLogger.logRuntime('plugin.log-export', 'done', { messages: rawMessages.length, turns: turns.length });
+      exportCurrentLog(agent, services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }

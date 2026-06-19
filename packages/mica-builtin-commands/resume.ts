@@ -14,9 +14,9 @@ export function createResumeCommand(
     name: 'resume',
     description: '恢复之前的会话',
     action: (arg) => {
-      if (services.isAgentRunning()) {
-        micaLogger.logRuntime('plugin.resume', 'blocked:agent_running', undefined, 'warn');
-        services.showMessage('Agent is running; wait or abort before resuming');
+      if (services.isAgentBusy(agent)) {
+        micaLogger.logRuntime('plugin.resume', 'blocked:agent_busy', undefined, 'warn');
+        services.showMessage('Agent is busy; wait or abort before resuming');
         return;
       }
 

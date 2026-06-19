@@ -1,6 +1,7 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { micaTools, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { connectToServer, connections, type ConnectedMcpServer } from './client.js';
+import { createHash } from 'node:crypto';
 
 type TextContent = { type: 'text'; text: string };
 type ContentItem = TextContent | { type: 'image' | 'audio' | 'resource' | 'resource_link' };
@@ -34,11 +35,12 @@ class McpProxyTool extends micaTools.MicaTool {
 
 export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<InstanceType<typeof micaTools.MicaTool>[]> {
   const result = await server.client.request({ method: 'tools/list' }, ListToolsResultSchema, { timeout: 15_000 });
+  const usedNames = new Set<string>();
 
   return result.tools.map(
     (tool) =>
       new McpProxyTool(
-        `mcp__${server.name}__${tool.name}`,
+        createMcpToolName(server.name, tool.name, usedNames),
         tool.description ?? `MCP tool: ${tool.name}`,
         tool.inputSchema as Record<string, unknown>,
         server.name,
@@ -90,4 +92,27 @@ async function doCallMcpTool(
   const textParts = content.filter((item): item is TextContent => item.type === 'text').map((item) => item.text);
 
   return textParts.length > 0 ? textParts.join('\n') : JSON.stringify(content);
+}
+
+function createMcpToolName(serverName: string, toolName: string, usedNames: Set<string>): string {
+  const hash = createHash('sha1').update(`${serverName}:${toolName}`).digest('hex').slice(0, 8);
+  const serverPart = sanitizeNamePart(serverName, 20);
+  const toolPart = sanitizeNamePart(toolName, 64);
+  const prefix = `mcp__${serverPart}__`;
+  const maxToolLength = Math.max(1, 64 - prefix.length - hash.length - 1);
+  const base = `${prefix}${toolPart.slice(0, maxToolLength)}_${hash}`;
+  let candidate = base;
+  let suffix = 1;
+  while (usedNames.has(candidate)) {
+    const suffixText = `_${suffix++}`;
+    candidate = `${base.slice(0, 64 - suffixText.length)}${suffixText}`;
+  }
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function sanitizeNamePart(value: string, maxLength: number): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const fallback = sanitized || 'tool';
+  return fallback.slice(0, maxLength);
 }

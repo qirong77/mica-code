@@ -1,4 +1,4 @@
-import type { MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
+import type { AgentContentBlockParam } from './Content.js';
 
 export type ConversationTextBlock = {
   type: 'text';
@@ -62,7 +62,7 @@ export function contentBlocksToText(blocks: ConversationContentBlock[]): string 
     .join('\n');
 }
 
-export function micaContentToConversationBlocks(content: string | MicaUiContentBlockParam[]): ConversationContentBlock[] {
+export function micaContentToConversationBlocks(content: string | AgentContentBlockParam[]): ConversationContentBlock[] {
   if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
 
   return content.map((block) => {

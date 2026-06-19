@@ -12,12 +12,13 @@ import type {
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
   BaseAgent,
+  type AgentContentBlockParam,
+  type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
 import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
 
@@ -132,7 +133,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
     this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
   }
 
-  toConversationMessages(): MicaUiConversationMessage[] {
+  toConversationMessages(): AgentConversationMessage[] {
     return this.messages.flatMap((message) => {
       if (message.role !== 'user' && message.role !== 'assistant') return [];
       const content = anthropicContentToMicaContent(message.content);
@@ -156,6 +157,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       ...this.messages,
       { role: 'user', content: micaContentToAnthropicContent(question) },
     ];
+    let totalContent = '';
 
     while (true) {
       throwIfQueryStopped(options);
@@ -205,6 +207,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
         const delta = event.delta;
         if (delta.type === 'text_delta') {
           content += delta.text;
+          totalContent += delta.text;
           this.onText?.(delta.text);
         } else if (delta.type === 'thinking_delta') {
           this.onThinking?.(delta.thinking);
@@ -231,7 +234,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
 
       if (toolUses.length === 0) {
         this.messages = messages;
-        return content;
+        return totalContent || content;
       }
 
       const toolResults: ContentBlockParam[] = [];
@@ -395,12 +398,12 @@ function parseToolInput(inputJson: string | undefined, fallback: unknown): unkno
   }
 }
 
-function anthropicContentToMicaContent(content: MessageParam['content']): string | MicaUiContentBlockParam[] | null {
+function anthropicContentToMicaContent(content: MessageParam['content']): string | AgentContentBlockParam[] | null {
   if (!content) return null;
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return String(content);
 
-  const blocks: MicaUiContentBlockParam[] = [];
+  const blocks: AgentContentBlockParam[] = [];
   const fallbackText: string[] = [];
 
   for (const part of content) {

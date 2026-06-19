@@ -6,6 +6,14 @@ import { randomUUID } from 'node:crypto';
 
 const TEMP_IMAGE_DIR = resolve(homedir(), '.mica', 'tmp-images');
 const IMAGES_DIR = resolve(homedir(), '.mica', 'images');
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+} as const;
 
 export interface ImageData {
   base64: string;
@@ -67,7 +75,7 @@ export function saveClipboardImage(): string | null {
 
 export function saveImage(base64: string, mediaType: string): string {
   ensureTempDir();
-  const ext = mediaType.split('/')[1] || 'png';
+  const ext = mediaType === 'image/jpeg' ? 'jpg' : mediaType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
   const filePath = resolve(TEMP_IMAGE_DIR, `paste-${randomUUID()}.${ext}`);
   writeFileSync(filePath, Buffer.from(base64, 'base64'));
   return filePath;
@@ -85,13 +93,24 @@ export function parseImageRefs(text: string): string | import('../types.js').Mic
     if (idx > lastIndex) blocks.push({ type: 'text', text: text.slice(lastIndex, idx) });
     try {
       const resolved = imgPath.startsWith('~') ? resolve(homedir(), imgPath.slice(2)) : imgPath;
+      const stat = statSync(resolved);
+      if (!stat.isFile()) {
+        blocks.push({ type: 'text', text: `${full} [image omitted: not a file]` });
+        lastIndex = idx + full.length;
+        continue;
+      }
+      if (stat.size > MAX_IMAGE_BYTES) {
+        blocks.push({ type: 'text', text: `${full} [image omitted: file exceeds ${formatBytes(MAX_IMAGE_BYTES)}]` });
+        lastIndex = idx + full.length;
+        continue;
+      }
+      const mediaType = mediaTypeFromPath(resolved);
+      if (!mediaType) {
+        blocks.push({ type: 'text', text: `${full} [image omitted: unsupported image type]` });
+        lastIndex = idx + full.length;
+        continue;
+      }
       const buffer = readFileSync(resolved);
-      const rawExt = resolved.toLowerCase().match(/\.(\w+)$/)?.[1] || 'png';
-      const mediaType = (rawExt === 'jpg' ? 'image/jpeg' : `image/${rawExt}`) as
-        | 'image/jpeg'
-        | 'image/png'
-        | 'image/gif'
-        | 'image/webp';
       blocks.push(
         { type: 'text', text: full },
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: buffer.toString('base64') } },
@@ -106,6 +125,17 @@ export function parseImageRefs(text: string): string | import('../types.js').Mic
   if (blocks.length === 1 && blocks[0]!.type === 'text')
     return (blocks[0] as import('../types.js').MicaUiTextBlock).text;
   return blocks;
+}
+
+function mediaTypeFromPath(path: string): (typeof SUPPORTED_IMAGE_TYPES)[keyof typeof SUPPORTED_IMAGE_TYPES] | null {
+  const ext = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] as keyof typeof SUPPORTED_IMAGE_TYPES | undefined;
+  return ext ? (SUPPORTED_IMAGE_TYPES[ext] ?? null) : null;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 function cleanupTempDir(): void {

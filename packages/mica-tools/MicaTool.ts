@@ -22,14 +22,26 @@ export abstract class MicaTool {
   }
 
   validateInput(input: Record<string, any>): ValidationResult {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      return {
+        valid: false,
+        message: `工具输入应为 object 类型，实际为 ${Array.isArray(input) ? 'array' : typeof input}`,
+      };
+    }
     const required = (this.input_schema.required as string[]) || [];
     for (const key of required) {
       if (!(key in input) || input[key] === undefined || input[key] === null) {
         return { valid: false, message: `缺少必需参数 ${key}` };
       }
-      const prop = (this.input_schema.properties as Record<string, any>)?.[key];
-      if (prop?.type === 'string' && typeof input[key] !== 'string') {
-        return { valid: false, message: `参数 ${key} 应为 string 类型，实际为 ${typeof input[key]}` };
+    }
+    const properties = (this.input_schema.properties as Record<string, any>) ?? {};
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined || value === null) continue;
+      const prop = properties[key];
+      const expected = prop?.type;
+      if (!expected) continue;
+      if (!matchesJsonSchemaType(value, expected)) {
+        return { valid: false, message: `参数 ${key} 应为 ${expected} 类型，实际为 ${Array.isArray(value) ? 'array' : typeof value}` };
       }
     }
     return { valid: true };
@@ -45,4 +57,15 @@ export abstract class MicaTool {
       return `工具 ${this.name} 执行失败：\n${formatError(error)}`;
     }
   }
+}
+
+function matchesJsonSchemaType(value: unknown, expected: string | string[]): boolean {
+  const expectedTypes = Array.isArray(expected) ? expected : [expected];
+  return expectedTypes.some((type) => {
+    if (type === 'array') return Array.isArray(value);
+    if (type === 'integer') return typeof value === 'number' && Number.isInteger(value);
+    if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+    if (type === 'object') return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+    return typeof value === type;
+  });
 }

@@ -1,17 +1,29 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, RunningAgentRecord } from './services.js';
+import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDisplay.js';
 
 type AgentsPanelState = { view: 'list'; selectedIdx: number };
 
 export function createAgentsCommand(services: CommandRuntimeServices) {
   return {
     name: 'agents',
-    description: '显示当前终端的 agents',
-    action: () => {
+    description: '显示当前终端的 agents；/agents clear 清除空闲 agent',
+    action: (arg?: string) => {
+      if (arg?.trim().toLowerCase() === 'clear') {
+        const result = services.clearIdleAgents();
+        micaLogger.logRuntime('plugin.agents', 'clear:done', { cleared: result.cleared.length });
+        services.showMessage(
+          result.cleared.length > 0
+            ? `Cleared ${result.cleared.length} idle agent${result.cleared.length === 1 ? '' : 's'}`
+            : 'No idle agents to clear',
+          4000,
+        );
+        return;
+      }
       const agents = services.listRunningAgents();
       micaLogger.logRuntime('plugin.agents', 'opened', { count: agents.length });
       showAgentsPanel(agents, services);
@@ -32,32 +44,32 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
 
   function AgentsPanel() {
     const state = micaUi.useScheduleState(stateAtom);
+    const terminalSize = useTerminalSize();
+    const layout = buildAgentGrid(agents, terminalSize?.columns ?? process.stdout.columns ?? 100);
     return (
       <micaUi.Dialog
         title={`agents (${agents.length})`}
-        footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ switch', 'esc close']} />}
+        footer={<micaUi.KeyHints hints={['←↑↓→ navigate', '↵ switch', 'esc close']} />}
       >
-        <micaUi.SelectList
-          items={agents.map((agent) => ({ key: agent.id, label: agent.title }))}
-          selectedIdx={state.selectedIdx}
-          empty={<Text dimColor>No running agents</Text>}
-          renderItem={(item) => {
-            const agent = agents.find((entry) => entry.id === item.key);
-            if (!agent) return null;
-            return (
-              <Box flexDirection="column">
-                <Text color={agent.current ? micaUi.theme.colors.accent : undefined}>
-                  {agent.current ? '● ' : '○ '}
-                  {agent.title}
-                </Text>
-                <Text color={micaUi.theme.colors.dim}>
-                  #{agent.index} · {formatSessionMeta(agent.updatedAt, agent.model)} · {agent.status} ·{' '}
-                  {agent.providerName}
-                </Text>
+        <Box marginTop={1} flexDirection="column">
+          {agents.length === 0 ? (
+            <Text dimColor>No running agents</Text>
+          ) : (
+            layout.rows.map((row, rowIndex) => (
+              <Box key={rowIndex} flexDirection="row">
+                {row.map((agent, colIndex) => (
+                  <AgentListItem
+                    key={agent.id}
+                    agent={agent}
+                    width={layout.itemWidth}
+                    selected={agents[state.selectedIdx]?.id === agent.id}
+                    marginRight={colIndex < row.length - 1 ? 2 : 0}
+                  />
+                ))}
               </Box>
-            );
-          }}
-        />
+            ))
+          )}
+        </Box>
       </micaUi.Dialog>
     );
   }
@@ -76,7 +88,13 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
         }
         if (state.view === 'list') {
           if (key.upArrow || key.downArrow) {
-            const next = navigate(state.selectedIdx, agents.length, key.downArrow ? 1 : -1);
+            const columns = buildAgentGrid(agents, process.stdout.columns ?? 100).columns;
+            const next = navigateGrid(state.selectedIdx, agents.length, key.downArrow ? columns : -columns);
+            stateAtom.set({ view: 'list', selectedIdx: next });
+            return true;
+          }
+          if (key.leftArrow || key.rightArrow) {
+            const next = navigateGrid(state.selectedIdx, agents.length, key.rightArrow ? 1 : -1);
             stateAtom.set({ view: 'list', selectedIdx: next });
             return true;
           }
@@ -108,10 +126,63 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
   }
 }
 
-function navigate(index: number, length: number, direction: 1 | -1): number {
+function AgentListItem({
+  agent,
+  width,
+  selected,
+  marginRight,
+}: {
+  agent: RunningAgentRecord;
+  width: number;
+  selected: boolean;
+  marginRight: number;
+}) {
+  const status = getWorkingStatusDisplay(agent.status);
+  const contentWidth = Math.max(12, width - 8);
+  const statusWidth = Math.max(8, Math.min(18, Math.floor(contentWidth * 0.34)));
+  const remaining = Math.max(4, contentWidth - statusWidth);
+  const titleWidth = Math.max(6, Math.floor(remaining * 0.55));
+  const metaWidth = Math.max(4, remaining - titleWidth);
+  return (
+    <Box width={width} marginRight={marginRight} flexDirection="row">
+      <Box width={2} flexShrink={0}>
+        <Text color={selected ? micaUi.theme.colors.accent : micaUi.theme.colors.dim}>{selected ? '▶' : ' '}</Text>
+      </Box>
+      <Box width={titleWidth} flexShrink={0}>
+        <Text color={agent.current ? micaUi.theme.colors.accent : undefined} wrap="truncate">
+          #{agent.index} {agent.title}
+        </Text>
+      </Box>
+      <Text color={micaUi.theme.colors.dim}> · </Text>
+      <Box width={statusWidth} flexShrink={0}>
+        <Text color={status.color} wrap="truncate">
+          {status.text}
+        </Text>
+      </Box>
+      <Text color={micaUi.theme.colors.dim}> · </Text>
+      <Box width={metaWidth} flexShrink={0}>
+        <Text color={micaUi.theme.colors.dim} wrap="truncate">
+          {formatSessionMeta(agent.updatedAt, agent.model)} {agent.providerName}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function buildAgentGrid(agents: RunningAgentRecord[], terminalColumns: number) {
+  const available = Math.max(32, terminalColumns - 6);
+  const minItemWidth = 60;
+  const columns = Math.max(1, Math.min(agents.length || 1, Math.floor((available + 2) / (minItemWidth + 2))));
+  const itemWidth =
+    columns === 1 ? available : Math.max(minItemWidth, Math.floor((available - (columns - 1) * 2) / columns));
+  const rows: RunningAgentRecord[][] = [];
+  for (let i = 0; i < agents.length; i += columns) rows.push(agents.slice(i, i + columns));
+  return { columns, itemWidth, rows };
+}
+
+function navigateGrid(index: number, length: number, direction: number): number {
   if (length <= 0) return 0;
-  if (direction === -1) return index > 0 ? index - 1 : length - 1;
-  return index < length - 1 ? index + 1 : 0;
+  return (index + direction + length) % length;
 }
 
 function formatSessionMeta(updatedAt: string, model: string): string {

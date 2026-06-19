@@ -65,6 +65,6 @@ export type RuntimeRpcMethods = {
   getState(): Promise<RuntimeViewSnapshot>;
   attach(params: AttachParams): Promise<AttachResult>;
   detach(params: { controllerAgentId: string; controllerPid: number }): Promise<{ detached: true }>;
-  submit(params: { text: string }): Promise<SubmitResult>;
-  abort(params?: { reason?: string }): Promise<AbortResult>;
+  submit(params: { text: string; controllerAgentId: string; controllerPid: number }): Promise<SubmitResult>;
+  abort(params: { reason?: string; controllerAgentId: string; controllerPid: number }): Promise<AbortResult>;
 };

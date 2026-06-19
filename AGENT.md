@@ -26,10 +26,11 @@
   - `builtinPlugins.ts`：内置插件注册入口。
   - `index.ts`：应用层导出。
 - `src/runtime/`
-  - `TurnLoop.ts`：应用层单 turn 生命周期，包括输入解析、agent.run、会话保存和错误处理。
-  - `MessageQueue.ts`：运行中用户输入的排队状态。
   - `ToolLogController.ts`：thinking/tool call/tool result 的 UI 日志控制。
   - `uiBridge.ts`：runtime 状态到 mica-ui 的映射，包括错误、消息、状态和模型展示同步。
+- `src/app/adapters/`
+  - `LocalRuntimeController.ts`：当前应用的单 turn 生命周期，包括命令分发、输入排队接入、agent.run、会话保存和错误处理。
+  - `MicaUiRuntimeBridge.ts`：订阅 runtime/agent 事件并同步终端 UI 与多 agent UI 状态。
 - `src/agent/AgentRuntime.ts`：agent 运行时封装，负责模型 client 生命周期、事件分发、状态管理和 snapshot。
 - `src/agents/terminalAgentSessions.ts`：终端 agent 会话相关状态/桥接。
 - `src/session/SessionController.ts`：应用层会话保存、恢复与 UI 状态同步。
@@ -51,7 +52,7 @@
 - `packages/mica-commands/`
   - 命令注册抽象与类型，例如 `CommandRegistry`。
 - `packages/mica-builtin-commands/`
-  - 内置斜杠/快捷命令实现，例如 provider、model、resume、mcp、skills、commit、compact、agents、logs、status、new、clear。
+  - 内置斜杠/快捷命令实现，例如 provider、model、resume、mcp、skills、commit、compact、agents、log、rewind、status、new、clear。
 - `packages/mica-plugin/`
   - 插件系统基础设施，包括 `PluginManager`、`HookRegistry`、`ServiceContainer`、`ServiceToken`、插件上下文和 hook 类型。
   - 新增长期能力优先以 plugin/service/hook 形式接入，而不是堆到入口文件。
@@ -90,8 +91,8 @@
 3. 内置插件通过 `src/app/builtinPlugins.ts` 接入，命令通过 `packages/mica-commands` / `packages/mica-builtin-commands` 注册。
 4. MCP 通过 `packages/mica-mcp` 初始化，并把远端工具桥接到 `packages/mica-tools` 的工具注册体系。
 5. 用户输入从 `packages/mica-ui/input` 进入应用层 runtime。
-6. `src/runtime/TurnLoop.ts` 负责当前应用的单 turn 编排：排队判断、append user message、调用 `AgentRuntime.run`、处理流式事件、保存 session、更新 UI。
-7. `src/runtime/ToolLogController.ts` 与 `src/runtime/uiBridge.ts` 将 agent/tool/runtime 状态映射到 `packages/mica-ui`。
+6. `src/app/adapters/LocalRuntimeController.ts` 负责当前应用的单 turn 编排：命令分发、排队接入、append user message、调用 `AgentRuntime.run`、保存 session、发布 runtime 事件。
+7. `src/app/adapters/MicaUiRuntimeBridge.ts` 与 `src/runtime/ToolLogController.ts` 将 agent/tool/runtime 状态映射到 `packages/mica-ui`。
 8. `src/session/SessionController.ts` 负责保存和恢复当前会话，并在恢复后同步 UI 状态。
 
 ## 配置与数据位置
@@ -109,19 +110,20 @@
 
 - `packages/mica-agent` 不依赖 UI、session、commands、plugin 或应用层 `src/`；它只负责 provider adapter、prompt、agent run 和公共 agent 接口。
 - `packages/mica-ui` 不依赖 provider 和 agent 业务逻辑；它只负责终端 UI 状态、组件和交互呈现。
-- `packages/mica-runtime` 承载可复用 runtime 抽象；`src/runtime` 可以保留应用层编排和兼容逻辑，但新增通用 runtime 能力应优先下沉到 `packages/mica-runtime`。
+- `packages/mica-runtime` 承载可复用 runtime 抽象；当前应用层 turn 编排在 `src/app/adapters/LocalRuntimeController.ts`，新增通用 runtime 能力应优先下沉到 `packages/mica-runtime`。
+- 插件命令如果会长时间运行并修改会话、配置或文件状态，需要通过 command services 的 exclusive task 包裹，并用插件状态更新左下角文案；这样多 agent 切换时状态归属仍绑定到原 agent。
 - `packages/mica-plugin` 是长期扩展入口；新增 memory、todo、compact、multi-agent 等能力优先采用 `Service + Store + Hook + Command/Plugin` 结构。
 - `packages/mica-commands` 只定义命令体系；具体内置命令放在 `packages/mica-builtin-commands`。
 - `src/app` 负责 wiring，不应承载长期业务状态。
 - `src/session` / `packages/mica-session` 只负责会话/快照持久化，不负责 provider 调用。
-- Runtime 到 UI 的映射优先放在 `src/runtime/uiBridge.ts` 或专门 controller 中，不要让 `AgentRuntime` 直接操作 UI。
+- Runtime 到 UI 的映射优先放在 `src/app/adapters/MicaUiRuntimeBridge.ts`、`src/runtime/uiBridge.ts` 或专门 controller 中，不要让 `AgentRuntime` 直接操作 UI。
 - 不要跨层偷懒引用：package 不应随意 import `src/`；底层 package 不应依赖上层 package。
 
 ## 后续 Roadmap
 
 ### Phase 1：Runtime Hook 基础
 
-- 在 `packages/mica-runtime` 中沉淀稳定生命周期和 hook runner，应用层 `src/runtime` 负责接入。
+- 在 `packages/mica-runtime` 中沉淀稳定生命周期和 hook runner，应用层 `src/app/adapters/LocalRuntimeController.ts` 负责接入。
 - 推荐生命周期：
   - `onUserInput`
   - `beforeTurn`
@@ -159,7 +161,7 @@
 ### Phase 5：Session Graph 与 Fork
 
 - 扩展 `packages/mica-session` 和 `src/session`，引入 turn record、branch、session graph。
-- 实现 `/fork-agent` 或相关命令。
+- 完善 `/fork` 的 branch/session graph 元数据。
 - fork 应复制指定 turn 的 snapshot，生成新 branch/session，并保留 parent relation。
 - UI 上先只需要能 resume branch；复杂可视化后置。
 
@@ -200,7 +202,7 @@
 
 - 终端 UI 修改优先遵循 `packages/mica-ui` 现有组件层级：`app`、`conversation`、`bottom`、`input`、`panels`、`primitives`。
 - 会话恢复后需要同步恢复 UI 状态，相关逻辑在 `src/session/SessionController.ts`。
-- Runtime 到 UI 的映射优先放在 `src/runtime/uiBridge.ts` 或专门 controller 中。
+- Runtime 到 UI 的映射优先放在 `src/app/adapters/MicaUiRuntimeBridge.ts`、`src/runtime/uiBridge.ts` 或专门 controller 中。
 - 输入框、快捷键、dropdown、plugin panel 的状态不要散落到入口文件。
 - 如果新增运行中输入、队列、回退、history search 等交互，需要同步考虑 UI 提示、session 状态和 runtime 状态一致性。
 

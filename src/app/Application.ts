@@ -81,8 +81,10 @@ export class Application {
       await runtime.start();
 
       void micaConfig.loadMissingProviderModels().then(() => {
-        agent.reloadConfig(false);
-        syncModelDisplay(agent);
+        if (!agent.isRunning) {
+          agent.reloadConfig(false);
+          syncModelDisplay(agent);
+        }
       });
 
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');

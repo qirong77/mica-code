@@ -3,6 +3,8 @@ import { Box, ScrollBox, Text } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@packages/@anthropic/ink/src/components/ScrollBox.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger, type RuntimeLogEntry } from '@packages/mica-logger/index.js';
+import type { CommandAgent, CommandRuntimeServices } from './services.js';
+import { exportCurrentLog } from './logExport.js';
 
 const PANEL_ID = 'logs-panel';
 const LOGS_PLACEHOLDER = 'Logs: ↑↓ scroll, Esc close';
@@ -11,11 +13,32 @@ const SCROLL_STEP = 4;
 let previousPlaceholder: string | null = null;
 let scrollBox: ScrollBoxHandle | null = null;
 
-export function createLogsCommand() {
+export function createLogCommand(agent: CommandAgent, services: CommandRuntimeServices) {
+  return {
+    name: 'log',
+    description: '展示当前运行日志；/log export 导出对话与日志',
+    action: (arg?: string) => {
+      if (arg?.trim().toLowerCase() === 'export') {
+        closeLogsPanel();
+        exportCurrentLog(agent, services);
+        return;
+      }
+      showLogsPanel();
+    },
+  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+export function createLogsCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
     name: 'logs',
     description: '展示当前运行日志',
-    action: () => {
+    hidden: true,
+    action: (arg?: string) => {
+      if (arg?.trim().toLowerCase() === 'export') {
+        closeLogsPanel();
+        exportCurrentLog(agent, services);
+        return;
+      }
       showLogsPanel();
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];

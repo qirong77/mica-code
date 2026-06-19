@@ -33,7 +33,7 @@ export type TerminalAgentSessionRecord = {
   providerId: string;
   providerName: string;
   model: string;
-  status: string;
+  status: MicaUiWorkingStatus;
   current: boolean;
   startedAt: string;
   updatedAt: string;
@@ -47,7 +47,7 @@ export type TerminalAgentSession = {
   uiState: TerminalAgentUiState;
   startedAt: string;
   updatedAt: string;
-  status: string;
+  status: MicaUiWorkingStatus;
   disposeStatusListener: () => void;
 };
 
@@ -104,6 +104,32 @@ export class TerminalAgentSessionManager {
     return this.sessions.map((session) => this.toRecord(session));
   }
 
+  setStatusForAgent(agent: AgentRuntime, status: MicaUiWorkingStatus): TerminalAgentSessionRecord | null {
+    const session = this.findByAgent(agent);
+    if (!session) return null;
+    session.status = status;
+    session.updatedAt = new Date().toISOString();
+    session.uiState = normalizeUiState({ ...session.uiState, workingStatus: status });
+    return this.toRecord(session);
+  }
+
+  clearIdleSessions(): { cleared: TerminalAgentSessionRecord[]; remaining: TerminalAgentSessionRecord[] } {
+    const cleared: TerminalAgentSessionRecord[] = [];
+    for (let index = this.sessions.length - 1; index >= 0; index--) {
+      const session = this.sessions[index]!;
+      if (session.id === this.currentSessionId || isRunningStatus(session.status)) continue;
+      cleared.push(this.toRecord(session));
+      session.disposeStatusListener();
+      session.agent.abort();
+      this.sessions.splice(index, 1);
+    }
+    cleared.reverse();
+    if (!this.currentSessionId || !this.sessions.some((session) => session.id === this.currentSessionId)) {
+      this.currentSessionId = this.sessions[0]?.id ?? null;
+    }
+    return { cleared, remaining: this.list() };
+  }
+
   stop(): void {
     for (const session of this.sessions) {
       session.disposeStatusListener();
@@ -122,7 +148,7 @@ export class TerminalAgentSessionManager {
       uiState: createEmptyUiState(),
       startedAt: now,
       updatedAt: now,
-      status: 'idle',
+      status: { type: 'idle' },
       disposeStatusListener: () => undefined,
     };
     this.nextIndex += 1;
@@ -203,14 +229,27 @@ function contentToText(content: ReturnType<AgentRuntime['toConversationMessages'
     .join('\n');
 }
 
-function formatStatus(status: AgentRuntimeStatus): string {
-  if (status.type === 'calling_tool') {
-    const tools = status.toolNames?.join(', ');
-    return tools ? `calling_tool:${tools}` : 'calling_tool';
+function formatStatus(status: AgentRuntimeStatus): MicaUiWorkingStatus {
+  switch (status.type) {
+    case 'idle':
+      return { type: 'idle' };
+    case 'connecting':
+      return { type: 'connecting' };
+    case 'thinking':
+      return { type: 'thinking' };
+    case 'streaming':
+      return { type: 'streaming' };
+    case 'calling_tool':
+      return { type: 'calling_tool', toolNames: status.toolNames };
+    case 'completed':
+      return { type: 'completed', elapsedMs: status.elapsedMs };
+    case 'error':
+      return { type: 'error', message: status.message };
   }
-  if (status.type === 'completed') return 'idle';
-  if (status.type === 'error') return `error:${status.message}`;
-  return status.type;
+}
+
+function isRunningStatus(status: MicaUiWorkingStatus): boolean {
+  return status.type !== 'idle' && status.type !== 'completed' && status.type !== 'error';
 }
 
 function tailText(text: string, maxChars: number): string {

@@ -2,8 +2,12 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-console.log('Running prebuild checks...\n');
-execSync('bun run prebuild', { stdio: 'inherit' });
+if (process.env.MICA_PREBUILD_DONE === '1') {
+  console.log('Prebuild checks completed.\n');
+} else {
+  console.log('Running prebuild checks...\n');
+  execSync('bun run prebuild', { stdio: 'inherit' });
+}
 
 const outDir = 'dist';
 const outName = 'mica';

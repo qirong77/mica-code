@@ -58,9 +58,9 @@ export class SessionController {
     this.currentSessionId = micaSession.createId();
   }
 
-  saveCurrent(): void {
+  saveCurrent(options: { allowEmpty?: boolean } = {}): void {
     const snapshot = this.agent.getSnapshot();
-    if (snapshot.messages.length === 0) return;
+    if (snapshot.messages.length === 0 && !options.allowEmpty) return;
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);

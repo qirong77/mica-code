@@ -7,6 +7,7 @@ export class AgentIpcClient {
   private socket: Socket | null = null;
   private connection: JsonLineConnection | null = null;
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void }>();
+  private controllerAgentId: string | null = null;
 
   constructor(private readonly socketPath: string) {}
 
@@ -14,6 +15,8 @@ export class AgentIpcClient {
     this.socket = connect(this.socketPath);
     this.connection = new JsonLineConnection(this.socket);
     this.connection.on('message', (message) => this.handleMessage(message));
+    this.connection.on('error', (error) => this.rejectAll(error));
+    this.connection.on('close', () => this.rejectAll(new Error('IPC connection closed')));
     await new Promise<void>((resolve, reject) => {
       this.socket?.once('connect', resolve);
       this.socket?.once('error', reject);
@@ -24,9 +27,11 @@ export class AgentIpcClient {
     this.connection?.close();
     this.connection = null;
     this.socket = null;
+    this.rejectAll(new Error('IPC client closed'));
   }
 
   hello(clientAgentId: string) {
+    this.controllerAgentId = clientAgentId;
     return this.request('hello', {
       protocol: MICA_AGENT_RPC_PROTOCOL,
       protocolVersion: MICA_AGENT_RPC_VERSION,
@@ -41,6 +46,7 @@ export class AgentIpcClient {
   }
 
   attach(params: Omit<AttachParams, 'controllerPid' | 'controllerCwd'>) {
+    this.controllerAgentId = params.controllerAgentId;
     return this.request('attach', {
       ...params,
       controllerPid: process.pid,
@@ -56,11 +62,27 @@ export class AgentIpcClient {
   }
 
   submit(text: string) {
-    return this.request('submit', { text });
+    return this.request('submit', {
+      text,
+      ...this.controlIdentity(),
+    });
   }
 
   abort(reason?: string) {
-    return this.request('abort', { reason });
+    return this.request('abort', {
+      reason,
+      ...this.controlIdentity(),
+    });
+  }
+
+  private controlIdentity(): { controllerAgentId: string; controllerPid: number } {
+    if (!this.controllerAgentId) {
+      throw new Error('IPC client is not attached as a controller');
+    }
+    return {
+      controllerAgentId: this.controllerAgentId,
+      controllerPid: process.pid,
+    };
   }
 
   private request(method: string, params?: unknown): Promise<unknown> {
@@ -82,5 +104,12 @@ export class AgentIpcClient {
       return;
     }
     pending.resolve(message.result);
+  }
+
+  private rejectAll(error: unknown): void {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 }

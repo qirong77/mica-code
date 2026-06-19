@@ -1,5 +1,5 @@
 import { atom } from 'nanostores';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import defaultConfig from './default.json';
@@ -34,7 +34,13 @@ const configAtom = atom<IMicaConfig>(readConfig());
 
 export function readConfig(): IMicaConfig {
   ensureConfigFile();
-  return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as IMicaConfig;
+  try {
+    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as IMicaConfig;
+  } catch {
+    backupInvalidConfig();
+    writeDefaultConfig();
+    return defaultConfig as IMicaConfig;
+  }
 }
 
 export function getConfig() {
@@ -108,11 +114,25 @@ export async function loadMissingProviderModels() {
 function ensureConfigFile() {
   if (existsSync(CONFIG_PATH)) return;
   ensureConfigDir();
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
+  writeDefaultConfig();
 }
 
 function ensureConfigDir() {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+}
+
+function writeDefaultConfig() {
+  ensureConfigDir();
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
+}
+
+function backupInvalidConfig() {
+  try {
+    if (!existsSync(CONFIG_PATH)) return;
+    renameSync(CONFIG_PATH, `${CONFIG_PATH}.invalid-${Date.now()}`);
+  } catch {
+    // If the backup fails, still try to restore a usable default config.
+  }
 }
 
 function requireProvider(config: IMicaConfig, providerId: string): ProviderDefinition {

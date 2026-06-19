@@ -50,6 +50,8 @@ export const status = {
   streaming: () => setWorkingStatus({ type: 'streaming' }),
   callingTool: (toolNames?: string[], elapsedMs?: number) =>
     setWorkingStatus({ type: 'calling_tool', toolNames, elapsedMs }),
+  pluginTask: (text: string, level?: 'info' | 'warn' | 'error') =>
+    setWorkingStatus({ type: 'plugin_task', text, level }),
   completed: (elapsedMs?: number) => setWorkingStatus({ type: 'completed', elapsedMs }),
   error: (message?: string) => setWorkingStatus({ type: 'error', message }),
 };
@@ -110,6 +112,7 @@ export function setAgentStatusItems(items: MicaUiAgentStatusItem[]): void {
 }
 
 let _onAbortAgent: (() => void) | null = null;
+let _onEditPendingInput: (() => string | null | undefined) | null = null;
 
 export function setOnAbortAgent(cb: () => void): void {
   _onAbortAgent = cb;
@@ -117,4 +120,12 @@ export function setOnAbortAgent(cb: () => void): void {
 
 export function abortAgent(): void {
   _onAbortAgent?.();
+}
+
+export function setOnEditPendingInput(cb: () => string | null | undefined): void {
+  _onEditPendingInput = cb;
+}
+
+export function editPendingInput(): string | null {
+  return _onEditPendingInput?.() ?? null;
 }

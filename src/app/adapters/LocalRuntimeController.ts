@@ -1,5 +1,4 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
-import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -19,6 +18,13 @@ import type { SessionController } from '../../session/SessionController.js';
 import { reportRuntimeError } from '../../runtime/uiBridge.js';
 import { getActiveApplication } from '../Application.js';
 import { normalizeUiState } from '../../agents/terminalAgentSessions.js';
+import {
+  RewindCheckpointManager,
+  type RewindApplyResult,
+  type RewindPreviewResult,
+} from '../../runtime/RewindCheckpointManager.js';
+
+const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'logs', 'status', 'agents', 'new']);
 
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();
@@ -34,7 +40,10 @@ export class LocalRuntimeController implements RuntimeController {
   private readonly queues = new Map<AgentRuntime, InstanceType<typeof micaRuntime.MessageQueueService>>();
   private readonly sessionControllers = new Map<AgentRuntime, SessionController>();
   private readonly clearingAgents = new Set<AgentRuntime>();
+  private readonly exclusiveTasks = new Map<AgentRuntime, { id: number; label: string }>();
+  private readonly rewindCheckpoints = new RewindCheckpointManager();
   private hookAgent: AgentRuntime | null = null;
+  private nextExclusiveTaskId = 1;
 
   constructor(
     private agent: AgentRuntime,
@@ -92,6 +101,7 @@ export class LocalRuntimeController implements RuntimeController {
   clear(): void {
     const isRunning = this.runningAgents.has(this.agent);
     this.responseBuffers.set(this.agent, '');
+    this.rewindCheckpoints.clear(this.agent);
     if (isRunning) {
       this.clearingAgents.add(this.agent);
     } else {
@@ -112,12 +122,65 @@ export class LocalRuntimeController implements RuntimeController {
     return this.queueAgent();
   }
 
+  isAgentBusy(agent = this.agent): boolean {
+    return this.runningAgents.has(agent) || this.exclusiveTasks.has(agent);
+  }
+
+  getExclusiveTask(agent = this.agent): { label: string } | null {
+    return this.exclusiveTasks.get(agent) ?? null;
+  }
+
+  beginExclusiveTask(agent: AgentRuntime, label: string): () => void {
+    if (this.runningAgents.has(agent)) {
+      throw new Error('Agent is running; wait or abort before starting another task');
+    }
+    const existing = this.exclusiveTasks.get(agent);
+    if (existing) {
+      throw new Error(`${existing.label} is already running`);
+    }
+    const id = this.nextExclusiveTaskId++;
+    this.exclusiveTasks.set(agent, { id, label });
+    return () => {
+      const current = this.exclusiveTasks.get(agent);
+      if (current?.id === id) this.exclusiveTasks.delete(agent);
+    };
+  }
+
+  editLastPendingInput(): string | null {
+    const owner = this.queueAgent();
+    const input = this.queueFor(owner).removeLast();
+    this.events.publish({ type: 'queue:changed', pendingInputs: this.queueFor(owner).list(), owner });
+    return input?.text ?? null;
+  }
+
+  getRewindPreview(): RewindPreviewResult {
+    return this.rewindCheckpoints.preview(this.agent);
+  }
+
+  applyRewind(id: string): RewindApplyResult {
+    const result = this.rewindCheckpoints.apply(this.agent, id);
+    this.responseBuffers.set(this.agent, '');
+    this.queue.clear();
+    this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
+    return result;
+  }
+
   async submit(rawText: string, options: SubmitOptions = {}): Promise<SubmitResult> {
     const text = rawText.trim();
     if (!text) return { ok: false, reason: 'empty' };
 
     const parsedCommand = this.commands.resolve(text);
     if (parsedCommand) {
+      const activeTask = this.exclusiveTasks.get(this.agent);
+      if (activeTask && !ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS.has(parsedCommand.command.name)) {
+        this.events.publish({
+          type: 'notification',
+          level: 'warn',
+          message: `${activeTask.label} 正在执行，完成后再执行该命令`,
+          owner: this.agent,
+        });
+        return { ok: false, reason: 'busy' };
+      }
       if (this.runningAgents.has(this.agent) && parsedCommand.command.allowDuringTurn !== true) {
         this.events.publish({
           type: 'notification',
@@ -155,6 +218,16 @@ export class LocalRuntimeController implements RuntimeController {
     const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui');
     const targetAgent = this.submissionAgent(options);
     const targetSessionController = this.sessionControllers.get(targetAgent) ?? this.sessionController;
+    const activeTask = this.exclusiveTasks.get(targetAgent);
+    if (activeTask) {
+      this.events.publish({
+        type: 'notification',
+        level: 'warn',
+        message: `${activeTask.label} 正在执行，完成后再发送对话`,
+        owner: targetAgent,
+      });
+      return { ok: false, reason: 'busy' };
+    }
 
     micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.runningAgents.has(targetAgent) });
 
@@ -204,6 +277,7 @@ export class LocalRuntimeController implements RuntimeController {
     let hasError = false;
 
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
+    this.rewindCheckpoints.capture(agent, input);
     this.responseBuffers.set(agent, '');
     const session = getActiveApplication()?.activeContext?.agentSessions.findByAgent(agent);
     if (session) {
@@ -219,7 +293,7 @@ export class LocalRuntimeController implements RuntimeController {
       });
     }
     if (this.isActiveAgent(agent)) {
-      this.events.publish({ type: 'turn:started', input });
+      this.events.publish({ type: 'turn:started', input, owner: agent });
       micaUi.terminalInput.clearText();
       micaUi.conversation.appendUserMessage(content);
       micaUi.conversation.clearResponseText();
@@ -272,7 +346,7 @@ export class LocalRuntimeController implements RuntimeController {
         }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
-        if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input });
+        if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
         micaLogger.logRuntime(
           'runtime',
           this.clearingAgents.has(agent) ? 'turn:aborted_cleared' : 'turn:aborted_saved',
@@ -292,7 +366,7 @@ export class LocalRuntimeController implements RuntimeController {
           thinkingText: '',
           workingStatus: { type: 'error', message },
           agentTurnLogItems: [
-            micaAgent.createErrorLogItem({
+            micaUi.createErrorLogItem({
               id: `error-${Date.now()}`,
               title: '请求失败',
               error,
@@ -301,7 +375,7 @@ export class LocalRuntimeController implements RuntimeController {
         });
       }
       if (this.isActiveAgent(agent)) {
-        this.events.publish({ type: 'turn:error', input, error });
+        this.events.publish({ type: 'turn:error', input, error, owner: agent });
         reportRuntimeError(error, '请求失败');
       }
     } finally {
@@ -316,7 +390,7 @@ export class LocalRuntimeController implements RuntimeController {
       }
       if (!hasError && this.isActiveAgent(agent)) micaUi.panels.clearAgentTurnLogItems();
       const elapsedMs = Date.now() - startedAt;
-      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs });
+      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
       try {
         await this.hooks.emit('turn:after', { runtime: this, input, elapsedMs, hasError });

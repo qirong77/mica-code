@@ -1,1 +1,3 @@
-console.log('Skipping TypeScript validation during prebuild.');
+import { execSync } from 'node:child_process';
+
+execSync('bunx tsc --noEmit', { stdio: 'inherit' });

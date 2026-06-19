@@ -5,7 +5,7 @@ import { SimpleTextInput } from './CursorInput.js';
 import { themeColors } from '../theme.js';
 import { useScheduleState } from '../hooks/index.js';
 import * as input from './state.js';
-import { pluginUIs, workingStatus, abortAgent, setPluginUIs } from '../panels/state.js';
+import { pluginUIs, workingStatus, abortAgent, setPluginUIs, editPendingInput } from '../panels/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { MessageBarAPI } from '../panels/MessageBar.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
@@ -78,7 +78,11 @@ function TerminalInput() {
 
   React.useEffect(() => clearExitConfirmation, [clearExitConfirmation]);
 
-  const isAgentRunning = status.type !== 'idle' && status.type !== 'completed' && status.type !== 'error';
+  const isAgentRunning =
+    status.type === 'connecting' ||
+    status.type === 'thinking' ||
+    status.type === 'streaming' ||
+    status.type === 'calling_tool';
 
   const armExitConfirmation = useCallback(
     (text: string) => {
@@ -124,6 +128,16 @@ function TerminalInput() {
   useInput((_input, key, event) => {
     if (key.ctrl && (_input === '\x03' || _input === '' || _input === 'c')) {
       handleCtrlC();
+      return;
+    }
+
+    if (key.shift && key.leftArrow && localText.length === 0 && activePluginUIs.filter((x) => x.onInput).length === 0) {
+      const pendingInput = editPendingInput();
+      if (pendingInput) {
+        setLocalText(pendingInput);
+        setCursorOffset(pendingInput.length);
+        input.text.set(pendingInput);
+      }
       return;
     }
 

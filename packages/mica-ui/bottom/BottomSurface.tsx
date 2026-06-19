@@ -22,6 +22,9 @@ export function BottomSurface(): React.ReactNode {
   if (plugins.length > 0) {
     return <PluginPanel />;
   }
+  if (status.type === 'plugin_task' && logItems.length === 0) {
+    return null;
+  }
   if (status.type !== 'idle' || logItems.length > 0) {
     return <AgentTurnLog />;
   }

@@ -4,6 +4,8 @@ import { useScheduleState } from '../hooks/index.js';
 import { agentStatusItems } from './state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
+import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
+import type { MicaUiAgentStatusItem } from '../types.js';
 
 const MIN_SEGMENT_WIDTH = 18;
 
@@ -15,10 +17,13 @@ export function AgentsStatusBar(): React.ReactNode {
     if (agents.length <= 1) return [];
     const available = Math.max(40, (terminalSize?.columns ?? process.stdout.columns ?? 100) - 4);
     const separator = '  ';
-    const segmentWidth = Math.max(MIN_SEGMENT_WIDTH, Math.floor((available - separator.length * (agents.length - 1)) / agents.length));
+    const segmentWidth = Math.max(
+      MIN_SEGMENT_WIDTH,
+      Math.floor((available - separator.length * (agents.length - 1)) / agents.length),
+    );
     return agents.map((agent) => ({
       agent,
-      text: formatAgent(agent, segmentWidth),
+      width: segmentWidth,
     }));
   }, [agents, terminalSize?.columns]);
 
@@ -26,11 +31,10 @@ export function AgentsStatusBar(): React.ReactNode {
 
   return (
     <Box paddingX={1}>
-      {segments.map(({ agent, text }, index) => (
+      {segments.map(({ agent, width }, index) => (
         <Box key={agent.id}>
-          {index > 0 && <Text color={themeColors.dim}>  </Text>}
-          {isRunningStatus(agent.status) && <Spin />}
-          <Text color={agent.current ? themeColors.accent : themeColors.dim}>{text}</Text>
+          {index > 0 && <Text color={themeColors.dim}> </Text>}
+          <AgentSegment agent={agent} width={width} />
         </Box>
       ))}
     </Box>
@@ -39,24 +43,18 @@ export function AgentsStatusBar(): React.ReactNode {
 
 export const AgentsStatusBarUI = { renderFn: AgentsStatusBar };
 
-function formatAgent(
-  agent: {
-    index: number;
-    title: string;
-    providerName: string;
-    model: string;
-    status: string;
-    current: boolean;
-  },
-  width: number,
-): string {
-  const marker = agent.current ? '*' : ' ';
-  const raw = `${marker}#${agent.index} ${agent.status} ${agent.title} (${agent.model})`;
-  return truncate(raw, width);
-}
-
-function isRunningStatus(status: string): boolean {
-  return status !== 'idle' && !status.startsWith('error:');
+function AgentSegment({ agent, width }: { agent: MicaUiAgentStatusItem; width: number }): React.ReactNode {
+  const status = getWorkingStatusDisplay(agent.status);
+  const prefix = `${agent.current ? '*' : ' '}#${agent.index} `;
+  const suffix = ` ${truncate(`${agent.title} (${agent.model})`, Math.max(4, width - prefix.length - status.text.length - 1))}`;
+  return (
+    <>
+      {status.spinning && <Spin />}
+      <Text color={agent.current ? themeColors.accent : themeColors.dim}>{prefix}</Text>
+      <Text color={status.color}>{status.text}</Text>
+      <Text color={agent.current ? themeColors.accent : themeColors.dim}>{suffix}</Text>
+    </>
+  );
 }
 
 function truncate(text: string, width: number): string {

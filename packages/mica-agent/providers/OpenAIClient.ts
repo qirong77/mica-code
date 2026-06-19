@@ -2,12 +2,13 @@ import { OpenAI } from 'openai';
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
   BaseAgent,
+  type AgentContentBlockParam,
+  type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent';
-import type { MicaUiConversationMessage, MicaUiContentBlockParam } from '@packages/mica-ui/index.js';
 import { buildSystemPrompt } from '../prompt';
 import { OpenAIHistoryNormalizer } from './OpenAIHistoryNormalizer.js';
 
@@ -104,7 +105,7 @@ export class OpenAIClient extends BaseAgent<
     this.lastUsage = snapshot.lastUsage;
     this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
   }
-  toConversationMessages(): MicaUiConversationMessage[] {
+  toConversationMessages(): AgentConversationMessage[] {
     return this.messages.flatMap((message) => {
       if (message.role !== 'user' && message.role !== 'assistant') return [];
       const content = openAIContentToMicaContent(message.content);
@@ -131,6 +132,7 @@ export class OpenAIClient extends BaseAgent<
       ...compactHistoricalToolResults(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
+    let totalContent = '';
     let hasStreamedText = false;
     let streamTextEndsWithBlankLine = false;
 
@@ -179,6 +181,7 @@ export class OpenAIClient extends BaseAgent<
             const textDelta: string = contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
             emittedContentSeparator = true;
             content += textDelta;
+            totalContent += textDelta;
             hasStreamedText = true;
             streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
             throwIfQueryStopped(options);
@@ -232,6 +235,7 @@ export class OpenAIClient extends BaseAgent<
       if (message.tool_calls && message.tool_calls.length > 0) {
         if (hasVisibleTextSuffix(content)) {
           content += '\n\n';
+          totalContent += '\n\n';
           message.content = content;
           streamTextEndsWithBlankLine = true;
           this.onText?.('\n\n');
@@ -261,7 +265,7 @@ export class OpenAIClient extends BaseAgent<
       if (!message.tool_calls || message.tool_calls.length === 0) {
         messages.push(message);
         this.messages = messages.filter((message) => message.role !== 'system');
-        return message.content || '';
+        return totalContent || message.content || '';
       }
     }
   }
@@ -357,12 +361,12 @@ function compactHistoricalToolResults(
 
 function openAIContentToMicaContent(
   content: OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] | null | undefined,
-): string | MicaUiContentBlockParam[] | null {
+): string | AgentContentBlockParam[] | null {
   if (!content) return null;
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return String(content);
 
-  const blocks: MicaUiContentBlockParam[] = [];
+  const blocks: AgentContentBlockParam[] = [];
   const fallbackText: string[] = [];
 
   for (const part of content) {

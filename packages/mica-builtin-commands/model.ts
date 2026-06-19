@@ -3,23 +3,34 @@ import type { CommandAgent } from './services.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import type { CommandRuntimeServices } from './services.js';
+import type { CommandRuntimeServices, CommandSessionController } from './services.js';
+import { compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
 
-export function createModelCommand(agent: CommandAgent, services: CommandRuntimeServices) {
+export function createModelCommand(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+) {
   return {
     name: 'model',
     description: '切换当前 provider 的模型',
     action: () => {
+      const targetAgent = services.getCurrentAgent() ?? agent;
+      const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       micaLogger.logRuntime('plugin.model', 'opened', {
-        current: agent.config.model,
-        provider: agent.config.provider.id,
+        current: targetAgent.config.model,
+        provider: targetAgent.config.provider.id,
       });
-      void showModelSelector(agent, services);
+      void showModelSelector(targetAgent, targetSessionController, services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-async function showModelSelector(agent: CommandAgent, services: CommandRuntimeServices) {
+async function showModelSelector(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+) {
   const config = micaConfig.get();
   const provider = config.providers.find((item) => item.id === config.provider);
   if (!provider) {
@@ -39,11 +50,35 @@ async function showModelSelector(agent: CommandAgent, services: CommandRuntimeSe
     options: provider.models?.map((model) => ({ name: model, label: model })) || [],
     emptyMessage: 'no models available',
     onSelect: (model) => {
-      micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: provider.id });
-      micaConfig.update((config) => ({ ...config, model }));
-      agent.reloadConfig();
-      services.syncModelDisplay(agent);
-      services.showMessage(`Model: ${model}`);
+      return applyModelSelection(agent, sessionController, services, provider.id, model);
     },
   });
+}
+
+async function applyModelSelection(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+  providerId: string,
+  model: string,
+): Promise<void> {
+  try {
+    if (services.isAgentBusy(agent)) {
+      services.showMessage('Agent is busy; wait or abort before switching model');
+      return;
+    }
+    if (model === agent.config.model) {
+      micaLogger.logRuntime('plugin.model', 'selected_current', { model });
+      return;
+    }
+    micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: providerId });
+    await compactBeforeConfigSwitch(agent, sessionController, services, 'model');
+    micaConfig.update((config) => ({ ...config, model }));
+    agent.reloadConfig(false);
+    sessionController.saveCurrent();
+    services.syncModelDisplay(agent);
+    services.showMessage(`Model: ${model}`);
+  } catch (error) {
+    reportConfigSwitchError(services, 'model', error);
+  }
 }

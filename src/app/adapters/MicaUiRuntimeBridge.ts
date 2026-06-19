@@ -1,7 +1,7 @@
-import { micaAgent, type AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
-import type { AgentRuntime, AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
+import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
 import {
   normalizeUiState,
   type TerminalAgentSessionManager,
@@ -38,19 +38,19 @@ export class MicaUiRuntimeBridge {
 
     this.runtime.events.on('event', (event) => {
       if (event.type === 'queue:changed') {
-        const owner = event.owner instanceof Object ? event.owner : this.agent;
-        const session =
-          this.agentSessions.findByAgent(owner as AgentRuntime) ?? this.agentSessions.current();
+        const owner = eventOwnerAgent(event.owner, this.agent);
+        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
         const pendingInputs = event.pendingInputs.map((input) => input.text);
         session.uiState = normalizeUiState({ ...session.uiState, pendingInputs });
         if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs);
       }
       if (event.type === 'notification') {
-        const owner = event.owner instanceof Object ? (event.owner as AgentRuntime) : this.agent;
+        const owner = eventOwnerAgent(event.owner, this.agent);
         this.showMessageForAgent(owner, event.message, event.ttl);
       }
       if (event.type === 'turn:started') {
-        const session = this.agentSessions.current();
+        const owner = eventOwnerAgent(event.owner, this.agent);
+        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
         const toolLogs = this.toolLogFor(session.agent);
         toolLogs.resetTurn();
         session.uiState = normalizeUiState({
@@ -59,10 +59,10 @@ export class MicaUiRuntimeBridge {
           agentTurnLogItems: [],
           thinkingText: '',
         });
-        micaUi.panels.clearLogEntries();
+        if (this.isActiveAgent(session.agent)) micaUi.panels.clearLogEntries();
       }
       if (event.type === 'turn:finished') {
-        this.toolLogFor(this.agent).endThinkingSegment();
+        this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
       }
     });
 
@@ -88,6 +88,8 @@ export class MicaUiRuntimeBridge {
       });
       this.toolLogFor(this.agent).resetTurn();
     });
+
+    micaUi.panels.setOnEditPendingInput(() => this.runtime.editLastPendingInput());
   }
 
   clearToolLogs(): void {
@@ -283,4 +285,8 @@ function readTotalCachedTokenRate(agent: AgentRuntime): number {
   const totalCached = snapshot.usageHistory.reduce((sum, u) => sum + (u.cachedInputTokens ?? 0), 0);
   if (totalInput <= 0) return 0;
   return Math.max(0, totalCached / totalInput);
+}
+
+function eventOwnerAgent(owner: unknown, fallback: AgentRuntime): AgentRuntime {
+  return owner instanceof AgentRuntime ? owner : fallback;
 }

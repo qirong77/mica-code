@@ -13,6 +13,10 @@ export function createClearCommand(
     name: 'clear',
     description: '清空当前对话和运行状态',
     action: () => {
+      if (services.isAgentBusy(agent)) {
+        services.showMessage('Agent is busy; wait or abort before clearing');
+        return;
+      }
       micaLogger.logRuntime('plugin.clear', 'clear:start', {
         runId: agent.currentRunId,
       });

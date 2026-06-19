@@ -25,15 +25,30 @@ export function createCommitCommand(agent: CommandAgent, services: CommandRuntim
   return {
     name: 'commit',
     description: '分析当前 git 变化，生成提交信息，提交并推送',
-    action: () => {
+    action: async () => {
+      const targetAgent = services.getCurrentAgent() ?? agent;
+      if (services.isAgentBusy(targetAgent)) {
+        services.showMessage('Agent is busy; wait or abort before committing');
+        return;
+      }
       micaLogger.logRuntime('plugin.commit', 'requested');
       const ownerSessionId = services.getCurrentAgentSessionId();
-      void runCommit(services.getCurrentAgent() ?? agent, services, ownerSessionId);
+      await services.runExclusiveTask(
+        targetAgent,
+        { ownerSessionId, statusText: 'commit: analyzing git changes' },
+        () => runCommit(targetAgent, services, ownerSessionId),
+      );
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-function setStatusMessage(services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
+function setStatusMessage(
+  agent: CommandAgent,
+  services: CommandRuntimeServices,
+  text: string,
+  ownerSessionId?: string,
+) {
+  services.setPluginStatus(agent, text, { ownerSessionId });
   services.showMessage(text, 5000, ownerSessionId);
 }
 
@@ -44,7 +59,7 @@ function showTerminalMessage(services: CommandRuntimeServices, text: string, own
 async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, ownerSessionId?: string) {
   try {
     micaLogger.logRuntime('plugin.commit', 'start');
-    setStatusMessage(services, 'commit: 正在分析 git 变化...', ownerSessionId);
+    setStatusMessage(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
     micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
@@ -64,7 +79,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     const commitMessage = await generateCommitMessage(agent, summary);
     micaLogger.logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
-    setStatusMessage(services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
+    setStatusMessage(agent, services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
     git(['add', '-A']);
     micaLogger.logRuntime('plugin.commit', 'git:add_done');
 
@@ -80,9 +95,10 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
     micaLogger.logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
-    setStatusMessage(services, `commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`, ownerSessionId);
+    setStatusMessage(agent, services, `commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`, ownerSessionId);
     const pushed = pushCurrentBranch();
     setStatusMessage(
+      agent,
       services,
       pushed
         ? `commit: 已提交并推送 ${commitHash}(${commitMessage})`

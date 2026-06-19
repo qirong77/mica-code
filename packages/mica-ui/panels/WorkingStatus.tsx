@@ -1,13 +1,13 @@
 import { Box, Text } from '@anthropic/ink';
 import React, { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../hooks/index.js';
-import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate, status } from './state.js';
+import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate } from './state.js';
 import { responseText as convResponseText } from '../conversation/state.js';
-import { text as inputText } from '../input/state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { IfComponent } from '../primitives/IfComponent.js';
 import { formatElapsed } from '../utils/format.js';
+import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
 
 const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
 const CONTEXT_USAGE_COLORS = [
@@ -93,18 +93,10 @@ export function WorkingStatus() {
     return () => clearInterval(timer);
   }, [info.type]);
 
-  useEffect(() => {
-    if (info.type !== 'completed') return;
-    const resetOnInput = (text: string) => {
-      if (text.length > 0) status.idle();
-    };
-    resetOnInput(inputText.get());
-    return inputText.subscribe(resetOnInput);
-  }, [info.type]);
-
   const displayElapsed =
     info.type === 'completed' || info.type === 'calling_tool' ? (info.elapsedMs ?? elapsed) : elapsed;
   const elapsedText = displayElapsed > 0 ? formatElapsed(displayElapsed) : '';
+  const statusDisplay = getWorkingStatusDisplay(info);
 
   const content = (() => {
     switch (info.type) {
@@ -112,14 +104,14 @@ export function WorkingStatus() {
         return (
           <Box>
             <Spin />
-            <Text>connecting</Text>
+            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
           </Box>
         );
       case 'thinking':
         return (
           <Box>
             <Spin />
-            <Text>thinking</Text>
+            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
             <Text color={themeColors.dim}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
           </Box>
         );
@@ -127,7 +119,7 @@ export function WorkingStatus() {
         return (
           <Box>
             <Spin />
-            <Text>streaming</Text>
+            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
             <Text color={themeColors.dim}> ↓{estimateTokens(currentResponseText)} tokens</Text>
           </Box>
         );
@@ -135,18 +127,20 @@ export function WorkingStatus() {
         return (
           <Box>
             <Spin />
-            <Text>{info.toolNames?.length ? info.toolNames.join(', ') : 'calling_tool'}</Text>
-            {info.elapsedMs != null && <Text color={themeColors.dim}> ({formatElapsed(info.elapsedMs)})</Text>}
+            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+          </Box>
+        );
+      case 'plugin_task':
+        return (
+          <Box>
+            <Spin />
+            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
           </Box>
         );
       case 'error':
-        return <Text color={themeColors.error}>✗ error</Text>;
+        return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
       case 'completed':
-        return (
-          <Text color={themeColors.success}>
-            ✓ completed {info.elapsedMs != null ? formatElapsed(info.elapsedMs) : 'Done'}
-          </Text>
-        );
+        return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
       default:
         return null;
     }

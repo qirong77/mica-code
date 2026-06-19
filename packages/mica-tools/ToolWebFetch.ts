@@ -1,4 +1,6 @@
 import { LRUCache } from 'lru-cache';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import TurndownService from 'turndown';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
@@ -291,6 +293,7 @@ export class ToolWebFetch extends MicaTool {
     if (targetUrl.startsWith('http://')) {
       targetUrl = targetUrl.replace('http://', 'https://');
     }
+    await this._assertPublicNetworkTarget(targetUrl);
 
     const response = await fetch(targetUrl, {
       signal,
@@ -344,4 +347,71 @@ export class ToolWebFetch extends MicaTool {
       return false;
     }
   }
+
+  private async _assertPublicNetworkTarget(url: string): Promise<void> {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    if (isBlockedHostname(hostname)) {
+      throw new Error('不允许访问本地或内网地址');
+    }
+
+    const addresses = isIP(hostname)
+      ? [{ address: hostname }]
+      : await lookup(hostname, { all: true, verbatim: true });
+    if (addresses.length === 0 || addresses.some((entry) => isPrivateOrReservedAddress(entry.address))) {
+      throw new Error('不允许访问解析到本地、内网或保留地址的 URL');
+    }
+  }
+}
+
+function isBlockedHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.lan')
+  );
+}
+
+function isPrivateOrReservedAddress(address: string): boolean {
+  if (address.startsWith('::ffff:')) {
+    return isPrivateOrReservedAddress(address.slice('::ffff:'.length));
+  }
+  const ipVersion = isIP(address);
+  if (ipVersion === 4) return isPrivateOrReservedIpv4(address);
+  if (ipVersion === 6) return isPrivateOrReservedIpv6(address);
+  return true;
+}
+
+function isPrivateOrReservedIpv4(address: string): boolean {
+  const parts = address.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && parts[2] === 0) ||
+    (a === 198 && (b === 18 || b === 19))
+  );
+}
+
+function isPrivateOrReservedIpv6(address: string): boolean {
+  const normalized = address.toLowerCase();
+  return (
+    normalized === '::' ||
+    normalized === '::1' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe8') ||
+    normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') ||
+    normalized.startsWith('feb')
+  );
 }
