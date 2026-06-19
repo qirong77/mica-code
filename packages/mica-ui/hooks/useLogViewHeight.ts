@@ -6,7 +6,7 @@ import { inputBottomDistance } from '../input/state.js';
 const MIN_LOG_VIEW_HEIGHT = 5;
 const BELOW_INPUT_RESERVED_LINES = 2;
 
-export function getBottomPanelHeight(rows: number, bottomDistance: number): number {
+function getBottomPanelHeight(rows: number, bottomDistance: number): number {
   const fallbackHeight = Math.ceil(rows / 3);
 
   if (bottomDistance <= 0) {

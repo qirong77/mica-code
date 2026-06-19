@@ -310,14 +310,6 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
   }
 }
 
-export function createAnthropicSubAgent(options: AnthropicAgentOptions): AnthropicAgent {
-  return new AnthropicAgent({
-    ...options,
-    effort: 'none',
-    tools: false,
-  });
-}
-
 function createUsageAccumulator(): AnthropicMergedUsage {
   return {
     input_tokens: 0,

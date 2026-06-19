@@ -8,7 +8,7 @@ Mica Code 是一个轻量级 CLI code agent。它基于 Bun、TypeScript、React
 
 - 终端交互 UI：基于 `@anthropic/ink`，支持对话流式渲染、状态栏、工具日志、面板和快捷命令。
 - Agent runtime：负责单轮 turn 编排、模型事件处理、工具调用、中止控制、输入排队和会话保存。
-- Provider adapter：支持 OpenAI-compatible provider，并保留 Anthropic adapter 扩展路径。
+- Provider adapter：支持 OpenAI Chat Completions 风格的 provider，并保留 Anthropic adapter 扩展路径。
 - 工具系统：内置文件读写、精确编辑、搜索、shell、web search/fetch、skill 等工具。
 - MCP 支持：读取 MCP 配置，连接远端 MCP server，并把远端工具注册进统一工具系统。
 - 会话恢复：会话快照保存到本地，可通过 `/resume` 恢复。
@@ -99,7 +99,7 @@ packages/mica-agent/.env
 }
 ```
 
-当前主路径通过 OpenAI-compatible client 连接 provider，因此第三方 provider 需要提供兼容 OpenAI Chat Completions 的接口。
+当前主路径通过 OpenAI Chat Completions 风格的 client 连接 provider，因此第三方 provider 需要实现对应接口。
 
 ## 常用命令
 
@@ -126,7 +126,7 @@ src/
   app/                  应用装配层，连接 UI、runtime、agent、session 和插件
   agent/                AgentRuntime 与 provider client 生命周期
   agents/               agent 相关扩展入口
-  plugins/              插件适配层：commands、ipc、mcp、runtime 等
+  plugins/              插件适配层：commands、mcp、runtime 等
   runtime/              当前应用侧 turn loop、输入队列、工具日志和 UI bridge
   session/              应用侧会话控制
 
@@ -136,8 +136,7 @@ packages/
   mica-commands/        命令注册、执行和命令面板抽象
   mica-common/          跨包公共类型和工具函数
   mica-config/          配置读写与 provider/model 配置能力
-  mica-context/         上下文能力预留
-  mica-ipc/             IPC 能力预留与示例
+  mica-context/         上下文能力，当前主要是 compact
   mica-logger/          日志状态与格式化
   mica-mcp/             MCP 配置读取、连接管理和远端工具注册
   mica-plugin/          插件系统抽象

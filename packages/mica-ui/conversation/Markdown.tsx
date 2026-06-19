@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Ansi, stringWidth, wrapAnsi, useInput, wrappedRender } from '@anthropic/ink';
+import React, { useMemo } from 'react';
+import { Box, Ansi, stringWidth, wrapAnsi } from '@anthropic/ink';
 import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
@@ -15,7 +15,7 @@ import type { Token, Tokens } from 'marked';
 const BLOCKQUOTE_BAR = '\u258e'; // ▎
 const EOL = '\n';
 
-// ─── theme (dark, inlined from src/utils/theme.ts) ───────────────────────────
+// ─── Markdown theme ──────────────────────────────────────────────────────────
 
 const theme = {
   permission: 'rgb(177,185,249)',
@@ -147,7 +147,6 @@ function linkifyIssueReferences(text: string): string {
 }
 
 // ─── formatToken ─────────────────────────────────────────────────────────────
-// Copied from src/utils/markdown.ts — theme colors inlined.
 
 function formatToken(
   token: Token,
@@ -296,7 +295,7 @@ function formatToken(
   return '';
 }
 
-// ─── MarkdownTable (copied from src/components/MarkdownTable.tsx) ─────────────
+// ─── MarkdownTable ───────────────────────────────────────────────────────────
 
 const SAFETY_MARGIN = 4;
 const MIN_COLUMN_WIDTH = 3;
@@ -532,7 +531,7 @@ const MarkdownTable = React.memo(function MarkdownTable({ token, highlight, forc
   return <Ansi>{tableLines.join('\n')}</Ansi>;
 });
 
-// ─── Markdown component (copied from src/components/Markdown.tsx) ─────────────
+// ─── Markdown component ──────────────────────────────────────────────────────
 
 type MarkdownProps = {
   children: string;

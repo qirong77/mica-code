@@ -1,9 +1,9 @@
-import React from 'react';
 import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import type { CommandRuntimeServices, RunningAgentRecord } from './services.js';
+import type { MicaUiAgentStatusItem } from '@packages/mica-ui/index.js';
+import type { CommandRuntimeServices } from './services.js';
 import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDisplay.js';
 
 type AgentsPanelState = { view: 'list'; selectedIdx: number };
@@ -26,12 +26,13 @@ export function createAgentsCommand(services: CommandRuntimeServices) {
       }
       const agents = services.listRunningAgents();
       micaLogger.logRuntime('plugin.agents', 'opened', { count: agents.length });
-      showAgentsPanel(agents, services);
+      micaUi.panels.setAgentStatusItems(agents);
+      showAgentsPanel(services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeServices) {
+function showAgentsPanel(services: CommandRuntimeServices) {
   const panelId = 'agents-panel';
   const initialText = micaUi.terminalInput.text.get();
   const stateAtom = atom<AgentsPanelState>({ view: 'list', selectedIdx: 0 });
@@ -44,8 +45,10 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
 
   function AgentsPanel() {
     const state = micaUi.useScheduleState(stateAtom);
+    const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
     const terminalSize = useTerminalSize();
     const layout = buildAgentGrid(agents, terminalSize?.columns ?? process.stdout.columns ?? 100);
+    const selectedIdx = clampSelectedIndex(state.selectedIdx, agents.length);
     return (
       <micaUi.Dialog
         title={`agents (${agents.length})`}
@@ -62,7 +65,7 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
                     key={agent.id}
                     agent={agent}
                     width={layout.itemWidth}
-                    selected={agents[state.selectedIdx]?.id === agent.id}
+                    selected={agents[selectedIdx]?.id === agent.id}
                     marginRight={colIndex < row.length - 1 ? 2 : 0}
                   />
                 ))}
@@ -80,26 +83,28 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
       id: panelId,
       component: AgentsPanel,
       preserveInput: true,
-      onInput: (input, key) => {
+      onInput: (_input, key) => {
         const state = stateAtom.get();
         if (key.escape) {
           hide();
           return true;
         }
         if (state.view === 'list') {
+          const agents = micaUi.panels.agentStatusItems.get();
+          const selectedIdx = clampSelectedIndex(state.selectedIdx, agents.length);
           if (key.upArrow || key.downArrow) {
             const columns = buildAgentGrid(agents, process.stdout.columns ?? 100).columns;
-            const next = navigateGrid(state.selectedIdx, agents.length, key.downArrow ? columns : -columns);
+            const next = navigateGrid(selectedIdx, agents.length, key.downArrow ? columns : -columns);
             stateAtom.set({ view: 'list', selectedIdx: next });
             return true;
           }
           if (key.leftArrow || key.rightArrow) {
-            const next = navigateGrid(state.selectedIdx, agents.length, key.rightArrow ? 1 : -1);
+            const next = navigateGrid(selectedIdx, agents.length, key.rightArrow ? 1 : -1);
             stateAtom.set({ view: 'list', selectedIdx: next });
             return true;
           }
           if (key.return && agents.length > 0) {
-            switchToSelectedAgent(state.selectedIdx);
+            switchToSelectedAgent(selectedIdx);
             return true;
           }
         }
@@ -113,6 +118,7 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
   ]);
 
   function switchToSelectedAgent(selectedIdx: number) {
+    const agents = micaUi.panels.agentStatusItems.get();
     const agent = agents[selectedIdx];
     if (!agent) return;
     try {
@@ -132,7 +138,7 @@ function AgentListItem({
   selected,
   marginRight,
 }: {
-  agent: RunningAgentRecord;
+  agent: MicaUiAgentStatusItem;
   width: number;
   selected: boolean;
   marginRight: number;
@@ -169,15 +175,20 @@ function AgentListItem({
   );
 }
 
-function buildAgentGrid(agents: RunningAgentRecord[], terminalColumns: number) {
+function buildAgentGrid(agents: readonly MicaUiAgentStatusItem[], terminalColumns: number) {
   const available = Math.max(32, terminalColumns - 6);
   const minItemWidth = 60;
   const columns = Math.max(1, Math.min(agents.length || 1, Math.floor((available + 2) / (minItemWidth + 2))));
   const itemWidth =
     columns === 1 ? available : Math.max(minItemWidth, Math.floor((available - (columns - 1) * 2) / columns));
-  const rows: RunningAgentRecord[][] = [];
+  const rows: MicaUiAgentStatusItem[][] = [];
   for (let i = 0; i < agents.length; i += columns) rows.push(agents.slice(i, i + columns));
   return { columns, itemWidth, rows };
+}
+
+function clampSelectedIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  return Math.min(Math.max(0, index), length - 1);
 }
 
 function navigateGrid(index: number, length: number, direction: number): number {

@@ -42,14 +42,13 @@ export function createCommitCommand(agent: CommandAgent, services: CommandRuntim
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-function setStatusMessage(
+function setCommitStatus(
   agent: CommandAgent,
   services: CommandRuntimeServices,
   text: string,
   ownerSessionId?: string,
 ) {
   services.setPluginStatus(agent, text, { ownerSessionId });
-  services.showMessage(text, 5000, ownerSessionId);
 }
 
 function showTerminalMessage(services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
@@ -59,7 +58,7 @@ function showTerminalMessage(services: CommandRuntimeServices, text: string, own
 async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, ownerSessionId?: string) {
   try {
     micaLogger.logRuntime('plugin.commit', 'start');
-    setStatusMessage(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
+    setCommitStatus(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
     micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
@@ -79,7 +78,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     const commitMessage = await generateCommitMessage(agent, summary);
     micaLogger.logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
-    setStatusMessage(agent, services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
+    setCommitStatus(agent, services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
     git(['add', '-A']);
     micaLogger.logRuntime('plugin.commit', 'git:add_done');
 
@@ -95,10 +94,9 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
     micaLogger.logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
-    setStatusMessage(agent, services, `commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`, ownerSessionId);
+    setCommitStatus(agent, services, `commit: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
     const pushed = pushCurrentBranch();
-    setStatusMessage(
-      agent,
+    showTerminalMessage(
       services,
       pushed
         ? `commit: 已提交并推送 ${commitHash}(${commitMessage})`

@@ -3,22 +3,21 @@
 ## 项目定位
 
 - Mica Code 是一个基于 Bun + TypeScript + React（Ink）的 CLI code agent。
-- 目标是把 CLI 启动、运行时 turn loop、agent provider、工具、命令、会话、配置、UI、插件分层管理，为 compact、memory、todo、fork、multi-agent、IPC/remote control 等能力保留稳定扩展点。
-- 当前仓库采用 `src/` 应用装配层 + `packages/` 可复用包的结构。新增通用能力优先放入对应 package，`src/` 只做应用级 wiring 和少量兼容胶水。
+- 目标是把 CLI 启动、运行时 turn loop、agent provider、工具、命令、会话、配置、UI、插件分层管理，为 compact、memory、todo、fork、multi-agent 等能力保留稳定扩展点。
+- 当前仓库采用 `src/` 应用装配层 + `packages/` 可复用包的结构。新增通用能力优先放入对应 package，`src/` 只做应用级 wiring。
 
 ## 维护要求
 
 - 如果一次改动涉及项目整体架构、目录结构、关键运行链路、公共 package 边界、配置/数据位置、常用命令或开发约束变化，必须同步修改本 `AGENT.md`。
 - 如果新增长期模块、核心服务、命令体系、runtime 生命周期、session 存储格式、工具注册方式或 UI 状态模型，也必须更新本文件中的对应章节。
 - 不要让本文件变成实现细节日志；只记录会影响后续 agent/开发者理解和修改项目的稳定约定。
-- 如果改动影响到，到旧数据，或者和旧架构不兼容，全部使用新的写法，禁止先兼容性代码，后逐步迭代，而是一次性完成。
+- 如果改动影响旧数据或旧架构，全部使用新的写法，禁止先保留旧路径再逐步迭代，而是一次性完成。
 
 ## 当前目录结构
 
 ### 应用入口与装配：`src/`
 
 - `src/index.ts`：CLI 启动入口，负责加载环境、创建应用并启动 UI/运行时。
-- `src/prebuild.ts`：构建前处理脚本。
 - `src/app/`
   - `Application.ts`：应用生命周期对象。
   - `ApplicationContext.ts`：应用运行所需服务上下文。
@@ -67,8 +66,6 @@
   - skills 类型和加载逻辑。
 - `packages/mica-context/`
   - context/compact 相关能力，例如 `CompactionService.ts`。
-- `packages/mica-ipc/`
-  - JSON line 协议、IPC client/server、control lock，用于远程控制或进程间协作。
 - `packages/mica-common/`
   - 通用基础工具，例如 id、json、event bus、disposable、result。
 - `packages/mica-logger/`
@@ -169,7 +166,7 @@
 
 - 新增 agent instance registry/manager，主 agent、sub agent、planner、reviewer、summarizer 都作为 agent instance 管理。
 - multi-agent 协作通过 runtime hooks、plugin 或 command 显式触发，不要让 provider adapter 感知其他 agent。
-- 和 IPC/terminal agent session 集成时，应明确区分 UI 展示状态、agent API 输入和 session 持久化状态。
+- 和 terminal agent session 集成时，应明确区分 UI 展示状态、agent API 输入和 session 持久化状态。
 
 ## 开发约束
 
@@ -180,7 +177,7 @@
 - import 路径风格应与所在文件周边保持一致。
 - 不要手写修改 `dist/` 构建产物。
 - `temp/` 下是参考项目/临时材料，不属于本项目源码；除非用户明确要求，不要修改。
-- 注意不要引入安全问题，尤其是 shell 调用、文件读写、MCP、IPC、外部请求和凭据处理边界。
+- 注意不要引入安全问题，尤其是 shell 调用、文件读写、MCP、外部请求和凭据处理边界。
 - 如果变更了整体架构、目录结构、关键链路、公共 package 边界或常用命令，必须同步更新本 `AGENT.md`。
 
 ## 工具层约定
@@ -221,5 +218,5 @@
 - 修改完成后，至少执行与改动范围匹配的验证。
 - 本仓库的最低要求是执行 TypeScript 校验：`bunx tsc --noEmit`。
 - 如果改动涉及 prompt，运行 `bun test packages/mica-agent/prompt/index.test.ts`。
-- 如果改动涉及构建、工具、runtime、IPC、MCP 或 UI，尽量补充运行对应测试、示例或构建命令。
+- 如果改动涉及构建、工具、runtime、MCP 或 UI，尽量补充运行对应测试、示例或构建命令。
 - 如果只修改文档，可以不运行完整类型校验，但最终回复中要明确说明未运行代码验证的原因。

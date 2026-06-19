@@ -24,7 +24,7 @@ import {
   type RewindPreviewResult,
 } from '../../runtime/RewindCheckpointManager.js';
 
-const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'logs', 'status', 'agents', 'new']);
+const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
 
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();

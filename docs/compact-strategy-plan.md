@@ -168,15 +168,15 @@ content_summary:
 示例：
 
 ```text
-Warning: deprecated API
-Warning: deprecated API
-Warning: deprecated API
+Warning: repeated event
+Warning: repeated event
+Warning: repeated event
 ```
 
 压缩为：
 
 ```text
-Warning: deprecated API
+Warning: repeated event
 [previous line repeated 3 times]
 ```
 
@@ -391,7 +391,7 @@ Compact 必须是原子操作：
 ]
 ```
 
-Compact 后不要继续在活跃上下文中保留原始历史 tool calls。否则容易带来 provider 不兼容、orphan tool message、重复执行旧工作、压缩效果差等问题。
+Compact 后不要继续在活跃上下文中保留原始历史 tool calls。否则容易带来 provider 格式不匹配、orphan tool message、重复执行旧工作、压缩效果差等问题。
 
 ### 13. 元数据与审计记录
 

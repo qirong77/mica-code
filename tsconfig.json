@@ -8,7 +8,6 @@
     "packages/mica-commands",
     "packages/mica-builtin-commands",
     "packages/mica-context",
-    "packages/mica-ipc",
     "packages/mica-agent",
     "packages/mica-tools",
     "packages/mica-ui",

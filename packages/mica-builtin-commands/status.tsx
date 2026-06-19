@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';

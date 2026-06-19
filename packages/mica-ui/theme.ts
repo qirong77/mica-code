@@ -11,5 +11,3 @@ export const themeColors = {
   borderInput: '#9d9d9d',
   border: '#26C6DA',
 } as const;
-
-export const C = themeColors;

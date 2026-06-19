@@ -5,8 +5,7 @@ import { createCompactCommand } from './compact.js';
 import { createEffortCommand } from './effort.js';
 import { createForkCommand } from './fork.js';
 import { createGitDiffContextCommand } from './gitDiffContext.js';
-import { createLogExportCommand } from './logExport.js';
-import { closeLogsPanel, createLogCommand, createLogsCommand } from './logs.js';
+import { closeLogPanel, createLogCommand } from './log.js';
 import { createMcpCommand } from './mcp.js';
 import { createModelCommand } from './model.js';
 import { createNewCommand } from './new.js';
@@ -25,9 +24,7 @@ export const micaBuiltinCommands = {
   createForkCommand,
   createGitDiffContextCommand,
   createLogCommand,
-  createLogExportCommand,
-  createLogsCommand,
-  closeLogsPanel,
+  closeLogPanel,
   createMcpCommand,
   createModelCommand,
   createNewCommand,

@@ -7,7 +7,6 @@ export const micaCommands = {
 export type { CommandRegistry } from './CommandRegistry.js';
 export type {
   CommandContext,
-  CommandListOptions,
   CommandResult,
   CommandScope,
   MicaCommand,

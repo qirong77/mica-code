@@ -3,7 +3,6 @@ import type {
   MicaUiWorkingStatus,
   MicaUiLogEntry,
   MicaUiAgentTurnLogItem,
-  MicaUiToolEntry,
   MicaUiPluginUI,
   MicaUiUILogEntry,
   MicaUiAgentStatusItem,
@@ -58,18 +57,6 @@ export const status = {
 
 export function setLogEntries(entries: MicaUiLogEntry[]): void {
   logEntries.set(entries);
-}
-
-export function appendLogEntry(entry: MicaUiLogEntry): void {
-  logEntries.set([...logEntries.get(), entry]);
-}
-
-export function addThinking(text: string): void {
-  appendLogEntry({ type: 'thinking', id: logEntries.get().length, text });
-}
-
-export function addToolCall(entry: Omit<MicaUiToolEntry, 'type'>): void {
-  appendLogEntry({ type: 'tool', ...entry });
 }
 
 export function clearLogEntries(): void {

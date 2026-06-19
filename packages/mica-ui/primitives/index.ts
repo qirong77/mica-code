@@ -5,4 +5,3 @@ export type { KeyHintsProps } from './KeyHints.js';
 export { Dialog } from './Dialog.js';
 export type { DialogProps } from './Dialog.js';
 export { Spin, useSpinner } from './Spin.js';
-export { IfComponent } from './IfComponent.js';

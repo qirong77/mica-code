@@ -122,7 +122,7 @@ function toLogData(data: unknown): Record<string, unknown> | undefined {
 
 let activeApplication: Application | null = null;
 
-export function setActiveApplication(app: Application): void {
+function setActiveApplication(app: Application): void {
   activeApplication = app;
 }
 

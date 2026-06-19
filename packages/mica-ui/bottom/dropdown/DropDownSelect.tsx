@@ -1,5 +1,5 @@
 import { Box } from '@anthropic/ink';
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { CommandDropdown } from './CommandDropdown.js';
 import { inputValue } from './state.js';

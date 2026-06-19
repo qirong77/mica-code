@@ -22,7 +22,6 @@
  * - /clear：清空 UI
  */
 
-import React from 'react';
 import { wrappedRender, Box, Text } from '@anthropic/ink';
 import { micaUi } from '../index.js';
 

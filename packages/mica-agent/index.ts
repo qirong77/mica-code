@@ -6,7 +6,7 @@ import { BaseAgent } from './core/Agent.js';
 import { buildSystemPrompt, buildSystemPromptForTest } from './prompt/index.js';
 
 export const micaAgent = {
-  /** 创建支持工具调用和流式事件的 OpenAI-compatible agent。 */
+  /** 创建支持工具调用和流式事件的 OpenAI Chat Completions 风格 agent。 */
   createOpenAI: createOpenAIClient,
   /** 创建不启用工具、不使用 reasoning effort 的轻量子 agent。 */
   createSubAgent,

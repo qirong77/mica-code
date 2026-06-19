@@ -16,7 +16,7 @@ import { micaContext } from '@packages/mica-context/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'logs', 'status', 'agents', 'new', 'fork']);
+const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'status', 'agents', 'new', 'fork']);
 
 export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
   constructor(
@@ -37,12 +37,11 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
       const disposable = ctx.commands.register({
         name: command.name,
         description: command.description,
-        hidden: command.hidden,
         scope: 'local-only',
         allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name),
         pluginId: ctx.pluginId,
         async handler(_commandCtx, args) {
-          if (command.name !== 'log' && command.name !== 'logs') micaBuiltinCommands.closeLogsPanel();
+          if (command.name !== 'log') micaBuiltinCommands.closeLogPanel();
           micaLogger.logRuntime('plugin', 'action:start', { name: command.name, arg: args });
           try {
             await command.action(args || undefined);
@@ -58,10 +57,9 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
     }
 
     micaUi.dropdown.setQuickCommands(
-      ctx.commands.list({ includeHidden: true }).map((command) => ({
+      ctx.commands.list().map((command) => ({
         name: command.name,
         description: command.description ?? '',
-        hidden: command.hidden,
         action: (arg?: string) => {
           const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
           const runtime = getActiveApplication()?.activeContext?.runtime;
@@ -94,7 +92,6 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createForkCommand(services),
     micaBuiltinCommands.createRewindCommand(services),
     micaBuiltinCommands.createLogCommand(activeAgent, services),
-    micaBuiltinCommands.createLogsCommand(activeAgent, services),
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createGitDiffContextCommand(services),
@@ -357,20 +354,24 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       concreteAgent.loadSnapshot({
         ...snapshot,
         messages: result.messages,
-        usageHistory: snapshot.usageHistory,
-        lastUsage: snapshot.lastUsage,
+        usageHistory: [],
+        lastUsage: undefined,
       });
       const nextUiState = normalizeUiState({
         ...(ownerSession?.uiState ?? captureSessionUi()),
         conversationMessages: concreteAgent.toConversationMessages(),
         responseText: '',
         pendingInputs: [],
+        contextSize: 0,
+        cachedTokenRate: 0,
       });
       if (ownerSession) ownerSession.uiState = nextUiState;
       if (!ownerSession || context?.agentSessions.current().id === ownerSession.id) {
         micaUi.conversation.setMessages(concreteAgent.toConversationMessages());
         micaUi.conversation.clearResponseText();
         micaUi.conversation.clearPendingInput();
+        micaUi.panels.contextSize.set(0);
+        micaUi.panels.cachedTokenRate.set(0);
         if (ownerSession) ownerSession.uiState = normalizeUiState(captureSessionUi());
       }
       concreteSessionController.saveCurrent();

@@ -1,5 +1,4 @@
-import React from 'react';
-import { Box, Text, ScrollBox } from '@anthropic/ink';
+import { Text, ScrollBox } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
 import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
 import { uiLog } from './state.js';

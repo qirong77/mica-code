@@ -5,7 +5,7 @@
 ## 主要能力
 
 - 提供 `BaseAgent`、`IAgent`、conversation message 等公共 agent 类型。
-- 提供 OpenAI-compatible provider：`OpenAIClient`、`createOpenAIClient`。
+- 提供 OpenAI Chat Completions 风格 provider：`OpenAIClient`、`createOpenAIClient`。
 - 提供 Anthropic provider：`AnthropicAgent`。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 构建运行时系统提示词：`buildSystemPrompt`。

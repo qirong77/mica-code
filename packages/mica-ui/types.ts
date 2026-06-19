@@ -39,7 +39,6 @@ export interface MicaUiCommand {
   name: string;
   description: string;
   action: (arg?: string) => void | Promise<void>;
-  hidden?: boolean;
 }
 
 export interface MicaUiPluginUI {

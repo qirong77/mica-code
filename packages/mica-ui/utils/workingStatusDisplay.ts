@@ -42,7 +42,3 @@ export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingSta
       return { text: 'idle', color: themeColors.dim, spinning: false };
   }
 }
-
-export function isRunningWorkingStatus(status: MicaUiWorkingStatus): boolean {
-  return status.type !== 'idle' && status.type !== 'completed' && status.type !== 'error';
-}

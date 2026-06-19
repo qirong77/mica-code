@@ -1,5 +1,4 @@
-export const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 60_000;
-export const DEFAULT_PREVIEW_CHARS = 4_000;
+const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 60_000;
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;

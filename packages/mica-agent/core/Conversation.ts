@@ -1,5 +1,3 @@
-import type { AgentContentBlockParam } from './Content.js';
-
 export type ConversationTextBlock = {
   type: 'text';
   text: string;
@@ -60,13 +58,4 @@ export function contentBlocksToText(blocks: ConversationContentBlock[]): string 
     .filter((block): block is ConversationTextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
-}
-
-export function micaContentToConversationBlocks(content: string | AgentContentBlockParam[]): ConversationContentBlock[] {
-  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
-
-  return content.map((block) => {
-    if (block.type === 'text') return { type: 'text', text: block.text };
-    return { type: 'image', source: block.source };
-  });
 }

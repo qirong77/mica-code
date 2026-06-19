@@ -16,7 +16,6 @@
 - `mica-context`：上下文管理能力，当前主要是 compact。
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks 和 service container。
-- `mica-ipc`：本地 agent 进程间 IPC/RPC 协议。
 - `mica-common`：跨包共享的底层工具。
 - `mica-logger`：运行时日志 store 和格式化工具。
 

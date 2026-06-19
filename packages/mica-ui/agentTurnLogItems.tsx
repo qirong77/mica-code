@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';

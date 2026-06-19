@@ -1,10 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const TEMP_IMAGE_DIR = resolve(homedir(), '.mica', 'tmp-images');
 const IMAGES_DIR = resolve(homedir(), '.mica', 'images');
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = {
@@ -14,45 +13,6 @@ const SUPPORTED_IMAGE_TYPES = {
   gif: 'image/gif',
   webp: 'image/webp',
 } as const;
-
-export interface ImageData {
-  base64: string;
-  mediaType: string;
-  path: string;
-}
-
-function ensureTempDir(): void {
-  if (!existsSync(TEMP_IMAGE_DIR)) mkdirSync(TEMP_IMAGE_DIR, { recursive: true });
-}
-
-export function hasImageInClipboard(): boolean {
-  if (process.platform !== 'darwin') return false;
-  try {
-    execFileSync('osascript', ['-e', 'the clipboard as «class PNGf»'], { stdio: 'ignore', timeout: 2000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function getImageFromClipboard(): ImageData | null {
-  if (process.platform !== 'darwin') return null;
-  try {
-    ensureTempDir();
-    const filePath = resolve(TEMP_IMAGE_DIR, `paste-${randomUUID()}.png`);
-    execFileSync(
-      'osascript',
-      [
-        '-e',
-        `set png_data to (the clipboard as «class PNGf»)\nset fp to open for access POSIX file "${filePath}" with write permission\nwrite png_data to fp\nclose access fp`,
-      ],
-      { stdio: 'ignore', timeout: 5000 },
-    );
-    return { base64: readFileSync(filePath).toString('base64'), mediaType: 'image/png', path: filePath };
-  } catch {
-    return null;
-  }
-}
 
 export function saveClipboardImage(): string | null {
   if (process.platform !== 'darwin') return null;
@@ -71,14 +31,6 @@ export function saveClipboardImage(): string | null {
   } catch {
     return null;
   }
-}
-
-export function saveImage(base64: string, mediaType: string): string {
-  ensureTempDir();
-  const ext = mediaType === 'image/jpeg' ? 'jpg' : mediaType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
-  const filePath = resolve(TEMP_IMAGE_DIR, `paste-${randomUUID()}.${ext}`);
-  writeFileSync(filePath, Buffer.from(base64, 'base64'));
-  return filePath;
 }
 
 const IMAGE_REF_RE = /\[Image\]\(([^)]+)\)/g;
@@ -137,26 +89,3 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
-
-function cleanupTempDir(): void {
-  try {
-    if (!existsSync(TEMP_IMAGE_DIR)) return;
-    const entries = readdirSync(TEMP_IMAGE_DIR)
-      .map((name) => {
-        const p = join(TEMP_IMAGE_DIR, name);
-        try {
-          return { name, path: p, mtime: statSync(p).mtimeMs };
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is NonNullable<typeof e> => e !== null)
-      .sort((a, b) => b.mtime - a.mtime);
-    if (entries.length > 100) {
-      for (const f of entries.slice(100)) rmSync(f.path, { force: true });
-    }
-  } catch {
-    /* ignore */
-  }
-}
-cleanupTempDir();

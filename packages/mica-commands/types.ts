@@ -3,7 +3,6 @@ export type CommandScope = 'local-only' | 'remote-capable' | 'remote-only';
 export type MicaCommand = {
   name: string;
   description?: string;
-  hidden?: boolean;
   scope?: CommandScope;
   allowDuringTurn?: boolean;
   pluginId: string;
@@ -23,8 +22,4 @@ export type ParsedCommand = {
   command: MicaCommand;
   args: string;
   raw: string;
-};
-
-export type CommandListOptions = {
-  includeHidden?: boolean;
 };

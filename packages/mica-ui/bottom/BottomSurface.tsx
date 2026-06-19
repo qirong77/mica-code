@@ -1,5 +1,4 @@
-import React from 'react';
-import { Box } from '@anthropic/ink';
+import type React from 'react';
 import { useScheduleState } from '../hooks/index.js';
 import { pluginUIs, agentTurnLogItems, workingStatus } from '../panels/state.js';
 import { state as dropdownState } from './dropdown/state.js';

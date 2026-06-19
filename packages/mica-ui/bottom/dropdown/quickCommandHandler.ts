@@ -8,12 +8,11 @@ export function setSelectEmitter(emit: (item: MicaUiDropdownItem) => void): void
   _emitSelect = emit;
 }
 
-export function showQuickCommands(query: string, includeHidden = false): void {
+export function showQuickCommands(query: string): void {
   const commands = quickCommands.get();
   const filter = query.toLowerCase();
   const filtered = commands.filter(
     (cmd) =>
-      (includeHidden || !cmd.hidden) &&
       (cmd.name.toLowerCase().includes(filter) || cmd.description.toLowerCase().includes(filter)),
   );
   filtered.sort((a, b) => {

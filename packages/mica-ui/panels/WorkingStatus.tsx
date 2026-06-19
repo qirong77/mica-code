@@ -1,5 +1,5 @@
 import { Box, Text } from '@anthropic/ink';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../hooks/index.js';
 import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate } from './state.js';
 import { responseText as convResponseText } from '../conversation/state.js';

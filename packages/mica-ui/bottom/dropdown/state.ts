@@ -9,17 +9,3 @@ export const quickCommands = atom<MicaUiCommand[]>([]);
 export function setQuickCommands(commands: MicaUiCommand[]): void {
   quickCommands.set(commands);
 }
-
-export function clearQuickCommands(): void {
-  quickCommands.set([]);
-}
-
-export function setDropdownState(nextState: MicaUiDropdownState): void {
-  state.set(nextState);
-}
-
-export function hideDropdown(): void {
-  state.set({ visible: false, items: [], selectedIndex: 0 });
-  selection.set(null);
-  inputValue.set('');
-}

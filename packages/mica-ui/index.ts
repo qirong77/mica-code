@@ -1,4 +1,4 @@
-import { themeColors, C } from './theme.js';
+import { themeColors } from './theme.js';
 import * as conv from './conversation/state.js';
 import * as input from './input/state.js';
 import * as dropdown from './bottom/dropdown/state.js';
@@ -57,7 +57,6 @@ export const micaUi = {
   createThinkingLogItem,
   /** 创建 agent 工具调用日志 UI item。 */
   createToolCallLogItem,
-  C,
   conversation: conv,
   terminalInput: {
     ...input,

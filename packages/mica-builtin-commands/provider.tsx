@@ -1,4 +1,3 @@
-import React from 'react';
 import { Text } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';

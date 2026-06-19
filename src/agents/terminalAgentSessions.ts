@@ -196,7 +196,7 @@ export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiSt
   };
 }
 
-export function createEmptyUiState(): TerminalAgentUiState {
+function createEmptyUiState(): TerminalAgentUiState {
   return {
     conversationMessages: [],
     responseText: '',

@@ -49,11 +49,7 @@ export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<I
   );
 }
 
-export async function callMcpTool(
-  serverName: string,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<string> {
+async function callMcpTool(serverName: string, toolName: string, args: Record<string, unknown>): Promise<string> {
   const server = connections.get(serverName);
   if (!server) {
     throw new Error(`MCP 服务器 "${serverName}" 未连接`);

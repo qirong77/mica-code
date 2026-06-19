@@ -1,5 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
-import type { CommandContext, CommandListOptions, CommandResult, MicaCommand, ParsedCommand } from './types.js';
+import type { CommandContext, CommandResult, MicaCommand, ParsedCommand } from './types.js';
 
 export class CommandRegistry {
   private readonly commands = new Map<string, MicaCommand>();
@@ -54,10 +54,8 @@ export class CommandRegistry {
     }
   }
 
-  list(options: CommandListOptions = {}): MicaCommand[] {
-    const commands = [...this.commands.values()];
-    const filtered = options.includeHidden ? commands : commands.filter((command) => !command.hidden);
-    return filtered.sort((a, b) => a.name.localeCompare(b.name));
+  list(): MicaCommand[] {
+    return [...this.commands.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 }
 
