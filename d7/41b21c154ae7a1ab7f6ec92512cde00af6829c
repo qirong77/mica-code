@@ -1,0 +1,103 @@
+src/plugins/commands/index.ts
+  2a5833213fe27f3a 1-109,113-125,127-187
+packages/mica-builtin-commands/status.tsx
+  2a5833213fe27f3a 3,5-6,8,18-20,42,47,50-52,57,60,65,69-70
+docs/todo.md
+  h_a456b67147438e 1-5
+packages/mica-common/disposable.ts
+  2a5833213fe27f3a 1-30
+src/app/adapters/index.ts
+  2a5833213fe27f3a 1-3
+packages/mica-ui/examples/full-app.tsx
+  2a5833213fe27f3a 27,30,32-34,37,49,67-68,74-81,86,98,113,115,129,141,146,151,160,165,168,179-180,196-198,204,210,212,225,229-230,234-237,241,243,246-248,255
+src/plugins/runtime/index.ts
+  2a5833213fe27f3a 1
+packages/mica-common/index.ts
+  2a5833213fe27f3a 1-14
+packages/mica-builtin-commands/agents.tsx
+  2a5833213fe27f3a 3-6,8-12,17-19,21,24,26-27,30-32,36-45,48-58,62-64,67-70,74-75,80-104,106-110,120-166
+packages/mica-builtin-commands/logs.tsx
+  2a5833213fe27f3a 4-5,14,21,25,28,43,51,57,61-64,89,92,94,99-100,106-108
+packages/mica-builtin-commands/index.ts
+  2a5833213fe27f3a 1-41
+packages/mica-plugin/index.ts
+  2a5833213fe27f3a 1-23
+packages/mica-builtin-commands/clear.ts
+  2a5833213fe27f3a 1-5,7-11,16,19-21,23
+src/app/index.ts
+  2a5833213fe27f3a 1-3
+src/index.ts
+  2a5833213fe27f3a 5-6,19,21,23
+packages/mica-ui/index.ts
+  2a5833213fe27f3a 23
+packages/mica-builtin-commands/commit.ts
+  2a5833213fe27f3a 5-7,24,29,32,38-39,43,47,49-50,53,55,59,61,66,72,74,78,82,86,90,100,103,110,136-137,183,188,250,260,268,272
+packages/mica-common/json.ts
+  2a5833213fe27f3a 1-2
+src/plugins/runtime/messageQueuePlugin.ts
+  2a5833213fe27f3a 1,4,6-12,14-19,21-34,36-40,42-56
+  h_a456b67147438e 2-3,5,13,20,35,41,57
+packages/mica-commands/index.ts
+  2a5833213fe27f3a 1-15
+packages/mica-common/result.ts
+  2a5833213fe27f3a 1
+packages/mica-logger/index.ts
+  2a5833213fe27f3a 1,3-7,10
+packages/mica-runtime/index.ts
+  2a5833213fe27f3a 1-19
+packages/mica-builtin-commands/compact.ts
+  2a5833213fe27f3a 1-30
+packages/mica-common/ids.ts
+  2a5833213fe27f3a 1-3
+packages/mica-builtin-commands/effort.ts
+  2a5833213fe27f3a 1-2,6-7,9,14,27,40,42-43,48-49,53
+packages/mica-context/index.ts
+  2a5833213fe27f3a 1-8
+packages/mica-builtin-commands/services.ts
+  2a5833213fe27f3a 1-97
+src/plugins/ipc/index.ts
+  2a5833213fe27f3a 1-45
+packages/mica-builtin-commands/provider.tsx
+  2a5833213fe27f3a 3-4,7-8,10,16,35,38,42,55,58-59,61,68-70,78
+packages/mica-commands/types.ts
+  2a5833213fe27f3a 1-30
+packages/mica-builtin-commands/model.ts
+  2a5833213fe27f3a 1-2,5-6,8,13,17,19,22,26-27,30,42,45-46
+packages/mica-builtin-commands/mcp.tsx
+  2a5833213fe27f3a 4,6-7,21-23,39,48-49,52-53,57,61-62,66-67,76,78,80,97,100,106,113,115,117,137,152,169,190,194,204,216,244,278,296,299-300,304-305,310-311,314-315
+src/plugins/mcp/index.ts
+  2a5833213fe27f3a 1-36
+packages/mica-builtin-commands/skills.tsx
+  2a5833213fe27f3a 4,6,16,22,29-30,34,48,50,52,82,90,113,116,120,130,163,179
+packages/mica-builtin-commands/resume.ts
+  2a5833213fe27f3a 1-3,5-6,8-12,17-19,25-26,30-31,33,36-40,42,52,56-62,65-66,69-71
+packages/mica-ipc/protocol.ts
+  2a5833213fe27f3a 1-70
+packages/mica-ipc/index.ts
+  2a5833213fe27f3a 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d741b21c154ae7a1ab7f6ec92512cde00af6829c",
+  "prompts": {
+    "2a5833213fe27f3a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019edf30-d5ed-7482-adcf-6ac87e5ab115",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 14738,
+      "total_deletions": 1059,
+      "accepted_lines": 13832,
+      "overriden_lines": 17
+    }
+  },
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
