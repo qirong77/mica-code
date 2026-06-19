@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { AgentRuntime, AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 
 export type RunningAgentRecord = {
-  version: 1;
+  version: 2;
   id: string;
   pid: number;
   cwd: string;
@@ -12,8 +12,30 @@ export type RunningAgentRecord = {
   providerName: string;
   model: string;
   status: string;
+  sessionId?: string;
+  sessionTitle?: string;
   startedAt: string;
   updatedAt: string;
+  ipc: {
+    transport: 'unix';
+    socketPath: string;
+    protocol: 'mica-agent-rpc';
+    version: 1;
+  };
+  capabilities: {
+    attach: true;
+    exclusiveControl: true;
+    observe: true;
+    remoteCommands: true;
+    takeover: true;
+  };
+  control: {
+    mode: 'local' | 'remote-controlled';
+    controllerAgentId?: string;
+    controllerPid?: number;
+    controllerCwd?: string;
+    attachedAt?: string;
+  };
 };
 
 const AGENTS_DIR = resolve(homedir(), '.mica', 'agents');
@@ -23,8 +45,24 @@ const HEARTBEAT_MS = 10_000;
 export class AgentRegistry {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private status = 'idle';
+  private readonly agentId = `${process.pid}-${Date.now()}`;
+  private readonly startedAt = new Date().toISOString();
+  private control: RunningAgentRecord['control'] = { mode: 'local' };
 
   constructor(private readonly agent: AgentRuntime) {}
+
+  get id(): string {
+    return this.agentId;
+  }
+
+  get socketPath(): string {
+    return resolve(AGENTS_DIR, `${this.agentId}.sock`);
+  }
+
+  setControl(control: RunningAgentRecord['control']): void {
+    this.control = control;
+    this.write();
+  }
 
   start(): void {
     ensureAgentsDir();
@@ -59,19 +97,32 @@ export class AgentRegistry {
   private write(): void {
     ensureAgentsDir();
     const { provider, model } = this.agent.config;
-    const existing = readAgentRecord(agentPath(process.pid));
     const now = new Date().toISOString();
     const record: RunningAgentRecord = {
-      version: 1,
-      id: existing?.id ?? `${process.pid}-${Date.now()}`,
+      version: 2,
+      id: this.agentId,
       pid: process.pid,
       cwd: process.cwd(),
       providerId: provider.id,
       providerName: provider.name ?? provider.id,
       model,
       status: this.status,
-      startedAt: existing?.startedAt ?? now,
+      startedAt: this.startedAt,
       updatedAt: now,
+      ipc: {
+        transport: 'unix',
+        socketPath: this.socketPath,
+        protocol: 'mica-agent-rpc',
+        version: 1,
+      },
+      capabilities: {
+        attach: true,
+        exclusiveControl: true,
+        observe: true,
+        remoteCommands: true,
+        takeover: true,
+      },
+      control: this.control,
     };
     writeFileSync(agentPath(process.pid), `${JSON.stringify(record, null, 2)}\n`, 'utf-8');
   }
@@ -84,7 +135,11 @@ export function listRunningAgents(): RunningAgentRecord[] {
     .filter((file) => file.endsWith('.json'))
     .map((file) => resolve(AGENTS_DIR, file))
     .map((path) => ({ path, record: readAgentRecord(path) }))
-    .filter((entry): entry is { path: string; record: RunningAgentRecord } => Boolean(entry.record))
+    .filter((entry): entry is { path: string; record: RunningAgentRecord } => {
+      if (entry.record) return true;
+      rmSync(entry.path, { force: true });
+      return false;
+    })
     .filter(({ path, record }) => {
       const alive = isProcessAlive(record.pid) && now - Date.parse(record.updatedAt) <= STALE_MS;
       if (!alive) rmSync(path, { force: true });
@@ -107,11 +162,12 @@ function readAgentRecord(path: string): RunningAgentRecord | null {
 function parseAgentRecord(value: unknown): RunningAgentRecord | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Partial<RunningAgentRecord>;
-  if (record.version !== 1) return null;
+  if (record.version !== 2) return null;
   if (!record.id || !record.cwd || !record.providerId || !record.model || !record.status || !record.startedAt || !record.updatedAt) {
     return null;
   }
   if (typeof record.pid !== 'number' || !Number.isInteger(record.pid) || record.pid <= 0) return null;
+  if (!record.ipc || !record.capabilities || !record.control) return null;
   return record as RunningAgentRecord;
 }
 

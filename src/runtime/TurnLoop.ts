@@ -1,8 +1,8 @@
-import { micaUI } from '@packages/mica-ui/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '@packages/mica-logger/index.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
 import { MessageQueue } from './MessageQueue.js';
 import { ToolLogController } from './ToolLogController.js';
 import { reportRuntimeError } from './uiBridge.js';
@@ -30,13 +30,13 @@ export class TurnLoop {
   appendResponseText(text: string) {
     this.toolLogs.endThinkingSegment();
     this.responseBuffer += text;
-    micaUI.conversation.setResponseText(this.responseBuffer);
+    micaUi.conversation.setResponseText(this.responseBuffer);
   }
 
   async submit(rawText: string) {
     const text = rawText.trim();
     if (!text) return;
-    logRuntime('runtime', 'submit', { chars: text.length, running: this.queue.isRunning });
+    micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.queue.isRunning });
 
     if (this.queue.isRunning) {
       this.queue.enqueue(text);
@@ -54,36 +54,36 @@ export class TurnLoop {
   private async runTurn(text: string) {
     this.queue.startRun();
     const startedAt = Date.now();
-    const content = micaUI.parseImageRefs(text) as AgentQueryContent;
+    const content = micaUi.parseImageRefs(text) as AgentQueryContent;
     let runId: number | null = null;
     let hasError = false;
 
-    logRuntime('runtime', 'turn:start', { chars: text.length });
+    micaLogger.logRuntime('runtime', 'turn:start', { chars: text.length });
     this.responseBuffer = '';
     this.toolLogs.resetTurn();
-    micaUI.terminalInput.clearText();
-    micaUI.conversation.appendUserMessage(content);
-    micaUI.conversation.clearResponseText();
-    micaUI.panels.clearLogEntries();
-    micaUI.panels.status.connecting();
+    micaUi.terminalInput.clearText();
+    micaUi.conversation.appendUserMessage(content);
+    micaUi.conversation.clearResponseText();
+    micaUi.panels.clearLogEntries();
+    micaUi.panels.status.connecting();
 
     try {
       const result = await this.agent.run(content);
       runId = result.runId;
       const finalText = result.text;
       if (!this.agent.isCurrent(runId)) return;
-      micaUI.conversation.appendAssistantMessage([
+      micaUi.conversation.appendAssistantMessage([
         { type: 'text', text: finalText || this.responseBuffer || '(empty response)' },
       ]);
-      micaUI.conversation.clearResponseText();
+      micaUi.conversation.clearResponseText();
       this.sessionController.saveCurrent();
-      logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || this.responseBuffer).length });
+      micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || this.responseBuffer).length });
     } catch (error) {
       if (error instanceof AgentAbortError) {
         runId = error.runId;
         this.agent.preserveAbortedTurn(content, this.responseBuffer);
         this.sessionController.saveCurrent();
-        logRuntime('runtime', 'turn:aborted_saved', { runId, chars: this.responseBuffer.length }, 'warn');
+        micaLogger.logRuntime('runtime', 'turn:aborted_saved', { runId, chars: this.responseBuffer.length }, 'warn');
         return;
       }
       hasError = true;
@@ -92,10 +92,10 @@ export class TurnLoop {
       const ownsCurrentTurn = runId == null || this.agent.isCurrent(runId);
       if (ownsCurrentTurn) {
         this.toolLogs.endThinkingSegment();
-        if (!hasError) micaUI.panels.clearAgentTurnLogItems();
+        if (!hasError) micaUi.panels.clearAgentTurnLogItems();
         this.queue.finishRun();
       }
-      logRuntime('runtime', 'turn:finish', { elapsedMs: Date.now() - startedAt, hasError });
+      micaLogger.logRuntime('runtime', 'turn:finish', { elapsedMs: Date.now() - startedAt, hasError });
     }
   }
 }

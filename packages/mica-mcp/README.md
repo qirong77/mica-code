@@ -18,9 +18,18 @@ import { micaMcp } from '../packages/mica-mcp/index.js';
 await micaMcp.init();
 ```
 
+## 设计约束
+
+- MCP server 的生命周期由本包统一管理。
+- 远端工具必须通过 `mica-tools` 的注册入口接入，不绕开工具 registry。
+- 重连或关闭 server 时需要同步清理对应工具，避免留下失效工具定义。
+- 配置读取与连接状态更新应保持可观测，便于 `/mcp` 命令展示。
+
 ## 目录说明
 
 - `config.ts`：MCP 配置路径、配置类型和加载逻辑。
 - `client.ts`：MCP client 与连接状态。
 - `service.ts`：初始化、重连和关闭编排。
 - `tools.ts`：MCP tool 到 Mica tool 的适配。
+- `index.ts`：公共 API 聚合导出。
+- `examples/`：基础使用示例。

@@ -20,7 +20,7 @@ import { useLogViewHeight } from './hooks/useLogViewHeight.js';
 import { Dialog, KeyHints, SelectList, Spin, useSpinner } from './primitives/index.js';
 import { parseImageRefs } from './utils/imagePaste.js';
 
-export const micaUI = {
+export const micaUi = {
   App,
   Conversation,
   ConversationUI,

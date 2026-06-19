@@ -14,6 +14,162 @@
 
 ---
 
+## 通用概念导读
+
+本方案里会反复出现 IPC、RPC、attach、controller、snapshot 等词。它们分别处在不同层次：
+
+```text
+用户操作层：  /agents、attach、detach、takeover
+业务控制层：  controller、observer、control lock、runtime snapshot
+协议调用层：  RPC / JSON-RPC request-response-event
+进程通信层：  IPC / Unix domain socket / JSON Lines
+运行实体层：  agent process、local agent、remote agent、session、cwd
+```
+
+可以用一个类比理解：
+
+```text
+两个 Mica 终端像两个房间里的操作台。
+IPC 是两间房之间接好的线缆。
+RPC 是线缆上约定好的对话格式。
+attach 是一个操作台请求接管另一个操作台。
+controller 是当前真正拥有操作权的人。
+observer 是只能观看状态的人。
+snapshot 是接管开始时先拍下的一张完整现场照片。
+event stream 是接管后持续传来的现场变化。
+```
+
+### IPC 是什么
+
+IPC 是 Inter-Process Communication，中文通常叫「进程间通信」。
+
+一个 Mica CLI 终端就是一个操作系统进程。两个终端之间默认不能直接读写彼此内存，也不能直接调用彼此对象方法，所以需要一个通信机制来交换数据。IPC 解决的就是：
+
+- 进程 A 如何找到进程 B
+- 进程 A 如何连接进程 B
+- 两个进程之间如何传输字节流
+- 连接断开、进程退出、权限不足时如何处理
+
+本方案选择 Unix domain socket 作为本机 IPC 方式。它类似本机专用的 socket 文件，不对外暴露 TCP 端口，适合「同一台机器上的多个 Mica 进程互相通信」。
+
+### RPC 是什么
+
+RPC 是 Remote Procedure Call，中文通常叫「远程过程调用」。
+
+如果只有 IPC，两个进程只能互相发送字节，例如一段 JSON 字符串。RPC 在 IPC 之上约定了更高层的调用格式，让调用方可以表达：
+
+```text
+我要调用对端的 submit 方法，参数是 { text: "..." }，请返回结果或错误。
+```
+
+在这个方案里，RPC 负责定义：
+
+- request：调用哪个方法，例如 `getState`、`attach`、`submit`
+- response：这个调用成功还是失败，返回什么数据
+- event：不需要请求也会主动推送的状态变化，例如 `text`、`toolCall`、`controlChanged`
+- error：错误码、错误信息和可选调试数据
+
+所以可以简单区分：
+
+```text
+IPC 关心「消息怎么送到另一个进程」。
+RPC 关心「送过去的消息是什么意思」。
+```
+
+### Attach 是什么
+
+attach 是「当前终端连接到另一个正在运行的 agent，并把自己的 UI 和输入临时切换到那个 agent」的动作。
+
+attach 不是复制，也不是迁移：
+
+- 不复制 remote agent 的 session
+- 不把 remote agent 的 runtime 移到当前进程
+- 不在当前进程执行 remote agent 的工具
+- 不接管 remote 终端的原生 PTY
+
+attach 后，当前终端更像一个远程控制台：
+
+```text
+当前终端负责显示 UI、接收用户输入、发送控制请求。
+被 attach 的 agent 进程负责真正运行模型、执行工具、保存 session。
+```
+
+### Detach 是什么
+
+detach 是 attach 的反向动作：当前终端释放 remote agent 的控制权，并切回自己原本的 local agent。
+
+detach 后：
+
+- 当前终端恢复自己的会话和 UI
+- remote agent 原终端恢复输入能力
+- remote agent 的 session、cwd、工具状态仍然留在 remote 进程里
+
+### Takeover 是什么
+
+Takeover 是「强制夺回或转移控制权」。常见场景包括：
+
+- remote agent 原终端不想继续被控制，执行 `/takeover` 夺回控制权
+- 第三个终端请求强制接管一个已被控制的 agent
+- controller 崩溃或长期失联后，server 释放旧控制权
+
+第一版可以只支持原终端手动 takeover；后续再增加确认式远程 takeover。
+
+### Controller 和 Observer 是什么
+
+Controller 是当前拥有输入控制权的一端。只有 controller 可以：
+
+- submit 普通用户输入
+- abort 当前 turn
+- 执行 remote-capable slash command
+- detach 释放控制权
+
+Observer 是只读观察者。Observer 可以接收状态、流式文本、工具日志等事件，但不能修改 remote agent 状态。
+
+一个 agent 同一时间只能有一个 controller，但可以有多个 observer。
+
+### Snapshot 和 Event Stream 是什么
+
+attach 要解决两个问题：
+
+1. 刚接上时，当前 UI 需要立刻知道 remote agent 的完整状态。
+2. 接上之后，当前 UI 需要持续收到后续变化。
+
+因此协议采用「快照 + 增量事件」模式：
+
+```text
+attach 成功
+  -> 先返回 RuntimeViewSnapshot 完整快照
+  -> UI 根据快照一次性渲染当前现场
+  -> 后续通过 event stream 持续应用 text/tool/status 等增量事件
+```
+
+Snapshot 是某一刻的完整状态，例如历史消息、当前 responseText、tool logs、usage、queue、control 状态。
+
+Event stream 是之后不断发生的小变化，例如新增一段流式文本、工具调用开始、工具调用结束、控制权变化。
+
+### Local Agent、Remote Agent 和 Background Agent 的区别
+
+```text
+Local Agent
+  当前终端所在进程里的 agent。
+
+Remote Agent
+  另一个终端进程里的 agent，需要通过 IPC/RPC attach。
+
+Background Agent
+  同一个终端进程内，但当前没有显示在 UI 上的本地 agent。
+```
+
+三者的关键差异：
+
+```text
+local current agent      当前终端直接控制，不需要 IPC
+local background agent   同进程内切换，类似浏览器标签页，不需要 IPC
+remote agent             跨进程接管，需要 IPC、RPC、权限校验和 control lock
+```
+
+---
+
 ## 核心概念
 
 ### Agent Process

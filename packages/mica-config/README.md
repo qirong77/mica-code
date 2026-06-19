@@ -25,7 +25,16 @@ micaConfig.update((current) => ({
 }));
 ```
 
+## 设计约束
+
+- 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
+- provider 模型缓存属于配置数据，加载失败时应保留现有配置。
+- 默认配置模板放在 `default.json`，新增字段需要兼容旧配置。
+- 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
+
 ## 目录说明
 
 - `config.ts`：配置读写、provider 模型拉取和类型定义。
 - `default.json`：首次启动时使用的默认配置模板。
+- `index.ts`：公共 API 聚合导出。
+- `examples/`：基础使用示例。

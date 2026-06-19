@@ -1,4 +1,4 @@
-import { micaUI } from '@packages/mica-ui/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
@@ -95,24 +95,24 @@ const defaultSessionConfigAdapter: SessionConfigAdapter = {
 
 const defaultSessionUiAdapter: SessionUiAdapter = {
   restore(agent, lastUsage) {
-    micaUI.conversation.setMessages(agent.toConversationMessages());
-    micaUI.conversation.clearResponseText();
-    micaUI.conversation.clearPendingInput();
-    micaUI.panels.thinkingText.set('');
-    micaUI.panels.clearLogEntries();
-    micaUI.panels.clearAgentTurnLogItems();
-    micaUI.panels.clearLog();
-    micaUI.panels.clearPluginUIs();
-    micaUI.messageBar.clearMessages();
-    micaUI.panels.status.idle();
-    micaUI.terminalInput.clearText();
+    micaUi.conversation.setMessages(agent.toConversationMessages());
+    micaUi.conversation.clearResponseText();
+    micaUi.conversation.clearPendingInput();
+    micaUi.panels.thinkingText.set('');
+    micaUi.panels.clearLogEntries();
+    micaUi.panels.clearAgentTurnLogItems();
+    micaUi.panels.clearLog();
+    micaUi.panels.clearPluginUIs();
+    micaUi.messageBar.clearMessages();
+    micaUi.panels.status.idle();
+    micaUi.terminalInput.clearText();
 
     if (lastUsage) {
-      micaUI.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUI.panels.cachedTokenRate.set(readTotalCachedTokenRate(agent));
+      micaUi.panels.contextSize.set(readContextTokens(lastUsage));
+      micaUi.panels.cachedTokenRate.set(readTotalCachedTokenRate(agent));
     } else {
-      micaUI.panels.contextSize.set(0);
-      micaUI.panels.cachedTokenRate.set(0);
+      micaUi.panels.contextSize.set(0);
+      micaUi.panels.cachedTokenRate.set(0);
     }
   },
 };

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
-import { micaUI } from '../index.js';
+import { micaUi } from '../index.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
 
@@ -43,10 +43,10 @@ interface LogItem {
 }
 
 export const Conversation = (): React.ReactNode => {
-  const { colors } = micaUI.theme;
-  const messages = useScheduleState(micaUI.conversation.messages);
-  const responseText = useScheduleState(micaUI.conversation.responseText);
-  const pendingInputs = useScheduleState(micaUI.conversation.pendingInputs);
+  const { colors } = micaUi.theme;
+  const messages = useScheduleState(micaUi.conversation.messages);
+  const responseText = useScheduleState(micaUi.conversation.responseText);
+  const pendingInputs = useScheduleState(micaUi.conversation.pendingInputs);
   const dots = useDots();
 
   const staticItems = useMemo(

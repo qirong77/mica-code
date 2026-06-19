@@ -21,6 +21,15 @@ const store = micaSession.createStore();
 const sessions = store.list(10);
 ```
 
+## 设计约束
+
+- 本包只负责会话文件存储，不直接调用 provider 或渲染 UI。
+- 会话 ID 和路径需要做安全处理，避免越权读取任意文件。
+- 保存内容应是可序列化快照，便于后续 resume、fork 或 session graph 扩展。
+- 新增会话字段时应兼容历史会话文件。
+
 ## 目录说明
 
 - `sessionStore.ts`：会话类型、文件存储实现、ID 创建和路径安全处理。
+- `index.ts`：公共 API 聚合导出。
+- `examples/`：基础使用示例。

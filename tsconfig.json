@@ -2,6 +2,13 @@
   "extends": "./tsconfig.base.json",
   "include": [
     "src",
+    "packages/mica-common",
+    "packages/mica-plugin",
+    "packages/mica-runtime",
+    "packages/mica-commands",
+    "packages/mica-builtin-commands",
+    "packages/mica-context",
+    "packages/mica-ipc",
     "packages/mica-agent",
     "packages/mica-tools",
     "packages/mica-ui",

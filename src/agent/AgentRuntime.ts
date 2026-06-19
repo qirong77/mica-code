@@ -3,7 +3,7 @@ import type { OpenAI } from 'openai';
 import { micaAgent, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaConfig, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
-import { logRuntime } from '@packages/mica-logger/index.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
 
 export type AgentRuntimeStatus =
   | { type: 'idle' }
@@ -55,7 +55,7 @@ export class AgentRuntime {
   constructor() {
     this.currentConfig = this.readConfig();
     this.recreateClient();
-    logRuntime('agent', 'initialized', {
+    micaLogger.logRuntime('agent', 'initialized', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
       configured: this.isConfigured,
@@ -90,7 +90,7 @@ export class AgentRuntime {
     this.currentConfig = this.readConfig();
     this.recreateClient();
     if (resetSession) this.clearSession();
-    logRuntime('agent', 'config:reloaded', {
+    micaLogger.logRuntime('agent', 'config:reloaded', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
       resetSession,
@@ -102,7 +102,7 @@ export class AgentRuntime {
     this.runId++;
     this.activeAbortController?.abort();
     this.activeAbortController = null;
-    logRuntime('agent', 'abort', { runId: this.runId }, 'warn');
+    micaLogger.logRuntime('agent', 'abort', { runId: this.runId }, 'warn');
     this.events.emit('status', { type: 'idle' });
   }
 
@@ -111,7 +111,7 @@ export class AgentRuntime {
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.client?.reset();
-    logRuntime('agent', 'session:cleared', { runId: this.runId });
+    micaLogger.logRuntime('agent', 'session:cleared', { runId: this.runId });
   }
 
   getSnapshot(): AgentRuntimeSnapshot {
@@ -137,7 +137,7 @@ export class AgentRuntime {
       messages.push({ role: 'assistant', content: answer });
     }
     this.client.messages = messages as typeof this.client.messages;
-    logRuntime('agent', 'turn:preserved_aborted', { messages: messages.length, hasPartialAnswer: Boolean(answer) }, 'warn');
+    micaLogger.logRuntime('agent', 'turn:preserved_aborted', { messages: messages.length, hasPartialAnswer: Boolean(answer) }, 'warn');
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {
@@ -149,7 +149,7 @@ export class AgentRuntime {
       lastUsage: snapshot.lastUsage,
       conversationMessages: [],
     });
-    logRuntime('agent', 'snapshot:loaded', {
+    micaLogger.logRuntime('agent', 'snapshot:loaded', {
       provider: snapshot.providerId,
       model: snapshot.model,
       messages: snapshot.messages.length,
@@ -164,7 +164,7 @@ export class AgentRuntime {
     const runId = ++this.runId;
     const startedAt = Date.now();
     const questionText = contentToText(question);
-    logRuntime('agent', 'run:start', {
+    micaLogger.logRuntime('agent', 'run:start', {
       runId,
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
@@ -174,7 +174,7 @@ export class AgentRuntime {
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       this.events.emit('status', { type: 'error', message });
-      logRuntime('agent', 'run:not_configured', { runId, provider: this.currentConfig.provider.id }, 'error');
+      micaLogger.logRuntime('agent', 'run:not_configured', { runId, provider: this.currentConfig.provider.id }, 'error');
       throw new Error(message);
     }
 
@@ -191,7 +191,7 @@ export class AgentRuntime {
           type: 'completed',
           elapsedMs: Date.now() - startedAt,
         });
-        logRuntime('agent', 'run:completed', {
+        micaLogger.logRuntime('agent', 'run:completed', {
           runId,
           elapsedMs: Date.now() - startedAt,
           chars: text.length,
@@ -200,12 +200,12 @@ export class AgentRuntime {
       return { runId, text };
     } catch (error) {
       if (!this.isCurrent(runId) || isAbortError(error)) {
-        logRuntime('agent', 'run:aborted', { runId }, 'warn');
+        micaLogger.logRuntime('agent', 'run:aborted', { runId }, 'warn');
         throw new AgentAbortError(runId);
       }
       const message = error instanceof Error ? error.message : String(error);
       if (this.isCurrent(runId)) this.events.emit('status', { type: 'error', message });
-      logRuntime('agent', 'run:error', { runId, message }, 'error');
+      micaLogger.logRuntime('agent', 'run:error', { runId, message }, 'error');
       throw error;
     } finally {
       if (this.activeAbortController === abortController) {
@@ -221,11 +221,11 @@ export class AgentRuntime {
   private recreateClient() {
     if (!this.currentConfig.provider.api_key) {
       this.client = null;
-      logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
+      micaLogger.logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
       return;
     }
     this.client = new micaAgent.OpenAIClient(this.clientOptions());
-    logRuntime('agent', 'client:created', {
+    micaLogger.logRuntime('agent', 'client:created', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
@@ -241,15 +241,15 @@ export class AgentRuntime {
     this.client.onToolCall = (name, args, id) => {
       this.events.emit('status', { type: 'calling_tool', toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
-      logRuntime('agent.tool', 'call', { name, id, argsChars: args.length });
+      micaLogger.logRuntime('agent.tool', 'call', { name, id, argsChars: args.length });
     };
     this.client.onToolResult = (name, result, id) => {
       this.events.emit('toolResult', { name, result, id });
-      logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
+      micaLogger.logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
     };
     this.client.onUsage = (usage) => {
       this.events.emit('usage', usage);
-      logRuntime('agent', 'usage', {
+      micaLogger.logRuntime('agent', 'usage', {
         input: usage.inputTokens,
         cachedInput: usage.cachedInputTokens ?? 0,
         output: usage.outputTokens,

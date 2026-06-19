@@ -1,0 +1,145 @@
+import React from 'react';
+import { Box, Text } from '@anthropic/ink';
+import { micaUi } from '@packages/mica-ui/index.js';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { CommandAgent } from './services.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
+
+export function createStatusCommand(agent: CommandAgent) {
+  return {
+    name: 'status',
+    description: '显示当前 provider/model/effort 状态',
+    action: () => {
+      const { provider, model, effort } = agent.config;
+      const snapshot = agent.getSnapshot();
+      const usageTotals = summarizeUsage(snapshot.usageHistory);
+      const latestUsage = snapshot.lastUsage;
+
+      const contextTokens = micaUi.panels.contextSize.get();
+      const contextWindowSize = micaUi.panels.modelDisplay.contextWindowSize.get();
+      micaLogger.logRuntime('plugin.status', 'opened', {
+        provider: provider.id,
+        model,
+        effort: provider.supportsEffort !== false ? effort : 'none',
+        messages: snapshot.messages.length,
+        contextTokens,
+        usageRecords: snapshot.usageHistory.length,
+      });
+      showStatusPanel(
+        formatStatusList([
+          ['Model', model],
+          ['Effort', provider.supportsEffort !== false ? effort : 'none'],
+          ['Provider', provider.name ?? provider.id],
+          ['Cwd', process.cwd()],
+          ['Context', formatContextUsage(contextTokens, contextWindowSize)],
+          ['Total input tokens', formatTokenValue(usageTotals.inputTokens, usageTotals.records)],
+          ['Total output tokens', formatTokenValue(usageTotals.outputTokens, usageTotals.records)],
+          ['Latest input cached', formatUsageCachedTokenValue(latestUsage)],
+          ['Total input cached', formatTotalsCachedTokenValue(usageTotals)],
+        ]),
+      );
+    },
+  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+function showStatusPanel(text: string) {
+  const panelId = 'status-panel';
+  const initialText = micaUi.terminalInput.text.get();
+
+  function hide() {
+    const nextPanels = micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId);
+    micaUi.panels.setPluginUIs(nextPanels);
+    micaLogger.logRuntime('plugin.status', 'closed');
+  }
+
+  function StatusPanel() {
+    return (
+      <micaUi.Dialog title="status" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
+        <Box flexDirection="column">
+          {text.split('\n').map((line, index) => (
+            <Text key={`${index}:${line}`} color={micaUi.theme.colors.dim}>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      </micaUi.Dialog>
+    );
+  }
+
+  micaUi.panels.setPluginUIs([
+    ...micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId),
+    {
+      id: panelId,
+      component: StatusPanel,
+      preserveInput: true,
+      onInput: (_input, key) => {
+        if (!key.escape) return false;
+        hide();
+        return true;
+      },
+      onTextChange: (value) => {
+        if (value !== initialText) hide();
+        return false;
+      },
+    },
+  ]);
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return `${tokens}`;
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
+  return `${(tokens / 1_000_000).toFixed(2)}M`;
+}
+
+function formatTokenValue(tokens: number, records: number): string {
+  if (records === 0) return '-';
+  return formatTokens(tokens);
+}
+
+function formatContextUsage(contextTokens: number, contextWindowSize: number): string {
+  if (contextTokens <= 0 || contextWindowSize <= 0) return '-';
+  const usagePct = ((contextTokens / contextWindowSize) * 100).toFixed(1);
+  return `${formatTokens(contextTokens)} / ${formatTokens(contextWindowSize)} (${usagePct}%)`;
+}
+
+function formatUsageCachedTokenValue(usage: AgentUsageRecord | undefined): string {
+  if (!usage) return '-';
+  const cachedInputTokens = usage.cachedInputTokens ?? 0;
+  const cacheRate = usage.inputTokens > 0 ? cachedInputTokens / usage.inputTokens : 0;
+  return `${formatTokens(cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
+}
+
+function formatTotalsCachedTokenValue(usageTotals: UsageTotals): string {
+  if (usageTotals.records === 0) return '-';
+  const cacheRate = usageTotals.inputTokens > 0 ? usageTotals.cachedInputTokens / usageTotals.inputTokens : 0;
+  return `${formatTokens(usageTotals.cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
+}
+
+type UsageTotals = {
+  records: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+};
+
+function summarizeUsage(usageHistory: AgentUsageRecord[]): UsageTotals {
+  return usageHistory.reduce<UsageTotals>(
+    (totals, usage) => ({
+      records: totals.records + 1,
+      inputTokens: totals.inputTokens + usage.inputTokens,
+      outputTokens: totals.outputTokens + usage.outputTokens,
+      cachedInputTokens: totals.cachedInputTokens + (usage.cachedInputTokens ?? 0),
+    }),
+    {
+      records: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+    },
+  );
+}
+
+function formatStatusList(entries: Array<[string, string]>) {
+  const width = entries.reduce((max, [label]) => Math.max(max, label.length), 0);
+  return entries.map(([label, value]) => `${label.padEnd(width)} : ${value}`).join('\n');
+}

@@ -1,5 +1,5 @@
-import { micaUI } from '@packages/mica-ui/index.js';
-import { logRuntime } from '@packages/mica-logger/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
 import { showMessage } from './uiBridge.js';
 
 export class MessageQueue {
@@ -21,20 +21,20 @@ export class MessageQueue {
   clear() {
     this.pendingInputs = [];
     this.running = false;
-    micaUI.conversation.clearPendingInput();
+    micaUi.conversation.clearPendingInput();
   }
 
   enqueue(text: string) {
     this.pendingInputs.push(text);
-    logRuntime('runtime', 'submit:queued', { chars: text.length, queued: this.pendingInputs.length });
-    micaUI.conversation.setPendingInputs(this.pendingInputs);
+    micaLogger.logRuntime('runtime', 'submit:queued', { chars: text.length, queued: this.pendingInputs.length });
+    micaUi.conversation.setPendingInputs(this.pendingInputs);
     showMessage('消息已排队，将在当前任务完成后发送');
-    micaUI.terminalInput.clearText();
+    micaUi.terminalInput.clearText();
   }
 
   takePending(): string | null {
     const next = this.pendingInputs.shift() ?? null;
-    micaUI.conversation.setPendingInputs(this.pendingInputs);
+    micaUi.conversation.setPendingInputs(this.pendingInputs);
     return next;
   }
 }

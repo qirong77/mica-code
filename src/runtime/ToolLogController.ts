@@ -1,7 +1,7 @@
-import { micaUI } from '@packages/mica-ui/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
-import { logRuntime } from '@packages/mica-logger/index.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
 
 type ActiveToolCall = { id: string; startTime: number; displayText: string };
 
@@ -16,7 +16,7 @@ export class ToolLogController {
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
     this.activeToolCalls.clear();
-    micaUI.panels.thinkingText.set('');
+    micaUi.panels.thinkingText.set('');
   }
 
   resetAll() {
@@ -28,7 +28,7 @@ export class ToolLogController {
   endThinkingSegment() {
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
-    micaUI.panels.thinkingText.set('');
+    micaUi.panels.thinkingText.set('');
   }
 
   appendThinking(text: string) {
@@ -37,8 +37,8 @@ export class ToolLogController {
       this.thinkingBuffer = '';
     }
     this.thinkingBuffer += text;
-    micaUI.panels.thinkingText.set(this.thinkingBuffer);
-    micaUI.panels.replaceAgentTurnLogItem(micaAgent.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
+    micaUi.panels.thinkingText.set(this.thinkingBuffer);
+    micaUi.panels.replaceAgentTurnLogItem(micaAgent.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
   }
 
   addToolCall({ name, args, id }: { name: string; args: string; id?: string }) {
@@ -53,8 +53,8 @@ export class ToolLogController {
       displayText,
     });
 
-    logRuntime('runtime.tool', 'ui:add', { name, id: toolKey });
-    micaUI.panels.appendAgentTurnLogItem(
+    micaLogger.logRuntime('runtime.tool', 'ui:add', { name, id: toolKey });
+    micaUi.panels.appendAgentTurnLogItem(
       micaAgent.createToolCallLogItem({
         id: toolLogId,
         toolName: name,
@@ -74,14 +74,14 @@ export class ToolLogController {
     const displayText = activeTool?.displayText ?? `${name} result`;
 
     if (toolKey) this.activeToolCalls.delete(toolKey);
-    logRuntime('runtime.tool', 'ui:complete', {
+    micaLogger.logRuntime('runtime.tool', 'ui:complete', {
       name,
       id: toolKey,
       elapsedMs: Date.now() - startTime,
       resultChars: result.length,
     });
 
-    micaUI.panels.replaceAgentTurnLogItem(
+    micaUi.panels.replaceAgentTurnLogItem(
       micaAgent.createToolCallLogItem({
         id: toolLogId,
         toolName: name,

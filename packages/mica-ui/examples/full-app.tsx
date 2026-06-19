@@ -24,17 +24,17 @@
 
 import React from 'react';
 import { wrappedRender, Box, Text } from '@anthropic/ink';
-import { micaUI } from '../index.js';
+import { micaUi } from '../index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 
-const colors = micaUI.theme.colors;
+const colors = micaUi.theme.colors;
 
-micaUI.panels.setOnAbortAgent(() => {
-  micaUI.panels.status.error('Agent aborted by user');
-  micaUI.messageBar.addMessage({ id: `abort-${Date.now()}`, text: 'Agent aborted' });
+micaUi.panels.setOnAbortAgent(() => {
+  micaUi.panels.status.error('Agent aborted by user');
+  micaUi.messageBar.addMessage({ id: `abort-${Date.now()}`, text: 'Agent aborted' });
 });
 
-micaUI.dropdown.setQuickCommands([
+micaUi.dropdown.setQuickCommands([
   { name: 'demo', description: '重新播放完整 UI 流程', action: () => startDemo() },
   { name: 'clear', description: '清空对话、日志和插件面板', action: () => resetDemo() },
   { name: 'plugin', description: '显示一个插件面板', action: () => showPluginPanel(3500) },
@@ -46,7 +46,7 @@ micaUI.dropdown.setQuickCommands([
   {
     name: 'error',
     description: '切换到 error 状态',
-    action: () => micaUI.panels.status.error('Example error from /error'),
+    action: () => micaUi.panels.status.error('Example error from /error'),
   },
   {
     name: 'help',
@@ -64,26 +64,26 @@ let demoRunId = 0;
 
 function showMessage(text: string, ttl = 3000) {
   const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  micaUI.messageBar.addMessage({ id, text });
-  setTimeout(() => micaUI.messageBar.removeMessage(id), ttl);
+  micaUi.messageBar.addMessage({ id, text });
+  setTimeout(() => micaUi.messageBar.removeMessage(id), ttl);
 }
 
 function resetDemo() {
   demoRunId++;
   toolId = 0;
-  micaUI.conversation.clearMessages();
-  micaUI.conversation.clearResponseText();
-  micaUI.conversation.clearPendingInput();
-  micaUI.panels.clearLogEntries();
-  micaUI.panels.clearPluginUIs();
-  micaUI.messageBar.clearMessages();
-  micaUI.panels.status.idle();
-  micaUI.terminalInput.setPlaceholder('Type a message or press / for commands...');
+  micaUi.conversation.clearMessages();
+  micaUi.conversation.clearResponseText();
+  micaUi.conversation.clearPendingInput();
+  micaUi.panels.clearLogEntries();
+  micaUi.panels.clearPluginUIs();
+  micaUi.messageBar.clearMessages();
+  micaUi.panels.status.idle();
+  micaUi.terminalInput.setPlaceholder('Type a message or press / for commands...');
 }
 
 function addTool(name: string, displayText: string, durationMs: number, output = '') {
   const id = `tool-${++toolId}`;
-  micaUI.panels.appendAgentTurnLogItem(
+  micaUi.panels.appendAgentTurnLogItem(
     micaAgent.createToolCallLogItem({
       id,
       toolName: name,
@@ -95,7 +95,7 @@ function addTool(name: string, displayText: string, durationMs: number, output =
 }
 
 function addThinking(text: string) {
-  micaUI.panels.appendAgentTurnLogItem(micaAgent.createThinkingLogItem(`thinking-${Date.now()}-${Math.random()}`, text));
+  micaUi.panels.appendAgentTurnLogItem(micaAgent.createThinkingLogItem(`thinking-${Date.now()}-${Math.random()}`, text));
 }
 
 async function showPluginPanel(durationMs = 2500) {
@@ -110,9 +110,9 @@ async function showPluginPanel(durationMs = 2500) {
       </Box>
     );
   }
-  micaUI.panels.setPluginUIs([{ id: 'demo-plugin', component: PluginContent }]);
+  micaUi.panels.setPluginUIs([{ id: 'demo-plugin', component: PluginContent }]);
   await sleep(durationMs);
-  micaUI.panels.clearPluginUIs();
+  micaUi.panels.clearPluginUIs();
 }
 
 async function startDemo() {
@@ -126,7 +126,7 @@ async function startDemo() {
   await sleep(500);
   if (!isCurrent()) return;
 
-  micaUI.conversation.setMessages([
+  micaUi.conversation.setMessages([
     { role: 'user', content: '演示一下 mica-ui 能做什么' },
     {
       role: 'assistant',
@@ -138,17 +138,17 @@ async function startDemo() {
       ],
     },
   ]);
-  micaUI.conversation.setPendingInput('等当前 agent 完成后，再发送这条排队输入');
+  micaUi.conversation.setPendingInput('等当前 agent 完成后，再发送这条排队输入');
 
   await sleep(600);
   if (!isCurrent()) return;
 
-  micaUI.panels.status.connecting();
+  micaUi.panels.status.connecting();
   showMessage('WorkingStatus: connecting');
   await sleep(800);
   if (!isCurrent()) return;
 
-  micaUI.panels.status.thinking();
+  micaUi.panels.status.thinking();
   addThinking('Thinking: 先展示 AgentTurnLog 的思考记录。');
   await sleep(400);
   addThinking('Thinking: 再展示多个 tool call 和 shell 输出。');
@@ -157,15 +157,15 @@ async function startDemo() {
   await sleep(400);
   if (!isCurrent()) return;
 
-  micaUI.panels.status.callingTool(['list_files'], 0);
+  micaUi.panels.status.callingTool(['list_files'], 0);
   addTool('list_files', 'list_files packages/mica-ui', 720);
   await sleep(900);
   if (!isCurrent()) return;
 
-  micaUI.panels.status.callingTool(['read_file', 'grep_search', 'run_shell'], 1800);
+  micaUi.panels.status.callingTool(['read_file', 'grep_search', 'run_shell'], 1800);
   addTool('read_file', 'read_file packages/mica-ui/api.ts', 820);
   await sleep(500);
-  addTool('grep_search', 'grep_search "micaUI" packages/mica-ui', 640);
+  addTool('grep_search', 'grep_search "micaUi" packages/mica-ui', 640);
   await sleep(500);
   addTool('run_shell', 'bun run check:types', 1600, '$ tsc --noEmit\nDone');
   await sleep(1300);
@@ -176,8 +176,8 @@ async function startDemo() {
   await sleep(1200);
   if (!isCurrent()) return;
 
-  micaUI.panels.status.streaming();
-  micaUI.conversation.clearPendingInput();
+  micaUi.panels.status.streaming();
+  micaUi.conversation.clearPendingInput();
 
   const response =
     '## mica-ui 综合演示\n\n' +
@@ -193,23 +193,23 @@ async function startDemo() {
     '| Dropdown | 输入 `/` 后选择 quick command |\n\n' +
     '### 示例代码片段\n\n' +
     '```ts\n' +
-    'micaUI.panels.status.streaming();\n' +
-    'micaUI.conversation.setResponseText(markdown);\n' +
-    'micaUI.panels.appendAgentTurnLogItem(createToolCallLogItem({ id, toolName, displayText }));\n' +
+    'micaUi.panels.status.streaming();\n' +
+    'micaUi.conversation.setResponseText(markdown);\n' +
+    'micaUi.panels.appendAgentTurnLogItem(createToolCallLogItem({ id, toolName, displayText }));\n' +
     '```\n\n' +
     '> 输入 `/` 可以打开快捷命令菜单；输入普通文本会追加一轮对话。';
 
   for (let i = 1; i <= response.length; i++) {
     if (!isCurrent()) return;
-    micaUI.conversation.setResponseText(response.slice(0, i));
+    micaUi.conversation.setResponseText(response.slice(0, i));
     await sleep(i < 50 ? 6 : 12);
   }
 
   await sleep(300);
   if (!isCurrent()) return;
-  micaUI.panels.status.completed(8750);
+  micaUi.panels.status.completed(8750);
 
-  micaUI.conversation.setMessages([
+  micaUi.conversation.setMessages([
     { role: 'user', content: '演示一下 mica-ui 能做什么' },
     {
       role: 'assistant',
@@ -222,35 +222,35 @@ async function startDemo() {
     },
     { role: 'assistant', content: [{ type: 'text', text: response }] },
   ]);
-  micaUI.conversation.clearResponseText();
+  micaUi.conversation.clearResponseText();
   showMessage('Demo completed. Press / for commands.');
 }
 
-micaUI.terminalInput.onSubmit(async (text) => {
-  micaUI.terminalInput.clearText();
+micaUi.terminalInput.onSubmit(async (text) => {
+  micaUi.terminalInput.clearText();
   const trimmed = text.trim();
   if (!trimmed) return;
 
-  micaUI.panels.status.thinking();
-  micaUI.panels.setAgentTurnLogItems([micaAgent.createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`)]);
-  micaUI.conversation.appendUserMessage(trimmed);
-  micaUI.conversation.setResponseText('');
+  micaUi.panels.status.thinking();
+  micaUi.panels.setAgentTurnLogItems([micaAgent.createThinkingLogItem(`input-${Date.now()}`, `Received user input: ${trimmed}`)]);
+  micaUi.conversation.appendUserMessage(trimmed);
+  micaUi.conversation.setResponseText('');
   await sleep(500);
 
   const reply = `收到：**${trimmed}**\n\n这是通过 \`terminalInput.onSubmit\` 触发的普通消息回显。输入 \`/\` 可以打开 quick command dropdown。`;
-  micaUI.panels.status.streaming();
+  micaUi.panels.status.streaming();
   for (let i = 1; i <= reply.length; i += 3) {
-    micaUI.conversation.setResponseText(reply.slice(0, i));
+    micaUi.conversation.setResponseText(reply.slice(0, i));
     await sleep(12);
   }
-  micaUI.conversation.appendAssistantMessage([{ type: 'text', text: reply }]);
-  micaUI.conversation.clearResponseText();
-  micaUI.panels.status.completed(700);
+  micaUi.conversation.appendAssistantMessage([{ type: 'text', text: reply }]);
+  micaUi.conversation.clearResponseText();
+  micaUi.panels.status.completed(700);
 });
 
 setTimeout(() => {
   startDemo();
 }, 300);
 
-const instance = await wrappedRender(<micaUI.App />);
+const instance = await wrappedRender(<micaUi.App />);
 await instance.waitUntilExit();
