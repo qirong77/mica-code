@@ -1,20 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
 import { micaUi } from '../index.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { Markdown } from './Markdown.js';
-
-function useDots(delay = 500): string {
-  const [dots, setDots] = useState('');
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setDots((d) => (d.length >= 3 ? '' : d + '.'));
-    }, delay);
-    return () => clearInterval(timer);
-  }, [delay]);
-  return dots;
-}
 
 interface LogMessage extends MicaUiMessageParam {
   status?: 'clear';
@@ -47,7 +36,6 @@ export const Conversation = (): React.ReactNode => {
   const messages = useScheduleState(micaUi.conversation.messages);
   const responseText = useScheduleState(micaUi.conversation.responseText);
   const pendingInputs = useScheduleState(micaUi.conversation.pendingInputs);
-  const dots = useDots();
 
   const staticItems = useMemo(
     () =>
@@ -96,7 +84,6 @@ export const Conversation = (): React.ReactNode => {
             <Text color={colors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
             <Text color={colors.dim}>
               {'（等待当前 agent 执行完成后发送，shift + ← 重新编辑'}
-              {dots}
               {'）'}
             </Text>
           </Box>
