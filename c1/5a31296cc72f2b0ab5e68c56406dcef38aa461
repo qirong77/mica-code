@@ -1,0 +1,14 @@
+src/commands/commit.ts
+  h_a456b67147438e 96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "c15a31296cc72f2b0ab5e68c56406dcef38aa461",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
