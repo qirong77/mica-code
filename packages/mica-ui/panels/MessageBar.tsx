@@ -4,7 +4,12 @@ import mitt from 'mitt';
 import { state as dropdownState } from '../bottom/dropdown/state.js';
 import { inputBottomDistance } from '../input/state.js';
 
-type Events = { add: { id: string; text: string }; remove: string; clear: void };
+export interface MessageItem {
+  id: string;
+  text: string;
+}
+
+type Events = { add: MessageItem; remove: string; clear: void; set: MessageItem[] };
 const emitter = mitt<Events>();
 type PendingEvent = { type: 'add'; item: MessageItem } | { type: 'remove'; id: string } | { type: 'clear' };
 
@@ -13,10 +18,7 @@ let pendingEvents: PendingEvent[] = [];
 
 const MIN_VISIBLE = 3;
 
-interface MessageItem {
-  id: string;
-  text: string;
-}
+let currentItems: MessageItem[] = [];
 
 export const MessageBarAPI = {
   addMessage: (item: MessageItem) => {
@@ -40,6 +42,11 @@ export const MessageBarAPI = {
     }
     emitter.emit('clear');
   },
+  setMessages: (items: MessageItem[]) => {
+    currentItems = [...items];
+    emitter.emit('set', currentItems);
+  },
+  getMessages: () => [...currentItems],
 };
 
 export const MessageBar = React.memo(function MessageBar() {
@@ -56,13 +63,26 @@ export const MessageBar = React.memo(function MessageBar() {
     const onAdd = (item: MessageItem) =>
       setItems((prev) => {
         const next = [...prev, item];
-        return next.length > maxBufferRef.current ? next.slice(-maxBufferRef.current) : next;
+        currentItems = next.length > maxBufferRef.current ? next.slice(-maxBufferRef.current) : next;
+        return currentItems;
       });
-    const onRemove = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
-    const onClear = () => setItems([]);
+    const onRemove = (id: string) =>
+      setItems((prev) => {
+        currentItems = prev.filter((s) => s.id !== id);
+        return currentItems;
+      });
+    const onClear = () => {
+      currentItems = [];
+      setItems([]);
+    };
+    const onSet = (nextItems: MessageItem[]) => {
+      currentItems = [...nextItems];
+      setItems(currentItems);
+    };
     emitter.on('add', onAdd);
     emitter.on('remove', onRemove);
     emitter.on('clear', onClear);
+    emitter.on('set', onSet);
     isMounted = true;
     for (const event of pendingEvents) {
       if (event.type === 'add') onAdd(event.item);
@@ -72,13 +92,14 @@ export const MessageBar = React.memo(function MessageBar() {
     pendingEvents = [];
     let prevVisible = false;
     const unsub = dropdownState.subscribe((state) => {
-      if (state.visible && !prevVisible) setItems([]);
+      if (state.visible && !prevVisible) onClear();
       prevVisible = state.visible;
     });
     return () => {
       emitter.off('add', onAdd);
       emitter.off('remove', onRemove);
       emitter.off('clear', onClear);
+      emitter.off('set', onSet);
       unsub();
       isMounted = false;
     };

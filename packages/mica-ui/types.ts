@@ -105,3 +105,14 @@ export interface MicaUiUILogEntry {
   dimColor?: boolean;
   bold?: boolean;
 }
+
+export interface MicaUiAgentStatusItem {
+  id: string;
+  index: number;
+  title: string;
+  providerName: string;
+  model: string;
+  status: string;
+  current: boolean;
+  updatedAt: string;
+}

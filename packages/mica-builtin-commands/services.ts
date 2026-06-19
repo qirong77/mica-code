@@ -13,10 +13,7 @@ export type CommandAgent = {
   };
   readonly currentRunId: number;
   reloadConfig(resetClient?: boolean): void;
-  createSubAgent(options?: {
-    systemPrompt?: string;
-    [key: string]: unknown;
-  }): {
+  createSubAgent(options?: { systemPrompt?: string; [key: string]: unknown }): {
     query(input: string): Promise<string>;
   };
   getSnapshot(): {
@@ -43,52 +40,40 @@ export type ResumeSessionResult =
 export type CommandSessionController = {
   list(limit?: number): SessionSummary[];
   resume(id: string): ResumeSessionResult;
+  startNewSession(): void;
+  saveCurrent(): void;
 };
 
 export type RunningAgentRecord = {
-  version: 2;
   id: string;
-  pid: number;
+  index: number;
+  title: string;
   cwd: string;
   providerId: string;
   providerName: string;
   model: string;
   status: string;
-  sessionId?: string;
-  sessionTitle?: string;
+  current: boolean;
   startedAt: string;
   updatedAt: string;
-  ipc: {
-    transport: 'unix';
-    socketPath: string;
-    protocol: 'mica-agent-rpc';
-    version: 1;
-  };
-  capabilities: {
-    attach: boolean;
-    exclusiveControl: boolean;
-    observe: boolean;
-    remoteCommands: boolean;
-    takeover: boolean;
-  };
-  control: {
-    mode: 'local' | 'remote-controlled';
-    controllerAgentId?: string;
-    controllerPid?: number;
-    controllerCwd?: string;
-    attachedAt?: string;
-  };
 };
 
 export type CommandRuntimeServices = {
   clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void;
-  showMessage(text: string, ttl?: number): void;
+  showMessage(text: string, ttl?: number, ownerSessionId?: string): void;
   syncModelDisplay(agent: CommandAgent): void;
   isAgentRunning(): boolean;
+  getCurrentAgentSessionId(): string | undefined;
+  getCurrentAgent(): CommandAgent | undefined;
   listRunningAgents(): RunningAgentRecord[];
-  attachAgent(agent: RunningAgentRecord): Promise<string>;
-  detachAgent(): Promise<string>;
-  compact(agent: CommandAgent, sessionController: CommandSessionController): Promise<{
+  newAgentSession(): RunningAgentRecord;
+  switchAgentSession(id: string): RunningAgentRecord;
+  refreshCurrentAgentSessionUi(): void;
+  compact(
+    agent: CommandAgent,
+    sessionController: CommandSessionController,
+    ownerSessionId?: string,
+  ): Promise<{
     beforeCount: number;
     afterCount: number;
     beforeTokenEstimate: number;

@@ -4,6 +4,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from './services.js';
 import type { CommandSessionController } from './services.js';
+import type { CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 
 interface TurnData {
@@ -13,7 +14,11 @@ interface TurnData {
   messages: unknown[];
 }
 
-export function createLogExportCommand(agent: CommandAgent, sessionController: CommandSessionController) {
+export function createLogExportCommand(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+) {
   return {
     name: 'log-export',
     description: '导出当前对话记录为 JSON 文件',
@@ -25,8 +30,7 @@ export function createLogExportCommand(agent: CommandAgent, sessionController: C
       const usageHistory = snapshot.usageHistory;
 
       if (rawMessages.length === 0) {
-        micaUi.messageBar.addMessage({ id: 'log-export-empty', text: 'log-export: 当前会话为空，无内容可导出' });
-        setTimeout(() => micaUi.messageBar.removeMessage('log-export-empty'), 4000);
+        services.showMessage('log-export: 当前会话为空，无内容可导出', 4000);
         micaLogger.logRuntime('plugin.log-export', 'empty');
         return;
       }
@@ -68,12 +72,10 @@ export function createLogExportCommand(agent: CommandAgent, sessionController: C
       writeFileSync(resolve(cwd, 'conversation.json'), `${JSON.stringify(conversationData, null, 2)}\n`, 'utf-8');
       writeFileSync(resolve(cwd, 'log.text'), `${JSON.stringify(logData, null, 2)}\n`, 'utf-8');
 
-      const id = `log-export-${Date.now()}`;
-      micaUi.messageBar.addMessage({
-        id,
-        text: `log-export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) → conversation.json, log.text`,
-      });
-      setTimeout(() => micaUi.messageBar.removeMessage(id), 6000);
+      services.showMessage(
+        `log-export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) → conversation.json, log.text`,
+        6000,
+      );
 
       micaLogger.logRuntime('plugin.log-export', 'done', { messages: rawMessages.length, turns: turns.length });
     },

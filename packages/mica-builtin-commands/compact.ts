@@ -12,18 +12,20 @@ export function createCompactCommand(
     description: '压缩当前会话上下文为 checkpoint',
     action: () => {
       micaLogger.logRuntime('plugin.compact', 'requested');
+      const ownerSessionId = services.getCurrentAgentSessionId();
       void services
-        .compact(agent, sessionController)
+        .compact(agent, sessionController, ownerSessionId)
         .then((result) => {
           services.showMessage(
             `Compact: ${result.beforeCount} -> ${result.afterCount} messages, tokens ${result.beforeTokenEstimate} -> ${result.afterTokenEstimate}`,
             6000,
+            ownerSessionId,
           );
         })
         .catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
           micaLogger.logRuntime('plugin.compact', 'error', { message }, 'error');
-          services.showMessage(`Compact failed: ${message}`, 6000);
+          services.showMessage(`Compact failed: ${message}`, 6000, ownerSessionId);
         });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];

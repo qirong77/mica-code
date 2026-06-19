@@ -112,6 +112,7 @@ export class AgentRuntime {
     this.activeAbortController = null;
     this.client?.reset();
     micaLogger.logRuntime('agent', 'session:cleared', { runId: this.runId });
+    this.events.emit('status', { type: 'idle' });
   }
 
   getSnapshot(): AgentRuntimeSnapshot {

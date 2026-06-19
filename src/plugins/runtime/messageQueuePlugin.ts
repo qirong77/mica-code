@@ -22,11 +22,13 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
         event.runtime.events.publish({
           type: 'queue:changed',
           pendingInputs: event.runtime.queue.list(),
+          owner: event.runtime.getQueueOwner(),
         });
         event.runtime.events.publish({
           type: 'notification',
           level: 'info',
           message: '消息已排队，将在当前任务完成后发送',
+          owner: event.runtime.getQueueOwner(),
         });
         micaLogger.logRuntime('runtime', 'submit:queued', {
           chars: event.input.text.length,
@@ -46,6 +48,7 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
         event.runtime.events.publish({
           type: 'queue:changed',
           pendingInputs: event.runtime.queue.list(),
+          owner: event.runtime.getQueueOwner(),
         });
         if (!next) return;
         await event.runtime.submit(next.text, { source: 'plugin' });

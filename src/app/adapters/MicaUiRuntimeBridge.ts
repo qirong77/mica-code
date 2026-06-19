@@ -1,90 +1,279 @@
-import { micaAgent } from '@packages/mica-agent/index.js';
+import { micaAgent, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
-import type { AgentRuntime } from '../../agent/AgentRuntime.js';
+import type { AgentRuntime, AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
+import {
+  normalizeUiState,
+  type TerminalAgentSessionManager,
+  type TerminalAgentUiState,
+} from '../../agents/terminalAgentSessions.js';
 import { ToolLogController } from '../../runtime/ToolLogController.js';
-import { applyStatus, resetActiveTurnUI, showMessage, syncModelDisplay } from '../../runtime/uiBridge.js';
+import { applyStatus, resetActiveTurnUI, syncModelDisplay } from '../../runtime/uiBridge.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
-import type { RuntimeController } from '@packages/mica-runtime/index.js';
 
 export class MicaUiRuntimeBridge {
-  private readonly toolLogs = new ToolLogController();
-  private activeController: RuntimeController;
+  private readonly toolLogs = new Map<AgentRuntime, ToolLogController>();
+  private readonly disposers = new Map<AgentRuntime, () => void>();
+  private readonly messageTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
-    private readonly agent: AgentRuntime,
+    private agent: AgentRuntime,
     private readonly runtime: LocalRuntimeController,
-  ) {
-    this.activeController = runtime;
-  }
+    private readonly agentSessions: TerminalAgentSessionManager,
+  ) {}
 
-  setActiveController(controller: RuntimeController): void {
-    this.activeController = controller;
-  }
-
-  resetActiveController(): void {
-    this.activeController = this.runtime;
-  }
-
-  async detachActiveController(): Promise<void> {
-    if (this.activeController === this.runtime) return;
-    await this.activeController.stop();
-    this.activeController = this.runtime;
+  switchAgent(agent: AgentRuntime): void {
+    this.agent = agent;
+    this.attachAgentEvents(agent);
+    syncModelDisplay(agent);
+    this.syncAgentStatusItems();
   }
 
   start(): void {
     syncModelDisplay(this.agent);
     micaLogger.logRuntime('runtime', 'ui_bridge:start');
 
-    this.agent.events.on('status', applyStatus);
-    this.agent.events.on('text', (text) => {
-      this.toolLogs.endThinkingSegment();
-      micaUi.conversation.setResponseText(this.runtime.appendResponseText(text));
-    });
-    this.agent.events.on('thinking', (text) => this.toolLogs.appendThinking(text));
-    this.agent.events.on('toolCall', (toolCall) => this.toolLogs.addToolCall(toolCall));
-    this.agent.events.on('toolResult', (toolResult) => this.toolLogs.completeToolCall(toolResult));
-    this.agent.events.on('usage', (usage) => {
-      const cachedTokenRate = readTotalCachedTokenRate(this.agent);
-      micaUi.panels.contextSize.set(usage.totalTokens);
-      micaUi.panels.cachedTokenRate.set(cachedTokenRate);
-      micaLogger.logRuntime('runtime', 'usage:displayed', {
-        context: usage.totalTokens,
-        cachedInputTokens: usage.cachedInputTokens ?? 0,
-        cachedTokenRate,
-        paidTokenRate: usage.paidTokenRate,
-      });
-    });
+    this.attachAgentEvents(this.agent);
+    this.syncAgentStatusItems();
 
     this.runtime.events.on('event', (event) => {
       if (event.type === 'queue:changed') {
-        micaUi.conversation.setPendingInputs(event.pendingInputs.map((input) => input.text));
+        const owner = event.owner instanceof Object ? event.owner : this.agent;
+        const session =
+          this.agentSessions.findByAgent(owner as AgentRuntime) ?? this.agentSessions.current();
+        const pendingInputs = event.pendingInputs.map((input) => input.text);
+        session.uiState = normalizeUiState({ ...session.uiState, pendingInputs });
+        if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs);
       }
       if (event.type === 'notification') {
-        showMessage(event.message);
+        const owner = event.owner instanceof Object ? (event.owner as AgentRuntime) : this.agent;
+        this.showMessageForAgent(owner, event.message, event.ttl);
       }
       if (event.type === 'turn:started') {
-        this.toolLogs.resetTurn();
+        const session = this.agentSessions.current();
+        const toolLogs = this.toolLogFor(session.agent);
+        toolLogs.resetTurn();
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          logEntries: [],
+          agentTurnLogItems: [],
+          thinkingText: '',
+        });
         micaUi.panels.clearLogEntries();
       }
       if (event.type === 'turn:finished') {
-        this.toolLogs.endThinkingSegment();
+        this.toolLogFor(this.agent).endThinkingSegment();
       }
     });
 
     micaUi.terminalInput.onSubmit((text) => {
-      void this.activeController.submit(text);
+      void this.runtime.submit(text);
     });
 
     micaUi.panels.setOnAbortAgent(() => {
-      void this.activeController.abort();
+      void this.runtime.abort();
       resetActiveTurnUI();
-      this.toolLogs.resetTurn();
+      const session = this.agentSessions.current();
+      session.uiState = normalizeUiState({
+        ...session.uiState,
+        responseText: '',
+        pendingInputs: [],
+        messageBarMessages: [],
+        logEntries: [],
+        agentTurnLogItems: [],
+        uiLog: [],
+        thinkingText: '',
+        pluginUIs: [],
+        workingStatus: { type: 'idle' },
+      });
+      this.toolLogFor(this.agent).resetTurn();
     });
   }
 
   clearToolLogs(): void {
-    this.toolLogs.resetAll();
+    const session = this.agentSessions.current();
+    session.uiState = normalizeUiState({
+      ...session.uiState,
+      logEntries: [],
+      agentTurnLogItems: [],
+      thinkingText: '',
+    });
+    this.toolLogFor(this.agent).resetAll();
+  }
+
+  showMessageForAgent(agent: AgentRuntime, text: string, ttl = 3000): void {
+    const session = this.sessionFor(agent);
+    const id = `msg-${session.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    session.uiState = normalizeUiState({
+      ...session.uiState,
+      messageBarMessages: [...session.uiState.messageBarMessages, { id, text }],
+    });
+    if (this.isActiveAgent(agent)) {
+      micaUi.messageBar.addMessage({ id, text });
+    }
+    const timer = setTimeout(() => {
+      const currentSession = this.agentSessions.findByAgent(agent);
+      if (currentSession) {
+        currentSession.uiState = normalizeUiState({
+          ...currentSession.uiState,
+          messageBarMessages: currentSession.uiState.messageBarMessages.filter((message) => message.id !== id),
+        });
+      }
+      if (this.isActiveAgent(agent)) micaUi.messageBar.removeMessage(id);
+      this.messageTimers.delete(id);
+    }, ttl);
+    this.messageTimers.set(id, timer);
+  }
+
+  syncAgentStatusItems(): void {
+    micaUi.panels.setAgentStatusItems(this.agentSessions.list());
+  }
+
+  stop(): void {
+    for (const dispose of this.disposers.values()) dispose();
+    for (const timer of this.messageTimers.values()) clearTimeout(timer);
+    this.disposers.clear();
+    this.toolLogs.clear();
+    this.messageTimers.clear();
+  }
+
+  private onText(agent: AgentRuntime, text: string): void {
+    const session = this.sessionFor(agent);
+    const toolLogs = this.toolLogFor(agent);
+    toolLogs.endThinkingSegment();
+    const responseText = this.runtime.appendResponseTextFor(agent, text);
+    session.uiState = normalizeUiState({ ...session.uiState, responseText });
+    if (this.isActiveAgent(agent)) micaUi.conversation.setResponseText(responseText);
+  }
+
+  private onThinking(agent: AgentRuntime, text: string): void {
+    this.toolLogFor(agent).appendThinking(text);
+  }
+
+  private onToolCall(agent: AgentRuntime, toolCall: Parameters<ToolLogController['addToolCall']>[0]): void {
+    this.toolLogFor(agent).addToolCall(toolCall);
+  }
+
+  private onToolResult(agent: AgentRuntime, toolResult: Parameters<ToolLogController['completeToolCall']>[0]): void {
+    this.toolLogFor(agent).completeToolCall(toolResult);
+  }
+
+  private onUsage(agent: AgentRuntime, usage: AgentUsageRecord): void {
+    const session = this.sessionFor(agent);
+    const cachedTokenRate = readTotalCachedTokenRate(agent);
+    session.uiState.contextSize = usage.totalTokens;
+    session.uiState.cachedTokenRate = cachedTokenRate;
+    session.uiState = normalizeUiState(session.uiState);
+    if (this.isActiveAgent(agent)) {
+      micaUi.panels.contextSize.set(usage.totalTokens);
+      micaUi.panels.cachedTokenRate.set(cachedTokenRate);
+    }
+    micaLogger.logRuntime('runtime', 'usage:displayed', {
+      context: usage.totalTokens,
+      cachedInputTokens: usage.cachedInputTokens ?? 0,
+      cachedTokenRate,
+      paidTokenRate: usage.paidTokenRate,
+    });
+  }
+
+  private attachAgentEvents(agent: AgentRuntime): void {
+    if (this.disposers.has(agent)) return;
+    const onStatus = (status: AgentRuntimeStatus) => this.onStatus(agent, status);
+    const onText = (text: string) => this.onText(agent, text);
+    const onThinking = (text: string) => this.onThinking(agent, text);
+    const onToolCall = (toolCall: Parameters<ToolLogController['addToolCall']>[0]) => this.onToolCall(agent, toolCall);
+    const onToolResult = (toolResult: Parameters<ToolLogController['completeToolCall']>[0]) =>
+      this.onToolResult(agent, toolResult);
+    const onUsage = (usage: AgentUsageRecord) => this.onUsage(agent, usage);
+    agent.events.on('status', onStatus);
+    agent.events.on('text', onText);
+    agent.events.on('thinking', onThinking);
+    agent.events.on('toolCall', onToolCall);
+    agent.events.on('toolResult', onToolResult);
+    agent.events.on('usage', onUsage);
+    this.disposers.set(agent, () => {
+      agent.events.off('status', onStatus);
+      agent.events.off('text', onText);
+      agent.events.off('thinking', onThinking);
+      agent.events.off('toolCall', onToolCall);
+      agent.events.off('toolResult', onToolResult);
+      agent.events.off('usage', onUsage);
+    });
+  }
+
+  private onStatus(agent: AgentRuntime, status: AgentRuntimeStatus): void {
+    const session = this.sessionFor(agent);
+    if (status.type === 'connecting') {
+      this.toolLogFor(agent).resetTurn();
+    }
+    if (status.type === 'completed' || status.type === 'error' || status.type === 'idle') {
+      this.toolLogFor(agent).endThinkingSegment();
+    }
+    session.uiState = normalizeUiState({ ...session.uiState, workingStatus: toWorkingStatus(status) });
+    this.syncAgentStatusItems();
+    if (this.isActiveAgent(agent)) applyStatus(status);
+  }
+
+  private toolLogFor(agent: AgentRuntime): ToolLogController {
+    let controller = this.toolLogs.get(agent);
+    if (controller) return controller;
+    controller = new ToolLogController({
+      setThinkingText: (text) => {
+        const session = this.sessionFor(agent);
+        session.uiState = normalizeUiState({ ...session.uiState, thinkingText: text });
+        if (this.isActiveAgent(agent)) micaUi.panels.thinkingText.set(text);
+      },
+      appendAgentTurnLogItem: (item) => {
+        const session = this.sessionFor(agent);
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          agentTurnLogItems: [...session.uiState.agentTurnLogItems, item],
+        });
+        if (this.isActiveAgent(agent)) micaUi.panels.appendAgentTurnLogItem(item);
+      },
+      replaceAgentTurnLogItem: (item) => {
+        const session = this.sessionFor(agent);
+        const items = session.uiState.agentTurnLogItems;
+        const index = items.findIndex((existing) => existing.id === item.id);
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          agentTurnLogItems:
+            index === -1 ? [...items, item] : [...items.slice(0, index), item, ...items.slice(index + 1)],
+        });
+        if (this.isActiveAgent(agent)) micaUi.panels.replaceAgentTurnLogItem(item);
+      },
+    });
+    this.toolLogs.set(agent, controller);
+    return controller;
+  }
+
+  private sessionFor(agent: AgentRuntime) {
+    const session = this.agentSessions.findByAgent(agent);
+    if (!session) throw new Error('Agent session is not registered');
+    return session;
+  }
+
+  private isActiveAgent(agent: AgentRuntime): boolean {
+    return this.agent === agent;
+  }
+}
+
+function toWorkingStatus(status: AgentRuntimeStatus): TerminalAgentUiState['workingStatus'] {
+  switch (status.type) {
+    case 'idle':
+      return { type: 'idle' };
+    case 'connecting':
+      return { type: 'connecting' };
+    case 'thinking':
+      return { type: 'thinking' };
+    case 'streaming':
+      return { type: 'streaming' };
+    case 'calling_tool':
+      return { type: 'calling_tool', toolNames: status.toolNames };
+    case 'completed':
+      return { type: 'completed', elapsedMs: status.elapsedMs };
+    case 'error':
+      return { type: 'error', message: status.message };
   }
 }
 

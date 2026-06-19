@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
-import type { CommandAgent } from './services.js';
+import type { CommandAgent, CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 
 const MAX_TOTAL_DIFF_CHARS = 18_000;
@@ -21,50 +21,41 @@ const COMMIT_TYPES = [
   'ci: CI 配置 👷',
 ];
 
-export function createCommitCommand(agent: CommandAgent) {
+export function createCommitCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
     name: 'commit',
     description: '分析当前 git 变化，生成提交信息，提交并推送',
     action: () => {
       micaLogger.logRuntime('plugin.commit', 'requested');
-      void runCommit(agent);
+      const ownerSessionId = services.getCurrentAgentSessionId();
+      void runCommit(services.getCurrentAgent() ?? agent, services, ownerSessionId);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-const STATUS_ID = 'commit-status';
-
-function setStatusMessage(text: string) {
-  micaUi.messageBar.removeMessage(STATUS_ID);
-  micaUi.messageBar.addMessage({ id: STATUS_ID, text });
+function setStatusMessage(services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
+  services.showMessage(text, 5000, ownerSessionId);
 }
 
-function clearStatusMessage() {
-  setTimeout(() => micaUi.messageBar.removeMessage(STATUS_ID), 5000);
+function showTerminalMessage(services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
+  services.showMessage(text, 5000, ownerSessionId);
 }
 
-function showTerminalMessage(text: string) {
-  micaUi.messageBar.removeMessage(STATUS_ID);
-  const id = `commit-msg-${Date.now()}`;
-  micaUi.messageBar.addMessage({ id, text });
-  setTimeout(() => micaUi.messageBar.removeMessage(id), 5000);
-}
-
-async function runCommit(agent: CommandAgent) {
+async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, ownerSessionId?: string) {
   try {
     micaLogger.logRuntime('plugin.commit', 'start');
-    setStatusMessage('commit: 正在分析 git 变化...');
+    setStatusMessage(services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
     micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
     if (!status.trim()) {
       micaLogger.logRuntime('plugin.commit', 'status:empty');
-      showTerminalMessage('commit: 没有可提交的变化');
+      showTerminalMessage(services, 'commit: 没有可提交的变化', ownerSessionId);
       return;
     }
     if (hasUnmergedFiles(status)) {
       micaLogger.logRuntime('plugin.commit', 'blocked:unmerged_files', undefined, 'warn');
-      showTerminalMessage('commit: 存在未解决冲突，请先处理');
+      showTerminalMessage(services, 'commit: 存在未解决冲突，请先处理', ownerSessionId);
       return;
     }
 
@@ -73,14 +64,14 @@ async function runCommit(agent: CommandAgent) {
     const commitMessage = await generateCommitMessage(agent, summary);
     micaLogger.logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
-    setStatusMessage(`commit: ${firstLine(commitMessage)}`);
+    setStatusMessage(services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
     git(['add', '-A']);
     micaLogger.logRuntime('plugin.commit', 'git:add_done');
 
     const stagedStatus = git(['diff', '--cached', '--name-only']);
     if (!stagedStatus.trim()) {
       micaLogger.logRuntime('plugin.commit', 'blocked:no_staged_changes', undefined, 'warn');
-      showTerminalMessage('commit: git add 后没有 staged 变化');
+      showTerminalMessage(services, 'commit: git add 后没有 staged 变化', ownerSessionId);
       return;
     }
     micaLogger.logRuntime('plugin.commit', 'staged:ready', { files: stagedStatus.trim().split('\n').filter(Boolean).length });
@@ -89,19 +80,20 @@ async function runCommit(agent: CommandAgent) {
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
     micaLogger.logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
-    setStatusMessage(`commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`);
+    setStatusMessage(services, `commit: 已提交 ${commitHash}(${commitMessage})，正在 push...`, ownerSessionId);
     const pushed = pushCurrentBranch();
     setStatusMessage(
+      services,
       pushed
         ? `commit: 已提交并推送 ${commitHash}(${commitMessage})`
         : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
+      ownerSessionId,
     );
-    clearStatusMessage();
     micaLogger.logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', { commit: commitHash });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     micaLogger.logRuntime('plugin.commit', 'error', { message }, 'error');
-    showTerminalMessage(`commit failed: ${message}`);
+    showTerminalMessage(services, `commit failed: ${message}`, ownerSessionId);
   }
 }
 

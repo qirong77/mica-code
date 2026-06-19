@@ -1,4 +1,5 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -16,20 +17,34 @@ import {
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { reportRuntimeError } from '../../runtime/uiBridge.js';
+import { getActiveApplication } from '../Application.js';
+import { normalizeUiState } from '../../agents/terminalAgentSessions.js';
 
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();
-  readonly queue = new micaRuntime.MessageQueueService();
-  private running = false;
-  private responseBuffer = '';
+  readonly queue = {
+    enqueue: (input: RuntimeInput) => this.queueFor(this.queueAgent()).enqueue(input),
+    dequeue: () => this.queueFor(this.queueAgent()).dequeue(),
+    clear: () => this.queueFor(this.queueAgent()).clear(),
+    list: () => this.queueFor(this.queueAgent()).list(),
+    count: () => this.queueFor(this.queueAgent()).count(),
+  };
+  private readonly runningAgents = new Set<AgentRuntime>();
+  private readonly responseBuffers = new Map<AgentRuntime, string>();
+  private readonly queues = new Map<AgentRuntime, InstanceType<typeof micaRuntime.MessageQueueService>>();
+  private readonly sessionControllers = new Map<AgentRuntime, SessionController>();
+  private readonly clearingAgents = new Set<AgentRuntime>();
+  private hookAgent: AgentRuntime | null = null;
 
   constructor(
-    private readonly agent: AgentRuntime,
-    private readonly sessionController: SessionController,
+    private agent: AgentRuntime,
+    private sessionController: SessionController,
     private readonly commands: CommandRegistry,
     private readonly hooks: HookRegistry,
     private readonly services: ServiceContainer,
-  ) {}
+  ) {
+    this.sessionControllers.set(agent, sessionController);
+  }
 
   async start(): Promise<void> {
     await this.hooks.emit('runtime:start', { runtime: this });
@@ -40,7 +55,7 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   getStatus(): RuntimeStatus {
-    return { running: this.running };
+    return { running: this.runningAgents.has(this.queueAgent()) };
   }
 
   getSnapshot(): RuntimeViewSnapshot {
@@ -51,18 +66,50 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   appendResponseText(text: string): string {
-    this.responseBuffer += text;
-    return this.responseBuffer;
+    const next = `${this.responseBuffers.get(this.agent) ?? ''}${text}`;
+    this.responseBuffers.set(this.agent, next);
+    return next;
+  }
+
+  appendResponseTextFor(agent: AgentRuntime, text: string): string {
+    const next = `${this.responseBuffers.get(agent) ?? ''}${text}`;
+    this.responseBuffers.set(agent, next);
+    return next;
+  }
+
+  getResponseBufferFor(agent: AgentRuntime): string {
+    return this.responseBuffers.get(agent) ?? '';
   }
 
   clearResponseBuffer(): void {
-    this.responseBuffer = '';
+    this.responseBuffers.set(this.agent, '');
+  }
+
+  clearResponseBufferFor(agent: AgentRuntime): void {
+    this.responseBuffers.set(agent, '');
   }
 
   clear(): void {
-    this.responseBuffer = '';
+    const isRunning = this.runningAgents.has(this.agent);
+    this.responseBuffers.set(this.agent, '');
+    if (isRunning) {
+      this.clearingAgents.add(this.agent);
+    } else {
+      this.clearingAgents.delete(this.agent);
+    }
     this.queue.clear();
-    this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list() });
+    this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
+  }
+
+  switchSession(agent: AgentRuntime, sessionController: SessionController): void {
+    this.agent = agent;
+    this.sessionController = sessionController;
+    this.sessionControllers.set(agent, sessionController);
+    this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: agent });
+  }
+
+  getQueueOwner(): AgentRuntime {
+    return this.queueAgent();
   }
 
   async submit(rawText: string, options: SubmitOptions = {}): Promise<SubmitResult> {
@@ -71,23 +118,34 @@ export class LocalRuntimeController implements RuntimeController {
 
     const parsedCommand = this.commands.resolve(text);
     if (parsedCommand) {
-      if (this.running && parsedCommand.command.allowDuringTurn !== true) {
+      if (this.runningAgents.has(this.agent) && parsedCommand.command.allowDuringTurn !== true) {
         this.events.publish({
           type: 'notification',
           level: 'warn',
           message: '当前任务运行中，稍后再执行该命令',
+          owner: this.agent,
         });
         return { ok: false, reason: 'busy' };
       }
 
-      await this.hooks.emit('command:before', { runtime: this, command: parsedCommand.command, args: parsedCommand.args });
+      await this.hooks.emit('command:before', {
+        runtime: this,
+        command: parsedCommand.command,
+        args: parsedCommand.args,
+      });
       const result = await this.commands.execute(text, { runtime: this, services: this.services });
-      await this.hooks.emit('command:after', { runtime: this, command: parsedCommand.command, args: parsedCommand.args, result });
+      await this.hooks.emit('command:after', {
+        runtime: this,
+        command: parsedCommand.command,
+        args: parsedCommand.args,
+        result,
+      });
       if (!result.ok) {
         this.events.publish({
           type: 'notification',
           level: 'error',
           message: result.error instanceof Error ? result.error.message : String(result.error),
+          owner: this.agent,
         });
         return { ok: false, reason: 'command_failed', error: result.error };
       }
@@ -95,7 +153,10 @@ export class LocalRuntimeController implements RuntimeController {
     }
 
     const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui');
-    micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.running });
+    const targetAgent = this.submissionAgent(options);
+    const targetSessionController = this.sessionControllers.get(targetAgent) ?? this.sessionController;
+
+    micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.runningAgents.has(targetAgent) });
 
     const inputHook = await this.hooks.guard('input:received', {
       runtime: this,
@@ -110,21 +171,22 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: true, handled: true, queued: inputHook.reason === 'queued' };
     }
 
-    if (this.running) {
+    if (this.runningAgents.has(targetAgent)) {
       this.events.publish({
         type: 'notification',
         level: 'warn',
         message: '当前任务运行中',
+        owner: targetAgent,
       });
       return { ok: false, reason: 'busy' };
     }
 
-    await this.runTurn(inputHook.event.input);
+    await this.runTurn(inputHook.event.input, targetAgent, targetSessionController);
     return { ok: true };
   }
 
   async abort(): Promise<AbortResult> {
-    if (!this.running) return { ok: false, reason: 'not_running' };
+    if (!this.runningAgents.has(this.agent)) return { ok: false, reason: 'not_running' };
     try {
       micaLogger.logRuntime('runtime', 'abort:requested', undefined, 'warn');
       this.agent.abort();
@@ -134,64 +196,155 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
-  private async runTurn(input: RuntimeInput): Promise<void> {
-    this.running = true;
+  private async runTurn(input: RuntimeInput, agent: AgentRuntime, sessionController: SessionController): Promise<void> {
+    this.runningAgents.add(agent);
     const startedAt = Date.now();
     const content = micaUi.parseImageRefs(input.text) as AgentQueryContent;
     let runId: number | null = null;
     let hasError = false;
 
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
-    this.responseBuffer = '';
-    this.events.publish({ type: 'turn:started', input });
-    micaUi.terminalInput.clearText();
-    micaUi.conversation.appendUserMessage(content);
-    micaUi.conversation.clearResponseText();
-    micaUi.panels.clearLogEntries();
-    micaUi.panels.status.connecting();
+    this.responseBuffers.set(agent, '');
+    const session = getActiveApplication()?.activeContext?.agentSessions.findByAgent(agent);
+    if (session) {
+      session.uiState = normalizeUiState({
+        ...session.uiState,
+        conversationMessages: [...agent.toConversationMessages(), { role: 'user', content }],
+        responseText: '',
+        pendingInputs: [],
+        logEntries: [],
+        agentTurnLogItems: [],
+        thinkingText: '',
+        workingStatus: { type: 'connecting' },
+      });
+    }
+    if (this.isActiveAgent(agent)) {
+      this.events.publish({ type: 'turn:started', input });
+      micaUi.terminalInput.clearText();
+      micaUi.conversation.appendUserMessage(content);
+      micaUi.conversation.clearResponseText();
+      micaUi.panels.clearLogEntries();
+      micaUi.panels.status.connecting();
+    }
 
     try {
       await this.hooks.emit('turn:before', { runtime: this, input, content });
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
-      const result = await this.agent.run(content);
+      const result = await agent.run(content);
       runId = result.runId;
       const finalText = result.text;
-      if (!this.agent.isCurrent(runId)) return;
+      if (!agent.isCurrent(runId)) return;
 
-      micaUi.conversation.appendAssistantMessage([
-        { type: 'text', text: finalText || this.responseBuffer || '(empty response)' },
-      ]);
-      micaUi.conversation.clearResponseText();
+      const responseBuffer = this.responseBuffers.get(agent) ?? '';
+      this.responseBuffers.set(agent, '');
+      if (session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages: agent.toConversationMessages(),
+          responseText: '',
+        });
+      }
+      if (this.isActiveAgent(agent)) {
+        micaUi.conversation.appendAssistantMessage([
+          { type: 'text', text: finalText || responseBuffer || '(empty response)' },
+        ]);
+        micaUi.conversation.clearResponseText();
+      }
 
       await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
-      this.sessionController.saveCurrent();
-      micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || this.responseBuffer).length });
+      sessionController.saveCurrent();
+      micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
     } catch (error) {
       if (error instanceof AgentAbortError) {
         runId = error.runId;
-        this.agent.preserveAbortedTurn(content, this.responseBuffer);
+        const responseBuffer = this.responseBuffers.get(agent) ?? '';
+        this.responseBuffers.set(agent, '');
+        if (!this.clearingAgents.has(agent)) {
+          agent.preserveAbortedTurn(content, responseBuffer);
+        }
+        if (session && !this.clearingAgents.has(agent)) {
+          session.uiState = normalizeUiState({
+            ...session.uiState,
+            conversationMessages: agent.toConversationMessages(),
+            responseText: '',
+          });
+        }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
-        this.sessionController.saveCurrent();
-        this.events.publish({ type: 'turn:aborted', input });
-        micaLogger.logRuntime('runtime', 'turn:aborted_saved', { runId, chars: this.responseBuffer.length }, 'warn');
+        if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
+        if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input });
+        micaLogger.logRuntime(
+          'runtime',
+          this.clearingAgents.has(agent) ? 'turn:aborted_cleared' : 'turn:aborted_saved',
+          { runId, chars: responseBuffer.length },
+          'warn',
+        );
         return;
       }
 
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
-      this.events.publish({ type: 'turn:error', input, error });
-      reportRuntimeError(error, '请求失败');
-    } finally {
-      const ownsCurrentTurn = runId == null || this.agent.isCurrent(runId);
-      if (ownsCurrentTurn) {
-        this.running = false;
-        if (!hasError) micaUi.panels.clearAgentTurnLogItems();
+      const message = error instanceof Error ? error.message : String(error);
+      if (session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          responseText: '',
+          thinkingText: '',
+          workingStatus: { type: 'error', message },
+          agentTurnLogItems: [
+            micaAgent.createErrorLogItem({
+              id: `error-${Date.now()}`,
+              title: '请求失败',
+              error,
+            }),
+          ],
+        });
       }
+      if (this.isActiveAgent(agent)) {
+        this.events.publish({ type: 'turn:error', input, error });
+        reportRuntimeError(error, '请求失败');
+      }
+    } finally {
+      this.runningAgents.delete(agent);
+      this.clearingAgents.delete(agent);
+      if (!hasError && session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          agentTurnLogItems: [],
+          thinkingText: '',
+        });
+      }
+      if (!hasError && this.isActiveAgent(agent)) micaUi.panels.clearAgentTurnLogItems();
       const elapsedMs = Date.now() - startedAt;
-      this.events.publish({ type: 'turn:finished', input, elapsedMs });
-      await this.hooks.emit('turn:after', { runtime: this, input, elapsedMs, hasError });
+      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs });
+      this.hookAgent = agent;
+      try {
+        await this.hooks.emit('turn:after', { runtime: this, input, elapsedMs, hasError });
+      } finally {
+        this.hookAgent = null;
+      }
       micaLogger.logRuntime('runtime', 'turn:finish', { elapsedMs, hasError });
     }
+  }
+
+  private isActiveAgent(agent: AgentRuntime): boolean {
+    return this.agent === agent;
+  }
+
+  private queueAgent(): AgentRuntime {
+    return this.hookAgent ?? this.agent;
+  }
+
+  private submissionAgent(options: SubmitOptions): AgentRuntime {
+    return options.source === 'plugin' && this.hookAgent ? this.hookAgent : this.agent;
+  }
+
+  private queueFor(agent: AgentRuntime): InstanceType<typeof micaRuntime.MessageQueueService> {
+    let queue = this.queues.get(agent);
+    if (!queue) {
+      queue = new micaRuntime.MessageQueueService();
+      this.queues.set(agent, queue);
+    }
+    return queue;
   }
 }

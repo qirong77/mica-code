@@ -8,6 +8,7 @@ import { createLogExportCommand } from './logExport.js';
 import { closeLogsPanel, createLogsCommand } from './logs.js';
 import { createMcpCommand } from './mcp.js';
 import { createModelCommand } from './model.js';
+import { createNewCommand } from './new.js';
 import { createProviderCommand } from './provider.js';
 import { createResumeCommand } from './resume.js';
 import { createSkillsCommand } from './skills.js';
@@ -25,6 +26,7 @@ export const micaBuiltinCommands = {
   closeLogsPanel,
   createMcpCommand,
   createModelCommand,
+  createNewCommand,
   createProviderCommand,
   createResumeCommand,
   createSkillsCommand,

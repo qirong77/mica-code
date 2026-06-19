@@ -1,8 +1,9 @@
 import { execSync } from 'node:child_process';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import type { CommandRuntimeServices } from './services.js';
 
-export function createGitDiffContextCommand() {
+export function createGitDiffContextCommand(services: CommandRuntimeServices) {
   return {
     name: 'git-diff-context',
     description: '将当前分支与 master 的差异作为上下文发送给 agent',
@@ -32,7 +33,7 @@ export function createGitDiffContextCommand() {
 
         if (!diff) {
           micaLogger.logRuntime('plugin.git-diff-context', 'diff:empty', { branch });
-          showTemporaryMessage(`branch ${branch} has no diff from master`);
+          services.showMessage(`branch ${branch} has no diff from master`, 5000);
           return;
         }
 
@@ -42,14 +43,8 @@ export function createGitDiffContextCommand() {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         micaLogger.logRuntime('plugin.git-diff-context', 'error', { message: msg }, 'error');
-        showTemporaryMessage(`git diff failed: ${msg}`);
+        services.showMessage(`git diff failed: ${msg}`, 5000);
       }
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-}
-
-function showTemporaryMessage(text: string) {
-  const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  micaUi.messageBar.addMessage({ id, text });
-  setTimeout(() => micaUi.messageBar.removeMessage(id), 5000);
 }

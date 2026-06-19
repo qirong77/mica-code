@@ -6,7 +6,7 @@ import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
-import { AgentRegistry } from '../agents/agentRegistry.js';
+import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
@@ -16,7 +16,6 @@ import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
-  private agentRegistry: AgentRegistry | null = null;
   private context: ApplicationContext | null = null;
 
   get activeContext(): ApplicationContext | null {
@@ -44,11 +43,10 @@ export class Application {
       const hooks = new micaPlugin.HookRegistry();
       const services = new micaPlugin.ServiceContainer();
       const plugins = new micaPlugin.PluginManager();
+      const agentSessions = new TerminalAgentSessionManager();
       const runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services);
-      const uiBridge = new MicaUiRuntimeBridge(agent, runtime);
-
-      this.agentRegistry = new AgentRegistry(agent);
-      this.agentRegistry.start();
+      const uiBridge = new MicaUiRuntimeBridge(agent, runtime, agentSessions);
+      agentSessions.registerCurrent(agent, sessionController);
 
       this.context = {
         agent,
@@ -60,12 +58,12 @@ export class Application {
         plugins,
         runtime,
         uiBridge,
-        agentRegistry: this.agentRegistry,
+        agentSessions,
       };
 
       setActiveApplication(this);
 
-      useBuiltinPlugins(this, agent, sessionController, this.agentRegistry, runtime);
+      useBuiltinPlugins(this, agent, sessionController);
 
       await plugins.setupAll({
         services,
@@ -92,8 +90,7 @@ export class Application {
     } catch (error) {
       micaUi.terminalInput.setPlaceholder('Fix the startup error and restart Mica Code');
       reportRuntimeError(error, '启动失败');
-      this.agentRegistry?.stop();
-      this.agentRegistry = null;
+      this.context?.agentSessions.stop();
       await this.context?.plugins.disposeAll();
       this.context = null;
       this.renderInstance?.unmount();
@@ -105,10 +102,10 @@ export class Application {
   }
 
   async stop(): Promise<void> {
+    this.context?.uiBridge.stop();
     await this.context?.runtime.stop();
     await this.context?.plugins.disposeAll();
-    this.agentRegistry?.stop();
-    this.agentRegistry = null;
+    this.context?.agentSessions.stop();
     if (activeApplication === this) {
       activeApplication = null;
     }

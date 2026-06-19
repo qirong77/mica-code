@@ -5,7 +5,7 @@ import type { HookRegistry, PluginManager, ServiceContainer } from '@packages/mi
 import type { RuntimeEventBus } from '@packages/mica-runtime/index.js';
 import type { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import type { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
-import type { AgentRegistry } from '../agents/agentRegistry.js';
+import type { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 
 export type ApplicationContext = {
   agent: AgentRuntime;
@@ -17,5 +17,5 @@ export type ApplicationContext = {
   plugins: PluginManager;
   runtime: LocalRuntimeController;
   uiBridge: MicaUiRuntimeBridge;
-  agentRegistry: AgentRegistry;
+  agentSessions: TerminalAgentSessionManager;
 };

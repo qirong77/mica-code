@@ -67,6 +67,7 @@ function resumeSession(
     return;
   }
   services.syncModelDisplay(agent);
+  services.refreshCurrentAgentSessionUi();
   services.showMessage(`Resumed: ${result.session.title}`, 4000);
   micaLogger.logRuntime('plugin.resume', 'resume:done', {
     id,

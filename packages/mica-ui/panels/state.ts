@@ -6,6 +6,7 @@ import type {
   MicaUiToolEntry,
   MicaUiPluginUI,
   MicaUiUILogEntry,
+  MicaUiAgentStatusItem,
 } from '../types.js';
 
 export const workingStatus = atom<MicaUiWorkingStatus>({ type: 'idle' });
@@ -15,6 +16,7 @@ export const agentTurnLogItems = atom<MicaUiAgentTurnLogItem[]>([]);
 export const pluginUIs = atom<MicaUiPluginUI[]>([]);
 export const contextSize = atom(0);
 export const cachedTokenRate = atom(0);
+export const agentStatusItems = atom<MicaUiAgentStatusItem[]>([]);
 
 export const modelDisplay = {
   name: atom('claude-sonnet-4-6'),
@@ -101,6 +103,10 @@ export function setPluginUIs(pluginPanels: MicaUiPluginUI[]): void {
 
 export function clearPluginUIs(): void {
   pluginUIs.set([]);
+}
+
+export function setAgentStatusItems(items: MicaUiAgentStatusItem[]): void {
+  agentStatusItems.set([...items]);
 }
 
 let _onAbortAgent: (() => void) | null = null;

@@ -5,14 +5,12 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, RunningAgentRecord } from './services.js';
 
-type AgentsPanelState =
-  | { view: 'list'; selectedIdx: number }
-  | { view: 'detail'; selectedIdx: number };
+type AgentsPanelState = { view: 'list'; selectedIdx: number };
 
 export function createAgentsCommand(services: CommandRuntimeServices) {
   return {
     name: 'agents',
-    description: '显示当前正在运行的 agents',
+    description: '显示当前终端的 agents',
     action: () => {
       const agents = services.listRunningAgents();
       micaLogger.logRuntime('plugin.agents', 'opened', { count: agents.length });
@@ -34,34 +32,27 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
 
   function AgentsPanel() {
     const state = micaUi.useScheduleState(stateAtom);
-    if (state.view === 'detail') {
-      const agent = agents[state.selectedIdx];
-      return (
-        <micaUi.Dialog title="agent detail" footer={<micaUi.KeyHints hints={['esc back', 'type close']} />}>
-          {agent ? <AgentDetail agent={agent} /> : <Text color={micaUi.theme.colors.dim}>Agent not found</Text>}
-        </micaUi.Dialog>
-      );
-    }
-
     return (
-      <micaUi.Dialog title={`agents (${agents.length})`} footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ detail', 'a switch', 'esc close']} />}>
+      <micaUi.Dialog
+        title={`agents (${agents.length})`}
+        footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ switch', 'esc close']} />}
+      >
         <micaUi.SelectList
-          items={agents.map((agent) => ({ key: agent.id, label: agent.cwd }))}
+          items={agents.map((agent) => ({ key: agent.id, label: agent.title }))}
           selectedIdx={state.selectedIdx}
           empty={<Text dimColor>No running agents</Text>}
           renderItem={(item) => {
             const agent = agents.find((entry) => entry.id === item.key);
             if (!agent) return null;
-            const isCurrent = agent.pid === process.pid;
             return (
               <Box flexDirection="column">
-                <Text color={isCurrent ? micaUi.theme.colors.accent : undefined}>
-                  {isCurrent ? '● local ' : '○ remote '}
-                  {agent.cwd}
+                <Text color={agent.current ? micaUi.theme.colors.accent : undefined}>
+                  {agent.current ? '● ' : '○ '}
+                  {agent.title}
                 </Text>
                 <Text color={micaUi.theme.colors.dim}>
-                  pid {agent.pid} · {agent.providerName}/{agent.model} · {agent.status} · {formatControl(agent)} · updated{' '}
-                  {formatRelativeTime(agent.updatedAt)}
+                  #{agent.index} · {formatSessionMeta(agent.updatedAt, agent.model)} · {agent.status} ·{' '}
+                  {agent.providerName}
                 </Text>
               </Box>
             );
@@ -80,10 +71,6 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
       onInput: (input, key) => {
         const state = stateAtom.get();
         if (key.escape) {
-          if (state.view === 'detail') {
-            stateAtom.set({ view: 'list', selectedIdx: state.selectedIdx });
-            return true;
-          }
           hide();
           return true;
         }
@@ -94,16 +81,7 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
             return true;
           }
           if (key.return && agents.length > 0) {
-            stateAtom.set({ view: 'detail', selectedIdx: state.selectedIdx });
-            return true;
-          }
-          if (input === 'a' && agents.length > 0) {
-            const agent = agents[state.selectedIdx];
-            if (!agent) return true;
-            void services.attachAgent(agent).catch((error) => {
-              const message = error instanceof Error ? error.message : String(error);
-              micaUi.messageBar.addMessage({ id: `agents-switch-${Date.now()}`, text: `Switch failed: ${message}` });
-            });
+            switchToSelectedAgent(state.selectedIdx);
             return true;
           }
         }
@@ -115,47 +93,19 @@ function showAgentsPanel(agents: RunningAgentRecord[], services: CommandRuntimeS
       },
     },
   ]);
-}
 
-function AgentDetail({ agent }: { agent: RunningAgentRecord }) {
-  return (
-    <Box flexDirection="column">
-      {formatDetail(agent).map(([label, value]) => (
-        <Text key={label} color={micaUi.theme.colors.dim}>
-          {label.padEnd(14)} : {value}
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
-function formatDetail(agent: RunningAgentRecord): Array<[string, string]> {
-  return [
-    ['id', agent.id],
-    ['pid', String(agent.pid)],
-    ['cwd', agent.cwd],
-    ['provider', `${agent.providerName}/${agent.model}`],
-    ['status', agent.status],
-    ['control', formatControl(agent)],
-    ['socket', agent.ipc.socketPath],
-    ['protocol', `${agent.ipc.protocol}@${agent.ipc.version}`],
-    ['capabilities', formatCapabilities(agent)],
-    ['updated', agent.updatedAt],
-  ];
-}
-
-function formatControl(agent: RunningAgentRecord): string {
-  if (agent.control.mode === 'remote-controlled') {
-    return `controlled by pid ${agent.control.controllerPid ?? 'unknown'}`;
+  function switchToSelectedAgent(selectedIdx: number) {
+    const agent = agents[selectedIdx];
+    if (!agent) return;
+    try {
+      const switched = services.switchAgentSession(agent.id);
+      services.showMessage(`Switched to #${switched.index}: ${switched.title}`, 4000);
+      hide();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      services.showMessage(`Switch failed: ${message}`, 5000);
+    }
   }
-  return 'local control';
-}
-
-function formatCapabilities(agent: RunningAgentRecord): string {
-  return Object.entries(agent.capabilities)
-    .filter(([, enabled]) => enabled)
-    .map(([name]) => name)
-    .join(', ');
 }
 
 function navigate(index: number, length: number, direction: 1 | -1): number {
@@ -164,11 +114,15 @@ function navigate(index: number, length: number, direction: 1 | -1): number {
   return index < length - 1 ? index + 1 : 0;
 }
 
-function formatRelativeTime(value: string): string {
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
-  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  return `${elapsedHours}h ago`;
+function formatSessionMeta(updatedAt: string, model: string): string {
+  const date = new Date(updatedAt);
+  const timestamp = Number.isNaN(date.getTime())
+    ? updatedAt
+    : date.toLocaleString(undefined, {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+  return `[${timestamp} ${model}]`;
 }

@@ -11,6 +11,7 @@ import { App } from './app/App.js';
 import { Conversation, ConversationUI } from './conversation/Conversation.js';
 import { Markdown } from './conversation/Markdown.js';
 import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
+import { AgentsStatusBar, AgentsStatusBarUI } from './panels/AgentsStatusBar.js';
 import { LogView } from './panels/LogView.js';
 import { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
 import { PluginPanel } from './bottom/PluginPanel.js';
@@ -28,6 +29,8 @@ export const micaUi = {
   TerminalInputUI,
   WorkingStatus,
   WorkingStatusUI,
+  AgentsStatusBar,
+  AgentsStatusBarUI,
   LogView,
   AgentTurnLog,
   AgentTurnLogUI,
@@ -102,6 +105,7 @@ export const micaUi = {
 };
 
 export type { SelectItem } from './primitives/index.js';
+export type { MessageItem } from './panels/MessageBar.js';
 export type {
   MicaUiWorkingStatus,
   MicaUiLogEntry,
@@ -118,4 +122,5 @@ export type {
   MicaUiContentBlockParam,
   MicaUiMessageParam,
   MicaUiAgentTurnLogItem,
+  MicaUiAgentStatusItem,
 } from './types.js';

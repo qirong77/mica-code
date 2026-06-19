@@ -5,6 +5,7 @@ import { TerminalInputUI } from '../input/TerminalInput.js';
 import { WorkingStatusUI } from '../panels/WorkingStatus.js';
 import { BottomSurface } from '../bottom/BottomSurface.js';
 import { MessageBar } from '../panels/MessageBar.js';
+import { AgentsStatusBar } from '../panels/AgentsStatusBar.js';
 
 export function App(): React.ReactNode {
   useTerminalTitle('* Mica Code');
@@ -12,6 +13,7 @@ export function App(): React.ReactNode {
   return (
     <Box flexDirection="column" height="100%">
       <ConversationUI.renderFn />
+      <AgentsStatusBar />
       <TerminalInputUI.renderFn />
       <WorkingStatusUI.renderFn />
       <MessageBar />
