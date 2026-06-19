@@ -1,7 +1,7 @@
 import { micaUI } from '../../packages/mica-ui/index.js';
 import { micaAgent } from '../../packages/mica-agent/index.js';
 import { micaTools } from '../../packages/mica-tools/index.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 type ActiveToolCall = { id: string; startTime: number; displayText: string };
 

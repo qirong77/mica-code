@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import { micaSkills } from '../../packages/mica-skills/index.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }

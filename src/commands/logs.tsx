@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Box, ScrollBox, Text } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '../../packages/@anthropic/ink/src/components/ScrollBox.js';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { formatLogEntry, logRuntime, runtimeLogs, type RuntimeLogEntry } from '../logger.js';
+import { formatLogEntry, logRuntime, runtimeLogs, type RuntimeLogEntry } from '../../packages/mica-logger/index.js';
 
 const PANEL_ID = 'logs-panel';
 const LOGS_PLACEHOLDER = 'Logs: ↑↓ scroll, Esc close';

@@ -2,7 +2,7 @@ import { micaUI } from '../../packages/mica-ui/index.js';
 import { micaAgent } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime, AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { clearRuntimeLogs, logRuntime } from '../logger.js';
+import { clearRuntimeLogs, logRuntime } from '../../packages/mica-logger/index.js';
 
 export function reportRuntimeError(error: unknown, title = '运行错误') {
   const message = error instanceof Error ? error.message : String(error);

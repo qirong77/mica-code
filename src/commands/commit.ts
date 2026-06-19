@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 const MAX_TOTAL_DIFF_CHARS = 18_000;
 const MAX_DIFF_CHARS_PER_FILE = 3_000;

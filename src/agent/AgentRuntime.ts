@@ -3,7 +3,7 @@ import type { OpenAI } from 'openai';
 import { micaAgent, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '../../packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '../../packages/mica-ui/index.js';
 import { micaConfig, type EffortOption, type ProviderDefinition } from '../../packages/mica-config/index.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 export type AgentRuntimeStatus =
   | { type: 'idle' }

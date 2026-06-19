@@ -4,7 +4,7 @@ import { micaUI } from '../../packages/mica-ui/index.js';
 import type { AgentUsageRecord } from '../../packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 interface TurnData {
   turnIndex: number;

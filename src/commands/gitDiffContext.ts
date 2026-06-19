@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { micaUI } from '../../packages/mica-ui/index.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 export function registerGitDiffContextPlugin() {
   return {

@@ -14,7 +14,7 @@ import { registerLogExportPlugin } from './logExport.js';
 import { registerAgentsPlugin } from './agents.js';
 import { closeLogsPanel, registerLogsPlugin } from './logs.js';
 import type { SessionController } from '../session/SessionController.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 export function registerCommands({
   agent,

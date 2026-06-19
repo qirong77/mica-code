@@ -5,7 +5,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { showMessage, syncModelDisplay } from '../app/bootstrap.js';
 import { micaConfig } from '../../packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
-import { logRuntime } from '../logger.js';
+import { logRuntime } from '../../packages/mica-logger/index.js';
 
 export function registerProviderPlugin(agent: AgentRuntime) {
   return {
