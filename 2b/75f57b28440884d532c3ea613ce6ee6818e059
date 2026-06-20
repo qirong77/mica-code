@@ -1,0 +1,25 @@
+packages/mica-builtin-commands/mcp.tsx
+  1f827bc54e17f934 65-67,83-120,130-133,150-167,184-192,213-241
+packages/mica-ui/index.ts
+  1f827bc54e17f934 6-13,28-36,65-66,134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "2b75f57b28440884d532c3ea613ce6ee6818e059",
+  "prompts": {
+    "1f827bc54e17f934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ee413-ca97-7be1-aa8c-a9278d2f8d96",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 244,
+      "total_deletions": 49,
+      "accepted_lines": 314,
+      "overriden_lines": 1
+    }
+  }
+}
