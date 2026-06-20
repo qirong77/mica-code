@@ -30,7 +30,7 @@ class SystemPromptBuilder {
       this.append('project-instructions', projectInstructions);
     }
 
-    const skills = options.skills ?? micaSkills.getLoaded();
+    const skills = [...(options.skills ?? micaSkills.getLoaded())].sort((a, b) => a.name.localeCompare(b.name));
     if (skills.length > 0) {
       const listing = skills
         .map((skill) =>
@@ -83,16 +83,10 @@ function readOptionalText(path: string): string | undefined {
 }
 
 function buildContextBlock(options: BuildSystemPromptOptions = {}): string {
-  const now = options.now ?? new Date();
   return [
     `# 环境信息`,
     `- 当前工作目录: ${options.cwd ?? process.cwd()}`,
-    `- 当前日期: ${formatDate(now)}`,
     `- 操作系统: ${options.platform ?? process.platform}`,
     `- Shell: ${options.shell ?? process.env.SHELL ?? 'unknown'}`,
   ].join('\n');
-}
-
-function formatDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }

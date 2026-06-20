@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import { MicaTool } from './MicaTool.js';
+import { getToolDefinitions, registerMcpTools, unregisterMcpTools } from './registry.js';
 
 class TestTool extends MicaTool {
-  constructor() {
-    super('test_tool', 'test tool', {
+  constructor(name = 'test_tool') {
+    super(name, 'test tool', {
       type: 'object',
       properties: {
         file_path: { type: 'string' },
@@ -47,5 +48,19 @@ describe('MicaTool.validateInput', () => {
       valid: false,
       message: expect.stringContaining('boolean'),
     });
+  });
+});
+
+describe('getToolDefinitions', () => {
+  afterEach(() => {
+    unregisterMcpTools();
+  });
+
+  it('returns tool definitions in stable name order', () => {
+    registerMcpTools([new TestTool('zeta_tool'), new TestTool('alpha_tool')]);
+
+    const names = getToolDefinitions().map((tool) => tool.name);
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+    expect(names.indexOf('alpha_tool')).toBeLessThan(names.indexOf('zeta_tool'));
   });
 });

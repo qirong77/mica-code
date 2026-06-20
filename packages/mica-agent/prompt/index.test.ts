@@ -30,7 +30,8 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('<project-instructions>');
     expect(prompt).toContain('- 不要使用动态导入');
     expect(prompt).toContain('- 当前工作目录: /repo');
-    expect(prompt).toContain('- 当前日期: 2026-06-17');
+    expect(prompt).not.toContain('当前日期');
+    expect(prompt).not.toContain('2026-06-17');
     expect(prompt).not.toContain('2026-06-17T10:20:30.000Z');
   });
 
@@ -58,5 +59,31 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('when_to_use: When the user asks for a review');
     expect(prompt).toContain('argument_hint: [path]');
     expect(prompt).not.toContain('Full skill instructions should not be injected eagerly.');
+  });
+
+  it('renders skills index in stable name order', () => {
+    const prompt = buildSystemPromptForTest({
+      cwd: '/repo',
+      now: new Date('2026-06-17T10:20:30.000Z'),
+      platform: 'darwin',
+      shell: '/bin/zsh',
+      projectInstructions: null,
+      skills: [
+        {
+          name: 'zeta',
+          description: 'Zeta skill',
+          content: '',
+          baseDir: '/skills/zeta',
+        },
+        {
+          name: 'alpha',
+          description: 'Alpha skill',
+          content: '',
+          baseDir: '/skills/alpha',
+        },
+      ],
+    });
+
+    expect(prompt.indexOf('- alpha: Alpha skill')).toBeLessThan(prompt.indexOf('- zeta: Zeta skill'));
   });
 });

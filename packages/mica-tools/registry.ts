@@ -38,6 +38,10 @@ function getAllTools(): MicaTool[] {
   return [...builtinTools, ...mcpTools];
 }
 
+function getAllToolsForPrompt(): MicaTool[] {
+  return getAllTools().sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function findTool(name: string): MicaTool | undefined {
   const exact = getAllTools().find((t) => t.name === name);
   if (exact) return exact;
@@ -45,7 +49,7 @@ function findTool(name: string): MicaTool | undefined {
 }
 
 export function getToolDefinitions(): Tool[] {
-  return getAllTools().map((t) => ({
+  return getAllToolsForPrompt().map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,
