@@ -3,7 +3,6 @@ import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { maxColumnWidth } from './layout.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }
@@ -31,9 +30,9 @@ export function createSkillsCommand() {
         const currentSkills = micaSkills.getLoaded();
 
         if (state.view === 'list') {
-          const nameWidth = maxColumnWidth(
-            currentSkills.map((skill) => skill.name.length + 2),
-            16,
+          const nameWidth = micaUi.getOneLineColumnWidth(
+            currentSkills.map((skill) => `/${skill.name}`),
+            { min: 16, max: 30, padding: 1 },
           );
           return (
             <micaUi.Dialog
@@ -56,14 +55,24 @@ export function createSkillsCommand() {
                   const skill = currentSkills.find((entry) => entry.name === item.key);
                   if (!skill) return null;
                   return (
-                    <Box flexDirection="row">
-                      <Box width={nameWidth}>
-                        <Text bold={isSelected}>/{skill.name}</Text>
-                      </Box>
-                      <Box>
-                        <Text dimColor>{skill.description}</Text>
-                      </Box>
-                    </Box>
+                    <micaUi.OneLineItem
+                      cells={[
+                        {
+                          key: 'name',
+                          content: `/${skill.name}`,
+                          width: nameWidth,
+                          color: isSelected ? micaUi.theme.colors.accent : undefined,
+                          bold: isSelected,
+                        },
+                        {
+                          key: 'description',
+                          content: skill.description,
+                          flexGrow: 1,
+                          minWidth: 0,
+                          dimColor: true,
+                        },
+                      ]}
+                    />
                   );
                 }}
               />

@@ -5,3 +5,4 @@
 5. autocompact
 6. prompt engineering
 7. 多 agent 列表对齐和展开
+8. permission

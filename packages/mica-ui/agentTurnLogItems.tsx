@@ -10,11 +10,11 @@ const TOOL_ICONS: Record<string, string> = {
   write_file: '✍️',
   edit_file: '✏️',
   list_files: '📂',
-  grep_search: '🔍',
-  run_shell: '⚡',
-  web_fetch: '🌐',
-  web_search: '🔎',
-  Skill: '🔧',
+  grep_search: '📊',
+  run_shell: '🚀',
+  web_fetch: '🔗',
+  web_search: '🌐',
+  Skill: '🛠️',
 };
 
 export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurnLogItem {

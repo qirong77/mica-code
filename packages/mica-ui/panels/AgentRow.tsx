@@ -1,20 +1,49 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
+import { OneLineItem, getOneLineColumnWidth } from '../primitives/OneLineItem.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
 import type { MicaUiAgentStatusItem } from '../types.js';
+
+export type AgentRowLayout = {
+  titleWidth: number;
+  statusWidth: number;
+};
+
+export function getAgentRowLayout(agents: readonly MicaUiAgentStatusItem[], availableWidth = 120): AgentRowLayout {
+  const statusWidth = getOneLineColumnWidth(
+    agents.map((agent) => getWorkingStatusDisplay(agent.status).text),
+    { min: 12, max: 28, padding: 1 },
+  );
+  const metaWidth = getOneLineColumnWidth(
+    agents.map((agent) => `${formatSessionMeta(agent.updatedAt, agent.model)} ${agent.providerName}`),
+    { min: 24, max: 72, padding: 1 },
+  );
+  const separatorsAndGapsWidth = 6;
+  const titleMaxWidth = Math.max(16, availableWidth - statusWidth - metaWidth - separatorsAndGapsWidth);
+
+  return {
+    titleWidth: getOneLineColumnWidth(
+      agents.map((agent) => `#${agent.index} ${agent.title}`),
+      { min: 16, max: titleMaxWidth, padding: 1 },
+    ),
+    statusWidth,
+  };
+}
 
 export function AgentRow({
   agent,
   selected,
   compact,
   width,
+  layout,
 }: {
   agent: MicaUiAgentStatusItem;
   selected?: boolean;
   compact?: boolean;
   width?: number;
+  layout?: AgentRowLayout;
 }): React.ReactNode {
   const status = getWorkingStatusDisplay(agent.status);
 
@@ -24,47 +53,94 @@ export function AgentRow({
       // 暂时不显示当前的 agent
       return null;
     }
-    const prefix = `${marker} # ${agent.index} `;
     const model = `(${agent.model})`;
-    const w = width ?? 60;
-    const spinnerWidth = status.spinning ? 1 : 0;
-    const titleWidth = Math.max(4, w - spinnerWidth - prefix.length - status.text.length - model.length - 3);
     return (
-      <Box flexDirection="row" paddingTop={1}>
-        {status.spinning && <Spin />}
-        <Text color={status.color}> {status.text} </Text>
-        <Text color={agent.current ? themeColors.accent : themeColors.dim}>{prefix}</Text>
-        <Text color={agent.current ? themeColors.accent : themeColors.dim}> {truncate(agent.title, titleWidth)} </Text>
-        <Text color={agent.current ? themeColors.accent : themeColors.dim}>{model}</Text>
+      <Box paddingTop={1} width={width ?? '100%'} minWidth={0}>
+        <OneLineItem
+          cells={[
+            {
+              key: 'spinner',
+              content: status.spinning ? <Spin /> : undefined,
+              width: status.spinning ? 1 : 0,
+            },
+            {
+              key: 'status',
+              content: status.text,
+              maxWidth: '25%',
+              minWidth: 8,
+              flexShrink: 1,
+              color: status.color,
+            },
+            {
+              key: 'index',
+              content: `#${agent.index}`,
+              flexShrink: 0,
+              dimColor: true,
+            },
+            {
+              key: 'title',
+              content: agent.title,
+              maxWidth: '45%',
+              minWidth: 0,
+              flexShrink: 1,
+              color: agent.current ? themeColors.accent : themeColors.dim,
+            },
+            {
+              key: 'model',
+              content: model,
+              maxWidth: '30%',
+              minWidth: 6,
+              flexShrink: 1,
+              color: agent.current ? themeColors.accent : themeColors.dim,
+            },
+          ]}
+        />
       </Box>
     );
   }
 
   const meta = formatSessionMeta(agent.updatedAt, agent.model);
-  const title = truncate(`#${agent.index} ${agent.title}`, 22);
-  const statusText = truncate(status.text, 18);
   return (
-    <Box flexDirection="row">
-      <Box flexShrink={0} width={'30%'} overflowX={'hidden'}>
-        <Text color={agent.current ? themeColors.accent : undefined} bold={selected}>
-          {title}
-        </Text>
-      </Box>
-      <Box flexShrink={0} width={2}>
-        <Text color={themeColors.dim}>·</Text>
-      </Box>
-      <Box flexShrink={0} width={20}>
-        <Text color={status.color}>{statusText}</Text>
-      </Box>
-      <Box flexShrink={0} width={2}>
-        <Text color={themeColors.dim}>·</Text>
-      </Box>
-      <Box flexShrink={0}>
-        <Text color={themeColors.dim}>
-          {meta} {agent.providerName}
-        </Text>
-      </Box>
-    </Box>
+    <OneLineItem
+      cells={[
+        {
+          key: 'title',
+          content: `#${agent.index} ${agent.title}`,
+          width: layout?.titleWidth ?? 24,
+          minWidth: 8,
+          flexShrink: 1,
+          color: agent.current ? themeColors.accent : undefined,
+          bold: selected,
+        },
+        {
+          key: 'sep-status',
+          content: '·',
+          flexShrink: 0,
+          color: themeColors.dim,
+        },
+        {
+          key: 'status',
+          content: status.text,
+          width: layout?.statusWidth ?? 18,
+          minWidth: 8,
+          flexShrink: 1,
+          color: status.color,
+        },
+        {
+          key: 'sep-meta',
+          content: '·',
+          flexShrink: 0,
+          color: themeColors.dim,
+        },
+        {
+          key: 'meta',
+          content: `${meta} ${agent.providerName}`,
+          flexGrow: 1,
+          minWidth: 0,
+          dimColor: true,
+        },
+      ]}
+    />
   );
 }
 
@@ -79,11 +155,4 @@ function formatSessionMeta(updatedAt: string, model: string): string {
         minute: '2-digit',
       });
   return `[${timestamp} ${model}]`;
-}
-
-function truncate(text: string, width: number): string {
-  if (text.length <= width) return text;
-  if (width <= 1) return text.slice(0, width);
-  if (width <= 3) return text.slice(0, width);
-  return `${text.slice(0, width - 3)}...`;
 }

@@ -8,6 +8,11 @@ import { micaLogger } from '@packages/mica-logger/index.js';
 export type SelectOption = {
   name: string;
   label: React.ReactNode;
+  status?: React.ReactNode;
+  description?: React.ReactNode;
+  suffix?: React.ReactNode;
+  labelWidth?: number | string;
+  labelMaxWidth?: number | string;
 };
 
 export type SelectCommandConfig = {
@@ -73,7 +78,12 @@ export function showSelectCommand(config: SelectCommandConfig) {
     const items: SelectItem[] = config.options.map((option) => ({
       key: option.name,
       label: option.label,
-      suffix: option.name === config.current ? <Text color={micaUi.theme.colors.success}> (active)</Text> : undefined,
+      status: option.status,
+      description: option.description,
+      labelWidth: option.labelWidth,
+      labelMaxWidth: option.labelMaxWidth,
+      suffix:
+        option.name === config.current ? <Text color={micaUi.theme.colors.success}> (active)</Text> : option.suffix,
     }));
 
     return (
@@ -152,11 +162,7 @@ export function showConfirmPrompt(message: string, defaultYes = true): Promise<b
           title={message}
           footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel (no)']} />}
         >
-          <micaUi.SelectList
-            items={items}
-            selectedIdx={currentIdx}
-            itemGap={1}
-          />
+          <micaUi.SelectList items={items} selectedIdx={currentIdx} itemGap={1} />
         </micaUi.Dialog>
       );
     }

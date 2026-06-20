@@ -46,7 +46,8 @@ function showResumeSelector(
     current: '',
     options: sessions.map((session) => ({
       name: session.id,
-      label: `${session.title}  ${formatSessionMeta(session.updatedAt, session.model)}`,
+      label: session.title,
+      suffix: formatSessionMeta(session.updatedAt, session.model),
     })),
     emptyMessage: 'no saved sessions',
     onSelect: (id) => resumeSession(agent, sessionController, services, id),

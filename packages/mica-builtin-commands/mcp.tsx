@@ -4,7 +4,6 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
-import { maxColumnWidth } from './layout.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }
@@ -63,9 +62,9 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         const servers = micaUi.useScheduleState(micaMcp.servers);
 
         if (state.view === 'list') {
-          const nameWidth = maxColumnWidth(
-            servers.map((server) => server.name.length + 2),
-            18,
+          const nameWidth = micaUi.getOneLineColumnWidth(
+            servers.map((server) => server.name),
+            { min: 18, max: 32, padding: 1 },
           );
 
           return (
@@ -81,21 +80,44 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                   const server = servers.find((entry) => entry.name === item.key);
                   if (!server) return null;
                   return (
-                    <Box flexDirection="row">
-                      <Box width={4}>
-                        <Text color={statusColor(server.status)}>{STATUS_ICON[server.status]}</Text>
-                      </Box>
-                      <Box width={nameWidth}>
-                        <Text bold={isSelected}>{server.name}</Text>
-                      </Box>
-                      <Text dimColor>{server.url}</Text>
-                      {server.status === 'connected' ? (
-                        <Text color={micaUi.theme.colors.success}>{`  ${server.toolCount} tools`}</Text>
-                      ) : null}
-                      {server.status === 'failed' && server.error ? (
-                        <Text color={micaUi.theme.colors.error}>{`  ${server.error.slice(0, 40)}`}</Text>
-                      ) : null}
-                    </Box>
+                    <micaUi.OneLineItem
+                      cells={[
+                        {
+                          key: 'status',
+                          content: STATUS_ICON[server.status],
+                          width: 2,
+                          color: statusColor(server.status),
+                        },
+                        {
+                          key: 'name',
+                          content: server.name,
+                          width: nameWidth,
+                          color: isSelected ? micaUi.theme.colors.accent : undefined,
+                          bold: isSelected,
+                        },
+                        {
+                          key: 'url',
+                          content: server.url,
+                          flexGrow: 1,
+                          minWidth: 0,
+                          dimColor: true,
+                        },
+                        {
+                          key: 'tools',
+                          content: server.status === 'connected' ? `${server.toolCount} tools` : undefined,
+                          flexShrink: 0,
+                          color: micaUi.theme.colors.success,
+                        },
+                        {
+                          key: 'error',
+                          content: server.status === 'failed' ? server.error : undefined,
+                          maxWidth: '35%',
+                          flexShrink: 1,
+                          minWidth: 0,
+                          color: micaUi.theme.colors.error,
+                        },
+                      ]}
+                    />
                   );
                 }}
               />
@@ -105,6 +127,10 @@ export function createMcpCommand(services: CommandRuntimeServices) {
 
         if (state.view === 'tools') {
           const server = servers[state.serverIdx];
+          const toolNameWidth = micaUi.getOneLineColumnWidth(
+            (server?.tools ?? []).map((tool) => tool.name),
+            { min: 24, max: 34, padding: 1 },
+          );
           return (
             <micaUi.Dialog
               title={`${server?.name ?? 'mcp'} tools`}
@@ -121,12 +147,24 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                   const tool = server?.tools.find((entry) => entry.name === item.key);
                   if (!tool) return null;
                   return (
-                    <Box flexDirection="row">
-                      <Box width={30}>
-                        <Text bold={isSelected}>{tool.name}</Text>
-                      </Box>
-                      <Text dimColor>{tool.description.slice(0, 70)}</Text>
-                    </Box>
+                    <micaUi.OneLineItem
+                      cells={[
+                        {
+                          key: 'name',
+                          content: tool.name,
+                          width: toolNameWidth,
+                          color: isSelected ? micaUi.theme.colors.accent : undefined,
+                          bold: isSelected,
+                        },
+                        {
+                          key: 'description',
+                          content: tool.description,
+                          flexGrow: 1,
+                          minWidth: 0,
+                          dimColor: true,
+                        },
+                      ]}
+                    />
                   );
                 }}
               />
@@ -143,6 +181,15 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         };
         const properties = schema.properties ?? {};
         const required = schema.required ?? [];
+        const parameterNameWidth = micaUi.getOneLineColumnWidth(Object.keys(properties), {
+          min: 16,
+          max: 28,
+          padding: 1,
+        });
+        const parameterTypeWidth = micaUi.getOneLineColumnWidth(
+          Object.values(properties).map((prop) => prop.type || 'any'),
+          { min: 8, max: 14, padding: 1 },
+        );
 
         return (
           <micaUi.Dialog
@@ -163,20 +210,35 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                     <Text bold>parameters</Text>
                   </Box>
                   {Object.entries(properties).map(([name, prop]) => (
-                    <Box key={name} flexDirection="row">
-                      <Box width={4}>
-                        <Text color={required.includes(name) ? micaUi.theme.colors.error : micaUi.theme.colors.dim}>
-                          {required.includes(name) ? '*' : ' '}
-                        </Text>
-                      </Box>
-                      <Box width={20}>
-                        <Text>{name}</Text>
-                      </Box>
-                      <Box width={12}>
-                        <Text color={typeColor(prop.type || 'any')}>{prop.type || 'any'}</Text>
-                      </Box>
-                      <Text dimColor>{prop.description?.slice(0, 60) ?? ''}</Text>
-                    </Box>
+                    <micaUi.OneLineItem
+                      key={name}
+                      cells={[
+                        {
+                          key: 'required',
+                          content: required.includes(name) ? '*' : ' ',
+                          width: 2,
+                          color: required.includes(name) ? micaUi.theme.colors.error : micaUi.theme.colors.dim,
+                        },
+                        {
+                          key: 'name',
+                          content: name,
+                          width: parameterNameWidth,
+                        },
+                        {
+                          key: 'type',
+                          content: prop.type || 'any',
+                          width: parameterTypeWidth,
+                          color: typeColor(prop.type || 'any'),
+                        },
+                        {
+                          key: 'description',
+                          content: prop.description ?? '',
+                          flexGrow: 1,
+                          minWidth: 0,
+                          dimColor: true,
+                        },
+                      ]}
+                    />
                   ))}
                 </Box>
               )}

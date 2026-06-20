@@ -3,7 +3,14 @@ import * as conv from './conversation/state.js';
 import * as input from './input/state.js';
 import * as dropdown from './bottom/dropdown/state.js';
 import * as panels from './panels/state.js';
-import { pushLog, clearLog, setOnAbortAgent, abortAgent, setOnEditPendingInput, editPendingInput } from './panels/state.js';
+import {
+  pushLog,
+  clearLog,
+  setOnAbortAgent,
+  abortAgent,
+  setOnEditPendingInput,
+  editPendingInput,
+} from './panels/state.js';
 import { MessageBar, MessageBarAPI } from './panels/MessageBar.js';
 import { DropDownUI } from './bottom/dropdown/index.js';
 import { TerminalInputUI } from './input/TerminalInput.js';
@@ -18,7 +25,15 @@ import { PluginPanel } from './bottom/PluginPanel.js';
 import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
 import { useScheduleState } from './hooks/index.js';
 import { useLogViewHeight } from './hooks/useLogViewHeight.js';
-import { Dialog, KeyHints, SelectList, Spin, useSpinner } from './primitives/index.js';
+import {
+  Dialog,
+  KeyHints,
+  OneLineItem,
+  SelectList,
+  Spin,
+  getOneLineColumnWidth,
+  useSpinner,
+} from './primitives/index.js';
 import { parseImageRefs } from './utils/imagePaste.js';
 import { createErrorLogItem, createThinkingLogItem, createToolCallLogItem } from './agentTurnLogItems.js';
 
@@ -47,6 +62,8 @@ export const micaUi = {
   Dialog,
   KeyHints,
   SelectList,
+  OneLineItem,
+  getOneLineColumnWidth,
   Spin,
   useSpinner,
   /** 从用户输入文本中提取图片引用并转换成 agent 可消费的内容块。 */
@@ -114,7 +131,7 @@ export const micaUi = {
   theme: { colors: themeColors },
 };
 
-export type { SelectItem } from './primitives/index.js';
+export type { OneLineItemCell, SelectItem } from './primitives/index.js';
 export type { MessageItem } from './panels/MessageBar.js';
 export type {
   MicaUiWorkingStatus,

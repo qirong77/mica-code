@@ -1,9 +1,9 @@
-import { Text } from '@anthropic/ink';
+import { Text, useTerminalSize } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
-import { AgentRow } from '@packages/mica-ui/panels/AgentRow.js';
+import { AgentRow, getAgentRowLayout } from '@packages/mica-ui/panels/AgentRow.js';
 
 type AgentsPanelState = { selectedIdx: number };
 
@@ -45,6 +45,8 @@ function showAgentsPanel(services: CommandRuntimeServices) {
   function AgentsPanel() {
     const state = micaUi.useScheduleState(stateAtom);
     const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
+    const { columns } = useTerminalSize();
+    const layout = getAgentRowLayout(agents, Math.max(20, columns - 6));
     return (
       <micaUi.Dialog
         title={`agents (${agents.length})`}
@@ -58,7 +60,7 @@ function showAgentsPanel(services: CommandRuntimeServices) {
           renderItem={(item, isSelected) => {
             const agent = agents.find((a) => a.id === item.key);
             if (!agent) return null;
-            return <AgentRow agent={agent} selected={isSelected} />;
+            return <AgentRow agent={agent} selected={isSelected} layout={layout} />;
           }}
         />
       </micaUi.Dialog>

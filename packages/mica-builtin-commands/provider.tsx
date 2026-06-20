@@ -1,4 +1,3 @@
-import { Text } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -29,12 +28,8 @@ export function createProviderCommand(
         current: config.provider,
         options: config.providers.map((provider) => ({
           name: provider.id,
-          label: (
-            <>
-              {provider.name ?? provider.id}
-              <Text dimColor>{` (${provider.api_base})`}</Text>
-            </>
-          ),
+          label: provider.name ?? provider.id,
+          description: provider.api_base ? `(${provider.api_base})` : undefined,
         })),
         onSelect: (providerId) => {
           return applyProviderSelection(targetAgent, targetSessionController, services, providerId);

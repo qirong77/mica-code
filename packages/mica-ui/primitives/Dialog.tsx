@@ -10,7 +10,7 @@ export interface DialogProps {
 
 export function Dialog({ title, children, footer }: DialogProps): React.ReactNode {
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" width="100%" minWidth={0} paddingX={1}>
       <IfComponent condition={!!title}>
         <Box paddingBottom={1}>
           <Text dimColor>{title}</Text>
