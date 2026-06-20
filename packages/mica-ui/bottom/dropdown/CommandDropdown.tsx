@@ -91,6 +91,7 @@ export function CommandDropdown({
           marker=""
           maxVisibleItems={maxVisibleItems}
           renderItem={renderItem}
+          reservedRows={10}
         />
       </Dialog>
     </Box>

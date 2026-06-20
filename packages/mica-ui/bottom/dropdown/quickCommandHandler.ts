@@ -9,6 +9,8 @@ export function setSelectEmitter(emit: (item: MicaUiDropdownItem) => void): void
 }
 
 export function showQuickCommands(query: string): void {
+  // 强制重置输入禁用状态，确保下拉菜单可以正常展示
+  inputDisabled.set(false);
   const commands = quickCommands.get();
   const parsedQuery = parseQuickCommandQuery(query);
   const filter = parsedQuery.filter;

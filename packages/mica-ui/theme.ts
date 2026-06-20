@@ -8,6 +8,6 @@ export const themeColors = {
   cyan: '#26C6DA',
   dim: '#7b7b7b',
   textSecondary: '#9d9d9d',
-  borderInput: '#9d9d9d',
+  borderInput: '#888888',
   border: '#26C6DA',
 } as const;

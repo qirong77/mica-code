@@ -281,7 +281,7 @@ function TerminalInput() {
         width="100%"
       >
         <Box marginLeft={1} marginRight={1}>
-          <Text bold color={themeColors.primary}>
+          <Text bold>
             {'❯'}
           </Text>
         </Box>
