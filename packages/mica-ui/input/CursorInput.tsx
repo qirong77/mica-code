@@ -429,6 +429,15 @@ class Cursor {
   }
 }
 
+function normalizeInsertedInput(input: string): string {
+  const normalized = input.replace(/\r\n?/g, '\n');
+  if (normalized.length <= 1) return normalized;
+  return normalized
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n');
+}
+
 function buildTextHandler({
   value,
   onChange,
@@ -625,7 +634,7 @@ function buildTextHandler({
         }
         break;
       }
-      nextCursor = cursor.insert(input.replace(/\r/g, '\n'));
+      nextCursor = cursor.insert(normalizeInsertedInput(input));
       break;
     }
     if (nextCursor && nextCursor instanceof Cursor && !cursor.equals(nextCursor)) {
