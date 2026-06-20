@@ -35,11 +35,6 @@ export function createSkillsCommand() {
             currentSkills.map((skill) => skill.name.length + 2),
             16,
           );
-          const descWidth = maxColumnWidth(
-            currentSkills.map((skill) => Math.min(skill.description.length, 36) + 2),
-            40,
-          );
-
           return (
             <micaUi.Dialog
               title={`skills (${currentSkills.length})`}
@@ -65,11 +60,8 @@ export function createSkillsCommand() {
                       <Box width={nameWidth}>
                         <Text bold={isSelected}>/{skill.name}</Text>
                       </Box>
-                      <Box width={descWidth}>
-                        <Text dimColor>
-                          {skill.description.slice(0, 36)}
-                          {skill.description.length > 36 ? '...' : ''}
-                        </Text>
+                      <Box>
+                        <Text dimColor>{skill.description}</Text>
                       </Box>
                     </Box>
                   );

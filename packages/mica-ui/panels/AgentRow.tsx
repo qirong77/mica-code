@@ -32,10 +32,10 @@ export function AgentRow({
     return (
       <Box flexDirection="row" paddingTop={1}>
         {status.spinning && <Spin />}
+        <Text color={status.color}> {status.text} </Text>
         <Text color={agent.current ? themeColors.accent : themeColors.dim}>{prefix}</Text>
         <Text color={agent.current ? themeColors.accent : themeColors.dim}> {truncate(agent.title, titleWidth)} </Text>
         <Text color={agent.current ? themeColors.accent : themeColors.dim}>{model}</Text>
-        <Text color={status.color}>{status.text}</Text>
       </Box>
     );
   }
