@@ -8,7 +8,7 @@ import {
   type TerminalAgentSessionManager,
 } from '../../agents/terminalAgentSessions.js';
 import { ToolLogController } from '../../runtime/ToolLogController.js';
-import { applyStatus, resetActiveTurnUI, syncModelDisplay } from '../../runtime/uiBridge.js';
+import { applyStatus, syncModelDisplay } from '../../runtime/uiBridge.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
 
 export class MicaUiRuntimeBridge {
@@ -69,6 +69,23 @@ export class MicaUiRuntimeBridge {
       if (event.type === 'turn:finished') {
         this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
       }
+      if (event.type === 'turn:aborted') {
+        const owner = eventOwnerAgent(event.owner, this.agent);
+        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages: session.agent.toConversationMessages(),
+          responseText: '',
+          pendingInputs: [],
+          workingStatus: { type: 'idle' },
+        });
+        if (this.isActiveAgent(session.agent)) {
+          micaUi.conversation.setMessages(session.uiState.conversationMessages);
+          micaUi.conversation.clearResponseText();
+          micaUi.conversation.clearPendingInput();
+          micaUi.panels.status.idle();
+        }
+      }
     });
 
     micaUi.terminalInput.onSubmit((text) => {
@@ -77,21 +94,6 @@ export class MicaUiRuntimeBridge {
 
     micaUi.panels.setOnAbortAgent(() => {
       void this.runtime.abort();
-      resetActiveTurnUI();
-      const session = this.agentSessions.current();
-      session.uiState = normalizeUiState({
-        ...session.uiState,
-        responseText: '',
-        pendingInputs: [],
-        messageBarMessages: [],
-        logEntries: [],
-        agentTurnLogItems: [],
-        uiLog: [],
-        thinkingText: '',
-        pluginUIs: [],
-        workingStatus: { type: 'idle' },
-      });
-      this.toolLogFor(this.agent).resetTurn();
     });
 
     micaUi.panels.setOnEditPendingInput(() => this.runtime.editLastPendingInput());

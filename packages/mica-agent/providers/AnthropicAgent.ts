@@ -155,6 +155,14 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       ...this.messages,
       { role: 'user', content: micaContentToAnthropicContent(question) },
     ];
+    const commitCompleteIteration = async (takeNextInput: boolean) => {
+      this.messages = messages;
+      if (!takeNextInput) return;
+      const nextInput = await options?.onIterationComplete?.();
+      if (nextInput !== null && nextInput !== undefined) {
+        appendAnthropicUserInput(messages, nextInput);
+      }
+    };
     let totalContent = '';
 
     while (true) {
@@ -231,7 +239,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       messages.push(assistantMessage);
 
       if (toolUses.length === 0) {
-        this.messages = messages;
+        await commitCompleteIteration(false);
         return totalContent || content;
       }
 
@@ -261,7 +269,8 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
         });
       }
 
-      messages.push({ role: 'user', content: toolResults });
+      appendAnthropicUserContent(messages, toolResults);
+      await commitCompleteIteration(true);
     }
   }
 
@@ -364,6 +373,25 @@ function micaContentToAnthropicContent(content: AgentQueryContent): MessageParam
       },
     };
   });
+}
+
+function appendAnthropicUserInput(messages: MessageParam[], input: AgentQueryContent): void {
+  appendAnthropicUserContent(messages, micaContentToAnthropicContent(input));
+}
+
+function appendAnthropicUserContent(messages: MessageParam[], content: MessageParam['content']): void {
+  const last = messages.at(-1);
+  if (last?.role !== 'user') {
+    messages.push({ role: 'user', content });
+    return;
+  }
+
+  last.content = [...toAnthropicContentBlocks(last.content), ...toAnthropicContentBlocks(content)];
+}
+
+function toAnthropicContentBlocks(content: MessageParam['content']): ContentBlockParam[] {
+  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
+  return content;
 }
 
 function buildAssistantContent(text: string, toolUses: AnthropicToolUse[]): MessageParam['content'] {

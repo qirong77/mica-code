@@ -38,6 +38,10 @@ type AgentRuntimeConfig = {
   effort: EffortOption;
 };
 
+type AgentRunOptions = {
+  onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
+};
+
 export class AgentAbortError extends Error {
   constructor(readonly runId: number) {
     super('Agent run aborted');
@@ -51,6 +55,9 @@ export class AgentRuntime {
   private runId = 0;
   private activeAbortController: AbortController | null = null;
   private activeRunUsageStartIndex: number | null = null;
+  private activeRunCompleteUsageLength: number | null = null;
+  private abortedRunUsageStartIndex: number | null = null;
+  private abortedRunCompleteUsageLength: number | null = null;
   private currentConfig: AgentRuntimeConfig;
 
   constructor() {
@@ -165,8 +172,17 @@ export class AgentRuntime {
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string) {
-    if (!this.client) return;
+    if (!this.client) return false;
+    this.trimAbortedRunUsage();
     const messages = [...(this.client.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[])];
+    const hasCurrentTurn = messages.some((message) =>
+      message.role === 'user' && isSameOpenAIUserContent(message.content, question),
+    );
+    if (hasCurrentTurn) {
+      micaLogger.logRuntime('agent', 'turn:preserved_aborted_complete_iteration', { messages: messages.length }, 'warn');
+      return true;
+    }
+
     messages.push({ role: 'user', content: toOpenAIUserContent(question) });
     const answer = partialAnswer?.trim();
     if (answer) {
@@ -174,6 +190,7 @@ export class AgentRuntime {
     }
     this.client.messages = messages as typeof this.client.messages;
     micaLogger.logRuntime('agent', 'turn:preserved_aborted', { messages: messages.length, hasPartialAnswer: Boolean(answer) }, 'warn');
+    return false;
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {
@@ -201,7 +218,7 @@ export class AgentRuntime {
     return this.client?.toConversationMessages() ?? [];
   }
 
-  async run(question: AgentQueryContent): Promise<{ runId: number; text: string }> {
+  async run(question: AgentQueryContent, options: AgentRunOptions = {}): Promise<{ runId: number; text: string }> {
     const runId = ++this.runId;
     const startedAt = Date.now();
     const questionText = contentToText(question);
@@ -222,11 +239,20 @@ export class AgentRuntime {
     const abortController = new AbortController();
     this.activeAbortController = abortController;
     this.activeRunUsageStartIndex = this.client.usageHistory.length;
+    this.activeRunCompleteUsageLength = this.client.usageHistory.length;
+    this.abortedRunUsageStartIndex = null;
+    this.abortedRunCompleteUsageLength = null;
     this.events.emit('status', { type: 'connecting' });
     try {
       const text = await this.client.query(question, {
         signal: abortController.signal,
         shouldContinue: () => this.isCurrent(runId),
+        onIterationComplete: async () => {
+          if (!this.isCurrent(runId)) return null;
+          this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
+          micaLogger.logRuntime('agent', 'run:iteration_complete', { runId });
+          return options.onIterationComplete?.() ?? null;
+        },
       });
       if (this.isCurrent(runId)) {
         this.events.emit('status', {
@@ -242,6 +268,8 @@ export class AgentRuntime {
       return { runId, text };
     } catch (error) {
       if (!this.isCurrent(runId) || isAbortError(error)) {
+        this.abortedRunUsageStartIndex = this.activeRunUsageStartIndex;
+        this.abortedRunCompleteUsageLength = this.activeRunCompleteUsageLength;
         micaLogger.logRuntime('agent', 'run:aborted', { runId }, 'warn');
         throw new AgentAbortError(runId);
       }
@@ -255,6 +283,7 @@ export class AgentRuntime {
       }
       if (this.activeAbortController === null) {
         this.activeRunUsageStartIndex = null;
+        this.activeRunCompleteUsageLength = null;
       }
     }
   }
@@ -338,6 +367,25 @@ export class AgentRuntime {
       effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
     };
   }
+
+  private trimAbortedRunUsage() {
+    if (!this.client) return;
+    const startIndex = this.abortedRunUsageStartIndex;
+    const completeLength = this.abortedRunCompleteUsageLength;
+    if (startIndex === null || completeLength === null) return;
+    if (completeLength < this.client.usageHistory.length) {
+      this.client.usageHistory = this.client.usageHistory.slice(0, completeLength) as typeof this.client.usageHistory;
+      this.client.lastUsage = this.client.usageHistory.at(-1);
+      micaLogger.logRuntime(
+        'agent',
+        'run:trim_aborted_usage',
+        { startIndex, completeLength, usage: this.client.usageHistory.length },
+        'warn',
+      );
+    }
+    this.abortedRunUsageStartIndex = null;
+    this.abortedRunCompleteUsageLength = null;
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -363,6 +411,13 @@ function toOpenAIUserContent(content: AgentQueryContent): OpenAI.Chat.Completion
       },
     };
   });
+}
+
+function isSameOpenAIUserContent(
+  left: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'],
+  right: AgentQueryContent,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(toOpenAIUserContent(right));
 }
 
 function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {

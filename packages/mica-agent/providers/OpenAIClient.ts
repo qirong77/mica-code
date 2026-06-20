@@ -130,6 +130,14 @@ export class OpenAIClient extends BaseAgent<
       ...compactHistoricalToolResults(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
+    const commitCompleteIteration = async (takeNextInput: boolean) => {
+      this.messages = messages.filter((message) => message.role !== 'system');
+      if (!takeNextInput) return;
+      const nextInput = await options?.onIterationComplete?.();
+      if (nextInput !== null && nextInput !== undefined) {
+        messages.push({ role: 'user', content: micaContentToOpenAIContent(nextInput) });
+      }
+    };
     let totalContent = '';
     let hasStreamedText = false;
     let streamTextEndsWithBlankLine = false;
@@ -263,10 +271,11 @@ export class OpenAIClient extends BaseAgent<
             content: result,
           });
         }
+        await commitCompleteIteration(true);
       }
       if (!message.tool_calls || message.tool_calls.length === 0) {
         messages.push(message);
-        this.messages = messages.filter((message) => message.role !== 'system');
+        await commitCompleteIteration(false);
         return totalContent || message.content || '';
       }
     }

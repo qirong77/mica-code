@@ -25,6 +25,7 @@ export type AgentCallbacks = {
 export type AgentQueryOptions = {
   signal?: AbortSignal;
   shouldContinue?: () => boolean;
+  onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
 };
 
 export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = AgentUsageRecord> = {

@@ -52,6 +52,7 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
     const turnAfterDisposable = ctx.hooks.on<{ runtime: LocalRuntimeController }>(
       'turn:after',
       async (event) => {
+        if (event.runtime.getStatus().running) return;
         const next = event.runtime.queue.dequeue();
         event.runtime.events.publish({
           type: 'queue:changed',

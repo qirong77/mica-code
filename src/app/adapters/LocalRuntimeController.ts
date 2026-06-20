@@ -28,6 +28,9 @@ type RuntimeActiveContext = {
   agentSessions: {
     findByAgent(agent: AgentRuntime): TerminalAgentSession | undefined;
   };
+  uiBridge?: {
+    syncAgentStatusItems(): void;
+  };
 };
 
 type RuntimeInputHookEvent = {
@@ -308,11 +311,13 @@ export class LocalRuntimeController implements RuntimeController {
     const content = micaUi.parseImageRefs(input.text) as AgentQueryContent;
     let runId: number | null = null;
     let hasError = false;
+    let wasAborted = false;
 
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
     this.rewindCheckpoints.capture(agent, input);
     this.responseBuffers.set(agent, '');
-    const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+    const activeContext = getActiveContext<RuntimeActiveContext>();
+    const session = activeContext?.agentSessions.findByAgent(agent);
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
@@ -324,6 +329,7 @@ export class LocalRuntimeController implements RuntimeController {
         thinkingText: '',
         workingStatus: { type: 'connecting' },
       });
+      activeContext?.uiBridge?.syncAgentStatusItems();
     }
     if (this.isActiveAgent(agent)) {
       this.events.publish({ type: 'turn:started', input, owner: agent });
@@ -338,7 +344,9 @@ export class LocalRuntimeController implements RuntimeController {
       await this.hooks.emit('turn:before', { runtime: this, input, content });
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
-      const result = await agent.run(content);
+      const result = await agent.run(content, {
+        onIterationComplete: () => this.takeQueuedIterationInput(agent),
+      });
       runId = result.runId;
       const finalText = result.text;
       if (!agent.isCurrent(runId)) return;
@@ -354,7 +362,7 @@ export class LocalRuntimeController implements RuntimeController {
       }
       if (this.isActiveAgent(agent)) {
         micaUi.conversation.appendAssistantMessage([
-          { type: 'text', text: finalText || responseBuffer || '(empty response)' },
+          { type: 'text', text: responseBuffer || finalText || '(empty response)' },
         ]);
         micaUi.conversation.clearResponseText();
       }
@@ -364,6 +372,7 @@ export class LocalRuntimeController implements RuntimeController {
       micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
     } catch (error) {
       if (error instanceof AgentAbortError) {
+        wasAborted = true;
         runId = error.runId;
         const responseBuffer = this.responseBuffers.get(agent) ?? '';
         this.responseBuffers.set(agent, '');
@@ -414,14 +423,14 @@ export class LocalRuntimeController implements RuntimeController {
     } finally {
       this.runningAgents.delete(agent);
       this.clearingAgents.delete(agent);
-      if (!hasError && session) {
+      if (!hasError && !wasAborted && session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
           agentTurnLogItems: [],
           thinkingText: '',
         });
       }
-      if (!hasError && this.isActiveAgent(agent)) micaUi.panels.clearAgentTurnLogItems();
+      if (!hasError && !wasAborted && this.isActiveAgent(agent)) micaUi.panels.clearAgentTurnLogItems();
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
@@ -432,6 +441,45 @@ export class LocalRuntimeController implements RuntimeController {
       }
       micaLogger.logRuntime('runtime', 'turn:finish', { elapsedMs, hasError });
     }
+  }
+
+  private takeQueuedIterationInput(agent: AgentRuntime): AgentQueryContent | null {
+    const queue = this.queueFor(agent);
+    const next = queue.dequeue();
+    this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
+    if (!next) return null;
+
+    const responseBuffer = this.responseBuffers.get(agent) ?? '';
+    if (responseBuffer) {
+      const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+      if (session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages: agent.toConversationMessages(),
+          responseText: '',
+        });
+      }
+      this.responseBuffers.set(agent, '');
+      if (this.isActiveAgent(agent)) {
+        micaUi.conversation.appendAssistantMessage([{ type: 'text', text: responseBuffer }]);
+        micaUi.conversation.clearResponseText();
+      }
+    }
+
+    const content = micaUi.parseImageRefs(next.text) as AgentQueryContent;
+    const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+    if (session) {
+      session.uiState = normalizeUiState({
+        ...session.uiState,
+        conversationMessages: [...agent.toConversationMessages(), { role: 'user', content }],
+      });
+    }
+    if (this.isActiveAgent(agent)) {
+      micaUi.conversation.appendUserMessage(content);
+      micaUi.conversation.clearResponseText();
+    }
+    micaLogger.logRuntime('runtime', 'submit:queued_iteration', { chars: next.text.length, queued: queue.count() });
+    return content;
   }
 
   private isActiveAgent(agent: AgentRuntime): boolean {

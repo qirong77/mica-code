@@ -169,7 +169,7 @@ export class TerminalAgentSessionManager {
     return {
       id: session.id,
       index: session.index,
-      title: deriveTitle(session.agent.toConversationMessages()),
+      title: deriveTitle(session.uiState.conversationMessages.length ? session.uiState.conversationMessages : session.agent.toConversationMessages()),
       cwd: process.cwd(),
       providerId: provider.id,
       providerName: provider.name ?? provider.id,

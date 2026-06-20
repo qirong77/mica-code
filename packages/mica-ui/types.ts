@@ -114,5 +114,6 @@ export interface MicaUiAgentStatusItem {
   model: string;
   status: MicaUiWorkingStatus;
   current: boolean;
+  startedAt: string;
   updatedAt: string;
 }

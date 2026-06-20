@@ -1,10 +1,10 @@
 import React from 'react';
-import { Box } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { OneLineItem, getOneLineColumnWidth } from '../primitives/OneLineItem.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
-import { formatSessionMeta } from '../utils/format.js';
+import { formatElapsed, formatSessionMeta } from '../utils/format.js';
 import type { MicaUiAgentStatusItem } from '../types.js';
 
 export type AgentRowLayout = {
@@ -39,26 +39,41 @@ export function AgentRow({
   compact,
   width,
   layout,
+  nowMs = Date.now(),
 }: {
   agent: MicaUiAgentStatusItem;
   selected?: boolean;
   compact?: boolean;
   width?: number;
   layout?: AgentRowLayout;
+  nowMs?: number;
 }): React.ReactNode {
   const status = getWorkingStatusDisplay(agent.status);
 
   if (compact) {
-    const marker = agent.current ? '*' : ' ';
-    if (marker === '*') {
+    if (agent.current) {
       // 暂时不显示当前的 agent
       return null;
     }
-    const model = `(${agent.model})`;
+
+    const runtime = formatAgentRuntime(agent.startedAt, nowMs);
     return (
       <Box paddingTop={1} width={width ?? '100%'} minWidth={0}>
         <OneLineItem
           cells={[
+            {
+              key: 'marker',
+              content: `🤖`,
+              flexShrink: 0,
+            },
+            {
+              key: 'title',
+              content: agent.title,
+              maxWidth: '70%',
+              minWidth: 0,
+              flexShrink: 1,
+              color: themeColors.dim,
+            },
             {
               key: 'spinner',
               content: status.spinning ? <Spin /> : undefined,
@@ -66,33 +81,14 @@ export function AgentRow({
             },
             {
               key: 'status',
-              content: status.text,
-              maxWidth: '25%',
-              minWidth: 8,
-              flexShrink: 1,
+              content: status.spinning ? `${status.text}...` : status.text,
+              flexShrink: 0,
               color: status.color,
             },
             {
-              key: 'index',
-              content: `#${agent.index}`,
+              key: 'runtime',
+              content: status.spinning ? <Text dimColor>{runtime}</Text> : undefined,
               flexShrink: 0,
-              dimColor: true,
-            },
-            {
-              key: 'title',
-              content: agent.title,
-              maxWidth: '45%',
-              minWidth: 0,
-              flexShrink: 1,
-              color: agent.current ? themeColors.accent : themeColors.dim,
-            },
-            {
-              key: 'model',
-              content: model,
-              maxWidth: '30%',
-              minWidth: 6,
-              flexShrink: 1,
-              color: agent.current ? themeColors.accent : themeColors.dim,
             },
           ]}
         />
@@ -143,4 +139,10 @@ export function AgentRow({
       ]}
     />
   );
+}
+
+function formatAgentRuntime(startedAt: string, nowMs: number): string {
+  const startedMs = new Date(startedAt).getTime();
+  if (Number.isNaN(startedMs)) return '--';
+  return formatElapsed(Math.max(0, nowMs - startedMs));
 }
