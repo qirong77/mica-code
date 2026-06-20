@@ -111,6 +111,8 @@ bun run build
 bun run format
 ```
 
+`temp/` 是临时外部目录，不属于默认验证范围。测试请使用 `bun run test` 或显式测试文件，避免直接运行裸 `bun test` 扫到 `temp/`。
+
 仅运行 TypeScript 检查：
 
 ```bash

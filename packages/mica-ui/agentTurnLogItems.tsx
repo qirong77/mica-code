@@ -3,6 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';
 import { themeColors } from './theme.js';
+import { formatElapsed } from './utils/format.js';
 
 const MAX_RUN_SHELL_LOG_LINES = 10;
 const TOOL_ICONS: Record<string, string> = {
@@ -140,9 +141,4 @@ function useNow(interval = 100): number {
 function toolIcon(name: string): string {
   if (name.startsWith('mcp__')) return '🔌';
   return TOOL_ICONS[name] || '⚙️';
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }

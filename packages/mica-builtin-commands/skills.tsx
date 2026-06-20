@@ -3,6 +3,7 @@ import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { moveSelection } from './commandInput.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }
@@ -114,64 +115,62 @@ export function createSkillsCommand() {
         );
       }
 
-      micaUi.panels.setPluginUIs([
-        {
-          id: 'skills-panel',
-          component: SkillsPanel,
-          onInput: (_input, key) => {
-            const currentSkills = micaSkills.getLoaded();
-            const state = panelState.get();
+      micaUi.panels.setExclusivePluginUI({
+        id: 'skills-panel',
+        component: SkillsPanel,
+        onInput: (_input, key) => {
+          const currentSkills = micaSkills.getLoaded();
+          const state = panelState.get();
 
-            if (key.escape) {
-              if (state.view === 'detail') {
-                micaLogger.logRuntime('plugin.skills', 'view:list', {
-                  skill: currentSkills[state.detailSkillIdx]?.name,
-                });
-                panelState.set({
-                  view: 'list',
-                  selectedIdx: state.detailSkillIdx,
-                });
-                return true;
-              }
-              hide();
-              return true;
-            }
-
-            if (state.view !== 'list') return false;
-            if (currentSkills.length === 0) return true;
-
-            if (key.upArrow) {
+          if (key.escape) {
+            if (state.view === 'detail') {
+              micaLogger.logRuntime('plugin.skills', 'view:list', {
+                skill: currentSkills[state.detailSkillIdx]?.name,
+              });
               panelState.set({
                 view: 'list',
-                selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : currentSkills.length - 1,
+                selectedIdx: state.detailSkillIdx,
               });
               return true;
             }
+            hide();
+            return true;
+          }
 
-            if (key.downArrow) {
-              panelState.set({
-                view: 'list',
-                selectedIdx: state.selectedIdx < currentSkills.length - 1 ? state.selectedIdx + 1 : 0,
-              });
-              return true;
-            }
+          if (state.view !== 'list') return false;
+          if (currentSkills.length === 0) return true;
 
-            if (key.return) {
-              micaLogger.logRuntime('plugin.skills', 'view:detail', {
-                skill: currentSkills[state.selectedIdx]?.name,
-              });
-              panelState.set({
-                view: 'detail',
-                selectedIdx: 0,
-                detailSkillIdx: state.selectedIdx,
-              });
-              return true;
-            }
+          if (key.upArrow) {
+            panelState.set({
+              view: 'list',
+              selectedIdx: moveSelection(state.selectedIdx, currentSkills.length, -1),
+            });
+            return true;
+          }
 
-            return false;
-          },
+          if (key.downArrow) {
+            panelState.set({
+              view: 'list',
+              selectedIdx: moveSelection(state.selectedIdx, currentSkills.length, 1),
+            });
+            return true;
+          }
+
+          if (key.return) {
+            micaLogger.logRuntime('plugin.skills', 'view:detail', {
+              skill: currentSkills[state.selectedIdx]?.name,
+            });
+            panelState.set({
+              view: 'detail',
+              selectedIdx: 0,
+              detailSkillIdx: state.selectedIdx,
+            });
+            return true;
+          }
+
+          return false;
         },
-      ]);
+      });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }

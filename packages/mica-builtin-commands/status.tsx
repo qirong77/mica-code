@@ -51,9 +51,7 @@ function showStatusPanel(text: string) {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    const nextPanels = micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId);
-    micaUi.panels.setPluginUIs(nextPanels);
-    micaLogger.logRuntime('plugin.status', 'closed');
+    if (micaUi.panels.removePluginUI(panelId)) micaLogger.logRuntime('plugin.status', 'closed');
   }
 
   function StatusPanel() {
@@ -70,23 +68,20 @@ function showStatusPanel(text: string) {
     );
   }
 
-  micaUi.panels.setPluginUIs([
-    ...micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId),
-    {
-      id: panelId,
-      component: StatusPanel,
-      preserveInput: true,
-      onInput: (_input, key) => {
-        if (!key.escape) return false;
-        hide();
-        return true;
-      },
-      onTextChange: (value) => {
-        if (value !== initialText) hide();
-        return false;
-      },
+  micaUi.panels.upsertPluginUI({
+    id: panelId,
+    component: StatusPanel,
+    preserveInput: true,
+    onInput: (_input, key) => {
+      if (!key.escape) return false;
+      hide();
+      return true;
     },
-  ]);
+    onTextChange: (value) => {
+      if (value !== initialText) hide();
+      return false;
+    },
+  });
 }
 
 function formatTokens(tokens: number): string {

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -18,6 +17,7 @@ import type {
   RewindPreviewResult,
   RuntimeInput,
 } from '@packages/mica-runtime/index.js';
+import { gitBuffer, gitText } from '@packages/mica-common/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 
 type FileSnapshotEntry =
@@ -48,6 +48,7 @@ type RewindCheckpoint = {
 
 const MAX_CHECKPOINTS_PER_AGENT = 20;
 const MAX_LABEL_CHARS = 80;
+const GIT_MAX_BUFFER = 100 * 1024 * 1024;
 
 export class RewindCheckpointManager {
   private readonly checkpoints = new WeakMap<AgentRuntime, RewindCheckpoint[]>();
@@ -113,7 +114,7 @@ export class RewindCheckpointManager {
 
 function captureFileState(): FileStateSnapshot {
   try {
-    const root = gitText(process.cwd(), ['rev-parse', '--show-toplevel']).trim();
+    const root = gitText(['rev-parse', '--show-toplevel'], { cwd: process.cwd(), maxBuffer: GIT_MAX_BUFFER }).trim();
     const paths = collectDirtyPaths(root);
     const entries = new Map<string, FileSnapshotEntry>();
     for (const path of paths) {
@@ -145,7 +146,10 @@ function restoreFileState(state: FileStateSnapshot): RewindFileChange[] {
   const headPaths = new Set(files.map((file) => file.path).filter((path) => pathExistsInHead(state.root, path)));
   const headTracked = files.map((file) => file.path).filter((path) => headPaths.has(path));
   if (headTracked.length > 0) {
-    gitBuffer(state.root, ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...headTracked]);
+    gitBuffer(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...headTracked], {
+      cwd: state.root,
+      maxBuffer: GIT_MAX_BUFFER,
+    });
   }
 
   for (const file of files) {
@@ -179,8 +183,12 @@ function describeFileChanges(
 }
 
 function collectDirtyPaths(root: string): string[] {
-  const tracked = splitNul(gitBuffer(root, ['diff', '--name-only', '-z', 'HEAD', '--']));
-  const untracked = splitNul(gitBuffer(root, ['ls-files', '--others', '--exclude-standard', '-z']));
+  const tracked = splitNul(
+    gitBuffer(['diff', '--name-only', '-z', 'HEAD', '--'], { cwd: root, maxBuffer: GIT_MAX_BUFFER }),
+  );
+  const untracked = splitNul(
+    gitBuffer(['ls-files', '--others', '--exclude-standard', '-z'], { cwd: root, maxBuffer: GIT_MAX_BUFFER }),
+  );
   return [...new Set([...tracked, ...untracked])].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
@@ -236,7 +244,10 @@ function pruneEmptyParents(start: string, root: string): void {
 }
 
 function pathExistsInHead(root: string, path: string): boolean {
-  const output = gitBuffer(root, ['ls-tree', '-z', '--name-only', 'HEAD', '--', path]);
+  const output = gitBuffer(['ls-tree', '-z', '--name-only', 'HEAD', '--', path], {
+    cwd: root,
+    maxBuffer: GIT_MAX_BUFFER,
+  });
   return splitNul(output).includes(path);
 }
 
@@ -247,19 +258,6 @@ function safePath(root: string, path: string): string {
     throw new Error(`Unsafe rewind path: ${path}`);
   }
   return absolute;
-}
-
-function gitText(cwd: string, args: string[]): string {
-  return gitBuffer(cwd, args).toString('utf-8');
-}
-
-function gitBuffer(cwd: string, args: string[]): Buffer {
-  return execFileSync('git', args, {
-    cwd,
-    encoding: 'buffer',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 100 * 1024 * 1024,
-  }) as Buffer;
 }
 
 function splitNul(buffer: Buffer): string[] {

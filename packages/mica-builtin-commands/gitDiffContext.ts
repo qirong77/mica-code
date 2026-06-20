@@ -1,7 +1,7 @@
-import { execSync } from 'node:child_process';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
+import { formatExecError, gitText } from '@packages/mica-common/index.js';
 
 export function createGitDiffContextCommand(services: CommandRuntimeServices) {
   return {
@@ -10,24 +10,18 @@ export function createGitDiffContextCommand(services: CommandRuntimeServices) {
     action: () => {
       try {
         micaLogger.logRuntime('plugin.git-diff-context', 'start');
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-          encoding: 'utf-8',
-          timeout: 5000,
-        }).trim();
+        const branch = gitText(['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
         micaLogger.logRuntime('plugin.git-diff-context', 'branch:detected', { branch });
 
         let diff: string;
         try {
-          diff = execSync('git diff origin/master...HEAD', {
-            encoding: 'utf-8',
-            timeout: 10000,
-          }).trim();
-          micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', { base: 'origin/master', chars: diff.length });
+          diff = gitText(['diff', 'origin/master...HEAD'], { timeout: 10000 }).trim();
+          micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', {
+            base: 'origin/master',
+            chars: diff.length,
+          });
         } catch {
-          diff = execSync('git diff master...HEAD', {
-            encoding: 'utf-8',
-            timeout: 10000,
-          }).trim();
+          diff = gitText(['diff', 'master...HEAD'], { timeout: 10000 }).trim();
           micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', { base: 'master', chars: diff.length });
         }
 
@@ -41,7 +35,7 @@ export function createGitDiffContextCommand(services: CommandRuntimeServices) {
         micaUi.terminalInput.submit(message);
         micaLogger.logRuntime('plugin.git-diff-context', 'submitted', { branch, chars: message.length });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatExecError(error);
         micaLogger.logRuntime('plugin.git-diff-context', 'error', { message: msg }, 'error');
         services.showMessage(`git diff failed: ${msg}`, 5000);
       }

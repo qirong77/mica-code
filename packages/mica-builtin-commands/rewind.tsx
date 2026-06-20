@@ -36,7 +36,7 @@ export function createRewindCommand(services: CommandRuntimeServices) {
 
 function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true }>, services: CommandRuntimeServices) {
   function hide() {
-    micaUi.panels.setPluginUIs(micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== PANEL_ID));
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function confirm() {
@@ -76,7 +76,11 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
             <Box flexDirection="column" marginTop={1}>
               <Text color={micaUi.theme.colors.primary}>将回退下面的文件：</Text>
               {visibleFiles.map((file) => (
-                <Text key={file.path} color={file.action === 'delete' ? micaUi.theme.colors.warning : undefined} wrap="truncate">
+                <Text
+                  key={file.path}
+                  color={file.action === 'delete' ? micaUi.theme.colors.warning : undefined}
+                  wrap="truncate"
+                >
                   {formatFileChange(file)}
                 </Text>
               ))}
@@ -88,26 +92,23 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
     );
   }
 
-  micaUi.panels.setPluginUIs([
-    ...micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== PANEL_ID),
-    {
-      id: PANEL_ID,
-      component: RewindConfirmPanel,
-      preserveInput: true,
-      onInput: (input, key) => {
-        if (key.escape) {
-          hide();
-          micaLogger.logRuntime('plugin.rewind', 'confirm:cancel', { id: preview.id });
-          return true;
-        }
-        if (input.toLowerCase() === 'y') {
-          confirm();
-          return true;
-        }
+  micaUi.panels.upsertPluginUI({
+    id: PANEL_ID,
+    component: RewindConfirmPanel,
+    preserveInput: true,
+    onInput: (input, key) => {
+      if (key.escape) {
+        hide();
+        micaLogger.logRuntime('plugin.rewind', 'confirm:cancel', { id: preview.id });
         return true;
-      },
+      }
+      if (input.toLowerCase() === 'y') {
+        confirm();
+        return true;
+      }
+      return true;
     },
-  ]);
+  });
 }
 
 function formatFileChange(file: RewindFileChange): string {

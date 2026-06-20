@@ -90,6 +90,22 @@ export function setPluginUIs(pluginPanels: MicaUiPluginUI[]): void {
   pluginUIs.set(pluginPanels);
 }
 
+export function setExclusivePluginUI(pluginPanel: MicaUiPluginUI): void {
+  pluginUIs.set([pluginPanel]);
+}
+
+export function upsertPluginUI(pluginPanel: MicaUiPluginUI): void {
+  pluginUIs.set([...pluginUIs.get().filter((panel) => panel.id !== pluginPanel.id), pluginPanel]);
+}
+
+export function removePluginUI(id: string): boolean {
+  const panels = pluginUIs.get();
+  const nextPanels = panels.filter((panel) => panel.id !== id);
+  if (nextPanels.length === panels.length) return false;
+  pluginUIs.set(nextPanels);
+  return true;
+}
+
 export function clearPluginUIs(): void {
   pluginUIs.set([]);
 }

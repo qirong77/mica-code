@@ -4,7 +4,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
+import { applyConfigSwitchUpdate, compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
 
 export function createProviderCommand(
   agent: CommandAgent,
@@ -57,19 +57,26 @@ async function applyProviderSelection(
     micaLogger.logRuntime('plugin.provider', 'selected', { from: agent.config.provider.id, to: providerId });
     await compactBeforeConfigSwitch(agent, sessionController, services, 'provider');
 
-    const next = micaConfig.update((config) => {
-      const provider = config.providers.find((item) => item.id === providerId);
-      if (!provider) {
-        micaLogger.logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
-        throw new Error(`Provider not found: ${providerId}`);
-      }
-      return {
-        ...config,
-        provider: provider.id,
-        model: provider.models?.[0] || provider.model,
-        effort: provider.supportsEffort === false ? 'none' : provider.effort,
-        contextWindowSize: provider.contextWindowSize,
-      };
+    const next = applyConfigSwitchUpdate({
+      agent,
+      sessionController,
+      services,
+      update: (config) => {
+        const provider = config.providers.find((item) => item.id === providerId);
+        if (!provider) {
+          micaLogger.logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
+          throw new Error(`Provider not found: ${providerId}`);
+        }
+        return {
+          ...config,
+          provider: provider.id,
+          model: provider.models?.[0] || provider.model,
+          effort: provider.supportsEffort === false ? 'none' : provider.effort,
+          contextWindowSize: provider.contextWindowSize,
+        };
+      },
+      successMessage: (config) => `Provider: ${config.provider}`,
+      successTtl: 3000,
     });
 
     const provider = next.providers.find((item) => item.id === providerId);
@@ -97,10 +104,6 @@ async function applyProviderSelection(
           );
         });
     }
-    agent.reloadConfig(false);
-    sessionController.saveCurrent();
-    services.syncModelDisplay(agent);
-    services.showMessage(`Provider: ${next.provider}`, 3000);
     micaLogger.logRuntime('plugin.provider', 'applied', {
       provider: next.provider,
       model: next.model,

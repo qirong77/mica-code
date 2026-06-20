@@ -76,36 +76,30 @@ function showLogPanel() {
 
   micaUi.terminalInput.placeholder.set(LOG_PLACEHOLDER);
   micaLogger.logRuntime('plugin.log', 'opened');
-  micaUi.panels.setPluginUIs([
-    ...micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== PANEL_ID),
-    {
-      id: PANEL_ID,
-      component: LogPanel,
-      preserveInput: true,
-      onInput: (_input, key) => {
-        if (key.escape) {
-          closeLogPanel();
-          return true;
-        }
-        if (key.upArrow) {
-          scrollBox?.scrollBy(-SCROLL_STEP);
-          return true;
-        }
-        if (key.downArrow) {
-          scrollBox?.scrollBy(SCROLL_STEP);
-          return true;
-        }
-        return false;
-      },
+  micaUi.panels.upsertPluginUI({
+    id: PANEL_ID,
+    component: LogPanel,
+    preserveInput: true,
+    onInput: (_input, key) => {
+      if (key.escape) {
+        closeLogPanel();
+        return true;
+      }
+      if (key.upArrow) {
+        scrollBox?.scrollBy(-SCROLL_STEP);
+        return true;
+      }
+      if (key.downArrow) {
+        scrollBox?.scrollBy(SCROLL_STEP);
+        return true;
+      }
+      return false;
     },
-  ]);
+  });
 }
 
 export function closeLogPanel() {
-  const panels = micaUi.panels.pluginUIs.get();
-  const wasOpen = panels.some((panel) => panel.id === PANEL_ID);
-  const nextPanels = panels.filter((panel) => panel.id !== PANEL_ID);
-  micaUi.panels.setPluginUIs(nextPanels);
+  const wasOpen = micaUi.panels.removePluginUI(PANEL_ID);
   restorePlaceholder();
   if (wasOpen) micaLogger.logRuntime('plugin.log', 'closed');
 }

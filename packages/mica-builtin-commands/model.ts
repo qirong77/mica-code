@@ -4,7 +4,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
+import { applyConfigSwitchUpdate, compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
 
 export function createModelCommand(
   agent: CommandAgent,
@@ -73,11 +73,13 @@ async function applyModelSelection(
     }
     micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: providerId });
     await compactBeforeConfigSwitch(agent, sessionController, services, 'model');
-    micaConfig.update((config) => ({ ...config, model }));
-    agent.reloadConfig(false);
-    sessionController.saveCurrent();
-    services.syncModelDisplay(agent);
-    services.showMessage(`Model: ${model}`);
+    applyConfigSwitchUpdate({
+      agent,
+      sessionController,
+      services,
+      update: (config) => ({ ...config, model }),
+      successMessage: () => `Model: ${model}`,
+    });
   } catch (error) {
     reportConfigSwitchError(services, 'model', error);
   }

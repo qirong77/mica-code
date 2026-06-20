@@ -4,6 +4,7 @@ import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { SelectItem } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { moveSelection, selectionDirection } from './commandInput.js';
 
 export type SelectOption = {
   name: string;
@@ -101,32 +102,28 @@ export function showSelectCommand(config: SelectCommandConfig) {
     );
   }
 
-  micaUi.panels.setPluginUIs([
-    {
-      id: config.id,
-      component: SelectorPanel,
-      onInput: (_input, key) => {
-        if (applying.get()) return true;
-        if (key.escape) {
-          hide();
-          return true;
-        }
-        if (key.return || key.tab) {
-          selectCurrent();
-          return true;
-        }
-        if (key.upArrow || key.downArrow) {
-          const direction = key.upArrow ? -1 : 1;
-          const len = config.options.length;
-          if (len > 0) {
-            selectedIdx.set((selectedIdx.get() + direction + len) % len);
-          }
-          return true;
-        }
-        return false;
-      },
+  micaUi.panels.setExclusivePluginUI({
+    id: config.id,
+    component: SelectorPanel,
+    onInput: (_input, key) => {
+      if (applying.get()) return true;
+      if (key.escape) {
+        hide();
+        return true;
+      }
+      if (key.return || key.tab) {
+        selectCurrent();
+        return true;
+      }
+      const direction = selectionDirection(key);
+      if (direction) {
+        const len = config.options.length;
+        if (len > 0) selectedIdx.set(moveSelection(selectedIdx.get(), len, direction));
+        return true;
+      }
+      return false;
     },
-  ]);
+  });
 }
 
 export function showConfirmPrompt(message: string, defaultYes = true): Promise<boolean> {
@@ -167,28 +164,25 @@ export function showConfirmPrompt(message: string, defaultYes = true): Promise<b
       );
     }
 
-    micaUi.panels.setPluginUIs([
-      {
-        id: 'confirm-prompt',
-        component: ConfirmPanel,
-        onInput: (_input, key) => {
-          if (resolved) return true;
-          if (key.escape) {
-            finish(false);
-            return true;
-          }
-          if (key.return || key.tab) {
-            finish(selectedIdx.get() === yesIdx);
-            return true;
-          }
-          if (key.upArrow || key.downArrow) {
-            const current = selectedIdx.get();
-            selectedIdx.set(current === yesIdx ? noIdx : yesIdx);
-            return true;
-          }
-          return false;
-        },
+    micaUi.panels.setExclusivePluginUI({
+      id: 'confirm-prompt',
+      component: ConfirmPanel,
+      onInput: (_input, key) => {
+        if (resolved) return true;
+        if (key.escape) {
+          finish(false);
+          return true;
+        }
+        if (key.return || key.tab) {
+          finish(selectedIdx.get() === yesIdx);
+          return true;
+        }
+        if (selectionDirection(key)) {
+          selectedIdx.set(selectedIdx.get() === yesIdx ? noIdx : yesIdx);
+          return true;
+        }
+        return false;
       },
-    ]);
+    });
   });
 }

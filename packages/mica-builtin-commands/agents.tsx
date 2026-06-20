@@ -4,6 +4,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { AgentRow, getAgentRowLayout } from '@packages/mica-ui/panels/AgentRow.js';
+import { moveSelection } from './commandInput.js';
 
 type AgentsPanelState = { selectedIdx: number };
 
@@ -37,9 +38,7 @@ function showAgentsPanel(services: CommandRuntimeServices) {
   const stateAtom = atom<AgentsPanelState>({ selectedIdx: 0 });
 
   function hide() {
-    const nextPanels = micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId);
-    micaUi.panels.setPluginUIs(nextPanels);
-    micaLogger.logRuntime('plugin.agents', 'closed');
+    if (micaUi.panels.removePluginUI(panelId)) micaLogger.logRuntime('plugin.agents', 'closed');
   }
 
   function AgentsPanel() {
@@ -67,50 +66,47 @@ function showAgentsPanel(services: CommandRuntimeServices) {
     );
   }
 
-  micaUi.panels.setPluginUIs([
-    ...micaUi.panels.pluginUIs.get().filter((panel) => panel.id !== panelId),
-    {
-      id: panelId,
-      component: AgentsPanel,
-      preserveInput: true,
-      onInput: (_input, key) => {
-        const agents = micaUi.panels.agentStatusItems.get();
-        const state = stateAtom.get();
+  micaUi.panels.upsertPluginUI({
+    id: panelId,
+    component: AgentsPanel,
+    preserveInput: true,
+    onInput: (_input, key) => {
+      const agents = micaUi.panels.agentStatusItems.get();
+      const state = stateAtom.get();
 
-        if (key.escape) {
-          hide();
-          return true;
-        }
+      if (key.escape) {
+        hide();
+        return true;
+      }
 
-        if (agents.length === 0) return true;
+      if (agents.length === 0) return true;
 
-        if (key.upArrow) {
-          stateAtom.set({
-            selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : agents.length - 1,
-          });
-          return true;
-        }
+      if (key.upArrow) {
+        stateAtom.set({
+          selectedIdx: moveSelection(state.selectedIdx, agents.length, -1),
+        });
+        return true;
+      }
 
-        if (key.downArrow) {
-          stateAtom.set({
-            selectedIdx: state.selectedIdx < agents.length - 1 ? state.selectedIdx + 1 : 0,
-          });
-          return true;
-        }
+      if (key.downArrow) {
+        stateAtom.set({
+          selectedIdx: moveSelection(state.selectedIdx, agents.length, 1),
+        });
+        return true;
+      }
 
-        if (key.return) {
-          switchToSelectedAgent(state.selectedIdx);
-          return true;
-        }
+      if (key.return) {
+        switchToSelectedAgent(state.selectedIdx);
+        return true;
+      }
 
-        return false;
-      },
-      onTextChange: (value) => {
-        if (value !== initialText) hide();
-        return false;
-      },
+      return false;
     },
-  ]);
+    onTextChange: (value) => {
+      if (value !== initialText) hide();
+      return false;
+    },
+  });
 
   function switchToSelectedAgent(selectedIdx: number) {
     const agents = micaUi.panels.agentStatusItems.get();

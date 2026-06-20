@@ -34,6 +34,7 @@ packages/         可复用包（详见 packages/README.md）
   mica-logger     运行时日志 store 和格式化
   @anthropic/ink  Ink fork（终端 React 渲染）
 scripts/          构建和安装脚本
+temp/             临时外部/实验代码目录，不属于项目源码、测试、格式化或构建范围
 ```
 
 ## 常用命令
@@ -41,7 +42,7 @@ scripts/          构建和安装脚本
 ```bash
 bun run dev             # 开发运行
 bun run typecheck       # 类型检查（tsc --noEmit）
-bun run test            # 运行测试
+bun run test            # 运行项目白名单测试；不要直接运行裸 bun test
 bun run build           # 构建
 bun run format          # 格式化（prettier）
 ```
@@ -54,9 +55,18 @@ bun run format          # 格式化（prettier）
 
 - `packages/mica-agent/prompt/index.test.ts`
 - `packages/mica-tools/MicaTool.test.ts`
+- `packages/mica-tools/ToolRunShell.test.ts`
 - `src/runtime/RewindCheckpointManager.test.ts`
 
 运行：`bun test <files>` 或 `bun run test`。
+
+不要直接运行裸 `bun test`。Bun 会递归发现仓库下所有测试文件，而根目录 `temp/` 可能包含外部项目、临时代码或缺依赖代码，会导致无关失败、超时或长时间扫描。扩大验证范围时也要显式指定项目路径或测试文件，例如 `bun test src/runtime/RewindCheckpointManager.test.ts packages/mica-tools/MicaTool.test.ts`。
+
+## 命令范围与临时目录
+
+- 根目录 `temp/` 是临时目录，已被 git 忽略，不是本项目的源码、测试、格式化、构建或搜索默认范围。
+- 后续 agent/开发者执行会递归扫描的命令时，必须避开 `temp/`：优先使用 `bun run test`、`bun run format`、`bun run typecheck` 等项目脚本，或显式传入 `src/`、`packages/`、`scripts/`、`docs/` 等目标路径。
+- 如果必须手写递归命令，使用白名单路径或排除规则，例如 `rg --glob '!temp/**' ...`。只有用户明确要求检查 `temp/` 时才进入该目录。
 
 ## Import 约定
 

@@ -4,6 +4,7 @@ import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { OneLineItem, getOneLineColumnWidth } from '../primitives/OneLineItem.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
+import { formatSessionMeta } from '../utils/format.js';
 import type { MicaUiAgentStatusItem } from '../types.js';
 
 export type AgentRowLayout = {
@@ -142,17 +143,4 @@ export function AgentRow({
       ]}
     />
   );
-}
-
-function formatSessionMeta(updatedAt: string, model: string): string {
-  const date = new Date(updatedAt);
-  const timestamp = Number.isNaN(date.getTime())
-    ? updatedAt
-    : date.toLocaleString(undefined, {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-  return `[${timestamp} ${model}]`;
 }

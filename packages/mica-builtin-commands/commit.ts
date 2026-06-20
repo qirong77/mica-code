@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { formatExecError, gitText, safeGitText } from '@packages/mica-common/index.js';
 
 const MAX_TOTAL_DIFF_CHARS = 18_000;
 const MAX_DIFF_CHARS_PER_FILE = 3_000;
@@ -42,12 +42,7 @@ export function createCommitCommand(agent: CommandAgent, services: CommandRuntim
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-function setCommitStatus(
-  agent: CommandAgent,
-  services: CommandRuntimeServices,
-  text: string,
-  ownerSessionId?: string,
-) {
+function setCommitStatus(agent: CommandAgent, services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
   services.setPluginStatus(agent, text, { ownerSessionId });
 }
 
@@ -88,7 +83,9 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
       showTerminalMessage(services, 'commit: git add 后没有 staged 变化', ownerSessionId);
       return;
     }
-    micaLogger.logRuntime('plugin.commit', 'staged:ready', { files: stagedStatus.trim().split('\n').filter(Boolean).length });
+    micaLogger.logRuntime('plugin.commit', 'staged:ready', {
+      files: stagedStatus.trim().split('\n').filter(Boolean).length,
+    });
 
     commitWithMessage(commitMessage);
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
@@ -103,9 +100,11 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
         : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
       ownerSessionId,
     );
-    micaLogger.logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', { commit: commitHash });
+    micaLogger.logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', {
+      commit: commitHash,
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatExecError(error);
     micaLogger.logRuntime('plugin.commit', 'error', { message }, 'error');
     showTerminalMessage(services, `commit failed: ${message}`, ownerSessionId);
   }
@@ -281,40 +280,11 @@ function pushCurrentBranch() {
 }
 
 function git(args: string[], timeout = 30_000) {
-  try {
-    return execFileSync('git', args, {
-      encoding: 'utf-8',
-      timeout,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-  } catch (error) {
-    throw new Error(formatExecError(error));
-  }
+  return gitText(args, { timeout });
 }
 
 function safeGit(args: string[], timeout = 30_000) {
-  try {
-    return git(args, timeout);
-  } catch {
-    return '';
-  }
-}
-
-function formatExecError(error: unknown) {
-  if (!error || typeof error !== 'object') return String(error);
-  const err = error as {
-    message?: string;
-    stdout?: Buffer | string;
-    stderr?: Buffer | string;
-  };
-  const stderr = bufferToString(err.stderr).trim();
-  const stdout = bufferToString(err.stdout).trim();
-  return stderr || stdout || err.message || String(error);
-}
-
-function bufferToString(value: Buffer | string | undefined) {
-  if (!value) return '';
-  return Buffer.isBuffer(value) ? value.toString('utf-8') : value;
+  return safeGitText(args, { timeout });
 }
 
 function truncate(text: string, maxChars: number) {

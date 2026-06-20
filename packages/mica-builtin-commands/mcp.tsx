@@ -4,6 +4,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
+import { moveSelection } from './commandInput.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }
@@ -252,107 +253,105 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         );
       }
 
-      micaUi.panels.setPluginUIs([
-        {
-          id: 'mcp-panel',
-          component: McpPanel,
-          onInput: (_input, key) => {
-            const state = panelState.get();
-            const servers = micaMcp.servers.get();
+      micaUi.panels.setExclusivePluginUI({
+        id: 'mcp-panel',
+        component: McpPanel,
+        onInput: (_input, key) => {
+          const state = panelState.get();
+          const servers = micaMcp.servers.get();
 
-            if (key.escape) {
-              if (state.view === 'detail') {
-                micaLogger.logRuntime('plugin.mcp', 'view:tools', {
-                  server: servers[state.serverIdx]?.name,
-                  from: 'detail',
-                });
-                panelState.set({
-                  view: 'tools',
-                  serverIdx: state.serverIdx,
-                  selectedIdx: state.toolIdx,
-                });
-                return true;
-              }
-              if (state.view === 'tools') {
-                micaLogger.logRuntime('plugin.mcp', 'view:list', {
-                  server: servers[state.serverIdx]?.name,
-                  from: 'tools',
-                });
-                panelState.set({ view: 'list', selectedIdx: state.serverIdx });
-                return true;
-              }
-              hide();
+          if (key.escape) {
+            if (state.view === 'detail') {
+              micaLogger.logRuntime('plugin.mcp', 'view:tools', {
+                server: servers[state.serverIdx]?.name,
+                from: 'detail',
+              });
+              panelState.set({
+                view: 'tools',
+                serverIdx: state.serverIdx,
+                selectedIdx: state.toolIdx,
+              });
               return true;
             }
-
-            if (state.view === 'list') {
-              if (servers.length === 0) return true;
-              if (key.upArrow) {
-                panelState.set({
-                  view: 'list',
-                  selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : servers.length - 1,
-                });
-                return true;
-              }
-              if (key.downArrow) {
-                panelState.set({
-                  view: 'list',
-                  selectedIdx: state.selectedIdx < servers.length - 1 ? state.selectedIdx + 1 : 0,
-                });
-                return true;
-              }
-              if (key.return) {
-                micaLogger.logRuntime('plugin.mcp', 'view:tools', {
-                  server: servers[state.selectedIdx]?.name,
-                  tools: servers[state.selectedIdx]?.tools.length ?? 0,
-                });
-                panelState.set({
-                  view: 'tools',
-                  serverIdx: state.selectedIdx,
-                  selectedIdx: 0,
-                });
-                return true;
-              }
-              return false;
-            }
-
             if (state.view === 'tools') {
-              const toolCount = servers[state.serverIdx]?.tools.length ?? 0;
-              if (toolCount === 0) return true;
-              if (key.upArrow) {
-                panelState.set({
-                  view: 'tools',
-                  serverIdx: state.serverIdx,
-                  selectedIdx: state.selectedIdx > 0 ? state.selectedIdx - 1 : toolCount - 1,
-                });
-                return true;
-              }
-              if (key.downArrow) {
-                panelState.set({
-                  view: 'tools',
-                  serverIdx: state.serverIdx,
-                  selectedIdx: state.selectedIdx < toolCount - 1 ? state.selectedIdx + 1 : 0,
-                });
-                return true;
-              }
-              if (key.return) {
-                micaLogger.logRuntime('plugin.mcp', 'view:detail', {
-                  server: servers[state.serverIdx]?.name,
-                  tool: servers[state.serverIdx]?.tools[state.selectedIdx]?.name,
-                });
-                panelState.set({
-                  view: 'detail',
-                  serverIdx: state.serverIdx,
-                  toolIdx: state.selectedIdx,
-                });
-                return true;
-              }
+              micaLogger.logRuntime('plugin.mcp', 'view:list', {
+                server: servers[state.serverIdx]?.name,
+                from: 'tools',
+              });
+              panelState.set({ view: 'list', selectedIdx: state.serverIdx });
+              return true;
             }
+            hide();
+            return true;
+          }
 
+          if (state.view === 'list') {
+            if (servers.length === 0) return true;
+            if (key.upArrow) {
+              panelState.set({
+                view: 'list',
+                selectedIdx: moveSelection(state.selectedIdx, servers.length, -1),
+              });
+              return true;
+            }
+            if (key.downArrow) {
+              panelState.set({
+                view: 'list',
+                selectedIdx: moveSelection(state.selectedIdx, servers.length, 1),
+              });
+              return true;
+            }
+            if (key.return) {
+              micaLogger.logRuntime('plugin.mcp', 'view:tools', {
+                server: servers[state.selectedIdx]?.name,
+                tools: servers[state.selectedIdx]?.tools.length ?? 0,
+              });
+              panelState.set({
+                view: 'tools',
+                serverIdx: state.selectedIdx,
+                selectedIdx: 0,
+              });
+              return true;
+            }
             return false;
-          },
+          }
+
+          if (state.view === 'tools') {
+            const toolCount = servers[state.serverIdx]?.tools.length ?? 0;
+            if (toolCount === 0) return true;
+            if (key.upArrow) {
+              panelState.set({
+                view: 'tools',
+                serverIdx: state.serverIdx,
+                selectedIdx: moveSelection(state.selectedIdx, toolCount, -1),
+              });
+              return true;
+            }
+            if (key.downArrow) {
+              panelState.set({
+                view: 'tools',
+                serverIdx: state.serverIdx,
+                selectedIdx: moveSelection(state.selectedIdx, toolCount, 1),
+              });
+              return true;
+            }
+            if (key.return) {
+              micaLogger.logRuntime('plugin.mcp', 'view:detail', {
+                server: servers[state.serverIdx]?.name,
+                tool: servers[state.serverIdx]?.tools[state.selectedIdx]?.name,
+              });
+              panelState.set({
+                view: 'detail',
+                serverIdx: state.serverIdx,
+                toolIdx: state.selectedIdx,
+              });
+              return true;
+            }
+          }
+
+          return false;
         },
-      ]);
+      });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }

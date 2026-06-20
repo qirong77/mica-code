@@ -5,7 +5,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand, showConfirmPrompt } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { reportConfigSwitchError } from './configSwitch.js';
+import { applyConfigSwitchUpdate, reportConfigSwitchError } from './configSwitch.js';
 
 export function createEffortCommand(
   agent: CommandAgent,
@@ -99,14 +99,16 @@ async function applyEffortSelection(
       }
     }
 
-    micaConfig.update((config) => ({
-      ...config,
-      effort: effort as (typeof micaConfig.effortOptions)[number],
-    }));
-    agent.reloadConfig(false);
-    sessionController.saveCurrent();
-    services.syncModelDisplay(agent);
-    services.showMessage(`Effort: ${effort}`);
+    applyConfigSwitchUpdate({
+      agent,
+      sessionController,
+      services,
+      update: (config) => ({
+        ...config,
+        effort: effort as (typeof micaConfig.effortOptions)[number],
+      }),
+      successMessage: () => `Effort: ${effort}`,
+    });
     micaLogger.logRuntime('plugin.effort', 'applied', { effort });
   } catch (error) {
     reportConfigSwitchError(services, 'effort', error);

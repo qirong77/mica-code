@@ -1,0 +1,9 @@
+node_modules/
+dist/
+temp/
+.backups/
+.codegraph/
+.claude/
+bun.lock
+conversation.json
+log.text

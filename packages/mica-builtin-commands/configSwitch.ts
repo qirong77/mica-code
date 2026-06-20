@@ -1,11 +1,14 @@
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { micaConfig, type IMicaConfig } from '@packages/mica-config/index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
+
+export type ConfigSwitchReason = 'model' | 'effort' | 'provider';
 
 export async function compactBeforeConfigSwitch(
   agent: CommandAgent,
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
-  reason: 'model' | 'effort' | 'provider',
+  reason: ConfigSwitchReason,
 ): Promise<void> {
   const snapshot = agent.getSnapshot();
   if (snapshot.messages.length === 0) return;
@@ -38,10 +41,33 @@ export async function compactBeforeConfigSwitch(
 
 export function reportConfigSwitchError(
   services: CommandRuntimeServices,
-  reason: 'model' | 'effort' | 'provider',
+  reason: ConfigSwitchReason,
   error: unknown,
 ): void {
   const message = error instanceof Error ? error.message : String(error);
   micaLogger.logRuntime('plugin.config_switch', 'error', { reason, message }, 'error');
   services.showMessage(`Switch ${reason} failed: ${message}`, 6000, services.getCurrentAgentSessionId());
+}
+
+export function applyConfigSwitchUpdate({
+  agent,
+  sessionController,
+  services,
+  update,
+  successMessage,
+  successTtl,
+}: {
+  agent: CommandAgent;
+  sessionController: CommandSessionController;
+  services: CommandRuntimeServices;
+  update: (config: IMicaConfig) => IMicaConfig;
+  successMessage: (config: IMicaConfig) => string;
+  successTtl?: number;
+}): IMicaConfig {
+  const next = micaConfig.update(update);
+  agent.reloadConfig(false);
+  sessionController.saveCurrent();
+  services.syncModelDisplay(agent);
+  services.showMessage(successMessage(next), successTtl);
+  return next;
 }
