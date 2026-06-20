@@ -2,10 +2,10 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 
 import { micaConfig } from '@packages/mica-config/index.js';
-import { showSelectCommand } from './selectCommand.js';
+import { showSelectCommand, showConfirmPrompt } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
+import { reportConfigSwitchError } from './configSwitch.js';
 
 export function createEffortCommand(
   agent: CommandAgent,
@@ -65,7 +65,40 @@ async function applyEffortSelection(
       to: effort,
       provider: agent.config.provider.id,
     });
-    await compactBeforeConfigSwitch(agent, sessionController, services, 'effort');
+
+    // 如果上下文使用率超过 20%，询问用户是否压缩
+    const snapshot = agent.getSnapshot();
+    if (snapshot.messages.length > 0) {
+      const usagePercent =
+        agent.config.provider.contextWindowSize > 0
+          ? (snapshot.lastUsage?.totalTokens ?? 0) / agent.config.provider.contextWindowSize
+          : 0;
+      if (usagePercent > 0.2) {
+        const shouldCompact = await showConfirmPrompt(
+          `Context usage is ${Math.round(usagePercent * 100)}%. Compact before switching effort?`,
+          true,
+        );
+        if (shouldCompact) {
+          micaLogger.logRuntime('plugin.effort', 'compact:start', { usagePercent });
+          const ownerSessionId = services.getCurrentAgentSessionId();
+          const result = await services.runExclusiveTask(
+            agent,
+            { ownerSessionId, statusText: 'switch effort: compacting context' },
+            () => services.compact(agent, sessionController, ownerSessionId),
+          );
+          services.showMessage(
+            `Compact: ${result.beforeCount} -> ${result.afterCount} messages, tokens ${result.beforeTokenEstimate} -> ${result.afterTokenEstimate}`,
+            6000,
+            ownerSessionId,
+          );
+          micaLogger.logRuntime('plugin.effort', 'compact:done', {
+            beforeCount: result.beforeCount,
+            afterCount: result.afterCount,
+          });
+        }
+      }
+    }
+
     micaConfig.update((config) => ({
       ...config,
       effort: effort as (typeof micaConfig.effortOptions)[number],

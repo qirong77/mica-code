@@ -118,3 +118,71 @@ export function showSelectCommand(config: SelectCommandConfig) {
     },
   ]);
 }
+
+export function showConfirmPrompt(message: string, defaultYes = true): Promise<boolean> {
+  return new Promise((resolve) => {
+    micaLogger.logRuntime('plugin.confirm', 'opened', { message });
+    const yesIdx = defaultYes ? 0 : 1;
+    const noIdx = defaultYes ? 1 : 0;
+    const selectedIdx = atom(yesIdx);
+    let resolved = false;
+
+    function hide() {
+      micaLogger.logRuntime('plugin.confirm', 'closed', { message });
+      micaUi.panels.clearPluginUIs();
+    }
+
+    function finish(value: boolean) {
+      if (resolved) return;
+      resolved = true;
+      micaLogger.logRuntime('plugin.confirm', 'resolved', { message, value });
+      hide();
+      resolve(value);
+    }
+
+    function ConfirmPanel() {
+      const currentIdx = micaUi.useScheduleState(selectedIdx);
+      const items: SelectItem[] = [
+        { key: 'yes', label: 'Yes, compact first' },
+        { key: 'no', label: 'No, switch directly' },
+      ];
+
+      return (
+        <micaUi.Dialog
+          title={message}
+          footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel (no)']} />}
+        >
+          <micaUi.SelectList
+            items={items}
+            selectedIdx={currentIdx}
+            itemGap={1}
+          />
+        </micaUi.Dialog>
+      );
+    }
+
+    micaUi.panels.setPluginUIs([
+      {
+        id: 'confirm-prompt',
+        component: ConfirmPanel,
+        onInput: (_input, key) => {
+          if (resolved) return true;
+          if (key.escape) {
+            finish(false);
+            return true;
+          }
+          if (key.return || key.tab) {
+            finish(selectedIdx.get() === yesIdx);
+            return true;
+          }
+          if (key.upArrow || key.downArrow) {
+            const current = selectedIdx.get();
+            selectedIdx.set(current === yesIdx ? noIdx : yesIdx);
+            return true;
+          }
+          return false;
+        },
+      },
+    ]);
+  });
+}

@@ -20,18 +20,22 @@ export function AgentRow({
 
   if (compact) {
     const marker = agent.current ? '*' : ' ';
+    if (marker === '*') {
+      // 暂时不显示当前的 agent
+      return null;
+    }
     const prefix = `${marker} # ${agent.index} `;
     const model = `(${agent.model})`;
     const w = width ?? 60;
     const spinnerWidth = status.spinning ? 1 : 0;
     const titleWidth = Math.max(4, w - spinnerWidth - prefix.length - status.text.length - model.length - 3);
     return (
-      <Box flexDirection="row">
+      <Box flexDirection="row" paddingTop={1}>
         {status.spinning && <Spin />}
         <Text color={agent.current ? themeColors.accent : themeColors.dim}>{prefix}</Text>
-        <Text color={status.color}>{status.text}</Text>
         <Text color={agent.current ? themeColors.accent : themeColors.dim}> {truncate(agent.title, titleWidth)} </Text>
         <Text color={agent.current ? themeColors.accent : themeColors.dim}>{model}</Text>
+        <Text color={status.color}>{status.text}</Text>
       </Box>
     );
   }
@@ -41,7 +45,7 @@ export function AgentRow({
   const statusText = truncate(status.text, 18);
   return (
     <Box flexDirection="row">
-      <Box flexShrink={0} width={24}>
+      <Box flexShrink={0} width={'30%'} overflowX={'hidden'}>
         <Text color={agent.current ? themeColors.accent : undefined} bold={selected}>
           {title}
         </Text>
