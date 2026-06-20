@@ -1,4 +1,4 @@
-import { quickCommands, state, selection, inputValue } from './state.js';
+import { quickCommands, state, selection, inputValue, rawInputValue } from './state.js';
 import { disabled as inputDisabled } from '../../input/state.js';
 import type { MicaUiDropdownItem } from '../../types.js';
 
@@ -32,7 +32,8 @@ export function showQuickCommands(query: string): void {
     title: '',
     emptyMessage: 'no matching commands',
   });
-  inputValue.set(query);
+  inputValue.set(filter);
+  rawInputValue.set(query);
   inputDisabled.set(true);
 }
 
@@ -42,6 +43,7 @@ export function hideQuickCommands(): void {
   state.set({ visible: false, items: [], selectedIndex: 0 });
   selection.set(null);
   inputValue.set('');
+  rawInputValue.set('');
   inputDisabled.set(false);
 }
 
@@ -82,6 +84,7 @@ function closeAndClear(): void {
   state.set({ visible: false, items: [], selectedIndex: 0 });
   selection.set(null);
   inputValue.set('');
+  rawInputValue.set('');
   inputDisabled.set(false);
 }
 
@@ -95,7 +98,7 @@ function executeSelected(): void {
   const cmd = commands.find((c) => c.name === selected.key);
   if (cmd) {
     const beforeItems = state.get().items;
-    const raw = inputValue.get();
+    const raw = rawInputValue.get();
     cmd.action(commandArg(raw, cmd.name));
     if (state.get().visible && state.get().items === beforeItems) closeAndClear();
     return;
