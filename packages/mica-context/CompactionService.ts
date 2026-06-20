@@ -14,11 +14,22 @@ export type CompactResult = {
   afterTokenEstimate: number;
 };
 
+export class CompactionNotNeededError extends Error {
+  constructor(message = '当前会话内容较少，暂不需要 compact') {
+    super(message);
+    this.name = 'CompactionNotNeededError';
+  }
+}
+
+export function isCompactionNotNeededError(error: unknown): boolean {
+  return error instanceof CompactionNotNeededError;
+}
+
 export class CompactionService {
   async compact(input: CompactInput): Promise<CompactResult> {
     const messages = input.messages.filter((message) => !isCompactCheckpoint(message));
     if (messages.length < 4) {
-      throw new Error('当前会话内容较少，暂不需要 compact');
+      throw new CompactionNotNeededError();
     }
 
     const transcript = buildTranscript(messages);

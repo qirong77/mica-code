@@ -4,6 +4,7 @@ import type { CommandAgent } from './services.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand, showConfirmPrompt } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError } from './configSwitch.js';
 
@@ -81,20 +82,31 @@ async function applyEffortSelection(
         if (shouldCompact) {
           micaLogger.logRuntime('plugin.effort', 'compact:start', { usagePercent });
           const ownerSessionId = services.getCurrentAgentSessionId();
-          const result = await services.runExclusiveTask(
-            agent,
-            { ownerSessionId, statusText: 'switch effort: compacting context' },
-            () => services.compact(agent, sessionController, ownerSessionId),
-          );
-          services.showMessage(
-            `Compact: ${result.beforeCount} -> ${result.afterCount} messages, tokens ${result.beforeTokenEstimate} -> ${result.afterTokenEstimate}`,
-            6000,
-            ownerSessionId,
-          );
-          micaLogger.logRuntime('plugin.effort', 'compact:done', {
-            beforeCount: result.beforeCount,
-            afterCount: result.afterCount,
-          });
+          const result = await services
+            .runExclusiveTask(agent, { ownerSessionId, statusText: 'switch effort: compacting context' }, () =>
+              services.compact(agent, sessionController, ownerSessionId),
+            )
+            .catch((error) => {
+              if (!isCompactionNotNeededError(error)) throw error;
+              micaLogger.logRuntime('plugin.effort', 'compact:skipped', {
+                usagePercent,
+                messages: snapshot.messages.length,
+                message: error instanceof Error ? error.message : String(error),
+              });
+              services.showMessage('Current session is short; switching without compact', 4000, ownerSessionId);
+              return undefined;
+            });
+          if (result) {
+            services.showMessage(
+              `Compact: ${result.beforeCount} -> ${result.afterCount} messages, tokens ${result.beforeTokenEstimate} -> ${result.afterTokenEstimate}`,
+              6000,
+              ownerSessionId,
+            );
+            micaLogger.logRuntime('plugin.effort', 'compact:done', {
+              beforeCount: result.beforeCount,
+              afterCount: result.afterCount,
+            });
+          }
         }
       }
     }

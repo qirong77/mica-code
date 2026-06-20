@@ -8,7 +8,7 @@
     "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test packages/mica-agent/prompt/index.test.ts packages/mica-tools/MicaTool.test.ts packages/mica-tools/ToolRunShell.test.ts src/runtime/RewindCheckpointManager.test.ts",
+    "test": "bun test packages/mica-agent/prompt/index.test.ts packages/mica-builtin-commands/configSwitch.test.ts packages/mica-tools/MicaTool.test.ts packages/mica-tools/ToolRunShell.test.ts src/runtime/RewindCheckpointManager.test.ts",
     "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"src/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
   },
   "workspaces": [
