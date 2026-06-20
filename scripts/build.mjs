@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 if (process.env.MICA_PREBUILD_DONE === '1') {
   console.log('Prebuild checks completed.\n');
@@ -9,13 +9,16 @@ if (process.env.MICA_PREBUILD_DONE === '1') {
   execSync('bun run prebuild', { stdio: 'inherit' });
 }
 
-const outDir = 'dist';
-const outName = 'mica';
+const outDir = process.env.MICA_BUILD_DIR ?? 'dist';
+const outName = process.env.MICA_BUILD_NAME ?? 'mica';
+const outFile = process.env.MICA_BUILD_OUTFILE ?? join(outDir, outName);
+const target = process.env.MICA_BUILD_TARGET;
 
-if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+const targetDir = dirname(outFile);
+if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
-const outFile = join(outDir, outName);
-execSync(`bun build --compile ./src/index.ts --outfile ${outFile}`, {
+const targetArg = target ? ` --target ${target}` : '';
+execSync(`bun build --compile${targetArg} ./src/index.ts --outfile ${outFile}`, {
   stdio: 'inherit',
 });
 console.log(`Built native binary: ${outFile}`);
