@@ -19,7 +19,7 @@ function getBottomPanelHeight(rows: number, bottomDistance: number): number {
 export function useBottomPanelHeight(extraReservedLines = 0) {
   const { rows } = useTerminalSize();
   const bottomDistance = useScheduleState(inputBottomDistance);
-  const nextHeight = getBottomPanelHeight(rows, bottomDistance) - extraReservedLines;
+  const nextHeight = getBottomPanelHeight(rows, bottomDistance) - extraReservedLines - 5;
   const stableHeightRef = React.useRef(nextHeight);
   const lastRowsRef = React.useRef(rows);
 

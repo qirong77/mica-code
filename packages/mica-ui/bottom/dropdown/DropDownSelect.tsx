@@ -5,7 +5,7 @@ import { CommandDropdown } from './CommandDropdown.js';
 import { inputValue, state } from './state.js';
 import { inputBottomDistance } from '../../input/state.js';
 
-const DEFAULT_OVERHEAD = 6;
+const DEFAULT_OVERHEAD = 10;
 
 export function DropDownSelect() {
   const dropdown = useScheduleState(state);
