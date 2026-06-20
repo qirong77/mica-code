@@ -30,6 +30,13 @@ type RuntimeActiveContext = {
   };
 };
 
+type RuntimeInputHookEvent = {
+  runtime: LocalRuntimeController;
+  input: RuntimeInput;
+  isCommand: boolean;
+  owner: AgentRuntime;
+};
+
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();
   readonly queue = {
@@ -219,9 +226,30 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: true, handled: true };
     }
 
-    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui');
     const targetAgent = this.submissionAgent(options);
     const targetSessionController = this.sessionControllers.get(targetAgent) ?? this.sessionController;
+    return this.submitInputToAgent(text, targetAgent, targetSessionController, options);
+  }
+
+  async submitToAgent(
+    agent: AgentRuntime,
+    sessionController: SessionController,
+    rawText: string,
+    options: SubmitOptions = {},
+  ): Promise<SubmitResult> {
+    const text = rawText.trim();
+    if (!text) return { ok: false, reason: 'empty' };
+    this.sessionControllers.set(agent, sessionController);
+    return this.submitInputToAgent(text, agent, sessionController, options);
+  }
+
+  private async submitInputToAgent(
+    text: string,
+    targetAgent: AgentRuntime,
+    targetSessionController: SessionController,
+    options: SubmitOptions,
+  ): Promise<SubmitResult> {
+    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui');
     const activeTask = this.exclusiveTasks.get(targetAgent);
     if (activeTask) {
       this.events.publish({
@@ -235,10 +263,11 @@ export class LocalRuntimeController implements RuntimeController {
 
     micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.runningAgents.has(targetAgent) });
 
-    const inputHook = await this.hooks.guard('input:received', {
+    const inputHook = await this.hooks.guard<RuntimeInputHookEvent>('input:received', {
       runtime: this,
       input,
       isCommand: false,
+      owner: targetAgent,
     });
 
     if (inputHook.blocked) {

@@ -10,13 +10,14 @@ export function setSelectEmitter(emit: (item: MicaUiDropdownItem) => void): void
 
 export function showQuickCommands(query: string): void {
   const commands = quickCommands.get();
-  const filter = query.toLowerCase();
-  const filtered = commands.filter(
-    (cmd) =>
-      (cmd.name.toLowerCase().includes(filter) || cmd.description.toLowerCase().includes(filter)),
-  );
+  const parsedQuery = parseQuickCommandQuery(query);
+  const filter = parsedQuery.filter;
+  const filtered = commands.filter((cmd) => commandMatchesQuery(cmd, parsedQuery));
   filtered.sort((a, b) => {
     if (filter) {
+      const aExact = a.name.toLowerCase() === filter;
+      const bExact = b.name.toLowerCase() === filter;
+      if (aExact !== bExact) return aExact ? -1 : 1;
       const aPrefix = a.name.toLowerCase().startsWith(filter);
       const bPrefix = b.name.toLowerCase().startsWith(filter);
       if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
@@ -95,7 +96,7 @@ function executeSelected(): void {
   if (cmd) {
     const beforeItems = state.get().items;
     const raw = inputValue.get();
-    cmd.action(raw.slice(cmd.name.length).trim() || undefined);
+    cmd.action(commandArg(raw, cmd.name));
     if (state.get().visible && state.get().items === beforeItems) closeAndClear();
     return;
   }
@@ -117,4 +118,38 @@ function navigateDropdown(direction: 1 | -1): void {
         ? s.selectedIndex + 1
         : 0;
   state.set({ ...s, selectedIndex: newIndex });
+}
+
+type ParsedQuickCommandQuery = {
+  filter: string;
+  commandToken: string;
+  hasArgs: boolean;
+};
+
+function parseQuickCommandQuery(query: string): ParsedQuickCommandQuery {
+  const trimmedStart = query.trimStart();
+  const commandToken = trimmedStart.match(/^\S*/)?.[0].toLowerCase() ?? '';
+  const remainder = trimmedStart.slice(commandToken.length);
+  const hasArgs = remainder.length > 0;
+  return {
+    filter: hasArgs ? commandToken : trimmedStart.trimEnd().toLowerCase(),
+    commandToken,
+    hasArgs,
+  };
+}
+
+function commandMatchesQuery(cmd: { name: string; description: string }, query: ParsedQuickCommandQuery): boolean {
+  if (!query.filter) return true;
+  const name = cmd.name.toLowerCase();
+  if (query.hasArgs) {
+    return name === query.commandToken || name.startsWith(query.commandToken);
+  }
+  const description = cmd.description.toLowerCase();
+  return name.includes(query.filter) || description.includes(query.filter);
+}
+
+function commandArg(raw: string, commandName: string): string | undefined {
+  const trimmedStart = raw.trimStart();
+  const arg = trimmedStart.slice(commandName.length).trim();
+  return arg || undefined;
 }

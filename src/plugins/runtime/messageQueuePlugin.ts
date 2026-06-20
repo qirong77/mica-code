@@ -1,7 +1,15 @@
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
+import type { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { LocalRuntimeController } from '../../app/adapters/LocalRuntimeController.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+
+type RuntimeInputHookEvent = {
+  runtime: LocalRuntimeController;
+  input: RuntimeInput;
+  isCommand: boolean;
+  owner?: AgentRuntime;
+};
 
 export class MessageQueuePlugin extends micaPlugin.Plugin {
   constructor() {
@@ -12,11 +20,11 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
   }
 
   setup(ctx: PluginContext): void {
-    const inputDisposable = ctx.hooks.on<{ runtime: LocalRuntimeController; input: RuntimeInput; isCommand: boolean }>(
+    const inputDisposable = ctx.hooks.on<RuntimeInputHookEvent>(
       'input:received',
       async (event) => {
         if (event.isCommand) return;
-        if (!event.runtime.getStatus().running) return;
+        if (!event.runtime.isAgentBusy(event.owner)) return;
 
         event.runtime.queue.enqueue(event.input);
         event.runtime.events.publish({

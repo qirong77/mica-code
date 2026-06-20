@@ -177,9 +177,21 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       return result;
     },
     newAgentSession() {
-      const session = currentContext()?.agentSessions.createSession();
-      if (!session) throw new Error('Application is not ready');
-      return session;
+      const context = currentContext();
+      const record = context?.agentSessions.createSession();
+      if (!context || !record) throw new Error('Application is not ready');
+      const session = context.agentSessions.findById(record.id);
+      if (session) context.uiBridge.watchAgent(session.agent);
+      context.uiBridge.syncAgentStatusItems();
+      return record;
+    },
+    submitAgentSessionInput(id, text) {
+      const context = currentContext();
+      if (!context) throw new Error('Application is not ready');
+      const session = context.agentSessions.findById(id);
+      if (!session) throw new Error(`Agent session not found: ${id}`);
+      context.uiBridge.watchAgent(session.agent);
+      return context.runtime.submitToAgent(session.agent, session.sessionController, text, { source: 'command' });
     },
     forkCurrentAgent() {
       const context = currentContext();

@@ -111,6 +111,7 @@ packages/mica-agent/.env
 - `/model`：切换模型。
 - `/effort`：切换推理努力等级。
 - `/status`：查看当前 provider、model、上下文和 token 状态。
+- `/new`：新建并切换到一个 agent；`/new <text>` 不切换当前 agent，后台创建并运行新 agent。
 - `/log`：查看运行时日志；`/log export` 导出当前对话与日志。
 - `/agents clear`：清除非当前且空闲的 agent。
 - `/rewind`：确认后回退到上一轮对话之前的对话与文件状态。

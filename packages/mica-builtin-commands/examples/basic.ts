@@ -24,6 +24,7 @@ const command = micaBuiltinCommands.createAgentsCommand({
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }),
+  submitAgentSessionInput: async () => ({ ok: true }),
   forkCurrentAgent: () => ({
     id: 'fork-example',
     index: 2,

@@ -22,6 +22,11 @@ export class MicaUiRuntimeBridge {
     private readonly agentSessions: TerminalAgentSessionManager,
   ) {}
 
+  watchAgent(agent: AgentRuntime): void {
+    this.attachAgentEvents(agent);
+    this.syncAgentStatusItems();
+  }
+
   switchAgent(agent: AgentRuntime): void {
     this.agent = agent;
     this.attachAgentEvents(agent);

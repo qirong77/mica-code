@@ -1,5 +1,5 @@
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
-import type { RewindApplyResult, RewindPreviewResult } from '@packages/mica-runtime/index.js';
+import type { RewindApplyResult, RewindPreviewResult, SubmitResult } from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
@@ -95,6 +95,7 @@ export type CommandRuntimeServices = {
   listRunningAgents(): RunningAgentRecord[];
   clearIdleAgents(): ClearIdleAgentsResult;
   newAgentSession(): RunningAgentRecord;
+  submitAgentSessionInput(id: string, text: string): Promise<SubmitResult>;
   forkCurrentAgent(): ForkAgentResult;
   switchAgentSession(id: string): RunningAgentRecord;
   refreshCurrentAgentSessionUi(): void;
