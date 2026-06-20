@@ -1,0 +1,33 @@
+packages/mica-builtin-commands/rewind.tsx
+  1f827bc54e17f934 39,79-83,95-102,104-109,111
+packages/mica-builtin-commands/status.tsx
+  1f827bc54e17f934 54,71-78,80-84
+blogs/3.offscreen-terminal-shell.md
+  1f827bc54e17f934 1-524
+packages/mica-builtin-commands/log.tsx
+  1f827bc54e17f934 79-96,98,102
+packages/mica-builtin-commands/commit.ts
+  1f827bc54e17f934 7,45,86-88,103-105,107,283,287
+packages/mica-builtin-commands/agents.tsx
+  1f827bc54e17f934 7,41,69-75,77-80,82,84-89,91-96,98-101,103-107,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f9c7353efe0944e96bfd90567292e99b9973b115",
+  "prompts": {
+    "1f827bc54e17f934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ee413-ca97-7be1-aa8c-a9278d2f8d96",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 658,
+      "total_deletions": 186,
+      "accepted_lines": 845,
+      "overriden_lines": 5
+    }
+  }
+}
