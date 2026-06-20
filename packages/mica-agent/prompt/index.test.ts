@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPromptForTest } from './index';
+import { buildSystemPromptForTest } from './index.js';
 
 describe('buildSystemPrompt', () => {
   it('keeps stable sections in priority order with dynamic context last', () => {

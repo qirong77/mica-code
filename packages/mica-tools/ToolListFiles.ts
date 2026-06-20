@@ -30,7 +30,10 @@ export class ToolListFiles extends MicaTool {
     });
   }
 
-  async execute(input: { pattern: string; path?: string; limit?: number }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(
+    input: { pattern: string; path?: string; limit?: number },
+    _callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
     const limit = clampNumber(input.limit, DEFAULT_LIMIT, 1, HARD_LIMIT);
     const files = await glob(input.pattern, {
       cwd: input.path || process.cwd(),
@@ -40,11 +43,14 @@ export class ToolListFiles extends MicaTool {
     if (files.length === 0) return '没有匹配的文件。';
 
     const shown = files.slice(0, limit);
-    const suffix = files.length > limit ? `\n\n[显示 ${limit} 个文件，共 ${files.length} 个。请缩小 path/pattern 或调整 limit。]` : '';
+    const suffix =
+      files.length > limit
+        ? `\n\n[显示 ${limit} 个文件，共 ${files.length} 个。请缩小 path/pattern 或调整 limit。]`
+        : '';
     return shown.join('\n') + suffix;
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
-    return `list ${truncateDisplayText(input.pattern as string, 10)} in ${input.path || '.'}`;
+  onToolUseDisplayText(input: Record<string, unknown>): string {
+    return `list ${truncateDisplayText(input.pattern as string, 10)} in ${String(input.path || '.')}`;
   }
 }

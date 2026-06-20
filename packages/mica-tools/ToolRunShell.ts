@@ -177,7 +177,7 @@ export class ToolRunShell extends MicaTool {
     ].join('\n');
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     const cmd = (input.command ?? '') as string;
     // "$ " prefix + " [后台]" suffix 大约占 10 个额外字符
     const truncated = truncateDisplayText(cmd.trim(), 10);

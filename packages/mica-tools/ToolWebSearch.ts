@@ -70,9 +70,10 @@ export class ToolWebSearch extends MicaTool {
     );
   }
 
-  async execute(input: Record<string, any>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
     const query = String(input.query);
-    const count = Math.min(Math.max(1, input.count ?? DEFAULT_COUNT), MAX_RESULTS);
+    const requestedCount = typeof input.count === 'number' ? input.count : DEFAULT_COUNT;
+    const count = Math.min(Math.max(1, requestedCount), MAX_RESULTS);
 
     const cacheKey = `${query}:${count}`;
     const cached = resultCache.get(cacheKey);
@@ -88,7 +89,7 @@ export class ToolWebSearch extends MicaTool {
     return await this._searchSerper(query, count, apiKey);
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     return `search ${truncateDisplayText(input.query as string, 6)}`;
   }
 

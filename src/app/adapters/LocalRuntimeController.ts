@@ -10,21 +10,25 @@ import {
   type RuntimeInput,
   type RuntimeStatus,
   type RuntimeViewSnapshot,
+  type RewindApplyResult,
+  type RewindPreviewResult,
   type SubmitOptions,
   type SubmitResult,
 } from '@packages/mica-runtime/index.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { reportRuntimeError } from '../../runtime/uiBridge.js';
-import { getActiveApplication } from '../Application.js';
-import { normalizeUiState } from '../../agents/terminalAgentSessions.js';
-import {
-  RewindCheckpointManager,
-  type RewindApplyResult,
-  type RewindPreviewResult,
-} from '../../runtime/RewindCheckpointManager.js';
+import { getActiveContext } from '../activeContext.js';
+import { normalizeUiState, type TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
+import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
+
+type RuntimeActiveContext = {
+  agentSessions: {
+    findByAgent(agent: AgentRuntime): TerminalAgentSession | undefined;
+  };
+};
 
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();
@@ -279,7 +283,7 @@ export class LocalRuntimeController implements RuntimeController {
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
     this.rewindCheckpoints.capture(agent, input);
     this.responseBuffers.set(agent, '');
-    const session = getActiveApplication()?.activeContext?.agentSessions.findByAgent(agent);
+    const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,

@@ -1,14 +1,13 @@
 import type { OpenAI } from 'openai';
 import {
   contentBlocksToText,
+  providerContentToConversationBlocks,
   type ConversationContentBlock,
   type ConversationItem,
   type ProviderHistoryNormalizer,
 } from '../core/Conversation.js';
 
-export class OpenAIHistoryNormalizer
-  implements ProviderHistoryNormalizer<OpenAI.Chat.Completions.ChatCompletionMessageParam>
-{
+export class OpenAIHistoryNormalizer implements ProviderHistoryNormalizer<OpenAI.Chat.Completions.ChatCompletionMessageParam> {
   normalize(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): ConversationItem[] {
     const items: ConversationItem[] = [];
     const toolNames = new Map<string, string>();
@@ -53,7 +52,12 @@ export class OpenAIHistoryNormalizer
         continue;
       }
 
-      items.push({ type: 'unknown', role: (message as { role?: string }).role, content: message, providerMetadata: message });
+      items.push({
+        type: 'unknown',
+        role: (message as { role?: string }).role,
+        content: message,
+        providerMetadata: message,
+      });
     }
 
     return items;
@@ -94,22 +98,11 @@ export class OpenAIHistoryNormalizer
 function openAIContentToConversationBlocks(
   content: OpenAI.Chat.Completions.ChatCompletionMessageParam['content'],
 ): ConversationContentBlock[] {
-  if (!content) return [];
-  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
-  if (!Array.isArray(content)) return [{ type: 'text', text: String(content) }];
-
-  const blocks: ConversationContentBlock[] = [];
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    if (part.type === 'text') {
-      blocks.push({ type: 'text', text: part.text });
-    } else if (part.type === 'image_url') {
-      blocks.push({ type: 'image', source: part.image_url });
-    } else {
-      blocks.push({ type: 'text', text: `[${part.type}]` });
-    }
-  }
-  return blocks;
+  return providerContentToConversationBlocks(content, (part) => {
+    if (part.type === 'text' && typeof part.text === 'string') return { type: 'text', text: part.text };
+    if (part.type === 'image_url') return { type: 'image', source: part.image_url };
+    return typeof part.type === 'string' ? { type: 'text', text: `[${part.type}]` } : null;
+  });
 }
 
 function conversationBlocksToOpenAIContent(blocks: ConversationContentBlock[]): string {

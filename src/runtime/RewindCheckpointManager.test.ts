@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
-import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { RewindCheckpointManager } from './RewindCheckpointManager.js';
 
 describe('RewindCheckpointManager', () => {
@@ -30,10 +30,10 @@ describe('RewindCheckpointManager', () => {
         loadSnapshot: (snapshot: AgentRuntimeSnapshot) => {
           currentSnapshot = snapshot;
         },
-      };
+      } as unknown as AgentRuntime;
 
       const manager = new RewindCheckpointManager();
-      manager.capture(agent as any, makeInput('change files'));
+      manager.capture(agent, makeInput('change files'));
 
       currentSnapshot = makeSnapshot([
         { role: 'user', content: 'before' },
@@ -44,12 +44,12 @@ describe('RewindCheckpointManager', () => {
       writeFileSync(join(dir, 'keep.txt'), 'after untracked\n');
       writeFileSync(join(dir, 'new.txt'), 'new file\n');
 
-      const preview = manager.preview(agent as any);
+      const preview = manager.preview(agent);
       expect(preview.ok).toBe(true);
       if (!preview.ok) throw new Error(preview.message);
       expect(preview.files.map((file) => file.path)).toEqual(['keep.txt', 'new.txt', 'tracked.txt']);
 
-      manager.apply(agent as any, preview.id);
+      manager.apply(agent, preview.id);
 
       expect(currentSnapshot.messages).toEqual(beforeSnapshot.messages);
       expect(readFileSync(join(dir, 'tracked.txt'), 'utf-8')).toBe('before dirty\n');

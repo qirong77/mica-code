@@ -1,11 +1,12 @@
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
+import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
 import { micaUi, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
 import { clearUI, showMessage as showGlobalMessage, syncModelDisplay } from '../../runtime/uiBridge.js';
-import { getActiveApplication } from '../../app/Application.js';
+import { getActiveContext } from '../../app/activeContext.js';
 import type { ApplicationContext } from '../../app/ApplicationContext.js';
 import type {
   CommandAgent,
@@ -17,6 +18,10 @@ import { normalizeUiState, type TerminalAgentUiState } from '../../agents/termin
 
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'status', 'agents', 'new', 'fork']);
+
+function currentContext(): ApplicationContext | null {
+  return getActiveContext<ApplicationContext>();
+}
 
 export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
   constructor(
@@ -62,7 +67,7 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
         description: command.description ?? '',
         action: (arg?: string) => {
           const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
-          const runtime = getActiveApplication()?.activeContext?.runtime;
+          const runtime = currentContext()?.runtime;
           if (runtime) {
             void runtime.submit(text, { source: 'command' });
             return;
@@ -104,7 +109,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
 function createCommandRuntimeServices(): CommandRuntimeServices {
   return {
     clearUI(agent, sessionController) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       const session = context?.agentSessions.current();
       context?.runtime.clear();
       context?.uiBridge.clearToolLogs();
@@ -115,7 +120,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       if (session) session.uiState = normalizeUiState(captureSessionUi());
     },
     showMessage(text, ttl, ownerSessionId) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       const session = ownerSessionId
         ? context?.agentSessions.findById(ownerSessionId)
         : context?.agentSessions.current();
@@ -126,58 +131,58 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       showGlobalMessage(text, ttl);
     },
     setPluginStatus(agent, text, options = {}) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) return;
       const target = resolveCommandAgent(agent);
       const status: MicaUiWorkingStatus = { type: 'plugin_task', text, level: options.level };
       setAgentWorkingStatus(context, target, status, options.ownerSessionId);
     },
     clearPluginStatus(agent, ownerSessionId) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) return;
       setAgentWorkingStatus(context, resolveCommandAgent(agent), { type: 'idle' }, ownerSessionId);
     },
     syncModelDisplay(_agent) {
-      const session = getActiveApplication()?.activeContext?.agentSessions.current();
+      const session = currentContext()?.agentSessions.current();
       const target = _agent as AgentRuntime;
       if (session && target instanceof AgentRuntime && session.agent !== target) return;
       syncModelDisplay(session?.agent ?? target);
     },
     isAgentRunning() {
-      return getActiveApplication()?.activeContext?.runtime.getStatus().running ?? false;
+      return currentContext()?.runtime.getStatus().running ?? false;
     },
     isAgentBusy(agent) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) return false;
       const target = agent ? resolveCommandAgent(agent) : context.agentSessions.current().agent;
       return context.runtime.isAgentBusy(target);
     },
     getCurrentAgentSessionId() {
-      return getActiveApplication()?.activeContext?.agentSessions.current().id;
+      return currentContext()?.agentSessions.current().id;
     },
     getCurrentAgent() {
-      return getActiveApplication()?.activeContext?.agentSessions.current().agent;
+      return currentContext()?.agentSessions.current().agent;
     },
     getCurrentSessionController() {
-      return getActiveApplication()?.activeContext?.agentSessions.current().sessionController;
+      return currentContext()?.agentSessions.current().sessionController;
     },
     listRunningAgents() {
-      return getActiveApplication()?.activeContext?.agentSessions.list() ?? [];
+      return currentContext()?.agentSessions.list() ?? [];
     },
     clearIdleAgents() {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) return { cleared: [], remaining: [] };
       const result = context.agentSessions.clearIdleSessions();
       context.uiBridge.syncAgentStatusItems();
       return result;
     },
     newAgentSession() {
-      const session = getActiveApplication()?.activeContext?.agentSessions.createSession();
+      const session = currentContext()?.agentSessions.createSession();
       if (!session) throw new Error('Application is not ready');
       return session;
     },
     forkCurrentAgent() {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) throw new Error('Application is not ready');
 
       const sourceSession = context.agentSessions.current();
@@ -206,7 +211,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         pluginUIs: [],
         workingStatus: { type: 'idle' },
         contextSize: sourceSnapshot.lastUsage?.totalTokens ?? 0,
-        cachedTokenRate: readCachedTokenRate(sourceSnapshot.usageHistory),
+        cachedTokenRate: calculateCachedTokenRate(sourceSnapshot.usageHistory),
       });
       const record = context.agentSessions.list().find((agent) => agent.id === created.id) ?? created;
       micaLogger.logRuntime('plugin.fork', 'snapshot:loaded', {
@@ -217,8 +222,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       return { ...record, sourceWasRunning };
     },
     switchAgentSession(id) {
-      const app = getActiveApplication();
-      const context = app?.activeContext;
+      const context = currentContext();
       if (!context) throw new Error('Application is not ready');
 
       const previous = context.agentSessions.current();
@@ -232,18 +236,18 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       return record;
     },
     refreshCurrentAgentSessionUi() {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       const session = context?.agentSessions.current();
       if (!session) return;
       session.uiState = normalizeUiState(captureSessionUi());
     },
     getRewindPreview() {
-      const runtime = getActiveApplication()?.activeContext?.runtime;
+      const runtime = currentContext()?.runtime;
       if (!runtime) return { ok: false, message: 'rewind: Application is not ready' };
       return runtime.getRewindPreview();
     },
     applyRewind(id) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) throw new Error('Application is not ready');
       const result = context.runtime.applyRewind(id);
       const session = context.agentSessions.current();
@@ -260,7 +264,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         pluginUIs: [],
         workingStatus: { type: 'idle' },
         contextSize: snapshot.lastUsage?.totalTokens ?? 0,
-        cachedTokenRate: readCachedTokenRate(snapshot.usageHistory),
+        cachedTokenRate: calculateCachedTokenRate(snapshot.usageHistory),
       });
       restoreSessionUi(session.agent, session.uiState);
       syncModelDisplay(session.agent);
@@ -269,7 +273,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       return result;
     },
     async runExclusiveTask(agent, options, task) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       if (!context) return task();
       const target = resolveCommandAgent(agent);
       const release = context.runtime.beginExclusiveTask(target, options.statusText);
@@ -287,7 +291,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       }
     },
     async compact(agent, sessionController, ownerSessionId) {
-      const context = getActiveApplication()?.activeContext;
+      const context = currentContext();
       const ownerSession = ownerSessionId
         ? context?.agentSessions.findById(ownerSessionId)
         : context?.agentSessions.current();
@@ -398,7 +402,7 @@ function captureSessionUi(): TerminalAgentUiState {
 }
 
 function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
-  const current = () => getActiveApplication()?.activeContext?.agentSessions.current().agent ?? fallback;
+  const current = () => currentContext()?.agentSessions.current().agent ?? fallback;
   return {
     get config() {
       return current().config;
@@ -422,7 +426,7 @@ function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
 }
 
 function createActiveSessionControllerProxy(fallback: SessionController): CommandSessionController {
-  const current = () => getActiveApplication()?.activeContext?.agentSessions.current().sessionController ?? fallback;
+  const current = () => currentContext()?.agentSessions.current().sessionController ?? fallback;
   return {
     list(limit?: number) {
       return current().list(limit);
@@ -441,7 +445,7 @@ function createActiveSessionControllerProxy(fallback: SessionController): Comman
 
 function resolveCommandAgent(agent: CommandAgent): AgentRuntime {
   if (agent instanceof AgentRuntime) return agent;
-  const current = getActiveApplication()?.activeContext?.agentSessions.current().agent;
+  const current = currentContext()?.agentSessions.current().agent;
   if (current) return current;
   return agent as AgentRuntime;
 }
@@ -485,19 +489,11 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
     micaUi.panels.cachedTokenRate.set(uiState.cachedTokenRate);
   } else if (snapshot.lastUsage) {
     micaUi.panels.contextSize.set(snapshot.lastUsage.totalTokens);
-    const totalInput = snapshot.usageHistory.reduce((sum, usage) => sum + usage.inputTokens, 0);
-    const totalCached = snapshot.usageHistory.reduce((sum, usage) => sum + (usage.cachedInputTokens ?? 0), 0);
-    micaUi.panels.cachedTokenRate.set(totalInput > 0 ? Math.max(0, totalCached / totalInput) : 0);
+    micaUi.panels.cachedTokenRate.set(calculateCachedTokenRate(snapshot.usageHistory));
   } else {
     micaUi.panels.contextSize.set(0);
     micaUi.panels.cachedTokenRate.set(0);
   }
-}
-
-function readCachedTokenRate(usageHistory: ReturnType<AgentRuntime['getSnapshot']>['usageHistory']): number {
-  const totalInput = usageHistory.reduce((sum, usage) => sum + usage.inputTokens, 0);
-  const totalCached = usageHistory.reduce((sum, usage) => sum + (usage.cachedInputTokens ?? 0), 0);
-  return totalInput > 0 ? Math.max(0, totalCached / totalInput) : 0;
 }
 
 function formatError(error: unknown) {

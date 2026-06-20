@@ -1,15 +1,19 @@
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
+import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
 import { McpPlugin } from '../plugins/mcp/index.js';
 import { MessageQueuePlugin } from '../plugins/runtime/index.js';
-import type { Application } from './Application.js';
+
+type PluginHost = {
+  use(plugin: MicaPlugin): PluginHost;
+};
 
 export function useBuiltinPlugins(
-  app: Application,
+  app: PluginHost,
   agent: AgentRuntime,
   sessionController: SessionController,
-): Application {
+): PluginHost {
   return app
     .use(new BuiltInCommandsPlugin(agent, sessionController))
     .use(new MessageQueuePlugin())

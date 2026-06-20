@@ -3,6 +3,7 @@ import { OpenAIHistoryNormalizer } from './providers/OpenAIHistoryNormalizer.js'
 import { AnthropicAgent } from './providers/AnthropicAgent.js';
 import { AnthropicHistoryNormalizer } from './providers/AnthropicHistoryNormalizer.js';
 import { BaseAgent } from './core/Agent.js';
+import { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsageHistory } from './core/Usage.js';
 import { buildSystemPrompt, buildSystemPromptForTest } from './prompt/index.js';
 
 export const micaAgent = {
@@ -15,6 +16,9 @@ export const micaAgent = {
   AnthropicAgent,
   AnthropicHistoryNormalizer,
   BaseAgent,
+  calculateCachedTokenRate,
+  calculateUsageCachedTokenRate,
+  summarizeUsageHistory,
   /** 构建运行时系统提示词，包含工具、项目说明和环境上下文。 */
   buildSystemPrompt,
   /** 构建可注入固定参数的系统提示词，供 prompt 单测使用。 */
@@ -30,6 +34,10 @@ export type {
   AgentUsageRecord,
   IAgent,
 } from './core/Agent.js';
+export { providerContentToAgentContent } from './core/Content.js';
+export type { AgentContentPartMapper } from './core/Content.js';
+export type { AgentUsageSummary } from './core/Usage.js';
+export { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsageHistory } from './core/Usage.js';
 export type {
   ConversationContentBlock,
   ConversationImageBlock,
@@ -39,6 +47,8 @@ export type {
   ConversationToolCallItem,
   ConversationToolResultItem,
   ConversationUnknownItem,
+  ConversationContentPartMapper,
   ProviderHistoryNormalizer,
 } from './core/Conversation.js';
+export { providerContentToConversationBlocks } from './core/Conversation.js';
 export type { OpenAIClientOptions, OpenAIUsageRecord, UsageRecord } from './providers/OpenAIClient.js';

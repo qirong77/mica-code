@@ -1,5 +1,5 @@
 import { micaUi } from '@packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -108,8 +108,8 @@ const defaultSessionUiAdapter: SessionUiAdapter = {
     micaUi.terminalInput.clearText();
 
     if (lastUsage) {
-      micaUi.panels.contextSize.set(readContextTokens(lastUsage));
-      micaUi.panels.cachedTokenRate.set(readTotalCachedTokenRate(agent));
+      micaUi.panels.contextSize.set(lastUsage.totalTokens);
+      micaUi.panels.cachedTokenRate.set(calculateCachedTokenRate(agent.getSnapshot().usageHistory));
     } else {
       micaUi.panels.contextSize.set(0);
       micaUi.panels.cachedTokenRate.set(0);
@@ -117,7 +117,9 @@ const defaultSessionUiAdapter: SessionUiAdapter = {
   },
 };
 
-function isSessionControllerOptions(value: SessionAgentAdapter | SessionControllerOptions): value is SessionControllerOptions {
+function isSessionControllerOptions(
+  value: SessionAgentAdapter | SessionControllerOptions,
+): value is SessionControllerOptions {
   return Boolean(value && typeof value === 'object' && 'agent' in value);
 }
 
@@ -130,18 +132,6 @@ function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSn
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
   };
-}
-
-function readContextTokens(usage: AgentUsageRecord): number {
-  return usage.totalTokens;
-}
-
-function readTotalCachedTokenRate(agent: SessionAgentAdapter): number {
-  const snapshot = agent.getSnapshot();
-  const totalInput = snapshot.usageHistory.reduce((sum, u) => sum + u.inputTokens, 0);
-  const totalCached = snapshot.usageHistory.reduce((sum, u) => sum + (u.cachedInputTokens ?? 0), 0);
-  if (totalInput <= 0) return 0;
-  return Math.max(0, totalCached / totalInput);
 }
 
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {

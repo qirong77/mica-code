@@ -1,13 +1,10 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
-import { micaUi } from '../index.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
+import { themeColors } from '../theme.js';
+import { messages, pendingInputs, responseText } from './state.js';
 import { Markdown } from './Markdown.js';
-
-interface LogMessage extends MicaUiMessageParam {
-  status?: 'clear';
-}
 
 const MAX_USER_LINES = 10;
 
@@ -32,16 +29,13 @@ interface LogItem {
 }
 
 export const Conversation = (): React.ReactNode => {
-  const { colors } = micaUi.theme;
-  const messages = useScheduleState(micaUi.conversation.messages);
-  const responseText = useScheduleState(micaUi.conversation.responseText);
-  const pendingInputs = useScheduleState(micaUi.conversation.pendingInputs);
+  const currentMessages = useScheduleState(messages);
+  const currentResponseText = useScheduleState(responseText);
+  const currentPendingInputs = useScheduleState(pendingInputs);
 
   const staticItems = useMemo(
     () =>
-      (messages as any[]).flatMap((raw: any, i: number): LogItem[] => {
-        const msg = raw as LogMessage;
-        if (msg.status === 'clear') return [];
+      currentMessages.flatMap((msg: MicaUiMessageParam, i: number): LogItem[] => {
         const text = getTextContent(msg.content);
         if (!text) return [];
         if (msg.role === 'user' || msg.role === 'assistant') {
@@ -49,19 +43,19 @@ export const Conversation = (): React.ReactNode => {
         }
         return [];
       }),
-    [messages],
+    [currentMessages],
   );
 
   return (
     <Box flexDirection="column">
       {staticItems.map((item: LogItem, index) => {
-        const isLast = index === staticItems.length - 1 && !responseText;
+        const isLast = index === staticItems.length - 1 && !currentResponseText;
         if (item.role === 'user') {
           return (
             <Box key={item.id} paddingY={1} paddingBottom={isLast ? 0 : 1} flexDirection="row">
-              <Text color={colors.primary}>{'\u258c'}</Text>
+              <Text color={themeColors.primary}>{'\u258c'}</Text>
               <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
-                <Text color={colors.primary} bold>
+                <Text color={themeColors.primary} bold>
                   {truncateLines(item.text, MAX_USER_LINES)}
                 </Text>
               </Box>
@@ -75,14 +69,14 @@ export const Conversation = (): React.ReactNode => {
         );
       })}
       <Box>
-        <Markdown>{responseText}</Markdown>
+        <Markdown>{currentResponseText}</Markdown>
       </Box>
-      {pendingInputs.map((pendingInput, index) => (
+      {currentPendingInputs.map((pendingInput, index) => (
         <Box key={`pending-${index}`} paddingY={1} flexDirection="row">
-          <Text color={colors.dim}>{'\u258c'}</Text>
+          <Text color={themeColors.dim}>{'\u258c'}</Text>
           <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="row">
-            <Text color={colors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
-            <Text color={colors.dim}>
+            <Text color={themeColors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
+            <Text color={themeColors.dim}>
               {'（等待当前 agent 执行完成后发送，shift + ← 重新编辑'}
               {'）'}
             </Text>

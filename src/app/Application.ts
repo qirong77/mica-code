@@ -11,6 +11,7 @@ import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import type { ApplicationContext } from './ApplicationContext.js';
+import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 
@@ -61,7 +62,7 @@ export class Application {
         agentSessions,
       };
 
-      setActiveApplication(this);
+      setActiveContext(this.context);
 
       useBuiltinPlugins(this, agent, sessionController);
 
@@ -108,9 +109,7 @@ export class Application {
     await this.context?.runtime.stop();
     await this.context?.plugins.disposeAll();
     this.context?.agentSessions.stop();
-    if (activeApplication === this) {
-      activeApplication = null;
-    }
+    if (this.context) clearActiveContext(this.context);
   }
 }
 
@@ -118,14 +117,4 @@ function toLogData(data: unknown): Record<string, unknown> | undefined {
   if (data == null) return undefined;
   if (typeof data === 'object' && !Array.isArray(data)) return data as Record<string, unknown>;
   return { value: data };
-}
-
-let activeApplication: Application | null = null;
-
-function setActiveApplication(app: Application): void {
-  activeApplication = app;
-}
-
-export function getActiveApplication(): Application | null {
-  return activeApplication;
 }

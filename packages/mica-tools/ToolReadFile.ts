@@ -28,7 +28,11 @@ function normalizeOffset(value: unknown): number {
   return clampNumber(value, 1, 1, Number.MAX_SAFE_INTEGER);
 }
 
-async function readLineRange(filePath: string, offset: number, limit: number): Promise<{ lines: string[]; totalLines: number }> {
+async function readLineRange(
+  filePath: string,
+  offset: number,
+  limit: number,
+): Promise<{ lines: string[]; totalLines: number }> {
   const lines: string[] = [];
   let lineNo = 0;
   const end = offset + limit - 1;
@@ -116,7 +120,9 @@ export class ToolReadFile extends MicaTool {
     const end = start + lines.length;
     const width = String(end).length;
     const body = lines
-      .map((line: string, i: number) => `${String(start + i + 1).padStart(width)} | ${truncateLine(line, MAX_LINE_CHARS)}`)
+      .map(
+        (line: string, i: number) => `${String(start + i + 1).padStart(width)} | ${truncateLine(line, MAX_LINE_CHARS)}`,
+      )
       .join('\n');
 
     const truncated = end < totalLines;
@@ -132,7 +138,7 @@ export class ToolReadFile extends MicaTool {
     return `${header}\n${body}`;
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     const filePath = truncateDisplayText(input.file_path as string, 5);
     const parts = [filePath];
     if (input.offset) parts.push(`:${input.offset}`);

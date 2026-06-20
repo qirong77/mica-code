@@ -18,8 +18,9 @@ import {
   type AgentQueryOptions,
   type AgentSnapshot,
   type AgentUsageRecord,
-} from '../core/Agent';
-import { buildSystemPrompt } from '../prompt';
+} from '../core/Agent.js';
+import { providerContentToAgentContent } from '../core/Content.js';
+import { buildSystemPrompt } from '../prompt/index.js';
 import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
 
 export type AnthropicAgentOptions = {
@@ -127,10 +128,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
   }
 
   loadSnapshot(snapshot: AgentSnapshot<MessageParam, AnthropicUsageRecord>) {
-    this.messages = snapshot.messages.filter((message) => message.role !== 'system');
-    this.usageHistory = snapshot.usageHistory;
-    this.lastUsage = snapshot.lastUsage;
-    this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
+    this.turnId = this.loadSnapshotState(snapshot, (message) => message.role !== 'system');
   }
 
   toConversationMessages(): AgentConversationMessage[] {
@@ -240,12 +238,13 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       const toolResults: ContentBlockParam[] = [];
       for (const toolUse of toolUses) {
         throwIfQueryStopped(options);
-        const args = JSON.stringify(toolUse.input ?? {});
+        const toolInput = toToolInput(toolUse.input);
+        const args = JSON.stringify(toolInput);
         this.onToolCall?.(toolUse.name, args, toolUse.id);
         let result: string;
         let isError = false;
         try {
-          result = await micaTools.execute(toolUse.name, toolUse.input ?? {}, {
+          result = await micaTools.execute(toolUse.name, toolInput, {
             signal: options?.signal,
           });
         } catch (error) {
@@ -390,37 +389,18 @@ function parseToolInput(inputJson: string | undefined, fallback: unknown): unkno
   }
 }
 
+function toToolInput(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
 function anthropicContentToMicaContent(content: MessageParam['content']): string | AgentContentBlockParam[] | null {
-  if (!content) return null;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return String(content);
-
-  const blocks: AgentContentBlockParam[] = [];
-  const fallbackText: string[] = [];
-
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    if (part.type === 'text') {
-      blocks.push({ type: 'text', text: part.text });
-      continue;
+  return providerContentToAgentContent(content, (part) => {
+    if (part.type === 'text' && typeof part.text === 'string') {
+      return { type: 'text', text: part.text };
     }
-    if (part.type === 'image') {
-      fallbackText.push('[Image]');
-      continue;
-    }
-    if (part.type === 'tool_use') {
-      fallbackText.push(`[Tool: ${part.name}]`);
-      continue;
-    }
-    if (part.type === 'tool_result') {
-      fallbackText.push('[Tool result]');
-      continue;
-    }
-    fallbackText.push(`[${part.type}]`);
-  }
-
-  if (fallbackText.length > 0) {
-    blocks.push({ type: 'text', text: fallbackText.join('\n') });
-  }
-  return blocks.length > 0 ? blocks : null;
+    if (part.type === 'image') return '[Image]';
+    if (part.type === 'tool_use') return `[Tool: ${String(part.name)}]`;
+    if (part.type === 'tool_result') return '[Tool result]';
+    return typeof part.type === 'string' ? `[${part.type}]` : null;
+  });
 }

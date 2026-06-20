@@ -96,6 +96,16 @@ export abstract class BaseAgent<
     };
   }
 
+  protected loadSnapshotState(
+    snapshot: AgentSnapshot<TMessage, TUsage>,
+    filterMessage?: (message: TMessage) => boolean,
+  ): number {
+    this.messages = filterMessage ? snapshot.messages.filter(filterMessage) : snapshot.messages;
+    this.usageHistory = snapshot.usageHistory;
+    this.lastUsage = snapshot.lastUsage;
+    return this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
+  }
+
   protected textMessage(role: 'user' | 'assistant', text: string): AgentConversationMessage | null {
     if (!text) return null;
     return { role, content: [{ type: 'text', text }] };

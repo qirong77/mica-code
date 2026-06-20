@@ -3,14 +3,11 @@ import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { maxColumnWidth } from './layout.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }
   | { view: 'detail'; selectedIdx: number; detailSkillIdx: number };
-
-function widthOrDefault(values: number[], fallback: number) {
-  return values.length > 0 ? Math.max(...values) : fallback;
-}
 
 export function createSkillsCommand() {
   return {
@@ -34,11 +31,11 @@ export function createSkillsCommand() {
         const currentSkills = micaSkills.getLoaded();
 
         if (state.view === 'list') {
-          const nameWidth = widthOrDefault(
+          const nameWidth = maxColumnWidth(
             currentSkills.map((skill) => skill.name.length + 2),
             16,
           );
-          const descWidth = widthOrDefault(
+          const descWidth = maxColumnWidth(
             currentSkills.map((skill) => Math.min(skill.description.length, 36) + 2),
             40,
           );

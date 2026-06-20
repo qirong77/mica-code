@@ -15,3 +15,5 @@
 ## 特别注意
 
 - 如果改动影响旧数据或旧架构，全部使用新的写法，禁止先保留旧路径再逐步迭代，而是一次性完成。
+- 当前运行中的应用上下文通过 `src/app/activeContext.ts` 注册和读取，插件/runtime 不应反向 import `Application.ts` 取得全局状态。
+- runtime 级公共结果类型优先放在 `packages/mica-runtime`；例如 rewind 预览/应用结果类型由 `packages/mica-runtime/Rewind.ts` 导出，命令包只做消费或 re-export。

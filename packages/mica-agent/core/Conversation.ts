@@ -59,3 +59,24 @@ export function contentBlocksToText(blocks: ConversationContentBlock[]): string 
     .map((block) => block.text)
     .join('\n');
 }
+
+export type ConversationContentPartMapper = (
+  part: Record<string, unknown>,
+) => ConversationContentBlock | null | undefined;
+
+export function providerContentToConversationBlocks(
+  content: unknown,
+  mapPart: ConversationContentPartMapper,
+): ConversationContentBlock[] {
+  if (!content) return [];
+  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
+  if (!Array.isArray(content)) return [{ type: 'text', text: String(content) }];
+
+  const blocks: ConversationContentBlock[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const mapped = mapPart(part as Record<string, unknown>);
+    if (mapped) blocks.push(mapped);
+  }
+  return blocks;
+}

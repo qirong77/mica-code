@@ -1,4 +1,4 @@
-import { MicaTool, type ToolExecuteCallbacks } from './MicaTool';
+import { MicaTool, type ToolExecuteCallbacks } from './MicaTool.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 
 function findSkill(name: string): Skill | undefined {
@@ -47,22 +47,23 @@ export class ToolSkill extends MicaTool {
     });
   }
 
-  async execute(input: Record<string, any>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
     const skillName = String(input.skill ?? '').trim();
     if (!skillName) return '错误：缺少 skill 名称';
 
     const skill = findSkill(skillName);
     if (!skill) {
-      const available = micaSkills.getLoaded()
+      const available = micaSkills
+        .getLoaded()
         .map((entry) => entry.name)
         .join(', ');
       return `未知 skill: ${skillName}\n可用的 skills: ${available || '无'}`;
     }
 
-    return substituteArgs(skill.content, input.args as string | undefined, skill);
+    return substituteArgs(skill.content, typeof input.args === 'string' ? input.args : undefined, skill);
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     return `调用 skill: ${String(input.skill ?? '')}`;
   }
 }

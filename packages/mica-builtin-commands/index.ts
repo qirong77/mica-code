@@ -43,10 +43,8 @@ export type {
   ExclusiveTaskOptions,
   ForkAgentResult,
   PluginStatusOptions,
-  RewindApplyResult,
-  RewindFileChange,
-  RewindPreviewResult,
   ResumeSessionResult,
   RunningAgentRecord,
   SessionSummary,
 } from './services.js';
+export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';

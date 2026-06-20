@@ -17,11 +17,11 @@ class McpProxyTool extends micaTools.MicaTool {
     super(name, description, inputSchema);
   }
 
-  async execute(input: Record<string, any>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
     return callMcpTool(this.serverName, this.toolName, input);
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     const keys = Object.keys(input);
     if (keys.length === 0) return `[MCP:${this.serverName}] ${this.toolName}`;
     const summary = keys
@@ -33,7 +33,9 @@ class McpProxyTool extends micaTools.MicaTool {
   }
 }
 
-export async function fetchToolsForServer(server: ConnectedMcpServer): Promise<InstanceType<typeof micaTools.MicaTool>[]> {
+export async function fetchToolsForServer(
+  server: ConnectedMcpServer,
+): Promise<InstanceType<typeof micaTools.MicaTool>[]> {
   const result = await server.client.request({ method: 'tools/list' }, ListToolsResultSchema, { timeout: 15_000 });
   const usedNames = new Set<string>();
 
@@ -108,7 +110,10 @@ function createMcpToolName(serverName: string, toolName: string, usedNames: Set<
 }
 
 function sanitizeNamePart(value: string, maxLength: number): string {
-  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const sanitized = value
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
   const fallback = sanitized || 'tool';
   return fallback.slice(0, maxLength);
 }

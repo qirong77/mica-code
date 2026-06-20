@@ -191,17 +191,17 @@ export class ToolWebFetch extends MicaTool {
         maxChars,
         Date.now() - start,
       );
-    } catch (error: any) {
+    } catch (error) {
       clearTimeout(timeout);
       callbacks?.signal?.removeEventListener('abort', onAbort);
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         return `请求超时: ${url}`;
       }
-      return `抓取失败: ${error.message}`;
+      return `抓取失败: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     return `fetch ${truncateDisplayText(input.url as string, 6)}`;
   }
 
@@ -355,9 +355,7 @@ export class ToolWebFetch extends MicaTool {
       throw new Error('不允许访问本地或内网地址');
     }
 
-    const addresses = isIP(hostname)
-      ? [{ address: hostname }]
-      : await lookup(hostname, { all: true, verbatim: true });
+    const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true, verbatim: true });
     if (addresses.length === 0 || addresses.some((entry) => isPrivateOrReservedAddress(entry.address))) {
       throw new Error('不允许访问解析到本地、内网或保留地址的 URL');
     }

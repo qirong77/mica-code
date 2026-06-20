@@ -154,7 +154,7 @@ export class TerminalAgentSessionManager {
     this.nextIndex += 1;
 
     const onStatus = (status: AgentRuntimeStatus) => {
-      session.status = formatStatus(status);
+      session.status = toMicaUiWorkingStatus(status);
       session.updatedAt = new Date().toISOString();
     };
     agent.events.on('status', onStatus);
@@ -229,7 +229,7 @@ function contentToText(content: ReturnType<AgentRuntime['toConversationMessages'
     .join('\n');
 }
 
-function formatStatus(status: AgentRuntimeStatus): MicaUiWorkingStatus {
+export function toMicaUiWorkingStatus(status: AgentRuntimeStatus): MicaUiWorkingStatus {
   switch (status.type) {
     case 'idle':
       return { type: 'idle' };

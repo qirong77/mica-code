@@ -10,7 +10,7 @@ import { ToolWebSearch } from './ToolWebSearch.js';
 import { ToolSkill } from './ToolSkill.js';
 import { MicaTool } from './MicaTool.js';
 import { ToolRunShell } from './ToolRunShell.js';
-import type { ToolExecuteCallbacks } from './MicaTool.js';
+import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),
@@ -52,11 +52,7 @@ export function getToolDefinitions(): Tool[] {
   }));
 }
 
-export async function executeTool(
-  name: string,
-  input: Record<string, any>,
-  callbacks?: ToolExecuteCallbacks,
-): Promise<string> {
+export async function executeTool(name: string, input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
 
@@ -68,7 +64,7 @@ export async function executeTool(
   return await tool.executeTimed(input, callbacks);
 }
 
-export function getToolDisplayText(name: string, input: Record<string, any>): string {
+export function getToolDisplayText(name: string, input: ToolInput): string {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
   try {

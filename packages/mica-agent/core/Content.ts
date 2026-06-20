@@ -24,3 +24,35 @@ export type AgentConversationMessage =
       stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'error';
     }
   | { role: 'user'; content: string | AgentContentBlockParam[] };
+
+export type AgentContentPartMapper = (
+  part: Record<string, unknown>,
+) => AgentContentBlockParam | string | null | undefined;
+
+export function providerContentToAgentContent(
+  content: unknown,
+  mapPart: AgentContentPartMapper,
+): string | AgentContentBlockParam[] | null {
+  if (!content) return null;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return String(content);
+
+  const blocks: AgentContentBlockParam[] = [];
+  const fallbackText: string[] = [];
+
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const mapped = mapPart(part as Record<string, unknown>);
+    if (!mapped) continue;
+    if (typeof mapped === 'string') {
+      fallbackText.push(mapped);
+    } else {
+      blocks.push(mapped);
+    }
+  }
+
+  if (fallbackText.length > 0) {
+    blocks.push({ type: 'text', text: fallbackText.join('\n') });
+  }
+  return blocks.length > 0 ? blocks : null;
+}

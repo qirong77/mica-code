@@ -8,8 +8,9 @@ import {
   type AgentQueryOptions,
   type AgentSnapshot,
   type AgentUsageRecord,
-} from '../core/Agent';
-import { buildSystemPrompt } from '../prompt';
+} from '../core/Agent.js';
+import { providerContentToAgentContent } from '../core/Content.js';
+import { buildSystemPrompt } from '../prompt/index.js';
 import { OpenAIHistoryNormalizer } from './OpenAIHistoryNormalizer.js';
 
 export type OpenAIClientOptions = {
@@ -23,7 +24,7 @@ export type OpenAIClientOptions = {
 
 export type OpenAIUsageRecord = AgentUsageRecord & {
   provider: 'openai';
-  rawUsage: Record<string, unknown>;
+  rawUsage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
   promptTokens: number;
 };
 
@@ -100,10 +101,7 @@ export class OpenAIClient extends BaseAgent<
     this.turnId = 0;
   }
   loadSnapshot(snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, UsageRecord>) {
-    this.messages = snapshot.messages.filter((message) => message.role !== 'system');
-    this.usageHistory = snapshot.usageHistory;
-    this.lastUsage = snapshot.lastUsage;
-    this.turnId = this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
+    this.turnId = this.loadSnapshotState(snapshot, (message) => message.role !== 'system');
   }
   toConversationMessages(): AgentConversationMessage[] {
     return this.messages.flatMap((message) => {
@@ -149,7 +147,9 @@ export class OpenAIClient extends BaseAgent<
                 tool_choice: 'auto' as const,
               }
             : {}),
-          ...(this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort as any } : {}),
+          ...(this.effort && this.effort !== 'none'
+            ? { reasoning_effort: this.effort as OpenAI.Chat.Completions.ChatCompletionReasoningEffort }
+            : {}),
           stream: true,
           stream_options: {
             include_usage: true,
@@ -159,7 +159,8 @@ export class OpenAIClient extends BaseAgent<
       );
 
       let content = '';
-      const contentSeparator: string = requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
+      const contentSeparator: string =
+        requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
       let emittedContentSeparator = false;
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
 
@@ -178,7 +179,8 @@ export class OpenAIClient extends BaseAgent<
           const delta = choice?.delta;
           if (!delta) continue;
           if (typeof delta.content === 'string' && delta.content) {
-            const textDelta: string = contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
+            const textDelta: string =
+              contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
             emittedContentSeparator = true;
             content += textDelta;
             totalContent += textDelta;
@@ -187,7 +189,7 @@ export class OpenAIClient extends BaseAgent<
             throwIfQueryStopped(options);
             this.onText?.(textDelta);
           }
-          const reasoning = (delta as any).reasoning_content;
+          const reasoning = readReasoningContent(delta);
           if (typeof reasoning === 'string' && reasoning) {
             throwIfQueryStopped(options);
             this.onThinking?.(reasoning);
@@ -271,7 +273,7 @@ export class OpenAIClient extends BaseAgent<
   }
 
   private recordUsage(
-    usage: Record<string, any>,
+    usage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>,
     metadata: {
       model?: string;
       turnId: number;
@@ -303,6 +305,12 @@ export class OpenAIClient extends BaseAgent<
     this.usageHistory.push(record);
     this.onUsage?.(record);
   }
+}
+
+function readReasoningContent(delta: unknown): string | undefined {
+  if (!delta || typeof delta !== 'object' || !('reasoning_content' in delta)) return undefined;
+  const reasoning = delta.reasoning_content;
+  return typeof reasoning === 'string' ? reasoning : undefined;
 }
 
 export function createOpenAIClient(options: OpenAIClientOptions): OpenAIClient {
@@ -362,30 +370,11 @@ function compactHistoricalToolResults(
 function openAIContentToMicaContent(
   content: OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] | null | undefined,
 ): string | AgentContentBlockParam[] | null {
-  if (!content) return null;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return String(content);
-
-  const blocks: AgentContentBlockParam[] = [];
-  const fallbackText: string[] = [];
-
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    if ('type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string') {
-      blocks.push({ type: 'text', text: part.text });
-      continue;
+  return providerContentToAgentContent(content, (part) => {
+    if (part.type === 'text' && typeof part.text === 'string') {
+      return { type: 'text', text: part.text };
     }
-    if ('type' in part && part.type === 'image_url') {
-      fallbackText.push('[Image]');
-      continue;
-    }
-    if ('type' in part && typeof part.type === 'string') {
-      fallbackText.push(`[${part.type}]`);
-    }
-  }
-
-  if (fallbackText.length > 0) {
-    blocks.push({ type: 'text', text: fallbackText.join('\n') });
-  }
-  return blocks.length > 0 ? blocks : null;
+    if (part.type === 'image_url') return '[Image]';
+    return typeof part.type === 'string' ? `[${part.type}]` : null;
+  });
 }

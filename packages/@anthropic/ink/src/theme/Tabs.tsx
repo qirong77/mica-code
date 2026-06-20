@@ -1,7 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useIsInsideModal, useModalScrollRef } from './modalContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import type { RefObject } from 'react';
 import ScrollBox from '../components/ScrollBox.js';
 import type { ScrollBoxHandle } from '../components/ScrollBox.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';

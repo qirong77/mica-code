@@ -11,7 +11,6 @@ import { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { Key, InputEvent } from '../core/events/input-event.js';
 import type { ParsedKey } from '../core/parse-keypress.js';
 import useInput from './use-input.js';
-import { useTerminalSize } from './useTerminalSize.js';
 
 type UseSearchInputOptions = {
   isActive: boolean;
@@ -57,12 +56,9 @@ export function useSearchInput({
   onExit,
   onCancel,
   onExitUp,
-  columns,
   initialQuery = '',
   backspaceExitsOnEmpty = true,
 }: UseSearchInputOptions): UseSearchInputReturn {
-  const { columns: terminalColumns } = useTerminalSize();
-  const _effectiveColumns = columns ?? terminalColumns;
   const [query, setQueryState] = useState(initialQuery);
   const [cursorOffset, setCursorOffset] = useState(initialQuery.length);
 

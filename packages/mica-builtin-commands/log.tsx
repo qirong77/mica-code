@@ -160,7 +160,10 @@ function exportCurrentLog(agent: CommandAgent, services: CommandRuntimeServices)
   writeFileSync(resolve(cwd, 'conversation.json'), `${JSON.stringify(conversationData, null, 2)}\n`, 'utf-8');
   writeFileSync(resolve(cwd, 'log.text'), `${JSON.stringify(logData, null, 2)}\n`, 'utf-8');
 
-  services.showMessage(`log export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) -> conversation.json, log.text`, 6000);
+  services.showMessage(
+    `log export: 已导出 ${rawMessages.length} 条消息 (${turns.length} turns) -> conversation.json, log.text`,
+    6000,
+  );
   micaLogger.logRuntime('plugin.log', 'export:done', { messages: rawMessages.length, turns: turns.length });
 }
 
@@ -211,7 +214,7 @@ function makeTurn(turnIndex: number, messages: unknown[], usageHistory: AgentUsa
 }
 
 function isUserMessage(message: unknown): boolean {
-  return typeof message === 'object' && message !== null && 'role' in message && (message as any).role === 'user';
+  return typeof message === 'object' && message !== null && 'role' in message && message.role === 'user';
 }
 
 function compactUsage(usage: AgentUsageRecord) {

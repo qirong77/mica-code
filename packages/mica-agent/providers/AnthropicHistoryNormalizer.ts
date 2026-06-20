@@ -1,6 +1,7 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
 import {
   contentBlocksToText,
+  providerContentToConversationBlocks,
   type ConversationContentBlock,
   type ConversationItem,
   type ProviderHistoryNormalizer,
@@ -92,20 +93,11 @@ export class AnthropicHistoryNormalizer implements ProviderHistoryNormalizer<Mes
 }
 
 function anthropicContentToConversationBlocks(content: MessageParam['content']): ConversationContentBlock[] {
-  if (!content) return [];
-  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
-  if (!Array.isArray(content)) return [{ type: 'text', text: String(content) }];
-
-  const blocks: ConversationContentBlock[] = [];
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    if (part.type === 'text') {
-      blocks.push({ type: 'text', text: part.text });
-    } else if (part.type === 'image') {
-      blocks.push({ type: 'image', source: part.source });
-    }
-  }
-  return blocks;
+  return providerContentToConversationBlocks(content, (part) => {
+    if (part.type === 'text' && typeof part.text === 'string') return { type: 'text', text: part.text };
+    if (part.type === 'image') return { type: 'image', source: part.source };
+    return null;
+  });
 }
 
 function conversationBlocksToAnthropicContent(blocks: ConversationContentBlock[]): MessageParam['content'] {

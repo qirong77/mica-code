@@ -1,11 +1,11 @@
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
 import {
   normalizeUiState,
+  toMicaUiWorkingStatus,
   type TerminalAgentSessionManager,
-  type TerminalAgentUiState,
 } from '../../agents/terminalAgentSessions.js';
 import { ToolLogController } from '../../runtime/ToolLogController.js';
 import { applyStatus, resetActiveTurnUI, syncModelDisplay } from '../../runtime/uiBridge.js';
@@ -162,7 +162,7 @@ export class MicaUiRuntimeBridge {
 
   private onUsage(agent: AgentRuntime, usage: AgentUsageRecord): void {
     const session = this.sessionFor(agent);
-    const cachedTokenRate = readTotalCachedTokenRate(agent);
+    const cachedTokenRate = calculateCachedTokenRate(agent.getSnapshot().usageHistory);
     session.uiState.contextSize = usage.totalTokens;
     session.uiState.cachedTokenRate = cachedTokenRate;
     session.uiState = normalizeUiState(session.uiState);
@@ -211,7 +211,7 @@ export class MicaUiRuntimeBridge {
     if (status.type === 'completed' || status.type === 'error' || status.type === 'idle') {
       this.toolLogFor(agent).endThinkingSegment();
     }
-    session.uiState = normalizeUiState({ ...session.uiState, workingStatus: toWorkingStatus(status) });
+    session.uiState = normalizeUiState({ ...session.uiState, workingStatus: toMicaUiWorkingStatus(status) });
     this.syncAgentStatusItems();
     if (this.isActiveAgent(agent)) applyStatus(status);
   }
@@ -258,33 +258,6 @@ export class MicaUiRuntimeBridge {
   private isActiveAgent(agent: AgentRuntime): boolean {
     return this.agent === agent;
   }
-}
-
-function toWorkingStatus(status: AgentRuntimeStatus): TerminalAgentUiState['workingStatus'] {
-  switch (status.type) {
-    case 'idle':
-      return { type: 'idle' };
-    case 'connecting':
-      return { type: 'connecting' };
-    case 'thinking':
-      return { type: 'thinking' };
-    case 'streaming':
-      return { type: 'streaming' };
-    case 'calling_tool':
-      return { type: 'calling_tool', toolNames: status.toolNames };
-    case 'completed':
-      return { type: 'completed', elapsedMs: status.elapsedMs };
-    case 'error':
-      return { type: 'error', message: status.message };
-  }
-}
-
-function readTotalCachedTokenRate(agent: AgentRuntime): number {
-  const snapshot = agent.getSnapshot();
-  const totalInput = snapshot.usageHistory.reduce((sum, u) => sum + u.inputTokens, 0);
-  const totalCached = snapshot.usageHistory.reduce((sum, u) => sum + (u.cachedInputTokens ?? 0), 0);
-  if (totalInput <= 0) return 0;
-  return Math.max(0, totalCached / totalInput);
 }
 
 function eventOwnerAgent(owner: unknown, fallback: AgentRuntime): AgentRuntime {

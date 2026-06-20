@@ -2,14 +2,13 @@ import { Box } from '@anthropic/ink';
 import { useMemo } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { CommandDropdown } from './CommandDropdown.js';
-import { inputValue } from './state.js';
-import { DropDownUI } from './index.js';
+import { inputValue, state } from './state.js';
 import { inputBottomDistance } from '../../input/state.js';
 
 const DEFAULT_OVERHEAD = 6;
 
 export function DropDownSelect() {
-  const dropdown = useScheduleState(DropDownUI.atomData.dropdown);
+  const dropdown = useScheduleState(state);
   const filterValue = useScheduleState(inputValue);
   const bottomDistance = useScheduleState(inputBottomDistance);
 

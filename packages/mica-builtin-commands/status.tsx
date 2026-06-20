@@ -1,6 +1,11 @@
 import { Box, Text } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import {
+  calculateUsageCachedTokenRate,
+  summarizeUsageHistory,
+  type AgentUsageRecord,
+  type AgentUsageSummary,
+} from '@packages/mica-agent/index.js';
 import type { CommandAgent } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 
@@ -11,7 +16,7 @@ export function createStatusCommand(agent: CommandAgent) {
     action: () => {
       const { provider, model, effort } = agent.config;
       const snapshot = agent.getSnapshot();
-      const usageTotals = summarizeUsage(snapshot.usageHistory);
+      const usageTotals = summarizeUsageHistory(snapshot.usageHistory);
       const latestUsage = snapshot.lastUsage;
 
       const contextTokens = micaUi.panels.contextSize.get();
@@ -104,38 +109,14 @@ function formatContextUsage(contextTokens: number, contextWindowSize: number): s
 function formatUsageCachedTokenValue(usage: AgentUsageRecord | undefined): string {
   if (!usage) return '-';
   const cachedInputTokens = usage.cachedInputTokens ?? 0;
-  const cacheRate = usage.inputTokens > 0 ? cachedInputTokens / usage.inputTokens : 0;
+  const cacheRate = calculateUsageCachedTokenRate(usage);
   return `${formatTokens(cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
 }
 
-function formatTotalsCachedTokenValue(usageTotals: UsageTotals): string {
+function formatTotalsCachedTokenValue(usageTotals: AgentUsageSummary): string {
   if (usageTotals.records === 0) return '-';
   const cacheRate = usageTotals.inputTokens > 0 ? usageTotals.cachedInputTokens / usageTotals.inputTokens : 0;
   return `${formatTokens(usageTotals.cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
-}
-
-type UsageTotals = {
-  records: number;
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-};
-
-function summarizeUsage(usageHistory: AgentUsageRecord[]): UsageTotals {
-  return usageHistory.reduce<UsageTotals>(
-    (totals, usage) => ({
-      records: totals.records + 1,
-      inputTokens: totals.inputTokens + usage.inputTokens,
-      outputTokens: totals.outputTokens + usage.outputTokens,
-      cachedInputTokens: totals.cachedInputTokens + (usage.cachedInputTokens ?? 0),
-    }),
-    {
-      records: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-    },
-  );
 }
 
 function formatStatusList(entries: Array<[string, string]>) {

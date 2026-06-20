@@ -117,7 +117,12 @@ export class ToolGrepSearch extends MicaTool {
         if (code === 0) {
           const lines = output.trim().split('\n').filter(Boolean);
           if (headLimit === 0) {
-            resolve(finalizeTextOutput(lines.slice(skipOffset).join('\n'), { maxChars: MAX_GREP_OUTPUT_CHARS, label: '搜索结果' }));
+            resolve(
+              finalizeTextOutput(lines.slice(skipOffset).join('\n'), {
+                maxChars: MAX_GREP_OUTPUT_CHARS,
+                label: '搜索结果',
+              }),
+            );
           } else {
             const sliced = lines.slice(skipOffset, skipOffset + headLimit);
             let result = finalizeTextOutput(sliced.join('\n'), { maxChars: MAX_GREP_OUTPUT_CHARS, label: '搜索结果' });
@@ -141,7 +146,7 @@ export class ToolGrepSearch extends MicaTool {
       });
     });
   }
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     const pattern = truncateDisplayText(input.pattern as string, 10); // grep "…" prefix ~8chars
     const p = input.path ? truncateDisplayText(input.path as string, 0) : '.';
     const inc = input.include ? ` [${input.include}]` : '';

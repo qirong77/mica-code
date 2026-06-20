@@ -1,4 +1,4 @@
-import React, { PureComponent, type ReactNode } from 'react';
+import { PureComponent, type ReactNode } from 'react';
 // Business-layer callbacks — replaced with inline defaults so this package
 // has zero dependencies on business code. The business layer can inject
 // implementations via AppCallbacks when needed.

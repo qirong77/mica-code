@@ -27,7 +27,7 @@ export class ToolWriteFile extends MicaTool {
     await writeFile(input.file_path, input.content);
     return `写入成功: ${input.file_path}`;
   }
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     const filePath = truncateDisplayText(input.file_path as string, 6); // "write " prefix
     const len = typeof input.content === 'string' ? input.content.length : 0;
     const sizeHint = len > 0 ? ` (${len}B)` : '';

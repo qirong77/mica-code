@@ -11,38 +11,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import type { RuntimeInput } from '@packages/mica-runtime/index.js';
+import type {
+  RewindApplyResult,
+  RewindFileAction,
+  RewindFileChange,
+  RewindPreviewResult,
+  RuntimeInput,
+} from '@packages/mica-runtime/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-
-export type RewindFileAction = 'restore' | 'delete';
-
-export type RewindFileChange = {
-  path: string;
-  action: RewindFileAction;
-};
-
-export type RewindPreviewResult =
-  | {
-      ok: true;
-      id: string;
-      conversationLabel: string;
-      createdAt: string;
-      messageCountBefore: number;
-      messageCountNow: number;
-      fileStateAvailable: boolean;
-      fileStateError?: string;
-      files: RewindFileChange[];
-    }
-  | { ok: false; message: string };
-
-export type RewindApplyResult = {
-  id: string;
-  conversationLabel: string;
-  messageCount: number;
-  fileStateAvailable: boolean;
-  fileStateError?: string;
-  files: RewindFileChange[];
-};
 
 type FileSnapshotEntry =
   | { kind: 'absent' }
@@ -186,14 +162,18 @@ function restoreFileState(state: FileStateSnapshot): RewindFileChange[] {
   return files;
 }
 
-function describeFileChanges(state: Extract<FileStateSnapshot, { available: true }>, currentDirtyPaths: string[]): RewindFileChange[] {
+function describeFileChanges(
+  state: Extract<FileStateSnapshot, { available: true }>,
+  currentDirtyPaths: string[],
+): RewindFileChange[] {
   const paths = new Set([...state.entries.keys(), ...currentDirtyPaths]);
   const headPaths = new Set([...paths].filter((path) => pathExistsInHead(state.root, path)));
   return [...paths]
     .sort((a, b) => a.localeCompare(b))
     .map((path) => {
       const entry = state.entries.get(path);
-      const action: RewindFileAction = entry?.kind === 'absent' || (!entry && !headPaths.has(path)) ? 'delete' : 'restore';
+      const action: RewindFileAction =
+        entry?.kind === 'absent' || (!entry && !headPaths.has(path)) ? 'delete' : 'restore';
       return { path, action };
     });
 }

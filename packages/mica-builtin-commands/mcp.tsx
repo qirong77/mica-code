@@ -4,6 +4,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
+import { maxColumnWidth } from './layout.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }
@@ -29,10 +30,6 @@ function typeColor(type: string) {
   if (type === 'object') return '#81C784';
   if (type === 'array') return '#FF8A65';
   return undefined;
-}
-
-function widthOrDefault(values: number[], fallback: number) {
-  return values.length > 0 ? Math.max(...values) : fallback;
 }
 
 export function createMcpCommand(services: CommandRuntimeServices) {
@@ -66,7 +63,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         const servers = micaUi.useScheduleState(micaMcp.servers);
 
         if (state.view === 'list') {
-          const nameWidth = widthOrDefault(
+          const nameWidth = maxColumnWidth(
             servers.map((server) => server.name.length + 2),
             18,
           );
@@ -148,7 +145,10 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         const required = schema.required ?? [];
 
         return (
-          <micaUi.Dialog title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`} footer={<micaUi.KeyHints hints={['esc back']} />}>
+          <micaUi.Dialog
+            title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`}
+            footer={<micaUi.KeyHints hints={['esc back']} />}
+          >
             <Box flexDirection="column">
               {tool?.description ? (
                 <Box paddingBottom={1}>

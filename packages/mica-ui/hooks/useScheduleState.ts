@@ -16,7 +16,7 @@ const THROTTLE_INTERVAL = 16;
 let lastFlushTime = 0;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-const pendingUpdaters: Record<string, Function> = {};
+const pendingUpdaters: Record<string, () => void> = {};
 
 function flushAll() {
   if (flushTimer) {

@@ -38,7 +38,7 @@ export class ToolEditFile extends MicaTool {
     return `编辑成功: ${input.file_path}`;
   }
 
-  onToolUseDisplayText(input: Record<string, any>): string {
+  onToolUseDisplayText(input: Record<string, unknown>): string {
     return `edit ${truncateDisplayText(input.file_path as string, 5)}`;
   }
 }
