@@ -6,8 +6,13 @@ import type { CommandAgent, CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { formatExecError, gitText, safeGitText } from '@packages/mica-common/index.js';
 
-const MAX_TOTAL_DIFF_CHARS = 18_000;
-const MAX_DIFF_CHARS_PER_FILE = 3_000;
+const MAX_SUMMARY_CHARS = 20_000;
+const MAX_TOTAL_DIFF_CHARS = 12_000;
+const MAX_DIFF_CHARS_PER_FILE = 2_500;
+const MAX_CHANGED_FILES_LINES = 100;
+const MAX_STAT_LINES = 80;
+const MAX_NAME_STATUS_LINES = 120;
+const MAX_UNTRACKED_FILE_CHARS = 16_000;
 const COMMIT_TYPES = [
   'feat: 新功能 ✨',
   'fix: 问题修复 🐛',
@@ -113,29 +118,36 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
 function buildChangeSummary(status: string) {
   const changedFiles = parsePorcelainStatus(status);
   micaLogger.logRuntime('plugin.commit', 'changes:parsed', { files: changedFiles.length });
-  const stat = safeGit(['diff', '--stat']) || safeGit(['diff', '--cached', '--stat']);
-  const nameStatus = [safeGit(['diff', '--name-status']), safeGit(['diff', '--cached', '--name-status'])]
+  const stat = safeGit(['diff', '--stat', '--no-color']) || safeGit(['diff', '--cached', '--stat', '--no-color']);
+  const nameStatus = [safeGit(['diff', '--name-status', '--no-color']), safeGit(['diff', '--cached', '--name-status', '--no-color'])]
     .filter(Boolean)
     .join('\n')
     .trim();
   const diffSamples = buildDiffSamples(changedFiles);
+  const statusSummary = summarizeStatus(changedFiles);
 
-  return [
-    'Git status:',
-    status.trim(),
+  const summary = [
+    'Git status summary:',
+    statusSummary,
     '',
     'Changed files:',
-    changedFiles.map((file) => `${file.status.padEnd(2)} ${file.path}`).join('\n'),
+    limitLines(
+      changedFiles.map((file) => `${file.status.padEnd(2)} ${file.path}`).join('\n'),
+      MAX_CHANGED_FILES_LINES,
+      changedFiles.length,
+    ),
     '',
     'Diff stat:',
-    stat.trim() || '(empty)',
+    limitLines(stat.trim() || '(empty)', MAX_STAT_LINES),
     '',
     'Name status:',
-    nameStatus || '(empty)',
+    limitLines(nameStatus || '(empty)', MAX_NAME_STATUS_LINES),
     '',
-    'Bounded diff samples:',
+    'Compact diff samples:',
     diffSamples || '(no diff samples)',
   ].join('\n');
+
+  return truncate(summary, MAX_SUMMARY_CHARS);
 }
 
 async function generateCommitMessage(agent: CommandAgent, summary: string) {
@@ -174,15 +186,12 @@ function buildDiffSamples(files: Array<{ status: string; path: string }>) {
   let remaining = MAX_TOTAL_DIFF_CHARS;
   const sections: string[] = [];
 
-  for (const file of files) {
+  for (const file of prioritizeFilesForDiff(files)) {
     if (remaining <= 0) break;
-    const diff =
-      safeGit(['diff', '--', file.path]) ||
-      safeGit(['diff', '--cached', '--', file.path]) ||
-      (file.status === '??' ? readUntrackedFileSample(file.path) : '');
+    const diff = getCompactDiff(file);
     if (!diff.trim()) continue;
 
-    const sample = truncate(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
+    const sample = truncateByHunks(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
     sections.push(`--- ${file.path}\n${sample}`);
     remaining -= sample.length;
     micaLogger.logRuntime('plugin.commit', 'diff:sampled', { file: file.path, chars: sample.length });
@@ -194,6 +203,56 @@ function buildDiffSamples(files: Array<{ status: string; path: string }>) {
   }
 
   return sections.join('\n\n');
+}
+
+function getCompactDiff(file: { status: string; path: string }) {
+  if (isLowValueDiffFile(file.path)) return lowValueDiffSummary(file);
+  const stagedDiff = safeGit(['diff', '--cached', '--unified=0', '--no-color', '--', file.path]);
+  const unstagedDiff = safeGit(['diff', '--unified=0', '--no-color', '--', file.path]);
+  const untrackedSample = file.status === '??' ? readUntrackedFileSample(file.path) : '';
+  return [
+    stagedDiff.trim() ? `[staged]\n${compactDiff(stagedDiff)}` : '',
+    unstagedDiff.trim() ? `[unstaged]\n${compactDiff(unstagedDiff)}` : '',
+    untrackedSample.trim() ? `[untracked file sample]\n${untrackedSample.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function prioritizeFilesForDiff(files: Array<{ status: string; path: string }>) {
+  return [...files].sort((a, b) => Number(isLowValueDiffFile(a.path)) - Number(isLowValueDiffFile(b.path)));
+}
+
+function isLowValueDiffFile(path: string) {
+  return (
+    /(^|\/)(bun\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(path) ||
+    /\.(lock|snap|min\.(js|css)|map)$/i.test(path) ||
+    /(^|\/)(dist|build|coverage|generated|__snapshots__)(\/|$)/.test(path)
+  );
+}
+
+function lowValueDiffSummary(file: { status: string; path: string }) {
+  const stat =
+    safeGit(['diff', '--stat', '--no-color', '--', file.path]) ||
+    safeGit(['diff', '--cached', '--stat', '--no-color', '--', file.path]);
+  return [`[low-value large/generated file: ${file.status.trim() || 'changed'}]`, stat.trim()].filter(Boolean).join('\n');
+}
+
+function compactDiff(diff: string) {
+  return diff
+    .split('\n')
+    .filter((line) => {
+      if (line.startsWith('diff --git ')) return false;
+      if (line.startsWith('index ')) return false;
+      if (line.startsWith('new file mode ')) return false;
+      if (line.startsWith('deleted file mode ')) return false;
+      if (line.startsWith('similarity index ')) return false;
+      if (line.startsWith('rename from ') || line.startsWith('rename to ')) return true;
+      if (line.startsWith('--- ') || line.startsWith('+++ ')) return false;
+      return true;
+    })
+    .join('\n')
+    .trim();
 }
 
 function parsePorcelainStatus(status: string) {
@@ -235,13 +294,66 @@ function sanitizeCommitMessage(response: string) {
   return message;
 }
 
+function summarizeStatus(files: Array<{ status: string; path: string }>) {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const key = normalizeStatus(file.status);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [`total files: ${files.length}`, ...[...counts.entries()].map(([status, count]) => `${status}: ${count}`)].join('\n');
+}
+
+function normalizeStatus(status: string) {
+  if (status === '??') return 'untracked';
+  if (status.includes('R')) return 'renamed';
+  if (status.includes('A')) return 'added';
+  if (status.includes('D')) return 'deleted';
+  if (status.includes('M')) return 'modified';
+  return status.trim() || 'changed';
+}
+
+function limitLines(text: string, maxLines: number, totalLinesOverride?: number) {
+  const lines = text.split('\n').filter(Boolean);
+  const total = totalLinesOverride ?? lines.length;
+  if (lines.length <= maxLines && total <= maxLines) return text;
+  const visible = lines.slice(0, maxLines).join('\n');
+  return `${visible}\n[omitted ${Math.max(0, total - maxLines)} lines]`;
+}
+
+function truncateByHunks(text: string, maxChars: number) {
+  if (text.length <= maxChars) return text;
+
+  const hunks = text.split(/(?=^@@ )/m);
+  if (hunks.length <= 1) return truncate(text, maxChars);
+
+  const selected: string[] = [];
+  let remaining = maxChars;
+  let omitted = 0;
+  for (const hunk of hunks) {
+    if (remaining <= 0) {
+      omitted += 1;
+      continue;
+    }
+    const sample = truncate(hunk.trim(), Math.min(remaining, Math.ceil(maxChars / Math.min(hunks.length, 4))));
+    if (!sample) continue;
+    selected.push(sample);
+    remaining -= sample.length;
+    if (sample.length < hunk.trim().length) omitted += 1;
+  }
+
+  const result = selected.join('\n');
+  return omitted > 0 ? `${truncate(result, maxChars)}\n[omitted/truncated ${omitted} hunks]` : result;
+}
+
 function readUntrackedFileSample(path: string) {
   try {
     const stat = statSync(path);
     if (!stat.isFile() || stat.size > 512 * 1024) return '';
-    const content = readFileSync(path, 'utf-8');
+    const content = readFileSync(path, 'utf-8').slice(0, MAX_UNTRACKED_FILE_CHARS);
     if (content.includes('\u0000')) return '';
-    return content;
+    return stat.size > MAX_UNTRACKED_FILE_CHARS
+      ? `${content}\n[untracked file truncated ${stat.size - MAX_UNTRACKED_FILE_CHARS} bytes]`
+      : content;
   } catch {
     return '';
   }
