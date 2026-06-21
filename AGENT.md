@@ -77,7 +77,7 @@ bun run format          # 格式化（prettier）
 
 ## 配置与数据
 
-- 用户配置由 `mica-config` 管理，本地持久化。
+- 用户配置和 userConfig 类本地数据由 `mica-config` 管理，本地持久化；例如共享输入框历史保存在 `~/.mica/input-history.json`。
 - 运行时 env：入口 `src/index.ts` 自动加载 `.env` 和 `packages/mica-agent/.env`。
 - 会话数据由 `mica-session` 管理，`SessionController` 负责序列化为 `PersistedSession`（version 1）。
 

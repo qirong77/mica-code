@@ -7,6 +7,7 @@ import {
   loadProviderModels,
   loadMissingProviderModels,
 } from './config.js';
+import { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
 
 export const micaConfig = {
   path: CONFIG_PATH,
@@ -21,6 +22,13 @@ export const micaConfig = {
   loadProviderModels,
   /** 为配置中尚未缓存模型列表的 provider 批量拉取模型。 */
   loadMissingProviderModels,
+  inputHistory: {
+    path: INPUT_HISTORY_PATH,
+    read: readInputHistory,
+    append: appendInputHistory,
+  },
 };
 
 export type { EffortOption, IMicaConfig, ProviderDefinition } from './config.js';
+export { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
+export type { InputHistoryFile } from './inputHistory.js';

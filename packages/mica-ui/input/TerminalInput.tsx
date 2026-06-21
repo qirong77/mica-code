@@ -1,4 +1,5 @@
 import { Box, Text, useInput, useTerminalSize } from '@anthropic/ink';
+import { micaConfig } from '@packages/mica-config/index.js';
 import React from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { SimpleTextInput } from './CursorInput.js';
@@ -20,7 +21,6 @@ const EXIT_CONFIRM_TIMEOUT_MS = 800;
 
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
-  const [prevInputs, setPrevInputs] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const columns = process.stdout.columns - 6;
   const activePluginUIs = useScheduleState(pluginUIs);
@@ -211,7 +211,7 @@ function TerminalInput() {
     (value: string) => {
       if (!value.trim() || input.disabled.get() || activePluginUIs.some((x) => x.onInput)) return;
       const trimmed = value.trim();
-      setPrevInputs((prev) => [...prev, trimmed]);
+      micaConfig.inputHistory.append(trimmed);
       setHistoryIndex(-1);
       input.text.set('');
       setLocalText('');
@@ -240,30 +240,36 @@ function TerminalInput() {
 
   const onHistoryUp = useCallback(() => {
     if (input.disabled.get() || preserveInputOnPluginHandle) return;
-    if (prevInputs.length === 0) return;
-    const newIndex = historyIndex < prevInputs.length - 1 ? historyIndex + 1 : historyIndex;
+    const history = micaConfig.inputHistory.read();
+    if (history.length === 0) return;
+    const newIndex = historyIndex < history.length - 1 ? historyIndex + 1 : historyIndex;
     if (newIndex !== historyIndex) {
       setHistoryIndex(newIndex);
-      const historyValue = prevInputs[prevInputs.length - 1 - newIndex]!;
+      const historyValue = history[history.length - 1 - newIndex]!;
       setLocalText(historyValue);
       setCursorOffset(historyValue.length);
+      input.text.set(historyValue);
     }
-  }, [historyIndex, prevInputs, preserveInputOnPluginHandle]);
+  }, [historyIndex, preserveInputOnPluginHandle]);
 
   const onHistoryDown = useCallback(() => {
     if (input.disabled.get() || preserveInputOnPluginHandle) return;
+    const history = micaConfig.inputHistory.read();
     if (historyIndex > 0) {
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
-      const historyValue = prevInputs[prevInputs.length - 1 - newIndex]!;
+      const historyValue = history[history.length - 1 - newIndex];
+      if (!historyValue) return;
       setLocalText(historyValue);
       setCursorOffset(historyValue.length);
+      input.text.set(historyValue);
     } else if (historyIndex === 0) {
       setHistoryIndex(-1);
       setLocalText('');
       setCursorOffset(0);
+      input.text.set('');
     }
-  }, [historyIndex, prevInputs, preserveInputOnPluginHandle]);
+  }, [historyIndex, preserveInputOnPluginHandle]);
 
   const inputDisabled = useScheduleState(input.disabled);
 
