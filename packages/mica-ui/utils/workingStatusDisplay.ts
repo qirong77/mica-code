@@ -37,7 +37,7 @@ export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingSta
       return { text: `completed${elapsed}`, color: themeColors.success, spinning: false };
     }
     case 'error':
-      return { text: status.message ? `error: ${status.message}` : 'error', color: themeColors.error, spinning: false };
+      return { text: 'error', color: themeColors.error, spinning: false };
     case 'idle':
       return { text: 'idle', color: themeColors.dim, spinning: false };
   }

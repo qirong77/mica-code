@@ -416,13 +416,12 @@ export class LocalRuntimeController implements RuntimeController {
 
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
-      const message = error instanceof Error ? error.message : String(error);
       if (session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
           responseText: '',
           thinkingText: '',
-          workingStatus: { type: 'error', message },
+          workingStatus: { type: 'error' },
           agentTurnLogItems: [
             micaUi.createErrorLogItem({
               id: `error-${Date.now()}`,

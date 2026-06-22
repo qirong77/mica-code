@@ -74,12 +74,13 @@ export const Conversation = (): React.ReactNode => {
       {currentPendingInputs.map((pendingInput, index) => (
         <Box key={`pending-${index}`} paddingY={1} flexDirection="row">
           <Text color={themeColors.dim}>{'\u258c'}</Text>
+          <Text color={themeColors.dim}>
+            {'（等待当前 agent 本轮迭代完成后发送，shift + ← 重新编辑'}
+            {'）'}
+            {'\n'}
+          </Text>
           <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="row">
             <Text color={themeColors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
-            <Text color={themeColors.dim}>
-              {'（等待当前 agent 本轮迭代完成后发送，shift + ← 重新编辑'}
-              {'）'}
-            </Text>
           </Box>
         </Box>
       ))}

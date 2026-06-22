@@ -8,7 +8,7 @@ export function reportRuntimeError(error: unknown, title = '运行错误') {
   micaLogger.logRuntime('runtime', 'error', { title, message }, 'error');
   micaUi.conversation.clearResponseText();
   micaUi.panels.thinkingText.set('');
-  micaUi.panels.status.error(message);
+  micaUi.panels.status.error();
   micaUi.panels.setAgentTurnLogItems([
     micaUi.createErrorLogItem({
       id: `error-${Date.now()}`,
@@ -83,7 +83,7 @@ export function applyStatus(status: AgentRuntimeStatus) {
       micaUi.panels.status.completed(status.elapsedMs);
       break;
     case 'error':
-      micaUi.panels.status.error(status.message);
+      micaUi.panels.status.error();
       break;
   }
 }
