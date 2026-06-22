@@ -17,6 +17,10 @@ export function createModelCommand(
     action: () => {
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
+      if (services.isAgentBusy(targetAgent)) {
+        services.showMessage('Agent is busy; wait or abort before switching model');
+        return;
+      }
       micaLogger.logRuntime('plugin.model', 'opened', {
         current: targetAgent.config.model,
         provider: targetAgent.config.provider.id,

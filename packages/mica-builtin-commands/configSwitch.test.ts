@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { micaUi } from '@packages/mica-ui/index.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
@@ -61,6 +62,52 @@ describe('compactBeforeConfigSwitch', () => {
     ).rejects.toThrow('summarizer unavailable');
   });
 });
+
+describe('config switch commands', () => {
+  it.each([
+    ['provider', 'Agent is busy; wait or abort before switching provider'],
+    ['model', 'Agent is busy; wait or abort before switching model'],
+    ['effort', 'Agent is busy; wait or abort before switching effort'],
+  ] as const)('does not open the %s selector while the agent is busy', async (commandName, message) => {
+    const services = makeServices(async () => {
+      throw new Error('compact should not run');
+    });
+    services.isAgentBusy = vi.fn(() => true);
+    services.showMessage = vi.fn();
+    const setPluginUIs = vi.spyOn(micaUi.panels, 'setPluginUIs');
+    const agent = makeAgent([]);
+    const session = makeSession();
+
+    try {
+      const command = await makeConfigSwitchCommand(commandName, agent, session, services);
+      await command.action();
+
+      expect(services.showMessage).toHaveBeenCalledWith(message);
+      expect(setPluginUIs).not.toHaveBeenCalled();
+    } finally {
+      setPluginUIs.mockRestore();
+      micaUi.panels.clearPluginUIs();
+    }
+  });
+});
+
+async function makeConfigSwitchCommand(
+  commandName: 'provider' | 'model' | 'effort',
+  agent: CommandAgent,
+  session: CommandSessionController,
+  services: CommandRuntimeServices,
+) {
+  if (commandName === 'provider') {
+    const { createProviderCommand } = await import('./provider.js');
+    return createProviderCommand(agent, session, services);
+  }
+  if (commandName === 'model') {
+    const { createModelCommand } = await import('./model.js');
+    return createModelCommand(agent, session, services);
+  }
+  const { createEffortCommand } = await import('./effort.js');
+  return createEffortCommand(agent, session, services);
+}
 
 function makeAgent(messages: unknown[]): CommandAgent {
   return {

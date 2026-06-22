@@ -17,6 +17,10 @@ export function createProviderCommand(
     action: () => {
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
+      if (services.isAgentBusy(targetAgent)) {
+        services.showMessage('Agent is busy; wait or abort before switching provider');
+        return;
+      }
       const config = micaConfig.get();
       micaLogger.logRuntime('plugin.provider', 'opened', {
         current: config.provider,

@@ -19,6 +19,10 @@ export function createEffortCommand(
     action: () => {
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
+      if (services.isAgentBusy(targetAgent)) {
+        services.showMessage('Agent is busy; wait or abort before switching effort');
+        return;
+      }
       micaLogger.logRuntime('plugin.effort', 'opened', {
         current: targetAgent.config.provider.supportsEffort !== false ? targetAgent.config.effort : 'none',
         provider: targetAgent.config.provider.id,
