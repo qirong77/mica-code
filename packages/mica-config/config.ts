@@ -3,32 +3,57 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import defaultConfig from './default.json';
+import modelRules from './model-rules.json';
+import { readLastUsedConfig, updateLastUsedConfig, type LastUsedConfig } from './micaStorage.js';
 
-export const CONFIG_PATH = resolve(homedir(), '.mica', 'config.json');
-export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
+export const CONFIG_PATH = resolveMicaHomePath('config.json');
+export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number];
+export type EffortMap = Partial<Record<EffortOption, string | null>>;
+export const DEFAULT_EFFORT_MAP: EffortMap = {
+  none: null,
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+};
 
 export interface ProviderDefinition {
   id: string;
   name?: string;
   api_base: string;
   api_key?: string;
-  model: string;
-  effort: EffortOption;
+  model?: string;
+  effort?: EffortOption;
   models?: string[];
-  contextWindowSize: number;
+  contextWindowSize?: number;
   supportsEffort?: boolean;
   get_model_url?: string;
 }
 
-export interface IMicaConfig {
+export interface PersistedMicaConfig {
+  providers: ProviderDefinition[];
+  [key: string]: unknown;
+}
+
+export interface IMicaConfig extends PersistedMicaConfig {
   provider: string;
   model: string;
   effort: EffortOption;
   contextWindowSize: number;
   providers: ProviderDefinition[];
 }
+
+export type ModelRule = {
+  name?: string;
+  modelKeysIncludes: string[];
+  contextSize?: number | string;
+  enableEffort?: boolean;
+  effortMap?: EffortMap;
+};
+
+const MODEL_RULES = modelRules as ModelRule[];
 
 export type ConfigValidationSeverity = 'error' | 'warning';
 
@@ -58,13 +83,35 @@ export class ConfigValidationError extends Error {
 const configAtom = atom<IMicaConfig>(readConfig());
 
 export function readConfig(): IMicaConfig {
+  const persisted = readPersistedConfig();
+  const legacyLastUsed = readLegacyLastUsedConfig(persisted);
+  const storedLastUsed = readLastUsedConfig();
+  const legacyProviderLastUsed = readLegacyProviderLastUsedConfig(
+    persisted,
+    legacyLastUsed.provider ?? storedLastUsed.provider,
+  );
+  const lastUsed = { ...legacyProviderLastUsed, ...legacyLastUsed, ...storedLastUsed };
+  const hasLegacyRuntimeState = hasLegacyRuntimeFields(persisted);
+  const hasLegacyProviderRuntimeState = hasLegacyProviderRuntimeFields(persisted);
+  const normalizedPersisted =
+    hasLegacyRuntimeState || hasLegacyProviderRuntimeState ? stripRuntimeFields(persisted) : persisted;
+  if (hasLegacyRuntimeState || hasLegacyProviderRuntimeState) {
+    writePersistedConfig(normalizedPersisted);
+  }
+  if ((hasLegacyRuntimeState || hasLegacyProviderRuntimeState) && hasLastUsedConfig(lastUsed)) {
+    updateLastUsedConfig(lastUsed);
+  }
+  return mergeRuntimeConfig(normalizedPersisted, lastUsed);
+}
+
+function readPersistedConfig(): PersistedMicaConfig {
   ensureConfigFile();
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as IMicaConfig;
+    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as PersistedMicaConfig;
   } catch {
     backupInvalidConfig();
     writeDefaultConfig();
-    return defaultConfig as IMicaConfig;
+    return defaultConfig as PersistedMicaConfig;
   }
 }
 
@@ -75,9 +122,123 @@ export function getConfig() {
 export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);
-  ensureConfigDir();
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+  writePersistedConfig(stripRuntimeFields(next));
+  updateLastUsedConfig({
+    provider: next.provider,
+    model: next.model,
+    effort: next.effort,
+    contextWindowSize: next.contextWindowSize,
+  });
   return next;
+}
+
+function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfig): IMicaConfig {
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
+  const provider = providers.find((item) => item.id === providerId);
+  const model = resolveLastUsedModel(provider, lastUsed.model);
+  const effort = resolveLastUsedEffort(provider, lastUsed.effort, model);
+  return {
+    ...config,
+    providers,
+    provider: providerId,
+    model,
+    effort,
+    contextWindowSize: getModelContextWindowSizeFromConfig(model),
+  };
+}
+
+function resolveLastUsedProvider(providers: ProviderDefinition[], providerId: unknown): string {
+  if (isNonEmptyString(providerId) && providers.some((provider) => provider.id === providerId)) return providerId;
+  return providers[0]?.id ?? '';
+}
+
+function resolveLastUsedModel(provider: ProviderDefinition | undefined, model: unknown): string {
+  if (!provider) return isNonEmptyString(model) ? model : '';
+  if (isNonEmptyString(model) && providerSupportsModel(provider, model)) return model;
+  return firstProviderModel(provider) ?? '';
+}
+
+function resolveLastUsedEffort(provider: ProviderDefinition | undefined, effort: unknown, model: string): EffortOption {
+  const fallback = isEffortOption(provider?.effort) ? provider.effort : 'medium';
+  const selected = isEffortOption(effort) ? effort : fallback;
+  return provider ? clampProviderEffort(provider, selected, model) : selected;
+}
+
+function providerSupportsModel(provider: ProviderDefinition, model: string): boolean {
+  if (provider.model === model) return true;
+  if (!Array.isArray(provider.models) || provider.models.length === 0) return true;
+  return provider.models.includes(model);
+}
+
+function readLegacyLastUsedConfig(config: PersistedMicaConfig): LastUsedConfig {
+  return {
+    provider: isNonEmptyString(config.provider) ? config.provider : undefined,
+    model: isNonEmptyString(config.model) ? config.model : undefined,
+    effort: isEffortOption(config.effort) ? config.effort : undefined,
+    contextWindowSize: isPositiveNumber(config.contextWindowSize) ? config.contextWindowSize : undefined,
+  };
+}
+
+function readLegacyProviderLastUsedConfig(config: PersistedMicaConfig, providerId: unknown): LastUsedConfig {
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const provider =
+    (isNonEmptyString(providerId) ? providers.find((item) => item.id === providerId) : undefined) ?? providers[0];
+  if (!provider) return {};
+  return {
+    provider: provider.id,
+    model: isNonEmptyString(provider.model) ? provider.model : firstProviderModel(provider),
+    effort: isEffortOption(provider.effort) ? provider.effort : undefined,
+    contextWindowSize: isPositiveNumber(provider.contextWindowSize) ? provider.contextWindowSize : undefined,
+  };
+}
+
+function hasLastUsedConfig(lastUsed: LastUsedConfig): boolean {
+  return Boolean(lastUsed.provider || lastUsed.model || lastUsed.effort || lastUsed.contextWindowSize);
+}
+
+function hasLegacyRuntimeFields(config: PersistedMicaConfig): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(config, 'provider') ||
+    Object.prototype.hasOwnProperty.call(config, 'model') ||
+    Object.prototype.hasOwnProperty.call(config, 'effort') ||
+    Object.prototype.hasOwnProperty.call(config, 'contextWindowSize')
+  );
+}
+
+function hasLegacyProviderRuntimeFields(config: PersistedMicaConfig): boolean {
+  if (!Array.isArray(config.providers)) return false;
+  return config.providers.some(
+    (provider) =>
+      isRecord(provider) &&
+      (Object.prototype.hasOwnProperty.call(provider, 'model') ||
+        Object.prototype.hasOwnProperty.call(provider, 'effort') ||
+        Object.prototype.hasOwnProperty.call(provider, 'contextWindowSize') ||
+        (Object.prototype.hasOwnProperty.call(provider, 'models') && isNonEmptyString(provider.get_model_url))),
+  );
+}
+
+function stripRuntimeFields(config: PersistedMicaConfig | IMicaConfig): PersistedMicaConfig {
+  const {
+    provider: _provider,
+    model: _model,
+    effort: _effort,
+    contextWindowSize: _contextWindowSize,
+    ...persisted
+  } = config;
+  return {
+    ...persisted,
+    providers: Array.isArray(persisted.providers) ? persisted.providers.map(stripProviderRuntimeFields) : [],
+  } as PersistedMicaConfig;
+}
+
+function stripProviderRuntimeFields(provider: ProviderDefinition): ProviderDefinition {
+  const { model: _model, effort: _effort, contextWindowSize: _contextWindowSize, models, ...persisted } = provider;
+  if (provider.get_model_url) return persisted;
+  return {
+    ...persisted,
+    ...(models ? { models } : {}),
+  };
 }
 
 export function validateConfig(config: IMicaConfig): ConfigValidationResult {
@@ -153,7 +314,9 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
         message: `provider "${provider.id}" 的 api_base 不能为空。`,
       });
     }
-    if (!isEffortOption(provider.effort)) {
+    const hasProviderEffort = Object.prototype.hasOwnProperty.call(provider, 'effort');
+    const providerEffort = isEffortOption(provider.effort) ? provider.effort : undefined;
+    if (hasProviderEffort && !providerEffort) {
       issues.push({
         severity: invalidProviderSeverity,
         code: 'provider_effort_invalid',
@@ -161,7 +324,31 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
         message: `provider "${provider.id}" 的 effort 必须是 ${EFFORT_OPTIONS.join(' | ')}。`,
       });
     }
-    if (!isPositiveNumber(provider.contextWindowSize)) {
+    const providerModel = firstProviderModel(provider as unknown as ProviderDefinition);
+    const providerEffortOptions =
+      providerEffort && isNonEmptyString(provider.api_base) && providerModel
+        ? getProviderEffortOptions(provider as unknown as ProviderDefinition, providerModel)
+        : undefined;
+    if (providerEffort && provider.supportsEffort === false && providerEffort !== 'none') {
+      issues.push({
+        severity: 'warning',
+        code: 'provider_effort_ignored',
+        path: `providers[${index}].effort`,
+        message: `provider "${provider.id}" 不使用 reasoning effort，建议设置为 none。`,
+      });
+    } else if (providerEffort && providerEffortOptions && !providerEffortOptions.includes(providerEffort)) {
+      issues.push({
+        severity: 'warning',
+        code: 'provider_effort_unsupported',
+        path: `providers[${index}].effort`,
+        message: `provider "${provider.id}" 的默认 model "${providerModel}" 不支持 effort "${providerEffort}"。`,
+        suggestion: `可用 effort: ${providerEffortOptions.join(' | ')}。`,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(provider, 'contextWindowSize') &&
+      !isPositiveNumber(provider.contextWindowSize)
+    ) {
       issues.push({
         severity: invalidProviderSeverity,
         code: 'provider_context_window_invalid',
@@ -213,13 +400,15 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
     const currentProviderIndex = providers.indexOf(currentProvider);
     if (!isNonEmptyString(config.model)) {
       issues.push({
-        severity: 'error',
+        severity: isNonEmptyString(currentProvider.get_model_url) ? 'warning' : 'error',
         code: 'model_empty',
         path: 'model',
         message: '顶层 "model" 不能为空。',
-        suggestion: isNonEmptyString(currentProvider.model)
-          ? `可以把 "model" 设置为当前 provider 的默认模型 "${currentProvider.model}"。`
-          : undefined,
+        suggestion: isNonEmptyString(currentProvider.get_model_url)
+          ? `provider "${currentProvider.id}" 配置了 get_model_url，模型列表会在运行时获取。`
+          : firstProviderModel(currentProvider)
+            ? `可以把 "model" 设置为当前 provider 的默认模型 "${firstProviderModel(currentProvider)}"。`
+            : undefined,
       });
     } else if (
       isNonEmptyStringArray(currentProvider.models) &&
@@ -246,12 +435,24 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
       });
     }
 
+    const currentProviderEffortOptions =
+      isEffortOption(config.effort) && isNonEmptyString(currentProvider.api_base) && isNonEmptyString(config.model)
+        ? getProviderEffortOptions(currentProvider, config.model)
+        : undefined;
     if (currentProvider.supportsEffort === false && config.effort !== 'none') {
       issues.push({
         severity: 'warning',
         code: 'effort_ignored',
         path: 'effort',
         message: `当前 provider "${currentProvider.id}" 不使用 reasoning effort，运行时会显示为 none。`,
+      });
+    } else if (currentProviderEffortOptions && !currentProviderEffortOptions.includes(config.effort)) {
+      issues.push({
+        severity: 'error',
+        code: 'effort_not_supported_by_provider',
+        path: 'effort',
+        message: `当前 provider "${currentProvider.id}" 的 model "${config.model}" 不支持 effort "${config.effort}"。`,
+        suggestion: `可用 effort: ${currentProviderEffortOptions.join(' | ')}。`,
       });
     }
   }
@@ -302,21 +503,30 @@ export async function loadProviderModels(providerId: string): Promise<string[]> 
     throw new Error(`Invalid model list for provider ${provider.id}`);
   }
 
-  updateConfig((config) => {
-    const providers = config.providers.map((item) =>
-      item.id === providerId
-        ? {
-            ...item,
-            models,
-            model: models.includes(item.model) ? item.model : (models[0] ?? item.model),
-          }
-        : item,
-    );
+  updateRuntimeConfig((config) => {
+    const providers = config.providers.map((item) => {
+      if (item.id !== providerId) return item;
+      const currentModel = firstProviderModel(item) ?? '';
+      const model = models.includes(currentModel) ? currentModel : models[0]!;
+      const provider = {
+        ...item,
+        models,
+        model,
+        contextWindowSize: getModelContextWindowSizeFromConfig(model),
+      };
+      return {
+        ...provider,
+        effort: clampProviderEffort(provider, item.effort ?? config.effort, model),
+      };
+    });
     const current = config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
+    const model = current && !models.includes(config.model) ? models[0]! : config.model;
     return {
       ...config,
       providers,
-      model: current && !models.includes(config.model) ? models[0] || current.model : config.model,
+      model,
+      contextWindowSize: current ? getModelContextWindowSizeFromConfig(model) : config.contextWindowSize,
+      effort: current ? clampProviderEffort(current, config.effort, model) : config.effort,
     };
   });
   return models;
@@ -335,6 +545,139 @@ export async function loadMissingProviderModels() {
   );
 }
 
+function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
+  const next = updater(getConfig());
+  configAtom.set(next);
+  updateLastUsedConfig({
+    provider: next.provider,
+    model: next.model,
+    effort: next.effort,
+    contextWindowSize: next.contextWindowSize,
+  });
+  return next;
+}
+
+export function getProviderEffortOptions(
+  provider: ProviderDefinition,
+  model = firstProviderModel(provider) ?? '',
+): EffortOption[] {
+  if (provider.supportsEffort === false) return ['none'];
+  const effortMap = getEffortMapFromConfig(model);
+  if (!effortMap) return ['none'];
+  return EFFORT_OPTIONS.filter((effort) => hasOwnEffort(effortMap, effort));
+}
+
+export function clampProviderEffort(
+  provider: ProviderDefinition,
+  effort: EffortOption,
+  model = firstProviderModel(provider) ?? '',
+): EffortOption {
+  const options = getProviderEffortOptions(provider, model);
+  if (options.includes(effort)) return effort;
+  const requestedIndex = EFFORT_OPTIONS.indexOf(effort);
+  if (requestedIndex >= 0) {
+    for (let index = requestedIndex + 1; index < EFFORT_OPTIONS.length; index++) {
+      const candidate = EFFORT_OPTIONS[index];
+      if (options.includes(candidate)) return candidate;
+    }
+    for (let index = requestedIndex - 1; index >= 0; index--) {
+      const candidate = EFFORT_OPTIONS[index];
+      if (options.includes(candidate)) return candidate;
+    }
+  }
+  return options[0] ?? 'none';
+}
+
+export type ResolvedEffortParams = Record<string, unknown>;
+
+export function resolveProviderEffortParams(
+  provider: ProviderDefinition,
+  effort: EffortOption,
+  model = firstProviderModel(provider) ?? '',
+): ResolvedEffortParams {
+  if (provider.supportsEffort === false) return {};
+
+  const effortMap = getEffortMapFromConfig(model);
+  if (!effortMap || !hasOwnEffort(effortMap, effort)) return {};
+
+  const mapped = effortMap[effort];
+  if (effort === 'none' || mapped === null) return resolveDisabledEffortParams(provider, mapped);
+
+  switch (detectProviderEffortParamFormat(provider)) {
+    case 'deepseek':
+    case 'zai':
+      return { thinking: { type: 'enabled' }, reasoning_effort: mapped ?? effort };
+    case 'openrouter':
+      return { reasoning: { effort: mapped ?? effort } };
+    case 'openai':
+      return { reasoning_effort: mapped ?? effort };
+  }
+}
+
+export function getEffortMapFromConfig(modelId: string): EffortMap | null {
+  const rule = findModelRule(modelId);
+  if (rule?.enableEffort === false) return null;
+  return rule?.effortMap ?? DEFAULT_EFFORT_MAP;
+}
+
+export function getModelContextWindowSizeFromConfig(modelId: string): number {
+  return parseModelContextSize(findModelRule(modelId)?.contextSize ?? DEFAULT_MODEL_CONTEXT_SIZE);
+}
+
+type ProviderEffortParamFormat = 'openai' | 'deepseek' | 'zai' | 'openrouter';
+
+function findModelRule(modelId: string): ModelRule | undefined {
+  const normalizedModelId = modelId.toLowerCase();
+  return MODEL_RULES.find((rule) =>
+    rule.modelKeysIncludes.map((key) => key.toLowerCase()).some((key) => normalizedModelId.includes(key)),
+  );
+}
+
+function parseModelContextSize(value: number | string): number {
+  if (typeof value === 'number') return Math.max(1, Math.round(value * 1000));
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/^(\d+(?:\.\d+)?)([km])?$/);
+  if (!match) return DEFAULT_MODEL_CONTEXT_SIZE * 1000;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return DEFAULT_MODEL_CONTEXT_SIZE * 1000;
+  const unit = match[2];
+  if (unit === 'm') return Math.round(amount * 1_000_000);
+  return Math.round(amount * 1000);
+}
+
+function detectProviderEffortParamFormat(
+  provider: Pick<ProviderDefinition, 'id' | 'api_base'>,
+): ProviderEffortParamFormat {
+  const id = typeof provider.id === 'string' ? provider.id.toLowerCase() : '';
+  const apiBase = typeof provider.api_base === 'string' ? provider.api_base.toLowerCase() : '';
+  if (id.includes('deepseek') || apiBase.includes('deepseek.com')) return 'deepseek';
+  if (id === 'zai' || id.includes('glm') || apiBase.includes('api.z.ai') || apiBase.includes('bigmodel.cn'))
+    return 'zai';
+  if (id.includes('openrouter') || apiBase.includes('openrouter.ai')) return 'openrouter';
+  return 'openai';
+}
+
+function hasOwnEffort(effortMap: EffortMap, effort: EffortOption): boolean {
+  return Object.prototype.hasOwnProperty.call(effortMap, effort);
+}
+
+function resolveDisabledEffortParams(
+  provider: Pick<ProviderDefinition, 'id' | 'api_base'>,
+  offValue: string | null | undefined,
+): ResolvedEffortParams {
+  switch (detectProviderEffortParamFormat(provider)) {
+    case 'deepseek':
+    case 'zai':
+      return offValue
+        ? { thinking: { type: 'disabled' }, reasoning_effort: offValue }
+        : { thinking: { type: 'disabled' } };
+    case 'openrouter':
+      return { reasoning: { effort: offValue ?? 'none' } };
+    case 'openai':
+      return offValue ? { reasoning_effort: offValue } : {};
+  }
+}
+
 function ensureConfigFile() {
   if (existsSync(CONFIG_PATH)) return;
   ensureConfigDir();
@@ -346,8 +689,12 @@ function ensureConfigDir() {
 }
 
 function writeDefaultConfig() {
+  writePersistedConfig(defaultConfig as PersistedMicaConfig);
+}
+
+function writePersistedConfig(config: PersistedMicaConfig) {
   ensureConfigDir();
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf-8');
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(stripRuntimeFields(config), null, 2)}\n`, 'utf-8');
 }
 
 function backupInvalidConfig() {
@@ -392,7 +739,7 @@ function modelNotSupportedSuggestion(
   if (matchingProviderIds.length > 1) {
     return `当前 model "${model}" 可匹配这些 provider: ${matchingProviderIds.join(', ')}。`;
   }
-  const firstModel = currentProvider.models?.find(isNonEmptyString) ?? currentProvider.model;
+  const firstModel = firstProviderModel(currentProvider);
   if (isNonEmptyString(firstModel)) {
     return `可以把 "model" 改为当前 provider 支持的模型，例如 "${firstModel}"。`;
   }
@@ -409,6 +756,12 @@ function findProvidersForModel(config: IMicaConfig, providers: unknown[]): strin
       return matchesModel ? [provider.id] : [];
     })
     .filter(isNonEmptyString);
+}
+
+function firstProviderModel(provider: ProviderDefinition | Record<string, unknown>): string | undefined {
+  if (isNonEmptyString(provider.model)) return provider.model;
+  if (Array.isArray(provider.models)) return provider.models.find(isNonEmptyString);
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -457,9 +810,14 @@ function isModelListResponse(payload: unknown): payload is { data: unknown[] } {
 function isModelObject(item: unknown): item is { id: string } {
   return Boolean(
     item &&
-      typeof item === 'object' &&
-      'id' in item &&
-      typeof (item as { id?: unknown }).id === 'string' &&
-      (item as { id: string }).id.length > 0,
+    typeof item === 'object' &&
+    'id' in item &&
+    typeof (item as { id?: unknown }).id === 'string' &&
+    (item as { id: string }).id.length > 0,
   );
+}
+
+function resolveMicaHomePath(...parts: string[]): string {
+  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
+  return resolve(micaHome, ...parts);
 }

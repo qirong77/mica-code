@@ -9,8 +9,20 @@ import {
   formatConfigValidationIssues,
   loadProviderModels,
   loadMissingProviderModels,
+  getEffortMapFromConfig,
+  getModelContextWindowSizeFromConfig,
+  getProviderEffortOptions,
+  clampProviderEffort,
+  resolveProviderEffortParams,
 } from './config.js';
 import { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
+import {
+  MICA_STORAGE_PATH,
+  readLastUsedConfig,
+  readMicaStorage,
+  updateLastUsedConfig,
+  updateMicaStorage,
+} from './micaStorage.js';
 
 export const micaConfig = {
   path: CONFIG_PATH,
@@ -27,10 +39,29 @@ export const micaConfig = {
   assertValid: assertValidConfig,
   /** 把配置校验问题格式化成面向用户的可读文本。 */
   formatValidationIssues: formatConfigValidationIssues,
-  /** 拉取指定 provider 的模型列表并更新本地配置。 */
+  /** 拉取指定 provider 的模型列表并缓存到内存运行态配置，不写回 config.json。 */
   loadProviderModels,
-  /** 为配置中尚未缓存模型列表的 provider 批量拉取模型。 */
+  /** 为配置中尚未加载模型列表的动态 provider 批量拉取模型。 */
   loadMissingProviderModels,
+  /** 按模型名从内置规则读取 effort 映射；未命中时返回默认四档。 */
+  getEffortMapFromConfig,
+  /** 按模型名从内置规则读取 context window token 数；未命中时返回 256K。 */
+  getModelContextWindowSizeFromConfig,
+  /** 获取当前 provider 实际可选的 effort。 */
+  getProviderEffortOptions,
+  /** 把 effort 修正到当前 provider 支持的最近可用值。 */
+  clampProviderEffort,
+  /** 把统一 effort 转换为 provider 请求参数。 */
+  resolveProviderEffortParams,
+  storage: {
+    path: MICA_STORAGE_PATH,
+    read: readMicaStorage,
+    update: updateMicaStorage,
+    lastUsed: {
+      read: readLastUsedConfig,
+      update: updateLastUsedConfig,
+    },
+  },
   inputHistory: {
     path: INPUT_HISTORY_PATH,
     read: readInputHistory,
@@ -43,10 +74,19 @@ export {
   validateConfig,
   assertValidConfig,
   formatConfigValidationIssues,
+  getEffortMapFromConfig,
+  getModelContextWindowSizeFromConfig,
+  getProviderEffortOptions,
+  clampProviderEffort,
+  resolveProviderEffortParams,
 } from './config.js';
 export type {
   EffortOption,
+  EffortMap,
+  ModelRule,
+  ResolvedEffortParams,
   IMicaConfig,
+  PersistedMicaConfig,
   ProviderDefinition,
   ConfigValidationIssue,
   ConfigValidationResult,
@@ -54,3 +94,11 @@ export type {
 } from './config.js';
 export { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
 export type { InputHistoryFile } from './inputHistory.js';
+export {
+  MICA_STORAGE_PATH,
+  readLastUsedConfig,
+  readMicaStorage,
+  updateLastUsedConfig,
+  updateMicaStorage,
+} from './micaStorage.js';
+export type { LastUsedConfig, MicaStorageFile } from './micaStorage.js';

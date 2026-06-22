@@ -1,6 +1,13 @@
 import mitt from 'mitt';
 import type { OpenAI } from 'openai';
-import { micaAgent, type AgentQueryContent, type AgentSnapshot, type IAgent, type AgentUsageRecord, type OpenAIClientOptions } from '@packages/mica-agent/index.js';
+import {
+  micaAgent,
+  type AgentQueryContent,
+  type AgentSnapshot,
+  type IAgent,
+  type AgentUsageRecord,
+  type OpenAIClientOptions,
+} from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaConfig, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
@@ -32,8 +39,10 @@ export type AgentRuntimeSnapshot = {
   lastUsage: AgentUsageRecord | undefined;
 };
 
+type RuntimeProviderDefinition = ProviderDefinition & { contextWindowSize: number };
+
 type AgentRuntimeConfig = {
-  provider: ProviderDefinition;
+  provider: RuntimeProviderDefinition;
   model: string;
   effort: EffortOption;
 };
@@ -175,11 +184,16 @@ export class AgentRuntime {
     if (!this.client) return false;
     this.trimAbortedRunUsage();
     const messages = [...(this.client.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[])];
-    const hasCurrentTurn = messages.some((message) =>
-      message.role === 'user' && isSameOpenAIUserContent(message.content, question),
+    const hasCurrentTurn = messages.some(
+      (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
     );
     if (hasCurrentTurn) {
-      micaLogger.logRuntime('agent', 'turn:preserved_aborted_complete_iteration', { messages: messages.length }, 'warn');
+      micaLogger.logRuntime(
+        'agent',
+        'turn:preserved_aborted_complete_iteration',
+        { messages: messages.length },
+        'warn',
+      );
       return true;
     }
 
@@ -189,7 +203,12 @@ export class AgentRuntime {
       messages.push({ role: 'assistant', content: answer });
     }
     this.client.messages = messages as typeof this.client.messages;
-    micaLogger.logRuntime('agent', 'turn:preserved_aborted', { messages: messages.length, hasPartialAnswer: Boolean(answer) }, 'warn');
+    micaLogger.logRuntime(
+      'agent',
+      'turn:preserved_aborted',
+      { messages: messages.length, hasPartialAnswer: Boolean(answer) },
+      'warn',
+    );
     return false;
   }
 
@@ -232,7 +251,12 @@ export class AgentRuntime {
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       this.events.emit('status', { type: 'error', message });
-      micaLogger.logRuntime('agent', 'run:not_configured', { runId, provider: this.currentConfig.provider.id }, 'error');
+      micaLogger.logRuntime(
+        'agent',
+        'run:not_configured',
+        { runId, provider: this.currentConfig.provider.id },
+        'error',
+      );
       throw new Error(message);
     }
 
@@ -338,7 +362,12 @@ export class AgentRuntime {
       apiKey: this.currentConfig.provider.api_key,
       baseURL: this.currentConfig.provider.api_base,
       model: this.currentConfig.model,
-      effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+      effort: micaConfig.clampProviderEffort(
+        this.currentConfig.provider,
+        this.currentConfig.effort,
+        this.currentConfig.model,
+      ),
+      provider: this.currentConfig.provider,
     };
   }
 
@@ -349,10 +378,15 @@ export class AgentRuntime {
     if (!provider) {
       throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
     }
+    const model = config.model;
+    const normalizedProvider = {
+      ...provider,
+      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+    };
     return {
-      provider,
-      model: config.model,
-      effort: config.effort,
+      provider: normalizedProvider,
+      model,
+      effort: micaConfig.clampProviderEffort(normalizedProvider, config.effort, model),
     };
   }
 
@@ -362,10 +396,15 @@ export class AgentRuntime {
     if (!provider) {
       throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
     }
+    const model = snapshot.model || provider.model || provider.models?.[0] || '';
+    const normalizedProvider = {
+      ...provider,
+      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+    };
     return {
-      provider,
-      model: snapshot.model || provider.model,
-      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
+      provider: normalizedProvider,
+      model,
+      effort: micaConfig.clampProviderEffort(normalizedProvider, snapshot.effort, model),
     };
   }
 
@@ -401,7 +440,9 @@ function contentToText(content: AgentQueryContent): string {
     .join('\n');
 }
 
-function toOpenAIUserContent(content: AgentQueryContent): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
+function toOpenAIUserContent(
+  content: AgentQueryContent,
+): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
   if (typeof content === 'string') return content;
   return content.map((part) => {
     if (part.type === 'text') return { type: 'text', text: part.text };

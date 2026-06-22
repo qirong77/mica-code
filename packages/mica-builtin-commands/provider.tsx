@@ -60,6 +60,7 @@ async function applyProviderSelection(
     }
     micaLogger.logRuntime('plugin.provider', 'selected', { from: agent.config.provider.id, to: providerId });
     await compactBeforeConfigSwitch(agent, sessionController, services, 'provider');
+    await loadProviderModelsForSwitch(providerId, services);
 
     const next = applyConfigSwitchUpdate({
       agent,
@@ -71,43 +72,22 @@ async function applyProviderSelection(
           micaLogger.logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
           throw new Error(`Provider not found: ${providerId}`);
         }
+        const model = provider.models?.[0] || provider.model;
+        if (!model) {
+          throw new Error(`Provider ${providerId} has no models configured`);
+        }
         return {
           ...config,
           provider: provider.id,
-          model: provider.models?.[0] || provider.model,
-          effort: provider.supportsEffort === false ? 'none' : provider.effort,
-          contextWindowSize: provider.contextWindowSize,
+          model,
+          effort: micaConfig.clampProviderEffort(provider, provider.effort ?? config.effort, model),
+          contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
         };
       },
       successMessage: (config) => `Provider: ${config.provider}`,
       successTtl: 3000,
     });
 
-    const provider = next.providers.find((item) => item.id === providerId);
-    if (provider?.get_model_url && !provider.models?.length) {
-      micaLogger.logRuntime('plugin.provider', 'models:load:start', { provider: providerId });
-      void micaConfig
-        .loadProviderModels(providerId)
-        .then(() => {
-          if (!agent.isRunning) {
-            agent.reloadConfig(false);
-            sessionController.saveCurrent();
-            services.syncModelDisplay(agent);
-          }
-          micaLogger.logRuntime('plugin.provider', 'models:load:done', { provider: providerId });
-        })
-        .catch((error) => {
-          micaLogger.logRuntime(
-            'plugin.provider',
-            'models:load:error',
-            {
-              provider: providerId,
-              error: error instanceof Error ? error.message : String(error),
-            },
-            'error',
-          );
-        });
-    }
     micaLogger.logRuntime('plugin.provider', 'applied', {
       provider: next.provider,
       model: next.model,
@@ -115,5 +95,29 @@ async function applyProviderSelection(
     });
   } catch (error) {
     reportConfigSwitchError(services, 'provider', error);
+  }
+}
+
+async function loadProviderModelsForSwitch(providerId: string, services: CommandRuntimeServices): Promise<void> {
+  const provider = micaConfig.get().providers.find((item) => item.id === providerId);
+  if (!provider?.get_model_url || provider.models?.length) return;
+
+  try {
+    micaLogger.logRuntime('plugin.provider', 'models:load:start', { provider: providerId });
+    await micaConfig.loadProviderModels(providerId);
+    micaLogger.logRuntime('plugin.provider', 'models:load:done', { provider: providerId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    micaLogger.logRuntime(
+      'plugin.provider',
+      'models:load:error',
+      {
+        provider: providerId,
+        error: message,
+      },
+      'error',
+    );
+    services.showMessage(message);
+    throw error;
   }
 }

@@ -1,17 +1,15 @@
+import type { ProviderDefinition } from '@packages/mica-config/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { RewindApplyResult, RewindPreviewResult, SubmitResult } from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
 
+export type CommandProvider = ProviderDefinition & { contextWindowSize: number };
+
 export type CommandAgent = {
   readonly config: {
-    provider: {
-      id: string;
-      name?: string;
-      supportsEffort?: boolean;
-      contextWindowSize: number;
-    };
+    provider: CommandProvider;
     model: string;
     effort: string;
   };

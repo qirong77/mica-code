@@ -77,7 +77,9 @@ bun run format          # 格式化（prettier）
 
 ## 配置与数据
 
-- 用户配置和 userConfig 类本地数据由 `mica-config` 管理，本地持久化；例如共享输入框历史保存在 `~/.mica/input-history.json`。
+- 用户配置和 userConfig 类本地数据由 `mica-config` 管理，本地持久化；静态 provider 配置保存在 `~/.mica/config.json`，最后一次使用的 provider/model/effort/contextWindowSize、共享输入框历史等本地状态保存在 `~/.mica/storage.json`。
+- 配置了 `get_model_url` 的 provider 运行时拉取模型列表，结果只缓存到内存配置，不回填 `models` 到 `~/.mica/config.json`。
+- Provider/model 的能力由 `mica-config` 统一建模：全局 effort UI 枚举为 `none/minimal/low/medium/high/xhigh`；模型规则维护在 `packages/mica-config/model-rules.json`，规则只按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配；规则可用 `enableEffort: false` 禁用模型族，未命中规则时默认支持原来的 `none/low/medium/high` 四档；`contextSize` 默认 256K，DeepSeek 规则为 1M；用户配置只保留当前选择的 `effort` 和可选的 `supportsEffort` 禁用开关；请求参数必须通过 `resolveProviderEffortParams` 生成，不能在 OpenAI-compatible client 中直接透传 `reasoning_effort`。
 - 运行时 env：入口 `src/index.ts` 自动加载 `.env` 和 `packages/mica-agent/.env`。
 - 会话数据由 `mica-session` 管理，`SessionController` 负责序列化为 `PersistedSession`（version 1）。
 

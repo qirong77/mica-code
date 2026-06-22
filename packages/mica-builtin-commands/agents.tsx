@@ -49,12 +49,14 @@ function showAgentsPanel(services: CommandRuntimeServices) {
     return (
       <micaUi.Dialog
         title={`agents (${agents.length})`}
+        paddingX={0}
         footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ switch', 'esc close']} />}
       >
         <micaUi.SelectList
           items={agents.map((agent) => ({ key: agent.id, label: '' }))}
           selectedIdx={state.selectedIdx}
           itemGap={0}
+          markerWidth={1}
           empty={<Text dimColor>No running agents</Text>}
           renderItem={(item, isSelected) => {
             const agent = agents.find((a) => a.id === item.key);

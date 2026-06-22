@@ -151,12 +151,13 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
     if (!provider) {
       throw new Error(`Provider not found: ${snapshot.providerId}`);
     }
+    const model = snapshot.model || provider.model || provider.models?.[0] || '';
     return {
       ...config,
       provider: provider.id,
-      model: snapshot.model || provider.model,
-      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
-      contextWindowSize: provider.contextWindowSize,
+      model,
+      effort: micaConfig.clampProviderEffort(provider, snapshot.effort, model),
+      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
     };
   });
 }

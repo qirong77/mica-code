@@ -72,15 +72,14 @@ bun run dev
   "id": "deepseek",
   "name": "DeepSeek",
   "api_base": "https://api.deepseek.com",
-  "api_key": "",
-  "model": "deepseek-v4-pro",
-  "effort": "low",
-  "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
-  "contextWindowSize": 1000000
+  "get_model_url": "https://api.deepseek.com/models",
+  "api_key": ""
 }
 ```
 
 主路径通过 OpenAI Chat Completions 风格的 client 连接 provider，第三方 provider 需实现对应接口。
+最后一次使用的 provider、model、effort 和 context window 会写入 `~/.mica/storage.json`，不写入 provider 静态配置。
+如果 provider 配置了 `get_model_url`，模型列表会在运行时获取，不会回填到 `~/.mica/config.json`；没有动态模型接口的 provider 可以直接配置静态 `models` 数组。
 
 ## 常用命令
 

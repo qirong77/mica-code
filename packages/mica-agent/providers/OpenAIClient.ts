@@ -1,6 +1,11 @@
 import { OpenAI } from 'openai';
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
+  resolveProviderEffortParams,
+  type EffortOption,
+  type ProviderDefinition,
+} from '@packages/mica-config/index.js';
+import {
   BaseAgent,
   type AgentContentBlockParam,
   type AgentConversationMessage,
@@ -18,6 +23,7 @@ export type OpenAIClientOptions = {
   apiKey?: string;
   baseURL?: string;
   effort?: string;
+  provider?: ProviderDefinition;
   tools?: boolean;
   systemPrompt?: string;
 };
@@ -68,6 +74,7 @@ export class OpenAIClient extends BaseAgent<
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: string | undefined;
+  provider: ProviderDefinition | undefined;
   tools: boolean;
   systemPrompt: string | undefined;
   readonly historyNormalizer = new OpenAIHistoryNormalizer();
@@ -83,6 +90,7 @@ export class OpenAIClient extends BaseAgent<
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
     this.effort = options.effort;
+    this.provider = options.provider;
     this.tools = options.tools ?? true;
     this.systemPrompt = options.systemPrompt;
   }
@@ -91,6 +99,7 @@ export class OpenAIClient extends BaseAgent<
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
     this.effort = options.effort;
+    this.provider = options.provider;
     this.tools = options.tools ?? true;
     this.systemPrompt = options.systemPrompt;
   }
@@ -155,9 +164,7 @@ export class OpenAIClient extends BaseAgent<
                 tool_choice: 'auto' as const,
               }
             : {}),
-          ...(this.effort && this.effort !== 'none'
-            ? { reasoning_effort: this.effort as OpenAI.Chat.Completions.ChatCompletionReasoningEffort }
-            : {}),
+          ...this.reasoningParams,
           stream: true,
           stream_options: {
             include_usage: true,
@@ -279,6 +286,11 @@ export class OpenAIClient extends BaseAgent<
         return totalContent || message.content || '';
       }
     }
+  }
+
+  private get reasoningParams(): Record<string, unknown> {
+    if (!this.provider || !this.effort) return this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort } : {};
+    return resolveProviderEffortParams(this.provider, this.effort as EffortOption, this.model);
   }
 
   private recordUsage(

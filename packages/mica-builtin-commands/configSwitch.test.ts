@@ -1,15 +1,18 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { micaUi } from '@packages/mica-ui/index.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
 const previousHome = process.env.HOME;
+const previousMicaHome = process.env.MICA_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'mica-config-switch-'));
+let micaUi: typeof import('@packages/mica-ui/index.js').micaUi;
 
-beforeAll(() => {
+beforeAll(async () => {
   process.env.HOME = tempHome;
+  process.env.MICA_HOME = tempHome;
+  ({ micaUi } = await import('@packages/mica-ui/index.js'));
 });
 
 afterAll(() => {
@@ -17,6 +20,11 @@ afterAll(() => {
     delete process.env.HOME;
   } else {
     process.env.HOME = previousHome;
+  }
+  if (previousMicaHome === undefined) {
+    delete process.env.MICA_HOME;
+  } else {
+    process.env.MICA_HOME = previousMicaHome;
   }
   rmSync(tempHome, { recursive: true, force: true });
 });
@@ -89,6 +97,68 @@ describe('config switch commands', () => {
       micaUi.panels.clearPluginUIs();
     }
   });
+
+  it('clamps effort when switching to a model with narrower effort support', async () => {
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const provider = {
+      id: 'openai',
+      name: 'OpenAI',
+      api_base: 'https://api.openai.com/v1',
+      api_key: 'test-key',
+      model: 'gpt-5.4',
+      effort: 'medium' as const,
+      models: ['gpt-5.5', 'gpt-5.4'],
+      contextWindowSize: 1000,
+    };
+    micaConfig.update(() => ({
+      provider: provider.id,
+      model: 'gpt-5.4',
+      effort: 'minimal',
+      contextWindowSize: provider.contextWindowSize,
+      providers: [provider],
+    }));
+    const services = makeServices(async () => {
+      throw new Error('compact should not run');
+    });
+    const agent = makeAgent([], {
+      provider,
+      model: 'gpt-5.4',
+      effort: 'minimal',
+    });
+    const session = makeSession();
+
+    try {
+      const command = await makeConfigSwitchCommand('model', agent, session, services);
+      await command.action();
+      const panel = micaUi.panels.pluginUIs.get()[0];
+      expect(panel?.id).toBe('select-model');
+
+      panel?.onInput?.('', { upArrow: true });
+      panel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      expect(micaConfig.get().model).toBe('gpt-5.5');
+      expect(micaConfig.get().effort).toBe('low');
+      const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
+      const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
+        lastUsed?: Record<string, unknown>;
+      };
+      expect(persistedConfig.provider).toBeUndefined();
+      expect(persistedConfig.model).toBeUndefined();
+      expect(persistedConfig.effort).toBeUndefined();
+      expect(persistedConfig.contextWindowSize).toBeUndefined();
+      expect(persistedStorage.lastUsed).toMatchObject({
+        provider: 'openai',
+        model: 'gpt-5.5',
+        effort: 'low',
+        contextWindowSize: 256000,
+      });
+      expect(agent.reloadConfig).toHaveBeenCalledWith(false);
+      expect(session.saveCurrent).toHaveBeenCalled();
+    } finally {
+      micaUi.panels.clearPluginUIs();
+    }
+  });
 });
 
 async function makeConfigSwitchCommand(
@@ -109,28 +179,38 @@ async function makeConfigSwitchCommand(
   return createEffortCommand(agent, session, services);
 }
 
-function makeAgent(messages: unknown[]): CommandAgent {
-  return {
-    config: {
-      provider: {
-        id: 'test',
-        contextWindowSize: 1000,
-      },
+function makeAgent(
+  messages: unknown[],
+  config: CommandAgent['config'] = {
+    provider: {
+      id: 'test',
+      api_base: 'https://example.com/v1',
       model: 'test-model',
       effort: 'none',
+      contextWindowSize: 1000,
     },
+    model: 'test-model',
+    effort: 'none',
+  },
+): CommandAgent {
+  return {
+    config,
     currentRunId: 0,
     isRunning: false,
     reloadConfig: vi.fn(),
     createSubAgent: () => ({ query: async () => '' }),
     getSnapshot: () => ({
-      providerId: 'test',
-      model: 'test-model',
-      effort: 'none',
+      providerId: config.provider.id,
+      model: config.model,
+      effort: config.effort,
       messages,
       usageHistory: [],
     }),
   };
+}
+
+function waitForSelectCommand(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function makeSession(): CommandSessionController {

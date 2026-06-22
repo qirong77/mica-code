@@ -1,19 +1,11 @@
 {
-  "provider": "deepseek",
-  "model": "deepseek-v4-pro",
-  "effort": "low",
-  "contextWindowSize": 256000,
   "providers": [
     {
       "id": "deepseek",
       "name": "DeepSeek",
       "api_base": "https://api.deepseek.com",
       "get_model_url": "https://api.deepseek.com/models",
-      "api_key": "",
-      "model": "deepseek-v4-pro",
-      "effort": "low",
-      "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
-      "contextWindowSize": 1000000
+      "api_key": ""
     }
   ],
   "mcpServers": {

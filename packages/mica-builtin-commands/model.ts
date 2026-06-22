@@ -36,11 +36,41 @@ async function showModelSelector(
   services: CommandRuntimeServices,
 ) {
   const config = micaConfig.get();
-  const provider = config.providers.find((item) => item.id === config.provider);
+  let provider = config.providers.find((item) => item.id === config.provider);
   if (!provider) {
     micaLogger.logRuntime('plugin.model', 'provider:not_found', { provider: config.provider }, 'error');
     services.showMessage('Provider not found');
     return;
+  }
+  const providerId = provider.id;
+  if (provider.get_model_url && !provider.models?.length) {
+    try {
+      micaLogger.logRuntime('plugin.model', 'models:load:start', { provider: providerId });
+      await micaConfig.loadProviderModels(providerId);
+      provider = micaConfig.get().providers.find((item) => item.id === config.provider);
+      if (!provider) {
+        services.showMessage('Provider not found');
+        return;
+      }
+      if (!agent.isRunning) {
+        agent.reloadConfig(false);
+        sessionController.saveCurrent();
+        services.syncModelDisplay(agent);
+      }
+      micaLogger.logRuntime('plugin.model', 'models:load:done', { provider: provider.id });
+    } catch (error) {
+      micaLogger.logRuntime(
+        'plugin.model',
+        'models:load:error',
+        {
+          provider: providerId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'error',
+      );
+      services.showMessage(error instanceof Error ? error.message : String(error));
+      return;
+    }
   }
   micaLogger.logRuntime('plugin.model', 'selector:ready', {
     provider: provider.id,
@@ -81,7 +111,15 @@ async function applyModelSelection(
       agent,
       sessionController,
       services,
-      update: (config) => ({ ...config, model }),
+      update: (config) => {
+        const provider = config.providers.find((item) => item.id === providerId) ?? agent.config.provider;
+        return {
+          ...config,
+          model,
+          contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+          effort: micaConfig.clampProviderEffort(provider, config.effort, model),
+        };
+      },
       successMessage: () => `Model: ${model}`,
     });
   } catch (error) {

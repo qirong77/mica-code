@@ -1,9 +1,9 @@
 # mica-config
 
-`mica-config` 负责 Mica Code 的本地配置、userConfig 数据读取、更新和 provider 模型列表加载。
+`mica-config` 负责 Mica Code 的本地 provider 配置、本地状态数据读取、更新和 provider 模型列表加载。
 
 配置文件默认位于：`~/.mica/config.json`。当配置文件不存在时，会基于 `default.json` 自动创建。
-输入框历史记录默认位于：`~/.mica/input-history.json`，所有 Mica Code 实例共享。
+本地状态默认位于：`~/.mica/storage.json`，保存最后一次使用的 provider/model/effort、输入框历史等所有 Mica Code 实例共享的数据。
 
 ## 主要能力
 
@@ -11,8 +11,9 @@
 - 获取内存中的当前配置：`micaConfig.get()`。
 - 更新配置并写回磁盘：`micaConfig.update(updater)`。
 - 校验配置语义并生成可操作提示：`micaConfig.validate(config)`、`micaConfig.assertValid(config)`。
-- 拉取指定 provider 的模型列表：`micaConfig.loadProviderModels(providerId)`。
-- 为缺失模型缓存的 provider 批量加载模型：`micaConfig.loadMissingProviderModels()`。
+- 拉取指定 provider 的模型列表并缓存到内存运行态配置：`micaConfig.loadProviderModels(providerId)`。
+- 为动态 provider 批量加载运行时模型列表：`micaConfig.loadMissingProviderModels()`。
+- 读取本地状态：`micaConfig.storage.read()`。
 - 读取共享输入框历史：`micaConfig.inputHistory.read()`。
 - 追加共享输入框历史：`micaConfig.inputHistory.append(text)`。
 
@@ -36,17 +37,19 @@ if (!result.ok) {
 
 ## 设计约束
 
-- 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
-- userConfig 类本地数据统一通过本包暴露 API，避免 UI 或 runtime 直接关心文件路径。
-- provider 模型缓存属于配置数据，加载失败时应保留现有配置。
+- 静态 provider 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
+- userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
+- `config.json` 不保存最后一次使用的 provider/model/effort/contextWindowSize；这些运行时选择写入 `storage.json` 的 `lastUsed`。
+- provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
 - 配置语义校验属于本包职责；应用层只负责决定如何展示校验结果。
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值和迁移策略。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 
 ## 目录说明
 
-- `config.ts`：配置读写、provider 模型拉取和类型定义。
-- `inputHistory.ts`：共享输入框历史记录的 userConfig 文件读写。
+- `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
+- `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
+- `inputHistory.ts`：共享输入框历史记录的兼容入口，底层读写 `micaStorage.ts`。
 - `default.json`：首次启动时使用的默认配置模板。
 - `index.ts`：公共 API 聚合导出。
 - `examples/`：基础使用示例。

@@ -1,7 +1,7 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 
-import { micaConfig } from '@packages/mica-config/index.js';
+import { micaConfig, type EffortOption } from '@packages/mica-config/index.js';
 import { showSelectCommand, showConfirmPrompt } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
@@ -27,11 +27,16 @@ export function createEffortCommand(
         current: targetAgent.config.provider.supportsEffort !== false ? targetAgent.config.effort : 'none',
         provider: targetAgent.config.provider.id,
       });
+      const effortOptions = micaConfig.getProviderEffortOptions(targetAgent.config.provider, targetAgent.config.model);
       showSelectCommand({
         id: 'select-effort',
         title: 'select effort',
-        current: targetAgent.config.provider.supportsEffort !== false ? targetAgent.config.effort : 'none',
-        options: micaConfig.effortOptions.map((effort) => ({
+        current: micaConfig.clampProviderEffort(
+          targetAgent.config.provider,
+          targetAgent.config.effort as EffortOption,
+          targetAgent.config.model,
+        ),
+        options: effortOptions.map((effort) => ({
           name: effort,
           label: effort,
         })),
@@ -58,6 +63,13 @@ async function applyEffortSelection(
       micaLogger.logRuntime('plugin.effort', 'provider_ignores_effort', { provider: agent.config.provider.id }, 'warn');
       services.showMessage(
         `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; status shows none`,
+      );
+      return;
+    }
+    const availableEfforts = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
+    if (!availableEfforts.includes(effort as EffortOption)) {
+      services.showMessage(
+        `${agent.config.provider.name ?? agent.config.provider.id} supports effort: ${availableEfforts.join(', ')}`,
       );
       return;
     }
@@ -121,7 +133,11 @@ async function applyEffortSelection(
       services,
       update: (config) => ({
         ...config,
-        effort: effort as (typeof micaConfig.effortOptions)[number],
+        effort: micaConfig.clampProviderEffort(
+          config.providers.find((provider) => provider.id === config.provider) ?? agent.config.provider,
+          effort as EffortOption,
+          config.model,
+        ),
       }),
       successMessage: () => `Effort: ${effort}`,
     });
