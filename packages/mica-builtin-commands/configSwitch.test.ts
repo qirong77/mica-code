@@ -171,6 +171,7 @@ function makeServices(compact: CommandRuntimeServices['compact']): CommandRuntim
     }),
     runExclusiveTask: vi.fn((_agent, _options, task) => task()),
     compact: vi.fn(compact),
+    requestExit: vi.fn(),
   };
 }
 

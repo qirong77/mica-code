@@ -112,4 +112,5 @@ export type CommandRuntimeServices = {
     beforeTokenEstimate: number;
     afterTokenEstimate: number;
   }>;
+  requestExit(): void;
 };

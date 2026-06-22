@@ -17,7 +17,7 @@ import { micaContext } from '@packages/mica-context/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'status', 'agents', 'new', 'fork']);
+const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'status', 'agents', 'new', 'fork', 'exit', 'copy']);
 
 function currentContext(): ApplicationContext | null {
   return getActiveContext<ApplicationContext>();
@@ -103,6 +103,8 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createAgentsCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
+    micaBuiltinCommands.createExitCommand(services),
+    micaBuiltinCommands.createCopyCommand(services),
   ];
 }
 
@@ -392,6 +394,14 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       }
       concreteSessionController.saveCurrent();
       return result;
+    },
+    requestExit() {
+      const context = currentContext();
+      if (context) {
+        const session = context.agentSessions.current();
+        if (session.agent.isRunning) session.agent.abort();
+      }
+      process.exit(0);
     },
   };
 }

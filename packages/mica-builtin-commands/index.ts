@@ -2,7 +2,9 @@ import { createAgentsCommand } from './agents.js';
 import { createClearCommand } from './clear.js';
 import { createCommitCommand } from './commit.js';
 import { createCompactCommand } from './compact.js';
+import { createCopyCommand } from './copy.js';
 import { createEffortCommand } from './effort.js';
+import { createExitCommand } from './exit.js';
 import { createForkCommand } from './fork.js';
 import { createGitDiffContextCommand } from './gitDiffContext.js';
 import { closeLogPanel, createLogCommand } from './log.js';
@@ -20,7 +22,9 @@ export const micaBuiltinCommands = {
   createClearCommand,
   createCommitCommand,
   createCompactCommand,
+  createCopyCommand,
   createEffortCommand,
+  createExitCommand,
   createForkCommand,
   createGitDiffContextCommand,
   createLogCommand,

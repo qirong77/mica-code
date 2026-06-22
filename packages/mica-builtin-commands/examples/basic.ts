@@ -70,6 +70,7 @@ const command = micaBuiltinCommands.createAgentsCommand({
     beforeTokenEstimate: 100,
     afterTokenEstimate: 25,
   }),
+  requestExit: () => process.exit(0),
 });
 
 console.log(`/${command.name}: ${command.description}`);
