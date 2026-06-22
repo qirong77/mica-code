@@ -220,7 +220,7 @@ describe('validateConfig', () => {
       'xhigh',
     ]);
     expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-oss-120b')).toEqual(['low', 'medium', 'high']);
+    expect(configApi.getProviderEffortOptions(openai, 'claude-fable-5')).toEqual(['none']);
     expect(configApi.getEffortMapFromConfig('unknown-reasoning-model')).toEqual({
       none: null,
       low: 'low',
@@ -265,7 +265,7 @@ describe('validateConfig', () => {
       reasoning_effort: 'max',
     });
     expect(configApi.getProviderEffortOptions(kimi, 'kimi-k2.6')).toEqual(['none', 'high']);
-    expect(configApi.getProviderEffortOptions(kimi, 'kimi-k2.7-code')).toEqual(['none']);
+    expect(configApi.getProviderEffortOptions(kimi, 'kimi-k2.5')).toEqual(['none']);
     expect(configApi.getProviderEffortOptions(disabledProvider, 'kimi-k2.6')).toEqual(['none']);
   });
 

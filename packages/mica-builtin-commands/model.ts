@@ -4,7 +4,12 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { applyConfigSwitchUpdate, compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
+import {
+  applyConfigSwitchUpdate,
+  compactBeforeConfigSwitch,
+  reportConfigSwitchError,
+  syncConfigFromAgent,
+} from './configSwitch.js';
 
 export function createModelCommand(
   agent: CommandAgent,
@@ -35,23 +40,14 @@ async function showModelSelector(
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
 ) {
-  const config = micaConfig.get();
-  let provider = config.providers.find((item) => item.id === config.provider);
-  if (!provider) {
-    micaLogger.logRuntime('plugin.model', 'provider:not_found', { provider: config.provider }, 'error');
-    services.showMessage('Provider not found');
-    return;
-  }
+  const config = syncConfigFromAgent(agent);
+  let provider = config.providers.find((item) => item.id === agent.config.provider.id) ?? agent.config.provider;
   const providerId = provider.id;
   if (provider.get_model_url && !provider.models?.length) {
     try {
       micaLogger.logRuntime('plugin.model', 'models:load:start', { provider: providerId });
       await micaConfig.loadProviderModels(providerId);
-      provider = micaConfig.get().providers.find((item) => item.id === config.provider);
-      if (!provider) {
-        services.showMessage('Provider not found');
-        return;
-      }
+      provider = micaConfig.get().providers.find((item) => item.id === providerId) ?? provider;
       if (!agent.isRunning) {
         agent.reloadConfig(false);
         sessionController.saveCurrent();

@@ -16,6 +16,7 @@ import { createResumeCommand } from './resume.js';
 import { createRewindCommand } from './rewind.js';
 import { createSkillsCommand } from './skills.js';
 import { createStatusCommand } from './status.js';
+import { syncConfigFromAgent } from './configSwitch.js';
 
 export const micaBuiltinCommands = {
   createAgentsCommand,
@@ -37,6 +38,7 @@ export const micaBuiltinCommands = {
   createRewindCommand,
   createSkillsCommand,
   createStatusCommand,
+  syncConfigFromAgent,
 };
 
 export type {

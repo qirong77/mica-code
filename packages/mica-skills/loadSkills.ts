@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Skill } from './types.js';
 
 function getUserSkillsDirs(): string[] {
-  return [join(homedir(), '.mica', 'skills')];
+  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(homedir(), '.mica');
+  return [join(micaHome, 'skills')];
 }
 
 function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; content: string } {
@@ -94,14 +95,24 @@ function loadSkillFromDir(skillDir: string, name: string): Skill | null {
     return {
       name: String(frontmatter.name || name),
       description: String(frontmatter.description || name),
-      whenToUse: frontmatter.when_to_use as string | undefined,
-      argumentHint: frontmatter['argument-hint'] as string | undefined,
+      whenToUse: formatFrontmatterValue(frontmatter.when_to_use),
+      argumentHint: formatFrontmatterValue(frontmatter['argument-hint']),
       content,
       baseDir: skillDir,
     };
   } catch {
     return null;
   }
+}
+
+function formatFrontmatterValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item).trim()).filter(Boolean);
+    return items.length > 0 ? items.join('; ') : undefined;
+  }
+  if (value === undefined || value === null) return undefined;
+  return String(value);
 }
 
 let loadedSkills: Skill[] | null = null;

@@ -136,6 +136,22 @@ export class LocalRuntimeController implements RuntimeController {
     return this.queueAgent();
   }
 
+  enqueueForAgent(agent: AgentRuntime, input: RuntimeInput): void {
+    this.queueFor(agent).enqueue(input);
+  }
+
+  dequeueForAgent(agent: AgentRuntime): RuntimeInput | null {
+    return this.queueFor(agent).dequeue();
+  }
+
+  listQueueForAgent(agent: AgentRuntime): RuntimeInput[] {
+    return this.queueFor(agent).list();
+  }
+
+  countQueueForAgent(agent: AgentRuntime): number {
+    return this.queueFor(agent).count();
+  }
+
   isAgentBusy(agent = this.agent): boolean {
     return this.runningAgents.has(agent) || this.exclusiveTasks.has(agent);
   }

@@ -26,7 +26,7 @@ const config = micaConfig.get();
 
 micaConfig.update((current) => ({
   ...current,
-  model: 'gpt-4.1',
+  model: 'gpt-5.4',
 }));
 
 const result = micaConfig.validate(config);
@@ -45,11 +45,19 @@ if (!result.ok) {
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值和迁移策略。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 
+## 模型规则
+
+`model-rules.json` 维护 model → effort/contextSize 映射规则，按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配。规则目前仅兼容 [opencode.ai/zen/v1/models](https://opencode.ai/zen/v1/models) 接口返回的模型列表。
+
+- 未命中规则时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
+- 规则可通过 `enableEffort: false` 禁用模型族的 effort 选择。
+- 规则仅影响 effort UI 选项过滤和参数展开，不参与 provider 选择。
+
 ## 目录说明
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `inputHistory.ts`：共享输入框历史记录的兼容入口，底层读写 `micaStorage.ts`。
 - `default.json`：首次启动时使用的默认配置模板。
+- `model-rules.json`：模型 effort/contextSize 规则。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

@@ -1,5 +1,5 @@
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { micaConfig, type IMicaConfig } from '@packages/mica-config/index.js';
+import { micaConfig, type EffortOption, type IMicaConfig } from '@packages/mica-config/index.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
@@ -76,10 +76,35 @@ export function applyConfigSwitchUpdate({
   successMessage: (config: IMicaConfig) => string;
   successTtl?: number;
 }): IMicaConfig {
-  const next = micaConfig.update(update);
+  const next = micaConfig.update((config) => update(configForAgent(config, agent)));
   agent.reloadConfig(false);
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
   services.showMessage(successMessage(next), successTtl);
   return next;
+}
+
+export function syncConfigFromAgent(agent: CommandAgent): IMicaConfig {
+  return micaConfig.update((config) => configForAgent(config, agent));
+}
+
+function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
+  const agentProvider = agent.config.provider;
+  const provider = config.providers.find((item) => item.id === agentProvider.id) ?? agentProvider;
+  const model = agent.config.model || provider.model || provider.models?.[0] || '';
+  const effort = isEffortOption(agent.config.effort)
+    ? micaConfig.clampProviderEffort(provider, agent.config.effort, model)
+    : config.effort;
+
+  return {
+    ...config,
+    provider: provider.id,
+    model,
+    effort,
+    contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+  };
+}
+
+function isEffortOption(value: string): value is EffortOption {
+  return micaConfig.effortOptions.includes(value as EffortOption);
 }

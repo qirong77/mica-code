@@ -44,6 +44,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Test
+        run: bun run test
+
       - name: Build binary
         env:
           MICA_PREBUILD_DONE: '1'

@@ -11,8 +11,8 @@
     }
   },
   {
-    "name": "OpenAI GPT-5.2+",
-    "modelKeysIncludes": ["gpt-5.2", "gpt-5.3", "gpt-5.4"],
+    "name": "OpenAI GPT-5.4 / 5.3 / 5.2",
+    "modelKeysIncludes": ["gpt-5.4", "gpt-5.3", "gpt-5.2"],
     "contextSize": 256,
     "effortMap": {
       "minimal": "minimal",
@@ -23,8 +23,8 @@
     }
   },
   {
-    "name": "OpenAI GPT-5 / o-series",
-    "modelKeysIncludes": ["gpt-5", "o1", "o3", "o4"],
+    "name": "OpenAI GPT-5.1 / GPT-5",
+    "modelKeysIncludes": ["gpt-5.1", "gpt-5"],
     "contextSize": 256,
     "effortMap": {
       "minimal": "minimal",
@@ -34,14 +34,16 @@
     }
   },
   {
-    "name": "OpenAI GPT-OSS",
-    "modelKeysIncludes": ["gpt-oss"],
-    "contextSize": 256,
-    "effortMap": {
-      "low": "low",
-      "medium": "medium",
-      "high": "high"
-    }
+    "name": "Claude",
+    "modelKeysIncludes": ["claude"],
+    "contextSize": 200,
+    "enableEffort": false
+  },
+  {
+    "name": "Gemini",
+    "modelKeysIncludes": ["gemini"],
+    "contextSize": "1M",
+    "enableEffort": false
   },
   {
     "name": "DeepSeek",
@@ -66,12 +68,6 @@
     }
   },
   {
-    "name": "Kimi K2.7 Code",
-    "modelKeysIncludes": ["kimi-k2.7-code"],
-    "contextSize": 256,
-    "enableEffort": false
-  },
-  {
     "name": "Kimi K2.6",
     "modelKeysIncludes": ["kimi-k2.6"],
     "contextSize": 256,
@@ -83,6 +79,30 @@
   {
     "name": "Kimi",
     "modelKeysIncludes": ["kimi"],
+    "contextSize": 256,
+    "enableEffort": false
+  },
+  {
+    "name": "Minimax",
+    "modelKeysIncludes": ["minimax"],
+    "contextSize": 256,
+    "enableEffort": false
+  },
+  {
+    "name": "Qwen",
+    "modelKeysIncludes": ["qwen"],
+    "contextSize": 256,
+    "enableEffort": false
+  },
+  {
+    "name": "Grok",
+    "modelKeysIncludes": ["grok"],
+    "contextSize": 256,
+    "enableEffort": false
+  },
+  {
+    "name": "Other OpenCode Models",
+    "modelKeysIncludes": ["big-pickle", "mimo", "nemotron", "north-mini-code"],
     "contextSize": 256,
     "enableEffort": false
   }

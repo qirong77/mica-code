@@ -54,9 +54,14 @@ bun run format          # 格式化（prettier）
 测试文件与源码放在同一目录，命名为 `*.test.ts`：
 
 - `packages/mica-agent/prompt/index.test.ts`
+- `packages/mica-config/config.test.ts`
+- `packages/mica-builtin-commands/configSwitch.test.ts`
+- `packages/mica-skills/loadSkills.test.ts`
 - `packages/mica-tools/MicaTool.test.ts`
 - `packages/mica-tools/ToolRunShell.test.ts`
+- `src/plugins/runtime/messageQueuePlugin.test.ts`
 - `src/runtime/RewindCheckpointManager.test.ts`
+- `src/session/SessionController.test.ts`
 
 运行：`bun test <files>` 或 `bun run test`。
 

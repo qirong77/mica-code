@@ -244,6 +244,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
       const record = context.agentSessions.switchTo(id);
       if (!record) throw new Error(`Agent session not found: ${id}`);
       const session = context.agentSessions.current();
+      micaBuiltinCommands.syncConfigFromAgent(session.agent);
       context.runtime.switchSession(session.agent, session.sessionController);
       context.uiBridge.switchAgent(session.agent);
       restoreSessionUi(session.agent, session.uiState);

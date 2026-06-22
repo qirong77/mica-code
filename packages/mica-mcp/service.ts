@@ -64,6 +64,7 @@ export async function reconnectMcpServer(name: string, config: McpServerConfig):
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     markServerFailed(name, configLabel(config), message);
+    await refreshRegisteredToolsFromConnections();
     return `${name} 重连失败: ${message}`;
   }
 }
@@ -71,4 +72,16 @@ export async function reconnectMcpServer(name: string, config: McpServerConfig):
 export async function shutdownMcp(): Promise<void> {
   micaTools.unregisterMcp();
   await disconnectAll();
+}
+
+async function refreshRegisteredToolsFromConnections(): Promise<void> {
+  const allTools: MicaTool[] = [];
+  for (const server of connections.values()) {
+    try {
+      allTools.push(...(await fetchToolsForServer(server)));
+    } catch {
+      // Keep the registry consistent with servers that can still list tools.
+    }
+  }
+  micaTools.registerMcp(allTools);
 }

@@ -159,6 +159,66 @@ describe('config switch commands', () => {
       micaUi.panels.clearPluginUIs();
     }
   });
+
+  it('uses the target agent provider when the global config belongs to another agent', async () => {
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const deepseek = {
+      id: 'deepseek',
+      name: 'DeepSeek',
+      api_base: 'https://api.deepseek.com',
+      api_key: 'test-key',
+      model: 'deepseek-v4-pro',
+      effort: 'high' as const,
+      models: ['deepseek-v4-pro'],
+      contextWindowSize: 1000000,
+    };
+    const openai = {
+      id: 'openai',
+      name: 'OpenAI',
+      api_base: 'https://api.openai.com/v1',
+      api_key: 'test-key',
+      model: 'gpt-5.4',
+      effort: 'medium' as const,
+      models: ['gpt-5.5', 'gpt-5.4'],
+      contextWindowSize: 256000,
+    };
+    micaConfig.update(() => ({
+      provider: deepseek.id,
+      model: deepseek.model,
+      effort: 'high',
+      contextWindowSize: deepseek.contextWindowSize,
+      providers: [deepseek, openai],
+    }));
+    const services = makeServices(async () => {
+      throw new Error('compact should not run');
+    });
+    const agent = makeAgent([], {
+      provider: openai,
+      model: 'gpt-5.4',
+      effort: 'minimal',
+    });
+    const session = makeSession();
+
+    try {
+      const command = await makeConfigSwitchCommand('model', agent, session, services);
+      await command.action();
+
+      expect(micaConfig.get().provider).toBe('openai');
+      const panel = micaUi.panels.pluginUIs.get()[0];
+      expect(panel?.id).toBe('select-model');
+
+      panel?.onInput?.('', { upArrow: true });
+      panel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      expect(micaConfig.get().provider).toBe('openai');
+      expect(micaConfig.get().model).toBe('gpt-5.5');
+      expect(agent.reloadConfig).toHaveBeenCalledWith(false);
+      expect(session.saveCurrent).toHaveBeenCalled();
+    } finally {
+      micaUi.panels.clearPluginUIs();
+    }
+  });
 });
 
 async function makeConfigSwitchCommand(

@@ -26,21 +26,22 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
         if (event.isCommand) return;
         if (!event.runtime.isAgentBusy(event.owner)) return;
 
-        event.runtime.queue.enqueue(event.input);
+        const owner = event.owner ?? event.runtime.getQueueOwner();
+        event.runtime.enqueueForAgent(owner, event.input);
         event.runtime.events.publish({
           type: 'queue:changed',
-          pendingInputs: event.runtime.queue.list(),
-          owner: event.runtime.getQueueOwner(),
+          pendingInputs: event.runtime.listQueueForAgent(owner),
+          owner,
         });
         event.runtime.events.publish({
           type: 'notification',
           level: 'info',
           message: '消息已排队，将在当前任务完成后发送',
-          owner: event.runtime.getQueueOwner(),
+          owner,
         });
         micaLogger.logRuntime('runtime', 'submit:queued', {
           chars: event.input.text.length,
-          queued: event.runtime.queue.count(),
+          queued: event.runtime.countQueueForAgent(owner),
         });
 
         return { action: 'handled', reason: 'queued' };
