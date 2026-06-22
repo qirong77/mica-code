@@ -346,7 +346,7 @@ export class AgentRuntime {
     const config = micaConfig.get();
     const provider = config.providers.find((item) => item.id === config.provider);
     if (!provider) {
-      throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
+      throw new Error(formatProviderNotFoundMessage(config));
     }
     return {
       provider,
@@ -386,6 +386,32 @@ export class AgentRuntime {
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;
   }
+}
+
+function formatProviderNotFoundMessage(config: ReturnType<typeof micaConfig.get>): string {
+  const configuredProvider = config.provider || '(empty)';
+  const availableProviders = config.providers.map((provider) => provider.id);
+  const matchingProviders = config.providers
+    .filter((provider) => provider.model === config.model || provider.models?.includes(config.model))
+    .map((provider) => provider.id);
+
+  const lines = [
+    `Provider not found: ${configuredProvider}`,
+    `配置文件 ${micaConfig.path} 中的 "provider" 必须匹配 providers[].id。`,
+  ];
+
+  if (availableProviders.length > 0) {
+    lines.push(`可用 provider: ${availableProviders.join(', ')}`);
+  } else {
+    lines.push('当前没有可用 provider，请先在配置文件中添加 providers。');
+  }
+
+  if (config.model && matchingProviders.length > 0) {
+    lines.push(`当前 model "${config.model}" 可匹配 provider: ${matchingProviders.join(', ')}`);
+  }
+
+  lines.push('修复配置后重新运行 mica。');
+  return lines.join('\n');
 }
 
 function isAbortError(error: unknown): boolean {

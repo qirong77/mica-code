@@ -88,11 +88,15 @@ export const renderSync = (node: ReactNode, options?: NodeJS.WriteStream | Rende
   instance.render(node);
 
   return {
-    rerender: instance.render,
+    rerender(node) {
+      instance.render(node);
+    },
     unmount() {
       instance.unmount();
     },
-    waitUntilExit: instance.waitUntilExit,
+    waitUntilExit() {
+      return instance.waitUntilExit();
+    },
     cleanup: () => instances.delete(inkOptions.stdout),
   };
 };

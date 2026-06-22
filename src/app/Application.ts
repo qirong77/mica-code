@@ -91,11 +91,16 @@ export class Application {
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');
       micaLogger.logRuntime('runtime', 'application:start');
     } catch (error) {
-      micaUi.terminalInput.setPlaceholder('Fix the startup error and restart Mica Code');
+      micaUi.terminalInput.setPlaceholder('启动失败：修复配置后重新运行 mica');
       reportRuntimeError(error, '启动失败');
+      micaUi.messageBar.addMessage({
+        id: 'startup-error-hint',
+        text: '启动失败：请根据错误提示修复配置文件，然后重新运行 mica',
+      });
       this.context?.agentSessions.stop();
       await this.context?.plugins.disposeAll();
       this.context = null;
+      process.exitCode = 1;
       this.renderInstance?.unmount();
     }
   }

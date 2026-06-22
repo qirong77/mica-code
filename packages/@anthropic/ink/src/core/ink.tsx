@@ -1665,6 +1665,8 @@ export default class Ink {
   }
 
   async waitUntilExit(): Promise<void> {
+    if (this.isUnmounted) return;
+
     this.exitPromise ||= new Promise((resolve, reject) => {
       this.resolveExitPromise = resolve;
       this.rejectExitPromise = reject;

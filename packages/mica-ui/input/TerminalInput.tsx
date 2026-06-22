@@ -22,11 +22,11 @@ const EXIT_CONFIRM_TIMEOUT_MS = 800;
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const columns = process.stdout.columns - 6;
+  const terminalSize = useTerminalSize();
+  const columns = Math.max(1, (process.stdout.columns ?? terminalSize?.columns ?? 80) - 6);
   const activePluginUIs = useScheduleState(pluginUIs);
   const status = useScheduleState(workingStatus);
   const placeholder = useScheduleState(input.placeholder);
-  const terminalSize = useTerminalSize();
   const inputBoxRef = useRef<DOMElement | null>(null);
   const setInputBoxRef = useCallback((el: DOMElement | null) => {
     inputBoxRef.current = el;
