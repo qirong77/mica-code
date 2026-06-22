@@ -112,8 +112,6 @@ async function applyModelSelection(
         return {
           ...config,
           model,
-          contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
-          effort: micaConfig.clampProviderEffort(provider, config.effort, model),
         };
       },
       successMessage: () => `Model: ${model}`,

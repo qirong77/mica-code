@@ -1,9 +1,18 @@
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { micaConfig, type EffortOption, type IMicaConfig } from '@packages/mica-config/index.js';
+import {
+  micaConfig,
+  type EffortOption,
+  type IMicaConfig,
+  type ProviderDefinition,
+} from '@packages/mica-config/index.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
 export type ConfigSwitchReason = 'model' | 'effort' | 'provider';
+
+type ConfigSwitchAdjustment =
+  | { field: 'effort'; from: EffortOption; to: EffortOption; model: string; provider: string }
+  | { field: 'contextWindowSize'; from: number; to: number; model: string; provider: string };
 
 export async function compactBeforeConfigSwitch(
   agent: CommandAgent,
@@ -76,16 +85,69 @@ export function applyConfigSwitchUpdate({
   successMessage: (config: IMicaConfig) => string;
   successTtl?: number;
 }): IMicaConfig {
-  const next = micaConfig.update((config) => update(configForAgent(config, agent)));
+  let adjustments: ConfigSwitchAdjustment[] = [];
+  const next = micaConfig.update((config) => {
+    const normalized = normalizeConfigSwitchSelection(update(configForAgent(config, agent)));
+    adjustments = normalized.adjustments;
+    return normalized.config;
+  });
   agent.reloadConfig(false);
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
-  services.showMessage(successMessage(next), successTtl);
+  if (adjustments.length > 0) {
+    micaLogger.logRuntime('plugin.config_switch', 'normalized', {
+      provider: next.provider,
+      model: next.model,
+      adjustments,
+    });
+  }
+  services.showMessage(formatConfigSwitchSuccess(successMessage(next), adjustments), successTtl);
   return next;
 }
 
 export function syncConfigFromAgent(agent: CommandAgent): IMicaConfig {
-  return micaConfig.update((config) => configForAgent(config, agent));
+  return micaConfig.update((config) => normalizeConfigSwitchSelection(configForAgent(config, agent)).config);
+}
+
+function normalizeConfigSwitchSelection(config: IMicaConfig): { config: IMicaConfig; adjustments: ConfigSwitchAdjustment[] } {
+  const provider = findCurrentProvider(config);
+  if (!provider) return { config, adjustments: [] };
+
+  const model = config.model || provider.model || provider.models?.[0] || '';
+  const effort = isEffortOption(config.effort)
+    ? micaConfig.clampProviderEffort(provider, config.effort, model)
+    : micaConfig.clampProviderEffort(provider, provider.effort ?? 'medium', model);
+  const contextWindowSize = micaConfig.getModelContextWindowSizeFromConfig(model);
+  const adjustments: ConfigSwitchAdjustment[] = [];
+
+  if (config.effort !== effort) {
+    adjustments.push({
+      field: 'effort',
+      from: config.effort,
+      to: effort,
+      model,
+      provider: provider.id,
+    });
+  }
+  if (config.contextWindowSize !== contextWindowSize) {
+    adjustments.push({
+      field: 'contextWindowSize',
+      from: config.contextWindowSize,
+      to: contextWindowSize,
+      model,
+      provider: provider.id,
+    });
+  }
+
+  return {
+    config: {
+      ...config,
+      model,
+      effort,
+      contextWindowSize,
+    },
+    adjustments,
+  };
 }
 
 function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
@@ -103,6 +165,31 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
     effort,
     contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
   };
+}
+
+function findCurrentProvider(config: IMicaConfig): ProviderDefinition | undefined {
+  return config.providers.find((item) => item.id === config.provider);
+}
+
+function formatConfigSwitchSuccess(message: string, adjustments: ConfigSwitchAdjustment[]): string {
+  if (adjustments.length === 0) return message;
+  return `${message}; ${formatConfigSwitchAdjustments(adjustments)}`;
+}
+
+function formatConfigSwitchAdjustments(adjustments: ConfigSwitchAdjustment[]): string {
+  const parts = adjustments.map((adjustment) => {
+    if (adjustment.field === 'effort') {
+      return `effort ${adjustment.from} -> ${adjustment.to}`;
+    }
+    return `context ${formatTokenCount(adjustment.from)} -> ${formatTokenCount(adjustment.to)}`;
+  });
+  return `Adjusted defaults: ${parts.join(', ')}`;
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000 && value % 1_000_000 === 0) return `${value / 1_000_000}M`;
+  if (value >= 1000 && value % 1000 === 0) return `${value / 1000}K`;
+  return String(value);
 }
 
 function isEffortOption(value: string): value is EffortOption {

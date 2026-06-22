@@ -80,8 +80,7 @@ async function applyProviderSelection(
           ...config,
           provider: provider.id,
           model,
-          effort: micaConfig.clampProviderEffort(provider, provider.effort ?? config.effort, model),
-          contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+          effort: provider.effort ?? config.effort,
         };
       },
       successMessage: (config) => `Provider: ${config.provider}`,

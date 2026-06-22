@@ -39,6 +39,8 @@ function StatusInfo() {
   const cachedRate = useScheduleState(cachedTokenRate);
   const tokenStr = formatTokens(contextTokens);
   const cachedPct = (cachedRate * 100).toFixed(0);
+  const contextRatio = contextTokens / windowSize;
+  const contextPct = (contextRatio * 100).toFixed(0);
   const modelText = `${modelValue}_${effortLevel}`;
   if (contextTokens <= 0 || windowSize <= 0)
     return (
@@ -49,9 +51,11 @@ function StatusInfo() {
   return (
     <Text wrap="wrap">
       <Text color={themeColors.dim}>{modelText}</Text>{' '}
-      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens / windowSize)]}>
-        {tokenStr} ({cachedPct}% cached tokens)
+      <Text color={themeColors.dim}>
+        {tokenStr} (cached {cachedPct}%,{' '}
       </Text>
+      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextRatio)]}>ctx {contextPct}%</Text>
+      <Text color={themeColors.dim}>)</Text>
     </Text>
   );
 }

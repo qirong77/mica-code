@@ -139,6 +139,10 @@ describe('config switch commands', () => {
 
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
+      expect(services.showMessage).toHaveBeenLastCalledWith(
+        'Model: gpt-5.5; Adjusted defaults: effort minimal -> low',
+        undefined,
+      );
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
       const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
         lastUsed?: Record<string, unknown>;
@@ -153,6 +157,72 @@ describe('config switch commands', () => {
         effort: 'low',
         contextWindowSize: 256000,
       });
+      expect(agent.reloadConfig).toHaveBeenCalledWith(false);
+      expect(session.saveCurrent).toHaveBeenCalled();
+    } finally {
+      micaUi.panels.clearPluginUIs();
+    }
+  });
+
+  it('normalizes effort and context defaults when switching provider', async () => {
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const openai = {
+      id: 'openai',
+      name: 'OpenAI',
+      api_base: 'https://api.openai.com/v1',
+      api_key: 'test-key',
+      model: 'gpt-5.4',
+      effort: 'minimal' as const,
+      models: ['gpt-5.4'],
+      contextWindowSize: 1000,
+    };
+    const deepseek = {
+      id: 'deepseek',
+      name: 'DeepSeek',
+      api_base: 'https://api.deepseek.com',
+      api_key: 'test-key',
+      model: 'deepseek-v4-pro',
+      effort: 'minimal' as const,
+      models: ['deepseek-v4-pro'],
+      contextWindowSize: 1000,
+    };
+    micaConfig.update(() => ({
+      provider: openai.id,
+      model: openai.model,
+      effort: 'minimal',
+      contextWindowSize: openai.contextWindowSize,
+      providers: [openai, deepseek],
+    }));
+    const services = makeServices(async () => {
+      throw new Error('compact should not run');
+    });
+    const agent = makeAgent([], {
+      provider: openai,
+      model: openai.model,
+      effort: 'minimal',
+    });
+    const session = makeSession();
+
+    try {
+      const command = await makeConfigSwitchCommand('provider', agent, session, services);
+      await command.action();
+      const panel = micaUi.panels.pluginUIs.get()[0];
+      expect(panel?.id).toBe('select-provider');
+
+      panel?.onInput?.('', { downArrow: true });
+      panel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      expect(micaConfig.get()).toMatchObject({
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro',
+        effort: 'high',
+        contextWindowSize: 1000000,
+      });
+      expect(services.showMessage).toHaveBeenLastCalledWith(
+        'Provider: deepseek; Adjusted defaults: effort minimal -> high, context 256K -> 1M',
+        3000,
+      );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -213,6 +283,10 @@ describe('config switch commands', () => {
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
+      expect(services.showMessage).toHaveBeenLastCalledWith(
+        'Model: gpt-5.5; Adjusted defaults: effort minimal -> low',
+        undefined,
+      );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
