@@ -10,6 +10,7 @@
 - 读取磁盘配置：`micaConfig.read()`。
 - 获取内存中的当前配置：`micaConfig.get()`。
 - 更新配置并写回磁盘：`micaConfig.update(updater)`。
+- 校验配置语义并生成可操作提示：`micaConfig.validate(config)`、`micaConfig.assertValid(config)`。
 - 拉取指定 provider 的模型列表：`micaConfig.loadProviderModels(providerId)`。
 - 为缺失模型缓存的 provider 批量加载模型：`micaConfig.loadMissingProviderModels()`。
 - 读取共享输入框历史：`micaConfig.inputHistory.read()`。
@@ -26,6 +27,11 @@ micaConfig.update((current) => ({
   ...current,
   model: 'gpt-4.1',
 }));
+
+const result = micaConfig.validate(config);
+if (!result.ok) {
+  console.log(micaConfig.formatValidationIssues(result.issues));
+}
 ```
 
 ## 设计约束
@@ -33,6 +39,7 @@ micaConfig.update((current) => ({
 - 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
 - userConfig 类本地数据统一通过本包暴露 API，避免 UI 或 runtime 直接关心文件路径。
 - provider 模型缓存属于配置数据，加载失败时应保留现有配置。
+- 配置语义校验属于本包职责；应用层只负责决定如何展示校验结果。
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值和迁移策略。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 

@@ -38,6 +38,7 @@ export class Application {
     });
 
     try {
+      micaConfig.assertValid();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);
       const commands = new micaCommands.CommandRegistry();
