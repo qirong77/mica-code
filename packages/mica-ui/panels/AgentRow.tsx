@@ -97,7 +97,7 @@ export function AgentRow({
       cells={[
         {
           key: 'title',
-          content: `#${agent.index} ${agent.title}`,
+          content: ` #${agent.index} ${agent.title}`,
           flexGrow: 1,
           flexShrink: 1,
           minWidth: 16,

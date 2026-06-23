@@ -79,7 +79,6 @@ export function CommandDropdown({
           maxVisibleItems={maxVisibleItems}
           adaptiveHeight={false}
           renderItem={renderItem}
-          reservedRows={10}
         />
       </Dialog>
     </Box>
