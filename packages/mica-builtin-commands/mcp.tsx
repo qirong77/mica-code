@@ -76,6 +76,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
               <micaUi.SelectList
                 items={servers.map((server) => ({ key: server.name, label: server.name }))}
                 selectedIdx={state.selectedIdx}
+                itemGap={0}
                 empty={<Text dimColor>no mcp servers configured</Text>}
                 renderItem={(item, isSelected) => {
                   const server = servers.find((entry) => entry.name === item.key);
@@ -84,7 +85,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                     <micaUi.OneLineItem
                       cells={[
                         {
-                          key: 'status',
+                          key: 'icon',
                           content: STATUS_ICON[server.status],
                           width: 2,
                           color: statusColor(server.status),
@@ -97,25 +98,27 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                           bold: isSelected,
                         },
                         {
-                          key: 'url',
-                          content: server.url,
-                          flexGrow: 1,
-                          minWidth: 0,
-                          dimColor: true,
+                          key: 'status',
+                          content: server.status,
+                          width: 12,
+                          flexShrink: 0,
+                          color: statusColor(server.status),
                         },
                         {
                           key: 'tools',
-                          content: server.status === 'connected' ? `${server.toolCount} tools` : undefined,
+                          content: server.status === 'connected' ? `${server.toolCount} tools` : '-',
+                          width: 10,
                           flexShrink: 0,
-                          color: micaUi.theme.colors.success,
+                          color: server.status === 'connected' ? micaUi.theme.colors.success : micaUi.theme.colors.dim,
                         },
                         {
-                          key: 'error',
-                          content: server.status === 'failed' ? server.error : undefined,
-                          maxWidth: '35%',
+                          key: 'detail',
+                          content: server.status === 'failed' ? server.error : server.url,
+                          flexGrow: 1,
                           flexShrink: 1,
                           minWidth: 0,
-                          color: micaUi.theme.colors.error,
+                          color: server.status === 'failed' ? micaUi.theme.colors.error : undefined,
+                          dimColor: server.status !== 'failed',
                         },
                       ]}
                     />
@@ -143,6 +146,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                   label: tool.name,
                 }))}
                 selectedIdx={state.selectedIdx}
+                itemGap={0}
                 empty={<Text dimColor>no tools available</Text>}
                 renderItem={(item, isSelected) => {
                   const tool = server?.tools.find((entry) => entry.name === item.key);

@@ -1,4 +1,4 @@
-import { Text, useTerminalSize } from '@anthropic/ink';
+import { Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
@@ -44,8 +44,7 @@ function showAgentsPanel(services: CommandRuntimeServices) {
   function AgentsPanel() {
     const state = micaUi.useScheduleState(stateAtom);
     const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
-    const { columns } = useTerminalSize();
-    const layout = getAgentRowLayout(agents, Math.max(20, columns - 6));
+    const layout = getAgentRowLayout(agents);
     return (
       <micaUi.Dialog
         title={`agents (${agents.length})`}

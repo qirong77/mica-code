@@ -1,34 +1,30 @@
+import { basename } from 'node:path';
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { OneLineItem, getOneLineColumnWidth } from '../primitives/OneLineItem.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
-import { formatElapsed, formatSessionMeta } from '../utils/format.js';
+import { formatElapsed, formatSessionListTime } from '../utils/format.js';
 import type { MicaUiAgentStatusItem } from '../types.js';
 
 export type AgentRowLayout = {
-  titleWidth: number;
+  workspaceWidth: number;
   statusWidth: number;
 };
 
-export function getAgentRowLayout(agents: readonly MicaUiAgentStatusItem[], availableWidth = 120): AgentRowLayout {
+export function getAgentRowLayout(agents: readonly MicaUiAgentStatusItem[]): AgentRowLayout {
+  const workspaceWidth = getOneLineColumnWidth(
+    agents.map((agent) => formatAgentWorkspace(agent)),
+    { min: 18, max: 24, padding: 1 },
+  );
   const statusWidth = getOneLineColumnWidth(
     agents.map((agent) => getWorkingStatusDisplay(agent.status).text),
-    { min: 12, max: 28, padding: 1 },
+    { min: 10, max: 18, padding: 1 },
   );
-  const metaWidth = getOneLineColumnWidth(
-    agents.map((agent) => `${formatSessionMeta(agent.updatedAt, agent.model)} ${agent.providerName}`),
-    { min: 24, max: 72, padding: 1 },
-  );
-  const separatorsAndGapsWidth = 6;
-  const titleMaxWidth = Math.max(16, availableWidth - statusWidth - metaWidth - separatorsAndGapsWidth);
 
   return {
-    titleWidth: getOneLineColumnWidth(
-      agents.map((agent) => `#${agent.index} ${agent.title}`),
-      { min: 16, max: titleMaxWidth, padding: 1 },
-    ),
+    workspaceWidth,
     statusWidth,
   };
 }
@@ -96,49 +92,57 @@ export function AgentRow({
     );
   }
 
-  const meta = formatSessionMeta(agent.updatedAt, agent.model);
   return (
     <OneLineItem
       cells={[
         {
           key: 'title',
           content: `#${agent.index} ${agent.title}`,
-          width: layout?.titleWidth ?? 24,
-          minWidth: 8,
+          flexGrow: 1,
           flexShrink: 1,
-          color: agent.current ? themeColors.accent : undefined,
+          minWidth: 16,
+          color: selected || agent.current ? themeColors.accent : undefined,
           bold: selected,
         },
         {
-          key: 'sep-status',
-          content: '·',
+          key: 'workspace',
+          content: formatAgentWorkspace(agent),
+          width: layout?.workspaceWidth ?? 24,
           flexShrink: 0,
-          color: themeColors.dim,
+          color: selected ? themeColors.accent : undefined,
+          dimColor: !selected,
         },
         {
           key: 'status',
           content: status.text,
-          width: layout?.statusWidth ?? 18,
-          minWidth: 8,
-          flexShrink: 1,
+          width: layout?.statusWidth ?? 12,
+          flexShrink: 0,
           color: status.color,
         },
         {
-          key: 'sep-meta',
-          content: '·',
+          key: 'time',
+          content: formatSessionListTime(agent.updatedAt),
+          width: 16,
           flexShrink: 0,
-          color: themeColors.dim,
+          color: selected ? themeColors.accent : undefined,
+          dimColor: !selected,
         },
         {
-          key: 'meta',
-          content: `${meta} ${agent.providerName}`,
-          flexGrow: 1,
-          minWidth: 0,
-          dimColor: true,
+          key: 'model',
+          content: agent.model,
+          width: 20,
+          flexShrink: 0,
+          color: selected ? themeColors.accent : undefined,
+          dimColor: !selected,
         },
       ]}
     />
   );
+}
+
+function formatAgentWorkspace(agent: MicaUiAgentStatusItem): string {
+  const workspace = basename(agent.cwd) || agent.cwd;
+  return agent.current ? `${workspace} · current` : workspace;
 }
 
 function formatAgentRuntime(startedAt: string, nowMs: number): string {

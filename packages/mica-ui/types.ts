@@ -110,6 +110,7 @@ export interface MicaUiAgentStatusItem {
   id: string;
   index: number;
   title: string;
+  cwd: string;
   providerName: string;
   model: string;
   status: MicaUiWorkingStatus;

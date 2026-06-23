@@ -22,6 +22,8 @@ export type SelectCommandConfig = {
   current: string;
   options: SelectOption[];
   emptyMessage?: string;
+  itemGap?: number;
+  renderItem?: (item: SelectItem, isSelected: boolean) => React.ReactNode;
   onSelect: (name: string) => void | Promise<void>;
 };
 
@@ -96,7 +98,8 @@ export function showSelectCommand(config: SelectCommandConfig) {
           items={items}
           selectedIdx={currentIdx}
           empty={<Text dimColor>{config.emptyMessage ?? 'no options'}</Text>}
-          itemGap={1}
+          itemGap={config.itemGap ?? 1}
+          renderItem={config.renderItem}
         />
       </micaUi.Dialog>
     );

@@ -33,6 +33,7 @@ export type SessionSummary = {
   id: string;
   title: string;
   updatedAt: string;
+  cwd: string;
   model: string;
 };
 
