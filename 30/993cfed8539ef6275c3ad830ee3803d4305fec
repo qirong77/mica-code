@@ -1,0 +1,29 @@
+packages/mica-ui/input/TerminalInput.tsx
+  f13eee631b2f0a53 10,24-27,40,76,117-129
+  h_a456b67147438e 15,28-29,38-39,71,74-75,80-81,110-116,130-134,138-147,196-199,203,281-283,285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "30993cfed8539ef6275c3ad830ee3803d4305fec",
+  "prompts": {
+    "f13eee631b2f0a53": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef3a3-497c-7383-a7a6-5f5582e42ba9",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 968,
+      "total_deletions": 66,
+      "accepted_lines": 901,
+      "overriden_lines": 7
+    }
+  },
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
