@@ -73,7 +73,6 @@ export function AgentRow({
             {
               key: 'spinner',
               content: status.spinning ? <Spin /> : undefined,
-              width: status.spinning ? 1 : 0,
             },
             {
               key: 'status',
