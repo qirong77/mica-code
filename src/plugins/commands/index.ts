@@ -217,6 +217,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         conversationMessages: targetSession.agent.toConversationMessages(),
         responseText: '',
         pendingInputs: [],
+        pendingQueueMode: null,
         messageBarMessages: [],
         logEntries: [],
         agentTurnLogItems: [],
@@ -272,6 +273,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         conversationMessages: session.agent.toConversationMessages(),
         responseText: '',
         pendingInputs: [],
+        pendingQueueMode: null,
         messageBarMessages: [],
         logEntries: [],
         agentTurnLogItems: [],
@@ -381,6 +383,7 @@ function createCommandRuntimeServices(): CommandRuntimeServices {
         conversationMessages: concreteAgent.toConversationMessages(),
         responseText: '',
         pendingInputs: [],
+        pendingQueueMode: null,
         contextSize: 0,
         cachedTokenRate: 0,
       });
@@ -412,6 +415,7 @@ function captureSessionUi(): TerminalAgentUiState {
     conversationMessages: micaUi.conversation.messages.get(),
     responseText: micaUi.conversation.responseText.get(),
     pendingInputs: micaUi.conversation.pendingInputs.get(),
+    pendingQueueMode: micaUi.conversation.pendingQueueMode.get(),
     messageBarMessages: micaUi.messageBar.getMessages(),
     logEntries: micaUi.panels.logEntries.get(),
     agentTurnLogItems: micaUi.panels.agentTurnLogItems.get(),
@@ -498,7 +502,7 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
     uiState.conversationMessages.length > 0 ? uiState.conversationMessages : agent.toConversationMessages(),
   );
   micaUi.conversation.setResponseText(uiState.responseText);
-  micaUi.conversation.setPendingInputs(uiState.pendingInputs);
+  micaUi.conversation.setPendingInputs(uiState.pendingInputs, uiState.pendingQueueMode);
   micaUi.panels.thinkingText.set(uiState.thinkingText);
   micaUi.panels.setLogEntries(uiState.logEntries);
   micaUi.panels.setAgentTurnLogItems(uiState.agentTurnLogItems);

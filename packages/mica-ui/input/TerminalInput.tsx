@@ -7,10 +7,12 @@ import { themeColors } from '../theme.js';
 import { useScheduleState } from '../hooks/index.js';
 import * as input from './state.js';
 import { pluginUIs, workingStatus, abortAgent, setPluginUIs, editPendingInput } from '../panels/state.js';
+import { pendingInputs, pendingQueueMode } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { MessageBarAPI } from '../panels/MessageBar.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
 import type { DOMElement } from '@anthropic/ink';
+import type { TerminalInputQueueMode, TerminalInputSubmitOptions } from './state.js';
 
 interface YogaNodeLike {
   getComputedTop(): number;
@@ -18,6 +20,12 @@ interface YogaNodeLike {
 }
 
 const EXIT_CONFIRM_TIMEOUT_MS = 800;
+
+function formatPendingStatusText(queueMode: ReturnType<typeof pendingQueueMode.get>): string {
+  if (queueMode === 'after_turn') return '已排队，等待当前 agent 执行完成后发送';
+  if (queueMode === 'after_iteration') return '已排队，等待当前 agent 本轮迭代完成后发送';
+  return '已排队，等待当前 agent 可继续时发送';
+}
 
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
@@ -27,6 +35,9 @@ function TerminalInput() {
   const activePluginUIs = useScheduleState(pluginUIs);
   const status = useScheduleState(workingStatus);
   const placeholder = useScheduleState(input.placeholder);
+  const inputDisabled = useScheduleState(input.disabled);
+  const currentPendingInputs = useScheduleState(pendingInputs);
+  const currentPendingQueueMode = useScheduleState(pendingQueueMode);
   const inputBoxRef = useRef<DOMElement | null>(null);
   const setInputBoxRef = useCallback((el: DOMElement | null) => {
     inputBoxRef.current = el;
@@ -53,9 +64,21 @@ function TerminalInput() {
     if (input.inputBottomDistance.get() !== nextDistance) {
       input.inputBottomDistance.set(nextDistance);
     }
-  }, [terminalSize?.rows, terminalSize?.columns, localText, placeholder, status.type, activePluginUIs.length]);
+  }, [
+    terminalSize?.rows,
+    terminalSize?.columns,
+    localText,
+    cursorOffset,
+    placeholder,
+    status.type,
+    activePluginUIs.length,
+    currentPendingInputs.length,
+    currentPendingQueueMode,
+  ]);
 
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
+  const hasActiveInputPlugin = activePluginUIs.some((ui) => ui.onInput);
+  const isCommandInput = localText.trimStart().startsWith('/');
 
   React.useEffect(() => {
     return input.text.subscribe((text) => {
@@ -83,6 +106,45 @@ function TerminalInput() {
     status.type === 'thinking' ||
     status.type === 'streaming' ||
     status.type === 'calling_tool';
+
+  const showQueueShortcutTip =
+    isAgentRunning &&
+    !inputDisabled &&
+    !hasActiveInputPlugin &&
+    !isCommandInput &&
+    localText.trim().length > 0 &&
+    cursorOffset === localText.length;
+
+  React.useEffect(() => {
+    const nextStatusText =
+      currentPendingInputs.length > 0
+        ? formatPendingStatusText(currentPendingQueueMode)
+        : showQueueShortcutTip
+          ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送'
+          : '';
+    input.setQueueStatusText(nextStatusText);
+    return () => {
+      if (input.queueStatusText.get() === nextStatusText) input.setQueueStatusText('');
+    };
+  }, [currentPendingInputs.length, currentPendingQueueMode, showQueueShortcutTip]);
+
+  const submitValue = useCallback((value: string, options?: TerminalInputSubmitOptions) => {
+    const trimmed = value.trim();
+    micaConfig.inputHistory.append(trimmed);
+    setHistoryIndex(-1);
+    input.text.set('');
+    setLocalText('');
+    setCursorOffset(0);
+    input.submit(trimmed, options);
+  }, []);
+
+  const queueCurrentInput = useCallback(
+    (queueMode: TerminalInputQueueMode) => {
+      if (!showQueueShortcutTip || currentPendingInputs.length > 0) return;
+      submitValue(localText, { queueMode });
+    },
+    [currentPendingInputs.length, localText, showQueueShortcutTip, submitValue],
+  );
 
   const armExitConfirmation = useCallback(
     (text: string) => {
@@ -131,7 +193,14 @@ function TerminalInput() {
       return;
     }
 
-    if (key.shift && key.leftArrow && localText.length === 0 && activePluginUIs.filter((x) => x.onInput).length === 0) {
+    if (key.tab && showQueueShortcutTip) {
+      event?.preventDefault?.();
+      event?.stopImmediatePropagation?.();
+      queueCurrentInput(key.shift ? 'after_iteration' : 'after_turn');
+      return;
+    }
+
+    if (key.shift && key.leftArrow && localText.length === 0 && !hasActiveInputPlugin) {
       const pendingInput = editPendingInput();
       if (pendingInput) {
         setLocalText(pendingInput);
@@ -209,16 +278,11 @@ function TerminalInput() {
 
   const onSubmit = useCallback(
     (value: string) => {
-      if (!value.trim() || input.disabled.get() || activePluginUIs.some((x) => x.onInput)) return;
-      const trimmed = value.trim();
-      micaConfig.inputHistory.append(trimmed);
-      setHistoryIndex(-1);
-      input.text.set('');
-      setLocalText('');
-      setCursorOffset(0);
-      input.submit(trimmed);
+      if (!value.trim() || input.disabled.get() || hasActiveInputPlugin) return;
+      if (isAgentRunning && currentPendingInputs.length > 0) return;
+      submitValue(value);
     },
-    [activePluginUIs],
+    [currentPendingInputs.length, hasActiveInputPlugin, isAgentRunning, submitValue],
   );
 
   const onExit = useCallback(() => {
@@ -271,8 +335,6 @@ function TerminalInput() {
     }
   }, [historyIndex, preserveInputOnPluginHandle]);
 
-  const inputDisabled = useScheduleState(input.disabled);
-
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
       <Box
@@ -287,9 +349,7 @@ function TerminalInput() {
         width="100%"
       >
         <Box marginLeft={1} marginRight={1}>
-          <Text bold>
-            {'❯'}
-          </Text>
+          <Text bold>{'❯'}</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <SimpleTextInput

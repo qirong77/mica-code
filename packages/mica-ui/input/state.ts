@@ -1,31 +1,52 @@
 import { atom } from 'nanostores';
 import mitt from 'mitt';
 
-type Events = { submit: string };
+export type TerminalInputQueueMode = 'after_iteration' | 'after_turn';
+export type TerminalInputSubmitOptions = {
+  queueMode?: TerminalInputQueueMode;
+};
+
+type SubmitHandler = (text: string, options?: TerminalInputSubmitOptions) => void;
+type SubmitEvent = { text: string; options?: TerminalInputSubmitOptions };
+type Events = { submit: SubmitEvent };
 const emitter = mitt<Events>();
+const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>();
 
 export const text = atom('');
 export const disabled = atom(false);
 export const placeholder = atom('Type something and press Enter...');
 export const inputBottomDistance = atom(0);
+export const queueStatusText = atom('');
 
 export function clearText(): void {
   text.set('');
+}
+
+export function setQueueStatusText(value: string): void {
+  queueStatusText.set(value);
 }
 
 export function setPlaceholder(value: string): void {
   placeholder.set(value);
 }
 
-export function onSubmit(cb: (text: string) => void) {
-  emitter.on('submit', cb);
-  return () => emitter.off('submit', cb);
+export function onSubmit(cb: SubmitHandler) {
+  const handler = (event: SubmitEvent) => cb(event.text, event.options);
+  submitHandlers.set(cb, handler);
+  emitter.on('submit', handler);
+  return () => {
+    emitter.off('submit', handler);
+    submitHandlers.delete(cb);
+  };
 }
 
-export function submit(text: string) {
-  emitter.emit('submit', text);
+export function submit(text: string, options?: TerminalInputSubmitOptions) {
+  emitter.emit('submit', { text, options });
 }
 
-export function offSubmit(cb: (text: string) => void) {
-  emitter.off('submit', cb);
+export function offSubmit(cb: SubmitHandler) {
+  const handler = submitHandlers.get(cb);
+  if (!handler) return;
+  emitter.off('submit', handler);
+  submitHandlers.delete(cb);
 }

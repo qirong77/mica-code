@@ -6,6 +6,7 @@ import type {
   MicaUiLogEntry,
   MessageItem,
   MicaUiPluginUI,
+  MicaUiPendingInputQueueMode,
   MicaUiUILogEntry,
   MicaUiWorkingStatus,
 } from '@packages/mica-ui/index.js';
@@ -14,6 +15,7 @@ export type TerminalAgentUiState = {
   conversationMessages: MicaUiConversationMessage[];
   responseText: string;
   pendingInputs: string[];
+  pendingQueueMode: MicaUiPendingInputQueueMode | null;
   messageBarMessages: MessageItem[];
   logEntries: MicaUiLogEntry[];
   agentTurnLogItems: MicaUiAgentTurnLogItem[];
@@ -53,7 +55,7 @@ export type TerminalAgentSession = {
 
 const MAX_UI_CONVERSATION_MESSAGES = 200;
 const MAX_RESPONSE_TEXT_CHARS = 80_000;
-const MAX_PENDING_INPUTS = 50;
+const MAX_PENDING_INPUTS = 1;
 const MAX_MESSAGE_BAR_MESSAGES = 8;
 const MAX_LOG_ENTRIES = 200;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
@@ -169,7 +171,11 @@ export class TerminalAgentSessionManager {
     return {
       id: session.id,
       index: session.index,
-      title: deriveTitle(session.uiState.conversationMessages.length ? session.uiState.conversationMessages : session.agent.toConversationMessages()),
+      title: deriveTitle(
+        session.uiState.conversationMessages.length
+          ? session.uiState.conversationMessages
+          : session.agent.toConversationMessages(),
+      ),
       cwd: process.cwd(),
       providerId: provider.id,
       providerName: provider.name ?? provider.id,
@@ -183,11 +189,13 @@ export class TerminalAgentSessionManager {
 }
 
 export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiState {
+  const pendingInputs = state.pendingInputs.slice(-MAX_PENDING_INPUTS);
   return {
     ...state,
     conversationMessages: state.conversationMessages.slice(-MAX_UI_CONVERSATION_MESSAGES),
     responseText: tailText(state.responseText, MAX_RESPONSE_TEXT_CHARS),
-    pendingInputs: state.pendingInputs.slice(-MAX_PENDING_INPUTS),
+    pendingInputs,
+    pendingQueueMode: pendingInputs.length > 0 ? state.pendingQueueMode : null,
     messageBarMessages: state.messageBarMessages.slice(-MAX_MESSAGE_BAR_MESSAGES),
     logEntries: state.logEntries.slice(-MAX_LOG_ENTRIES),
     agentTurnLogItems: state.agentTurnLogItems.slice(-MAX_AGENT_TURN_LOG_ITEMS),
@@ -201,6 +209,7 @@ function createEmptyUiState(): TerminalAgentUiState {
     conversationMessages: [],
     responseText: '',
     pendingInputs: [],
+    pendingQueueMode: null,
     messageBarMessages: [],
     logEntries: [],
     agentTurnLogItems: [],

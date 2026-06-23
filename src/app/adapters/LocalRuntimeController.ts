@@ -45,6 +45,7 @@ export class LocalRuntimeController implements RuntimeController {
   readonly queue = {
     enqueue: (input: RuntimeInput) => this.queueFor(this.queueAgent()).enqueue(input),
     dequeue: () => this.queueFor(this.queueAgent()).dequeue(),
+    dequeueByMode: (mode: RuntimeInput['queueMode']) => this.queueFor(this.queueAgent()).dequeueByMode(mode),
     clear: () => this.queueFor(this.queueAgent()).clear(),
     list: () => this.queueFor(this.queueAgent()).list(),
     count: () => this.queueFor(this.queueAgent()).count(),
@@ -136,8 +137,8 @@ export class LocalRuntimeController implements RuntimeController {
     return this.queueAgent();
   }
 
-  enqueueForAgent(agent: AgentRuntime, input: RuntimeInput): void {
-    this.queueFor(agent).enqueue(input);
+  enqueueForAgent(agent: AgentRuntime, input: RuntimeInput): boolean {
+    return this.queueFor(agent).enqueue(input);
   }
 
   dequeueForAgent(agent: AgentRuntime): RuntimeInput | null {
@@ -268,7 +269,7 @@ export class LocalRuntimeController implements RuntimeController {
     targetSessionController: SessionController,
     options: SubmitOptions,
   ): Promise<SubmitResult> {
-    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui');
+    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui', { queueMode: options.queueMode });
     const activeTask = this.exclusiveTasks.get(targetAgent);
     if (activeTask) {
       this.events.publish({
@@ -340,6 +341,7 @@ export class LocalRuntimeController implements RuntimeController {
         conversationMessages: [...agent.toConversationMessages(), { role: 'user', content }],
         responseText: '',
         pendingInputs: [],
+        pendingQueueMode: null,
         logEntries: [],
         agentTurnLogItems: [],
         thinkingText: '',
@@ -460,7 +462,7 @@ export class LocalRuntimeController implements RuntimeController {
 
   private takeQueuedIterationInput(agent: AgentRuntime): AgentQueryContent | null {
     const queue = this.queueFor(agent);
-    const next = queue.dequeue();
+    const next = queue.dequeueByMode('after_iteration');
     this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
     if (!next) return null;
 

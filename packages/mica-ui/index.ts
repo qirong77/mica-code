@@ -133,6 +133,7 @@ export const micaUi = {
 
 export type { OneLineItemCell, SelectItem } from './primitives/index.js';
 export type { MessageItem } from './panels/MessageBar.js';
+export type { MicaUiPendingInputQueueMode } from './conversation/state.js';
 export type {
   MicaUiWorkingStatus,
   MicaUiLogEntry,

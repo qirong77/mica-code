@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { themeColors } from '../theme.js';
-import { messages, pendingInputs, responseText } from './state.js';
+import { messages, responseText } from './state.js';
 import { Markdown } from './Markdown.js';
 
 const MAX_USER_LINES = 10;
@@ -31,7 +31,6 @@ interface LogItem {
 export const Conversation = (): React.ReactNode => {
   const currentMessages = useScheduleState(messages);
   const currentResponseText = useScheduleState(responseText);
-  const currentPendingInputs = useScheduleState(pendingInputs);
 
   const staticItems = useMemo(
     () =>
@@ -71,19 +70,6 @@ export const Conversation = (): React.ReactNode => {
       <Box>
         <Markdown>{currentResponseText}</Markdown>
       </Box>
-      {currentPendingInputs.map((pendingInput, index) => (
-        <Box key={`pending-${index}`} paddingY={1} flexDirection="row">
-          <Text color={themeColors.dim}>{'\u258c'}</Text>
-          <Text color={themeColors.dim}>
-            {'（等待当前 agent 本轮迭代完成后发送，shift + ← 重新编辑'}
-            {'）'}
-            {'\n'}
-          </Text>
-          <Box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="row">
-            <Text color={themeColors.dim}>{truncateLines(pendingInput, MAX_USER_LINES)}</Text>
-          </Box>
-        </Box>
-      ))}
     </Box>
   );
 };

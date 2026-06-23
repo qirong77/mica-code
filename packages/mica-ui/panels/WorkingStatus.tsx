@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useScheduleState } from '../hooks/index.js';
 import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate } from './state.js';
 import { responseText as convResponseText } from '../conversation/state.js';
+import { queueStatusText } from '../input/state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { IfComponent } from '../primitives/IfComponent.js';
@@ -83,6 +84,7 @@ export function WorkingStatus() {
   const info = useScheduleState(workingStatus);
   const currentThinkingText = useScheduleState(thinkingText);
   const currentResponseText = useScheduleState(convResponseText);
+  const queueStatus = useScheduleState(queueStatusText);
   const startRef = useRef(0);
   const [elapsed, setElapsed] = useState(0);
 
@@ -102,53 +104,59 @@ export function WorkingStatus() {
   const elapsedText = displayElapsed > 0 ? formatElapsed(displayElapsed) : '';
   const statusDisplay = getWorkingStatusDisplay(info);
 
-  const content = (() => {
-    switch (info.type) {
-      case 'connecting':
-        return (
-          <Box>
-            <Spin />
-            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-          </Box>
-        );
-      case 'thinking':
-        return (
-          <Box>
-            <Spin />
-            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-            <Text color={themeColors.dim}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
-          </Box>
-        );
-      case 'streaming':
-        return (
-          <Box>
-            <Spin />
-            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-            <Text color={themeColors.dim}> ↓{estimateTokens(currentResponseText)} tokens</Text>
-          </Box>
-        );
-      case 'calling_tool':
-        return (
-          <Box>
-            <Spin />
-            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-          </Box>
-        );
-      case 'plugin_task':
-        return (
-          <Box>
-            <Spin />
-            <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-          </Box>
-        );
-      case 'error':
-        return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
-      case 'completed':
-        return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
-      default:
-        return null;
-    }
-  })();
+  const content = queueStatus ? (
+    <Text color={themeColors.dim} wrap="wrap">
+      {queueStatus}
+    </Text>
+  ) : (
+    (() => {
+      switch (info.type) {
+        case 'connecting':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+            </Box>
+          );
+        case 'thinking':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={themeColors.dim}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
+            </Box>
+          );
+        case 'streaming':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={themeColors.dim}> ↓{estimateTokens(currentResponseText)} tokens</Text>
+            </Box>
+          );
+        case 'calling_tool':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+            </Box>
+          );
+        case 'plugin_task':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+            </Box>
+          );
+        case 'error':
+          return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
+        case 'completed':
+          return <Text color={statusDisplay.color}>{statusDisplay.text}</Text>;
+        default:
+          return null;
+      }
+    })()
+  );
 
   return (
     <Box flexDirection="row">
@@ -157,7 +165,9 @@ export function WorkingStatus() {
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <StatusInfo />
-        <IfComponent condition={info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle'}>
+        <IfComponent
+          condition={!queueStatus && info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle'}
+        >
           <Text color={themeColors.dim}> {elapsedText}</Text>
         </IfComponent>
       </Box>

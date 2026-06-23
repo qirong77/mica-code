@@ -45,9 +45,11 @@ export class MicaUiRuntimeBridge {
       if (event.type === 'queue:changed') {
         const owner = eventOwnerAgent(event.owner, this.agent);
         const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
-        const pendingInputs = event.pendingInputs.map((input) => input.text);
-        session.uiState = normalizeUiState({ ...session.uiState, pendingInputs });
-        if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs);
+        const pendingInput = event.pendingInputs.at(-1);
+        const pendingInputs = pendingInput ? [pendingInput.text] : [];
+        const pendingQueueMode = pendingInput?.queueMode ?? null;
+        session.uiState = normalizeUiState({ ...session.uiState, pendingInputs, pendingQueueMode });
+        if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs, pendingQueueMode);
       }
       if (event.type === 'notification') {
         const owner = eventOwnerAgent(event.owner, this.agent);
@@ -77,6 +79,7 @@ export class MicaUiRuntimeBridge {
           conversationMessages: session.agent.toConversationMessages(),
           responseText: '',
           pendingInputs: [],
+          pendingQueueMode: null,
           workingStatus: { type: 'idle' },
         });
         if (this.isActiveAgent(session.agent)) {
@@ -88,8 +91,8 @@ export class MicaUiRuntimeBridge {
       }
     });
 
-    micaUi.terminalInput.onSubmit((text) => {
-      void this.runtime.submit(text);
+    micaUi.terminalInput.onSubmit((text, options) => {
+      void this.runtime.submit(text, { queueMode: options?.queueMode });
     });
 
     micaUi.panels.setOnAbortAgent(() => {

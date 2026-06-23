@@ -11,7 +11,7 @@ export const micaRuntime = {
 export type { RuntimeEventBus } from './RuntimeEventBus.js';
 export type { MessageQueueService } from './MessageQueueService.js';
 export type { RuntimeController } from './RuntimeController.js';
-export type { RuntimeInput, RuntimeInputSource } from './RuntimeInput.js';
+export type { RuntimeInput, RuntimeInputSource, RuntimeQueueMode } from './RuntimeInput.js';
 export type { RuntimeEvent, RuntimeEventMap } from './RuntimeEvent.js';
 export type { RuntimeStatus } from './RuntimeStatus.js';
 export type { RuntimeViewSnapshot } from './RuntimeViewSnapshot.js';

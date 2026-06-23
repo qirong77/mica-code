@@ -4,4 +4,5 @@ export type SubmitResult =
 
 export type SubmitOptions = {
   source?: import('./RuntimeInput.js').RuntimeInputSource;
+  queueMode?: import('./RuntimeInput.js').RuntimeQueueMode;
 };
