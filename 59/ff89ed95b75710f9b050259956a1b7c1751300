@@ -1,0 +1,14 @@
+packages/mica-ui/panels/AgentRow.tsx
+  h_a456b67147438e 80-81,98-100,108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "59ff89ed95b75710f9b050259956a1b7c1751300",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
