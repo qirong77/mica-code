@@ -6,6 +6,7 @@ import type {
   MicaUiPluginUI,
   MicaUiUILogEntry,
   MicaUiAgentStatusItem,
+  MicaUiStartupBannerState,
 } from '../types.js';
 
 export const workingStatus = atom<MicaUiWorkingStatus>({ type: 'idle' });
@@ -16,6 +17,17 @@ export const pluginUIs = atom<MicaUiPluginUI[]>([]);
 export const contextSize = atom(0);
 export const cachedTokenRate = atom(0);
 export const agentStatusItems = atom<MicaUiAgentStatusItem[]>([]);
+export const startupBanner = atom<MicaUiStartupBannerState>({
+  provider: '-',
+  model: '-',
+  context: '-',
+  effort: '-',
+  tools: '-',
+  mcp: '-',
+  session: 'new',
+  workdir: '-',
+  tips: '/help for commands · /model to switch',
+});
 
 export const modelDisplay = {
   name: atom('claude-sonnet-4-6'),
@@ -112,6 +124,10 @@ export function clearPluginUIs(): void {
 
 export function setAgentStatusItems(items: MicaUiAgentStatusItem[]): void {
   agentStatusItems.set([...items]);
+}
+
+export function setStartupBanner(state: Partial<MicaUiStartupBannerState>): void {
+  startupBanner.set({ ...startupBanner.get(), ...state });
 }
 
 let _onAbortAgent: (() => void) | null = null;

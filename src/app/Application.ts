@@ -9,6 +9,7 @@ import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
+import { syncStartupBanner } from '../runtime/startupBanner.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
@@ -80,12 +81,15 @@ export class Application {
       });
 
       uiBridge.start();
+      syncStartupBanner(agent);
       await runtime.start();
+      syncStartupBanner(agent);
 
       void micaConfig.loadMissingProviderModels().then(() => {
         if (!agent.isRunning) {
           agent.reloadConfig(false);
           syncModelDisplay(agent);
+          syncStartupBanner(agent);
         }
       });
 

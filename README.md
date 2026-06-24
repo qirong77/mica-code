@@ -1,20 +1,34 @@
 # Mica Code
 
-Mica Code 是一个在终端里运行的轻量级 AI coding agent。它可以阅读和编辑代码、搜索文件、运行 shell 命令、调用网页与 MCP 工具，并根据执行反馈持续推进任务。
+> **MICA — Minimal, Intelligent, Cache-first Agent.**
+>
+> 一个轻量、终端原生、关注上下文复用的 AI coding agent。
 
-它的重点是保持终端 agent 的核心体验清晰、可控、可扩展：直接对话、改文件、跑命令、看结果，无需切换到额外的 IDE 或网页控制台。
+Mica Code 在你的项目目录中运行，能够阅读和编辑代码、搜索文件、执行 shell 命令、调用网页与 MCP 工具，并根据执行反馈持续推进任务。
+
+它追求的是一种更克制的 agent 体验：少一点界面负担，多一点上下文理解；少一点重复消耗，多一点可恢复、可观察、可扩展的工程工作流。
 
 > 当前项目仍在快速迭代，内部 API 与配置格式可能调整。
 
+## MICA 是什么
+
+**MICA** 代表：
+
+- **Minimal**：终端优先，界面克制，专注对话、编辑、命令和结果。
+- **Intelligent**：具备完整 agent loop，可结合工具反馈持续分析和执行。
+- **Cache-first**：关注上下文复用、cached token 可见性和低重复消耗的工作方式。
+- **Agent**：不只是补全代码，而是能围绕一个任务持续阅读、修改、验证和回退。
+
 ## 为什么是 Mica Code
 
-- **终端优先的工作流**：在项目目录中直接对话、改文件、跑命令、看结果，无需切换工具。
+- **终端原生**：在项目目录中直接对话、改文件、跑命令、看结果，无需切换到额外 IDE 或网页控制台。
 - **轻量但完整的 agent loop**：支持流式响应、thinking/tool 日志、工具调用、多轮反馈、中止控制、输入排队和会话快照。
+- **上下文与缓存可见**：展示上下文窗口、token 使用与 cached token rate，帮助你理解每轮对话的消耗与复用情况。
 - **OpenAI 兼容 provider**：主路径面向 OpenAI Chat Completions 风格接口，支持 DeepSeek、Moonshot、OpenAI 兼容网关及自建 provider。
-- **可插拔工具系统**：内置文件读写、精确编辑、搜索、shell、web search/fetch、skills 等工具；MCP 工具进入同一套 registry 和执行链路。
+- **统一工具系统**：内置文件读写、精确编辑、搜索、shell、web search/fetch、skills 等工具；MCP 工具进入同一套 registry 和执行链路。
 - **MCP 原生接入**：读取本地 MCP 配置、连接远端 server，将外部能力暴露给 agent 使用。
 - **会话可恢复，改动可回退**：本地保存 session snapshot，支持 `/resume` 恢复历史会话；`/rewind` 回退到上一轮对话前的对话与文件状态。
-- **多 agent 并行**：通过 `/new` 创建独立的 agent session，探索、计划、实现等任务分开进行，避免主会话上下文污染。
+- **多 agent 并行**：通过 `/new` 创建独立的 agent session，让探索、计划、实现等任务分开进行，避免主会话上下文污染。
 - **模块化工程架构**：runtime、provider、tools、commands、session、UI、plugin、skills 等能力拆为独立 package，定界清晰、易于扩展和替换。
 
 ## 快速开始
@@ -40,7 +54,7 @@ Release 产物：
 - `mica-darwin-x64.tar.gz`
 - `mica-darwin-arm64.tar.gz`
 
-### 本地构建
+### 本地运行
 
 ```bash
 bun install
@@ -78,7 +92,9 @@ bun run dev
 ```
 
 主路径通过 OpenAI Chat Completions 风格的 client 连接 provider，第三方 provider 需实现对应接口。
+
 最后一次使用的 provider、model、effort 和 context window 会写入 `~/.mica/storage.json`，不写入 provider 静态配置。
+
 如果 provider 配置了 `get_model_url`，模型列表会在运行时获取，不会回填到 `~/.mica/config.json`；没有动态模型接口的 provider 可以直接配置静态 `models` 数组。
 
 ## 常用命令
@@ -128,4 +144,4 @@ bun test packages/mica-agent/prompt/index.test.ts
 
 ## 状态
 
-Mica Code 目前在积极迭代中，核心 agent loop、工具系统和会话管理已稳定可用，更多能力持续加入。
+Mica Code 目前在积极迭代中，核心 agent loop、工具系统、会话管理和 MCP 接入已稳定可用，更多能力持续加入。

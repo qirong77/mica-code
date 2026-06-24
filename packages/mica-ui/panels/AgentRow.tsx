@@ -63,14 +63,6 @@ export function AgentRow({
               flexShrink: 0,
             },
             {
-              key: 'title',
-              content: agent.title,
-              maxWidth: '70%',
-              minWidth: 0,
-              flexShrink: 1,
-              color: themeColors.dim,
-            },
-            {
               key: 'spinner',
               content: status.spinning ? <Spin /> : undefined,
             },
@@ -85,6 +77,15 @@ export function AgentRow({
               content: status.spinning ? <Text dimColor>{runtime}</Text> : undefined,
               flexShrink: 0,
             },
+
+            {
+              key: 'title',
+              content: agent.title,
+              maxWidth: '70%',
+              minWidth: 0,
+              flexShrink: 1,
+              color: themeColors.dim,
+            },
           ]}
         />
       </Box>
@@ -94,6 +95,17 @@ export function AgentRow({
   return (
     <OneLineItem
       cells={[
+        {
+          key: 'spinner',
+          content: status.spinning ? <Spin /> : undefined,
+        },
+        {
+          key: 'status',
+          content: status.text,
+          width: layout?.statusWidth ?? 12,
+          flexShrink: 0,
+          color: status.color,
+        },
         {
           key: 'title',
           content: ` #${agent.index} ${agent.title}`,
@@ -110,13 +122,6 @@ export function AgentRow({
           flexShrink: 0,
           color: selected ? themeColors.accent : undefined,
           dimColor: !selected,
-        },
-        {
-          key: 'status',
-          content: status.text,
-          width: layout?.statusWidth ?? 12,
-          flexShrink: 0,
-          color: status.color,
         },
         {
           key: 'time',

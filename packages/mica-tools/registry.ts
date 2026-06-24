@@ -56,6 +56,14 @@ export function getToolDefinitions(): Tool[] {
   }));
 }
 
+export function getToolCounts(): { builtin: number; mcp: number; total: number } {
+  return {
+    builtin: builtinTools.length,
+    mcp: mcpTools.length,
+    total: builtinTools.length + mcpTools.length,
+  };
+}
+
 export async function executeTool(name: string, input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;

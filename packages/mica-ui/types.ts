@@ -118,3 +118,15 @@ export interface MicaUiAgentStatusItem {
   startedAt: string;
   updatedAt: string;
 }
+
+export interface MicaUiStartupBannerState {
+  provider: string;
+  model: string;
+  context: string;
+  effort: string;
+  tools: string;
+  mcp: string;
+  session: string;
+  workdir: string;
+  tips: string;
+}

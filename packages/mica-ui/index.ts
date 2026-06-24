@@ -15,6 +15,7 @@ import { MessageBar, MessageBarAPI } from './panels/MessageBar.js';
 import { DropDownUI } from './bottom/dropdown/index.js';
 import { TerminalInputUI } from './input/TerminalInput.js';
 import { App } from './app/App.js';
+import { StartupBanner, StartupBannerUI } from './app/StartupBanner.js';
 import { Conversation, ConversationUI } from './conversation/Conversation.js';
 import { Markdown } from './conversation/Markdown.js';
 import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
@@ -39,6 +40,8 @@ import { createErrorLogItem, createThinkingLogItem, createToolCallLogItem } from
 
 export const micaUi = {
   App,
+  StartupBanner,
+  StartupBannerUI,
   Conversation,
   ConversationUI,
   Markdown,
@@ -151,4 +154,5 @@ export type {
   MicaUiMessageParam,
   MicaUiAgentTurnLogItem,
   MicaUiAgentStatusItem,
+  MicaUiStartupBannerState,
 } from './types.js';
