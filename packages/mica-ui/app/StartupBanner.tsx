@@ -1,74 +1,252 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useTerminalSize } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { startupBanner } from '../panels/state.js';
+import type { MicaUiStartupBannerState } from '../types.js';
 
-const INNER_WIDTH = 54;
-const CONTENT_WIDTH = INNER_WIDTH - 2;
-const COLUMN_WIDTH = 24;
+const DEFAULT_FRAME_WIDTH = 56;
+const MIN_FRAME_WIDTH = 4;
+const FRAME_CHROME_WIDTH = 4;
+const BORDER_CHROME_WIDTH = 2;
+const TWO_COLUMN_MIN_CONTENT_WIDTH = 44;
 const COLUMN_GAP = 4;
 const LABEL_WIDTH = 8;
 const LABEL_VALUE_GAP = 2;
-const VALUE_WIDTH = COLUMN_WIDTH - LABEL_WIDTH - LABEL_VALUE_GAP;
-const RULE = '─'.repeat(INNER_WIDTH);
+const MIN_VALUE_WIDTH = 4;
+const RULE_CHAR = '─';
+
+type StartupBannerMode = 'two-column' | 'single-column';
+type StartupBannerFieldKey = keyof Omit<MicaUiStartupBannerState, 'tips'>;
+
+type StartupBannerField = {
+  label: string;
+  key: StartupBannerFieldKey;
+};
+
+type StartupBannerRow = readonly [StartupBannerField, StartupBannerField];
+
+export interface StartupBannerLayout {
+  frameWidth: number;
+  ruleWidth: number;
+  contentWidth: number;
+  mode: StartupBannerMode;
+  columnGap: number;
+  columnWidths: readonly [number, number];
+  singlePairWidth: number;
+}
+
+export interface StartupBannerPairLayout {
+  labelWidth: number;
+  gapWidth: number;
+  valueWidth: number;
+}
+
+const STARTUP_BANNER_ROWS = [
+  [
+    { label: 'Provider', key: 'provider' },
+    { label: 'Model', key: 'model' },
+  ],
+  [
+    { label: 'Context', key: 'context' },
+    { label: 'Effort', key: 'effort' },
+  ],
+  [
+    { label: 'Tools', key: 'tools' },
+    { label: 'MCP', key: 'mcp' },
+  ],
+  [
+    { label: 'Session', key: 'session' },
+    { label: 'Workdir', key: 'workdir' },
+  ],
+] as const satisfies readonly StartupBannerRow[];
 
 export function StartupBanner(): React.ReactNode {
   const state = useScheduleState(startupBanner);
+  const { columns } = useTerminalSize();
+
+  return <StartupBannerView state={state} terminalColumns={columns} />;
+}
+
+export function StartupBannerView({
+  state,
+  terminalColumns,
+}: {
+  state: MicaUiStartupBannerState;
+  terminalColumns?: number;
+}): React.ReactNode {
+  const layout = getStartupBannerLayout(terminalColumns);
 
   return (
-    <Box flexDirection="column" paddingBottom={1}>
-      <Border left="╭" right="╮" />
-      <Content text="✦ Mica Code" color={themeColors.primary} bold />
-      <Content text="  Minimal, Intelligent, Cache-first Agent" color={themeColors.dim} />
-      <Border left="├" right="┤" />
-      <Content text={formatRow('Provider', state.provider, 'Model', state.model)} />
-      <Content text={formatRow('Context', state.context, 'Effort', state.effort)} />
-      <Content text={formatRow('Tools', state.tools, 'MCP', state.mcp)} />
-      <Content text={formatRow('Session', state.session, 'Workdir', state.workdir)} />
-      <Border left="├" right="┤" />
-      <Content text={formatTip(state.tips)} />
-      <Border left="╰" right="╯" />
+    <Box flexDirection="column" width={layout.frameWidth} minWidth={0} overflowX="hidden" paddingBottom={1}>
+      <Border layout={layout} left="╭" right="╮" />
+      <HeaderLine layout={layout} text="✦ Mica Code" color={themeColors.primary} bold />
+      <HeaderLine layout={layout} text="  Minimal, Intelligent, Cache-first Agent" color={themeColors.dim} />
+      <Border layout={layout} left="├" right="┤" />
+      <InfoGrid layout={layout} state={state} />
+      <Border layout={layout} left="├" right="┤" />
+      <TipLine layout={layout} tip={state.tips} />
+      <Border layout={layout} left="╰" right="╯" />
     </Box>
   );
 }
 
-function Border({ left, right }: { left: string; right: string }): React.ReactNode {
-  return <Text color={themeColors.dim}>{`${left}${RULE}${right}`}</Text>;
+export function getStartupBannerLayout(terminalColumns: number | undefined): StartupBannerLayout {
+  const availableWidth =
+    typeof terminalColumns === 'number' && Number.isFinite(terminalColumns) && terminalColumns > 0
+      ? Math.floor(terminalColumns)
+      : DEFAULT_FRAME_WIDTH;
+  const frameWidth = Math.max(MIN_FRAME_WIDTH, Math.min(DEFAULT_FRAME_WIDTH, availableWidth));
+  const contentWidth = Math.max(0, frameWidth - FRAME_CHROME_WIDTH);
+  const mode: StartupBannerMode = contentWidth >= TWO_COLUMN_MIN_CONTENT_WIDTH ? 'two-column' : 'single-column';
+  const columnGap = mode === 'two-column' ? Math.min(COLUMN_GAP, Math.max(0, contentWidth - MIN_VALUE_WIDTH * 2)) : 0;
+  const leftColumnWidth = mode === 'two-column' ? Math.floor((contentWidth - columnGap) / 2) : contentWidth;
+  const rightColumnWidth = mode === 'two-column' ? contentWidth - columnGap - leftColumnWidth : 0;
+
+  return {
+    frameWidth,
+    ruleWidth: Math.max(0, frameWidth - BORDER_CHROME_WIDTH),
+    contentWidth,
+    mode,
+    columnGap,
+    columnWidths: [leftColumnWidth, rightColumnWidth],
+    singlePairWidth: contentWidth,
+  };
 }
 
-function Content({ text, color, bold }: { text: string; color?: string; bold?: boolean }): React.ReactNode {
+export function getStartupBannerPairLayout(width: number): StartupBannerPairLayout {
+  const safeWidth = Math.max(0, Math.floor(width));
+  const wideEnoughForDefaultGap = safeWidth >= LABEL_WIDTH + LABEL_VALUE_GAP + MIN_VALUE_WIDTH;
+  const gapWidth = wideEnoughForDefaultGap ? LABEL_VALUE_GAP : Math.min(1, Math.max(0, safeWidth - MIN_VALUE_WIDTH));
+  const labelWidth = Math.min(LABEL_WIDTH, Math.max(0, safeWidth - gapWidth - MIN_VALUE_WIDTH));
+
+  return {
+    labelWidth,
+    gapWidth,
+    valueWidth: Math.max(0, safeWidth - labelWidth - gapWidth),
+  };
+}
+
+export function buildStartupBannerRule(
+  layout: Pick<StartupBannerLayout, 'ruleWidth'>,
+  left: string,
+  right: string,
+): string {
+  return `${left}${RULE_CHAR.repeat(layout.ruleWidth)}${right}`;
+}
+
+function Border({
+  layout,
+  left,
+  right,
+}: {
+  layout: StartupBannerLayout;
+  left: string;
+  right: string;
+}): React.ReactNode {
   return (
-    <Box>
-      <Text color={themeColors.dim}>│ </Text>
-      <Text color={color} bold={bold}>
-        {padRight(fitText(text, CONTENT_WIDTH), CONTENT_WIDTH)}
+    <Box width={layout.frameWidth} minWidth={0} overflowX="hidden">
+      <Text color={themeColors.dim} wrap="truncate-end">
+        {buildStartupBannerRule(layout, left, right)}
       </Text>
+    </Box>
+  );
+}
+
+function BannerLine({ layout, children }: { layout: StartupBannerLayout; children: React.ReactNode }): React.ReactNode {
+  return (
+    <Box flexDirection="row" width={layout.frameWidth} minWidth={0} overflowX="hidden">
+      <Text color={themeColors.dim}>│ </Text>
+      <Box width={layout.contentWidth} minWidth={0} overflowX="hidden">
+        {children}
+      </Box>
       <Text color={themeColors.dim}> │</Text>
     </Box>
   );
 }
 
-function formatRow(leftLabel: string, leftValue: string, rightLabel: string, rightValue: string): string {
-  return `${formatPair(leftLabel, leftValue)}${' '.repeat(COLUMN_GAP)}${formatPair(rightLabel, rightValue)}`;
+function HeaderLine({
+  layout,
+  text,
+  color,
+  bold,
+}: {
+  layout: StartupBannerLayout;
+  text: string;
+  color?: string;
+  bold?: boolean;
+}): React.ReactNode {
+  return (
+    <BannerLine layout={layout}>
+      <Text color={color} bold={bold} wrap="truncate-end">
+        {text}
+      </Text>
+    </BannerLine>
+  );
 }
 
-function formatTip(tip: string): string {
-  return `${padRight('Tips', LABEL_WIDTH)}${' '.repeat(LABEL_VALUE_GAP)}${fitText(tip, CONTENT_WIDTH - LABEL_WIDTH - LABEL_VALUE_GAP)}`;
+function InfoGrid({
+  layout,
+  state,
+}: {
+  layout: StartupBannerLayout;
+  state: MicaUiStartupBannerState;
+}): React.ReactNode {
+  if (layout.mode === 'single-column') {
+    return (
+      <>
+        {STARTUP_BANNER_ROWS.flat().map((field) => (
+          <BannerLine key={field.key} layout={layout}>
+            <InfoPair label={field.label} value={state[field.key]} width={layout.singlePairWidth} />
+          </BannerLine>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {STARTUP_BANNER_ROWS.map(([left, right]) => (
+        <BannerLine key={`${left.key}-${right.key}`} layout={layout}>
+          <Box
+            flexDirection="row"
+            width={layout.contentWidth}
+            minWidth={0}
+            overflowX="hidden"
+            columnGap={layout.columnGap}
+          >
+            <InfoPair label={left.label} value={state[left.key]} width={layout.columnWidths[0]} />
+            <InfoPair label={right.label} value={state[right.key]} width={layout.columnWidths[1]} />
+          </Box>
+        </BannerLine>
+      ))}
+    </>
+  );
 }
 
-function formatPair(label: string, value: string): string {
-  return `${padRight(label, LABEL_WIDTH)}${' '.repeat(LABEL_VALUE_GAP)}${padRight(fitText(value, VALUE_WIDTH), VALUE_WIDTH)}`;
+function TipLine({ layout, tip }: { layout: StartupBannerLayout; tip: string }): React.ReactNode {
+  return (
+    <BannerLine layout={layout}>
+      <InfoPair label="Tips" value={tip} width={layout.contentWidth} />
+    </BannerLine>
+  );
 }
 
-function fitText(value: string, width: number): string {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return `${value.slice(0, width - 1)}…`;
-}
+function InfoPair({ label, value, width }: { label: string; value: string; width: number }): React.ReactNode {
+  const layout = getStartupBannerPairLayout(width);
 
-function padRight(value: string, width: number): string {
-  return value.length >= width ? value : `${value}${' '.repeat(width - value.length)}`;
+  return (
+    <Box flexDirection="row" width={width} minWidth={0} overflowX="hidden" columnGap={layout.gapWidth}>
+      {layout.labelWidth > 0 ? (
+        <Box width={layout.labelWidth} minWidth={0} overflowX="hidden">
+          <Text wrap="truncate-end">{label}</Text>
+        </Box>
+      ) : null}
+      <Box width={layout.valueWidth} minWidth={0} overflowX="hidden">
+        <Text wrap="truncate-end">{value || '-'}</Text>
+      </Box>
+    </Box>
+  );
 }
 
 export const StartupBannerUI = { renderFn: StartupBanner };

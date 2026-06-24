@@ -6,8 +6,6 @@ import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiStartupBannerState } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 
-const TIP_MAX_LENGTH = 42;
-
 type StartupBannerSessionState = 'new' | 'restored';
 
 type StartupTip = {
@@ -60,8 +58,7 @@ function chooseStartupTip(
   if (sessionCount > 0) candidates.push({ text: 'Use /resume to continue work', priority: 420 });
   candidates.push({ text: seededDefaultTip(), priority: 100 });
 
-  const selected = candidates.sort((a, b) => b.priority - a.priority)[0]?.text ?? '/help for commands · /model to switch';
-  return fitTip(selected);
+  return candidates.sort((a, b) => b.priority - a.priority)[0]?.text ?? '/help for commands · /model to switch';
 }
 
 function configIssueTip(code: string): string {
@@ -144,9 +141,4 @@ function formatTokens(tokens: number): string {
 
 function plural(count: number, singular: string): string {
   return count === 1 ? singular : `${singular}s`;
-}
-
-function fitTip(value: string): string {
-  if (value.length <= TIP_MAX_LENGTH) return value;
-  return `${value.slice(0, TIP_MAX_LENGTH - 1)}…`;
 }
