@@ -165,6 +165,8 @@ function AdaptiveSelectList<T extends SelectItem>({
   maxVisibleItems: number;
   reservedRows: number;
 }): React.ReactNode {
+  // Adaptive mode lets the bottom panel grow into available terminal space;
+  // maxVisibleItems remains a floor so callers still get a predictable minimum.
   const panelHeight = useBottomPanelHeight(reservedRows);
   const adaptiveVisibleItems = Math.max(1, Math.floor((panelHeight + itemGap) / (1 + itemGap)));
   const visibleItemLimit = Math.max(maxVisibleItems, adaptiveVisibleItems);
@@ -207,6 +209,8 @@ function SelectListContent<T extends SelectItem>({
 }): React.ReactNode {
   if (items.length === 0) return <>{empty}</>;
 
+  // This component is intentionally height-agnostic: callers decide the item
+  // limit, and the content layer only chooses between plain and scrollable list.
   const body =
     items.length <= visibleItemLimit ? (
       <Box flexDirection="column" width="100%" minWidth={0}>
@@ -252,6 +256,9 @@ function ScrollBody<T extends SelectItem>({
 }) {
   const visibleRows = visibleItems + (visibleItems - 1) * itemGap;
   const scrollRef = useRef<ScrollBoxHandle>(null);
+
+  // Keep keyboard navigation centered on the selected item without forcing
+  // every caller to manage scroll offsets.
   useEffect(() => {
     const s = scrollRef.current;
     if (!s) return;
