@@ -35,24 +35,27 @@ Mica Code 在你的项目目录中运行，能够阅读和编辑代码、搜索�
 
 ### 从 GitHub Release 安装
 
-仓库推送 `v*` tag 后，GitHub Actions 自动构建并发布 Linux/macOS 二进制包：
+仓库推送 `v*` tag 后，GitHub Actions 自动构建 Linux/macOS 二进制，并发布一个自包含、可直接 pipe 到 `sh` 的安装脚本。脚本会自动解包当前平台对应的二进制，并安装为 `mica-code`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install-github.sh | MICA_GITHUB_REPO=<owner>/<repo> bash
+curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
 ```
 
 指定版本或安装目录：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install-github.sh | MICA_GITHUB_REPO=<owner>/<repo> MICA_VERSION=v0.1.0 MICA_INSTALL_DIR=$HOME/.local/bin bash
+curl -fsSL https://github.com/qirong77/mica-code/releases/download/v0.1.0/install.sh | MICA_INSTALL_DIR=$HOME/.local/bin sh
+```
+
+如果有自定义域名指向这个 `install.sh`，安装方式可以简化成：
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
 Release 产物：
 
-- `mica-linux-x64.tar.gz`
-- `mica-linux-arm64.tar.gz`
-- `mica-darwin-x64.tar.gz`
-- `mica-darwin-arm64.tar.gz`
+- `install.sh`
 
 ### 本地运行
 

@@ -1,4 +1,4 @@
-name: Build binaries
+name: Build installer
 
 on:
   push:
@@ -14,20 +14,8 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.asset }}
+    name: Build install.sh
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - asset: mica-linux-x64
-            target: bun-linux-x64
-          - asset: mica-linux-arm64
-            target: bun-linux-arm64
-          - asset: mica-darwin-x64
-            target: bun-darwin-x64
-          - asset: mica-darwin-arm64
-            target: bun-darwin-arm64
 
     steps:
       - name: Checkout
@@ -47,30 +35,40 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Build binary
-        env:
-          MICA_PREBUILD_DONE: '1'
-          MICA_BUILD_TARGET: ${{ matrix.target }}
-          MICA_BUILD_OUTFILE: dist/mica
-        run: bun scripts/build.mjs
-
-      - name: Package artifact
+      - name: Build binaries
         run: |
-          tar -czf ${{ matrix.asset }}.tar.gz -C dist mica
-          shasum -a 256 ${{ matrix.asset }}.tar.gz > ${{ matrix.asset }}.tar.gz.sha256
+          mkdir -p dist/release
+
+          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-linux-x64 MICA_BUILD_OUTFILE=dist/release/mica-code-linux-x64 bun scripts/build.mjs
+          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-linux-arm64 MICA_BUILD_OUTFILE=dist/release/mica-code-linux-arm64 bun scripts/build.mjs
+          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-darwin-x64 MICA_BUILD_OUTFILE=dist/release/mica-code-darwin-x64 bun scripts/build.mjs
+          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-darwin-arm64 MICA_BUILD_OUTFILE=dist/release/mica-code-darwin-arm64 bun scripts/build.mjs
+
+          chmod 755 dist/release/mica-code-*
+
+      - name: Build installer
+        run: |
+          tar -czf dist/mica-code-payload.tar.gz -C dist/release .
+          base64 < dist/mica-code-payload.tar.gz > dist/mica-code-payload.tar.gz.b64
+
+          awk '
+            /^__MICA_CODE_PAYLOAD__$/ {
+              while ((getline line < "dist/mica-code-payload.tar.gz.b64") > 0) print line
+              next
+            }
+            { print }
+          ' scripts/install.sh > install.sh
+
+          chmod 755 install.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: |
-            ${{ matrix.asset }}.tar.gz
-            ${{ matrix.asset }}.tar.gz.sha256
+          name: install.sh
+          path: install.sh
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ${{ matrix.asset }}.tar.gz
-            ${{ matrix.asset }}.tar.gz.sha256
+          files: install.sh

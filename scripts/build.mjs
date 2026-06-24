@@ -10,7 +10,7 @@ if (process.env.MICA_PREBUILD_DONE === '1') {
 }
 
 const outDir = process.env.MICA_BUILD_DIR ?? 'dist';
-const outName = process.env.MICA_BUILD_NAME ?? 'mica';
+const outName = process.env.MICA_BUILD_NAME ?? 'mica-code';
 const outFile = process.env.MICA_BUILD_OUTFILE ?? join(outDir, outName);
 const target = process.env.MICA_BUILD_TARGET;
 
