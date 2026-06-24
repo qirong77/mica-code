@@ -20,7 +20,7 @@ export function StartupBanner(): React.ReactNode {
     <Box flexDirection="column" paddingBottom={1}>
       <Border left="╭" right="╮" />
       <Content text="✦ Mica Code" color={themeColors.primary} bold />
-      <Content text="  Lightweight coding agent for your CLI" color={themeColors.dim} />
+      <Content text="  Minimal, Intelligent, Cache-first Agent" color={themeColors.dim} />
       <Border left="├" right="┤" />
       <Content text={formatRow('Provider', state.provider, 'Model', state.model)} />
       <Content text={formatRow('Context', state.context, 'Effort', state.effort)} />
@@ -39,9 +39,13 @@ function Border({ left, right }: { left: string; right: string }): React.ReactNo
 
 function Content({ text, color, bold }: { text: string; color?: string; bold?: boolean }): React.ReactNode {
   return (
-    <Text color={color} bold={bold}>
-      {`│ ${padRight(fitText(text, CONTENT_WIDTH), CONTENT_WIDTH)} │`}
-    </Text>
+    <Box>
+      <Text color={themeColors.dim}>│ </Text>
+      <Text color={color} bold={bold}>
+        {padRight(fitText(text, CONTENT_WIDTH), CONTENT_WIDTH)}
+      </Text>
+      <Text color={themeColors.dim}> │</Text>
+    </Box>
   );
 }
 
