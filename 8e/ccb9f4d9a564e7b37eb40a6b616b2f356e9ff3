@@ -1,0 +1,14 @@
+packages/mica-ui/app/StartupBanner.tsx
+  h_a456b67147438e 23,42-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8eccb9f4d9a564e7b37eb40a6b616b2f356e9ff3",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
