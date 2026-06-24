@@ -83,10 +83,18 @@ function readOptionalText(path: string): string | undefined {
 }
 
 function buildContextBlock(options: BuildSystemPromptOptions = {}): string {
+  const now = options.now ?? new Date();
   return [
     `# 环境信息`,
     `- 当前工作目录: ${options.cwd ?? process.cwd()}`,
+    `- 当前时间: ${formatCurrentMonth(now)}`,
     `- 操作系统: ${options.platform ?? process.platform}`,
     `- Shell: ${options.shell ?? process.env.SHELL ?? 'unknown'}`,
   ].join('\n');
+}
+
+function formatCurrentMonth(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
 }

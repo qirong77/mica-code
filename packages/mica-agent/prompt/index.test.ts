@@ -17,7 +17,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt.trim().endsWith('</context>')).toBe(true);
   });
 
-  it('injects project instructions and day-level environment context', () => {
+  it('injects project instructions and month-level environment context', () => {
     const prompt = buildSystemPromptForTest({
       cwd: '/repo',
       now: new Date('2026-06-17T10:20:30.000Z'),
@@ -30,7 +30,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('<project-instructions>');
     expect(prompt).toContain('- 不要使用动态导入');
     expect(prompt).toContain('- 当前工作目录: /repo');
-    expect(prompt).not.toContain('当前日期');
+    expect(prompt).toContain('- 当前时间: 2026-06');
     expect(prompt).not.toContain('2026-06-17');
     expect(prompt).not.toContain('2026-06-17T10:20:30.000Z');
   });

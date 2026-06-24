@@ -6,14 +6,14 @@ import { WorkingStatusUI } from '../panels/WorkingStatus.js';
 import { BottomSurface } from '../bottom/BottomSurface.js';
 import { MessageBar } from '../panels/MessageBar.js';
 import { AgentsStatusBar } from '../panels/AgentsStatusBar.js';
-import { StartupBannerUI } from './StartupBanner.js';
+// import { StartupBannerUI } from './StartupBanner.js';
 
 export function App(): React.ReactNode {
   useTerminalTitle('* Mica Code');
 
   return (
     <Box flexDirection="column" height="100%">
-      <StartupBannerUI.renderFn />
+      {/* <StartupBannerUI.renderFn /> */}
       <ConversationUI.renderFn />
       <AgentsStatusBar />
       <TerminalInputUI.renderFn />
