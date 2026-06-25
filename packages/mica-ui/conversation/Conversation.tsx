@@ -3,7 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { themeColors } from '../theme.js';
-import { messages, responseText } from './state.js';
+import { messages, responseText, pendingInputs, pendingQueueMode } from './state.js';
 import { Markdown } from './Markdown.js';
 
 const MAX_USER_LINES = 10;
@@ -22,6 +22,12 @@ function truncateLines(text: string, maxLines: number): string {
   return lines.slice(0, maxLines).join('\n') + '…';
 }
 
+function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null): string {
+  if (queueMode === 'after_turn') return 'waiting to send after current turn';
+  if (queueMode === 'after_iteration') return 'waiting to send after current iteration';
+  return 'waiting to send';
+}
+
 interface LogItem {
   id: string | number;
   role: 'user' | 'assistant';
@@ -31,6 +37,8 @@ interface LogItem {
 export const Conversation = (): React.ReactNode => {
   const currentMessages = useScheduleState(messages);
   const currentResponseText = useScheduleState(responseText);
+  const currentPendingInputs = useScheduleState(pendingInputs);
+  const currentQueueMode = useScheduleState(pendingQueueMode);
 
   const staticItems = useMemo(
     () =>
@@ -70,6 +78,19 @@ export const Conversation = (): React.ReactNode => {
       <Box>
         <Markdown>{currentResponseText}</Markdown>
       </Box>
+      {currentPendingInputs.map((text, i) => (
+        <Box key={`pending-${i}`} paddingY={1} flexDirection="row">
+          <Text color={themeColors.dim}>{'\u258c'}</Text>
+          <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
+            <Text color={themeColors.dim} italic>
+              {truncateLines(text, MAX_USER_LINES)}
+            </Text>
+            <Text color={themeColors.dim}>
+              {'  '}({formatPendingStatus(currentQueueMode)} · shift+← to re-edit)
+            </Text>
+          </Box>
+        </Box>
+      ))}
     </Box>
   );
 };

@@ -7,7 +7,7 @@ import { themeColors } from '../theme.js';
 import { useScheduleState } from '../hooks/index.js';
 import * as input from './state.js';
 import { pluginUIs, workingStatus, abortAgent, setPluginUIs, editPendingInput } from '../panels/state.js';
-import { pendingInputs, pendingQueueMode } from '../conversation/state.js';
+import { pendingInputs } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { MessageBarAPI } from '../panels/MessageBar.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
@@ -21,12 +21,6 @@ interface YogaNodeLike {
 
 const EXIT_CONFIRM_TIMEOUT_MS = 800;
 
-function formatPendingStatusText(queueMode: ReturnType<typeof pendingQueueMode.get>): string {
-  if (queueMode === 'after_turn') return '已排队，等待当前 agent 执行完成后发送';
-  if (queueMode === 'after_iteration') return '已排队，等待当前 agent 本轮迭代完成后发送';
-  return '已排队，等待当前 agent 可继续时发送';
-}
-
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -37,7 +31,6 @@ function TerminalInput() {
   const placeholder = useScheduleState(input.placeholder);
   const inputDisabled = useScheduleState(input.disabled);
   const currentPendingInputs = useScheduleState(pendingInputs);
-  const currentPendingQueueMode = useScheduleState(pendingQueueMode);
   const inputBoxRef = useRef<DOMElement | null>(null);
   const setInputBoxRef = useCallback((el: DOMElement | null) => {
     inputBoxRef.current = el;
@@ -73,7 +66,6 @@ function TerminalInput() {
     status.type,
     activePluginUIs.length,
     currentPendingInputs.length,
-    currentPendingQueueMode,
   ]);
 
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
@@ -116,17 +108,14 @@ function TerminalInput() {
     cursorOffset === localText.length;
 
   React.useEffect(() => {
-    const nextStatusText =
-      currentPendingInputs.length > 0
-        ? formatPendingStatusText(currentPendingQueueMode)
-        : showQueueShortcutTip
-          ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送'
-          : '';
+    const nextStatusText = showQueueShortcutTip
+      ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送'
+      : '';
     input.setQueueStatusText(nextStatusText);
     return () => {
       if (input.queueStatusText.get() === nextStatusText) input.setQueueStatusText('');
     };
-  }, [currentPendingInputs.length, currentPendingQueueMode, showQueueShortcutTip]);
+  }, [showQueueShortcutTip]);
 
   const submitValue = useCallback((value: string, options?: TerminalInputSubmitOptions) => {
     const trimmed = value.trim();

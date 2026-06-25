@@ -20,6 +20,7 @@ import {
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { providerContentToAgentContent } from '../core/Content.js';
+import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
 
@@ -168,22 +169,24 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await getClient(this).messages.create(
-        {
-          model: this.model,
-          system: this.systemPrompt ?? buildSystemPrompt(),
-          max_tokens: this.maxTokens,
-          messages,
-          ...(this.tools
-            ? {
-                tools: this.anthropicTools,
-                tool_choice: { type: 'auto' as const },
-              }
-            : {}),
-          ...(this.thinkingConfig ? { thinking: this.thinkingConfig } : {}),
-          stream: true,
-        },
-        { signal: options?.signal },
+      const stream = await withRetry(() =>
+        getClient(this).messages.create(
+          {
+            model: this.model,
+            system: this.systemPrompt ?? buildSystemPrompt(),
+            max_tokens: this.maxTokens,
+            messages,
+            ...(this.tools
+              ? {
+                  tools: this.anthropicTools,
+                  tool_choice: { type: 'auto' as const },
+                }
+              : {}),
+            ...(this.thinkingConfig ? { thinking: this.thinkingConfig } : {}),
+            stream: true,
+          },
+          { signal: options?.signal },
+        ),
       );
 
       let content = '';

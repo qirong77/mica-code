@@ -15,6 +15,7 @@ import {
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { providerContentToAgentContent } from '../core/Content.js';
+import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { OpenAIHistoryNormalizer } from './OpenAIHistoryNormalizer.js';
 
@@ -154,23 +155,26 @@ export class OpenAIClient extends BaseAgent<
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await getClient(this).chat.completions.create(
-        {
-          model: this.model,
-          messages,
-          ...(this.tools
-            ? {
-                tools: this.openaiTools,
-                tool_choice: 'auto' as const,
-              }
-            : {}),
-          ...this.reasoningParams,
-          stream: true,
-          stream_options: {
-            include_usage: true,
-          },
-        },
-        { signal: options?.signal },
+      const stream = await withRetry(
+        () =>
+          getClient(this).chat.completions.create(
+            {
+              model: this.model,
+              messages,
+              ...(this.tools
+                ? {
+                    tools: this.openaiTools,
+                    tool_choice: 'auto' as const,
+                  }
+                : {}),
+              ...this.reasoningParams,
+              stream: true,
+              stream_options: {
+                include_usage: true,
+              },
+            },
+            { signal: options?.signal },
+          ),
       );
 
       let content = '';
