@@ -1,0 +1,14 @@
+packages/mica-config/default.json
+  h_a456b67147438e 4-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "06db1e86fdb337cd7a7fe0ea2634cb2081cf2d36",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
