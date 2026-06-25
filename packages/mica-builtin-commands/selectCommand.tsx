@@ -14,17 +14,19 @@ export type SelectOption = {
   suffix?: React.ReactNode;
   labelWidth?: number | string;
   labelMaxWidth?: number | string;
+  searchField?: string;
 };
 
 export type SelectCommandConfig = {
   id: string;
-  title: string;
+  title: string | ((currentIndex: number, total: number) => string);
   current: string;
   options: SelectOption[];
   emptyMessage?: string;
   itemGap?: number;
   renderItem?: (item: SelectItem, isSelected: boolean) => React.ReactNode;
   onSelect: (name: string) => void | Promise<void>;
+  filterable?: boolean;
 };
 
 export function showSelectCommand(config: SelectCommandConfig) {
@@ -40,6 +42,19 @@ export function showSelectCommand(config: SelectCommandConfig) {
   );
   const selectedIdx = atom(initialIndex);
   const applying = atom(false);
+  const searchText = atom('');
+
+  function resolveSearchField(option: SelectOption): string {
+    if (typeof option.searchField === 'string') return option.searchField;
+    if (typeof option.label === 'string') return option.label;
+    return option.name;
+  }
+
+  function getFilteredOptions(): SelectOption[] {
+    const text = searchText.get().toLowerCase();
+    if (!text || !config.filterable) return config.options;
+    return config.options.filter((option) => resolveSearchField(option).toLowerCase().includes(text));
+  }
 
   function hide() {
     micaLogger.logRuntime('plugin.select', 'closed', { id: config.id, title: config.title });
@@ -48,7 +63,8 @@ export function showSelectCommand(config: SelectCommandConfig) {
 
   function selectCurrent() {
     if (applying.get()) return;
-    const selected = config.options[selectedIdx.get()];
+    const filtered = getFilteredOptions();
+    const selected = filtered[selectedIdx.get()];
     if (selected) {
       micaLogger.logRuntime('plugin.select', 'selected', { id: config.id, title: config.title, value: selected.name });
       applying.set(true);
@@ -78,7 +94,9 @@ export function showSelectCommand(config: SelectCommandConfig) {
   function SelectorPanel() {
     const currentIdx = micaUi.useScheduleState(selectedIdx);
     const isApplying = micaUi.useScheduleState(applying);
-    const items: SelectItem[] = config.options.map((option) => ({
+    const filter = micaUi.useScheduleState(searchText);
+    const filtered = getFilteredOptions();
+    const items: SelectItem[] = filtered.map((option) => ({
       key: option.name,
       label: option.label,
       status: option.status,
@@ -89,10 +107,27 @@ export function showSelectCommand(config: SelectCommandConfig) {
         option.name === config.current ? <Text color={micaUi.theme.colors.success}> (active)</Text> : option.suffix,
     }));
 
+    const titleText =
+      typeof config.title === 'function'
+        ? config.title(currentIdx, items.length)
+        : config.title;
+
     return (
       <micaUi.Dialog
-        title={isApplying ? `${config.title} (applying...)` : config.title}
-        footer={<micaUi.KeyHints hints={isApplying ? ['applying'] : ['↑↓ navigate', '↵ select', 'esc cancel']} />}
+        title={isApplying ? `${titleText} (applying...)` : titleText}
+        footer={
+          <micaUi.KeyHints
+            hints={
+              isApplying
+                ? ['applying']
+                : filter
+                  ? ['search: ' + filter, '↑↓ navigate', '↵ select', 'esc cancel', 'backspace clear']
+                  : config.filterable
+                    ? ['type to search', '↑↓ navigate', '↵ select', 'esc cancel']
+                    : ['↑↓ navigate', '↵ select', 'esc cancel']
+            }
+          />
+        }
       >
         <micaUi.SelectList
           items={items}
@@ -108,7 +143,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
   micaUi.panels.setExclusivePluginUI({
     id: config.id,
     component: SelectorPanel,
-    onInput: (_input, key) => {
+    onInput: (input, key) => {
       if (applying.get()) return true;
       if (key.escape) {
         hide();
@@ -120,8 +155,21 @@ export function showSelectCommand(config: SelectCommandConfig) {
       }
       const direction = selectionDirection(key);
       if (direction) {
-        const len = config.options.length;
-        if (len > 0) selectedIdx.set(moveSelection(selectedIdx.get(), len, direction));
+        const filtered = getFilteredOptions();
+        if (filtered.length > 0) selectedIdx.set(moveSelection(selectedIdx.get(), filtered.length, direction));
+        return true;
+      }
+      if (config.filterable && key.backspace) {
+        const current = searchText.get();
+        if (current.length > 0) {
+          searchText.set(current.slice(0, -1));
+          selectedIdx.set(0);
+        }
+        return true;
+      }
+      if (config.filterable && input.length > 0) {
+        searchText.set(searchText.get() + input);
+        selectedIdx.set(0);
         return true;
       }
       return false;

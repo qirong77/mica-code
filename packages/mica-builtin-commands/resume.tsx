@@ -42,11 +42,11 @@ function showResumeSelector(
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
 ) {
-  const sessions = sessionController.list(20);
+  const sessions = sessionController.list(1000);
   micaLogger.logRuntime('plugin.resume', 'selector:ready', { sessions: sessions.length });
   showSelectCommand({
     id: 'select-session',
-    title: 'resume sessions',
+    title: (currentIdx, total) => `resume sessions (${currentIdx + 1} / ${total})`,
     current: '',
     options: sessions.map((session) => ({
       name: session.id,
@@ -54,9 +54,11 @@ function showResumeSelector(
       status: formatSessionWorkspace(session.cwd),
       description: formatSessionListTime(session.updatedAt),
       suffix: session.model,
+      searchField: `${session.title} ${basename(session.cwd)} ${session.model}`,
     })),
     emptyMessage: 'no saved sessions',
     itemGap: 0,
+    filterable: true,
     renderItem: renderResumeSessionItem,
     onSelect: (id) => resumeSession(agent, sessionController, services, id),
   });

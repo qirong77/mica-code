@@ -43,11 +43,17 @@ export const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
 export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {
     ensureSessionDir();
+    const cwd = process.cwd();
     return readdirSync(SESSION_DIR)
       .filter((file) => file.endsWith('.json'))
       .map((file) => this.read(resolve(SESSION_DIR, file)))
       .filter((session): session is PersistedSession => Boolean(session))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .sort((a, b) => {
+        const aMatch = a.cwd === cwd ? 0 : 1;
+        const bMatch = b.cwd === cwd ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+        return b.updatedAt.localeCompare(a.updatedAt);
+      })
       .slice(0, limit)
       .map((session) => ({
         id: session.id,
