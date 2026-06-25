@@ -1,0 +1,14 @@
+src/plugins/commands/index.ts
+  h_a456b67147438e 21,68-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b3fd9c9d84f760ce0579d779272ef82789c23d25",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
