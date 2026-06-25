@@ -86,7 +86,7 @@ export const Conversation = (): React.ReactNode => {
               {truncateLines(text, MAX_USER_LINES)}
             </Text>
             <Text color={themeColors.dim}>
-              {'  '}({formatPendingStatus(currentQueueMode)} · shift+← to re-edit)
+              {'  '}({formatPendingStatus(currentQueueMode)} · shift + ⬅️ to re-edit)
             </Text>
           </Box>
         </Box>
