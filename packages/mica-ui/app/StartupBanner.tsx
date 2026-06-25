@@ -15,6 +15,7 @@ const LABEL_WIDTH = 8;
 const LABEL_VALUE_GAP = 2;
 const MIN_VALUE_WIDTH = 4;
 const RULE_CHAR = '─';
+const STARTUP_BANNER_ENABLED = false;
 
 type StartupBannerMode = 'two-column' | 'single-column';
 type StartupBannerFieldKey = keyof Omit<MicaUiStartupBannerState, 'tips'>;
@@ -62,6 +63,12 @@ const STARTUP_BANNER_ROWS = [
 ] as const satisfies readonly StartupBannerRow[];
 
 export function StartupBanner(): React.ReactNode {
+  if (!STARTUP_BANNER_ENABLED) return null;
+
+  return <StartupBannerContent />;
+}
+
+function StartupBannerContent(): React.ReactNode {
   const state = useScheduleState(startupBanner);
   const { columns } = useTerminalSize();
 
@@ -75,6 +82,8 @@ export function StartupBannerView({
   state: MicaUiStartupBannerState;
   terminalColumns?: number;
 }): React.ReactNode {
+  if (!STARTUP_BANNER_ENABLED) return null;
+
   const layout = getStartupBannerLayout(terminalColumns);
 
   return (

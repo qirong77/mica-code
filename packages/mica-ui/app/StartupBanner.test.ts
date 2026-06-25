@@ -1,8 +1,32 @@
 import { stringWidth } from '@anthropic/ink';
 import { describe, expect, it } from 'vitest';
-import { buildStartupBannerRule, getStartupBannerLayout, getStartupBannerPairLayout } from './StartupBanner.js';
+import {
+  StartupBannerView,
+  buildStartupBannerRule,
+  getStartupBannerLayout,
+  getStartupBannerPairLayout,
+} from './StartupBanner.js';
 
 describe('StartupBanner layout', () => {
+  it('does not render the startup banner', () => {
+    expect(
+      StartupBannerView({
+        state: {
+          provider: 'openai',
+          model: 'gpt-5',
+          context: '128k',
+          effort: 'medium',
+          tools: 'enabled',
+          mcp: 'ready',
+          session: 'new',
+          workdir: '/repo',
+          tips: 'ready',
+        },
+        terminalColumns: 80,
+      }),
+    ).toBeNull();
+  });
+
   it('keeps the current default two-column geometry', () => {
     const layout = getStartupBannerLayout(80);
 
