@@ -8,6 +8,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { BUILD_TIME } from '../../src/buildMeta.js';
 
 export function createStatusCommand(agent: CommandAgent) {
   return {
@@ -40,6 +41,7 @@ export function createStatusCommand(agent: CommandAgent) {
           ['Total output tokens', formatTokenValue(usageTotals.outputTokens, usageTotals.records)],
           ['Latest input cached', formatUsageCachedTokenValue(latestUsage)],
           ['Total input cached', formatTotalsCachedTokenValue(usageTotals)],
+          ['Build', formatBuildTime(BUILD_TIME)],
         ]),
       );
     },
@@ -117,4 +119,14 @@ function formatTotalsCachedTokenValue(usageTotals: AgentUsageSummary): string {
 function formatStatusList(entries: Array<[string, string]>) {
   const width = entries.reduce((max, [label]) => Math.max(max, label.length), 0);
   return entries.map(([label, value]) => `${label.padEnd(width)} : ${value}`).join('\n');
+}
+
+function formatBuildTime(iso: string): string {
+  if (iso === 'dev') return 'dev run';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('zh-CN', { hour12: false });
+  } catch {
+    return iso;
+  }
 }

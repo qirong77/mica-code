@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 if (process.env.MICA_PREBUILD_DONE === '1') {
@@ -9,8 +9,14 @@ if (process.env.MICA_PREBUILD_DONE === '1') {
   execSync('bun run prebuild', { stdio: 'inherit' });
 }
 
+// Inject build timestamp into source before compiling
+const buildMetaFile = join(import.meta.dirname, '..', 'src', 'buildMeta.ts');
+const buildTime = new Date().toISOString();
+writeFileSync(buildMetaFile, `// Generated during build.\nexport const BUILD_TIME = '${buildTime}';\n`);
+console.log(`Build time: ${buildTime}`);
+
 const outDir = process.env.MICA_BUILD_DIR ?? 'dist';
-const outName = process.env.MICA_BUILD_NAME ?? 'mica-code';
+const outName = process.env.MICA_BUILD_NAME ?? 'mica';
 const outFile = process.env.MICA_BUILD_OUTFILE ?? join(outDir, outName);
 const target = process.env.MICA_BUILD_TARGET;
 

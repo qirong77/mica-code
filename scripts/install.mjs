@@ -3,13 +3,13 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFil
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const outFile = process.env.MICA_BUILD_OUTFILE ?? join('dist', process.env.MICA_BUILD_NAME ?? 'mica-code');
+const outFile = process.env.MICA_BUILD_OUTFILE ?? join('dist', process.env.MICA_BUILD_NAME ?? 'mica');
 if (!existsSync(outFile)) {
   execSync('bun scripts/build.mjs', { stdio: 'inherit' });
 }
 
 const installDir = process.env.MICA_INSTALL_DIR ?? resolve(homedir(), '.local/bin');
-const binName = process.env.MICA_BIN_NAME ?? 'mica-code';
+const binName = process.env.MICA_BIN_NAME ?? 'mica';
 
 try {
   if (!existsSync(installDir)) mkdirSync(installDir, { recursive: true });
