@@ -34,6 +34,7 @@ export interface ProviderDefinition {
 
 export interface PersistedMicaConfig {
   providers: ProviderDefinition[];
+  serperApiKey?: string;
   [key: string]: unknown;
 }
 

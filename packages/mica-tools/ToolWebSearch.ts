@@ -1,4 +1,5 @@
 import { LRUCache } from 'lru-cache';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
@@ -81,9 +82,9 @@ export class ToolWebSearch extends MicaTool {
       return buildResponseText('cache', query, cached.slice(0, count), []);
     }
 
-    const apiKey = process.env.SERPER_API_KEY;
+    const apiKey = micaConfig.get().serperApiKey || process.env.SERPER_API_KEY;
     if (!apiKey) {
-      return '未配置 SERPER_API_KEY 环境变量。';
+      return '未配置 serperApiKey（配置文件 ~/.mica/config.json）或 SERPER_API_KEY 环境变量。';
     }
 
     return await this._searchSerper(query, count, apiKey);

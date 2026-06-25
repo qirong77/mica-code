@@ -8,6 +8,7 @@
       "api_key": ""
     }
   ],
+  "serperApiKey": "",
   "mcpServers": {
     "sequential-thinking": {
       "command": "npx",
