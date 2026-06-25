@@ -77,7 +77,7 @@ async function showModelSelector(
     id: 'select-model',
     title: 'select model',
     current: agent.config.model,
-    options: provider.models?.map((model) => ({ name: model, label: model })) || [],
+    options: provider.models?.sort((a, b) => a.localeCompare(b)).map((model) => ({ name: model, label: model })) || [],
     emptyMessage: 'no models available',
     onSelect: (model) => {
       return applyModelSelection(agent, sessionController, services, provider.id, model);
