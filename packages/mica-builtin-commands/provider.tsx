@@ -4,7 +4,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import { applyConfigSwitchUpdate, compactBeforeConfigSwitch, reportConfigSwitchError } from './configSwitch.js';
+import { applyConfigSwitchUpdate, reportConfigSwitchError } from './configSwitch.js';
 
 export function createProviderCommand(
   agent: CommandAgent,
@@ -59,7 +59,11 @@ async function applyProviderSelection(
       return;
     }
     micaLogger.logRuntime('plugin.provider', 'selected', { from: agent.config.provider.id, to: providerId });
-    await compactBeforeConfigSwitch(agent, sessionController, services, 'provider');
+    services.showMessage(
+      'Provider changed, prompt cache may be invalidated. Consider /compact',
+      6000,
+      services.getCurrentAgentSessionId(),
+    );
     await loadProviderModelsForSwitch(providerId, services);
 
     const next = applyConfigSwitchUpdate({

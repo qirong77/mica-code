@@ -29,57 +29,13 @@ afterAll(() => {
   rmSync(tempHome, { recursive: true, force: true });
 });
 
-describe('compactBeforeConfigSwitch', () => {
-  it('skips compact-not-needed errors so config switches can continue', async () => {
-    const { compactBeforeConfigSwitch } = await import('./configSwitch.js');
-    const { CompactionNotNeededError } = await import('@packages/mica-context/index.js');
-    const services = makeServices(async () => {
-      throw new CompactionNotNeededError();
-    });
-
-    await expect(
-      compactBeforeConfigSwitch(
-        makeAgent([{ role: 'user' }, { role: 'assistant' }, { role: 'user' }]),
-        makeSession(),
-        services,
-        'provider',
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(services.compact).toHaveBeenCalledTimes(1);
-    expect(services.showMessage).toHaveBeenCalledWith(
-      'Current session is short; switching without compact',
-      4000,
-      'session-1',
-    );
-  });
-
-  it('still fails on real compact errors', async () => {
-    const { compactBeforeConfigSwitch } = await import('./configSwitch.js');
-    const services = makeServices(async () => {
-      throw new Error('summarizer unavailable');
-    });
-
-    await expect(
-      compactBeforeConfigSwitch(
-        makeAgent([{ role: 'user' }, { role: 'assistant' }, { role: 'user' }]),
-        makeSession(),
-        services,
-        'model',
-      ),
-    ).rejects.toThrow('summarizer unavailable');
-  });
-});
-
 describe('config switch commands', () => {
   it.each([
     ['provider', 'Agent is busy; wait or abort before switching provider'],
     ['model', 'Agent is busy; wait or abort before switching model'],
     ['effort', 'Agent is busy; wait or abort before switching effort'],
   ] as const)('does not open the %s selector while the agent is busy', async (commandName, message) => {
-    const services = makeServices(async () => {
-      throw new Error('compact should not run');
-    });
+    const services = makeServices();
     services.isAgentBusy = vi.fn(() => true);
     services.showMessage = vi.fn();
     const setPluginUIs = vi.spyOn(micaUi.panels, 'setPluginUIs');
@@ -117,9 +73,7 @@ describe('config switch commands', () => {
       contextWindowSize: provider.contextWindowSize,
       providers: [provider],
     }));
-    const services = makeServices(async () => {
-      throw new Error('compact should not run');
-    });
+    const services = makeServices();
     const agent = makeAgent([], {
       provider,
       model: 'gpt-5.4',
@@ -193,9 +147,7 @@ describe('config switch commands', () => {
       contextWindowSize: openai.contextWindowSize,
       providers: [openai, deepseek],
     }));
-    const services = makeServices(async () => {
-      throw new Error('compact should not run');
-    });
+    const services = makeServices();
     const agent = makeAgent([], {
       provider: openai,
       model: openai.model,
@@ -259,9 +211,7 @@ describe('config switch commands', () => {
       contextWindowSize: deepseek.contextWindowSize,
       providers: [deepseek, openai],
     }));
-    const services = makeServices(async () => {
-      throw new Error('compact should not run');
-    });
+    const services = makeServices();
     const agent = makeAgent([], {
       provider: openai,
       model: 'gpt-5.4',
@@ -356,7 +306,7 @@ function makeSession(): CommandSessionController {
   };
 }
 
-function makeServices(compact: CommandRuntimeServices['compact']): CommandRuntimeServices {
+function makeServices(): CommandRuntimeServices {
   return {
     clearUI: vi.fn(),
     showMessage: vi.fn(),
@@ -384,7 +334,7 @@ function makeServices(compact: CommandRuntimeServices['compact']): CommandRuntim
       files: [],
     }),
     runExclusiveTask: vi.fn((_agent, _options, task) => task()),
-    compact: vi.fn(compact),
+    compact: vi.fn(),
     requestExit: vi.fn(),
   };
 }

@@ -6,7 +6,6 @@ import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import {
   applyConfigSwitchUpdate,
-  compactBeforeConfigSwitch,
   reportConfigSwitchError,
   syncConfigFromAgent,
 } from './configSwitch.js';
@@ -102,7 +101,11 @@ async function applyModelSelection(
       return;
     }
     micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: providerId });
-    await compactBeforeConfigSwitch(agent, sessionController, services, 'model');
+    services.showMessage(
+      'Model changed, prompt cache may be invalidated. Consider /compact',
+      6000,
+      services.getCurrentAgentSessionId(),
+    );
     applyConfigSwitchUpdate({
       agent,
       sessionController,
