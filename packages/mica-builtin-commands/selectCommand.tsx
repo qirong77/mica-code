@@ -58,6 +58,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
 
   function hide() {
     micaLogger.logRuntime('plugin.select', 'closed', { id: config.id, title: config.title });
+    micaUi.terminalInput.clearText();
     micaUi.panels.clearPluginUIs();
   }
 
@@ -107,10 +108,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
         option.name === config.current ? <Text color={micaUi.theme.colors.success}> (active)</Text> : option.suffix,
     }));
 
-    const titleText =
-      typeof config.title === 'function'
-        ? config.title(currentIdx, items.length)
-        : config.title;
+    const titleText = typeof config.title === 'function' ? config.title(currentIdx, items.length) : config.title;
 
     return (
       <micaUi.Dialog
@@ -120,17 +118,16 @@ export function showSelectCommand(config: SelectCommandConfig) {
             hints={
               isApplying
                 ? ['applying']
-                : filter
-                  ? ['search: ' + filter, '↑↓ navigate', '↵ select', 'esc cancel', 'backspace clear']
-                  : config.filterable
-                    ? ['type to search', '↑↓ navigate', '↵ select', 'esc cancel']
-                    : ['↑↓ navigate', '↵ select', 'esc cancel']
+                : config.filterable
+                  ? ['type to filter', '↑↓ navigate', '↵ select', 'esc cancel']
+                  : ['↑↓ navigate', '↵ select', 'esc cancel']
             }
           />
         }
       >
         <micaUi.SelectList
           items={items}
+          adaptiveHeight
           selectedIdx={currentIdx}
           empty={<Text dimColor>{config.emptyMessage ?? 'no options'}</Text>}
           itemGap={config.itemGap ?? 1}
@@ -140,9 +137,19 @@ export function showSelectCommand(config: SelectCommandConfig) {
     );
   }
 
+  micaUi.terminalInput.clearText();
+
   micaUi.panels.setExclusivePluginUI({
     id: config.id,
     component: SelectorPanel,
+    preserveInput: true,
+    onTextChange: config.filterable
+      ? (text) => {
+          searchText.set(text);
+          selectedIdx.set(0);
+          return true;
+        }
+      : undefined,
     onInput: (input, key) => {
       if (applying.get()) return true;
       if (key.escape) {
@@ -157,19 +164,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
       if (direction) {
         const filtered = getFilteredOptions();
         if (filtered.length > 0) selectedIdx.set(moveSelection(selectedIdx.get(), filtered.length, direction));
-        return true;
-      }
-      if (config.filterable && key.backspace) {
-        const current = searchText.get();
-        if (current.length > 0) {
-          searchText.set(current.slice(0, -1));
-          selectedIdx.set(0);
-        }
-        return true;
-      }
-      if (config.filterable && input.length > 0) {
-        searchText.set(searchText.get() + input);
-        selectedIdx.set(0);
         return true;
       }
       return false;
