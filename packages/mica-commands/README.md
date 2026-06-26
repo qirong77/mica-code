@@ -33,4 +33,3 @@ registry.register({
 - `CommandRegistry.ts`：命令注册、查询和执行分发。
 - `types.ts`：命令定义、上下文与结果类型。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

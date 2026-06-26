@@ -45,4 +45,3 @@ const skills = micaSkills.getLoaded();
 - `loadSkills.ts`：扫描目录、解析 frontmatter、缓存和刷新 skills。
 - `types.ts`：Skill 类型定义。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

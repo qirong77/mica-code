@@ -46,4 +46,3 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `types.ts`：模型侧工具定义类型。
 - `utils/`：展示文案、文件历史、错误格式化和输出限制工具。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

@@ -35,4 +35,3 @@ class ExamplePlugin extends micaPlugin.Plugin {
 - `HookRegistry.ts`、`HookTypes.ts`：hook 类型与注册表。
 - `ServiceContainer.ts`、`ServiceToken.ts`：服务容器与 token。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

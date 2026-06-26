@@ -27,4 +27,3 @@ micaLogger.runtimeLogger.info('ready');
 
 - `runtimeLogger.ts`：运行时日志 store 与记录方法。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

@@ -33,4 +33,3 @@ const agent = micaAgent.createOpenAI({
 - `core/`：agent 抽象类型、基类和对话消息类型。
 - `providers/`：具体模型 provider adapter 和历史消息归一化。
 - `prompt/`：系统 prompt 构建、系统提示词模板和测试。
-- `examples/`：provider 使用示例。

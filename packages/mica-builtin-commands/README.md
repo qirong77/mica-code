@@ -35,4 +35,3 @@ const commands = micaBuiltinCommands.createBuiltInCommands(services);
 - `compact.ts`：上下文压缩命令。
 - `log.tsx`、`status.tsx`：日志查看、日志导出与状态查看命令。
 - `commit.ts`、`gitDiffContext.ts`：提交辅助命令。
-- `examples/`：基础使用示例。

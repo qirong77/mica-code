@@ -1,0 +1,44 @@
+import modelRules from './model-rules.json';
+import { DEFAULT_MODEL_CONTEXT_SIZE, type EffortMap, type EffortOption, type ModelRule } from './types.js';
+
+export const DEFAULT_EFFORT_MAP: EffortMap = {
+  none: null,
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+};
+
+const MODEL_RULES = modelRules as ModelRule[];
+
+export function getEffortMapFromConfig(modelId: string): EffortMap | null {
+  const rule = findModelRule(modelId);
+  if (rule?.enableEffort === false) return null;
+  return rule?.effortMap ?? DEFAULT_EFFORT_MAP;
+}
+
+export function getModelContextWindowSizeFromConfig(modelId: string): number {
+  return parseModelContextSize(findModelRule(modelId)?.contextSize ?? DEFAULT_MODEL_CONTEXT_SIZE);
+}
+
+export function hasOwnEffort(effortMap: EffortMap, effort: EffortOption): boolean {
+  return Object.prototype.hasOwnProperty.call(effortMap, effort);
+}
+
+function findModelRule(modelId: string): ModelRule | undefined {
+  const normalizedModelId = modelId.toLowerCase();
+  return MODEL_RULES.find((rule) =>
+    rule.modelKeysIncludes.map((key) => key.toLowerCase()).some((key) => normalizedModelId.includes(key)),
+  );
+}
+
+function parseModelContextSize(value: number | string): number {
+  if (typeof value === 'number') return Math.max(1, Math.round(value * 1000));
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/^(\d+(?:\.\d+)?)([km])?$/);
+  if (!match) return DEFAULT_MODEL_CONTEXT_SIZE * 1000;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return DEFAULT_MODEL_CONTEXT_SIZE * 1000;
+  const unit = match[2];
+  if (unit === 'm') return Math.round(amount * 1_000_000);
+  return Math.round(amount * 1000);
+}

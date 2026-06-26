@@ -32,4 +32,3 @@ const id = micaCommon.createId();
 - `result.ts`：结果类型。
 - `ids.ts`：ID 生成。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

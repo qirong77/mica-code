@@ -32,4 +32,3 @@ await micaMcp.init();
 - `service.ts`：初始化、重连和关闭编排。
 - `tools.ts`：MCP tool 到 Mica tool 的适配。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

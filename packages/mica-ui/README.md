@@ -42,4 +42,3 @@ micaUi.panels.pushLog({
 - `types.ts`：UI 公开类型。
 - `theme.ts`：终端 UI 主题定义。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：完整应用示例。

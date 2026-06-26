@@ -83,6 +83,7 @@ bun run format          # 格式化（prettier）
 ## 配置与数据
 
 - 用户配置和 userConfig 类本地数据由 `mica-config` 管理，本地持久化；静态 provider 配置保存在 `~/.mica/config.json`，最后一次使用的 provider/model/effort/contextWindowSize、共享输入框历史等本地状态保存在 `~/.mica/storage.json`。
+- `mica-config/config.ts` 是对外兼容 facade；路径、类型、持久化、旧配置迁移、校验、模型规则、effort 参数和动态模型加载分别放在同包内的单职责模块。新增配置能力优先扩展这些模块，再从 `config.ts` 或 `index.ts` 暴露稳定 API。
 - 配置了 `get_model_url` 的 provider 运行时拉取模型列表，结果只缓存到内存配置，不回填 `models` 到 `~/.mica/config.json`。
 - Provider/model 的能力由 `mica-config` 统一建模：全局 effort UI 枚举为 `none/minimal/low/medium/high/xhigh`；模型规则维护在 `packages/mica-config/model-rules.json`，规则只按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配；规则可用 `enableEffort: false` 禁用模型族，未命中规则时默认支持原来的 `none/low/medium/high` 四档；`contextSize` 默认 256K，DeepSeek 规则为 1M；用户配置只保留当前选择的 `effort` 和可选的 `supportsEffort` 禁用开关；请求参数必须通过 `resolveProviderEffortParams` 生成，不能在 OpenAI-compatible client 中直接透传 `reasoning_effort`。
 - 运行时 env：入口 `src/index.ts` 自动加载 `.env` 和 `packages/mica-agent/.env`。
@@ -94,6 +95,9 @@ bun run format          # 格式化（prettier）
 - `ApplicationContext` 通过 `src/app/activeContext.ts` 暴露：`setActiveContext` / `getActiveContext` / `clearActiveContext`。
 - 插件、runtime 等模块不应反向 import `Application.ts` 获取全局状态，统一走 `activeContext`。
 - 运行时核心对象：`Application` → `AgentRuntime` + `SessionController` + `LocalRuntimeController` + `MicaUiRuntimeBridge` + `CommandRegistry` + `PluginManager`。
+- `AgentRuntime` 保持 provider client 生命周期和 run loop；runtime config 解析放在相邻 helper 模块，OpenAI 内容转换等单调用点逻辑留在主类本地 helper。
+- `LocalRuntimeController` 保持命令分发、turn loop 和 UI 协调；per-agent queue、running/clearing、response buffer、exclusive task 状态就地维护，避免为了状态容器增加低收益抽象。
+- 内置命令插件的 `index.ts` 负责插件注册、内置命令列表和 quick command wiring；runtime services、active proxy 放在 `src/plugins/commands/` 相邻模块。
 - 插件注册阶段（`use(plugin)`）在 `start()` 内部完成，先注册内置插件，再通过 `plugins.setupAll()` 初始化。
 
 ## 包依赖边界
@@ -105,6 +109,7 @@ bun run format          # 格式化（prettier）
 - `mica-commands` 只放通用命令机制，产品命令放在 `mica-builtin-commands`。
 - `mica-builtin-commands` 通过 services 注入外部能力，避免直接导入应用层单例。
 - `mica-tools` 统一管理工具定义和执行，MCP 工具也必须通过它注册。
+- `ToolRunShell.ts` 保留前后台执行流程和 shell/cwd 校验；输出截断/结果格式、后台任务 watchdog 等有体量的辅助逻辑放在同包相邻模块。
 - `mica-session` 只负责持久化，不调用模型、不渲染 UI。
 - `mica-plugin` 只提供插件机制，不内置具体产品插件。
 

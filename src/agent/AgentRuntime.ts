@@ -9,8 +9,14 @@ import {
   type OpenAIClientOptions,
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import { micaConfig, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
+import type { EffortOption } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import {
+  agentRuntimeConfigFromSnapshot,
+  createAgentClientOptions,
+  readAgentRuntimeConfig,
+  type AgentRuntimeConfig,
+} from './AgentRuntimeConfig.js';
 
 export type AgentRuntimeStatus =
   | { type: 'idle' }
@@ -39,14 +45,6 @@ export type AgentRuntimeSnapshot = {
   lastUsage: AgentUsageRecord | undefined;
 };
 
-type RuntimeProviderDefinition = ProviderDefinition & { contextWindowSize: number };
-
-type AgentRuntimeConfig = {
-  provider: RuntimeProviderDefinition;
-  model: string;
-  effort: EffortOption;
-};
-
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
 };
@@ -56,6 +54,50 @@ export class AgentAbortError extends Error {
     super('Agent run aborted');
     this.name = 'AgentAbortError';
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
+}
+
+function contentToText(content: AgentQueryContent): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+}
+
+function toOpenAIUserContent(
+  content: AgentQueryContent,
+): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
+  if (typeof content === 'string') return content;
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${part.source.media_type};base64,${part.source.data}`,
+      },
+    };
+  });
+}
+
+function isSameOpenAIUserContent(
+  left: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'],
+  right: AgentQueryContent,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(toOpenAIUserContent(right));
+}
+
+function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message && typeof message === 'object' && 'role' in message && message.role === 'user') {
+      return messages.slice(0, index);
+    }
+  }
+  return messages;
 }
 
 export class AgentRuntime {
@@ -70,7 +112,7 @@ export class AgentRuntime {
   private currentConfig: AgentRuntimeConfig;
 
   constructor() {
-    this.currentConfig = this.readConfig();
+    this.currentConfig = readAgentRuntimeConfig();
     this.recreateClient();
     micaLogger.logRuntime('agent', 'initialized', {
       provider: this.currentConfig.provider.id,
@@ -115,7 +157,7 @@ export class AgentRuntime {
     if (resetSession) {
       this.runId++;
     }
-    this.currentConfig = this.readConfig();
+    this.currentConfig = readAgentRuntimeConfig();
     this.recreateClient();
     if (!resetSession && previousSnapshot && this.client) {
       this.client.loadSnapshot({
@@ -217,7 +259,7 @@ export class AgentRuntime {
       throw new Error('Cannot load snapshot while agent is running');
     }
     this.runId++;
-    this.currentConfig = this.configFromSnapshot(snapshot);
+    this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,
@@ -358,54 +400,7 @@ export class AgentRuntime {
   }
 
   private clientOptions(): OpenAIClientOptions {
-    return {
-      apiKey: this.currentConfig.provider.api_key,
-      baseURL: this.currentConfig.provider.api_base,
-      model: this.currentConfig.model,
-      effort: micaConfig.clampProviderEffort(
-        this.currentConfig.provider,
-        this.currentConfig.effort,
-        this.currentConfig.model,
-      ),
-      provider: this.currentConfig.provider,
-    };
-  }
-
-  private readConfig(): AgentRuntimeConfig {
-    const config = micaConfig.get();
-    micaConfig.assertValid(config);
-    const provider = config.providers.find((item) => item.id === config.provider);
-    if (!provider) {
-      throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
-    }
-    const model = config.model;
-    const normalizedProvider = {
-      ...provider,
-      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
-    };
-    return {
-      provider: normalizedProvider,
-      model,
-      effort: micaConfig.clampProviderEffort(normalizedProvider, config.effort, model),
-    };
-  }
-
-  private configFromSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeConfig {
-    const config = micaConfig.get();
-    const provider = config.providers.find((item) => item.id === snapshot.providerId);
-    if (!provider) {
-      throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
-    }
-    const model = snapshot.model || provider.model || provider.models?.[0] || '';
-    const normalizedProvider = {
-      ...provider,
-      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
-    };
-    return {
-      provider: normalizedProvider,
-      model,
-      effort: micaConfig.clampProviderEffort(normalizedProvider, snapshot.effort, model),
-    };
+    return createAgentClientOptions(this.currentConfig);
   }
 
   private trimAbortedRunUsage() {
@@ -426,48 +421,4 @@ export class AgentRuntime {
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;
   }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
-}
-
-function contentToText(content: AgentQueryContent): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
-}
-
-function toOpenAIUserContent(
-  content: AgentQueryContent,
-): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
-  if (typeof content === 'string') return content;
-  return content.map((part) => {
-    if (part.type === 'text') return { type: 'text', text: part.text };
-    return {
-      type: 'image_url',
-      image_url: {
-        url: `data:${part.source.media_type};base64,${part.source.data}`,
-      },
-    };
-  });
-}
-
-function isSameOpenAIUserContent(
-  left: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'],
-  right: AgentQueryContent,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(toOpenAIUserContent(right));
-}
-
-function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message && typeof message === 'object' && 'role' in message && message.role === 'user') {
-      return messages.slice(0, index);
-    }
-  }
-  return messages;
 }

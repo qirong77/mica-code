@@ -35,4 +35,3 @@ queue.enqueue({ text: '继续' });
 - `SubmitResult.ts`、`AbortResult.ts`：提交与中止结果。
 - `MessageQueueService.ts`：运行中输入排队服务。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。

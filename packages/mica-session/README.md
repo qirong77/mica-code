@@ -32,4 +32,3 @@ const sessions = store.list(10);
 
 - `sessionStore.ts`：会话类型、文件存储实现、ID 创建和路径安全处理。
 - `index.ts`：公共 API 聚合导出。
-- `examples/`：基础使用示例。
