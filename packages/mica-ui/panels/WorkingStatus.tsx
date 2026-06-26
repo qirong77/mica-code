@@ -12,11 +12,11 @@ import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
 
 const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
 const CONTEXT_USAGE_COLORS = [
-  themeColors.dim,
-  themeColors.info,
-  themeColors.warning,
+  themeColors.inactive,
+  themeColors.statusInfo,
+  themeColors.statusWarning,
   '#FF9800',
-  themeColors.error,
+  themeColors.statusError,
 ] as const;
 
 function formatTokens(tokens: number): string {
@@ -45,18 +45,18 @@ function StatusInfo() {
   const modelText = `${modelValue}_${effortLevel}`;
   if (contextTokens <= 0 || windowSize <= 0)
     return (
-      <Text color={themeColors.dim} wrap="wrap">
+      <Text color={themeColors.inactive} wrap="wrap">
         {modelText}
       </Text>
     );
   return (
     <Text wrap="wrap">
-      <Text color={themeColors.dim}>{modelText}</Text>{' '}
-      <Text color={themeColors.dim}>
+      <Text color={themeColors.inactive}>{modelText}</Text>{' '}
+      <Text color={themeColors.inactive}>
         {tokenStr} (cached {cachedPct}%,{' '}
       </Text>
       <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextRatio)]}>ctx {contextPct}%</Text>
-      <Text color={themeColors.dim}>)</Text>
+      <Text color={themeColors.inactive}>)</Text>
     </Text>
   );
 }
@@ -105,7 +105,7 @@ export function WorkingStatus() {
   const statusDisplay = getWorkingStatusDisplay(info);
 
   const content = queueStatus ? (
-    <Text color={themeColors.dim} wrap="wrap">
+    <Text color={themeColors.inactive} wrap="wrap">
       {queueStatus}
     </Text>
   ) : (
@@ -123,7 +123,7 @@ export function WorkingStatus() {
             <Box>
               <Spin />
               <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-              <Text color={themeColors.dim}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
+              <Text color={themeColors.inactive}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
             </Box>
           );
         case 'streaming':
@@ -131,7 +131,7 @@ export function WorkingStatus() {
             <Box>
               <Spin />
               <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
-              <Text color={themeColors.dim}> ↓{estimateTokens(currentResponseText)} tokens</Text>
+              <Text color={themeColors.inactive}> ↓{estimateTokens(currentResponseText)} tokens</Text>
             </Box>
           );
         case 'calling_tool':
@@ -168,7 +168,7 @@ export function WorkingStatus() {
         <IfComponent
           condition={!queueStatus && info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle'}
         >
-          <Text color={themeColors.dim}> {elapsedText}</Text>
+          <Text color={themeColors.inactive}> {elapsedText}</Text>
         </IfComponent>
       </Box>
     </Box>

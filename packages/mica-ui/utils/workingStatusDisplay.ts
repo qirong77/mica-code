@@ -11,34 +11,34 @@ export type WorkingStatusDisplay = {
 export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingStatusDisplay {
   switch (status.type) {
     case 'connecting':
-      return { text: 'connecting', color: themeColors.textSecondary, spinning: true };
+      return { text: 'connecting', color: themeColors.statusRunning, spinning: true };
     case 'thinking':
-      return { text: 'thinking', color: themeColors.textSecondary, spinning: true };
+      return { text: 'thinking', color: themeColors.statusRunning, spinning: true };
     case 'streaming':
-      return { text: 'streaming', color: themeColors.textSecondary, spinning: true };
+      return { text: 'streaming', color: themeColors.statusRunning, spinning: true };
     case 'calling_tool': {
       const base = status.toolNames?.length ? status.toolNames.join(', ') : 'calling_tool';
       const elapsed = status.elapsedMs != null ? ` ${formatElapsed(status.elapsedMs)}` : '';
-      return { text: `${base}${elapsed}`, color: themeColors.textSecondary, spinning: true };
+      return { text: `${base}${elapsed}`, color: themeColors.statusRunning, spinning: true };
     }
     case 'plugin_task':
       return {
         text: status.text,
         color:
           status.level === 'error'
-            ? themeColors.error
+            ? themeColors.statusError
             : status.level === 'warn'
-              ? themeColors.warning
-              : themeColors.textSecondary,
+              ? themeColors.statusWarning
+              : themeColors.statusRunning,
         spinning: true,
       };
     case 'completed': {
       const elapsed = status.elapsedMs != null ? ` ${formatElapsed(status.elapsedMs)}` : '';
-      return { text: `completed${elapsed}`, color: themeColors.success, spinning: false };
+      return { text: `completed${elapsed}`, color: themeColors.statusSuccess, spinning: false };
     }
     case 'error':
-      return { text: 'error', color: themeColors.error, spinning: false };
+      return { text: 'error', color: themeColors.statusError, spinning: false };
     case 'idle':
-      return { text: 'idle', color: themeColors.dim, spinning: false };
+      return { text: 'idle', color: themeColors.inactive, spinning: false };
   }
 }

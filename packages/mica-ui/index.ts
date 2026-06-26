@@ -29,6 +29,8 @@ import { useLogViewHeight } from './hooks/useLogViewHeight.js';
 import {
   Dialog,
   KeyHints,
+  MessageGutter,
+  MessageResponse,
   OneLineItem,
   SelectList,
   Spin,
@@ -64,6 +66,8 @@ export const micaUi = {
   useLogViewHeight,
   Dialog,
   KeyHints,
+  MessageGutter,
+  MessageResponse,
   SelectList,
   OneLineItem,
   getOneLineColumnWidth,
@@ -134,7 +138,13 @@ export const micaUi = {
   theme: { colors: themeColors },
 };
 
-export type { OneLineItemCell, SelectItem } from './primitives/index.js';
+export type {
+  MessageGutterProps,
+  MessageGutterTone,
+  OneLineItemCell,
+  SelectItem,
+  SelectListLayout,
+} from './primitives/index.js';
 export type { MessageItem } from './panels/MessageBar.js';
 export type { MicaUiPendingInputQueueMode } from './conversation/state.js';
 export type {

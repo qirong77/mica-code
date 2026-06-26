@@ -1,12 +1,11 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { Dialog, KeyHints, OneLineItem, SelectList, getOneLineColumnWidth } from '../../primitives/index.js';
+import { OneLineItem, SelectList, getOneLineColumnWidth } from '../../primitives/index.js';
 import type { SelectItem } from '../../primitives/index.js';
 import type { MicaUiDropdownItem } from '../../types.js';
 import { themeColors } from '../../theme.js';
 
 const MIN_LABEL_COL = 18;
-const SIDE_MARGIN = 4;
 
 function useLabelWidth(items: MicaUiDropdownItem[]): number {
   return useMemo(() => {
@@ -38,6 +37,8 @@ export function CommandDropdown({
 
   const renderItem = (item: SelectItem, isSelected: boolean) => {
     const orig = items.find((it) => it.key === item.key);
+    const primaryColor = isSelected ? themeColors.accent : themeColors.textSecondary;
+    const secondaryColor = isSelected ? themeColors.accent : themeColors.dim;
     return (
       <OneLineItem
         cells={[
@@ -45,20 +46,22 @@ export function CommandDropdown({
             key: 'label',
             content: orig?.label ?? '',
             width: labelWidth,
-            color: isSelected ? themeColors.accent : themeColors.dim,
+            color: primaryColor,
           },
           {
             key: 'description',
             content: orig?.description,
             flexGrow: 1,
             minWidth: 0,
-            color: isSelected ? themeColors.accent : themeColors.dim,
+            color: secondaryColor,
+            dimColor: !isSelected,
           },
           {
             key: 'suffix',
             content: orig?.suffix?.text,
             flexShrink: 0,
-            color: orig?.suffix?.color ?? themeColors.success,
+            color: isSelected ? (orig?.suffix?.color ?? themeColors.success) : themeColors.dim,
+            dimColor: !isSelected,
           },
         ]}
       />
@@ -66,21 +69,21 @@ export function CommandDropdown({
   };
 
   return (
-    <Box paddingX={Math.floor(SIDE_MARGIN / 2)}>
-      <Dialog title="" footer={<KeyHints hints={['↑↓ navigate', '↵ select', 'esc cancel']} />}>
-        <SelectList
-          items={selectItems}
-          selectedIdx={selectedIndex}
-          title={title}
-          empty={<Text dimColor>{emptyMessage}</Text>}
-          itemGap={0}
-          markerWidth={0}
-          marker=""
-          maxVisibleItems={maxVisibleItems}
-          adaptiveHeight={false}
-          renderItem={renderItem}
-        />
-      </Dialog>
+    <Box paddingTop={1}>
+      <SelectList
+        items={selectItems}
+        selectedIdx={selectedIndex}
+        title={title}
+        empty={<Text dimColor>{emptyMessage}</Text>}
+        itemGap={0}
+        markerWidth={0}
+        marker=""
+        maxVisibleItems={maxVisibleItems}
+        adaptiveHeight={false}
+        layout="table"
+        scrollIndicators={false}
+        renderItem={renderItem}
+      />
     </Box>
   );
 }

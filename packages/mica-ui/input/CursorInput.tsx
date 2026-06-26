@@ -453,6 +453,7 @@ function buildTextHandler({
   onOffsetChange,
   maxVisibleLines,
   disableCursorMovementForUpDownKeys,
+  shouldIgnoreInput,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -468,6 +469,7 @@ function buildTextHandler({
   onOffsetChange: (offset: number) => void;
   maxVisibleLines?: number;
   disableCursorMovementForUpDownKeys: boolean;
+  shouldIgnoreInput?: (input: string, key: any) => boolean;
 }): { onInput: (input: string, key: any) => void; renderedValue: string; cursorLine: number; cursorColumn: number } {
   const offset = externalOffset;
   const setOffset = onOffsetChange;
@@ -511,6 +513,7 @@ function buildTextHandler({
   }
 
   function onInput(input: string, key: any): void {
+    if (shouldIgnoreInput?.(input, key)) return;
     if (key.ctrl && input === 'c') {
       if (value) {
         onChange('');
@@ -668,6 +671,7 @@ interface SimpleTextInputProps {
   onHistoryUp?: () => void;
   onHistoryDown?: () => void;
   showCursor?: boolean;
+  shouldIgnoreInput?: (input: string, key: any) => boolean;
 }
 
 export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
@@ -690,6 +694,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
     onOffsetChange: props.onChangeCursorOffset,
     maxVisibleLines: props.maxVisibleLines,
     disableCursorMovementForUpDownKeys: false,
+    shouldIgnoreInput: props.shouldIgnoreInput,
   });
 
   const cursorRef = useDeclaredCursor({

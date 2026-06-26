@@ -1,9 +1,8 @@
-import { Box, Text, useInput, useTerminalSize } from '@anthropic/ink';
+import { Box, useInput, useTerminalSize } from '@anthropic/ink';
 import { micaConfig } from '@packages/mica-config/index.js';
 import React from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { SimpleTextInput } from './CursorInput.js';
-import { themeColors } from '../theme.js';
 import { useScheduleState } from '../hooks/index.js';
 import * as input from './state.js';
 import { pluginUIs, workingStatus, abortAgent, setPluginUIs, editPendingInput } from '../panels/state.js';
@@ -11,8 +10,10 @@ import { pendingInputs } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { MessageBarAPI } from '../panels/MessageBar.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
+import { PromptFrame } from './PromptFrame.js';
 import type { DOMElement } from '@anthropic/ink';
 import type { TerminalInputQueueMode, TerminalInputSubmitOptions } from './state.js';
+import type { PromptFrameMode } from './PromptFrame.js';
 
 interface YogaNodeLike {
   getComputedTop(): number;
@@ -71,6 +72,7 @@ function TerminalInput() {
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
   const hasActiveInputPlugin = activePluginUIs.some((ui) => ui.onInput);
   const isCommandInput = localText.trimStart().startsWith('/');
+  const quickCommandVisible = useScheduleState(DropDownUI.atomData.dropdown).visible;
 
   React.useEffect(() => {
     return input.text.subscribe((text) => {
@@ -108,9 +110,7 @@ function TerminalInput() {
     cursorOffset === localText.length;
 
   React.useEffect(() => {
-    const nextStatusText = showQueueShortcutTip
-      ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送'
-      : '';
+    const nextStatusText = showQueueShortcutTip ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送' : '';
     input.setQueueStatusText(nextStatusText);
     return () => {
       if (input.queueStatusText.get() === nextStatusText) input.setQueueStatusText('');
@@ -250,8 +250,13 @@ function TerminalInput() {
     }
 
     if (DropDownUI.quickCommand.handleKey(key)) {
-      setLocalText('');
-      setCursorOffset(0);
+      event?.preventDefault?.();
+      event?.stopImmediatePropagation?.();
+      if (!DropDownUI.atomData.dropdown.get().visible) {
+        setLocalText('');
+        setCursorOffset(0);
+        input.text.set('');
+      }
       return;
     }
 
@@ -267,7 +272,8 @@ function TerminalInput() {
 
   const onSubmit = useCallback(
     (value: string) => {
-      if (!value.trim() || input.disabled.get() || hasActiveInputPlugin) return;
+      if (!value.trim() || input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || hasActiveInputPlugin)
+        return;
       if (isAgentRunning && currentPendingInputs.length > 0) return;
       submitValue(value);
     },
@@ -291,8 +297,13 @@ function TerminalInput() {
     [activePluginUIs],
   );
 
+  const shouldIgnoreTextInput = useCallback((_input: string, key: any) => {
+    if (!DropDownUI.atomData.dropdown.get().visible) return false;
+    return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
+  }, []);
+
   const onHistoryUp = useCallback(() => {
-    if (input.disabled.get() || preserveInputOnPluginHandle) return;
+    if (input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || preserveInputOnPluginHandle) return;
     const history = micaConfig.inputHistory.read();
     if (history.length === 0) return;
     const newIndex = historyIndex < history.length - 1 ? historyIndex + 1 : historyIndex;
@@ -306,7 +317,7 @@ function TerminalInput() {
   }, [historyIndex, preserveInputOnPluginHandle]);
 
   const onHistoryDown = useCallback(() => {
-    if (input.disabled.get() || preserveInputOnPluginHandle) return;
+    if (input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || preserveInputOnPluginHandle) return;
     const history = micaConfig.inputHistory.read();
     if (historyIndex > 0) {
       const newIndex = historyIndex - 1;
@@ -324,40 +335,37 @@ function TerminalInput() {
     }
   }, [historyIndex, preserveInputOnPluginHandle]);
 
+  const frameMode: PromptFrameMode = inputDisabled
+    ? 'disabled'
+    : quickCommandVisible || isCommandInput
+      ? 'command'
+      : hasActiveInputPlugin
+        ? 'plugin'
+        : showQueueShortcutTip
+          ? 'queue'
+          : 'default';
+  const frameLabel = frameMode === 'queue' ? 'queue' : '';
+
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
-      <Box
-        flexDirection="row"
-        alignItems="flex-start"
-        justifyContent="flex-start"
-        borderColor={themeColors.borderInput}
-        borderStyle="round"
-        borderLeft={false}
-        borderRight={false}
-        borderBottom
-        width="100%"
-      >
-        <Box marginLeft={1} marginRight={1}>
-          <Text bold>{'❯'}</Text>
-        </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <SimpleTextInput
-            value={localText}
-            onChange={handleChange}
-            onSubmit={onSubmit}
-            onExit={onExit}
-            focus={true}
-            multiline={true}
-            placeholder={placeholder}
-            columns={columns}
-            cursorOffset={cursorOffset}
-            onChangeCursorOffset={setCursorOffset}
-            onHistoryUp={onHistoryUp}
-            onHistoryDown={onHistoryDown}
-            showCursor={!inputDisabled}
-          />
-        </Box>
-      </Box>
+      <PromptFrame mode={frameMode} label={frameLabel}>
+        <SimpleTextInput
+          value={localText}
+          onChange={handleChange}
+          onSubmit={onSubmit}
+          onExit={onExit}
+          focus={true}
+          multiline={true}
+          placeholder={placeholder}
+          columns={columns}
+          cursorOffset={cursorOffset}
+          onChangeCursorOffset={setCursorOffset}
+          onHistoryUp={onHistoryUp}
+          onHistoryDown={onHistoryDown}
+          showCursor={!inputDisabled}
+          shouldIgnoreInput={shouldIgnoreTextInput}
+        />
+      </PromptFrame>
     </Box>
   );
 }

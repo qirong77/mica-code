@@ -95,7 +95,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
   function SelectorPanel() {
     const currentIdx = micaUi.useScheduleState(selectedIdx);
     const isApplying = micaUi.useScheduleState(applying);
-    const filter = micaUi.useScheduleState(searchText);
     const filtered = getFilteredOptions();
     const items: SelectItem[] = filtered.map((option) => ({
       key: option.name,
@@ -131,6 +130,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
           selectedIdx={currentIdx}
           empty={<Text dimColor>{config.emptyMessage ?? 'no options'}</Text>}
           itemGap={config.itemGap ?? 1}
+          layout="table"
           renderItem={config.renderItem}
         />
       </micaUi.Dialog>

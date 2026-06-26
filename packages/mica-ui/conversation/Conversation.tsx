@@ -5,6 +5,7 @@ import { useScheduleState } from '../hooks/useScheduleState.js';
 import { themeColors } from '../theme.js';
 import { messages, responseText, pendingInputs, pendingQueueMode } from './state.js';
 import { Markdown } from './Markdown.js';
+import { MessageGutter } from '../primitives/MessageGutter.js';
 
 const MAX_USER_LINES = 10;
 
@@ -56,40 +57,41 @@ export const Conversation = (): React.ReactNode => {
   return (
     <Box flexDirection="column">
       {staticItems.map((item: LogItem, index) => {
-        const isLast = index === staticItems.length - 1 && !currentResponseText;
         if (item.role === 'user') {
           return (
-            <Box key={item.id} paddingY={1} paddingBottom={isLast ? 0 : 1} flexDirection="row">
-              <Text color={themeColors.primary}>{'\u258c'}</Text>
-              <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
-                <Text color={themeColors.primary} bold>
-                  {truncateLines(item.text, MAX_USER_LINES)}
-                </Text>
-              </Box>
-            </Box>
+            <MessageGutter
+              key={item.id}
+              tone="user"
+              marker={'\u258c'}
+              marginTop={1}
+              backgroundColor={themeColors.surfaceUser}
+            >
+              <Text color={themeColors.messageUser} wrap="wrap">
+                {truncateLines(item.text, MAX_USER_LINES)}
+              </Text>
+            </MessageGutter>
           );
         }
         return (
-          <Box key={item.id}>
+          <MessageGutter key={item.id} tone="assistant" marker="●" marginTop={index === 0 ? 0 : 1}>
             <Markdown>{item.text}</Markdown>
-          </Box>
+          </MessageGutter>
         );
       })}
-      <Box>
-        <Markdown>{currentResponseText}</Markdown>
-      </Box>
+      {currentResponseText ? (
+        <MessageGutter tone="assistant" marker="●" marginTop={staticItems.length > 0 ? 1 : 0}>
+          <Markdown>{currentResponseText}</Markdown>
+        </MessageGutter>
+      ) : null}
       {currentPendingInputs.map((text, i) => (
-        <Box key={`pending-${i}`} paddingY={1} flexDirection="row">
-          <Text color={themeColors.dim}>{'\u258c'}</Text>
-          <Box flexGrow={1} paddingLeft={1} paddingRight={1}>
-            <Text color={themeColors.dim} italic>
-              {truncateLines(text, MAX_USER_LINES)}
-            </Text>
-            <Text color={themeColors.dim}>
-              {'  '}({formatPendingStatus(currentQueueMode)} · shift + ⬅️ to re-edit)
-            </Text>
-          </Box>
-        </Box>
+        <MessageGutter key={`pending-${i}`} tone="pending" marker={'\u258c'} marginTop={1}>
+          <Text color={themeColors.messagePending} italic>
+            {truncateLines(text, MAX_USER_LINES)}
+          </Text>
+          <Text color={themeColors.messagePending}>
+            {'  '}({formatPendingStatus(currentQueueMode)} · shift + ⬅️ to re-edit)
+          </Text>
+        </MessageGutter>
       ))}
     </Box>
   );

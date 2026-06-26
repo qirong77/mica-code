@@ -1,5 +1,4 @@
 import { quickCommands, state, selection, inputValue, rawInputValue } from './state.js';
-import { disabled as inputDisabled } from '../../input/state.js';
 import type { MicaUiDropdownItem } from '../../types.js';
 
 let _emitSelect: ((item: MicaUiDropdownItem) => void) | null = null;
@@ -9,8 +8,6 @@ export function setSelectEmitter(emit: (item: MicaUiDropdownItem) => void): void
 }
 
 export function showQuickCommands(query: string): void {
-  // 强制重置输入禁用状态，确保下拉菜单可以正常展示
-  inputDisabled.set(false);
   const commands = quickCommands.get();
   const parsedQuery = parseQuickCommandQuery(query);
   const filter = parsedQuery.filter;
@@ -36,7 +33,6 @@ export function showQuickCommands(query: string): void {
   });
   inputValue.set(filter);
   rawInputValue.set(query);
-  inputDisabled.set(true);
 }
 
 export function hideQuickCommands(): void {
@@ -46,7 +42,6 @@ export function hideQuickCommands(): void {
   selection.set(null);
   inputValue.set('');
   rawInputValue.set('');
-  inputDisabled.set(false);
 }
 
 export function handleDropdownKey(key: {
@@ -58,10 +53,13 @@ export function handleDropdownKey(key: {
   shift?: boolean;
 }): boolean {
   const s = state.get();
-  if (!s.visible || s.items.length === 0) return false;
+  if (!s.visible) return false;
   if (key.escape) {
     closeAndClear();
     return true;
+  }
+  if (s.items.length === 0) {
+    return Boolean(key.tab || key.return || key.upArrow || key.downArrow);
   }
   if (key.tab) {
     executeSelected();
@@ -87,7 +85,6 @@ function closeAndClear(): void {
   selection.set(null);
   inputValue.set('');
   rawInputValue.set('');
-  inputDisabled.set(false);
 }
 
 function executeSelected(): void {
