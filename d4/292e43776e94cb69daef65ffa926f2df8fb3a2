@@ -1,0 +1,14 @@
+packages/mica-builtin-commands/selectCommand.tsx
+  h_a456b67147438e 61,121-122,130,140-141,145-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d4292e43776e94cb69daef65ffa926f2df8fb3a2",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
