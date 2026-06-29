@@ -69,7 +69,7 @@ export function CommandDropdown({
   };
 
   return (
-    <Box paddingTop={1}>
+    <Box>
       <SelectList
         items={selectItems}
         selectedIdx={selectedIndex}
