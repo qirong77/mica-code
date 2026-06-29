@@ -60,6 +60,23 @@ describe('RewindCheckpointManager', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('skips checkpoints when the conversation snapshot is too large', () => {
+    const manager = new RewindCheckpointManager();
+    const agent = {
+      getSnapshot: () => makeSnapshot([{ role: 'user', content: 'x'.repeat(2_000_000) }]),
+      loadSnapshot: () => {
+        throw new Error('should not load snapshot');
+      },
+    } as unknown as AgentRuntime;
+
+    manager.capture(agent, makeInput('large turn'));
+
+    expect(manager.preview(agent)).toMatchObject({
+      ok: false,
+      message: 'rewind: 没有可回退的上一轮对话',
+    });
+  });
 });
 
 function git(cwd: string, args: string[]): void {

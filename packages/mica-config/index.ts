@@ -16,6 +16,7 @@ import {
   getProviderEffortOptions,
   clampProviderEffort,
   mapProviderEffortValue,
+  providerSupportsModel,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
   resolveProviderProtocol,
@@ -25,8 +26,10 @@ import {
   MICA_STORAGE_PATH,
   readLastUsedConfig,
   readMicaStorage,
+  readProviderPreference,
   updateLastUsedConfig,
   updateMicaStorage,
+  updateProviderPreference,
 } from './micaStorage.js';
 
 export const micaConfig = {
@@ -74,6 +77,10 @@ export const micaConfig = {
       read: readLastUsedConfig,
       update: updateLastUsedConfig,
     },
+    providerPreference: {
+      read: readProviderPreference,
+      update: updateProviderPreference,
+    },
   },
   inputHistory: {
     path: INPUT_HISTORY_PATH,
@@ -92,6 +99,7 @@ export {
   getProviderEffortOptions,
   clampProviderEffort,
   mapProviderEffortValue,
+  providerSupportsModel,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
   resolveProviderProtocol,
@@ -115,7 +123,9 @@ export {
   MICA_STORAGE_PATH,
   readLastUsedConfig,
   readMicaStorage,
+  readProviderPreference,
   updateLastUsedConfig,
   updateMicaStorage,
+  updateProviderPreference,
 } from './micaStorage.js';
-export type { LastUsedConfig, MicaStorageFile } from './micaStorage.js';
+export type { LastUsedConfig, MicaStorageFile, ProviderPreference } from './micaStorage.js';

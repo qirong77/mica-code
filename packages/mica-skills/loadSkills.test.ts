@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const previousMicaHome = process.env.MICA_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'mica-skills-'));
@@ -37,9 +37,8 @@ describe('loadSkills', () => {
       'utf-8',
     );
 
-    const { getLoadedSkills } = (await import(
-      `./loadSkills.js?load-skills-test=${Date.now()}`
-    )) as typeof import('./loadSkills.js');
+    vi.resetModules();
+    const { getLoadedSkills } = (await import('./loadSkills.js')) as typeof import('./loadSkills.js');
     const skills = getLoadedSkills();
 
     expect(skills).toHaveLength(1);

@@ -1,0 +1,204 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
+import type { MicaUiAgentTurnLogItem, MicaUiLogEntry } from '@packages/mica-ui/index.js';
+import type { AgentRuntime } from '../../agent/AgentRuntime.js';
+import type { TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
+
+const uiMocks = (() => {
+  const fn = () => vi.fn();
+  return {
+    appendAgentTurnLogItem: fn(),
+    cachedTokenRateSet: fn(),
+    clearLogEntries: fn(),
+    clearPendingInput: fn(),
+    clearResponseText: fn(),
+    contextSizeSet: fn(),
+    effortSet: fn(),
+    inputClearText: fn(),
+    inputOnSubmit: fn(),
+    messageAdd: fn(),
+    messageRemove: fn(),
+    modelNameSet: fn(),
+    modelWindowSet: fn(),
+    replaceAgentTurnLogItem: fn(),
+    setAgentStatusItems: fn(),
+    setMessages: fn(),
+    setOnAbortAgent: fn(),
+    setOnEditPendingInput: fn(),
+    setPendingInputs: fn(),
+    setResponseText: fn(),
+    statusCallingTool: fn(),
+    statusCompleted: fn(),
+    statusConnecting: fn(),
+    statusError: fn(),
+    statusIdle: fn(),
+    statusStreaming: fn(),
+    statusThinking: fn(),
+    thinkingSet: fn(),
+  };
+})();
+
+vi.mock('@packages/mica-ui/index.js', () => ({
+  micaUi: {
+    conversation: {
+      clearPendingInput: uiMocks.clearPendingInput,
+      clearResponseText: uiMocks.clearResponseText,
+      setMessages: uiMocks.setMessages,
+      setPendingInputs: uiMocks.setPendingInputs,
+      setResponseText: uiMocks.setResponseText,
+    },
+    messageBar: {
+      addMessage: uiMocks.messageAdd,
+      removeMessage: uiMocks.messageRemove,
+    },
+    panels: {
+      appendAgentTurnLogItem: uiMocks.appendAgentTurnLogItem,
+      cachedTokenRate: { set: uiMocks.cachedTokenRateSet },
+      clearLogEntries: uiMocks.clearLogEntries,
+      contextSize: { set: uiMocks.contextSizeSet },
+      modelDisplay: {
+        contextWindowSize: { set: uiMocks.modelWindowSet },
+        effort: { set: uiMocks.effortSet },
+        name: { set: uiMocks.modelNameSet },
+      },
+      replaceAgentTurnLogItem: uiMocks.replaceAgentTurnLogItem,
+      setAgentStatusItems: uiMocks.setAgentStatusItems,
+      setOnAbortAgent: uiMocks.setOnAbortAgent,
+      setOnEditPendingInput: uiMocks.setOnEditPendingInput,
+      status: {
+        callingTool: uiMocks.statusCallingTool,
+        completed: uiMocks.statusCompleted,
+        connecting: uiMocks.statusConnecting,
+        error: uiMocks.statusError,
+        idle: uiMocks.statusIdle,
+        streaming: uiMocks.statusStreaming,
+        thinking: uiMocks.statusThinking,
+      },
+      thinkingText: { set: uiMocks.thinkingSet },
+    },
+    terminalInput: {
+      clearText: uiMocks.inputClearText,
+      onSubmit: uiMocks.inputOnSubmit,
+    },
+  },
+}));
+
+describe('MicaUiRuntimeBridge turn UI preservation', () => {
+  beforeEach(() => {
+    for (const value of Object.values(uiMocks)) value.mockClear();
+  });
+
+  it('keeps prior error or abort logs when a new turn asks to preserve them', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+
+    bridge.start();
+    runtime.events.publish({
+      type: 'turn:started',
+      input: micaRuntime.createRuntimeInput('continue'),
+      owner: agent,
+      preservePreviousTurnUi: true,
+    });
+
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'previous-error' })]);
+    expect(session.uiState.logEntries).toEqual([expect.objectContaining({ type: 'thinking' })]);
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+    expect(session.uiState.lastTurnOutcome).toBe('running');
+    expect(uiMocks.clearLogEntries).not.toHaveBeenCalled();
+    expect(uiMocks.thinkingSet).not.toHaveBeenCalledWith('');
+  });
+
+  it('clears prior logs for a normal new turn', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+
+    bridge.start();
+    runtime.events.publish({
+      type: 'turn:started',
+      input: micaRuntime.createRuntimeInput('next task'),
+      owner: agent,
+    });
+
+    expect(session.uiState.agentTurnLogItems).toEqual([]);
+    expect(session.uiState.logEntries).toEqual([]);
+    expect(session.uiState.thinkingText).toBe('');
+    expect(session.uiState.lastTurnOutcome).toBe('running');
+    expect(uiMocks.clearLogEntries).toHaveBeenCalledTimes(1);
+    expect(uiMocks.thinkingSet).toHaveBeenCalledWith('');
+  });
+});
+
+function createRuntime() {
+  return {
+    abort: vi.fn(),
+    editLastPendingInput: vi.fn(),
+    events: new micaRuntime.RuntimeEventBus(),
+    submit: vi.fn(),
+  };
+}
+
+function createAgent(): AgentRuntime {
+  return {
+    config: {
+      effort: 'none',
+      model: 'test-model',
+      provider: {
+        contextWindowSize: 1000,
+        id: 'test-provider',
+        name: 'Test Provider',
+        supportsEffort: false,
+      },
+    },
+    events: {
+      off: vi.fn(),
+      on: vi.fn(),
+    },
+    getSnapshot: vi.fn(() => ({ usageHistory: [] })),
+    toConversationMessages: vi.fn(() => []),
+  } as unknown as AgentRuntime;
+}
+
+function createSession(agent: AgentRuntime): TerminalAgentSession {
+  const logItem: MicaUiAgentTurnLogItem = { id: 'previous-error', component: () => null };
+  const logEntry: MicaUiLogEntry = { type: 'thinking', id: 1, text: 'previous thinking' };
+  return {
+    agent,
+    disposeStatusListener: vi.fn(),
+    id: 'session-1',
+    index: 1,
+    sessionController: {} as TerminalAgentSession['sessionController'],
+    startedAt: new Date(0).toISOString(),
+    status: { type: 'error' },
+    uiState: {
+      agentTurnLogItems: [logItem],
+      cachedTokenRate: 0,
+      contextSize: 0,
+      conversationMessages: [],
+      lastTurnOutcome: 'error',
+      logEntries: [logEntry],
+      messageBarMessages: [],
+      pendingInputs: [],
+      pendingQueueMode: null,
+      pluginUIs: [],
+      responseText: '',
+      thinkingText: 'previous thinking',
+      uiLog: [],
+      workingStatus: { type: 'error' },
+    },
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+function createSessionManager(session: TerminalAgentSession) {
+  return {
+    current: vi.fn(() => session),
+    findByAgent: vi.fn((agent: AgentRuntime) => (agent === session.agent ? session : undefined)),
+    list: vi.fn(() => []),
+  } as never;
+}

@@ -43,8 +43,30 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortError(): Error {
+  const error = new Error('Agent query aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    let onAbort: () => void;
+    const finish = (fn: () => void) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      fn();
+    };
+    onAbort = () => {
+      finish(() => reject(abortError()));
+    };
+    timer = setTimeout(() => {
+      finish(resolve);
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export async function withRetry<T>(
@@ -52,6 +74,7 @@ export async function withRetry<T>(
   options?: {
     maxRetries?: number;
     delayMs?: number;
+    signal?: AbortSignal;
   },
 ): Promise<T> {
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -59,12 +82,13 @@ export async function withRetry<T>(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (options?.signal?.aborted) throw abortError();
     try {
       return await fn();
     } catch (error) {
       lastError = error;
       if (attempt < maxRetries && isRetryableError(error)) {
-        await sleep(delayMs);
+        await sleep(delayMs, options?.signal);
         continue;
       }
       throw error;

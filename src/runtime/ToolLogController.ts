@@ -10,6 +10,10 @@ type ToolLogSink = {
   replaceAgentTurnLogItem(item: MicaUiAgentTurnLogItem): void;
 };
 
+const MAX_THINKING_BUFFER_CHARS = 40_000;
+const THINKING_TRUNCATION_MARKER = '[thinking display truncated]\n';
+const THINKING_UI_UPDATE_INTERVAL_MS = 50;
+
 const defaultSink: ToolLogSink = {
   setThinkingText: (text) => micaUi.panels.thinkingText.set(text),
   appendAgentTurnLogItem: (item) => micaUi.panels.appendAgentTurnLogItem(item),
@@ -21,15 +25,17 @@ export class ToolLogController {
   private thinkingId = 0;
   private thinkingBuffer = '';
   private activeThinkingId: string | null = null;
+  private lastThinkingUiUpdateAt = 0;
   private activeToolCalls = new Map<string, ActiveToolCall>();
 
   constructor(private readonly sink: ToolLogSink = defaultSink) {}
 
-  resetTurn() {
+  resetTurn(options: { clearThinkingText?: boolean } = {}) {
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
+    this.lastThinkingUiUpdateAt = 0;
     this.activeToolCalls.clear();
-    this.sink.setThinkingText('');
+    if (options.clearThinkingText !== false) this.sink.setThinkingText('');
   }
 
   resetAll() {
@@ -49,7 +55,15 @@ export class ToolLogController {
       this.activeThinkingId = `thinking-${++this.thinkingId}`;
       this.thinkingBuffer = '';
     }
-    this.thinkingBuffer += text;
+    this.thinkingBuffer = appendBoundedText(
+      this.thinkingBuffer,
+      text,
+      MAX_THINKING_BUFFER_CHARS,
+      THINKING_TRUNCATION_MARKER,
+    );
+    const now = Date.now();
+    if (now - this.lastThinkingUiUpdateAt < THINKING_UI_UPDATE_INTERVAL_MS) return;
+    this.lastThinkingUiUpdateAt = now;
     this.sink.setThinkingText(this.thinkingBuffer);
     this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
   }
@@ -121,4 +135,11 @@ export class ToolLogController {
     }
     return undefined;
   }
+}
+
+function appendBoundedText(previous: string, chunk: string, maxChars: number, marker: string): string {
+  const next = `${previous}${chunk}`;
+  if (next.length <= maxChars) return next;
+  const body = next.startsWith(marker) ? next.slice(marker.length) : next;
+  return `${marker}${body.slice(-(maxChars - marker.length))}`;
 }

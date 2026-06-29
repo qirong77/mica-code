@@ -174,24 +174,26 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await withRetry(() =>
-        getClient(this).messages.create(
-          {
-            model: this.model,
-            system: this.systemPrompt ?? buildSystemPrompt(),
-            max_tokens: this.maxTokens,
-            messages,
-            ...(this.tools
-              ? {
-                  tools: this.anthropicTools,
-                  tool_choice: { type: 'auto' as const },
-                }
-              : {}),
-            ...(this.thinkingConfig ? { thinking: this.thinkingConfig } : {}),
-            stream: true,
-          },
-          { signal: options?.signal },
-        ),
+      const stream = await withRetry(
+        () =>
+          getClient(this).messages.create(
+            {
+              model: this.model,
+              system: this.systemPrompt ?? buildSystemPrompt(),
+              max_tokens: this.maxTokens,
+              messages,
+              ...(this.tools
+                ? {
+                    tools: this.anthropicTools,
+                    tool_choice: { type: 'auto' as const },
+                  }
+                : {}),
+              ...(this.thinkingConfig ? { thinking: this.thinkingConfig } : {}),
+              stream: true,
+            },
+            { signal: options?.signal },
+          ),
+        { signal: options?.signal },
       );
 
       let content = '';

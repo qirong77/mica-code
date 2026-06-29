@@ -8,7 +8,8 @@
     "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test packages/mica-agent/prompt/index.test.ts packages/mica-agent/providers/createModelClient.test.ts packages/mica-config/config.test.ts packages/mica-builtin-commands/configSwitch.test.ts packages/mica-builtin-commands/gitDiffContext.test.ts packages/mica-skills/loadSkills.test.ts packages/mica-tools/MicaTool.test.ts packages/mica-tools/ToolRunShell.test.ts packages/mica-ui/agentTurnLogItems.test.ts packages/mica-ui/app/StartupBanner.test.ts packages/mica-ui/bottom/dropdown/quickCommandHandler.test.ts src/plugins/runtime/messageQueuePlugin.test.ts src/runtime/RewindCheckpointManager.test.ts src/session/SessionController.test.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"src/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
   },
   "workspaces": [

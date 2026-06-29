@@ -2,6 +2,7 @@ import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js'
 import { SessionController } from '../session/SessionController.js';
 import type {
   MicaUiAgentTurnLogItem,
+  MicaUiContentBlockParam,
   MicaUiConversationMessage,
   MicaUiLogEntry,
   MessageItem,
@@ -23,9 +24,12 @@ export type TerminalAgentUiState = {
   thinkingText: string;
   pluginUIs: MicaUiPluginUI[];
   workingStatus: MicaUiWorkingStatus;
+  lastTurnOutcome: TerminalAgentTurnOutcome;
   contextSize: number;
   cachedTokenRate: number;
 };
+
+export type TerminalAgentTurnOutcome = 'idle' | 'running' | 'completed' | 'error' | 'aborted';
 
 export type TerminalAgentSessionRecord = {
   id: string;
@@ -61,6 +65,7 @@ const MAX_LOG_ENTRIES = 200;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
 const MAX_UI_LOG_ENTRIES = 200;
 const MAX_THINKING_TEXT_CHARS = 40_000;
+const MAX_UI_MESSAGE_TEXT_CHARS = 80_000;
 
 export class TerminalAgentSessionManager {
   private readonly sessions: TerminalAgentSession[] = [];
@@ -192,7 +197,9 @@ export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiSt
   const pendingInputs = state.pendingInputs.slice(-MAX_PENDING_INPUTS);
   return {
     ...state,
-    conversationMessages: state.conversationMessages.slice(-MAX_UI_CONVERSATION_MESSAGES),
+    conversationMessages: state.conversationMessages
+      .slice(-MAX_UI_CONVERSATION_MESSAGES)
+      .map(sanitizeConversationMessage),
     responseText: tailText(state.responseText, MAX_RESPONSE_TEXT_CHARS),
     pendingInputs,
     pendingQueueMode: pendingInputs.length > 0 ? state.pendingQueueMode : null,
@@ -201,6 +208,7 @@ export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiSt
     agentTurnLogItems: state.agentTurnLogItems.slice(-MAX_AGENT_TURN_LOG_ITEMS),
     uiLog: state.uiLog.slice(-MAX_UI_LOG_ENTRIES),
     thinkingText: tailText(state.thinkingText, MAX_THINKING_TEXT_CHARS),
+    lastTurnOutcome: state.lastTurnOutcome ?? 'idle',
   };
 }
 
@@ -217,6 +225,7 @@ function createEmptyUiState(): TerminalAgentUiState {
     thinkingText: '',
     pluginUIs: [],
     workingStatus: { type: 'idle' },
+    lastTurnOutcome: 'idle',
     contextSize: 0,
     cachedTokenRate: 0,
   };
@@ -264,4 +273,41 @@ function isRunningStatus(status: MicaUiWorkingStatus): boolean {
 function tailText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(text.length - maxChars);
+}
+
+function sanitizeConversationMessage(message: MicaUiConversationMessage): MicaUiConversationMessage {
+  return {
+    ...message,
+    content: sanitizeConversationContent(message.content),
+  } as MicaUiConversationMessage;
+}
+
+function sanitizeConversationContent(
+  content: MicaUiConversationMessage['content'],
+): MicaUiConversationMessage['content'] {
+  if (typeof content === 'string') return truncateMiddleText(content, MAX_UI_MESSAGE_TEXT_CHARS);
+
+  const blocks: MicaUiContentBlockParam[] = [];
+  let omittedImages = 0;
+  for (const block of content) {
+    if (block.type === 'text') {
+      blocks.push({ type: 'text', text: truncateMiddleText(block.text, MAX_UI_MESSAGE_TEXT_CHARS) });
+      continue;
+    }
+    omittedImages++;
+  }
+
+  if (omittedImages > 0 && blocks.length === 0) {
+    blocks.push({ type: 'text', text: omittedImages === 1 ? '[Image]' : `[${omittedImages} images]` });
+  }
+  return blocks.length === 1 && blocks[0]!.type === 'text' ? blocks[0]!.text : blocks;
+}
+
+function truncateMiddleText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const marker = `\n\n[message stored for UI truncated, omitted ${text.length - maxChars} chars]\n\n`;
+  const budget = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(budget * 0.65);
+  const tail = Math.floor(budget * 0.35);
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
 }

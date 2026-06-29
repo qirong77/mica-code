@@ -18,10 +18,16 @@ import {
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { getActiveContext } from '../activeContext.js';
-import { normalizeUiState, type TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
+import {
+  normalizeUiState,
+  type TerminalAgentSession,
+  type TerminalAgentTurnOutcome,
+} from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
+const MAX_RESPONSE_BUFFER_CHARS = 80_000;
+const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 
 type RuntimeActiveContext = {
   agentSessions: {
@@ -89,13 +95,23 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   appendResponseText(text: string): string {
-    const next = `${this.responseBuffers.get(this.agent) ?? ''}${text}`;
+    const next = appendBoundedText(
+      this.responseBuffers.get(this.agent) ?? '',
+      text,
+      MAX_RESPONSE_BUFFER_CHARS,
+      RESPONSE_TRUNCATION_MARKER,
+    );
     this.responseBuffers.set(this.agent, next);
     return next;
   }
 
   appendResponseTextFor(agent: AgentRuntime, text: string): string {
-    const next = `${this.responseBuffers.get(agent) ?? ''}${text}`;
+    const next = appendBoundedText(
+      this.responseBuffers.get(agent) ?? '',
+      text,
+      MAX_RESPONSE_BUFFER_CHARS,
+      RESPONSE_TRUNCATION_MARKER,
+    );
     this.responseBuffers.set(agent, next);
     return next;
   }
@@ -334,6 +350,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.responseBuffers.set(agent, '');
     const activeContext = getActiveContext<RuntimeActiveContext>();
     const session = activeContext?.agentSessions.findByAgent(agent);
+    const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
@@ -341,19 +358,20 @@ export class LocalRuntimeController implements RuntimeController {
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
-        logEntries: [],
-        agentTurnLogItems: [],
-        thinkingText: '',
+        logEntries: clearPreviousTurnUi ? [] : session.uiState.logEntries,
+        agentTurnLogItems: clearPreviousTurnUi ? [] : session.uiState.agentTurnLogItems,
+        thinkingText: clearPreviousTurnUi ? '' : session.uiState.thinkingText,
         workingStatus: { type: 'connecting' },
+        lastTurnOutcome: 'running',
       });
       activeContext?.uiBridge?.syncAgentStatusItems();
     }
     if (this.isActiveAgent(agent)) {
-      this.events.publish({ type: 'turn:started', input, owner: agent });
+      this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
       micaUi.terminalInput.clearText();
       micaUi.conversation.appendUserMessage(content);
       micaUi.conversation.clearResponseText();
-      micaUi.panels.clearLogEntries();
+      if (clearPreviousTurnUi) micaUi.panels.clearLogEntries();
       micaUi.panels.status.connecting();
     }
 
@@ -393,14 +411,21 @@ export class LocalRuntimeController implements RuntimeController {
         runId = error.runId;
         const responseBuffer = this.responseBuffers.get(agent) ?? '';
         this.responseBuffers.set(agent, '');
+        let currentTurnAlreadyCommitted = false;
         if (!this.clearingAgents.has(agent)) {
-          agent.preserveAbortedTurn(content, responseBuffer);
+          currentTurnAlreadyCommitted = agent.preserveAbortedTurn(content, responseBuffer);
         }
         if (session && !this.clearingAgents.has(agent)) {
+          const conversationMessages = appendAbortedResponseForDisplay(
+            agent.toConversationMessages(),
+            responseBuffer,
+            currentTurnAlreadyCommitted,
+          );
           session.uiState = normalizeUiState({
             ...session.uiState,
-            conversationMessages: agent.toConversationMessages(),
+            conversationMessages,
             responseText: '',
+            lastTurnOutcome: 'aborted',
           });
         }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
@@ -428,6 +453,7 @@ export class LocalRuntimeController implements RuntimeController {
           responseText: '',
           thinkingText: '',
           workingStatus: { type: 'error' },
+          lastTurnOutcome: 'error',
           agentTurnLogItems: [...session.uiState.agentTurnLogItems, errorLogItem],
         });
       }
@@ -444,11 +470,13 @@ export class LocalRuntimeController implements RuntimeController {
       if (!hasError && !wasAborted && session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
+          logEntries: [],
           agentTurnLogItems: [],
           thinkingText: '',
+          lastTurnOutcome: 'completed',
         });
       }
-      if (!hasError && !wasAborted && this.isActiveAgent(agent)) micaUi.panels.clearAgentTurnLogItems();
+      if (!hasError && !wasAborted && this.isActiveAgent(agent)) micaUi.panels.clearLogEntries();
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
@@ -520,4 +548,25 @@ export class LocalRuntimeController implements RuntimeController {
     }
     return queue;
   }
+}
+
+function shouldClearPreviousTurnUi(outcome: TerminalAgentTurnOutcome | undefined): boolean {
+  return outcome === undefined || outcome === 'idle' || outcome === 'completed';
+}
+
+function appendAbortedResponseForDisplay(
+  messages: ReturnType<AgentRuntime['toConversationMessages']>,
+  responseText: string,
+  appendResponse: boolean,
+): ReturnType<AgentRuntime['toConversationMessages']> {
+  const text = responseText.trim();
+  if (!appendResponse || !text) return messages;
+  return [...messages, { role: 'assistant', content: [{ type: 'text', text: responseText }] }];
+}
+
+function appendBoundedText(previous: string, chunk: string, maxChars: number, marker: string): string {
+  const next = `${previous}${chunk}`;
+  if (next.length <= maxChars) return next;
+  const body = next.startsWith(marker) ? next.slice(marker.length) : next;
+  return `${marker}${body.slice(-(maxChars - marker.length))}`;
 }

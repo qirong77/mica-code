@@ -8,6 +8,7 @@ import { Markdown } from './Markdown.js';
 import { MessageGutter } from '../primitives/MessageGutter.js';
 
 const MAX_USER_LINES = 10;
+const MAX_ASSISTANT_CHARS = 80_000;
 
 function getTextContent(content: MicaUiMessageParam['content']): string {
   if (typeof content === 'string') return content;
@@ -21,6 +22,15 @@ function truncateLines(text: string, maxLines: number): string {
   const lines = text.split('\n');
   if (lines.length <= maxLines) return text;
   return lines.slice(0, maxLines).join('\n') + '…';
+}
+
+function truncateMiddleText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const marker = `\n\n[message display truncated, omitted ${text.length - maxChars} chars]\n\n`;
+  const budget = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(budget * 0.65);
+  const tail = Math.floor(budget * 0.35);
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
 }
 
 function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null): string {
@@ -74,13 +84,13 @@ export const Conversation = (): React.ReactNode => {
         }
         return (
           <MessageGutter key={item.id} tone="assistant" marker="●" marginTop={index === 0 ? 0 : 1}>
-            <Markdown>{item.text}</Markdown>
+            <Markdown>{truncateMiddleText(item.text, MAX_ASSISTANT_CHARS)}</Markdown>
           </MessageGutter>
         );
       })}
       {currentResponseText ? (
         <MessageGutter tone="assistant" marker="●" marginTop={staticItems.length > 0 ? 1 : 0}>
-          <Markdown>{currentResponseText}</Markdown>
+          <Markdown>{truncateMiddleText(currentResponseText, MAX_ASSISTANT_CHARS)}</Markdown>
         </MessageGutter>
       ) : null}
       {currentPendingInputs.map((text, i) => (

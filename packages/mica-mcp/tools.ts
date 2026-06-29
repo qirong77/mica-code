@@ -1,10 +1,12 @@
 import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { micaTools, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
+import { finalizeTextOutput } from '@packages/mica-tools/utils/outputLimits.js';
 import { connectToServer, connections, type ConnectedMcpServer } from './client.js';
 import { createHash } from 'node:crypto';
 
 type TextContent = { type: 'text'; text: string };
 type ContentItem = TextContent | { type: 'image' | 'audio' | 'resource' | 'resource_link' };
+const MAX_MCP_TOOL_RESULT_CHARS = 60_000;
 
 class McpProxyTool extends micaTools.MicaTool {
   constructor(
@@ -89,7 +91,10 @@ async function doCallMcpTool(
 
   const textParts = content.filter((item): item is TextContent => item.type === 'text').map((item) => item.text);
 
-  return textParts.length > 0 ? textParts.join('\n') : JSON.stringify(content);
+  return finalizeTextOutput(textParts.length > 0 ? textParts.join('\n') : JSON.stringify(content), {
+    maxChars: MAX_MCP_TOOL_RESULT_CHARS,
+    label: `MCP ${server.name}.${toolName} 输出`,
+  });
 }
 
 function createMcpToolName(serverName: string, toolName: string, usedNames: Set<string>): string {

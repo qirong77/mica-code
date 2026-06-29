@@ -18,6 +18,7 @@ import type {
   RuntimeInput,
 } from '@packages/mica-runtime/index.js';
 import { gitBuffer, gitText } from '@packages/mica-common/index.js';
+import { micaLogger } from '@packages/mica-logger/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 
 type FileSnapshotEntry =
@@ -49,16 +50,36 @@ type RewindCheckpoint = {
 const MAX_CHECKPOINTS_PER_AGENT = 20;
 const MAX_LABEL_CHARS = 80;
 const GIT_MAX_BUFFER = 100 * 1024 * 1024;
+const MAX_CHECKPOINT_SNAPSHOT_CHARS = 1_500_000;
+const MAX_DIRTY_FILES = 120;
+const MAX_FILE_SNAPSHOT_BYTES = 1 * 1024 * 1024;
+const MAX_FILE_SNAPSHOT_TOTAL_BYTES = 4 * 1024 * 1024;
 
 export class RewindCheckpointManager {
   private readonly checkpoints = new WeakMap<AgentRuntime, RewindCheckpoint[]>();
 
   capture(agent: AgentRuntime, input: RuntimeInput): void {
+    const snapshot = agent.getSnapshot();
+    const snapshotChars = estimateJsonLikeChars(snapshot, MAX_CHECKPOINT_SNAPSHOT_CHARS);
+    if (snapshotChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
+      micaLogger.logRuntime(
+        'runtime.rewind',
+        'checkpoint:skipped_large_snapshot',
+        {
+          chars: snapshotChars,
+          limit: MAX_CHECKPOINT_SNAPSHOT_CHARS,
+          messages: snapshot.messages.length,
+        },
+        'warn',
+      );
+      return;
+    }
+
     const checkpoint: RewindCheckpoint = {
       id: `${input.id}-${Date.now()}`,
       createdAt: new Date().toISOString(),
       conversationLabel: labelForInput(input.text),
-      snapshot: cloneSnapshot(agent.getSnapshot()),
+      snapshot: cloneSnapshot(snapshot),
       fileState: captureFileState(),
     };
     const next = [...(this.checkpoints.get(agent) ?? []), checkpoint].slice(-MAX_CHECKPOINTS_PER_AGENT);
@@ -116,9 +137,13 @@ function captureFileState(): FileStateSnapshot {
   try {
     const root = gitText(['rev-parse', '--show-toplevel'], { cwd: process.cwd(), maxBuffer: GIT_MAX_BUFFER }).trim();
     const paths = collectDirtyPaths(root);
+    if (paths.length > MAX_DIRTY_FILES) {
+      throw new Error(`too many dirty files for rewind snapshot: ${paths.length} > ${MAX_DIRTY_FILES}`);
+    }
     const entries = new Map<string, FileSnapshotEntry>();
+    const budget = { totalBytes: 0 };
     for (const path of paths) {
-      const entry = snapshotPath(root, path);
+      const entry = snapshotPath(root, path, budget);
       if (entry) entries.set(path, entry);
     }
     return { available: true, root, entries };
@@ -192,7 +217,7 @@ function collectDirtyPaths(root: string): string[] {
   return [...new Set([...tracked, ...untracked])].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
-function snapshotPath(root: string, path: string): FileSnapshotEntry | null {
+function snapshotPath(root: string, path: string, budget: { totalBytes: number }): FileSnapshotEntry | null {
   const absolute = safePath(root, path);
   if (!existsSync(absolute)) return { kind: 'absent' };
 
@@ -201,6 +226,15 @@ function snapshotPath(root: string, path: string): FileSnapshotEntry | null {
     return { kind: 'symlink', target: readlinkSync(absolute) };
   }
   if (stat.isFile()) {
+    if (stat.size > MAX_FILE_SNAPSHOT_BYTES) {
+      throw new Error(`dirty file too large for rewind snapshot: ${path} (${stat.size} bytes)`);
+    }
+    if (budget.totalBytes + stat.size > MAX_FILE_SNAPSHOT_TOTAL_BYTES) {
+      throw new Error(
+        `dirty files exceed rewind snapshot budget: ${budget.totalBytes + stat.size} > ${MAX_FILE_SNAPSHOT_TOTAL_BYTES} bytes`,
+      );
+    }
+    budget.totalBytes += stat.size;
     return { kind: 'file', data: readFileSync(absolute), mode: stat.mode & 0o777 };
   }
   return null;
@@ -279,6 +313,46 @@ function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
 function cloneJson<T>(value: T): T {
   if (value === undefined) return value;
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function estimateJsonLikeChars(value: unknown, maxChars: number): number {
+  const seen = new WeakSet<object>();
+  let total = 0;
+
+  function walk(current: unknown): void {
+    if (total > maxChars) return;
+    if (current === null || current === undefined) {
+      total += 4;
+      return;
+    }
+    if (typeof current === 'string') {
+      total += current.length;
+      return;
+    }
+    if (typeof current === 'number' || typeof current === 'boolean') {
+      total += 8;
+      return;
+    }
+    if (typeof current !== 'object') {
+      total += String(current).length;
+      return;
+    }
+    if (seen.has(current)) return;
+    seen.add(current);
+    if (Array.isArray(current)) {
+      total += 2;
+      for (const item of current) walk(item);
+      return;
+    }
+    total += 2;
+    for (const [key, item] of Object.entries(current as Record<string, unknown>)) {
+      total += key.length + 4;
+      walk(item);
+    }
+  }
+
+  walk(value);
+  return total;
 }
 
 function labelForInput(text: string): string {

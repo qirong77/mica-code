@@ -13,7 +13,8 @@ let configApi: typeof import('./config.js');
 beforeAll(async () => {
   process.env.HOME = tempHome;
   process.env.MICA_HOME = tempHome;
-  configApi = (await import(`./config.js?config-test=${Date.now()}`)) as typeof import('./config.js');
+  vi.resetModules();
+  configApi = (await import('./config.js')) as typeof import('./config.js');
 });
 
 afterAll(() => {

@@ -12,10 +12,13 @@ import { applyStatus, syncModelDisplay } from '../../runtime/uiBridge.js';
 // import { syncStartupBanner } from '../../runtime/startupBanner.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
 
+const MAX_AGENT_TURN_LOG_ITEMS = 120;
+
 export class MicaUiRuntimeBridge {
   private readonly toolLogs = new Map<AgentRuntime, ToolLogController>();
   private readonly disposers = new Map<AgentRuntime, () => void>();
   private readonly messageTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
 
   constructor(
     private agent: AgentRuntime,
@@ -61,14 +64,21 @@ export class MicaUiRuntimeBridge {
         const owner = eventOwnerAgent(event.owner, this.agent);
         const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
         const toolLogs = this.toolLogFor(session.agent);
-        toolLogs.resetTurn();
+        const preservePreviousTurnUi = event.preservePreviousTurnUi === true;
+        if (preservePreviousTurnUi) {
+          this.preserveTurnUiOnConnecting.add(session.agent);
+        } else {
+          this.preserveTurnUiOnConnecting.delete(session.agent);
+        }
+        toolLogs.resetTurn({ clearThinkingText: !preservePreviousTurnUi });
         session.uiState = normalizeUiState({
           ...session.uiState,
-          logEntries: [],
-          agentTurnLogItems: [],
-          thinkingText: '',
+          logEntries: preservePreviousTurnUi ? session.uiState.logEntries : [],
+          agentTurnLogItems: preservePreviousTurnUi ? session.uiState.agentTurnLogItems : [],
+          thinkingText: preservePreviousTurnUi ? session.uiState.thinkingText : '',
+          lastTurnOutcome: 'running',
         });
-        if (this.isActiveAgent(session.agent)) micaUi.panels.clearLogEntries();
+        if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) micaUi.panels.clearLogEntries();
       }
       if (event.type === 'turn:finished') {
         this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
@@ -76,13 +86,17 @@ export class MicaUiRuntimeBridge {
       if (event.type === 'turn:aborted') {
         const owner = eventOwnerAgent(event.owner, this.agent);
         const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
+        const conversationMessages = session.uiState.conversationMessages.length
+          ? session.uiState.conversationMessages
+          : session.agent.toConversationMessages();
         session.uiState = normalizeUiState({
           ...session.uiState,
-          conversationMessages: session.agent.toConversationMessages(),
+          conversationMessages,
           responseText: '',
           pendingInputs: [],
           pendingQueueMode: null,
           workingStatus: { type: 'idle' },
+          lastTurnOutcome: 'aborted',
         });
         if (this.isActiveAgent(session.agent)) {
           micaUi.conversation.setMessages(session.uiState.conversationMessages);
@@ -156,7 +170,7 @@ export class MicaUiRuntimeBridge {
     const toolLogs = this.toolLogFor(agent);
     toolLogs.endThinkingSegment();
     const responseText = this.runtime.appendResponseTextFor(agent, text);
-    session.uiState = normalizeUiState({ ...session.uiState, responseText });
+    session.uiState.responseText = responseText;
     if (this.isActiveAgent(agent)) micaUi.conversation.setResponseText(responseText);
   }
 
@@ -218,7 +232,9 @@ export class MicaUiRuntimeBridge {
   private onStatus(agent: AgentRuntime, status: AgentRuntimeStatus): void {
     const session = this.sessionFor(agent);
     if (status.type === 'connecting') {
-      this.toolLogFor(agent).resetTurn();
+      const preservePreviousTurnUi = this.preserveTurnUiOnConnecting.has(agent);
+      this.toolLogFor(agent).resetTurn({ clearThinkingText: !preservePreviousTurnUi });
+      this.preserveTurnUiOnConnecting.delete(agent);
     }
     if (status.type === 'completed' || status.type === 'error' || status.type === 'idle') {
       this.toolLogFor(agent).endThinkingSegment();
@@ -234,26 +250,23 @@ export class MicaUiRuntimeBridge {
     controller = new ToolLogController({
       setThinkingText: (text) => {
         const session = this.sessionFor(agent);
-        session.uiState = normalizeUiState({ ...session.uiState, thinkingText: text });
+        session.uiState.thinkingText = text;
         if (this.isActiveAgent(agent)) micaUi.panels.thinkingText.set(text);
       },
       appendAgentTurnLogItem: (item) => {
         const session = this.sessionFor(agent);
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          agentTurnLogItems: [...session.uiState.agentTurnLogItems, item],
-        });
+        session.uiState.agentTurnLogItems = [...session.uiState.agentTurnLogItems, item].slice(
+          -MAX_AGENT_TURN_LOG_ITEMS,
+        );
         if (this.isActiveAgent(agent)) micaUi.panels.appendAgentTurnLogItem(item);
       },
       replaceAgentTurnLogItem: (item) => {
         const session = this.sessionFor(agent);
         const items = session.uiState.agentTurnLogItems;
         const index = items.findIndex((existing) => existing.id === item.id);
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          agentTurnLogItems:
-            index === -1 ? [...items, item] : [...items.slice(0, index), item, ...items.slice(index + 1)],
-        });
+        session.uiState.agentTurnLogItems = (
+          index === -1 ? [...items, item] : [...items.slice(0, index), item, ...items.slice(index + 1)]
+        ).slice(-MAX_AGENT_TURN_LOG_ITEMS);
         if (this.isActiveAgent(agent)) micaUi.panels.replaceAgentTurnLogItem(item);
       },
     });

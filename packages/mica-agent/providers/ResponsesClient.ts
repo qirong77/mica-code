@@ -174,23 +174,25 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await withRetry(() =>
-        getClient(this).responses.create(
-          {
-            model: this.model,
-            instructions: this.systemPrompt ?? buildSystemPrompt(),
-            input: messages,
-            ...(this.tools
-              ? {
-                  tools: this.responseTools,
-                  tool_choice: 'auto' as const,
-                }
-              : {}),
-            ...this.reasoningParams,
-            stream: true,
-          },
-          { signal: options?.signal },
-        ),
+      const stream = await withRetry(
+        () =>
+          getClient(this).responses.create(
+            {
+              model: this.model,
+              instructions: this.systemPrompt ?? buildSystemPrompt(),
+              input: messages,
+              ...(this.tools
+                ? {
+                    tools: this.responseTools,
+                    tool_choice: 'auto' as const,
+                  }
+                : {}),
+              ...this.reasoningParams,
+              stream: true,
+            },
+            { signal: options?.signal },
+          ),
+        { signal: options?.signal },
       );
 
       const contentSeparator: string =

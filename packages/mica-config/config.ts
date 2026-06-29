@@ -1,5 +1,5 @@
 import { atom } from 'nanostores';
-import { readLastUsedConfig, updateLastUsedConfig } from './micaStorage.js';
+import { readLastUsedConfig, updateLastUsedConfig, updateProviderPreference } from './micaStorage.js';
 import { CONFIG_PATH, type IMicaConfig } from './types.js';
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import {
@@ -20,6 +20,7 @@ export {
   DEFAULT_PROVIDER_PROTOCOL,
   EFFORT_OPTIONS,
   PROVIDER_PROTOCOLS,
+  providerSupportsModel,
   resolveProviderProtocol,
 } from './types.js';
 export type {
@@ -83,6 +84,7 @@ export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMi
     effort: next.effort,
     contextWindowSize: next.contextWindowSize,
   });
+  updateProviderPreference(next.provider, { model: next.model, effort: next.effort });
   return next;
 }
 
@@ -110,5 +112,6 @@ function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMi
     effort: next.effort,
     contextWindowSize: next.contextWindowSize,
   });
+  updateProviderPreference(next.provider, { model: next.model, effort: next.effort });
   return next;
 }

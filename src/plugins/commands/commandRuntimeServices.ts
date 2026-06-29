@@ -28,6 +28,7 @@ function captureSessionUi(): TerminalAgentUiState {
     thinkingText: micaUi.panels.thinkingText.get(),
     pluginUIs: micaUi.panels.pluginUIs.get(),
     workingStatus: micaUi.panels.workingStatus.get(),
+    lastTurnOutcome: currentContext()?.agentSessions.current().uiState.lastTurnOutcome ?? 'idle',
     contextSize: micaUi.panels.contextSize.get(),
     cachedTokenRate: micaUi.panels.cachedTokenRate.get(),
   };
@@ -90,7 +91,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         session?.agent ?? (agent as AgentRuntime),
         session?.sessionController ?? (sessionController as SessionController | undefined),
       );
-      if (session) session.uiState = normalizeUiState(captureSessionUi());
+      if (session) session.uiState = normalizeUiState({ ...captureSessionUi(), lastTurnOutcome: 'idle' });
     },
     showMessage(text, ttl, ownerSessionId) {
       const context = currentContext();
@@ -196,6 +197,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         thinkingText: '',
         pluginUIs: [],
         workingStatus: { type: 'idle' },
+        lastTurnOutcome: 'idle',
         contextSize: sourceSnapshot.lastUsage?.totalTokens ?? 0,
         cachedTokenRate: calculateCachedTokenRate(sourceSnapshot.usageHistory),
       });
@@ -251,6 +253,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         thinkingText: '',
         pluginUIs: [],
         workingStatus: { type: 'idle' },
+        lastTurnOutcome: 'idle',
         contextSize: snapshot.lastUsage?.totalTokens ?? 0,
         cachedTokenRate: calculateCachedTokenRate(snapshot.usageHistory),
       });

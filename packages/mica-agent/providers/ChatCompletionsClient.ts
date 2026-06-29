@@ -159,25 +159,27 @@ export class ChatCompletionsClient extends BaseAgent<
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await withRetry(() =>
-        getClient(this).chat.completions.create(
-          {
-            model: this.model,
-            messages,
-            ...(this.tools
-              ? {
-                  tools: this.openaiTools,
-                  tool_choice: 'auto' as const,
-                }
-              : {}),
-            ...this.reasoningParams,
-            stream: true,
-            stream_options: {
-              include_usage: true,
+      const stream = await withRetry(
+        () =>
+          getClient(this).chat.completions.create(
+            {
+              model: this.model,
+              messages,
+              ...(this.tools
+                ? {
+                    tools: this.openaiTools,
+                    tool_choice: 'auto' as const,
+                  }
+                : {}),
+              ...this.reasoningParams,
+              stream: true,
+              stream_options: {
+                include_usage: true,
+              },
             },
-          },
-          { signal: options?.signal },
-        ),
+            { signal: options?.signal },
+          ),
+        { signal: options?.signal },
       );
 
       let content = '';

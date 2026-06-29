@@ -18,8 +18,8 @@ export function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUs
   const providers = Array.isArray(config.providers) ? config.providers : [];
   const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
   const provider = providers.find((item) => item.id === providerId);
-  const model = resolveLastUsedModel(provider, lastUsed.model);
-  const effort = resolveLastUsedEffort(provider, lastUsed.effort, model);
+  const model = resolveLastUsedModel(provider, lastUsed.model, lastUsed.providerPreferences?.[providerId]?.model);
+  const effort = resolveLastUsedEffort(provider, lastUsed.effort, model, lastUsed.providerPreferences?.[providerId]?.effort);
   return {
     ...config,
     providers,
@@ -105,14 +105,25 @@ function resolveLastUsedProvider(providers: ProviderDefinition[], providerId: un
   return providers[0]?.id ?? '';
 }
 
-function resolveLastUsedModel(provider: ProviderDefinition | undefined, model: unknown): string {
+function resolveLastUsedModel(
+  provider: ProviderDefinition | undefined,
+  model: unknown,
+  preferenceModel?: unknown,
+): string {
   if (!provider) return isNonEmptyString(model) ? model : '';
+  if (isNonEmptyString(preferenceModel) && providerSupportsModel(provider, preferenceModel)) return preferenceModel;
   if (isNonEmptyString(model) && providerSupportsModel(provider, model)) return model;
   return firstProviderModel(provider) ?? '';
 }
 
-function resolveLastUsedEffort(provider: ProviderDefinition | undefined, effort: unknown, model: string): EffortOption {
+function resolveLastUsedEffort(
+  provider: ProviderDefinition | undefined,
+  effort: unknown,
+  model: string,
+  preferenceEffort?: unknown,
+): EffortOption {
+  const selectedPreference = isEffortOption(preferenceEffort) ? preferenceEffort : undefined;
   const fallback = isEffortOption(provider?.effort) ? provider.effort : 'medium';
-  const selected = isEffortOption(effort) ? effort : fallback;
+  const selected = selectedPreference ?? (isEffortOption(effort) ? effort : fallback);
   return provider ? clampProviderEffort(provider, selected, model) : selected;
 }

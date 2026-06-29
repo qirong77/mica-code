@@ -6,11 +6,17 @@ export const MICA_STORAGE_PATH = resolveMicaHomePath('storage.json');
 
 const MAX_INPUT_HISTORY_ITEMS = 200;
 
+export interface ProviderPreference {
+  model?: string;
+  effort?: string;
+}
+
 export interface LastUsedConfig {
   provider?: string;
   model?: string;
   effort?: string;
   contextWindowSize?: number;
+  providerPreferences?: Record<string, ProviderPreference>;
 }
 
 export interface MicaStorageFile {
@@ -54,6 +60,30 @@ export function updateLastUsedConfig(update: LastUsedConfig): LastUsedConfig {
     },
   }));
   return next.lastUsed ?? {};
+}
+
+export function readProviderPreference(providerId: string): ProviderPreference {
+  return readLastUsedConfig().providerPreferences?.[providerId] ?? {};
+}
+
+export function updateProviderPreference(
+  providerId: string,
+  preference: ProviderPreference,
+): ProviderPreference {
+  const next = updateMicaStorage((storage) => ({
+    ...storage,
+    lastUsed: {
+      ...(storage.lastUsed ?? {}),
+      providerPreferences: {
+        ...(storage.lastUsed?.providerPreferences ?? {}),
+        [providerId]: {
+          ...(storage.lastUsed?.providerPreferences?.[providerId] ?? {}),
+          ...dropUndefined(preference),
+        },
+      },
+    },
+  }));
+  return next.lastUsed?.providerPreferences?.[providerId] ?? {};
 }
 
 export function readInputHistory(): string[] {
@@ -109,8 +139,21 @@ function isLastUsedConfig(value: unknown): value is LastUsedConfig {
     optionalString(lastUsed.provider) &&
     optionalString(lastUsed.model) &&
     optionalString(lastUsed.effort) &&
-    optionalPositiveNumber(lastUsed.contextWindowSize)
+    optionalPositiveNumber(lastUsed.contextWindowSize) &&
+    optionalProviderPreferences(lastUsed.providerPreferences)
   );
+}
+
+function optionalProviderPreferences(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(isProviderPreference);
+}
+
+function isProviderPreference(value: unknown): value is ProviderPreference {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const pref = value as Partial<ProviderPreference>;
+  return optionalString(pref.model) && optionalString(pref.effort);
 }
 
 function isStringArray(value: unknown): value is string[] {

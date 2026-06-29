@@ -1,6 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
-import { micaConfig } from '@packages/mica-config/index.js';
+import { micaConfig, providerSupportsModel, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
@@ -76,15 +76,14 @@ async function applyProviderSelection(
           micaLogger.logRuntime('plugin.provider', 'provider:not_found', { provider: providerId }, 'error');
           throw new Error(`Provider not found: ${providerId}`);
         }
-        const model = provider.models?.[0] || provider.model;
-        if (!model) {
-          throw new Error(`Provider ${providerId} has no models configured`);
-        }
+        const preference = micaConfig.storage.providerPreference.read(providerId);
+        const model = resolvePreferenceModel(provider, preference.model);
+        const effort: EffortOption = (preference.effort as EffortOption | undefined) ?? provider.effort ?? config.effort;
         return {
           ...config,
           provider: provider.id,
           model,
-          effort: provider.effort ?? config.effort,
+          effort,
         };
       },
       successMessage: (config) => `Provider: ${config.provider}`,
@@ -123,4 +122,9 @@ async function loadProviderModelsForSwitch(providerId: string, services: Command
     services.showMessage(message);
     throw error;
   }
+}
+
+function resolvePreferenceModel(provider: ProviderDefinition, preferenceModel?: string): string {
+  if (preferenceModel && providerSupportsModel(provider, preferenceModel)) return preferenceModel;
+  return provider.models?.[0] || provider.model || '';
 }
