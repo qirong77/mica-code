@@ -97,7 +97,7 @@ export function createErrorLogItem({
   error: unknown;
 }): MicaUiAgentTurnLogItem {
   const message = error instanceof Error ? error.message : String(error);
-  const stackLines = error instanceof Error && error.stack ? error.stack.split('\n').slice(1, 12) : [];
+  const stackLines = getErrorStackLines(error);
 
   function ErrorLogItem() {
     return (
@@ -127,6 +127,12 @@ export function createErrorLogItem({
   }
 
   return { id, component: ErrorLogItem };
+}
+
+export function getErrorStackLines(error: unknown): string[] {
+  const stackFrames = error instanceof Error && error.stack ? error.stack.split('\n') : [];
+  const firstStackFrameIndex = stackFrames.findIndex((line) => line.trim().startsWith('at '));
+  return firstStackFrameIndex === -1 ? [] : stackFrames.slice(firstStackFrameIndex, firstStackFrameIndex + 11);
 }
 
 function useNow(interval = 100): number {

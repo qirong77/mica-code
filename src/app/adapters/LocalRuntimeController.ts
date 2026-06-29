@@ -17,7 +17,6 @@ import {
 } from '@packages/mica-runtime/index.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
-import { reportRuntimeError } from '../../runtime/uiBridge.js';
 import { getActiveContext } from '../activeContext.js';
 import { normalizeUiState, type TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
@@ -418,24 +417,26 @@ export class LocalRuntimeController implements RuntimeController {
 
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
+      const errorLogItem = micaUi.createErrorLogItem({
+        id: `error-${Date.now()}`,
+        title: '请求失败',
+        error,
+      });
       if (session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
           responseText: '',
           thinkingText: '',
           workingStatus: { type: 'error' },
-          agentTurnLogItems: [
-            micaUi.createErrorLogItem({
-              id: `error-${Date.now()}`,
-              title: '请求失败',
-              error,
-            }),
-          ],
+          agentTurnLogItems: [...session.uiState.agentTurnLogItems, errorLogItem],
         });
       }
       if (this.isActiveAgent(agent)) {
         this.events.publish({ type: 'turn:error', input, error, owner: agent });
-        reportRuntimeError(error, '请求失败');
+        micaUi.conversation.clearResponseText();
+        micaUi.panels.thinkingText.set('');
+        micaUi.panels.status.error();
+        micaUi.panels.appendAgentTurnLogItem(errorLogItem);
       }
     } finally {
       this.runningAgents.delete(agent);

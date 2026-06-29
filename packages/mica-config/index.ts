@@ -1,6 +1,8 @@
 import {
   CONFIG_PATH,
   EFFORT_OPTIONS,
+  PROVIDER_PROTOCOLS,
+  DEFAULT_PROVIDER_PROTOCOL,
   readConfig,
   getConfig,
   updateConfig,
@@ -13,7 +15,10 @@ import {
   getModelContextWindowSizeFromConfig,
   getProviderEffortOptions,
   clampProviderEffort,
-  resolveProviderEffortParams,
+  mapProviderEffortValue,
+  resolveChatCompletionsEffortParams,
+  resolveResponsesReasoningParams,
+  resolveProviderProtocol,
 } from './config.js';
 import { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
 import {
@@ -27,6 +32,8 @@ import {
 export const micaConfig = {
   path: CONFIG_PATH,
   effortOptions: EFFORT_OPTIONS,
+  providerProtocols: PROVIDER_PROTOCOLS,
+  defaultProviderProtocol: DEFAULT_PROVIDER_PROTOCOL,
   /** 从磁盘读取配置文件；缺失时会先写入默认配置。 */
   read: readConfig,
   /** 读取内存中的当前配置快照。 */
@@ -51,8 +58,14 @@ export const micaConfig = {
   getProviderEffortOptions,
   /** 把 effort 修正到当前 provider 支持的最近可用值。 */
   clampProviderEffort,
-  /** 把统一 effort 转换为 provider 请求参数。 */
-  resolveProviderEffortParams,
+  /** 获取 provider 实际发送的 reasoning effort 值。 */
+  mapProviderEffortValue,
+  /** 把统一 effort 转换为 Chat Completions 请求参数。 */
+  resolveChatCompletionsEffortParams,
+  /** 把统一 effort 转换为 Responses 请求参数。 */
+  resolveResponsesReasoningParams,
+  /** 读取 provider 协议，缺省为 OpenAI Chat Completions。 */
+  resolveProviderProtocol,
   storage: {
     path: MICA_STORAGE_PATH,
     read: readMicaStorage,
@@ -78,12 +91,16 @@ export {
   getModelContextWindowSizeFromConfig,
   getProviderEffortOptions,
   clampProviderEffort,
-  resolveProviderEffortParams,
+  mapProviderEffortValue,
+  resolveChatCompletionsEffortParams,
+  resolveResponsesReasoningParams,
+  resolveProviderProtocol,
 } from './config.js';
 export type {
   EffortOption,
   EffortMap,
   ModelRule,
+  ProviderProtocol,
   ResolvedEffortParams,
   IMicaConfig,
   PersistedMicaConfig,

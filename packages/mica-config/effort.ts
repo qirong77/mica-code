@@ -8,12 +8,14 @@ import {
 import { getEffortMapFromConfig, hasOwnEffort } from './modelRules.js';
 
 type ProviderEffortParamFormat = 'openai' | 'deepseek' | 'zai' | 'openrouter';
+export type ResponsesReasoningParams = { reasoning?: { effort: string } };
 
 export function getProviderEffortOptions(
   provider: ProviderDefinition,
   model = firstProviderModel(provider) ?? '',
 ): EffortOption[] {
   if (provider.supportsEffort === false) return ['none'];
+  if (provider.protocol === 'anthropic_messages') return ['none', 'low', 'medium', 'high'];
   const effortMap = getEffortMapFromConfig(model);
   if (!effortMap) return ['none'];
   return EFFORT_OPTIONS.filter((effort) => hasOwnEffort(effortMap, effort));
@@ -40,7 +42,20 @@ export function clampProviderEffort(
   return options[0] ?? 'none';
 }
 
-export function resolveProviderEffortParams(
+export function mapProviderEffortValue(
+  provider: ProviderDefinition,
+  effort: EffortOption,
+  model = firstProviderModel(provider) ?? '',
+): string | null | undefined {
+  if (provider.supportsEffort === false) return undefined;
+
+  const effortMap = getEffortMapFromConfig(model);
+  if (!effortMap || !hasOwnEffort(effortMap, effort)) return undefined;
+
+  return effortMap[effort] ?? effort;
+}
+
+export function resolveChatCompletionsEffortParams(
   provider: ProviderDefinition,
   effort: EffortOption,
   model = firstProviderModel(provider) ?? '',
@@ -62,6 +77,15 @@ export function resolveProviderEffortParams(
     case 'openai':
       return { reasoning_effort: mapped ?? effort };
   }
+}
+
+export function resolveResponsesReasoningParams(
+  provider: ProviderDefinition,
+  effort: EffortOption,
+  model = firstProviderModel(provider) ?? '',
+): ResponsesReasoningParams {
+  const mapped = mapProviderEffortValue(provider, effort, model);
+  return mapped && mapped !== 'none' ? { reasoning: { effort: mapped } } : {};
 }
 
 function detectProviderEffortParamFormat(

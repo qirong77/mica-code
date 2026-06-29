@@ -4,6 +4,7 @@
       "id": "deepseek",
       "name": "DeepSeek",
       "api_base": "https://api.deepseek.com",
+      "protocol": "openai_chat_completions",
       "get_model_url": "https://api.deepseek.com/models",
       "api_key": ""
     }

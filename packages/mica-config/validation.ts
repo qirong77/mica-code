@@ -2,12 +2,14 @@ import { getProviderEffortOptions } from './effort.js';
 import {
   CONFIG_PATH,
   EFFORT_OPTIONS,
+  PROVIDER_PROTOCOLS,
   findProvidersForModel,
   firstProviderModel,
   isEffortOption,
   isNonEmptyString,
   isNonEmptyStringArray,
   isPositiveNumber,
+  isProviderProtocol,
   isRecord,
   type ConfigValidationIssue,
   type ConfigValidationResult,
@@ -80,6 +82,14 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
         'provider_api_base_empty',
         `providers[${index}].api_base`,
         `provider "${provider.id}" 的 api_base 不能为空。`,
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(provider, 'protocol') && !isProviderProtocol(provider.protocol)) {
+      add(
+        severity,
+        'provider_protocol_invalid',
+        `providers[${index}].protocol`,
+        `provider "${provider.id}" 的 protocol 必须是 ${PROVIDER_PROTOCOLS.join(' | ')}。`,
       );
     }
 

@@ -1,5 +1,5 @@
 import { micaConfig, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
-import type { OpenAIClientOptions } from '@packages/mica-agent/index.js';
+import type { ModelClientOptions } from '@packages/mica-agent/index.js';
 
 export type RuntimeProviderDefinition = ProviderDefinition & { contextWindowSize: number };
 
@@ -46,7 +46,7 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   };
 }
 
-export function createAgentClientOptions(config: AgentRuntimeConfig): OpenAIClientOptions {
+export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClientOptions {
   return {
     apiKey: config.provider.api_key,
     baseURL: config.provider.api_base,

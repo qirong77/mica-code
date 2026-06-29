@@ -1,7 +1,7 @@
 import { OpenAI } from 'openai';
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
-  resolveProviderEffortParams,
+  resolveChatCompletionsEffortParams,
   type EffortOption,
   type ProviderDefinition,
 } from '@packages/mica-config/index.js';
@@ -17,25 +17,14 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { OpenAIHistoryNormalizer } from './OpenAIHistoryNormalizer.js';
+import { ChatCompletionsHistoryNormalizer } from './ChatCompletionsHistoryNormalizer.js';
+import type { ModelClientOptions } from './types.js';
 
-export type OpenAIClientOptions = {
-  model: string;
-  apiKey?: string;
-  baseURL?: string;
-  effort?: string;
-  provider?: ProviderDefinition;
-  tools?: boolean;
-  systemPrompt?: string;
-};
-
-export type OpenAIUsageRecord = AgentUsageRecord & {
-  provider: 'openai';
+export type ChatCompletionsUsageRecord = AgentUsageRecord & {
+  provider: 'openai_chat_completions';
   rawUsage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
   promptTokens: number;
 };
-
-export type UsageRecord = OpenAIUsageRecord;
 
 const MAX_HISTORICAL_TOOL_RESULT_LENGTH = 12_000;
 
@@ -55,31 +44,31 @@ function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
 }
 
-function getClient(options: OpenAIClientOptions) {
+function getClient(options: ModelClientOptions) {
   return new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseURL,
   });
 }
 
-export class OpenAIClient extends BaseAgent<
-  OpenAIClientOptions,
+export class ChatCompletionsClient extends BaseAgent<
+  ModelClientOptions,
   OpenAI.Chat.Completions.ChatCompletionMessageParam,
-  UsageRecord
+  ChatCompletionsUsageRecord
 > {
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  usageHistory: UsageRecord[] = [];
-  lastUsage: UsageRecord | undefined;
+  usageHistory: ChatCompletionsUsageRecord[] = [];
+  lastUsage: ChatCompletionsUsageRecord | undefined;
   private turnId = 0;
   model: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
-  effort: string | undefined;
+  effort: EffortOption | undefined;
   provider: ProviderDefinition | undefined;
   tools: boolean;
   systemPrompt: string | undefined;
-  readonly historyNormalizer = new OpenAIHistoryNormalizer();
-  constructor(options: string | OpenAIClientOptions) {
+  readonly historyNormalizer = new ChatCompletionsHistoryNormalizer();
+  constructor(options: string | ModelClientOptions) {
     super();
     this.tools = true;
     if (typeof options === 'string') {
@@ -95,7 +84,7 @@ export class OpenAIClient extends BaseAgent<
     this.tools = options.tools ?? true;
     this.systemPrompt = options.systemPrompt;
   }
-  configure(options: OpenAIClientOptions) {
+  configure(options: ModelClientOptions) {
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
@@ -110,7 +99,9 @@ export class OpenAIClient extends BaseAgent<
     this.lastUsage = undefined;
     this.turnId = 0;
   }
-  loadSnapshot(snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, UsageRecord>) {
+  loadSnapshot(
+    snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, ChatCompletionsUsageRecord>,
+  ) {
     this.turnId = this.loadSnapshotState(snapshot, (message) => message.role !== 'system');
   }
   toConversationMessages(): AgentConversationMessage[] {
@@ -121,6 +112,19 @@ export class OpenAIClient extends BaseAgent<
       return [{ role: message.role, content }];
     });
   }
+
+  preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
+    const hasCurrentTurn = this.messages.some(
+      (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
+    );
+    if (hasCurrentTurn) return true;
+
+    this.messages.push({ role: 'user', content: micaContentToOpenAIContent(question) });
+    const answer = partialAnswer?.trim();
+    if (answer) this.messages.push({ role: 'assistant', content: answer });
+    return false;
+  }
+
   private get openaiTools() {
     const defs = micaTools.getDefinitions();
     return defs.map((t) => ({
@@ -155,26 +159,25 @@ export class OpenAIClient extends BaseAgent<
     while (true) {
       throwIfQueryStopped(options);
       requestIndex++;
-      const stream = await withRetry(
-        () =>
-          getClient(this).chat.completions.create(
-            {
-              model: this.model,
-              messages,
-              ...(this.tools
-                ? {
-                    tools: this.openaiTools,
-                    tool_choice: 'auto' as const,
-                  }
-                : {}),
-              ...this.reasoningParams,
-              stream: true,
-              stream_options: {
-                include_usage: true,
-              },
+      const stream = await withRetry(() =>
+        getClient(this).chat.completions.create(
+          {
+            model: this.model,
+            messages,
+            ...(this.tools
+              ? {
+                  tools: this.openaiTools,
+                  tool_choice: 'auto' as const,
+                }
+              : {}),
+            ...this.reasoningParams,
+            stream: true,
+            stream_options: {
+              include_usage: true,
             },
-            { signal: options?.signal },
-          ),
+          },
+          { signal: options?.signal },
+        ),
       );
 
       let content = '';
@@ -293,8 +296,9 @@ export class OpenAIClient extends BaseAgent<
   }
 
   private get reasoningParams(): Record<string, unknown> {
-    if (!this.provider || !this.effort) return this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort } : {};
-    return resolveProviderEffortParams(this.provider, this.effort as EffortOption, this.model);
+    if (!this.provider || !this.effort)
+      return this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort } : {};
+    return resolveChatCompletionsEffortParams(this.provider, this.effort, this.model);
   }
 
   private recordUsage(
@@ -311,8 +315,8 @@ export class OpenAIClient extends BaseAgent<
     const outputTokens = usage.completion_tokens ?? 0;
     const totalTokens = usage.total_tokens ?? promptTokens + outputTokens;
     const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
-    const record: OpenAIUsageRecord = {
-      provider: 'openai',
+    const record: ChatCompletionsUsageRecord = {
+      provider: 'openai_chat_completions',
       turnId: metadata.turnId,
       requestIndex: metadata.requestIndex,
       messageCount: metadata.messageCount,
@@ -338,16 +342,11 @@ function readReasoningContent(delta: unknown): string | undefined {
   return typeof reasoning === 'string' ? reasoning : undefined;
 }
 
-export function createOpenAIClient(options: OpenAIClientOptions): OpenAIClient {
-  return new OpenAIClient(options);
-}
-
-export function createSubAgent(options: OpenAIClientOptions): OpenAIClient {
-  return new OpenAIClient({
-    ...options,
-    effort: 'none',
-    tools: false,
-  });
+function isSameOpenAIUserContent(
+  left: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'],
+  right: AgentQueryContent,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(micaContentToOpenAIContent(right));
 }
 
 function micaContentToOpenAIContent(

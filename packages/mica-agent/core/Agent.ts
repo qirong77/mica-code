@@ -49,6 +49,7 @@ export interface IAgent<
   configure(options: TOptions): void;
   reset(): void;
   query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
+  preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean;
   toConversationMessages(): AgentConversationMessage[];
   toConversationItems(): ConversationItem[];
   loadConversationItems(items: ConversationItem[]): void;
@@ -75,6 +76,7 @@ export abstract class BaseAgent<
   abstract configure(options: TOptions): void;
   abstract reset(): void;
   abstract query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
+  abstract preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean;
   abstract toConversationMessages(): AgentConversationMessage[];
   abstract get historyNormalizer(): ProviderHistoryNormalizer<TMessage>;
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;

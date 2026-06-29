@@ -1,12 +1,11 @@
 import mitt from 'mitt';
-import type { OpenAI } from 'openai';
 import {
   micaAgent,
   type AgentQueryContent,
   type AgentSnapshot,
   type IAgent,
   type AgentUsageRecord,
-  type OpenAIClientOptions,
+  type ModelClientOptions,
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption } from '@packages/mica-config/index.js';
@@ -68,28 +67,6 @@ function contentToText(content: AgentQueryContent): string {
     .join('\n');
 }
 
-function toOpenAIUserContent(
-  content: AgentQueryContent,
-): OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] {
-  if (typeof content === 'string') return content;
-  return content.map((part) => {
-    if (part.type === 'text') return { type: 'text', text: part.text };
-    return {
-      type: 'image_url',
-      image_url: {
-        url: `data:${part.source.media_type};base64,${part.source.data}`,
-      },
-    };
-  });
-}
-
-function isSameOpenAIUserContent(
-  left: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'],
-  right: AgentQueryContent,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(toOpenAIUserContent(right));
-}
-
 function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
@@ -102,7 +79,7 @@ function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[]
 
 export class AgentRuntime {
   readonly events = mitt<AgentRuntimeEvents>();
-  private client: IAgent<OpenAIClientOptions> | null = null;
+  private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
   private activeAbortController: AbortController | null = null;
   private activeRunUsageStartIndex: number | null = null;
@@ -137,7 +114,7 @@ export class AgentRuntime {
     return this.activeAbortController !== null;
   }
 
-  createSubAgent(options: Partial<OpenAIClientOptions> = {}) {
+  createSubAgent(options: Partial<ModelClientOptions> = {}) {
     if (!this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       throw new Error(message);
@@ -225,33 +202,14 @@ export class AgentRuntime {
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string) {
     if (!this.client) return false;
     this.trimAbortedRunUsage();
-    const messages = [...(this.client.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[])];
-    const hasCurrentTurn = messages.some(
-      (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
-    );
-    if (hasCurrentTurn) {
-      micaLogger.logRuntime(
-        'agent',
-        'turn:preserved_aborted_complete_iteration',
-        { messages: messages.length },
-        'warn',
-      );
-      return true;
-    }
-
-    messages.push({ role: 'user', content: toOpenAIUserContent(question) });
-    const answer = partialAnswer?.trim();
-    if (answer) {
-      messages.push({ role: 'assistant', content: answer });
-    }
-    this.client.messages = messages as typeof this.client.messages;
+    const hadCurrentTurn = this.client.preserveAbortedTurn(question, partialAnswer);
     micaLogger.logRuntime(
       'agent',
-      'turn:preserved_aborted',
-      { messages: messages.length, hasPartialAnswer: Boolean(answer) },
+      hadCurrentTurn ? 'turn:preserved_aborted_complete_iteration' : 'turn:preserved_aborted',
+      { messages: this.client.messages.length, hasPartialAnswer: Boolean(partialAnswer?.trim()) },
       'warn',
     );
-    return false;
+    return hadCurrentTurn;
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {
@@ -364,7 +322,7 @@ export class AgentRuntime {
       micaLogger.logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
       return;
     }
-    this.client = new micaAgent.OpenAIClient(this.clientOptions());
+    this.client = micaAgent.createModelClient(this.clientOptions());
     micaLogger.logRuntime('agent', 'client:created', {
       provider: this.currentConfig.provider.id,
       model: this.currentConfig.model,
@@ -399,7 +357,7 @@ export class AgentRuntime {
     };
   }
 
-  private clientOptions(): OpenAIClientOptions {
+  private clientOptions(): ModelClientOptions {
     return createAgentClientOptions(this.currentConfig);
   }
 

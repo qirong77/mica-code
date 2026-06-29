@@ -85,7 +85,7 @@ bun run format          # 格式化（prettier）
 - 用户配置和 userConfig 类本地数据由 `mica-config` 管理，本地持久化；静态 provider 配置保存在 `~/.mica/config.json`，最后一次使用的 provider/model/effort/contextWindowSize、共享输入框历史等本地状态保存在 `~/.mica/storage.json`。
 - `mica-config/config.ts` 是对外兼容 facade；路径、类型、持久化、旧配置迁移、校验、模型规则、effort 参数和动态模型加载分别放在同包内的单职责模块。新增配置能力优先扩展这些模块，再从 `config.ts` 或 `index.ts` 暴露稳定 API。
 - 配置了 `get_model_url` 的 provider 运行时拉取模型列表，结果只缓存到内存配置，不回填 `models` 到 `~/.mica/config.json`。
-- Provider/model 的能力由 `mica-config` 统一建模：全局 effort UI 枚举为 `none/minimal/low/medium/high/xhigh`；模型规则维护在 `packages/mica-config/model-rules.json`，规则只按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配；规则可用 `enableEffort: false` 禁用模型族，未命中规则时默认支持原来的 `none/low/medium/high` 四档；`contextSize` 默认 256K，DeepSeek 规则为 1M；用户配置只保留当前选择的 `effort` 和可选的 `supportsEffort` 禁用开关；请求参数必须通过 `resolveProviderEffortParams` 生成，不能在 OpenAI-compatible client 中直接透传 `reasoning_effort`。
+- Provider/model 的能力由 `mica-config` 统一建模：provider 通过 `protocol` 显式选择 `openai_chat_completions`、`openai_responses` 或 `anthropic_messages`，缺省为 `openai_chat_completions`，不要根据 `api_base` 猜测接口协议；全局 effort UI 枚举为 `none/minimal/low/medium/high/xhigh`；模型规则维护在 `packages/mica-config/model-rules.json`，规则只按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配；规则可用 `enableEffort: false` 禁用模型族，未命中规则时默认支持原来的 `none/low/medium/high` 四档；`contextSize` 默认 256K，DeepSeek 规则为 1M；用户配置只保留当前选择的 `effort` 和可选的 `supportsEffort` 禁用开关；请求参数必须通过 `resolveChatCompletionsEffortParams` 或 `resolveResponsesReasoningParams` 在具体协议 client 内生成，runtime 不直接拼 provider 请求参数。
 - 运行时 env：入口 `src/index.ts` 自动加载 `.env` 和 `packages/mica-agent/.env`。
 - 会话数据由 `mica-session` 管理，`SessionController` 负责序列化为 `PersistedSession`（version 1）。
 
@@ -95,7 +95,7 @@ bun run format          # 格式化（prettier）
 - `ApplicationContext` 通过 `src/app/activeContext.ts` 暴露：`setActiveContext` / `getActiveContext` / `clearActiveContext`。
 - 插件、runtime 等模块不应反向 import `Application.ts` 获取全局状态，统一走 `activeContext`。
 - 运行时核心对象：`Application` → `AgentRuntime` + `SessionController` + `LocalRuntimeController` + `MicaUiRuntimeBridge` + `CommandRegistry` + `PluginManager`。
-- `AgentRuntime` 保持 provider client 生命周期和 run loop；runtime config 解析放在相邻 helper 模块，OpenAI 内容转换等单调用点逻辑留在主类本地 helper。
+- `AgentRuntime` 保持 provider client 生命周期和 run loop；runtime config 解析放在相邻 helper 模块；具体协议消息结构、history normalizer 和请求参数转换都留在 `packages/mica-agent/providers/` 内，runtime 只依赖 `IAgent` 和 `createModelClient`。
 - `LocalRuntimeController` 保持命令分发、turn loop 和 UI 协调；per-agent queue、running/clearing、response buffer、exclusive task 状态就地维护，避免为了状态容器增加低收益抽象。
 - 内置命令插件的 `index.ts` 负责插件注册、内置命令列表和 quick command wiring；runtime services、active proxy 放在 `src/plugins/commands/` 相邻模块。
 - 插件注册阶段（`use(plugin)`）在 `start()` 内部完成，先注册内置插件，再通过 `plugins.setupAll()` 初始化。

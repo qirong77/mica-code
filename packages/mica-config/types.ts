@@ -2,10 +2,13 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const;
+export const DEFAULT_PROVIDER_PROTOCOL: ProviderProtocol = 'openai_chat_completions';
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number];
+export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 export type EffortMap = Partial<Record<EffortOption, string | null>>;
 
 export interface ProviderDefinition {
@@ -13,6 +16,7 @@ export interface ProviderDefinition {
   name?: string;
   api_base: string;
   api_key?: string;
+  protocol?: ProviderProtocol;
   model?: string;
   effort?: EffortOption;
   models?: string[];
@@ -78,6 +82,15 @@ export function isPositiveNumber(value: unknown): value is number {
 
 export function isEffortOption(value: unknown): value is EffortOption {
   return EFFORT_OPTIONS.includes(value as EffortOption);
+}
+
+export function isProviderProtocol(value: unknown): value is ProviderProtocol {
+  return PROVIDER_PROTOCOLS.includes(value as ProviderProtocol);
+}
+
+export function resolveProviderProtocol(provider?: Pick<ProviderDefinition, 'protocol'> | null): ProviderProtocol {
+  const protocol = provider?.protocol;
+  return isProviderProtocol(protocol) ? protocol : DEFAULT_PROVIDER_PROTOCOL;
 }
 
 export function providerSupportsModel(provider: ProviderDefinition, model: string): boolean {

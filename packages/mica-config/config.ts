@@ -14,7 +14,14 @@ import {
 import { ConfigValidationError, formatConfigValidationIssues, validateConfig } from './validation.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 
-export { CONFIG_PATH, DEFAULT_MODEL_CONTEXT_SIZE, EFFORT_OPTIONS } from './types.js';
+export {
+  CONFIG_PATH,
+  DEFAULT_MODEL_CONTEXT_SIZE,
+  DEFAULT_PROVIDER_PROTOCOL,
+  EFFORT_OPTIONS,
+  PROVIDER_PROTOCOLS,
+  resolveProviderProtocol,
+} from './types.js';
 export type {
   ConfigValidationIssue,
   ConfigValidationResult,
@@ -25,10 +32,17 @@ export type {
   ModelRule,
   PersistedMicaConfig,
   ProviderDefinition,
+  ProviderProtocol,
   ResolvedEffortParams,
 } from './types.js';
 export { DEFAULT_EFFORT_MAP, getEffortMapFromConfig, getModelContextWindowSizeFromConfig } from './modelRules.js';
-export { clampProviderEffort, getProviderEffortOptions, resolveProviderEffortParams } from './effort.js';
+export {
+  clampProviderEffort,
+  getProviderEffortOptions,
+  mapProviderEffortValue,
+  resolveChatCompletionsEffortParams,
+  resolveResponsesReasoningParams,
+} from './effort.js';
 export { ConfigValidationError, formatConfigValidationIssues, validateConfig } from './validation.js';
 
 const configAtom = atom<IMicaConfig>(readConfig());

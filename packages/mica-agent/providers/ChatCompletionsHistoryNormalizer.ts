@@ -7,7 +7,7 @@ import {
   type ProviderHistoryNormalizer,
 } from '../core/Conversation.js';
 
-export class OpenAIHistoryNormalizer implements ProviderHistoryNormalizer<OpenAI.Chat.Completions.ChatCompletionMessageParam> {
+export class ChatCompletionsHistoryNormalizer implements ProviderHistoryNormalizer<OpenAI.Chat.Completions.ChatCompletionMessageParam> {
   normalize(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): ConversationItem[] {
     const items: ConversationItem[] = [];
     const toolNames = new Map<string, string>();

@@ -5,9 +5,9 @@
 ## 主要能力
 
 - 提供 `BaseAgent`、`IAgent`、conversation message 等公共 agent 类型。
-- 提供 OpenAI Chat Completions 风格 provider：`OpenAIClient`、`createOpenAIClient`。
-- 提供 Anthropic provider：`AnthropicAgent`。
+- 提供 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 三类协议 client。
 - 提供子 agent 创建入口：`createSubAgent`。
+- 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
 
 ## 使用入口
@@ -15,9 +15,15 @@
 ```ts
 import { micaAgent } from '../packages/mica-agent/index.js';
 
-const agent = micaAgent.createOpenAI({
+const agent = micaAgent.createModelClient({
   model: 'gpt-4.1',
   apiKey: process.env.OPENAI_API_KEY,
+  baseURL: 'https://api.openai.com/v1',
+  provider: {
+    id: 'openai',
+    api_base: 'https://api.openai.com/v1',
+    protocol: 'openai_responses',
+  },
 });
 ```
 

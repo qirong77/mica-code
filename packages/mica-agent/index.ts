@@ -1,5 +1,8 @@
-import { createOpenAIClient, createSubAgent, OpenAIClient } from './providers/OpenAIClient.js';
-import { OpenAIHistoryNormalizer } from './providers/OpenAIHistoryNormalizer.js';
+import { createModelClient, createSubAgent } from './providers/createModelClient.js';
+import { ChatCompletionsClient } from './providers/ChatCompletionsClient.js';
+import { ChatCompletionsHistoryNormalizer } from './providers/ChatCompletionsHistoryNormalizer.js';
+import { ResponsesClient } from './providers/ResponsesClient.js';
+import { ResponsesHistoryNormalizer } from './providers/ResponsesHistoryNormalizer.js';
 import { AnthropicAgent } from './providers/AnthropicAgent.js';
 import { AnthropicHistoryNormalizer } from './providers/AnthropicHistoryNormalizer.js';
 import { BaseAgent } from './core/Agent.js';
@@ -7,12 +10,14 @@ import { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsage
 import { buildSystemPrompt, buildSystemPromptForTest } from './prompt/index.js';
 
 export const micaAgent = {
-  /** 创建支持工具调用和流式事件的 OpenAI Chat Completions 风格 agent。 */
-  createOpenAI: createOpenAIClient,
+  /** 按 provider.protocol 创建支持工具调用和流式事件的模型 client。 */
+  createModelClient,
   /** 创建不启用工具、不使用 reasoning effort 的轻量子 agent。 */
   createSubAgent,
-  OpenAIClient,
-  OpenAIHistoryNormalizer,
+  ChatCompletionsClient,
+  ChatCompletionsHistoryNormalizer,
+  ResponsesClient,
+  ResponsesHistoryNormalizer,
   AnthropicAgent,
   AnthropicHistoryNormalizer,
   BaseAgent,
@@ -51,4 +56,14 @@ export type {
   ProviderHistoryNormalizer,
 } from './core/Conversation.js';
 export { providerContentToConversationBlocks } from './core/Conversation.js';
-export type { OpenAIClientOptions, OpenAIUsageRecord, UsageRecord } from './providers/OpenAIClient.js';
+export { createModelClient, createSubAgent } from './providers/createModelClient.js';
+export { ChatCompletionsClient } from './providers/ChatCompletionsClient.js';
+export { ChatCompletionsHistoryNormalizer } from './providers/ChatCompletionsHistoryNormalizer.js';
+export { ResponsesClient } from './providers/ResponsesClient.js';
+export { ResponsesHistoryNormalizer } from './providers/ResponsesHistoryNormalizer.js';
+export { AnthropicAgent } from './providers/AnthropicAgent.js';
+export { AnthropicHistoryNormalizer } from './providers/AnthropicHistoryNormalizer.js';
+export type { ModelClientOptions } from './providers/types.js';
+export type { ChatCompletionsUsageRecord } from './providers/ChatCompletionsClient.js';
+export type { ResponsesUsageRecord } from './providers/ResponsesClient.js';
+export type { AnthropicUsageRecord } from './providers/AnthropicAgent.js';

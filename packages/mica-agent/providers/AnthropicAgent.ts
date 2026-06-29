@@ -10,6 +10,7 @@ import type {
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
 import { micaTools } from '@packages/mica-tools/index.js';
+import type { EffortOption } from '@packages/mica-config/index.js';
 import {
   BaseAgent,
   type AgentContentBlockParam,
@@ -23,16 +24,7 @@ import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
-
-export type AnthropicAgentOptions = {
-  model: string;
-  apiKey?: string;
-  baseURL?: string;
-  maxTokens?: number;
-  effort?: 'none' | 'low' | 'medium' | 'high';
-  tools?: boolean;
-  systemPrompt?: string;
-};
+import type { ModelClientOptions } from './types.js';
 
 type AnthropicMergedUsage = {
   input_tokens: number;
@@ -53,7 +45,7 @@ export type AnthropicUsageRecord = AgentUsageRecord & {
 type AnthropicToolUse = Pick<ToolUseBlock, 'id' | 'name' | 'input' | 'type'>;
 
 const DEFAULT_MAX_TOKENS = 4096;
-const THINKING_BUDGET_TOKENS: Record<Exclude<AnthropicAgentOptions['effort'], undefined | 'none'>, number> = {
+const THINKING_BUDGET_TOKENS: Partial<Record<EffortOption, number>> = {
   low: 1024,
   medium: 4096,
   high: 8192,
@@ -71,14 +63,14 @@ function throwIfQueryStopped(options?: AgentQueryOptions): void {
   }
 }
 
-function getClient(options: AnthropicAgentOptions) {
+function getClient(options: ModelClientOptions) {
   return new Anthropic({
     apiKey: options.apiKey,
     baseURL: options.baseURL,
   });
 }
 
-export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessageParam, AnthropicUsageRecord> {
+export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, AnthropicUsageRecord> {
   messages: MessageParam[] = [];
   usageHistory: AnthropicUsageRecord[] = [];
   lastUsage: AnthropicUsageRecord | undefined;
@@ -87,12 +79,12 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
   apiKey: string | undefined;
   baseURL: string | undefined;
   maxTokens: number;
-  effort: AnthropicAgentOptions['effort'];
+  effort: EffortOption | undefined;
   tools: boolean;
   systemPrompt: string | undefined;
   readonly historyNormalizer = new AnthropicHistoryNormalizer();
 
-  constructor(options: string | AnthropicAgentOptions) {
+  constructor(options: string | ModelClientOptions) {
     super();
     this.tools = true;
     this.maxTokens = DEFAULT_MAX_TOKENS;
@@ -111,7 +103,7 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
     this.systemPrompt = options.systemPrompt;
   }
 
-  configure(options: AnthropicAgentOptions) {
+  configure(options: ModelClientOptions) {
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
@@ -139,6 +131,19 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
       if (!content) return [];
       return [{ role: message.role, content }];
     });
+  }
+
+  preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
+    const content = micaContentToAnthropicContent(question);
+    const hasCurrentTurn = this.messages.some(
+      (message) => message.role === 'user' && JSON.stringify(message.content) === JSON.stringify(content),
+    );
+    if (hasCurrentTurn) return true;
+
+    this.messages.push({ role: 'user', content });
+    const answer = partialAnswer?.trim();
+    if (answer) this.messages.push({ role: 'assistant', content: answer });
+    return false;
   }
 
   private get anthropicTools(): Tool[] {
@@ -279,7 +284,9 @@ export class AnthropicAgent extends BaseAgent<AnthropicAgentOptions, MessagePara
 
   private get thinkingConfig() {
     if (!this.effort || this.effort === 'none') return undefined;
-    const budget_tokens = Math.min(THINKING_BUDGET_TOKENS[this.effort], Math.max(1024, this.maxTokens - 1));
+    const budget = THINKING_BUDGET_TOKENS[this.effort];
+    if (!budget) return undefined;
+    const budget_tokens = Math.min(budget, Math.max(1024, this.maxTokens - 1));
     if (budget_tokens >= this.maxTokens) return undefined;
     return { type: 'enabled' as const, budget_tokens };
   }

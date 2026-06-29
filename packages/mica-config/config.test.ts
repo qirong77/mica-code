@@ -196,16 +196,47 @@ describe('validateConfig', () => {
 
     expect(configApi.getProviderEffortOptions(deepseek)).toEqual(['none', 'high', 'xhigh']);
     expect(configApi.clampProviderEffort(deepseek, 'low')).toBe('high');
-    expect(configApi.resolveProviderEffortParams(deepseek, 'xhigh')).toEqual({
+    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
-    expect(configApi.resolveProviderEffortParams(deepseek, 'none')).toEqual({ thinking: { type: 'disabled' } });
+    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none')).toEqual({ thinking: { type: 'disabled' } });
+  });
+
+  it('validates provider protocol and resolves the default protocol', () => {
+    const config = baseConfig();
+    const result = configApi.validateConfig({
+      ...config,
+      providers: [
+        {
+          ...config.providers[0]!,
+          protocol: 'openai_responses',
+        },
+        {
+          ...config.providers[1]!,
+          protocol: 'unsupported',
+        },
+      ] as IMicaConfig['providers'],
+    });
+
+    expect(configApi.resolveProviderProtocol(config.providers[0])).toBe('openai_chat_completions');
+    expect(configApi.resolveProviderProtocol({ protocol: 'openai_responses' })).toBe('openai_responses');
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'provider_protocol_invalid',
+          path: 'providers[1].protocol',
+        }),
+      ]),
+    );
   });
 
   it('uses model-specific effort rules before broad family rules', () => {
+    const krill = baseConfig().providers[1]!;
     const openai = {
-      ...baseConfig().providers[1]!,
+      ...krill,
       id: 'openai',
       api_base: 'https://api.openai.com/v1',
       model: 'gpt-5.5',
@@ -234,7 +265,15 @@ describe('validateConfig', () => {
       'high',
     ]);
     expect(configApi.getModelContextWindowSizeFromConfig('unknown-reasoning-model')).toBe(256000);
-    expect(configApi.resolveProviderEffortParams(openai, 'xhigh', 'gpt-5.4')).toEqual({ reasoning_effort: 'xhigh' });
+    expect(configApi.resolveChatCompletionsEffortParams(openai, 'xhigh', 'gpt-5.4')).toEqual({
+      reasoning_effort: 'xhigh',
+    });
+    expect(configApi.resolveResponsesReasoningParams(openai, 'xhigh', 'gpt-5.4')).toEqual({
+      reasoning: { effort: 'xhigh' },
+    });
+    expect(configApi.resolveResponsesReasoningParams(krill, 'xhigh', 'gpt-5.5')).toEqual({
+      reasoning: { effort: 'xhigh' },
+    });
   });
 
   it('maps zai glm and kimi model effort variants', () => {
@@ -260,7 +299,7 @@ describe('validateConfig', () => {
 
     expect(configApi.getProviderEffortOptions(zai)).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
     expect(configApi.getModelContextWindowSizeFromConfig('deepseek-v4-pro')).toBe(1000000);
-    expect(configApi.resolveProviderEffortParams(zai, 'xhigh')).toEqual({
+    expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
