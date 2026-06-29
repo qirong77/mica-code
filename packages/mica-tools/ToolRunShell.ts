@@ -1,7 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { appendFileSync, closeSync, openSync, statSync, writeFileSync } from 'fs';
-import { mkdir } from 'fs/promises';
-import { tmpdir } from 'os';
 import path from 'path';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
@@ -9,7 +7,12 @@ import { truncateDisplayText } from './utils/display.js';
 import { clampNumber, formatSize } from './utils/outputLimits.js';
 import {
   backgroundHeader,
+  createBackgroundTaskMeta,
+  getTaskOutputPath,
   killChildProcess,
+  markBackgroundTaskExited,
+  markBackgroundTaskRunning,
+  markBackgroundTaskSpawnFailed,
   MAX_BACKGROUND_OUTPUT_BYTES,
   startBackgroundOutputWatchdog,
   taskId,
@@ -202,11 +205,17 @@ export class ToolRunShell extends MicaTool {
     if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
 
     const id = taskId();
-    const outputDir = path.join(tmpdir(), 'mica-tasks');
-    const outputPath = path.join(outputDir, `${id}.out`);
+    const outputPath = getTaskOutputPath(id);
     const shell = defaultShell();
 
-    await mkdir(outputDir, { recursive: true });
+    createBackgroundTaskMeta({
+      id,
+      command: input.command,
+      cwd: cwdResult.cwd,
+      shell,
+      outputPath,
+      outputLimit: MAX_BACKGROUND_OUTPUT_BYTES,
+    });
 
     writeFileSync(
       outputPath,
@@ -231,21 +240,25 @@ export class ToolRunShell extends MicaTool {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      markBackgroundTaskSpawnFailed(id, message);
       appendFileSync(outputPath, `\n[mica background task error]\nmessage: ${message}\n`, 'utf-8');
       return [`命令后台启动失败 (id: ${id})`, `cwd: ${cwdResult.cwd}`, `错误: ${message}`].join('\n');
     } finally {
       closeSync(fd);
     }
 
+    markBackgroundTaskRunning(id, child.pid);
     appendFileSync(outputPath, `[mica background task spawned]\npid: ${child.pid ?? 'unknown'}\n\n`, 'utf-8');
 
     child.on('error', (error) => {
+      markBackgroundTaskSpawnFailed(id, error.message);
       appendFileSync(outputPath, `\n[mica background task error]\nmessage: ${error.message}\n`, 'utf-8');
     });
 
-    const watchdog = startBackgroundOutputWatchdog(child, outputPath);
+    const watchdog = startBackgroundOutputWatchdog(child, outputPath, id);
     child.on('exit', (code, signal) => {
       clearInterval(watchdog);
+      markBackgroundTaskExited(id, code, signal);
       appendFileSync(
         outputPath,
         [
@@ -263,6 +276,7 @@ export class ToolRunShell extends MicaTool {
     const spawnResult = await waitForBackgroundSpawn(child);
     if (!spawnResult.ok) {
       clearInterval(watchdog);
+      markBackgroundTaskSpawnFailed(id, spawnResult.message);
       return [`命令后台启动失败 (id: ${id})`, `cwd: ${cwdResult.cwd}`, `错误: ${spawnResult.message}`].join('\n');
     }
 
@@ -274,7 +288,8 @@ export class ToolRunShell extends MicaTool {
       `cwd: ${cwdResult.cwd}`,
       `输出文件: ${outputPath}`,
       `输出上限: ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}，超过后会自动终止进程。`,
-      `如需查看结果，用 read_file 读取输出文件。命令完成后再读一次获取最终输出。`,
+      `查看输出: read_task_output(task_id="${id}")`,
+      `终止任务: kill_task(task_id="${id}")`,
     ].join('\n');
   }
 

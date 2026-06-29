@@ -1,5 +1,6 @@
 import { Box, Text } from '@anthropic/ink';
 import { useEffect, useRef, useState } from 'react';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { useScheduleState } from '../hooks/index.js';
 import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate } from './state.js';
 import { responseText as convResponseText } from '../conversation/state.js';
@@ -95,7 +96,7 @@ export function WorkingStatus() {
       return;
     }
     if (!startRef.current) startRef.current = Date.now();
-    const timer = setInterval(() => setElapsed(Date.now() - startRef.current), 100);
+    const timer = setInterval(() => setElapsed(Date.now() - startRef.current), runtimeEnv.ui.elapsedRefreshIntervalMs);
     return () => clearInterval(timer);
   }, [info.type]);
 

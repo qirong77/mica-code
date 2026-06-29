@@ -1,0 +1,110 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { micaConfig } from '@packages/mica-config/index.js';
+import type { AgentQueryContent, AgentQueryOptions, AgentUsageRecord, IAgent, ModelClientOptions } from '@packages/mica-agent/index.js';
+
+const modelClient = createModelClientStub();
+
+vi.mock('@packages/mica-agent/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@packages/mica-agent/index.js')>();
+  return {
+    ...actual,
+    micaAgent: {
+      ...actual.micaAgent,
+      createModelClient: vi.fn(() => modelClient),
+    },
+  };
+});
+
+describe('AgentRuntime tool status', () => {
+  beforeEach(() => {
+    modelClient.resetState();
+    micaConfig.update(() => ({
+      provider: 'test-provider',
+      model: 'test-model',
+      effort: 'none',
+      contextWindowSize: 1000,
+      providers: [
+        {
+          id: 'test-provider',
+          name: 'Test Provider',
+          api_base: 'https://example.com/v1',
+          api_key: 'test-key',
+          model: 'test-model',
+          models: ['test-model'],
+          contextWindowSize: 1000,
+          supportsEffort: false,
+        },
+      ],
+    }));
+  });
+
+  it('returns to model-waiting status after a tool result is received', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const statuses: string[] = [];
+
+    agent.events.on('status', (status) => statuses.push(status.type));
+    modelClient.queryImpl = async () => {
+      modelClient.onToolCall?.('run_shell', '{"command":"true"}', 'tool-1');
+      modelClient.onToolResult?.('run_shell', 'done', 'tool-1');
+      return 'ok';
+    };
+
+    await agent.run('hello');
+
+    expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
+  });
+});
+
+function createModelClientStub(): IAgent<ModelClientOptions> & {
+  queryImpl?: (question: AgentQueryContent, options?: AgentQueryOptions) => Promise<string>;
+  resetState(): void;
+} {
+  return {
+    model: 'test-model',
+    messages: [],
+    usageHistory: [],
+    lastUsage: undefined,
+    onText: undefined,
+    onThinking: undefined,
+    onToolCall: undefined,
+    onToolResult: undefined,
+    onUsage: undefined,
+    configure: vi.fn(),
+    reset: vi.fn(),
+    async query(question, options) {
+      return this.queryImpl?.(question, options) ?? '';
+    },
+    preserveAbortedTurn: vi.fn(() => false),
+    toConversationMessages: vi.fn(() => []),
+    toConversationItems: vi.fn(() => []),
+    loadConversationItems: vi.fn(),
+    getSnapshot: vi.fn(() => ({
+      model: 'test-model',
+      messages: [],
+      usageHistory: [] as AgentUsageRecord[],
+      lastUsage: undefined,
+      conversationMessages: [],
+    })),
+    loadSnapshot: vi.fn(),
+    resetState() {
+      this.messages = [];
+      this.usageHistory = [];
+      this.lastUsage = undefined;
+      this.onText = undefined;
+      this.onThinking = undefined;
+      this.onToolCall = undefined;
+      this.onToolResult = undefined;
+      this.onUsage = undefined;
+      this.queryImpl = undefined;
+      vi.mocked(this.configure).mockClear();
+      vi.mocked(this.reset).mockClear();
+      vi.mocked(this.preserveAbortedTurn).mockClear();
+      vi.mocked(this.toConversationMessages).mockClear();
+      vi.mocked(this.toConversationItems).mockClear();
+      vi.mocked(this.loadConversationItems).mockClear();
+      vi.mocked(this.getSnapshot).mockClear();
+      vi.mocked(this.loadSnapshot).mockClear();
+    },
+  };
+}

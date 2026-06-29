@@ -1,4 +1,5 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -26,7 +27,7 @@ import {
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
-const MAX_RESPONSE_BUFFER_CHARS = 80_000;
+const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 
 type RuntimeActiveContext = {

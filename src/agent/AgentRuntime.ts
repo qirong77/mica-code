@@ -344,6 +344,7 @@ export class AgentRuntime {
     };
     this.client.onToolResult = (name, result, id) => {
       this.events.emit('toolResult', { name, result, id });
+      this.emitStatus({ type: 'connecting' });
       micaLogger.logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
     };
     this.client.onUsage = (usage) => {

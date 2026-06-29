@@ -1,7 +1,11 @@
 import { readFileSync, rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ToolRunShell } from './ToolRunShell.js';
+import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
+import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
+import { ToolKillTask } from './ToolKillTask.js';
 
 function bunEval(script: string): string {
   return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
@@ -11,6 +15,19 @@ function parseOutputPath(result: string): string {
   const match = result.match(/^输出文件: (.+)$/m);
   expect(match).not.toBeNull();
   return match![1]!.trim();
+}
+
+function parseTaskId(result: string): string {
+  const match = result.match(/id: ([a-f0-9]{12})/);
+  expect(match).not.toBeNull();
+  return match![1]!;
+}
+
+function cleanupTask(outputPath: string): void {
+  const taskDir = dirname(outputPath);
+  const id = path.basename(outputPath, '.out');
+  rmSync(outputPath, { force: true });
+  rmSync(path.join(taskDir, `${id}.json`), { force: true });
 }
 
 async function waitForFileContains(filePath: string, text: string): Promise<string> {
@@ -93,13 +110,49 @@ describe('ToolRunShell', () => {
       expect(result).toContain(`cwd: ${cwd}`);
       expect(result).toContain('输出上限: 64.0MB');
 
+      const taskId = parseTaskId(result);
+      expect(result).toContain(`查看输出: read_task_output(task_id="${taskId}")`);
+      expect(result).toContain(`终止任务: kill_task(task_id="${taskId}")`);
+
       const content = await waitForFileContains(outputPath, 'background ok');
       expect(content).toContain('[mica background task]');
       expect(content).toContain(`cwd: ${cwd}`);
       expect(content).toContain('[mica background task spawned]');
       expect(content).toContain('background ok');
     } finally {
-      rmSync(outputPath, { force: true });
+      cleanupTask(outputPath);
+    }
+  });
+
+  it('lists, reads, and kills background tasks by id', async () => {
+    const runShell = new ToolRunShell();
+    const listTasks = new ToolBackgroundTasks();
+    const readTaskOutput = new ToolReadTaskOutput();
+    const killTask = new ToolKillTask();
+
+    const result = await runShell.execute({
+      command: bunEval("console.log('ready'); setInterval(() => console.log('tick'), 200)"),
+      run_in_background: true,
+    });
+    const outputPath = parseOutputPath(result);
+    const taskId = parseTaskId(result);
+
+    try {
+      await waitForFileContains(outputPath, 'ready');
+
+      const listResult = await listTasks.execute({ status: 'running' });
+      expect(listResult).toContain(taskId);
+      expect(listResult).toContain('running');
+
+      const outputResult = await readTaskOutput.execute({ task_id: taskId });
+      expect(outputResult).toContain(`Task ${taskId}`);
+      expect(outputResult).toContain('ready');
+
+      const killResult = await killTask.execute({ task_id: taskId, force_after_ms: 100 });
+      expect(killResult).toContain(`id: ${taskId}`);
+      expect(killResult).toContain(`output: ${outputPath}`);
+    } finally {
+      cleanupTask(outputPath);
     }
   });
 });

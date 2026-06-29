@@ -1,13 +1,85 @@
-import { type ChildProcess } from 'child_process';
-import { appendFileSync, statSync } from 'fs';
+import { spawnSync, type ChildProcess } from 'child_process';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import crypto from 'crypto';
+import { tmpdir } from 'os';
+import path from 'path';
 import { formatSize } from './utils/outputLimits.js';
 
 export const MAX_BACKGROUND_OUTPUT_BYTES = 64 * 1024 * 1024;
 const BACKGROUND_OUTPUT_WATCH_INTERVAL_MS = 5_000;
+const TASK_ID_PATTERN = /^[a-f0-9]{12}$/;
+
+export type BackgroundTaskStatus = 'starting' | 'running' | 'finished' | 'killed' | 'failed' | 'unknown_exited';
+
+export type BackgroundTaskMeta = {
+  id: string;
+  command: string;
+  cwd: string;
+  shell: string;
+  pid?: number;
+  output_path: string;
+  status: BackgroundTaskStatus;
+  started_at: string;
+  finished_at?: string;
+  exit_code?: number | null;
+  signal?: string | null;
+  output_limit_bytes: number;
+  error?: string;
+};
+
+export type OutputRange = {
+  content: string;
+  size: number;
+  start: number;
+  end: number;
+};
 
 export function taskId(): string {
   return crypto.randomBytes(6).toString('hex');
+}
+
+export function getBackgroundTaskDir(): string {
+  return path.join(tmpdir(), 'mica-tasks');
+}
+
+export function getTaskOutputPath(id: string): string {
+  assertSafeTaskId(id);
+  return path.join(getBackgroundTaskDir(), `${id}.out`);
+}
+
+export function getTaskMetaPath(id: string): string {
+  assertSafeTaskId(id);
+  return path.join(getBackgroundTaskDir(), `${id}.json`);
+}
+
+export function assertSafeTaskId(id: string): void {
+  if (!TASK_ID_PATTERN.test(id)) {
+    throw new Error(`无效 task_id: ${id}`);
+  }
+}
+
+function ensureBackgroundTaskDir(): void {
+  mkdirSync(getBackgroundTaskDir(), { recursive: true });
+}
+
+function writeTaskMeta(meta: BackgroundTaskMeta): void {
+  ensureBackgroundTaskDir();
+  const filePath = getTaskMetaPath(meta.id);
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(meta, null, 2)}\n`, 'utf-8');
+  renameSync(tmpPath, filePath);
 }
 
 export function backgroundHeader({
@@ -38,7 +110,193 @@ export function backgroundHeader({
   ].join('\n');
 }
 
-export function startBackgroundOutputWatchdog(child: ChildProcess, outputPath: string): NodeJS.Timeout {
+export function createBackgroundTaskMeta(params: {
+  id: string;
+  command: string;
+  cwd: string;
+  shell: string;
+  outputPath: string;
+  outputLimit: number;
+}): BackgroundTaskMeta {
+  const meta: BackgroundTaskMeta = {
+    id: params.id,
+    command: params.command,
+    cwd: params.cwd,
+    shell: params.shell,
+    output_path: params.outputPath,
+    status: 'starting',
+    started_at: new Date().toISOString(),
+    output_limit_bytes: params.outputLimit,
+  };
+  writeTaskMeta(meta);
+  return meta;
+}
+
+export function markBackgroundTaskRunning(id: string, pid: number | undefined): void {
+  const meta = loadBackgroundTask(id);
+  if (!meta) return;
+  writeTaskMeta({ ...meta, pid, status: 'running' });
+}
+
+export function markBackgroundTaskSpawnFailed(id: string, message: string): void {
+  const meta = loadBackgroundTask(id);
+  if (!meta) return;
+  writeTaskMeta({
+    ...meta,
+    status: 'failed',
+    finished_at: new Date().toISOString(),
+    error: message,
+  });
+}
+
+export function markBackgroundTaskExited(id: string, code: number | null, signal: NodeJS.Signals | null): void {
+  const meta = loadBackgroundTask(id);
+  if (!meta) return;
+  writeTaskMeta({
+    ...meta,
+    status: meta.status === 'killed' ? 'killed' : 'finished',
+    finished_at: new Date().toISOString(),
+    exit_code: code,
+    signal,
+  });
+}
+
+export function loadBackgroundTask(id: string): BackgroundTaskMeta | undefined {
+  assertSafeTaskId(id);
+  const filePath = getTaskMetaPath(id);
+  if (!existsSync(filePath)) return undefined;
+  const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as BackgroundTaskMeta;
+  return refreshBackgroundTask(parsed);
+}
+
+export function listBackgroundTasks(options: {
+  status?: BackgroundTaskStatus | 'all';
+  limit?: number;
+} = {}): BackgroundTaskMeta[] {
+  const dir = getBackgroundTaskDir();
+  if (!existsSync(dir)) return [];
+
+  const tasks = readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .flatMap((file): BackgroundTaskMeta[] => {
+      const id = file.slice(0, -'.json'.length);
+      try {
+        if (!TASK_ID_PATTERN.test(id)) return [];
+        const meta = loadBackgroundTask(id);
+        return meta ? [meta] : [];
+      } catch {
+        return [];
+      }
+    })
+    .filter((task) => options.status === undefined || options.status === 'all' || task.status === options.status)
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+
+  return typeof options.limit === 'number' ? tasks.slice(0, options.limit) : tasks;
+}
+
+export function getBackgroundTaskOutputSize(meta: BackgroundTaskMeta): number {
+  try {
+    return statSync(meta.output_path).size;
+  } catch {
+    return 0;
+  }
+}
+
+export function readBackgroundTaskOutput(
+  meta: BackgroundTaskMeta,
+  options: { offset?: number; maxBytes: number; tailBytes?: number },
+): OutputRange {
+  const size = getBackgroundTaskOutputSize(meta);
+  if (size === 0) {
+    return { content: '', size, start: 0, end: 0 };
+  }
+
+  const requestedLength = Math.max(0, Math.min(options.tailBytes ?? options.maxBytes, options.maxBytes));
+  const start = options.tailBytes !== undefined ? Math.max(0, size - requestedLength) : Math.min(options.offset ?? 0, size);
+  const length = Math.max(0, Math.min(requestedLength, size - start));
+  const buffer = Buffer.alloc(length);
+  const fd = openSync(meta.output_path, 'r');
+  try {
+    const bytesRead = readSync(fd, buffer, 0, length, start);
+    return {
+      content: buffer.subarray(0, bytesRead).toString('utf-8'),
+      size,
+      start,
+      end: start + bytesRead,
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function appendBackgroundTaskOutput(meta: BackgroundTaskMeta, text: string): void {
+  appendFileSync(meta.output_path, text, 'utf-8');
+}
+
+export function isBackgroundTaskAlive(meta: BackgroundTaskMeta): boolean {
+  return isProcessAlive(meta.pid);
+}
+
+export async function killBackgroundTask(
+  id: string,
+  signal: NodeJS.Signals,
+  forceAfterMs: number,
+): Promise<{ ok: boolean; message: string; meta?: BackgroundTaskMeta; stillRunning?: boolean }> {
+  const meta = loadBackgroundTask(id);
+  if (!meta) return { ok: false, message: `未知后台任务: ${id}` };
+
+  if (!['starting', 'running'].includes(meta.status)) {
+    return { ok: false, message: `后台任务 ${id} 当前状态为 ${meta.status}，无需终止。`, meta };
+  }
+  if (!meta.pid) {
+    markBackgroundTaskSpawnFailed(id, 'missing pid');
+    return { ok: false, message: `后台任务 ${id} 没有记录 pid，无法终止。`, meta: loadBackgroundTask(id) };
+  }
+
+  appendBackgroundTaskOutput(
+    meta,
+    [
+      '',
+      '[mica background task kill requested]',
+      `requested_at: ${new Date().toISOString()}`,
+      `signal: ${signal}`,
+      '',
+    ].join('\n'),
+  );
+
+  const sent = killProcessTree(meta.pid, signal);
+  if (!sent) {
+    const refreshed = loadBackgroundTask(id) ?? meta;
+    return { ok: false, message: `后台任务 ${id} 的进程已不存在。`, meta: refreshed };
+  }
+
+  if (signal === 'SIGKILL') {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } else if (forceAfterMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, forceAfterMs));
+    if (isProcessAlive(meta.pid)) {
+      killProcessTree(meta.pid, 'SIGKILL');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  const stillRunning = isProcessAlive(meta.pid);
+  const latest = loadBackgroundTask(id) ?? meta;
+  if (stillRunning) {
+    return { ok: true, message: `已发送 ${signal}，但任务仍在运行。`, meta: latest, stillRunning };
+  }
+
+  const killed: BackgroundTaskMeta = {
+    ...latest,
+    status: 'killed',
+    finished_at: latest.finished_at ?? new Date().toISOString(),
+    signal: latest.signal ?? signal,
+  };
+  writeTaskMeta(killed);
+  return { ok: true, message: `已终止后台任务 ${id}。`, meta: killed, stillRunning };
+}
+
+export function startBackgroundOutputWatchdog(child: ChildProcess, outputPath: string, id?: string): NodeJS.Timeout {
   const timer = setInterval(() => {
     try {
       const size = statSync(outputPath).size;
@@ -48,6 +306,18 @@ export function startBackgroundOutputWatchdog(child: ChildProcess, outputPath: s
         `\n[mica background task stopped]\nreason: output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}\n`,
         'utf-8',
       );
+      if (id) {
+        const meta = loadBackgroundTask(id);
+        if (meta) {
+          writeTaskMeta({
+            ...meta,
+            status: 'killed',
+            finished_at: new Date().toISOString(),
+            signal: 'SIGTERM',
+            error: `output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}`,
+          });
+        }
+      }
       killChildProcess(child, 'SIGTERM');
       setTimeout(() => killChildProcess(child, 'SIGKILL'), 5_000).unref?.();
       clearInterval(timer);
@@ -78,9 +348,57 @@ export function waitForBackgroundSpawn(child: ChildProcess): Promise<{ ok: true 
 
 export function killChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
+  killProcessTree(child.pid, signal);
+}
+
+function refreshBackgroundTask(meta: BackgroundTaskMeta): BackgroundTaskMeta {
+  if (!['starting', 'running'].includes(meta.status)) return meta;
+  if (isProcessAlive(meta.pid)) return meta.status === 'starting' && meta.pid ? { ...meta, status: 'running' } : meta;
+
+  const refreshed: BackgroundTaskMeta = {
+    ...meta,
+    status: 'unknown_exited',
+    finished_at: meta.finished_at ?? new Date().toISOString(),
+  };
+  writeTaskMeta(refreshed);
+  return refreshed;
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid || pid <= 0) return false;
   try {
-    process.kill(-child.pid, signal);
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(-pid, 0);
+        return true;
+      } catch {
+        // Fall through to checking the direct process id.
+      }
+    }
+    process.kill(pid, 0);
+    return true;
   } catch {
-    child.kill(signal);
+    return false;
+  }
+}
+
+function killProcessTree(pid: number, signal: NodeJS.Signals): boolean {
+  if (process.platform === 'win32') {
+    const args = ['/PID', String(pid), '/T'];
+    if (signal === 'SIGKILL') args.push('/F');
+    const result = spawnSync('taskkill', args, { stdio: 'ignore' });
+    return result.status === 0;
+  }
+
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

@@ -21,6 +21,7 @@ import {
   resolveResponsesReasoningParams,
   resolveProviderProtocol,
 } from './config.js';
+import { runtimeEnv } from './runtimeEnv.js';
 import { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
 import {
   MICA_STORAGE_PATH,
@@ -69,6 +70,8 @@ export const micaConfig = {
   resolveResponsesReasoningParams,
   /** 读取 provider 协议，缺省为 OpenAI Chat Completions。 */
   resolveProviderProtocol,
+  /** 运行时调参配置，只读取环境变量，不写入 config.json。 */
+  runtimeEnv,
   storage: {
     path: MICA_STORAGE_PATH,
     read: readMicaStorage,
@@ -104,6 +107,8 @@ export {
   resolveResponsesReasoningParams,
   resolveProviderProtocol,
 } from './config.js';
+export { readRuntimeEnvConfig, runtimeEnv } from './runtimeEnv.js';
+export type { RuntimeEnvConfig, RuntimeEnvSource } from './runtimeEnv.js';
 export type {
   EffortOption,
   EffortMap,

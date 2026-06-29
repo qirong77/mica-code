@@ -10,6 +10,9 @@ import { ToolWebSearch } from './ToolWebSearch.js';
 import { ToolSkill } from './ToolSkill.js';
 import { MicaTool } from './MicaTool.js';
 import { ToolRunShell } from './ToolRunShell.js';
+import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
+import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
+import { ToolKillTask } from './ToolKillTask.js';
 import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
 const builtinTools: MicaTool[] = [
@@ -19,6 +22,9 @@ const builtinTools: MicaTool[] = [
   new ToolListFiles(),
   new ToolGrepSearch(),
   new ToolRunShell(),
+  new ToolBackgroundTasks(),
+  new ToolReadTaskOutput(),
+  new ToolKillTask(),
   new ToolWebFetch(),
   new ToolWebSearch(),
   new ToolSkill(),

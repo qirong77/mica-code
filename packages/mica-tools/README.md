@@ -17,7 +17,10 @@
 - `edit_file`：通过精确字符串替换编辑文件。
 - `list_files`：按 glob 模式列出文件。
 - `grep_search`：在文件中搜索正则。
-- `run_shell`：执行 shell 命令。
+- `run_shell`：执行 shell 命令，可启动后台任务。
+- `background_tasks`：列出后台任务。
+- `read_task_output`：读取后台任务输出。
+- `kill_task`：终止后台任务。
 - `web_fetch`：抓取 URL 内容。
 - `web_search`：搜索网络信息。
 - `Skill`：读取并调用本地 skill 指令。

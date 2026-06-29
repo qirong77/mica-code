@@ -11,7 +11,7 @@ export type WorkingStatusDisplay = {
 export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingStatusDisplay {
   switch (status.type) {
     case 'connecting':
-      return { text: 'connecting', color: themeColors.statusRunning, spinning: true };
+      return { text: 'waiting_model', color: themeColors.statusRunning, spinning: true };
     case 'thinking':
       return { text: 'thinking', color: themeColors.statusRunning, spinning: true };
     case 'streaming':

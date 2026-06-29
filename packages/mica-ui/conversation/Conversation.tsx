@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { themeColors } from '../theme.js';
@@ -8,7 +9,7 @@ import { Markdown } from './Markdown.js';
 import { MessageGutter } from '../primitives/MessageGutter.js';
 
 const MAX_USER_LINES = 10;
-const MAX_ASSISTANT_CHARS = 80_000;
+const MAX_ASSISTANT_CHARS = runtimeEnv.ui.assistantDisplayMaxChars;
 
 function getTextContent(content: MicaUiMessageParam['content']): string {
   if (typeof content === 'string') return content;

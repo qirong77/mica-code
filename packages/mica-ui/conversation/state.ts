@@ -1,4 +1,5 @@
 import { atom } from 'nanostores';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiContentBlockParam, MicaUiMessageParam, MicaUiTextBlock } from '../types.js';
 
 export type MicaUiPendingInputQueueMode = 'after_iteration' | 'after_turn';
@@ -8,7 +9,7 @@ export const responseText = atom<string>('');
 export const pendingInput = atom<string>('');
 export const pendingInputs = atom<string[]>([]);
 export const pendingQueueMode = atom<MicaUiPendingInputQueueMode | null>(null);
-const MAX_UI_MESSAGE_TEXT_CHARS = 80_000;
+const MAX_UI_MESSAGE_TEXT_CHARS = runtimeEnv.ui.messageTextMaxChars;
 
 export function setMessages(nextMessages: MicaUiMessageParam[]): void {
   messages.set(nextMessages.map(sanitizeMessageForUi));

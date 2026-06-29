@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 
 interface Readable<T> {
   get(): T;
@@ -12,7 +13,7 @@ function uuid(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-const THROTTLE_INTERVAL = 16;
+const THROTTLE_INTERVAL = runtimeEnv.ui.scheduleStateThrottleMs;
 let lastFlushTime = 0;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 

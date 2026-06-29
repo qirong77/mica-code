@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';
 import { themeColors } from './theme.js';
 import { formatElapsed } from './utils/format.js';
 
-const MAX_RUN_SHELL_LOG_LINES = 10;
+export const RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS = runtimeEnv.ui.runShellVerboseLogThresholdMs;
+const MAX_RUN_SHELL_LOG_LINES = runtimeEnv.ui.runShellLogMaxLines;
 const TOOL_ICONS: Record<string, string> = {
   read_file: '📖',
   write_file: '✍️',
@@ -51,10 +53,12 @@ export function createToolCallLogItem({
   function ToolCallLogItem() {
     const spinner = useSpinner();
     const now = useNow();
-    const outputLines = toolName === 'run_shell' && output ? output.replace(/\n$/, '').split('\n') : [];
+    const elapsed = elapsedMs ?? Math.max(0, now - startTime);
+    const outputLines = shouldShowToolOutput({ toolName, output, elapsedMs: elapsed })
+      ? output.replace(/\n$/, '').split('\n')
+      : [];
     const capped =
       outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
-    const elapsed = elapsedMs ?? Math.max(0, now - startTime);
     return (
       <Box flexDirection="column">
         {completed ? (
@@ -85,6 +89,18 @@ export function createToolCallLogItem({
     );
   }
   return { id, component: ToolCallLogItem };
+}
+
+export function shouldShowToolOutput({
+  toolName,
+  output,
+  elapsedMs,
+}: {
+  toolName: string;
+  output: string;
+  elapsedMs: number;
+}): boolean {
+  return toolName === 'run_shell' && Boolean(output) && elapsedMs > RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS;
 }
 
 export function createErrorLogItem({

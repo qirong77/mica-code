@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Text } from '@anthropic/ink';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-export function useSpinner(delay = 80): string {
+export function useSpinner(delay = runtimeEnv.ui.spinnerFrameIntervalMs): string {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), delay);

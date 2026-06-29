@@ -1,6 +1,7 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
 
 type ActiveToolCall = { id: string; startTime: number; displayText: string };
@@ -10,9 +11,9 @@ type ToolLogSink = {
   replaceAgentTurnLogItem(item: MicaUiAgentTurnLogItem): void;
 };
 
-const MAX_THINKING_BUFFER_CHARS = 40_000;
+const MAX_THINKING_BUFFER_CHARS = runtimeEnv.ui.thinkingTextMaxChars;
 const THINKING_TRUNCATION_MARKER = '[thinking display truncated]\n';
-const THINKING_UI_UPDATE_INTERVAL_MS = 50;
+const THINKING_UI_UPDATE_INTERVAL_MS = runtimeEnv.ui.thinkingUpdateIntervalMs;
 
 const defaultSink: ToolLogSink = {
   setThinkingText: (text) => micaUi.panels.thinkingText.set(text),

@@ -1,3 +1,4 @@
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import { SessionController } from '../session/SessionController.js';
 import type {
@@ -58,14 +59,14 @@ export type TerminalAgentSession = {
 };
 
 const MAX_UI_CONVERSATION_MESSAGES = 200;
-const MAX_RESPONSE_TEXT_CHARS = 80_000;
+const MAX_RESPONSE_TEXT_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const MAX_PENDING_INPUTS = 1;
 const MAX_MESSAGE_BAR_MESSAGES = 8;
 const MAX_LOG_ENTRIES = 200;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
 const MAX_UI_LOG_ENTRIES = 200;
-const MAX_THINKING_TEXT_CHARS = 40_000;
-const MAX_UI_MESSAGE_TEXT_CHARS = 80_000;
+const MAX_THINKING_TEXT_CHARS = runtimeEnv.ui.thinkingTextMaxChars;
+const MAX_UI_MESSAGE_TEXT_CHARS = runtimeEnv.ui.messageTextMaxChars;
 
 export class TerminalAgentSessionManager {
   private readonly sessions: TerminalAgentSession[] = [];
