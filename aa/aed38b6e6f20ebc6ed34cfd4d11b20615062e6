@@ -1,0 +1,14 @@
+packages/mica-config/runtimeEnv.ts
+  h_a456b67147438e 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "aaaed38b6e6f20ebc6ed34cfd4d11b20615062e6",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
