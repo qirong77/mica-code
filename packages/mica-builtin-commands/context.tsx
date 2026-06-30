@@ -18,9 +18,11 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 
 const PANEL_ID = 'context-panel';
-const ROW_WIDTH = 58;
-const BAR_WIDTH = 24;
-const OVERALL_BAR_WIDTH = 56;
+const SOURCE_COL_WIDTH = 15;
+const MAP_WIDTH = 42;
+const TOKENS_COL_WIDTH = 7;
+const SHARE_COL_WIDTH = 6;
+const TABLE_WIDTH = SOURCE_COL_WIDTH + 1 + MAP_WIDTH + 1 + TOKENS_COL_WIDTH + 1 + SHARE_COL_WIDTH;
 
 type BucketKey = 'toolSchemas' | 'toolOutputs' | 'conversation' | 'systemPrompt' | 'skills' | 'toolCalls';
 
@@ -102,39 +104,22 @@ function showContextPanel(overview: ContextOverview) {
 
   function ContextPanel() {
     return (
-      <Box flexDirection="column" width="100%" minWidth={0} paddingX={1}>
-        <Box
-          flexDirection="column"
-          borderStyle="round"
-          borderColor={micaUi.theme.colors.border}
-          borderText={{ content: ' context ', position: 'top', align: 'start', offset: 1 }}
-          paddingX={1}
-        >
-          <Text>{alignRight(formatModelLine(overview), formatWindowLine(overview))}</Text>
-          <Text color={micaUi.theme.colors.dim}>{formatUsageLine(overview)}</Text>
-          <Text color={usageColor(overview.usageRatio)}>{progressBar(overview.usageRatio, OVERALL_BAR_WIDTH)}</Text>
+      <micaUi.Dialog title="context map" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
+        <Box flexDirection="column" width={TABLE_WIDTH} maxWidth="100%" minWidth={0}>
+          <UsageLine overview={overview} />
+          <Text>
+            <Text color={micaUi.theme.colors.dim}>{'       '}</Text>
+            <MapBar ratio={overview.usageRatio} width={MAP_WIDTH} color={usageColor(overview.usageRatio)} />
+          </Text>
 
           <Text> </Text>
-          <Text color={micaUi.theme.colors.dim}>token map - estimated</Text>
+          <TokenMapHeader />
+          <Text color={micaUi.theme.colors.dim}>{'─'.repeat(TABLE_WIDTH)}</Text>
           {overview.buckets.map((bucket) => (
-            <Text key={bucket.key}>{formatBucketLine(bucket, overview.usedTokens)}</Text>
+            <TokenMapRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} />
           ))}
-
-          <Text> </Text>
-          <Text color={micaUi.theme.colors.dim}>largest sources</Text>
-          {overview.largestSources.length > 0 ? (
-            overview.largestSources.map((source) => <Text key={source.label}>{formatSourceLine(source)}</Text>)
-          ) : (
-            <Text color={micaUi.theme.colors.dim}>no context sources yet</Text>
-          )}
-
-          <Text> </Text>
-          <Text color={micaUi.theme.colors.dim}>session</Text>
-          <Text>{`${overview.messageCount} messages    ${overview.turns} turns    ${overview.toolCalls} tool calls`}</Text>
-          <Text>{`${overview.filesRead} files read    ${overview.filesEdited} edited    ${overview.shellCommands} shell    ${overview.backgroundTasks} background`}</Text>
         </Box>
-        <micaUi.KeyHints hints={['esc exit', 'type to close']} />
-      </Box>
+      </micaUi.Dialog>
     );
   }
 
@@ -463,8 +448,66 @@ function sumTokens(buckets: Bucket[]): number {
   return buckets.reduce((sum, bucket) => sum + bucket.tokens, 0);
 }
 
-function formatModelLine(overview: ContextOverview): string {
-  return truncateText(`${overview.model} - ${overview.effort}`, 34);
+function UsageLine({ overview }: { overview: ContextOverview }) {
+  return (
+    <Text>
+      <Text color={micaUi.theme.colors.dim}>{'used'.padEnd(7)}</Text>
+      <Text color={micaUi.theme.colors.textSecondary}>{formatWindowLine(overview)}</Text>
+      <Text>{'   '}</Text>
+      <Text color={usageColor(overview.usageRatio)}>
+        {overview.windowTokens > 0 ? formatPercent(overview.usageRatio) : '-'}
+      </Text>
+    </Text>
+  );
+}
+
+function TokenMapHeader() {
+  return (
+    <Text>
+      <Text color={micaUi.theme.colors.dim}>{'source'.padEnd(SOURCE_COL_WIDTH)}</Text>
+      <Text> </Text>
+      <Text color={micaUi.theme.colors.dim}>{'map'.padEnd(MAP_WIDTH)}</Text>
+      <Text> </Text>
+      <Text color={micaUi.theme.colors.dim}>{'tokens'.padStart(TOKENS_COL_WIDTH)}</Text>
+      <Text> </Text>
+      <Text color={micaUi.theme.colors.dim}>{'share'.padStart(SHARE_COL_WIDTH)}</Text>
+    </Text>
+  );
+}
+
+function TokenMapRow({ bucket, totalTokens }: { bucket: Bucket; totalTokens: number }) {
+  const ratio = totalTokens > 0 ? bucket.tokens / totalTokens : 0;
+  const isEmpty = bucket.tokens <= 0;
+
+  return (
+    <Text>
+      <Text color={isEmpty ? micaUi.theme.colors.dim : undefined}>
+        {truncateText(bucket.label, SOURCE_COL_WIDTH).padEnd(SOURCE_COL_WIDTH)}
+      </Text>
+      <Text> </Text>
+      {isEmpty ? (
+        <Text color={micaUi.theme.colors.dim}>{'·'.padEnd(MAP_WIDTH)}</Text>
+      ) : (
+        <MapBar ratio={ratio} width={MAP_WIDTH} color={bucketColor(bucket.key, ratio)} />
+      )}
+      <Text> </Text>
+      <Text color={isEmpty ? micaUi.theme.colors.dim : micaUi.theme.colors.textSecondary}>
+        {formatTokens(bucket.tokens).padStart(TOKENS_COL_WIDTH)}
+      </Text>
+      <Text> </Text>
+      <Text color={micaUi.theme.colors.dim}>{formatPercent(ratio).padStart(SHARE_COL_WIDTH)}</Text>
+    </Text>
+  );
+}
+
+function MapBar({ ratio, width, color }: { ratio: number; width: number; color: string }) {
+  const { filled, empty } = barParts(ratio, width);
+  return (
+    <Text>
+      <Text color={color}>{filled}</Text>
+      <Text color={micaUi.theme.colors.subtle}>{empty}</Text>
+    </Text>
+  );
 }
 
 function formatWindowLine(overview: ContextOverview): string {
@@ -472,36 +515,10 @@ function formatWindowLine(overview: ContextOverview): string {
   return `${formatTokens(overview.usedTokens)} / ${formatTokens(overview.windowTokens)}`;
 }
 
-function formatUsageLine(overview: ContextOverview): string {
-  const used = overview.windowTokens > 0 ? `used ${formatPercent(overview.usageRatio)}` : 'used -';
-  const free = overview.windowTokens > 0 ? `free ${formatTokens(overview.freeTokens)}` : 'free -';
-  const cache = `cache ${formatRate(overview.latestCacheRate)} latest / ${formatRate(overview.totalCacheRate)} all`;
-  return alignRight(`${used}    ${free}`, cache);
-}
-
-function formatBucketLine(bucket: Bucket, totalTokens: number): string {
-  const ratio = totalTokens > 0 ? bucket.tokens / totalTokens : 0;
-  const label = bucket.label.padEnd(15);
-  const tokens = formatTokens(bucket.tokens).padStart(7);
-  const pct = formatPercent(ratio).padStart(5);
-  return `${label} ${progressBar(ratio, BAR_WIDTH)} ${tokens} ${pct}`;
-}
-
-function formatSourceLine(source: Source): string {
-  const label = truncateText(source.label, 26).padEnd(26);
-  const tokens = formatTokens(source.tokens).padStart(7);
-  return `${label} ${tokens}    ${source.detail}`;
-}
-
-function alignRight(left: string, right: string, width = ROW_WIDTH): string {
-  const gap = Math.max(2, width - visibleLength(left) - visibleLength(right));
-  return `${left}${' '.repeat(gap)}${right}`;
-}
-
-function progressBar(ratio: number, width: number): string {
+function barParts(ratio: number, width: number): { filled: string; empty: string } {
   const normalized = Math.max(0, Math.min(1, ratio));
   const filled = normalized > 0 ? Math.max(1, Math.round(normalized * width)) : 0;
-  return `[${'#'.repeat(filled)}${'.'.repeat(width - filled)}]`;
+  return { filled: '█'.repeat(filled), empty: '░'.repeat(width - filled) };
 }
 
 function usageColor(ratio: number): string {
@@ -510,6 +527,16 @@ function usageColor(ratio: number): string {
   if (ratio >= 0.45) return micaUi.theme.colors.warning;
   if (ratio >= 0.3) return micaUi.theme.colors.info;
   return micaUi.theme.colors.dim;
+}
+
+function bucketColor(key: BucketKey, ratio: number): string {
+  if (ratio <= 0) return micaUi.theme.colors.dim;
+  if (key === 'toolSchemas') return micaUi.theme.colors.toolNetwork;
+  if (key === 'toolOutputs') return micaUi.theme.colors.toolShell;
+  if (key === 'toolCalls') return micaUi.theme.colors.toolDefault;
+  if (key === 'systemPrompt') return micaUi.theme.colors.accent;
+  if (key === 'skills') return micaUi.theme.colors.warning;
+  return micaUi.theme.colors.info;
 }
 
 function formatTokens(tokens: number): string {

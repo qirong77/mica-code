@@ -43,11 +43,7 @@ function defaultShell(): string {
 }
 
 function resolveCwd(cwd: string | undefined): { ok: true; cwd: string } | { ok: false; message: string } {
-  const root = process.cwd();
-  const resolved = cwd?.trim() ? path.resolve(root, cwd) : root;
-  if (!isInsideOrSame(root, resolved)) {
-    return { ok: false, message: `cwd must stay inside workspace: ${cwd}` };
-  }
+  const resolved = cwd?.trim() ? path.resolve(process.cwd(), cwd) : process.cwd();
   try {
     const stat = statSync(resolved);
     if (!stat.isDirectory()) return { ok: false, message: `cwd is not a directory: ${cwd}` };
@@ -56,11 +52,6 @@ function resolveCwd(cwd: string | undefined): { ok: true; cwd: string } | { ok: 
     return { ok: false, message: `cwd is not accessible: ${cwd} (${message})` };
   }
   return { ok: true, cwd: resolved };
-}
-
-function isInsideOrSame(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 export class ToolRunShell extends MicaTool {
@@ -72,7 +63,7 @@ export class ToolRunShell extends MicaTool {
         timeout: { type: 'number', description: '超时毫秒，默认 30000，有效范围 250-120000' },
         cwd: {
           type: 'string',
-          description: '命令工作目录。默认当前 workspace 根目录；相对路径会基于当前 workspace 解析。',
+          description: '命令工作目录。默认当前进程目录；相对路径会基于当前进程目录解析。',
         },
         run_in_background: {
           type: 'boolean',

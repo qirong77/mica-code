@@ -1,4 +1,5 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -66,6 +67,19 @@ describe('ToolRunShell', () => {
     const result = await tool.execute({
       command: bunEval('console.log(process.cwd())'),
       cwd: 'packages/mica-tools',
+    });
+
+    expect(result).toContain(`cwd: ${cwd}`);
+    expect(result).toContain(`[stdout]\n${cwd}`);
+  });
+
+  it('allows cwd outside the workspace', async () => {
+    const tool = new ToolRunShell();
+    const cwd = realpathSync(tmpdir());
+
+    const result = await tool.execute({
+      command: bunEval('console.log(process.cwd())'),
+      cwd,
     });
 
     expect(result).toContain(`cwd: ${cwd}`);
