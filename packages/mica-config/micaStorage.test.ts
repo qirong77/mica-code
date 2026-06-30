@@ -25,7 +25,7 @@ afterAll(() => {
 });
 
 describe('mica storage runtime config', () => {
-  it('keeps last-used provider, model, and effort scoped to the exact cwd', () => {
+  it('uses global last-used config as fallback while keeping exact cwd overrides', () => {
     const projectA = join(tempHome, 'project-a');
     const projectB = join(tempHome, 'project-b');
     mkdirSync(projectA, { recursive: true });
@@ -36,7 +36,8 @@ describe('mica storage runtime config', () => {
     storageApi.updateProviderPreference('a', { model: 'b', effort: 'high' });
 
     process.chdir(projectB);
-    expect(storageApi.readLastUsedConfig()).toEqual({});
+    expect(storageApi.readLastUsedConfig()).toMatchObject({ provider: 'a', model: 'b', effort: 'high' });
+    expect(storageApi.readProviderPreference('a')).toEqual({ model: 'b', effort: 'high' });
     storageApi.updateLastUsedConfig({ provider: 'a', model: 'b', effort: 'low' });
     storageApi.updateProviderPreference('a', { model: 'b', effort: 'low' });
 
@@ -49,8 +50,10 @@ describe('mica storage runtime config', () => {
     expect(storageApi.readProviderPreference('a')).toEqual({ model: 'b', effort: 'low' });
 
     const persisted = JSON.parse(readFileSync(storageApi.MICA_STORAGE_PATH, 'utf-8')) as {
+      lastUsed?: Record<string, unknown>;
       lastUsedByDirectory?: Record<string, unknown>;
     };
+    expect(persisted.lastUsed).toMatchObject({ provider: 'a', model: 'b', effort: 'low' });
     expect(Object.keys(persisted.lastUsedByDirectory ?? {}).sort()).toEqual(
       [realpathSync(projectA), realpathSync(projectB)].sort(),
     );

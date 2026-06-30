@@ -21,7 +21,7 @@ export interface LastUsedConfig {
 
 export interface MicaStorageFile {
   version: 1;
-  /** Legacy global runtime selection. New writes go to lastUsedByDirectory. */
+  /** Global fallback runtime selection for directories without an exact entry. */
   lastUsed?: LastUsedConfig;
   lastUsedByDirectory?: Record<string, LastUsedConfig>;
   inputHistory?: string[];
@@ -50,13 +50,18 @@ export function updateMicaStorage(updater: (storage: MicaStorageFile) => MicaSto
 }
 
 export function readLastUsedConfig(directory = getCurrentDirectory()): LastUsedConfig {
-  return readDirectoryLastUsedConfig(readMicaStorage(), directory) ?? {};
+  const storage = readMicaStorage();
+  return readDirectoryLastUsedConfig(storage, directory) ?? storage.lastUsed ?? {};
 }
 
 export function updateLastUsedConfig(update: LastUsedConfig, directory = getCurrentDirectory()): LastUsedConfig {
   const directoryPath = normalizeDirectoryPath(directory);
   const next = updateMicaStorage((storage) => ({
     ...storage,
+    lastUsed: {
+      ...(storage.lastUsed ?? {}),
+      ...dropUndefined(update),
+    },
     lastUsedByDirectory: {
       ...(storage.lastUsedByDirectory ?? {}),
       [directoryPath]: {
@@ -80,18 +85,30 @@ export function updateProviderPreference(
   const directoryPath = normalizeDirectoryPath(directory);
   const next = updateMicaStorage((storage) => {
     const currentLastUsed = readLastUsedConfigForStorage(storage, directoryPath);
+    const currentGlobalLastUsed = storage.lastUsed ?? {};
+    const nextPreference = {
+      ...(currentLastUsed.providerPreferences?.[providerId] ?? {}),
+      ...dropUndefined(preference),
+    };
     return {
       ...storage,
+      lastUsed: {
+        ...currentGlobalLastUsed,
+        providerPreferences: {
+          ...(currentGlobalLastUsed.providerPreferences ?? {}),
+          [providerId]: {
+            ...(currentGlobalLastUsed.providerPreferences?.[providerId] ?? {}),
+            ...dropUndefined(preference),
+          },
+        },
+      },
       lastUsedByDirectory: {
         ...(storage.lastUsedByDirectory ?? {}),
         [directoryPath]: {
           ...currentLastUsed,
           providerPreferences: {
             ...(currentLastUsed.providerPreferences ?? {}),
-            [providerId]: {
-              ...(currentLastUsed.providerPreferences?.[providerId] ?? {}),
-              ...dropUndefined(preference),
-            },
+            [providerId]: nextPreference,
           },
         },
       },

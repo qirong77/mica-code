@@ -40,6 +40,7 @@ export class Application {
 
     try {
       micaConfig.assertValid();
+      await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);
       const commands = new micaCommands.CommandRegistry();
@@ -120,6 +121,16 @@ export class Application {
     this.context?.agentSessions.stop();
     if (this.context) clearActiveContext(this.context);
   }
+}
+
+async function ensureInitialModelSelection(): Promise<void> {
+  const config = micaConfig.get();
+  if (config.model) return;
+
+  const provider = config.providers.find((item) => item.id === config.provider);
+  if (!provider?.get_model_url) return;
+
+  await micaConfig.loadProviderModels(provider.id);
 }
 
 function toLogData(data: unknown): Record<string, unknown> | undefined {
