@@ -3,6 +3,7 @@ import { createClearCommand } from './clear.js';
 import { createCommitCommand } from './commit.js';
 import { createCompactCommand } from './compact.js';
 import { createCopyCommand } from './copy.js';
+import { createContextCommand } from './context.js';
 import { createEffortCommand } from './effort.js';
 import { createExitCommand } from './exit.js';
 import { createForkCommand } from './fork.js';
@@ -24,6 +25,7 @@ export const micaBuiltinCommands = {
   createCommitCommand,
   createCompactCommand,
   createCopyCommand,
+  createContextCommand,
   createEffortCommand,
   createExitCommand,
   createForkCommand,

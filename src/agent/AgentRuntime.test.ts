@@ -1,8 +1,47 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { micaConfig } from '@packages/mica-config/index.js';
+import type { EffortOption, IMicaConfig, ProviderDefinition } from '@packages/mica-config/index.js';
 import type { AgentQueryContent, AgentQueryOptions, AgentUsageRecord, IAgent, ModelClientOptions } from '@packages/mica-agent/index.js';
 
 const modelClient = createModelClientStub();
+
+let configState: IMicaConfig | null = null;
+const testConfig: IMicaConfig = {
+  provider: 'test-provider',
+  model: 'test-model',
+  effort: 'none',
+  contextWindowSize: 1000,
+  providers: [
+    {
+      id: 'test-provider',
+      name: 'Test Provider',
+      api_base: 'https://example.com/v1',
+      api_key: 'test-key',
+      model: 'test-model',
+      models: ['test-model'],
+      contextWindowSize: 1000,
+      supportsEffort: false,
+    },
+  ],
+};
+
+vi.mock('@packages/mica-config/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@packages/mica-config/index.js')>();
+  return {
+    ...actual,
+    micaConfig: {
+      ...actual.micaConfig,
+      get: () => configState,
+      update: (updater: (c: IMicaConfig) => IMicaConfig) => {
+        if (!configState) throw new Error('config not initialized');
+        configState = updater(configState);
+        return configState;
+      },
+      assertValid: () => {},
+      clampProviderEffort: (_p: ProviderDefinition, effort: EffortOption) => effort,
+      getModelContextWindowSizeFromConfig: () => 1000,
+    },
+  };
+});
 
 vi.mock('@packages/mica-agent/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@packages/mica-agent/index.js')>();
@@ -18,24 +57,7 @@ vi.mock('@packages/mica-agent/index.js', async (importOriginal) => {
 describe('AgentRuntime tool status', () => {
   beforeEach(() => {
     modelClient.resetState();
-    micaConfig.update(() => ({
-      provider: 'test-provider',
-      model: 'test-model',
-      effort: 'none',
-      contextWindowSize: 1000,
-      providers: [
-        {
-          id: 'test-provider',
-          name: 'Test Provider',
-          api_base: 'https://example.com/v1',
-          api_key: 'test-key',
-          model: 'test-model',
-          models: ['test-model'],
-          contextWindowSize: 1000,
-          supportsEffort: false,
-        },
-      ],
-    }));
+    configState = { ...testConfig, providers: [...testConfig.providers] };
   });
 
   it('returns to model-waiting status after a tool result is received', async () => {

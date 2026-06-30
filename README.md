@@ -111,6 +111,7 @@ bun run dev
 - `/model`：切换模型。
 - `/effort`：切换推理努力等级。
 - `/status`：查看当前 provider、model、上下文和 token 状态。
+- `/context`：查看当前上下文占用总览，包括 tool schemas、tool outputs、conversation、system prompt 与 skills 估算分布。
 - `/new`：新建 agent 并切换；`/new <text>` 后台创建并运行，不切换当前 agent。
 - `/log`：查看运行时日志；`/log export` 导出当前对话与日志。
 - `/agents clear`：清除非当前且空闲的 agent。

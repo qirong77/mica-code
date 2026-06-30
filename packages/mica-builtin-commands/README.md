@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如 `/model`、`/provider`、`/resume`、`/mcp`、`/skills`、`/log`、`/status`、`/compact`、`/agents`、`/fork`、`/rewind`、`/commit`、`/clear`。
+- 注册产品内置命令，例如 `/model`、`/provider`、`/resume`、`/mcp`、`/skills`、`/log`、`/status`、`/context`、`/compact`、`/agents`、`/fork`、`/rewind`、`/commit`、`/clear`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 provider、resume、mcp、skills、agents。
 - 支持运行时控制类命令，例如切换模型、恢复会话、导出日志、压缩上下文、多 agent 切换与分叉。
@@ -33,5 +33,5 @@ const commands = micaBuiltinCommands.createBuiltInCommands(services);
 - `mcp.tsx`、`skills.tsx`：MCP 与 skills 管理命令。
 - `agents.tsx`、`fork.ts`、`rewind.tsx`：多 agent、分叉与回退相关命令。
 - `compact.ts`：上下文压缩命令。
-- `log.tsx`、`status.tsx`：日志查看、日志导出与状态查看命令。
+- `log.tsx`、`status.tsx`、`context.tsx`：日志查看、日志导出、状态查看与上下文总览命令。
 - `commit.ts`、`gitDiffContext.ts`：提交辅助命令。
