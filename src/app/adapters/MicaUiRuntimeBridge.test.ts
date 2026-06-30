@@ -9,6 +9,7 @@ const uiMocks = (() => {
   return {
     appendAgentTurnLogItem: fn(),
     cachedTokenRateSet: fn(),
+    clearAgentTurnLogItems: fn(),
     clearLogEntries: fn(),
     clearPendingInput: fn(),
     clearResponseText: fn(),
@@ -54,6 +55,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
     panels: {
       appendAgentTurnLogItem: uiMocks.appendAgentTurnLogItem,
       cachedTokenRate: { set: uiMocks.cachedTokenRateSet },
+      clearAgentTurnLogItems: uiMocks.clearAgentTurnLogItems,
       clearLogEntries: uiMocks.clearLogEntries,
       contextSize: { set: uiMocks.contextSizeSet },
       modelDisplay: {
@@ -175,6 +177,7 @@ function createSession(agent: AgentRuntime): TerminalAgentSession {
     sessionController: {} as TerminalAgentSession['sessionController'],
     startedAt: new Date(0).toISOString(),
     status: { type: 'error' },
+    titleOverride: null,
     uiState: {
       agentTurnLogItems: [logItem],
       cachedTokenRate: 0,

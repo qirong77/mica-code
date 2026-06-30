@@ -29,6 +29,38 @@ afterAll(() => {
 });
 
 describe('SessionController', () => {
+  it('preserves a manually renamed current session across later saves', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'test-provider',
+        model: 'test-model',
+        effort: 'none' as const,
+        messages: [{ role: 'user', content: 'original prompt' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'original prompt' }]),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.renameCurrent('Manual title');
+    controller.saveCurrent();
+
+    expect(saves.at(-1)?.title).toBe('Manual title');
+    expect(controller.getCurrentTitle()).toBe('Manual title');
+  });
+
   it('clamps restored session effort before reloading config', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const { SessionController } = await import('./SessionController.js');

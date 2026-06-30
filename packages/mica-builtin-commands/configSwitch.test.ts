@@ -303,6 +303,7 @@ function makeSession(): CommandSessionController {
     resume: () => ({ ok: false, message: 'not found' }),
     startNewSession: vi.fn(),
     saveCurrent: vi.fn(),
+    renameCurrent: vi.fn(),
   };
 }
 
@@ -318,6 +319,7 @@ function makeServices(): CommandRuntimeServices {
     getCurrentAgentSessionId: () => 'session-1',
     getCurrentAgent: () => undefined,
     getCurrentSessionController: () => undefined,
+    renameCurrentAgentSession: vi.fn(),
     listRunningAgents: () => [],
     clearIdleAgents: () => ({ cleared: [], remaining: [] }),
     newAgentSession: makeRunningAgent,

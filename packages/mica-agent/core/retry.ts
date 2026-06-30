@@ -1,7 +1,7 @@
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 3000;
 
-function isRetryableError(error: unknown): boolean {
+export function isRetryableError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const err = error as Record<string, unknown>;
 

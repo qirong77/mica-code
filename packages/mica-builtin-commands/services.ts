@@ -46,6 +46,8 @@ export type CommandSessionController = {
   resume(id: string): ResumeSessionResult;
   startNewSession(): void;
   saveCurrent(): void;
+  renameCurrent(title: string): void;
+  getCurrentTitle?(): string | null;
 };
 
 export type RunningAgentRecord = {
@@ -91,6 +93,7 @@ export type CommandRuntimeServices = {
   getCurrentAgentSessionId(): string | undefined;
   getCurrentAgent(): CommandAgent | undefined;
   getCurrentSessionController(): CommandSessionController | undefined;
+  renameCurrentAgentSession(title: string): void;
   listRunningAgents(): RunningAgentRecord[];
   clearIdleAgents(): ClearIdleAgentsResult;
   newAgentSession(): RunningAgentRecord;

@@ -91,7 +91,11 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         session?.agent ?? (agent as AgentRuntime),
         session?.sessionController ?? (sessionController as SessionController | undefined),
       );
-      if (session) session.uiState = normalizeUiState({ ...captureSessionUi(), lastTurnOutcome: 'idle' });
+      if (session) {
+        session.titleOverride = session.sessionController.getCurrentTitle();
+        session.uiState = normalizeUiState({ ...captureSessionUi(), lastTurnOutcome: 'idle' });
+        context?.uiBridge.syncAgentStatusItems();
+      }
     },
     showMessage(text, ttl, ownerSessionId) {
       const context = currentContext();
@@ -139,6 +143,12 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     },
     getCurrentSessionController() {
       return currentContext()?.agentSessions.current().sessionController;
+    },
+    renameCurrentAgentSession(title) {
+      const context = currentContext();
+      if (!context) return;
+      context.agentSessions.renameCurrent(title);
+      context.uiBridge.syncAgentStatusItems();
     },
     listRunningAgents() {
       return currentContext()?.agentSessions.list() ?? [];
@@ -228,7 +238,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const context = currentContext();
       const session = context?.agentSessions.current();
       if (!session) return;
+      session.titleOverride = session.sessionController.getCurrentTitle();
       session.uiState = normalizeUiState(captureSessionUi());
+      context?.uiBridge.syncAgentStatusItems();
     },
     getRewindPreview() {
       const runtime = currentContext()?.runtime;

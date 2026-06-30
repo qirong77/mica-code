@@ -37,6 +37,7 @@ export type SessionControllerOptions = {
 
 export class SessionController {
   private currentSessionId = micaSession.createId();
+  private currentTitleOverride: string | null = null;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
   private readonly config: SessionConfigAdapter;
@@ -56,6 +57,7 @@ export class SessionController {
 
   startNewSession(): void {
     this.currentSessionId = micaSession.createId();
+    this.currentTitleOverride = null;
   }
 
   saveCurrent(options: { allowEmpty?: boolean } = {}): void {
@@ -67,13 +69,35 @@ export class SessionController {
     const session: PersistedSession = {
       version: 1,
       id: this.currentSessionId,
-      title: deriveTitle(this.agent.toConversationMessages()),
+      title: this.currentTitleOverride ?? deriveTitle(this.agent.toConversationMessages()),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
       snapshot: toPersistedSnapshot(snapshot),
     };
     this.store.save(session);
+  }
+
+  renameCurrent(title: string): void {
+    const now = new Date().toISOString();
+    const nextTitle = normalizeSessionTitle(title);
+    this.currentTitleOverride = nextTitle;
+
+    const existing = this.store.load(this.currentSessionId);
+    const snapshot = this.agent.getSnapshot();
+    this.store.save({
+      version: 1,
+      id: this.currentSessionId,
+      title: nextTitle,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      cwd: process.cwd(),
+      snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot),
+    });
+  }
+
+  getCurrentTitle(): string | null {
+    return this.currentTitleOverride;
   }
 
   resume(id: string): ResumeSessionResult {
@@ -84,9 +108,15 @@ export class SessionController {
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot));
     this.currentSessionId = session.id;
+    const derivedTitle = deriveTitle(this.agent.toConversationMessages());
+    this.currentTitleOverride = session.title === derivedTitle ? null : session.title;
     this.ui.restore(this.agent, session.snapshot.lastUsage);
     return { ok: true, session };
   }
+}
+
+function normalizeSessionTitle(title: string): string {
+  return title.trim() || 'Untitled session';
 }
 
 const defaultSessionConfigAdapter: SessionConfigAdapter = {

@@ -47,6 +47,12 @@ export function createActiveSessionControllerProxy(fallback: SessionController):
     saveCurrent() {
       current().saveCurrent();
     },
+    renameCurrent(title: string) {
+      current().renameCurrent(title);
+    },
+    getCurrentTitle() {
+      return current().getCurrentTitle();
+    },
   };
 }
 

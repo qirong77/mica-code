@@ -51,6 +51,7 @@ export type TerminalAgentSession = {
   index: number;
   agent: AgentRuntime;
   sessionController: SessionController;
+  titleOverride: string | null;
   uiState: TerminalAgentUiState;
   startedAt: string;
   updatedAt: string;
@@ -121,6 +122,13 @@ export class TerminalAgentSessionManager {
     return this.toRecord(session);
   }
 
+  renameCurrent(title: string): TerminalAgentSessionRecord {
+    const session = this.current();
+    session.titleOverride = normalizeTitle(title);
+    session.updatedAt = new Date().toISOString();
+    return this.toRecord(session);
+  }
+
   clearIdleSessions(): { cleared: TerminalAgentSessionRecord[]; remaining: TerminalAgentSessionRecord[] } {
     const cleared: TerminalAgentSessionRecord[] = [];
     for (let index = this.sessions.length - 1; index >= 0; index--) {
@@ -153,6 +161,7 @@ export class TerminalAgentSessionManager {
       index: this.nextIndex,
       agent,
       sessionController,
+      titleOverride: sessionController.getCurrentTitle(),
       uiState: createEmptyUiState(),
       startedAt: now,
       updatedAt: now,
@@ -177,11 +186,13 @@ export class TerminalAgentSessionManager {
     return {
       id: session.id,
       index: session.index,
-      title: deriveTitle(
-        session.uiState.conversationMessages.length
-          ? session.uiState.conversationMessages
-          : session.agent.toConversationMessages(),
-      ),
+      title:
+        session.titleOverride ??
+        deriveTitle(
+          session.uiState.conversationMessages.length
+            ? session.uiState.conversationMessages
+            : session.agent.toConversationMessages(),
+        ),
       cwd: process.cwd(),
       providerId: provider.id,
       providerName: provider.name ?? provider.id,
@@ -238,6 +249,10 @@ function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']
   const title = text.replace(/\s+/g, ' ').trim();
   if (!title) return 'New session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
+}
+
+function normalizeTitle(title: string): string {
+  return title.trim() || 'Untitled session';
 }
 
 function contentToText(content: ReturnType<AgentRuntime['toConversationMessages']>[number]['content']): string {

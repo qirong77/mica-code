@@ -8,8 +8,10 @@ import { AnthropicHistoryNormalizer } from './providers/AnthropicHistoryNormaliz
 import { BaseAgent } from './core/Agent.js';
 import { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsageHistory } from './core/Usage.js';
 import { buildSystemPrompt, buildSystemPromptForTest } from './prompt/index.js';
+import { isRetryableError } from './core/retry.js';
 
 export const micaAgent = {
+  isRetryableError,
   /** 按 provider.protocol 创建支持工具调用和流式事件的模型 client。 */
   createModelClient,
   /** 创建不启用工具、不使用 reasoning effort 的轻量子 agent。 */

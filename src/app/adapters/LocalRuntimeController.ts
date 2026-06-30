@@ -1,4 +1,5 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
@@ -29,6 +30,8 @@ import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.j
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
+const MAX_TURN_RETRIES = 2;
+const TURN_RETRY_DELAY_MS = 5000;
 
 type RuntimeActiveContext = {
   agentSessions: {
@@ -348,6 +351,15 @@ export class LocalRuntimeController implements RuntimeController {
 
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
     this.rewindCheckpoints.capture(agent, input);
+
+    // Capture pre-turn client state so we can restore it before each retry.
+    const preTurnSnapshot = agent.captureClientSnapshot();
+    let hadToolCall = false;
+    const markToolCall = () => {
+      hadToolCall = true;
+    };
+    agent.events.on('toolCall', markToolCall);
+
     this.responseBuffers.set(agent, '');
     const activeContext = getActiveContext<RuntimeActiveContext>();
     const session = activeContext?.agentSessions.findByAgent(agent);
@@ -372,7 +384,10 @@ export class LocalRuntimeController implements RuntimeController {
       micaUi.terminalInput.clearText();
       micaUi.conversation.appendUserMessage(content);
       micaUi.conversation.clearResponseText();
-      if (clearPreviousTurnUi) micaUi.panels.clearLogEntries();
+      if (clearPreviousTurnUi) {
+        micaUi.panels.clearLogEntries();
+        micaUi.panels.clearAgentTurnLogItems();
+      }
       micaUi.panels.status.connecting();
     }
 
@@ -380,32 +395,74 @@ export class LocalRuntimeController implements RuntimeController {
       await this.hooks.emit('turn:before', { runtime: this, input, content });
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
-      const result = await agent.run(content, {
-        onIterationComplete: () => this.takeQueuedIterationInput(agent),
-      });
-      runId = result.runId;
-      const finalText = result.text;
-      if (!agent.isCurrent(runId)) return;
+      let lastError: unknown;
+      for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
+        if (attempt > 0) {
+          // Restore client state to before the turn, clearing any partial tool results.
+          if (preTurnSnapshot) {
+            agent.restoreClientSnapshot(preTurnSnapshot);
+          }
+          this.responseBuffers.set(agent, '');
 
-      const responseBuffer = this.responseBuffers.get(agent) ?? '';
-      this.responseBuffers.set(agent, '');
-      if (session) {
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          conversationMessages: agent.toConversationMessages(),
-          responseText: '',
-        });
-      }
-      if (this.isActiveAgent(agent)) {
-        micaUi.conversation.appendAssistantMessage([
-          { type: 'text', text: responseBuffer || finalText || '(empty response)' },
-        ]);
-        micaUi.conversation.clearResponseText();
-      }
+          micaLogger.logRuntime(
+            'runtime',
+            'turn:retry',
+            {
+              attempt,
+              maxRetries: MAX_TURN_RETRIES,
+              error: lastError instanceof Error ? lastError.message : String(lastError),
+            },
+            'warn',
+          );
 
-      await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
-      sessionController.saveCurrent();
-      micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
+          if (this.isActiveAgent(agent)) {
+            micaUi.conversation.clearResponseText();
+            micaUi.panels.thinkingText.set('');
+            micaUi.panels.status.connecting();
+          }
+
+          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS);
+        }
+
+        try {
+          const result = await agent.run(content, {
+            onIterationComplete: () => this.takeQueuedIterationInput(agent),
+          });
+          runId = result.runId;
+          const finalText = result.text;
+          if (!agent.isCurrent(runId)) return;
+
+          const responseBuffer = this.responseBuffers.get(agent) ?? '';
+          this.responseBuffers.set(agent, '');
+          if (session) {
+            session.uiState = normalizeUiState({
+              ...session.uiState,
+              conversationMessages: agent.toConversationMessages(),
+              responseText: '',
+            });
+          }
+          if (this.isActiveAgent(agent)) {
+            micaUi.conversation.appendAssistantMessage([
+              { type: 'text', text: responseBuffer || finalText || '(empty response)' },
+            ]);
+            micaUi.conversation.clearResponseText();
+          }
+
+          await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
+          sessionController.saveCurrent();
+          micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
+          return;
+        } catch (error) {
+          if (error instanceof AgentAbortError) {
+            throw error;
+          }
+          lastError = error;
+          if (hadToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
+            throw error;
+          }
+          await this.hooks.emit('turn:error', { runtime: this, input, content, error });
+        }
+      }
     } catch (error) {
       if (error instanceof AgentAbortError) {
         wasAborted = true;
@@ -466,6 +523,7 @@ export class LocalRuntimeController implements RuntimeController {
         micaUi.panels.appendAgentTurnLogItem(errorLogItem);
       }
     } finally {
+      agent.events.off('toolCall', markToolCall);
       this.runningAgents.delete(agent);
       this.clearingAgents.delete(agent);
       if (!hasError && !wasAborted && session) {
@@ -552,7 +610,27 @@ export class LocalRuntimeController implements RuntimeController {
 }
 
 function shouldClearPreviousTurnUi(outcome: TerminalAgentTurnOutcome | undefined): boolean {
-  return outcome === undefined || outcome === 'idle' || outcome === 'completed';
+  return outcome === undefined || outcome === 'idle' || outcome === 'completed' || outcome === 'error';
+}
+
+function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {
+  const delayRunId = agent.activeRunId;
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      fn();
+    };
+    const timer = setTimeout(() => finish(resolve), delayMs);
+    const poll = setInterval(() => {
+      if (agent.activeRunId !== delayRunId) {
+        finish(() => reject(new AgentAbortError(agent.activeRunId)));
+      }
+    }, 300);
+  });
 }
 
 function appendAbortedResponseForDisplay(

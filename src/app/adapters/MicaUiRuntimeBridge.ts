@@ -78,7 +78,10 @@ export class MicaUiRuntimeBridge {
           thinkingText: preservePreviousTurnUi ? session.uiState.thinkingText : '',
           lastTurnOutcome: 'running',
         });
-        if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) micaUi.panels.clearLogEntries();
+        if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) {
+          micaUi.panels.clearLogEntries();
+          micaUi.panels.clearAgentTurnLogItems();
+        }
       }
       if (event.type === 'turn:finished') {
         this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();

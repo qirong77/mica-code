@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { formatExecError, gitText, safeGitText } from '@packages/mica-common/index.js';
+import { formatExecError, gitText, gitTextAsync, safeGitText, safeGitTextAsync } from '@packages/mica-common/index.js';
 
 const MAX_SUMMARY_CHARS = 20_000;
 const MAX_TOTAL_DIFF_CHARS = 12_000;
@@ -13,6 +13,7 @@ const MAX_CHANGED_FILES_LINES = 100;
 const MAX_STAT_LINES = 80;
 const MAX_NAME_STATUS_LINES = 120;
 const MAX_UNTRACKED_FILE_CHARS = 16_000;
+const MAX_DIFF_FILE_CONCURRENCY = 4;
 const COMMIT_TYPES = [
   'feat: 新功能 ✨',
   'fix: 问题修复 🐛',
@@ -73,7 +74,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
       return;
     }
 
-    const summary = buildChangeSummary(status);
+    const summary = await buildChangeSummary(status);
     micaLogger.logRuntime('plugin.commit', 'summary:built', { chars: summary.length });
     const commitMessage = await generateCommitMessage(agent, summary);
     micaLogger.logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
@@ -97,7 +98,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     micaLogger.logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
     setCommitStatus(agent, services, `commit: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
-    const pushed = pushCurrentBranch();
+    const pushed = await pushCurrentBranch();
     showTerminalMessage(
       services,
       pushed
@@ -115,15 +116,21 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
   }
 }
 
-function buildChangeSummary(status: string) {
+async function buildChangeSummary(status: string) {
   const changedFiles = parsePorcelainStatus(status);
   micaLogger.logRuntime('plugin.commit', 'changes:parsed', { files: changedFiles.length });
-  const stat = safeGit(['diff', '--stat', '--no-color']) || safeGit(['diff', '--cached', '--stat', '--no-color']);
-  const nameStatus = [safeGit(['diff', '--name-status', '--no-color']), safeGit(['diff', '--cached', '--name-status', '--no-color'])]
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-  const diffSamples = buildDiffSamples(changedFiles);
+
+  const [stat, nameStatus, diffSamples] = await Promise.all([
+    safeGitTextAsync(['diff', '--stat', '--no-color']).then(
+      (s) => s || safeGitTextAsync(['diff', '--cached', '--stat', '--no-color']),
+    ),
+    Promise.all([
+      safeGitTextAsync(['diff', '--name-status', '--no-color']),
+      safeGitTextAsync(['diff', '--cached', '--name-status', '--no-color']),
+    ]).then(([a, b]) => [a, b].filter(Boolean).join('\n').trim()),
+    buildDiffSamples(changedFiles),
+  ]);
+
   const statusSummary = summarizeStatus(changedFiles);
 
   const summary = [
@@ -182,19 +189,26 @@ async function generateCommitMessage(agent: CommandAgent, summary: string) {
   return sanitizeCommitMessage(response);
 }
 
-function buildDiffSamples(files: Array<{ status: string; path: string }>) {
+async function buildDiffSamples(files: Array<{ status: string; path: string }>) {
   let remaining = MAX_TOTAL_DIFF_CHARS;
   const sections: string[] = [];
+  const prioritized = prioritizeFilesForDiff(files);
 
-  for (const file of prioritizeFilesForDiff(files)) {
-    if (remaining <= 0) break;
-    const diff = getCompactDiff(file);
-    if (!diff.trim()) continue;
+  for (let index = 0; index < prioritized.length && remaining > 0; index += MAX_DIFF_FILE_CONCURRENCY) {
+    const batch = prioritized.slice(index, index + MAX_DIFF_FILE_CONCURRENCY);
+    const diffs = await Promise.all(batch.map((file) => getCompactDiff(file)));
 
-    const sample = truncateByHunks(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
-    sections.push(`--- ${file.path}\n${sample}`);
-    remaining -= sample.length;
-    micaLogger.logRuntime('plugin.commit', 'diff:sampled', { file: file.path, chars: sample.length });
+    for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
+      if (remaining <= 0) break;
+      const file = batch[batchIndex]!;
+      const diff = diffs[batchIndex] ?? '';
+      if (!diff.trim()) continue;
+
+      const sample = truncateByHunks(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
+      sections.push(`--- ${file.path}\n${sample}`);
+      remaining -= sample.length;
+      micaLogger.logRuntime('plugin.commit', 'diff:sampled', { file: file.path, chars: sample.length });
+    }
   }
 
   if (remaining <= 0) {
@@ -205,11 +219,13 @@ function buildDiffSamples(files: Array<{ status: string; path: string }>) {
   return sections.join('\n\n');
 }
 
-function getCompactDiff(file: { status: string; path: string }) {
+async function getCompactDiff(file: { status: string; path: string }) {
   if (isLowValueDiffFile(file.path)) return lowValueDiffSummary(file);
-  const stagedDiff = safeGit(['diff', '--cached', '--unified=0', '--no-color', '--', file.path]);
-  const unstagedDiff = safeGit(['diff', '--unified=0', '--no-color', '--', file.path]);
-  const untrackedSample = file.status === '??' ? readUntrackedFileSample(file.path) : '';
+  const [stagedDiff, unstagedDiff, untrackedSample] = await Promise.all([
+    safeGitTextAsync(['diff', '--cached', '--unified=0', '--no-color', '--', file.path]),
+    safeGitTextAsync(['diff', '--unified=0', '--no-color', '--', file.path]),
+    file.status === '??' ? readUntrackedFileSample(file.path) : Promise.resolve(''),
+  ]);
   return [
     stagedDiff.trim() ? `[staged]\n${compactDiff(stagedDiff)}` : '',
     unstagedDiff.trim() ? `[unstaged]\n${compactDiff(unstagedDiff)}` : '',
@@ -231,11 +247,15 @@ function isLowValueDiffFile(path: string) {
   );
 }
 
-function lowValueDiffSummary(file: { status: string; path: string }) {
-  const stat =
-    safeGit(['diff', '--stat', '--no-color', '--', file.path]) ||
-    safeGit(['diff', '--cached', '--stat', '--no-color', '--', file.path]);
-  return [`[low-value large/generated file: ${file.status.trim() || 'changed'}]`, stat.trim()].filter(Boolean).join('\n');
+async function lowValueDiffSummary(file: { status: string; path: string }) {
+  const [statA, statB] = await Promise.all([
+    safeGitTextAsync(['diff', '--stat', '--no-color', '--', file.path]),
+    safeGitTextAsync(['diff', '--cached', '--stat', '--no-color', '--', file.path]),
+  ]);
+  const stat = statA || statB;
+  return [`[low-value large/generated file: ${file.status.trim() || 'changed'}]`, stat.trim()]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function compactDiff(diff: string) {
@@ -300,7 +320,10 @@ function summarizeStatus(files: Array<{ status: string; path: string }>) {
     const key = normalizeStatus(file.status);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
-  return [`total files: ${files.length}`, ...[...counts.entries()].map(([status, count]) => `${status}: ${count}`)].join('\n');
+  return [
+    `total files: ${files.length}`,
+    ...[...counts.entries()].map(([status, count]) => `${status}: ${count}`),
+  ].join('\n');
 }
 
 function normalizeStatus(status: string) {
@@ -371,11 +394,11 @@ function commitWithMessage(message: string) {
   }
 }
 
-function pushCurrentBranch() {
+async function pushCurrentBranch() {
   const upstream = safeGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim();
   if (upstream) {
     micaLogger.logRuntime('plugin.commit', 'push:start', { upstream });
-    git(['push'], 120_000);
+    await gitAsync(['push'], 120_000);
     return true;
   }
 
@@ -387,7 +410,7 @@ function pushCurrentBranch() {
   }
 
   micaLogger.logRuntime('plugin.commit', 'push:start', { branch, remote: 'origin' });
-  git(['push', 'origin', branch], 120_000);
+  await gitAsync(['push', 'origin', branch], 120_000);
   return true;
 }
 
@@ -397,6 +420,10 @@ function git(args: string[], timeout = 30_000) {
 
 function safeGit(args: string[], timeout = 30_000) {
   return safeGitText(args, { timeout });
+}
+
+async function gitAsync(args: string[], timeout = 30_000) {
+  return gitTextAsync(args, { timeout });
 }
 
 function truncate(text: string, maxChars: number) {

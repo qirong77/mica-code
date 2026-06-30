@@ -115,6 +115,10 @@ export class AgentRuntime {
     return this.activeAbortController !== null;
   }
 
+  get activeRunId() {
+    return this.runId;
+  }
+
   createSubAgent(options: Partial<ModelClientOptions> = {}) {
     if (!this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
@@ -211,6 +215,22 @@ export class AgentRuntime {
       'warn',
     );
     return hadCurrentTurn;
+  }
+
+  captureClientSnapshot() {
+    const snapshot = this.client?.getSnapshot();
+    if (!snapshot) return null;
+    return {
+      ...snapshot,
+      messages: cloneJson(snapshot.messages),
+      usageHistory: cloneJson(snapshot.usageHistory),
+      lastUsage: cloneJson(snapshot.lastUsage),
+      conversationMessages: cloneJson(snapshot.conversationMessages),
+    };
+  }
+
+  restoreClientSnapshot(snapshot: AgentSnapshot<unknown, AgentUsageRecord>) {
+    this.client?.loadSnapshot(snapshot);
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot) {
@@ -388,6 +408,11 @@ export class AgentRuntime {
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;
   }
+}
+
+function cloneJson<T>(value: T): T {
+  if (value === undefined) return value;
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function statusKey(status: AgentRuntimeStatus): string {
