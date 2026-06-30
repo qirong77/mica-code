@@ -1,5 +1,5 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
-import { dirname, resolve } from 'path';
+import { basename, dirname, resolve } from 'path';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
@@ -75,8 +75,97 @@ export class ToolApplyPatch extends MicaTool {
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
     const patch = typeof input.patch === 'string' ? input.patch : '';
-    return `apply_patch (${truncateDisplayText(`${patch.length}B`, 12)})`;
+    return truncateDisplayText(formatPatchDisplayText(patch), 0);
   }
+}
+
+function formatPatchDisplayText(patch: string): string {
+  try {
+    const operations = parsePatch(patch);
+    if (operations.length === 0) return `Patch ${patch.length}B`;
+
+    const target = formatPatchTargets(operations);
+    const detail = formatPatchDetail(operations);
+    return detail ? `Patch ${target} · ${detail}` : `Patch ${target}`;
+  } catch {
+    return `Patch ${patch.length}B`;
+  }
+}
+
+function formatPatchTargets(operations: PatchOperation[]): string {
+  const labels = operations.map((operation) => {
+    if (operation.type === 'update' && operation.moveTo) {
+      return `${basename(operation.path)} -> ${basename(operation.moveTo)}`;
+    }
+    return basename(operation.path);
+  });
+  const uniqueLabels = [...new Set(labels)];
+  if (uniqueLabels.length === 1) return uniqueLabels[0]!;
+  return `${uniqueLabels[0]} +${uniqueLabels.length - 1} more`;
+}
+
+function formatPatchDetail(operations: PatchOperation[]): string {
+  const counts = countPatchOperations(operations);
+  const lineDelta = countPatchLineDelta(operations);
+  const operationSummary = formatOperationSummary(counts);
+  const lineSummary = formatLineDelta(lineDelta);
+  const hasStructuralOperation = counts.add > 0 || counts.delete > 0 || counts.move > 0;
+
+  if (hasStructuralOperation && operationSummary && lineSummary) return `${operationSummary} · ${lineSummary}`;
+  if (hasStructuralOperation) return operationSummary;
+  return lineSummary || operationSummary;
+}
+
+function countPatchOperations(operations: PatchOperation[]): Record<AppliedChange['type'], number> {
+  return operations.reduce(
+    (acc, operation) => {
+      if (operation.type === 'add') acc.add++;
+      if (operation.type === 'delete') acc.delete++;
+      if (operation.type === 'update' && operation.moveTo) acc.move++;
+      if (operation.type === 'update' && !operation.moveTo) acc.update++;
+      return acc;
+    },
+    { add: 0, update: 0, delete: 0, move: 0 },
+  );
+}
+
+function countPatchLineDelta(operations: PatchOperation[]): { added: number; removed: number } {
+  return operations.reduce(
+    (acc, operation) => {
+      if (operation.type === 'add') {
+        acc.added += operation.lines.length;
+        return acc;
+      }
+      if (operation.type === 'delete') return acc;
+
+      for (const hunk of operation.hunks) {
+        for (const line of hunk.lines) {
+          if (line.type === 'add') acc.added++;
+          if (line.type === 'remove') acc.removed++;
+        }
+      }
+      return acc;
+    },
+    { added: 0, removed: 0 },
+  );
+}
+
+function formatOperationSummary(counts: Record<AppliedChange['type'], number>): string {
+  return [
+    counts.add ? `${counts.add} add` : undefined,
+    counts.update ? `${counts.update} update` : undefined,
+    counts.delete ? `${counts.delete} delete` : undefined,
+    counts.move ? `${counts.move} move` : undefined,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function formatLineDelta({ added, removed }: { added: number; removed: number }): string {
+  if (added > 0 && removed > 0) return `+${added}/-${removed}`;
+  if (added > 0) return `+${added}`;
+  if (removed > 0) return `-${removed}`;
+  return '';
 }
 
 function parsePatch(patch: string): PatchOperation[] {

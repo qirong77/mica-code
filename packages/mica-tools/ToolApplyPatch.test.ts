@@ -24,6 +24,60 @@ describe('ToolApplyPatch', () => {
     expect(getToolDefinitions().some((tool) => tool.name === 'apply_patch')).toBe(true);
   });
 
+  it('shows a concise single-file patch display text', () => {
+    const tool = new ToolApplyPatch();
+    const filePath = pathInTemp('update.txt');
+
+    expect(
+      tool.onToolUseDisplayText({
+        patch: `*** Begin Patch
+*** Update File: ${filePath}
+@@
+-old
++new
+*** End Patch
+`,
+      }),
+    ).toBe('Patch update.txt · +1/-1');
+  });
+
+  it('shows operation details for structural patch display text', () => {
+    const tool = new ToolApplyPatch();
+    const addPath = pathInTemp('added.txt');
+    const deletePath = pathInTemp('deleted.txt');
+
+    expect(
+      tool.onToolUseDisplayText({
+        patch: `*** Begin Patch
+*** Add File: ${addPath}
++hello
++world
+*** Delete File: ${deletePath}
+*** End Patch
+`,
+      }),
+    ).toBe('Patch added.txt +1 more · 1 add, 1 delete · +2');
+  });
+
+  it('shows file names for move patch display text', () => {
+    const tool = new ToolApplyPatch();
+    const oldPath = pathInTemp('old.txt');
+    const newPath = pathInTemp('new.txt');
+
+    expect(
+      tool.onToolUseDisplayText({
+        patch: `*** Begin Patch
+*** Update File: ${oldPath}
+*** Move to: ${newPath}
+@@
+-name=old
++name=new
+*** End Patch
+`,
+      }),
+    ).toBe('Patch old.txt -> new.txt · 1 move · +1/-1');
+  });
+
   it('adds a new file', async () => {
     const tool = new ToolApplyPatch();
     const filePath = pathInTemp('new-file.txt');
