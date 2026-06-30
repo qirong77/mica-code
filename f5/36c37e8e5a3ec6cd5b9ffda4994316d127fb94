@@ -1,0 +1,14 @@
+packages/mica-ui/agentTurnLogItems.tsx
+  h_a456b67147438e 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f536c37e8e5a3ec6cd5b9ffda4994316d127fb94",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
