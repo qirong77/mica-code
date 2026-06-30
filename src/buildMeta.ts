@@ -1,2 +1,3 @@
-// Generated during build.
-export const BUILD_TIME = '2026-06-30T07:13:16.656Z';
+declare const __MICA_BUILD_TIME__: string | undefined;
+
+export const BUILD_TIME = typeof __MICA_BUILD_TIME__ === 'string' ? __MICA_BUILD_TIME__ : 'dev';
