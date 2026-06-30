@@ -19,6 +19,10 @@ Mica Code 在你的项目目录中运行，能够阅读和编辑代码、搜索�
 - **Cache-first**：关注上下文复用、cached token 可见性和低重复消耗的工作方式。
 - **Agent**：不只是补全代码，而是能围绕一个任务持续阅读、修改、验证和回退。
 
+## 设计原则
+
+- **Append-only 优先**：会话历史、工具调用、工具输出和运行日志默认以追加方式演进，尽量保持请求前缀稳定，最大程度保证 provider prompt cache 命中。只有在上下文压力明显影响任务推进时，才在阶段边界进行摘要压缩，并把摘要作为新的稳定前缀继续追加。
+
 ## 为什么是 Mica Code
 
 - **终端原生**：在项目目录中直接对话、改文件、跑命令、看结果，无需切换到额外 IDE 或网页控制台。
@@ -97,7 +101,7 @@ bun run dev
 
 `protocol` 决定使用哪个模型接口：`openai_chat_completions`、`openai_responses` 或 `anthropic_messages`。未配置时按 `openai_chat_completions` 处理；第三方 provider 需要明确选择自己实际支持的接口。
 
-最后一次使用的 provider、model、effort 和 context window 会写入 `~/.mica/storage.json`，不写入 provider 静态配置。
+最后一次使用的 provider、model、effort 和 context window 会按精确当前目录写入 `~/.mica/storage.json` 的 `lastUsedByDirectory`，不写入 provider 静态配置。
 
 如果 provider 配置了 `get_model_url`，模型列表会在运行时获取，不会回填到 `~/.mica/config.json`；没有动态模型接口的 provider 可以直接配置静态 `models` 数组。
 

@@ -36,6 +36,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createGitDiffContextCommand(services),
+    micaBuiltinCommands.createGitDiffContextCurrentCommand(services),
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createAgentsCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
@@ -63,6 +64,9 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
       const disposable = ctx.commands.register({
         name: command.name,
         description: command.description,
+        hidden: command.hidden,
+        hiddenMenuParent: command.hiddenMenuParent,
+        hiddenMenuItems: command.hiddenMenuItems,
         scope: 'local-only',
         allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name),
         pluginId: ctx.pluginId,
@@ -86,6 +90,9 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
       ctx.commands.list().map((command) => ({
         name: command.name,
         description: command.description ?? '',
+        hidden: command.hidden,
+        hiddenMenuParent: command.hiddenMenuParent,
+        hiddenMenuItems: command.hiddenMenuItems,
         action: (arg?: string) => {
           const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
           const runtime = currentContext()?.runtime;

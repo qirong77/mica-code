@@ -126,6 +126,7 @@ export { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inpu
 export type { InputHistoryFile } from './inputHistory.js';
 export {
   MICA_STORAGE_PATH,
+  getCurrentDirectory,
   readLastUsedConfig,
   readMicaStorage,
   readProviderPreference,

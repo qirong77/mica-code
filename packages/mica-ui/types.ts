@@ -38,7 +38,18 @@ export type MicaUiWorkingStatus =
 export interface MicaUiCommand {
   name: string;
   description: string;
+  hidden?: boolean;
+  hiddenMenuParent?: string;
+  hiddenMenuItems?: MicaUiCommandHiddenMenuItems;
   action: (arg?: string) => void | Promise<void>;
+}
+
+export type MicaUiCommandHiddenMenuItems = MicaUiCommandHiddenMenuItem[] | (() => MicaUiCommandHiddenMenuItem[]);
+
+export interface MicaUiCommandHiddenMenuItem {
+  arg: string;
+  label?: string;
+  description?: string;
 }
 
 export interface MicaUiPluginUI {
@@ -59,6 +70,8 @@ export interface MicaUiDropdownItem {
   label: string;
   description?: string;
   suffix?: { text: string; color?: string };
+  commandName?: string;
+  commandArg?: string;
 }
 
 export interface MicaUiDropdownState {

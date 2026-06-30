@@ -3,6 +3,7 @@ import type { Tool } from './types.js';
 import { ToolReadFile } from './ToolReadFile.js';
 import { ToolWriteFile } from './ToolWriteFile.js';
 import { ToolEditFile } from './ToolEditFile.js';
+import { ToolApplyPatch } from './ToolApplyPatch.js';
 import { ToolListFiles } from './ToolListFiles.js';
 import { ToolGrepSearch } from './ToolGrepSearch.js';
 import { ToolWebFetch } from './ToolWebFetch.js';
@@ -19,6 +20,7 @@ const builtinTools: MicaTool[] = [
   new ToolReadFile(),
   new ToolWriteFile(),
   new ToolEditFile(),
+  new ToolApplyPatch(),
   new ToolListFiles(),
   new ToolGrepSearch(),
   new ToolRunShell(),

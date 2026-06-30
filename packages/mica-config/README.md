@@ -3,7 +3,7 @@
 `mica-config` 负责 Mica Code 的本地 provider 配置、本地状态数据读取、更新和 provider 模型列表加载。
 
 配置文件默认位于：`~/.mica/config.json`。当配置文件不存在时，会基于 `default.json` 自动创建。
-本地状态默认位于：`~/.mica/storage.json`，保存最后一次使用的 provider/model/effort、输入框历史等所有 Mica Code 实例共享的数据。
+本地状态默认位于：`~/.mica/storage.json`，其中最后一次使用的 provider/model/effort 按精确当前目录保存，输入框历史等数据仍为所有 Mica Code 实例共享。
 
 ## 主要能力
 
@@ -39,7 +39,7 @@ if (!result.ok) {
 
 - 静态 provider 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
 - userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
-- `config.json` 不保存最后一次使用的 provider/model/effort/contextWindowSize；这些运行时选择写入 `storage.json` 的 `lastUsed`。
+- `config.json` 不保存最后一次使用的 provider/model/effort/contextWindowSize；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
 - provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
 - 配置语义校验属于本包职责；应用层只负责决定如何展示校验结果。
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值和迁移策略。

@@ -27,7 +27,7 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
         if (!event.runtime.isAgentBusy(event.owner)) return;
 
         const owner = event.owner ?? event.runtime.getQueueOwner();
-        const queueMode = event.input.queueMode ?? 'after_iteration';
+        const queueMode = event.input.queueMode ?? 'after_turn';
         const queuedInput: RuntimeInput = event.input.queueMode ? event.input : { ...event.input, queueMode };
         const queued = event.runtime.enqueueForAgent(owner, queuedInput);
         if (!queued) {

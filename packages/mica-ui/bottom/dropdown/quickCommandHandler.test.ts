@@ -58,4 +58,106 @@ describe('quick command dropdown', () => {
     expect(handleDropdownKey({ return: true })).toBe(true);
     expect(state.get().visible).toBe(true);
   });
+
+  it('shows hidden commands when only one parent command name matches', () => {
+    const gitDiffAction = vi.fn();
+    const currentAction = vi.fn();
+    quickCommands.set([
+      { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
+      {
+        name: 'git-diff-context-current',
+        description: 'send current git changes',
+        hidden: true,
+        hiddenMenuParent: 'git-diff-context',
+        action: currentAction,
+      },
+      { name: 'commit', description: 'analyze git changes', action: vi.fn() },
+    ]);
+
+    showQuickCommands('git');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-diff-context-current']);
+
+    state.set({ ...state.get(), selectedIndex: 1 });
+    expect(handleDropdownKey({ return: true })).toBe(true);
+    expect(gitDiffAction).not.toHaveBeenCalled();
+    expect(currentAction).toHaveBeenCalledWith(undefined);
+  });
+
+  it('does not show hidden commands when multiple parent command names match', () => {
+    quickCommands.set([
+      { name: 'git-diff-context', description: 'send git diff context', action: vi.fn() },
+      {
+        name: 'git-diff-context-current',
+        description: 'send current git changes',
+        hidden: true,
+        hiddenMenuParent: 'git-diff-context',
+        action: vi.fn(),
+      },
+      { name: 'git-status', description: 'show git status', action: vi.fn() },
+    ]);
+
+    showQuickCommands('git');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-status']);
+  });
+
+  it('selects a hidden command when the query matches it directly', () => {
+    const gitDiffAction = vi.fn();
+    const currentAction = vi.fn();
+    quickCommands.set([
+      { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
+      {
+        name: 'git-diff-context-current',
+        description: 'send current git changes',
+        hidden: true,
+        hiddenMenuParent: 'git-diff-context',
+        action: currentAction,
+      },
+    ]);
+
+    showQuickCommands('git-diff-context-current');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context-current']);
+    expect(state.get().selectedIndex).toBe(0);
+
+    expect(handleDropdownKey({ return: true })).toBe(true);
+    expect(gitDiffAction).not.toHaveBeenCalled();
+    expect(currentAction).toHaveBeenCalledWith(undefined);
+  });
+
+  it('runs hidden menu items with their configured arg', () => {
+    const action = vi.fn();
+    quickCommands.set([
+      {
+        name: 'log',
+        description: 'show log',
+        hiddenMenuItems: [{ arg: 'export', description: 'export logs' }],
+        action,
+      },
+    ]);
+
+    showQuickCommands('log');
+    state.set({ ...state.get(), selectedIndex: 1 });
+
+    expect(handleDropdownKey({ return: true })).toBe(true);
+    expect(action).toHaveBeenCalledWith('export');
+    expect(state.get().visible).toBe(false);
+  });
+
+  it('supports dynamic hidden menu items', () => {
+    const action = vi.fn();
+    quickCommands.set([
+      {
+        name: 'mcp',
+        description: 'show mcp servers',
+        hiddenMenuItems: () => [{ arg: 'reconnect cooper', description: 'reconnect cooper' }],
+        action,
+      },
+    ]);
+
+    showQuickCommands('mcp');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/mcp', '/mcp reconnect cooper']);
+
+    state.set({ ...state.get(), selectedIndex: 1 });
+    expect(handleDropdownKey({ tab: true })).toBe(true);
+    expect(action).toHaveBeenCalledWith('reconnect cooper');
+  });
 });

@@ -21,7 +21,9 @@ export interface LastUsedConfig {
 
 export interface MicaStorageFile {
   version: 1;
+  /** Legacy global runtime selection. New writes go to lastUsedByDirectory. */
   lastUsed?: LastUsedConfig;
+  lastUsedByDirectory?: Record<string, LastUsedConfig>;
   inputHistory?: string[];
   preferences?: Record<string, unknown>;
   usage?: Record<string, unknown>;
@@ -32,10 +34,10 @@ export function readMicaStorage(): MicaStorageFile {
   try {
     const parsed = JSON.parse(readFileSync(MICA_STORAGE_PATH, 'utf-8')) as unknown;
     if (!isMicaStorageFile(parsed)) return { version: 1 };
-    return {
+    return normalizeStorage({
       ...parsed,
       inputHistory: normalizeInputHistory(parsed.inputHistory ?? []),
-    };
+    });
   } catch {
     return { version: 1 };
   }
@@ -47,43 +49,71 @@ export function updateMicaStorage(updater: (storage: MicaStorageFile) => MicaSto
   return next;
 }
 
-export function readLastUsedConfig(): LastUsedConfig {
-  return readMicaStorage().lastUsed ?? {};
+export function readLastUsedConfig(directory = getCurrentDirectory()): LastUsedConfig {
+  return readDirectoryLastUsedConfig(readMicaStorage(), directory) ?? {};
 }
 
-export function updateLastUsedConfig(update: LastUsedConfig): LastUsedConfig {
+export function updateLastUsedConfig(update: LastUsedConfig, directory = getCurrentDirectory()): LastUsedConfig {
+  const directoryPath = normalizeDirectoryPath(directory);
   const next = updateMicaStorage((storage) => ({
     ...storage,
-    lastUsed: {
-      ...(storage.lastUsed ?? {}),
-      ...dropUndefined(update),
+    lastUsedByDirectory: {
+      ...(storage.lastUsedByDirectory ?? {}),
+      [directoryPath]: {
+        ...readLastUsedConfigForStorage(storage, directoryPath),
+        ...dropUndefined(update),
+      },
     },
   }));
-  return next.lastUsed ?? {};
+  return next.lastUsedByDirectory?.[directoryPath] ?? {};
 }
 
-export function readProviderPreference(providerId: string): ProviderPreference {
-  return readLastUsedConfig().providerPreferences?.[providerId] ?? {};
+export function readProviderPreference(providerId: string, directory = getCurrentDirectory()): ProviderPreference {
+  return readLastUsedConfig(directory).providerPreferences?.[providerId] ?? {};
 }
 
 export function updateProviderPreference(
   providerId: string,
   preference: ProviderPreference,
+  directory = getCurrentDirectory(),
 ): ProviderPreference {
-  const next = updateMicaStorage((storage) => ({
-    ...storage,
-    lastUsed: {
-      ...(storage.lastUsed ?? {}),
-      providerPreferences: {
-        ...(storage.lastUsed?.providerPreferences ?? {}),
-        [providerId]: {
-          ...(storage.lastUsed?.providerPreferences?.[providerId] ?? {}),
-          ...dropUndefined(preference),
+  const directoryPath = normalizeDirectoryPath(directory);
+  const next = updateMicaStorage((storage) => {
+    const currentLastUsed = readLastUsedConfigForStorage(storage, directoryPath);
+    return {
+      ...storage,
+      lastUsedByDirectory: {
+        ...(storage.lastUsedByDirectory ?? {}),
+        [directoryPath]: {
+          ...currentLastUsed,
+          providerPreferences: {
+            ...(currentLastUsed.providerPreferences ?? {}),
+            [providerId]: {
+              ...(currentLastUsed.providerPreferences?.[providerId] ?? {}),
+              ...dropUndefined(preference),
+            },
+          },
         },
       },
-    },
-  }));
-  return next.lastUsed?.providerPreferences?.[providerId] ?? {};
+    };
+  });
+  return next.lastUsedByDirectory?.[directoryPath]?.providerPreferences?.[providerId] ?? {};
+}
+
+export function getCurrentDirectory(): string {
+  return normalizeDirectoryPath(process.cwd());
+}
+
+function readLastUsedConfigForStorage(storage: MicaStorageFile, directory: string): LastUsedConfig {
+  return readDirectoryLastUsedConfig(storage, directory) ?? {};
+}
+
+function readDirectoryLastUsedConfig(storage: MicaStorageFile, directory: string): LastUsedConfig | undefined {
+  return storage.lastUsedByDirectory?.[normalizeDirectoryPath(directory)];
+}
+
+function normalizeDirectoryPath(directory: string): string {
+  return resolve(directory);
 }
 
 export function readInputHistory(): string[] {
@@ -111,8 +141,17 @@ function normalizeStorage(storage: MicaStorageFile): MicaStorageFile {
   return {
     ...storage,
     version: 1,
+    lastUsedByDirectory: storage.lastUsedByDirectory
+      ? normalizeLastUsedByDirectory(storage.lastUsedByDirectory)
+      : undefined,
     inputHistory: storage.inputHistory ? normalizeInputHistory(storage.inputHistory) : undefined,
   };
+}
+
+function normalizeLastUsedByDirectory(entries: Record<string, LastUsedConfig>): Record<string, LastUsedConfig> {
+  return Object.fromEntries(
+    Object.entries(entries).map(([directory, lastUsed]) => [normalizeDirectoryPath(directory), lastUsed]),
+  );
 }
 
 function normalizeInputHistory(entries: string[]): string[] {
@@ -129,6 +168,7 @@ function isMicaStorageFile(value: unknown): value is MicaStorageFile {
   if (storage.version !== 1) return false;
   if (storage.inputHistory !== undefined && !isStringArray(storage.inputHistory)) return false;
   if (storage.lastUsed !== undefined && !isLastUsedConfig(storage.lastUsed)) return false;
+  if (storage.lastUsedByDirectory !== undefined && !isLastUsedByDirectory(storage.lastUsedByDirectory)) return false;
   return true;
 }
 
@@ -148,6 +188,13 @@ function optionalProviderPreferences(value: unknown): boolean {
   if (value === undefined) return true;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return Object.values(value as Record<string, unknown>).every(isProviderPreference);
+}
+
+function isLastUsedByDirectory(value: unknown): value is Record<string, LastUsedConfig> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.entries(value as Record<string, unknown>).every(
+    ([directory, lastUsed]) => typeof directory === 'string' && isLastUsedConfig(lastUsed),
+  );
 }
 
 function isProviderPreference(value: unknown): value is ProviderPreference {

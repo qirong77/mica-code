@@ -2,26 +2,18 @@ import { Box } from '@anthropic/ink';
 import { useMemo } from 'react';
 import { useScheduleState } from '../../hooks/index.js';
 import { CommandDropdown } from './CommandDropdown.js';
-import { inputValue, state } from './state.js';
+import { state } from './state.js';
 import { inputBottomDistance } from '../../input/state.js';
 
 const DEFAULT_OVERHEAD = 10;
 
 export function DropDownSelect() {
   const dropdown = useScheduleState(state);
-  const filterValue = useScheduleState(inputValue);
   const bottomDistance = useScheduleState(inputBottomDistance);
 
-  const filteredItems = useMemo(() => {
-    if (!dropdown.visible) return dropdown.items;
-    const filter = filterValue.toLowerCase();
-    if (!filter) return dropdown.items;
-    return dropdown.items.filter((item) => item.label.toLowerCase().includes(filter));
-  }, [dropdown.items, dropdown.visible, filterValue]);
-
   const selectedIndex = useMemo(
-    () => Math.min(dropdown.selectedIndex, Math.max(0, filteredItems.length - 1)),
-    [dropdown.selectedIndex, filteredItems.length],
+    () => Math.min(dropdown.selectedIndex, Math.max(0, dropdown.items.length - 1)),
+    [dropdown.selectedIndex, dropdown.items.length],
   );
   const maxVisibleItems = useMemo(() => {
     if (bottomDistance <= 0) return 5;
@@ -33,7 +25,7 @@ export function DropDownSelect() {
   return (
     <Box flexDirection="column" flexGrow={1} flexBasis={0} minWidth={0}>
       <CommandDropdown
-        items={filteredItems}
+        items={dropdown.items}
         selectedIndex={selectedIndex}
         title={dropdown.title}
         emptyMessage={dropdown.emptyMessage}

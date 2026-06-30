@@ -38,6 +38,7 @@ export function createLogCommand(agent: CommandAgent, services: CommandRuntimeSe
   return {
     name: 'log',
     description: '展示当前运行日志；/log export 导出对话与日志',
+    hiddenMenuItems: [{ arg: 'export', description: '导出对话与日志' }],
     action: (arg?: string) => {
       if (arg?.trim().toLowerCase() === 'export') {
         closeLogPanel();

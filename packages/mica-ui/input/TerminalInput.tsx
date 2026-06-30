@@ -110,7 +110,7 @@ function TerminalInput() {
     cursorOffset === localText.length;
 
   React.useEffect(() => {
-    const nextStatusText = showQueueShortcutTip ? 'Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送' : '';
+    const nextStatusText = showQueueShortcutTip ? 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送' : '';
     input.setQueueStatusText(nextStatusText);
     return () => {
       if (input.queueStatusText.get() === nextStatusText) input.setQueueStatusText('');

@@ -4,45 +4,59 @@ import type { CommandRuntimeServices } from './services.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 
 const DEFAULT_BASE_BRANCH = 'master';
-const CURRENT_CHANGES_ARG = '-';
 
 export function createGitDiffContextCommand(services: CommandRuntimeServices) {
   return {
     name: 'git-diff-context',
-    description: '将当前分支与指定 base 分支的差异作为上下文发送给 agent，默认 master；传 - 发送当前 git 变化',
+    description: '将当前分支与指定 base 分支的差异作为上下文发送给 agent，默认 master',
     action: (arg?: string) => {
-      try {
-        const target = resolveDiffTarget(arg);
-        micaLogger.logRuntime('plugin.git-diff-context', 'start', target);
-        const branch = gitText(['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
-        micaLogger.logRuntime('plugin.git-diff-context', 'branch:detected', { branch });
-
-        const context = loadDiffContext(target);
-        micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', {
-          target: context.label,
-          chars: context.diff.length,
-        });
-
-        if (!context.diff) {
-          micaLogger.logRuntime('plugin.git-diff-context', 'diff:empty', { branch, target: context.label });
-          services.showMessage(context.emptyMessage(branch), 5000);
-          return;
-        }
-
-        const message = buildMessage(branch, context);
-        micaUi.terminalInput.submit(message);
-        micaLogger.logRuntime('plugin.git-diff-context', 'submitted', {
-          branch,
-          target: context.label,
-          chars: message.length,
-        });
-      } catch (error) {
-        const msg = formatExecError(error);
-        micaLogger.logRuntime('plugin.git-diff-context', 'error', { message: msg }, 'error');
-        services.showMessage(`git diff failed: ${msg}`, 5000);
-      }
+      runGitDiffContext(services, resolveBaseDiffTarget(arg));
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+export function createGitDiffContextCurrentCommand(services: CommandRuntimeServices) {
+  return {
+    name: 'git-diff-context-current',
+    description: '将当前 git 变化作为上下文发送给 agent',
+    hidden: true,
+    hiddenMenuParent: 'git-diff-context',
+    action: () => {
+      runGitDiffContext(services, { type: 'current' });
+    },
+  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+function runGitDiffContext(services: CommandRuntimeServices, target: DiffTarget) {
+  try {
+    micaLogger.logRuntime('plugin.git-diff-context', 'start', target);
+    const branch = gitText(['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
+    micaLogger.logRuntime('plugin.git-diff-context', 'branch:detected', { branch });
+
+    const context = loadDiffContext(target);
+    micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', {
+      target: context.label,
+      chars: context.diff.length,
+    });
+
+    if (!context.diff) {
+      micaLogger.logRuntime('plugin.git-diff-context', 'diff:empty', { branch, target: context.label });
+      services.showMessage(context.emptyMessage(branch), 5000);
+      return;
+    }
+
+    const message = buildMessage(branch, context);
+    micaUi.terminalInput.submit(message);
+    micaLogger.logRuntime('plugin.git-diff-context', 'submitted', {
+      branch,
+      target: context.label,
+      chars: message.length,
+    });
+  } catch (error) {
+    const msg = formatExecError(error);
+    micaLogger.logRuntime('plugin.git-diff-context', 'error', { message: msg }, 'error');
+    services.showMessage(`git diff failed: ${msg}`, 5000);
+  }
 }
 
 type DiffTarget = { type: 'current' } | { type: 'base'; baseBranch: string };
@@ -54,10 +68,9 @@ type DiffContext = {
   emptyMessage: (branch: string) => string;
 };
 
-function resolveDiffTarget(arg?: string): DiffTarget {
-  const firstArg = arg?.trim().split(/\s+/)[0] || DEFAULT_BASE_BRANCH;
-  if (firstArg === CURRENT_CHANGES_ARG) return { type: 'current' };
-  return { type: 'base', baseBranch: firstArg };
+function resolveBaseDiffTarget(arg?: string): DiffTarget {
+  const baseBranch = arg?.trim().split(/\s+/)[0] || DEFAULT_BASE_BRANCH;
+  return { type: 'base', baseBranch };
 }
 
 function loadDiffContext(target: DiffTarget): DiffContext {

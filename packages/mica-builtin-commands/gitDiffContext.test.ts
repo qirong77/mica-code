@@ -30,7 +30,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
   },
 }));
 
-const { createGitDiffContextCommand } = await import('./gitDiffContext.js');
+const { createGitDiffContextCommand, createGitDiffContextCurrentCommand } = await import('./gitDiffContext.js');
 
 function makeServices(): CommandRuntimeServices {
   return {
@@ -80,7 +80,7 @@ describe('git-diff-context command', () => {
     expect(mocks.submit).not.toHaveBeenCalledWith(expect.stringContaining('`feature` and `master`'));
   });
 
-  it('sends current git changes when the first command argument is dash', () => {
+  it('sends current git changes from the hidden current command', () => {
     mocks.gitText.mockImplementation((args: string[]) => {
       if (args[0] === 'rev-parse') return 'feature\n';
       if (args[0] === 'diff' && args[1] === '--cached') return 'diff --git a/staged b/staged\n';
@@ -88,11 +88,10 @@ describe('git-diff-context command', () => {
       throw new Error(`unexpected git args: ${args.join(' ')}`);
     });
 
-    createGitDiffContextCommand(makeServices()).action('-');
+    createGitDiffContextCurrentCommand(makeServices()).action();
 
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', '--cached'], { timeout: 10000 });
     expect(mocks.gitText).toHaveBeenCalledWith(['diff'], { timeout: 10000 });
-    expect(mocks.gitText).not.toHaveBeenCalledWith(['diff', 'origin/-...HEAD'], { timeout: 10000 });
     expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('current git changes on branch `feature`'));
     expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('# Staged changes'));
     expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/staged b/staged'));

@@ -8,7 +8,7 @@ import type { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { LocalRuntimeController } from '../../app/adapters/LocalRuntimeController.js';
 
 describe('MessageQueuePlugin', () => {
-  it('queues busy input for the event owner instead of the active queue owner', async () => {
+  it('queues busy input for the event owner and defaults to after-turn delivery', async () => {
     const hooks = new micaPlugin.HookRegistry();
     const owner = { id: 'owner' } as unknown as AgentRuntime;
     const activeOwner = { id: 'active-owner' } as unknown as AgentRuntime;
@@ -50,16 +50,16 @@ describe('MessageQueuePlugin', () => {
     expect(result).toMatchObject({ handled: true, blocked: false, reason: 'queued' });
     expect(runtime.enqueueForAgent).toHaveBeenCalledWith(
       owner,
-      expect.objectContaining({ ...input, queueMode: 'after_iteration' }),
+      expect.objectContaining({ ...input, queueMode: 'after_turn' }),
     );
     expect(runtime.enqueueForAgent).not.toHaveBeenCalledWith(activeOwner, input);
-    expect(queues.get(owner)).toEqual([expect.objectContaining({ ...input, queueMode: 'after_iteration' })]);
+    expect(queues.get(owner)).toEqual([expect.objectContaining({ ...input, queueMode: 'after_turn' })]);
     expect(queues.get(activeOwner)).toBeUndefined();
     expect(published).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: 'queue:changed',
-          pendingInputs: [expect.objectContaining({ ...input, queueMode: 'after_iteration' })],
+          pendingInputs: [expect.objectContaining({ ...input, queueMode: 'after_turn' })],
           owner,
         }),
         expect.objectContaining({
@@ -68,6 +68,48 @@ describe('MessageQueuePlugin', () => {
         }),
       ]),
     );
+  });
+
+  it('preserves explicit after-iteration delivery', async () => {
+    const hooks = new micaPlugin.HookRegistry();
+    const owner = { id: 'owner' } as unknown as AgentRuntime;
+    const queues = new Map<AgentRuntime, RuntimeInput[]>();
+    const input = micaRuntime.createRuntimeInput('iteration follow-up', 'ui', { queueMode: 'after_iteration' });
+
+    const runtime = {
+      isAgentBusy: vi.fn((agent?: AgentRuntime) => agent === owner),
+      getQueueOwner: vi.fn(() => owner),
+      enqueueForAgent: vi.fn((agent: AgentRuntime, item: RuntimeInput) => {
+        queues.set(agent, [...(queues.get(agent) ?? []), item]);
+        return true;
+      }),
+      listQueueForAgent: vi.fn((agent: AgentRuntime) => queues.get(agent) ?? []),
+      countQueueForAgent: vi.fn((agent: AgentRuntime) => queues.get(agent)?.length ?? 0),
+      events: {
+        publish: vi.fn(),
+      },
+    } as unknown as LocalRuntimeController;
+
+    new MessageQueuePlugin().setup({
+      pluginId: 'test.messageQueue',
+      hooks,
+      commands: new micaCommands.CommandRegistry(),
+      services: new micaPlugin.ServiceContainer(),
+      events: runtime.events,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      onDispose: vi.fn(),
+    });
+
+    const result = await hooks.guard('input:received', {
+      runtime,
+      input,
+      isCommand: false,
+      owner,
+    });
+
+    expect(result).toMatchObject({ handled: true, blocked: false, reason: 'queued' });
+    expect(runtime.enqueueForAgent).toHaveBeenCalledWith(owner, input);
+    expect(queues.get(owner)).toEqual([input]);
   });
 
   it('does not append a second pending input for the same owner', async () => {

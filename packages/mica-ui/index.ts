@@ -156,6 +156,8 @@ export type {
   MicaUiDropdownState,
   MicaUiPluginUI,
   MicaUiCommand,
+  MicaUiCommandHiddenMenuItem,
+  MicaUiCommandHiddenMenuItems,
   MicaUiConversationMessage,
   MicaUiUILogEntry,
   MicaUiTextBlock,

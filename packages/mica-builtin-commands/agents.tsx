@@ -12,6 +12,7 @@ export function createAgentsCommand(services: CommandRuntimeServices) {
   return {
     name: 'agents',
     description: '显示当前终端的 agents；/agents clear 清除空闲 agent',
+    hiddenMenuItems: [{ arg: 'clear', description: '清除空闲 agent' }],
     action: (arg?: string) => {
       if (arg?.trim().toLowerCase() === 'clear') {
         const result = services.clearIdleAgents();

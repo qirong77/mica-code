@@ -35,7 +35,12 @@ function typeColor(type: string) {
 export function createMcpCommand(services: CommandRuntimeServices) {
   return {
     name: 'mcp',
-    description: '列出 MCP 服务器和工具',
+    description: '列出 MCP 服务器和工具；/mcp reconnect <server> 重连指定服务',
+    hiddenMenuItems: () =>
+      micaMcp.servers.get().map((server) => ({
+        arg: `reconnect ${server.name}`,
+        description: `重连 ${server.name}`,
+      })),
     action: (arg?: string) => {
       const trimmed = arg?.trim();
       if (trimmed?.startsWith('reconnect ')) {
