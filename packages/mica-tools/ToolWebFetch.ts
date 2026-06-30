@@ -1,18 +1,14 @@
 import { LRUCache } from 'lru-cache';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import TurndownService from 'turndown';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
-import { clampNumber, formatSize, truncateMiddle } from './utils/outputLimits.js';
+import { formatSize, truncateMiddle } from './utils/outputLimits.js';
 
-const MAX_URL_LENGTH = 2000;
-const MAX_CONTENT_LENGTH = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 60_000;
 const MAX_REDIRECTS = 10;
-const DEFAULT_MAX_CHARS = 30_000;
-const HARD_MAX_CHARS = 100_000;
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_MAX_CHARS = 0;
 const QUERY_CONTEXT_CHARS = 1_500;
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -137,7 +133,11 @@ export class ToolWebFetch extends MicaTool {
         },
         max_chars: {
           type: 'number',
-          description: `最多返回字符数，默认 ${DEFAULT_MAX_CHARS}，最大 ${HARD_MAX_CHARS}`,
+          description: '最多返回字符数，默认 0 表示不限制；传 0 表示不截断',
+        },
+        max_bytes: {
+          type: 'number',
+          description: `最多下载字节数，默认 ${DEFAULT_MAX_BYTES}；传 0 表示不限制`,
         },
       },
       required: ['url'],
@@ -145,11 +145,12 @@ export class ToolWebFetch extends MicaTool {
   }
 
   async execute(
-    input: { url: string; prompt?: string; query?: string; max_chars?: number },
+    input: { url: string; prompt?: string; query?: string; max_chars?: number; max_bytes?: number },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
     const { url, prompt = '', query = '' } = input;
-    const maxChars = clampNumber(input.max_chars, DEFAULT_MAX_CHARS, 1_000, HARD_MAX_CHARS);
+    const maxChars = normalizeMaxChars(input.max_chars);
+    const maxBytes = normalizeMaxBytes(input.max_bytes);
     this._validateUrl(url);
 
     const cached = urlCache.get(url);
@@ -165,7 +166,7 @@ export class ToolWebFetch extends MicaTool {
     callbacks?.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
-      const result = await this._fetchWithRedirects(url, controller.signal);
+      const result = await this._fetchWithRedirects(url, controller.signal, maxBytes);
       clearTimeout(timeout);
       callbacks?.signal?.removeEventListener('abort', onAbort);
 
@@ -214,7 +215,7 @@ export class ToolWebFetch extends MicaTool {
     durationMs = 0,
   ): string {
     const focused = query ? pickRelevantSections(entry.content, query) : entry.content;
-    const content = truncateMiddle(focused, maxChars, query ? '相关内容过大' : '网页内容过大');
+    const content = maxChars > 0 ? truncateMiddle(focused, maxChars, query ? '相关内容过大' : '网页内容过大') : focused;
     return buildResponseText({
       status: entry.code,
       statusText: entry.codeText,
@@ -253,33 +254,17 @@ export class ToolWebFetch extends MicaTool {
   }
 
   private _validateUrl(url: string): void {
-    if (url.length > MAX_URL_LENGTH) {
-      throw new Error(`URL 超过 ${MAX_URL_LENGTH} 字符限制`);
-    }
-
-    let parsed: URL;
     try {
-      parsed = new URL(url);
+      new URL(url);
     } catch {
       throw new Error('无效 URL');
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error('只支持 http/https 协议');
-    }
-
-    if (parsed.username || parsed.password) {
-      throw new Error('不允许在 URL 中包含用户名/密码');
-    }
-
-    if (parsed.hostname.split('.').length < 2) {
-      throw new Error('无效域名');
     }
   }
 
   private async _fetchWithRedirects(
     url: string,
     signal: AbortSignal,
+    maxBytes: number,
     depth = 0,
   ): Promise<
     | { type: 'redirect'; originalUrl: string; redirectUrl: string }
@@ -289,11 +274,7 @@ export class ToolWebFetch extends MicaTool {
       throw new Error(`重定向次数超过 ${MAX_REDIRECTS} 次`);
     }
 
-    let targetUrl = url;
-    if (targetUrl.startsWith('http://')) {
-      targetUrl = targetUrl.replace('http://', 'https://');
-    }
-    await this._assertPublicNetworkTarget(targetUrl);
+    const targetUrl = url;
 
     const response = await fetch(targetUrl, {
       signal,
@@ -307,11 +288,7 @@ export class ToolWebFetch extends MicaTool {
 
       const redirectUrl = new URL(location, targetUrl).toString();
 
-      if (!this._isSameHost(url, redirectUrl)) {
-        return { type: 'redirect', originalUrl: url, redirectUrl };
-      }
-
-      return this._fetchWithRedirects(redirectUrl, signal, depth + 1);
+      return this._fetchWithRedirects(redirectUrl, signal, maxBytes, depth + 1);
     }
 
     if (!response.ok) {
@@ -320,13 +297,13 @@ export class ToolWebFetch extends MicaTool {
 
     const contentType = response.headers.get('content-type') ?? '';
     const contentLength = response.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > MAX_CONTENT_LENGTH) {
-      throw new Error(`内容大小超过 ${formatSize(MAX_CONTENT_LENGTH)} 限制`);
+    if (maxBytes > 0 && contentLength && parseInt(contentLength, 10) > maxBytes) {
+      throw new Error(`内容大小超过 ${formatSize(maxBytes)} 限制`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    if (arrayBuffer.byteLength > MAX_CONTENT_LENGTH) {
-      throw new Error(`内容大小超过 ${formatSize(MAX_CONTENT_LENGTH)} 限制`);
+    if (maxBytes > 0 && arrayBuffer.byteLength > maxBytes) {
+      throw new Error(`内容大小超过 ${formatSize(maxBytes)} 限制`);
     }
 
     return {
@@ -339,77 +316,14 @@ export class ToolWebFetch extends MicaTool {
     };
   }
 
-  private _isSameHost(a: string, b: string): boolean {
-    try {
-      const strip = (h: string) => h.replace(/^www\./, '');
-      return strip(new URL(a).hostname) === strip(new URL(b).hostname);
-    } catch {
-      return false;
-    }
-  }
-
-  private async _assertPublicNetworkTarget(url: string): Promise<void> {
-    const parsed = new URL(url);
-    const hostname = parsed.hostname.toLowerCase();
-    if (isBlockedHostname(hostname)) {
-      throw new Error('不允许访问本地或内网地址');
-    }
-
-    const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true, verbatim: true });
-    if (addresses.length === 0 || addresses.some((entry) => isPrivateOrReservedAddress(entry.address))) {
-      throw new Error('不允许访问解析到本地、内网或保留地址的 URL');
-    }
-  }
 }
 
-function isBlockedHostname(hostname: string): boolean {
-  return (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.internal') ||
-    hostname.endsWith('.lan')
-  );
+function normalizeMaxChars(value: number | undefined): number {
+  if (value === undefined || value === null || !Number.isFinite(value)) return DEFAULT_MAX_CHARS;
+  return Math.max(0, Math.floor(value));
 }
 
-function isPrivateOrReservedAddress(address: string): boolean {
-  if (address.startsWith('::ffff:')) {
-    return isPrivateOrReservedAddress(address.slice('::ffff:'.length));
-  }
-  const ipVersion = isIP(address);
-  if (ipVersion === 4) return isPrivateOrReservedIpv4(address);
-  if (ipVersion === 6) return isPrivateOrReservedIpv6(address);
-  return true;
-}
-
-function isPrivateOrReservedIpv4(address: string): boolean {
-  const parts = address.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b] = parts as [number, number, number, number];
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0 && parts[2] === 0) ||
-    (a === 198 && (b === 18 || b === 19))
-  );
-}
-
-function isPrivateOrReservedIpv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  return (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
-  );
+function normalizeMaxBytes(value: number | undefined): number {
+  if (value === undefined || value === null || !Number.isFinite(value)) return DEFAULT_MAX_BYTES;
+  return Math.max(0, Math.floor(value));
 }

@@ -27,12 +27,12 @@ export interface MicaUiMessageParam {
 
 export type MicaUiWorkingStatus =
   | { type: 'idle' }
-  | { type: 'connecting' }
-  | { type: 'thinking' }
-  | { type: 'streaming' }
-  | { type: 'calling_tool'; elapsedMs?: number; toolNames?: string[] }
+  | { type: 'connecting'; startedAt?: number }
+  | { type: 'thinking'; startedAt?: number }
+  | { type: 'streaming'; startedAt?: number }
+  | { type: 'calling_tool'; startedAt?: number; elapsedMs?: number; toolNames?: string[] }
   | { type: 'plugin_task'; text: string; level?: 'info' | 'warn' | 'error' }
-  | { type: 'completed'; elapsedMs?: number }
+  | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message?: string };
 
 export interface MicaUiCommand {

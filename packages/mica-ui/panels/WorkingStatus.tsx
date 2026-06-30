@@ -88,6 +88,7 @@ export function WorkingStatus() {
   const queueStatus = useScheduleState(queueStatusText);
   const startRef = useRef(0);
   const [elapsed, setElapsed] = useState(0);
+  const statusStartedAt = 'startedAt' in info ? info.startedAt : undefined;
 
   useEffect(() => {
     if (info.type === 'idle' || info.type === 'completed' || info.type === 'error') {
@@ -95,10 +96,11 @@ export function WorkingStatus() {
       setElapsed(0);
       return;
     }
-    if (!startRef.current) startRef.current = Date.now();
+    if (statusStartedAt) startRef.current = statusStartedAt;
+    else if (!startRef.current) startRef.current = Date.now();
     const timer = setInterval(() => setElapsed(Date.now() - startRef.current), runtimeEnv.ui.elapsedRefreshIntervalMs);
     return () => clearInterval(timer);
-  }, [info.type]);
+  }, [info.type, statusStartedAt]);
 
   const displayElapsed =
     info.type === 'completed' || info.type === 'calling_tool' ? (info.elapsedMs ?? elapsed) : elapsed;

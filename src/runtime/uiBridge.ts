@@ -68,19 +68,19 @@ export function applyStatus(status: AgentRuntimeStatus) {
       micaUi.panels.status.idle();
       break;
     case 'connecting':
-      micaUi.panels.status.connecting();
+      micaUi.panels.status.connecting(status.startedAt);
       break;
     case 'thinking':
-      micaUi.panels.status.thinking();
+      micaUi.panels.status.thinking(status.startedAt);
       break;
     case 'streaming':
-      micaUi.panels.status.streaming();
+      micaUi.panels.status.streaming(status.startedAt);
       break;
     case 'calling_tool':
-      micaUi.panels.status.callingTool(status.toolNames);
+      micaUi.panels.status.callingTool(status.toolNames, undefined, status.startedAt);
       break;
     case 'completed':
-      micaUi.panels.status.completed(status.elapsedMs);
+      micaUi.panels.status.completed(status.elapsedMs, status.startedAt);
       break;
     case 'error':
       micaUi.panels.status.error();

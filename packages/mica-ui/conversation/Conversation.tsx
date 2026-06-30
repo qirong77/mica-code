@@ -8,7 +8,7 @@ import { messages, responseText, pendingInputs, pendingQueueMode } from './state
 import { Markdown } from './Markdown.js';
 import { MessageGutter } from '../primitives/MessageGutter.js';
 
-const MAX_USER_LINES = 10;
+const MAX_USER_LINES = runtimeEnv.ui.messageCollapseMaxLines;
 const MAX_ASSISTANT_CHARS = runtimeEnv.ui.assistantDisplayMaxChars;
 
 function getTextContent(content: MicaUiMessageParam['content']): string {

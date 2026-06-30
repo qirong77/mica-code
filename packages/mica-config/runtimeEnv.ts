@@ -30,6 +30,8 @@ export function readRuntimeEnvConfig(env: RuntimeEnvSource = process.env) {
       }),
       // shell 日志在 UI 中最多展示的行数。
       runShellLogMaxLines: intEnv(env, 'MICA_RUN_SHELL_LOG_MAX_LINES', 10, { min: 1, max: 200 }),
+      // 用户消息超过该行数后在 UI 中折叠。
+      messageCollapseMaxLines: intEnv(env, 'MICA_UI_MESSAGE_COLLAPSE_MAX_LINES', 100, { min: 1, max: 10_000 }),
       // 助手消息整体展示的最大字符数，防止长输出拖慢界面。
       assistantDisplayMaxChars: intEnv(env, 'MICA_UI_ASSISTANT_DISPLAY_MAX_CHARS', 80_000, {
         min: 1_000,

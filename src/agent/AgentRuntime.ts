@@ -19,11 +19,11 @@ import {
 
 export type AgentRuntimeStatus =
   | { type: 'idle' }
-  | { type: 'connecting' }
-  | { type: 'thinking' }
-  | { type: 'streaming' }
-  | { type: 'calling_tool'; toolNames?: string[] }
-  | { type: 'completed'; elapsedMs?: number }
+  | { type: 'connecting'; startedAt?: number }
+  | { type: 'thinking'; startedAt?: number }
+  | { type: 'streaming'; startedAt?: number }
+  | { type: 'calling_tool'; startedAt?: number; toolNames?: string[] }
+  | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message: string };
 
 export type AgentRuntimeEvents = {
@@ -88,6 +88,7 @@ export class AgentRuntime {
   private abortedRunCompleteUsageLength: number | null = null;
   private currentConfig: AgentRuntimeConfig;
   private lastStatusKey: string | null = null;
+  private activeRunStartedAt: number | null = null;
 
   constructor() {
     this.currentConfig = readAgentRuntimeConfig();
@@ -283,11 +284,12 @@ export class AgentRuntime {
 
     const abortController = new AbortController();
     this.activeAbortController = abortController;
+    this.activeRunStartedAt = startedAt;
     this.activeRunUsageStartIndex = this.client.usageHistory.length;
     this.activeRunCompleteUsageLength = this.client.usageHistory.length;
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;
-    this.emitStatus({ type: 'connecting' });
+    this.emitStatus({ type: 'connecting', startedAt });
     try {
       const text = await this.client.query(question, {
         signal: abortController.signal,
@@ -302,6 +304,7 @@ export class AgentRuntime {
       if (this.isCurrent(runId)) {
         this.emitStatus({
           type: 'completed',
+          startedAt,
           elapsedMs: Date.now() - startedAt,
         });
         micaLogger.logRuntime('agent', 'run:completed', {
@@ -327,6 +330,7 @@ export class AgentRuntime {
         this.activeAbortController = null;
       }
       if (this.activeAbortController === null) {
+        this.activeRunStartedAt = null;
         this.activeRunUsageStartIndex = null;
         this.activeRunCompleteUsageLength = null;
       }
@@ -350,21 +354,21 @@ export class AgentRuntime {
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
     });
     this.client.onText = (text) => {
-      this.emitStatus({ type: 'streaming' });
+      this.emitStatus({ type: 'streaming', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('text', text);
     };
     this.client.onThinking = (thinking) => {
-      this.emitStatus({ type: 'thinking' });
+      this.emitStatus({ type: 'thinking', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('thinking', thinking);
     };
     this.client.onToolCall = (name, args, id) => {
-      this.emitStatus({ type: 'calling_tool', toolNames: [name] });
+      this.emitStatus({ type: 'calling_tool', startedAt: this.activeRunStartedAt ?? undefined, toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
       micaLogger.logRuntime('agent.tool', 'call', { name, id, argsChars: args.length });
     };
     this.client.onToolResult = (name, result, id) => {
       this.events.emit('toolResult', { name, result, id });
-      this.emitStatus({ type: 'connecting' });
+      this.emitStatus({ type: 'connecting', startedAt: this.activeRunStartedAt ?? undefined });
       micaLogger.logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
     };
     this.client.onUsage = (usage) => {

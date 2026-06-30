@@ -56,14 +56,14 @@ export function setWorkingStatus(status: MicaUiWorkingStatus): void {
 
 export const status = {
   idle: () => setWorkingStatus({ type: 'idle' }),
-  connecting: () => setWorkingStatus({ type: 'connecting' }),
-  thinking: () => setWorkingStatus({ type: 'thinking' }),
-  streaming: () => setWorkingStatus({ type: 'streaming' }),
-  callingTool: (toolNames?: string[], elapsedMs?: number) =>
-    setWorkingStatus({ type: 'calling_tool', toolNames, elapsedMs }),
+  connecting: (startedAt?: number) => setWorkingStatus({ type: 'connecting', startedAt }),
+  thinking: (startedAt?: number) => setWorkingStatus({ type: 'thinking', startedAt }),
+  streaming: (startedAt?: number) => setWorkingStatus({ type: 'streaming', startedAt }),
+  callingTool: (toolNames?: string[], elapsedMs?: number, startedAt?: number) =>
+    setWorkingStatus({ type: 'calling_tool', startedAt, toolNames, elapsedMs }),
   pluginTask: (text: string, level?: 'info' | 'warn' | 'error') =>
     setWorkingStatus({ type: 'plugin_task', text, level }),
-  completed: (elapsedMs?: number) => setWorkingStatus({ type: 'completed', elapsedMs }),
+  completed: (elapsedMs?: number, startedAt?: number) => setWorkingStatus({ type: 'completed', startedAt, elapsedMs }),
   error: (message?: string) => setWorkingStatus({ type: 'error', message }),
 };
 

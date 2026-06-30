@@ -268,15 +268,15 @@ export function toMicaUiWorkingStatus(status: AgentRuntimeStatus): MicaUiWorking
     case 'idle':
       return { type: 'idle' };
     case 'connecting':
-      return { type: 'connecting' };
+      return { type: 'connecting', startedAt: status.startedAt };
     case 'thinking':
-      return { type: 'thinking' };
+      return { type: 'thinking', startedAt: status.startedAt };
     case 'streaming':
-      return { type: 'streaming' };
+      return { type: 'streaming', startedAt: status.startedAt };
     case 'calling_tool':
-      return { type: 'calling_tool', toolNames: status.toolNames };
+      return { type: 'calling_tool', startedAt: status.startedAt, toolNames: status.toolNames };
     case 'completed':
-      return { type: 'completed', elapsedMs: status.elapsedMs };
+      return { type: 'completed', startedAt: status.startedAt, elapsedMs: status.elapsedMs };
     case 'error':
       return { type: 'error', message: status.message };
   }
