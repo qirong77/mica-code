@@ -1,4 +1,4 @@
-# 【07】Code Agent 从零到一：后台命令执行与自动终止
+# 后台命令执行：让长任务不阻塞 Agent
 
 > 本文是 [mica-code](https://github.com/qirong77/mica-code) 系列文章之一。mica-code 是一个从零搭建的 CLI code agent，基于 Bun + TypeScript + React（Ink）+ Anthropic SDK，目标是搞清楚 Claude Code 这类工具底层到底怎么工作。
 

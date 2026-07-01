@@ -11,17 +11,17 @@ export function createClearCommand(
 ) {
   return {
     name: 'clear',
-    description: '清空当前对话和运行状态',
+    description: '新开一个空 session，不清除当前 session 内容',
     action: () => {
       if (services.isAgentBusy(agent)) {
-        services.showMessage('Agent is busy; wait or abort before clearing');
+        services.showMessage('Agent is busy; wait or abort before starting a new session');
         return;
       }
       micaLogger.logRuntime('plugin.clear', 'clear:start', {
         runId: agent.currentRunId,
       });
       services.clearUI(agent, sessionController);
-      services.showMessage('Session cleared');
+      services.showMessage('Started new session');
       micaLogger.logRuntime('plugin.clear', 'clear:done');
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];

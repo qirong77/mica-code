@@ -1,4 +1,4 @@
-# 【09】Code Agent 从零到一：Skill 不是更长的 Prompt
+# Agent Skills：不是更长的 Prompt
 
 > 本文是 [mica-code](https://github.com/qirong77/mica-code) 系列文章之一。mica-code 是一个从零搭建的 CLI code agent，基于 Bun + TypeScript + React（Ink）+ Anthropic SDK，目标是搞清楚 Claude Code 这类工具底层到底怎么工作。
 

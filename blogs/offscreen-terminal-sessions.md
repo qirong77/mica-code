@@ -1,4 +1,4 @@
-# 【08】Code Agent 从零到一：离屏终端与 Shell 工具的下一步
+# 离屏终端：从一次性 Shell 到可交互 Session
 
 > 本文是 [mica-code](https://github.com/qirong77/mica-code) 系列文章之一。mica-code 是一个从零搭建的 CLI code agent，基于 Bun + TypeScript + React（Ink）+ Anthropic SDK，目标是搞清楚 Claude Code 这类工具底层到底怎么工作。
 
