@@ -95,6 +95,53 @@ describe('LocalRuntimeController abort display state', () => {
     ]);
   });
 
+  it('keeps full input for the agent while storing formatted display content for the UI', async () => {
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async () => ({ runId: 1, text: 'ok' })),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    const controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    await expect(controller.submit('full diff payload', { displayText: 'formatted git diff summary' })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(agent.run).toHaveBeenCalledWith('full diff payload', expect.any(Object));
+    expect(session.uiState.conversationMessages[0]).toEqual({
+      role: 'user',
+      content: 'full diff payload',
+      displayContent: 'formatted git diff summary',
+    });
+  });
+
   it('stores failed turn errors in the session message bar', async () => {
     const addMessage = vi.spyOn(micaUi.messageBar, 'addMessage').mockImplementation(() => undefined);
     const error = new Error('provider exploded');

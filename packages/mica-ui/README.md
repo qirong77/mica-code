@@ -9,6 +9,7 @@
 - 底部交互面板：`BottomSurface`、`DropDownUI`、`PluginPanel`。
 - 基础组件：`Dialog`、`KeyHints`、`SelectList`、`Spin`。
 - 状态入口：`conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
+- 会话消息支持 `displayContent`，可在不改变实际上下文内容的情况下展示更易读的输入摘要。
 - 文本和图片输入处理：`parseImageRefs`。
 
 ## 使用入口

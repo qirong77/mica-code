@@ -64,6 +64,7 @@ temp/                        临时外部/实验代码目录，不属于默认�
 - `LocalRuntimeController` 负责任务提交、命令分发、turn loop、UI 协调、per-agent queue、exclusive task、rewind checkpoint、retry 和中止处理。
 - `MicaUiRuntimeBridge` 监听 agent/runtime/session 状态并同步到 `mica-ui` store；`mica-ui` 不直接调用 provider 或持有 agent 运行逻辑。
 - 运行中输入通过 `MessageQueueService` 管理；message queue 插件决定哪些输入可在 turn 运行期间排队。
+- 需要向 agent 发送大段上下文但 UI 不适合原样展示时，使用 `RuntimeInput.displayText` / UI `displayContent` 做 conversation formatter；`text`/`content` 仍保留完整上下文给 agent。
 
 ## Provider、配置与本地数据
 

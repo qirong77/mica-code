@@ -58,7 +58,7 @@ export const Conversation = (): React.ReactNode => {
   const staticItems = useMemo(
     () =>
       currentMessages.flatMap((msg: MicaUiMessageParam, i: number): LogItem[] => {
-        const text = getTextContent(msg.content);
+        const text = getTextContent(msg.displayContent ?? msg.content);
         if (!text) return [];
         if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'notice') {
           return [{ id: i, role: msg.role, text, variant: msg.variant, command: msg.command }];
@@ -87,42 +87,36 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         if (item.role === 'notice') {
-          const isStyledNotice = item.variant === 'recap' || item.variant === 'commit';
-          if (isStyledNotice) {
-            return (
+          const tone = item.variant === 'commit' ? 'commit' : item.variant === 'recap' ? 'recap' : 'notice';
+          const color =
+            item.variant === 'commit'
+              ? themeColors.messageCommit
+              : item.variant === 'recap'
+                ? themeColors.messageRecap
+                : themeColors.messageNotice;
+          const backgroundColor =
+            item.variant === 'commit'
+              ? themeColors.surfaceCommit
+              : item.variant === 'recap'
+                ? themeColors.surfaceRecap
+                : themeColors.surfaceNotice;
+          const title =
+            item.command ?? (item.variant === 'commit' ? '/commit' : item.variant === 'recap' ? '/recap' : 'notice');
+
+          return (
+            <React.Fragment key={item.id}>
               <MessageGutter
-                key={item.id}
-                tone={item.variant === 'commit' ? 'commit' : 'recap'}
+                tone={tone}
                 marker={'\u258c'}
                 marginTop={index === 0 ? 0 : 1}
-                backgroundColor={item.variant === 'commit' ? themeColors.surfaceCommit : themeColors.surfaceRecap}
+                backgroundColor={backgroundColor}
               >
-                <Box marginBottom={1}>
-                  <Text color={item.variant === 'commit' ? themeColors.messageCommit : themeColors.messageRecap}>
-                    {item.command ?? (item.variant === 'commit' ? '/commit' : '/recap')}
-                  </Text>
-                </Box>
-                <Box marginBottom={1}>
-                  <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
-                </Box>
+                <Text color={color}>{title}</Text>
               </MessageGutter>
-            );
-          }
-          return (
-            <MessageGutter
-              key={item.id}
-              tone="notice"
-              marker={'\u258c'}
-              marginTop={index === 0 ? 0 : 1}
-              backgroundColor={themeColors.surfaceNotice}
-            >
-              <Box marginBottom={1}>
-                <Text color={themeColors.messageNotice}>{item.command ?? 'notice'}</Text>
-              </Box>
-              <Box marginBottom={1}>
+              <MessageGutter tone="muted" marker="" marginTop={1}>
                 <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
-              </Box>
-            </MessageGutter>
+              </MessageGutter>
+            </React.Fragment>
           );
         }
         return (

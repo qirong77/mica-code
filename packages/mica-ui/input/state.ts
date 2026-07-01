@@ -4,6 +4,7 @@ import mitt from 'mitt';
 export type TerminalInputQueueMode = 'after_iteration' | 'after_turn';
 export type TerminalInputSubmitOptions = {
   queueMode?: TerminalInputQueueMode;
+  displayText?: string;
 };
 
 type SubmitHandler = (text: string, options?: TerminalInputSubmitOptions) => void;

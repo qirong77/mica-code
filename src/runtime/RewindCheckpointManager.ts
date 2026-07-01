@@ -78,7 +78,7 @@ export class RewindCheckpointManager {
     const checkpoint: RewindCheckpoint = {
       id: `${input.id}-${Date.now()}`,
       createdAt: new Date().toISOString(),
-      conversationLabel: labelForInput(input.text),
+      conversationLabel: labelForInput(input.displayText ?? input.text),
       snapshot: cloneSnapshot(snapshot),
       fileState: captureFileState(),
     };

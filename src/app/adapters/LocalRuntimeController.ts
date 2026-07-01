@@ -298,7 +298,10 @@ export class LocalRuntimeController implements RuntimeController {
     targetSessionController: SessionController,
     options: SubmitOptions,
   ): Promise<SubmitResult> {
-    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui', { queueMode: options.queueMode });
+    const input = micaRuntime.createRuntimeInput(text, options.source ?? 'ui', {
+      queueMode: options.queueMode,
+      displayText: options.displayText,
+    });
     const activeTask = this.exclusiveTasks.get(targetAgent);
     if (activeTask) {
       this.events.publish({
@@ -364,6 +367,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.runningAgents.add(agent);
     const startedAt = Date.now();
     const content = micaUi.parseImageRefs(input.text) as AgentQueryContent;
+    const displayContent = parseDisplayContent(input);
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
@@ -390,7 +394,7 @@ export class LocalRuntimeController implements RuntimeController {
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
-        conversationMessages: [...previousConversationMessages, { role: 'user', content }],
+        conversationMessages: [...previousConversationMessages, { role: 'user', content, displayContent }],
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
@@ -408,7 +412,7 @@ export class LocalRuntimeController implements RuntimeController {
       if (session) {
         micaUi.conversation.setMessages(session.uiState.conversationMessages);
       } else {
-        micaUi.conversation.appendUserMessage(content);
+        micaUi.conversation.appendUserMessage(displayContent ?? content);
       }
       micaUi.conversation.clearResponseText();
       if (clearPreviousTurnUi) {
@@ -611,18 +615,19 @@ export class LocalRuntimeController implements RuntimeController {
     }
 
     const content = micaUi.parseImageRefs(next.text) as AgentQueryContent;
+    const displayContent = parseDisplayContent(next);
     const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
-        conversationMessages: [...session.uiState.conversationMessages, { role: 'user', content }],
+        conversationMessages: [...session.uiState.conversationMessages, { role: 'user', content, displayContent }],
       });
     }
     if (this.isActiveAgent(agent)) {
       if (session) {
         micaUi.conversation.setMessages(session.uiState.conversationMessages);
       } else {
-        micaUi.conversation.appendUserMessage(content);
+        micaUi.conversation.appendUserMessage(displayContent ?? content);
       }
       micaUi.conversation.clearResponseText();
     }
@@ -663,6 +668,10 @@ function displayConversationMessages(
   return session?.uiState.conversationMessages.length
     ? session.uiState.conversationMessages
     : agent.toConversationMessages();
+}
+
+function parseDisplayContent(input: RuntimeInput): AgentQueryContent | undefined {
+  return input.displayText ? (micaUi.parseImageRefs(input.displayText) as AgentQueryContent) : undefined;
 }
 
 function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {

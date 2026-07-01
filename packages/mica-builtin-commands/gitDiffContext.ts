@@ -46,7 +46,7 @@ function runGitDiffContext(services: CommandRuntimeServices, target: DiffTarget)
     }
 
     const message = buildMessage(branch, context);
-    micaUi.terminalInput.submit(message);
+    micaUi.terminalInput.submit(message, { displayText: buildDisplayMessage(branch, context) });
     micaLogger.logRuntime('plugin.git-diff-context', 'submitted', {
       branch,
       target: context.label,
@@ -121,4 +121,32 @@ function getBaseRefCandidates(baseBranch: string): string[] {
 
 function buildMessage(branch: string, context: DiffContext): string {
   return `${context.promptLead(branch)}\n\n\`\`\`diff\n${context.diff}\n\`\`\``;
+}
+
+function buildDisplayMessage(branch: string, context: DiffContext): string {
+  const stats = summarizeDiff(context.diff);
+  const scope =
+    context.label === 'current git changes'
+      ? '总结当前工作区 Git 变化'
+      : `总结当前分支相对 ${context.label} 的 Git diff`;
+  const summary = [
+    `已发送 ${scope} 给 agent。`,
+    `分支：${branch}`,
+    `文件：${stats.files}，新增：${stats.additions} 行，删除：${stats.deletions} 行`,
+  ];
+  return summary.join('\n');
+}
+
+function summarizeDiff(diff: string): { files: number; additions: number; deletions: number } {
+  const files = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) files.add(line);
+    else if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+  }
+
+  return { files: files.size, additions, deletions };
 }

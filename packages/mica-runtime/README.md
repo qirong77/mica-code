@@ -6,6 +6,7 @@
 
 - 定义 runtime controller 接口。
 - 定义用户输入、提交结果、终止结果和运行状态。
+- `RuntimeInput` 可携带 `displayText`，用于让 UI 展示更友好的输入摘要，同时保留完整 `text` 发送给 agent。
 - 定义 runtime event 与 event bus。
 - 定义可用于 UI 同步或会话保存的 view snapshot。
 - 提供 `MessageQueueService` 管理运行中输入排队状态。

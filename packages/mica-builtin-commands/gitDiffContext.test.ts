@@ -58,8 +58,14 @@ describe('git-diff-context command', () => {
 
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', 'origin/master...HEAD'], { timeout: 10000 });
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', 'master...HEAD'], { timeout: 10000 });
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('`feature` and `master`'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/file b/file'));
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('`feature` and `master`'),
+      expect.objectContaining({ displayText: expect.stringContaining('已发送') }),
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('diff --git a/file b/file'),
+      expect.objectContaining({ displayText: expect.stringContaining('文件：1') }),
+    );
     expect(mocks.showMessage).not.toHaveBeenCalled();
   });
 
@@ -75,9 +81,18 @@ describe('git-diff-context command', () => {
 
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', 'origin/develop...HEAD'], { timeout: 10000 });
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', 'develop...HEAD'], { timeout: 10000 });
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('`feature` and `develop`'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/dev b/dev'));
-    expect(mocks.submit).not.toHaveBeenCalledWith(expect.stringContaining('`feature` and `master`'));
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('`feature` and `develop`'),
+      expect.objectContaining({ displayText: expect.stringContaining('develop') }),
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('diff --git a/dev b/dev'),
+      expect.objectContaining({ displayText: expect.stringContaining('文件：1') }),
+    );
+    expect(mocks.submit).not.toHaveBeenCalledWith(
+      expect.stringContaining('`feature` and `master`'),
+      expect.anything(),
+    );
   });
 
   it('sends current git changes from the hidden current command', () => {
@@ -92,11 +107,17 @@ describe('git-diff-context command', () => {
 
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', '--cached'], { timeout: 10000 });
     expect(mocks.gitText).toHaveBeenCalledWith(['diff'], { timeout: 10000 });
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('current git changes on branch `feature`'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('# Staged changes'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/staged b/staged'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('# Unstaged changes'));
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/unstaged b/unstaged'));
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('current git changes on branch `feature`'),
+      expect.objectContaining({ displayText: expect.stringContaining('当前工作区 Git 变化') }),
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('# Staged changes'),
+      expect.objectContaining({ displayText: expect.stringContaining('文件：2') }),
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/staged b/staged'), expect.anything());
+    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('# Unstaged changes'), expect.anything());
+    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/unstaged b/unstaged'), expect.anything());
     expect(mocks.showMessage).not.toHaveBeenCalled();
   });
 });

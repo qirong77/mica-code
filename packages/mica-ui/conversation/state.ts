@@ -73,6 +73,7 @@ function sanitizeMessageForUi(message: MicaUiMessageParam): MicaUiMessageParam {
   return {
     ...message,
     content: sanitizeContentForUi(message.content),
+    ...(message.displayContent ? { displayContent: sanitizeContentForUi(message.displayContent) } : {}),
   };
 }
 

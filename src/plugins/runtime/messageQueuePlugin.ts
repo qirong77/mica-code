@@ -74,7 +74,7 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
           owner: event.runtime.getQueueOwner(),
         });
         if (!next) return;
-        await event.runtime.submit(next.text, { source: 'plugin' });
+        await event.runtime.submit(next.text, { source: 'plugin', displayText: next.displayText });
       },
       { pluginId: ctx.pluginId, priority: 100 },
     );
