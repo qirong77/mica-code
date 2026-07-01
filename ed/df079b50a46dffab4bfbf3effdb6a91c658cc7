@@ -1,0 +1,14 @@
+packages/mica-builtin-commands/gitDiffContext.ts
+  h_a456b67147438e 49,125-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "eddf079b50a46dffab4bfbf3effdb6a91c658cc7",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
