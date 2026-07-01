@@ -101,18 +101,15 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     setCommitStatus(agent, services, `commit: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
     const pushed = await pushCurrentBranch();
 
+    const commitSubject = commitMessage.split('\n')[0]?.trim() || commitMessage.trim();
     const messageLines = [
-      `**${commitMessage.split('\n')[0]?.trim() || commitMessage.trim()}**`,
-      '',
-      pushed ? `已提交并推送 \`${commitHash}\`` : `已提交 \`${commitHash}\`，未找到远程分支`,
+      pushed
+        ? `已提交并推送 \`${commitHash}\`  ${commitSubject}`
+        : `已提交 \`${commitHash}\`，未找到远程分支  ${commitSubject}`,
     ];
     if (!pushed && commitMessage.split('\n').length > 1) {
       messageLines.push('');
       messageLines.push(commitMessage.split('\n').slice(1).join('\n').trim());
-    }
-    if (changedFiles.length > 0) {
-      messageLines.push('');
-      messageLines.push(summarizeStatus(changedFiles));
     }
     services.showCommitNotice(messageLines.join('\n'), ownerSessionId);
 
