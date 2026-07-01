@@ -102,7 +102,10 @@ export class ChatCompletionsClient extends BaseAgent<
   loadSnapshot(
     snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, ChatCompletionsUsageRecord>,
   ) {
-    this.turnId = this.loadSnapshotState(snapshot, (message) => message.role !== 'system');
+    this.turnId = this.loadSnapshotState(
+      { ...snapshot, messages: repairChatCompletionsToolResults(snapshot.messages) },
+      (message) => message.role !== 'system',
+    );
   }
   toConversationMessages(): AgentConversationMessage[] {
     return this.messages.flatMap((message) => {
@@ -342,6 +345,56 @@ function readReasoningContent(delta: unknown): string | undefined {
   if (!delta || typeof delta !== 'object' || !('reasoning_content' in delta)) return undefined;
   const reasoning = delta.reasoning_content;
   return typeof reasoning === 'string' ? reasoning : undefined;
+}
+
+function repairChatCompletionsToolResults(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const repaired: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]!;
+    if (message.role !== 'assistant' || !message.tool_calls?.length) {
+      repaired.push(message);
+      continue;
+    }
+
+    const toolCalls = message.tool_calls.filter((toolCall) => toolCall.type === 'function' && toolCall.id);
+    if (toolCalls.length === 0) {
+      repaired.push(message);
+      continue;
+    }
+
+    const toolResults = new Map<string, OpenAI.Chat.Completions.ChatCompletionToolMessageParam>();
+    let nextIndex = index + 1;
+    while (messages[nextIndex]?.role === 'tool') {
+      const toolMessage = messages[nextIndex] as OpenAI.Chat.Completions.ChatCompletionToolMessageParam;
+      toolResults.set(toolMessage.tool_call_id, toolMessage);
+      nextIndex++;
+    }
+
+    repaired.push(message);
+    for (const toolCall of toolCalls) {
+      repaired.push(toolResults.get(toolCall.id) ?? interruptedChatToolResult(toolCall.id));
+    }
+    index = nextIndex - 1;
+  }
+  return repaired;
+}
+
+function interruptedChatToolResult(toolCallId: string): OpenAI.Chat.Completions.ChatCompletionToolMessageParam {
+  return {
+    role: 'tool',
+    tool_call_id: toolCallId,
+    content: interruptedToolOutput(),
+  };
+}
+
+function interruptedToolOutput(): string {
+  return JSON.stringify({
+    ok: false,
+    status: 'interrupted',
+    error: 'Previous tool execution was interrupted before producing output.',
+  });
 }
 
 function isSameOpenAIUserContent(

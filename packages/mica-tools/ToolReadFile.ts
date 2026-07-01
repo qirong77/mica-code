@@ -48,21 +48,26 @@ async function readLineRange(
 
 export class ToolReadFile extends MicaTool {
   constructor() {
-    super('read_file', '读取文件内容，返回带行号的文本。', {
-      type: 'object' as const,
-      properties: {
-        file_path: { type: 'string', description: '文件路径' },
-        offset: {
-          type: 'number',
-          description: '起始行号。默认 1。文件过大时使用，与 limit 配合分段读取。',
+    super(
+      'read_file',
+      '读取文件内容，返回带行号的文本。',
+      {
+        type: 'object' as const,
+        properties: {
+          file_path: { type: 'string', description: '文件路径' },
+          offset: {
+            type: 'number',
+            description: '起始行号。默认 1。文件过大时使用，与 limit 配合分段读取。',
+          },
+          limit: {
+            type: 'number',
+            description: `读取行数。默认 ${DEFAULT_LIMIT_LINES}，最大 ${HARD_LIMIT_LINES}。`,
+          },
         },
-        limit: {
-          type: 'number',
-          description: `读取行数。默认 ${DEFAULT_LIMIT_LINES}，最大 ${HARD_LIMIT_LINES}。`,
-        },
+        required: ['file_path'],
       },
-      required: ['file_path'],
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(

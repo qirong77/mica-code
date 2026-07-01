@@ -83,9 +83,19 @@ export type ExclusiveTaskOptions = PluginStatusOptions & {
   statusText: string;
 };
 
+export type RecapOptions = {
+  customInstructions?: string;
+};
+
+export type RecapResult = {
+  summary: string;
+  messageCount: number;
+};
+
 export type CommandRuntimeServices = {
   clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void;
   showMessage(text: string, ttl?: number, ownerSessionId?: string): void;
+  showNotice(text: string, ownerSessionId?: string): void;
   setPluginStatus(agent: CommandAgent, text: string, options?: PluginStatusOptions): void;
   clearPluginStatus(agent: CommandAgent, ownerSessionId?: string): void;
   syncModelDisplay(agent: CommandAgent): void;
@@ -111,5 +121,6 @@ export type CommandRuntimeServices = {
     ownerSessionId?: string,
     options?: CompactOptions,
   ): Promise<CompactResult>;
-  requestExit(): void;
+  recap(agent: CommandAgent, ownerSessionId?: string, options?: RecapOptions): Promise<RecapResult>;
+  requestExit(): void | Promise<void>;
 };

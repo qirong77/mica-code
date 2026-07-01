@@ -161,7 +161,7 @@ function TerminalInput() {
 
     if (exitConfirmExpiresAtRef.current > now) {
       clearExitConfirmation();
-      process.exit(0);
+      input.requestExit();
     }
 
     if (isAgentRunning) {

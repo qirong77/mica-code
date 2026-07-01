@@ -311,6 +311,7 @@ function makeServices(): CommandRuntimeServices {
   return {
     clearUI: vi.fn(),
     showMessage: vi.fn(),
+    showNotice: vi.fn(),
     setPluginStatus: vi.fn(),
     clearPluginStatus: vi.fn(),
     syncModelDisplay: vi.fn(),
@@ -337,6 +338,7 @@ function makeServices(): CommandRuntimeServices {
     }),
     runExclusiveTask: vi.fn((_agent, _options, task) => task()),
     compact: vi.fn(),
+    recap: vi.fn(),
     requestExit: vi.fn(),
   };
 }

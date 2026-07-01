@@ -80,6 +80,64 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
   }
 }
 
+function showNoticeForSession(context: ApplicationContext | null, ownerSessionId: string | undefined, text: string): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  if (!context || !session) {
+    micaUi.conversation.appendNoticeMessage(text);
+    return;
+  }
+  const nextMessages = [...session.uiState.conversationMessages, { role: 'notice' as const, content: text }];
+  session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
+  if (context.agentSessions.current().id === session.id) {
+    micaUi.conversation.setMessages(session.uiState.conversationMessages);
+  }
+}
+
+function buildRecapPrompt(customInstructions?: string): string {
+  return [
+    'You are creating a live-only recap for a coding-agent terminal UI.',
+    'Use only the transcript provided by the user. Do not call tools.',
+    'This recap will not be saved into conversation history and must not include new facts.',
+    '',
+    'Write in Chinese unless the transcript is mostly English.',
+    'Keep it concise but useful for catching up.',
+    'Include concrete file paths, commands, validation results, user constraints, decisions, and immediate next steps when present.',
+    'Return markdown text only. Do not wrap it in XML tags or code fences.',
+    customInstructions?.trim() ? `\nAdditional user focus:\n${customInstructions.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildRecapTranscript(messages: unknown[]): string {
+  if (messages.length === 0) return '(empty conversation)';
+  return messages
+    .map((message, index) => `## Message ${index + 1}\n${truncateMiddle(stringifyValue(message), 12_000)}`)
+    .join('\n\n');
+}
+
+function stringifyValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncateMiddle(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const marker = `\n\n[recap transcript truncated, omitted ${text.length - maxChars} chars]\n\n`;
+  const budget = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(budget * 0.55);
+  const tail = Math.floor(budget * 0.45);
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
+}
+
+function cleanRecapSummary(text: string): string {
+  return text.replace(/^```(?:markdown)?\s*/i, '').replace(/```\s*$/i, '').trim();
+}
+
 export function createCommandRuntimeServices(): CommandRuntimeServices {
   return {
     clearUI(agent, sessionController) {
@@ -107,6 +165,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         return;
       }
       showGlobalMessage(text, ttl);
+    },
+    showNotice(text, ownerSessionId) {
+      showNoticeForSession(currentContext(), ownerSessionId, text);
     },
     setPluginStatus(agent, text, options = {}) {
       const context = currentContext();
@@ -374,13 +435,35 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       concreteSessionController.saveCurrent();
       return result;
     },
-    requestExit() {
+    async recap(agent, ownerSessionId, options) {
       const context = currentContext();
-      if (context) {
-        const session = context.agentSessions.current();
-        if (session.agent.isRunning) session.agent.abort();
+      const ownerSession = ownerSessionId
+        ? context?.agentSessions.findById(ownerSessionId)
+        : context?.agentSessions.current();
+      const concreteAgent = ownerSession?.agent ?? (agent as AgentRuntime);
+      const snapshot = concreteAgent.getSnapshot();
+      if (snapshot.messages.length === 0) {
+        throw new Error('当前会话还没有可总结的内容');
       }
-      process.exit(0);
+      const subAgent = concreteAgent.createSubAgent({
+        systemPrompt: buildRecapPrompt(options?.customInstructions),
+      });
+      const summary = cleanRecapSummary(
+        await subAgent.query(
+          [
+            'Create a live-only recap of this conversation.',
+            'Do not mention that this instruction exists.',
+            '',
+            buildRecapTranscript(snapshot.messages),
+          ].join('\n'),
+        ),
+      );
+      if (!summary) throw new Error('Recap summary is empty');
+      showNoticeForSession(context, ownerSession?.id ?? ownerSessionId, summary);
+      return { summary, messageCount: snapshot.messages.length };
+    },
+    requestExit() {
+      micaUi.terminalInput.requestExit();
     },
   };
 }

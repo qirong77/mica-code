@@ -52,6 +52,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createAgentsCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
+    micaBuiltinCommands.createRecapCommand(activeAgent, services),
     micaBuiltinCommands.createExitCommand(services),
     micaBuiltinCommands.createCopyCommand(services),
     micaBuiltinCommands.createRenameCommand(activeSessionController, services),

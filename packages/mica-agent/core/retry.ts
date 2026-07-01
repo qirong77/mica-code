@@ -18,13 +18,27 @@ export function isRetryableError(error: unknown): boolean {
   if (type === 'connection_error' || type === 'timeout_error') return true;
   if (type === 'api_error' || type === 'server_error' || type === 'rate_limit_error') return true;
 
-  const code = typeof err.code === 'string' ? err.code : undefined;
-  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND') return true;
+  const code = typeof err.code === 'string' ? err.code.toLowerCase() : undefined;
+  if (code) {
+    if (code === 'econnreset' || code === 'etimedout' || code === 'econnrefused' || code === 'enotfound') return true;
+    if (
+      code === 'rate_limit_exceeded' ||
+      code === 'rate_limit_error' ||
+      code === 'server_error' ||
+      code === 'service_unavailable' ||
+      code === 'temporarily_unavailable' ||
+      code === 'overloaded'
+    ) {
+      return true;
+    }
+  }
 
   if (err.message && typeof err.message === 'string') {
     const msg = err.message.toLowerCase();
     if (
       msg.includes('rate limit') ||
+      msg.includes('rate_limit') ||
+      msg.includes('too many requests') ||
       msg.includes('timeout') ||
       msg.includes('connection') ||
       msg.includes('network') ||
@@ -32,9 +46,13 @@ export function isRetryableError(error: unknown): boolean {
       msg.includes('econnreset') ||
       msg.includes('etimedout') ||
       msg.includes('5xx') ||
+      msg.includes('server_error') ||
       msg.includes('server error') ||
       msg.includes('service unavailable') ||
-      msg.includes('internal server error')
+      msg.includes('internal server error') ||
+      msg.includes('temporarily unavailable') ||
+      msg.includes('try again later') ||
+      msg.includes('overloaded')
     ) {
       return true;
     }

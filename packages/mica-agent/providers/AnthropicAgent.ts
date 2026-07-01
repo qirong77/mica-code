@@ -121,7 +121,10 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   }
 
   loadSnapshot(snapshot: AgentSnapshot<MessageParam, AnthropicUsageRecord>) {
-    this.turnId = this.loadSnapshotState(snapshot, (message) => message.role !== 'system');
+    this.turnId = this.loadSnapshotState(
+      { ...snapshot, messages: repairAnthropicToolResults(snapshot.messages) },
+      (message) => message.role !== 'system',
+    );
   }
 
   toConversationMessages(): AgentConversationMessage[] {
@@ -353,6 +356,49 @@ function collectUsageEvent(accumulator: AnthropicMergedUsage, event: RawMessageS
     accumulator.rawEvents.messageDeltas.push(event.usage);
     mergeAnthropicUsage(accumulator, event.usage);
   }
+}
+
+function repairAnthropicToolResults(messages: MessageParam[]): MessageParam[] {
+  const repaired: MessageParam[] = [];
+  const pending = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && pending.size > 0) {
+      repaired.push(interruptedAnthropicToolResultMessage(pending));
+      pending.clear();
+    }
+
+    repaired.push(message);
+    for (const part of toAnthropicContentBlocks(message.content)) {
+      if (part.type === 'tool_use') {
+        pending.add(part.id);
+      } else if (part.type === 'tool_result') {
+        pending.delete(part.tool_use_id);
+      }
+    }
+  }
+
+  if (pending.size > 0) repaired.push(interruptedAnthropicToolResultMessage(pending));
+  return repaired;
+}
+
+function interruptedAnthropicToolResultMessage(toolUseIds: Iterable<string>): MessageParam {
+  return {
+    role: 'user',
+    content: Array.from(toolUseIds, (toolUseId) => ({
+      type: 'tool_result' as const,
+      tool_use_id: toolUseId,
+      content: interruptedToolOutput(),
+      is_error: true,
+    })),
+  };
+}
+
+function interruptedToolOutput(): string {
+  return JSON.stringify({
+    ok: false,
+    status: 'interrupted',
+    error: 'Previous tool execution was interrupted before producing output.',
+  });
 }
 
 function mergeAnthropicUsage(accumulator: AnthropicMergedUsage, usage: Usage | MessageDeltaUsage): void {

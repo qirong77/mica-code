@@ -11,23 +11,28 @@ const DEFAULT_HEAD_LIMIT = 200;
 
 export class ToolGrepSearch extends MicaTool {
   constructor() {
-    super('grep_search', '在文件中搜索正则表达式，返回匹配行。', {
-      type: 'object' as const,
-      properties: {
-        pattern: { type: 'string', description: '正则表达式' },
-        path: { type: 'string', description: '搜索目录或文件' },
-        include: { type: 'string', description: '文件过滤，如 *.ts' },
-        head_limit: {
-          type: 'number',
-          description: `限制返回行数，默认 ${DEFAULT_HEAD_LIMIT}。传 0 表示不限制。`,
+    super(
+      'grep_search',
+      '在文件中搜索正则表达式，返回匹配行。',
+      {
+        type: 'object' as const,
+        properties: {
+          pattern: { type: 'string', description: '正则表达式' },
+          path: { type: 'string', description: '搜索目录或文件' },
+          include: { type: 'string', description: '文件过滤，如 *.ts' },
+          head_limit: {
+            type: 'number',
+            description: `限制返回行数，默认 ${DEFAULT_HEAD_LIMIT}。传 0 表示不限制。`,
+          },
+          offset: {
+            type: 'number',
+            description: '跳过前 N 行后再应用 head_limit，用于分页。默认 0。',
+          },
         },
-        offset: {
-          type: 'number',
-          description: '跳过前 N 行后再应用 head_limit，用于翻页。默认 0。',
-        },
+        required: ['pattern'],
       },
-      required: ['pattern'],
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(

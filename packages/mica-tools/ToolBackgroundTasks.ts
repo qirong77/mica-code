@@ -29,16 +29,21 @@ function pad(text: string, width: number): string {
 
 export class ToolBackgroundTasks extends MicaTool {
   constructor() {
-    super('background_tasks', '列出 run_shell 后台任务。', {
-      type: 'object' as const,
-      properties: {
-        status: {
-          type: 'string',
-          description: '过滤任务状态：running、finished、killed、failed、unknown_exited 或 all。默认 all。',
+    super(
+      'background_tasks',
+      '列出 run_shell 后台任务。',
+      {
+        type: 'object' as const,
+        properties: {
+          status: {
+            type: 'string',
+            description: '过滤任务状态：running、finished、killed、failed、unknown_exited 或 all。默认 all。',
+          },
+          limit: { type: 'number', description: `最多返回任务数，默认 ${DEFAULT_LIMIT}，最大 ${HARD_LIMIT}。` },
         },
-        limit: { type: 'number', description: `最多返回任务数，默认 ${DEFAULT_LIMIT}，最大 ${HARD_LIMIT}。` },
       },
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(input: { status?: string; limit?: number }, _callbacks?: ToolExecuteCallbacks): Promise<string> {

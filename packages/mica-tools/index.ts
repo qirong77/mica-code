@@ -6,6 +6,7 @@ import {
   getToolCounts,
   executeTool,
   getToolDisplayText,
+  isToolReadOnly,
 } from './registry.js';
 
 export const micaTools = {
@@ -21,6 +22,8 @@ export const micaTools = {
   execute: executeTool,
   /** 获取工具调用在 UI 日志中的展示文本。 */
   getDisplayText: getToolDisplayText,
+  /** 判断工具是否声明为只读。 */
+  isReadOnly: isToolReadOnly,
   MicaTool,
 };
 

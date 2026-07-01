@@ -31,20 +31,25 @@ function substituteArgs(content: string, args: string | undefined, skill: Skill)
 
 export class ToolSkill extends MicaTool {
   constructor() {
-    super('Skill', 'Invoke a skill by name', {
-      type: 'object',
-      properties: {
-        skill: {
-          type: 'string',
-          description: 'The skill name. E.g. "commit", "pdf", or "review-pr".',
+    super(
+      'Skill',
+      'Invoke a skill by name',
+      {
+        type: 'object',
+        properties: {
+          skill: {
+            type: 'string',
+            description: 'The skill name. E.g. "commit", "pdf", or "review-pr".',
+          },
+          args: {
+            type: 'string',
+            description: 'Optional arguments for the skill',
+          },
         },
-        args: {
-          type: 'string',
-          description: 'Optional arguments for the skill',
-        },
+        required: ['skill'],
       },
-      required: ['skill'],
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {

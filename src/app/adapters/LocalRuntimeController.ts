@@ -2,6 +2,7 @@ import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import type { HookRegistry, ServiceContainer } from '@packages/mica-plugin/index.js';
@@ -32,6 +33,7 @@ const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 const MAX_TURN_RETRIES = 2;
 const TURN_RETRY_DELAY_MS = 5000;
+const STOP_ABORT_WAIT_MS = 5000;
 
 type RuntimeActiveContext = {
   agentSessions: {
@@ -66,6 +68,7 @@ export class LocalRuntimeController implements RuntimeController {
   private readonly clearingAgents = new Set<AgentRuntime>();
   private readonly exclusiveTasks = new Map<AgentRuntime, { id: number; label: string }>();
   private readonly rewindCheckpoints = new RewindCheckpointManager();
+  private readonly activeTurns = new Set<Promise<void>>();
   private hookAgent: AgentRuntime | null = null;
   private nextExclusiveTaskId = 1;
 
@@ -84,6 +87,12 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   async stop(): Promise<void> {
+    for (const agent of this.runningAgents) {
+      agent.abort();
+    }
+    if (this.activeTurns.size > 0) {
+      await waitForActiveTurns(this.activeTurns, STOP_ABORT_WAIT_MS);
+    }
     await this.hooks.emit('runtime:stop', { runtime: this });
   }
 
@@ -326,8 +335,17 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: false, reason: 'busy' };
     }
 
-    await this.runTurn(inputHook.event.input, targetAgent, targetSessionController);
+    await this.trackTurn(this.runTurn(inputHook.event.input, targetAgent, targetSessionController));
     return { ok: true };
+  }
+
+  private async trackTurn(turn: Promise<void>): Promise<void> {
+    this.activeTurns.add(turn);
+    try {
+      await turn;
+    } finally {
+      this.activeTurns.delete(turn);
+    }
   }
 
   async abort(): Promise<AbortResult> {
@@ -354,9 +372,11 @@ export class LocalRuntimeController implements RuntimeController {
 
     // Capture pre-turn client state so we can restore it before each retry.
     const preTurnSnapshot = agent.captureClientSnapshot();
-    let hadToolCall = false;
-    const markToolCall = () => {
-      hadToolCall = true;
+    let hadNonRetryableToolCall = false;
+    const markToolCall = (toolCall: { name: string }) => {
+      if (!micaTools.isReadOnly(toolCall.name)) {
+        hadNonRetryableToolCall = true;
+      }
     };
     agent.events.on('toolCall', markToolCall);
 
@@ -457,7 +477,7 @@ export class LocalRuntimeController implements RuntimeController {
             throw error;
           }
           lastError = error;
-          if (hadToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
+          if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
             throw error;
           }
           await this.hooks.emit('turn:error', { runtime: this, input, content, error });
@@ -648,4 +668,9 @@ function appendBoundedText(previous: string, chunk: string, maxChars: number, ma
   if (next.length <= maxChars) return next;
   const body = next.startsWith(marker) ? next.slice(marker.length) : next;
   return `${marker}${body.slice(-(maxChars - marker.length))}`;
+}
+
+async function waitForActiveTurns(activeTurns: Set<Promise<void>>, timeoutMs: number): Promise<void> {
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+  await Promise.race([Promise.allSettled([...activeTurns]).then(() => undefined), timeout]);
 }

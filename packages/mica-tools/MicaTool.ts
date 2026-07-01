@@ -18,16 +18,21 @@ export type ToolInputSchema = {
 };
 
 export type ToolInput = Record<string, unknown>;
+export type ToolSafetyOptions = {
+  readOnly?: boolean;
+};
 
 export abstract class MicaTool {
   name: string;
   description: string;
   input_schema: ToolInputSchema;
+  readOnly: boolean;
 
-  constructor(name: string, description: string, input_schema: ToolInputSchema) {
+  constructor(name: string, description: string, input_schema: ToolInputSchema, options: ToolSafetyOptions = {}) {
     this.name = name;
     this.description = description;
     this.input_schema = input_schema;
+    this.readOnly = options.readOnly ?? false;
   }
 
   validateInput(input: unknown): ValidationResult {

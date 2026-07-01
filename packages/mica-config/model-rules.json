@@ -15,7 +15,7 @@
     "modelKeysIncludes": ["gpt-5.4", "gpt-5.3", "gpt-5.2"],
     "contextSize": 256,
     "effortMap": {
-      "none": "none",
+      "minimal": "minimal",
       "low": "low",
       "medium": "medium",
       "high": "high",

@@ -14,6 +14,7 @@ import { createMcpCommand } from './mcp.js';
 import { createModelCommand } from './model.js';
 import { createNewCommand } from './new.js';
 import { createProviderCommand } from './provider.js';
+import { createRecapCommand } from './recap.js';
 import { createRenameCommand } from './rename.js';
 import { createResumeCommand } from './resume.js';
 import { createRewindCommand } from './rewind.js';
@@ -40,6 +41,7 @@ export const micaBuiltinCommands = {
   createModelCommand,
   createNewCommand,
   createProviderCommand,
+  createRecapCommand,
   createRenameCommand,
   createResumeCommand,
   createRewindCommand,
@@ -56,6 +58,8 @@ export type {
   ExclusiveTaskOptions,
   ForkAgentResult,
   PluginStatusOptions,
+  RecapOptions,
+  RecapResult,
   ResumeSessionResult,
   RunningAgentRecord,
   SessionSummary,

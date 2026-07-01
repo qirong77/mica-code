@@ -103,6 +103,7 @@ function makeServices(options: {
   const services = {
     clearUI: vi.fn(),
     showMessage: vi.fn(),
+    showNotice: vi.fn(),
     setPluginStatus: vi.fn(),
     clearPluginStatus: vi.fn(),
     syncModelDisplay: vi.fn(),
@@ -126,6 +127,7 @@ function makeServices(options: {
       if (options.error) throw options.error;
       return options.result ?? makeResult();
     }),
+    recap: vi.fn(),
     requestExit: vi.fn(),
   };
   return services as unknown as CommandRuntimeServices;

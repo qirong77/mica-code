@@ -31,6 +31,7 @@ export const themeColors = {
   messageGutter: '#666666',
   messageAssistant: '#EDEDED',
   messageUser: '#D77757',
+  messageNotice: '#9d9d9d',
   messagePending: '#7b7b7b',
   responseGuide: '#666666',
   toolDefault: '#9d9d9d',

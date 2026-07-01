@@ -19,6 +19,7 @@ import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
   private context: ApplicationContext | null = null;
+  private stopPromise: Promise<void> | null = null;
 
   get activeContext(): ApplicationContext | null {
     return this.context;
@@ -95,6 +96,9 @@ export class Application {
       });
 
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');
+      micaUi.terminalInput.setOnExitRequested(() => {
+        void this.requestExit();
+      });
       micaLogger.logRuntime('runtime', 'application:start');
     } catch (error) {
       micaUi.terminalInput.setPlaceholder('启动失败：修复配置后重新运行 mica，按 Ctrl+C 退出');
@@ -114,12 +118,26 @@ export class Application {
     await this.renderInstance?.waitUntilExit();
   }
 
+  async requestExit(exitCode = 0): Promise<void> {
+    process.exitCode = exitCode;
+    await this.stop();
+    this.renderInstance?.unmount();
+  }
+
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    this.stopPromise = this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
+    micaUi.terminalInput.setOnExitRequested(null);
     this.context?.uiBridge.stop();
     await this.context?.runtime.stop();
     await this.context?.plugins.disposeAll();
     this.context?.agentSessions.stop();
     if (this.context) clearActiveContext(this.context);
+    this.context = null;
   }
 }
 

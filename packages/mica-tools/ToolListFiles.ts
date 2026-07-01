@@ -19,15 +19,20 @@ const DEFAULT_IGNORE = [
 
 export class ToolListFiles extends MicaTool {
   constructor() {
-    super('list_files', '按 glob 模式列出文件。', {
-      type: 'object' as const,
-      properties: {
-        pattern: { type: 'string', description: 'glob 模式，如 **/*.ts' },
-        path: { type: 'string', description: '搜索目录，默认当前目录' },
-        limit: { type: 'number', description: `最多返回文件数，默认 ${DEFAULT_LIMIT}，最大 ${HARD_LIMIT}` },
+    super(
+      'list_files',
+      '按 glob 模式列出文件。',
+      {
+        type: 'object' as const,
+        properties: {
+          pattern: { type: 'string', description: 'glob 模式，如 **/*.ts' },
+          path: { type: 'string', description: '搜索目录，默认当前目录' },
+          limit: { type: 'number', description: `最多返回文件数，默认 ${DEFAULT_LIMIT}，最大 ${HARD_LIMIT}` },
+        },
+        required: ['pattern'],
       },
-      required: ['pattern'],
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(

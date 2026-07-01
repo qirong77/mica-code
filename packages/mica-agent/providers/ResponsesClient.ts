@@ -116,7 +116,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   }
 
   loadSnapshot(snapshot: AgentSnapshot<ResponseInputItem, ResponsesUsageRecord>) {
-    this.turnId = this.loadSnapshotState(snapshot);
+    this.turnId = this.loadSnapshotState({ ...snapshot, messages: repairResponsesToolResults(snapshot.messages) });
   }
 
   toConversationMessages(): AgentConversationMessage[] {
@@ -406,6 +406,43 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
   }
 }
 
+function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInputItem[] {
+  const repaired: ResponseInputItem[] = [];
+  const pending = new Set<string>();
+  for (const item of messages) {
+    if (item.type === 'message' && pending.size > 0) {
+      repaired.push(...Array.from(pending, interruptedResponsesToolResult));
+      pending.clear();
+    }
+
+    repaired.push(item);
+    if (item.type === 'function_call' && item.call_id) {
+      pending.add(item.call_id);
+    } else if (item.type === 'function_call_output') {
+      pending.delete(item.call_id);
+    }
+  }
+
+  if (pending.size > 0) repaired.push(...Array.from(pending, interruptedResponsesToolResult));
+  return repaired;
+}
+
+function interruptedResponsesToolResult(callId: string): ResponseInputItem {
+  return {
+    type: 'function_call_output',
+    call_id: callId,
+    output: interruptedToolOutput(),
+  };
+}
+
+function interruptedToolOutput(): string {
+  return JSON.stringify({
+    ok: false,
+    status: 'interrupted',
+    error: 'Previous tool execution was interrupted before producing output.',
+  });
+}
+
 function parseDataUrl(url: string): AgentImageSource | null {
   const match = /^data:([^;,]+);base64,(.+)$/.exec(url);
   if (!match || !isSupportedImageMediaType(match[1])) return null;
@@ -417,13 +454,19 @@ function isSupportedImageMediaType(value: string): value is AgentImageSource['me
 }
 
 function responseEventError(event: ResponseStreamEvent): Error {
-  if (event.type === 'error') return new Error(`${event.code ?? 'unknown'}: ${event.message}`);
+  if (event.type === 'error') return errorWithCode(`${event.code ?? 'unknown'}: ${event.message}`, event.code);
   if (event.type === 'response.failed') {
     const error = event.response.error;
-    return new Error(error ? `${error.code ?? 'unknown'}: ${error.message}` : 'Response failed');
+    return errorWithCode(error ? `${error.code ?? 'unknown'}: ${error.message}` : 'Response failed', error?.code);
   }
   if (event.type === 'response.incomplete') {
     return new Error(`Response incomplete: ${event.response.incomplete_details?.reason ?? 'unknown'}`);
   }
   return new Error(`Unhandled response stream event: ${event.type}`);
+}
+
+function errorWithCode(message: string, code: string | null | undefined): Error {
+  const error = new Error(message);
+  if (code) Object.assign(error, { code });
+  return error;
 }

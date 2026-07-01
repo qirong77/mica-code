@@ -42,7 +42,7 @@ function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null)
 
 interface LogItem {
   id: string | number;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'notice';
   text: string;
 }
 
@@ -57,7 +57,7 @@ export const Conversation = (): React.ReactNode => {
       currentMessages.flatMap((msg: MicaUiMessageParam, i: number): LogItem[] => {
         const text = getTextContent(msg.content);
         if (!text) return [];
-        if (msg.role === 'user' || msg.role === 'assistant') {
+        if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'notice') {
           return [{ id: i, role: msg.role, text }];
         }
         return [];
@@ -80,6 +80,13 @@ export const Conversation = (): React.ReactNode => {
               <Text color={themeColors.messageUser} wrap="wrap">
                 {truncateLines(item.text, MAX_USER_LINES)}
               </Text>
+            </MessageGutter>
+          );
+        }
+        if (item.role === 'notice') {
+          return (
+            <MessageGutter key={item.id} tone="notice" marker="◦" marginTop={index === 0 ? 0 : 1}>
+              <Markdown>{truncateMiddleText(item.text, MAX_ASSISTANT_CHARS)}</Markdown>
             </MessageGutter>
           );
         }

@@ -11,6 +11,7 @@ type SubmitEvent = { text: string; options?: TerminalInputSubmitOptions };
 type Events = { submit: SubmitEvent };
 const emitter = mitt<Events>();
 const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>();
+let exitRequestedHandler: (() => void) | null = null;
 
 export const text = atom('');
 export const disabled = atom(false);
@@ -49,4 +50,16 @@ export function offSubmit(cb: SubmitHandler) {
   if (!handler) return;
   emitter.off('submit', handler);
   submitHandlers.delete(cb);
+}
+
+export function setOnExitRequested(cb: (() => void) | null): void {
+  exitRequestedHandler = cb;
+}
+
+export function requestExit(): void {
+  if (exitRequestedHandler) {
+    exitRequestedHandler();
+    return;
+  }
+  process.exit(0);
 }

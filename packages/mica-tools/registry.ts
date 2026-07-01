@@ -94,3 +94,8 @@ export function getToolDisplayText(name: string, input: ToolInput): string {
     return `工具 ${name} onToolUseDisplayText 执行失败：\n${message}`;
   }
 }
+
+export function isToolReadOnly(name: string): boolean {
+  const tool = findTool(name);
+  return tool?.readOnly === true;
+}

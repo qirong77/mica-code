@@ -19,7 +19,7 @@ export interface MicaUiImageBlockParam {
 export type MicaUiContentBlockParam = MicaUiTextBlock | MicaUiImageBlockParam;
 
 export interface MicaUiMessageParam {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'notice';
   content: string | MicaUiContentBlockParam[];
 }
 
@@ -110,7 +110,8 @@ export type MicaUiConversationMessage =
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
       stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'error';
     }
-  | { role: 'user'; content: string | MicaUiContentBlockParam[] };
+  | { role: 'user'; content: string | MicaUiContentBlockParam[] }
+  | { role: 'notice'; content: string | MicaUiContentBlockParam[] };
 
 export interface MicaUiUILogEntry {
   text: string;
