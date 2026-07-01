@@ -293,7 +293,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         setAgentWorkingStatus(context, target, { type: 'idle' }, options.ownerSessionId);
       }
     },
-    async compact(agent, sessionController, ownerSessionId) {
+    async compact(agent, sessionController, ownerSessionId, options) {
       const context = currentContext();
       const ownerSession = ownerSessionId
         ? context?.agentSessions.findById(ownerSessionId)
@@ -312,7 +312,8 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const service = new micaContext.CompactionService();
       const result = await service.compact({
         messages: snapshot.messages,
-        summarize: async (transcript) => {
+        options,
+        summarize: async (transcript, prompt) => {
           if (context) {
             setAgentWorkingStatus(
               context,
@@ -322,33 +323,21 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
             );
           }
           const subAgent = concreteAgent.createSubAgent({
-            systemPrompt: [
-              'You create compact checkpoints for coding-agent conversations.',
-              'Use only facts visible in the transcript. Do not infer hidden intent.',
-              'Return markdown with these exact sections:',
-              '## User Intent',
-              '## Current State',
-              '## Constraints and Preferences',
-              '## Files Inspected',
-              '## Files Modified',
-              '## Tool Results and Evidence',
-              '## Key Decisions',
-              '## Errors and Fixes',
-              '## Validation',
-              '## Pending Work',
-              '## Immediate Next Step',
-            ].join('\n'),
+            systemPrompt: prompt,
           });
           return subAgent.query(
             [
               'Summarize this conversation into a compact checkpoint for the next coding agent.',
               'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
+              'Return only the requested <analysis> and <summary> blocks.',
               '',
               transcript,
             ].join('\n'),
           );
         },
       });
+
+      if (result.preview) return result;
 
       if (context) {
         setAgentWorkingStatus(

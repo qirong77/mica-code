@@ -1,5 +1,6 @@
 import type { ProviderDefinition } from '@packages/mica-config/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { CompactOptions, CompactResult } from '@packages/mica-context/index.js';
 import type { RewindApplyResult, RewindPreviewResult, SubmitResult } from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 
@@ -108,11 +109,7 @@ export type CommandRuntimeServices = {
     agent: CommandAgent,
     sessionController: CommandSessionController,
     ownerSessionId?: string,
-  ): Promise<{
-    beforeCount: number;
-    afterCount: number;
-    beforeTokenEstimate: number;
-    afterTokenEstimate: number;
-  }>;
+    options?: CompactOptions,
+  ): Promise<CompactResult>;
   requestExit(): void;
 };

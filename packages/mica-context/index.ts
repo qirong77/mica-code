@@ -1,16 +1,20 @@
 import {
+  COMPACT_BOUNDARY_PREFIX,
   COMPACT_SUMMARY_PREFIX,
   CompactionNotNeededError,
+  CompactionPromptTooLongError,
   CompactionService,
   isCompactionNotNeededError,
 } from './CompactionService.js';
 
 export const micaContext = {
+  COMPACT_BOUNDARY_PREFIX,
   COMPACT_SUMMARY_PREFIX,
   CompactionNotNeededError,
+  CompactionPromptTooLongError,
   CompactionService,
   isCompactionNotNeededError,
 };
 
-export { CompactionNotNeededError, isCompactionNotNeededError };
-export type { CompactInput, CompactResult } from './CompactionService.js';
+export { CompactionNotNeededError, CompactionPromptTooLongError, isCompactionNotNeededError };
+export type { CompactInput, CompactOptions, CompactResult } from './CompactionService.js';
