@@ -85,11 +85,12 @@ Blog 01 在 1.4 开头加了归属说明。Blog 02 和 03 在导语末尾补了�
 
 ---
 
-## 文章列表（当前共 3 篇）
+## 文章列表（当前共 4 篇）
 
 - [【05】Code Agent 从零到一：工具设计的防御性编程](./1.tool-optimization.md)
 - [【07】Code Agent 从零到一：后台命令执行与自动终止](./2.background-task.md)
 - [【08】Code Agent 从零到一：离屏终端与 Shell 工具的下一步](./3.offscreen-terminal-shell.md)
+- [【09】Code Agent 从零到一：Skill 不是更长的 Prompt](./4.skills.md)
 
 ---
 
