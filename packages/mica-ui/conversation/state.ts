@@ -27,8 +27,11 @@ export function appendAssistantMessage(content: MicaUiMessageParam['content']): 
   appendMessage({ role: 'assistant', content });
 }
 
-export function appendNoticeMessage(content: MicaUiMessageParam['content']): void {
-  appendMessage({ role: 'notice', content });
+export function appendNoticeMessage(
+  content: MicaUiMessageParam['content'],
+  options: Pick<MicaUiMessageParam, 'variant' | 'command'> = {},
+): void {
+  appendMessage({ role: 'notice', content, ...options });
 }
 
 export function clearMessages(): void {

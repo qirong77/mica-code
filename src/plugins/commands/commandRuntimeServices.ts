@@ -93,6 +93,30 @@ function showNoticeForSession(context: ApplicationContext | null, ownerSessionId
   }
 }
 
+function showRecapForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+  command: string,
+): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  const message = { role: 'notice' as const, content: text, variant: 'recap' as const, command };
+  if (!context || !session) {
+    micaUi.conversation.appendNoticeMessage(text, { variant: 'recap', command });
+    return;
+  }
+  const nextMessages = [...session.uiState.conversationMessages, message];
+  session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
+  if (context.agentSessions.current().id === session.id) {
+    micaUi.conversation.setMessages(session.uiState.conversationMessages);
+  }
+}
+
+function formatRecapCommand(options?: { customInstructions?: string }): string {
+  const focus = options?.customInstructions?.trim();
+  return focus ? `/recap ${focus}` : '/recap';
+}
+
 function buildRecapPrompt(customInstructions?: string): string {
   return [
     'You are creating a live-only recap for a coding-agent terminal UI.',
@@ -459,7 +483,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         ),
       );
       if (!summary) throw new Error('Recap summary is empty');
-      showNoticeForSession(context, ownerSession?.id ?? ownerSessionId, summary);
+      showRecapForSession(context, ownerSession?.id ?? ownerSessionId, summary, formatRecapCommand(options));
       return { summary, messageCount: snapshot.messages.length };
     },
     requestExit() {

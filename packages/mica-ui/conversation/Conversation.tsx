@@ -44,6 +44,8 @@ interface LogItem {
   id: string | number;
   role: 'user' | 'assistant' | 'notice';
   text: string;
+  variant?: MicaUiMessageParam['variant'];
+  command?: string;
 }
 
 export const Conversation = (): React.ReactNode => {
@@ -58,7 +60,7 @@ export const Conversation = (): React.ReactNode => {
         const text = getTextContent(msg.content);
         if (!text) return [];
         if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'notice') {
-          return [{ id: i, role: msg.role, text }];
+          return [{ id: i, role: msg.role, text, variant: msg.variant, command: msg.command }];
         }
         return [];
       }),
@@ -84,6 +86,20 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         if (item.role === 'notice') {
+          if (item.variant === 'recap') {
+            return (
+              <MessageGutter
+                key={item.id}
+                tone="recap"
+                marker={'\u258c'}
+                marginTop={index === 0 ? 0 : 1}
+                backgroundColor={themeColors.surfaceRecap}
+              >
+                <Text color={themeColors.messageRecap}>{item.command ?? '/recap'}</Text>
+                <Markdown>{truncateMiddleText(item.text, MAX_ASSISTANT_CHARS)}</Markdown>
+              </MessageGutter>
+            );
+          }
           return (
             <MessageGutter key={item.id} tone="notice" marker="◦" marginTop={index === 0 ? 0 : 1}>
               <Markdown>{truncateMiddleText(item.text, MAX_ASSISTANT_CHARS)}</Markdown>
