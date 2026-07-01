@@ -9,7 +9,18 @@ import type { SessionController } from '../../session/SessionController.js';
 import { createActiveAgentProxy, createActiveSessionControllerProxy } from './activeCommandProxies.js';
 import { createCommandRuntimeServices } from './commandRuntimeServices.js';
 
-const ALLOW_DURING_TURN_COMMANDS = new Set(['log', 'status', 'context', 'agents', 'new', 'fork', 'exit', 'copy', 'rename']);
+const ALLOW_DURING_TURN_COMMANDS = new Set([
+  'log',
+  'status',
+  'context',
+  'doctor',
+  'agents',
+  'new',
+  'fork',
+  'exit',
+  'copy',
+  'rename',
+]);
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 
 function currentContext(): ApplicationContext | null {
@@ -29,6 +40,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createStatusCommand(activeAgent),
     micaBuiltinCommands.createContextCommand(activeAgent),
+    micaBuiltinCommands.createDoctorCommand(activeAgent),
     micaBuiltinCommands.createNewCommand(services),
     micaBuiltinCommands.createForkCommand(services),
     micaBuiltinCommands.createRewindCommand(services),

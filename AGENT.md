@@ -83,7 +83,7 @@ temp/                        临时外部/实验代码目录，不属于默认�
 - `src/plugins/commands/index.ts` 负责把内置命令注册到 `CommandRegistry`，并同步到 UI quick commands。
 - 命令实现不要直接依赖应用层单例；需要的 runtime、session、agent、UI、MCP、日志等能力通过 `services` 或 active proxy 注入。
 - 耗时且会修改上下文、文件或配置的命令应通过 runtime exclusive task 执行，避免用户并发发送对话或切换状态。
-- 当前内置命令包括：`clear`、`resume`、`provider`、`model`、`effort`、`status`、`context`、`compact`、`new`、`fork`、`agents`、`rewind`、`mcp`、`skills`、`log`、`copy`、`rename`、`git-diff-context`、`git-diff-context-current`、`commit`、`exit`。
+- 当前内置命令包括：`clear`、`resume`、`provider`、`model`、`effort`、`status`、`context`、`doctor`、`compact`、`new`、`fork`、`agents`、`rewind`、`mcp`、`skills`、`log`、`copy`、`rename`、`git-diff-context`、`git-diff-context-current`、`commit`、`exit`。
 
 ## 工具、MCP 与 Skills
 

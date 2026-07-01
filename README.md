@@ -122,6 +122,7 @@ MICA_BUILD_OUTFILE=dist/mica-code MICA_INSTALL_DIR=$HOME/.local/bin MICA_BIN_NAM
 - `/effort`：切换推理强度。
 - `/status`：查看当前 provider、model、effort、context 和 token 状态。
 - `/context`：查看当前上下文占用总览。
+- `/doctor`：诊断运行环境、配置、MCP、工具、会话目录和 git 状态。
 - `/compact`：压缩当前会话上下文为 checkpoint。
 - `/new`：新建 agent 并切换；`/new <text>` 后台创建并运行新 agent。
 - `/fork`：从当前 agent 历史分叉新 agent；`/fork <text>` 后台运行。
