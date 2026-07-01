@@ -117,6 +117,24 @@ function formatRecapCommand(options?: { customInstructions?: string }): string {
   return focus ? `/recap ${focus}` : '/recap';
 }
 
+function showCommitNoticeForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  const message = { role: 'notice' as const, content: text, variant: 'commit' as const, command: '/commit' };
+  if (!context || !session) {
+    micaUi.conversation.appendNoticeMessage(text, { variant: 'commit', command: '/commit' });
+    return;
+  }
+  const nextMessages = [...session.uiState.conversationMessages, message];
+  session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
+  if (context.agentSessions.current().id === session.id) {
+    micaUi.conversation.setMessages(session.uiState.conversationMessages);
+  }
+}
+
 function buildRecapPrompt(customInstructions?: string): string {
   return [
     'You are creating a live-only recap for a coding-agent terminal UI.',
@@ -192,6 +210,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     },
     showNotice(text, ownerSessionId) {
       showNoticeForSession(currentContext(), ownerSessionId, text);
+    },
+    showCommitNotice(text, ownerSessionId) {
+      showCommitNoticeForSession(currentContext(), ownerSessionId, text);
     },
     setPluginStatus(agent, text, options = {}) {
       const context = currentContext();

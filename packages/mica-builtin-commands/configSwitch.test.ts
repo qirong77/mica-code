@@ -312,6 +312,7 @@ function makeServices(): CommandRuntimeServices {
     clearUI: vi.fn(),
     showMessage: vi.fn(),
     showNotice: vi.fn(),
+    showCommitNotice: vi.fn(),
     setPluginStatus: vi.fn(),
     clearPluginStatus: vi.fn(),
     syncModelDisplay: vi.fn(),

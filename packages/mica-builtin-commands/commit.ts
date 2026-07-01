@@ -62,7 +62,8 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     setCommitStatus(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
-    micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: parsePorcelainStatus(status).length });
+    const changedFiles = parsePorcelainStatus(status);
+    micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: changedFiles.length });
     if (!status.trim()) {
       micaLogger.logRuntime('plugin.commit', 'status:empty');
       showTerminalMessage(services, 'commit: 没有可提交的变化', ownerSessionId);
@@ -99,13 +100,22 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
 
     setCommitStatus(agent, services, `commit: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
     const pushed = await pushCurrentBranch();
-    showTerminalMessage(
-      services,
-      pushed
-        ? `commit: 已提交并推送 ${commitHash}(${commitMessage})`
-        : `commit: 已提交 ${commitHash}，未找到远程分支，已跳过 push`,
-      ownerSessionId,
-    );
+
+    const messageLines = [
+      `**${commitMessage.split('\n')[0]?.trim() || commitMessage.trim()}**`,
+      '',
+      pushed ? `已提交并推送 \`${commitHash}\`` : `已提交 \`${commitHash}\`，未找到远程分支`,
+    ];
+    if (!pushed && commitMessage.split('\n').length > 1) {
+      messageLines.push('');
+      messageLines.push(commitMessage.split('\n').slice(1).join('\n').trim());
+    }
+    if (changedFiles.length > 0) {
+      messageLines.push('');
+      messageLines.push(summarizeStatus(changedFiles));
+    }
+    services.showCommitNotice(messageLines.join('\n'), ownerSessionId);
+
     micaLogger.logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', {
       commit: commitHash,
     });

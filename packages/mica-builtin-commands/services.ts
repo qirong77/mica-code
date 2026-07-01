@@ -96,6 +96,7 @@ export type CommandRuntimeServices = {
   clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void;
   showMessage(text: string, ttl?: number, ownerSessionId?: string): void;
   showNotice(text: string, ownerSessionId?: string): void;
+  showCommitNotice(text: string, ownerSessionId?: string): void;
   setPluginStatus(agent: CommandAgent, text: string, options?: PluginStatusOptions): void;
   clearPluginStatus(agent: CommandAgent, ownerSessionId?: string): void;
   syncModelDisplay(agent: CommandAgent): void;

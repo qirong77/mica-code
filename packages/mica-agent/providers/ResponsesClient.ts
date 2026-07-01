@@ -134,10 +134,13 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       (item) =>
         item.type === 'message' && item.role === 'user' && JSON.stringify(item.content) === JSON.stringify(content),
     );
-    if (hasCurrentTurn) return true;
+    const answer = partialAnswer?.trim();
+    if (hasCurrentTurn) {
+      if (answer) this.messages.push({ type: 'message', role: 'assistant', content: answer });
+      return true;
+    }
 
     this.messages.push({ type: 'message', role: 'user', content });
-    const answer = partialAnswer?.trim();
     if (answer) this.messages.push({ type: 'message', role: 'assistant', content: answer });
     return false;
   }

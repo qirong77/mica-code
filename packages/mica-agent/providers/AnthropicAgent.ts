@@ -141,10 +141,13 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     const hasCurrentTurn = this.messages.some(
       (message) => message.role === 'user' && JSON.stringify(message.content) === JSON.stringify(content),
     );
-    if (hasCurrentTurn) return true;
+    const answer = partialAnswer?.trim();
+    if (hasCurrentTurn) {
+      if (answer) this.messages.push({ role: 'assistant', content: answer });
+      return true;
+    }
 
     this.messages.push({ role: 'user', content });
-    const answer = partialAnswer?.trim();
     if (answer) this.messages.push({ role: 'assistant', content: answer });
     return false;
   }

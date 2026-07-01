@@ -63,6 +63,7 @@ export class LocalRuntimeController implements RuntimeController {
   };
   private readonly runningAgents = new Set<AgentRuntime>();
   private readonly responseBuffers = new Map<AgentRuntime, string>();
+  private readonly committedResponseBuffers = new Map<AgentRuntime, string>();
   private readonly queues = new Map<AgentRuntime, InstanceType<typeof micaRuntime.MessageQueueService>>();
   private readonly sessionControllers = new Map<AgentRuntime, SessionController>();
   private readonly clearingAgents = new Set<AgentRuntime>();
@@ -381,13 +382,15 @@ export class LocalRuntimeController implements RuntimeController {
     agent.events.on('toolCall', markToolCall);
 
     this.responseBuffers.set(agent, '');
+    this.committedResponseBuffers.set(agent, '');
     const activeContext = getActiveContext<RuntimeActiveContext>();
     const session = activeContext?.agentSessions.findByAgent(agent);
     const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
+    const previousConversationMessages = displayConversationMessages(session, agent);
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
-        conversationMessages: [...agent.toConversationMessages(), { role: 'user', content }],
+        conversationMessages: [...previousConversationMessages, { role: 'user', content }],
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
@@ -402,7 +405,11 @@ export class LocalRuntimeController implements RuntimeController {
     if (this.isActiveAgent(agent)) {
       this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
       micaUi.terminalInput.clearText();
-      micaUi.conversation.appendUserMessage(content);
+      if (session) {
+        micaUi.conversation.setMessages(session.uiState.conversationMessages);
+      } else {
+        micaUi.conversation.appendUserMessage(content);
+      }
       micaUi.conversation.clearResponseText();
       if (clearPreviousTurnUi) {
         micaUi.panels.clearLogEntries();
@@ -423,6 +430,7 @@ export class LocalRuntimeController implements RuntimeController {
             agent.restoreClientSnapshot(preTurnSnapshot);
           }
           this.responseBuffers.set(agent, '');
+          this.committedResponseBuffers.set(agent, '');
 
           micaLogger.logRuntime(
             'runtime',
@@ -453,18 +461,22 @@ export class LocalRuntimeController implements RuntimeController {
           if (!agent.isCurrent(runId)) return;
 
           const responseBuffer = this.responseBuffers.get(agent) ?? '';
+          this.committedResponseBuffers.set(agent, '');
           this.responseBuffers.set(agent, '');
+          const assistantMessage = createAssistantTextMessage(responseBuffer || finalText || '(empty response)');
           if (session) {
             session.uiState = normalizeUiState({
               ...session.uiState,
-              conversationMessages: agent.toConversationMessages(),
+              conversationMessages: [...session.uiState.conversationMessages, assistantMessage],
               responseText: '',
             });
           }
           if (this.isActiveAgent(agent)) {
-            micaUi.conversation.appendAssistantMessage([
-              { type: 'text', text: responseBuffer || finalText || '(empty response)' },
-            ]);
+            if (session) {
+              micaUi.conversation.setMessages(session.uiState.conversationMessages);
+            } else {
+              micaUi.conversation.appendAssistantMessage(assistantMessage.content);
+            }
             micaUi.conversation.clearResponseText();
           }
 
@@ -488,16 +500,19 @@ export class LocalRuntimeController implements RuntimeController {
         wasAborted = true;
         runId = error.runId;
         const responseBuffer = this.responseBuffers.get(agent) ?? '';
+        const responseForHistory = uncommittedResponseText(
+          responseBuffer,
+          this.committedResponseBuffers.get(agent) ?? '',
+        );
         this.responseBuffers.set(agent, '');
-        let currentTurnAlreadyCommitted = false;
+        this.committedResponseBuffers.set(agent, '');
         if (!this.clearingAgents.has(agent)) {
-          currentTurnAlreadyCommitted = agent.preserveAbortedTurn(content, responseBuffer);
+          agent.preserveAbortedTurn(content, responseForHistory);
         }
         if (session && !this.clearingAgents.has(agent)) {
-          const conversationMessages = appendAbortedResponseForDisplay(
-            agent.toConversationMessages(),
+          const conversationMessages = appendAssistantResponseForDisplay(
+            displayConversationMessages(session, agent),
             responseBuffer,
-            currentTurnAlreadyCommitted,
           );
           session.uiState = normalizeUiState({
             ...session.uiState,
@@ -546,6 +561,7 @@ export class LocalRuntimeController implements RuntimeController {
       agent.events.off('toolCall', markToolCall);
       this.runningAgents.delete(agent);
       this.clearingAgents.delete(agent);
+      this.committedResponseBuffers.delete(agent);
       if (!hasError && !wasAborted && session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
@@ -570,6 +586,7 @@ export class LocalRuntimeController implements RuntimeController {
 
   private takeQueuedIterationInput(agent: AgentRuntime): AgentQueryContent | null {
     const queue = this.queueFor(agent);
+    this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
     const next = queue.dequeueByMode('after_iteration');
     this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
     if (!next) return null;
@@ -580,13 +597,18 @@ export class LocalRuntimeController implements RuntimeController {
       if (session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
-          conversationMessages: agent.toConversationMessages(),
+          conversationMessages: appendAssistantResponseForDisplay(session.uiState.conversationMessages, responseBuffer),
           responseText: '',
         });
       }
       this.responseBuffers.set(agent, '');
+      this.committedResponseBuffers.set(agent, '');
       if (this.isActiveAgent(agent)) {
-        micaUi.conversation.appendAssistantMessage([{ type: 'text', text: responseBuffer }]);
+        if (session) {
+          micaUi.conversation.setMessages(session.uiState.conversationMessages);
+        } else {
+          micaUi.conversation.appendAssistantMessage([{ type: 'text', text: responseBuffer }]);
+        }
         micaUi.conversation.clearResponseText();
       }
     }
@@ -596,11 +618,15 @@ export class LocalRuntimeController implements RuntimeController {
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
-        conversationMessages: [...agent.toConversationMessages(), { role: 'user', content }],
+        conversationMessages: [...session.uiState.conversationMessages, { role: 'user', content }],
       });
     }
     if (this.isActiveAgent(agent)) {
-      micaUi.conversation.appendUserMessage(content);
+      if (session) {
+        micaUi.conversation.setMessages(session.uiState.conversationMessages);
+      } else {
+        micaUi.conversation.appendUserMessage(content);
+      }
       micaUi.conversation.clearResponseText();
     }
     micaLogger.logRuntime('runtime', 'submit:queued_iteration', { chars: next.text.length, queued: queue.count() });
@@ -633,6 +659,15 @@ function shouldClearPreviousTurnUi(outcome: TerminalAgentTurnOutcome | undefined
   return outcome === undefined || outcome === 'idle' || outcome === 'completed' || outcome === 'error';
 }
 
+function displayConversationMessages(
+  session: TerminalAgentSession | undefined,
+  agent: AgentRuntime,
+): ReturnType<AgentRuntime['toConversationMessages']> {
+  return session?.uiState.conversationMessages.length
+    ? session.uiState.conversationMessages
+    : agent.toConversationMessages();
+}
+
 function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {
   const delayRunId = agent.activeRunId;
   return new Promise<void>((resolve, reject) => {
@@ -653,14 +688,25 @@ function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> 
   });
 }
 
-function appendAbortedResponseForDisplay(
+function createAssistantTextMessage(text: string): ReturnType<AgentRuntime['toConversationMessages']>[number] {
+  return { role: 'assistant', content: [{ type: 'text', text }] };
+}
+
+function appendAssistantResponseForDisplay(
   messages: ReturnType<AgentRuntime['toConversationMessages']>,
   responseText: string,
-  appendResponse: boolean,
 ): ReturnType<AgentRuntime['toConversationMessages']> {
   const text = responseText.trim();
-  if (!appendResponse || !text) return messages;
-  return [...messages, { role: 'assistant', content: [{ type: 'text', text: responseText }] }];
+  if (!text) return messages;
+  return [...messages, createAssistantTextMessage(responseText)];
+}
+
+function uncommittedResponseText(responseText: string, committedResponseText: string): string {
+  if (!committedResponseText) return responseText;
+  if (responseText.startsWith(committedResponseText)) {
+    return responseText.slice(committedResponseText.length);
+  }
+  return responseText;
 }
 
 function appendBoundedText(previous: string, chunk: string, maxChars: number, marker: string): string {

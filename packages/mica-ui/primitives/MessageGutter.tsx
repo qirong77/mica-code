@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 
-export type MessageGutterTone = 'assistant' | 'user' | 'recap' | 'notice' | 'pending' | 'tool' | 'error' | 'muted';
+export type MessageGutterTone = 'assistant' | 'user' | 'recap' | 'commit' | 'notice' | 'pending' | 'tool' | 'error' | 'muted';
 
 export interface MessageGutterProps {
   tone?: MessageGutterTone;
@@ -17,6 +17,7 @@ const TONE_COLOR: Record<MessageGutterTone, string> = {
   assistant: themeColors.messageGutter,
   user: themeColors.messageUser,
   recap: themeColors.messageRecap,
+  commit: themeColors.messageCommit,
   notice: themeColors.messageNotice,
   pending: themeColors.messagePending,
   tool: themeColors.toolDefault,

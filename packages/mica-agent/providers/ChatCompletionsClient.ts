@@ -120,10 +120,13 @@ export class ChatCompletionsClient extends BaseAgent<
     const hasCurrentTurn = this.messages.some(
       (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
     );
-    if (hasCurrentTurn) return true;
+    const answer = partialAnswer?.trim();
+    if (hasCurrentTurn) {
+      if (answer) this.messages.push({ role: 'assistant', content: answer });
+      return true;
+    }
 
     this.messages.push({ role: 'user', content: micaContentToOpenAIContent(question) });
-    const answer = partialAnswer?.trim();
     if (answer) this.messages.push({ role: 'assistant', content: answer });
     return false;
   }
