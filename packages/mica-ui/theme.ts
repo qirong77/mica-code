@@ -18,6 +18,7 @@ export const themeColors = {
   surfaceUser: '#1F1F1F',
   surfaceRecap: '#172326',
   surfaceCommit: '#1a2820',
+  surfaceNotice: '#171f24',
   surfaceSelected: '#263238',
   promptBorder: '#888888',
   promptBorderFocus: '#D77757',

@@ -535,19 +535,16 @@ export class LocalRuntimeController implements RuntimeController {
 
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
-      const errorLogItem = micaUi.createErrorLogItem({
-        id: `error-${Date.now()}`,
-        title: '请求失败',
-        error,
-      });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const messageBarError = { id: `error-${Date.now()}`, text: `请求失败: ${errorMessage}` };
       if (session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
+          messageBarMessages: [...session.uiState.messageBarMessages, messageBarError],
           responseText: '',
           thinkingText: '',
           workingStatus: { type: 'error' },
           lastTurnOutcome: 'error',
-          agentTurnLogItems: [...session.uiState.agentTurnLogItems, errorLogItem],
         });
       }
       if (this.isActiveAgent(agent)) {
@@ -555,7 +552,7 @@ export class LocalRuntimeController implements RuntimeController {
         micaUi.conversation.clearResponseText();
         micaUi.panels.thinkingText.set('');
         micaUi.panels.status.error();
-        micaUi.panels.appendAgentTurnLogItem(errorLogItem);
+        micaUi.messageBar.addMessage(messageBarError);
       }
     } finally {
       agent.events.off('toolCall', markToolCall);

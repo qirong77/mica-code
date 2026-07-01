@@ -15,9 +15,6 @@ export function BottomSurface(): React.ReactNode {
   if (dropdown.visible) {
     return <DropDownUI.renderFn />;
   }
-  if (status.type === 'error') {
-    return <AgentTurnLog />;
-  }
   if (plugins.length > 0) {
     return <PluginPanel />;
   }

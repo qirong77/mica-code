@@ -12,10 +12,12 @@ import { LocalRuntimeController } from './LocalRuntimeController.js';
 describe('LocalRuntimeController abort display state', () => {
   afterEach(() => {
     setActiveContext(null);
+    vi.restoreAllMocks();
     micaUi.conversation.clearMessages();
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
     micaUi.panels.clearLogEntries();
+    micaUi.messageBar.clearMessages();
     micaUi.panels.status.idle();
   });
 
@@ -91,6 +93,54 @@ describe('LocalRuntimeController abort display state', () => {
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: `${committedText}${uncommittedText}` },
     ]);
+  });
+
+  it('stores failed turn errors in the session message bar', async () => {
+    const addMessage = vi.spyOn(micaUi.messageBar, 'addMessage').mockImplementation(() => undefined);
+    const error = new Error('provider exploded');
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async () => {
+        throw error;
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    const controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
+
+    expect(session.uiState.messageBarMessages).toEqual([
+      expect.objectContaining({ text: '请求失败: provider exploded' }),
+    ]);
+    expect(session.uiState.lastTurnOutcome).toBe('error');
+    expect(session.uiState.workingStatus).toEqual({ type: 'error' });
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '请求失败: provider exploded' }));
   });
 });
 

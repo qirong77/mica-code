@@ -90,7 +90,7 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     for (const value of Object.values(uiMocks)) value.mockClear();
   });
 
-  it('keeps prior error or abort logs when a new turn asks to preserve them', async () => {
+  it('keeps prior turn logs when a new turn asks to preserve them', async () => {
     const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
     const agent = createAgent();
     const session = createSession(agent);

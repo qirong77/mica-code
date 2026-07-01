@@ -40,5 +40,5 @@ export function useBottomPanelHeight(extraReservedLines = 0) {
  * 首次布局尚未测量到输入框位置时，回退到终端高度的 1/3。
  */
 export function useLogViewHeight() {
-  return useBottomPanelHeight(3);
+  return useBottomPanelHeight(1);
 }

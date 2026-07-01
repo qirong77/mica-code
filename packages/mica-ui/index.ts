@@ -38,7 +38,7 @@ import {
   useSpinner,
 } from './primitives/index.js';
 import { parseImageRefs } from './utils/imagePaste.js';
-import { createErrorLogItem, createThinkingLogItem, createToolCallLogItem } from './agentTurnLogItems.js';
+import { createThinkingLogItem, createToolCallLogItem } from './agentTurnLogItems.js';
 
 export const micaUi = {
   App,
@@ -75,8 +75,6 @@ export const micaUi = {
   useSpinner,
   /** 从用户输入文本中提取图片引用并转换成 agent 可消费的内容块。 */
   parseImageRefs,
-  /** 创建 agent 错误日志 UI item。 */
-  createErrorLogItem,
   /** 创建 agent thinking 流式日志 UI item。 */
   createThinkingLogItem,
   /** 创建 agent 工具调用日志 UI item。 */

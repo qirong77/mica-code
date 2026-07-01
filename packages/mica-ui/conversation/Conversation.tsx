@@ -10,6 +10,7 @@ import { MessageGutter } from '../primitives/MessageGutter.js';
 
 const MAX_USER_LINES = runtimeEnv.ui.messageCollapseMaxLines;
 const MAX_ASSISTANT_CHARS = runtimeEnv.ui.assistantDisplayMaxChars;
+const MAX_NOTICE_CHARS = 3_000;
 
 function getTextContent(content: MicaUiMessageParam['content']): string {
   if (typeof content === 'string') return content;
@@ -44,6 +45,7 @@ interface LogItem {
   id: string | number;
   role: 'user' | 'assistant' | 'notice';
   text: string;
+  variant?: MicaUiMessageParam['variant'];
   command?: string;
 }
 
@@ -59,7 +61,7 @@ export const Conversation = (): React.ReactNode => {
         const text = getTextContent(msg.content);
         if (!text) return [];
         if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'notice') {
-          return [{ id: i, role: msg.role, text, command: msg.command }];
+          return [{ id: i, role: msg.role, text, variant: msg.variant, command: msg.command }];
         }
         return [];
       }),
@@ -85,13 +87,40 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         if (item.role === 'notice') {
+          const isStyledNotice = item.variant === 'recap' || item.variant === 'commit';
+          if (isStyledNotice) {
+            return (
+              <MessageGutter
+                key={item.id}
+                tone={item.variant === 'commit' ? 'commit' : 'recap'}
+                marker={'\u258c'}
+                marginTop={index === 0 ? 0 : 1}
+                backgroundColor={item.variant === 'commit' ? themeColors.surfaceCommit : themeColors.surfaceRecap}
+              >
+                <Box marginBottom={1}>
+                  <Text color={item.variant === 'commit' ? themeColors.messageCommit : themeColors.messageRecap}>
+                    {item.command ?? (item.variant === 'commit' ? '/commit' : '/recap')}
+                  </Text>
+                </Box>
+                <Box marginBottom={1}>
+                  <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
+                </Box>
+              </MessageGutter>
+            );
+          }
           return (
-            <MessageGutter key={item.id} tone="notice" marker={'\u258c'} marginTop={index === 0 ? 0 : 1}>
+            <MessageGutter
+              key={item.id}
+              tone="notice"
+              marker={'\u258c'}
+              marginTop={index === 0 ? 0 : 1}
+              backgroundColor={themeColors.surfaceNotice}
+            >
               <Box marginBottom={1}>
                 <Text color={themeColors.messageNotice}>{item.command ?? 'notice'}</Text>
               </Box>
               <Box marginBottom={1}>
-                <Markdown>{truncateMiddleText(item.text, MAX_ASSISTANT_CHARS)}</Markdown>
+                <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
               </Box>
             </MessageGutter>
           );

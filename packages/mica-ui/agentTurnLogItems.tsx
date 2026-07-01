@@ -3,7 +3,6 @@ import { Box, Text } from '@anthropic/ink';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';
-import { themeColors } from './theme.js';
 import { formatElapsed } from './utils/format.js';
 
 export const RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS = runtimeEnv.ui.runShellVerboseLogThresholdMs;
@@ -104,52 +103,9 @@ export function shouldShowToolOutput({
   return toolName === 'run_shell' && Boolean(output) && elapsedMs > RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS;
 }
 
-export function createErrorLogItem({
-  id,
-  title = '请求失败',
-  error,
-}: {
-  id: string;
-  title?: string;
-  error: unknown;
-}): MicaUiAgentTurnLogItem {
-  const message = error instanceof Error ? error.message : String(error);
-  const stackLines = getErrorStackLines(error);
-
-  function ErrorLogItem() {
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="row">
-          <Text color={themeColors.error}> ✗ </Text>
-          <Text color={themeColors.error} bold>
-            {title}
-          </Text>
-        </Box>
-        <Text color={themeColors.error} wrap="wrap">
-          {' '}
-          {message}
-        </Text>
-        {stackLines.length > 0 ? (
-          <Box flexDirection="column">
-            {stackLines.map((line, i) => (
-              <Text key={i} dimColor wrap="wrap">
-                {'  │ '}
-                {line.trim()}
-              </Text>
-            ))}
-          </Box>
-        ) : null}
-      </Box>
-    );
-  }
-
-  return { id, component: ErrorLogItem };
-}
-
-export function getErrorStackLines(error: unknown): string[] {
-  const stackFrames = error instanceof Error && error.stack ? error.stack.split('\n') : [];
-  const firstStackFrameIndex = stackFrames.findIndex((line) => line.trim().startsWith('at '));
-  return firstStackFrameIndex === -1 ? [] : stackFrames.slice(firstStackFrameIndex, firstStackFrameIndex + 11);
+function toolIcon(name: string): string {
+  if (name.startsWith('mcp__')) return '🔌';
+  return TOOL_ICONS[name] || '⚙️';
 }
 
 function useNow(interval = 100): number {
@@ -159,9 +115,4 @@ function useNow(interval = 100): number {
     return () => clearInterval(timer);
   }, [interval]);
   return now;
-}
-
-function toolIcon(name: string): string {
-  if (name.startsWith('mcp__')) return '🔌';
-  return TOOL_ICONS[name] || '⚙️';
 }

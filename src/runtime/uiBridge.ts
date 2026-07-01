@@ -9,13 +9,7 @@ export function reportRuntimeError(error: unknown, title = '运行错误') {
   micaUi.conversation.clearResponseText();
   micaUi.panels.thinkingText.set('');
   micaUi.panels.status.error();
-  micaUi.panels.setAgentTurnLogItems([
-    micaUi.createErrorLogItem({
-      id: `error-${Date.now()}`,
-      title,
-      error,
-    }),
-  ]);
+  micaUi.messageBar.addMessage({ id: `error-${Date.now()}`, text: `${title}: ${message}` });
 }
 
 export function resetActiveTurnUI() {

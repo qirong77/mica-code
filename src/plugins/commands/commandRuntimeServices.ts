@@ -142,9 +142,10 @@ function buildRecapPrompt(customInstructions?: string): string {
     'This recap will not be saved into conversation history and must not include new facts.',
     '',
     'Write in Chinese unless the transcript is mostly English.',
-    'Keep it concise but useful for catching up.',
-    'Include concrete file paths, commands, validation results, user constraints, decisions, and immediate next steps when present.',
-    'Return markdown text only. Do not wrap it in XML tags or code fences.',
+    'Return exactly one paragraph of no more than 4 sentences.',
+    'Cover only: what the user is building/what the current task is, the most recent meaningful progress or result, and the immediate next step.',
+    'Do not list files, commands, or details. Synthesize, do not enumerate.',
+    'Return plain markdown text only. Do not wrap in XML tags, code fences, bullet lists, or headings.',
     customInstructions?.trim() ? `\nAdditional user focus:\n${customInstructions.trim()}` : '',
   ]
     .filter(Boolean)
