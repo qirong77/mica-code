@@ -30,7 +30,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
   },
 }));
 
-const { createGitDiffContextCommand, createGitDiffContextCurrentCommand } = await import('./gitDiffContext.js');
+const { createGitDiffContextCommand } = await import('./gitDiffContext.js');
 
 function makeServices(): CommandRuntimeServices {
   return {
@@ -89,13 +89,10 @@ describe('git-diff-context command', () => {
       expect.stringContaining('diff --git a/dev b/dev'),
       expect.objectContaining({ displayText: expect.stringContaining('文件：1') }),
     );
-    expect(mocks.submit).not.toHaveBeenCalledWith(
-      expect.stringContaining('`feature` and `master`'),
-      expect.anything(),
-    );
+    expect(mocks.submit).not.toHaveBeenCalledWith(expect.stringContaining('`feature` and `master`'), expect.anything());
   });
 
-  it('sends current git changes from the hidden current command', () => {
+  it('sends current git changes when passed dash', () => {
     mocks.gitText.mockImplementation((args: string[]) => {
       if (args[0] === 'rev-parse') return 'feature\n';
       if (args[0] === 'diff' && args[1] === '--cached') return 'diff --git a/staged b/staged\n';
@@ -103,7 +100,7 @@ describe('git-diff-context command', () => {
       throw new Error(`unexpected git args: ${args.join(' ')}`);
     });
 
-    createGitDiffContextCurrentCommand(makeServices()).action();
+    createGitDiffContextCommand(makeServices()).action('-');
 
     expect(mocks.gitText).toHaveBeenCalledWith(['diff', '--cached'], { timeout: 10000 });
     expect(mocks.gitText).toHaveBeenCalledWith(['diff'], { timeout: 10000 });
@@ -115,9 +112,15 @@ describe('git-diff-context command', () => {
       expect.stringContaining('# Staged changes'),
       expect.objectContaining({ displayText: expect.stringContaining('文件：2') }),
     );
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/staged b/staged'), expect.anything());
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('diff --git a/staged b/staged'),
+      expect.anything(),
+    );
     expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('# Unstaged changes'), expect.anything());
-    expect(mocks.submit).toHaveBeenCalledWith(expect.stringContaining('diff --git a/unstaged b/unstaged'), expect.anything());
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.stringContaining('diff --git a/unstaged b/unstaged'),
+      expect.anything(),
+    );
     expect(mocks.showMessage).not.toHaveBeenCalled();
   });
 });

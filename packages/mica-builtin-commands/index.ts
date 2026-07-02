@@ -8,7 +8,7 @@ import { createDoctorCommand } from './doctor.js';
 import { createEffortCommand } from './effort.js';
 import { createExitCommand } from './exit.js';
 import { createForkCommand } from './fork.js';
-import { createGitDiffContextCommand, createGitDiffContextCurrentCommand } from './gitDiffContext.js';
+import { createGitDiffContextCommand } from './gitDiffContext.js';
 import { closeLogPanel, createLogCommand } from './log.js';
 import { createMcpCommand } from './mcp.js';
 import { createModelCommand } from './model.js';
@@ -16,6 +16,7 @@ import { createNewCommand } from './new.js';
 import { createProviderCommand } from './provider.js';
 import { createRecapCommand } from './recap.js';
 import { createRenameCommand } from './rename.js';
+import { createReviewCommand } from './review.js';
 import { createResumeCommand } from './resume.js';
 import { createRewindCommand } from './rewind.js';
 import { createSkillsCommand } from './skills.js';
@@ -34,7 +35,6 @@ export const micaBuiltinCommands = {
   createExitCommand,
   createForkCommand,
   createGitDiffContextCommand,
-  createGitDiffContextCurrentCommand,
   createLogCommand,
   closeLogPanel,
   createMcpCommand,
@@ -43,6 +43,7 @@ export const micaBuiltinCommands = {
   createProviderCommand,
   createRecapCommand,
   createRenameCommand,
+  createReviewCommand,
   createResumeCommand,
   createRewindCommand,
   createSkillsCommand,

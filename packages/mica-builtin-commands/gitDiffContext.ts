@@ -1,28 +1,19 @@
+import { readFileSync, statSync } from 'node:fs';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 
 const DEFAULT_BASE_BRANCH = 'master';
+const MAX_UNTRACKED_FILE_BYTES = 64 * 1024;
+const MAX_UNTRACKED_TOTAL_CHARS = 80_000;
 
 export function createGitDiffContextCommand(services: CommandRuntimeServices) {
   return {
     name: 'git-diff-context',
-    description: '将当前分支与指定 base 分支的差异作为上下文发送给 agent，默认 master',
+    description: '将 git diff 作为上下文发送给 agent，默认对比 master，传 - 使用当前工作区变化',
     action: (arg?: string) => {
-      runGitDiffContext(services, resolveBaseDiffTarget(arg));
-    },
-  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-}
-
-export function createGitDiffContextCurrentCommand(services: CommandRuntimeServices) {
-  return {
-    name: 'git-diff-context-current',
-    description: '将当前 git 变化作为上下文发送给 agent',
-    hidden: true,
-    hiddenMenuParent: 'git-diff-context',
-    action: () => {
-      runGitDiffContext(services, { type: 'current' });
+      runGitDiffContext(services, resolveDiffTarget(arg));
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
@@ -30,7 +21,7 @@ export function createGitDiffContextCurrentCommand(services: CommandRuntimeServi
 function runGitDiffContext(services: CommandRuntimeServices, target: DiffTarget) {
   try {
     micaLogger.logRuntime('plugin.git-diff-context', 'start', target);
-    const branch = gitText(['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
+    const branch = getCurrentBranch();
     micaLogger.logRuntime('plugin.git-diff-context', 'branch:detected', { branch });
 
     const context = loadDiffContext(target);
@@ -68,31 +59,78 @@ type DiffContext = {
   emptyMessage: (branch: string) => string;
 };
 
-function resolveBaseDiffTarget(arg?: string): DiffTarget {
-  const baseBranch = arg?.trim().split(/\s+/)[0] || DEFAULT_BASE_BRANCH;
+export function getCurrentBranch(): string {
+  return gitText(['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
+}
+
+function resolveDiffTarget(arg?: string): DiffTarget {
+  const firstArg = arg?.trim().split(/\s+/)[0];
+  if (firstArg === '-') return { type: 'current' };
+  const baseBranch = firstArg || DEFAULT_BASE_BRANCH;
   return { type: 'base', baseBranch };
 }
 
 function loadDiffContext(target: DiffTarget): DiffContext {
-  return target.type === 'current' ? loadCurrentGitChanges() : loadDiffFromBase(target.baseBranch);
+  return target.type === 'current' ? loadCurrentGitChangesContext() : loadDiffFromBase(target.baseBranch);
 }
 
-function loadCurrentGitChanges(): DiffContext {
-  const stagedDiff = gitText(['diff', '--cached'], { timeout: 10000 }).trim();
-  const unstagedDiff = gitText(['diff'], { timeout: 10000 }).trim();
-  const diff = [
-    stagedDiff ? `# Staged changes\n${stagedDiff}` : '',
-    unstagedDiff ? `# Unstaged changes\n${unstagedDiff}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
+function loadCurrentGitChangesContext(): DiffContext {
+  const diff = loadCurrentGitChanges();
   return {
     diff,
     label: 'current git changes',
-    promptLead: (branch) => `Give me a summery. Here are the current git changes on branch \`${branch}\`:`,
+    promptLead: (branch) => `Give me a summary. Here are the current git changes on branch \`${branch}\`:`,
     emptyMessage: (branch) => `branch ${branch} has no current git changes`,
   };
+}
+
+export function loadCurrentGitChanges(options: { includeUntracked?: boolean } = {}): string {
+  const stagedDiff = gitText(['diff', '--cached'], { timeout: 10000 }).trim();
+  const unstagedDiff = gitText(['diff'], { timeout: 10000 }).trim();
+  return [
+    stagedDiff ? `# Staged changes\n${stagedDiff}` : '',
+    unstagedDiff ? `# Unstaged changes\n${unstagedDiff}` : '',
+    options.includeUntracked ? loadUntrackedGitChanges() : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function loadUntrackedGitChanges(): string {
+  const paths = gitText(['ls-files', '--others', '--exclude-standard', '-z'], { timeout: 10000 })
+    .split('\0')
+    .filter(Boolean);
+  const sections: string[] = [];
+  let remainingChars = MAX_UNTRACKED_TOTAL_CHARS;
+
+  for (const path of paths) {
+    if (remainingChars <= 0) break;
+    const section = formatUntrackedFileDiff(path, remainingChars);
+    if (!section) continue;
+    sections.push(section);
+    remainingChars -= section.length;
+  }
+
+  return sections.length ? `# Untracked files\n${sections.join('\n\n')}` : '';
+}
+
+function formatUntrackedFileDiff(path: string, maxChars: number): string | null {
+  const stats = statSync(path);
+  if (!stats.isFile()) return null;
+  const content = stats.size > MAX_UNTRACKED_FILE_BYTES ? null : readFileSync(path);
+  const body = content ? formatUntrackedFileBody(content, maxChars) : '+[untracked file omitted: file too large]';
+  return [`diff --git a/${path} b/${path}`, 'new file mode 100644', '--- /dev/null', `+++ b/${path}`, body].join('\n');
+}
+
+function formatUntrackedFileBody(content: Buffer, maxChars: number): string {
+  if (content.includes(0)) return '+[untracked file omitted: binary content]';
+  const prefixed = content
+    .toString('utf-8')
+    .split('\n')
+    .map((line) => `+${line}`)
+    .join('\n');
+  if (prefixed.length <= maxChars) return prefixed;
+  return `${prefixed.slice(0, maxChars)}\n+[untracked file truncated]`;
 }
 
 function loadDiffFromBase(baseBranch: string): DiffContext {
@@ -104,7 +142,7 @@ function loadDiffFromBase(baseBranch: string): DiffContext {
         diff,
         label: baseRef,
         promptLead: (branch) =>
-          `Give me a summery. Here is the git diff between the current branch \`${branch}\` and \`${baseBranch}\`:`,
+          `Give me a summary. Here is the git diff between the current branch \`${branch}\` and \`${baseBranch}\`:`,
         emptyMessage: (branch) => `branch ${branch} has no diff from ${baseBranch}`,
       };
     } catch (error) {
@@ -137,7 +175,7 @@ function buildDisplayMessage(branch: string, context: DiffContext): string {
   return summary.join('\n');
 }
 
-function summarizeDiff(diff: string): { files: number; additions: number; deletions: number } {
+export function summarizeDiff(diff: string): { files: number; additions: number; deletions: number } {
   const files = new Set<string>();
   let additions = 0;
   let deletions = 0;

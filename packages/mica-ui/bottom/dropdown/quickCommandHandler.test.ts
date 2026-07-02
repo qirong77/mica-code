@@ -61,34 +61,34 @@ describe('quick command dropdown', () => {
 
   it('shows hidden commands when only one parent command name matches', () => {
     const gitDiffAction = vi.fn();
-    const currentAction = vi.fn();
+    const baseAction = vi.fn();
     quickCommands.set([
       { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
       {
-        name: 'git-diff-context-current',
-        description: 'send current git changes',
+        name: 'git-diff-context-base',
+        description: 'send git diff from a base branch',
         hidden: true,
         hiddenMenuParent: 'git-diff-context',
-        action: currentAction,
+        action: baseAction,
       },
       { name: 'commit', description: 'analyze git changes', action: vi.fn() },
     ]);
 
     showQuickCommands('git');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-diff-context-current']);
+    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-diff-context-base']);
 
     state.set({ ...state.get(), selectedIndex: 1 });
     expect(handleDropdownKey({ return: true })).toBe(true);
     expect(gitDiffAction).not.toHaveBeenCalled();
-    expect(currentAction).toHaveBeenCalledWith(undefined);
+    expect(baseAction).toHaveBeenCalledWith(undefined);
   });
 
   it('does not show hidden commands when multiple parent command names match', () => {
     quickCommands.set([
       { name: 'git-diff-context', description: 'send git diff context', action: vi.fn() },
       {
-        name: 'git-diff-context-current',
-        description: 'send current git changes',
+        name: 'git-diff-context-base',
+        description: 'send git diff from a base branch',
         hidden: true,
         hiddenMenuParent: 'git-diff-context',
         action: vi.fn(),
@@ -102,25 +102,25 @@ describe('quick command dropdown', () => {
 
   it('selects a hidden command when the query matches it directly', () => {
     const gitDiffAction = vi.fn();
-    const currentAction = vi.fn();
+    const baseAction = vi.fn();
     quickCommands.set([
       { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
       {
-        name: 'git-diff-context-current',
-        description: 'send current git changes',
+        name: 'git-diff-context-base',
+        description: 'send git diff from a base branch',
         hidden: true,
         hiddenMenuParent: 'git-diff-context',
-        action: currentAction,
+        action: baseAction,
       },
     ]);
 
-    showQuickCommands('git-diff-context-current');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context-current']);
+    showQuickCommands('git-diff-context-base');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context-base']);
     expect(state.get().selectedIndex).toBe(0);
 
     expect(handleDropdownKey({ return: true })).toBe(true);
     expect(gitDiffAction).not.toHaveBeenCalled();
-    expect(currentAction).toHaveBeenCalledWith(undefined);
+    expect(baseAction).toHaveBeenCalledWith(undefined);
   });
 
   it('runs hidden menu items with their configured arg', () => {

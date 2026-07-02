@@ -134,8 +134,8 @@ MICA_BUILD_OUTFILE=dist/mica-code MICA_INSTALL_DIR=$HOME/.local/bin MICA_BIN_NAM
 - `/log`：查看运行时日志；`/log export` 导出当前对话与日志。
 - `/copy`：复制最后一条消息内容到剪贴板。
 - `/rename`：重命名当前会话。
-- `/git-diff-context [base]`：把当前分支相对 base 分支的 diff 作为上下文发送给 agent，默认 `master`。
-- `/git-diff-context-current`：把当前未提交 git 变化作为上下文发送给 agent。
+- `/git-diff-context [base|-]`：把 git diff 作为上下文发送给 agent，默认对比 `master`，传 `-` 使用当前工作区变化。
+- `/review`：把当前工作区 git 变化发送给 agent 做代码审查。
 - `/commit`：分析当前 git 变化，生成提交信息，提交并推送。
 - `/exit`：退出程序。
 

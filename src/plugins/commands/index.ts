@@ -48,7 +48,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createGitDiffContextCommand(services),
-    micaBuiltinCommands.createGitDiffContextCurrentCommand(services),
+    micaBuiltinCommands.createReviewCommand(services),
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createAgentsCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
