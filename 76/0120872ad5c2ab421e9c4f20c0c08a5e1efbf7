@@ -1,0 +1,33 @@
+src/app/adapters/LocalRuntimeController.ts
+  706da24eae654808 6,34-36,55-56,431,458-475,518-526,528-538,722-771,773-774,784-790,795,797-798
+src/app/adapters/LocalRuntimeController.test.ts
+  706da24eae654808 245,247,264-266,293-297,299-304,308-311,313,318-320,323-334,384,387
+src/session/SessionController.ts
+  706da24eae654808 236-239
+packages/mica-ui/conversation/Conversation.tsx
+  706da24eae654808 128
+packages/mica-ui/theme.ts
+  706da24eae654808 38
+src/session/SessionController.test.ts
+  706da24eae654808 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "760120872ad5c2ab421e9c4f20c0c08a5e1efbf7",
+  "prompts": {
+    "706da24eae654808": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f229d-4771-7592-b0a4-484e3f7e0f71",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 983,
+      "total_deletions": 110,
+      "accepted_lines": 913,
+      "overriden_lines": 21
+    }
+  }
+}
