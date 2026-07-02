@@ -11,6 +11,7 @@ export type MessageGutterTone =
   | 'notice'
   | 'pending'
   | 'tool'
+  | 'retry_error'
   | 'error'
   | 'muted';
 
@@ -32,6 +33,7 @@ const TONE_COLOR: Record<MessageGutterTone, string> = {
   notice: themeColors.messageNotice,
   pending: themeColors.messagePending,
   tool: themeColors.toolDefault,
+  retry_error: themeColors.messageError,
   error: themeColors.statusError,
   muted: themeColors.responseGuide,
 };

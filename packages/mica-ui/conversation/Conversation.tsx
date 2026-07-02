@@ -6,7 +6,7 @@ import { useScheduleState } from '../hooks/useScheduleState.js';
 import { themeColors } from '../theme.js';
 import { messages, responseText, pendingInputs, pendingQueueMode } from './state.js';
 import { Markdown } from './Markdown.js';
-import { MessageGutter } from '../primitives/MessageGutter.js';
+import { MessageGutter, type MessageGutterTone } from '../primitives/MessageGutter.js';
 
 const MAX_USER_LINES = runtimeEnv.ui.messageCollapseMaxLines;
 const MAX_ASSISTANT_CHARS = runtimeEnv.ui.assistantDisplayMaxChars;
@@ -49,6 +49,54 @@ interface LogItem {
   command?: string;
 }
 
+type NoticeVariant = NonNullable<MicaUiMessageParam['variant']>;
+
+type NoticePresentation = {
+  tone: MessageGutterTone;
+  color: string;
+  backgroundColor: string;
+  title: string;
+};
+
+const DEFAULT_NOTICE_PRESENTATION: NoticePresentation = {
+  tone: 'notice',
+  color: themeColors.messageNotice,
+  backgroundColor: themeColors.surfaceNotice,
+  title: 'notice',
+};
+
+const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> = {
+  commit: {
+    tone: 'commit',
+    color: themeColors.messageCommit,
+    backgroundColor: themeColors.surfaceCommit,
+    title: '/commit',
+  },
+  compact: {
+    tone: 'compact',
+    color: themeColors.messageCompact,
+    backgroundColor: themeColors.surfaceCompact,
+    title: '/compact',
+  },
+  error: {
+    tone: 'retry_error',
+    color: themeColors.messageError,
+    backgroundColor: themeColors.surfaceError,
+    title: '/error',
+  },
+  recap: {
+    tone: 'recap',
+    color: themeColors.messageRecap,
+    backgroundColor: themeColors.surfaceRecap,
+    title: '/recap',
+  },
+};
+
+function noticePresentationFor(item: LogItem): NoticePresentation {
+  const presentation = item.variant ? NOTICE_PRESENTATION_BY_VARIANT[item.variant] : DEFAULT_NOTICE_PRESENTATION;
+  return { ...presentation, title: item.command ?? presentation.title };
+}
+
 export const Conversation = (): React.ReactNode => {
   const currentMessages = useScheduleState(messages);
   const currentResponseText = useScheduleState(responseText);
@@ -87,49 +135,17 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         if (item.role === 'notice') {
-          const tone =
-            item.variant === 'commit'
-              ? 'commit'
-              : item.variant === 'recap'
-                ? 'recap'
-                : item.variant === 'compact'
-                  ? 'compact'
-                  : 'notice';
-          const color =
-            item.variant === 'commit'
-              ? themeColors.messageCommit
-              : item.variant === 'recap'
-                ? themeColors.messageRecap
-                : item.variant === 'compact'
-                  ? themeColors.messageCompact
-                  : themeColors.messageNotice;
-          const backgroundColor =
-            item.variant === 'commit'
-              ? themeColors.surfaceCommit
-              : item.variant === 'recap'
-                ? themeColors.surfaceRecap
-                : item.variant === 'compact'
-                  ? themeColors.surfaceCompact
-                  : themeColors.surfaceNotice;
-          const title =
-            item.command ??
-            (item.variant === 'commit'
-              ? '/commit'
-              : item.variant === 'recap'
-                ? '/recap'
-                : item.variant === 'compact'
-                  ? '/compact'
-                  : 'notice');
+          const notice = noticePresentationFor(item);
 
           return (
             <React.Fragment key={item.id}>
               <MessageGutter
-                tone={tone}
+                tone={notice.tone}
                 marker={'\u258c'}
                 marginTop={index === 0 ? 0 : 1}
-                backgroundColor={backgroundColor}
+                backgroundColor={notice.backgroundColor}
               >
-                <Text color={color}>{title}</Text>
+                <Text color={notice.color}>{notice.title}</Text>
               </MessageGutter>
               <MessageGutter tone="muted" marker="" marginTop={1}>
                 <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>

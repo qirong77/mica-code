@@ -33,6 +33,7 @@ const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 const MAX_TURN_RETRIES = 2;
 const TURN_RETRY_DELAY_MS = 5000;
+const RETRY_TURN_NOTICE_COMMAND = '/retry';
 const STOP_ABORT_WAIT_MS = 5000;
 
 type RuntimeActiveContext = {
@@ -452,6 +453,7 @@ export class LocalRuntimeController implements RuntimeController {
           }
 
           await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS);
+          if (this.isActiveAgent(agent)) micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
         }
 
         try {
@@ -494,6 +496,13 @@ export class LocalRuntimeController implements RuntimeController {
           if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
             throw error;
           }
+          if (this.isActiveAgent(agent)) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            micaUi.conversation.appendNoticeMessage(
+              `retrying in ${TURN_RETRY_DELAY_MS / 1000}s (${attempt + 1}/${MAX_TURN_RETRIES})\n\`\`\`\n${errorMessage}\n\`\`\``,
+              { variant: 'error', command: RETRY_TURN_NOTICE_COMMAND },
+            );
+          }
           await this.hooks.emit('turn:error', { runtime: this, input, content, error });
         }
       }
@@ -526,6 +535,7 @@ export class LocalRuntimeController implements RuntimeController {
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
         if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
+        if (this.isActiveAgent(agent)) micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
         micaLogger.logRuntime(
           'runtime',
           this.clearingAgents.has(agent) ? 'turn:aborted_cleared' : 'turn:aborted_saved',
@@ -552,6 +562,7 @@ export class LocalRuntimeController implements RuntimeController {
       if (this.isActiveAgent(agent)) {
         this.events.publish({ type: 'turn:error', input, error, owner: agent });
         micaUi.conversation.clearResponseText();
+        micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
         micaUi.panels.thinkingText.set('');
         micaUi.panels.status.error();
         micaUi.messageBar.addMessage(messageBarError);

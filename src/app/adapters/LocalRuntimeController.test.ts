@@ -11,6 +11,7 @@ import { LocalRuntimeController } from './LocalRuntimeController.js';
 
 describe('LocalRuntimeController abort display state', () => {
   afterEach(() => {
+    vi.useRealTimers();
     setActiveContext(null);
     vi.restoreAllMocks();
     micaUi.conversation.clearMessages();
@@ -190,6 +191,76 @@ describe('LocalRuntimeController abort display state', () => {
     expect(session.uiState.workingStatus).toEqual({ type: 'error' });
     expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '请求失败: provider exploded' }));
   });
+
+  it('shows a retry notice while a mocked request fails with a 70% probability, then clears it after success', async () => {
+    vi.useFakeTimers();
+    const failureProbability = 0.7;
+    const rolls = [0.69, 0.42, 0.91];
+    const agent = {
+      abort: vi.fn(),
+      activeRunId: 1,
+      captureClientSnapshot: vi.fn(() => ({ before: 'turn' })),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async () => {
+        const roll = rolls.shift() ?? 1;
+        if (roll < failureProbability) {
+          throw Object.assign(new Error(`mock request failed at roll ${roll}`), { status: 503 });
+        }
+        return { runId: 3, text: 'eventual ok' };
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    const controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    const submitPromise = controller.submit('hello');
+    await flushAsyncWork();
+
+    expect(agent.run).toHaveBeenCalledTimes(1);
+    expect(currentRetryNotice()?.content).toContain('mock request failed at roll 0.69');
+    expect(currentRetryNotice()).toEqual(expect.objectContaining({ command: '/retry', variant: 'error' }));
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushAsyncWork();
+
+    expect(agent.run).toHaveBeenCalledTimes(2);
+    expect(currentRetryNotice()?.content).toContain('mock request failed at roll 0.42');
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(submitPromise).resolves.toEqual({ ok: true });
+
+    expect(agent.run).toHaveBeenCalledTimes(3);
+    expect(agent.restoreClientSnapshot).toHaveBeenCalledTimes(2);
+    expect(currentRetryNotice()).toBeUndefined();
+    expect(session.uiState.conversationMessages).toEqual([
+      expect.objectContaining({ role: 'user', content: 'hello' }),
+      { role: 'assistant', content: 'eventual ok' },
+    ]);
+  });
 });
 
 function createSession(agent: AgentRuntime): TerminalAgentSession {
@@ -228,4 +299,16 @@ function createDeferred<T>() {
     reject = rejectPromise;
   });
   return { promise, reject, resolve };
+}
+
+async function flushAsyncWork(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve();
+  }
+}
+
+function currentRetryNotice() {
+  return micaUi.conversation.messages
+    .get()
+    .find((message) => message.role === 'notice' && message.command === '/retry');
 }

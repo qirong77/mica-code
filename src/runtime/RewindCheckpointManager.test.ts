@@ -57,7 +57,7 @@ describe('RewindCheckpointManager', () => {
       expect(() => readFileSync(join(dir, 'new.txt'), 'utf-8')).toThrow();
     } finally {
       process.chdir(previousCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 

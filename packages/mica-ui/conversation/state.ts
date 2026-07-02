@@ -35,6 +35,26 @@ export function appendNoticeMessage(
   appendMessage({ role: 'notice', content, ...options });
 }
 
+export function removeMessagesByCommand(command: string): void {
+  const current = messages.get();
+  const filtered = current.filter(
+    (msg) => msg.role !== 'notice' || msg.command !== command,
+  );
+  if (filtered.length !== current.length) {
+    messages.set(filtered);
+  }
+}
+
+export function removeMessagesByCommandPrefix(prefix: string): void {
+  const current = messages.get();
+  const filtered = current.filter(
+    (msg) => msg.role !== 'notice' || !msg.command?.startsWith(prefix),
+  );
+  if (filtered.length !== current.length) {
+    messages.set(filtered);
+  }
+}
+
 export function clearMessages(): void {
   messages.set([]);
 }
