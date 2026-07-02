@@ -3,7 +3,7 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
-import { micaUi } from '@packages/mica-ui/index.js';
+import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import type { HookRegistry, ServiceContainer } from '@packages/mica-plugin/index.js';
 import {
@@ -31,9 +31,9 @@ import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.j
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
-const MAX_TURN_RETRIES = 2;
-const TURN_RETRY_DELAY_MS = 5000;
-const RETRY_TURN_NOTICE_COMMAND = '/retry';
+const MAX_TURN_RETRIES = 5;
+const TURN_RETRY_DELAY_MS = 10_000;
+const RETRY_TURN_NOTICE_COMMAND = '/error';
 const STOP_ABORT_WAIT_MS = 5000;
 
 type RuntimeActiveContext = {
@@ -51,6 +51,8 @@ type RuntimeInputHookEvent = {
   isCommand: boolean;
   owner: AgentRuntime;
 };
+
+type MicaUiNoticeMessage = Extract<MicaUiConversationMessage, { role: 'notice' }>;
 
 export class LocalRuntimeController implements RuntimeController {
   readonly events = new micaRuntime.RuntimeEventBus();
@@ -426,6 +428,7 @@ export class LocalRuntimeController implements RuntimeController {
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
       let lastError: unknown;
+      let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
         if (attempt > 0) {
           // Restore client state to before the turn, clearing any partial tool results.
@@ -452,8 +455,24 @@ export class LocalRuntimeController implements RuntimeController {
             micaUi.panels.status.connecting();
           }
 
-          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS);
-          if (this.isActiveAgent(agent)) micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
+          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS, (remainingMs) => {
+            if (!pendingRetryNotice) return;
+            updateRetryNoticeMessage(
+              session,
+              pendingRetryNotice.index,
+              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, remainingMs),
+              this.isActiveAgent(agent),
+            );
+          });
+          if (pendingRetryNotice) {
+            updateRetryNoticeMessage(
+              session,
+              pendingRetryNotice.index,
+              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, null),
+              this.isActiveAgent(agent),
+            );
+            pendingRetryNotice = null;
+          }
         }
 
         try {
@@ -496,12 +515,27 @@ export class LocalRuntimeController implements RuntimeController {
           if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
             throw error;
           }
+          const retryNotice = createRetryNoticeMessage(error, attempt + 1, TURN_RETRY_DELAY_MS);
+          let retryNoticeIndex = -1;
+          if (session) {
+            session.uiState = normalizeUiState({
+              ...session.uiState,
+              conversationMessages: [...session.uiState.conversationMessages, retryNotice],
+            });
+            retryNoticeIndex = session.uiState.conversationMessages.length - 1;
+          }
           if (this.isActiveAgent(agent)) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            micaUi.conversation.appendNoticeMessage(
-              `retrying in ${TURN_RETRY_DELAY_MS / 1000}s (${attempt + 1}/${MAX_TURN_RETRIES})\n\`\`\`\n${errorMessage}\n\`\`\``,
-              { variant: 'error', command: RETRY_TURN_NOTICE_COMMAND },
-            );
+            if (session) {
+              micaUi.conversation.setMessages(session.uiState.conversationMessages);
+            } else {
+              micaUi.conversation.appendNoticeMessage(retryNotice.content, {
+                variant: retryNotice.variant,
+                command: retryNotice.command,
+              });
+            }
+          }
+          if (retryNoticeIndex >= 0) {
+            pendingRetryNotice = { error, index: retryNoticeIndex, retryAttempt: attempt + 1 };
           }
           await this.hooks.emit('turn:error', { runtime: this, input, content, error });
         }
@@ -535,7 +569,6 @@ export class LocalRuntimeController implements RuntimeController {
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
         if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
-        if (this.isActiveAgent(agent)) micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
         micaLogger.logRuntime(
           'runtime',
           this.clearingAgents.has(agent) ? 'turn:aborted_cleared' : 'turn:aborted_saved',
@@ -562,7 +595,6 @@ export class LocalRuntimeController implements RuntimeController {
       if (this.isActiveAgent(agent)) {
         this.events.publish({ type: 'turn:error', input, error, owner: agent });
         micaUi.conversation.clearResponseText();
-        micaUi.conversation.removeMessagesByCommand(RETRY_TURN_NOTICE_COMMAND);
         micaUi.panels.thinkingText.set('');
         micaUi.panels.status.error();
         micaUi.messageBar.addMessage(messageBarError);
@@ -687,8 +719,59 @@ function parseDisplayContent(input: RuntimeInput): AgentQueryContent | undefined
   return input.displayText ? (micaUi.parseImageRefs(input.displayText) as AgentQueryContent) : undefined;
 }
 
-function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {
+function createRetryNoticeMessage(
+  error: unknown,
+  retryAttempt: number,
+  remainingMs: number | null,
+): MicaUiNoticeMessage {
+  return {
+    role: 'notice',
+    content: formatRetryNoticeContent(error, retryAttempt, remainingMs),
+    variant: 'error',
+    command: RETRY_TURN_NOTICE_COMMAND,
+  };
+}
+
+function formatRetryNoticeContent(error: unknown, retryAttempt: number, remainingMs: number | null): string {
+  const retryLabel = `第 ${retryAttempt}/${MAX_TURN_RETRIES} 次重试`;
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  if (remainingMs === null) {
+    return [`请求暂时失败，已发起${retryLabel}。`, `错误：${errorMessage}`].join('\n');
+  }
+
+  const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  return [`请求暂时失败，将自动重试。`, `倒计时：${remainingSeconds}s 后发起${retryLabel}`, `错误：${errorMessage}`].join(
+    '\n',
+  );
+}
+
+function updateRetryNoticeMessage(
+  session: TerminalAgentSession | undefined,
+  index: number,
+  notice: MicaUiNoticeMessage,
+  isActive: boolean,
+): void {
+  if (!session || index < 0 || session.uiState.conversationMessages[index]?.role !== 'notice') return;
+  session.uiState = normalizeUiState({
+    ...session.uiState,
+    conversationMessages: [
+      ...session.uiState.conversationMessages.slice(0, index),
+      notice,
+      ...session.uiState.conversationMessages.slice(index + 1),
+    ],
+  });
+  if (isActive) micaUi.conversation.setMessages(session.uiState.conversationMessages);
+}
+
+function waitForRetryDelay(
+  agent: AgentRuntime,
+  delayMs: number,
+  onRemainingMs?: (remainingMs: number) => void,
+): Promise<void> {
   const delayRunId = agent.activeRunId;
+  const startedAt = Date.now();
+  let lastRemainingSeconds = Math.ceil(delayMs / 1000);
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const finish = (fn: () => void) => {
@@ -698,12 +781,21 @@ function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> 
       clearInterval(poll);
       fn();
     };
+    const updateCountdown = () => {
+      const remainingMs = Math.max(0, delayMs - (Date.now() - startedAt));
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      if (remainingSeconds === lastRemainingSeconds) return;
+      lastRemainingSeconds = remainingSeconds;
+      onRemainingMs?.(remainingMs);
+    };
     const timer = setTimeout(() => finish(resolve), delayMs);
     const poll = setInterval(() => {
       if (agent.activeRunId !== delayRunId) {
         finish(() => reject(new AgentAbortError(agent.activeRunId)));
+        return;
       }
-    }, 300);
+      updateCountdown();
+    }, 250);
   });
 }
 

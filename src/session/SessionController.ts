@@ -233,7 +233,10 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       role: 'notice',
       content,
       ...display,
-      ...(record.variant === 'recap' || record.variant === 'commit' || record.variant === 'compact'
+      ...(record.variant === 'recap' ||
+      record.variant === 'commit' ||
+      record.variant === 'compact' ||
+      record.variant === 'error'
         ? { variant: record.variant }
         : {}),
       ...(typeof record.command === 'string' ? { command: record.command } : {}),

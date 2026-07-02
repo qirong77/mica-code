@@ -125,6 +125,7 @@ export const Conversation = (): React.ReactNode => {
               key={item.id}
               tone="user"
               marker={'\u258c'}
+              markerColor={themeColors.messageGutter}
               marginTop={1}
               backgroundColor={themeColors.surfaceUser}
             >

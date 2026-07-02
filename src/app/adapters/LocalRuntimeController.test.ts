@@ -242,10 +242,9 @@ describe('LocalRuntimeController abort display state', () => {
     expect(micaUi.panels.thinkingText.get()).toBe('');
   });
 
-  it('shows a retry notice while a mocked request fails with a 70% probability, then clears it after success', async () => {
+  it('keeps retry notices in the session when a retried request succeeds', async () => {
     vi.useFakeTimers();
-    const failureProbability = 0.7;
-    const rolls = [0.69, 0.42, 0.91];
+    const retryableFailures = ['upstream unavailable on first attempt', 'upstream unavailable on second attempt'];
     const agent = {
       abort: vi.fn(),
       activeRunId: 1,
@@ -262,9 +261,9 @@ describe('LocalRuntimeController abort display state', () => {
       isCurrent: vi.fn(() => true),
       restoreClientSnapshot: vi.fn(),
       run: vi.fn(async () => {
-        const roll = rolls.shift() ?? 1;
-        if (roll < failureProbability) {
-          throw Object.assign(new Error(`mock request failed at roll ${roll}`), { status: 503 });
+        const failure = retryableFailures.shift();
+        if (failure) {
+          throw Object.assign(new Error(failure), { status: 503 });
         }
         return { runId: 3, text: 'eventual ok' };
       }),
@@ -291,23 +290,48 @@ describe('LocalRuntimeController abort display state', () => {
     await flushAsyncWork();
 
     expect(agent.run).toHaveBeenCalledTimes(1);
-    expect(currentRetryNotice()?.content).toContain('mock request failed at roll 0.69');
-    expect(currentRetryNotice()).toEqual(expect.objectContaining({ command: '/retry', variant: 'error' }));
+    expect(retryNotices()).toHaveLength(1);
+    expect(retryNotices()[0]?.content).toContain('请求暂时失败，将自动重试。');
+    expect(retryNotices()[0]?.content).toContain('倒计时：10s 后发起第 1/5 次重试');
+    expect(retryNotices()[0]?.content).toContain('错误：upstream unavailable on first attempt');
+    expect(retryNotices()[0]).toEqual(expect.objectContaining({ command: '/error', variant: 'error' }));
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushAsyncWork();
+
+    expect(retryNotices()[0]?.content).toContain('倒计时：9s 后发起第 1/5 次重试');
+
+    await vi.advanceTimersByTimeAsync(9000);
     await flushAsyncWork();
 
     expect(agent.run).toHaveBeenCalledTimes(2);
-    expect(currentRetryNotice()?.content).toContain('mock request failed at roll 0.42');
+    expect(retryNotices()).toHaveLength(2);
+    expect(retryNotices()[0]?.content).toContain('请求暂时失败，已发起第 1/5 次重试。');
+    expect(retryNotices()[1]?.content).toContain('倒计时：10s 后发起第 2/5 次重试');
+    expect(retryNotices()[1]?.content).toContain('错误：upstream unavailable on second attempt');
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(10000);
     await expect(submitPromise).resolves.toEqual({ ok: true });
 
     expect(agent.run).toHaveBeenCalledTimes(3);
     expect(agent.restoreClientSnapshot).toHaveBeenCalledTimes(2);
-    expect(currentRetryNotice()).toBeUndefined();
+    expect(retryNotices()).toHaveLength(2);
+    expect(retryNotices()[0]?.content).toContain('请求暂时失败，已发起第 1/5 次重试。');
+    expect(retryNotices()[1]?.content).toContain('请求暂时失败，已发起第 2/5 次重试。');
     expect(session.uiState.conversationMessages).toEqual([
       expect.objectContaining({ role: 'user', content: 'hello' }),
+      expect.objectContaining({
+        role: 'notice',
+        command: '/error',
+        variant: 'error',
+        content: expect.stringContaining('upstream unavailable on first attempt'),
+      }),
+      expect.objectContaining({
+        role: 'notice',
+        command: '/error',
+        variant: 'error',
+        content: expect.stringContaining('upstream unavailable on second attempt'),
+      }),
       { role: 'assistant', content: 'eventual ok' },
     ]);
   });
@@ -357,8 +381,8 @@ async function flushAsyncWork(): Promise<void> {
   }
 }
 
-function currentRetryNotice() {
+function retryNotices() {
   return micaUi.conversation.messages
     .get()
-    .find((message) => message.role === 'notice' && message.command === '/retry');
+    .filter((message) => message.role === 'notice' && message.command === '/error');
 }

@@ -74,6 +74,7 @@ describe('SessionController', () => {
         { role: 'user' as const, content: 'model prompt' },
         { role: 'notice' as const, content: 'saved recap', variant: 'recap' as const, command: '/recap' },
         { role: 'notice' as const, content: 'saved compact', variant: 'compact' as const, command: '/compact' },
+        { role: 'notice' as const, content: 'saved retry', variant: 'error' as const, command: '/error' },
       ],
       usageHistory: [],
       lastUsage: undefined,

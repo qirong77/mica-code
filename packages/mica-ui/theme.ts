@@ -35,7 +35,7 @@ export const themeColors = {
   statusError: '#F44336',
   messageGutter: '#666666',
   messageAssistant: '#EDEDED',
-  messageUser: '#D77757',
+  messageUser: '#C8C8C8',
   messageRecap: '#26C6DA',
   messageCommit: '#66BB6A',
   messageCompact: '#C9A227',
