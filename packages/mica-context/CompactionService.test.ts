@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   COMPACT_BOUNDARY_PREFIX,
   COMPACT_SUMMARY_PREFIX,
@@ -141,6 +141,104 @@ describe('CompactionService', () => {
     expect(result.keptCount).toBe(2);
   });
 
+  it('lightweight compact prunes media and every tool result before skipping summary', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const result = await service.compact({
+      messages: makeToolMessages(5),
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 3,
+        lightweightPrune: true,
+        contextWindowSize: 100_000,
+        summarizeThresholdRatio: 0.3,
+      },
+      summarize,
+    });
+
+    const serialized = JSON.stringify(result.messages);
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.mode).toBe('pruned');
+    expect(result.summarizedCount).toBe(0);
+    expect(result.contextUsageRatio ?? 1).toBeLessThanOrEqual(0.3);
+    expect(serialized).toContain(COMPACT_BOUNDARY_PREFIX);
+    expect(serialized).toContain('user request 5');
+    expect(serialized).toContain('read_file');
+    expect(serialized).toContain('run_shell');
+    expect(serialized).toContain('[oldResult has been delete]');
+    expect(serialized).not.toContain('RAW_TOOL_RESULT_1');
+    expect(serialized).not.toContain('RAW_TOOL_RESULT_5');
+    expect(serialized).not.toContain('RAW_RESPONSES_RESULT_1');
+    expect(serialized).not.toContain('RAW_RESPONSES_RESULT_5');
+    expect(serialized).not.toContain(IMAGE_BASE64);
+  });
+
+  it('summarizes sanitized history when lightweight compact is still above threshold', async () => {
+    const service = new CompactionService();
+    let summaryTranscript = '';
+    const result = await service.compact({
+      messages: makeToolMessages(5),
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 3,
+        lightweightPrune: true,
+        contextWindowSize: 10,
+        summarizeThresholdRatio: 0.3,
+      },
+      summarize: async (transcript) => {
+        summaryTranscript = transcript;
+        return FULL_SUMMARY;
+      },
+    });
+
+    const serialized = JSON.stringify(result.messages);
+    expect(result.mode).toBe('summarized');
+    expect(result.summarizedCount).toBeGreaterThan(0);
+    expect(result.keptCount).toBe(0);
+    expect(summaryTranscript).toContain('user request 5');
+    expect(summaryTranscript).toContain('read_file');
+    expect(summaryTranscript).toContain('run_shell');
+    expect(summaryTranscript).toContain('[oldResult has been delete]');
+    expect(summaryTranscript).not.toContain('RAW_TOOL_RESULT_1');
+    expect(summaryTranscript).not.toContain('RAW_RESPONSES_RESULT_1');
+    expect(summaryTranscript).not.toContain(IMAGE_BASE64);
+    expect(serialized).toContain(COMPACT_SUMMARY_PREFIX);
+    expect(serialized).not.toContain('user request 5');
+    expect(serialized).not.toContain('RAW_TOOL_RESULT_5');
+    expect(serialized).not.toContain('RAW_RESPONSES_RESULT_5');
+    expect(serialized).not.toContain(IMAGE_BASE64);
+  });
+
+  it('lightweight compact can prune a short session without an older section to summarize', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const result = await service.compact({
+      messages: makeToolMessages(2),
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 3,
+        lightweightPrune: true,
+        contextWindowSize: 100_000,
+        summarizeThresholdRatio: 0.3,
+      },
+      summarize,
+    });
+
+    const serialized = JSON.stringify(result.messages);
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.mode).toBe('pruned');
+    expect(serialized).toContain('user request 1');
+    expect(serialized).toContain('user request 2');
+    expect(serialized).toContain('[oldResult has been delete]');
+    expect(serialized).not.toContain('RAW_TOOL_RESULT_1');
+    expect(serialized).not.toContain('RAW_TOOL_RESULT_2');
+    expect(serialized).not.toContain('RAW_RESPONSES_RESULT_1');
+    expect(serialized).not.toContain('RAW_RESPONSES_RESULT_2');
+  });
+
   it('does not force compact when there is no complete recent round to keep', async () => {
     const service = new CompactionService();
 
@@ -186,6 +284,48 @@ function makeMessages(rounds: number, offset = 0): unknown[] {
   return Array.from({ length: rounds }, (_, index) => index + 1 + offset).flatMap((turn) => [
     { role: 'user', content: `user request ${turn}` },
     { role: 'assistant', content: `assistant answer ${turn}\nfile packages/example${turn}.ts` },
+  ]);
+}
+
+const IMAGE_BASE64 = 'QUJD'.repeat(400);
+
+function makeToolMessages(rounds: number): unknown[] {
+  return Array.from({ length: rounds }, (_, index) => index + 1).flatMap((turn) => [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: `user request ${turn}` },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: IMAGE_BASE64 } },
+      ],
+    },
+    {
+      role: 'assistant',
+      content: `assistant answer ${turn}`,
+      tool_calls: [
+        {
+          id: `call-${turn}`,
+          type: 'function',
+          function: { name: 'read_file', arguments: `{"path":"packages/example${turn}.ts"}` },
+        },
+      ],
+    },
+    {
+      role: 'tool',
+      tool_call_id: `call-${turn}`,
+      content: `RAW_TOOL_RESULT_${turn}: ${'x'.repeat(4_000)}`,
+      toolUseResult: { stdout: `RAW_TOOL_RESULT_${turn}: nested payload` },
+    },
+    {
+      type: 'function_call',
+      call_id: `responses-call-${turn}`,
+      name: 'run_shell',
+      arguments: `{"cmd":"sed -n '1,20p' packages/example${turn}.ts"}`,
+    },
+    {
+      type: 'function_call_output',
+      call_id: `responses-call-${turn}`,
+      output: `RAW_RESPONSES_RESULT_${turn}: ${'y'.repeat(4_000)}`,
+    },
   ]);
 }
 

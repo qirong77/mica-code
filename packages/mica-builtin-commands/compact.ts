@@ -6,7 +6,9 @@ import type { CommandAgent, CommandRuntimeServices, CommandSessionController } f
 const MANUAL_COMPACT_OPTIONS: CompactOptions = {
   aggressive: true,
   force: true,
-  keepRecentRounds: 1,
+  keepRecentRounds: 3,
+  lightweightPrune: true,
+  summarizeThresholdRatio: 0.3,
 };
 
 export function createCompactCommand(
@@ -35,13 +37,20 @@ export function createCompactCommand(
         aggressive: MANUAL_COMPACT_OPTIONS.aggressive,
         force: MANUAL_COMPACT_OPTIONS.force,
         keepRecentRounds: MANUAL_COMPACT_OPTIONS.keepRecentRounds,
+        lightweightPrune: MANUAL_COMPACT_OPTIONS.lightweightPrune,
+        summarizeThresholdRatio: MANUAL_COMPACT_OPTIONS.summarizeThresholdRatio,
+        contextWindowSize: targetAgent.config.provider.contextWindowSize,
       });
 
       try {
+        const compactOptions: CompactOptions = {
+          ...MANUAL_COMPACT_OPTIONS,
+          contextWindowSize: targetAgent.config.provider.contextWindowSize,
+        };
         const result = await services.runExclusiveTask(
           targetAgent,
           { ownerSessionId, statusText: 'compact: preparing context' },
-          () => services.compact(targetAgent, targetSessionController, ownerSessionId, MANUAL_COMPACT_OPTIONS),
+          () => services.compact(targetAgent, targetSessionController, ownerSessionId, compactOptions),
         );
         micaLogger.logRuntime('plugin.compact', 'done', resultLog(result));
         services.showMessage(formatCompactResult(result), 8000, ownerSessionId);
@@ -63,8 +72,11 @@ function formatCompactResult(result: CompactResult): string {
   const prefix = result.preview ? 'compact preview' : 'compact';
   const saved = formatTokens(result.savedTokenEstimate);
   const ratio = Math.round(result.savedRatio * 100);
+  const mode = result.mode === 'pruned' ? 'pruned' : 'summarized';
+  const contextRatio =
+    result.contextUsageRatio !== undefined ? `, context ${Math.round(result.contextUsageRatio * 100)}%` : '';
   const retries = result.promptTooLongRetries > 0 ? `, retries ${result.promptTooLongRetries}` : '';
-  return `${prefix}: ${result.beforeCount} -> ${result.afterCount} messages, saved ~${saved} tokens (${ratio}%), kept ${result.keptCount}${retries}`;
+  return `${prefix}: ${mode}, ${result.beforeCount} -> ${result.afterCount} messages, saved ~${saved} tokens (${ratio}%), kept ${result.keptCount}${contextRatio}${retries}`;
 }
 
 function formatTokens(tokens: number): string {
@@ -74,6 +86,7 @@ function formatTokens(tokens: number): string {
 
 function resultLog(result: CompactResult) {
   return {
+    mode: result.mode,
     beforeCount: result.beforeCount,
     afterCount: result.afterCount,
     summarizedCount: result.summarizedCount,
@@ -85,5 +98,8 @@ function resultLog(result: CompactResult) {
     promptTooLongRetries: result.promptTooLongRetries,
     forced: result.forced,
     preview: result.preview,
+    contextWindowSize: result.contextWindowSize,
+    contextUsageRatio: result.contextUsageRatio,
+    lightweightTokenEstimate: result.lightweightTokenEstimate,
   };
 }

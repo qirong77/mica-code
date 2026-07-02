@@ -11,12 +11,16 @@ const AGGRESSIVE_MAX_TOKENS_TO_KEEP = 12_000;
 const MAX_MESSAGE_TRANSCRIPT_CHARS = 8_000;
 const MAX_SUMMARY_TRANSCRIPT_CHARS = 16_000;
 const RETRY_DROP_RATIO = 0.2;
+const OLD_MESSAGE_STRING_CHARS = 4_000;
+const TOOL_RESULT_PLACEHOLDER = '[oldResult has been delete]';
 
 export type CompactInput = {
   messages: unknown[];
   summarize(transcript: string, prompt: string): Promise<string>;
   options?: CompactOptions;
 };
+
+export type CompactMode = 'summarized' | 'pruned';
 
 export type CompactOptions = {
   customInstructions?: string;
@@ -25,11 +29,16 @@ export type CompactOptions = {
   force?: boolean;
   preview?: boolean;
   maxPromptTooLongRetries?: number;
+  lightweightPrune?: boolean;
+  summarizeThresholdRatio?: number;
+  contextWindowSize?: number;
+  toolResultPlaceholder?: string;
 };
 
 export type CompactResult = {
   messages: unknown[];
   summary: string;
+  mode: CompactMode;
   beforeCount: number;
   afterCount: number;
   summarizedCount: number;
@@ -42,6 +51,9 @@ export type CompactResult = {
   promptTooLongRetries: number;
   forced: boolean;
   preview: boolean;
+  contextWindowSize?: number;
+  contextUsageRatio?: number;
+  lightweightTokenEstimate?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -82,17 +94,86 @@ export class CompactionService {
     if (splitIndex <= 0 && options.force) {
       splitIndex = chooseForcedKeepStartIndex(activeMessages, options);
     }
-    if (splitIndex <= 0) {
+    if (splitIndex <= 0 && options.lightweightPrune) {
+      splitIndex = 0;
+    }
+    if (splitIndex <= 0 && !options.lightweightPrune) {
       throw new CompactionNotNeededError('当前会话最近上下文已经足够完整，暂不需要 compact');
     }
 
     const keptMessages = activeMessages.slice(splitIndex);
-    let messagesToSummarize = activeMessages.slice(0, splitIndex);
-    if (messagesToSummarize.length < (options.force ? 1 : 2)) {
+    const oldMessages = activeMessages.slice(0, splitIndex);
+    if (!options.lightweightPrune && oldMessages.length < (options.force ? 1 : 2)) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
     const beforeTokenEstimate = estimateMessagesTokens(originalMessages);
+    const userMessageTemplate = findUserMessageTemplate(activeMessages) ?? findUserMessageTemplate(originalMessages);
+    const compactedOldMessages = options.lightweightPrune
+      ? compactMessagesForCheckpoint(oldMessages, options)
+      : oldMessages;
+    const compactedKeptMessages = options.lightweightPrune
+      ? compactMessagesForCheckpoint(keptMessages, options)
+      : compactKeptMessages(keptMessages, options);
+    const lightweightGate = getLightweightGate(options);
+    let lightweightTokenEstimate: number | undefined;
+
+    if (options.lightweightPrune) {
+      const lightweightBoundaryMessage = createCompactBoundaryMessage(
+        {
+          mode: 'pruned',
+          beforeCount,
+          beforeTokenEstimate,
+          prunedCount: activeMessages.length,
+          keptCount: keptMessages.length,
+          keptTokenEstimate: estimateMessagesTokens(compactedKeptMessages),
+          keptCompacted: estimateMessagesTokens(compactedKeptMessages) < estimateMessagesTokens(keptMessages),
+          trigger: 'manual',
+          contextWindowSize: lightweightGate?.contextWindowSize,
+          summarizeThresholdRatio: lightweightGate?.thresholdRatio,
+        },
+        userMessageTemplate,
+      );
+      const lightweightMessages = [lightweightBoundaryMessage, ...compactedOldMessages, ...compactedKeptMessages];
+      lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
+      const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, lightweightGate?.contextWindowSize);
+      if (
+        lightweightGate &&
+        lightweightUsageRatio !== undefined &&
+        lightweightUsageRatio <= lightweightGate.thresholdRatio
+      ) {
+        const savedTokenEstimate = Math.max(0, beforeTokenEstimate - lightweightTokenEstimate);
+        const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
+        return {
+          messages: options.preview ? cloneJson(originalMessages) : lightweightMessages,
+          summary: 'Lightweight compact pruned media, documents, base64 payloads, and tool results.',
+          mode: 'pruned',
+          beforeCount,
+          afterCount: lightweightMessages.length,
+          summarizedCount: 0,
+          keptCount: keptMessages.length,
+          beforeTokenEstimate,
+          afterTokenEstimate: lightweightTokenEstimate,
+          savedTokenEstimate,
+          savedRatio,
+          boundaryIndex: activeStartIndex - 1,
+          promptTooLongRetries: 0,
+          forced: Boolean(options.force),
+          preview: Boolean(options.preview),
+          contextWindowSize: lightweightGate.contextWindowSize,
+          contextUsageRatio: lightweightUsageRatio,
+          lightweightTokenEstimate,
+        };
+      }
+    }
+
+    let messagesToSummarize = options.lightweightPrune
+      ? [...compactedOldMessages, ...compactedKeptMessages]
+      : compactedOldMessages;
+    const finalKeptMessages = options.lightweightPrune ? [] : compactedKeptMessages;
+    if (messagesToSummarize.length === 0) {
+      throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
+    }
     const maxRetries = options.maxPromptTooLongRetries ?? (options.aggressive ? 4 : 3);
     const prompt = getCompactPrompt(options.customInstructions);
     let promptTooLongRetries = 0;
@@ -122,26 +203,32 @@ export class CompactionService {
 
     if (!summary.trim()) throw new Error('Compact summary is empty');
 
-    const userMessageTemplate = findUserMessageTemplate(activeMessages) ?? findUserMessageTemplate(originalMessages);
-    const compactedKeptMessages = compactKeptMessages(keptMessages, options);
-    const summaryMessage = createCompactSummaryMessage(summary, keptMessages.length > 0, userMessageTemplate);
+    const summaryMessage = createCompactSummaryMessage(summary, finalKeptMessages.length > 0, userMessageTemplate);
     const boundaryMessage = createCompactBoundaryMessage(
       {
+        mode: 'summarized',
         beforeCount,
         beforeTokenEstimate,
         summarizedCount: messagesToSummarize.length,
-        keptCount: keptMessages.length,
-        keptTokenEstimate: estimateMessagesTokens(compactedKeptMessages),
-        keptCompacted: estimateMessagesTokens(compactedKeptMessages) < estimateMessagesTokens(keptMessages),
+        keptCount: finalKeptMessages.length,
+        keptTokenEstimate: estimateMessagesTokens(finalKeptMessages),
+        keptCompacted: estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(keptMessages),
         promptTooLongRetries,
         trigger: 'manual',
+        contextWindowSize: lightweightGate?.contextWindowSize,
+        summarizeThresholdRatio: lightweightGate?.thresholdRatio,
+        lightweightTokenEstimate,
       },
       userMessageTemplate,
     );
-    const compactMessages = [boundaryMessage, summaryMessage, ...compactedKeptMessages];
+    const compactMessages = [boundaryMessage, summaryMessage, ...finalKeptMessages];
     const afterTokenEstimate = estimateMessagesTokens(compactMessages);
     const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
     const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
+    const contextUsageRatio = usageRatio(
+      afterTokenEstimate,
+      lightweightGate?.contextWindowSize ?? options.contextWindowSize,
+    );
 
     if (!options.preview && afterTokenEstimate >= beforeTokenEstimate && !options.aggressive && !options.force) {
       throw new CompactionNotNeededError('compact 后预计不会节省上下文，已保留原会话');
@@ -150,10 +237,11 @@ export class CompactionService {
     return {
       messages: options.preview ? cloneJson(originalMessages) : compactMessages,
       summary,
+      mode: 'summarized',
       beforeCount,
       afterCount: compactMessages.length,
       summarizedCount: messagesToSummarize.length,
-      keptCount: keptMessages.length,
+      keptCount: finalKeptMessages.length,
       beforeTokenEstimate,
       afterTokenEstimate,
       savedTokenEstimate,
@@ -162,6 +250,9 @@ export class CompactionService {
       promptTooLongRetries,
       forced: Boolean(options.force),
       preview: Boolean(options.preview),
+      contextWindowSize: lightweightGate?.contextWindowSize,
+      contextUsageRatio,
+      lightweightTokenEstimate,
     };
   }
 }
@@ -199,7 +290,90 @@ function chooseForcedKeepStartIndex(messages: unknown[], options: CompactOptions
   const rounds = groupMessagesByRound(messages);
   if (rounds.length < 2) return 0;
   const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds ?? 1));
+  if (options.keepRecentRounds !== undefined && rounds.length <= keepRounds) return 0;
   return rounds[Math.max(1, rounds.length - keepRounds)]?.start ?? 0;
+}
+
+function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
+  const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
+  return messages.map((message) => pruneOldValue(message, OLD_MESSAGE_STRING_CHARS, placeholder));
+}
+
+function pruneOldValue(value: unknown, maxStringChars: number, placeholder: string): unknown {
+  if (typeof value === 'string') return pruneOldString(value, maxStringChars);
+  if (Array.isArray(value)) return value.map((item) => pruneOldValue(item, maxStringChars, placeholder));
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  const mediaReplacement = mediaPlaceholder(record);
+  if (mediaReplacement) return mediaReplacement;
+
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'toolUseResult') {
+      next[key] = placeholder;
+      continue;
+    }
+    if (isToolResultRecord(record) && (key === 'content' || key === 'output')) {
+      next[key] = placeholder;
+      continue;
+    }
+    if (key === 'data' && typeof child === 'string' && shouldOmitBase64String(child)) {
+      next[key] = `[omitted base64 data: ${child.length} chars]`;
+      continue;
+    }
+    if ((key === 'url' || key === 'image_url') && typeof child === 'string' && isDataUrl(child)) {
+      next[key] = `[omitted data url: ${child.length} chars]`;
+      continue;
+    }
+    next[key] = pruneOldValue(child, maxStringChars, placeholder);
+  }
+  return next;
+}
+
+function mediaPlaceholder(record: Record<string, unknown>): Record<string, string> | null {
+  if (record.type === 'image') return { type: 'text', text: '[image omitted during compact]' };
+  if (record.type === 'document') return { type: 'text', text: '[document omitted during compact]' };
+  if (record.type === 'image_url') return { type: 'text', text: '[image omitted during compact]' };
+  if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
+  if (record.type === 'file') return { type: 'text', text: '[document omitted during compact]' };
+  if (record.type === 'resource') return { type: 'text', text: '[document omitted during compact]' };
+  if (record.type === 'input_file') return { type: 'input_text', text: '[document omitted during compact]' };
+  return null;
+}
+
+function isToolResultRecord(record: Record<string, unknown>): boolean {
+  return record.role === 'tool' || record.type === 'tool_result' || record.type === 'function_call_output';
+}
+
+function pruneOldString(value: string, maxChars: number): string {
+  if (isDataUrl(value)) return `[omitted data url: ${value.length} chars]`;
+  if (shouldOmitBase64String(value)) return `[omitted base64 data: ${value.length} chars]`;
+  return pruneString(value, maxChars);
+}
+
+function isDataUrl(value: string): boolean {
+  return /^data:[^;,]+;base64,/i.test(value);
+}
+
+function shouldOmitBase64String(value: string): boolean {
+  if (value.length < 512) return false;
+  if (isDataUrl(value)) return true;
+  if (/\s/.test(value)) return false;
+  return /^[A-Za-z0-9+/=_-]+$/.test(value);
+}
+
+function getLightweightGate(options: CompactOptions): { contextWindowSize: number; thresholdRatio: number } | null {
+  const contextWindowSize = Number(options.contextWindowSize);
+  const thresholdRatio = Number(options.summarizeThresholdRatio);
+  if (!Number.isFinite(contextWindowSize) || contextWindowSize <= 0) return null;
+  if (!Number.isFinite(thresholdRatio) || thresholdRatio <= 0) return null;
+  return { contextWindowSize, thresholdRatio: Math.min(1, thresholdRatio) };
+}
+
+function usageRatio(tokens: number, contextWindowSize: number | undefined): number | undefined {
+  if (!contextWindowSize || contextWindowSize <= 0) return undefined;
+  return tokens / contextWindowSize;
 }
 
 function compactKeptMessages(messages: unknown[], options: CompactOptions): unknown[] {
@@ -308,6 +482,18 @@ function stringifyContent(record: Record<string, unknown>): string {
   if ('tool_call_id' in record) {
     parts.push(`tool_call_id: ${String(record.tool_call_id)}`);
   }
+  if ('call_id' in record) {
+    parts.push(`call_id: ${String(record.call_id)}`);
+  }
+  if ('arguments' in record) {
+    parts.push(`arguments:\n${stringifyValue(record.arguments)}`);
+  }
+  if ('input' in record) {
+    parts.push(`input:\n${stringifyValue(record.input)}`);
+  }
+  if ('output' in record) {
+    parts.push(`output:\n${stringifyValue(record.output)}`);
+  }
   if ('type' in record && !('role' in record)) {
     parts.unshift(`type: ${String(record.type)}`);
   }
@@ -330,10 +516,13 @@ function createCompactBoundaryMessage(metadata: Record<string, unknown>, templat
   );
 }
 
-function createCompactSummaryMessage(summary: string, recentMessagesPreserved: boolean, template: unknown) {
-  const recentNote = recentMessagesPreserved ? '\n\nRecent messages are preserved verbatim after this checkpoint.' : '';
+function createCompactSummaryMessage(summary: string, recentMessagesRetained: boolean, template: unknown) {
+  const recentNote = recentMessagesRetained
+    ? '\n\nRecent messages are retained after this checkpoint, with bulky payloads and tool results pruned when needed.'
+    : '';
+  const coverage = recentMessagesRetained ? 'the earlier portion of the conversation' : 'the compacted conversation';
   return createUserTextMessage(
-    `${COMPACT_SUMMARY_PREFIX}\n\nThis session is being continued from a previous conversation. The summary below covers the earlier portion of the conversation.\n\n${summary}${recentNote}`,
+    `${COMPACT_SUMMARY_PREFIX}\n\nThis session is being continued from a previous conversation. The summary below covers ${coverage}.\n\n${summary}${recentNote}`,
     template,
   );
 }

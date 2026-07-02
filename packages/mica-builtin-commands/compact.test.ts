@@ -18,7 +18,10 @@ describe('createCompactCommand', () => {
     expect(services.compact).toHaveBeenCalledWith(currentAgent, currentSession, 'session-1', {
       aggressive: true,
       force: true,
-      keepRecentRounds: 1,
+      keepRecentRounds: 3,
+      lightweightPrune: true,
+      summarizeThresholdRatio: 0.3,
+      contextWindowSize: 1000,
     });
     expect(services.showMessage).toHaveBeenCalledWith(expect.stringContaining('compact'), 8000, 'session-1');
   });
@@ -87,6 +90,7 @@ function makeResult(overrides: Partial<CompactResult> = {}): CompactResult {
   return {
     messages: [],
     summary: 'summary',
+    mode: 'summarized',
     beforeCount: 20,
     afterCount: 6,
     summarizedCount: 14,

@@ -17,4 +17,4 @@ export const micaContext = {
 };
 
 export { CompactionNotNeededError, CompactionPromptTooLongError, isCompactionNotNeededError };
-export type { CompactInput, CompactOptions, CompactResult } from './CompactionService.js';
+export type { CompactInput, CompactMode, CompactOptions, CompactResult } from './CompactionService.js';
