@@ -2,7 +2,12 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMPACT_BOUNDARY_PREFIX, COMPACT_SUMMARY_PREFIX, CompactionService } from './CompactionService.js';
+import {
+  COMPACT_BOUNDARY_PREFIX,
+  COMPACT_SUMMARY_PREFIX,
+  CompactionNotNeededError,
+  CompactionService,
+} from './CompactionService.js';
 
 const FULL_SUMMARY = `<analysis>draft</analysis>
 <summary>
@@ -116,6 +121,39 @@ describe('CompactionService', () => {
     expect(result.preview).toBe(true);
     expect(result.messages).toEqual(messages);
     expect(result.afterCount).toBeLessThan(result.beforeCount);
+  });
+
+  it('force compacts when default recent-context guard would skip', async () => {
+    const service = new CompactionService();
+    const messages = makeMessages(3);
+    const result = await service.compact({
+      messages,
+      options: { force: true, aggressive: true },
+      summarize: async (transcript) => {
+        expect(transcript).toContain('user request 1');
+        expect(transcript).not.toContain('user request 3');
+        return FULL_SUMMARY;
+      },
+    });
+
+    expect(result.forced).toBe(true);
+    expect(result.summarizedCount).toBe(4);
+    expect(result.keptCount).toBe(2);
+  });
+
+  it('does not force compact when there is no complete recent round to keep', async () => {
+    const service = new CompactionService();
+
+    await expect(
+      service.compact({
+        messages: [
+          { role: 'user', content: 'only request' },
+          { role: 'assistant', content: 'only answer' },
+        ],
+        options: { force: true, aggressive: true },
+        summarize: async () => FULL_SUMMARY,
+      }),
+    ).rejects.toBeInstanceOf(CompactionNotNeededError);
   });
 
   it('compacts cloned real resume sessions when local history exists', async () => {

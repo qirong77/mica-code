@@ -1,7 +1,7 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
-import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import type { MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
+import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import {
   micaSession,
@@ -10,6 +10,8 @@ import {
   type SessionStoreLike,
   type SessionSummary,
 } from '@packages/mica-session/index.js';
+import { getActiveContext } from '../app/activeContext.js';
+import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult = { ok: true; session: PersistedSession } | { ok: false; message: string };
 
@@ -25,7 +27,11 @@ export type SessionConfigAdapter = {
 };
 
 export type SessionUiAdapter = {
-  restore(agent: SessionAgentAdapter, lastUsage: AgentUsageRecord | undefined): void;
+  restore(
+    agent: SessionAgentAdapter,
+    lastUsage: AgentUsageRecord | undefined,
+    conversationMessages: MicaUiConversationMessage[],
+  ): void;
 };
 
 export type SessionControllerOptions = {
@@ -62,18 +68,19 @@ export class SessionController {
 
   saveCurrent(options: { allowEmpty?: boolean } = {}): void {
     const snapshot = this.agent.getSnapshot();
-    if (snapshot.messages.length === 0 && !options.allowEmpty) return;
+    const conversationMessages = getPersistableConversationMessages(this.agent);
+    if (snapshot.messages.length === 0 && conversationMessages.length === 0 && !options.allowEmpty) return;
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
     const session: PersistedSession = {
       version: 1,
       id: this.currentSessionId,
-      title: this.currentTitleOverride ?? deriveTitle(this.agent.toConversationMessages()),
+      title: this.currentTitleOverride ?? deriveTitle(getTitleConversationMessages(this.agent, conversationMessages)),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
-      snapshot: toPersistedSnapshot(snapshot),
+      snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
   }
@@ -85,6 +92,7 @@ export class SessionController {
 
     const existing = this.store.load(this.currentSessionId);
     const snapshot = this.agent.getSnapshot();
+    const conversationMessages = getPersistableConversationMessages(this.agent);
     this.store.save({
       version: 1,
       id: this.currentSessionId,
@@ -92,7 +100,7 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
-      snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot),
+      snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     });
   }
 
@@ -108,9 +116,10 @@ export class SessionController {
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot));
     this.currentSessionId = session.id;
-    const derivedTitle = deriveTitle(this.agent.toConversationMessages());
+    const conversationMessages = getPersistedConversationMessages(session.snapshot, this.agent);
+    const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     this.currentTitleOverride = session.title === derivedTitle ? null : session.title;
-    this.ui.restore(this.agent, session.snapshot.lastUsage);
+    this.ui.restore(this.agent, session.snapshot.lastUsage, conversationMessages);
     return { ok: true, session };
   }
 }
@@ -124,8 +133,10 @@ const defaultSessionConfigAdapter: SessionConfigAdapter = {
 };
 
 const defaultSessionUiAdapter: SessionUiAdapter = {
-  restore(agent, lastUsage) {
-    micaUi.conversation.setMessages(agent.toConversationMessages());
+  restore(agent, lastUsage, conversationMessages) {
+    micaUi.conversation.setMessages(
+      conversationMessages.length > 0 ? conversationMessages : agent.toConversationMessages(),
+    );
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
     micaUi.panels.thinkingText.set('');
@@ -153,12 +164,16 @@ function isSessionControllerOptions(
   return Boolean(value && typeof value === 'object' && 'agent' in value);
 }
 
-function toPersistedSnapshot(snapshot: AgentRuntimeSnapshot): PersistedRuntimeSnapshot {
+function toPersistedSnapshot(
+  snapshot: AgentRuntimeSnapshot,
+  conversationMessages: MicaUiConversationMessage[],
+): PersistedRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
     model: snapshot.model,
     effort: snapshot.effort,
     messages: snapshot.messages,
+    conversationMessages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
   };
@@ -173,6 +188,87 @@ function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntime
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
   };
+}
+
+function getPersistableConversationMessages(agent: SessionAgentAdapter): MicaUiConversationMessage[] {
+  const activeMessages =
+    agent instanceof AgentRuntime
+      ? getActiveContext<ApplicationContext>()?.agentSessions.findByAgent(agent)?.uiState.conversationMessages
+      : undefined;
+  return sanitizeConversationMessages(activeMessages?.length ? activeMessages : agent.toConversationMessages());
+}
+
+function getPersistedConversationMessages(
+  snapshot: PersistedRuntimeSnapshot,
+  agent: SessionAgentAdapter,
+): MicaUiConversationMessage[] {
+  const messages = sanitizeConversationMessages(snapshot.conversationMessages);
+  return messages.length ? messages : sanitizeConversationMessages(agent.toConversationMessages());
+}
+
+function getTitleConversationMessages(
+  agent: SessionAgentAdapter,
+  fallbackMessages: MicaUiConversationMessage[],
+): MicaUiConversationMessage[] {
+  const historyMessages = sanitizeConversationMessages(agent.toConversationMessages());
+  return historyMessages.length ? historyMessages : fallbackMessages;
+}
+
+function sanitizeConversationMessages(value: unknown): MicaUiConversationMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((message) => {
+    const sanitized = sanitizeConversationMessage(message);
+    return sanitized ? [sanitized] : [];
+  });
+}
+
+function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const content = sanitizeConversationContent(record.content);
+  if (content === null) return null;
+  const displayContent = sanitizeConversationContent(record.displayContent);
+  const display = displayContent === null ? {} : { displayContent };
+
+  if (record.role === 'user') {
+    return { role: 'user', content, ...display };
+  }
+  if (record.role === 'assistant') {
+    return { role: 'assistant', content, ...display };
+  }
+  if (record.role === 'notice') {
+    return {
+      role: 'notice',
+      content,
+      ...display,
+      ...(record.variant === 'recap' || record.variant === 'commit' ? { variant: record.variant } : {}),
+      ...(typeof record.command === 'string' ? { command: record.command } : {}),
+    };
+  }
+  return null;
+}
+
+function sanitizeConversationContent(value: unknown): MicaUiConversationMessage['content'] | null {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return null;
+
+  const blocks: MicaUiTextBlock[] = [];
+  let omittedImages = 0;
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const block = item as Record<string, unknown>;
+    if (block.type === 'text' && typeof block.text === 'string') {
+      blocks.push({ type: 'text', text: block.text });
+      continue;
+    }
+    if (block.type === 'image') omittedImages++;
+  }
+
+  if (blocks.length > 0) {
+    return blocks.length === 1 ? blocks[0]!.text : blocks;
+  }
+  if (omittedImages > 0) return omittedImages === 1 ? '[Image]' : `[${omittedImages} images]`;
+  return '';
 }
 
 function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {

@@ -3,7 +3,7 @@ import { createRecapCommand } from './recap.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 
 describe('createRecapCommand', () => {
-  it('runs live-only recap through current agent and owner session', async () => {
+  it('runs saved recap through current agent and owner session', async () => {
     const agent = makeAgent();
     const currentAgent = makeAgent();
     const services = makeServices({ currentAgent });

@@ -4,26 +4,35 @@ import { createCompactCommand } from './compact.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
 describe('createCompactCommand', () => {
-  it('passes current session controller, owner session, and parsed options', async () => {
+  it('passes current session controller, owner session, and fixed compact options', async () => {
     const agent = makeAgent();
     const currentAgent = makeAgent();
     const session = makeSession();
     const currentSession = makeSession();
-    const result = makeResult({ preview: true });
+    const result = makeResult();
     const services = makeServices({ currentAgent, currentSession, result });
     const command = createCompactCommand(agent, session, services);
 
-    await command.action('--preview --keep-recent 5 --aggressive focus on tests');
+    await command.action();
 
     expect(services.compact).toHaveBeenCalledWith(currentAgent, currentSession, 'session-1', {
-      preview: true,
       aggressive: true,
-      keepRecentRounds: 5,
-      customInstructions: 'focus on tests',
+      force: true,
+      keepRecentRounds: 1,
     });
+    expect(services.showMessage).toHaveBeenCalledWith(expect.stringContaining('compact'), 8000, 'session-1');
+  });
+
+  it('rejects arguments instead of treating them as compact options', async () => {
+    const services = makeServices({});
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action('--force --keep-recent=1');
+
+    expect(services.compact).not.toHaveBeenCalled();
     expect(services.showMessage).toHaveBeenCalledWith(
-      expect.stringContaining('compact preview'),
-      8000,
+      'compact: /compact 不支持参数，请直接运行 /compact',
+      5000,
       'session-1',
     );
   });
@@ -88,6 +97,7 @@ function makeResult(overrides: Partial<CompactResult> = {}): CompactResult {
     savedRatio: 0.8,
     boundaryIndex: -1,
     promptTooLongRetries: 0,
+    forced: false,
     preview: false,
     ...overrides,
   };

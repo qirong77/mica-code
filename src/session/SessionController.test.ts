@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/index.js';
+import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import type { SessionAgentAdapter } from './SessionController.js';
 
 const previousHome = process.env.HOME;
@@ -58,7 +59,73 @@ describe('SessionController', () => {
     controller.saveCurrent();
 
     expect(saves.at(-1)?.title).toBe('Manual title');
+    expect(saves.at(-1)?.snapshot.conversationMessages).toEqual([{ role: 'user', content: 'original prompt' }]);
     expect(controller.getCurrentTitle()).toBe('Manual title');
+  });
+
+  it('restores persisted UI conversation messages without loading notices into agent history', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const snapshot = {
+      providerId: 'test-provider',
+      model: 'test-model',
+      effort: 'none' as const,
+      messages: [{ role: 'user', content: 'model prompt' }],
+      conversationMessages: [
+        { role: 'user' as const, content: 'model prompt' },
+        { role: 'notice' as const, content: 'saved recap', variant: 'recap' as const, command: '/recap' },
+      ],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    const session: PersistedSession = {
+      version: 1,
+      id: 'session-with-recap',
+      title: 'model prompt',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      cwd: process.cwd(),
+      snapshot,
+    };
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: snapshot.providerId,
+          model: snapshot.model,
+          effort: snapshot.effort,
+          messages: snapshot.messages,
+          usageHistory: snapshot.usageHistory,
+          lastUsage: snapshot.lastUsage,
+        }),
+      ),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'model prompt' }]),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      load: vi.fn((id: string) => (id === session.id ? session : null)),
+      save: vi.fn(),
+    };
+    const restore = vi.fn();
+
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: vi.fn() },
+      ui: { restore },
+    });
+    const result = controller.resume(session.id);
+
+    expect(result.ok).toBe(true);
+    expect(agent.loadSnapshot).toHaveBeenCalledWith({
+      providerId: snapshot.providerId,
+      model: snapshot.model,
+      effort: snapshot.effort,
+      messages: snapshot.messages,
+      usageHistory: snapshot.usageHistory,
+      lastUsage: snapshot.lastUsage,
+    });
+    expect(restore).toHaveBeenCalledWith(agent, undefined, snapshot.conversationMessages);
   });
 
   it('clamps restored session effort before reloading config', async () => {
@@ -98,7 +165,16 @@ describe('SessionController', () => {
       },
     };
     const agent: SessionAgentAdapter = {
-      getSnapshot: vi.fn(() => session.snapshot),
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: session.snapshot.providerId,
+          model: session.snapshot.model,
+          effort: session.snapshot.effort,
+          messages: session.snapshot.messages,
+          usageHistory: session.snapshot.usageHistory,
+          lastUsage: session.snapshot.lastUsage,
+        }),
+      ),
       loadSnapshot: vi.fn(),
       reloadConfig: vi.fn(() => {
         expect(micaConfig.get().effort).toBe('high');

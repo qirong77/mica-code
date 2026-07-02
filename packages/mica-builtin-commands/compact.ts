@@ -3,8 +3,10 @@ import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
-type CompactArgs = CompactOptions & {
-  customInstructions?: string;
+const MANUAL_COMPACT_OPTIONS: CompactOptions = {
+  aggressive: true,
+  force: true,
+  keepRecentRounds: 1,
 };
 
 export function createCompactCommand(
@@ -15,16 +17,14 @@ export function createCompactCommand(
   return {
     name: 'compact',
     description: '压缩当前会话上下文为 checkpoint',
-    hiddenMenuItems: [
-      { arg: '--preview', label: 'preview' },
-      { arg: '--aggressive', label: 'aggressive' },
-      { arg: '--keep-recent 4', label: 'keep recent 4 rounds' },
-    ],
     action: async (rawArgs?: string) => {
       const ownerSessionId = services.getCurrentAgentSessionId();
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
-      const args = parseCompactArgs(rawArgs);
+      if ((rawArgs ?? '').trim()) {
+        services.showMessage('compact: /compact 不支持参数，请直接运行 /compact', 5000, ownerSessionId);
+        return;
+      }
 
       if (services.isAgentBusy(targetAgent)) {
         services.showMessage('compact: agent is busy; wait or abort first', 5000, ownerSessionId);
@@ -32,17 +32,16 @@ export function createCompactCommand(
       }
 
       micaLogger.logRuntime('plugin.compact', 'requested', {
-        preview: Boolean(args.preview),
-        aggressive: Boolean(args.aggressive),
-        keepRecentRounds: args.keepRecentRounds,
-        hasCustomInstructions: Boolean(args.customInstructions),
+        aggressive: MANUAL_COMPACT_OPTIONS.aggressive,
+        force: MANUAL_COMPACT_OPTIONS.force,
+        keepRecentRounds: MANUAL_COMPACT_OPTIONS.keepRecentRounds,
       });
 
       try {
         const result = await services.runExclusiveTask(
           targetAgent,
           { ownerSessionId, statusText: 'compact: preparing context' },
-          () => services.compact(targetAgent, targetSessionController, ownerSessionId, args),
+          () => services.compact(targetAgent, targetSessionController, ownerSessionId, MANUAL_COMPACT_OPTIONS),
         );
         micaLogger.logRuntime('plugin.compact', 'done', resultLog(result));
         services.showMessage(formatCompactResult(result), 8000, ownerSessionId);
@@ -58,53 +57,6 @@ export function createCompactCommand(
       }
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-}
-
-function parseCompactArgs(rawArgs?: string): CompactArgs {
-  const tokens = tokenizeArgs(rawArgs ?? '');
-  const instructions: string[] = [];
-  const result: CompactArgs = {};
-
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!;
-    if (token === '--preview') {
-      result.preview = true;
-      continue;
-    }
-    if (token === '--aggressive') {
-      result.aggressive = true;
-      continue;
-    }
-    if (token === '--keep-recent' || token === '--keep-last') {
-      const next = tokens[index + 1];
-      const value = next ? Number.parseInt(next, 10) : Number.NaN;
-      if (Number.isFinite(value) && value > 0) {
-        result.keepRecentRounds = value;
-        index++;
-      }
-      continue;
-    }
-    if (token.startsWith('--keep-recent=')) {
-      const value = Number.parseInt(token.slice('--keep-recent='.length), 10);
-      if (Number.isFinite(value) && value > 0) result.keepRecentRounds = value;
-      continue;
-    }
-    instructions.push(token);
-  }
-
-  const customInstructions = instructions.join(' ').trim();
-  if (customInstructions) result.customInstructions = customInstructions;
-  return result;
-}
-
-function tokenizeArgs(value: string): string[] {
-  const tokens: string[] = [];
-  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(value))) {
-    tokens.push(match[1] ?? match[2] ?? match[3] ?? '');
-  }
-  return tokens;
 }
 
 function formatCompactResult(result: CompactResult): string {
@@ -131,6 +83,7 @@ function resultLog(result: CompactResult) {
     savedTokenEstimate: result.savedTokenEstimate,
     savedRatio: result.savedRatio,
     promptTooLongRetries: result.promptTooLongRetries,
+    forced: result.forced,
     preview: result.preview,
   };
 }

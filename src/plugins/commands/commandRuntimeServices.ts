@@ -80,7 +80,11 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
   }
 }
 
-function showNoticeForSession(context: ApplicationContext | null, ownerSessionId: string | undefined, text: string): void {
+function showNoticeForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+): void {
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
   if (!context || !session) {
     micaUi.conversation.appendNoticeMessage(text);
@@ -91,6 +95,7 @@ function showNoticeForSession(context: ApplicationContext | null, ownerSessionId
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
   }
+  session.sessionController.saveCurrent({ allowEmpty: true });
 }
 
 function showRecapForSession(
@@ -110,6 +115,7 @@ function showRecapForSession(
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
   }
+  session.sessionController.saveCurrent({ allowEmpty: true });
 }
 
 function formatRecapCommand(options?: { customInstructions?: string }): string {
@@ -133,13 +139,14 @@ function showCommitNoticeForSession(
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
   }
+  session.sessionController.saveCurrent({ allowEmpty: true });
 }
 
 function buildRecapPrompt(customInstructions?: string): string {
   return [
-    'You are creating a live-only recap for a coding-agent terminal UI.',
+    'You are creating a recap for a coding-agent terminal UI.',
     'Use only the transcript provided by the user. Do not call tools.',
-    'This recap will not be saved into conversation history and must not include new facts.',
+    'This recap must not include new facts.',
     '',
     'Write in Chinese unless the transcript is mostly English.',
     'Return exactly one paragraph of no more than 4 sentences.',
@@ -178,7 +185,10 @@ function truncateMiddle(text: string, maxChars: number): string {
 }
 
 function cleanRecapSummary(text: string): string {
-  return text.replace(/^```(?:markdown)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  return text
+    .replace(/^```(?:markdown)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
 }
 
 export function createCommandRuntimeServices(): CommandRuntimeServices {
@@ -497,7 +507,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const summary = cleanRecapSummary(
         await subAgent.query(
           [
-            'Create a live-only recap of this conversation.',
+            'Create a recap of this conversation.',
             'Do not mention that this instruction exists.',
             '',
             buildRecapTranscript(snapshot.messages),

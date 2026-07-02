@@ -22,6 +22,7 @@ export type CompactOptions = {
   customInstructions?: string;
   keepRecentRounds?: number;
   aggressive?: boolean;
+  force?: boolean;
   preview?: boolean;
   maxPromptTooLongRetries?: number;
 };
@@ -39,6 +40,7 @@ export type CompactResult = {
   savedRatio: number;
   boundaryIndex: number;
   promptTooLongRetries: number;
+  forced: boolean;
   preview: boolean;
 };
 
@@ -64,25 +66,29 @@ export class CompactionService {
   async compact(input: CompactInput): Promise<CompactResult> {
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
-    if (beforeCount < DEFAULT_MIN_MESSAGES) {
+    const options = input.options ?? {};
+    const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
+    if (beforeCount < minMessages) {
       throw new CompactionNotNeededError();
     }
 
-    const options = input.options ?? {};
     const activeStartIndex = findLastCompactBoundaryIndex(originalMessages) + 1;
     const activeMessages = originalMessages.slice(activeStartIndex);
-    if (activeMessages.length < DEFAULT_MIN_MESSAGES) {
+    if (activeMessages.length < minMessages) {
       throw new CompactionNotNeededError();
     }
 
-    const splitIndex = chooseKeepStartIndex(activeMessages, options);
+    let splitIndex = chooseKeepStartIndex(activeMessages, options);
+    if (splitIndex <= 0 && options.force) {
+      splitIndex = chooseForcedKeepStartIndex(activeMessages, options);
+    }
     if (splitIndex <= 0) {
       throw new CompactionNotNeededError('当前会话最近上下文已经足够完整，暂不需要 compact');
     }
 
     const keptMessages = activeMessages.slice(splitIndex);
     let messagesToSummarize = activeMessages.slice(0, splitIndex);
-    if (messagesToSummarize.length < 2) {
+    if (messagesToSummarize.length < (options.force ? 1 : 2)) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
@@ -137,7 +143,7 @@ export class CompactionService {
     const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
     const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
 
-    if (!options.preview && afterTokenEstimate >= beforeTokenEstimate && !options.aggressive) {
+    if (!options.preview && afterTokenEstimate >= beforeTokenEstimate && !options.aggressive && !options.force) {
       throw new CompactionNotNeededError('compact 后预计不会节省上下文，已保留原会话');
     }
 
@@ -154,6 +160,7 @@ export class CompactionService {
       savedRatio,
       boundaryIndex: activeStartIndex - 1,
       promptTooLongRetries,
+      forced: Boolean(options.force),
       preview: Boolean(options.preview),
     };
   }
@@ -188,6 +195,13 @@ function chooseKeepStartIndex(messages: unknown[], options: CompactOptions): num
   return Math.max(0, Math.min(start, messages.length - 1));
 }
 
+function chooseForcedKeepStartIndex(messages: unknown[], options: CompactOptions): number {
+  const rounds = groupMessagesByRound(messages);
+  if (rounds.length < 2) return 0;
+  const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds ?? 1));
+  return rounds[Math.max(1, rounds.length - keepRounds)]?.start ?? 0;
+}
+
 function compactKeptMessages(messages: unknown[], options: CompactOptions): unknown[] {
   const budget = options.aggressive ? AGGRESSIVE_MAX_TOKENS_TO_KEEP : DEFAULT_MAX_TOKENS_TO_KEEP;
   if (estimateMessagesTokens(messages) <= budget) return cloneJson(messages);
@@ -207,7 +221,8 @@ function pruneKeptValue(value: unknown, maxStringChars: number): unknown {
   if (!value || typeof value !== 'object') return value;
 
   const record = value as Record<string, unknown>;
-  if (record.type === 'image' || record.type === 'document') return { type: 'text', text: `[${record.type} omitted during compact]` };
+  if (record.type === 'image' || record.type === 'document')
+    return { type: 'text', text: `[${record.type} omitted during compact]` };
   if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
 
   const next: Record<string, unknown> = {};
@@ -229,7 +244,8 @@ function pruneKeptValue(value: unknown, maxStringChars: number): unknown {
 function pruneContentBlock(value: unknown, maxStringChars: number): unknown {
   if (!value || typeof value !== 'object') return pruneKeptValue(value, maxStringChars);
   const record = value as Record<string, unknown>;
-  if (record.type === 'image' || record.type === 'document') return { type: 'text', text: `[${record.type} omitted during compact]` };
+  if (record.type === 'image' || record.type === 'document')
+    return { type: 'text', text: `[${record.type} omitted during compact]` };
   if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
   return pruneKeptValue(value, maxStringChars);
 }
@@ -398,7 +414,10 @@ function estimateTokens(text: string): number {
 }
 
 function cleanSummary(summary: string): string {
-  const withoutFences = summary.replace(/^```(?:markdown)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  const withoutFences = summary
+    .replace(/^```(?:markdown)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
   const withoutAnalysis = withoutFences.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
   const match = /<summary>([\s\S]*?)<\/summary>/i.exec(withoutAnalysis);
   const body = match?.[1]?.trim() || withoutAnalysis.replace(/<\/?summary>/gi, '').trim();
@@ -483,7 +502,9 @@ function isPromptTooLongError(error: unknown): boolean {
 }
 
 function looksLikePromptTooLongResponse(summary: string): boolean {
-  return /prompt.*too.*long|context.*length|maximum context|input.*too.*large|tokens.*exceed/i.test(summary.slice(0, 500));
+  return /prompt.*too.*long|context.*length|maximum context|input.*too.*large|tokens.*exceed/i.test(
+    summary.slice(0, 500),
+  );
 }
 
 function getCompactPrompt(customInstructions?: string): string {

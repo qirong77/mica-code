@@ -9,7 +9,7 @@ type RecapArgs = {
 export function createRecapCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
     name: 'recap',
-    description: '生成一条仅当前界面显示的会话回顾',
+    description: '生成并保存一条会话回顾',
     hiddenMenuItems: [
       { arg: '聚焦当前任务和下一步', label: 'focus next step' },
       { arg: '只总结最近的报错和验证结果', label: 'focus errors' },

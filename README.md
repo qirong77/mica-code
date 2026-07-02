@@ -124,7 +124,7 @@ MICA_BUILD_OUTFILE=dist/mica-code MICA_INSTALL_DIR=$HOME/.local/bin MICA_BIN_NAM
 - `/context`：查看当前上下文占用总览。
 - `/doctor`：诊断运行环境、配置、MCP、工具、会话目录和 git 状态。
 - `/compact`：压缩当前会话上下文为 checkpoint。
-- `/recap`：生成一条仅当前界面显示、不写入会话历史的临时回顾。
+- `/recap`：生成一条会话回顾，并随 session 一起保存，`/resume` 后可见。
 - `/new`：新建 agent 并切换；`/new <text>` 后台创建并运行新 agent。
 - `/fork`：从当前 agent 历史分叉新 agent；`/fork <text>` 后台运行。
 - `/agents`：显示当前终端的 agents；`/agents clear` 清除空闲 agent。
