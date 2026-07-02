@@ -1,6 +1,6 @@
 # mica-agent
 
-`mica-agent` 是 Mica Code 的 agent provider 与 prompt 入口包。它封装模型客户端、通用 agent 抽象、系统提示词构建和 provider 历史消息归一化。
+`mica-agent` 是 Mica Code 的 agent provider 与 prompt 入口包。它封装模型客户端、通用 agent 抽象和系统提示词构建。
 
 ## 主要能力
 
@@ -37,5 +37,5 @@ const agent = micaAgent.createModelClient({
 ## 目录说明
 
 - `core/`：agent 抽象类型、基类和对话消息类型。
-- `providers/`：具体模型 provider adapter 和历史消息归一化。
+- `providers/`：具体模型 provider adapter。
 - `prompt/`：系统 prompt 构建、系统提示词模板和测试。

@@ -51,8 +51,7 @@
 - 读取文件用 `read_file`；大文件先用 `grep_search` 定位，或用 `read_file` 的 `offset`/`limit` 分段读取。
 - 搜索文件内容用 `grep_search`；列文件用 `list_files`。只有需要构建、测试、包管理、git、shell 管道或项目脚本时才用 `run_shell`。
 - 在 shell 中搜索文本优先用 `rg`，列文件优先用 `rg --files`；不可用时再用替代工具。
-- 结构化代码修改、多处变更或新增/删除文件时优先用 `apply_patch`；简单唯一字符串替换可用 `edit_file`。
-- 使用 `edit_file` 时，匹配不唯一要先读取更多上下文并扩大 `old_string`，不要盲目覆盖。
+- 结构化代码修改、多处变更或新增/删除文件时用 `apply_patch`。
 - 创建新文件或确实需要整文件重写时可用 `write_file`；覆盖现有文件前必须确认内容来自已读取的上下文或用户明确要求。
 - 长时间运行的命令（dev server、watch、后台服务）用 `run_shell` 的 `run_in_background`，并按工具返回的输出文件查看结果。
 - 网络事实先用 `web_search` 查找入口，再用 `web_fetch` 读取页面内容；工具报告未配置或失败时明确说明，不能假装已经查证。

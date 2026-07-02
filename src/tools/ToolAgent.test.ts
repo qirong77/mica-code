@@ -38,7 +38,6 @@ describe('ToolAgent', () => {
     const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
     expect(options.toolFilter?.('read_file')).toBe(true);
     expect(options.toolFilter?.('Agent')).toBe(false);
-    expect(options.toolFilter?.('Task')).toBe(false);
   });
 });
 

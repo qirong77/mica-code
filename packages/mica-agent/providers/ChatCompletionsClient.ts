@@ -17,7 +17,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { ChatCompletionsHistoryNormalizer } from './ChatCompletionsHistoryNormalizer.js';
+import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
@@ -27,18 +27,6 @@ export type ChatCompletionsUsageRecord = AgentUsageRecord & {
 };
 
 const MAX_HISTORICAL_TOOL_RESULT_LENGTH = 12_000;
-
-function abortError(): Error {
-  const error = new Error('Agent query aborted');
-  error.name = 'AbortError';
-  return error;
-}
-
-function throwIfQueryStopped(options?: AgentQueryOptions): void {
-  if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
-    throw abortError();
-  }
-}
 
 function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
@@ -60,7 +48,7 @@ export class ChatCompletionsClient extends BaseAgent<
   usageHistory: ChatCompletionsUsageRecord[] = [];
   lastUsage: ChatCompletionsUsageRecord | undefined;
   private turnId = 0;
-  model: string;
+  model!: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: EffortOption | undefined;
@@ -69,7 +57,6 @@ export class ChatCompletionsClient extends BaseAgent<
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: string | undefined;
-  readonly historyNormalizer = new ChatCompletionsHistoryNormalizer();
   constructor(options: string | ModelClientOptions) {
     super();
     this.tools = true;
@@ -78,15 +65,7 @@ export class ChatCompletionsClient extends BaseAgent<
       this.apiKey = process.env.OPENAI_API_KEY;
       return;
     }
-    this.model = options.model;
-    this.apiKey = options.apiKey;
-    this.baseURL = options.baseURL;
-    this.effort = options.effort;
-    this.provider = options.provider;
-    this.tools = options.tools ?? true;
-    this.toolFilter = options.toolFilter;
-    this.toolContext = options.toolContext;
-    this.systemPrompt = options.systemPrompt;
+    this.configure(options);
   }
   configure(options: ModelClientOptions) {
     this.model = options.model;
@@ -402,14 +381,6 @@ function interruptedChatToolResult(toolCallId: string): OpenAI.Chat.Completions.
     tool_call_id: toolCallId,
     content: interruptedToolOutput(),
   };
-}
-
-function interruptedToolOutput(): string {
-  return JSON.stringify({
-    ok: false,
-    status: 'interrupted',
-    error: 'Previous tool execution was interrupted before producing output.',
-  });
 }
 
 function isSameOpenAIUserContent(

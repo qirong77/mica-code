@@ -140,9 +140,7 @@ const defaultSessionUiAdapter: SessionUiAdapter = {
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
     micaUi.panels.thinkingText.set('');
-    micaUi.panels.clearLogEntries();
     micaUi.panels.clearAgentTurnLogItems();
-    micaUi.panels.clearLog();
     micaUi.panels.clearPluginUIs();
     micaUi.messageBar.clearMessages();
     micaUi.panels.status.idle();

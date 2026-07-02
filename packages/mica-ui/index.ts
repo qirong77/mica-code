@@ -3,14 +3,7 @@ import * as conv from './conversation/state.js';
 import * as input from './input/state.js';
 import * as dropdown from './bottom/dropdown/state.js';
 import * as panels from './panels/state.js';
-import {
-  pushLog,
-  clearLog,
-  setOnAbortAgent,
-  abortAgent,
-  setOnEditPendingInput,
-  editPendingInput,
-} from './panels/state.js';
+import { setOnAbortAgent, abortAgent, setOnEditPendingInput, editPendingInput } from './panels/state.js';
 import { MessageBar, MessageBarAPI } from './panels/MessageBar.js';
 import { DropDownUI } from './bottom/dropdown/index.js';
 import { TerminalInputUI } from './input/TerminalInput.js';
@@ -20,9 +13,7 @@ import { Conversation, ConversationUI } from './conversation/Conversation.js';
 import { Markdown } from './conversation/Markdown.js';
 import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
 import { AgentsStatusBar, AgentsStatusBarUI } from './panels/AgentsStatusBar.js';
-import { LogView } from './panels/LogView.js';
 import { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
-import { PluginPanel } from './bottom/PluginPanel.js';
 import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
 import { useScheduleState } from './hooks/index.js';
 import { useLogViewHeight } from './hooks/useLogViewHeight.js';
@@ -52,11 +43,9 @@ export const micaUi = {
   WorkingStatusUI,
   AgentsStatusBar,
   AgentsStatusBarUI,
-  LogView,
   AgentTurnLog,
   AgentTurnLogUI,
   MessageBar,
-  PluginPanel,
   BottomSurface,
   BottomSurfaceUI,
   DropDownUI,
@@ -119,10 +108,6 @@ export const micaUi = {
   },
   panels: {
     ...panels,
-    /** 在运行日志面板追加一条日志。 */
-    pushLog,
-    /** 清空运行日志面板内容。 */
-    clearLog,
     /** 设置用户触发 abort 时调用的 agent 中断回调。 */
     setOnAbortAgent,
     /** 触发当前 agent 任务中断。 */
@@ -147,9 +132,6 @@ export type { MessageItem } from './panels/MessageBar.js';
 export type { MicaUiPendingInputQueueMode } from './conversation/state.js';
 export type {
   MicaUiWorkingStatus,
-  MicaUiLogEntry,
-  MicaUiThinkingEntry,
-  MicaUiToolEntry,
   MicaUiDropdownItem,
   MicaUiDropdownState,
   MicaUiPluginUI,
@@ -157,7 +139,6 @@ export type {
   MicaUiCommandHiddenMenuItem,
   MicaUiCommandHiddenMenuItems,
   MicaUiConversationMessage,
-  MicaUiUILogEntry,
   MicaUiTextBlock,
   MicaUiImageBlockParam,
   MicaUiContentBlockParam,

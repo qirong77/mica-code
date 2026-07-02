@@ -1,14 +1,14 @@
 import { Box, Text } from '@anthropic/ink';
 import {
-  AnthropicHistoryNormalizer,
-  ChatCompletionsHistoryNormalizer,
-  ResponsesHistoryNormalizer,
   calculateUsageCachedTokenRate,
   micaAgent,
   summarizeUsageHistory,
   type ConversationContentBlock,
   type ConversationItem,
 } from '@packages/mica-agent/index.js';
+import { AnthropicHistoryNormalizer } from '@packages/mica-agent/providers/AnthropicHistoryNormalizer.js';
+import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
+import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
 import { resolveProviderProtocol, type ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
@@ -331,7 +331,7 @@ function recordToolCallWorkset(stats: ConversationStats, name: string, args: unk
     if (filePath) stats.readFiles.add(filePath);
     return;
   }
-  if (name === 'edit_file' || name === 'write_file') {
+  if (name === 'write_file') {
     const filePath = stringValue(input.file_path);
     if (filePath) stats.editedFiles.add(filePath);
     return;
@@ -549,11 +549,6 @@ function formatTokens(tokens: number): string {
 function formatPercent(ratio: number): string {
   if (!Number.isFinite(ratio)) return '-';
   return `${(Math.max(0, ratio) * 100).toFixed(1)}%`;
-}
-
-function formatRate(rate: number | null): string {
-  if (rate === null || !Number.isFinite(rate)) return '-';
-  return `${Math.round(Math.max(0, rate) * 100)}%`;
 }
 
 function truncateText(text: string, maxLength: number): string {

@@ -4,11 +4,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
-import {
-  applyConfigSwitchUpdate,
-  reportConfigSwitchError,
-  syncConfigFromAgent,
-} from './configSwitch.js';
+import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from './configSwitch.js';
 
 export function createModelCommand(
   agent: CommandAgent,
@@ -110,13 +106,10 @@ async function applyModelSelection(
       agent,
       sessionController,
       services,
-      update: (config) => {
-        const provider = config.providers.find((item) => item.id === providerId) ?? agent.config.provider;
-        return {
-          ...config,
-          model,
-        };
-      },
+      update: (config) => ({
+        ...config,
+        model,
+      }),
       successMessage: () => `Model: ${model}`,
     });
   } catch (error) {

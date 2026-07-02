@@ -3,19 +3,11 @@ import type {
   ResponseInputMessageContentList,
   ResponseOutputMessage,
 } from 'openai/resources/responses/responses.js';
-import {
-  providerContentToConversationBlocks,
-  type ConversationItem,
-  type ProviderHistoryNormalizer,
-} from '../core/Conversation.js';
+import { providerContentToConversationBlocks, type ConversationItem } from '../core/Conversation.js';
 
-export class ResponsesHistoryNormalizer implements ProviderHistoryNormalizer<ResponseInputItem> {
+export class ResponsesHistoryNormalizer {
   normalize(messages: ResponseInputItem[]): ConversationItem[] {
     return messages.map((message) => responseItemToConversationItem(message));
-  }
-
-  denormalize(items: ConversationItem[]): ResponseInputItem[] {
-    return items.map((item) => conversationItemToResponseItem(item));
   }
 }
 
@@ -52,51 +44,6 @@ function responseItemToConversationItem(item: ResponseInputItem): ConversationIt
   }
 
   return { type: 'unknown', content: item, providerMetadata: item };
-}
-
-function conversationItemToResponseItem(item: ConversationItem): ResponseInputItem {
-  if (item.providerMetadata) return item.providerMetadata as ResponseInputItem;
-
-  if (item.type === 'user' || item.type === 'system') {
-    return {
-      type: 'message',
-      role: item.type,
-      content: item.content.map((block) =>
-        block.type === 'text' ? { type: 'input_text', text: block.text } : { type: 'input_text', text: '[Image]' },
-      ),
-    };
-  }
-
-  if (item.type === 'assistant') {
-    return {
-      type: 'message',
-      role: 'assistant',
-      content: item.content.map((block) => (block.type === 'text' ? block.text : '[Image]')).join('\n'),
-    };
-  }
-
-  if (item.type === 'tool_call') {
-    return {
-      type: 'function_call',
-      call_id: item.id,
-      name: item.name,
-      arguments: item.argsText ?? JSON.stringify(item.args ?? {}),
-    };
-  }
-
-  if (item.type === 'tool_result') {
-    return {
-      type: 'function_call_output',
-      call_id: item.id,
-      output: item.content,
-    };
-  }
-
-  return {
-    type: 'message',
-    role: 'user',
-    content: [{ type: 'input_text', text: JSON.stringify(item.content) }],
-  };
 }
 
 function responseMessageContentToBlocks(

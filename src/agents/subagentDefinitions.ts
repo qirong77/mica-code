@@ -26,7 +26,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     name: 'general-purpose',
     description:
       'General-purpose subagent for multi-step research, code investigation, and focused implementation help.',
-    disallowedTools: ['Agent', 'Task'],
+    disallowedTools: ['Agent'],
     systemPrompt: [
       BASE_PROMPT,
       '',
@@ -50,13 +50,13 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'web_search',
       'Skill',
     ],
-    disallowedTools: ['Agent', 'Task'],
+    disallowedTools: ['Agent'],
     systemPrompt: [
       BASE_PROMPT,
       '',
       '<role>',
       'You are a read-only exploration subagent. Find and summarize relevant context without modifying files or starting new agents.',
-      'Prefer list_files, grep_search, and read_file. Do not run write, edit, patch, shell, kill, Agent, or Task tools.',
+      'Prefer list_files, grep_search, and read_file. Do not run write, patch, shell, kill, or Agent tools.',
       'Return the key files, symbols, behavior, and any uncertainty. Do not include implementation unless explicitly asked.',
       '</role>',
     ].join('\n'),

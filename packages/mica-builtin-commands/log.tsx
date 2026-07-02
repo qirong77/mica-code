@@ -132,7 +132,6 @@ function exportCurrentLog(agent: CommandAgent, services: CommandRuntimeServices)
     mkdirSync(exportDir, { recursive: false });
 
     const runtimeLogs = micaLogger.logs.get();
-    const panelLogEntries = micaUi.panels.logEntries.get();
     const agentTurnLogItems = micaUi.panels.agentTurnLogItems.get();
     const pendingInputs = micaUi.conversation.pendingInputs.get();
     const conversationData = {
@@ -163,7 +162,6 @@ function exportCurrentLog(agent: CommandAgent, services: CommandRuntimeServices)
       responseText: micaUi.conversation.responseText.get(),
       pendingInputs,
       pendingQueueMode: micaUi.conversation.pendingQueueMode.get(),
-      legacyEntries: panelLogEntries.map(formatPanelLogEntry),
       agentTurnLogItems: agentTurnLogItems.map((item) => ({ id: item.id })),
     };
     const diagnostics = {
@@ -186,14 +184,13 @@ function exportCurrentLog(agent: CommandAgent, services: CommandRuntimeServices)
       files: [...EXPORT_FILES],
       counts: {
         runtimeLogs: runtimeLogs.length,
-        panelLogEntries: panelLogEntries.length,
         agentTurnLogItems: agentTurnLogItems.length,
         messages: rawMessages.length,
         turns: turns.length,
       },
       notes: [
         'runtime.log/runtime-logs.log contain the bounded in-memory runtime log entries shown by /log.',
-        'turn-log.log contains current UI turn state and legacy structured tool/thinking entries when available.',
+        'turn-log.log contains current UI turn state.',
         'conversation.log omits image base64 payloads and truncates very large strings for export safety.',
         'Structured .log files are JSON content with a log-oriented suffix.',
       ],
@@ -287,22 +284,6 @@ function compactUsage(usage: AgentUsageRecord) {
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,
     paidTokenRate: usage.paidTokenRate,
-  };
-}
-
-function formatPanelLogEntry(entry: ReturnType<typeof micaUi.panels.logEntries.get>[number]) {
-  if (entry.type === 'thinking') {
-    return { type: 'thinking', text: entry.text };
-  }
-  return {
-    type: 'tool',
-    toolUseId: entry.toolUseId,
-    toolName: entry.toolName,
-    displayText: entry.displayText,
-    output: entry.output,
-    completed: entry.completed,
-    startTime: entry.startTime,
-    elapsedMs: entry.elapsedMs,
   };
 }
 

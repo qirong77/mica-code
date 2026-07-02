@@ -7,7 +7,6 @@ import { responseText as convResponseText } from '../conversation/state.js';
 import { queueStatusText } from '../input/state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
-import { IfComponent } from '../primitives/IfComponent.js';
 import { formatElapsed } from '../utils/format.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
 
@@ -168,11 +167,9 @@ export function WorkingStatus() {
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <StatusInfo />
-        <IfComponent
-          condition={!queueStatus && info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle'}
-        >
+        {!queueStatus && info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle' ? (
           <Text color={themeColors.inactive}> {elapsedText}</Text>
-        </IfComponent>
+        ) : null}
       </Box>
     </Box>
   );

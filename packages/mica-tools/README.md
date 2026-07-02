@@ -14,7 +14,7 @@
 
 - `read_file`：读取文件内容。
 - `write_file`：写入或覆盖文件。
-- `edit_file`：通过精确字符串替换编辑文件。
+- `apply_patch`：应用文件补丁。
 - `list_files`：按 glob 模式列出文件。
 - `grep_search`：在文件中搜索正则。
 - `run_shell`：执行 shell 命令，可启动后台任务。

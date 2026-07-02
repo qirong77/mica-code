@@ -3,6 +3,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
+import { finalizeTextOutput } from './utils/outputLimits.js';
 // https://serper.dev/dashboard
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_RESULTS = 20;
@@ -16,11 +17,9 @@ type SearchResult = {
 };
 
 type SerperResponse = {
-  searchParameters?: { q: string };
-  organic?: { title: string; link: string; snippet: string; position: number }[];
+  organic?: { title: string; link: string; snippet: string }[];
   answerBox?: { title?: string; answer?: string; snippet?: string; link?: string };
   knowledgeGraph?: { title?: string; type?: string; description?: string };
-  topStories?: { title: string; link: string; source: string }[];
 };
 
 const resultCache = new LRUCache<string, SearchResult[]>({
@@ -44,11 +43,7 @@ function buildResponseText(engine: string, query: string, results: SearchResult[
     for (const e of extras) lines.push(e);
   }
 
-  let output = lines.join('\n');
-  if (output.length > MAX_OUTPUT_LENGTH) {
-    output = output.slice(0, MAX_OUTPUT_LENGTH) + '\n\n[结果已截断]';
-  }
-  return output;
+  return finalizeTextOutput(lines.join('\n'), { maxChars: MAX_OUTPUT_LENGTH, label: '搜索结果' });
 }
 
 export class ToolWebSearch extends MicaTool {

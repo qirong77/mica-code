@@ -2,7 +2,6 @@ import { OpenAI } from 'openai';
 import type {
   FunctionTool,
   Response,
-  ResponseFunctionToolCall,
   ResponseInputItem,
   ResponseInputMessageContentList,
   ResponseOutputItem,
@@ -27,7 +26,7 @@ import {
 } from '../core/Agent.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { ResponsesHistoryNormalizer } from './ResponsesHistoryNormalizer.js';
+import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
@@ -51,18 +50,6 @@ function getClient(options: ModelClientOptions) {
   });
 }
 
-function abortError(): Error {
-  const error = new Error('Agent query aborted');
-  error.name = 'AbortError';
-  return error;
-}
-
-function throwIfQueryStopped(options?: AgentQueryOptions): void {
-  if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
-    throw abortError();
-  }
-}
-
 function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
 }
@@ -72,7 +59,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   usageHistory: ResponsesUsageRecord[] = [];
   lastUsage: ResponsesUsageRecord | undefined;
   private turnId = 0;
-  model: string;
+  model!: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: EffortOption | undefined;
@@ -81,7 +68,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: string | undefined;
-  readonly historyNormalizer = new ResponsesHistoryNormalizer();
 
   constructor(options: string | ModelClientOptions) {
     super();
@@ -91,15 +77,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       this.apiKey = process.env.OPENAI_API_KEY;
       return;
     }
-    this.model = options.model;
-    this.apiKey = options.apiKey;
-    this.baseURL = options.baseURL;
-    this.effort = options.effort;
-    this.provider = options.provider;
-    this.tools = options.tools ?? true;
-    this.toolFilter = options.toolFilter;
-    this.toolContext = options.toolContext;
-    this.systemPrompt = options.systemPrompt;
+    this.configure(options);
   }
 
   configure(options: ModelClientOptions) {
@@ -448,14 +426,6 @@ function interruptedResponsesToolResult(callId: string): ResponseInputItem {
     call_id: callId,
     output: interruptedToolOutput(),
   };
-}
-
-function interruptedToolOutput(): string {
-  return JSON.stringify({
-    ok: false,
-    status: 'interrupted',
-    error: 'Previous tool execution was interrupted before producing output.',
-  });
 }
 
 function parseDataUrl(url: string): AgentImageSource | null {

@@ -16,7 +16,6 @@ describe('LocalRuntimeController abort display state', () => {
     micaUi.conversation.clearMessages();
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
-    micaUi.panels.clearLogEntries();
     micaUi.messageBar.clearMessages();
     micaUi.panels.status.idle();
   });
@@ -130,7 +129,9 @@ describe('LocalRuntimeController abort display state', () => {
       },
     });
 
-    await expect(controller.submit('full diff payload', { displayText: 'formatted git diff summary' })).resolves.toEqual({
+    await expect(
+      controller.submit('full diff payload', { displayText: 'formatted git diff summary' }),
+    ).resolves.toEqual({
       ok: true,
     });
 
@@ -207,14 +208,12 @@ function createSession(agent: AgentRuntime): TerminalAgentSession {
       contextSize: 0,
       conversationMessages: [],
       lastTurnOutcome: 'idle',
-      logEntries: [],
       messageBarMessages: [],
       pendingInputs: [],
       pendingQueueMode: null,
       pluginUIs: [],
       responseText: '',
       thinkingText: '',
-      uiLog: [],
       workingStatus: { type: 'idle' },
     },
     updatedAt: new Date(0).toISOString(),

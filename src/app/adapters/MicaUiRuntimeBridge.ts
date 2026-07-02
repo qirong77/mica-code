@@ -73,13 +73,11 @@ export class MicaUiRuntimeBridge {
         toolLogs.resetTurn({ clearThinkingText: !preservePreviousTurnUi });
         session.uiState = normalizeUiState({
           ...session.uiState,
-          logEntries: preservePreviousTurnUi ? session.uiState.logEntries : [],
           agentTurnLogItems: preservePreviousTurnUi ? session.uiState.agentTurnLogItems : [],
           thinkingText: preservePreviousTurnUi ? session.uiState.thinkingText : '',
           lastTurnOutcome: 'running',
         });
         if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) {
-          micaUi.panels.clearLogEntries();
           micaUi.panels.clearAgentTurnLogItems();
         }
       }
@@ -125,7 +123,6 @@ export class MicaUiRuntimeBridge {
     const session = this.agentSessions.current();
     session.uiState = normalizeUiState({
       ...session.uiState,
-      logEntries: [],
       agentTurnLogItems: [],
       thinkingText: '',
     });

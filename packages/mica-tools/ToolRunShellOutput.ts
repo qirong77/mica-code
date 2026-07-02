@@ -24,7 +24,7 @@ export class BoundedTextAccumulator {
   private tail = '';
   private totalChars = 0;
 
-  constructor(private readonly maxChars: number) {
+  constructor(maxChars: number) {
     this.headBudget = Math.ceil(maxChars * 0.65);
     this.tailBudget = Math.max(0, maxChars - this.headBudget);
   }

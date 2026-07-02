@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EffortOption, IMicaConfig, ProviderDefinition } from '@packages/mica-config/index.js';
-import type { AgentQueryContent, AgentQueryOptions, AgentUsageRecord, IAgent, ModelClientOptions } from '@packages/mica-agent/index.js';
+import type {
+  AgentQueryContent,
+  AgentQueryOptions,
+  AgentUsageRecord,
+  IAgent,
+  ModelClientOptions,
+} from '@packages/mica-agent/index.js';
 
 const modelClient = createModelClientStub();
 
@@ -99,8 +105,6 @@ function createModelClientStub(): IAgent<ModelClientOptions> & {
     },
     preserveAbortedTurn: vi.fn(() => false),
     toConversationMessages: vi.fn(() => []),
-    toConversationItems: vi.fn(() => []),
-    loadConversationItems: vi.fn(),
     getSnapshot: vi.fn(() => ({
       model: 'test-model',
       messages: [],
@@ -123,8 +127,6 @@ function createModelClientStub(): IAgent<ModelClientOptions> & {
       vi.mocked(this.reset).mockClear();
       vi.mocked(this.preserveAbortedTurn).mockClear();
       vi.mocked(this.toConversationMessages).mockClear();
-      vi.mocked(this.toConversationItems).mockClear();
-      vi.mocked(this.loadConversationItems).mockClear();
       vi.mocked(this.getSnapshot).mockClear();
       vi.mocked(this.loadSnapshot).mockClear();
     },

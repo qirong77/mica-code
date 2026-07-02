@@ -398,7 +398,6 @@ export class LocalRuntimeController implements RuntimeController {
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
-        logEntries: clearPreviousTurnUi ? [] : session.uiState.logEntries,
         agentTurnLogItems: clearPreviousTurnUi ? [] : session.uiState.agentTurnLogItems,
         thinkingText: clearPreviousTurnUi ? '' : session.uiState.thinkingText,
         workingStatus: { type: 'connecting' },
@@ -416,7 +415,6 @@ export class LocalRuntimeController implements RuntimeController {
       }
       micaUi.conversation.clearResponseText();
       if (clearPreviousTurnUi) {
-        micaUi.panels.clearLogEntries();
         micaUi.panels.clearAgentTurnLogItems();
       }
       micaUi.panels.status.connecting();
@@ -566,13 +564,11 @@ export class LocalRuntimeController implements RuntimeController {
       if (!hasError && !wasAborted && session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
-          logEntries: [],
           agentTurnLogItems: [],
           thinkingText: '',
           lastTurnOutcome: 'completed',
         });
       }
-      if (!hasError && !wasAborted && this.isActiveAgent(agent)) micaUi.panels.clearLogEntries();
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;

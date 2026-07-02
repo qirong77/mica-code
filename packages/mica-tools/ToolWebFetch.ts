@@ -3,7 +3,7 @@ import TurndownService from 'turndown';
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
-import { formatSize, truncateMiddle } from './utils/outputLimits.js';
+import { clampNumber, formatSize, truncateMiddle } from './utils/outputLimits.js';
 
 const FETCH_TIMEOUT_MS = 60_000;
 const MAX_REDIRECTS = 10;
@@ -170,10 +170,6 @@ export class ToolWebFetch extends MicaTool {
       clearTimeout(timeout);
       callbacks?.signal?.removeEventListener('abort', onAbort);
 
-      if (result.type === 'redirect') {
-        return `检测到跨域重定向。请用以下 URL 重新请求：\n原始: ${result.originalUrl}\n重定向: ${result.redirectUrl}`;
-      }
-
       const { rawBuffer, status, statusText, contentType, finalUrl } = result;
       const bytes = rawBuffer.length;
       const content = this._extractContent(rawBuffer, contentType);
@@ -266,10 +262,14 @@ export class ToolWebFetch extends MicaTool {
     signal: AbortSignal,
     maxBytes: number,
     depth = 0,
-  ): Promise<
-    | { type: 'redirect'; originalUrl: string; redirectUrl: string }
-    | { type: 'content'; rawBuffer: Buffer; status: number; statusText: string; contentType: string; finalUrl: string }
-  > {
+  ): Promise<{
+    type: 'content';
+    rawBuffer: Buffer;
+    status: number;
+    statusText: string;
+    contentType: string;
+    finalUrl: string;
+  }> {
     if (depth > MAX_REDIRECTS) {
       throw new Error(`重定向次数超过 ${MAX_REDIRECTS} 次`);
     }
@@ -315,15 +315,12 @@ export class ToolWebFetch extends MicaTool {
       finalUrl: targetUrl,
     };
   }
-
 }
 
 function normalizeMaxChars(value: number | undefined): number {
-  if (value === undefined || value === null || !Number.isFinite(value)) return DEFAULT_MAX_CHARS;
-  return Math.max(0, Math.floor(value));
+  return clampNumber(value, DEFAULT_MAX_CHARS, 0, Number.MAX_SAFE_INTEGER);
 }
 
 function normalizeMaxBytes(value: number | undefined): number {
-  if (value === undefined || value === null || !Number.isFinite(value)) return DEFAULT_MAX_BYTES;
-  return Math.max(0, Math.floor(value));
+  return clampNumber(value, DEFAULT_MAX_BYTES, 0, Number.MAX_SAFE_INTEGER);
 }

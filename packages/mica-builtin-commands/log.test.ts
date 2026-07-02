@@ -10,7 +10,6 @@ import type { CommandAgent, CommandRuntimeServices } from './services.js';
 describe('log export command', () => {
   beforeEach(() => {
     micaLogger.clearRuntimeLogs();
-    micaUi.panels.clearLogEntries();
     micaUi.panels.clearAgentTurnLogItems();
     micaUi.panels.thinkingText.set('');
     micaUi.conversation.clearMessages();

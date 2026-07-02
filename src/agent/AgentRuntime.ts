@@ -125,7 +125,7 @@ export class AgentRuntime {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       throw new Error(message);
     }
-    return micaAgent.createSubAgent(this.createClientOptions({ ...options, effort: 'none' }));
+    return micaAgent.createSubAgent(this.createClientOptions(options));
   }
 
   createClientOptions(overrides: Partial<ModelClientOptions> = {}): ModelClientOptions {

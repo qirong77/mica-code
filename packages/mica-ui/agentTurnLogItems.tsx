@@ -10,7 +10,6 @@ const MAX_RUN_SHELL_LOG_LINES = runtimeEnv.ui.runShellLogMaxLines;
 const TOOL_ICONS: Record<string, string> = {
   read_file: '📖',
   write_file: '✍️',
-  edit_file: '✏️',
   list_files: '📂',
   grep_search: '📊',
   run_shell: '⚡️',

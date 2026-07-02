@@ -69,14 +69,6 @@ export class ToolAgent extends MicaTool {
   }
 }
 
-export class ToolTask extends ToolAgent {
-  constructor(fallbackAgent: AgentRuntime) {
-    super(fallbackAgent);
-    this.name = 'Task';
-    this.description = `Agent 工具的兼容别名。${this.description}`;
-  }
-}
-
 function isAgentToolContext(value: unknown): value is AgentToolContext {
   return Boolean(value && typeof value === 'object');
 }

@@ -169,10 +169,12 @@ export function loadBackgroundTask(id: string): BackgroundTaskMeta | undefined {
   return refreshBackgroundTask(parsed);
 }
 
-export function listBackgroundTasks(options: {
-  status?: BackgroundTaskStatus | 'all';
-  limit?: number;
-} = {}): BackgroundTaskMeta[] {
+export function listBackgroundTasks(
+  options: {
+    status?: BackgroundTaskStatus | 'all';
+    limit?: number;
+  } = {},
+): BackgroundTaskMeta[] {
   const dir = getBackgroundTaskDir();
   if (!existsSync(dir)) return [];
 
@@ -212,7 +214,8 @@ export function readBackgroundTaskOutput(
   }
 
   const requestedLength = Math.max(0, Math.min(options.tailBytes ?? options.maxBytes, options.maxBytes));
-  const start = options.tailBytes !== undefined ? Math.max(0, size - requestedLength) : Math.min(options.offset ?? 0, size);
+  const start =
+    options.tailBytes !== undefined ? Math.max(0, size - requestedLength) : Math.min(options.offset ?? 0, size);
   const length = Math.max(0, Math.min(requestedLength, size - start));
   const buffer = Buffer.alloc(length);
   const fd = openSync(meta.output_path, 'r');
@@ -227,14 +230,6 @@ export function readBackgroundTaskOutput(
   } finally {
     closeSync(fd);
   }
-}
-
-export function appendBackgroundTaskOutput(meta: BackgroundTaskMeta, text: string): void {
-  appendFileSync(meta.output_path, text, 'utf-8');
-}
-
-export function isBackgroundTaskAlive(meta: BackgroundTaskMeta): boolean {
-  return isProcessAlive(meta.pid);
 }
 
 export async function killBackgroundTask(
@@ -253,8 +248,8 @@ export async function killBackgroundTask(
     return { ok: false, message: `后台任务 ${id} 没有记录 pid，无法终止。`, meta: loadBackgroundTask(id) };
   }
 
-  appendBackgroundTaskOutput(
-    meta,
+  appendFileSync(
+    meta.output_path,
     [
       '',
       '[mica background task kill requested]',
@@ -262,6 +257,7 @@ export async function killBackgroundTask(
       `signal: ${signal}`,
       '',
     ].join('\n'),
+    'utf-8',
   );
 
   const sent = killProcessTree(meta.pid, signal);

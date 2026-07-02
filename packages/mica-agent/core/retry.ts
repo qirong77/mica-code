@@ -61,10 +61,16 @@ export function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-function abortError(): Error {
+export function abortError(): Error {
   const error = new Error('Agent query aborted');
   error.name = 'AbortError';
   return error;
+}
+
+export function throwIfQueryStopped(options?: { signal?: AbortSignal; shouldContinue?: () => boolean }): void {
+  if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
+    throw abortError();
+  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -100,7 +106,7 @@ export async function withRetry<T>(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (options?.signal?.aborted) throw abortError();
+    throwIfQueryStopped(options);
     try {
       return await fn();
     } catch (error) {

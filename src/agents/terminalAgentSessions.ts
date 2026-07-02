@@ -5,11 +5,9 @@ import type {
   MicaUiAgentTurnLogItem,
   MicaUiContentBlockParam,
   MicaUiConversationMessage,
-  MicaUiLogEntry,
   MessageItem,
   MicaUiPluginUI,
   MicaUiPendingInputQueueMode,
-  MicaUiUILogEntry,
   MicaUiWorkingStatus,
 } from '@packages/mica-ui/index.js';
 
@@ -19,9 +17,7 @@ export type TerminalAgentUiState = {
   pendingInputs: string[];
   pendingQueueMode: MicaUiPendingInputQueueMode | null;
   messageBarMessages: MessageItem[];
-  logEntries: MicaUiLogEntry[];
   agentTurnLogItems: MicaUiAgentTurnLogItem[];
-  uiLog: MicaUiUILogEntry[];
   thinkingText: string;
   pluginUIs: MicaUiPluginUI[];
   workingStatus: MicaUiWorkingStatus;
@@ -63,9 +59,7 @@ const MAX_UI_CONVERSATION_MESSAGES = 200;
 const MAX_RESPONSE_TEXT_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const MAX_PENDING_INPUTS = 1;
 const MAX_MESSAGE_BAR_MESSAGES = 8;
-const MAX_LOG_ENTRIES = 200;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
-const MAX_UI_LOG_ENTRIES = 200;
 const MAX_THINKING_TEXT_CHARS = runtimeEnv.ui.thinkingTextMaxChars;
 const MAX_UI_MESSAGE_TEXT_CHARS = runtimeEnv.ui.messageTextMaxChars;
 
@@ -216,9 +210,7 @@ export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiSt
     pendingInputs,
     pendingQueueMode: pendingInputs.length > 0 ? state.pendingQueueMode : null,
     messageBarMessages: state.messageBarMessages.slice(-MAX_MESSAGE_BAR_MESSAGES),
-    logEntries: state.logEntries.slice(-MAX_LOG_ENTRIES),
     agentTurnLogItems: state.agentTurnLogItems.slice(-MAX_AGENT_TURN_LOG_ITEMS),
-    uiLog: state.uiLog.slice(-MAX_UI_LOG_ENTRIES),
     thinkingText: tailText(state.thinkingText, MAX_THINKING_TEXT_CHARS),
     lastTurnOutcome: state.lastTurnOutcome ?? 'idle',
   };
@@ -231,9 +223,7 @@ function createEmptyUiState(): TerminalAgentUiState {
     pendingInputs: [],
     pendingQueueMode: null,
     messageBarMessages: [],
-    logEntries: [],
     agentTurnLogItems: [],
-    uiLog: [],
     thinkingText: '',
     pluginUIs: [],
     workingStatus: { type: 'idle' },

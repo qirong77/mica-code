@@ -1,17 +1,14 @@
 import { atom } from 'nanostores';
 import type {
   MicaUiWorkingStatus,
-  MicaUiLogEntry,
   MicaUiAgentTurnLogItem,
   MicaUiPluginUI,
-  MicaUiUILogEntry,
   MicaUiAgentStatusItem,
   MicaUiStartupBannerState,
 } from '../types.js';
 
 export const workingStatus = atom<MicaUiWorkingStatus>({ type: 'idle' });
 export const thinkingText = atom('');
-export const logEntries = atom<MicaUiLogEntry[]>([]);
 export const agentTurnLogItems = atom<MicaUiAgentTurnLogItem[]>([]);
 export const pluginUIs = atom<MicaUiPluginUI[]>([]);
 export const contextSize = atom(0);
@@ -35,21 +32,6 @@ export const modelDisplay = {
   contextWindowSize: atom(100000),
 };
 
-const _uiLog = atom<MicaUiUILogEntry[]>([]);
-export const uiLog = _uiLog as {
-  get(): MicaUiUILogEntry[];
-  set(v: MicaUiUILogEntry[]): void;
-  subscribe(cb: (v: MicaUiUILogEntry[]) => void): () => void;
-};
-
-export function pushLog(entry: MicaUiUILogEntry | string): void {
-  _uiLog.set([..._uiLog.get(), typeof entry === 'string' ? { text: entry } : entry]);
-}
-
-export function clearLog(): void {
-  _uiLog.set([]);
-}
-
 export function setWorkingStatus(status: MicaUiWorkingStatus): void {
   workingStatus.set(status);
 }
@@ -66,15 +48,6 @@ export const status = {
   completed: (elapsedMs?: number, startedAt?: number) => setWorkingStatus({ type: 'completed', startedAt, elapsedMs }),
   error: (message?: string) => setWorkingStatus({ type: 'error', message }),
 };
-
-export function setLogEntries(entries: MicaUiLogEntry[]): void {
-  logEntries.set(entries);
-}
-
-export function clearLogEntries(): void {
-  logEntries.set([]);
-  agentTurnLogItems.set([]);
-}
 
 export function setAgentTurnLogItems(items: MicaUiAgentTurnLogItem[]): void {
   agentTurnLogItems.set(items);

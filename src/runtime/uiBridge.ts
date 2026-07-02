@@ -16,8 +16,6 @@ export function resetActiveTurnUI() {
   micaUi.conversation.clearResponseText();
   micaUi.conversation.clearPendingInput();
   micaUi.panels.thinkingText.set('');
-  micaUi.panels.clearLogEntries();
-  micaUi.panels.clearLog();
   micaUi.panels.clearAgentTurnLogItems();
   micaLogger.clearRuntimeLogs();
   micaUi.panels.clearPluginUIs();
@@ -44,8 +42,6 @@ export function clearUI(agent: AgentRuntime, sessionController?: SessionControll
   micaUi.conversation.clearResponseText();
   micaUi.conversation.clearPendingInput();
   micaUi.panels.thinkingText.set('');
-  micaUi.panels.clearLogEntries();
-  micaUi.panels.clearLog();
   micaUi.panels.clearAgentTurnLogItems();
   micaLogger.clearRuntimeLogs();
   micaUi.panels.clearPluginUIs();

@@ -48,11 +48,6 @@ export type ConversationItem =
   | ConversationToolResultItem
   | ConversationUnknownItem;
 
-export interface ProviderHistoryNormalizer<TMessage> {
-  normalize(messages: TMessage[]): ConversationItem[];
-  denormalize(items: ConversationItem[]): TMessage[];
-}
-
 export function contentBlocksToText(blocks: ConversationContentBlock[]): string {
   return blocks
     .filter((block): block is ConversationTextBlock => block.type === 'text')

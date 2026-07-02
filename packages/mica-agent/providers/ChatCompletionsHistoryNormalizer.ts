@@ -4,10 +4,9 @@ import {
   providerContentToConversationBlocks,
   type ConversationContentBlock,
   type ConversationItem,
-  type ProviderHistoryNormalizer,
 } from '../core/Conversation.js';
 
-export class ChatCompletionsHistoryNormalizer implements ProviderHistoryNormalizer<OpenAI.Chat.Completions.ChatCompletionMessageParam> {
+export class ChatCompletionsHistoryNormalizer {
   normalize(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): ConversationItem[] {
     const items: ConversationItem[] = [];
     const toolNames = new Map<string, string>();
@@ -62,37 +61,6 @@ export class ChatCompletionsHistoryNormalizer implements ProviderHistoryNormaliz
 
     return items;
   }
-
-  denormalize(items: ConversationItem[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-    for (const item of items) {
-      if (item.type === 'system' || item.type === 'user' || item.type === 'assistant') {
-        messages.push({ role: item.type, content: conversationBlocksToOpenAIContent(item.content) });
-        continue;
-      }
-      if (item.type === 'tool_call') {
-        messages.push({
-          role: 'assistant',
-          content: item.precedingAssistantText ?? null,
-          tool_calls: [
-            {
-              id: item.id,
-              type: 'function',
-              function: {
-                name: item.name,
-                arguments: item.argsText ?? stringifyArgs(item.args),
-              },
-            },
-          ],
-        });
-        continue;
-      }
-      if (item.type === 'tool_result') {
-        messages.push({ role: 'tool', tool_call_id: item.id, content: item.content });
-      }
-    }
-    return messages;
-  }
 }
 
 function openAIContentToConversationBlocks(
@@ -121,14 +89,5 @@ function parseJsonOrRaw(value: string): unknown {
     return JSON.parse(value);
   } catch {
     return value;
-  }
-}
-
-function stringifyArgs(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value ?? {});
-  } catch {
-    return String(value);
   }
 }

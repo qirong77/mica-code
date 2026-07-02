@@ -23,7 +23,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { AnthropicHistoryNormalizer } from './AnthropicHistoryNormalizer.js';
+import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 type AnthropicMergedUsage = {
@@ -51,18 +51,6 @@ const THINKING_BUDGET_TOKENS: Partial<Record<EffortOption, number>> = {
   high: 8192,
 };
 
-function abortError(): Error {
-  const error = new Error('Agent query aborted');
-  error.name = 'AbortError';
-  return error;
-}
-
-function throwIfQueryStopped(options?: AgentQueryOptions): void {
-  if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
-    throw abortError();
-  }
-}
-
 function getClient(options: ModelClientOptions) {
   return new Anthropic({
     apiKey: options.apiKey,
@@ -75,7 +63,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   usageHistory: AnthropicUsageRecord[] = [];
   lastUsage: AnthropicUsageRecord | undefined;
   private turnId = 0;
-  model: string;
+  model!: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
   maxTokens: number;
@@ -84,7 +72,6 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: string | undefined;
-  readonly historyNormalizer = new AnthropicHistoryNormalizer();
 
   constructor(options: string | ModelClientOptions) {
     super();
@@ -96,15 +83,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
       this.effort = 'none';
       return;
     }
-    this.model = options.model;
-    this.apiKey = options.apiKey;
-    this.baseURL = options.baseURL;
-    this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
-    this.effort = options.effort ?? 'none';
-    this.tools = options.tools ?? true;
-    this.toolFilter = options.toolFilter;
-    this.toolContext = options.toolContext;
-    this.systemPrompt = options.systemPrompt;
+    this.configure(options);
   }
 
   configure(options: ModelClientOptions) {
@@ -406,14 +385,6 @@ function interruptedAnthropicToolResultMessage(toolUseIds: Iterable<string>): Me
       is_error: true,
     })),
   };
-}
-
-function interruptedToolOutput(): string {
-  return JSON.stringify({
-    ok: false,
-    status: 'interrupted',
-    error: 'Previous tool execution was interrupted before producing output.',
-  });
 }
 
 function mergeAnthropicUsage(accumulator: AnthropicMergedUsage, usage: Usage | MessageDeltaUsage): void {

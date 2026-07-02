@@ -16,7 +16,6 @@ import {
   getProviderEffortOptions,
   clampProviderEffort,
   mapProviderEffortValue,
-  providerSupportsModel,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
   resolveProviderProtocol,

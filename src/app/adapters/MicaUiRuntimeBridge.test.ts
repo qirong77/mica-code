@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import type { MicaUiAgentTurnLogItem, MicaUiLogEntry } from '@packages/mica-ui/index.js';
+import type { MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
 
@@ -10,7 +10,6 @@ const uiMocks = (() => {
     appendAgentTurnLogItem: fn(),
     cachedTokenRateSet: fn(),
     clearAgentTurnLogItems: fn(),
-    clearLogEntries: fn(),
     clearPendingInput: fn(),
     clearResponseText: fn(),
     contextSizeSet: fn(),
@@ -56,7 +55,6 @@ vi.mock('@packages/mica-ui/index.js', () => ({
       appendAgentTurnLogItem: uiMocks.appendAgentTurnLogItem,
       cachedTokenRate: { set: uiMocks.cachedTokenRateSet },
       clearAgentTurnLogItems: uiMocks.clearAgentTurnLogItems,
-      clearLogEntries: uiMocks.clearLogEntries,
       contextSize: { set: uiMocks.contextSizeSet },
       modelDisplay: {
         contextWindowSize: { set: uiMocks.modelWindowSet },
@@ -106,10 +104,9 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     });
 
     expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'previous-error' })]);
-    expect(session.uiState.logEntries).toEqual([expect.objectContaining({ type: 'thinking' })]);
     expect(session.uiState.thinkingText).toBe('previous thinking');
     expect(session.uiState.lastTurnOutcome).toBe('running');
-    expect(uiMocks.clearLogEntries).not.toHaveBeenCalled();
+    expect(uiMocks.clearAgentTurnLogItems).not.toHaveBeenCalled();
     expect(uiMocks.thinkingSet).not.toHaveBeenCalledWith('');
   });
 
@@ -128,10 +125,9 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     });
 
     expect(session.uiState.agentTurnLogItems).toEqual([]);
-    expect(session.uiState.logEntries).toEqual([]);
     expect(session.uiState.thinkingText).toBe('');
     expect(session.uiState.lastTurnOutcome).toBe('running');
-    expect(uiMocks.clearLogEntries).toHaveBeenCalledTimes(1);
+    expect(uiMocks.clearAgentTurnLogItems).toHaveBeenCalledTimes(1);
     expect(uiMocks.thinkingSet).toHaveBeenCalledWith('');
   });
 });
@@ -168,7 +164,6 @@ function createAgent(): AgentRuntime {
 
 function createSession(agent: AgentRuntime): TerminalAgentSession {
   const logItem: MicaUiAgentTurnLogItem = { id: 'previous-error', component: () => null };
-  const logEntry: MicaUiLogEntry = { type: 'thinking', id: 1, text: 'previous thinking' };
   return {
     agent,
     disposeStatusListener: vi.fn(),
@@ -184,14 +179,12 @@ function createSession(agent: AgentRuntime): TerminalAgentSession {
       contextSize: 0,
       conversationMessages: [],
       lastTurnOutcome: 'error',
-      logEntries: [logEntry],
       messageBarMessages: [],
       pendingInputs: [],
       pendingQueueMode: null,
       pluginUIs: [],
       responseText: '',
       thinkingText: 'previous thinking',
-      uiLog: [],
       workingStatus: { type: 'error' },
     },
     updatedAt: new Date(0).toISOString(),

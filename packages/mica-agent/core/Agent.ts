@@ -1,5 +1,4 @@
-import type { ConversationItem, ProviderHistoryNormalizer } from './Conversation.js';
-import type { AgentContentBlockParam, AgentConversationMessage, AgentQueryContent } from './Content.js';
+import type { AgentConversationMessage, AgentQueryContent } from './Content.js';
 
 export type AgentUsageRecord = {
   provider: string;
@@ -51,8 +50,6 @@ export interface IAgent<
   query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean;
   toConversationMessages(): AgentConversationMessage[];
-  toConversationItems(): ConversationItem[];
-  loadConversationItems(items: ConversationItem[]): void;
   getSnapshot(): AgentSnapshot<TMessage, TUsage>;
   loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 }
@@ -78,16 +75,7 @@ export abstract class BaseAgent<
   abstract query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   abstract preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean;
   abstract toConversationMessages(): AgentConversationMessage[];
-  abstract get historyNormalizer(): ProviderHistoryNormalizer<TMessage>;
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
-
-  toConversationItems(): ConversationItem[] {
-    return this.historyNormalizer.normalize(this.messages);
-  }
-
-  loadConversationItems(items: ConversationItem[]): void {
-    this.messages = this.historyNormalizer.denormalize(items);
-  }
 
   getSnapshot(): AgentSnapshot<TMessage, TUsage> {
     return {
@@ -107,18 +95,6 @@ export abstract class BaseAgent<
     this.usageHistory = snapshot.usageHistory;
     this.lastUsage = snapshot.lastUsage;
     return this.usageHistory.reduce((max, usage) => Math.max(max, usage.turnId), 0);
-  }
-
-  protected textMessage(role: 'user' | 'assistant', text: string): AgentConversationMessage | null {
-    if (!text) return null;
-    return { role, content: [{ type: 'text', text }] };
-  }
-
-  protected contentBlocksToText(blocks: AgentContentBlockParam[]): string {
-    return blocks
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('\n');
   }
 }
 

@@ -85,27 +85,6 @@ export interface MicaUiDropdownState {
   emptyMessage?: string;
 }
 
-// ── Log entry types ──
-
-export interface MicaUiThinkingEntry {
-  type: 'thinking';
-  id: number;
-  text: string;
-}
-
-export interface MicaUiToolEntry {
-  type: 'tool';
-  toolUseId: string;
-  toolName: string;
-  displayText: string;
-  completed: boolean;
-  output: string;
-  startTime: number;
-  elapsedMs?: number;
-}
-
-export type MicaUiLogEntry = MicaUiThinkingEntry | MicaUiToolEntry;
-
 export type MicaUiConversationMessage =
   | {
       role: 'assistant';
@@ -122,13 +101,6 @@ export type MicaUiConversationMessage =
       variant?: 'recap' | 'commit' | 'compact';
       command?: string;
     };
-
-export interface MicaUiUILogEntry {
-  text: string;
-  color?: string;
-  dimColor?: boolean;
-  bold?: boolean;
-}
 
 export interface MicaUiAgentStatusItem {
   id: string;

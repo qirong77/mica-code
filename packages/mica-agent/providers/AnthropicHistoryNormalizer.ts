@@ -4,10 +4,9 @@ import {
   providerContentToConversationBlocks,
   type ConversationContentBlock,
   type ConversationItem,
-  type ProviderHistoryNormalizer,
 } from '../core/Conversation.js';
 
-export class AnthropicHistoryNormalizer implements ProviderHistoryNormalizer<MessageParam> {
+export class AnthropicHistoryNormalizer {
   normalize(messages: MessageParam[]): ConversationItem[] {
     const items: ConversationItem[] = [];
     const toolNames = new Map<string, string>();
@@ -55,41 +54,6 @@ export class AnthropicHistoryNormalizer implements ProviderHistoryNormalizer<Mes
 
     return items;
   }
-
-  denormalize(items: ConversationItem[]): MessageParam[] {
-    return items.flatMap((item) => {
-      if (item.type === 'user' || item.type === 'assistant') {
-        return [{ role: item.type, content: conversationBlocksToAnthropicContent(item.content) }];
-      }
-      if (item.type === 'tool_call') {
-        return [
-          {
-            role: 'assistant',
-            content: [
-              ...(item.precedingAssistantText ? [{ type: 'text' as const, text: item.precedingAssistantText }] : []),
-              { type: 'tool_use' as const, id: item.id, name: item.name, input: item.args },
-            ],
-          },
-        ];
-      }
-      if (item.type === 'tool_result') {
-        return [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result' as const,
-                tool_use_id: item.id,
-                content: item.content,
-                is_error: item.isError,
-              },
-            ],
-          },
-        ];
-      }
-      return [];
-    });
-  }
 }
 
 function anthropicContentToConversationBlocks(content: MessageParam['content']): ConversationContentBlock[] {
@@ -98,14 +62,6 @@ function anthropicContentToConversationBlocks(content: MessageParam['content']):
     if (part.type === 'image') return { type: 'image', source: part.source };
     return null;
   });
-}
-
-function conversationBlocksToAnthropicContent(blocks: ConversationContentBlock[]): MessageParam['content'] {
-  const content = blocks.map((block) => {
-    if (block.type === 'text') return { type: 'text' as const, text: block.text };
-    return { type: 'text' as const, text: '[Image]' };
-  });
-  return content.length > 0 ? content : '';
 }
 
 function anthropicToolResultToText(content: unknown): string {

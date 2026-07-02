@@ -2,7 +2,7 @@ import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { loadBackgroundTask, readBackgroundTaskOutput } from './ToolRunShellBackground.js';
 import { truncateDisplayText } from './utils/display.js';
-import { clampNumber, formatSize } from './utils/outputLimits.js';
+import { clampNumber } from './utils/outputLimits.js';
 
 const DEFAULT_MAX_BYTES = 20_000;
 const HARD_MAX_BYTES = 200_000;

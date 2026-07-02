@@ -22,9 +22,7 @@ function captureSessionUi(): TerminalAgentUiState {
     pendingInputs: micaUi.conversation.pendingInputs.get(),
     pendingQueueMode: micaUi.conversation.pendingQueueMode.get(),
     messageBarMessages: micaUi.messageBar.getMessages(),
-    logEntries: micaUi.panels.logEntries.get(),
     agentTurnLogItems: micaUi.panels.agentTurnLogItems.get(),
-    uiLog: micaUi.panels.uiLog.get(),
     thinkingText: micaUi.panels.thinkingText.get(),
     pluginUIs: micaUi.panels.pluginUIs.get(),
     workingStatus: micaUi.panels.workingStatus.get(),
@@ -61,9 +59,7 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
   micaUi.conversation.setResponseText(uiState.responseText);
   micaUi.conversation.setPendingInputs(uiState.pendingInputs, uiState.pendingQueueMode);
   micaUi.panels.thinkingText.set(uiState.thinkingText);
-  micaUi.panels.setLogEntries(uiState.logEntries);
   micaUi.panels.setAgentTurnLogItems(uiState.agentTurnLogItems);
-  micaUi.panels.uiLog.set(uiState.uiLog);
   micaUi.panels.setPluginUIs(uiState.pluginUIs);
   micaUi.messageBar.setMessages(uiState.messageBarMessages);
   micaUi.panels.setWorkingStatus(uiState.workingStatus);
@@ -125,7 +121,9 @@ function showCommitNoticeForSession(
 function hideCompactArtifacts(messages: MicaUiConversationMessage[]): MicaUiConversationMessage[] {
   return messages.filter((message) => {
     const text = conversationContentToText(message.content);
-    return !text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) && !text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX);
+    return (
+      !text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) && !text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)
+    );
   });
 }
 
@@ -313,9 +311,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         pendingInputs: [],
         pendingQueueMode: null,
         messageBarMessages: [],
-        logEntries: [],
         agentTurnLogItems: [],
-        uiLog: [],
         thinkingText: '',
         pluginUIs: [],
         workingStatus: { type: 'idle' },
@@ -372,7 +368,6 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         pendingInputs: [],
         pendingQueueMode: null,
         messageBarMessages: [],
-        logEntries: [],
         agentTurnLogItems: [],
         thinkingText: '',
         pluginUIs: [],

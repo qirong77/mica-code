@@ -150,7 +150,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
           return true;
         }
       : undefined,
-    onInput: (input, key) => {
+    onInput: (_input, key) => {
       if (applying.get()) return true;
       if (key.escape) {
         hide();

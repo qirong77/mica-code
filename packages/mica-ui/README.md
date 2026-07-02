@@ -1,12 +1,12 @@
 # mica-ui
 
-`mica-ui` 是 Mica Code 的 Ink 终端 UI 包，提供应用根组件、对话视图、输入框、底部面板、日志面板、基础组件和 UI 状态 store。
+`mica-ui` 是 Mica Code 的 Ink 终端 UI 包，提供应用根组件、对话视图、输入框、底部面板、基础组件和 UI 状态 store。
 
 ## 主要能力
 
 - 应用与核心视图组件：`App`、`Conversation`、`TerminalInputUI`。
-- 运行状态与日志组件：`WorkingStatus`、`LogView`、`AgentTurnLog`。
-- 底部交互面板：`BottomSurface`、`DropDownUI`、`PluginPanel`。
+- 运行状态与日志组件：`WorkingStatus`、`AgentTurnLog`。
+- 底部交互面板：`BottomSurface`、`DropDownUI`。
 - 基础组件：`Dialog`、`KeyHints`、`SelectList`、`Spin`。
 - 状态入口：`conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
 - 会话消息支持 `displayContent`，可在不改变实际上下文内容的情况下展示更易读的输入摘要。
@@ -17,10 +17,7 @@
 ```ts
 import { micaUi } from '../packages/mica-ui/index.js';
 
-micaUi.panels.pushLog({
-  type: 'info',
-  text: 'ready',
-});
+micaUi.panels.status.connecting();
 ```
 
 ## 设计约束

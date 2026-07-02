@@ -11,7 +11,7 @@ import {
   readLegacyProviderLastUsedConfig,
   stripRuntimeFields,
 } from './migration.js';
-import { ConfigValidationError, formatConfigValidationIssues, validateConfig } from './validation.js';
+import { ConfigValidationError, validateConfig } from './validation.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 
 export {
