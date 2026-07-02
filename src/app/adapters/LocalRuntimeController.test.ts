@@ -18,6 +18,8 @@ describe('LocalRuntimeController abort display state', () => {
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
     micaUi.messageBar.clearMessages();
+    micaUi.panels.clearAgentTurnLogItems();
+    micaUi.panels.thinkingText.set('');
     micaUi.panels.status.idle();
   });
 
@@ -190,6 +192,54 @@ describe('LocalRuntimeController abort display state', () => {
     expect(session.uiState.lastTurnOutcome).toBe('error');
     expect(session.uiState.workingStatus).toEqual({ type: 'error' });
     expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '请求失败: provider exploded' }));
+  });
+
+  it('clears active lower logs after a completed turn', async () => {
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async () => {
+        micaUi.panels.appendAgentTurnLogItem({ id: 'live-thinking', component: () => null });
+        micaUi.panels.thinkingText.set('live thought');
+        return { runId: 1, text: 'ok' };
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    const controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
+
+    expect(session.uiState.lastTurnOutcome).toBe('completed');
+    expect(session.uiState.agentTurnLogItems).toEqual([]);
+    expect(session.uiState.thinkingText).toBe('');
+    expect(micaUi.panels.agentTurnLogItems.get()).toEqual([]);
+    expect(micaUi.panels.thinkingText.get()).toBe('');
   });
 
   it('shows a retry notice while a mocked request fails with a 70% probability, then clears it after success', async () => {

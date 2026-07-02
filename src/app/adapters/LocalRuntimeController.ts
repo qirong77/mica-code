@@ -572,13 +572,19 @@ export class LocalRuntimeController implements RuntimeController {
       this.runningAgents.delete(agent);
       this.clearingAgents.delete(agent);
       this.committedResponseBuffers.delete(agent);
-      if (!hasError && !wasAborted && session) {
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          agentTurnLogItems: [],
-          thinkingText: '',
-          lastTurnOutcome: 'completed',
-        });
+      if (!hasError && !wasAborted) {
+        if (session) {
+          session.uiState = normalizeUiState({
+            ...session.uiState,
+            agentTurnLogItems: [],
+            thinkingText: '',
+            lastTurnOutcome: 'completed',
+          });
+        }
+        if (this.isActiveAgent(agent)) {
+          micaUi.panels.clearAgentTurnLogItems();
+          micaUi.panels.thinkingText.set('');
+        }
       }
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
