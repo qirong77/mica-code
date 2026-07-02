@@ -76,7 +76,6 @@ function makeServices(options: { currentAgent?: CommandAgent; busy?: boolean } =
     runExclusiveTask: vi.fn(async (_agent, _taskOptions, task) => task()),
     compact: vi.fn(),
     recap: vi.fn(async () => ({ summary: 'summary', messageCount: 2 })),
-    requestExit: vi.fn(),
   };
   return services as unknown as CommandRuntimeServices;
 }

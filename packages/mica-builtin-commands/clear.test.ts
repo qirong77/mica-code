@@ -85,6 +85,5 @@ function makeServices(options: { busy?: boolean } = {}): CommandRuntimeServices 
     applyRewind: vi.fn(),
     runExclusiveTask: vi.fn(async (_agent, _taskOptions, task) => task()),
     compact: vi.fn(),
-    requestExit: vi.fn(),
   } as unknown as CommandRuntimeServices;
 }

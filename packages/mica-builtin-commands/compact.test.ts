@@ -158,7 +158,6 @@ function makeServices(options: {
       return options.result ?? makeResult();
     }),
     recap: vi.fn(),
-    requestExit: vi.fn(),
   };
   return services as unknown as CommandRuntimeServices;
 }

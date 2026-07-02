@@ -128,5 +128,4 @@ export type CommandRuntimeServices = {
     options?: CompactOptions,
   ): Promise<CompactResult>;
   recap(agent: CommandAgent, ownerSessionId?: string, options?: RecapOptions): Promise<RecapResult>;
-  requestExit(): void | Promise<void>;
 };

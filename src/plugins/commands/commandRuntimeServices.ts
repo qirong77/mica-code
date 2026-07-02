@@ -509,8 +509,5 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       showRecapForSession(context, ownerSession?.id ?? ownerSessionId, summary, formatRecapCommand(options));
       return { summary, messageCount: snapshot.messages.length };
     },
-    requestExit() {
-      micaUi.terminalInput.requestExit();
-    },
   };
 }
