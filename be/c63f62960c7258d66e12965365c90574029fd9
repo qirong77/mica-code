@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "bec63f62960c7258d66e12965365c90574029fd9",
+  "prompts": {
+    "ea7d92fd91e04bdc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1dd4-b85c-7002-bfbf-01602c91dbe8",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 1639,
+      "total_deletions": 0,
+      "accepted_lines": 1639,
+      "overriden_lines": 0
+    }
+  }
+}
