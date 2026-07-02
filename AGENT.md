@@ -68,11 +68,11 @@ temp/                        临时外部/实验代码目录，不属于默认�
 
 ## Provider、配置与本地数据
 
-- 静态 provider 配置保存在 `~/.mica/config.json`，由 `packages/mica-config` 统一读写、校验和迁移。
-- 本地状态保存在 `~/.mica/storage.json`，包括按精确当前目录记录的最后使用 provider/model/effort/contextWindowSize，以及共享输入框历史等数据。
+- 静态 provider 配置保存在 `~/.mica/config.json`，由 `packages/mica-config` 统一读写和校验。
+- 本地状态保存在 `~/.mica/storage.json`，包括按精确当前目录记录的最后使用 provider/model/effort，以及共享输入框历史等数据。
 - 会话数据由 `packages/mica-session` 管理，默认目录为 `~/.mica/sessions`；`SessionController` 负责把 `AgentRuntime` 序列化为 version 1 的 `PersistedSession`。
 - 入口 `src/index.ts` 会加载当前工作目录的 `.env` 和 `packages/mica-agent/.env`。
-- Provider 通过 `protocol` 显式选择 `openai_chat_completions`、`openai_responses` 或 `anthropic_messages`；缺省按 `openai_chat_completions` 处理，不要根据 `api_base` 猜测协议。
+- Provider 通过必填 `protocol` 显式选择 `openai_chat_completions`、`openai_responses` 或 `anthropic_messages`；不要根据 `api_base` 猜测协议。
 - 配置了 `get_model_url` 的 provider 在运行时拉取模型列表，只缓存到内存配置，不回填 `models` 到 `config.json`。没有动态模型接口的 provider 可以配置静态 `models`。
 - 模型能力由 `packages/mica-config/model-rules.json` 建模：按模型名小写后是否包含 `modelKeysIncludes` 任一项匹配；全局 effort 枚举为 `none/minimal/low/medium/high/xhigh`；规则可用 `enableEffort: false` 禁用 effort；未命中规则时只支持 `none`，context size 默认 256K。
 - 请求参数必须通过 `resolveChatCompletionsEffortParams` 或 `resolveResponsesReasoningParams` 在具体协议 client 内生成，runtime 不直接拼 provider 请求参数。

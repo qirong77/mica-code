@@ -39,10 +39,10 @@ if (!result.ok) {
 
 - 静态 provider 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
 - userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
-- `config.json` 不保存最后一次使用的 provider/model/effort/contextWindowSize；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
+- `config.json` 不保存最后一次使用的 provider/model/effort；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
 - provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
 - 配置语义校验属于本包职责；应用层只负责决定如何展示校验结果。
-- 默认配置模板放在 `default.json`，新增字段需要提供明确默认值和迁移策略。
+- 默认配置模板放在 `default.json`，新增字段需要提供明确默认值。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 
 ## 模型规则
@@ -57,7 +57,6 @@ if (!result.ok) {
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
-- `inputHistory.ts`：共享输入框历史记录的兼容入口，底层读写 `micaStorage.ts`。
 - `default.json`：首次启动时使用的默认配置模板。
 - `model-rules.json`：模型 effort/contextSize 规则。
 - `index.ts`：公共 API 聚合导出。

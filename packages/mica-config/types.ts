@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 
 export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const;
-export const DEFAULT_PROVIDER_PROTOCOL: ProviderProtocol = 'openai_chat_completions';
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
 
@@ -16,11 +15,8 @@ export interface ProviderDefinition {
   name?: string;
   api_base: string;
   api_key?: string;
-  protocol?: ProviderProtocol;
-  model?: string;
-  effort?: EffortOption;
+  protocol: ProviderProtocol;
   models?: string[];
-  contextWindowSize?: number;
   supportsEffort?: boolean;
   get_model_url?: string;
 }
@@ -88,19 +84,12 @@ export function isProviderProtocol(value: unknown): value is ProviderProtocol {
   return PROVIDER_PROTOCOLS.includes(value as ProviderProtocol);
 }
 
-export function resolveProviderProtocol(provider?: Pick<ProviderDefinition, 'protocol'> | null): ProviderProtocol {
-  const protocol = provider?.protocol;
-  return isProviderProtocol(protocol) ? protocol : DEFAULT_PROVIDER_PROTOCOL;
-}
-
 export function providerSupportsModel(provider: ProviderDefinition, model: string): boolean {
-  if (provider.model === model) return true;
   if (!Array.isArray(provider.models) || provider.models.length === 0) return true;
   return provider.models.includes(model);
 }
 
 export function firstProviderModel(provider: ProviderDefinition | Record<string, unknown>): string | undefined {
-  if (isNonEmptyString(provider.model)) return provider.model;
   if (Array.isArray(provider.models)) return provider.models.find(isNonEmptyString);
   return undefined;
 }
@@ -118,8 +107,7 @@ export function findProvidersForModel(config: IMicaConfig, providers: unknown[])
   return providers
     .flatMap((provider) => {
       if (!isRecord(provider)) return [];
-      const matchesModel =
-        provider.model === config.model || (Array.isArray(provider.models) && provider.models.includes(config.model));
+      const matchesModel = Array.isArray(provider.models) && provider.models.includes(config.model);
       return matchesModel ? [provider.id] : [];
     })
     .filter(isNonEmptyString);

@@ -25,19 +25,21 @@ afterAll(() => {
 });
 
 describe('mica storage runtime config', () => {
-  it('uses global last-used config as fallback while keeping exact cwd overrides', () => {
+  it('keeps runtime config scoped to exact cwd entries', () => {
     const projectA = join(tempHome, 'project-a');
     const projectB = join(tempHome, 'project-b');
+    const projectC = join(tempHome, 'project-c');
     mkdirSync(projectA, { recursive: true });
     mkdirSync(projectB, { recursive: true });
+    mkdirSync(projectC, { recursive: true });
 
     process.chdir(projectA);
     storageApi.updateLastUsedConfig({ provider: 'a', model: 'b', effort: 'high' });
     storageApi.updateProviderPreference('a', { model: 'b', effort: 'high' });
 
     process.chdir(projectB);
-    expect(storageApi.readLastUsedConfig()).toMatchObject({ provider: 'a', model: 'b', effort: 'high' });
-    expect(storageApi.readProviderPreference('a')).toEqual({ model: 'b', effort: 'high' });
+    expect(storageApi.readLastUsedConfig()).toEqual({});
+    expect(storageApi.readProviderPreference('a')).toEqual({});
     storageApi.updateLastUsedConfig({ provider: 'a', model: 'b', effort: 'low' });
     storageApi.updateProviderPreference('a', { model: 'b', effort: 'low' });
 
@@ -49,11 +51,15 @@ describe('mica storage runtime config', () => {
     expect(storageApi.readLastUsedConfig()).toMatchObject({ provider: 'a', model: 'b', effort: 'low' });
     expect(storageApi.readProviderPreference('a')).toEqual({ model: 'b', effort: 'low' });
 
+    process.chdir(projectC);
+    expect(storageApi.readLastUsedConfig()).toEqual({});
+    expect(storageApi.readProviderPreference('a')).toEqual({});
+
     const persisted = JSON.parse(readFileSync(storageApi.MICA_STORAGE_PATH, 'utf-8')) as {
       lastUsed?: Record<string, unknown>;
       lastUsedByDirectory?: Record<string, unknown>;
     };
-    expect(persisted.lastUsed).toMatchObject({ provider: 'a', model: 'b', effort: 'low' });
+    expect(persisted.lastUsed).toBeUndefined();
     expect(Object.keys(persisted.lastUsedByDirectory ?? {}).sort()).toEqual(
       [realpathSync(projectA), realpathSync(projectB)].sort(),
     );

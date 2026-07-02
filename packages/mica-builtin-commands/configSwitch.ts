@@ -1,3 +1,4 @@
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import {
   micaConfig,
@@ -62,14 +63,17 @@ export function syncConfigFromAgent(agent: CommandAgent): IMicaConfig {
   return micaConfig.update((config) => normalizeConfigSwitchSelection(configForAgent(config, agent)).config);
 }
 
-function normalizeConfigSwitchSelection(config: IMicaConfig): { config: IMicaConfig; adjustments: ConfigSwitchAdjustment[] } {
+function normalizeConfigSwitchSelection(config: IMicaConfig): {
+  config: IMicaConfig;
+  adjustments: ConfigSwitchAdjustment[];
+} {
   const provider = findCurrentProvider(config);
   if (!provider) return { config, adjustments: [] };
 
-  const model = config.model || provider.model || provider.models?.[0] || '';
+  const model = config.model || provider.models?.[0] || '';
   const effort = isEffortOption(config.effort)
     ? micaConfig.clampProviderEffort(provider, config.effort, model)
-    : micaConfig.clampProviderEffort(provider, provider.effort ?? 'medium', model);
+    : micaConfig.clampProviderEffort(provider, 'medium', model);
   const contextWindowSize = micaConfig.getModelContextWindowSizeFromConfig(model);
   const adjustments: ConfigSwitchAdjustment[] = [];
 
@@ -106,7 +110,7 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): { config: IMicaCon
 function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
   const agentProvider = agent.config.provider;
   const provider = config.providers.find((item) => item.id === agentProvider.id) ?? agentProvider;
-  const model = agent.config.model || provider.model || provider.models?.[0] || '';
+  const model = agent.config.model || provider.models?.[0] || '';
   const effort = isEffortOption(agent.config.effort)
     ? micaConfig.clampProviderEffort(provider, agent.config.effort, model)
     : config.effort;
@@ -134,15 +138,9 @@ function formatConfigSwitchAdjustments(adjustments: ConfigSwitchAdjustment[]): s
     if (adjustment.field === 'effort') {
       return `effort ${adjustment.from} -> ${adjustment.to}`;
     }
-    return `context ${formatTokenCount(adjustment.from)} -> ${formatTokenCount(adjustment.to)}`;
+    return `context ${formatTokenCount(adjustment.from, { roundedThousands: true })} -> ${formatTokenCount(adjustment.to, { roundedThousands: true })}`;
   });
   return `Adjusted defaults: ${parts.join(', ')}`;
-}
-
-function formatTokenCount(value: number): string {
-  if (value >= 1_000_000 && value % 1_000_000 === 0) return `${value / 1_000_000}M`;
-  if (value >= 1000 && value % 1000 === 0) return `${value / 1000}K`;
-  return String(value);
 }
 
 function isEffortOption(value: string): value is EffortOption {

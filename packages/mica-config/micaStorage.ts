@@ -15,14 +15,11 @@ export interface LastUsedConfig {
   provider?: string;
   model?: string;
   effort?: string;
-  contextWindowSize?: number;
   providerPreferences?: Record<string, ProviderPreference>;
 }
 
 export interface MicaStorageFile {
   version: 1;
-  /** Global fallback runtime selection for directories without an exact entry. */
-  lastUsed?: LastUsedConfig;
   lastUsedByDirectory?: Record<string, LastUsedConfig>;
   inputHistory?: string[];
   preferences?: Record<string, unknown>;
@@ -51,17 +48,13 @@ export function updateMicaStorage(updater: (storage: MicaStorageFile) => MicaSto
 
 export function readLastUsedConfig(directory = getCurrentDirectory()): LastUsedConfig {
   const storage = readMicaStorage();
-  return readDirectoryLastUsedConfig(storage, directory) ?? storage.lastUsed ?? {};
+  return readDirectoryLastUsedConfig(storage, directory) ?? {};
 }
 
 export function updateLastUsedConfig(update: LastUsedConfig, directory = getCurrentDirectory()): LastUsedConfig {
   const directoryPath = normalizeDirectoryPath(directory);
   const next = updateMicaStorage((storage) => ({
     ...storage,
-    lastUsed: {
-      ...(storage.lastUsed ?? {}),
-      ...dropUndefined(update),
-    },
     lastUsedByDirectory: {
       ...(storage.lastUsedByDirectory ?? {}),
       [directoryPath]: {
@@ -85,23 +78,12 @@ export function updateProviderPreference(
   const directoryPath = normalizeDirectoryPath(directory);
   const next = updateMicaStorage((storage) => {
     const currentLastUsed = readLastUsedConfigForStorage(storage, directoryPath);
-    const currentGlobalLastUsed = storage.lastUsed ?? {};
     const nextPreference = {
       ...(currentLastUsed.providerPreferences?.[providerId] ?? {}),
       ...dropUndefined(preference),
     };
     return {
       ...storage,
-      lastUsed: {
-        ...currentGlobalLastUsed,
-        providerPreferences: {
-          ...(currentGlobalLastUsed.providerPreferences ?? {}),
-          [providerId]: {
-            ...(currentGlobalLastUsed.providerPreferences?.[providerId] ?? {}),
-            ...dropUndefined(preference),
-          },
-        },
-      },
       lastUsedByDirectory: {
         ...(storage.lastUsedByDirectory ?? {}),
         [directoryPath]: {
@@ -156,18 +138,42 @@ function writeMicaStorage(storage: MicaStorageFile): void {
 
 function normalizeStorage(storage: MicaStorageFile): MicaStorageFile {
   return {
-    ...storage,
     version: 1,
     lastUsedByDirectory: storage.lastUsedByDirectory
       ? normalizeLastUsedByDirectory(storage.lastUsedByDirectory)
       : undefined,
     inputHistory: storage.inputHistory ? normalizeInputHistory(storage.inputHistory) : undefined,
+    preferences: storage.preferences,
+    usage: storage.usage,
   };
 }
 
 function normalizeLastUsedByDirectory(entries: Record<string, LastUsedConfig>): Record<string, LastUsedConfig> {
   return Object.fromEntries(
-    Object.entries(entries).map(([directory, lastUsed]) => [normalizeDirectoryPath(directory), lastUsed]),
+    Object.entries(entries).map(([directory, lastUsed]) => [
+      normalizeDirectoryPath(directory),
+      normalizeLastUsed(lastUsed),
+    ]),
+  );
+}
+
+function normalizeLastUsed(lastUsed: LastUsedConfig): LastUsedConfig {
+  return dropUndefined({
+    provider: lastUsed.provider,
+    model: lastUsed.model,
+    effort: lastUsed.effort,
+    providerPreferences: lastUsed.providerPreferences
+      ? normalizeProviderPreferences(lastUsed.providerPreferences)
+      : undefined,
+  });
+}
+
+function normalizeProviderPreferences(entries: Record<string, ProviderPreference>): Record<string, ProviderPreference> {
+  return Object.fromEntries(
+    Object.entries(entries).map(([providerId, preference]) => [
+      providerId,
+      dropUndefined({ model: preference.model, effort: preference.effort }),
+    ]),
   );
 }
 
@@ -184,7 +190,6 @@ function isMicaStorageFile(value: unknown): value is MicaStorageFile {
   const storage = value as Partial<MicaStorageFile>;
   if (storage.version !== 1) return false;
   if (storage.inputHistory !== undefined && !isStringArray(storage.inputHistory)) return false;
-  if (storage.lastUsed !== undefined && !isLastUsedConfig(storage.lastUsed)) return false;
   if (storage.lastUsedByDirectory !== undefined && !isLastUsedByDirectory(storage.lastUsedByDirectory)) return false;
   return true;
 }
@@ -196,7 +201,6 @@ function isLastUsedConfig(value: unknown): value is LastUsedConfig {
     optionalString(lastUsed.provider) &&
     optionalString(lastUsed.model) &&
     optionalString(lastUsed.effort) &&
-    optionalPositiveNumber(lastUsed.contextWindowSize) &&
     optionalProviderPreferences(lastUsed.providerPreferences)
   );
 }
@@ -226,10 +230,6 @@ function isStringArray(value: unknown): value is string[] {
 
 function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
-}
-
-function optionalPositiveNumber(value: unknown): boolean {
-  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
 
 function resolveMicaHomePath(...parts: string[]): string {

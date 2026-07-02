@@ -8,7 +8,6 @@ import type { ModelClientOptions } from './types.js';
 
 describe('createModelClient', () => {
   it.each([
-    ['default', undefined, ChatCompletionsClient],
     ['openai_chat_completions', 'openai_chat_completions', ChatCompletionsClient],
     ['openai_responses', 'openai_responses', ResponsesClient],
     ['anthropic_messages', 'anthropic_messages', AnthropicAgent],
@@ -25,7 +24,7 @@ describe('createModelClient', () => {
   });
 });
 
-function options(protocol: ProviderProtocol | undefined): ModelClientOptions {
+function options(protocol: ProviderProtocol): ModelClientOptions {
   return {
     model: 'test-model',
     apiKey: 'test-key',
@@ -33,7 +32,7 @@ function options(protocol: ProviderProtocol | undefined): ModelClientOptions {
     provider: {
       id: 'test',
       api_base: 'https://example.com/v1',
-      ...(protocol ? { protocol } : {}),
+      protocol,
     },
   };
 }

@@ -71,7 +71,15 @@ describe('createCompactCommand', () => {
 function makeAgent(): CommandAgent {
   return {
     config: {
-      provider: { id: 'test', name: 'Test', api_base: '', api_key: '', model: 'm', contextWindowSize: 1000 },
+      provider: {
+        id: 'test',
+        name: 'Test',
+        api_base: '',
+        api_key: '',
+        protocol: 'openai_chat_completions',
+        models: ['m'],
+        contextWindowSize: 1000,
+      },
       model: 'm',
       effort: 'none',
     },

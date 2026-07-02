@@ -1,4 +1,5 @@
 import { Box, Text } from '@anthropic/ink';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import {
   calculateUsageCachedTokenRate,
@@ -86,34 +87,28 @@ function showStatusPanel(text: string) {
   });
 }
 
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
-  return `${(tokens / 1_000_000).toFixed(2)}M`;
-}
-
 function formatTokenValue(tokens: number, records: number): string {
   if (records === 0) return '-';
-  return formatTokens(tokens);
+  return formatTokenCount(tokens);
 }
 
 function formatContextUsage(contextTokens: number, contextWindowSize: number): string {
   if (contextTokens <= 0 || contextWindowSize <= 0) return '-';
   const usagePct = ((contextTokens / contextWindowSize) * 100).toFixed(1);
-  return `${formatTokens(contextTokens)} / ${formatTokens(contextWindowSize)} (${usagePct}%)`;
+  return `${formatTokenCount(contextTokens)} / ${formatTokenCount(contextWindowSize)} (${usagePct}%)`;
 }
 
 function formatUsageCachedTokenValue(usage: AgentUsageRecord | undefined): string {
   if (!usage) return '-';
   const cachedInputTokens = usage.cachedInputTokens ?? 0;
   const cacheRate = calculateUsageCachedTokenRate(usage);
-  return `${formatTokens(cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
+  return `${formatTokenCount(cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
 }
 
 function formatTotalsCachedTokenValue(usageTotals: AgentUsageSummary): string {
   if (usageTotals.records === 0) return '-';
   const cacheRate = usageTotals.inputTokens > 0 ? usageTotals.cachedInputTokens / usageTotals.inputTokens : 0;
-  return `${formatTokens(usageTotals.cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
+  return `${formatTokenCount(usageTotals.cachedInputTokens)} (${(cacheRate * 100).toFixed(0)}%)`;
 }
 
 function formatStatusList(entries: Array<[string, string]>) {

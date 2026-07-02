@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path';
 import defaultConfig from './default.json';
 import type { PersistedMicaConfig } from './types.js';
-import { stripRuntimeFields } from './migration.js';
 
 export function readPersistedConfig(configPath: string): PersistedMicaConfig {
   ensureConfigFile(configPath);
@@ -17,7 +16,7 @@ export function readPersistedConfig(configPath: string): PersistedMicaConfig {
 
 export function writePersistedConfig(configPath: string, config: PersistedMicaConfig) {
   ensureConfigDir(configPath);
-  writeFileSync(configPath, `${JSON.stringify(stripRuntimeFields(config), null, 2)}\n`, 'utf-8');
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
 }
 
 function ensureConfigFile(configPath: string) {

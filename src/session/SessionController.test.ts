@@ -137,16 +137,14 @@ describe('SessionController', () => {
       name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'test-key',
-      model: 'deepseek-v4-pro',
-      effort: 'high' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['deepseek-v4-pro'],
-      contextWindowSize: 1000,
     };
     micaConfig.update(() => ({
       provider: provider.id,
-      model: provider.model,
+      model: 'deepseek-v4-pro',
       effort: 'high',
-      contextWindowSize: provider.contextWindowSize,
+      contextWindowSize: 1000000,
       providers: [provider],
     }));
     const session: PersistedSession = {
@@ -158,9 +156,10 @@ describe('SessionController', () => {
       cwd: process.cwd(),
       snapshot: {
         providerId: provider.id,
-        model: provider.model,
+        model: 'deepseek-v4-pro',
         effort: 'low',
         messages: [],
+        conversationMessages: [],
         usageHistory: [],
         lastUsage: undefined,
       },
@@ -199,7 +198,14 @@ describe('SessionController', () => {
     expect(result.ok).toBe(true);
     expect(micaConfig.get().effort).toBe('high');
     expect(agent.reloadConfig).toHaveBeenCalledWith(false);
-    expect(agent.loadSnapshot).toHaveBeenCalledWith(session.snapshot);
+    expect(agent.loadSnapshot).toHaveBeenCalledWith({
+      providerId: session.snapshot.providerId,
+      model: session.snapshot.model,
+      effort: session.snapshot.effort,
+      messages: session.snapshot.messages,
+      usageHistory: session.snapshot.usageHistory,
+      lastUsage: session.snapshot.lastUsage,
+    });
     expect(restore).toHaveBeenCalled();
   });
 });

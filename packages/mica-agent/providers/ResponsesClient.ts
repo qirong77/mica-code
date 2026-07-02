@@ -26,7 +26,7 @@ import {
 } from '../core/Agent.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
@@ -63,20 +63,15 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: EffortOption | undefined;
-  provider: ProviderDefinition | undefined;
+  provider!: ProviderDefinition;
   tools: boolean;
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: string | undefined;
 
-  constructor(options: string | ModelClientOptions) {
+  constructor(options: ModelClientOptions) {
     super();
     this.tools = true;
-    if (typeof options === 'string') {
-      this.model = options;
-      this.apiKey = process.env.OPENAI_API_KEY;
-      return;
-    }
     this.configure(options);
   }
 
@@ -286,23 +281,18 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
       for (const toolCall of completedToolCalls) {
         throwIfQueryStopped(options);
-        this.onToolCall?.(toolCall.name, toolCall.arguments, toolCall.callId);
-        let result: string;
-        try {
-          result = await micaTools.execute(
-            toolCall.name,
-            JSON.parse(toolCall.arguments || '{}'),
-            {
-              signal: options?.signal,
-              context: this.toolContext,
-            },
-            this.toolFilter,
-          );
-        } catch (error) {
-          result = `工具执行失败: ${error instanceof Error ? error.message : String(error)}`;
-        }
+        const { result } = await executeProviderToolCall({
+          name: toolCall.name,
+          argsText: toolCall.arguments,
+          id: toolCall.callId,
+          parseArgs: () => JSON.parse(toolCall.arguments || '{}'),
+          signal: options?.signal,
+          context: this.toolContext,
+          toolFilter: this.toolFilter,
+          onToolCall: this.onToolCall,
+          onToolResult: this.onToolResult,
+        });
         throwIfQueryStopped(options);
-        this.onToolResult?.(toolCall.name, result, toolCall.callId);
         messages.push({
           type: 'function_call_output',
           call_id: toolCall.callId,

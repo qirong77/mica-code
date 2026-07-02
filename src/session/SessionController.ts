@@ -116,7 +116,7 @@ export class SessionController {
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot));
     this.currentSessionId = session.id;
-    const conversationMessages = getPersistedConversationMessages(session.snapshot, this.agent);
+    const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     this.currentTitleOverride = session.title === derivedTitle ? null : session.title;
     this.ui.restore(this.agent, session.snapshot.lastUsage, conversationMessages);
@@ -134,9 +134,7 @@ const defaultSessionConfigAdapter: SessionConfigAdapter = {
 
 const defaultSessionUiAdapter: SessionUiAdapter = {
   restore(agent, lastUsage, conversationMessages) {
-    micaUi.conversation.setMessages(
-      conversationMessages.length > 0 ? conversationMessages : agent.toConversationMessages(),
-    );
+    micaUi.conversation.setMessages(conversationMessages);
     micaUi.conversation.clearResponseText();
     micaUi.conversation.clearPendingInput();
     micaUi.panels.thinkingText.set('');
@@ -196,12 +194,8 @@ function getPersistableConversationMessages(agent: SessionAgentAdapter): MicaUiC
   return sanitizeConversationMessages(activeMessages?.length ? activeMessages : agent.toConversationMessages());
 }
 
-function getPersistedConversationMessages(
-  snapshot: PersistedRuntimeSnapshot,
-  agent: SessionAgentAdapter,
-): MicaUiConversationMessage[] {
-  const messages = sanitizeConversationMessages(snapshot.conversationMessages);
-  return messages.length ? messages : sanitizeConversationMessages(agent.toConversationMessages());
+function getPersistedConversationMessages(snapshot: PersistedRuntimeSnapshot): MicaUiConversationMessage[] {
+  return sanitizeConversationMessages(snapshot.conversationMessages);
 }
 
 function getTitleConversationMessages(
@@ -277,7 +271,7 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
     if (!provider) {
       throw new Error(`Provider not found: ${snapshot.providerId}`);
     }
-    const model = snapshot.model || provider.model || provider.models?.[0] || '';
+    const model = snapshot.model;
     return {
       ...config,
       provider: provider.id,

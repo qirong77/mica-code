@@ -1,5 +1,6 @@
 import { Box, Text } from '@anthropic/ink';
 import { useEffect, useRef, useState } from 'react';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { useScheduleState } from '../hooks/index.js';
 import { workingStatus, thinkingText, modelDisplay, contextSize, cachedTokenRate } from './state.js';
@@ -19,12 +20,6 @@ const CONTEXT_USAGE_COLORS = [
   themeColors.statusError,
 ] as const;
 
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
-  return `${(tokens / 1_000_000).toFixed(2)}M`;
-}
-
 function getContextUsageColorIndex(ratio: number): number {
   for (let i = CTX_THRESHOLDS.length - 1; i >= 0; i--) {
     if (ratio >= CTX_THRESHOLDS[i]) return i + 1;
@@ -38,7 +33,7 @@ function StatusInfo() {
   const contextTokens = useScheduleState(contextSize);
   const windowSize = useScheduleState(modelDisplay.contextWindowSize);
   const cachedRate = useScheduleState(cachedTokenRate);
-  const tokenStr = formatTokens(contextTokens);
+  const tokenStr = formatTokenCount(contextTokens);
   const cachedPct = (cachedRate * 100).toFixed(0);
   const contextRatio = contextTokens / windowSize;
   const contextPct = (contextRatio * 100).toFixed(0);

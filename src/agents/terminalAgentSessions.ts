@@ -1,9 +1,9 @@
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
+import { sanitizeUiContent } from '@packages/mica-ui/utils/sanitizeContent.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import { SessionController } from '../session/SessionController.js';
 import type {
   MicaUiAgentTurnLogItem,
-  MicaUiContentBlockParam,
   MicaUiConversationMessage,
   MessageItem,
   MicaUiPluginUI,
@@ -284,36 +284,6 @@ function tailText(text: string, maxChars: number): string {
 function sanitizeConversationMessage(message: MicaUiConversationMessage): MicaUiConversationMessage {
   return {
     ...message,
-    content: sanitizeConversationContent(message.content),
+    content: sanitizeUiContent(message.content, MAX_UI_MESSAGE_TEXT_CHARS),
   } as MicaUiConversationMessage;
-}
-
-function sanitizeConversationContent(
-  content: MicaUiConversationMessage['content'],
-): MicaUiConversationMessage['content'] {
-  if (typeof content === 'string') return truncateMiddleText(content, MAX_UI_MESSAGE_TEXT_CHARS);
-
-  const blocks: MicaUiContentBlockParam[] = [];
-  let omittedImages = 0;
-  for (const block of content) {
-    if (block.type === 'text') {
-      blocks.push({ type: 'text', text: truncateMiddleText(block.text, MAX_UI_MESSAGE_TEXT_CHARS) });
-      continue;
-    }
-    omittedImages++;
-  }
-
-  if (omittedImages > 0 && blocks.length === 0) {
-    blocks.push({ type: 'text', text: omittedImages === 1 ? '[Image]' : `[${omittedImages} images]` });
-  }
-  return blocks.length === 1 && blocks[0]!.type === 'text' ? blocks[0]!.text : blocks;
-}
-
-function truncateMiddleText(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  const marker = `\n\n[message stored for UI truncated, omitted ${text.length - maxChars} chars]\n\n`;
-  const budget = Math.max(0, maxChars - marker.length);
-  const head = Math.ceil(budget * 0.65);
-  const tail = Math.floor(budget * 0.35);
-  return text.slice(0, head) + marker + text.slice(text.length - tail);
 }

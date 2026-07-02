@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
@@ -22,7 +23,7 @@ export function syncStartupBanner(agent: AgentRuntime, sessionState: StartupBann
   micaUi.panels.setStartupBanner({
     provider: (provider.name ?? provider.id) || '-',
     model: model || '-',
-    context: formatTokens(provider.contextWindowSize),
+    context: formatTokenCount(provider.contextWindowSize, { zero: '-', roundedThousands: true }),
     effort: provider.supportsEffort !== false ? effort : 'none',
     tools: `${toolCounts.builtin} builtin`,
     mcp: formatMcpStatus(connectedMcpServers, mcpServers.length),
@@ -73,10 +74,8 @@ function configIssueTip(code: string): string {
     case 'model_not_supported':
       return 'Model unavailable · run /model';
     case 'effort_not_supported_by_provider':
-    case 'provider_effort_unsupported':
       return 'Effort unsupported · run /effort';
     case 'context_window_invalid':
-    case 'provider_context_window_invalid':
       return 'Context invalid · edit config';
     default:
       return 'Config needs attention';
@@ -96,8 +95,6 @@ function configIssuePriority(code: string, fallback: number): number {
       return 900;
     case 'provider_api_key_missing':
       return 850;
-    case 'provider_effort_unsupported':
-      return 650;
     default:
       return fallback;
   }
@@ -130,13 +127,6 @@ function formatMcpStatus(connected: number, total: number): string {
   if (total === 0) return '0 servers';
   if (connected === total) return `${total} ${plural(total, 'server')}`;
   return `${connected}/${total} ${plural(total, 'server')}`;
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens <= 0) return '-';
-  if (tokens < 1000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}K`;
-  return `${Number((tokens / 1_000_000).toFixed(1))}M`;
 }
 
 function plural(count: number, singular: string): string {

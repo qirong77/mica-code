@@ -1,12 +1,7 @@
 import { accessSync, constants, existsSync, mkdirSync, statSync } from 'node:fs';
 import { Box, Text } from '@anthropic/ink';
 import { gitText as defaultGitText, type GitCommandOptions } from '@packages/mica-common/index.js';
-import {
-  micaConfig,
-  resolveProviderProtocol,
-  type IMicaConfig,
-  type ProviderDefinition,
-} from '@packages/mica-config/index.js';
+import { micaConfig, type IMicaConfig, type ProviderDefinition } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaMcp, type McpServerConfig, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
@@ -260,7 +255,6 @@ function checkProvider(config: IMicaConfig, provider: ProviderDefinition | undef
       `current provider "${config.provider || '(empty)'}" was not found`,
     );
   }
-  const protocol = resolveProviderProtocol(provider);
   const modelCount = provider.models?.length ?? 0;
   const modelDetail =
     modelCount > 0 ? `${modelCount} model(s)` : provider.get_model_url ? 'dynamic models' : 'no model list';
@@ -268,7 +262,7 @@ function checkProvider(config: IMicaConfig, provider: ProviderDefinition | undef
     'provider',
     'Provider',
     'ok',
-    `${provider.name ?? provider.id} (${provider.id}); ${protocol}; ${modelDetail}`,
+    `${provider.name ?? provider.id} (${provider.id}); ${provider.protocol}; ${modelDetail}`,
   );
 }
 

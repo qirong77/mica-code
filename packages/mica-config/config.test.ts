@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IMicaConfig } from './config.js';
 
@@ -65,7 +65,7 @@ describe('validateConfig', () => {
         config.providers[0]!,
         {
           ...config.providers[0]!,
-          model: 'other-model',
+          name: 'Duplicate DeepSeek',
         },
       ],
     });
@@ -110,9 +110,7 @@ describe('validateConfig', () => {
       providers: [
         {
           id: 'broken',
-          model: 'gpt-5.5',
-          effort: 'medium',
-          contextWindowSize: 1000,
+          models: ['gpt-5.5'],
         },
       ] as unknown as IMicaConfig['providers'],
     });
@@ -195,16 +193,18 @@ describe('validateConfig', () => {
   it('filters and resolves provider-specific effort options', () => {
     const deepseek = baseConfig().providers[0]!;
 
-    expect(configApi.getProviderEffortOptions(deepseek)).toEqual(['none', 'high', 'xhigh']);
-    expect(configApi.clampProviderEffort(deepseek, 'low')).toBe('high');
-    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh')).toEqual({
+    expect(configApi.getProviderEffortOptions(deepseek, 'deepseek-v4-pro')).toEqual(['none', 'high', 'xhigh']);
+    expect(configApi.clampProviderEffort(deepseek, 'low', 'deepseek-v4-pro')).toBe('high');
+    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh', 'deepseek-v4-pro')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
-    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none')).toEqual({ thinking: { type: 'disabled' } });
+    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none', 'deepseek-v4-pro')).toEqual({
+      thinking: { type: 'disabled' },
+    });
   });
 
-  it('validates provider protocol and resolves the default protocol', () => {
+  it('requires and validates provider protocol', () => {
     const config = baseConfig();
     const result = configApi.validateConfig({
       ...config,
@@ -220,8 +220,6 @@ describe('validateConfig', () => {
       ] as IMicaConfig['providers'],
     });
 
-    expect(configApi.resolveProviderProtocol(config.providers[0])).toBe('openai_chat_completions');
-    expect(configApi.resolveProviderProtocol({ protocol: 'openai_responses' })).toBe('openai_responses');
     expect(result.ok).toBe(true);
     expect(result.issues).toEqual(
       expect.arrayContaining([
@@ -240,7 +238,6 @@ describe('validateConfig', () => {
       ...krill,
       id: 'openai',
       api_base: 'https://api.openai.com/v1',
-      model: 'gpt-5.5',
     };
 
     expect(configApi.getProviderEffortOptions(openai, 'gpt-5')).toEqual(['minimal', 'low', 'medium', 'high']);
@@ -282,25 +279,22 @@ describe('validateConfig', () => {
       ...baseConfig().providers[1]!,
       id: 'zai',
       api_base: 'https://api.z.ai/api/paas/v4',
-      model: 'glm-4.7',
     };
     const kimi = {
       ...baseConfig().providers[1]!,
       id: 'openrouter',
       api_base: 'https://openrouter.ai/api/v1',
-      model: 'kimi-k2.6',
     };
     const disabledProvider = {
       ...baseConfig().providers[1]!,
       id: 'moonshot',
       api_base: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2.6',
       supportsEffort: false,
     };
 
-    expect(configApi.getProviderEffortOptions(zai)).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(configApi.getProviderEffortOptions(zai, 'glm-4.7')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
     expect(configApi.getModelContextWindowSizeFromConfig('deepseek-v4-pro')).toBe(1000000);
-    expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh')).toEqual({
+    expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh', 'glm-4.7')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
@@ -327,32 +321,6 @@ describe('validateConfig', () => {
     );
   });
 
-  it('does not block startup when only a provider default effort is unsupported', () => {
-    const config = baseConfig();
-    const result = configApi.validateConfig({
-      ...config,
-      effort: 'high',
-      providers: [
-        {
-          ...config.providers[0]!,
-          effort: 'low',
-        },
-        config.providers[1]!,
-      ],
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'warning',
-          code: 'provider_effort_unsupported',
-          path: 'providers[0].effort',
-        }),
-      ]),
-    );
-  });
-
   it('allows a dynamic provider without static model effort or context size', () => {
     const result = configApi.validateConfig({
       provider: 'kimi',
@@ -365,6 +333,7 @@ describe('validateConfig', () => {
           name: 'Kimi',
           api_base: 'https://api.moonshot.cn/v1',
           api_key: 'test-key',
+          protocol: 'openai_chat_completions',
           get_model_url: 'https://api.moonshot.cn/v1/models',
         },
       ],
@@ -384,59 +353,13 @@ describe('validateConfig', () => {
 });
 
 describe('loadProviderModels', () => {
-  it('migrates provider runtime fields out of config and memory', () => {
-    mkdirSync(dirname(configApi.CONFIG_PATH), { recursive: true });
-    writeFileSync(
-      configApi.CONFIG_PATH,
-      `${JSON.stringify(
-        {
-          provider: 'kimi',
-          model: 'kimi-k2.6',
-          effort: 'high',
-          contextWindowSize: 256000,
-          providers: [
-            {
-              id: 'kimi',
-              name: 'Kimi',
-              api_base: 'https://api.moonshot.cn/v1',
-              api_key: 'test-key',
-              get_model_url: 'https://api.moonshot.cn/v1/models',
-              model: 'moonshot-v1-8k',
-              effort: 'medium',
-              models: ['stale-model'],
-              contextWindowSize: 1000,
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
-      'utf-8',
-    );
-
-    const config = configApi.readConfig();
-    const persisted = JSON.parse(readFileSync(configApi.CONFIG_PATH, 'utf-8')) as {
-      providers?: Array<Record<string, unknown>>;
-    };
-
-    expect(config.provider).toBe('kimi');
-    expect(config.model).toBe('kimi-k2.6');
-    expect(config.providers[0]?.models).toBeUndefined();
-    expect(config.providers[0]?.model).toBeUndefined();
-    expect(config.providers[0]?.effort).toBeUndefined();
-    expect(config.providers[0]?.contextWindowSize).toBeUndefined();
-    expect(persisted.providers?.[0]?.models).toBeUndefined();
-    expect(persisted.providers?.[0]?.model).toBeUndefined();
-    expect(persisted.providers?.[0]?.effort).toBeUndefined();
-    expect(persisted.providers?.[0]?.contextWindowSize).toBeUndefined();
-  });
-
   it('keeps dynamically fetched models in memory without persisting them to config.json', async () => {
     const provider = {
       id: 'kimi',
       name: 'Kimi',
       api_base: 'https://api.moonshot.cn/v1',
       api_key: 'test-key',
+      protocol: 'openai_chat_completions' as const,
       get_model_url: 'https://api.moonshot.cn/v1/models',
     };
     configApi.updateConfig(() => ({
@@ -480,20 +403,16 @@ function baseConfig(): IMicaConfig {
         name: 'DeepSeek',
         api_base: 'https://api.deepseek.com',
         api_key: 'test-key',
-        model: 'deepseek-v4-pro',
-        effort: 'high',
+        protocol: 'openai_chat_completions',
         models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-        contextWindowSize: 1000000,
       },
       {
         id: 'krill-codex',
         name: 'Krill-Codex',
         api_base: 'https://api.cdn-krill-ai.com/codex/v1',
         api_key: 'test-key',
-        model: 'gpt-5.5',
-        effort: 'medium',
+        protocol: 'openai_responses',
         models: ['gpt-5.5', 'gpt-5.4'],
-        contextWindowSize: 256000,
       },
     ],
   };

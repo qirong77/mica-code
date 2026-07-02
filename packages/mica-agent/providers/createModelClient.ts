@@ -1,4 +1,3 @@
-import { resolveProviderProtocol } from '@packages/mica-config/index.js';
 import type { IAgent } from '../core/Agent.js';
 import { AnthropicAgent } from './AnthropicAgent.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
@@ -6,7 +5,7 @@ import { ResponsesClient } from './ResponsesClient.js';
 import type { ModelClientOptions } from './types.js';
 
 export function createModelClient(options: ModelClientOptions): IAgent<ModelClientOptions> {
-  switch (resolveProviderProtocol(options.provider)) {
+  switch (options.provider.protocol) {
     case 'anthropic_messages':
       return new AnthropicAgent(options);
     case 'openai_responses':

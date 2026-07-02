@@ -1,5 +1,6 @@
 import { isCompactionNotNeededError, type CompactOptions, type CompactResult } from '@packages/mica-context/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from './services.js';
 
@@ -73,7 +74,7 @@ export function createCompactCommand(
 
 function formatCompactNotice(result: CompactResult): string {
   const prefix = result.preview ? 'compact preview' : 'compact';
-  const saved = formatTokens(result.savedTokenEstimate);
+  const saved = formatTokenCount(result.savedTokenEstimate, { compactLowercase: true });
   const ratio = Math.round(result.savedRatio * 100);
   const mode = result.mode === 'pruned' ? 'pruned' : 'summarized';
   const strategy = result.strategy.replace(/_/g, ' ');
@@ -95,11 +96,6 @@ function formatCompactNotice(result: CompactResult): string {
     lines.push(`- Recent rounds reduced: ${result.reducedRecentRounds}`);
   }
   return lines.join('\n');
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens >= 1000) return `${Math.round(tokens / 100) / 10}k`;
-  return String(tokens);
 }
 
 function resultLog(result: CompactResult) {

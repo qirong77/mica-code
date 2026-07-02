@@ -84,7 +84,7 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
         `provider "${provider.id}" 的 api_base 不能为空。`,
       );
     }
-    if (Object.prototype.hasOwnProperty.call(provider, 'protocol') && !isProviderProtocol(provider.protocol)) {
+    if (!isProviderProtocol(provider.protocol)) {
       add(
         severity,
         'provider_protocol_invalid',
@@ -93,49 +93,6 @@ export function validateConfig(config: IMicaConfig): ConfigValidationResult {
       );
     }
 
-    const providerEffort = isEffortOption(provider.effort) ? provider.effort : undefined;
-    if (Object.prototype.hasOwnProperty.call(provider, 'effort') && !providerEffort) {
-      add(
-        severity,
-        'provider_effort_invalid',
-        `providers[${index}].effort`,
-        `provider "${provider.id}" 的 effort 必须是 ${EFFORT_OPTIONS.join(' | ')}。`,
-      );
-    }
-
-    const providerModel = firstProviderModel(provider as unknown as ProviderDefinition);
-    const effortOptions =
-      providerEffort && isNonEmptyString(provider.api_base) && providerModel
-        ? getProviderEffortOptions(provider as unknown as ProviderDefinition, providerModel)
-        : undefined;
-    if (providerEffort && provider.supportsEffort === false && providerEffort !== 'none') {
-      add(
-        'warning',
-        'provider_effort_ignored',
-        `providers[${index}].effort`,
-        `provider "${provider.id}" 不使用 reasoning effort，建议设置为 none。`,
-      );
-    } else if (providerEffort && effortOptions && !effortOptions.includes(providerEffort)) {
-      add(
-        'warning',
-        'provider_effort_unsupported',
-        `providers[${index}].effort`,
-        `provider "${provider.id}" 的默认 model "${providerModel}" 不支持 effort "${providerEffort}"。`,
-        `可用 effort: ${effortOptions.join(' | ')}。`,
-      );
-    }
-
-    if (
-      Object.prototype.hasOwnProperty.call(provider, 'contextWindowSize') &&
-      !isPositiveNumber(provider.contextWindowSize)
-    ) {
-      add(
-        severity,
-        'provider_context_window_invalid',
-        `providers[${index}].contextWindowSize`,
-        `provider "${provider.id}" 的 contextWindowSize 必须是正数。`,
-      );
-    }
     if (provider.models !== undefined && !isNonEmptyStringArray(provider.models)) {
       add(
         severity,
@@ -201,11 +158,7 @@ function validateCurrentProvider(
           ? `可以把 "model" 设置为当前 provider 的默认模型 "${firstProviderModel(currentProvider)}"。`
           : undefined,
     );
-  } else if (
-    isNonEmptyStringArray(currentProvider.models) &&
-    !currentProvider.models.includes(config.model) &&
-    currentProvider.model !== config.model
-  ) {
+  } else if (isNonEmptyStringArray(currentProvider.models) && !currentProvider.models.includes(config.model)) {
     add(
       'error',
       'model_not_supported',

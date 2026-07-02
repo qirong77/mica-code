@@ -17,7 +17,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
@@ -52,19 +52,14 @@ export class ChatCompletionsClient extends BaseAgent<
   apiKey: string | undefined;
   baseURL: string | undefined;
   effort: EffortOption | undefined;
-  provider: ProviderDefinition | undefined;
+  provider!: ProviderDefinition;
   tools: boolean;
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: string | undefined;
-  constructor(options: string | ModelClientOptions) {
+  constructor(options: ModelClientOptions) {
     super();
     this.tools = true;
-    if (typeof options === 'string') {
-      this.model = options;
-      this.apiKey = process.env.OPENAI_API_KEY;
-      return;
-    }
     this.configure(options);
   }
   configure(options: ModelClientOptions) {
@@ -261,23 +256,18 @@ export class ChatCompletionsClient extends BaseAgent<
         for (const tc of message.tool_calls) {
           throwIfQueryStopped(options);
           if (tc.type !== 'function') continue;
-          this.onToolCall?.(tc.function.name, tc.function.arguments, tc.id);
-          let result: string;
-          try {
-            result = await micaTools.execute(
-              tc.function.name,
-              JSON.parse(tc.function.arguments),
-              {
-                signal: options?.signal,
-                context: this.toolContext,
-              },
-              this.toolFilter,
-            );
-          } catch (e) {
-            result = `工具执行失败: ${e instanceof Error ? e.message : String(e)}`;
-          }
+          const { result } = await executeProviderToolCall({
+            name: tc.function.name,
+            argsText: tc.function.arguments,
+            id: tc.id,
+            parseArgs: () => JSON.parse(tc.function.arguments),
+            signal: options?.signal,
+            context: this.toolContext,
+            toolFilter: this.toolFilter,
+            onToolCall: this.onToolCall,
+            onToolResult: this.onToolResult,
+          });
           throwIfQueryStopped(options);
-          this.onToolResult?.(tc.function.name, result, tc.id);
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,

@@ -1,6 +1,11 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
-import { micaConfig, providerSupportsModel, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
+import {
+  micaConfig,
+  providerSupportsModel,
+  type EffortOption,
+  type ProviderDefinition,
+} from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
@@ -78,7 +83,7 @@ async function applyProviderSelection(
         }
         const preference = micaConfig.storage.providerPreference.read(providerId);
         const model = resolvePreferenceModel(provider, preference.model);
-        const effort: EffortOption = (preference.effort as EffortOption | undefined) ?? provider.effort ?? config.effort;
+        const effort: EffortOption = (preference.effort as EffortOption | undefined) ?? config.effort;
         return {
           ...config,
           provider: provider.id,
@@ -126,5 +131,5 @@ async function loadProviderModelsForSwitch(providerId: string, services: Command
 
 function resolvePreferenceModel(provider: ProviderDefinition, preferenceModel?: string): string {
   if (preferenceModel && providerSupportsModel(provider, preferenceModel)) return preferenceModel;
-  return provider.models?.[0] || provider.model || '';
+  return provider.models?.[0] || '';
 }

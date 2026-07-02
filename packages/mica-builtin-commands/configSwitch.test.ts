@@ -61,21 +61,19 @@ describe('config switch commands', () => {
       name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
-      model: 'gpt-5.4',
-      effort: 'medium' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['gpt-5.5', 'gpt-5.4'],
-      contextWindowSize: 1000,
     };
     micaConfig.update(() => ({
       provider: provider.id,
       model: 'gpt-5.4',
       effort: 'minimal',
-      contextWindowSize: provider.contextWindowSize,
+      contextWindowSize: 256000,
       providers: [provider],
     }));
     const services = makeServices();
     const agent = makeAgent([], {
-      provider,
+      provider: { ...provider, contextWindowSize: 256000 },
       model: 'gpt-5.4',
       effort: 'minimal',
     });
@@ -109,7 +107,6 @@ describe('config switch commands', () => {
         provider: 'openai',
         model: 'gpt-5.5',
         effort: 'low',
-        contextWindowSize: 256000,
       });
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
@@ -125,32 +122,28 @@ describe('config switch commands', () => {
       name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
-      model: 'gpt-5.4',
-      effort: 'minimal' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['gpt-5.4'],
-      contextWindowSize: 1000,
     };
     const deepseek = {
       id: 'deepseek',
       name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'test-key',
-      model: 'deepseek-v4-pro',
-      effort: 'minimal' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['deepseek-v4-pro'],
-      contextWindowSize: 1000,
     };
     micaConfig.update(() => ({
       provider: openai.id,
-      model: openai.model,
+      model: 'gpt-5.4',
       effort: 'minimal',
-      contextWindowSize: openai.contextWindowSize,
+      contextWindowSize: 256000,
       providers: [openai, deepseek],
     }));
     const services = makeServices();
     const agent = makeAgent([], {
-      provider: openai,
-      model: openai.model,
+      provider: { ...openai, contextWindowSize: 256000 },
+      model: 'gpt-5.4',
       effort: 'minimal',
     });
     const session = makeSession();
@@ -189,31 +182,27 @@ describe('config switch commands', () => {
       name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'test-key',
-      model: 'deepseek-v4-pro',
-      effort: 'high' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['deepseek-v4-pro'],
-      contextWindowSize: 1000000,
     };
     const openai = {
       id: 'openai',
       name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
-      model: 'gpt-5.4',
-      effort: 'medium' as const,
+      protocol: 'openai_chat_completions' as const,
       models: ['gpt-5.5', 'gpt-5.4'],
-      contextWindowSize: 256000,
     };
     micaConfig.update(() => ({
       provider: deepseek.id,
-      model: deepseek.model,
+      model: 'deepseek-v4-pro',
       effort: 'high',
-      contextWindowSize: deepseek.contextWindowSize,
+      contextWindowSize: 1000000,
       providers: [deepseek, openai],
     }));
     const services = makeServices();
     const agent = makeAgent([], {
-      provider: openai,
+      provider: { ...openai, contextWindowSize: 256000 },
       model: 'gpt-5.4',
       effort: 'minimal',
     });
@@ -269,8 +258,8 @@ function makeAgent(
     provider: {
       id: 'test',
       api_base: 'https://example.com/v1',
-      model: 'test-model',
-      effort: 'none',
+      protocol: 'openai_chat_completions',
+      models: ['test-model'],
       contextWindowSize: 1000,
     },
     model: 'test-model',

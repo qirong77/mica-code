@@ -1,4 +1,4 @@
-import { firstProviderModel, requireProvider, type IMicaConfig } from './types.js';
+import { requireProvider, type IMicaConfig } from './types.js';
 import { clampProviderEffort } from './effort.js';
 import { getModelContextWindowSizeFromConfig } from './modelRules.js';
 
@@ -33,17 +33,9 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
   store.updateRuntimeConfig((config) => {
     const providers = config.providers.map((item) => {
       if (item.id !== providerId) return item;
-      const currentModel = firstProviderModel(item) ?? '';
-      const model = models.includes(currentModel) ? currentModel : models[0]!;
-      const provider = {
+      return {
         ...item,
         models,
-        model,
-        contextWindowSize: getModelContextWindowSizeFromConfig(model),
-      };
-      return {
-        ...provider,
-        effort: clampProviderEffort(provider, item.effort ?? config.effort, model),
       };
     });
     const current = config.provider === providerId ? providers.find((item) => item.id === providerId) : null;

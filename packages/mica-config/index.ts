@@ -2,7 +2,6 @@ import {
   CONFIG_PATH,
   EFFORT_OPTIONS,
   PROVIDER_PROTOCOLS,
-  DEFAULT_PROVIDER_PROTOCOL,
   readConfig,
   getConfig,
   updateConfig,
@@ -18,13 +17,13 @@ import {
   mapProviderEffortValue,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
-  resolveProviderProtocol,
 } from './config.js';
 import { runtimeEnv } from './runtimeEnv.js';
-import { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
 import {
   MICA_STORAGE_PATH,
+  appendInputHistory,
   readLastUsedConfig,
+  readInputHistory,
   readMicaStorage,
   readProviderPreference,
   updateLastUsedConfig,
@@ -36,7 +35,6 @@ export const micaConfig = {
   path: CONFIG_PATH,
   effortOptions: EFFORT_OPTIONS,
   providerProtocols: PROVIDER_PROTOCOLS,
-  defaultProviderProtocol: DEFAULT_PROVIDER_PROTOCOL,
   /** 从磁盘读取配置文件；缺失时会先写入默认配置。 */
   read: readConfig,
   /** 读取内存中的当前配置快照。 */
@@ -67,8 +65,6 @@ export const micaConfig = {
   resolveChatCompletionsEffortParams,
   /** 把统一 effort 转换为 Responses 请求参数。 */
   resolveResponsesReasoningParams,
-  /** 读取 provider 协议，缺省为 OpenAI Chat Completions。 */
-  resolveProviderProtocol,
   /** 运行时调参配置，只读取环境变量，不写入 config.json。 */
   runtimeEnv,
   storage: {
@@ -85,7 +81,7 @@ export const micaConfig = {
     },
   },
   inputHistory: {
-    path: INPUT_HISTORY_PATH,
+    path: MICA_STORAGE_PATH,
     read: readInputHistory,
     append: appendInputHistory,
   },
@@ -104,7 +100,6 @@ export {
   providerSupportsModel,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
-  resolveProviderProtocol,
 } from './config.js';
 export { readRuntimeEnvConfig, runtimeEnv } from './runtimeEnv.js';
 export type { RuntimeEnvConfig, RuntimeEnvSource } from './runtimeEnv.js';
@@ -121,11 +116,11 @@ export type {
   ConfigValidationResult,
   ConfigValidationSeverity,
 } from './config.js';
-export { INPUT_HISTORY_PATH, appendInputHistory, readInputHistory } from './inputHistory.js';
-export type { InputHistoryFile } from './inputHistory.js';
 export {
   MICA_STORAGE_PATH,
+  appendInputHistory,
   getCurrentDirectory,
+  readInputHistory,
   readLastUsedConfig,
   readMicaStorage,
   readProviderPreference,

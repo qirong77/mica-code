@@ -6,7 +6,7 @@ export type ModelClientOptions = {
   apiKey?: string;
   baseURL?: string;
   effort?: EffortOption;
-  provider?: ProviderDefinition;
+  provider: ProviderDefinition;
   tools?: boolean;
   toolFilter?: ToolFilter;
   toolContext?: unknown;

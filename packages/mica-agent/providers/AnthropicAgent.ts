@@ -10,7 +10,7 @@ import type {
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
 import { micaTools } from '@packages/mica-tools/index.js';
-import type { EffortOption } from '@packages/mica-config/index.js';
+import type { EffortOption, ProviderDefinition } from '@packages/mica-config/index.js';
 import {
   BaseAgent,
   type AgentContentBlockParam,
@@ -23,7 +23,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
 type AnthropicMergedUsage = {
@@ -66,6 +66,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   model!: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
+  provider!: ProviderDefinition;
   maxTokens: number;
   effort: EffortOption | undefined;
   tools: boolean;
@@ -73,16 +74,10 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   toolContext: unknown;
   systemPrompt: string | undefined;
 
-  constructor(options: string | ModelClientOptions) {
+  constructor(options: ModelClientOptions) {
     super();
     this.tools = true;
     this.maxTokens = DEFAULT_MAX_TOKENS;
-    if (typeof options === 'string') {
-      this.model = options;
-      this.apiKey = process.env.ANTHROPIC_API_KEY;
-      this.effort = 'none';
-      return;
-    }
     this.configure(options);
   }
 
@@ -90,6 +85,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
+    this.provider = options.provider;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.effort = options.effort ?? 'none';
     this.tools = options.tools ?? true;
@@ -249,25 +245,18 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
         throwIfQueryStopped(options);
         const toolInput = toToolInput(toolUse.input);
         const args = JSON.stringify(toolInput);
-        this.onToolCall?.(toolUse.name, args, toolUse.id);
-        let result: string;
-        let isError = false;
-        try {
-          result = await micaTools.execute(
-            toolUse.name,
-            toolInput,
-            {
-              signal: options?.signal,
-              context: this.toolContext,
-            },
-            this.toolFilter,
-          );
-        } catch (error) {
-          isError = true;
-          result = `工具执行失败: ${error instanceof Error ? error.message : String(error)}`;
-        }
+        const { result, isError } = await executeProviderToolCall({
+          name: toolUse.name,
+          argsText: args,
+          id: toolUse.id,
+          parseArgs: () => toolInput,
+          signal: options?.signal,
+          context: this.toolContext,
+          toolFilter: this.toolFilter,
+          onToolCall: this.onToolCall,
+          onToolResult: this.onToolResult,
+        });
         throwIfQueryStopped(options);
-        this.onToolResult?.(toolUse.name, result, toolUse.id);
         toolResults.push({
           type: 'tool_result',
           tool_use_id: toolUse.id,

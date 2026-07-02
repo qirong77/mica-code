@@ -1,4 +1,5 @@
 import { Box, Text } from '@anthropic/ink';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
   calculateUsageCachedTokenRate,
   micaAgent,
@@ -9,7 +10,7 @@ import {
 import { AnthropicHistoryNormalizer } from '@packages/mica-agent/providers/AnthropicHistoryNormalizer.js';
 import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
 import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
-import { resolveProviderProtocol, type ProviderProtocol } from '@packages/mica-config/index.js';
+import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
@@ -141,7 +142,7 @@ function showContextPanel(overview: ContextOverview) {
 
 function buildContextOverview(agent: CommandAgent): ContextOverview {
   const { provider, model, effort } = agent.config;
-  const protocol = resolveProviderProtocol(provider);
+  const protocol = provider.protocol;
   const snapshot = agent.getSnapshot();
   const usageTotals = summarizeUsageHistory(snapshot.usageHistory);
   const latestUsage = snapshot.lastUsage;
@@ -492,7 +493,7 @@ function TokenMapRow({ bucket, totalTokens }: { bucket: Bucket; totalTokens: num
       )}
       <Text> </Text>
       <Text color={isEmpty ? micaUi.theme.colors.dim : micaUi.theme.colors.textSecondary}>
-        {formatTokens(bucket.tokens).padStart(TOKENS_COL_WIDTH)}
+        {formatTokenCount(bucket.tokens).padStart(TOKENS_COL_WIDTH)}
       </Text>
       <Text> </Text>
       <Text color={micaUi.theme.colors.dim}>{formatPercent(ratio).padStart(SHARE_COL_WIDTH)}</Text>
@@ -511,8 +512,8 @@ function MapBar({ ratio, width, color }: { ratio: number; width: number; color: 
 }
 
 function formatWindowLine(overview: ContextOverview): string {
-  if (overview.windowTokens <= 0) return formatTokens(overview.usedTokens);
-  return `${formatTokens(overview.usedTokens)} / ${formatTokens(overview.windowTokens)}`;
+  if (overview.windowTokens <= 0) return formatTokenCount(overview.usedTokens);
+  return `${formatTokenCount(overview.usedTokens)} / ${formatTokenCount(overview.windowTokens)}`;
 }
 
 function barParts(ratio: number, width: number): { filled: string; empty: string } {
@@ -537,13 +538,6 @@ function bucketColor(key: BucketKey, ratio: number): string {
   if (key === 'systemPrompt') return micaUi.theme.colors.accent;
   if (key === 'skills') return micaUi.theme.colors.warning;
   return micaUi.theme.colors.info;
-}
-
-function formatTokens(tokens: number): string {
-  if (!Number.isFinite(tokens) || tokens <= 0) return '0';
-  if (tokens < 1000) return `${Math.round(tokens)}`;
-  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
-  return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
 function formatPercent(ratio: number): string {

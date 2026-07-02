@@ -37,7 +37,7 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   if (!provider) {
     throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
   }
-  const model = snapshot.model || provider.model || provider.models?.[0] || '';
+  const model = snapshot.model;
   const normalizedProvider = normalizeProviderForModel(provider, model);
   return {
     provider: normalizedProvider,
