@@ -127,12 +127,12 @@ temp/                        临时外部/实验代码目录，不属于默认�
 
 ## 测试与验证
 
-项目测试使用 Vitest，测试文件与源码放在同一目录，命名为 `*.test.ts` 或 `*.test.tsx`。常用运行方式：
+项目测试使用 Vitest，测试文件通常与源码放在同一目录，命名为 `*.test.ts` 或 `*.test.tsx`；`packages/mica-tools` 的测试统一放在 `tests/` 目录。常用运行方式：
 
 ```bash
 bun run test
 bun test packages/mica-agent/prompt/index.test.ts
-bun test src/runtime/RewindCheckpointManager.test.ts packages/mica-tools/MicaTool.test.ts
+bun test src/runtime/RewindCheckpointManager.test.ts packages/mica-tools/tests/MicaTool.test.ts
 ```
 
 不要直接运行裸 `bun test`。Bun 会递归发现仓库下所有测试文件，而根目录 `temp/` 可能包含外部项目、临时代码或缺依赖代码，会导致无关失败、超时或长时间扫描。扩大验证范围时显式指定 `src/`、`packages/`、`scripts/`、`docs/` 等白名单路径。
@@ -148,9 +148,9 @@ bun test src/runtime/RewindCheckpointManager.test.ts packages/mica-tools/MicaToo
 - `packages/mica-config/micaStorage.test.ts`
 - `packages/mica-config/runtimeEnv.test.ts`
 - `packages/mica-skills/loadSkills.test.ts`
-- `packages/mica-tools/MicaTool.test.ts`
-- `packages/mica-tools/ToolApplyPatch.test.ts`
-- `packages/mica-tools/ToolRunShell.test.ts`
+- `packages/mica-tools/tests/MicaTool.test.ts`
+- `packages/mica-tools/tests/ToolApplyPatch.test.ts`
+- `packages/mica-tools/tests/ToolRunShell.test.ts`
 - `packages/mica-ui/agentTurnLogItems.test.ts`
 - `packages/mica-ui/app/StartupBanner.test.ts`
 - `packages/mica-ui/bottom/dropdown/quickCommandHandler.test.ts`

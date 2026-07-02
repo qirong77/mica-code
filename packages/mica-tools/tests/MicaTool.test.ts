@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { MicaTool } from './MicaTool.js';
+import { MicaTool } from '../MicaTool.js';
 import {
   executeTool,
   getToolDefinitions,
@@ -7,7 +7,7 @@ import {
   registerRuntimeTool,
   unregisterMcpTools,
   unregisterRuntimeTools,
-} from './registry.js';
+} from '../registry.js';
 
 class TestTool extends MicaTool {
   constructor(name = 'test_tool') {

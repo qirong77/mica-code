@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ToolApplyPatch } from './ToolApplyPatch.js';
-import { getToolDefinitions } from './registry.js';
+import { ToolApplyPatch } from '../ToolApplyPatch.js';
+import { getToolDefinitions } from '../registry.js';
 
 let tempDir: string;
 

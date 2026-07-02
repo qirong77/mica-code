@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ToolRunShell } from './ToolRunShell.js';
-import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
-import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
-import { ToolKillTask } from './ToolKillTask.js';
+import { ToolRunShell } from '../ToolRunShell.js';
+import { ToolBackgroundTasks } from '../ToolBackgroundTasks.js';
+import { ToolReadTaskOutput } from '../ToolReadTaskOutput.js';
+import { ToolKillTask } from '../ToolKillTask.js';
 
 function bunEval(script: string): string {
   return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;

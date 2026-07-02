@@ -18,6 +18,7 @@ const TOOL_ICONS: Record<string, string> = {
   web_search: '🌐',
   Skill: '✨',
   apply_patch: '🩹',
+  Agent: '🤖',
 };
 
 export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurnLogItem {
