@@ -6,9 +6,12 @@ import type { CommandAgent, CommandRuntimeServices, CommandSessionController } f
 const MANUAL_COMPACT_OPTIONS: CompactOptions = {
   aggressive: true,
   force: true,
-  keepRecentRounds: 3,
   lightweightPrune: true,
-  summarizeThresholdRatio: 0.3,
+  pruneOnlyThresholdRatio: 0.3,
+  targetContextRatio: 0.35,
+  maxPromptTooLongRetries: 4,
+  minRecentRounds: 1,
+  maxRecentRounds: 3,
 };
 
 export function createCompactCommand(
@@ -36,9 +39,9 @@ export function createCompactCommand(
       micaLogger.logRuntime('plugin.compact', 'requested', {
         aggressive: MANUAL_COMPACT_OPTIONS.aggressive,
         force: MANUAL_COMPACT_OPTIONS.force,
-        keepRecentRounds: MANUAL_COMPACT_OPTIONS.keepRecentRounds,
         lightweightPrune: MANUAL_COMPACT_OPTIONS.lightweightPrune,
-        summarizeThresholdRatio: MANUAL_COMPACT_OPTIONS.summarizeThresholdRatio,
+        pruneOnlyThresholdRatio: MANUAL_COMPACT_OPTIONS.pruneOnlyThresholdRatio,
+        targetContextRatio: MANUAL_COMPACT_OPTIONS.targetContextRatio,
         contextWindowSize: targetAgent.config.provider.contextWindowSize,
       });
 
@@ -53,7 +56,7 @@ export function createCompactCommand(
           () => services.compact(targetAgent, targetSessionController, ownerSessionId, compactOptions),
         );
         micaLogger.logRuntime('plugin.compact', 'done', resultLog(result));
-        services.showMessage(formatCompactResult(result), 8000, ownerSessionId);
+        services.showNotice(formatCompactNotice(result), ownerSessionId, { variant: 'compact', command: '/compact' });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (isCompactionNotNeededError(error)) {
@@ -68,15 +71,30 @@ export function createCompactCommand(
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-function formatCompactResult(result: CompactResult): string {
+function formatCompactNotice(result: CompactResult): string {
   const prefix = result.preview ? 'compact preview' : 'compact';
   const saved = formatTokens(result.savedTokenEstimate);
   const ratio = Math.round(result.savedRatio * 100);
   const mode = result.mode === 'pruned' ? 'pruned' : 'summarized';
-  const contextRatio =
-    result.contextUsageRatio !== undefined ? `, context ${Math.round(result.contextUsageRatio * 100)}%` : '';
-  const retries = result.promptTooLongRetries > 0 ? `, retries ${result.promptTooLongRetries}` : '';
-  return `${prefix}: ${mode}, ${result.beforeCount} -> ${result.afterCount} messages, saved ~${saved} tokens (${ratio}%), kept ${result.keptCount}${contextRatio}${retries}`;
+  const strategy = result.strategy.replace(/_/g, ' ');
+  const lines = [
+    `**${prefix} complete**`,
+    '',
+    `- Mode: ${mode} (${strategy})`,
+    `- Messages: ${result.beforeCount} -> ${result.afterCount}`,
+    `- Saved: ~${saved} tokens (${ratio}%)`,
+    `- Recent kept: ${result.keptCount} messages`,
+  ];
+  if (result.contextUsageRatio !== undefined) {
+    lines.push(`- Context after compact: ${Math.round(result.contextUsageRatio * 100)}%`);
+  }
+  if (result.promptTooLongRetries > 0) {
+    lines.push(`- Prompt-too-long retries: ${result.promptTooLongRetries}`);
+  }
+  if (result.reducedRecentRounds && result.reducedRecentRounds > 0) {
+    lines.push(`- Recent rounds reduced: ${result.reducedRecentRounds}`);
+  }
+  return lines.join('\n');
 }
 
 function formatTokens(tokens: number): string {
@@ -87,6 +105,7 @@ function formatTokens(tokens: number): string {
 function resultLog(result: CompactResult) {
   return {
     mode: result.mode,
+    strategy: result.strategy,
     beforeCount: result.beforeCount,
     afterCount: result.afterCount,
     summarizedCount: result.summarizedCount,
@@ -101,5 +120,10 @@ function resultLog(result: CompactResult) {
     contextWindowSize: result.contextWindowSize,
     contextUsageRatio: result.contextUsageRatio,
     lightweightTokenEstimate: result.lightweightTokenEstimate,
+    targetContextRatio: result.targetContextRatio,
+    pruneOnlyThresholdRatio: result.pruneOnlyThresholdRatio,
+    recentTokenEstimate: result.recentTokenEstimate,
+    summaryInputTokenEstimate: result.summaryInputTokenEstimate,
+    reducedRecentRounds: result.reducedRecentRounds,
   };
 }

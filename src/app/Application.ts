@@ -5,12 +5,14 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 // import { syncStartupBanner } from '../runtime/startupBanner.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
+import { ToolAgent, ToolTask } from '../tools/ToolAgent.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
@@ -52,6 +54,8 @@ export class Application {
       const runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services);
       const uiBridge = new MicaUiRuntimeBridge(agent, runtime, agentSessions);
       agentSessions.registerCurrent(agent, sessionController);
+      micaTools.registerRuntime(new ToolAgent(agent));
+      micaTools.registerRuntime(new ToolTask(agent));
 
       this.context = {
         agent,
@@ -107,6 +111,8 @@ export class Application {
         id: 'startup-error-hint',
         text: '启动失败：请根据错误提示修复配置文件，然后重新运行 mica；按 Ctrl+C 退出',
       });
+      micaTools.unregisterRuntime('Agent');
+      micaTools.unregisterRuntime('Task');
       this.context?.agentSessions.stop();
       await this.context?.plugins.disposeAll();
       this.context = null;
@@ -135,6 +141,8 @@ export class Application {
     this.context?.uiBridge.stop();
     await this.context?.runtime.stop();
     await this.context?.plugins.disposeAll();
+    micaTools.unregisterRuntime('Agent');
+    micaTools.unregisterRuntime('Task');
     this.context?.agentSessions.stop();
     if (this.context) clearActiveContext(this.context);
     this.context = null;

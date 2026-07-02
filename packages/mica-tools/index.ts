@@ -2,6 +2,9 @@ import { MicaTool } from './MicaTool.js';
 import {
   registerMcpTools,
   unregisterMcpTools,
+  registerRuntimeTool,
+  unregisterRuntimeTool,
+  unregisterRuntimeTools,
   getToolDefinitions,
   getToolCounts,
   executeTool,
@@ -14,6 +17,12 @@ export const micaTools = {
   registerMcp: registerMcpTools,
   /** 移除指定 MCP server 已注册的工具。 */
   unregisterMcp: unregisterMcpTools,
+  /** 注册运行时工具，例如依赖应用上下文的 Agent 工具。 */
+  registerRuntime: registerRuntimeTool,
+  /** 移除指定运行时工具。 */
+  unregisterRuntime: unregisterRuntimeTool,
+  /** 移除所有运行时工具。 */
+  unregisterAllRuntime: unregisterRuntimeTools,
   /** 获取当前可提供给模型的工具定义列表。 */
   getDefinitions: getToolDefinitions,
   /** 获取当前工具数量统计。 */
@@ -27,5 +36,7 @@ export const micaTools = {
   MicaTool,
 };
 
-export type { MicaTool, ToolExecuteCallbacks } from './MicaTool.js';
+export { MicaTool } from './MicaTool.js';
+export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
+export type { ToolFilter } from './registry.js';
 export type { Tool } from './types.js';

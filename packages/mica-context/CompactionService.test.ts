@@ -61,6 +61,7 @@ describe('CompactionService', () => {
     expect(result.afterCount).toBe(8);
     expect(result.summarizedCount).toBe(14);
     expect(result.keptCount).toBe(6);
+    expect(result.strategy).toBe('summary_with_recent');
     expect(result.messages[0]).toMatchObject({ role: 'user' });
     expect(contentOf(result.messages[0])).toContain(COMPACT_BOUNDARY_PREFIX);
     expect(contentOf(result.messages[1])).toContain(COMPACT_SUMMARY_PREFIX);
@@ -107,6 +108,7 @@ describe('CompactionService', () => {
 
     expect(calls).toBe(2);
     expect(result.promptTooLongRetries).toBe(1);
+    expect(result.strategy).toBe('summary_with_recent');
   });
 
   it('previews without replacing messages', async () => {
@@ -121,6 +123,35 @@ describe('CompactionService', () => {
     expect(result.preview).toBe(true);
     expect(result.messages).toEqual(messages);
     expect(result.afterCount).toBeLessThan(result.beforeCount);
+  });
+
+  it('moves the recent boundary backward instead of orphaning Anthropic tool results', async () => {
+    const service = new CompactionService();
+    const result = await service.compact({
+      messages: [
+        { role: 'user', content: 'inspect packages/example.ts' },
+        {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'packages/example.ts' } }],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'RAW_TOOL_RESULT' }],
+        },
+        { role: 'assistant', content: 'packages/example.ts currently exports a helper.' },
+      ],
+      options: { keepRecentRounds: 1, aggressive: true, force: true },
+      summarize: async (transcript) => {
+        expect(transcript).toContain('inspect packages/example.ts');
+        expect(transcript).not.toContain('RAW_TOOL_RESULT');
+        return FULL_SUMMARY;
+      },
+    });
+
+    const serialized = JSON.stringify(result.messages);
+    expect(serialized).toContain('"tool_use"');
+    expect(serialized).toContain('"tool_result"');
+    expect(serialized).toContain('tool-1');
   });
 
   it('force compacts when default recent-context guard would skip', async () => {
@@ -160,13 +191,14 @@ describe('CompactionService', () => {
     const serialized = JSON.stringify(result.messages);
     expect(summarize).not.toHaveBeenCalled();
     expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('prune_only');
     expect(result.summarizedCount).toBe(0);
     expect(result.contextUsageRatio ?? 1).toBeLessThanOrEqual(0.3);
     expect(serialized).toContain(COMPACT_BOUNDARY_PREFIX);
     expect(serialized).toContain('user request 5');
     expect(serialized).toContain('read_file');
     expect(serialized).toContain('run_shell');
-    expect(serialized).toContain('[oldResult has been delete]');
+    expect(serialized).toContain('[Old tool result content cleared during compact]');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_1');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_5');
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_1');
@@ -195,17 +227,17 @@ describe('CompactionService', () => {
 
     const serialized = JSON.stringify(result.messages);
     expect(result.mode).toBe('summarized');
+    expect(result.strategy).toBe('summary_with_recent');
     expect(result.summarizedCount).toBeGreaterThan(0);
-    expect(result.keptCount).toBe(0);
-    expect(summaryTranscript).toContain('user request 5');
+    expect(result.keptCount).toBeGreaterThan(0);
     expect(summaryTranscript).toContain('read_file');
     expect(summaryTranscript).toContain('run_shell');
-    expect(summaryTranscript).toContain('[oldResult has been delete]');
+    expect(summaryTranscript).toContain('[Old tool result content cleared during compact]');
     expect(summaryTranscript).not.toContain('RAW_TOOL_RESULT_1');
     expect(summaryTranscript).not.toContain('RAW_RESPONSES_RESULT_1');
     expect(summaryTranscript).not.toContain(IMAGE_BASE64);
     expect(serialized).toContain(COMPACT_SUMMARY_PREFIX);
-    expect(serialized).not.toContain('user request 5');
+    expect(serialized).toContain('user request 5');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_5');
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_5');
     expect(serialized).not.toContain(IMAGE_BASE64);
@@ -230,9 +262,10 @@ describe('CompactionService', () => {
     const serialized = JSON.stringify(result.messages);
     expect(summarize).not.toHaveBeenCalled();
     expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('prune_only');
     expect(serialized).toContain('user request 1');
     expect(serialized).toContain('user request 2');
-    expect(serialized).toContain('[oldResult has been delete]');
+    expect(serialized).toContain('[Old tool result content cleared during compact]');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_1');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_2');
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_1');

@@ -66,6 +66,8 @@ export class ChatCompletionsClient extends BaseAgent<
   effort: EffortOption | undefined;
   provider: ProviderDefinition | undefined;
   tools: boolean;
+  toolFilter: ModelClientOptions['toolFilter'];
+  toolContext: unknown;
   systemPrompt: string | undefined;
   readonly historyNormalizer = new ChatCompletionsHistoryNormalizer();
   constructor(options: string | ModelClientOptions) {
@@ -82,6 +84,8 @@ export class ChatCompletionsClient extends BaseAgent<
     this.effort = options.effort;
     this.provider = options.provider;
     this.tools = options.tools ?? true;
+    this.toolFilter = options.toolFilter;
+    this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
   }
   configure(options: ModelClientOptions) {
@@ -91,6 +95,8 @@ export class ChatCompletionsClient extends BaseAgent<
     this.effort = options.effort;
     this.provider = options.provider;
     this.tools = options.tools ?? true;
+    this.toolFilter = options.toolFilter;
+    this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
   }
   reset() {
@@ -132,7 +138,7 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   private get openaiTools() {
-    const defs = micaTools.getDefinitions();
+    const defs = micaTools.getDefinitions(this.toolFilter);
     return defs.map((t) => ({
       type: 'function' as const,
       function: {
@@ -279,9 +285,15 @@ export class ChatCompletionsClient extends BaseAgent<
           this.onToolCall?.(tc.function.name, tc.function.arguments, tc.id);
           let result: string;
           try {
-            result = await micaTools.execute(tc.function.name, JSON.parse(tc.function.arguments), {
-              signal: options?.signal,
-            });
+            result = await micaTools.execute(
+              tc.function.name,
+              JSON.parse(tc.function.arguments),
+              {
+                signal: options?.signal,
+                context: this.toolContext,
+              },
+              this.toolFilter,
+            );
           } catch (e) {
             result = `工具执行失败: ${e instanceof Error ? e.message : String(e)}`;
           }

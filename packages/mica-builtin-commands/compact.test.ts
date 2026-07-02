@@ -18,12 +18,19 @@ describe('createCompactCommand', () => {
     expect(services.compact).toHaveBeenCalledWith(currentAgent, currentSession, 'session-1', {
       aggressive: true,
       force: true,
-      keepRecentRounds: 3,
       lightweightPrune: true,
-      summarizeThresholdRatio: 0.3,
+      pruneOnlyThresholdRatio: 0.3,
+      targetContextRatio: 0.35,
+      maxPromptTooLongRetries: 4,
+      minRecentRounds: 1,
+      maxRecentRounds: 3,
       contextWindowSize: 1000,
     });
-    expect(services.showMessage).toHaveBeenCalledWith(expect.stringContaining('compact'), 8000, 'session-1');
+    expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('**compact complete**'), 'session-1', {
+      variant: 'compact',
+      command: '/compact',
+    });
+    expect(services.showMessage).not.toHaveBeenCalled();
   });
 
   it('rejects arguments instead of treating them as compact options', async () => {
@@ -91,6 +98,7 @@ function makeResult(overrides: Partial<CompactResult> = {}): CompactResult {
     messages: [],
     summary: 'summary',
     mode: 'summarized',
+    strategy: 'summary_with_recent',
     beforeCount: 20,
     afterCount: 6,
     summarizedCount: 14,

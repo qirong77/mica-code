@@ -81,6 +81,8 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   maxTokens: number;
   effort: EffortOption | undefined;
   tools: boolean;
+  toolFilter: ModelClientOptions['toolFilter'];
+  toolContext: unknown;
   systemPrompt: string | undefined;
   readonly historyNormalizer = new AnthropicHistoryNormalizer();
 
@@ -100,6 +102,8 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.effort = options.effort ?? 'none';
     this.tools = options.tools ?? true;
+    this.toolFilter = options.toolFilter;
+    this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
   }
 
@@ -110,6 +114,8 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.effort = options.effort ?? 'none';
     this.tools = options.tools ?? true;
+    this.toolFilter = options.toolFilter;
+    this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
   }
 
@@ -153,7 +159,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   }
 
   private get anthropicTools(): Tool[] {
-    return micaTools.getDefinitions().map((tool) => ({
+    return micaTools.getDefinitions(this.toolFilter).map((tool) => ({
       name: tool.name,
       description: tool.description,
       input_schema: tool.input_schema as Tool.InputSchema,
@@ -268,9 +274,15 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
         let result: string;
         let isError = false;
         try {
-          result = await micaTools.execute(toolUse.name, toolInput, {
-            signal: options?.signal,
-          });
+          result = await micaTools.execute(
+            toolUse.name,
+            toolInput,
+            {
+              signal: options?.signal,
+              context: this.toolContext,
+            },
+            this.toolFilter,
+          );
         } catch (error) {
           isError = true;
           result = `工具执行失败: ${error instanceof Error ? error.message : String(error)}`;

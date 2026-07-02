@@ -53,6 +53,7 @@ export const micaBuiltinCommands = {
 export type {
   ClearIdleAgentsResult,
   CommandAgent,
+  CommandNoticeOptions,
   CommandRuntimeServices,
   CommandSessionController,
   ExclusiveTaskOptions,

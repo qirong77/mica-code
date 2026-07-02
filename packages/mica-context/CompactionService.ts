@@ -2,17 +2,19 @@ export const COMPACT_SUMMARY_PREFIX = '[Mica compact checkpoint]';
 export const COMPACT_BOUNDARY_PREFIX = '[Mica compact boundary]';
 
 const DEFAULT_MIN_MESSAGES = 4;
-const DEFAULT_MIN_TEXT_MESSAGES_TO_KEEP = 4;
-const DEFAULT_MIN_TOKENS_TO_KEEP = 8_000;
-const DEFAULT_MAX_TOKENS_TO_KEEP = 32_000;
-const AGGRESSIVE_MIN_TEXT_MESSAGES_TO_KEEP = 2;
-const AGGRESSIVE_MIN_TOKENS_TO_KEEP = 2_000;
-const AGGRESSIVE_MAX_TOKENS_TO_KEEP = 12_000;
 const MAX_MESSAGE_TRANSCRIPT_CHARS = 8_000;
 const MAX_SUMMARY_TRANSCRIPT_CHARS = 16_000;
 const RETRY_DROP_RATIO = 0.2;
 const OLD_MESSAGE_STRING_CHARS = 4_000;
-const TOOL_RESULT_PLACEHOLDER = '[oldResult has been delete]';
+const DEFAULT_MAX_RECENT_TOKENS = 12_000;
+const AGGRESSIVE_MAX_RECENT_TOKENS = 8_000;
+const DEFAULT_PRUNE_ONLY_THRESHOLD_RATIO = 0.3;
+const DEFAULT_TARGET_CONTEXT_RATIO = 0.35;
+const DEFAULT_RECENT_CONTEXT_RATIO = 0.12;
+const DEFAULT_SUMMARY_INPUT_TOKENS = 80_000;
+const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
+const MIN_SUMMARY_INPUT_TOKENS = 8_000;
+const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
 
 export type CompactInput = {
   messages: unknown[];
@@ -21,6 +23,7 @@ export type CompactInput = {
 };
 
 export type CompactMode = 'summarized' | 'pruned';
+export type CompactStrategy = 'prune_only' | 'summary_with_recent' | 'summary_only_fallback';
 
 export type CompactOptions = {
   customInstructions?: string;
@@ -33,12 +36,19 @@ export type CompactOptions = {
   summarizeThresholdRatio?: number;
   contextWindowSize?: number;
   toolResultPlaceholder?: string;
+  pruneOnlyThresholdRatio?: number;
+  targetContextRatio?: number;
+  maxRecentTokens?: number;
+  minRecentRounds?: number;
+  maxRecentRounds?: number;
+  summaryInputTokenBudget?: number;
 };
 
 export type CompactResult = {
   messages: unknown[];
   summary: string;
   mode: CompactMode;
+  strategy: CompactStrategy;
   beforeCount: number;
   afterCount: number;
   summarizedCount: number;
@@ -54,6 +64,11 @@ export type CompactResult = {
   contextWindowSize?: number;
   contextUsageRatio?: number;
   lightweightTokenEstimate?: number;
+  targetContextRatio?: number;
+  pruneOnlyThresholdRatio?: number;
+  recentTokenEstimate?: number;
+  summaryInputTokenEstimate?: number;
+  reducedRecentRounds?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -89,58 +104,43 @@ export class CompactionService {
     if (activeMessages.length < minMessages) {
       throw new CompactionNotNeededError();
     }
-
-    let splitIndex = chooseKeepStartIndex(activeMessages, options);
-    if (splitIndex <= 0 && options.force) {
-      splitIndex = chooseForcedKeepStartIndex(activeMessages, options);
-    }
-    if (splitIndex <= 0 && options.lightweightPrune) {
-      splitIndex = 0;
-    }
-    if (splitIndex <= 0 && !options.lightweightPrune) {
-      throw new CompactionNotNeededError('当前会话最近上下文已经足够完整，暂不需要 compact');
-    }
-
-    const keptMessages = activeMessages.slice(splitIndex);
-    const oldMessages = activeMessages.slice(0, splitIndex);
-    if (!options.lightweightPrune && oldMessages.length < (options.force ? 1 : 2)) {
+    if (!options.lightweightPrune && groupMessagesByRound(activeMessages).length < 2) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
     const beforeTokenEstimate = estimateMessagesTokens(originalMessages);
     const userMessageTemplate = findUserMessageTemplate(activeMessages) ?? findUserMessageTemplate(originalMessages);
-    const compactedOldMessages = options.lightweightPrune
-      ? compactMessagesForCheckpoint(oldMessages, options)
-      : oldMessages;
-    const compactedKeptMessages = options.lightweightPrune
-      ? compactMessagesForCheckpoint(keptMessages, options)
-      : compactKeptMessages(keptMessages, options);
-    const lightweightGate = getLightweightGate(options);
+    const compactedActiveMessages = options.lightweightPrune
+      ? compactMessagesForCheckpoint(activeMessages, options)
+      : cloneJson(activeMessages);
+    const budget = getCompactBudget(options, beforeTokenEstimate);
+    const pruneOnlyThresholdRatio = getPruneOnlyThresholdRatio(options);
+    const targetContextRatio = getTargetContextRatio(options);
     let lightweightTokenEstimate: number | undefined;
 
     if (options.lightweightPrune) {
       const lightweightBoundaryMessage = createCompactBoundaryMessage(
         {
           mode: 'pruned',
+          strategy: 'prune_only',
           beforeCount,
           beforeTokenEstimate,
           prunedCount: activeMessages.length,
-          keptCount: keptMessages.length,
-          keptTokenEstimate: estimateMessagesTokens(compactedKeptMessages),
-          keptCompacted: estimateMessagesTokens(compactedKeptMessages) < estimateMessagesTokens(keptMessages),
+          keptCount: activeMessages.length,
           trigger: 'manual',
-          contextWindowSize: lightweightGate?.contextWindowSize,
-          summarizeThresholdRatio: lightweightGate?.thresholdRatio,
+          contextWindowSize: budget.contextWindowSize,
+          pruneOnlyThresholdRatio,
+          targetContextRatio,
         },
         userMessageTemplate,
       );
-      const lightweightMessages = [lightweightBoundaryMessage, ...compactedOldMessages, ...compactedKeptMessages];
+      const lightweightMessages = [lightweightBoundaryMessage, ...compactedActiveMessages];
       lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
-      const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, lightweightGate?.contextWindowSize);
+      const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, budget.contextWindowSize);
       if (
-        lightweightGate &&
+        budget.contextWindowSize &&
         lightweightUsageRatio !== undefined &&
-        lightweightUsageRatio <= lightweightGate.thresholdRatio
+        lightweightUsageRatio <= pruneOnlyThresholdRatio
       ) {
         const savedTokenEstimate = Math.max(0, beforeTokenEstimate - lightweightTokenEstimate);
         const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
@@ -148,10 +148,11 @@ export class CompactionService {
           messages: options.preview ? cloneJson(originalMessages) : lightweightMessages,
           summary: 'Lightweight compact pruned media, documents, base64 payloads, and tool results.',
           mode: 'pruned',
+          strategy: 'prune_only',
           beforeCount,
           afterCount: lightweightMessages.length,
           summarizedCount: 0,
-          keptCount: keptMessages.length,
+          keptCount: activeMessages.length,
           beforeTokenEstimate,
           afterTokenEstimate: lightweightTokenEstimate,
           savedTokenEstimate,
@@ -160,33 +161,58 @@ export class CompactionService {
           promptTooLongRetries: 0,
           forced: Boolean(options.force),
           preview: Boolean(options.preview),
-          contextWindowSize: lightweightGate.contextWindowSize,
+          contextWindowSize: budget.contextWindowSize,
           contextUsageRatio: lightweightUsageRatio,
           lightweightTokenEstimate,
+          targetContextRatio,
+          pruneOnlyThresholdRatio,
+          recentTokenEstimate: estimateMessagesTokens(compactedActiveMessages),
+          summaryInputTokenEstimate: 0,
+          reducedRecentRounds: 0,
         };
       }
     }
 
-    let messagesToSummarize = options.lightweightPrune
-      ? [...compactedOldMessages, ...compactedKeptMessages]
-      : compactedOldMessages;
-    const finalKeptMessages = options.lightweightPrune ? [] : compactedKeptMessages;
+    let splitIndex = chooseRecentStartIndex(activeMessages, compactedActiveMessages, options);
+    splitIndex = adjustStartForToolPairs(activeMessages, splitIndex);
+    if (splitIndex <= 0 && options.force) {
+      splitIndex = chooseForcedRecentStartIndex(activeMessages, compactedActiveMessages, options);
+      splitIndex = adjustStartForToolPairs(activeMessages, splitIndex);
+    }
+
+    let messagesToSummarize = compactedActiveMessages.slice(0, splitIndex);
+    let keptMessages = compactedActiveMessages.slice(splitIndex);
+    if (messagesToSummarize.length === 0 && options.force) {
+      messagesToSummarize = compactedActiveMessages;
+      keptMessages = [];
+    }
     if (messagesToSummarize.length === 0) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
+
+    messagesToSummarize = fitMessagesToSummaryBudget(messagesToSummarize, getSummaryInputTokenBudget(options));
+    if (messagesToSummarize.length === 0) {
+      throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
+    }
+
     const maxRetries = options.maxPromptTooLongRetries ?? (options.aggressive ? 4 : 3);
     const prompt = getCompactPrompt(options.customInstructions);
     let promptTooLongRetries = 0;
     let summary = '';
+    let summaryInputTokenEstimate = 0;
 
     for (;;) {
       const transcript = buildTranscript(messagesToSummarize);
+      summaryInputTokenEstimate = estimateTokens(transcript);
       try {
         summary = cleanSummary(await input.summarize(transcript, prompt));
       } catch (error) {
         if (!isPromptTooLongError(error) || promptTooLongRetries >= maxRetries) throw error;
         promptTooLongRetries++;
-        messagesToSummarize = truncateHeadForPromptTooLongRetry(messagesToSummarize);
+        messagesToSummarize = fitMessagesToSummaryBudget(
+          truncateHeadForPromptTooLongRetry(messagesToSummarize),
+          getSummaryInputTokenBudget(options),
+        );
         continue;
       }
 
@@ -195,7 +221,10 @@ export class CompactionService {
           throw new CompactionPromptTooLongError();
         }
         promptTooLongRetries++;
-        messagesToSummarize = truncateHeadForPromptTooLongRetry(messagesToSummarize);
+        messagesToSummarize = fitMessagesToSummaryBudget(
+          truncateHeadForPromptTooLongRetry(messagesToSummarize),
+          getSummaryInputTokenBudget(options),
+        );
         continue;
       }
       break;
@@ -203,21 +232,61 @@ export class CompactionService {
 
     if (!summary.trim()) throw new Error('Compact summary is empty');
 
+    let finalKeptMessages = compactKeptMessages(keptMessages, options, getRecentTokenBudget(options));
+    const initialKeptRounds = groupMessagesByRound(finalKeptMessages).length;
+    let reducedRecentRounds = 0;
+    let strategy: CompactStrategy = finalKeptMessages.length > 0 ? 'summary_with_recent' : 'summary_only_fallback';
+
+    while (finalKeptMessages.length > 0) {
+      const candidateMessages = buildSummarizedMessages(
+        summary,
+        finalKeptMessages,
+        userMessageTemplate,
+        beforeCount,
+        beforeTokenEstimate,
+        messagesToSummarize.length,
+        promptTooLongRetries,
+        options,
+        budget,
+        lightweightTokenEstimate,
+        strategy,
+        pruneOnlyThresholdRatio,
+        targetContextRatio,
+      );
+      if (estimateMessagesTokens(candidateMessages) <= budget.targetContextTokens) break;
+
+      const nextKeptMessages = dropOldestRecentRound(finalKeptMessages);
+      if (nextKeptMessages.length === 0 || nextKeptMessages.length === finalKeptMessages.length) break;
+      finalKeptMessages = compactKeptMessages(nextKeptMessages, options, Math.floor(getRecentTokenBudget(options) * 0.75));
+      const nextKeptRounds = groupMessagesByRound(finalKeptMessages).length;
+      reducedRecentRounds = Math.max(reducedRecentRounds, Math.max(0, initialKeptRounds - nextKeptRounds));
+      strategy = finalKeptMessages.length > 0 ? 'summary_with_recent' : 'summary_only_fallback';
+    }
+
+    if (finalKeptMessages.length === 0) {
+      strategy = 'summary_only_fallback';
+      reducedRecentRounds = Math.max(reducedRecentRounds, initialKeptRounds);
+    }
+
     const summaryMessage = createCompactSummaryMessage(summary, finalKeptMessages.length > 0, userMessageTemplate);
     const boundaryMessage = createCompactBoundaryMessage(
       {
         mode: 'summarized',
+        strategy,
         beforeCount,
         beforeTokenEstimate,
         summarizedCount: messagesToSummarize.length,
         keptCount: finalKeptMessages.length,
         keptTokenEstimate: estimateMessagesTokens(finalKeptMessages),
-        keptCompacted: estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(keptMessages),
+        keptCompacted: estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(activeMessages.slice(splitIndex)),
         promptTooLongRetries,
         trigger: 'manual',
-        contextWindowSize: lightweightGate?.contextWindowSize,
-        summarizeThresholdRatio: lightweightGate?.thresholdRatio,
+        contextWindowSize: budget.contextWindowSize,
+        pruneOnlyThresholdRatio,
+        targetContextRatio,
         lightweightTokenEstimate,
+        summaryInputTokenEstimate,
+        reducedRecentRounds,
       },
       userMessageTemplate,
     );
@@ -225,10 +294,7 @@ export class CompactionService {
     const afterTokenEstimate = estimateMessagesTokens(compactMessages);
     const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
     const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
-    const contextUsageRatio = usageRatio(
-      afterTokenEstimate,
-      lightweightGate?.contextWindowSize ?? options.contextWindowSize,
-    );
+    const contextUsageRatio = usageRatio(afterTokenEstimate, budget.contextWindowSize);
 
     if (!options.preview && afterTokenEstimate >= beforeTokenEstimate && !options.aggressive && !options.force) {
       throw new CompactionNotNeededError('compact 后预计不会节省上下文，已保留原会话');
@@ -238,6 +304,7 @@ export class CompactionService {
       messages: options.preview ? cloneJson(originalMessages) : compactMessages,
       summary,
       mode: 'summarized',
+      strategy,
       beforeCount,
       afterCount: compactMessages.length,
       summarizedCount: messagesToSummarize.length,
@@ -250,48 +317,225 @@ export class CompactionService {
       promptTooLongRetries,
       forced: Boolean(options.force),
       preview: Boolean(options.preview),
-      contextWindowSize: lightweightGate?.contextWindowSize,
+      contextWindowSize: budget.contextWindowSize,
       contextUsageRatio,
       lightweightTokenEstimate,
+      targetContextRatio,
+      pruneOnlyThresholdRatio,
+      recentTokenEstimate: estimateMessagesTokens(finalKeptMessages),
+      summaryInputTokenEstimate,
+      reducedRecentRounds,
     };
   }
 }
 
-function chooseKeepStartIndex(messages: unknown[], options: CompactOptions): number {
+type CompactBudget = {
+  contextWindowSize?: number;
+  targetContextTokens: number;
+};
+
+function getCompactBudget(options: CompactOptions, beforeTokenEstimate: number): CompactBudget {
+  const contextWindowSize = positiveNumber(options.contextWindowSize);
+  const targetRatio = getTargetContextRatio(options);
+  const targetFromWindow = contextWindowSize ? Math.max(1, Math.floor(contextWindowSize * targetRatio)) : undefined;
+  const targetFromCurrent = Math.max(1, Math.floor(beforeTokenEstimate * targetRatio));
+  return {
+    contextWindowSize,
+    targetContextTokens: targetFromWindow
+      ? Math.min(targetFromWindow, Math.max(targetFromCurrent, getRecentTokenBudget(options)))
+      : Math.max(targetFromCurrent, getRecentTokenBudget(options)),
+  };
+}
+
+function getTargetContextRatio(options: CompactOptions): number {
+  return clampRatio(options.targetContextRatio ?? DEFAULT_TARGET_CONTEXT_RATIO, DEFAULT_TARGET_CONTEXT_RATIO);
+}
+
+function getPruneOnlyThresholdRatio(options: CompactOptions): number {
+  return clampRatio(
+    options.pruneOnlyThresholdRatio ?? options.summarizeThresholdRatio ?? DEFAULT_PRUNE_ONLY_THRESHOLD_RATIO,
+    DEFAULT_PRUNE_ONLY_THRESHOLD_RATIO,
+  );
+}
+
+function chooseRecentStartIndex(messages: unknown[], compactedMessages: unknown[], options: CompactOptions): number {
   const rounds = groupMessagesByRound(messages);
   if (rounds.length < 2) return 0;
   if (options.keepRecentRounds !== undefined) {
     const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds));
-    return rounds[Math.max(0, rounds.length - keepRounds)]?.start ?? 0;
+    if (rounds.length <= keepRounds && !options.force) return 0;
+    return rounds[Math.max(1, rounds.length - keepRounds)]?.start ?? 0;
   }
 
-  const minTextMessages = options.aggressive ? AGGRESSIVE_MIN_TEXT_MESSAGES_TO_KEEP : DEFAULT_MIN_TEXT_MESSAGES_TO_KEEP;
-  const minTokens = options.aggressive ? AGGRESSIVE_MIN_TOKENS_TO_KEEP : DEFAULT_MIN_TOKENS_TO_KEEP;
-  const maxTokens = options.aggressive ? AGGRESSIVE_MAX_TOKENS_TO_KEEP : DEFAULT_MAX_TOKENS_TO_KEEP;
+  const minRecentRounds = Math.max(1, Math.floor(options.minRecentRounds ?? 1));
+  const maxRecentRounds = Math.max(minRecentRounds, Math.floor(options.maxRecentRounds ?? 3));
+  const recentTokenBudget = getRecentTokenBudget(options);
   let start = messages.length;
-  let tokens = 0;
-  let textMessages = 0;
+  let keptRounds = 0;
 
-  for (let index = rounds.length - 1; index >= 0; index--) {
-    const round = rounds[index]!;
-    const roundMessages = messages.slice(round.start, round.end);
-    const roundTokens = estimateMessagesTokens(roundMessages);
-    if (start < messages.length && tokens + roundTokens > maxTokens) break;
-    start = round.start;
-    tokens += roundTokens;
-    textMessages += roundMessages.filter(hasTextContent).length;
-    if (tokens >= minTokens && textMessages >= minTextMessages) break;
+  for (let index = rounds.length - 1; index >= 0 && keptRounds < maxRecentRounds; index--) {
+    const candidateStart = rounds[index]!.start;
+    const candidateTokens = estimateMessagesTokens(compactedMessages.slice(candidateStart));
+    if (keptRounds >= minRecentRounds && candidateTokens > recentTokenBudget) break;
+    start = candidateStart;
+    keptRounds++;
   }
 
-  return Math.max(0, Math.min(start, messages.length - 1));
+  return start >= messages.length ? 0 : start;
 }
 
-function chooseForcedKeepStartIndex(messages: unknown[], options: CompactOptions): number {
+function chooseForcedRecentStartIndex(messages: unknown[], compactedMessages: unknown[], options: CompactOptions): number {
   const rounds = groupMessagesByRound(messages);
   if (rounds.length < 2) return 0;
-  const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds ?? 1));
+  const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds ?? options.minRecentRounds ?? 1));
   if (options.keepRecentRounds !== undefined && rounds.length <= keepRounds) return 0;
-  return rounds[Math.max(1, rounds.length - keepRounds)]?.start ?? 0;
+  let start = rounds[Math.max(1, rounds.length - keepRounds)]?.start ?? 0;
+  while (start > 0 && estimateMessagesTokens(compactedMessages.slice(start)) > getRecentTokenBudget(options)) {
+    const roundIndex = rounds.findIndex((round) => round.start === start);
+    if (roundIndex < 0 || roundIndex >= rounds.length - 1) break;
+    start = rounds[roundIndex + 1]?.start ?? start;
+  }
+  return start;
+}
+
+function getRecentTokenBudget(options: CompactOptions): number {
+  const explicit = positiveNumber(options.maxRecentTokens);
+  if (explicit) return explicit;
+  const contextWindowSize = positiveNumber(options.contextWindowSize);
+  const defaultBudget = options.aggressive ? AGGRESSIVE_MAX_RECENT_TOKENS : DEFAULT_MAX_RECENT_TOKENS;
+  if (!contextWindowSize) return defaultBudget;
+  return Math.max(1, Math.min(defaultBudget, Math.floor(contextWindowSize * DEFAULT_RECENT_CONTEXT_RATIO)));
+}
+
+function getSummaryInputTokenBudget(options: CompactOptions): number {
+  const explicit = positiveNumber(options.summaryInputTokenBudget);
+  if (explicit) return explicit;
+  const contextWindowSize = positiveNumber(options.contextWindowSize);
+  if (!contextWindowSize) return DEFAULT_SUMMARY_INPUT_TOKENS;
+  return Math.max(MIN_SUMMARY_INPUT_TOKENS, Math.floor(contextWindowSize * DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO));
+}
+
+function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number): unknown[] {
+  let next = messages;
+  while (next.length > 1 && estimateTokens(buildTranscript(next)) > tokenBudget) {
+    const truncated = truncateHeadForPromptTooLongRetry(next);
+    next = truncated;
+    if (truncated.length >= messages.length) break;
+  }
+  return next;
+}
+
+function dropOldestRecentRound(messages: unknown[]): unknown[] {
+  const rounds = groupMessagesByRound(messages);
+  if (rounds.length <= 1) return [];
+  return messages.slice(rounds[1]?.start ?? messages.length);
+}
+
+function buildSummarizedMessages(
+  summary: string,
+  keptMessages: unknown[],
+  template: unknown,
+  beforeCount: number,
+  beforeTokenEstimate: number,
+  summarizedCount: number,
+  promptTooLongRetries: number,
+  options: CompactOptions,
+  budget: CompactBudget,
+  lightweightTokenEstimate: number | undefined,
+  strategy: CompactStrategy,
+  pruneOnlyThresholdRatio: number,
+  targetContextRatio: number,
+): unknown[] {
+  const summaryMessage = createCompactSummaryMessage(summary, keptMessages.length > 0, template);
+  const boundaryMessage = createCompactBoundaryMessage(
+    {
+      mode: 'summarized',
+      strategy,
+      beforeCount,
+      beforeTokenEstimate,
+      summarizedCount,
+      keptCount: keptMessages.length,
+      keptTokenEstimate: estimateMessagesTokens(keptMessages),
+      promptTooLongRetries,
+      trigger: 'manual',
+      contextWindowSize: budget.contextWindowSize,
+      pruneOnlyThresholdRatio,
+      targetContextRatio,
+      lightweightTokenEstimate,
+      forced: Boolean(options.force),
+    },
+    template,
+  );
+  return [boundaryMessage, summaryMessage, ...keptMessages];
+}
+
+function adjustStartForToolPairs(messages: unknown[], start: number): number {
+  if (start <= 0 || start >= messages.length) return start;
+  let nextStart = start;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const suffixResultIds = new Set<string>();
+    for (let index = nextStart; index < messages.length; index++) {
+      for (const id of getToolResultIds(messages[index])) suffixResultIds.add(id);
+    }
+    for (let index = 0; index < nextStart; index++) {
+      if (!getToolCallIds(messages[index]).some((id) => suffixResultIds.has(id))) continue;
+      nextStart = index;
+      changed = true;
+      break;
+    }
+  }
+  return nextStart;
+}
+
+function getToolCallIds(message: unknown): string[] {
+  if (!message || typeof message !== 'object') return [];
+  const record = message as Record<string, unknown>;
+  const ids: string[] = [];
+
+  if (Array.isArray(record.tool_calls)) {
+    for (const toolCall of record.tool_calls) {
+      if (toolCall && typeof toolCall === 'object' && typeof (toolCall as Record<string, unknown>).id === 'string') {
+        ids.push((toolCall as Record<string, string>).id);
+      }
+    }
+  }
+  if (record.type === 'function_call' && typeof record.call_id === 'string') ids.push(record.call_id);
+  for (const block of contentBlocks(record)) {
+    if (block.type === 'tool_use' && typeof block.id === 'string') ids.push(block.id);
+  }
+  return ids;
+}
+
+function getToolResultIds(message: unknown): string[] {
+  if (!message || typeof message !== 'object') return [];
+  const record = message as Record<string, unknown>;
+  const ids: string[] = [];
+
+  if (record.role === 'tool' && typeof record.tool_call_id === 'string') ids.push(record.tool_call_id);
+  if (record.type === 'function_call_output' && typeof record.call_id === 'string') ids.push(record.call_id);
+  for (const block of contentBlocks(record)) {
+    if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') ids.push(block.tool_use_id);
+  }
+  return ids;
+}
+
+function contentBlocks(record: Record<string, unknown>): Array<Record<string, unknown>> {
+  return Array.isArray(record.content)
+    ? record.content.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === 'object'))
+    : [];
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function clampRatio(value: unknown, fallback: number): number {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.min(1, number);
 }
 
 function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
@@ -363,21 +607,13 @@ function shouldOmitBase64String(value: string): boolean {
   return /^[A-Za-z0-9+/=_-]+$/.test(value);
 }
 
-function getLightweightGate(options: CompactOptions): { contextWindowSize: number; thresholdRatio: number } | null {
-  const contextWindowSize = Number(options.contextWindowSize);
-  const thresholdRatio = Number(options.summarizeThresholdRatio);
-  if (!Number.isFinite(contextWindowSize) || contextWindowSize <= 0) return null;
-  if (!Number.isFinite(thresholdRatio) || thresholdRatio <= 0) return null;
-  return { contextWindowSize, thresholdRatio: Math.min(1, thresholdRatio) };
-}
-
 function usageRatio(tokens: number, contextWindowSize: number | undefined): number | undefined {
   if (!contextWindowSize || contextWindowSize <= 0) return undefined;
   return tokens / contextWindowSize;
 }
 
-function compactKeptMessages(messages: unknown[], options: CompactOptions): unknown[] {
-  const budget = options.aggressive ? AGGRESSIVE_MAX_TOKENS_TO_KEEP : DEFAULT_MAX_TOKENS_TO_KEEP;
+function compactKeptMessages(messages: unknown[], options: CompactOptions, tokenBudget = getRecentTokenBudget(options)): unknown[] {
+  const budget = Math.max(1, tokenBudget);
   if (estimateMessagesTokens(messages) <= budget) return cloneJson(messages);
 
   for (const maxStringChars of options.aggressive ? [6_000, 2_000, 800] : [12_000, 4_000, 1_200]) {
@@ -579,10 +815,6 @@ function getRole(message: unknown): string | null {
   return null;
 }
 
-function hasTextContent(message: unknown): boolean {
-  return extractText(message).trim().length > 0;
-}
-
 function extractText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join('\n');
@@ -678,11 +910,17 @@ function foldRepeats(text: string): string {
 }
 
 function truncateHeadForPromptTooLongRetry(messages: unknown[]): unknown[] {
-  const rounds = groupMessagesByRound(messages);
+  const input = stripPromptTooLongRetryMarker(messages);
+  const rounds = groupMessagesByRound(input);
   if (rounds.length < 2) throw new CompactionPromptTooLongError();
   const dropRounds = Math.min(rounds.length - 1, Math.max(1, Math.ceil(rounds.length * RETRY_DROP_RATIO)));
   const start = rounds[dropRounds]?.start ?? messages.length;
-  return [{ role: 'user', content: '[earlier conversation truncated for compaction retry]' }, ...messages.slice(start)];
+  return [{ role: 'user', content: '[earlier conversation truncated for compaction retry]' }, ...input.slice(start)];
+}
+
+function stripPromptTooLongRetryMarker(messages: unknown[]): unknown[] {
+  const [first] = messages;
+  return getStringContent(first) === '[earlier conversation truncated for compaction retry]' ? messages.slice(1) : messages;
 }
 
 function isPromptTooLongError(error: unknown): boolean {

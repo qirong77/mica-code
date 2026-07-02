@@ -3,6 +3,7 @@ import { formatError } from './utils/formatError.js';
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;
   signal?: AbortSignal;
+  context?: unknown;
 }
 
 export interface ValidationResult {

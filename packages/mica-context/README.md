@@ -6,6 +6,8 @@
 
 - 提供 `CompactionService`，封装上下文压缩流程。
 - 将长对话整理为摘要消息，降低后续 prompt 的上下文压力。
+- 先裁剪媒体、base64 和旧工具结果，再按上下文预算决定 prune-only 或 summary + recent checkpoint。
+- 保留完整 recent round，并避免把 tool call / tool result 切成不合法的 provider 历史。
 - 为后续 token budget、自动 compact、memory 注入等能力预留边界。
 
 ## 使用入口

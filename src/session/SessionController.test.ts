@@ -73,6 +73,7 @@ describe('SessionController', () => {
       conversationMessages: [
         { role: 'user' as const, content: 'model prompt' },
         { role: 'notice' as const, content: 'saved recap', variant: 'recap' as const, command: '/recap' },
+        { role: 'notice' as const, content: 'saved compact', variant: 'compact' as const, command: '/compact' },
       ],
       usageHistory: [],
       lastUsage: undefined,

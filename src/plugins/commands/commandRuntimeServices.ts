@@ -2,7 +2,7 @@ import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
 import { micaBuiltinCommands, type CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { micaUi, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
+import { micaUi, type MicaUiConversationMessage, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { getActiveContext } from '../../app/activeContext.js';
@@ -84,13 +84,15 @@ function showNoticeForSession(
   context: ApplicationContext | null,
   ownerSessionId: string | undefined,
   text: string,
+  options: { variant?: 'recap' | 'commit' | 'compact'; command?: string } = {},
 ): void {
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  const message = { role: 'notice' as const, content: text, ...options };
   if (!context || !session) {
-    micaUi.conversation.appendNoticeMessage(text);
+    micaUi.conversation.appendNoticeMessage(text, options);
     return;
   }
-  const nextMessages = [...session.uiState.conversationMessages, { role: 'notice' as const, content: text }];
+  const nextMessages = [...session.uiState.conversationMessages, message];
   session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
@@ -104,18 +106,7 @@ function showRecapForSession(
   text: string,
   command: string,
 ): void {
-  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
-  const message = { role: 'notice' as const, content: text, variant: 'recap' as const, command };
-  if (!context || !session) {
-    micaUi.conversation.appendNoticeMessage(text, { variant: 'recap', command });
-    return;
-  }
-  const nextMessages = [...session.uiState.conversationMessages, message];
-  session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
-  if (context.agentSessions.current().id === session.id) {
-    micaUi.conversation.setMessages(session.uiState.conversationMessages);
-  }
-  session.sessionController.saveCurrent({ allowEmpty: true });
+  showNoticeForSession(context, ownerSessionId, text, { variant: 'recap', command });
 }
 
 function formatRecapCommand(options?: { customInstructions?: string }): string {
@@ -128,18 +119,22 @@ function showCommitNoticeForSession(
   ownerSessionId: string | undefined,
   text: string,
 ): void {
-  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
-  const message = { role: 'notice' as const, content: text, variant: 'commit' as const, command: '/commit' };
-  if (!context || !session) {
-    micaUi.conversation.appendNoticeMessage(text, { variant: 'commit', command: '/commit' });
-    return;
-  }
-  const nextMessages = [...session.uiState.conversationMessages, message];
-  session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
-  if (context.agentSessions.current().id === session.id) {
-    micaUi.conversation.setMessages(session.uiState.conversationMessages);
-  }
-  session.sessionController.saveCurrent({ allowEmpty: true });
+  showNoticeForSession(context, ownerSessionId, text, { variant: 'commit', command: '/commit' });
+}
+
+function hideCompactArtifacts(messages: MicaUiConversationMessage[]): MicaUiConversationMessage[] {
+  return messages.filter((message) => {
+    const text = conversationContentToText(message.content);
+    return !text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) && !text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX);
+  });
+}
+
+function conversationContentToText(content: MicaUiConversationMessage['content']): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
 }
 
 function buildRecapPrompt(customInstructions?: string): string {
@@ -219,8 +214,8 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       }
       showGlobalMessage(text, ttl);
     },
-    showNotice(text, ownerSessionId) {
-      showNoticeForSession(currentContext(), ownerSessionId, text);
+    showNotice(text, ownerSessionId, options) {
+      showNoticeForSession(currentContext(), ownerSessionId, text, options);
     },
     showCommitNotice(text, ownerSessionId) {
       showCommitNoticeForSession(currentContext(), ownerSessionId, text);
@@ -470,9 +465,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         usageHistory: [],
         lastUsage: undefined,
       });
+      const conversationMessages = hideCompactArtifacts(concreteAgent.toConversationMessages());
       const nextUiState = normalizeUiState({
         ...(ownerSession?.uiState ?? captureSessionUi()),
-        conversationMessages: concreteAgent.toConversationMessages(),
+        conversationMessages,
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
@@ -481,7 +477,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       });
       if (ownerSession) ownerSession.uiState = nextUiState;
       if (!ownerSession || context?.agentSessions.current().id === ownerSession.id) {
-        micaUi.conversation.setMessages(concreteAgent.toConversationMessages());
+        micaUi.conversation.setMessages(conversationMessages);
         micaUi.conversation.clearResponseText();
         micaUi.conversation.clearPendingInput();
         micaUi.panels.contextSize.set(0);

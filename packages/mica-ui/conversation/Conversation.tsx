@@ -87,21 +87,39 @@ export const Conversation = (): React.ReactNode => {
           );
         }
         if (item.role === 'notice') {
-          const tone = item.variant === 'commit' ? 'commit' : item.variant === 'recap' ? 'recap' : 'notice';
+          const tone =
+            item.variant === 'commit'
+              ? 'commit'
+              : item.variant === 'recap'
+                ? 'recap'
+                : item.variant === 'compact'
+                  ? 'compact'
+                  : 'notice';
           const color =
             item.variant === 'commit'
               ? themeColors.messageCommit
               : item.variant === 'recap'
                 ? themeColors.messageRecap
-                : themeColors.messageNotice;
+                : item.variant === 'compact'
+                  ? themeColors.messageCompact
+                  : themeColors.messageNotice;
           const backgroundColor =
             item.variant === 'commit'
               ? themeColors.surfaceCommit
               : item.variant === 'recap'
                 ? themeColors.surfaceRecap
-                : themeColors.surfaceNotice;
+                : item.variant === 'compact'
+                  ? themeColors.surfaceCompact
+                  : themeColors.surfaceNotice;
           const title =
-            item.command ?? (item.variant === 'commit' ? '/commit' : item.variant === 'recap' ? '/recap' : 'notice');
+            item.command ??
+            (item.variant === 'commit'
+              ? '/commit'
+              : item.variant === 'recap'
+                ? '/recap'
+                : item.variant === 'compact'
+                  ? '/compact'
+                  : 'notice');
 
           return (
             <React.Fragment key={item.id}>

@@ -241,7 +241,9 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       role: 'notice',
       content,
       ...display,
-      ...(record.variant === 'recap' || record.variant === 'commit' ? { variant: record.variant } : {}),
+      ...(record.variant === 'recap' || record.variant === 'commit' || record.variant === 'compact'
+        ? { variant: record.variant }
+        : {}),
       ...(typeof record.command === 'string' ? { command: record.command } : {}),
     };
   }

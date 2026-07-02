@@ -125,11 +125,20 @@ export class AgentRuntime {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       throw new Error(message);
     }
-    return micaAgent.createSubAgent({
-      ...this.clientOptions(),
-      ...options,
-      effort: 'none',
-    });
+    return micaAgent.createSubAgent(this.createClientOptions({ ...options, effort: 'none' }));
+  }
+
+  createClientOptions(overrides: Partial<ModelClientOptions> = {}): ModelClientOptions {
+    return mergeDefined(
+      {
+        ...createAgentClientOptions(this.currentConfig),
+        toolContext: {
+          agent: this,
+          createClientOptions: this.createClientOptions.bind(this),
+        },
+      },
+      overrides,
+    );
   }
 
   reloadConfig(resetSession = true) {
@@ -384,7 +393,7 @@ export class AgentRuntime {
   }
 
   private clientOptions(): ModelClientOptions {
-    return createAgentClientOptions(this.currentConfig);
+    return this.createClientOptions();
   }
 
   private emitStatus(status: AgentRuntimeStatus): void {
@@ -417,6 +426,16 @@ export class AgentRuntime {
 function cloneJson<T>(value: T): T {
   if (value === undefined) return value;
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function mergeDefined(base: ModelClientOptions, overrides: Partial<ModelClientOptions>): ModelClientOptions {
+  const next = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) {
+      (next as Record<string, unknown>)[key] = value;
+    }
+  }
+  return next;
 }
 
 function statusKey(status: AgentRuntimeStatus): string {

@@ -22,7 +22,7 @@ export interface MicaUiMessageParam {
   role: 'user' | 'assistant' | 'notice';
   content: string | MicaUiContentBlockParam[];
   displayContent?: string | MicaUiContentBlockParam[];
-  variant?: 'recap' | 'commit';
+  variant?: 'recap' | 'commit' | 'compact';
   command?: string;
 }
 
@@ -119,7 +119,7 @@ export type MicaUiConversationMessage =
       role: 'notice';
       content: string | MicaUiContentBlockParam[];
       displayContent?: string | MicaUiContentBlockParam[];
-      variant?: 'recap' | 'commit';
+      variant?: 'recap' | 'commit' | 'compact';
       command?: string;
     };
 

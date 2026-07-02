@@ -1,6 +1,13 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { MicaTool } from './MicaTool.js';
-import { getToolDefinitions, registerMcpTools, unregisterMcpTools } from './registry.js';
+import {
+  executeTool,
+  getToolDefinitions,
+  registerMcpTools,
+  registerRuntimeTool,
+  unregisterMcpTools,
+  unregisterRuntimeTools,
+} from './registry.js';
 
 class TestTool extends MicaTool {
   constructor(name = 'test_tool') {
@@ -54,6 +61,7 @@ describe('MicaTool.validateInput', () => {
 describe('getToolDefinitions', () => {
   afterEach(() => {
     unregisterMcpTools();
+    unregisterRuntimeTools();
   });
 
   it('returns tool definitions in stable name order', () => {
@@ -62,5 +70,20 @@ describe('getToolDefinitions', () => {
     const names = getToolDefinitions().map((tool) => tool.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
     expect(names.indexOf('alpha_tool')).toBeLessThan(names.indexOf('zeta_tool'));
+  });
+
+  it('registers runtime tools and filters definitions and execution', async () => {
+    registerRuntimeTool(new TestTool('runtime_allowed'));
+    registerRuntimeTool(new TestTool('runtime_blocked'));
+
+    const filtered = getToolDefinitions((name) => name === 'runtime_allowed');
+
+    expect(filtered.map((tool) => tool.name)).toEqual(['runtime_allowed']);
+    await expect(
+      executeTool('runtime_allowed', { file_path: 'README.md' }, undefined, (name) => name === 'runtime_allowed'),
+    ).resolves.toBe('ok');
+    await expect(
+      executeTool('runtime_blocked', { file_path: 'README.md' }, undefined, (name) => name === 'runtime_allowed'),
+    ).resolves.toContain('不在当前 agent 的允许工具范围内');
   });
 });

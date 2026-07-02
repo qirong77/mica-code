@@ -16,6 +16,8 @@ import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
 import { ToolKillTask } from './ToolKillTask.js';
 import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
+export type ToolFilter = (name: string) => boolean;
+
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),
   new ToolWriteFile(),
@@ -33,6 +35,7 @@ const builtinTools: MicaTool[] = [
 ];
 
 let mcpTools: MicaTool[] = [];
+let runtimeTools: MicaTool[] = [];
 
 export function registerMcpTools(tools: MicaTool[]): void {
   mcpTools = tools;
@@ -42,8 +45,21 @@ export function unregisterMcpTools(): void {
   mcpTools = [];
 }
 
+export function registerRuntimeTool(tool: MicaTool): void {
+  runtimeTools = [...runtimeTools.filter((entry) => entry.name !== tool.name), tool];
+}
+
+export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
+  const name = typeof nameOrTool === 'string' ? nameOrTool : nameOrTool.name;
+  runtimeTools = runtimeTools.filter((tool) => tool.name !== name);
+}
+
+export function unregisterRuntimeTools(): void {
+  runtimeTools = [];
+}
+
 function getAllTools(): MicaTool[] {
-  return [...builtinTools, ...mcpTools];
+  return [...builtinTools, ...runtimeTools, ...mcpTools];
 }
 
 function getAllToolsForPrompt(): MicaTool[] {
@@ -56,25 +72,38 @@ function findTool(name: string): MicaTool | undefined {
   return getAllTools().find((t) => t.name.endsWith(`__${name}`));
 }
 
-export function getToolDefinitions(): Tool[] {
-  return getAllToolsForPrompt().map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.input_schema,
-  }));
+function toolAllowed(tool: MicaTool, requestedName: string, filter?: ToolFilter): boolean {
+  return !filter || filter(tool.name) || filter(requestedName);
 }
 
-export function getToolCounts(): { builtin: number; mcp: number; total: number } {
+export function getToolDefinitions(filter?: ToolFilter): Tool[] {
+  return getAllToolsForPrompt()
+    .filter((t) => toolAllowed(t, t.name, filter))
+    .map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema,
+    }));
+}
+
+export function getToolCounts(): { builtin: number; runtime: number; mcp: number; total: number } {
   return {
     builtin: builtinTools.length,
+    runtime: runtimeTools.length,
     mcp: mcpTools.length,
-    total: builtinTools.length + mcpTools.length,
+    total: builtinTools.length + runtimeTools.length + mcpTools.length,
   };
 }
 
-export async function executeTool(name: string, input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+export async function executeTool(
+  name: string,
+  input: ToolInput,
+  callbacks?: ToolExecuteCallbacks,
+  filter?: ToolFilter,
+): Promise<string> {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
+  if (!toolAllowed(tool, name, filter)) return `工具 ${name} 不在当前 agent 的允许工具范围内。`;
 
   const validation = tool.validateInput(input);
   if (!validation.valid) {
