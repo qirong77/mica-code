@@ -57,7 +57,7 @@ export type TerminalAgentSession = {
 
 const MAX_UI_CONVERSATION_MESSAGES = 200;
 const MAX_RESPONSE_TEXT_CHARS = runtimeEnv.ui.responseTextMaxChars;
-const MAX_PENDING_INPUTS = 1;
+const MAX_PENDING_INPUTS = 50;
 const MAX_MESSAGE_BAR_MESSAGES = 8;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
 const MAX_THINKING_TEXT_CHARS = runtimeEnv.ui.thinkingTextMaxChars;

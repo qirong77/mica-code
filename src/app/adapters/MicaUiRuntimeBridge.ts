@@ -50,9 +50,8 @@ export class MicaUiRuntimeBridge {
       if (event.type === 'queue:changed') {
         const owner = eventOwnerAgent(event.owner, this.agent);
         const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
-        const pendingInput = event.pendingInputs.at(-1);
-        const pendingInputs = pendingInput ? [pendingInput.displayText ?? pendingInput.text] : [];
-        const pendingQueueMode = pendingInput?.queueMode ?? null;
+        const pendingInputs = event.pendingInputs.map((input) => input.displayText ?? input.text);
+        const pendingQueueMode = event.pendingInputs.at(-1)?.queueMode ?? null;
         session.uiState = normalizeUiState({ ...session.uiState, pendingInputs, pendingQueueMode });
         if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs, pendingQueueMode);
       }

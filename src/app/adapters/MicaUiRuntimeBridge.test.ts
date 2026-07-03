@@ -88,6 +88,34 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     for (const value of Object.values(uiMocks)) value.mockClear();
   });
 
+  it('preserves all queue inputs from runtime events', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+
+    bridge.start();
+    runtime.events.publish({
+      type: 'queue:changed',
+      pendingInputs: [
+        micaRuntime.createRuntimeInput('first queued', 'ui', { queueMode: 'after_turn' }),
+        micaRuntime.createRuntimeInput('second queued full text', 'ui', {
+          displayText: 'second queued display',
+          queueMode: 'after_iteration',
+        }),
+      ],
+      owner: agent,
+    });
+
+    expect(session.uiState.pendingInputs).toEqual(['first queued', 'second queued display']);
+    expect(session.uiState.pendingQueueMode).toBe('after_iteration');
+    expect(uiMocks.setPendingInputs).toHaveBeenCalledWith(
+      ['first queued', 'second queued display'],
+      'after_iteration',
+    );
+  });
+
   it('keeps prior turn logs when a new turn asks to preserve them', async () => {
     const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
     const agent = createAgent();

@@ -60,7 +60,7 @@ export function clearPendingInput(): void {
 }
 
 export function setPendingInputs(texts: string[], queueMode: MicaUiPendingInputQueueMode | null = null): void {
-  const nextTexts = texts.slice(-1);
+  const nextTexts = [...texts];
   pendingInputs.set(nextTexts);
   pendingInput.set(nextTexts.at(-1) ?? '');
   pendingQueueMode.set(nextTexts.length > 0 ? queueMode : null);
