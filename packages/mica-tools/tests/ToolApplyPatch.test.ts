@@ -78,6 +78,21 @@ describe('ToolApplyPatch', () => {
     ).toBe('Patch old.txt -> new.txt · 1 move · +1/-1');
   });
 
+  it('falls back to a human-readable file summary when patch parsing fails', () => {
+    const tool = new ToolApplyPatch();
+    const filePath = pathInTemp('broken.txt');
+    const patch = [`*** Update File: ${filePath}`, '@@', '-old', '*** End Patch', ''].join('\n');
+
+    expect(tool.onToolUseDisplayText({ patch })).toBe('Edit broken.txt');
+  });
+
+  it('falls back to a generic summary when no file header can be extracted', () => {
+    const tool = new ToolApplyPatch();
+    const patch = ['*** Begin Patch', '@@', '-old', '+new', '*** End Patch', ''].join('\n');
+
+    expect(tool.onToolUseDisplayText({ patch })).toBe('Applying file changes');
+  });
+
   it('adds a new file', async () => {
     const tool = new ToolApplyPatch();
     const filePath = pathInTemp('new-file.txt');

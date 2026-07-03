@@ -82,14 +82,59 @@ export class ToolApplyPatch extends MicaTool {
 function formatPatchDisplayText(patch: string): string {
   try {
     const operations = parsePatch(patch);
-    if (operations.length === 0) return `Patch ${patch.length}B`;
+    if (operations.length === 0) return formatFallbackPatchDisplayText(patch);
 
     const target = formatPatchTargets(operations);
     const detail = formatPatchDetail(operations);
     return detail ? `Patch ${target} · ${detail}` : `Patch ${target}`;
   } catch {
-    return `Patch ${patch.length}B`;
+    return formatFallbackPatchDisplayText(patch);
   }
+}
+
+function formatFallbackPatchDisplayText(patch: string): string {
+  const operations = extractPatchOperationHeaders(patch);
+  if (operations.length === 0) return 'Applying file changes';
+
+  const target = formatFallbackTargets(operations);
+  const action = formatFallbackAction(operations);
+  return target ? `${action} ${target}` : 'Applying file changes';
+}
+
+function extractPatchOperationHeaders(patch: string): Array<{ type: 'add' | 'update' | 'delete'; path: string }> {
+  const operations: Array<{ type: 'add' | 'update' | 'delete'; path: string }> = [];
+  for (const rawLine of patch.split('\n')) {
+    const line = rawLine.trim();
+    if (line.startsWith(ADD_FILE_PREFIX)) {
+      operations.push({ type: 'add', path: line.slice(ADD_FILE_PREFIX.length).trim() });
+      continue;
+    }
+    if (line.startsWith(UPDATE_FILE_PREFIX)) {
+      operations.push({ type: 'update', path: line.slice(UPDATE_FILE_PREFIX.length).trim() });
+      continue;
+    }
+    if (line.startsWith(DELETE_FILE_PREFIX)) {
+      operations.push({ type: 'delete', path: line.slice(DELETE_FILE_PREFIX.length).trim() });
+    }
+  }
+  return operations.filter((operation) => operation.path);
+}
+
+function formatFallbackTargets(operations: Array<{ type: 'add' | 'update' | 'delete'; path: string }>): string {
+  const labels = [...new Set(operations.map((operation) => basename(operation.path)))];
+  if (labels.length === 0) return '';
+  if (labels.length === 1) return labels[0]!;
+  return `${labels[0]} +${labels.length - 1} more`;
+}
+
+function formatFallbackAction(operations: Array<{ type: 'add' | 'update' | 'delete'; path: string }>): string {
+  const types = new Set(operations.map((operation) => operation.type));
+  if (types.size === 1) {
+    if (types.has('add')) return 'Create';
+    if (types.has('delete')) return 'Delete';
+    return 'Edit';
+  }
+  return 'Patch';
 }
 
 function formatPatchTargets(operations: PatchOperation[]): string {
