@@ -39,6 +39,19 @@ type Source = {
   detail: string;
 };
 
+type ToolSchemaSource = {
+  name: string;
+  tokens: number;
+  kind: 'builtin' | 'mcp';
+};
+
+type ToolOutputEntry = {
+  toolName: string;
+  tokens: number;
+  argSummary: string;
+  resultSummary: string;
+};
+
 type ConversationStats = {
   conversationTokens: number;
   toolCallTokens: number;
@@ -52,6 +65,7 @@ type ConversationStats = {
   backgroundTasks: number;
   outputSources: Map<string, { tokens: number; count: number }>;
   skillOutputCount: number;
+  toolOutputEntries: ToolOutputEntry[];
 };
 
 type ContextOverview = {
@@ -65,6 +79,8 @@ type ContextOverview = {
   totalCacheRate: number | null;
   buckets: Bucket[];
   largestSources: Source[];
+  toolSchemaSources: ToolSchemaSource[];
+  largestToolOutputs: ToolOutputEntry[];
   messageCount: number;
   turns: number;
   toolCalls: number;
@@ -81,16 +97,22 @@ type UnknownNormalizer = {
 export function createContextCommand(agent: CommandAgent) {
   return {
     name: 'context',
-    description: '显示当前上下文占用总览',
-    action: () => {
+    description: '显示当前上下文占用总览，支持 `detail` 参数查看详细信息',
+    action: (arg?: string) => {
       const overview = buildContextOverview(agent);
+      const isDetail = arg?.trim().toLowerCase() === 'detail';
       micaLogger.logRuntime('plugin.context', 'opened', {
         provider: agent.config.provider.id,
         model: overview.model,
         usedTokens: overview.usedTokens,
         messages: overview.messageCount,
         toolCalls: overview.toolCalls,
+        detail: isDetail,
       });
+      if (isDetail) {
+        showContextDetailPanel(overview);
+        return;
+      }
       showContextPanel(overview);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -127,6 +149,74 @@ function showContextPanel(overview: ContextOverview) {
   micaUi.panels.upsertPluginUI({
     id: PANEL_ID,
     component: ContextPanel,
+    preserveInput: true,
+    onInput: (_input, key) => {
+      if (!key.escape) return false;
+      hide();
+      return true;
+    },
+    onTextChange: (value) => {
+      if (value !== initialText) hide();
+      return false;
+    },
+  });
+}
+
+function showContextDetailPanel(overview: ContextOverview) {
+  const initialText = micaUi.terminalInput.text.get();
+
+  function hide() {
+    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.context', 'closed');
+  }
+
+  function ContextDetailPanel() {
+    return (
+      <micaUi.Dialog title="context detail" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
+        <Box flexDirection="column" width={TABLE_WIDTH + 32} maxWidth="100%" minWidth={0}>
+          <Text color={micaUi.theme.colors.textSecondary}>{formatSummaryLine(overview)}</Text>
+          <Text> </Text>
+          <SectionTitle title="Buckets" />
+          {overview.buckets.map((bucket) => (
+            <DetailBucketRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} overview={overview} />
+          ))}
+          <Text> </Text>
+          <SectionTitle title="Largest tool outputs" />
+          {overview.largestToolOutputs.length === 0 ? (
+            <Text dimColor>no tool outputs</Text>
+          ) : (
+            overview.largestToolOutputs.map((entry, index) => (
+              <Box key={`${entry.toolName}-${index}`} flexDirection="column">
+                <Text>
+                  {`${index + 1}.`.padEnd(3)}
+                  {truncateText(entry.toolName, 14).padEnd(14)}
+                  {' '}
+                  <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(entry.tokens).padStart(6)}</Text>
+                  {'   '}
+                  {truncateText(entry.argSummary, 48)}
+                </Text>
+                <Text color={micaUi.theme.colors.dim}>{`   ${truncateText(entry.resultSummary, 72)}`}</Text>
+              </Box>
+            ))
+          )}
+          <Text> </Text>
+          <SectionTitle title="Tools" />
+          {overview.toolSchemaSources.map((tool) => (
+            <Text key={tool.name}>
+              {truncateText(tool.name, 52).padEnd(52)}
+              {' '}
+              <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(tool.tokens).padStart(6)}</Text>
+              {'   '}
+              <Text color={micaUi.theme.colors.dim}>{tool.kind}</Text>
+            </Text>
+          ))}
+        </Box>
+      </micaUi.Dialog>
+    );
+  }
+
+  micaUi.panels.upsertPluginUI({
+    id: PANEL_ID,
+    component: ContextDetailPanel,
     preserveInput: true,
     onInput: (_input, key) => {
       if (!key.escape) return false;
@@ -179,6 +269,11 @@ function buildContextOverview(agent: CommandAgent): ContextOverview {
     totalCacheRate,
     buckets,
     largestSources: buildLargestSources(toolSchemaBreakdown, promptBreakdown, conversationStats, scale),
+    toolSchemaSources: toolSchemaBreakdown.sources.map((source) => ({ ...source, tokens: Math.round(source.tokens * scale) })),
+    largestToolOutputs: conversationStats.toolOutputEntries
+      .map((entry) => ({ ...entry, tokens: Math.round(entry.tokens * scale) }))
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 4),
     messageCount: snapshot.messages.length,
     turns: conversationStats.userTurns,
     toolCalls: conversationStats.toolCalls,
@@ -203,22 +298,34 @@ function estimatePromptBreakdown(): { systemTokens: number; skillTokens: number;
 function estimateToolSchemas(
   tools: Tool[],
   protocol: ProviderProtocol,
-): { totalTokens: number; builtinTokens: number; builtinCount: number; mcpTokens: number; mcpCount: number } {
+): {
+  totalTokens: number;
+  builtinTokens: number;
+  builtinCount: number;
+  mcpTokens: number;
+  mcpCount: number;
+  sources: ToolSchemaSource[];
+} {
   let builtinTokens = 0;
   let mcpTokens = 0;
   let builtinCount = 0;
   let mcpCount = 0;
+  const sources: ToolSchemaSource[] = [];
 
   for (const tool of tools) {
     const tokens = estimateTokens(stringifyForEstimate(toProviderToolPayload(tool, protocol)));
     if (isMcpTool(tool.name)) {
       mcpTokens += tokens;
       mcpCount++;
+      sources.push({ name: tool.name, tokens, kind: 'mcp' });
     } else {
       builtinTokens += tokens;
       builtinCount++;
+      sources.push({ name: tool.name, tokens, kind: 'builtin' });
     }
   }
+
+  sources.sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
 
   return {
     totalTokens: builtinTokens + mcpTokens,
@@ -226,6 +333,7 @@ function estimateToolSchemas(
     builtinCount,
     mcpTokens,
     mcpCount,
+    sources,
   };
 }
 
@@ -287,8 +395,10 @@ function analyzeConversation(items: ConversationItem[]): ConversationStats {
     backgroundTasks: 0,
     outputSources: new Map(),
     skillOutputCount: 0,
+    toolOutputEntries: [],
   };
   const toolNamesById = new Map<string, string>();
+  const toolArgsById = new Map<string, unknown>();
 
   for (const item of items) {
     if (item.type === 'user' || item.type === 'assistant' || item.type === 'system') {
@@ -301,6 +411,7 @@ function analyzeConversation(items: ConversationItem[]): ConversationStats {
     if (item.type === 'tool_call') {
       stats.toolCalls++;
       toolNamesById.set(item.id, item.name);
+      toolArgsById.set(item.id, item.args);
       stats.toolCallTokens += estimateTokens(item.argsText ?? stringifyForEstimate(item.args));
       recordToolCallWorkset(stats, item.name, item.args);
       continue;
@@ -315,6 +426,12 @@ function analyzeConversation(items: ConversationItem[]): ConversationStats {
       } else {
         stats.toolOutputTokens += tokens;
         addOutputSource(stats, toolName, tokens);
+        stats.toolOutputEntries.push({
+          toolName,
+          tokens,
+          argSummary: summarizeToolArgs(toolName, toolArgsById.get(item.id)),
+          resultSummary: summarizeToolResult(toolName, item.content),
+        });
       }
       continue;
     }
@@ -392,6 +509,36 @@ function outputSourceDetail(
   return `${source.count} results`;
 }
 
+function summarizeToolArgs(toolName: string, args: unknown): string {
+  const input = isRecord(args) ? args : {};
+  if (toolName === 'read_file') {
+    const filePath = stringValue(input.file_path) ?? 'unknown file';
+    const offset = numberValue(input.offset);
+    return offset && offset > 1 ? `${filePath}:${offset}` : filePath;
+  }
+  if (toolName === 'run_shell') return truncateText(stringValue(input.command) ?? 'shell command', 80);
+  if (toolName === 'grep_search') return truncateText(stringValue(input.pattern) ?? 'pattern', 80);
+  if (toolName === 'web_fetch') return truncateText(stringValue(input.url) ?? 'url', 80);
+  if (toolName === 'write_file') return truncateText(stringValue(input.file_path) ?? 'file', 80);
+  return truncateText(stringifyForEstimate(args), 80);
+}
+
+function summarizeToolResult(toolName: string, content: string): string {
+  if (toolName === 'read_file') {
+    const lineCount = content.split('\n').length;
+    return `returned ${lineCount} lines`;
+  }
+  if (toolName === 'grep_search') {
+    const matches = content.split('\n').filter((line) => line.trim()).length;
+    return `${matches} matches`;
+  }
+  if (toolName === 'run_shell') {
+    const lines = content.split('\n').filter((line) => line.trim()).length;
+    return lines > 0 ? `${lines} output lines` : `${content.length} chars`;
+  }
+  return `${content.length} chars`;
+}
+
 function extractPromptSectionBlock(prompt: string, section: string): string {
   const match = prompt.match(new RegExp(`<${section}>\n[\s\S]*?\n</${section}>`));
   return match?.[0] ?? '';
@@ -439,6 +586,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function isMcpTool(name: string): boolean {
@@ -499,6 +650,52 @@ function TokenMapRow({ bucket, totalTokens }: { bucket: Bucket; totalTokens: num
       <Text color={micaUi.theme.colors.dim}>{formatPercent(ratio).padStart(SHARE_COL_WIDTH)}</Text>
     </Text>
   );
+}
+
+function DetailBucketRow({
+  bucket,
+  totalTokens,
+  overview,
+}: {
+  bucket: Bucket;
+  totalTokens: number;
+  overview: ContextOverview;
+}) {
+  const ratio = totalTokens > 0 ? bucket.tokens / totalTokens : 0;
+  return (
+    <Text>
+      {truncateText(bucket.label, 14).padEnd(14)}
+      {' '}
+      <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(bucket.tokens).padStart(6)}</Text>
+      {'   '}
+      <Text color={micaUi.theme.colors.dim}>{formatPercent(ratio).padStart(6)}</Text>
+      {'   '}
+      <Text color={micaUi.theme.colors.dim}>{bucketDetailText(bucket.key, overview)}</Text>
+    </Text>
+  );
+}
+
+function SectionTitle({ title }: { title: string }) {
+  return (
+    <Box flexDirection="column">
+      <Text>{title}</Text>
+      <Text color={micaUi.theme.colors.dim}>{'─'.repeat(TABLE_WIDTH + 18)}</Text>
+    </Box>
+  );
+}
+
+function bucketDetailText(key: BucketKey, overview: ContextOverview): string {
+  if (key === 'toolSchemas') return `${overview.toolSchemaSources.length} tools`;
+  if (key === 'toolOutputs') return `${overview.largestToolOutputs.length > 0 ? 'top outputs shown below' : 'no results'}`;
+  if (key === 'conversation') return `${overview.messageCount} messages / ${overview.turns} turns`;
+  if (key === 'toolCalls') return `${overview.toolCalls} invocations`;
+  return '';
+}
+
+function formatSummaryLine(overview: ContextOverview): string {
+  const latest = overview.latestCacheRate === null ? '-' : formatPercent(overview.latestCacheRate);
+  const total = overview.totalCacheRate === null ? '-' : formatPercent(overview.totalCacheRate);
+  return `used ${formatWindowLine(overview)}   free ${formatTokenCount(overview.freeTokens)}   cache ${latest} latest / ${total} total`;
 }
 
 function MapBar({ ratio, width, color }: { ratio: number; width: number; color: string }) {
