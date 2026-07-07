@@ -110,10 +110,7 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
 
     expect(session.uiState.pendingInputs).toEqual(['first queued', 'second queued display']);
     expect(session.uiState.pendingQueueMode).toBe('after_iteration');
-    expect(uiMocks.setPendingInputs).toHaveBeenCalledWith(
-      ['first queued', 'second queued display'],
-      'after_iteration',
-    );
+    expect(uiMocks.setPendingInputs).toHaveBeenCalledWith(['first queued', 'second queued display'], 'after_iteration');
   });
 
   it('keeps prior turn logs when a new turn asks to preserve them', async () => {
@@ -157,6 +154,42 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     expect(session.uiState.lastTurnOutcome).toBe('running');
     expect(uiMocks.clearAgentTurnLogItems).toHaveBeenCalledTimes(1);
     expect(uiMocks.thinkingSet).toHaveBeenCalledWith('');
+  });
+
+  it('detaches agent listeners when an idle agent session is cleared', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+
+    bridge.start();
+    bridge.disposeAgent(agent);
+
+    expect(agent.events.off).toHaveBeenCalledWith('status', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('text', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('thinking', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('toolCall', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('toolResult', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('usage', expect.any(Function));
+  });
+
+  it('unsubscribes bridge-level listeners on stop', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+
+    bridge.start();
+    bridge.stop();
+    runtime.events.publish({
+      type: 'queue:changed',
+      pendingInputs: [micaRuntime.createRuntimeInput('after stop', 'ui')],
+      owner: agent,
+    });
+
+    expect(session.uiState.pendingInputs).toEqual([]);
   });
 });
 

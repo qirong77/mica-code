@@ -266,7 +266,12 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     clearIdleAgents() {
       const context = currentContext();
       if (!context) return { cleared: [], remaining: [] };
-      const result = context.agentSessions.clearIdleSessions();
+      const result = context.agentSessions.clearIdleSessions({
+        onClear: (session) => {
+          context.runtime.disposeAgent(session.agent);
+          context.uiBridge.disposeAgent(session.agent);
+        },
+      });
       context.uiBridge.syncAgentStatusItems();
       return result;
     },

@@ -17,6 +17,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
+import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -25,8 +26,6 @@ export type ChatCompletionsUsageRecord = AgentUsageRecord & {
   rawUsage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
   promptTokens: number;
 };
-
-const MAX_HISTORICAL_TOOL_RESULT_LENGTH = 12_000;
 
 function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
@@ -83,7 +82,7 @@ export class ChatCompletionsClient extends BaseAgent<
     snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, ChatCompletionsUsageRecord>,
   ) {
     this.turnId = this.loadSnapshotState(
-      { ...snapshot, messages: repairChatCompletionsToolResults(snapshot.messages) },
+      { ...snapshot, messages: compactHistoricalToolResults(repairChatCompletionsToolResults(snapshot.messages)) },
       (message) => message.role !== 'system',
     );
   }
@@ -97,6 +96,7 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
+    this.messages = compactHistoricalToolResults(this.messages);
     const hasCurrentTurn = this.messages.some(
       (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
     );
@@ -131,7 +131,8 @@ export class ChatCompletionsClient extends BaseAgent<
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
-      this.messages = messages.filter((message) => message.role !== 'system');
+      const sessionMessages = messages.filter((message) => message.role !== 'system');
+      this.messages = takeNextInput ? sessionMessages : compactHistoricalToolResults(sessionMessages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
@@ -405,19 +406,13 @@ function compactHistoricalToolResults(
   return messages.map((message) => {
     if (message.role !== 'tool') return message;
     if (typeof message.content !== 'string') return message;
-    if (message.content.length <= MAX_HISTORICAL_TOOL_RESULT_LENGTH) {
+    if (message.content.length <= MAX_HISTORICAL_TOOL_RESULT_CHARS) {
       return message;
     }
 
-    const head = message.content.slice(0, MAX_HISTORICAL_TOOL_RESULT_LENGTH);
-    const omitted = message.content.length - head.length;
     return {
       ...message,
-      content: [
-        head,
-        '',
-        `[历史工具结果已压缩，省略 ${omitted} 字符。如需完整内容，请重新读取对应文件或重新运行相关工具。]`,
-      ].join('\n'),
+      content: compactHistoricalToolResultText(message.content),
     };
   });
 }

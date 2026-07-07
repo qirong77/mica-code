@@ -18,17 +18,32 @@ dotenv.config({ path: resolve(process.cwd(), 'packages/mica-agent/.env') });
 
 const app = createApplication();
 
+const SIGNAL_EXIT_FORCE_TIMEOUT_MS = 10_000;
 let signalExitStarted = false;
+let signalExitTimer: ReturnType<typeof setTimeout> | null = null;
 const requestSignalExit = (signal: NodeJS.Signals) => {
+  const exitCode = signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : 130;
   if (signalExitStarted) {
-    process.exit(130);
+    process.exit(exitCode);
   }
   signalExitStarted = true;
-  void app.requestExit(signal === 'SIGTERM' ? 143 : 130);
+  signalExitTimer = setTimeout(() => process.exit(exitCode), SIGNAL_EXIT_FORCE_TIMEOUT_MS);
+  signalExitTimer.unref?.();
+  void app
+    .requestExit(exitCode)
+    .catch((error) => {
+      reportRuntimeError(error, '退出失败');
+      process.exit(exitCode);
+    })
+    .finally(() => {
+      if (signalExitTimer) clearTimeout(signalExitTimer);
+      signalExitTimer = null;
+    });
 };
 
 process.once('SIGINT', requestSignalExit);
 process.once('SIGTERM', requestSignalExit);
+process.once('SIGHUP', requestSignalExit);
 
 await app.start();
 await app.waitUntilExit();

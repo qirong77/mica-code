@@ -26,6 +26,7 @@ import {
 } from '../core/Agent.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
+import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -95,7 +96,10 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   }
 
   loadSnapshot(snapshot: AgentSnapshot<ResponseInputItem, ResponsesUsageRecord>) {
-    this.turnId = this.loadSnapshotState({ ...snapshot, messages: repairResponsesToolResults(snapshot.messages) });
+    this.turnId = this.loadSnapshotState({
+      ...snapshot,
+      messages: compactHistoricalToolResults(repairResponsesToolResults(snapshot.messages)),
+    });
   }
 
   toConversationMessages(): AgentConversationMessage[] {
@@ -108,6 +112,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
+    this.messages = compactHistoricalToolResults(this.messages);
     const content = micaContentToResponsesContent(question);
     const hasCurrentTurn = this.messages.some(
       (item) =>
@@ -138,11 +143,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: ResponseInputItem[] = [
-      ...this.messages,
+      ...compactHistoricalToolResults(this.messages),
       { type: 'message', role: 'user', content: micaContentToResponsesContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
-      this.messages = messages;
+      this.messages = takeNextInput ? messages : compactHistoricalToolResults(messages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
@@ -408,6 +413,14 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
 
   if (pending.size > 0) repaired.push(...Array.from(pending, interruptedResponsesToolResult));
   return repaired;
+}
+
+function compactHistoricalToolResults(messages: ResponseInputItem[]): ResponseInputItem[] {
+  return messages.map((item) => {
+    if (item.type !== 'function_call_output' || typeof item.output !== 'string') return item;
+    const compacted = compactHistoricalToolResultText(item.output);
+    return compacted === item.output ? item : { ...item, output: compacted };
+  });
 }
 
 function interruptedResponsesToolResult(callId: string): ResponseInputItem {

@@ -1,4 +1,5 @@
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { Disposable } from '@packages/mica-common/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
@@ -18,7 +19,9 @@ export class MicaUiRuntimeBridge {
   private readonly toolLogs = new Map<AgentRuntime, ToolLogController>();
   private readonly disposers = new Map<AgentRuntime, () => void>();
   private readonly messageTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly messageTimerOwners = new Map<string, AgentRuntime>();
   private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
+  private readonly bridgeDisposers: Array<Disposable | (() => void) | undefined> = [];
 
   constructor(
     private agent: AgentRuntime,
@@ -46,70 +49,74 @@ export class MicaUiRuntimeBridge {
     this.attachAgentEvents(this.agent);
     this.syncAgentStatusItems();
 
-    this.runtime.events.on('event', (event) => {
-      if (event.type === 'queue:changed') {
-        const owner = eventOwnerAgent(event.owner, this.agent);
-        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
-        const pendingInputs = event.pendingInputs.map((input) => input.displayText ?? input.text);
-        const pendingQueueMode = event.pendingInputs.at(-1)?.queueMode ?? null;
-        session.uiState = normalizeUiState({ ...session.uiState, pendingInputs, pendingQueueMode });
-        if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs, pendingQueueMode);
-      }
-      if (event.type === 'notification') {
-        const owner = eventOwnerAgent(event.owner, this.agent);
-        this.showMessageForAgent(owner, event.message, event.ttl);
-      }
-      if (event.type === 'turn:started') {
-        const owner = eventOwnerAgent(event.owner, this.agent);
-        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
-        const toolLogs = this.toolLogFor(session.agent);
-        const preservePreviousTurnUi = event.preservePreviousTurnUi === true;
-        if (preservePreviousTurnUi) {
-          this.preserveTurnUiOnConnecting.add(session.agent);
-        } else {
-          this.preserveTurnUiOnConnecting.delete(session.agent);
+    this.bridgeDisposers.push(
+      this.runtime.events.on('event', (event) => {
+        if (event.type === 'queue:changed') {
+          const owner = eventOwnerAgent(event.owner, this.agent);
+          const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
+          const pendingInputs = event.pendingInputs.map((input) => input.displayText ?? input.text);
+          const pendingQueueMode = event.pendingInputs.at(-1)?.queueMode ?? null;
+          session.uiState = normalizeUiState({ ...session.uiState, pendingInputs, pendingQueueMode });
+          if (this.isActiveAgent(session.agent)) micaUi.conversation.setPendingInputs(pendingInputs, pendingQueueMode);
         }
-        toolLogs.resetTurn({ clearThinkingText: !preservePreviousTurnUi });
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          agentTurnLogItems: preservePreviousTurnUi ? session.uiState.agentTurnLogItems : [],
-          thinkingText: preservePreviousTurnUi ? session.uiState.thinkingText : '',
-          lastTurnOutcome: 'running',
-        });
-        if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) {
-          micaUi.panels.clearAgentTurnLogItems();
+        if (event.type === 'notification') {
+          const owner = eventOwnerAgent(event.owner, this.agent);
+          this.showMessageForAgent(owner, event.message, event.ttl);
         }
-      }
-      if (event.type === 'turn:finished') {
-        this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
-      }
-      if (event.type === 'turn:aborted') {
-        const owner = eventOwnerAgent(event.owner, this.agent);
-        const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
-        const conversationMessages = session.uiState.conversationMessages.length
-          ? session.uiState.conversationMessages
-          : session.agent.toConversationMessages();
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          conversationMessages,
-          responseText: '',
-          pendingInputs: [],
-          pendingQueueMode: null,
-          workingStatus: { type: 'idle' },
-          lastTurnOutcome: 'aborted',
-        });
-        if (this.isActiveAgent(session.agent)) {
-          micaUi.conversation.setMessages(session.uiState.conversationMessages);
-          micaUi.conversation.clearResponseText();
-          micaUi.conversation.clearPendingInput();
-          micaUi.panels.status.idle();
+        if (event.type === 'turn:started') {
+          const owner = eventOwnerAgent(event.owner, this.agent);
+          const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
+          const toolLogs = this.toolLogFor(session.agent);
+          const preservePreviousTurnUi = event.preservePreviousTurnUi === true;
+          if (preservePreviousTurnUi) {
+            this.preserveTurnUiOnConnecting.add(session.agent);
+          } else {
+            this.preserveTurnUiOnConnecting.delete(session.agent);
+          }
+          toolLogs.resetTurn({ clearThinkingText: !preservePreviousTurnUi });
+          session.uiState = normalizeUiState({
+            ...session.uiState,
+            agentTurnLogItems: preservePreviousTurnUi ? session.uiState.agentTurnLogItems : [],
+            thinkingText: preservePreviousTurnUi ? session.uiState.thinkingText : '',
+            lastTurnOutcome: 'running',
+          });
+          if (this.isActiveAgent(session.agent) && !preservePreviousTurnUi) {
+            micaUi.panels.clearAgentTurnLogItems();
+          }
         }
-      }
-    });
+        if (event.type === 'turn:finished') {
+          this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
+        }
+        if (event.type === 'turn:aborted') {
+          const owner = eventOwnerAgent(event.owner, this.agent);
+          const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
+          const conversationMessages = session.uiState.conversationMessages.length
+            ? session.uiState.conversationMessages
+            : session.agent.toConversationMessages();
+          session.uiState = normalizeUiState({
+            ...session.uiState,
+            conversationMessages,
+            responseText: '',
+            pendingInputs: [],
+            pendingQueueMode: null,
+            workingStatus: { type: 'idle' },
+            lastTurnOutcome: 'aborted',
+          });
+          if (this.isActiveAgent(session.agent)) {
+            micaUi.conversation.setMessages(session.uiState.conversationMessages);
+            micaUi.conversation.clearResponseText();
+            micaUi.conversation.clearPendingInput();
+            micaUi.panels.status.idle();
+          }
+        }
+      }),
+    );
 
-    micaUi.terminalInput.onSubmit((text, options) => {
-      void this.runtime.submit(text, { queueMode: options?.queueMode, displayText: options?.displayText });
-    });
+    this.bridgeDisposers.push(
+      micaUi.terminalInput.onSubmit((text, options) => {
+        void this.runtime.submit(text, { queueMode: options?.queueMode, displayText: options?.displayText });
+      }),
+    );
 
     micaUi.panels.setOnAbortAgent(() => {
       void this.runtime.abort();
@@ -148,8 +155,10 @@ export class MicaUiRuntimeBridge {
       }
       if (this.isActiveAgent(agent)) micaUi.messageBar.removeMessage(id);
       this.messageTimers.delete(id);
+      this.messageTimerOwners.delete(id);
     }, ttl);
     this.messageTimers.set(id, timer);
+    this.messageTimerOwners.set(id, agent);
   }
 
   syncAgentStatusItems(): void {
@@ -157,11 +166,38 @@ export class MicaUiRuntimeBridge {
   }
 
   stop(): void {
+    for (const disposable of this.bridgeDisposers.splice(0)) {
+      if (!disposable) continue;
+      if (typeof disposable === 'function') {
+        disposable();
+      } else {
+        void disposable.dispose();
+      }
+    }
+    micaUi.panels.setOnAbortAgent(() => undefined);
+    micaUi.panels.setOnEditPendingInput(() => null);
     for (const dispose of this.disposers.values()) dispose();
     for (const timer of this.messageTimers.values()) clearTimeout(timer);
     this.disposers.clear();
     this.toolLogs.clear();
     this.messageTimers.clear();
+    this.messageTimerOwners.clear();
+    this.preserveTurnUiOnConnecting.clear();
+  }
+
+  disposeAgent(agent: AgentRuntime): void {
+    this.disposers.get(agent)?.();
+    this.disposers.delete(agent);
+    this.toolLogs.delete(agent);
+    this.preserveTurnUiOnConnecting.delete(agent);
+    for (const [id, owner] of this.messageTimerOwners) {
+      if (owner !== agent) continue;
+      const timer = this.messageTimers.get(id);
+      if (timer) clearTimeout(timer);
+      this.messageTimers.delete(id);
+      this.messageTimerOwners.delete(id);
+      if (this.isActiveAgent(agent)) micaUi.messageBar.removeMessage(id);
+    }
   }
 
   private onText(agent: AgentRuntime, text: string): void {

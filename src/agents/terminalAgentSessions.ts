@@ -123,7 +123,10 @@ export class TerminalAgentSessionManager {
     return this.toRecord(session);
   }
 
-  clearIdleSessions(): { cleared: TerminalAgentSessionRecord[]; remaining: TerminalAgentSessionRecord[] } {
+  clearIdleSessions(options: { onClear?: (session: TerminalAgentSession) => void } = {}): {
+    cleared: TerminalAgentSessionRecord[];
+    remaining: TerminalAgentSessionRecord[];
+  } {
     const cleared: TerminalAgentSessionRecord[] = [];
     for (let index = this.sessions.length - 1; index >= 0; index--) {
       const session = this.sessions[index]!;
@@ -131,6 +134,7 @@ export class TerminalAgentSessionManager {
       cleared.push(this.toRecord(session));
       session.disposeStatusListener();
       session.agent.abort();
+      options.onClear?.(session);
       this.sessions.splice(index, 1);
     }
     cleared.reverse();

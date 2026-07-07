@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentQueryContent, AgentQueryOptions } from '@packages/mica-agent/index.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
@@ -334,6 +335,31 @@ describe('LocalRuntimeController abort display state', () => {
       }),
       { role: 'assistant', content: 'eventual ok' },
     ]);
+  });
+  it('drops per-agent runtime references when an idle agent session is cleared', () => {
+    const agent = {
+      abort: vi.fn(),
+      events: { off: vi.fn(), on: vi.fn() },
+    } as unknown as AgentRuntime;
+    const sessionController = { saveCurrent: vi.fn() } as unknown as SessionController;
+    const controller = new LocalRuntimeController(
+      agent,
+      sessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+
+    controller.appendResponseTextFor(agent, 'cached response');
+    controller.enqueueForAgent(agent, micaRuntime.createRuntimeInput('queued', 'ui'));
+
+    expect(controller.getResponseBufferFor(agent)).toBe('cached response');
+    expect(controller.countQueueForAgent(agent)).toBe(1);
+
+    controller.disposeAgent(agent);
+
+    expect(controller.getResponseBufferFor(agent)).toBe('');
+    expect(controller.countQueueForAgent(agent)).toBe(0);
   });
 });
 

@@ -23,6 +23,7 @@ import {
 import { providerContentToAgentContent } from '../core/Content.js';
 import { withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
+import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -103,7 +104,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
 
   loadSnapshot(snapshot: AgentSnapshot<MessageParam, AnthropicUsageRecord>) {
     this.turnId = this.loadSnapshotState(
-      { ...snapshot, messages: repairAnthropicToolResults(snapshot.messages) },
+      { ...snapshot, messages: compactHistoricalToolResults(repairAnthropicToolResults(snapshot.messages)) },
       (message) => message.role !== 'system',
     );
   }
@@ -118,6 +119,7 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
+    this.messages = compactHistoricalToolResults(this.messages);
     const content = micaContentToAnthropicContent(question);
     const hasCurrentTurn = this.messages.some(
       (message) => message.role === 'user' && JSON.stringify(message.content) === JSON.stringify(content),
@@ -145,11 +147,11 @@ export class AnthropicAgent extends BaseAgent<ModelClientOptions, MessageParam, 
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: MessageParam[] = [
-      ...this.messages,
+      ...compactHistoricalToolResults(this.messages),
       { role: 'user', content: micaContentToAnthropicContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
-      this.messages = messages;
+      this.messages = takeNextInput ? messages : compactHistoricalToolResults(messages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
@@ -362,6 +364,21 @@ function repairAnthropicToolResults(messages: MessageParam[]): MessageParam[] {
 
   if (pending.size > 0) repaired.push(interruptedAnthropicToolResultMessage(pending));
   return repaired;
+}
+
+function compactHistoricalToolResults(messages: MessageParam[]): MessageParam[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || typeof message.content === 'string') return message;
+    let changed = false;
+    const content = message.content.map((part) => {
+      if (part.type !== 'tool_result' || typeof part.content !== 'string') return part;
+      const compacted = compactHistoricalToolResultText(part.content);
+      if (compacted === part.content) return part;
+      changed = true;
+      return { ...part, content: compacted };
+    });
+    return changed ? { ...message, content } : message;
+  });
 }
 
 function interruptedAnthropicToolResultMessage(toolUseIds: Iterable<string>): MessageParam {

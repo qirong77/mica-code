@@ -98,6 +98,23 @@ export class LocalRuntimeController implements RuntimeController {
       await waitForActiveTurns(this.activeTurns, STOP_ABORT_WAIT_MS);
     }
     await this.hooks.emit('runtime:stop', { runtime: this });
+    this.responseBuffers.clear();
+    this.committedResponseBuffers.clear();
+    this.queues.clear();
+    this.sessionControllers.clear();
+    this.clearingAgents.clear();
+    this.exclusiveTasks.clear();
+  }
+
+  disposeAgent(agent: AgentRuntime): void {
+    this.responseBuffers.delete(agent);
+    this.committedResponseBuffers.delete(agent);
+    this.queues.delete(agent);
+    this.sessionControllers.delete(agent);
+    this.clearingAgents.delete(agent);
+    this.exclusiveTasks.delete(agent);
+    this.rewindCheckpoints.clear(agent);
+    this.runningAgents.delete(agent);
   }
 
   getStatus(): RuntimeStatus {
@@ -741,9 +758,11 @@ function formatRetryNoticeContent(error: unknown, retryAttempt: number, remainin
   }
 
   const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-  return [`请求暂时失败，将自动重试。`, `倒计时：${remainingSeconds}s 后发起${retryLabel}`, `错误：${errorMessage}`].join(
-    '\n',
-  );
+  return [
+    `请求暂时失败，将自动重试。`,
+    `倒计时：${remainingSeconds}s 后发起${retryLabel}`,
+    `错误：${errorMessage}`,
+  ].join('\n');
 }
 
 function updateRetryNoticeMessage(
