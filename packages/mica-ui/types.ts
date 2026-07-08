@@ -30,10 +30,10 @@ export interface MicaUiMessageParam {
 
 export type MicaUiWorkingStatus =
   | { type: 'idle' }
-  | { type: 'connecting'; startedAt?: number }
-  | { type: 'thinking'; startedAt?: number }
-  | { type: 'streaming'; startedAt?: number }
-  | { type: 'calling_tool'; startedAt?: number; elapsedMs?: number; toolNames?: string[] }
+  | { type: 'connecting'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'thinking'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'streaming'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'calling_tool'; startedAt?: number; moduleStartedAt?: number; elapsedMs?: number; toolNames?: string[] }
   | { type: 'plugin_task'; text: string; level?: 'info' | 'warn' | 'error' }
   | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message?: string };

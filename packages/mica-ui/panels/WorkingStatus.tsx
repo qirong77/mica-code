@@ -10,6 +10,7 @@ import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { formatElapsed } from '../utils/format.js';
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
+import type { MicaUiWorkingStatus } from '../types.js';
 
 const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
 const CONTEXT_USAGE_COLORS = [
@@ -75,6 +76,37 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(ascii / 4 + cjk / 1.5));
 }
 
+function getActiveStatusKey(info: MicaUiWorkingStatus): string {
+  switch (info.type) {
+    case 'connecting':
+    case 'thinking':
+    case 'streaming':
+      return info.type;
+    case 'calling_tool':
+      return `${info.type}:${info.toolNames?.join(',') ?? ''}`;
+    case 'plugin_task':
+      return `${info.type}:${info.text}`;
+    default:
+      return '';
+  }
+}
+
+function getActiveStatusStartedAt(info: MicaUiWorkingStatus): number | undefined {
+  if ('moduleStartedAt' in info && info.moduleStartedAt) return info.moduleStartedAt;
+  if ('startedAt' in info && info.startedAt) return info.startedAt;
+  return undefined;
+}
+
+function getInlineStatusDisplay(info: MicaUiWorkingStatus) {
+  if (info.type !== 'calling_tool' || info.elapsedMs == null) return getWorkingStatusDisplay(info);
+  return getWorkingStatusDisplay({
+    type: 'calling_tool',
+    startedAt: info.startedAt,
+    moduleStartedAt: info.moduleStartedAt,
+    toolNames: info.toolNames,
+  });
+}
+
 export function WorkingStatus() {
   const info = useScheduleState(workingStatus);
   const currentThinkingText = useScheduleState(thinkingText);
@@ -82,24 +114,25 @@ export function WorkingStatus() {
   const queueStatus = useScheduleState(queueStatusText);
   const startRef = useRef(0);
   const [elapsed, setElapsed] = useState(0);
-  const statusStartedAt = 'startedAt' in info ? info.startedAt : undefined;
+  const activeStatusKey = getActiveStatusKey(info);
+  const activeStatusStartedAt = getActiveStatusStartedAt(info);
+  const activeStatusElapsedMs = info.type === 'calling_tool' ? info.elapsedMs : undefined;
 
   useEffect(() => {
-    if (info.type === 'idle' || info.type === 'completed' || info.type === 'error') {
+    if (!activeStatusKey) {
       startRef.current = 0;
       setElapsed(0);
       return;
     }
-    if (statusStartedAt) startRef.current = statusStartedAt;
-    else if (!startRef.current) startRef.current = Date.now();
+    startRef.current = activeStatusStartedAt ?? (activeStatusElapsedMs != null ? Date.now() - activeStatusElapsedMs : Date.now());
+    setElapsed(Date.now() - startRef.current);
     const timer = setInterval(() => setElapsed(Date.now() - startRef.current), runtimeEnv.ui.elapsedRefreshIntervalMs);
     return () => clearInterval(timer);
-  }, [info.type, statusStartedAt]);
+  }, [activeStatusKey, activeStatusStartedAt, activeStatusElapsedMs]);
 
-  const displayElapsed =
-    info.type === 'completed' || info.type === 'calling_tool' ? (info.elapsedMs ?? elapsed) : elapsed;
-  const elapsedText = displayElapsed > 0 ? formatElapsed(displayElapsed) : '';
-  const statusDisplay = getWorkingStatusDisplay(info);
+  const elapsedText = activeStatusKey && elapsed > 0 ? formatElapsed(elapsed) : '';
+  const statusDisplay = getInlineStatusDisplay(info);
+  const statusText = elapsedText ? `${statusDisplay.text} ${elapsedText}` : statusDisplay.text;
 
   const content = queueStatus ? (
     <Text color={themeColors.inactive} wrap="wrap">
@@ -112,14 +145,14 @@ export function WorkingStatus() {
           return (
             <Box>
               <Spin />
-              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={statusDisplay.color}>{statusText}</Text>
             </Box>
           );
         case 'thinking':
           return (
             <Box>
               <Spin />
-              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={statusDisplay.color}>{statusText}</Text>
               <Text color={themeColors.inactive}> ↓{estimateTokens(currentThinkingText)} tokens</Text>
             </Box>
           );
@@ -127,7 +160,7 @@ export function WorkingStatus() {
           return (
             <Box>
               <Spin />
-              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={statusDisplay.color}>{statusText}</Text>
               <Text color={themeColors.inactive}> ↓{estimateTokens(currentResponseText)} tokens</Text>
             </Box>
           );
@@ -135,14 +168,14 @@ export function WorkingStatus() {
           return (
             <Box>
               <Spin />
-              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={statusDisplay.color}>{statusText}</Text>
             </Box>
           );
         case 'plugin_task':
           return (
             <Box>
               <Spin />
-              <Text color={statusDisplay.color}>{statusDisplay.text}</Text>
+              <Text color={statusDisplay.color}>{statusText}</Text>
             </Box>
           );
         case 'error':
@@ -162,9 +195,6 @@ export function WorkingStatus() {
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <StatusInfo />
-        {!queueStatus && info.type !== 'completed' && info.type !== 'error' && info.type !== 'idle' ? (
-          <Text color={themeColors.inactive}> {elapsedText}</Text>
-        ) : null}
       </Box>
     </Box>
   );

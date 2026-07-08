@@ -81,6 +81,43 @@ describe('AgentRuntime tool status', () => {
 
     expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
   });
+
+  it('tracks each active module start time separately', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1000);
+      const { AgentRuntime } = await import('./AgentRuntime.js');
+      const agent = new AgentRuntime();
+      const statuses: Array<{ type: string; moduleStartedAt?: number }> = [];
+
+      agent.events.on('status', (status) => {
+        if ('moduleStartedAt' in status) statuses.push({ type: status.type, moduleStartedAt: status.moduleStartedAt });
+        else statuses.push({ type: status.type });
+      });
+      modelClient.queryImpl = async () => {
+        vi.setSystemTime(1100);
+        modelClient.onToolCall?.('read_file', '{"file_path":"a"}', 'tool-1');
+        vi.setSystemTime(1300);
+        modelClient.onToolResult?.('read_file', 'done', 'tool-1');
+        vi.setSystemTime(1600);
+        modelClient.onText?.('ok');
+        vi.setSystemTime(1700);
+        return 'ok';
+      };
+
+      await agent.run('hello');
+
+      expect(statuses).toEqual([
+        { type: 'connecting', moduleStartedAt: 1000 },
+        { type: 'calling_tool', moduleStartedAt: 1100 },
+        { type: 'connecting', moduleStartedAt: 1300 },
+        { type: 'streaming', moduleStartedAt: 1600 },
+        { type: 'completed' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createModelClientStub(): IAgent<ModelClientOptions> & {

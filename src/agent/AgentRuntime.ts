@@ -19,10 +19,10 @@ import {
 
 export type AgentRuntimeStatus =
   | { type: 'idle' }
-  | { type: 'connecting'; startedAt?: number }
-  | { type: 'thinking'; startedAt?: number }
-  | { type: 'streaming'; startedAt?: number }
-  | { type: 'calling_tool'; startedAt?: number; toolNames?: string[] }
+  | { type: 'connecting'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'thinking'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'streaming'; startedAt?: number; moduleStartedAt?: number }
+  | { type: 'calling_tool'; startedAt?: number; moduleStartedAt?: number; toolNames?: string[] }
   | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message: string };
 
@@ -89,6 +89,8 @@ export class AgentRuntime {
   private currentConfig: AgentRuntimeConfig;
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
+  private activeStatusModuleStartedAt: number | null = null;
+  private activeStatusModuleKey = '';
 
   constructor() {
     this.currentConfig = readAgentRuntimeConfig();
@@ -397,10 +399,35 @@ export class AgentRuntime {
   }
 
   private emitStatus(status: AgentRuntimeStatus): void {
-    const key = statusKey(status);
+    const nextStatus = this.withModuleStartedAt(status);
+    const key = statusKey(nextStatus);
     if (key === this.lastStatusKey) return;
     this.lastStatusKey = key;
-    this.events.emit('status', status);
+    this.events.emit('status', nextStatus);
+  }
+
+  private withModuleStartedAt(status: AgentRuntimeStatus): AgentRuntimeStatus {
+    const moduleKey = statusModuleKey(status);
+    if (!moduleKey) {
+      this.activeStatusModuleStartedAt = null;
+      this.activeStatusModuleKey = '';
+      return status;
+    }
+
+    if (this.activeStatusModuleKey !== moduleKey || !this.activeStatusModuleStartedAt) {
+      this.activeStatusModuleKey = moduleKey;
+      this.activeStatusModuleStartedAt = Date.now();
+    }
+
+    switch (status.type) {
+      case 'connecting':
+      case 'thinking':
+      case 'streaming':
+      case 'calling_tool':
+        return { ...status, moduleStartedAt: this.activeStatusModuleStartedAt };
+      default:
+        return status;
+    }
   }
 
   private trimAbortedRunUsage() {
@@ -448,5 +475,18 @@ function statusKey(status: AgentRuntimeStatus): string {
       return `${status.type}:${status.message}`;
     default:
       return status.type;
+  }
+}
+
+function statusModuleKey(status: AgentRuntimeStatus): string {
+  switch (status.type) {
+    case 'connecting':
+    case 'thinking':
+    case 'streaming':
+      return status.type;
+    case 'calling_tool':
+      return `${status.type}:${status.toolNames?.join(',') ?? ''}`;
+    default:
+      return '';
   }
 }
