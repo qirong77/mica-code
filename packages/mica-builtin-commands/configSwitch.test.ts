@@ -347,6 +347,7 @@ function makeServices(): CommandRuntimeServices {
     renameCurrentAgentSession: vi.fn(),
     listRunningAgents: () => [],
     clearIdleAgents: () => ({ cleared: [], remaining: [] }),
+    requestExit: vi.fn(),
     newAgentSession: makeRunningAgent,
     submitAgentSessionInput: async () => ({ ok: true }),
     forkCurrentAgent: () => ({ ...makeRunningAgent(), sourceWasRunning: false }),

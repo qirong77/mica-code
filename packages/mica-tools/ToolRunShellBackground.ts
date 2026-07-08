@@ -20,7 +20,9 @@ import { formatSize } from './utils/outputLimits.js';
 export const MAX_BACKGROUND_OUTPUT_BYTES = 64 * 1024 * 1024;
 const BACKGROUND_OUTPUT_WATCH_INTERVAL_MS = 5_000;
 const TASK_ID_PATTERN = /^[a-f0-9]{12}$/;
+const BACKGROUND_TASK_OWNER_ID = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
 let backgroundTaskMonitor: NodeJS.Timeout | null = null;
+let backgroundTaskExitCleanupRegistered = false;
 
 export type BackgroundTaskStatus = 'starting' | 'running' | 'finished' | 'killed' | 'failed' | 'unknown_exited';
 
@@ -37,6 +39,8 @@ export type BackgroundTaskMeta = {
   exit_code?: number | null;
   signal?: string | null;
   output_limit_bytes: number;
+  owner_pid?: number;
+  owner_id?: string;
   error?: string;
 };
 
@@ -52,7 +56,7 @@ export function taskId(): string {
 }
 
 export function getBackgroundTaskDir(): string {
-  return path.join(tmpdir(), 'mica-tasks');
+  return path.join(tmpdir(), 'mica-tasks', BACKGROUND_TASK_OWNER_ID);
 }
 
 export function getTaskOutputPath(id: string): string {
@@ -128,6 +132,8 @@ export function createBackgroundTaskMeta(params: {
     status: 'starting',
     started_at: new Date().toISOString(),
     output_limit_bytes: params.outputLimit,
+    owner_pid: process.pid,
+    owner_id: BACKGROUND_TASK_OWNER_ID,
   };
   writeTaskMeta(meta);
   return meta;
@@ -208,6 +214,7 @@ export function listBackgroundTasks(
 }
 
 export function ensureBackgroundTaskMonitor(): void {
+  registerBackgroundTaskExitCleanup();
   if (backgroundTaskMonitor) return;
   backgroundTaskMonitor = setInterval(() => {
     const shouldContinue = checkBackgroundTasksOnce();
@@ -223,18 +230,51 @@ export function clearBackgroundTaskMonitor(): void {
   backgroundTaskMonitor = null;
 }
 
+export async function terminateCurrentBackgroundTasks(
+  options: { signal?: NodeJS.Signals; forceAfterMs?: number } = {},
+): Promise<{ count: number; failed: number; stillRunning: number }> {
+  const signal = options.signal ?? 'SIGTERM';
+  const forceAfterMs = options.forceAfterMs ?? 1500;
+  const tasks = listBackgroundTasks({ status: 'all' }).filter(isActiveBackgroundTask);
+  if (tasks.length === 0) return { count: 0, failed: 0, stillRunning: 0 };
+
+  const results = await Promise.allSettled(tasks.map((task) => killBackgroundTask(task.id, signal, forceAfterMs)));
+  return {
+    count: tasks.length,
+    failed: results.filter((result) => result.status === 'rejected' || !result.value.ok).length,
+    stillRunning: results.filter((result) => result.status === 'fulfilled' && result.value.stillRunning).length,
+  };
+}
+
+function terminateCurrentBackgroundTasksSync(signal: NodeJS.Signals = 'SIGTERM'): void {
+  for (const task of listBackgroundTasks({ status: 'all' })) {
+    if (!isActiveBackgroundTask(task) || !task.pid) continue;
+    killProcessTree(task.pid, signal);
+  }
+}
+
+function registerBackgroundTaskExitCleanup(): void {
+  if (backgroundTaskExitCleanupRegistered) return;
+  backgroundTaskExitCleanupRegistered = true;
+  process.once('exit', () => terminateCurrentBackgroundTasksSync('SIGTERM'));
+}
+
 export function checkBackgroundTasksOnce(): boolean {
   const tasks = listBackgroundTasks({ status: 'all' });
   let hasLiveTask = false;
 
   for (const task of tasks) {
-    if (!['starting', 'running'].includes(task.status)) continue;
+    if (!isActiveBackgroundTask(task)) continue;
     if (!isProcessAlive(task.pid)) continue;
     hasLiveTask = true;
     enforceBackgroundOutputLimit(task);
   }
 
   return hasLiveTask;
+}
+
+function isActiveBackgroundTask(task: BackgroundTaskMeta): boolean {
+  return task.status === 'starting' || task.status === 'running';
 }
 
 export function getBackgroundTaskOutputSize(meta: BackgroundTaskMeta): number {

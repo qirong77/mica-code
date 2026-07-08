@@ -1,11 +1,11 @@
-import { readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ToolRunShell } from '../ToolRunShell.js';
-import { waitForBackgroundSpawn } from '../ToolRunShellBackground.js';
+import { getBackgroundTaskDir, listBackgroundTasks, waitForBackgroundSpawn } from '../ToolRunShellBackground.js';
 import { ToolBackgroundTasks } from '../ToolBackgroundTasks.js';
 import { ToolReadTaskOutput } from '../ToolReadTaskOutput.js';
 import { ToolKillTask } from '../ToolKillTask.js';
@@ -154,6 +154,36 @@ describe('ToolRunShell', () => {
     await expect(resultPromise).resolves.toEqual({ ok: true });
     expect(child.listenerCount('spawn')).toBe(0);
     expect(child.listenerCount('error')).toBe(0);
+  });
+
+  it('does not list background tasks from another mica process directory', () => {
+    const oldTaskDir = path.join(tmpdir(), 'mica-tasks');
+    const oldTaskId = 'abcdef123456';
+    const oldOutputPath = path.join(oldTaskDir, `${oldTaskId}.out`);
+    mkdirSync(oldTaskDir, { recursive: true });
+    writeFileSync(oldOutputPath, 'old output', 'utf-8');
+    writeFileSync(
+      path.join(oldTaskDir, `${oldTaskId}.json`),
+      JSON.stringify({
+        id: oldTaskId,
+        command: 'old command',
+        cwd: process.cwd(),
+        shell: '/bin/sh',
+        output_path: oldOutputPath,
+        status: 'killed',
+        started_at: new Date().toISOString(),
+        output_limit_bytes: 1024,
+      }),
+      'utf-8',
+    );
+
+    try {
+      expect(getBackgroundTaskDir()).not.toBe(oldTaskDir);
+      expect(listBackgroundTasks({ status: 'all' }).some((task) => task.id === oldTaskId)).toBe(false);
+    } finally {
+      rmSync(oldOutputPath, { force: true });
+      rmSync(path.join(oldTaskDir, `${oldTaskId}.json`), { force: true });
+    }
   });
 
   it('lists, reads, and kills background tasks by id', async () => {

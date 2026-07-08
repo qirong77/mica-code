@@ -6,7 +6,7 @@ import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
+import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import { SessionController } from '../session/SessionController.js';
@@ -143,6 +143,7 @@ export class Application {
     }
     micaUi.terminalInput.setOnExitRequested(null);
     this.context?.uiBridge.stop();
+    await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });
     await this.context?.runtime.stop();
     await this.context?.plugins.disposeAll();
     micaTools.unregisterRuntime('Agent');

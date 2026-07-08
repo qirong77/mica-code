@@ -113,6 +113,7 @@ export type CommandRuntimeServices = {
   renameCurrentAgentSession(title: string): void;
   listRunningAgents(): RunningAgentRecord[];
   clearIdleAgents(): ClearIdleAgentsResult;
+  requestExit(exitCode?: number): Promise<void>;
   newAgentSession(): RunningAgentRecord;
   submitAgentSessionInput(id: string, text: string): Promise<SubmitResult>;
   forkCurrentAgent(): ForkAgentResult;

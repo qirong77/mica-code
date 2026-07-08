@@ -275,6 +275,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       context.uiBridge.syncAgentStatusItems();
       return result;
     },
+    async requestExit(exitCode = 0) {
+      process.exitCode = exitCode;
+      micaUi.terminalInput.requestExit();
+    },
     newAgentSession() {
       const context = currentContext();
       const record = context?.agentSessions.createSession();
