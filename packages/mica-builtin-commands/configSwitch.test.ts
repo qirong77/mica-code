@@ -8,11 +8,13 @@ const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'mica-config-switch-'));
 let micaUi: typeof import('@packages/mica-ui/index.js').micaUi;
+let micaConfig: typeof import('@packages/mica-config/index.js').micaConfig;
 
 beforeAll(async () => {
   process.env.HOME = tempHome;
   process.env.MICA_HOME = tempHome;
   ({ micaUi } = await import('@packages/mica-ui/index.js'));
+  ({ micaConfig } = await import('@packages/mica-config/index.js'));
 });
 
 afterAll(() => {
@@ -89,6 +91,7 @@ describe('config switch commands', () => {
       panel?.onInput?.('', { return: true });
       await waitForSelectCommand();
 
+      expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
       expect(services.showMessage).toHaveBeenLastCalledWith(
@@ -156,6 +159,24 @@ describe('config switch commands', () => {
 
       panel?.onInput?.('', { downArrow: true });
       panel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      let activePanel = micaUi.panels.pluginUIs.get()[0];
+      expect(activePanel?.id).toBe('select-model');
+      expect(micaConfig.get()).toMatchObject({
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro',
+        effort: 'high',
+        contextWindowSize: 1000000,
+      });
+
+      activePanel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      activePanel = micaUi.panels.pluginUIs.get()[0];
+      expect(activePanel?.id).toBe('select-effort');
+
+      activePanel?.onInput?.('', { return: true });
       await waitForSelectCommand();
 
       expect(micaConfig.get()).toMatchObject({
@@ -266,16 +287,29 @@ function makeAgent(
     effort: 'none',
   },
 ): CommandAgent {
+  let currentConfig = config;
+  const reloadConfig = vi.fn(() => {
+    const runtimeConfig = micaConfig.get();
+    const provider = runtimeConfig.providers.find((item) => item.id === runtimeConfig.provider);
+    if (!provider) return;
+    currentConfig = {
+      provider: { ...provider, contextWindowSize: runtimeConfig.contextWindowSize },
+      model: runtimeConfig.model,
+      effort: runtimeConfig.effort,
+    };
+  });
   return {
-    config,
+    get config() {
+      return currentConfig;
+    },
     currentRunId: 0,
     isRunning: false,
-    reloadConfig: vi.fn(),
+    reloadConfig,
     createSubAgent: () => ({ query: async () => '' }),
     getSnapshot: () => ({
-      providerId: config.provider.id,
-      model: config.model,
-      effort: config.effort,
+      providerId: currentConfig.provider.id,
+      model: currentConfig.model,
+      effort: currentConfig.effort,
       messages,
       usageHistory: [],
     }),

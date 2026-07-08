@@ -10,6 +10,7 @@ import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError } from './configSwitch.js';
+import { showModelSelector } from './model.js';
 
 export function createProviderCommand(
   agent: CommandAgent,
@@ -43,6 +44,9 @@ export function createProviderCommand(
         onSelect: (providerId) => {
           return applyProviderSelection(targetAgent, targetSessionController, services, providerId);
         },
+        onAfterSelect: () => {
+          void showModelSelector(targetAgent, targetSessionController, services, { activateEffortAfterSelect: true });
+        },
       });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -53,15 +57,15 @@ async function applyProviderSelection(
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
   providerId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     if (services.isAgentBusy(agent)) {
       services.showMessage('Agent is busy; wait or abort before switching provider');
-      return;
+      return false;
     }
     if (providerId === agent.config.provider.id) {
       micaLogger.logRuntime('plugin.provider', 'selected_current', { provider: providerId });
-      return;
+      return true;
     }
     micaLogger.logRuntime('plugin.provider', 'selected', { from: agent.config.provider.id, to: providerId });
     services.showMessage(
@@ -100,8 +104,10 @@ async function applyProviderSelection(
       model: next.model,
       effort: next.effort,
     });
+    return true;
   } catch (error) {
     reportConfigSwitchError(services, 'provider', error);
+    return false;
   }
 }
 

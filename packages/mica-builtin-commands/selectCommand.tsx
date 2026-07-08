@@ -25,7 +25,8 @@ export type SelectCommandConfig = {
   emptyMessage?: string;
   itemGap?: number;
   renderItem?: (item: SelectItem, isSelected: boolean) => React.ReactNode;
-  onSelect: (name: string) => void | Promise<void>;
+  onSelect: (name: string) => void | boolean | Promise<void | boolean>;
+  onAfterSelect?: (name: string) => void | Promise<void>;
   filterable?: boolean;
 };
 
@@ -69,7 +70,12 @@ export function showSelectCommand(config: SelectCommandConfig) {
     if (selected) {
       micaLogger.logRuntime('plugin.select', 'selected', { id: config.id, title: config.title, value: selected.name });
       applying.set(true);
-      void Promise.resolve(config.onSelect(selected.name))
+      let shouldRunAfterSelect = false;
+      void Promise.resolve()
+        .then(() => config.onSelect(selected.name))
+        .then((result) => {
+          shouldRunAfterSelect = result !== false;
+        })
         .catch((error) => {
           micaLogger.logRuntime(
             'plugin.select',
@@ -85,6 +91,22 @@ export function showSelectCommand(config: SelectCommandConfig) {
         .finally(() => {
           applying.set(false);
           hide();
+          if (shouldRunAfterSelect && config.onAfterSelect) {
+            void Promise.resolve()
+              .then(() => config.onAfterSelect?.(selected.name))
+              .catch((error) => {
+                micaLogger.logRuntime(
+                  'plugin.select',
+                  'after_select:error',
+                  {
+                    id: config.id,
+                    title: config.title,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  'error',
+                );
+              });
+          }
         });
     } else {
       micaLogger.logRuntime('plugin.select', 'select:empty', { id: config.id, title: config.title }, 'warn');

@@ -5,6 +5,7 @@ import { showSelectCommand } from './selectCommand.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from './configSwitch.js';
+import { showEffortSelector } from './effort.js';
 
 export function createModelCommand(
   agent: CommandAgent,
@@ -25,15 +26,16 @@ export function createModelCommand(
         current: targetAgent.config.model,
         provider: targetAgent.config.provider.id,
       });
-      void showModelSelector(targetAgent, targetSessionController, services);
+      void showModelSelector(targetAgent, targetSessionController, services, { activateEffortAfterSelect: true });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
-async function showModelSelector(
+export async function showModelSelector(
   agent: CommandAgent,
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
+  options: { activateEffortAfterSelect?: boolean } = {},
 ) {
   const config = syncConfigFromAgent(agent);
   let provider = config.providers.find((item) => item.id === agent.config.provider.id) ?? agent.config.provider;
@@ -77,6 +79,11 @@ async function showModelSelector(
     onSelect: (model) => {
       return applyModelSelection(agent, sessionController, services, provider.id, model);
     },
+    onAfterSelect: options.activateEffortAfterSelect
+      ? () => {
+          showEffortSelector(agent, sessionController, services);
+        }
+      : undefined,
   });
 }
 
@@ -86,15 +93,15 @@ async function applyModelSelection(
   services: CommandRuntimeServices,
   providerId: string,
   model: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     if (services.isAgentBusy(agent)) {
       services.showMessage('Agent is busy; wait or abort before switching model');
-      return;
+      return false;
     }
     if (model === agent.config.model) {
       micaLogger.logRuntime('plugin.model', 'selected_current', { model });
-      return;
+      return true;
     }
     micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: providerId });
     services.showMessage(
@@ -112,7 +119,9 @@ async function applyModelSelection(
       }),
       successMessage: () => `Model: ${model}`,
     });
+    return true;
   } catch (error) {
     reportConfigSwitchError(services, 'model', error);
+    return false;
   }
 }

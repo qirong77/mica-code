@@ -22,29 +22,35 @@ export function createEffortCommand(
         services.showMessage('Agent is busy; wait or abort before switching effort');
         return;
       }
-      micaLogger.logRuntime('plugin.effort', 'opened', {
-        current: targetAgent.config.provider.supportsEffort !== false ? targetAgent.config.effort : 'none',
-        provider: targetAgent.config.provider.id,
-      });
-      const effortOptions = micaConfig.getProviderEffortOptions(targetAgent.config.provider, targetAgent.config.model);
-      showSelectCommand({
-        id: 'select-effort',
-        title: 'select effort',
-        current: micaConfig.clampProviderEffort(
-          targetAgent.config.provider,
-          targetAgent.config.effort as EffortOption,
-          targetAgent.config.model,
-        ),
-        options: effortOptions.map((effort) => ({
-          name: effort,
-          label: effort,
-        })),
-        onSelect: (effort) => {
-          return applyEffortSelection(targetAgent, targetSessionController, services, effort);
-        },
-      });
+      showEffortSelector(targetAgent, targetSessionController, services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+export function showEffortSelector(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+  options: { onAfterSelect?: (effort: string) => void | Promise<void> } = {},
+): void {
+  micaLogger.logRuntime('plugin.effort', 'opened', {
+    current: agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none',
+    provider: agent.config.provider.id,
+  });
+  const effortOptions = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
+  showSelectCommand({
+    id: 'select-effort',
+    title: 'select effort',
+    current: micaConfig.clampProviderEffort(agent.config.provider, agent.config.effort as EffortOption, agent.config.model),
+    options: effortOptions.map((effort) => ({
+      name: effort,
+      label: effort,
+    })),
+    onSelect: (effort) => {
+      return applyEffortSelection(agent, sessionController, services, effort);
+    },
+    onAfterSelect: options.onAfterSelect,
+  });
 }
 
 async function applyEffortSelection(
@@ -52,29 +58,29 @@ async function applyEffortSelection(
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
   effort: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     if (services.isAgentBusy(agent)) {
       services.showMessage('Agent is busy; wait or abort before switching effort');
-      return;
+      return false;
     }
     if (agent.config.provider.supportsEffort === false) {
       micaLogger.logRuntime('plugin.effort', 'provider_ignores_effort', { provider: agent.config.provider.id }, 'warn');
       services.showMessage(
         `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; status shows none`,
       );
-      return;
+      return false;
     }
     const availableEfforts = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
     if (!availableEfforts.includes(effort as EffortOption)) {
       services.showMessage(
         `${agent.config.provider.name ?? agent.config.provider.id} supports effort: ${availableEfforts.join(', ')}`,
       );
-      return;
+      return false;
     }
     if (effort === agent.config.effort) {
       micaLogger.logRuntime('plugin.effort', 'selected_current', { effort });
-      return;
+      return true;
     }
     micaLogger.logRuntime('plugin.effort', 'selected', {
       from: agent.config.effort,
@@ -103,7 +109,9 @@ async function applyEffortSelection(
       successMessage: () => `Effort: ${effort}`,
     });
     micaLogger.logRuntime('plugin.effort', 'applied', { effort });
+    return true;
   } catch (error) {
     reportConfigSwitchError(services, 'effort', error);
+    return false;
   }
 }
