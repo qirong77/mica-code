@@ -22,7 +22,7 @@ export function App(): React.ReactNode {
       <Box flexGrow={1}>
         <BottomSurface />
       </Box>
-      <Box paddingBottom={1} />
+      {/* <Box paddingBottom={1} /> */}
     </Box>
   );
 }
