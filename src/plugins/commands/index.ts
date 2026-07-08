@@ -21,6 +21,7 @@ const ALLOW_DURING_TURN_COMMANDS = new Set([
   'copy',
   'rename',
   'memoryUsage',
+  'task',
 ]);
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 
@@ -40,6 +41,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createStatusCommand(activeAgent),
+    micaBuiltinCommands.createTaskCommand(),
     micaBuiltinCommands.createContextCommand(activeAgent),
     micaBuiltinCommands.createDoctorCommand(activeAgent),
     micaBuiltinCommands.createNewCommand(services),

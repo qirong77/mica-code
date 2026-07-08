@@ -28,7 +28,7 @@ import {
 } from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 
-const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'agents', 'new']);
+const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'task', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 const MAX_TURN_RETRIES = 5;

@@ -23,6 +23,7 @@ import { createRewindCommand } from './rewind.js';
 import { createSkillsCommand } from './skills.js';
 import { createStatusCommand } from './status.js';
 import { syncConfigFromAgent } from './configSwitch.js';
+import { createTaskCommand } from './task.js';
 
 export const micaBuiltinCommands = {
   createAgentsCommand,
@@ -50,6 +51,7 @@ export const micaBuiltinCommands = {
   createRewindCommand,
   createSkillsCommand,
   createStatusCommand,
+  createTaskCommand,
   syncConfigFromAgent,
 };
 

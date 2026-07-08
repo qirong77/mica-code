@@ -50,45 +50,73 @@ export function createToolCallLogItem({
   startTime?: number;
   elapsedMs?: number;
 }): MicaUiAgentTurnLogItem {
-  function ToolCallLogItem() {
-    const spinner = useSpinner();
-    const now = useNow();
-    const elapsed = elapsedMs ?? Math.max(0, now - startTime);
-    const outputLines = shouldShowToolOutput({ toolName, output, elapsedMs: elapsed })
-      ? output.replace(/\n$/, '').split('\n')
-      : [];
-    const capped =
-      outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
+  const completedElapsedMs = elapsedMs ?? Math.max(0, Date.now() - startTime);
+
+  function CompletedToolCallLogItem() {
+    const capped = getVisibleOutputLines({ toolName, output, elapsedMs: completedElapsedMs });
+
     return (
       <Box flexDirection="column">
-        {completed ? (
-          <Box flexDirection="row">
-            <Text dimColor>{toolIcon(toolName)} </Text>
-            <Text dimColor>{displayText}</Text>
-            <Text dimColor> ({formatElapsed(elapsed)})</Text>
-          </Box>
-        ) : (
-          <Box flexDirection="row">
-            <Text dimColor>{spinner} </Text>
-            <Text dimColor>{toolIcon(toolName)} </Text>
-            <Text dimColor>{displayText}</Text>
-            <Text dimColor> {formatElapsed(elapsed)}</Text>
-          </Box>
-        )}
-        {capped.length > 0 ? (
-          <Box flexDirection="column">
-            {capped.map((line, i) => (
-              <Text key={i} dimColor>
-                {'  │ '}
-                {line}
-              </Text>
-            ))}
-          </Box>
-        ) : null}
+        <Box flexDirection="row">
+          <Text dimColor>{toolIcon(toolName)} </Text>
+          <Text dimColor>{displayText}</Text>
+          <Text dimColor> ({formatElapsed(completedElapsedMs)})</Text>
+        </Box>
+        <ToolOutputLines lines={capped} />
       </Box>
     );
   }
-  return { id, component: ToolCallLogItem };
+
+  function RunningToolCallLogItem() {
+    const spinner = useSpinner();
+    const now = useNow();
+    const elapsed = elapsedMs ?? Math.max(0, now - startTime);
+    const capped = getVisibleOutputLines({ toolName, output, elapsedMs: elapsed });
+
+    return (
+      <Box flexDirection="column">
+        <Box flexDirection="row">
+          <Text dimColor>{spinner} </Text>
+          <Text dimColor>{toolIcon(toolName)} </Text>
+          <Text dimColor>{displayText}</Text>
+          <Text dimColor> {formatElapsed(elapsed)}</Text>
+        </Box>
+        <ToolOutputLines lines={capped} />
+      </Box>
+    );
+  }
+
+  return { id, component: completed ? CompletedToolCallLogItem : RunningToolCallLogItem };
+}
+
+function getVisibleOutputLines({
+  toolName,
+  output,
+  elapsedMs,
+}: {
+  toolName: string;
+  output: string;
+  elapsedMs: number;
+}): string[] {
+  const outputLines = shouldShowToolOutput({ toolName, output, elapsedMs })
+    ? output.replace(/\n$/, '').split('\n')
+    : [];
+  return outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
+}
+
+function ToolOutputLines({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+
+  return (
+    <Box flexDirection="column">
+      {lines.map((line, i) => (
+        <Text key={i} dimColor>
+          {'  │ '}
+          {line}
+        </Text>
+      ))}
+    </Box>
+  );
 }
 
 export function shouldShowToolOutput({

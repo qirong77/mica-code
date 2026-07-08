@@ -288,6 +288,7 @@ function runToolsDemo(): void {
   micaUi.dropdown.quickCommand.hide();
   micaUi.bottom.plugins.clear();
   const startedAt = Date.now() - 4800;
+  const activeStartedAt = Date.now() - 900;
   micaUi.panels.status.callingTool(['grep_search', 'run_shell'], 4800, startedAt);
   micaUi.bottom.agentTurnLog.setItems([
     micaUi.createThinkingLogItem('tools-thinking', 'Inspect the package API and summarize visible surfaces.'),
@@ -311,10 +312,27 @@ function runToolsDemo(): void {
       toolName: 'web_search',
       displayText: 'simulate a running network tool',
       completed: false,
-      startTime: Date.now() - 900,
+      startTime: activeStartedAt,
     }),
   ]);
   micaUi.messageBar.addMessage({ id: `tools-${Date.now()}`, text: 'agent turn log demo loaded' });
+
+  scheduleTimeout(() => {
+    const activeElapsedMs = Date.now() - activeStartedAt;
+    const totalElapsedMs = Date.now() - startedAt;
+    micaUi.bottom.agentTurnLog.replaceItem(
+      micaUi.createToolCallLogItem({
+        id: 'tools-active',
+        toolName: 'web_search',
+        displayText: 'simulate a running network tool',
+        completed: true,
+        elapsedMs: activeElapsedMs,
+      }),
+    );
+    micaUi.panels.status.completed(totalElapsedMs, startedAt);
+    micaUi.messageBar.addMessage({ id: `tools-complete-${Date.now()}`, text: 'agent turn log demo completed' });
+    scheduleTimeout(() => micaUi.panels.status.idle(), 1200);
+  }, 1800);
 }
 
 function runPluginDemo(): void {
@@ -456,7 +474,7 @@ function makeAgentStatuses(tick: number): MicaUiAgentStatusItem[] {
   const now = Date.now();
   const startedAt = new Date(now - 8 * 60 * 1000).toISOString();
   const updatedAt = new Date(now - (tick % 5) * 1000).toISOString();
-  const running = tick % 2 === 0;
+  const running = tick > 0 && tick % 2 === 0;
 
   return [
     {
@@ -490,9 +508,7 @@ function makeAgentStatuses(tick: number): MicaUiAgentStatusItem[] {
       cwd: `${process.cwd()}/packages/mica-tools`,
       providerName: 'Example Provider',
       model: 'example-opus',
-      status: running
-        ? { type: 'calling_tool', startedAt: now - 7000, toolNames: ['run_shell'] }
-        : { type: 'streaming', startedAt: now - 6000 },
+      status: running ? { type: 'calling_tool', startedAt: now - 7000, toolNames: ['run_shell'] } : { type: 'idle' },
       current: false,
       startedAt,
       updatedAt,
