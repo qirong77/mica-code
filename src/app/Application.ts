@@ -5,6 +5,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
@@ -37,6 +38,7 @@ export class Application {
   }
 
   async start(): Promise<void> {
+    micaRuntime.memoryUsageMonitor.start();
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
     });
@@ -135,6 +137,10 @@ export class Application {
   }
 
   private async stopOnce(): Promise<void> {
+    if (micaRuntime.memoryUsageMonitor.isRunning()) {
+      micaRuntime.memoryUsageMonitor.capture('application:stop');
+      micaRuntime.memoryUsageMonitor.stop();
+    }
     micaUi.terminalInput.setOnExitRequested(null);
     this.context?.uiBridge.stop();
     await this.context?.runtime.stop();

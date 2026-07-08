@@ -393,6 +393,7 @@ export class LocalRuntimeController implements RuntimeController {
     let wasAborted = false;
 
     micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
+    micaRuntime.memoryUsageMonitor.capture('turn:start');
     this.rewindCheckpoints.capture(agent, input);
 
     // Capture pre-turn client state so we can restore it before each retry.
@@ -584,6 +585,7 @@ export class LocalRuntimeController implements RuntimeController {
           });
         }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
+        micaRuntime.memoryUsageMonitor.capture('turn:abort');
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
         if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
         micaLogger.logRuntime(
@@ -597,6 +599,7 @@ export class LocalRuntimeController implements RuntimeController {
 
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
+      micaRuntime.memoryUsageMonitor.capture('turn:error');
       const errorMessage = error instanceof Error ? error.message : String(error);
       const messageBarError = { id: `error-${Date.now()}`, text: `请求失败: ${errorMessage}` };
       if (session) {
@@ -636,6 +639,9 @@ export class LocalRuntimeController implements RuntimeController {
         }
       }
       const elapsedMs = Date.now() - startedAt;
+      micaRuntime.memoryUsageMonitor.capture(
+        hasError ? 'turn:finish:error' : wasAborted ? 'turn:finish:aborted' : 'turn:finish',
+      );
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
       try {

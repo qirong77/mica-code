@@ -6,11 +6,12 @@ export class CommandRegistry {
 
   register(command: MicaCommand): Disposable {
     const name = normalizeCommandName(command.name);
+    const displayName = normalizeDisplayCommandName(command.name);
     if (this.commands.has(name)) {
       throw new Error(`Command already registered: ${name}`);
     }
 
-    this.commands.set(name, { ...command, name });
+    this.commands.set(name, { ...command, name: displayName });
 
     return {
       dispose: () => {
@@ -61,4 +62,8 @@ export class CommandRegistry {
 
 function normalizeCommandName(name: string): string {
   return name.trim().replace(/^\//, '').toLowerCase();
+}
+
+function normalizeDisplayCommandName(name: string): string {
+  return name.trim().replace(/^\//, '');
 }

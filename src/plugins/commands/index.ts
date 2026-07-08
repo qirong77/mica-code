@@ -20,6 +20,7 @@ const ALLOW_DURING_TURN_COMMANDS = new Set([
   'exit',
   'copy',
   'rename',
+  'memoryUsage',
 ]);
 type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 
@@ -46,6 +47,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createRewindCommand(services),
     micaBuiltinCommands.createLogCommand(activeAgent, services),
     micaBuiltinCommands.createMcpCommand(services),
+    micaBuiltinCommands.createMemoryUsageCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createGitDiffContextCommand(services),
     micaBuiltinCommands.createReviewCommand(services),

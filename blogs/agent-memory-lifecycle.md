@@ -196,10 +196,7 @@ mica-code 之前有一个不一致的地方：Chat Completions 会压缩历史 t
 ```ts
 export const MAX_HISTORICAL_TOOL_RESULT_CHARS = 12_000;
 
-export function compactHistoricalToolResultText(
-  text: string,
-  maxChars = MAX_HISTORICAL_TOOL_RESULT_CHARS,
-): string {
+export function compactHistoricalToolResultText(text: string, maxChars = MAX_HISTORICAL_TOOL_RESULT_CHARS): string {
   if (text.length <= maxChars) return text;
 
   let omitted = text.length - maxChars;
@@ -290,7 +287,130 @@ commitCompleteIteration(...)
 
 ---
 
-## 四、哪些东西没有一刀切掉
+## 四、第四类问题：没有采样，就只能靠活动监视器猜
+
+前面三类问题都在讲“怎么少占内存”。但内存治理还有另一半：**怎么知道内存是在什么时候涨起来的。**
+
+这次排查里有一个很典型的现象：活动监视器里看到 `mica` 有 4GB 到 6GB，但 `ps` 看到的 RSS 只有几百 MB。再用 `vmmap` / `footprint` 看，才发现大头在 `WebKit malloc`，而且大量页面已经被系统换出到 swap。
+
+也就是说，单看一个数字很容易误判。
+
+```txt
+Activity Monitor memory / footprint  不等于  ps RSS
+process.memoryUsage().heapUsed       不等于  WebKit malloc footprint
+```
+
+`mica` 是 Bun / JavaScriptCore 跑起来的进程。JS 对象、字符串、Buffer、ArrayBuffer、运行时内部 allocator、JIT、WebKit malloc 都可能参与进来。要判断一个问题是不是“我们自己的 JS 数据结构没释放”，至少需要一条持续的内存时间线。
+
+所以这次新增了一个默认开启的内存采样器：
+
+```ts
+export class MemoryUsageMonitor {
+  readonly snapshots = atom<MemoryUsageSnapshot[]>([]);
+
+  start(): void {
+    if (process.env.MICA_MEMORY_USAGE === '0') return;
+    this.capture('startup');
+    this.timer = setInterval(() => {
+      this.capture('interval');
+    }, this.intervalMs);
+    this.timer.unref?.();
+  }
+
+  capture(label = 'manual'): MemoryUsageSnapshot {
+    return {
+      label,
+      memory: process.memoryUsage(),
+      resourceUsage: process.resourceUsage?.(),
+      // ...timestamp, pid, uptime
+    };
+  }
+}
+```
+
+默认策略很保守：
+
+```txt
+采样间隔：5 秒
+保留快照：1440 条
+关闭开关：MICA_MEMORY_USAGE=0
+调整间隔：MICA_MEMORY_USAGE_INTERVAL_MS
+调整保留：MICA_MEMORY_USAGE_MAX_SNAPSHOTS
+```
+
+采样内容主要来自 `process.memoryUsage()`：
+
+```txt
+rss          当前常驻内存
+heapUsed     JS heap 已使用空间
+heapTotal    JS heap 已分配空间
+external     JS 对象关联的堆外内存
+arrayBuffers ArrayBuffer / Buffer 相关内存
+```
+
+再补一份 `process.resourceUsage()`，用于看 `maxRSS`、page fault、context switch 这些运行时层面的信息。
+
+光有后台采样还不够，还需要用户能在怀疑出问题时立刻看一眼。所以新增了一个内建命令：
+
+```txt
+/memoryUsage
+/memoryUsage export
+```
+
+`/memoryUsage` 会手动补一条 `command:open` 快照，然后打开一个面板，展示当前值、相对启动时的增量、相对上一条快照的增量。
+
+`/memoryUsage export` 会补一条 `command:export` 快照，并在当前工作目录导出：
+
+```txt
+mica-memory-usage-export-...
+  manifest.log
+  diagnostics.log
+  memory-usage.log
+  memory-usage-summary.log
+```
+
+此外，agent turn 的几个关键边界也会主动打点：
+
+```txt
+turn:start
+turn:finish
+turn:error
+turn:abort
+application:stop
+```
+
+这样之后再遇到“跑完一个任务后内存暴涨”，就不只是看活动监视器截图了，而是可以翻导出的 `memory-usage.log`：
+
+```txt
+任务开始前 rss / heapUsed / external 是多少？
+工具调用后 arrayBuffers 有没有涨？
+turn:finish 后 heapUsed 有没有掉？
+下一轮开始前 RSS 有没有继续持平或上涨？
+```
+
+判断方向大致是：
+
+```txt
+heapUsed 持续涨，GC 后也不掉
+  优先怀疑 JS 对象被长期引用，例如 messages、tool logs、缓存、session 状态。
+
+external / arrayBuffers 涨
+  优先怀疑 Buffer、ArrayBuffer、文件内容、网络响应、图片或流式拼接。
+
+rss 涨，但 heapUsed / external 不明显
+  可能是运行时 allocator、碎片、native 层或 mmap 类资源。
+
+process.memoryUsage() 不大，但 Activity Monitor footprint 很大
+  继续用 vmmap / footprint / Instruments 看 WebKit malloc、JSC、压缩页和 swap。
+```
+
+这点很重要：`/memoryUsage` 不是 Instruments 的替代品。它看不到某个具体 JS 变量，也不能完整解释 macOS 的 memory footprint。但它能提供一条低成本、默认存在、可导出的时间线。
+
+对 CLI agent 来说，这已经很有价值。因为很多内存问题不是“某一行代码立刻爆炸”，而是某类状态在长会话里一点点留下来。没有时间线，就只能靠猜。
+
+---
+
+## 五、哪些东西没有一刀切掉
 
 这次改造不是把所有历史都删掉。
 
@@ -326,7 +446,7 @@ Agent 的内存治理，真正难的地方就在这里：它不是一个开关�
 
 ---
 
-## 五、测试应该压住什么
+## 六、测试应该压住什么
 
 这类改动如果只靠肉眼看，很容易漏。
 
@@ -380,8 +500,21 @@ expect(session.uiState.pendingInputs).toEqual([]);
 
 ```ts
 expect(JSON.stringify(agent.getSnapshot().messages[1])).toContain('历史工具结果已压缩');
-expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(
-  MAX_HISTORICAL_TOOL_RESULT_CHARS + 500,
+expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(MAX_HISTORICAL_TOOL_RESULT_CHARS + 500);
+```
+
+第五类是内存快照导出：
+
+```ts
+micaRuntime.memoryUsageMonitor.capture('test:before');
+
+createMemoryUsageCommand(services).action('export');
+
+expect(memoryUsage.snapshots).toEqual(
+  expect.arrayContaining([
+    expect.objectContaining({ label: 'test:before' }),
+    expect.objectContaining({ label: 'command:export' }),
+  ]),
 );
 ```
 
@@ -392,20 +525,22 @@ expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(
 - 清理 agent 时，runtime 引用消失；
 - 清理 agent 时，UI listener 消失；
 - stop 后，bridge 不再响应事件；
-- 恢复或保存 provider history 时，大工具结果不会原样长期保存。
+- 恢复或保存 provider history 时，大工具结果不会原样长期保存；
+- `/memoryUsage export` 能导出当前保留的内存快照。
 
 这些边界稳定了，内存增长才有机会变得可解释。
 
 ---
 
-## 六、最后的经验
+## 七、最后的经验
 
-这次问题一开始看起来只是“活动监视器里有几个 mica 很大”。但拆开之后，其实是三个不同层次的问题：
+这次问题一开始看起来只是“活动监视器里有几个 mica 很大”。但拆开之后，其实是几个不同层次的问题：
 
 ```txt
 进程还活着：SIGHUP 没处理
 对象还活着：Map/Set 强引用没释放
 历史还变大：tool result 原样进入 provider history
+观测不清楚：缺少默认内存采样和导出
 ```
 
 它们的修法完全不同。
@@ -415,6 +550,8 @@ expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(
 第二类靠显式 dispose 边界。
 
 第三类靠历史预算和状态提交时压缩。
+
+第四类靠默认采样、关键生命周期打点和可导出的诊断日志。
 
 这也是我现在更倾向的一条规则：
 
@@ -430,7 +567,8 @@ expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(
 - 优雅退出卡住时，10 秒后强制退出；
 - 清理 idle agent 时，runtime 和 UI bridge 会释放 per-agent 引用；
 - provider history 里的历史工具结果会被压缩到固定预算内；
-- 三类 provider 的行为保持一致。
+- 三类 provider 的行为保持一致；
+- `/memoryUsage` 可以查看当前内存快照，`/memoryUsage export` 可以导出采样日志。
 
 这还不是内存治理的终点。
 
