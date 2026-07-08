@@ -1,5 +1,5 @@
-src/plugins/commands/index.ts
-  h_a456b67147438e 21,68-69
+packages/mica-builtin-commands/selectCommand.tsx
+  h_a456b67147438e 61,121-122,130,140-141,145-152
 ---
 {
   "schema_version": "authorship/3.0.0",
