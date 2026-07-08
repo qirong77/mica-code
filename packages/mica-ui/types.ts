@@ -115,6 +115,21 @@ export interface MicaUiAgentStatusItem {
   updatedAt: string;
 }
 
+export type MicaUiBackgroundTaskStatus = 'starting' | 'running' | 'finished' | 'killed' | 'failed' | 'unknown_exited';
+
+export interface MicaUiBackgroundTaskItem {
+  id: string;
+  command: string;
+  cwd: string;
+  shell: string;
+  pid?: number;
+  outputPath: string;
+  outputSize: number;
+  status: MicaUiBackgroundTaskStatus;
+  startedAt: string;
+  finishedAt?: string;
+}
+
 export interface MicaUiStartupBannerState {
   provider: string;
   model: string;

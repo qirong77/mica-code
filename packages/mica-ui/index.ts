@@ -12,7 +12,7 @@ import { StartupBanner, StartupBannerUI } from './app/StartupBanner.js';
 import { Conversation, ConversationUI } from './conversation/Conversation.js';
 import { Markdown } from './conversation/Markdown.js';
 import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
-import { AgentsStatusBar, AgentsStatusBarUI } from './panels/AgentsStatusBar.js';
+import { TaskStatusBar, TaskStatusBarUI } from './panels/TaskStatusBar.js';
 import { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
 import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
 import { useScheduleState } from './hooks/index.js';
@@ -41,8 +41,8 @@ export const micaUi = {
   TerminalInputUI,
   WorkingStatus,
   WorkingStatusUI,
-  AgentsStatusBar,
-  AgentsStatusBarUI,
+  TaskStatusBar,
+  TaskStatusBarUI,
   AgentTurnLog,
   AgentTurnLogUI,
   MessageBar,
@@ -136,6 +136,8 @@ export type {
   MicaUiDropdownState,
   MicaUiPluginUI,
   MicaUiCommand,
+  MicaUiBackgroundTaskItem,
+  MicaUiBackgroundTaskStatus,
   MicaUiCommandHiddenMenuItem,
   MicaUiCommandHiddenMenuItems,
   MicaUiConversationMessage,

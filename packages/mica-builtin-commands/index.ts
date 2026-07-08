@@ -1,4 +1,3 @@
-import { createAgentsCommand } from './agents.js';
 import { createClearCommand } from './clear.js';
 import { createCommitCommand } from './commit.js';
 import { createCompactCommand } from './compact.js';
@@ -26,7 +25,6 @@ import { syncConfigFromAgent } from './configSwitch.js';
 import { createTaskCommand } from './task.js';
 
 export const micaBuiltinCommands = {
-  createAgentsCommand,
   createClearCommand,
   createCommitCommand,
   createCompactCommand,

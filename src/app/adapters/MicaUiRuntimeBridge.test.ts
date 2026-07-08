@@ -22,6 +22,7 @@ const uiMocks = (() => {
     modelWindowSet: fn(),
     replaceAgentTurnLogItem: fn(),
     setAgentStatusItems: fn(),
+    setBackgroundTaskItems: fn(),
     setMessages: fn(),
     setOnAbortAgent: fn(),
     setOnEditPendingInput: fn(),
@@ -63,6 +64,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
       },
       replaceAgentTurnLogItem: uiMocks.replaceAgentTurnLogItem,
       setAgentStatusItems: uiMocks.setAgentStatusItems,
+      setBackgroundTaskItems: uiMocks.setBackgroundTaskItems,
       setOnAbortAgent: uiMocks.setOnAbortAgent,
       setOnEditPendingInput: uiMocks.setOnEditPendingInput,
       status: {

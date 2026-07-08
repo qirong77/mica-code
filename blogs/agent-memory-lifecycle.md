@@ -81,7 +81,7 @@ void app
 
 清掉孤儿进程后，还有另一个更像“真泄漏”的问题：多 agent session。
 
-mica-code 支持创建多个 agent、fork 当前 agent、后台运行 agent，再用 `/agents clear` 清理 idle agent。
+mica-code 支持创建多个 agent、fork 当前 agent、后台运行 agent，再用 `/task clear` 清理 idle task。
 
 原来的清理逻辑大概是：
 
@@ -114,7 +114,7 @@ private readonly messageTimers = new Map<string, ReturnType<typeof setTimeout>>(
 private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
 ```
 
-如果 `/agents clear` 只从 `TerminalAgentSessionManager` 里删掉 session，而这些 Map 没同步清理，那么 idle agent 仍然被 runtime/UI 层强引用着。它的 provider history、conversation messages、tool results、rewind checkpoints 都可能跟着留在内存里。
+如果 `/task clear` 只从 `TerminalAgentSessionManager` 里删掉 session，而这些 Map 没同步清理，那么 idle task 仍然被 runtime/UI 层强引用着。它的 provider history、conversation messages、tool results、rewind checkpoints 都可能跟着留在内存里。
 
 这类问题不能靠 GC 自动解决。GC 不知道“这个 agent 已经没用了”，因为从引用图上看，它确实还被用着。
 
@@ -154,7 +154,7 @@ disposeAgent(agent: AgentRuntime): void {
 }
 ```
 
-然后 `/agents clear` 不再只是删 session：
+然后 `/task clear` 不再只是删 session：
 
 ```ts
 const result = context.agentSessions.clearIdleSessions({

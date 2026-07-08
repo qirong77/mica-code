@@ -5,7 +5,7 @@ import { TerminalInputUI } from '../input/TerminalInput.js';
 import { WorkingStatusUI } from '../panels/WorkingStatus.js';
 import { BottomSurface } from '../bottom/BottomSurface.js';
 import { MessageBar } from '../panels/MessageBar.js';
-import { AgentsStatusBar } from '../panels/AgentsStatusBar.js';
+import { TaskStatusBar } from '../panels/TaskStatusBar.js';
 // import { StartupBannerUI } from './StartupBanner.js';
 
 export function App(): React.ReactNode {
@@ -15,7 +15,7 @@ export function App(): React.ReactNode {
     <Box flexDirection="column" height="100%" backgroundColor="red">
       {/* <StartupBannerUI.renderFn /> */}
       <ConversationUI.renderFn />
-      <AgentsStatusBar />
+      <TaskStatusBar />
       <TerminalInputUI.renderFn />
     </Box>
   );

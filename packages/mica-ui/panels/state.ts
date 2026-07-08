@@ -4,6 +4,7 @@ import type {
   MicaUiAgentTurnLogItem,
   MicaUiPluginUI,
   MicaUiAgentStatusItem,
+  MicaUiBackgroundTaskItem,
   MicaUiStartupBannerState,
 } from '../types.js';
 
@@ -14,6 +15,7 @@ export const pluginUIs = atom<MicaUiPluginUI[]>([]);
 export const contextSize = atom(0);
 export const cachedTokenRate = atom(0);
 export const agentStatusItems = atom<MicaUiAgentStatusItem[]>([]);
+export const backgroundTaskItems = atom<MicaUiBackgroundTaskItem[]>([]);
 export const startupBanner = atom<MicaUiStartupBannerState>({
   provider: '-',
   model: '-',
@@ -97,6 +99,10 @@ export function clearPluginUIs(): void {
 
 export function setAgentStatusItems(items: MicaUiAgentStatusItem[]): void {
   agentStatusItems.set([...items]);
+}
+
+export function setBackgroundTaskItems(items: MicaUiBackgroundTaskItem[]): void {
+  backgroundTaskItems.set([...items]);
 }
 
 export function setStartupBanner(state: Partial<MicaUiStartupBannerState>): void {

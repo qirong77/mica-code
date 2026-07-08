@@ -35,6 +35,7 @@ export function AgentRow({
   compact,
   width,
   layout,
+  showCurrent,
   nowMs = Date.now(),
 }: {
   agent: MicaUiAgentStatusItem;
@@ -42,13 +43,13 @@ export function AgentRow({
   compact?: boolean;
   width?: number;
   layout?: AgentRowLayout;
+  showCurrent?: boolean;
   nowMs?: number;
 }): React.ReactNode {
   const status = getWorkingStatusDisplay(agent.status);
 
   if (compact) {
-    if (agent.current) {
-      // 暂时不显示当前的 agent
+    if (agent.current && !showCurrent) {
       return null;
     }
 

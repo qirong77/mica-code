@@ -1,7 +1,12 @@
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { Disposable } from '@packages/mica-common/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { micaUi } from '@packages/mica-ui/index.js';
+import { micaUi, type MicaUiBackgroundTaskItem } from '@packages/mica-ui/index.js';
+import {
+  getBackgroundTaskOutputSize,
+  listBackgroundTasks,
+  type BackgroundTaskMeta,
+} from '@packages/mica-tools/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
 import {
   normalizeUiState,
@@ -14,6 +19,7 @@ import { applyStatus, syncModelDisplay } from '../../runtime/uiBridge.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
 
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
+const BACKGROUND_TASK_SYNC_INTERVAL_MS = 1000;
 
 export class MicaUiRuntimeBridge {
   private readonly toolLogs = new Map<AgentRuntime, ToolLogController>();
@@ -22,6 +28,7 @@ export class MicaUiRuntimeBridge {
   private readonly messageTimerOwners = new Map<string, AgentRuntime>();
   private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
   private readonly bridgeDisposers: Array<Disposable | (() => void) | undefined> = [];
+  private backgroundTaskSyncTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private agent: AgentRuntime,
@@ -48,6 +55,7 @@ export class MicaUiRuntimeBridge {
 
     this.attachAgentEvents(this.agent);
     this.syncAgentStatusItems();
+    this.startBackgroundTaskSync();
 
     this.bridgeDisposers.push(
       this.runtime.events.on('event', (event) => {
@@ -165,6 +173,10 @@ export class MicaUiRuntimeBridge {
     micaUi.panels.setAgentStatusItems(this.agentSessions.list());
   }
 
+  syncBackgroundTaskItems(): void {
+    micaUi.panels.setBackgroundTaskItems(listBackgroundTasks({ status: 'all' }).map(toUiBackgroundTask));
+  }
+
   stop(): void {
     for (const disposable of this.bridgeDisposers.splice(0)) {
       if (!disposable) continue;
@@ -176,6 +188,10 @@ export class MicaUiRuntimeBridge {
     }
     micaUi.panels.setOnAbortAgent(() => undefined);
     micaUi.panels.setOnEditPendingInput(() => null);
+    if (this.backgroundTaskSyncTimer) {
+      clearInterval(this.backgroundTaskSyncTimer);
+      this.backgroundTaskSyncTimer = null;
+    }
     for (const dispose of this.disposers.values()) dispose();
     for (const timer of this.messageTimers.values()) clearTimeout(timer);
     this.disposers.clear();
@@ -318,6 +334,28 @@ export class MicaUiRuntimeBridge {
   private isActiveAgent(agent: AgentRuntime): boolean {
     return this.agent === agent;
   }
+
+  private startBackgroundTaskSync(): void {
+    this.syncBackgroundTaskItems();
+    if (this.backgroundTaskSyncTimer) return;
+    this.backgroundTaskSyncTimer = setInterval(() => this.syncBackgroundTaskItems(), BACKGROUND_TASK_SYNC_INTERVAL_MS);
+    this.backgroundTaskSyncTimer.unref?.();
+  }
+}
+
+function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem {
+  return {
+    id: task.id,
+    command: task.command,
+    cwd: task.cwd,
+    shell: task.shell,
+    pid: task.pid,
+    outputPath: task.output_path,
+    outputSize: getBackgroundTaskOutputSize(task),
+    status: task.status,
+    startedAt: task.started_at,
+    finishedAt: task.finished_at,
+  };
 }
 
 function eventOwnerAgent(owner: unknown, fallback: AgentRuntime): AgentRuntime {
