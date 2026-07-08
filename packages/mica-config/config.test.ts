@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -388,6 +388,47 @@ describe('loadProviderModels', () => {
     expect(persisted.providers?.[0]?.effort).toBeUndefined();
     expect(persisted.providers?.[0]?.contextWindowSize).toBeUndefined();
     expect(persisted.providers?.[0]?.models).toBeUndefined();
+  });
+
+  it('does not rewrite read-only config.json after dynamic models are loaded', async () => {
+    const provider = {
+      id: 'kimi',
+      name: 'Kimi',
+      api_base: 'https://api.moonshot.cn/v1',
+      api_key: 'test-key',
+      protocol: 'openai_chat_completions' as const,
+      get_model_url: 'https://api.moonshot.cn/v1/models',
+    };
+    configApi.updateConfig(() => ({
+      provider: provider.id,
+      model: '',
+      effort: 'medium',
+      contextWindowSize: 256000,
+      providers: [provider],
+    }));
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }],
+      }),
+      text: async () => '',
+    })) as unknown as typeof fetch;
+
+    await configApi.loadProviderModels(provider.id);
+    const before = readFileSync(configApi.CONFIG_PATH, 'utf-8');
+    chmodSync(configApi.CONFIG_PATH, 0o444);
+    try {
+      expect(() =>
+        configApi.updateConfig((config) => ({
+          ...config,
+          model: 'moonshot-v1-8k',
+        })),
+      ).not.toThrow();
+    } finally {
+      chmodSync(configApi.CONFIG_PATH, 0o644);
+    }
+
+    expect(readFileSync(configApi.CONFIG_PATH, 'utf-8')).toBe(before);
   });
 });
 

@@ -4,6 +4,8 @@
 >
 > 一个轻量、终端原生、擅长复用上下文的 AI coding agent。
 
+![Mica Code 使用过程截图](./images/iShot_2026-07-08_19.54.28.png)
+
 ## 核心优势
 
 - **Cache-first**：会话历史默认追加演进，尽量保持请求前缀稳定，更容易命中 provider prompt cache。

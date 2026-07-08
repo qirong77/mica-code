@@ -67,7 +67,11 @@ export function getConfig() {
 export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);
-  writePersistedConfig(CONFIG_PATH, stripRuntimeFields(next));
+  const currentPersisted = readPersistedConfig(CONFIG_PATH);
+  const nextPersisted = stripRuntimeFields(next, currentPersisted);
+  if (!persistedConfigsEqual(currentPersisted, nextPersisted)) {
+    writePersistedConfig(CONFIG_PATH, nextPersisted);
+  }
   updateLastUsedConfig({
     provider: next.provider,
     model: next.model,
@@ -104,7 +108,7 @@ function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMi
   return next;
 }
 
-function stripRuntimeFields(config: IMicaConfig): PersistedMicaConfig {
+function stripRuntimeFields(config: IMicaConfig, currentPersisted: PersistedMicaConfig): PersistedMicaConfig {
   const {
     provider: _provider,
     model: _model,
@@ -112,7 +116,49 @@ function stripRuntimeFields(config: IMicaConfig): PersistedMicaConfig {
     contextWindowSize: _contextWindowSize,
     ...persisted
   } = config;
-  return persisted;
+  return {
+    ...persisted,
+    providers: stripRuntimeProviderFields(persisted.providers, currentPersisted.providers),
+  };
+}
+
+function stripRuntimeProviderFields(
+  providers: ProviderDefinition[],
+  persistedProviders: ProviderDefinition[],
+): ProviderDefinition[] {
+  const persistedById = new Map(persistedProviders.map((provider) => [provider.id, provider]));
+  return providers.map((provider) => stripRuntimeProviderModels(provider, persistedById.get(provider.id)));
+}
+
+function stripRuntimeProviderModels(
+  provider: ProviderDefinition,
+  persistedProvider: ProviderDefinition | undefined,
+): ProviderDefinition {
+  if (!provider.get_model_url) return provider;
+  const { models: _runtimeModels, ...withoutRuntimeModels } = provider;
+  if (persistedProvider?.models === undefined) return withoutRuntimeModels;
+  return {
+    ...withoutRuntimeModels,
+    models: persistedProvider.models,
+  };
+}
+
+function persistedConfigsEqual(a: PersistedMicaConfig, b: PersistedMicaConfig): boolean {
+  return stableJson(a) === stableJson(b);
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => [key, sortJson(item)]),
+  );
 }
 
 function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfig): IMicaConfig {
