@@ -1,9 +1,11 @@
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ToolRunShell } from '../ToolRunShell.js';
+import { waitForBackgroundSpawn } from '../ToolRunShellBackground.js';
 import { ToolBackgroundTasks } from '../ToolBackgroundTasks.js';
 import { ToolReadTaskOutput } from '../ToolReadTaskOutput.js';
 import { ToolKillTask } from '../ToolKillTask.js';
@@ -111,6 +113,7 @@ describe('ToolRunShell', () => {
 
   it('starts background commands with pid/cwd metadata and an output file header', async () => {
     const tool = new ToolRunShell();
+    const readTaskOutput = new ToolReadTaskOutput();
     const cwd = process.cwd();
 
     const result = await tool.execute({
@@ -128,14 +131,29 @@ describe('ToolRunShell', () => {
       expect(result).toContain(`查看输出: read_task_output(task_id="${taskId}")`);
       expect(result).toContain(`终止任务: kill_task(task_id="${taskId}")`);
 
-      const content = await waitForFileContains(outputPath, 'background ok');
+      const content = await waitForFileContains(outputPath, '[mica background task exited]');
       expect(content).toContain('[mica background task]');
       expect(content).toContain(`cwd: ${cwd}`);
       expect(content).toContain('[mica background task spawned]');
       expect(content).toContain('background ok');
+      expect(content).toContain('[mica background task exited]');
+
+      const outputResult = await readTaskOutput.execute({ task_id: taskId });
+      expect(outputResult).toContain('status: finished');
     } finally {
       cleanupTask(outputPath);
     }
+  });
+
+  it('removes transient spawn listeners after background startup settles', async () => {
+    const child = new EventEmitter();
+    const resultPromise = waitForBackgroundSpawn(child as Parameters<typeof waitForBackgroundSpawn>[0]);
+
+    child.emit('spawn');
+
+    await expect(resultPromise).resolves.toEqual({ ok: true });
+    expect(child.listenerCount('spawn')).toBe(0);
+    expect(child.listenerCount('error')).toBe(0);
   });
 
   it('lists, reads, and kills background tasks by id', async () => {

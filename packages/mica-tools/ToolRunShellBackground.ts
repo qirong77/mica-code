@@ -20,6 +20,7 @@ import { formatSize } from './utils/outputLimits.js';
 export const MAX_BACKGROUND_OUTPUT_BYTES = 64 * 1024 * 1024;
 const BACKGROUND_OUTPUT_WATCH_INTERVAL_MS = 5_000;
 const TASK_ID_PATTERN = /^[a-f0-9]{12}$/;
+let backgroundTaskMonitor: NodeJS.Timeout | null = null;
 
 export type BackgroundTaskStatus = 'starting' | 'running' | 'finished' | 'killed' | 'failed' | 'unknown_exited';
 
@@ -161,6 +162,16 @@ export function markBackgroundTaskExited(id: string, code: number | null, signal
   });
 }
 
+export function markBackgroundTaskOutputLimitExceeded(meta: BackgroundTaskMeta): void {
+  writeTaskMeta({
+    ...meta,
+    status: 'killed',
+    finished_at: new Date().toISOString(),
+    signal: 'SIGTERM',
+    error: `output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}`,
+  });
+}
+
 export function loadBackgroundTask(id: string): BackgroundTaskMeta | undefined {
   assertSafeTaskId(id);
   const filePath = getTaskMetaPath(id);
@@ -194,6 +205,36 @@ export function listBackgroundTasks(
     .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
 
   return typeof options.limit === 'number' ? tasks.slice(0, options.limit) : tasks;
+}
+
+export function ensureBackgroundTaskMonitor(): void {
+  if (backgroundTaskMonitor) return;
+  backgroundTaskMonitor = setInterval(() => {
+    const shouldContinue = checkBackgroundTasksOnce();
+    if (shouldContinue) return;
+    clearBackgroundTaskMonitor();
+  }, BACKGROUND_OUTPUT_WATCH_INTERVAL_MS);
+  backgroundTaskMonitor.unref?.();
+}
+
+export function clearBackgroundTaskMonitor(): void {
+  if (!backgroundTaskMonitor) return;
+  clearInterval(backgroundTaskMonitor);
+  backgroundTaskMonitor = null;
+}
+
+export function checkBackgroundTasksOnce(): boolean {
+  const tasks = listBackgroundTasks({ status: 'all' });
+  let hasLiveTask = false;
+
+  for (const task of tasks) {
+    if (!['starting', 'running'].includes(task.status)) continue;
+    if (!isProcessAlive(task.pid)) continue;
+    hasLiveTask = true;
+    enforceBackgroundOutputLimit(task);
+  }
+
+  return hasLiveTask;
 }
 
 export function getBackgroundTaskOutputSize(meta: BackgroundTaskMeta): number {
@@ -292,39 +333,6 @@ export async function killBackgroundTask(
   return { ok: true, message: `已终止后台任务 ${id}。`, meta: killed, stillRunning };
 }
 
-export function startBackgroundOutputWatchdog(child: ChildProcess, outputPath: string, id?: string): NodeJS.Timeout {
-  const timer = setInterval(() => {
-    try {
-      const size = statSync(outputPath).size;
-      if (size <= MAX_BACKGROUND_OUTPUT_BYTES) return;
-      appendFileSync(
-        outputPath,
-        `\n[mica background task stopped]\nreason: output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}\n`,
-        'utf-8',
-      );
-      if (id) {
-        const meta = loadBackgroundTask(id);
-        if (meta) {
-          writeTaskMeta({
-            ...meta,
-            status: 'killed',
-            finished_at: new Date().toISOString(),
-            signal: 'SIGTERM',
-            error: `output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}`,
-          });
-        }
-      }
-      killChildProcess(child, 'SIGTERM');
-      setTimeout(() => killChildProcess(child, 'SIGKILL'), 5_000).unref?.();
-      clearInterval(timer);
-    } catch {
-      clearInterval(timer);
-    }
-  }, BACKGROUND_OUTPUT_WATCH_INTERVAL_MS);
-  timer.unref?.();
-  return timer;
-}
-
 export function waitForBackgroundSpawn(child: ChildProcess): Promise<{ ok: true } | { ok: false; message: string }> {
   return new Promise((resolve) => {
     let settled = false;
@@ -332,13 +340,17 @@ export function waitForBackgroundSpawn(child: ChildProcess): Promise<{ ok: true 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      child.off('spawn', onSpawn);
+      child.off('error', onError);
       resolve(result);
     };
 
     const timer = setTimeout(() => finish({ ok: true }), 50);
     timer.unref?.();
-    child.once('spawn', () => finish({ ok: true }));
-    child.once('error', (error) => finish({ ok: false, message: error.message }));
+    const onSpawn = () => finish({ ok: true });
+    const onError = (error: Error) => finish({ ok: false, message: error.message });
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
   });
 }
 
@@ -349,6 +361,19 @@ export function killChildProcess(child: ChildProcess, signal: NodeJS.Signals): v
 
 function refreshBackgroundTask(meta: BackgroundTaskMeta): BackgroundTaskMeta {
   if (!['starting', 'running'].includes(meta.status)) return meta;
+  const output = readBackgroundTaskExitMarker(meta.output_path, meta.id);
+  if (output) {
+    const refreshed: BackgroundTaskMeta = {
+      ...meta,
+      status: meta.status === 'killed' ? 'killed' : 'finished',
+      finished_at: meta.finished_at ?? output.finishedAt ?? new Date().toISOString(),
+      exit_code: output.exitCode,
+      signal: output.signal,
+    };
+    writeTaskMeta(refreshed);
+    return refreshed;
+  }
+
   if (isProcessAlive(meta.pid)) return meta.status === 'starting' && meta.pid ? { ...meta, status: 'running' } : meta;
 
   const refreshed: BackgroundTaskMeta = {
@@ -358,6 +383,74 @@ function refreshBackgroundTask(meta: BackgroundTaskMeta): BackgroundTaskMeta {
   };
   writeTaskMeta(refreshed);
   return refreshed;
+}
+
+function enforceBackgroundOutputLimit(meta: BackgroundTaskMeta): void {
+  try {
+    const size = statSync(meta.output_path).size;
+    if (size <= MAX_BACKGROUND_OUTPUT_BYTES) return;
+    appendFileSync(
+      meta.output_path,
+      `\n[mica background task stopped]\nreason: output exceeded ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}\n`,
+      'utf-8',
+    );
+    markBackgroundTaskOutputLimitExceeded(meta);
+    if (meta.pid) {
+      killProcessTree(meta.pid, 'SIGTERM');
+      setTimeout(() => {
+        if (isProcessAlive(meta.pid)) killProcessTree(meta.pid!, 'SIGKILL');
+      }, 5_000).unref?.();
+    }
+  } catch {
+    // A task can finish and rotate metadata between list and size checks.
+  }
+}
+
+function readBackgroundTaskExitMarker(
+  outputPath: string,
+  id?: string,
+): {
+  finishedAt?: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+} | null {
+  let content: string;
+  try {
+    const size = statSync(outputPath).size;
+    const length = Math.min(size, 4096);
+    const buffer = Buffer.alloc(length);
+    const fd = openSync(outputPath, 'r');
+    try {
+      const bytesRead = readSync(fd, buffer, 0, length, size - length);
+      content = buffer.subarray(0, bytesRead).toString('utf-8');
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+
+  const markerIndex = content.lastIndexOf('[mica background task exited]');
+  if (markerIndex < 0) return null;
+  const marker = content.slice(markerIndex);
+  const markerId = marker.match(/^id: (.+)$/m)?.[1]?.trim();
+  if (id && markerId && markerId !== id) return null;
+  return {
+    finishedAt: marker.match(/^finished_at: (.+)$/m)?.[1]?.trim(),
+    exitCode: parseNullableNumber(marker.match(/^exit_code: (.+)$/m)?.[1]),
+    signal: parseNullableSignal(marker.match(/^signal: (.+)$/m)?.[1]),
+  };
+}
+
+function parseNullableNumber(value: string | undefined): number | null {
+  if (!value || value.trim() === 'null') return null;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseNullableSignal(value: string | undefined): NodeJS.Signals | null {
+  if (!value || value.trim() === 'null') return null;
+  return value.trim() as NodeJS.Signals;
 }
 
 function isProcessAlive(pid: number | undefined): boolean {

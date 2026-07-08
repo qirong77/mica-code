@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { appendFileSync, closeSync, openSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import { MicaTool } from './MicaTool.js';
@@ -8,13 +8,12 @@ import { clampNumber, formatSize } from './utils/outputLimits.js';
 import {
   backgroundHeader,
   createBackgroundTaskMeta,
+  ensureBackgroundTaskMonitor,
   getTaskOutputPath,
   killChildProcess,
-  markBackgroundTaskExited,
   markBackgroundTaskRunning,
   markBackgroundTaskSpawnFailed,
   MAX_BACKGROUND_OUTPUT_BYTES,
-  startBackgroundOutputWatchdog,
   taskId,
   waitForBackgroundSpawn,
 } from './ToolRunShellBackground.js';
@@ -40,6 +39,27 @@ type RunShellInput = {
 function defaultShell(): string {
   if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';
   return '/bin/sh';
+}
+
+// The detached shell writes its own completion marker so the parent can drop ChildProcess listeners after spawn.
+function backgroundCommand(command: string, id: string): string {
+  if (process.platform === 'win32') return command;
+  return [
+    `__mica_task_id=${id}`,
+    '__mica_status=0',
+    '__mica_signal=null',
+    '__mica_finish() {',
+    '  __mica_status=$?',
+    '  trap - EXIT INT TERM HUP',
+    '  printf "\\n[mica background task exited]\\nid: %s\\nfinished_at: %s\\nexit_code: %s\\nsignal: %s\\n\\n" "$__mica_task_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$__mica_status" "$__mica_signal"',
+    '  exit "$__mica_status"',
+    '}',
+    'trap __mica_finish EXIT',
+    'trap "__mica_signal=SIGINT; exit 130" INT',
+    'trap "__mica_signal=SIGTERM; exit 143" TERM',
+    'trap "__mica_signal=SIGHUP; exit 129" HUP',
+    command,
+  ].join('\n');
 }
 
 function resolveCwd(cwd: string | undefined): { ok: true; cwd: string } | { ok: false; message: string } {
@@ -221,9 +241,9 @@ export class ToolRunShell extends MicaTool {
       'utf-8',
     );
     const fd = openSync(outputPath, 'a');
-    let child: ChildProcess;
+    let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(input.command, {
+      child = spawn(backgroundCommand(input.command, id), {
         cwd: cwdResult.cwd,
         shell,
         detached: true,
@@ -238,40 +258,18 @@ export class ToolRunShell extends MicaTool {
       closeSync(fd);
     }
 
-    markBackgroundTaskRunning(id, child.pid);
-    appendFileSync(outputPath, `[mica background task spawned]\npid: ${child.pid ?? 'unknown'}\n\n`, 'utf-8');
-
-    child.on('error', (error) => {
-      markBackgroundTaskSpawnFailed(id, error.message);
-      appendFileSync(outputPath, `\n[mica background task error]\nmessage: ${error.message}\n`, 'utf-8');
-    });
-
-    const watchdog = startBackgroundOutputWatchdog(child, outputPath, id);
-    child.on('exit', (code, signal) => {
-      clearInterval(watchdog);
-      markBackgroundTaskExited(id, code, signal);
-      appendFileSync(
-        outputPath,
-        [
-          '',
-          '[mica background task exited]',
-          `finished_at: ${new Date().toISOString()}`,
-          `exit_code: ${code ?? 'null'}`,
-          `signal: ${signal ?? 'null'}`,
-          '',
-        ].join('\n'),
-        'utf-8',
-      );
-    });
-
     const spawnResult = await waitForBackgroundSpawn(child);
     if (!spawnResult.ok) {
-      clearInterval(watchdog);
       markBackgroundTaskSpawnFailed(id, spawnResult.message);
+      appendFileSync(outputPath, `\n[mica background task error]\nmessage: ${spawnResult.message}\n`, 'utf-8');
       return [`命令后台启动失败 (id: ${id})`, `cwd: ${cwdResult.cwd}`, `错误: ${spawnResult.message}`].join('\n');
     }
 
+    markBackgroundTaskRunning(id, child.pid);
+    appendFileSync(outputPath, `[mica background task spawned]\npid: ${child.pid ?? 'unknown'}\n\n`, 'utf-8');
+
     child.unref();
+    ensureBackgroundTaskMonitor();
 
     return [
       `命令已在后台启动 (id: ${id})`,
