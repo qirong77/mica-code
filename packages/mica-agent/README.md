@@ -15,15 +15,18 @@
 ```ts
 import { micaAgent } from '../packages/mica-agent/index.js';
 
+const provider = {
+  id: 'openai',
+  api_base: 'https://api.openai.com/v1',
+  api_key: 'sk-...',
+  protocol: 'openai_responses',
+} as const;
+
 const agent = micaAgent.createModelClient({
   model: 'gpt-4.1',
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: 'https://api.openai.com/v1',
-  provider: {
-    id: 'openai',
-    api_base: 'https://api.openai.com/v1',
-    protocol: 'openai_responses',
-  },
+  apiKey: provider.api_key,
+  baseURL: provider.api_base,
+  provider,
 });
 ```
 

@@ -53,7 +53,7 @@ git diff --check
 
 ```text
 src/
-  index.ts                         CLI 入口：dotenv、全局错误钩子、Application 启停
+  index.ts                         CLI 入口：全局错误钩子、Application 启停
   buildMeta.ts                     构建元信息
   agent/
     AgentRuntime.ts                provider client 生命周期、run/abort/snapshot/config reload
@@ -113,7 +113,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
-1. `src/index.ts` 加载当前工作目录 `.env` 和 `packages/mica-agent/.env`，注册全局错误处理，然后创建并启动 `Application`。
+1. `src/index.ts` 注册全局错误处理，然后创建并启动 `Application`。
 2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI。
 3. 启动后先执行 `micaConfig.assertValid()`。配置语义错误应该在 `AgentRuntime` 创建前失败，并通过 UI 展示可操作错误。
 4. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。

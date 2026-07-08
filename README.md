@@ -28,7 +28,6 @@ curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/instal
 
 首次运行会创建本地配置文件：`~/.mica/config.json`。
 
-启动时会读取当前工作目录下的 `.env` 和 `packages/mica-agent/.env`。
 典型 provider 配置：
 
 ```json
