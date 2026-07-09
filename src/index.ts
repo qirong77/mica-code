@@ -3,11 +3,11 @@
 import { createApplication } from './app/index.js';
 import { reportRuntimeError } from './runtime/uiBridge.js';
 import { startConfigWebServer } from '@packages/mica-config-web/server/server.js';
+import { getConfigWebWorkerToken } from '@packages/mica-config-web/server/workerArgs.js';
 
-if (process.argv[2] === '--config-web-worker') {
-  const token = process.argv[3];
-  if (!token) throw new Error('Missing config web token');
-  await startConfigWebServer({ token });
+const configWebWorkerToken = getConfigWebWorkerToken();
+if (configWebWorkerToken) {
+  await startConfigWebServer({ token: configWebWorkerToken });
   await new Promise(() => undefined);
 }
 
