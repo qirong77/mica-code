@@ -34,6 +34,8 @@ export function McpPage() {
       actions={<Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />}
     >
       {error ? <Alert message={error} /> : null}
+      <div style={{ marginTop: '4px' }}></div>
+
       <div className="detail-body detail-body-stacked">
         {!details || details.servers.length === 0 ? (
           <Empty description="暂无 MCP server" />
@@ -103,4 +105,3 @@ function statusColor(status: string): 'default' | 'green' | 'red' | 'blue' {
   if (status === 'connecting') return 'blue';
   return 'default';
 }
-

@@ -53,6 +53,7 @@ export type ConfigWebPlugin = {
   name: string;
   id: string;
   file: string;
+  content: string;
   extension: string;
   sizeBytes: number;
   updatedAt: string;

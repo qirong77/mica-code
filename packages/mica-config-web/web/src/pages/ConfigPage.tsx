@@ -64,9 +64,6 @@ export function ConfigPage() {
     >
       {error ? <Alert message={error} /> : null}
       <div className="editor-only">
-        <div className="editor-pane-header">
-          <h3>settings.json</h3>
-        </div>
         <div className="editor-host editor-host-large">
           <MonacoJsonEditor value={content} language="json" onChange={setContent} />
         </div>

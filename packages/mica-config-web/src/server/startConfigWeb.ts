@@ -14,7 +14,8 @@ export async function startConfigWeb(): Promise<ConfigWebServerInfo> {
   }
 
   const token = createToken();
-  const child = spawn(getExecutable(), [...getEntryArgs(), '--config-web-worker', token], {
+  const workerCommand = resolveConfigWebWorkerCommand();
+  const child = spawn(workerCommand.executable, [...workerCommand.entryArgs, '--config-web-worker', token], {
     detached: true,
     stdio: 'ignore',
     env: process.env,
@@ -44,12 +45,18 @@ function toUrl(port: number, token: string): string {
   return `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`;
 }
 
-function getExecutable(): string {
-  return process.argv[0] || process.execPath;
+export function resolveConfigWebWorkerCommand(
+  argv: readonly string[] = process.argv,
+  execPath: string = process.execPath,
+): { executable: string; entryArgs: string[] } {
+  const executable = execPath || argv[0] || process.execPath;
+  const entry = argv[1];
+  if (!entry || entry === argv[0] || isBunCompiledVirtualEntry(entry, executable, argv[0])) {
+    return { executable, entryArgs: [] };
+  }
+  return { executable, entryArgs: [entry] };
 }
 
-function getEntryArgs(): string[] {
-  const entry = process.argv[1];
-  if (!entry || entry === process.argv[0]) return [];
-  return [entry];
+function isBunCompiledVirtualEntry(entry: string, executable: string, argv0: string | undefined): boolean {
+  return entry.startsWith('/$bunfs/root/') && executable !== argv0;
 }

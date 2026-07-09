@@ -71,6 +71,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
             name,
             id: `file.${name}`,
             file,
+            content: readFileSync(file, 'utf-8'),
             extension: extname(fileName),
             sizeBytes: stat.size,
             updatedAt: stat.mtime.toISOString(),

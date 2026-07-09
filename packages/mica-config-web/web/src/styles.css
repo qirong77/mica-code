@@ -350,7 +350,8 @@ textarea {
 
 .simple-row strong,
 .tool-item p,
-.skill-preview {
+.skill-preview,
+.code-preview {
   overflow-wrap: anywhere;
   line-height: 1.6;
 }
@@ -377,6 +378,21 @@ textarea {
   color: var(--text-soft);
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.code-preview {
+  max-height: 520px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-muted);
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  tab-size: 2;
+  white-space: pre;
 }
 
 .ui-empty-wrap {

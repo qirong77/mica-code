@@ -57,7 +57,9 @@ function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
       meta={
         <>
           <Tag tone="blue">{plugin.extension}</Tag>
-          <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>{plugin.status ?? 'unknown'}</Tag>
+          <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>
+            {plugin.status ?? 'unknown'}
+          </Tag>
         </>
       }
     >
@@ -78,7 +80,13 @@ function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
           <span>Error</span>
           <strong>{plugin.error || '-'}</strong>
         </div>
+        <div style={{ marginTop: '4px' }}></div>
       </div>
+      {plugin.content ? (
+        <pre className="code-preview">
+          <code>{plugin.content}</code>
+        </pre>
+      ) : null}
     </CollapsiblePanel>
   );
 }
@@ -92,4 +100,3 @@ function formatBytes(bytes: number): string {
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
 }
-

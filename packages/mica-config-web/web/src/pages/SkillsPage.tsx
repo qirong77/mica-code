@@ -66,8 +66,8 @@ function SkillCard({ skill }: { skill: ConfigWebSkill }) {
           <strong>{skill.argumentHint || '-'}</strong>
         </div>
       </div>
+      <div style={{ marginTop: '4px' }}></div>
       {skill.contentPreview ? <pre className="skill-preview">{skill.contentPreview}</pre> : null}
     </CollapsiblePanel>
   );
 }
-
