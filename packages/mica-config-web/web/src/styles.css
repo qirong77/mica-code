@@ -47,7 +47,8 @@ body {
   padding: 18px;
 }
 
-.editor-page {
+.editor-page,
+.detail-page {
   height: 100%;
   display: flex;
   min-height: 0;
@@ -88,6 +89,108 @@ body {
 .editor-host {
   flex: 1;
   min-height: 0;
+}
+
+.config-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.field-help {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  border-right: 1px solid #eef0f2;
+  background: #fbfcfd;
+}
+
+.field-help h5.ant-typography {
+  margin: 0 0 12px;
+}
+
+.field-help-list {
+  display: grid;
+  gap: 10px;
+}
+
+.field-help-item {
+  padding: 10px;
+  border: 1px solid #eceff3;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.field-help-item .ant-typography {
+  margin: 0;
+}
+
+.field-help-item .ant-typography + .ant-typography {
+  margin-top: 6px;
+}
+
+.detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.detail-list {
+  display: grid;
+  gap: 14px;
+}
+
+.detail-card {
+  border: 1px solid #e6e8eb;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.detail-card-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detail-card-title .ant-typography {
+  margin: 0;
+}
+
+.tools-collapse {
+  margin-top: 10px;
+}
+
+.tool-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tool-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.tool-item .ant-typography {
+  margin: 0;
+}
+
+.skill-preview {
+  margin: 12px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #3b4048;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .empty-page {

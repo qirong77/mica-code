@@ -1,4 +1,10 @@
-import type { ConfigWebFilePayload, ConfigWebSection } from '../../src/shared/types.js';
+import type {
+  ConfigFieldDescription,
+  ConfigWebFilePayload,
+  ConfigWebMcpDetails,
+  ConfigWebSection,
+  ConfigWebSkillsDetails,
+} from '../../src/shared/types.js';
 
 const token = new URLSearchParams(window.location.search).get('token') ?? '';
 
@@ -13,6 +19,22 @@ export async function writeSection(section: ConfigWebSection, content: string): 
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content }),
   });
+  return readJson(response);
+}
+
+export async function readConfigDescriptions(): Promise<ConfigFieldDescription[]> {
+  const response = await fetch(`/api/descriptions/config?token=${encodeURIComponent(token)}`);
+  const payload = await readJson<{ fields: ConfigFieldDescription[] }>(response);
+  return payload.fields;
+}
+
+export async function readMcpDetails(): Promise<ConfigWebMcpDetails> {
+  const response = await fetch(`/api/details/mcp?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readSkillsDetails(): Promise<ConfigWebSkillsDetails> {
+  const response = await fetch(`/api/details/skills?token=${encodeURIComponent(token)}`);
   return readJson(response);
 }
 

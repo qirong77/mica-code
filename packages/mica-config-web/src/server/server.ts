@@ -1,4 +1,5 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
+import { getConfigFieldDescriptions, getMcpDetails, getSkillsDetails } from './details.js';
 import { writeConfigWebState } from './singleton.js';
 import type { ConfigWebSection } from '../shared/types.js';
 import { dirname, resolve } from 'node:path';
@@ -45,6 +46,18 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
       if (url.pathname === '/api/ping') {
         return json({ ok: true, clients });
+      }
+
+      if (url.pathname === '/api/descriptions/config') {
+        return json({ fields: getConfigFieldDescriptions() });
+      }
+
+      if (url.pathname === '/api/details/mcp') {
+        return json(await getMcpDetails());
+      }
+
+      if (url.pathname === '/api/details/skills') {
+        return json(getSkillsDetails());
       }
 
       if (url.pathname === '/api/events') {

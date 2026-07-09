@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { ConfigProvider } from 'antd';
 import { Sidebar } from './layout/Sidebar.js';
 import { EmptyState } from './components/EmptyState.js';
-import { EditorPage } from './pages/EditorPage.js';
+import { ConfigPage } from './pages/ConfigPage.js';
+import { McpPage } from './pages/McpPage.js';
+import { SkillsPage } from './pages/SkillsPage.js';
 import { connectHeartbeat } from './api.js';
 import type { ConfigWebSection } from '../../src/shared/types.js';
 
@@ -28,7 +30,10 @@ export function App() {
       <main className="app-shell">
         <Sidebar section={section} onChange={setSection} />
         <div className="content-shell">
-          {section === 'plugins' ? <EmptyState /> : <EditorPage section={section} />}
+          {section === 'config' ? <ConfigPage /> : null}
+          {section === 'mcp' ? <McpPage /> : null}
+          {section === 'skills' ? <SkillsPage /> : null}
+          {section === 'plugins' ? <EmptyState /> : null}
         </div>
       </main>
     </ConfigProvider>
