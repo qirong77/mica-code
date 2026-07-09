@@ -148,7 +148,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
       >
         <micaUi.SelectList
           items={items}
-          adaptiveHeight
           selectedIdx={currentIdx}
           empty={<Text dimColor>{config.emptyMessage ?? 'no options'}</Text>}
           itemGap={config.itemGap ?? 1}

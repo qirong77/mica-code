@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { useEffect, useRef } from 'react';
-import { Box, ScrollBox, Text } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@packages/@anthropic/ink/src/components/ScrollBox.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
@@ -70,7 +70,7 @@ function showLogPanel() {
 
     return (
       <micaUi.Dialog title={`log (${logs.length})`} footer={<micaUi.KeyHints hints={['↑↓ scroll', 'esc close']} />}>
-        <ScrollBox ref={scrollRef} height={18} flexDirection="column">
+        <micaUi.BottomScrollBox ref={scrollRef} height={18}>
           {logs.length === 0 ? (
             <Text dimColor>no logs</Text>
           ) : (
@@ -82,7 +82,7 @@ function showLogPanel() {
               ))}
             </Box>
           )}
-        </ScrollBox>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }

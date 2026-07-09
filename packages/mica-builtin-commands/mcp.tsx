@@ -206,7 +206,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
             title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`}
             footer={<micaUi.KeyHints hints={['esc back']} />}
           >
-            <Box flexDirection="column">
+            <micaUi.BottomScrollBox>
               {tool?.description ? (
                 <Box paddingBottom={1}>
                   <Text dimColor>{tool.description}</Text>
@@ -257,7 +257,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                   <Text>{`input type: ${schema.type}`}</Text>
                 </Box>
               ) : null}
-            </Box>
+            </micaUi.BottomScrollBox>
           </micaUi.Dialog>
         );
       }

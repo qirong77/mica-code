@@ -18,6 +18,7 @@ import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
 import { useScheduleState } from './hooks/index.js';
 import { useLogViewHeight } from './hooks/useLogViewHeight.js';
 import {
+  BottomScrollBox,
   Dialog,
   KeyHints,
   MessageGutter,
@@ -53,6 +54,7 @@ export const micaUi = {
   useScheduleState,
   /** 根据终端尺寸和底部面板状态计算日志视图高度。 */
   useLogViewHeight,
+  BottomScrollBox,
   Dialog,
   KeyHints,
   MessageGutter,
@@ -127,6 +129,7 @@ export type {
   OneLineItemCell,
   SelectItem,
   SelectListLayout,
+  BottomScrollBoxProps,
 } from './primitives/index.js';
 export type { MessageItem } from './panels/MessageBar.js';
 export type { MicaUiPendingInputQueueMode } from './conversation/state.js';

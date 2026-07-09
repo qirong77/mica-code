@@ -1,24 +1,23 @@
 import React from 'react';
-import { Box, ScrollBox } from '@anthropic/ink';
+import { Box } from '@anthropic/ink';
 import { useScheduleState } from '../hooks/index.js';
 import { agentTurnLogItems, workingStatus } from '../panels/state.js';
-import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
+import { BottomScrollBox } from '../primitives/index.js';
 
 export function AgentTurnLog(): React.ReactNode {
   const items = useScheduleState(agentTurnLogItems);
   const status = useScheduleState(workingStatus);
-  const viewportHeight = useLogViewHeight();
 
   if (status.type === 'idle' && items.length === 0) return null;
 
   return (
-    <ScrollBox height={viewportHeight} stickyScroll flexDirection="column">
+    <BottomScrollBox stickyScroll bottomReservedRows={0}>
       {items.map((item) => (
         <Box key={item.id}>
           <item.component />
         </Box>
       ))}
-    </ScrollBox>
+    </BottomScrollBox>
   );
 }
 

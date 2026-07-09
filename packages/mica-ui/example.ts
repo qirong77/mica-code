@@ -96,11 +96,15 @@ function seedDemoState(): void {
     },
     {
       role: 'assistant',
-      content: 'Loaded the main stores and components. The conversation stays intentionally short so the log viewport gets most of the attention.',
+      content:
+        'Loaded the main stores and components. The conversation stays intentionally short so the log viewport gets most of the attention.',
     },
   ]);
   micaUi.bottom.agentTurnLog.setItems([
-    micaUi.createThinkingLogItem('seed-thinking', 'Seeded compact conversation state and prepared the log viewport demo.'),
+    micaUi.createThinkingLogItem(
+      'seed-thinking',
+      'Seeded compact conversation state and prepared the log viewport demo.',
+    ),
     micaUi.createToolCallLogItem({
       id: 'seed-tool',
       toolName: 'read_file',
@@ -234,7 +238,8 @@ function runStreamDemo(): void {
     {
       role: 'notice',
       command: '/example',
-      content: 'Log stress demo is running. The bottom panel is intentionally dense so you can debug its layout and scrolling behavior.',
+      content:
+        'Log stress demo is running. The bottom panel is intentionally dense so you can debug its layout and scrolling behavior.',
     },
   ]);
 
@@ -474,8 +479,6 @@ function DemoPluginPanel(): React.ReactNode {
       selectedIdx: 1,
       layout: 'detail',
       showIndex: true,
-      maxVisibleItems: 4,
-      adaptiveHeight: false,
       highlightText: 'list',
     }),
     h(

@@ -63,7 +63,7 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
     const hiddenCount = Math.max(0, preview.files.length - visibleFiles.length);
     return (
       <micaUi.Dialog title="rewind" footer={<micaUi.KeyHints hints={['y confirm', 'esc cancel']} />}>
-        <Box flexDirection="column" marginTop={1}>
+        <micaUi.BottomScrollBox>
           <Text color={micaUi.theme.colors.warning}>确认回退到对话「{preview.conversationLabel}」之前吗？</Text>
           <Text color={micaUi.theme.colors.dim}>
             messages: {preview.messageCountNow} -&gt; {preview.messageCountBefore}
@@ -87,7 +87,7 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
               {hiddenCount > 0 ? <Text color={micaUi.theme.colors.dim}>... and {hiddenCount} more</Text> : null}
             </Box>
           )}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }

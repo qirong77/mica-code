@@ -27,6 +27,7 @@ vi.mock('@packages/mica-logger/index.js', () => ({
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
     Dialog: ({ children }: { children: unknown }) => children,
+    BottomScrollBox: ({ children }: { children: unknown }) => children,
     KeyHints: () => null,
     theme: {
       colors: {
@@ -87,9 +88,7 @@ describe('context command', () => {
     const command = createContextCommand(makeAgent());
     command.action('detail');
 
-    expect(mocks.upsertPluginUI).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'context-panel' }),
-    );
+    expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'context-panel' }));
     expect(mocks.logRuntime).toHaveBeenCalledWith(
       'plugin.context',
       'opened',
@@ -137,7 +136,13 @@ function makeAgent(): CommandAgent {
         lastUsage,
         messages: [
           { type: 'user', content: [{ type: 'text', text: 'inspect context' }] },
-          { type: 'tool_call', id: '1', name: 'read_file', args: { file_path: 'a.ts', offset: 1 }, argsText: '{"file_path":"a.ts"}' },
+          {
+            type: 'tool_call',
+            id: '1',
+            name: 'read_file',
+            args: { file_path: 'a.ts', offset: 1 },
+            argsText: '{"file_path":"a.ts"}',
+          },
           { type: 'tool_result', id: '1', name: 'read_file', content: '1 | a\n2 | b\n3 | c' },
         ],
       };

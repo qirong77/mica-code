@@ -110,7 +110,7 @@ function showDoctorPanel(report: DoctorReport) {
         title={`doctor (${formatSummary(report.summary)})`}
         footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}
       >
-        <Box flexDirection="column" width="100%" minWidth={0}>
+        <micaUi.BottomScrollBox>
           <Text color={micaUi.theme.colors.dim}>{`${formatGeneratedAt(report.generatedAt)}  ${report.cwd}`}</Text>
           <Text> </Text>
           {report.checks.map((check) => (
@@ -147,7 +147,7 @@ function showDoctorPanel(report: DoctorReport) {
               ) : null}
             </Box>
           ))}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }

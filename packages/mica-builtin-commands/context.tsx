@@ -128,7 +128,7 @@ function showContextPanel(overview: ContextOverview) {
   function ContextPanel() {
     return (
       <micaUi.Dialog title="context map" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <Box flexDirection="column" width={TABLE_WIDTH} maxWidth="100%" minWidth={0}>
+        <micaUi.BottomScrollBox width={TABLE_WIDTH} maxWidth="100%">
           <UsageLine overview={overview} />
           <Text>
             <Text color={micaUi.theme.colors.dim}>{'       '}</Text>
@@ -141,7 +141,7 @@ function showContextPanel(overview: ContextOverview) {
           {overview.buckets.map((bucket) => (
             <TokenMapRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} />
           ))}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }
@@ -172,7 +172,7 @@ function showContextDetailPanel(overview: ContextOverview) {
   function ContextDetailPanel() {
     return (
       <micaUi.Dialog title="context detail" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <Box flexDirection="column" width={TABLE_WIDTH + 32} maxWidth="100%" minWidth={0}>
+        <micaUi.BottomScrollBox width={TABLE_WIDTH + 32} maxWidth="100%">
           <Text color={micaUi.theme.colors.textSecondary}>{formatSummaryLine(overview)}</Text>
           <Text> </Text>
           <SectionTitle title="Buckets" />
@@ -188,8 +188,7 @@ function showContextDetailPanel(overview: ContextOverview) {
               <Box key={`${entry.toolName}-${index}`} flexDirection="column">
                 <Text>
                   {`${index + 1}.`.padEnd(3)}
-                  {truncateText(entry.toolName, 14).padEnd(14)}
-                  {' '}
+                  {truncateText(entry.toolName, 14).padEnd(14)}{' '}
                   <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(entry.tokens).padStart(6)}</Text>
                   {'   '}
                   {truncateText(entry.argSummary, 48)}
@@ -202,14 +201,13 @@ function showContextDetailPanel(overview: ContextOverview) {
           <SectionTitle title="Tools" />
           {overview.toolSchemaSources.map((tool) => (
             <Text key={tool.name}>
-              {truncateText(tool.name, 52).padEnd(52)}
-              {' '}
+              {truncateText(tool.name, 52).padEnd(52)}{' '}
               <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(tool.tokens).padStart(6)}</Text>
               {'   '}
               <Text color={micaUi.theme.colors.dim}>{tool.kind}</Text>
             </Text>
           ))}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }
@@ -269,7 +267,10 @@ function buildContextOverview(agent: CommandAgent): ContextOverview {
     totalCacheRate,
     buckets,
     largestSources: buildLargestSources(toolSchemaBreakdown, promptBreakdown, conversationStats, scale),
-    toolSchemaSources: toolSchemaBreakdown.sources.map((source) => ({ ...source, tokens: Math.round(source.tokens * scale) })),
+    toolSchemaSources: toolSchemaBreakdown.sources.map((source) => ({
+      ...source,
+      tokens: Math.round(source.tokens * scale),
+    })),
     largestToolOutputs: conversationStats.toolOutputEntries
       .map((entry) => ({ ...entry, tokens: Math.round(entry.tokens * scale) }))
       .sort((a, b) => b.tokens - a.tokens)
@@ -664,8 +665,7 @@ function DetailBucketRow({
   const ratio = totalTokens > 0 ? bucket.tokens / totalTokens : 0;
   return (
     <Text>
-      {truncateText(bucket.label, 14).padEnd(14)}
-      {' '}
+      {truncateText(bucket.label, 14).padEnd(14)}{' '}
       <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(bucket.tokens).padStart(6)}</Text>
       {'   '}
       <Text color={micaUi.theme.colors.dim}>{formatPercent(ratio).padStart(6)}</Text>
@@ -686,7 +686,8 @@ function SectionTitle({ title }: { title: string }) {
 
 function bucketDetailText(key: BucketKey, overview: ContextOverview): string {
   if (key === 'toolSchemas') return `${overview.toolSchemaSources.length} tools`;
-  if (key === 'toolOutputs') return `${overview.largestToolOutputs.length > 0 ? 'top outputs shown below' : 'no results'}`;
+  if (key === 'toolOutputs')
+    return `${overview.largestToolOutputs.length > 0 ? 'top outputs shown below' : 'no results'}`;
   if (key === 'conversation') return `${overview.messageCount} messages / ${overview.turns} turns`;
   if (key === 'toolCalls') return `${overview.toolCalls} invocations`;
   return '';

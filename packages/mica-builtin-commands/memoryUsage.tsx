@@ -60,7 +60,7 @@ function showMemoryUsagePanel() {
         title={`memoryUsage (${snapshots.length})`}
         footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}
       >
-        <Box flexDirection="column" width={86} maxWidth="100%" minWidth={0}>
+        <micaUi.BottomScrollBox width={86} maxWidth="100%">
           {!latest ? (
             <Text dimColor>no memory snapshots</Text>
           ) : (
@@ -73,7 +73,7 @@ function showMemoryUsagePanel() {
               <ResourceSummary snapshot={latest} />
             </>
           )}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }

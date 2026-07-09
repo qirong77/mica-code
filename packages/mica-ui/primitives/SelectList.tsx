@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { Box, Text } from '@anthropic/ink';
+import type { DOMElement } from '@packages/@anthropic/ink/src/core/dom.js';
+import type { ScrollBoxHandle } from '@packages/@anthropic/ink/src/components/ScrollBox.js';
 import { themeColors } from '../theme.js';
-import { useBottomPanelHeight } from '../hooks/useLogViewHeight.js';
 import { OneLineItem } from './OneLineItem.js';
+import { BottomScrollBox } from './BottomScrollBox.js';
 
 export type SelectListLayout = 'compact' | 'detail' | 'table';
 
@@ -25,13 +27,12 @@ export interface SelectListProps<T extends SelectItem> {
   itemGap?: number;
   markerWidth?: number;
   marker?: string;
-  maxVisibleItems?: number;
-  adaptiveHeight?: boolean;
-  reservedRows?: number;
   layout?: SelectListLayout;
   showIndex?: boolean;
   highlightText?: string;
-  scrollIndicators?: boolean;
+  height?: number;
+  maxHeight?: number;
+  bottomReservedRows?: number;
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
 }
 
@@ -44,37 +45,24 @@ function renderItems<T extends SelectItem>(
   layout: SelectListLayout,
   showIndex: boolean,
   highlightText: string | undefined,
-  scrollIndicators: boolean,
-  range: { start: number; end: number; total: number },
+  selectedItemRef: (el: DOMElement | null) => void,
   renderItem?: (item: T, isSelected: boolean) => React.ReactNode,
 ) {
-  const indexWidth = showIndex ? String(range.total).length + 2 : 0;
-  const hasAbove = range.start > 0;
-  const hasBelow = range.end < range.total;
+  const indexWidth = showIndex ? String(items.length).length + 2 : 0;
 
-  return items.map((item, localIndex) => {
-    const absoluteIndex = range.start + localIndex;
-    const isSelected = absoluteIndex === selectedIdx;
-    const isFirstVisible = localIndex === 0;
-    const isLastVisible = localIndex === items.length - 1;
-    const scrollMarker =
-      scrollIndicators && !isSelected && ((isFirstVisible && hasAbove) || (isLastVisible && hasBelow))
-        ? isFirstVisible && hasAbove
-          ? '↑'
-          : '↓'
-        : ' ';
-    const markerText = isSelected ? marker : scrollMarker;
-
+  return items.map((item, index) => {
+    const isSelected = index === selectedIdx;
     return (
       <Box
         key={item.key}
+        ref={isSelected ? selectedItemRef : undefined}
         flexDirection="row"
         width="100%"
         minWidth={0}
-        marginBottom={localIndex < items.length - 1 ? itemGap : 0}
+        marginBottom={index < items.length - 1 ? itemGap : 0}
       >
         <Box width={markerWidth} flexShrink={0}>
-          <Text color={isSelected ? themeColors.accent : themeColors.subtle}>{markerText}</Text>
+          <Text color={isSelected ? themeColors.accent : themeColors.subtle}>{isSelected ? marker : ' '}</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {renderItem ? (
@@ -83,7 +71,7 @@ function renderItems<T extends SelectItem>(
             <DefaultSelectItem
               item={item}
               isSelected={isSelected}
-              index={absoluteIndex + 1}
+              index={index + 1}
               indexWidth={indexWidth}
               layout={layout}
               showIndex={showIndex}
@@ -251,238 +239,87 @@ export function SelectList<T extends SelectItem>({
   itemGap = 1,
   markerWidth = 2,
   marker = '\u25B6',
-  maxVisibleItems = 5,
-  adaptiveHeight = true,
-  reservedRows = title ? 1 : 0,
   layout = 'table',
   showIndex = false,
   highlightText,
-  scrollIndicators = false,
+  height,
+  maxHeight,
+  bottomReservedRows = 4,
   renderItem,
 }: SelectListProps<T>): React.ReactNode {
-  const effectiveMarkerWidth = Math.max(markerWidth, scrollIndicators ? 1 : 0);
-
-  if (adaptiveHeight) {
-    return (
-      <AdaptiveSelectList
-        items={items}
-        selectedIdx={selectedIdx}
-        title={title}
-        empty={empty}
-        itemGap={itemGap}
-        markerWidth={effectiveMarkerWidth}
-        marker={marker}
-        maxVisibleItems={maxVisibleItems}
-        reservedRows={reservedRows}
-        layout={layout}
-        showIndex={showIndex}
-        highlightText={highlightText}
-        scrollIndicators={scrollIndicators}
-        renderItem={renderItem}
-      />
-    );
-  }
-
-  return (
-    <SelectListContent
-      items={items}
-      selectedIdx={selectedIdx}
-      title={title}
-      empty={empty}
-      itemGap={itemGap}
-      markerWidth={effectiveMarkerWidth}
-      marker={marker}
-      visibleItemLimit={maxVisibleItems}
-      layout={layout}
-      showIndex={showIndex}
-      highlightText={highlightText}
-      scrollIndicators={scrollIndicators}
-      renderItem={renderItem}
-    />
+  const scrollRef = useRef<ScrollBoxHandle | null>(null);
+  const selectedItemRef = useRef<DOMElement | null>(null);
+  const selectedItemRefCallback = useMemo(
+    () => (el: DOMElement | null) => {
+      selectedItemRef.current = el;
+    },
+    [],
   );
-}
+  const clampedSelectedIdx = clampIndex(selectedIdx, items.length);
+  const selectedKey = items[clampedSelectedIdx]?.key;
 
-function AdaptiveSelectList<T extends SelectItem>({
-  items,
-  selectedIdx,
-  title,
-  empty,
-  itemGap,
-  markerWidth,
-  marker,
-  maxVisibleItems,
-  reservedRows,
-  layout,
-  showIndex,
-  highlightText,
-  scrollIndicators,
-  renderItem,
-}: Omit<SelectListProps<T>, 'adaptiveHeight'> & {
-  empty: React.ReactNode;
-  itemGap: number;
-  markerWidth: number;
-  marker: string;
-  maxVisibleItems: number;
-  reservedRows: number;
-  layout: SelectListLayout;
-  showIndex: boolean;
-  highlightText?: string;
-  scrollIndicators: boolean;
-}): React.ReactNode {
-  // Adaptive mode lets the bottom panel grow into available terminal space;
-  // maxVisibleItems remains a floor so callers still get a predictable minimum.
-  const panelHeight = useBottomPanelHeight(reservedRows);
-  const adaptiveVisibleItems = Math.max(1, Math.floor((panelHeight + itemGap) / (1 + itemGap)));
-  const visibleItemLimit = Math.max(maxVisibleItems, adaptiveVisibleItems);
+  useLayoutEffect(() => {
+    const scrollBox = scrollRef.current;
+    const selectedItem = selectedItemRef.current;
+    if (!scrollBox || !selectedItem || items.length === 0) return;
 
-  return (
-    <SelectListContent
-      items={items}
-      selectedIdx={selectedIdx}
-      title={title}
-      empty={empty}
-      itemGap={itemGap}
-      markerWidth={markerWidth}
-      marker={marker}
-      visibleItemLimit={visibleItemLimit}
-      layout={layout}
-      showIndex={showIndex}
-      highlightText={highlightText}
-      scrollIndicators={scrollIndicators}
-      renderItem={renderItem}
-    />
+    const viewportHeight = scrollBox.getViewportHeight();
+    if (viewportHeight <= 0) {
+      scrollBox.scrollToElement(selectedItem);
+      return;
+    }
+
+    const selectedTop = selectedItem.yogaNode?.getComputedTop();
+    if (selectedTop === undefined) return;
+
+    const selectedHeight = selectedItem.yogaNode?.getComputedHeight() ?? 1;
+    const scrollTop = scrollBox.getScrollTop();
+    const scrollBottom = scrollTop + viewportHeight;
+    const selectedBottom = selectedTop + selectedHeight;
+
+    if (selectedTop < scrollTop) {
+      scrollBox.scrollToElement(selectedItem);
+    } else if (selectedBottom > scrollBottom) {
+      scrollBox.scrollToElement(
+        selectedItem,
+        selectedHeight >= viewportHeight ? 0 : -(viewportHeight - selectedHeight),
+      );
+    }
+  }, [clampedSelectedIdx, height, items.length, maxHeight, selectedKey]);
+
+  const body = (
+    <BottomScrollBox ref={scrollRef} height={height} maxHeight={maxHeight} bottomReservedRows={bottomReservedRows}>
+      {items.length === 0 ? (
+        empty
+      ) : (
+        <Box flexDirection="column" width="100%" minWidth={0}>
+          {renderItems(
+            items,
+            clampedSelectedIdx,
+            itemGap,
+            markerWidth,
+            marker,
+            layout,
+            showIndex,
+            highlightText,
+            selectedItemRefCallback,
+            renderItem,
+          )}
+        </Box>
+      )}
+    </BottomScrollBox>
   );
-}
-
-function SelectListContent<T extends SelectItem>({
-  items,
-  selectedIdx,
-  title,
-  empty,
-  itemGap,
-  markerWidth,
-  marker,
-  visibleItemLimit,
-  layout,
-  showIndex,
-  highlightText,
-  scrollIndicators,
-  renderItem,
-}: {
-  items: T[];
-  selectedIdx: number;
-  title?: React.ReactNode;
-  empty: React.ReactNode;
-  itemGap: number;
-  markerWidth: number;
-  marker: string;
-  visibleItemLimit: number;
-  layout: SelectListLayout;
-  showIndex: boolean;
-  highlightText?: string;
-  scrollIndicators: boolean;
-  renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
-}): React.ReactNode {
-  if (items.length === 0) return <>{empty}</>;
-
-  // This component is intentionally height-agnostic: callers decide the item
-  // limit, and the content layer only chooses between plain and windowed list.
-  const body =
-    items.length <= visibleItemLimit ? (
-      <Box flexDirection="column" width="100%" minWidth={0}>
-        {renderItems(
-          items,
-          selectedIdx,
-          itemGap,
-          markerWidth,
-          marker,
-          layout,
-          showIndex,
-          highlightText,
-          false,
-          { start: 0, end: items.length, total: items.length },
-          renderItem,
-        )}
-      </Box>
-    ) : (
-      <ScrollBody
-        items={items}
-        selectedIdx={selectedIdx}
-        visibleItems={visibleItemLimit}
-        itemGap={itemGap}
-        markerWidth={markerWidth}
-        marker={marker}
-        layout={layout}
-        showIndex={showIndex}
-        highlightText={highlightText}
-        scrollIndicators={scrollIndicators}
-        renderItem={renderItem}
-      />
-    );
 
   if (!title) return body;
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" minWidth={0} width="100%">
       <Box paddingBottom={1}>{typeof title === 'string' ? <Text dimColor>{title}</Text> : title}</Box>
       {body}
     </Box>
   );
 }
 
-function ScrollBody<T extends SelectItem>({
-  items,
-  selectedIdx,
-  visibleItems,
-  itemGap,
-  markerWidth,
-  marker,
-  layout,
-  showIndex,
-  highlightText,
-  scrollIndicators,
-  renderItem,
-}: {
-  items: T[];
-  selectedIdx: number;
-  visibleItems: number;
-  itemGap: number;
-  markerWidth: number;
-  marker: string;
-  layout: SelectListLayout;
-  showIndex: boolean;
-  highlightText?: string;
-  scrollIndicators: boolean;
-  renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
-}) {
-  const visibleRows = visibleItems + (visibleItems - 1) * itemGap;
-  const range = getVisibleRange(items.length, selectedIdx, visibleItems);
-  const visibleItemsSlice = items.slice(range.start, range.end);
-  const heightProps = layout === 'detail' ? {} : { height: visibleRows };
-
-  return (
-    <Box {...heightProps} flexDirection="column" width="100%" minWidth={0}>
-      {renderItems(
-        visibleItemsSlice,
-        selectedIdx,
-        itemGap,
-        markerWidth,
-        marker,
-        layout,
-        showIndex,
-        highlightText,
-        scrollIndicators,
-        { ...range, total: items.length },
-        renderItem,
-      )}
-    </Box>
-  );
-}
-
-function getVisibleRange(total: number, selectedIdx: number, visibleItems: number): { start: number; end: number } {
-  const limit = Math.max(1, Math.min(total, visibleItems));
-  const clampedSelected = Math.max(0, Math.min(selectedIdx, total - 1));
-  const half = Math.floor(limit / 2);
-  const maxStart = Math.max(0, total - limit);
-  const start = Math.min(maxStart, Math.max(0, clampedSelected - half));
-  return { start, end: Math.min(total, start + limit) };
+function clampIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  return Math.max(0, Math.min(index, length - 1));
 }

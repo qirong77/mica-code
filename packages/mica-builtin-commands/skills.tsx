@@ -86,7 +86,7 @@ export function createSkillsCommand() {
 
         return (
           <micaUi.Dialog title={`/${skill.name}`} footer={<micaUi.KeyHints hints={['esc back']} />}>
-            <Box flexDirection="column">
+            <micaUi.BottomScrollBox>
               <Box paddingBottom={1}>
                 <Text>{skill.description}</Text>
               </Box>
@@ -110,7 +110,7 @@ export function createSkillsCommand() {
                 <Text dimColor>preview</Text>
                 <micaUi.Markdown>{skill.content}</micaUi.Markdown>
               </Box>
-            </Box>
+            </micaUi.BottomScrollBox>
           </micaUi.Dialog>
         );
       }

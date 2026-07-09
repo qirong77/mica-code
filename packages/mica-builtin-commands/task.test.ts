@@ -114,6 +114,7 @@ vi.mock('@packages/mica-ui/panels/BackgroundTaskRow.js', () => ({
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
     Dialog: ({ children }: { children: unknown }) => children,
+    BottomScrollBox: ({ children }: { children: unknown }) => children,
     KeyHints: () => null,
     OneLineItem: () => null,
     SelectList: () => null,

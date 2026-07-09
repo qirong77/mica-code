@@ -1,4 +1,4 @@
-import { Box, Text } from '@anthropic/ink';
+import { Text } from '@anthropic/ink';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import {
@@ -60,13 +60,13 @@ function showStatusPanel(text: string) {
   function StatusPanel() {
     return (
       <micaUi.Dialog title="status" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <Box flexDirection="column">
+        <micaUi.BottomScrollBox>
           {text.split('\n').map((line, index) => (
             <Text key={`${index}:${line}`} color={micaUi.theme.colors.dim}>
               {line}
             </Text>
           ))}
-        </Box>
+        </micaUi.BottomScrollBox>
       </micaUi.Dialog>
     );
   }

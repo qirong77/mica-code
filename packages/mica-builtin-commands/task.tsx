@@ -85,10 +85,13 @@ function showTaskPanel(services: CommandRuntimeServices) {
     const detailTask = state.detailTaskId ? backgroundTasks.find((task) => task.id === state.detailTaskId) : undefined;
 
     useEffect(() => {
-      const timer = setInterval(() => {
-        syncBackgroundTasks();
-        setNowMs(Date.now());
-      }, hasActiveBackgroundTasks ? 1000 : 3000);
+      const timer = setInterval(
+        () => {
+          syncBackgroundTasks();
+          setNowMs(Date.now());
+        },
+        hasActiveBackgroundTasks ? 1000 : 3000,
+      );
       return () => clearInterval(timer);
     }, [hasActiveBackgroundTasks]);
 
@@ -107,7 +110,6 @@ function showTaskPanel(services: CommandRuntimeServices) {
           selectedIdx={selectedIdx}
           itemGap={0}
           markerWidth={1}
-          maxVisibleItems={12}
           empty={<Text dimColor>No tasks</Text>}
           renderItem={(item, isSelected) => {
             if (item.kind === 'background') {
@@ -180,7 +182,7 @@ function BackgroundTaskDetail({ task, nowMs }: { task: MicaUiBackgroundTaskItem;
 
   return (
     <micaUi.Dialog title={`task ${task.id}`} footer={<micaUi.KeyHints hints={['esc back']} />}>
-      <Box flexDirection="column" width="100%" minWidth={0}>
+      <micaUi.BottomScrollBox>
         <DetailLine label="status" value={formatTaskStatus(task.status)} color={statusColor(task.status)} />
         <DetailLine label="age" value={formatTaskAge(task, nowMs)} />
         <DetailLine label="pid" value={task.pid ? String(task.pid) : '-'} />
@@ -195,7 +197,7 @@ function BackgroundTaskDetail({ task, nowMs }: { task: MicaUiBackgroundTaskItem;
             {line || ' '}
           </Text>
         ))}
-      </Box>
+      </micaUi.BottomScrollBox>
     </micaUi.Dialog>
   );
 }
@@ -313,9 +315,7 @@ function buildTaskListItems(
   ];
 }
 
-function filterActiveBackgroundTasks(
-  tasks: readonly MicaUiBackgroundTaskItem[],
-): readonly MicaUiBackgroundTaskItem[] {
+function filterActiveBackgroundTasks(tasks: readonly MicaUiBackgroundTaskItem[]): readonly MicaUiBackgroundTaskItem[] {
   return tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
 }
 

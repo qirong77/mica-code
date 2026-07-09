@@ -21,13 +21,13 @@ export function CommandDropdown({
   selectedIndex,
   title,
   emptyMessage = 'no matching items',
-  maxVisibleItems,
+  height,
 }: {
   items: MicaUiDropdownItem[];
   selectedIndex: number;
   title?: string;
   emptyMessage?: string;
-  maxVisibleItems?: number;
+  height?: number;
 }): React.ReactNode {
   const labelWidth = useLabelWidth(items);
   const selectItems: SelectItem[] = useMemo(
@@ -69,7 +69,7 @@ export function CommandDropdown({
   };
 
   return (
-    <Box>
+    <Box flexDirection="column" minWidth={0} width="100%">
       <SelectList
         items={selectItems}
         selectedIdx={selectedIndex}
@@ -78,10 +78,9 @@ export function CommandDropdown({
         itemGap={0}
         markerWidth={0}
         marker=""
-        maxVisibleItems={maxVisibleItems}
-        adaptiveHeight={false}
+        height={height}
+        bottomReservedRows={4}
         layout="table"
-        scrollIndicators={false}
         renderItem={renderItem}
       />
     </Box>

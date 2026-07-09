@@ -6,6 +6,8 @@ export { KeyHints } from './KeyHints.js';
 export type { KeyHintsProps } from './KeyHints.js';
 export { Dialog } from './Dialog.js';
 export type { DialogProps } from './Dialog.js';
+export { BottomScrollBox } from './BottomScrollBox.js';
+export type { BottomScrollBoxProps } from './BottomScrollBox.js';
 export { MessageGutter, MessageResponse } from './MessageGutter.js';
 export type { MessageGutterProps, MessageGutterTone } from './MessageGutter.js';
 export { Spin, useSpinner } from './Spin.js';
