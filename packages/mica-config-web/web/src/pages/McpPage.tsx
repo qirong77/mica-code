@@ -1,15 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, DescriptionList, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, DataTable, Empty, SegmentTabs, Tag } from '../components/Ui.js';
 import { sectionDescriptions, sectionEyebrows } from '../dashboardData.js';
 import { readMcpDetails } from '../api.js';
-import type { ConfigWebMcpDetails } from '../../../src/shared/types.js';
+import type { ConfigWebMcpDetails, ConfigWebMcpServer } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
+
+type McpView = 'servers' | 'tools';
 
 export function McpPage() {
   const [details, setDetails] = useState<ConfigWebMcpDetails | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<McpView>('servers');
   const RefreshIcon = appIcons.refresh;
 
   async function load() {
@@ -28,6 +31,20 @@ export function McpPage() {
     void load();
   }, []);
 
+  const toolRows = useMemo(() => {
+    if (!details) return [];
+    return details.servers.flatMap((server) =>
+      server.tools.map((tool) => [
+        <div className="table-primary" key={`${server.name}-${tool.name}`}>
+          <strong>{tool.name}</strong>
+          <span>{server.name}</span>
+        </div>,
+        <Tag>{server.type}</Tag>,
+        <span className="table-wrap-text">{tool.description || '无描述'}</span>,
+      ]),
+    );
+  }, [details]);
+
   return (
     <PageFrame
       eyebrow={sectionEyebrows.mcp}
@@ -43,53 +60,61 @@ export function McpPage() {
       actions={<Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />}
     >
       {error ? <Alert message={error} /> : null}
-      <div className="detail-body">
+      <div className="detail-body detail-body-stacked">
+        <div className="section-toolbar">
+          <SegmentTabs
+            items={[
+              { key: 'servers', label: 'Servers', count: details?.servers.length ?? 0 },
+              { key: 'tools', label: 'Tools', count: details?.servers.reduce((total, server) => total + server.tools.length, 0) ?? 0 },
+            ]}
+            value={view}
+            onChange={(next) => setView(next as McpView)}
+          />
+        </div>
+
         {!details || details.servers.length === 0 ? (
           <Empty description="暂无 MCP server" />
-        ) : (
-          <div className="detail-list">
+        ) : view === 'servers' ? (
+          <div className="stacked-panels">
             {details.servers.map((server) => (
-              <section className="detail-card" key={server.name}>
-                <div className="detail-card-title">
-                  <div className="title-stack">
-                    <div className="title-row">
-                      <h3>{server.name}</h3>
-                      <Tag>{server.type}</Tag>
-                      <Tag tone={statusColor(server.status)}>{server.status}</Tag>
-                    </div>
-                    <p className="detail-card-subtitle">{server.target}</p>
-                  </div>
-                  <span className="metric-chip">{server.toolCount} tools</span>
-                </div>
-                <DescriptionList
-                  items={[
-                    { label: 'Target', value: server.target },
-                    { label: 'CWD', value: server.cwd },
-                    { label: 'Env / Headers', value: server.envKeys?.join(', ') },
-                    { label: 'Error', value: server.error },
-                  ]}
-                />
-                <details className="tools-collapse">
-                  <summary>工具详情</summary>
-                  {server.tools.length === 0 ? (
-                    <p className="muted-text">暂无已连接工具信息</p>
-                  ) : (
-                    <div className="tool-list">
-                      {server.tools.map((tool) => (
-                        <div className="tool-item" key={tool.name}>
-                          <strong>{tool.name}</strong>
-                          <p>{tool.description || '无描述'}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </details>
-              </section>
+              <ServerPanel key={server.name} server={server} />
             ))}
           </div>
+        ) : (
+          <DataTable columns={['Tool', 'Type', 'Description']} rows={toolRows} emptyMessage="暂无已连接工具信息" />
         )}
       </div>
     </PageFrame>
+  );
+}
+
+function ServerPanel({ server }: { server: ConfigWebMcpServer }) {
+  return (
+    <section className="table-panel">
+      <header className="table-panel-header">
+        <div className="table-panel-title">
+          <strong>{server.name}</strong>
+          <span>{server.target}</span>
+        </div>
+        <div className="table-panel-tags">
+          <Tag>{server.type}</Tag>
+          <Tag tone={statusColor(server.status)}>{server.status}</Tag>
+          <span className="metric-chip">{server.toolCount} tools</span>
+        </div>
+      </header>
+
+      <DataTable
+        columns={['Target', 'CWD', 'Env / Headers', 'Error']}
+        rows={[
+          [
+            <span className="table-wrap-text" key="target">{server.target}</span>,
+            <span className="table-wrap-text" key="cwd">{server.cwd || '-'}</span>,
+            <span className="table-wrap-text" key="env">{server.envKeys?.join(', ') || '-'}</span>,
+            <span className="table-wrap-text" key="error">{server.error || '-'}</span>,
+          ],
+        ]}
+      />
+    </section>
   );
 }
 
@@ -99,3 +124,4 @@ function statusColor(status: string): 'default' | 'green' | 'red' | 'blue' {
   if (status === 'connecting') return 'blue';
   return 'default';
 }
+

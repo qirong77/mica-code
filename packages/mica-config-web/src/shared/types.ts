@@ -77,3 +77,15 @@ export type ConfigWebPluginsDetails = {
   plugins: ConfigWebPlugin[];
   updatedAt: string;
 };
+
+export type ConfigWebOverviewCard = {
+  label: string;
+  value: string;
+  trend?: string;
+  detail: string;
+};
+
+export type ConfigWebOverview = {
+  cards: ConfigWebOverviewCard[];
+  updatedAt: string;
+};

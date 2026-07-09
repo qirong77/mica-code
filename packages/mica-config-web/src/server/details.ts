@@ -9,6 +9,7 @@ import type {
   ConfigFieldDescription,
   ConfigWebMcpDetails,
   ConfigWebMcpServer,
+  ConfigWebOverview,
   ConfigWebPluginsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
@@ -138,6 +139,42 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
     root,
     updatedAt: new Date().toISOString(),
     plugins,
+  };
+}
+
+export async function getOverviewDetails(): Promise<ConfigWebOverview> {
+  const [mcp, skills, plugins] = await Promise.all([getMcpDetails(), Promise.resolve(getSkillsDetails()), Promise.resolve(getPluginsDetails())]);
+  const connected = mcp.servers.filter((server) => server.status === 'connected').length;
+  const failedPlugins = plugins.plugins.filter((plugin) => plugin.status === 'failed').length;
+
+  return {
+    updatedAt: new Date().toISOString(),
+    cards: [
+      {
+        label: 'Config Surface',
+        value: '4',
+        trend: 'Sections',
+        detail: '统一管理 config、MCP、skills 与 plugins。',
+      },
+      {
+        label: 'Connected MCP',
+        value: String(connected),
+        trend: `${mcp.servers.length} servers`,
+        detail: connected > 0 ? '至少有一条运行链路已建立。' : '当前还没有成功连通的 MCP server。',
+      },
+      {
+        label: 'Skill Library',
+        value: String(skills.skills.length),
+        trend: 'Loaded',
+        detail: skills.skills.length > 0 ? '技能索引已就绪，可直接核对说明与参数。' : '当前没有加载到 skills。',
+      },
+      {
+        label: 'Plugin Health',
+        value: failedPlugins > 0 ? `${failedPlugins}` : 'OK',
+        trend: `${plugins.plugins.length} files`,
+        detail: failedPlugins > 0 ? '存在加载失败插件，建议优先排查。' : '插件状态稳定，没有失败项。',
+      },
+    ],
   };
 }
 

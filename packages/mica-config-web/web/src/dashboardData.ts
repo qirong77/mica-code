@@ -1,4 +1,4 @@
-import type { ConfigWebSection } from '../../src/shared/types.js';
+import type { ConfigWebOverviewCard, ConfigWebSection } from '../../src/shared/types.js';
 
 export const sectionLabels: Record<ConfigWebSection, string> = {
   config: 'Config',
@@ -21,24 +21,30 @@ export const sectionEyebrows: Record<ConfigWebSection, string> = {
   plugins: 'Plugin Registry',
 };
 
-export const dashboardMetrics = [
+export const fallbackOverviewCards: ConfigWebOverviewCard[] = [
   {
     label: 'Config Surface',
     value: '4',
     trend: 'Sections',
-    detail: '配置、连接、技能与插件统一收拢到一个工作台。',
+    detail: '统一管理 config、MCP、skills 与 plugins。',
   },
   {
-    label: 'Editor Mode',
-    value: 'JSON',
-    trend: 'Monaco',
-    detail: '保留代码编辑效率，同时补足摘要、状态与导航层次。',
+    label: 'Connected MCP',
+    value: '0',
+    trend: '0 servers',
+    detail: '当前还没有成功连通的 MCP server。',
   },
   {
-    label: 'Feedback Loop',
-    value: 'Live',
-    trend: 'Heartbeat',
-    detail: '页面与本地 worker 保持心跳，让状态反馈更像真正的工具。',
+    label: 'Skill Library',
+    value: '0',
+    trend: 'Loaded',
+    detail: '当前没有加载到 skills。',
   },
-] as const;
+  {
+    label: 'Plugin Health',
+    value: 'OK',
+    trend: '0 files',
+    detail: '插件状态稳定，没有失败项。',
+  },
+];
 

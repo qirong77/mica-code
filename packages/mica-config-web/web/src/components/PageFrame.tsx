@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-type StatItem = {
+export type PageFrameStat = {
   label: string;
   value: string;
   meta?: string;
@@ -13,7 +13,7 @@ type PageFrameProps = {
   path?: string;
   meta?: string;
   actions?: ReactNode;
-  stats?: StatItem[];
+  stats?: PageFrameStat[];
   children: ReactNode;
 };
 

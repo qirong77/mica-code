@@ -4,16 +4,29 @@ import { ConfigPage } from './pages/ConfigPage.js';
 import { McpPage } from './pages/McpPage.js';
 import { PluginsPage } from './pages/PluginsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
-import { connectHeartbeat } from './api.js';
-import type { ConfigWebSection } from '../../src/shared/types.js';
-import { dashboardMetrics, sectionDescriptions, sectionLabels } from './dashboardData.js';
+import { connectHeartbeat, readOverview } from './api.js';
+import type { ConfigWebOverviewCard, ConfigWebSection } from '../../src/shared/types.js';
+import { fallbackOverviewCards, sectionDescriptions, sectionLabels } from './dashboardData.js';
 
 export function App() {
   const [section, setSection] = useState<ConfigWebSection>('config');
+  const [overviewCards, setOverviewCards] = useState<ConfigWebOverviewCard[]>(fallbackOverviewCards);
 
   useEffect(() => {
     const socket = connectHeartbeat();
     return () => socket?.close();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readOverview()
+      .then((payload) => {
+        if (!cancelled) setOverviewCards(payload.cards);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -34,11 +47,11 @@ export function App() {
           </div>
         </header>
         <section className="overview-strip" aria-label="workspace overview">
-          {dashboardMetrics.map((item) => (
+          {overviewCards.map((item) => (
             <article className="overview-card" key={item.label}>
               <span className="overview-label">{item.label}</span>
               <strong className="overview-value">{item.value}</strong>
-              <span className="overview-trend">{item.trend}</span>
+              {item.trend ? <span className="overview-trend">{item.trend}</span> : null}
               <p className="overview-detail">{item.detail}</p>
             </article>
           ))}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
-import { PageFrame } from '../components/PageFrame.js';
+import { PageFrame, type PageFrameStat } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
 import { sectionDescriptions, sectionEyebrows } from '../dashboardData.js';
 import { readConfigDescriptions, readSection, writeSection } from '../api.js';
@@ -15,8 +15,23 @@ export function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [query, setQuery] = useState('');
   const RefreshIcon = appIcons.refresh;
   const SaveIcon = appIcons.save;
+
+  const visibleFields = fields.filter((field) => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    return [field.key, field.title, field.description, field.example]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  });
+
+  const stats: PageFrameStat[] = [
+    { label: 'Fields', value: String(fields.length), meta: '字段说明' },
+    { label: 'Updated', value: formatUpdatedState(saved, saving, loading), meta: '状态反馈' },
+    { label: 'Mode', value: 'JSON', meta: 'Monaco editor' },
+  ];
 
   async function load() {
     setLoading(true);
@@ -59,11 +74,7 @@ export function ConfigPage() {
       description={sectionDescriptions.config}
       path={path}
       meta={saved ? 'Saved' : loading ? 'Loading' : 'Editable'}
-      stats={[
-        { label: 'Fields', value: String(fields.length), meta: '字段说明' },
-        { label: 'Updated', value: formatUpdatedState(saved, saving, loading), meta: '状态反馈' },
-        { label: 'Mode', value: 'JSON', meta: 'Monaco editor' },
-      ]}
+      stats={stats}
       actions={
         <div className="toolbar">
           {saved ? <span className="save-status">已保存</span> : null}
@@ -82,10 +93,14 @@ export function ConfigPage() {
               <span className="panel-kicker">Field Guide</span>
               <h3>字段说明</h3>
             </div>
-            <span className="panel-count">{fields.length}</span>
+            <span className="panel-count">{visibleFields.length}</span>
           </div>
+          <label className="panel-search">
+            <span className="sr-only">搜索字段</span>
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 key / 描述" />
+          </label>
           <div className="field-help-list">
-            {fields.map((field) => (
+            {visibleFields.map((field) => (
               <section className="field-help-item" key={field.key}>
                 <div className="field-help-item-head">
                   <strong>{field.title}</strong>

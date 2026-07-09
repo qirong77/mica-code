@@ -2,6 +2,7 @@ import type {
   ConfigFieldDescription,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
+  ConfigWebOverview,
   ConfigWebPluginsDetails,
   ConfigWebSection,
   ConfigWebSkillsDetails,
@@ -31,6 +32,11 @@ export async function readConfigDescriptions(): Promise<ConfigFieldDescription[]
 
 export async function readMcpDetails(): Promise<ConfigWebMcpDetails> {
   const response = await fetch(`/api/details/mcp?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readOverview(): Promise<ConfigWebOverview> {
+  const response = await fetch(`/api/overview?token=${encodeURIComponent(token)}`);
   return readJson(response);
 }
 

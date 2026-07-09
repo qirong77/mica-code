@@ -1,5 +1,5 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
-import { getConfigFieldDescriptions, getMcpDetails, getPluginsDetails, getSkillsDetails } from './details.js';
+import { getConfigFieldDescriptions, getMcpDetails, getOverviewDetails, getPluginsDetails, getSkillsDetails } from './details.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import type { ConfigWebSection } from '../shared/types.js';
@@ -158,6 +158,7 @@ async function handleApiRequest(
 
   if (url.pathname === '/api/ping') return json({ ok: true, clients });
   if (url.pathname === '/api/descriptions/config') return json({ fields: getConfigFieldDescriptions() });
+  if (url.pathname === '/api/overview') return json(await getOverviewDetails());
   if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
   if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
   if (url.pathname === '/api/details/plugins') return json(getPluginsDetails());

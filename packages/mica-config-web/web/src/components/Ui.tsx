@@ -48,3 +48,50 @@ export function DescriptionList({ items }: { items: Array<{ label: string; value
     </dl>
   );
 }
+
+export function SegmentTabs({ items, value, onChange }: { items: Array<{ key: string; label: string; count?: number }>; value: string; onChange(value: string): void }) {
+  return (
+    <div className="segment-tabs" role="tablist" aria-label="section tabs">
+      {items.map((item) => (
+        <button
+          key={item.key}
+          className={`segment-tab ${value === item.key ? 'segment-tab-active' : ''}`}
+          type="button"
+          role="tab"
+          aria-selected={value === item.key}
+          onClick={() => onChange(item.key)}
+        >
+          <span>{item.label}</span>
+          {item.count !== undefined ? <span className="segment-tab-count">{item.count}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function DataTable({ columns, rows, emptyMessage }: { columns: string[]; rows: ReactNode[][]; emptyMessage?: string }) {
+  if (rows.length === 0) return <Empty description={emptyMessage ?? '暂无数据'} />;
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
