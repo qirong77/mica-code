@@ -9,7 +9,7 @@ import { queueStatusText } from '../input/state.js';
 import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { formatElapsed } from '../utils/format.js';
-import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
+import { getWorkingStatusDisplay, getWorkingStatusTotalElapsed } from '../utils/workingStatusDisplay.js';
 import type { MicaUiWorkingStatus } from '../types.js';
 
 const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
@@ -131,6 +131,7 @@ export function WorkingStatus() {
   }, [activeStatusKey, activeStatusStartedAt, activeStatusElapsedMs]);
 
   const elapsedText = activeStatusKey && elapsed > 0 ? formatElapsed(elapsed) : '';
+  const totalElapsedText = getWorkingStatusTotalElapsed(info, Date.now());
   const statusDisplay = getInlineStatusDisplay(info);
   const statusText = elapsedText ? `${statusDisplay.text} ${elapsedText}` : statusDisplay.text;
 
@@ -195,6 +196,7 @@ export function WorkingStatus() {
       </Box>
       <Box flexShrink={0} paddingRight={4} flexDirection="row">
         <StatusInfo />
+        {totalElapsedText ? <Text color={themeColors.inactive}> {totalElapsedText}</Text> : null}
       </Box>
     </Box>
   );

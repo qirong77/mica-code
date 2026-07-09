@@ -42,3 +42,21 @@ export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingSta
       return { text: 'idle', color: themeColors.inactive, spinning: false };
   }
 }
+
+export function getWorkingStatusTotalElapsed(status: MicaUiWorkingStatus, now = Date.now()): string {
+  const startedAt = getActiveTurnStartedAt(status);
+  if (startedAt == null) return '';
+  return formatElapsed(Math.max(0, now - startedAt));
+}
+
+function getActiveTurnStartedAt(status: MicaUiWorkingStatus): number | undefined {
+  switch (status.type) {
+    case 'connecting':
+    case 'thinking':
+    case 'streaming':
+    case 'calling_tool':
+      return status.startedAt;
+    default:
+      return undefined;
+  }
+}
