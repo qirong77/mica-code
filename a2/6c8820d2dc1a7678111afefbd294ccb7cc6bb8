@@ -1,0 +1,25 @@
+packages/mica-config-web/src/server/startConfigWeb.ts
+  c348c592f182d4b4 17-18,48-57,60-61
+packages/mica-config-web/src/server/startConfigWeb.test.ts
+  c348c592f182d4b4 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a26c8820d2dc1a7678111afefbd294ccb7cc6bb8",
+  "prompts": {
+    "c348c592f182d4b4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f46fb-d64f-7ae3-a62a-c803ebcb99f2",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 70,
+      "total_deletions": 7,
+      "accepted_lines": 65,
+      "overriden_lines": 5
+    }
+  }
+}
