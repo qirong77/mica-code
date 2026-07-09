@@ -1,8 +1,7 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
-import { getConfigFieldDescriptions, getMcpDetails, getOverviewDetails, getPluginsDetails, getSkillsDetails } from './details.js';
+import { getMcpDetails, getPluginsDetails, getSkillsDetails } from './details.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
-import type { ConfigWebSection } from '../shared/types.js';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,7 +68,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
   });
   const webPort = webServer.port;
 
-  const state = { pid: process.pid, port: webPort, token: options.token, updatedAt: new Date().toISOString() };
+  const state = { pid: process.pid, port: webPort, token: options.token };
   writeConfigWebState(state);
   scheduleIdleExit();
 
@@ -133,7 +132,7 @@ async function startDevConfigWebServer(
 
   const webAddress = viteServer.httpServer?.address();
   const webPort = typeof webAddress === 'object' && webAddress ? webAddress.port : apiServer.port;
-  writeConfigWebState({ pid: process.pid, port: webPort, token: options.token, updatedAt: new Date().toISOString() });
+  writeConfigWebState({ pid: process.pid, port: webPort, token: options.token });
   scheduleIdleExit();
 
   return {
@@ -157,8 +156,6 @@ async function handleApiRequest(
   if (!isAuthorized(url, token)) return json({ error: 'Unauthorized' }, 401);
 
   if (url.pathname === '/api/ping') return json({ ok: true, clients });
-  if (url.pathname === '/api/descriptions/config') return json({ fields: getConfigFieldDescriptions() });
-  if (url.pathname === '/api/overview') return json(await getOverviewDetails());
   if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
   if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
   if (url.pathname === '/api/details/plugins') return json(getPluginsDetails());
@@ -168,15 +165,13 @@ async function handleApiRequest(
     return json({ error: 'Upgrade failed' }, 400);
   }
 
-  if (url.pathname.startsWith('/api/files/')) {
-    const section = url.pathname.slice('/api/files/'.length) as ConfigWebSection;
-    if (!isSection(section)) return json({ error: 'Unknown section' }, 404);
+  if (url.pathname === '/api/files/config') {
     try {
-      if (request.method === 'GET') return json(readConfigWebFile(section));
+      if (request.method === 'GET') return json(readConfigWebFile());
       if (request.method === 'PUT') {
         const body = (await request.json()) as { content?: unknown };
         if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-        return json(writeConfigWebFile(section, body.content));
+        return json(writeConfigWebFile(body.content));
       }
     } catch (error) {
       return json({ error: formatError(error) }, 400);
@@ -189,10 +184,6 @@ async function handleApiRequest(
 
 function isAuthorized(url: URL, token: string): boolean {
   return url.searchParams.get('token') === token;
-}
-
-function isSection(value: string): value is ConfigWebSection {
-  return value === 'config' || value === 'mcp' || value === 'skills' || value === 'plugins';
 }
 
 function json(value: unknown, status = 200): Response {

@@ -6,7 +6,6 @@ export type ConfigWebState = {
   pid: number;
   port: number;
   token: string;
-  updatedAt: string;
 };
 
 export function readConfigWebState(): ConfigWebState | null {

@@ -25,17 +25,26 @@ export function BottomScrollBox({
   minWidth = 0,
   ...props
 }: BottomScrollBoxProps): React.ReactNode {
-  const { rows } = useTerminalSize();
-  const fallbackHeight = Math.max(1, Math.ceil(rows / 3) - bottomReservedRows);
+  const { columns, rows } = useTerminalSize();
   const logViewHeight = useLogViewHeight();
-  const defaultHeight = normalizeHeight(Math.max(logViewHeight - bottomReservedRows, fallbackHeight));
+  const defaultHeight = normalizeHeight(logViewHeight - bottomReservedRows);
   const resolvedHeight =
     height !== undefined ? normalizeHeight(height) : maxHeight === undefined ? defaultHeight : undefined;
   const resolvedMaxHeight = maxHeight === undefined ? undefined : normalizeHeight(maxHeight);
-  const sizeProps = {
+  const sizeProps: { height?: number; maxHeight?: number } = {
     ...(resolvedHeight !== undefined ? { height: resolvedHeight } : {}),
     ...(resolvedMaxHeight !== undefined ? { maxHeight: resolvedMaxHeight } : {}),
   };
+  const scrollKey = `${columns}x${rows}:${String(resolvedHeight ?? '')}:${String(resolvedMaxHeight ?? '')}`;
 
-  return <ScrollBox {...sizeProps} flexDirection={flexDirection} width={width} minWidth={minWidth} {...props} />;
+  return (
+    <ScrollBox
+      key={scrollKey}
+      {...sizeProps}
+      flexDirection={flexDirection}
+      width={width}
+      minWidth={minWidth}
+      {...props}
+    />
+  );
 }

@@ -1,10 +1,8 @@
 export type ConfigWebSection = 'config' | 'mcp' | 'skills' | 'plugins';
 
 export type ConfigWebFilePayload = {
-  section: ConfigWebSection;
-  path?: string;
+  path: string;
   content: string;
-  updatedAt: string;
 };
 
 export type ConfigWebServerInfo = {
@@ -14,17 +12,9 @@ export type ConfigWebServerInfo = {
   reused: boolean;
 };
 
-export type ConfigFieldDescription = {
-  key: string;
-  title: string;
-  description: string;
-  example?: string;
-};
-
 export type ConfigWebMcpTool = {
   name: string;
   description?: string;
-  inputSchema?: Record<string, unknown>;
 };
 
 export type ConfigWebMcpServer = {
@@ -43,7 +33,6 @@ export type ConfigWebMcpServer = {
 export type ConfigWebMcpDetails = {
   path: string;
   servers: ConfigWebMcpServer[];
-  updatedAt: string;
 };
 
 export type ConfigWebSkill = {
@@ -58,7 +47,6 @@ export type ConfigWebSkill = {
 export type ConfigWebSkillsDetails = {
   root: string;
   skills: ConfigWebSkill[];
-  updatedAt: string;
 };
 
 export type ConfigWebPlugin = {
@@ -75,17 +63,4 @@ export type ConfigWebPlugin = {
 export type ConfigWebPluginsDetails = {
   root: string;
   plugins: ConfigWebPlugin[];
-  updatedAt: string;
-};
-
-export type ConfigWebOverviewCard = {
-  label: string;
-  value: string;
-  trend?: string;
-  detail: string;
-};
-
-export type ConfigWebOverview = {
-  cards: ConfigWebOverviewCard[];
-  updatedAt: string;
 };

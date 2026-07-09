@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
-import { readSection, writeSection } from '../api.js';
+import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 
 export function ConfigPage() {
@@ -19,7 +19,7 @@ export function ConfigPage() {
     setLoading(true);
     setError(null);
     try {
-      const payload = await readSection('config');
+      const payload = await readConfigFile();
       setContent(payload.content);
       setPath(payload.path ?? '');
     } catch (loadError) {
@@ -33,7 +33,7 @@ export function ConfigPage() {
     setSaving(true);
     setError(null);
     try {
-      const payload = await writeSection('config', content);
+      const payload = await writeConfigFile(content);
       setContent(payload.content);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);

@@ -1,22 +1,19 @@
 import type {
-  ConfigFieldDescription,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
-  ConfigWebOverview,
   ConfigWebPluginsDetails,
-  ConfigWebSection,
   ConfigWebSkillsDetails,
 } from '../../src/shared/types.js';
 
 const token = new URLSearchParams(window.location.search).get('token') ?? '';
 
-export async function readSection(section: ConfigWebSection): Promise<ConfigWebFilePayload> {
-  const response = await fetch(`/api/files/${section}?token=${encodeURIComponent(token)}`);
+export async function readConfigFile(): Promise<ConfigWebFilePayload> {
+  const response = await fetch(`/api/files/config?token=${encodeURIComponent(token)}`);
   return readJson(response);
 }
 
-export async function writeSection(section: ConfigWebSection, content: string): Promise<ConfigWebFilePayload> {
-  const response = await fetch(`/api/files/${section}?token=${encodeURIComponent(token)}`, {
+export async function writeConfigFile(content: string): Promise<ConfigWebFilePayload> {
+  const response = await fetch(`/api/files/config?token=${encodeURIComponent(token)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content }),
@@ -24,19 +21,8 @@ export async function writeSection(section: ConfigWebSection, content: string): 
   return readJson(response);
 }
 
-export async function readConfigDescriptions(): Promise<ConfigFieldDescription[]> {
-  const response = await fetch(`/api/descriptions/config?token=${encodeURIComponent(token)}`);
-  const payload = await readJson<{ fields: ConfigFieldDescription[] }>(response);
-  return payload.fields;
-}
-
 export async function readMcpDetails(): Promise<ConfigWebMcpDetails> {
   const response = await fetch(`/api/details/mcp?token=${encodeURIComponent(token)}`);
-  return readJson(response);
-}
-
-export async function readOverview(): Promise<ConfigWebOverview> {
-  const response = await fetch(`/api/overview?token=${encodeURIComponent(token)}`);
   return readJson(response);
 }
 

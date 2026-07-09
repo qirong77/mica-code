@@ -8,12 +8,13 @@ const BELOW_INPUT_RESERVED_LINES = 2;
 
 function getBottomPanelHeight(rows: number, bottomDistance: number): number {
   const fallbackHeight = Math.ceil(rows / 3);
+  const measuredBottomDistance = Math.min(Math.max(0, bottomDistance), Math.max(0, rows));
 
-  if (bottomDistance <= 0) {
+  if (measuredBottomDistance <= 0) {
     return Math.max(MIN_LOG_VIEW_HEIGHT, fallbackHeight);
   }
 
-  return Math.max(MIN_LOG_VIEW_HEIGHT, bottomDistance - BELOW_INPUT_RESERVED_LINES);
+  return Math.max(MIN_LOG_VIEW_HEIGHT, measuredBottomDistance - BELOW_INPUT_RESERVED_LINES);
 }
 
 export function useBottomPanelHeight(extraReservedLines = 0) {
