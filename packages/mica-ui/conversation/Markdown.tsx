@@ -56,9 +56,10 @@ function supportsHyperlinks(): boolean {
 }
 
 function createHyperlink(url: string, content?: string): string {
-  if (!supportsHyperlinks()) return content ?? url;
   const displayText = content ?? url;
-  return `${OSC8_START}${url}${OSC8_END}${chalk.blue(displayText)}${OSC8_START}${OSC8_END}`;
+  const blueDisplayText = chalk.blue(displayText);
+  if (!supportsHyperlinks()) return blueDisplayText;
+  return `${OSC8_START}${url}${OSC8_END}${blueDisplayText}${OSC8_START}${OSC8_END}`;
 }
 
 // ─── list numbering ──────────────────────────────────────────────────────────

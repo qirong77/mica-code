@@ -7,6 +7,7 @@ export type MessageGutterTone =
   | 'user'
   | 'recap'
   | 'commit'
+  | 'config'
   | 'compact'
   | 'notice'
   | 'pending'
@@ -29,6 +30,7 @@ const TONE_COLOR: Record<MessageGutterTone, string> = {
   user: themeColors.messageUser,
   recap: themeColors.messageRecap,
   commit: themeColors.messageCommit,
+  config: themeColors.messageConfig,
   compact: themeColors.messageCompact,
   notice: themeColors.messageNotice,
   pending: themeColors.messagePending,

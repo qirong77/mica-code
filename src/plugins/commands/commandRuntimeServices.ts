@@ -80,7 +80,7 @@ function showNoticeForSession(
   context: ApplicationContext | null,
   ownerSessionId: string | undefined,
   text: string,
-  options: { variant?: 'recap' | 'commit' | 'compact'; command?: string } = {},
+  options: { variant?: 'recap' | 'commit' | 'config' | 'compact'; command?: string } = {},
 ): void {
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
   const message = { role: 'notice' as const, content: text, ...options };

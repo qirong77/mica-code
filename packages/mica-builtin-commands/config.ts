@@ -7,7 +7,10 @@ export function createConfigCommand(services: CommandRuntimeServices) {
     description: '打开 Mica 配置页面',
     action: async () => {
       const server = await startConfigWeb();
-      services.showNotice(`Config UI: ${server.url}`, services.getCurrentAgentSessionId(), { command: '/config' });
+      services.showNotice(`Config UI: [${server.url}](${server.url})`, services.getCurrentAgentSessionId(), {
+        variant: 'config',
+        command: '/config',
+      });
     },
   };
 }

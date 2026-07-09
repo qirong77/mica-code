@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, shouldShowToolOutput } from './agentTurnLogItems.js';
+import { RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, getToolIcon, shouldShowToolOutput } from './agentTurnLogItems.js';
 
 describe('run shell tool output logs', () => {
   it('hides command output at or below the verbose threshold', () => {
@@ -27,5 +27,11 @@ describe('run shell tool output logs', () => {
         elapsedMs: RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS + 1,
       }),
     ).toBe(true);
+  });
+});
+
+describe('tool log icons', () => {
+  it('uses a stop icon for kill_task instead of the generic tool icon', () => {
+    expect(getToolIcon('kill_task')).toBe('⏹');
   });
 });

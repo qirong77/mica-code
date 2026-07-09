@@ -72,6 +72,12 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
     backgroundColor: themeColors.surfaceCommit,
     title: '/commit',
   },
+  config: {
+    tone: 'config',
+    color: themeColors.messageConfig,
+    backgroundColor: themeColors.surfaceConfig,
+    title: '/config',
+  },
   compact: {
     tone: 'compact',
     color: themeColors.messageCompact,

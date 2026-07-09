@@ -18,6 +18,7 @@ const TOOL_ICONS: Record<string, string> = {
   Skill: '✨',
   apply_patch: '🩹',
   Agent: '🤖',
+  kill_task: '🛑',
 };
 
 export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurnLogItem {
@@ -58,7 +59,7 @@ export function createToolCallLogItem({
     return (
       <Box flexDirection="column">
         <Box flexDirection="row">
-          <Text dimColor>{toolIcon(toolName)} </Text>
+          <Text dimColor>{getToolIcon(toolName)} </Text>
           <Text dimColor>{displayText}</Text>
           <Text dimColor> ({formatElapsed(completedElapsedMs)})</Text>
         </Box>
@@ -77,7 +78,7 @@ export function createToolCallLogItem({
       <Box flexDirection="column">
         <Box flexDirection="row">
           <Text dimColor>{spinner} </Text>
-          <Text dimColor>{toolIcon(toolName)} </Text>
+          <Text dimColor>{getToolIcon(toolName)} </Text>
           <Text dimColor>{displayText}</Text>
           <Text dimColor> {formatElapsed(elapsed)}</Text>
         </Box>
@@ -131,7 +132,7 @@ export function shouldShowToolOutput({
   return toolName === 'run_shell' && Boolean(output) && elapsedMs > RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS;
 }
 
-function toolIcon(name: string): string {
+export function getToolIcon(name: string): string {
   if (name.startsWith('mcp__')) return '🔌';
   return TOOL_ICONS[name] || '⚙️';
 }

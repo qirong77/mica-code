@@ -235,6 +235,7 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       ...display,
       ...(record.variant === 'recap' ||
       record.variant === 'commit' ||
+      record.variant === 'config' ||
       record.variant === 'compact' ||
       record.variant === 'error'
         ? { variant: record.variant }

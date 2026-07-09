@@ -93,7 +93,7 @@ export type RecapResult = {
 };
 
 export type CommandNoticeOptions = {
-  variant?: 'recap' | 'commit' | 'compact';
+  variant?: 'recap' | 'commit' | 'config' | 'compact';
   command?: string;
 };
 
