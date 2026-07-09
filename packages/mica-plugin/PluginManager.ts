@@ -43,6 +43,10 @@ export class PluginManager {
     return report;
   }
 
+  has(pluginId: string): boolean {
+    return this.plugins.has(pluginId);
+  }
+
   async disposeAll(): Promise<void> {
     for (const disposable of this.disposables.splice(0).reverse()) {
       await disposable.dispose();

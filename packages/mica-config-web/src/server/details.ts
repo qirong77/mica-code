@@ -1,10 +1,17 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { getSkillsRootPath } from './paths.js';
+import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
 import type { Skill } from '@packages/mica-skills/index.js';
-import type { ConfigFieldDescription, ConfigWebMcpDetails, ConfigWebMcpServer, ConfigWebSkillsDetails } from '../shared/types.js';
+import type {
+  ConfigFieldDescription,
+  ConfigWebMcpDetails,
+  ConfigWebMcpServer,
+  ConfigWebPluginsDetails,
+  ConfigWebSkillsDetails,
+} from '../shared/types.js';
 
 let mcpInitialized = false;
 
@@ -102,6 +109,60 @@ export function getSkillsDetails(): ConfigWebSkillsDetails {
   };
 }
 
+export function getPluginsDetails(): ConfigWebPluginsDetails {
+  const root = getPluginsRootPath();
+  const statusByFile = readPluginStatusByFile();
+  const plugins = existsSync(root)
+    ? readdirSync(root)
+        .filter(isPluginFile)
+        .sort()
+        .map((fileName) => {
+          const file = join(root, fileName);
+          const stat = statSync(file);
+          const name = basename(fileName, extname(fileName));
+          const status = statusByFile.get(file);
+          return {
+            name,
+            id: `file.${name}`,
+            file,
+            extension: extname(fileName),
+            sizeBytes: stat.size,
+            updatedAt: stat.mtime.toISOString(),
+            status: status?.status ?? 'unknown',
+            error: status?.error,
+          };
+        })
+    : [];
+
+  return {
+    root,
+    updatedAt: new Date().toISOString(),
+    plugins,
+  };
+}
+
+function readPluginStatusByFile(): Map<string, { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string }> {
+  const path = getPluginStatusPath();
+  if (!existsSync(path)) return new Map();
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as {
+      plugins?: Array<{ file?: string; status?: string; error?: string }>;
+      loadFailed?: Array<{ file?: string; status?: string; error?: string }>;
+    };
+    return new Map(
+      [...(parsed.plugins ?? []), ...(parsed.loadFailed ?? [])]
+        .filter((item): item is { file: string; status?: string; error?: string } => typeof item.file === 'string')
+        .map((item) => [item.file, { status: normalizePluginStatus(item.status), error: item.error }]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function normalizePluginStatus(value: string | undefined): 'loaded' | 'registered' | 'failed' | 'unknown' {
+  return value === 'loaded' || value === 'registered' || value === 'failed' ? value : 'unknown';
+}
+
 function describeMcpConfig(name: string, config: McpServerConfig): Omit<ConfigWebMcpServer, 'status' | 'toolCount' | 'tools'> {
   if ('url' in config) {
     return {
@@ -121,4 +182,8 @@ function describeMcpConfig(name: string, config: McpServerConfig): Omit<ConfigWe
     cwd: config.cwd,
     envKeys: config.env ? Object.keys(config.env) : [],
   };
+}
+
+function isPluginFile(fileName: string): boolean {
+  return fileName.endsWith('.mjs') || fileName.endsWith('.js');
 }

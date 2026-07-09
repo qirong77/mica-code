@@ -17,6 +17,9 @@ let disposeSubmitHandler: (() => void) | null = null;
 
 const timeouts = new Set<ReturnType<typeof setTimeout>>();
 const intervals = new Set<ReturnType<typeof setInterval>>();
+let streamDemoRunToken = 0;
+let streamDemoActive = false;
+let logCycle = 0;
 
 const STREAM_RESPONSE = [
   'This response is streamed into `conversation.responseText` before it is committed as an assistant message.',
@@ -27,10 +30,19 @@ const STREAM_RESPONSE = [
   '- `TerminalInputUI` owns multiline editing, slash commands, queue shortcuts, and exit handling.',
 ].join('\n');
 
+const LOG_COMMANDS = [
+  'rg "agentTurnLog" packages/mica-ui -n',
+  'bun test packages/mica-ui/agentTurnLogItems.test.ts',
+  'bunx tsc -p packages/mica-ui/tsconfig.json --noEmit',
+  'sed -n "1,220p" packages/mica-ui/bottom/AgentTurnLog.tsx',
+  'sed -n "1,220p" packages/mica-ui/hooks/useLogViewHeight.ts',
+  'git diff -- packages/mica-ui/example.ts packages/mica-ui/bottom/AgentTurnLog.tsx',
+];
+
 function DemoRoot(): React.ReactNode {
   useEffect(() => {
     initializeDemo();
-    scheduleTimeout(runStreamDemo, 800);
+    scheduleTimeout(() => runStreamDemo(), 800);
     return disposeDemo;
   }, []);
 
@@ -79,31 +91,20 @@ function seedDemoState(): void {
       content: [
         'mica-ui example is running.',
         '',
-        'Open the slash command dropdown with `/`, or run `/demo stream`, `/demo tools`, `/demo plugin`, `/demo agents`, `/demo queue`, `/demo image`, `/demo error`, and `/reset`.',
+        'This build is tuned to stress the bottom log area. Use `/demo stream` to keep the log panel busy.',
       ].join('\n'),
     },
     {
-      role: 'user',
-      content: 'Show me the terminal UI surfaces in one compact example.',
-    },
-    {
       role: 'assistant',
-      content:
-        'Loaded the main stores and components: conversation, input, working status, message bar, command dropdown, bottom panels, agent status rows, and primitives.',
-    },
-    {
-      role: 'notice',
-      variant: 'recap',
-      command: '/recap',
-      content: 'This notice uses the recap presentation variant to show how command output can be styled differently.',
+      content: 'Loaded the main stores and components. The conversation stays intentionally short so the log viewport gets most of the attention.',
     },
   ]);
   micaUi.bottom.agentTurnLog.setItems([
-    micaUi.createThinkingLogItem('seed-thinking', 'Seeded conversation and UI stores for the demo.'),
+    micaUi.createThinkingLogItem('seed-thinking', 'Seeded compact conversation state and prepared the log viewport demo.'),
     micaUi.createToolCallLogItem({
       id: 'seed-tool',
       toolName: 'read_file',
-      displayText: 'read packages/mica-ui/index.ts',
+      displayText: 'read packages/mica-ui/bottom/AgentTurnLog.tsx',
       completed: true,
       elapsedMs: 420,
     }),
@@ -216,70 +217,109 @@ function handleSlashSubmit(text: string): void {
   void command.action(rest.join(' ') || undefined);
 }
 
+let streamDemoRunning = false;
+
 function runStreamDemo(): void {
+  if (streamDemoRunning) {
+    return;
+  }
+  streamDemoRunning = true;
   clearDemoTimers();
   micaUi.dropdown.quickCommand.hide();
   micaUi.bottom.plugins.clear();
   micaUi.conversation.clearPendingInput();
   micaUi.conversation.clearResponseText();
 
-  const startedAt = Date.now();
-  micaUi.panels.thinkingText.set('Planning how to update the demo UI stores.');
-  micaUi.panels.status.thinking(startedAt);
-  micaUi.conversation.appendUserMessage('Run the streaming demo scene.');
-  micaUi.bottom.agentTurnLog.setItems([
-    micaUi.createThinkingLogItem('stream-thinking', 'Plan: status updates, tool log, live markdown, commit message.'),
-    micaUi.createToolCallLogItem({
-      id: 'stream-tool',
-      toolName: 'read_file',
-      displayText: 'read packages/mica-ui/README.md',
-      completed: false,
-      startTime: startedAt,
-    }),
+  micaUi.conversation.setMessages([
+    {
+      role: 'notice',
+      command: '/example',
+      content: 'Log stress demo is running. The bottom panel is intentionally dense so you can debug its layout and scrolling behavior.',
+    },
   ]);
 
+  const startedAt = Date.now();
+  const runToken = ++streamDemoRunToken;
+  const cycle = ++logCycle;
+
+  streamDemoActive = true;
+  micaUi.panels.thinkingText.set('Filling the bottom log viewport with repeated tool activity.');
+  micaUi.panels.status.thinking(startedAt);
+  micaUi.bottom.agentTurnLog.setItems(buildLogDemoItems(cycle, startedAt));
+  micaUi.messageBar.addMessage({ id: `log-cycle-${cycle}`, text: `log cycle ${cycle} started` });
+
   scheduleTimeout(() => {
+    if (!streamDemoActive || runToken !== streamDemoRunToken) return;
+
     const elapsedMs = Date.now() - startedAt;
-    micaUi.panels.status.callingTool(['read_file'], elapsedMs, startedAt);
+    micaUi.panels.status.callingTool(['read_file', 'run_shell', 'grep_search'], elapsedMs, startedAt);
     micaUi.bottom.agentTurnLog.replaceItem(
       micaUi.createToolCallLogItem({
         id: 'stream-tool',
         toolName: 'read_file',
-        displayText: 'read packages/mica-ui/README.md',
+        displayText: 'read packages/mica-ui/bottom/AgentTurnLog.tsx',
         completed: true,
         elapsedMs,
+        output: '[stdout]\nCollected render path and viewport sizing details for the log surface.',
       }),
     );
   }, 700);
 
   scheduleTimeout(() => {
-    const chunks = splitForStreaming(STREAM_RESPONSE);
+    if (!streamDemoActive || runToken !== streamDemoRunToken) return;
+
     let index = 0;
     micaUi.panels.status.streaming(startedAt);
     const interval = scheduleInterval(() => {
+      if (!streamDemoActive || runToken !== streamDemoRunToken) {
+        clearDemoInterval(interval);
+        return;
+      }
+
       index += 1;
-      micaUi.conversation.setResponseText(chunks.slice(0, index).join(''));
-
-      if (index < chunks.length) return;
-
-      clearDemoInterval(interval);
-      const elapsedMs = Date.now() - startedAt;
-      micaUi.conversation.clearResponseText();
-      micaUi.conversation.appendAssistantMessage(STREAM_RESPONSE);
-      micaUi.panels.status.completed(elapsedMs, startedAt);
-      micaUi.bottom.agentTurnLog.appendItem(
+      const itemId = `stream-shell-${index}`;
+      micaUi.bottom.agentTurnLog.replaceItem(
         micaUi.createToolCallLogItem({
-          id: `stream-shell-${Date.now()}`,
+          id: itemId,
           toolName: 'run_shell',
-          displayText: 'bunx tsc --noEmit --pretty false',
-          completed: true,
-          elapsedMs: 2600,
-          output: '[stdout]\nType check completed for the simulated demo run.',
+          displayText: LOG_COMMANDS[(index - 1) % LOG_COMMANDS.length] ?? 'echo log item',
+          completed: index % 3 !== 0,
+          startTime: Date.now() - 400 - index * 120,
+          elapsedMs: 900 + index * 180,
+          output: buildVerboseToolOutput(cycle, index),
         }),
       );
-      micaUi.messageBar.addMessage({ id: `stream-complete-${Date.now()}`, text: 'stream demo completed' });
-      scheduleTimeout(() => micaUi.panels.status.idle(), 1500);
-    }, 45);
+
+      micaUi.bottom.agentTurnLog.replaceItem(
+        micaUi.createThinkingLogItem(
+          'stream-thinking',
+          `Cycle ${cycle}: scrolling through repeated tool rows to stress-test the bottom log viewport. Batch ${index}/${LOG_COMMANDS.length + 8}.`,
+        ),
+      );
+
+      if (index < LOG_COMMANDS.length + 8) return;
+
+      clearDemoInterval(interval);
+      micaUi.bottom.agentTurnLog.replaceItem(
+        micaUi.createToolCallLogItem({
+          id: 'stream-shell',
+          toolName: 'run_shell',
+          displayText: 'render dense log viewport sample',
+          completed: true,
+          elapsedMs: 2600 + index * 60,
+          output: buildVerboseToolOutput(cycle, index + 1),
+        }),
+      );
+
+      streamDemoRunning = false;
+      streamDemoActive = false;
+      micaUi.messageBar.addMessage({ id: `stream-complete-${Date.now()}`, text: `log cycle ${cycle} repeated` });
+      scheduleTimeout(() => {
+        if (!streamDemoActive && runToken === streamDemoRunToken) {
+          runStreamDemo();
+        }
+      }, 800);
+    }, 110);
   }, 1200);
 }
 
@@ -333,6 +373,57 @@ function runToolsDemo(): void {
     micaUi.messageBar.addMessage({ id: `tools-complete-${Date.now()}`, text: 'agent turn log demo completed' });
     scheduleTimeout(() => micaUi.panels.status.idle(), 1200);
   }, 1800);
+}
+
+function buildLogDemoItems(cycle: number, startedAt: number) {
+  const items = [
+    micaUi.createThinkingLogItem(
+      'stream-thinking',
+      `Cycle ${cycle}: seed enough log rows to keep the bottom viewport busy while the conversation stays compact.`,
+    ),
+    micaUi.createToolCallLogItem({
+      id: 'stream-tool',
+      toolName: 'read_file',
+      displayText: 'read packages/mica-ui/bottom/AgentTurnLog.tsx',
+      completed: false,
+      startTime: startedAt,
+    }),
+    micaUi.createToolCallLogItem({
+      id: 'stream-shell',
+      toolName: 'run_shell',
+      displayText: 'prepare dense log sample',
+      completed: false,
+      startTime: startedAt + 180,
+      output: buildVerboseToolOutput(cycle, 0),
+    }),
+  ];
+
+  for (let i = 0; i < 10; i += 1) {
+    items.push(
+      micaUi.createToolCallLogItem({
+        id: `seed-shell-${i}`,
+        toolName: i % 2 === 0 ? 'run_shell' : 'grep_search',
+        displayText: LOG_COMMANDS[i % LOG_COMMANDS.length] ?? `seed log item ${i + 1}`,
+        completed: i < 7,
+        startTime: startedAt - i * 350,
+        elapsedMs: i < 7 ? 700 + i * 210 : undefined,
+        output: i % 2 === 0 ? buildVerboseToolOutput(cycle, i + 1) : '',
+      }),
+    );
+  }
+
+  return items;
+}
+
+function buildVerboseToolOutput(cycle: number, index: number): string {
+  return [
+    '[stdout]',
+    `cycle=${cycle} index=${index}`,
+    'measuring bottom log viewport height and sticky scroll behavior',
+    'rendering repeated tool rows with long command labels and wrapped output',
+    'checking whether the remaining space is visually occupied by log content',
+    'capturing a realistic multi-line shell transcript for the example UI',
+  ].join('\n');
 }
 
 function runPluginDemo(): void {
@@ -541,6 +632,9 @@ function clearDemoInterval(interval: ReturnType<typeof setInterval>): void {
 }
 
 function clearDemoTimers(): void {
+  streamDemoActive = false;
+  streamDemoRunToken += 1;
+  streamDemoRunning = false;
   for (const timeout of timeouts) clearTimeout(timeout);
   for (const interval of intervals) clearInterval(interval);
   timeouts.clear();

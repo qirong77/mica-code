@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { getSkillsRootPath } from './paths.js';
+import { getPluginsRootPath, getSkillsRootPath } from './paths.js';
 import type { ConfigWebFilePayload, ConfigWebSection } from '../shared/types.js';
 
 export function readConfigWebFile(section: ConfigWebSection): ConfigWebFilePayload {
   if (section === 'plugins') {
     return {
       section,
+      path: getPluginsRootPath(),
       content: '',
       updatedAt: new Date().toISOString(),
     };

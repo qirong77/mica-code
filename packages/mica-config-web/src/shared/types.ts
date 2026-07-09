@@ -60,3 +60,20 @@ export type ConfigWebSkillsDetails = {
   skills: ConfigWebSkill[];
   updatedAt: string;
 };
+
+export type ConfigWebPlugin = {
+  name: string;
+  id: string;
+  file: string;
+  extension: string;
+  sizeBytes: number;
+  updatedAt: string;
+  status?: 'loaded' | 'registered' | 'failed' | 'unknown';
+  error?: string;
+};
+
+export type ConfigWebPluginsDetails = {
+  root: string;
+  plugins: ConfigWebPlugin[];
+  updatedAt: string;
+};

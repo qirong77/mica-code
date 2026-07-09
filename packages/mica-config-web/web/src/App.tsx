@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from './layout/Sidebar.js';
-import { EmptyState } from './components/EmptyState.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { McpPage } from './pages/McpPage.js';
+import { PluginsPage } from './pages/PluginsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
 import { connectHeartbeat } from './api.js';
 import type { ConfigWebSection } from '../../src/shared/types.js';
@@ -22,7 +22,7 @@ export function App() {
         {section === 'config' ? <ConfigPage /> : null}
         {section === 'mcp' ? <McpPage /> : null}
         {section === 'skills' ? <SkillsPage /> : null}
-        {section === 'plugins' ? <EmptyState /> : null}
+        {section === 'plugins' ? <PluginsPage /> : null}
       </div>
     </main>
   );

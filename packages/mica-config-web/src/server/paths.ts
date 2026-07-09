@@ -12,3 +12,11 @@ export function getConfigWebStatePath(): string {
 export function getSkillsRootPath(): string {
   return resolve(getMicaHome(), 'skills');
 }
+
+export function getPluginsRootPath(): string {
+  return resolve(getMicaHome(), 'plugins');
+}
+
+export function getPluginStatusPath(): string {
+  return resolve(getMicaHome(), 'plugin-status.json');
+}

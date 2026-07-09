@@ -3,6 +3,7 @@ import { PluginManager } from './PluginManager.js';
 import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
+import { loadFilePlugins } from './FilePluginLoader.js';
 
 export const micaPlugin = {
   Plugin,
@@ -10,6 +11,7 @@ export const micaPlugin = {
   HookRegistry,
   ServiceContainer,
   createServiceToken,
+  loadFilePlugins,
 };
 
 export type { Plugin } from './Plugin.js';
@@ -21,3 +23,4 @@ export type { HookRegistry } from './HookRegistry.js';
 export type { GuardHookResult, HookExecutionContext, HookHandler, HookKind, HookOptions } from './HookTypes.js';
 export type { ServiceContainer } from './ServiceContainer.js';
 export type { ServiceToken } from './ServiceToken.js';
+export type { FilePluginLoaderOptions, FilePluginLoadResult } from './FilePluginLoader.js';

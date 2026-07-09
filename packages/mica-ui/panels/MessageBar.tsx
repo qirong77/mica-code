@@ -11,7 +11,11 @@ export interface MessageItem {
 
 type Events = { add: MessageItem; remove: string; clear: void; set: MessageItem[] };
 const emitter = mitt<Events>();
-type PendingEvent = { type: 'add'; item: MessageItem } | { type: 'remove'; id: string } | { type: 'clear' };
+type PendingEvent =
+  | { type: 'add'; item: MessageItem }
+  | { type: 'remove'; id: string }
+  | { type: 'clear' }
+  | { type: 'set'; items: MessageItem[] };
 
 let isMounted = false;
 let pendingEvents: PendingEvent[] = [];
@@ -43,8 +47,13 @@ export const MessageBarAPI = {
     emitter.emit('clear');
   },
   setMessages: (items: MessageItem[]) => {
-    currentItems = [...items];
-    emitter.emit('set', currentItems);
+    const nextItems = [...items];
+    currentItems = nextItems;
+    if (!isMounted) {
+      pendingEvents.push({ type: 'set', items: nextItems });
+      return;
+    }
+    emitter.emit('set', nextItems);
   },
   getMessages: () => [...currentItems],
 };
@@ -88,6 +97,7 @@ export const MessageBar = React.memo(function MessageBar() {
       if (event.type === 'add') onAdd(event.item);
       if (event.type === 'remove') onRemove(event.id);
       if (event.type === 'clear') onClear();
+      if (event.type === 'set') onSet(event.items);
     }
     pendingEvents = [];
     let prevVisible = false;

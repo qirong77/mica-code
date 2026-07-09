@@ -2,6 +2,7 @@ import type {
   ConfigFieldDescription,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
+  ConfigWebPluginsDetails,
   ConfigWebSection,
   ConfigWebSkillsDetails,
 } from '../../src/shared/types.js';
@@ -35,6 +36,11 @@ export async function readMcpDetails(): Promise<ConfigWebMcpDetails> {
 
 export async function readSkillsDetails(): Promise<ConfigWebSkillsDetails> {
   const response = await fetch(`/api/details/skills?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
+  const response = await fetch(`/api/details/plugins?token=${encodeURIComponent(token)}`);
   return readJson(response);
 }
 

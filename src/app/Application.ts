@@ -1,10 +1,21 @@
 import React from 'react';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { Box, Text } from '@anthropic/ink';
 import { wrappedRender } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaLogger } from '@packages/mica-logger/index.js';
-import { micaCommands } from '@packages/mica-commands/index.js';
-import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
+import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
+import { formatExecError, gitText } from '@packages/mica-common/index.js';
+import {
+  micaPlugin,
+  type FilePluginLoadResult,
+  type MicaPlugin,
+  type PluginManager,
+  type PluginSetupReport,
+} from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
@@ -75,18 +86,58 @@ export class Application {
       setActiveContext(this.context);
 
       useBuiltinPlugins(this, agent, sessionController);
+      const filePlugins = await this.useFilePlugins(plugins);
 
-      await plugins.setupAll({
+      const setupReport = await plugins.setupAll({
+        paths: createPluginPaths(),
         services,
         hooks,
         commands,
         events: runtime.events,
+        runtime: {
+          submit: (text, options) => runtime.submit(text, options),
+        },
+        ui: {
+          submit: (text, options) => micaUi.terminalInput.submit(text, options),
+          showMessage: (text, ttl = 3000) => showPluginMessage(text, ttl),
+          components: {
+            createElement: React.createElement,
+            Dialog: micaUi.Dialog,
+            KeyHints: micaUi.KeyHints,
+            Box,
+            Text,
+          },
+          panels: {
+            upsert: micaUi.panels.upsertPluginUI,
+            remove: micaUi.panels.removePluginUI,
+          },
+          input: {
+            getText: () => micaUi.terminalInput.text.get(),
+          },
+          useScheduleState: micaUi.useScheduleState,
+          theme: micaUi.theme,
+        },
+        git: {
+          text: gitText,
+          formatError: formatExecError,
+        },
+        memory: {
+          capture: (label) => micaRuntime.memoryUsageMonitor.capture(label),
+          getSnapshots: () => micaRuntime.memoryUsageMonitor.getSnapshots(),
+          snapshots: micaRuntime.memoryUsageMonitor.snapshots,
+          isRunning: () => micaRuntime.memoryUsageMonitor.isRunning(),
+          getStartedAt: () => micaRuntime.memoryUsageMonitor.getStartedAt(),
+          getIntervalMs: () => micaRuntime.memoryUsageMonitor.getIntervalMs(),
+          getMaxSnapshots: () => micaRuntime.memoryUsageMonitor.getMaxSnapshots(),
+        },
         logger: {
           info: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data)),
           warn: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'warn'),
           error: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'error'),
         },
       });
+      writePluginStatus(filePlugins, setupReport);
+      syncCommandDropdown(commands, runtime);
 
       uiBridge.start();
       // syncStartupBanner(agent);
@@ -153,6 +204,59 @@ export class Application {
     if (this.context) clearActiveContext(this.context);
     this.context = null;
   }
+
+  private async useFilePlugins(plugins: PluginManager): Promise<FilePluginLoadResult> {
+    const loaded = await micaPlugin.loadFilePlugins({
+      pluginsDir: createPluginPaths().plugins,
+      logger: {
+        warn: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'warn'),
+      },
+    });
+
+    for (const plugin of loaded.plugins) {
+      if (plugins.has(plugin.id)) {
+        micaLogger.logRuntime('plugin', 'file-plugin:duplicate', { pluginId: plugin.id }, 'warn');
+        continue;
+      }
+      plugins.register(plugin);
+    }
+    return loaded;
+  }
+}
+
+function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {
+  micaUi.dropdown.setQuickCommands(
+    commands.list().map((command) => ({
+      name: command.name,
+      description: command.description ?? '',
+      hidden: command.hidden,
+      hiddenMenuParent: command.hiddenMenuParent,
+      hiddenMenuItems: command.hiddenMenuItems,
+      action: (arg?: string) => {
+        const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
+        void runtime.submit(text, { source: 'command' });
+      },
+    })),
+  );
+}
+
+function writePluginStatus(filePlugins: FilePluginLoadResult, setupReport: PluginSetupReport): void {
+  const paths = createPluginPaths();
+  const setupFailed = new Map(setupReport.failed.map((item) => [item.pluginId, formatError(item.error)]));
+  const loadedIds = new Set(setupReport.loaded);
+  const status = {
+    root: paths.plugins,
+    updatedAt: new Date().toISOString(),
+    plugins: filePlugins.loaded.map((plugin) => ({
+      id: plugin.pluginId,
+      file: plugin.file,
+      status: setupFailed.has(plugin.pluginId) ? 'failed' : loadedIds.has(plugin.pluginId) ? 'loaded' : 'registered',
+      error: setupFailed.get(plugin.pluginId),
+    })),
+    loadFailed: filePlugins.failed.map((item) => ({ file: item.file, status: 'failed', error: formatError(item.error) })),
+  };
+  mkdirSync(paths.config, { recursive: true });
+  writeFileSync(join(paths.config, 'plugin-status.json'), `${JSON.stringify(status, null, 2)}\n`, 'utf-8');
 }
 
 async function ensureInitialModelSelection(): Promise<void> {
@@ -169,4 +273,24 @@ function toLogData(data: unknown): Record<string, unknown> | undefined {
   if (data == null) return undefined;
   if (typeof data === 'object' && !Array.isArray(data)) return data as Record<string, unknown>;
   return { value: data };
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function showPluginMessage(text: string, ttl: number): void {
+  const id = `plugin-message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  micaUi.messageBar.addMessage({ id, text });
+  setTimeout(() => micaUi.messageBar.removeMessage(id), ttl);
+}
+
+function createPluginPaths() {
+  const home = homedir();
+  const config = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(home, '.mica');
+  return {
+    home,
+    config,
+    plugins: join(config, 'plugins'),
+  };
 }
