@@ -37,6 +37,10 @@ micaUi.panels.status.connecting();
 - `hooks/`：UI 刷新和布局相关 hooks。
 - `primitives/`：通用基础 UI 组件。
 - `utils/`：输入解析和格式化工具函数。
+- `agentTurnLogItems.tsx`：agent turn log 的展示项定义。
+- `example.ts`：开发示例入口。
 - `types.ts`：UI 公开类型。
 - `theme.ts`：终端 UI 主题定义。
+- `ink.d.ts`：Ink 类型补充声明。
+- `ui`：内置 UI 组件与状态示例/扩展目录。
 - `index.ts`：公共 API 聚合导出。

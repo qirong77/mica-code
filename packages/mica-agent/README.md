@@ -42,3 +42,6 @@ const agent = micaAgent.createModelClient({
 - `core/`：agent 抽象类型、基类和对话消息类型。
 - `providers/`：具体模型 provider adapter。
 - `prompt/`：系统 prompt 构建、系统提示词模板和测试。
+- `ui/`：UI 提示相关展示与样式相关。
+- `index.ts`：公共 API 聚合导出。
+- `assets.d.ts`：静态资源类型声明。

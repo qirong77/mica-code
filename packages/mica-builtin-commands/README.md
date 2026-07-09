@@ -4,18 +4,26 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如 `/model`、`/provider`、`/resume`、`/mcp`、`/skills`、`/log`、`/status`、`/task`、`/context`、`/doctor`、`/compact`、`/fork`、`/rewind`、`/review`、`/commit`、`/clear`。
+- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/log`、`/status`、`/task`、`/context`、`/doctor`、`/compact`、`/fork`、`/rewind`、`/review`、`/commit`、`/copy`、`/new`、`/recap`、`/rename`、`/memoryUsage`、`/git-diff-context`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
-- 支持带 UI 面板的命令，例如 provider、resume、mcp、skills、task。
-- 支持运行时控制类命令，例如切换模型、恢复会话、导出日志、压缩上下文、多任务切换与分叉。
-- 支持插件命令更新左下角运行状态；耗时且会改上下文/文件的命令应通过 exclusive task 执行，避免用户并发发送对话或切换配置。
+- 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
+- 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉。
+- 支持通过 `exclusive task` 执行耗时且会改上下文/文件的命令，避免用户并发切换配置导致状态抖动。
 
 ## 使用入口
 
 ```ts
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
 
-const commands = micaBuiltinCommands.createBuiltInCommands(services);
+// 示例：按需组合内置命令工厂函数。
+const activeAgent = {} as never;
+const activeSessionController = {} as never;
+const services = {} as never;
+const commands = [
+  micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
+  micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
+  micaBuiltinCommands.createStatusCommand(activeAgent),
+];
 ```
 
 ## 设计约束
@@ -26,12 +34,22 @@ const commands = micaBuiltinCommands.createBuiltInCommands(services);
 
 ## 目录说明
 
-- `index.ts`：内置命令统一导出与创建入口。
+- `index.ts`：内置命令创建工厂导出。
 - `services.ts`：命令依赖的服务接口定义。
 - `model.ts`、`provider.tsx`：模型与 provider 切换命令。
+- `effort.ts`：effort 切换命令。
+- `configSwitch.ts`：配置切换时的辅助函数。
+- `context.tsx`：上下文汇总与展示命令。
+- `exit.ts`：退出命令。
+- `copy.ts`：复制当前会话文本命令。
+- `new.ts`：新建会话命令。
+- `rename.ts`：会话重命名命令。
+- `recap.ts`：会话摘要命令。
+- `gitDiffContext.ts`：基于 git diff 的上下文命令。
+- `memoryUsage.tsx`：内存监控命令。
 - `resume.ts`：会话恢复命令。
 - `mcp.tsx`、`skills.tsx`：MCP 与 skills 管理命令。
 - `task.tsx`、`fork.ts`、`rewind.tsx`：多任务、分叉与回退相关命令。
 - `compact.ts`：上下文压缩命令。
 - `log.tsx`、`status.tsx`、`context.tsx`、`doctor.tsx`：日志查看、日志导出、状态查看、上下文总览与环境诊断命令。
-- `review.ts`、`commit.ts`、`gitDiffContext.ts`：代码审查与提交辅助命令。
+- `review.ts`、`commit.ts`：代码审查与提交辅助命令。

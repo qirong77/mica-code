@@ -6,7 +6,7 @@
 
 - 定义命令元信息、执行上下文和执行结果类型。
 - 提供 `CommandRegistry` 用于注册、查找和执行命令。
-- 支持命令别名、参数透传和命令列表查询。
+- 支持参数透传和命令列表查询。
 - 为应用层和内置命令包提供稳定的命令系统基础。
 
 ## 使用入口
@@ -18,7 +18,7 @@ const registry = new micaCommands.CommandRegistry();
 registry.register({
   name: 'hello',
   description: '输出问候',
-  handler: async () => ({ type: 'message', message: '你好' }),
+  handler: async () => ({ ok: true, handled: true }),
 });
 ```
 

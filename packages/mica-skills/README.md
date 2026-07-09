@@ -2,7 +2,7 @@
 
 `mica-skills` 负责加载用户自定义 skills。Skill 以目录形式存放，每个 skill 目录下需要包含 `SKILL.md`。
 
-默认扫描目录：`~/.mica/skills`。
+默认扫描目录：`~/.mica/skills`，可通过 `MICA_HOME` 覆盖。
 
 ## 主要能力
 
@@ -44,4 +44,5 @@ const skills = micaSkills.getLoaded();
 
 - `loadSkills.ts`：扫描目录、解析 frontmatter、缓存和刷新 skills。
 - `types.ts`：Skill 类型定义。
+- `loadSkills.test.ts`：skills 加载行为测试。
 - `index.ts`：公共 API 聚合导出。

@@ -8,14 +8,16 @@
 - 类型安全的事件总线工具。
 - JSON 值类型定义。
 - `Result` 成功/失败结果类型。
-- ID 生成工具。
+- `ID` 生成、token 格式化、Git 命令执行与错误格式化工具。
 
 ## 使用入口
 
 ```ts
 import { micaCommon } from '@packages/mica-common/index.js';
 
-const id = micaCommon.createId();
+const id = micaCommon.createId('item');
+const tokenText = micaCommon.formatTokenCount(15320);
+const errText = micaCommon.formatExecError(new Error('cmd error'));
 ```
 
 ## 设计约束
@@ -31,4 +33,6 @@ const id = micaCommon.createId();
 - `json.ts`：JSON 类型定义。
 - `result.ts`：结果类型。
 - `ids.ts`：ID 生成。
+- `format.ts`：token 数量格式化。
+- `git.ts`：git 命令执行与错误格式化。
 - `index.ts`：公共 API 聚合导出。

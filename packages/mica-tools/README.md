@@ -45,7 +45,20 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 
 - `MicaTool.ts`：工具基类和执行回调类型。
 - `registry.ts`：内置工具、MCP 工具注册和执行分发。
-- `Tool*.ts`：各内置工具实现。
+- `ToolApplyPatch.ts`：应用补丁工具。
+- `ToolBackgroundTasks.ts`：列出与管理后台任务。
+- `ToolGrepSearch.ts`：文件搜索工具。
+- `ToolKillTask.ts`：终止后台任务。
+- `ToolListFiles.ts`：按 glob 列文件。
+- `ToolReadFile.ts`：读取文件。
+- `ToolReadTaskOutput.ts`：读取后台任务输出。
+- `ToolRunShell.ts`：执行 shell 命令。
+- `ToolRunShellBackground.ts`：后台 shell 输出与任务控制支持。
+- `ToolRunShellOutput.ts`：run_shell 统一输出处理。
+- `ToolSkill.ts`：基于 skills 的工具调用。
+- `ToolWebFetch.ts`：抓取网址内容。
+- `ToolWebSearch.ts`：执行网络搜索。
+- `ToolWriteFile.ts`：写入与更新文件。
 - `types.ts`：模型侧工具定义类型。
 - `utils/`：展示文案、文件历史、错误格式化和输出限制工具。
 - `index.ts`：公共 API 聚合导出。

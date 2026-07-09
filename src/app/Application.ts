@@ -129,6 +129,7 @@ export class Application {
     process.exitCode = exitCode;
     await this.stop();
     this.renderInstance?.unmount();
+    process.exit(exitCode);
   }
 
   async stop(): Promise<void> {

@@ -59,7 +59,14 @@ if (!result.ok) {
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
+- `effort.ts`：Effort 选项、映射与请求参数转换。
+- `modelRules.ts`：模型规则与远端刷新。
+- `persistence.ts`：配置文件 IO。
+- `providerModels.ts`：模型列表加载和缓存管理。
+- `runtimeEnv.ts`：运行时环境变量读取。
+- `types.ts`：配置与 provider 的类型定义。
+- `validation.ts`：配置校验。
 - `default.json`：首次启动时使用的默认配置模板。
 - `model-rules.json`：模型 effort/contextSize 规则。
-- `../../scripts/update-model-rules.mjs`：根据 OpenCode Zen 模型列表同步 `model-rules.json` 中的模型 ID。
+- `../../scripts/update-model-rules.mjs`：根据 OpenCode Zen 模型列表同步 `model-rules.json` 中的模型 ID（脚本在仓库外层存在）。
 - `index.ts`：公共 API 聚合导出。

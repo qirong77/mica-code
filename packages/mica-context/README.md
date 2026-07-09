@@ -27,4 +27,5 @@ const service = new micaContext.CompactionService(options);
 ## 目录说明
 
 - `CompactionService.ts`：上下文压缩服务。
+- `CompactionService.test.ts`：上下文压缩服务测试。
 - `index.ts`：公共 API 聚合导出。
