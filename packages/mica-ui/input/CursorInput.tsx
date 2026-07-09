@@ -672,6 +672,7 @@ interface SimpleTextInputProps {
   onHistoryDown?: () => void;
   showCursor?: boolean;
   shouldIgnoreInput?: (input: string, key: any) => boolean;
+  suggestion?: string;
 }
 
 export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
@@ -706,6 +707,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   useInput(state.onInput, { isActive: props.focus });
 
   const showPlaceholder = props.value.length === 0 && props.placeholder;
+  const suggestionSuffix = getSuggestionSuffix(props.value, props.suggestion);
 
   return (
     <Box ref={cursorRef}>
@@ -722,9 +724,20 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
             )}
           </Text>
         ) : (
-          <Ansi>{state.renderedValue}</Ansi>
+          <>
+            <Ansi>{state.renderedValue}</Ansi>
+            {suggestionSuffix ? <Text dimColor>{suggestionSuffix}</Text> : null}
+          </>
         )}
       </Text>
     </Box>
   );
+}
+
+function getSuggestionSuffix(value: string, suggestion?: string): string {
+  if (!suggestion || !value) return '';
+  if (value.length < 3) return '';
+  if (suggestion === value) return '';
+  if (!suggestion.startsWith(value)) return '';
+  return suggestion.slice(value.length);
 }

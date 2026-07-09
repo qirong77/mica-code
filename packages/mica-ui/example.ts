@@ -130,7 +130,7 @@ function createDemoCommands(): MicaUiCommand[] {
     {
       name: 'demo',
       description: 'run a mica-ui demo scene',
-      hiddenMenuItems: demoMenu,
+      completionItems: demoMenu,
       action: (arg) => runDemoCommand(arg ?? 'stream'),
     },
     { name: 'stream', description: 'simulate streaming response text', action: runStreamDemo },

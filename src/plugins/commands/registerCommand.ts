@@ -11,9 +11,7 @@ export function registerCommand(ctx: PluginContext, command: BuiltInCommandItem,
   const disposable = ctx.commands.register({
     name: command.name,
     description: command.description,
-    hidden: command.hidden,
-    hiddenMenuParent: command.hiddenMenuParent,
-    hiddenMenuItems: command.hiddenMenuItems,
+    completionItems: command.completionItems,
     scope: 'local-only',
     allowDuringTurn: options.allowDuringTurn,
     pluginId: ctx.pluginId,
@@ -39,9 +37,7 @@ export function syncQuickCommands(ctx: PluginContext): void {
     ctx.commands.list().map((command) => ({
       name: command.name,
       description: command.description ?? '',
-      hidden: command.hidden,
-      hiddenMenuParent: command.hiddenMenuParent,
-      hiddenMenuItems: command.hiddenMenuItems,
+      completionItems: command.completionItems,
       action: (arg?: string) => {
         const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
         const runtime = getActiveContext<ApplicationContext>()?.runtime;

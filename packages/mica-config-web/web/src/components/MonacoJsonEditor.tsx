@@ -30,6 +30,13 @@ export function MonacoJsonEditor({ value, language = 'json', readOnly = false, o
         padding: { top: 14, bottom: 14 },
         wordWrap: 'on',
         automaticLayout: true,
+        smoothScrolling: true,
+        overviewRulerBorder: false,
+        hideCursorInOverviewRuler: true,
+        scrollbar: {
+          verticalScrollbarSize: 10,
+          horizontalScrollbarSize: 10,
+        },
       }}
       onChange={(next) => onChange(next ?? '')}
     />

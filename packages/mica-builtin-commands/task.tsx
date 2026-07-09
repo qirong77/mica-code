@@ -33,7 +33,7 @@ export function createTaskCommand(services: CommandRuntimeServices) {
   return {
     name: 'task',
     description: '显示后台任务和当前终端任务；/task clear 清除空闲任务',
-    hiddenMenuItems: [{ arg: 'clear', description: '清除空闲任务' }],
+    completionItems: [{ arg: 'clear', description: '清除空闲任务' }],
     action: (arg?: string) => {
       if (arg?.trim().toLowerCase() === 'clear') {
         const result = services.clearIdleAgents();

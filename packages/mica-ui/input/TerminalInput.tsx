@@ -72,7 +72,23 @@ function TerminalInput() {
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
   const hasActiveInputPlugin = activePluginUIs.some((ui) => ui.onInput);
   const isCommandInput = localText.trimStart().startsWith('/');
-  const quickCommandVisible = useScheduleState(DropDownUI.atomData.dropdown).visible;
+  const quickCommandDropdown = useScheduleState(DropDownUI.atomData.dropdown);
+  const quickCommandVisible = quickCommandDropdown.visible;
+  const selectedQuickCommand = quickCommandDropdown.items[quickCommandDropdown.selectedIndex];
+  const quickCommandSuggestion =
+    quickCommandVisible && selectedQuickCommand?.insertText?.startsWith(localText) ? selectedQuickCommand.insertText : undefined;
+
+  React.useEffect(() => {
+    return DropDownUI.onSelect((item) => {
+      if (!item.insertText) return;
+      const nextText = item.insertText;
+      setLocalText(nextText);
+      setCursorOffset(nextText.length);
+      input.text.set(nextText);
+      if (nextText.startsWith('/')) DropDownUI.quickCommand.show(nextText.slice(1));
+      else DropDownUI.quickCommand.hide();
+    });
+  }, []);
 
   React.useEffect(() => {
     return input.text.subscribe((text) => {
@@ -365,6 +381,7 @@ function TerminalInput() {
           onHistoryDown={onHistoryDown}
           showCursor={!inputDisabled}
           shouldIgnoreInput={shouldIgnoreTextInput}
+          suggestion={quickCommandSuggestion}
         />
       </PromptFrame>
     </Box>

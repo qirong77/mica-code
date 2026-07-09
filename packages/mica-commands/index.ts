@@ -10,7 +10,7 @@ export type {
   CommandResult,
   CommandScope,
   MicaCommand,
-  MicaCommandHiddenMenuItem,
-  MicaCommandHiddenMenuItems,
+  MicaCommandCompletionItem,
+  MicaCommandCompletionItems,
   ParsedCommand,
 } from './types.js';

@@ -10,7 +10,7 @@ export function createRecapCommand(agent: CommandAgent, services: CommandRuntime
   return {
     name: 'recap',
     description: '生成并保存一条会话回顾',
-    hiddenMenuItems: [
+    completionItems: [
       { arg: '聚焦当前任务和下一步', label: 'focus next step' },
       { arg: '只总结最近的报错和验证结果', label: 'focus errors' },
     ],

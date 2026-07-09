@@ -3,18 +3,16 @@ export type CommandScope = 'local-only' | 'remote-capable' | 'remote-only';
 export type MicaCommand = {
   name: string;
   description?: string;
-  hidden?: boolean;
-  hiddenMenuParent?: string;
-  hiddenMenuItems?: MicaCommandHiddenMenuItems;
+  completionItems?: MicaCommandCompletionItems;
   scope?: CommandScope;
   allowDuringTurn?: boolean;
   pluginId: string;
   handler(ctx: CommandContext, args: string): void | CommandResult | Promise<void | CommandResult>;
 };
 
-export type MicaCommandHiddenMenuItems = MicaCommandHiddenMenuItem[] | (() => MicaCommandHiddenMenuItem[]);
+export type MicaCommandCompletionItems = MicaCommandCompletionItem[] | (() => MicaCommandCompletionItem[]);
 
-export type MicaCommandHiddenMenuItem = {
+export type MicaCommandCompletionItem = {
   arg: string;
   label?: string;
   description?: string;

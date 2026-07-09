@@ -229,9 +229,7 @@ function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeCon
     commands.list().map((command) => ({
       name: command.name,
       description: command.description ?? '',
-      hidden: command.hidden,
-      hiddenMenuParent: command.hiddenMenuParent,
-      hiddenMenuItems: command.hiddenMenuItems,
+      completionItems: command.completionItems,
       action: (arg?: string) => {
         const text = `/${command.name}${arg ? ` ${arg}` : ''}`;
         void runtime.submit(text, { source: 'command' });

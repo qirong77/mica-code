@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { disabled as inputDisabled } from '../../input/state.js';
-import { handleDropdownKey, hideQuickCommands, showQuickCommands } from './quickCommandHandler.js';
+import { handleDropdownKey, hideQuickCommands, showQuickCommands, setSelectEmitter } from './quickCommandHandler.js';
 import { inputValue, quickCommands, rawInputValue, selection, state } from './state.js';
+import { backgroundTaskItems } from '../../panels/state.js';
 
 function resetDropdownState() {
   state.set({ visible: false, items: [], selectedIndex: 0 });
   selection.set(null);
   inputValue.set('');
   rawInputValue.set('');
+  backgroundTaskItems.set([]);
   quickCommands.set([
     { name: 'agents', description: 'show agents', action: vi.fn() },
     { name: 'model', description: 'switch model', action: vi.fn() },
@@ -18,6 +20,7 @@ function resetDropdownState() {
 describe('quick command dropdown', () => {
   beforeEach(() => {
     resetDropdownState();
+    setSelectEmitter(() => {});
   });
 
   it('does not take ownership of the terminal input disabled state', () => {
@@ -59,105 +62,125 @@ describe('quick command dropdown', () => {
     expect(state.get().visible).toBe(true);
   });
 
-  it('shows hidden commands when only one parent command name matches', () => {
-    const gitDiffAction = vi.fn();
-    const baseAction = vi.fn();
-    quickCommands.set([
-      { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
-      {
-        name: 'git-diff-context-base',
-        description: 'send git diff from a base branch',
-        hidden: true,
-        hiddenMenuParent: 'git-diff-context',
-        action: baseAction,
-      },
-      { name: 'commit', description: 'analyze git changes', action: vi.fn() },
-    ]);
-
-    showQuickCommands('git');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-diff-context-base']);
-
-    state.set({ ...state.get(), selectedIndex: 1 });
-    expect(handleDropdownKey({ return: true })).toBe(true);
-    expect(gitDiffAction).not.toHaveBeenCalled();
-    expect(baseAction).toHaveBeenCalledWith(undefined);
-  });
-
-  it('does not show hidden commands when multiple parent command names match', () => {
-    quickCommands.set([
-      { name: 'git-diff-context', description: 'send git diff context', action: vi.fn() },
-      {
-        name: 'git-diff-context-base',
-        description: 'send git diff from a base branch',
-        hidden: true,
-        hiddenMenuParent: 'git-diff-context',
-        action: vi.fn(),
-      },
-      { name: 'git-status', description: 'show git status', action: vi.fn() },
-    ]);
-
-    showQuickCommands('git');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context', '/git-status']);
-  });
-
-  it('selects a hidden command when the query matches it directly', () => {
-    const gitDiffAction = vi.fn();
-    const baseAction = vi.fn();
-    quickCommands.set([
-      { name: 'git-diff-context', description: 'send git diff context', action: gitDiffAction },
-      {
-        name: 'git-diff-context-base',
-        description: 'send git diff from a base branch',
-        hidden: true,
-        hiddenMenuParent: 'git-diff-context',
-        action: baseAction,
-      },
-    ]);
-
-    showQuickCommands('git-diff-context-base');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/git-diff-context-base']);
-    expect(state.get().selectedIndex).toBe(0);
-
-    expect(handleDropdownKey({ return: true })).toBe(true);
-    expect(gitDiffAction).not.toHaveBeenCalled();
-    expect(baseAction).toHaveBeenCalledWith(undefined);
-  });
-
-  it('runs hidden menu items with their configured arg', () => {
-    const action = vi.fn();
+  it('shows completion items when only one command matches', () => {
     quickCommands.set([
       {
         name: 'log',
         description: 'show log',
-        hiddenMenuItems: [{ arg: 'export', description: 'export logs' }],
-        action,
+        completionItems: [{ arg: 'export', description: 'export logs' }],
+        action: vi.fn(),
       },
+      { name: 'list', description: 'show list', action: vi.fn() },
     ]);
 
     showQuickCommands('log');
-    state.set({ ...state.get(), selectedIndex: 1 });
-
-    expect(handleDropdownKey({ return: true })).toBe(true);
-    expect(action).toHaveBeenCalledWith('export');
-    expect(state.get().visible).toBe(false);
+    expect(state.get().items.map((item) => item.label)).toEqual(['/log', '/log export']);
   });
 
-  it('supports dynamic hidden menu items', () => {
-    const action = vi.fn();
+  it('prioritizes /task when active background tasks exist', () => {
+    quickCommands.set([
+      { name: 'model', description: 'switch model', action: vi.fn() },
+      { name: 'task', description: 'show tasks', action: vi.fn() },
+    ]);
+    backgroundTaskItems.set([
+      {
+        id: 'task-1',
+        command: 'npm run dev',
+        cwd: '/tmp/project',
+        shell: '/bin/sh',
+        outputPath: '/tmp/task-1.out',
+        outputSize: 10,
+        status: 'running',
+        startedAt: '2026-01-02T03:04:05.000Z',
+      },
+    ]);
+
+    showQuickCommands('');
+
+    expect(state.get().items.map((item) => item.label)).toEqual(['/task', '/model']);
+  });
+
+  it('keeps exact and prefix matches ahead of task priority', () => {
+    quickCommands.set([
+      { name: 'model', description: 'switch model', action: vi.fn() },
+      { name: 'task', description: 'show tasks', action: vi.fn() },
+    ]);
+    backgroundTaskItems.set([
+      {
+        id: 'task-1',
+        command: 'npm run dev',
+        cwd: '/tmp/project',
+        shell: '/bin/sh',
+        outputPath: '/tmp/task-1.out',
+        outputSize: 10,
+        status: 'running',
+        startedAt: '2026-01-02T03:04:05.000Z',
+      },
+    ]);
+
+    showQuickCommands('mo');
+
+    expect(state.get().items.map((item) => item.label)).toEqual(['/model']);
+  });
+
+  it('filters completion items by argument text', () => {
     quickCommands.set([
       {
         name: 'mcp',
         description: 'show mcp servers',
-        hiddenMenuItems: () => [{ arg: 'reconnect cooper', description: 'reconnect cooper' }],
+        completionItems: () => [{ arg: 'reconnect cooper', description: 'reconnect cooper' }],
+        action: vi.fn(),
+      },
+    ]);
+
+    showQuickCommands('mcp reconnect');
+    expect(state.get().items.map((item) => item.label)).toEqual(['/mcp', '/mcp reconnect cooper']);
+  });
+
+  it('runs command with typed arguments on enter', () => {
+    const action = vi.fn();
+    quickCommands.set([{ name: 'log', description: 'show log', action }]);
+
+    showQuickCommands('log export');
+    expect(handleDropdownKey({ return: true })).toBe(true);
+    expect(action).toHaveBeenCalledWith('export');
+  });
+
+  it('runs selected completion on enter', () => {
+    const action = vi.fn();
+    quickCommands.set([
+      {
+        name: 'task',
+        description: 'show tasks',
+        completionItems: [{ arg: 'clear', description: 'clear idle tasks' }],
         action,
       },
     ]);
 
-    showQuickCommands('mcp');
-    expect(state.get().items.map((item) => item.label)).toEqual(['/mcp', '/mcp reconnect cooper']);
-
+    showQuickCommands('task');
     state.set({ ...state.get(), selectedIndex: 1 });
+
+    expect(handleDropdownKey({ return: true })).toBe(true);
+    expect(action).toHaveBeenCalledWith('clear');
+  });
+
+  it('emits selected completion text on tab', () => {
+    const emit = vi.fn();
+    setSelectEmitter(emit);
+    quickCommands.set([
+      {
+        name: 'task',
+        description: 'show tasks',
+        completionItems: [{ arg: 'clear', description: 'clear idle tasks' }],
+        action: vi.fn(),
+      },
+    ]);
+
+    showQuickCommands('task');
+    state.set({ ...state.get(), selectedIndex: 1 });
+
     expect(handleDropdownKey({ tab: true })).toBe(true);
-    expect(action).toHaveBeenCalledWith('reconnect cooper');
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ insertText: '/task clear' }));
+    expect(state.get().visible).toBe(true);
   });
 });

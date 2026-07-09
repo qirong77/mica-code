@@ -27,6 +27,7 @@
     "chalk": "^5.6.2",
     "cli-highlight": "^2.1.11",
     "glob": "^13.0.6",
+    "lucide-react": "^0.542.0",
     "lru-cache": "^11.2.4",
     "marked": "^18.0.3",
     "mitt": "^3.0.1",

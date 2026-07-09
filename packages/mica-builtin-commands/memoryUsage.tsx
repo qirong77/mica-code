@@ -23,7 +23,7 @@ export function createMemoryUsageCommand(services: CommandRuntimeServices) {
   return {
     name: 'memoryUsage',
     description: '显示当前进程内存快照；/memoryUsage export 导出内存日志',
-    hiddenMenuItems: [{ arg: 'export', description: '导出内存快照日志' }],
+    completionItems: [{ arg: 'export', description: '导出内存快照日志' }],
     action: (arg?: string) => {
       const normalized = arg?.trim().toLowerCase();
       if (normalized === 'export') {

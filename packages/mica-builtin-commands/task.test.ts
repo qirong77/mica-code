@@ -157,7 +157,7 @@ describe('task command', () => {
     command.action();
 
     expect(command.name).toBe('task');
-    expect(command.hiddenMenuItems).toEqual([{ arg: 'clear', description: '清除空闲任务' }]);
+    expect(command.completionItems).toEqual([{ arg: 'clear', description: '清除空闲任务' }]);
     expect(mocks.listBackgroundTasks).toHaveBeenCalledWith({ status: 'all' });
     expect(mocks.setBackgroundTaskItems).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'abc123def456', outputSize: 42, status: 'running' }),

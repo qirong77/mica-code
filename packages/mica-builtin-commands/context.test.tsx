@@ -78,9 +78,9 @@ describe('context command', () => {
     mocks.removePluginUI.mockReset();
   });
 
-  it('does not expose hidden menu entries', () => {
+  it('does not expose completion items', () => {
     const command = createContextCommand(makeAgent());
-    expect('hiddenMenuItems' in command).toBe(false);
+    expect('completionItems' in command).toBe(false);
   });
 
   it('opens the detail panel when invoked with detail', () => {
