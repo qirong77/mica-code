@@ -1,0 +1,27 @@
+packages/mica-config-web/src/server/workerArgs.test.ts
+  03857c2af61d98bc 1-26
+src/index.ts
+  03857c2af61d98bc 6,8-10
+packages/mica-config-web/src/server/workerArgs.ts
+  03857c2af61d98bc 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "59c586ebbaec8fd17e8e694f8e9505a8a83cb50c",
+  "prompts": {
+    "03857c2af61d98bc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f46b4-ae16-7cc3-bb8f-65843a88c1f6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "qirong77",
+      "messages": [],
+      "total_additions": 55,
+      "total_deletions": 5,
+      "accepted_lines": 54,
+      "overriden_lines": 0
+    }
+  }
+}
