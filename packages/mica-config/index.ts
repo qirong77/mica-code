@@ -10,6 +10,7 @@ import {
   formatConfigValidationIssues,
   loadProviderModels,
   loadMissingProviderModels,
+  refreshRemoteModelRules,
   getEffortMapFromConfig,
   getModelContextWindowSizeFromConfig,
   getProviderEffortOptions,
@@ -51,6 +52,8 @@ export const micaConfig = {
   loadProviderModels,
   /** 为配置中尚未加载模型列表的动态 provider 批量拉取模型。 */
   loadMissingProviderModels,
+  /** 从 GitHub 刷新模型规则，12 小时内最多尝试一次，失败时继续使用本地规则。 */
+  refreshRemoteModelRules,
   /** 按模型名从内置规则读取 effort 映射；未命中时返回默认四档。 */
   getEffortMapFromConfig,
   /** 按模型名从内置规则读取 context window token 数；未命中时返回 256K。 */
@@ -92,6 +95,7 @@ export {
   validateConfig,
   assertValidConfig,
   formatConfigValidationIssues,
+  refreshRemoteModelRules,
   getEffortMapFromConfig,
   getModelContextWindowSizeFromConfig,
   getProviderEffortOptions,

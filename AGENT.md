@@ -116,15 +116,16 @@ temp/                              临时代码和外部实验，默认不参与
 1. `src/index.ts` 注册全局错误处理，然后创建并启动 `Application`。
 2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI。
 3. 启动后先执行 `micaConfig.assertValid()`。配置语义错误应该在 `AgentRuntime` 创建前失败，并通过 UI 展示可操作错误。
-4. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
-5. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController` 和 `MicaUiRuntimeBridge`。
-6. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent))` 注册运行时工具上下文。
-7. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
-8. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
-9. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和 logger。
-10. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
-11. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-12. 设置输入框 placeholder、退出回调和 runtime 日志。
+4. 后台调用 `micaConfig.refreshRemoteModelRules()`，12 小时内最多尝试一次从 GitHub raw 刷新模型规则缓存；失败不阻塞启动。
+5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
+6. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController` 和 `MicaUiRuntimeBridge`。
+7. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent))` 注册运行时工具上下文。
+8. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
+9. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
+10. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和 logger。
+11. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
+12. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
+13. 设置输入框 placeholder、退出回调和 runtime 日志。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
 
@@ -322,6 +323,7 @@ AGENT.md
 - `web_search` 使用 `serperApiKey` 或 `SERPER_API_KEY`。
 - `web_fetch` 负责 URL 抓取和 HTML 转 Markdown。
 - 当用户询问当前、最新、官方、模型能力、provider 行为、API 行为、价格、法规等可变事实时，agent 应先联网或读官方资料查证；无法查证时要明确说明。
+- 更新 `packages/mica-config/model-rules.json` 时优先使用 `update-model-rules` skill；脚本入口是 `bun run update:model-rules`，只从 `https://opencode.ai/zen/v1/models/` 同步模型 ID。`contextSize` 和 `effortMap` 必须由执行者通过搜索工具查证后再写入。
 
 ### Skills
 
@@ -331,6 +333,7 @@ AGENT.md
 - frontmatter 支持简单 key/value、boolean 和列表；列表值会被规范化为分号连接的字符串。
 - `Skill` 工具会把 skill baseDir 和完整内容包在 `<skill-instructions>` 中返回，并支持简单 `$var` 参数替换。
 - skill 内容是用户数据和任务说明，不能覆盖安全规则、系统指令或当前用户请求。
+- 仓库内 `skills/update-model-rules` 记录了模型规则更新流程。新增或调整 OpenCode Zen 模型 family 时，要通过搜索工具查证 context window、reasoning effort 档位和 API 参数值，再更新 `model-rules.json` 并运行对应 typecheck/test。
 
 ## UI 状态与 Ink 约定
 

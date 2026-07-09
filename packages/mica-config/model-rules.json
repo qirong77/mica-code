@@ -1,8 +1,8 @@
 [
   {
     "name": "OpenAI GPT-5.5",
-    "modelKeysIncludes": ["gpt-5.5"],
-    "contextSize": 256,
+    "modelKeysIncludes": ["gpt-5.5", "gpt-5.5-pro"],
+    "contextSize": 272,
     "effortMap": {
       "low": "low",
       "medium": "medium",
@@ -12,8 +12,17 @@
   },
   {
     "name": "OpenAI GPT-5.4 / 5.3 / 5.2",
-    "modelKeysIncludes": ["gpt-5.4", "gpt-5.3", "gpt-5.2"],
-    "contextSize": 256,
+    "modelKeysIncludes": [
+      "gpt-5.2",
+      "gpt-5.2-codex",
+      "gpt-5.3-codex",
+      "gpt-5.3-codex-spark",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.4-pro"
+    ],
+    "contextSize": 272,
     "effortMap": {
       "minimal": "minimal",
       "low": "low",
@@ -24,7 +33,15 @@
   },
   {
     "name": "OpenAI GPT-5.1 / GPT-5",
-    "modelKeysIncludes": ["gpt-5.1", "gpt-5"],
+    "modelKeysIncludes": [
+      "gpt-5",
+      "gpt-5-codex",
+      "gpt-5-nano",
+      "gpt-5.1",
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-max",
+      "gpt-5.1-codex-mini"
+    ],
     "contextSize": 256,
     "effortMap": {
       "minimal": "minimal",
@@ -34,20 +51,8 @@
     }
   },
   {
-    "name": "Claude",
-    "modelKeysIncludes": ["claude"],
-    "contextSize": 200,
-    "enableEffort": false
-  },
-  {
-    "name": "Gemini",
-    "modelKeysIncludes": ["gemini"],
-    "contextSize": "1M",
-    "enableEffort": false
-  },
-  {
     "name": "DeepSeek",
-    "modelKeysIncludes": ["deepseek"],
+    "modelKeysIncludes": ["deepseek-v4-flash", "deepseek-v4-flash-free", "deepseek-v4-pro"],
     "contextSize": "1M",
     "effortMap": {
       "none": null,
@@ -68,8 +73,8 @@
     }
   },
   {
-    "name": "Kimi K2.6",
-    "modelKeysIncludes": ["kimi-k2.6"],
+    "name": "Kimi K2.6+",
+    "modelKeysIncludes": ["kimi-k2.6", "kimi-k2.7-code"],
     "contextSize": 256,
     "effortMap": {
       "none": null,
@@ -77,32 +82,78 @@
     }
   },
   {
+    "name": "Claude",
+    "modelKeysIncludes": [
+      "claude-fable-5",
+      "claude-haiku-4-5",
+      "claude-opus-4-1",
+      "claude-opus-4-5",
+      "claude-opus-4-6",
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-5"
+    ],
+    "contextSize": 200,
+    "enableEffort": false
+  },
+  {
+    "name": "Gemini",
+    "modelKeysIncludes": ["gemini-3-flash", "gemini-3.1-pro", "gemini-3.5-flash"],
+    "contextSize": "1M",
+    "enableEffort": false
+  },
+  {
+    "name": "Grok",
+    "modelKeysIncludes": ["grok-4.5", "grok-build-0.1"],
+    "contextSize": 256,
+    "enableEffort": false
+  },
+  {
     "name": "Kimi",
-    "modelKeysIncludes": ["kimi"],
+    "modelKeysIncludes": ["kimi-k2.5"],
     "contextSize": 256,
     "enableEffort": false
   },
   {
     "name": "Minimax",
-    "modelKeysIncludes": ["minimax"],
+    "modelKeysIncludes": ["minimax-m2.5", "minimax-m2.7", "minimax-m3"],
     "contextSize": 256,
     "enableEffort": false
   },
   {
     "name": "Qwen",
-    "modelKeysIncludes": ["qwen"],
+    "modelKeysIncludes": ["qwen3.5-plus", "qwen3.6-plus"],
     "contextSize": 256,
     "enableEffort": false
   },
   {
-    "name": "Grok",
-    "modelKeysIncludes": ["grok"],
+    "name": "Hy3",
+    "modelKeysIncludes": ["hy3-free"],
+    "contextSize": 256,
+    "effortMap": {
+      "none": null,
+      "low": "low",
+      "high": "high"
+    }
+  },
+  {
+    "name": "Nemotron 3 Ultra",
+    "modelKeysIncludes": ["nemotron-3-ultra-free"],
+    "contextSize": "1M",
+    "enableEffort": false
+  },
+  {
+    "name": "North Mini Code",
+    "modelKeysIncludes": ["north-mini-code-free"],
     "contextSize": 256,
     "enableEffort": false
   },
   {
-    "name": "Other OpenCode Models",
-    "modelKeysIncludes": ["big-pickle", "mimo", "nemotron", "north-mini-code"],
+    "name": "Unverified OpenCode Models",
+    "modelKeysIncludes": ["big-pickle", "mimo-v2.5-free"],
     "contextSize": 256,
     "enableEffort": false
   }

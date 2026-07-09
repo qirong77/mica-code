@@ -13,6 +13,7 @@
 - 校验配置语义并生成可操作提示：`micaConfig.validate(config)`、`micaConfig.assertValid(config)`。
 - 拉取指定 provider 的模型列表并缓存到内存运行态配置：`micaConfig.loadProviderModels(providerId)`。
 - 为动态 provider 批量加载运行时模型列表：`micaConfig.loadMissingProviderModels()`。
+- 从 GitHub 远程刷新模型规则缓存：`micaConfig.refreshRemoteModelRules()`。
 - 读取本地状态：`micaConfig.storage.read()`。
 - 读取共享输入框历史：`micaConfig.inputHistory.read()`。
 - 追加共享输入框历史：`micaConfig.inputHistory.append(text)`。
@@ -47,11 +48,12 @@ if (!result.ok) {
 
 ## 模型规则
 
-`model-rules.json` 维护 model → effort/contextSize 映射规则，按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配。规则目前仅兼容 [opencode.ai/zen/v1/models](https://opencode.ai/zen/v1/models) 接口返回的模型列表。
+`model-rules.json` 维护 model → effort/contextSize 映射规则，按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配。规则目前仅兼容 OpenCode Zen 模型列表。
 
 - 未命中规则时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
 - 规则可通过 `enableEffort: false` 禁用模型族的 effort 选择。
 - 规则仅影响 effort UI 选项过滤和参数展开，不参与 provider 选择。
+- 维护内置规则时优先运行 `bun run update:model-rules`，脚本只从 OpenCode Zen 模型接口同步最新模型 ID。`contextSize` 和 `effortMap` 需要通过搜索工具查证官方或可信资料后手动确认。
 
 ## 目录说明
 
@@ -59,4 +61,5 @@ if (!result.ok) {
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `default.json`：首次启动时使用的默认配置模板。
 - `model-rules.json`：模型 effort/contextSize 规则。
+- `../../scripts/update-model-rules.mjs`：根据 OpenCode Zen 模型列表同步 `model-rules.json` 中的模型 ID。
 - `index.ts`：公共 API 聚合导出。
