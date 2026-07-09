@@ -20,6 +20,9 @@ const target = process.env.MICA_BUILD_TARGET;
 const targetDir = dirname(outFile);
 if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
+console.log('Building config web assets...\n');
+execSync('bun run build:config-web', { stdio: 'inherit' });
+
 execFileSync('bun', [
   'build',
   '--compile',

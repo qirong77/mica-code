@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
+    "build:config-web": "vite build --config packages/mica-config-web/web/vite.config.ts && bun scripts/generate-config-web-assets.mjs",
     "build": "MICA_PREBUILD_DONE=1 bun scripts/build.mjs",
     "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",
@@ -21,10 +22,8 @@
     "@anthropic-ai/sdk": "^0.104.1",
     "@anthropic/ink": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@ant-design/icons": "^6.1.0",
     "@monaco-editor/react": "^4.7.0",
     "@vitejs/plugin-react": "latest",
-    "antd": "^6.1.1",
     "chalk": "^5.6.2",
     "cli-highlight": "^2.1.11",
     "glob": "^13.0.6",

@@ -1,12 +1,10 @@
-import { Menu } from 'antd';
-import { CodeOutlined, ControlOutlined, ProductOutlined, ToolOutlined } from '@ant-design/icons';
 import type { ConfigWebSection } from '../../../src/shared/types.js';
 
 const items = [
-  { key: 'config', icon: <ControlOutlined />, label: 'Config' },
-  { key: 'mcp', icon: <CodeOutlined />, label: 'MCP' },
-  { key: 'skills', icon: <ToolOutlined />, label: 'Skills' },
-  { key: 'plugins', icon: <ProductOutlined />, label: 'Plugins' },
+  { key: 'config', icon: '{}', label: 'Config' },
+  { key: 'mcp', icon: '<>', label: 'MCP' },
+  { key: 'skills', icon: '#', label: 'Skills' },
+  { key: 'plugins', icon: '+', label: 'Plugins' },
 ];
 
 type SidebarProps = {
@@ -18,12 +16,19 @@ export function Sidebar({ section, onChange }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">Mica</div>
-      <Menu
-        mode="inline"
-        selectedKeys={[section]}
-        items={items}
-        onClick={(event) => onChange(event.key as ConfigWebSection)}
-      />
+      <nav className="nav-menu">
+        {items.map((item) => (
+          <button
+            className={`nav-item ${section === item.key ? 'nav-item-active' : ''}`}
+            key={item.key}
+            type="button"
+            onClick={() => onChange(item.key as ConfigWebSection)}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
     </aside>
   );
 }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Descriptions, Empty, Typography } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, DescriptionList, Empty } from '../components/Ui.js';
 import { readSkillsDetails } from '../api.js';
 import type { ConfigWebSkillsDetails } from '../../../src/shared/types.js';
 
@@ -29,12 +28,12 @@ export function SkillsPage() {
     <section className="detail-page">
       <header className="editor-header">
         <div>
-          <Typography.Title level={4}>Skills</Typography.Title>
-          <Typography.Text type="secondary">{details?.root ?? ''}</Typography.Text>
+          <h2>Skills</h2>
+          <p className="path-text">{details?.root ?? ''}</p>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading} />
+        <Button icon="↻" title="重新加载" onClick={load} loading={loading} />
       </header>
-      {error ? <Alert className="editor-alert" type="error" message={error} showIcon /> : null}
+      {error ? <Alert message={error} /> : null}
       <div className="detail-body">
         {!details || details.skills.length === 0 ? (
           <Empty description="暂无 Skills" />
@@ -43,14 +42,16 @@ export function SkillsPage() {
             {details.skills.map((skill) => (
               <section className="detail-card" key={skill.baseDir}>
                 <div className="detail-card-title">
-                  <Typography.Title level={5}>{skill.name}</Typography.Title>
-                  <Typography.Text type="secondary">{skill.baseDir}</Typography.Text>
+                  <h3>{skill.name}</h3>
+                  <span className="muted-text">{skill.baseDir}</span>
                 </div>
-                <Descriptions size="small" column={1} bordered>
-                  <Descriptions.Item label="Description">{skill.description}</Descriptions.Item>
-                  {skill.whenToUse ? <Descriptions.Item label="When To Use">{skill.whenToUse}</Descriptions.Item> : null}
-                  {skill.argumentHint ? <Descriptions.Item label="Argument Hint">{skill.argumentHint}</Descriptions.Item> : null}
-                </Descriptions>
+                <DescriptionList
+                  items={[
+                    { label: 'Description', value: skill.description },
+                    { label: 'When To Use', value: skill.whenToUse },
+                    { label: 'Argument Hint', value: skill.argumentHint },
+                  ]}
+                />
                 {skill.contentPreview ? (
                   <pre className="skill-preview">{skill.contentPreview}</pre>
                 ) : null}

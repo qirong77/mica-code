@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Space, Typography, message } from 'antd';
-import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
+import { Alert, Button } from '../components/Ui.js';
 import { readConfigDescriptions, readSection, writeSection } from '../api.js';
 import type { ConfigFieldDescription } from '../../../src/shared/types.js';
 
@@ -12,7 +11,7 @@ export function ConfigPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [messageApi, contextHolder] = message.useMessage();
+  const [saved, setSaved] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -35,7 +34,8 @@ export function ConfigPage() {
     try {
       const payload = await writeSection('config', content);
       setContent(payload.content);
-      messageApi.success('已保存');
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1600);
     } catch (saveError) {
       setError(formatError(saveError));
     } finally {
@@ -49,29 +49,29 @@ export function ConfigPage() {
 
   return (
     <section className="editor-page config-page">
-      {contextHolder}
       <header className="editor-header">
         <div>
-          <Typography.Title level={4}>Config</Typography.Title>
-          <Typography.Text type="secondary">{path}</Typography.Text>
+          <h2>Config</h2>
+          <p className="path-text">{path}</p>
         </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={load} loading={loading} />
-          <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>
+        <div className="toolbar">
+          {saved ? <span className="save-status">已保存</span> : null}
+          <Button icon="↻" title="重新加载" onClick={load} loading={loading} />
+          <Button variant="primary" icon="✓" onClick={save} loading={saving}>
             保存
           </Button>
-        </Space>
+        </div>
       </header>
-      {error ? <Alert className="editor-alert" type="error" message={error} showIcon /> : null}
+      {error ? <Alert message={error} /> : null}
       <div className="config-body">
         <aside className="field-help">
-          <Typography.Title level={5}>字段说明</Typography.Title>
+          <h3>字段说明</h3>
           <div className="field-help-list">
             {fields.map((field) => (
               <section className="field-help-item" key={field.key}>
-                <Typography.Text strong>{field.title}</Typography.Text>
-                <Typography.Paragraph type="secondary">{field.description}</Typography.Paragraph>
-                {field.example ? <Typography.Text type="secondary">{field.example}</Typography.Text> : null}
+                <strong>{field.title}</strong>
+                <p>{field.description}</p>
+                {field.example ? <code>{field.example}</code> : null}
               </section>
             ))}
           </div>

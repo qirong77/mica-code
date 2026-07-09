@@ -29,6 +29,18 @@ const backgroundTasks = [
     started_at: '2026-01-02T03:04:05.000Z',
     output_limit_bytes: 1024,
   },
+  {
+    id: 'finished1234',
+    command: 'npm test',
+    cwd: '/tmp/project',
+    shell: '/bin/sh',
+    pid: 2345,
+    output_path: '/tmp/mica-tasks/finished1234.out',
+    status: 'finished',
+    started_at: '2026-01-02T03:04:05.000Z',
+    finished_at: '2026-01-02T03:04:06.000Z',
+    output_limit_bytes: 1024,
+  },
 ];
 
 const mocks = {
@@ -50,6 +62,18 @@ const mocks = {
       outputSize: 42,
       status: 'running',
       startedAt: '2026-01-02T03:04:05.000Z',
+    },
+    {
+      id: 'finished1234',
+      command: 'npm test',
+      cwd: '/tmp/project',
+      shell: '/bin/sh',
+      pid: 2345,
+      outputPath: '/tmp/mica-tasks/finished1234.out',
+      outputSize: 42,
+      status: 'finished',
+      startedAt: '2026-01-02T03:04:05.000Z',
+      finishedAt: '2026-01-02T03:04:06.000Z',
     },
   ]),
   listBackgroundTasks: vi.fn(() => backgroundTasks),
@@ -137,6 +161,7 @@ describe('task command', () => {
     expect(mocks.listBackgroundTasks).toHaveBeenCalledWith({ status: 'all' });
     expect(mocks.setBackgroundTaskItems).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'abc123def456', outputSize: 42, status: 'running' }),
+      expect.objectContaining({ id: 'finished1234', outputSize: 42, status: 'finished' }),
     ]);
     expect(services.listRunningAgents).toHaveBeenCalledTimes(1);
     expect(mocks.setAgentStatusItems).toHaveBeenCalledWith(agents);

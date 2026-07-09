@@ -1,4 +1,4 @@
-import { Empty } from 'antd';
+import { Empty } from './Ui.js';
 
 export function EmptyState() {
   return (

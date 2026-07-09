@@ -47,7 +47,7 @@ export function createTaskCommand(services: CommandRuntimeServices) {
         return;
       }
 
-      const backgroundTasks = syncBackgroundTasks();
+      const backgroundTasks = filterActiveBackgroundTasks(syncBackgroundTasks());
       const agents = services.listRunningAgents();
       micaUi.panels.setAgentStatusItems(agents);
       micaLogger.logRuntime('plugin.task', 'opened', {
@@ -78,8 +78,9 @@ function showTaskPanel(services: CommandRuntimeServices) {
     const backgroundTasks = micaUi.useScheduleState(micaUi.panels.backgroundTaskItems);
     const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
     const [nowMs, setNowMs] = useState(() => Date.now());
-    const hasActiveBackgroundTasks = backgroundTasks.some((task) => isActiveBackgroundTaskStatus(task.status));
-    const items = useMemo(() => buildTaskListItems(backgroundTasks, agents), [backgroundTasks, agents]);
+    const activeBackgroundTasks = useMemo(() => filterActiveBackgroundTasks(backgroundTasks), [backgroundTasks]);
+    const hasActiveBackgroundTasks = activeBackgroundTasks.length > 0;
+    const items = useMemo(() => buildTaskListItems(activeBackgroundTasks, agents), [activeBackgroundTasks, agents]);
     const selectedIdx = clampIndex(state.selectedIdx, items.length);
     const detailTask = state.detailTaskId ? backgroundTasks.find((task) => task.id === state.detailTaskId) : undefined;
 
@@ -110,7 +111,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
           empty={<Text dimColor>No tasks</Text>}
           renderItem={(item, isSelected) => {
             if (item.kind === 'background') {
-              const task = backgroundTasks.find((candidate) => candidate.id === item.taskId);
+              const task = activeBackgroundTasks.find((candidate) => candidate.id === item.taskId);
               if (!task) return null;
               return <TaskListBackgroundRow task={task} selected={isSelected} nowMs={nowMs} />;
             }
@@ -132,7 +133,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
       const state = stateAtom.get();
       const backgroundTasks = micaUi.panels.backgroundTaskItems.get();
       const agents = micaUi.panels.agentStatusItems.get();
-      const items = buildTaskListItems(backgroundTasks, agents);
+      const items = buildTaskListItems(filterActiveBackgroundTasks(backgroundTasks), agents);
 
       if (key.escape) {
         if (state.detailTaskId) {
@@ -310,6 +311,12 @@ function buildTaskListItems(
       taskId: agent.id,
     })),
   ];
+}
+
+function filterActiveBackgroundTasks(
+  tasks: readonly MicaUiBackgroundTaskItem[],
+): readonly MicaUiBackgroundTaskItem[] {
+  return tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
 }
 
 function formatAgentWorkspace(agent: MicaUiAgentStatusItem): string {
