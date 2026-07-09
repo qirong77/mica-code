@@ -1,6 +1,7 @@
 import { createClearCommand } from './clear.js';
 import { createCommitCommand } from './commit.js';
 import { createCompactCommand } from './compact.js';
+import { createConfigCommand } from './config.js';
 import { createCopyCommand } from './copy.js';
 import { createContextCommand } from './context.js';
 import { createDoctorCommand } from './doctor.js';
@@ -28,6 +29,7 @@ export const micaBuiltinCommands = {
   createClearCommand,
   createCommitCommand,
   createCompactCommand,
+  createConfigCommand,
   createCopyCommand,
   createContextCommand,
   createDoctorCommand,

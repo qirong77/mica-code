@@ -12,6 +12,7 @@
     "packages/mica-tools",
     "packages/mica-ui",
     "packages/mica-config",
+    "packages/mica-config-web",
     "packages/mica-session",
     "packages/mica-skills",
     "packages/mica-mcp",

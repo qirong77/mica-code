@@ -2,6 +2,14 @@
 
 import { createApplication } from './app/index.js';
 import { reportRuntimeError } from './runtime/uiBridge.js';
+import { startConfigWebServer } from '@packages/mica-config-web/server/server.js';
+
+if (process.argv[2] === '--config-web-worker') {
+  const token = process.argv[3];
+  if (!token) throw new Error('Missing config web token');
+  await startConfigWebServer({ token });
+  await new Promise(() => undefined);
+}
 
 process.on('uncaughtException', (error) => {
   reportRuntimeError(error, '未捕获异常');

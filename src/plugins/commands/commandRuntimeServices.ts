@@ -278,6 +278,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     async requestExit(exitCode = 0) {
       process.exitCode = exitCode;
       micaUi.terminalInput.requestExit();
+      process.exit(exitCode);
     },
     newAgentSession() {
       const context = currentContext();
