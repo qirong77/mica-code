@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, Empty, Tag } from '../components/Ui.js';
 import { readPluginsDetails } from '../api.js';
 import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
@@ -38,7 +38,7 @@ export function PluginsPage() {
         {!details || details.plugins.length === 0 ? (
           <Empty description="暂无文件插件" />
         ) : (
-          <div className="plugin-grid">
+          <div className="stacked-panels">
             {details.plugins.map((plugin) => (
               <PluginCard key={plugin.file} plugin={plugin} />
             ))}
@@ -51,15 +51,16 @@ export function PluginsPage() {
 
 function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
   return (
-    <section className="simple-card plugin-card">
-      <div className="table-panel-title">
-        <strong>{plugin.name}</strong>
-        <span>{plugin.id}</span>
-      </div>
-      <div className="table-tags">
-        <Tag tone="blue">{plugin.extension}</Tag>
-        <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>{plugin.status ?? 'unknown'}</Tag>
-      </div>
+    <CollapsiblePanel
+      title={plugin.name}
+      subtitle={plugin.id}
+      meta={
+        <>
+          <Tag tone="blue">{plugin.extension}</Tag>
+          <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>{plugin.status ?? 'unknown'}</Tag>
+        </>
+      }
+    >
       <div className="simple-list">
         <div className="simple-row">
           <span>File</span>
@@ -78,7 +79,7 @@ function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
           <strong>{plugin.error || '-'}</strong>
         </div>
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 

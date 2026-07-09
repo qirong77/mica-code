@@ -41,15 +41,15 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px;
+  gap: 16px;
+  padding: 16px;
   border-right: 1px solid var(--line);
   background: var(--panel);
 }
@@ -59,24 +59,24 @@ textarea {
 }
 
 .brand {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.1;
 }
 
 .nav-menu {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .nav-item {
   width: 100%;
-  min-height: 44px;
+  min-height: 36px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -95,8 +95,8 @@ textarea {
 }
 
 .nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -109,7 +109,7 @@ textarea {
 
 .nav-label {
   min-width: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -163,18 +163,19 @@ textarea {
 }
 
 .ui-button {
-  min-width: 38px;
-  height: 36px;
+  min-width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
+  font-size: 13px;
 }
 
 .ui-button:disabled {
@@ -189,16 +190,16 @@ textarea {
 }
 
 .ui-button-icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .ui-button-spinner {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 999px;
@@ -283,8 +284,7 @@ textarea {
   display: none;
 }
 
-.collapsible-body,
-.plugin-card {
+.collapsible-body {
   padding: 16px;
 }
 
@@ -379,10 +379,6 @@ textarea {
   white-space: pre-wrap;
 }
 
-.plugin-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .ui-empty-wrap {
   display: grid;
   place-items: center;
@@ -414,9 +410,6 @@ textarea {
     border-bottom: 1px solid var(--line);
   }
 
-  .plugin-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {

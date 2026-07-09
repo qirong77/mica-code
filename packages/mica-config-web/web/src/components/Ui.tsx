@@ -34,3 +34,26 @@ export function Tag({ children, tone = 'default' }: { children: ReactNode; tone?
   return <span className={`ui-tag ui-tag-${tone}`}>{children}</span>;
 }
 
+type CollapsiblePanelProps = {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  meta?: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+};
+
+export function CollapsiblePanel({ title, subtitle, meta, children, defaultOpen = false }: CollapsiblePanelProps) {
+  return (
+    <details className="simple-card collapsible-card" open={defaultOpen}>
+      <summary className="collapsible-summary">
+        <div className="table-panel-title">
+          <strong>{title}</strong>
+          {subtitle ? <span>{subtitle}</span> : null}
+        </div>
+        {meta ? <div className="table-panel-tags">{meta}</div> : null}
+      </summary>
+      <div className="collapsible-body">{children}</div>
+    </details>
+  );
+}
+

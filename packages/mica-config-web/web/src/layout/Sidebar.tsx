@@ -36,7 +36,7 @@ function SidebarItem({ currentSection, section, label, onChange }: { currentSect
   return (
     <button className={`nav-item ${active ? 'nav-item-active' : ''}`} type="button" onClick={() => onChange(section)}>
       <span className="nav-icon">
-        <Icon size={16} strokeWidth={2} />
+        <Icon size={14} strokeWidth={2} />
       </span>
       <span className="nav-label">{label}</span>
     </button>

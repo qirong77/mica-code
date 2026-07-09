@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, Empty } from '../components/Ui.js';
 import { readSkillsDetails } from '../api.js';
 import type { ConfigWebSkill, ConfigWebSkillsDetails } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
@@ -51,31 +51,23 @@ export function SkillsPage() {
 
 function SkillCard({ skill }: { skill: ConfigWebSkill }) {
   return (
-    <details className="simple-card collapsible-card" open>
-      <summary className="collapsible-summary">
-        <div className="table-panel-title">
-          <strong>{skill.name}</strong>
-          <span>{skill.baseDir}</span>
+    <CollapsiblePanel title={skill.name} subtitle={skill.baseDir}>
+      <div className="simple-list">
+        <div className="simple-row">
+          <span>Description</span>
+          <strong>{skill.description}</strong>
         </div>
-      </summary>
-      <div className="collapsible-body">
-        <div className="simple-list">
-          <div className="simple-row">
-            <span>Description</span>
-            <strong>{skill.description}</strong>
-          </div>
-          <div className="simple-row">
-            <span>When To Use</span>
-            <strong>{skill.whenToUse || '-'}</strong>
-          </div>
-          <div className="simple-row">
-            <span>Argument Hint</span>
-            <strong>{skill.argumentHint || '-'}</strong>
-          </div>
+        <div className="simple-row">
+          <span>When To Use</span>
+          <strong>{skill.whenToUse || '-'}</strong>
         </div>
-        {skill.contentPreview ? <pre className="skill-preview">{skill.contentPreview}</pre> : null}
+        <div className="simple-row">
+          <span>Argument Hint</span>
+          <strong>{skill.argumentHint || '-'}</strong>
+        </div>
       </div>
-    </details>
+      {skill.contentPreview ? <pre className="skill-preview">{skill.contentPreview}</pre> : null}
+    </CollapsiblePanel>
   );
 }
 

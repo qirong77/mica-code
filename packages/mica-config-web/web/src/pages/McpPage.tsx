@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, Empty, Tag } from '../components/Ui.js';
 import { readMcpDetails } from '../api.js';
 import type { ConfigWebMcpDetails, ConfigWebMcpServer } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
@@ -51,52 +51,49 @@ export function McpPage() {
 
 function ServerPanel({ server }: { server: ConfigWebMcpServer }) {
   return (
-    <details className="simple-card collapsible-card" open>
-      <summary className="collapsible-summary">
-        <div className="table-panel-title">
-          <strong>{server.name}</strong>
-          <span>{server.target}</span>
-        </div>
-        <div className="table-panel-tags">
+    <CollapsiblePanel
+      title={server.name}
+      subtitle={server.target}
+      meta={
+        <>
           <Tag>{server.type}</Tag>
           <Tag tone={statusColor(server.status)}>{server.status}</Tag>
           <span className="metric-chip">{server.toolCount} tools</span>
+        </>
+      }
+    >
+      <div className="simple-list">
+        <div className="simple-row">
+          <span>Config</span>
+          <strong>{server.configPath}</strong>
         </div>
-      </summary>
-      <div className="collapsible-body">
-        <div className="simple-list">
-          <div className="simple-row">
-            <span>Config</span>
-            <strong>{server.configPath}</strong>
-          </div>
-          <div className="simple-row">
-            <span>CWD</span>
-            <strong>{server.cwd || '-'}</strong>
-          </div>
-          <div className="simple-row">
-            <span>Env</span>
-            <strong>{server.envKeys?.join(', ') || '-'}</strong>
-          </div>
-          <div className="simple-row">
-            <span>Error</span>
-            <strong>{server.error || '-'}</strong>
-          </div>
+        <div className="simple-row">
+          <span>CWD</span>
+          <strong>{server.cwd || '-'}</strong>
         </div>
-
-        <div className="tool-list">
-          {server.tools.length === 0 ? (
-            <p className="muted-text">暂无 tools</p>
-          ) : (
-            server.tools.map((tool) => (
-              <div className="tool-item" key={tool.name}>
-                <strong>{tool.name}</strong>
-                <p>{tool.description || '无描述'}</p>
-              </div>
-            ))
-          )}
+        <div className="simple-row">
+          <span>Env</span>
+          <strong>{server.envKeys?.join(', ') || '-'}</strong>
+        </div>
+        <div className="simple-row">
+          <span>Error</span>
+          <strong>{server.error || '-'}</strong>
         </div>
       </div>
-    </details>
+
+      <div className="tool-list">
+        {server.tools.length === 0 ? (
+          <p className="muted-text">暂无 tools</p>
+        ) : (
+          server.tools.map((tool) => (
+            <div className="tool-item" key={tool.name}>
+              <strong>{tool.name}</strong>
+              <p>{tool.description || '无描述'}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </CollapsiblePanel>
   );
 }
 
