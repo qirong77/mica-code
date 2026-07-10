@@ -8,7 +8,7 @@ export const micaAgent = {
   createModelClient,
   /** 注册额外的 provider protocol client 实现。 */
   registerModelClient,
-  /** 创建不启用工具、不使用 reasoning effort 的轻量子 agent。 */
+  /** 创建子 agent；默认关闭工具，未指定时不使用 reasoning effort。 */
   createSubAgent,
   /** 构建运行时系统提示词，包含工具、项目说明和环境上下文。 */
   buildSystemPrompt,
@@ -23,6 +23,7 @@ export type {
   AgentUsageRecord,
   IAgent,
 } from './core/Agent.js';
+export { AgentMaxTurnsError, throwIfAgentMaxTurnsReached } from './core/Agent.js';
 export type { AgentContentPartMapper } from './core/Content.js';
 export type { AgentUsageSummary } from './core/Usage.js';
 export { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsageHistory } from './core/Usage.js';

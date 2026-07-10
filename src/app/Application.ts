@@ -18,6 +18,11 @@ import {
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
+import {
+  formatSubagentTaskDisplay,
+  formatSubagentTaskNotification,
+  SubagentTaskManager,
+} from '../agents/SubagentTaskManager.js';
 import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
@@ -31,6 +36,7 @@ export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
   private context: ApplicationContext | null = null;
   private stopPromise: Promise<void> | null = null;
+  private subagentTasks: SubagentTaskManager | null = null;
 
   get activeContext(): ApplicationContext | null {
     return this.context;
@@ -61,8 +67,14 @@ export class Application {
       const agentSessions = new TerminalAgentSessionManager();
       const runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services);
       const uiBridge = new MicaUiRuntimeBridge(agent, runtime, agentSessions);
+      const subagentTasks = new SubagentTaskManager({
+        onTaskFinished: (task, owner) => {
+          runtime.deliverSystemInput(owner, formatSubagentTaskNotification(task), formatSubagentTaskDisplay(task));
+        },
+      });
+      this.subagentTasks = subagentTasks;
       agentSessions.registerCurrent(agent, sessionController);
-      micaTools.registerRuntime(new ToolAgent(agent));
+      micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
 
       this.context = {
         agent,
@@ -75,6 +87,7 @@ export class Application {
         runtime,
         uiBridge,
         agentSessions,
+        subagentTasks,
       };
 
       setActiveContext(this.context);
@@ -146,8 +159,16 @@ export class Application {
         text: '启动失败：请根据错误提示修复配置文件，然后重新运行 mica；按 Ctrl+C 退出',
       });
       micaTools.unregisterRuntime('Agent');
-      this.context?.agentSessions.stop();
-      await this.context?.plugins.disposeAll();
+      const failedContext = this.context;
+      failedContext?.uiBridge.stop();
+      const runtimeStop = failedContext?.runtime.stop();
+      const subagentTasks = this.subagentTasks;
+      this.subagentTasks = null;
+      await subagentTasks?.stop();
+      await runtimeStop;
+      await failedContext?.plugins.disposeAll();
+      failedContext?.agentSessions.stop();
+      if (failedContext) clearActiveContext(failedContext);
       this.context = null;
       process.exitCode = 1;
     }
@@ -173,8 +194,12 @@ export class Application {
   private async stopOnce(): Promise<void> {
     micaUi.terminalInput.setOnExitRequested(null);
     this.context?.uiBridge.stop();
+    const runtimeStop = this.context?.runtime.stop();
+    const subagentTasks = this.subagentTasks;
+    this.subagentTasks = null;
+    await subagentTasks?.stop();
     await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });
-    await this.context?.runtime.stop();
+    await runtimeStop;
     await this.context?.plugins.disposeAll();
     micaTools.unregisterRuntime('Agent');
     this.context?.agentSessions.stop();

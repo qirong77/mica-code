@@ -7,6 +7,7 @@ import {
 } from '@packages/mica-config/index.js';
 import {
   BaseAgent,
+  throwIfAgentMaxTurnsReached,
   type AgentContentBlockParam,
   type AgentConversationMessage,
   type AgentQueryContent,
@@ -145,6 +146,7 @@ export class ChatCompletionsClient extends BaseAgent<
 
     while (true) {
       throwIfQueryStopped(options);
+      throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       requestIndex++;
       const stream = await withRetry(
         () =>

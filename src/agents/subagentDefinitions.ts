@@ -8,11 +8,11 @@ export type SubagentDefinition = {
   disallowedTools?: string[];
   model?: string;
   maxTurns?: number;
+  /** Whether the parent agent may select reasoning effort. Defaults to true. */
+  effort?: boolean;
 };
 
-const BASE_PROMPT = [
-  micaAgent.buildSystemPrompt(),
-  '',
+const SUBAGENT_INSTRUCTIONS = [
   '<subagent-instructions>',
   'You are running as a subagent for the primary Mica Code agent.',
   'Complete only the delegated task and return a concise, evidence-backed summary for the parent agent.',
@@ -27,9 +27,9 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description:
       'General-purpose subagent for multi-step research, code investigation, and focused implementation help.',
     disallowedTools: ['Agent'],
+    maxTurns: 30,
+    effort: true,
     systemPrompt: [
-      BASE_PROMPT,
-      '',
       '<role>',
       'You are a general-purpose coding subagent. Use the available tools to finish the delegated task autonomously.',
       'Keep the final answer compact and useful to the parent agent.',
@@ -51,9 +51,9 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'Skill',
     ],
     disallowedTools: ['Agent'],
+    maxTurns: 20,
+    effort: true,
     systemPrompt: [
-      BASE_PROMPT,
-      '',
       '<role>',
       'You are a read-only exploration subagent. Find and summarize relevant context without modifying files or starting new agents.',
       'Prefer list_files, grep_search, and read_file. Do not run write, patch, shell, kill, or Agent tools.',
@@ -71,7 +71,15 @@ export function listSubagents(): SubagentDefinition[] {
 
 export function getSubagent(name: string | undefined): SubagentDefinition {
   const normalized = normalizeSubagentName(name || 'general-purpose');
-  return subagentByName.get(normalized) ?? subagentByName.get('general-purpose')!;
+  const definition = subagentByName.get(normalized);
+  if (definition) return definition;
+  throw new Error(
+    `Unknown subagent_type: ${name}. Available types: ${BUILTIN_SUBAGENTS.map((agent) => agent.name).join(', ')}`,
+  );
+}
+
+export function buildSubagentSystemPrompt(definition: SubagentDefinition): string {
+  return [micaAgent.buildSystemPrompt(), '', SUBAGENT_INSTRUCTIONS, '', definition.systemPrompt].join('\n');
 }
 
 export function buildSubagentToolFilter(definition: SubagentDefinition): (toolName: string) => boolean {

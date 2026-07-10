@@ -27,5 +27,5 @@ export function createModelClient(options: ModelClientOptions): IAgent<ModelClie
 }
 
 export function createSubAgent(options: ModelClientOptions): IAgent<ModelClientOptions> {
-  return createModelClient({ ...options, effort: 'none', tools: options.tools ?? false });
+  return createModelClient({ ...options, effort: options.effort ?? 'none', tools: options.tools ?? false });
 }

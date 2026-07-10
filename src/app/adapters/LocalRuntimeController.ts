@@ -67,6 +67,7 @@ export class LocalRuntimeController implements RuntimeController {
   private readonly responseBuffers = new Map<AgentRuntime, string>();
   private readonly committedResponseBuffers = new Map<AgentRuntime, string>();
   private readonly queues = new Map<AgentRuntime, InstanceType<typeof micaRuntime.MessageQueueService>>();
+  private readonly systemQueues = new Map<AgentRuntime, RuntimeInput[]>();
   private readonly sessionControllers = new Map<AgentRuntime, SessionController>();
   private readonly clearingAgents = new Set<AgentRuntime>();
   private readonly exclusiveTasks = new Map<AgentRuntime, { id: number; label: string }>();
@@ -74,6 +75,7 @@ export class LocalRuntimeController implements RuntimeController {
   private readonly activeTurns = new Set<Promise<void>>();
   private hookAgent: AgentRuntime | null = null;
   private nextExclusiveTaskId = 1;
+  private stopping = false;
 
   constructor(
     private agent: AgentRuntime,
@@ -86,10 +88,12 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   async start(): Promise<void> {
+    this.stopping = false;
     await this.hooks.emit('runtime:start', { runtime: this });
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     for (const agent of this.runningAgents) {
       agent.abort();
     }
@@ -100,6 +104,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.responseBuffers.clear();
     this.committedResponseBuffers.clear();
     this.queues.clear();
+    this.systemQueues.clear();
     this.sessionControllers.clear();
     this.clearingAgents.clear();
     this.exclusiveTasks.clear();
@@ -109,6 +114,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.responseBuffers.delete(agent);
     this.committedResponseBuffers.delete(agent);
     this.queues.delete(agent);
+    this.systemQueues.delete(agent);
     this.sessionControllers.delete(agent);
     this.clearingAgents.delete(agent);
     this.exclusiveTasks.delete(agent);
@@ -201,6 +207,16 @@ export class LocalRuntimeController implements RuntimeController {
     return this.queueFor(agent).count();
   }
 
+  deliverSystemInput(agent: AgentRuntime, text: string, displayMessage: string): void {
+    if (this.stopping) return;
+    if (!this.sessionControllerFor(agent)) return;
+    const input = micaRuntime.createRuntimeInput(text, 'system');
+    const queue = this.systemQueues.get(agent) ?? [];
+    queue.push(input);
+    this.systemQueues.set(agent, queue);
+    this.events.publish({ type: 'notification', level: 'info', message: displayMessage, owner: agent, ttl: 6000 });
+  }
+
   isAgentBusy(agent = this.agent): boolean {
     return this.runningAgents.has(agent) || this.exclusiveTasks.has(agent);
   }
@@ -221,7 +237,8 @@ export class LocalRuntimeController implements RuntimeController {
     this.exclusiveTasks.set(agent, { id, label });
     return () => {
       const current = this.exclusiveTasks.get(agent);
-      if (current?.id === id) this.exclusiveTasks.delete(agent);
+      if (current?.id !== id) return;
+      this.exclusiveTasks.delete(agent);
     };
   }
 
@@ -382,12 +399,16 @@ export class LocalRuntimeController implements RuntimeController {
   private async runTurn(input: RuntimeInput, agent: AgentRuntime, sessionController: SessionController): Promise<void> {
     this.runningAgents.add(agent);
     const startedAt = Date.now();
-    const content = micaUi.parseImageRefs(input.text) as AgentQueryContent;
+    const initialSystemInputs = input.source === 'system' ? [] : this.takeAllSystemInputs(agent);
+    const inputContent =
+      input.source === 'system' ? input.text : (micaUi.parseImageRefs(input.text) as AgentQueryContent);
+    const content = appendSystemInputs(inputContent, initialSystemInputs);
+    const displayedUserContent = input.source === 'system' ? content : inputContent;
     const displayContent = parseDisplayContent(input);
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
-    this.rewindCheckpoints.capture(agent, input);
+    if (input.source !== 'system') this.rewindCheckpoints.capture(agent, input);
 
     // Capture pre-turn client state so we can restore it before each retry.
     const preTurnSnapshot = agent.captureClientSnapshot();
@@ -408,7 +429,10 @@ export class LocalRuntimeController implements RuntimeController {
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,
-        conversationMessages: [...previousConversationMessages, { role: 'user', content, displayContent }],
+        conversationMessages:
+          input.source === 'system'
+            ? previousConversationMessages
+            : [...previousConversationMessages, { role: 'user', content: displayedUserContent, displayContent }],
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
@@ -421,11 +445,11 @@ export class LocalRuntimeController implements RuntimeController {
     }
     if (this.isActiveAgent(agent)) {
       this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
-      micaUi.terminalInput.clearText();
+      if (input.source !== 'system') micaUi.terminalInput.clearText();
       if (session) {
         micaUi.conversation.setMessages(session.uiState.conversationMessages);
-      } else {
-        micaUi.conversation.appendUserMessage(displayContent ?? content);
+      } else if (input.source !== 'system') {
+        micaUi.conversation.appendUserMessage(displayContent ?? displayedUserContent);
       }
       micaUi.conversation.clearResponseText();
       if (clearPreviousTurnUi) {
@@ -440,6 +464,7 @@ export class LocalRuntimeController implements RuntimeController {
 
       let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
+        const attemptSystemInputs: RuntimeInput[] = [];
         if (attempt > 0) {
           // Restore client state to before the turn, clearing any partial tool results.
           if (preTurnSnapshot) {
@@ -476,11 +501,15 @@ export class LocalRuntimeController implements RuntimeController {
 
         try {
           const result = await agent.run(content, {
-            onIterationComplete: () => this.takeQueuedIterationInput(agent),
+            onIterationComplete: () => this.takeQueuedIterationInput(agent, attemptSystemInputs),
           });
           runId = result.runId;
           const finalText = result.text;
-          if (!agent.isCurrent(runId)) return;
+          if (!agent.isCurrent(runId)) {
+            this.prependSystemInputs(agent, initialSystemInputs);
+            this.prependSystemInputs(agent, attemptSystemInputs);
+            return;
+          }
 
           const responseBuffer = this.responseBuffers.get(agent) ?? '';
           this.committedResponseBuffers.set(agent, '');
@@ -506,6 +535,7 @@ export class LocalRuntimeController implements RuntimeController {
           sessionController.saveCurrent();
           return;
         } catch (error) {
+          this.prependSystemInputs(agent, attemptSystemInputs);
           if (error instanceof AgentAbortError) {
             throw error;
           }
@@ -539,6 +569,7 @@ export class LocalRuntimeController implements RuntimeController {
       }
     } catch (error) {
       if (error instanceof AgentAbortError) {
+        this.prependSystemInputs(agent, initialSystemInputs);
         wasAborted = true;
         runId = error.runId;
         const responseBuffer = this.responseBuffers.get(agent) ?? '';
@@ -549,7 +580,7 @@ export class LocalRuntimeController implements RuntimeController {
         this.responseBuffers.set(agent, '');
         this.committedResponseBuffers.set(agent, '');
         if (!this.clearingAgents.has(agent)) {
-          agent.preserveAbortedTurn(content, responseForHistory);
+          agent.preserveAbortedTurn(displayedUserContent, responseForHistory);
         }
         if (session && !this.clearingAgents.has(agent)) {
           const conversationMessages = appendAssistantResponseForDisplay(
@@ -570,6 +601,7 @@ export class LocalRuntimeController implements RuntimeController {
       }
 
       hasError = true;
+      this.prependSystemInputs(agent, initialSystemInputs);
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorNotice = createFinalErrorNoticeMessage(errorMessage);
@@ -627,11 +659,18 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
-  private takeQueuedIterationInput(agent: AgentRuntime): AgentQueryContent | null {
+  private takeQueuedIterationInput(
+    agent: AgentRuntime,
+    consumedSystemInputs: RuntimeInput[],
+  ): AgentQueryContent | null {
     const queue = this.queueFor(agent);
     this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
-    const next = queue.dequeueByMode('after_iteration');
-    this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
+    const systemQueue = this.systemQueues.get(agent);
+    const systemInput = systemQueue?.shift() ?? null;
+    if (systemQueue?.length === 0) this.systemQueues.delete(agent);
+    if (systemInput) consumedSystemInputs.push(systemInput);
+    const next = systemInput ?? queue.dequeueByMode('after_iteration');
+    if (!systemInput) this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
     if (!next) return null;
 
     const responseBuffer = this.responseBuffers.get(agent) ?? '';
@@ -656,16 +695,16 @@ export class LocalRuntimeController implements RuntimeController {
       }
     }
 
-    const content = micaUi.parseImageRefs(next.text) as AgentQueryContent;
+    const content = next.source === 'system' ? next.text : (micaUi.parseImageRefs(next.text) as AgentQueryContent);
     const displayContent = parseDisplayContent(next);
     const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
-    if (session) {
+    if (session && next.source !== 'system') {
       session.uiState = normalizeUiState({
         ...session.uiState,
         conversationMessages: [...session.uiState.conversationMessages, { role: 'user', content, displayContent }],
       });
     }
-    if (this.isActiveAgent(agent)) {
+    if (this.isActiveAgent(agent) && next.source !== 'system') {
       if (session) {
         micaUi.conversation.setMessages(session.uiState.conversationMessages);
       } else {
@@ -696,6 +735,33 @@ export class LocalRuntimeController implements RuntimeController {
     }
     return queue;
   }
+
+  private sessionControllerFor(agent: AgentRuntime): SessionController | undefined {
+    const existing = this.sessionControllers.get(agent);
+    if (existing) return existing;
+    const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+    if (!session) return undefined;
+    this.sessionControllers.set(agent, session.sessionController);
+    return session.sessionController;
+  }
+
+  private takeAllSystemInputs(agent: AgentRuntime): RuntimeInput[] {
+    const inputs = this.systemQueues.get(agent) ?? [];
+    this.systemQueues.delete(agent);
+    return inputs;
+  }
+
+  private prependSystemInputs(agent: AgentRuntime, inputs: RuntimeInput[]): void {
+    if (inputs.length === 0) return;
+    this.systemQueues.set(agent, [...inputs, ...(this.systemQueues.get(agent) ?? [])]);
+  }
+}
+
+function appendSystemInputs(content: AgentQueryContent, inputs: RuntimeInput[]): AgentQueryContent {
+  if (inputs.length === 0) return content;
+  const notifications = inputs.map((input) => input.text).join('\n\n');
+  if (typeof content === 'string') return `${notifications}\n\n${content}`;
+  return [{ type: 'text', text: notifications }, ...content];
 }
 
 function shouldClearPreviousTurnUi(outcome: TerminalAgentTurnOutcome | undefined): boolean {

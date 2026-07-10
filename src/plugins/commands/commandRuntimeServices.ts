@@ -343,6 +343,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       if (!context) return { cleared: [], remaining: [] };
       const result = context.agentSessions.clearIdleSessions({
         onClear: (session) => {
+          context.subagentTasks.killForOwner(session.agent);
           context.runtime.disposeAgent(session.agent);
           context.uiBridge.disposeAgent(session.agent);
         },

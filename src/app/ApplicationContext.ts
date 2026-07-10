@@ -6,6 +6,7 @@ import type { RuntimeEventBus } from '@packages/mica-runtime/index.js';
 import type { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import type { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import type { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
+import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 
 export type ApplicationContext = {
   agent: AgentRuntime;
@@ -18,4 +19,5 @@ export type ApplicationContext = {
   runtime: LocalRuntimeController;
   uiBridge: MicaUiRuntimeBridge;
   agentSessions: TerminalAgentSessionManager;
+  subagentTasks: SubagentTaskManager;
 };

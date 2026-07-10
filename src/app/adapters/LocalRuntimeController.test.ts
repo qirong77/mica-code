@@ -190,7 +190,12 @@ describe('LocalRuntimeController abort display state', () => {
     expect(session.uiState.messageBarMessages).toEqual([]);
     expect(session.uiState.conversationMessages).toEqual([
       expect.objectContaining({ role: 'user', content: 'hello' }),
-      expect.objectContaining({ role: 'notice', command: '/error', variant: 'error', content: '请求失败: provider exploded' }),
+      expect.objectContaining({
+        role: 'notice',
+        command: '/error',
+        variant: 'error',
+        content: '请求失败: provider exploded',
+      }),
     ]);
     expect(session.uiState.lastTurnOutcome).toBe('error');
     expect(session.uiState.workingStatus).toEqual({ type: 'idle' });
@@ -365,6 +370,175 @@ describe('LocalRuntimeController abort display state', () => {
 
     expect(controller.getResponseBufferFor(agent)).toBe('');
     expect(controller.countQueueForAgent(agent)).toBe(0);
+  });
+
+  it('feeds a background subagent notification into a running parent at the next iteration', async () => {
+    let controller: LocalRuntimeController;
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'medium',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        protocol: 'openai_responses',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async (_content: AgentQueryContent, options?: AgentQueryOptions) => {
+        controller.deliverSystemInput(
+          agent as unknown as AgentRuntime,
+          '<subagent-notification>done</subagent-notification>',
+          'Subagent completed',
+        );
+        expect(await options?.onIterationComplete?.()).toBe('<subagent-notification>done</subagent-notification>');
+        return { runId: 1, text: 'handled child result' };
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: { syncAgentStatusItems: vi.fn() },
+    });
+
+    await expect(controller.submit('start work')).resolves.toEqual({ ok: true });
+
+    expect(session.uiState.conversationMessages).toEqual([
+      expect.objectContaining({ role: 'user', content: 'start work' }),
+      { role: 'assistant', content: 'handled child result' },
+    ]);
+  });
+
+  it('requeues a consumed subagent notification when a provider attempt is retried', async () => {
+    vi.useFakeTimers();
+    let controller: LocalRuntimeController;
+    let attempt = 0;
+    const seenInputs: Array<AgentQueryContent | null | undefined> = [];
+    const agent = {
+      abort: vi.fn(),
+      activeRunId: 1,
+      captureClientSnapshot: vi.fn(() => ({ before: 'turn' })),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'medium',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        protocol: 'openai_responses',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async (_content: AgentQueryContent, options?: AgentQueryOptions) => {
+        attempt++;
+        if (attempt === 1) {
+          controller.deliverSystemInput(
+            agent as unknown as AgentRuntime,
+            '<subagent-notification>done</subagent-notification>',
+            'Subagent completed',
+          );
+        }
+        seenInputs.push(await options?.onIterationComplete?.());
+        if (attempt === 1) throw Object.assign(new Error('retry me'), { status: 503 });
+        return { runId: 2, text: 'ok' };
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: { syncAgentStatusItems: vi.fn() },
+    });
+
+    const submitPromise = controller.submit('start');
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(submitPromise).resolves.toEqual({ ok: true });
+
+    expect(seenInputs).toEqual([
+      '<subagent-notification>done</subagent-notification>',
+      '<subagent-notification>done</subagent-notification>',
+    ]);
+  });
+
+  it('holds an idle subagent notification until the next user turn without displaying it as user text', async () => {
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'medium',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        protocol: 'openai_responses',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async (content: AgentQueryContent) => ({ runId: 1, text: `processed ${String(content)}` })),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const sessionController = { saveCurrent: vi.fn() } as unknown as SessionController;
+    const session = createSession(agent);
+    session.sessionController = sessionController;
+    const controller = new LocalRuntimeController(
+      agent,
+      sessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: { syncAgentStatusItems: vi.fn() },
+    });
+
+    controller.deliverSystemInput(agent, '<subagent-notification>done</subagent-notification>', 'Subagent completed');
+    await flushAsyncWork();
+
+    expect(agent.run).not.toHaveBeenCalled();
+
+    await expect(controller.submit('continue')).resolves.toEqual({ ok: true });
+
+    expect(agent.run).toHaveBeenCalledWith(
+      '<subagent-notification>done</subagent-notification>\n\ncontinue',
+      expect.any(Object),
+    );
+    expect(session.uiState.conversationMessages).toEqual([
+      expect.objectContaining({ role: 'user', content: 'continue' }),
+      {
+        role: 'assistant',
+        content: 'processed <subagent-notification>done</subagent-notification>\n\ncontinue',
+      },
+    ]);
   });
 });
 

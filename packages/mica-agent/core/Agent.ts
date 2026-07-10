@@ -25,7 +25,34 @@ export type AgentQueryOptions = {
   signal?: AbortSignal;
   shouldContinue?: () => boolean;
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
+  /** Maximum number of model requests in one agentic query, including the initial request. */
+  maxTurns?: number;
 };
+
+export class AgentMaxTurnsError extends Error {
+  constructor(
+    readonly maxTurns: number,
+    readonly partialResult: string,
+  ) {
+    super(`Agent reached the maximum of ${maxTurns} turns before completing the task.`);
+    this.name = 'AgentMaxTurnsError';
+  }
+}
+
+export function throwIfAgentMaxTurnsReached(
+  options: AgentQueryOptions | undefined,
+  completedTurns: number,
+  partialResult: string,
+): void {
+  const maxTurns = options?.maxTurns;
+  if (maxTurns === undefined) return;
+  if (!Number.isInteger(maxTurns) || maxTurns <= 0) {
+    throw new Error(`maxTurns must be a positive integer, received ${String(maxTurns)}.`);
+  }
+  if (completedTurns >= maxTurns) {
+    throw new AgentMaxTurnsError(maxTurns, partialResult);
+  }
+}
 
 export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = AgentUsageRecord> = {
   model: string;

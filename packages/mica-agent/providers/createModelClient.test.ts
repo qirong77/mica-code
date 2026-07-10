@@ -21,6 +21,14 @@ describe('createModelClient', () => {
     expect((agent as ChatCompletionsClient).effort).toBe('none');
   });
 
+  it('preserves an explicitly selected subagent effort', () => {
+    const clientOptions = options('openai_chat_completions');
+    clientOptions.effort = 'high';
+    const agent = createSubAgent(clientOptions);
+
+    expect((agent as ChatCompletionsClient).effort).toBe('high');
+  });
+
   it('supports registering a future protocol without changing AgentRuntime', () => {
     const unregister = registerModelClient(
       'future_protocol',

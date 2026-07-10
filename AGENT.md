@@ -61,6 +61,7 @@ src/
   agents/
     terminalAgentSessions.ts       同一终端内多 agent session 与 per-agent UI snapshot
     subagentDefinitions.ts         子 agent 定义资料
+    SubagentTaskManager.ts         后台 subagent 生命周期、owner 隔离、结果与取消
   app/
     Application.ts                 应用生命周期、插件装配、runtime/UI/session 组合
     ApplicationContext.ts          应用上下文类型
@@ -81,7 +82,7 @@ src/
   session/
     SessionController.ts           session 保存、恢复、重命名和 UI restore 编排
   tools/
-    ToolAgent.ts                   把当前 AgentRuntime 暴露成工具上下文
+    ToolAgent.ts                   启动/查询/停止 subagent，并解析角色、effort 与工具权限
 
 packages/
   mica-agent                       agent 抽象、provider adapter、prompt 构建
@@ -113,15 +114,15 @@ temp/                              临时代码和外部实验，默认不参与
 
 1. `src/index.ts` 注册全局错误处理，然后创建并启动 `Application`。
 2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI。
-4. 5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
-5. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController` 和 `MicaUiRuntimeBridge`。
-6. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent))` 注册运行时工具上下文。
-7. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
-8. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
-9. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和插件 logger 接口。
-10. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
-11. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-12. 设置输入框 placeholder 和退出回调。
+3. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
+4. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
+5. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
+6. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
+7. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
+8. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和插件 logger 接口。
+9. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
+10. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
+11. 设置输入框 placeholder 和退出回调。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
 
@@ -341,6 +342,8 @@ AGENT.md
 - 主 runtime 维护 per-agent queue、response buffer、committed buffer、session controller 和运行状态。
 - `switchSession(agent, sessionController)` 必须同步 runtime 当前 agent、session controller、queue UI 和 UI bridge 当前 agent。
 - `/fork` 和后台 agent 相关命令要注意 provider/model/effort 与 UI snapshot 的一致性。
+- `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
+- subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。
 - `RewindCheckpointManager` 在 turn 前捕获对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
@@ -407,6 +410,8 @@ AGENT.md
 - `src/agent/AgentRuntime.test.ts`
 - `src/app/adapters/LocalRuntimeController.test.ts`
 - `src/app/adapters/MicaUiRuntimeBridge.test.ts`
+- `src/agents/SubagentTaskManager.test.ts`
+- `src/agents/subagentDefinitions.test.ts`
 - `src/plugins/runtime/messageQueuePlugin.test.ts`
 - `src/runtime/RewindCheckpointManager.test.ts`
 - `src/session/SessionController.test.ts`
