@@ -12,13 +12,14 @@ type AgentToolInput = ToolInput & {
   description: string;
   prompt: string;
   subagent_type?: string;
+  run_in_background?: boolean;
 };
 
 export class ToolAgent extends MicaTool {
   constructor(private readonly fallbackAgent: AgentRuntime) {
     super(
       'Agent',
-      `启动一个同步 subagent 来完成独立任务。可用 subagent_type: ${listSubagents()
+      `启动一个 subagent 来完成独立任务。默认同步等待结果，也可通过 run_in_background 在后台运行。可用 subagent_type: ${listSubagents()
         .map((agent) => `${agent.name} (${agent.description})`)
         .join('; ')}。`,
       {
@@ -27,6 +28,10 @@ export class ToolAgent extends MicaTool {
           description: { type: 'string', description: '给父 agent 和 UI 看的简短任务描述。' },
           prompt: { type: 'string', description: '交给 subagent 执行的完整任务说明。' },
           subagent_type: { type: 'string', description: 'subagent 类型，默认 general-purpose。' },
+          run_in_background: {
+            type: 'boolean',
+            description: '设为 true 在后台运行，不等待 subagent 完成。默认 false。',
+          },
         },
         required: ['description', 'prompt'],
       },
@@ -57,6 +62,17 @@ export class ToolAgent extends MicaTool {
       }),
       effort: 'none',
     });
+    if (input.run_in_background) {
+      void child.query(prompt, { signal: callbacks?.signal }).then(
+        () => callbacks?.onChunk?.(`[Agent:${definition.name}] completed ${input.description}\n`),
+        (error: unknown) =>
+          callbacks?.onChunk?.(
+            `[Agent:${definition.name}] failed ${input.description}: ${formatErrorMessage(error)}\n`,
+          ),
+      );
+      return `Subagent ${definition.name} 已在后台启动：${input.description}`;
+    }
+
     const result = await child.query(prompt, { signal: callbacks?.signal });
     return formatSubagentResult(definition.name, input.description, result);
   }
@@ -75,4 +91,8 @@ function isAgentToolContext(value: unknown): value is AgentToolContext {
 
 function formatSubagentResult(type: string, description: string, result: string): string {
   return [`Subagent: ${type}`, `Task: ${description}`, '', result.trim() || '(empty result)'].join('\n');
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

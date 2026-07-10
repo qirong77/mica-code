@@ -1,6 +1,18 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { clearModelData, setModelData, getEffortMapFromConfig, getModelContextWindowSizeFromConfig, hasOwnEffort, DEFAULT_EFFORT_MAP } from './index.js';
-import { getProviderEffortOptions, clampProviderEffort, resolveChatCompletionsEffortParams, resolveResponsesReasoningParams } from '../effort.js';
+import {
+  clearModelData,
+  setModelData,
+  getEffortMapFromConfig,
+  getModelContextWindowSizeFromConfig,
+  hasOwnEffort,
+  DEFAULT_EFFORT_MAP,
+} from './index.js';
+import {
+  getProviderEffortOptions,
+  clampProviderEffort,
+  resolveChatCompletionsEffortParams,
+  resolveResponsesReasoningParams,
+} from '../effort.js';
 import type { ProviderDefinition } from '../types.js';
 
 const baseProvider: ProviderDefinition = {
@@ -86,7 +98,7 @@ describe('resolveChatCompletionsEffortParams with per-model data', () => {
     });
   });
 
-  it('resolves deepseek-specific params', () => {
+  it('uses the same OpenAI params for every compatible provider', () => {
     setModelData('deepseek-model', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
     const deepseek: ProviderDefinition = {
       id: 'deepseek',
@@ -96,7 +108,6 @@ describe('resolveChatCompletionsEffortParams with per-model data', () => {
       models: ['deepseek-model'],
     };
     expect(resolveChatCompletionsEffortParams(deepseek, 'xhigh', 'deepseek-model')).toEqual({
-      thinking: { type: 'enabled' },
       reasoning_effort: 'xhigh',
     });
   });

@@ -286,9 +286,7 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   private get reasoningParams(): Record<string, unknown> {
-    if (!this.provider || !this.effort)
-      return this.effort && this.effort !== 'none' ? { reasoning_effort: this.effort } : {};
-    return resolveChatCompletionsEffortParams(this.provider, this.effort, this.model);
+    return resolveChatCompletionsEffortParams(this.provider, this.effort ?? 'none', this.model);
   }
 
   private recordUsage(

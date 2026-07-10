@@ -7,7 +7,6 @@ import {
 } from './types.js';
 import { getEffortMapFromConfig, hasOwnEffort } from './model-rules/index.js';
 
-type ProviderEffortParamFormat = 'openai' | 'deepseek' | 'zai' | 'openrouter';
 export type ResponsesReasoningParams = { reasoning?: { effort: string } };
 
 export function getProviderEffortOptions(
@@ -67,17 +66,8 @@ export function resolveChatCompletionsEffortParams(
   if (!effortMap || !hasOwnEffort(effortMap, effort)) return {};
 
   const mapped = effortMap[effort];
-  if (effort === 'none' || mapped === null) return resolveDisabledEffortParams(provider, mapped);
-
-  switch (detectProviderEffortParamFormat(provider)) {
-    case 'deepseek':
-    case 'zai':
-      return { thinking: { type: 'enabled' }, reasoning_effort: mapped ?? effort };
-    case 'openrouter':
-      return { reasoning: { effort: mapped ?? effort } };
-    case 'openai':
-      return { reasoning_effort: mapped ?? effort };
-  }
+  if (effort === 'none' || mapped === null) return {};
+  return { reasoning_effort: mapped ?? effort };
 }
 
 export function resolveResponsesReasoningParams(
@@ -87,33 +77,4 @@ export function resolveResponsesReasoningParams(
 ): ResponsesReasoningParams {
   const mapped = mapProviderEffortValue(provider, effort, model);
   return mapped ? { reasoning: { effort: mapped } } : {};
-}
-
-function detectProviderEffortParamFormat(
-  provider: Pick<ProviderDefinition, 'id' | 'api_base'>,
-): ProviderEffortParamFormat {
-  const id = typeof provider.id === 'string' ? provider.id.toLowerCase() : '';
-  const apiBase = typeof provider.api_base === 'string' ? provider.api_base.toLowerCase() : '';
-  if (id.includes('deepseek') || apiBase.includes('deepseek.com')) return 'deepseek';
-  if (id === 'zai' || id.includes('glm') || apiBase.includes('api.z.ai') || apiBase.includes('bigmodel.cn'))
-    return 'zai';
-  if (id.includes('openrouter') || apiBase.includes('openrouter.ai')) return 'openrouter';
-  return 'openai';
-}
-
-function resolveDisabledEffortParams(
-  provider: Pick<ProviderDefinition, 'id' | 'api_base'>,
-  offValue: string | null | undefined,
-): ResolvedEffortParams {
-  switch (detectProviderEffortParamFormat(provider)) {
-    case 'deepseek':
-    case 'zai':
-      return offValue
-        ? { thinking: { type: 'disabled' }, reasoning_effort: offValue }
-        : { thinking: { type: 'disabled' } };
-    case 'openrouter':
-      return { reasoning: { effort: offValue ?? 'none' } };
-    case 'openai':
-      return offValue ? { reasoning_effort: offValue } : {};
-  }
 }

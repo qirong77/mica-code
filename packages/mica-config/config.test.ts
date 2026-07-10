@@ -200,12 +200,9 @@ describe('validateConfig', () => {
     expect(configApi.getProviderEffortOptions(deepseek, 'deepseek-v4-pro')).toEqual(['none', 'high', 'xhigh']);
     expect(configApi.clampProviderEffort(deepseek, 'low', 'deepseek-v4-pro')).toBe('high');
     expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh', 'deepseek-v4-pro')).toEqual({
-      thinking: { type: 'enabled' },
       reasoning_effort: 'xhigh',
     });
-    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none', 'deepseek-v4-pro')).toEqual({
-      thinking: { type: 'disabled' },
-    });
+    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none', 'deepseek-v4-pro')).toEqual({});
   });
 
   it('requires and validates provider protocol', () => {
@@ -283,7 +280,7 @@ describe('validateConfig', () => {
     });
   });
 
-  it('maps zai glm and kimi model effort variants', () => {
+  it('uses OpenAI request params with mapped model effort values', () => {
     const zai = {
       ...baseConfig().providers[1]!,
       id: 'zai',
@@ -310,8 +307,10 @@ describe('validateConfig', () => {
 
     expect(configApi.getProviderEffortOptions(zai, 'glm-4.7')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
     expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh', 'glm-4.7')).toEqual({
-      thinking: { type: 'enabled' },
       reasoning_effort: 'max',
+    });
+    expect(configApi.resolveChatCompletionsEffortParams(kimi, 'high', 'kimi-k2.6')).toEqual({
+      reasoning_effort: 'high',
     });
     expect(configApi.getProviderEffortOptions(kimi, 'kimi-k2.6')).toEqual(['none', 'high']);
     expect(configApi.getProviderEffortOptions(kimi, 'kimi-k2.5')).toEqual(['none']);
