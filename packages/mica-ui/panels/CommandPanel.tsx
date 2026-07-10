@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { MicaUiCommandPanelItem, MicaUiCommandPanelStatus, MicaUiCommandPanelVariant } from '../types.js';
-import { useScheduleState } from '../hooks/index.js';
 import { Markdown } from '../conversation/Markdown.js';
+import { useScheduleState } from '../hooks/index.js';
 import { MessageGutter, type MessageGutterTone } from '../primitives/MessageGutter.js';
 import { Spin } from '../primitives/Spin.js';
 import { themeColors } from '../theme.js';
@@ -60,7 +60,7 @@ export function CommandPanel(): React.ReactNode {
   if (items.length === 0) return null;
 
   return (
-    <Box paddingX={1} flexDirection="column" width="100%" minWidth={0}>
+    <Box paddingX={1} marginTop={1} flexDirection="column" width="100%" minWidth={0}>
       {items.map((item, index) => (
         <CommandPanelRow key={item.id} item={item} nowMs={nowMs} marginTop={index === 0 ? 0 : 1} />
       ))}
@@ -80,37 +80,39 @@ function CommandPanelRow({
   const presentation = presentationFor(item);
   const elapsedText =
     item.status === 'running' && item.startedAt ? ` ${formatElapsed(Math.max(0, nowMs - item.startedAt))}` : '';
-  const text = truncateMiddleText(item.text, MAX_PANEL_TEXT_CHARS);
-  const progressLines = item.status === 'running' ? visibleProgressLines(item) : [];
+  const detailLines = item.status === 'running' ? visibleProgressLines(item) : [];
 
   return (
-    <React.Fragment>
+    <Box flexDirection="column" width="100%" minWidth={0} marginTop={marginTop}>
       <MessageGutter
         tone={presentation.tone}
         marker="|"
-        marginTop={marginTop}
         backgroundColor={presentation.backgroundColor}
       >
-        <Box flexDirection="row" minWidth={0}>
-          {item.status === 'running' ? <Spin /> : null}
-          <Text color={presentation.color}>{item.command}</Text>
-          <Text color={themeColors.inactive}> {statusLabel(item.status)}</Text>
-          {elapsedText ? <Text color={themeColors.inactive}>{elapsedText}</Text> : null}
+        <Box paddingX={1} paddingY={0} width="100%" minWidth={0}>
+          <Box flexDirection="row" minWidth={0}>
+            {item.status === 'running' ? <Spin /> : null}
+            <Text color={presentation.color}>{item.command}</Text>
+            <Text color={themeColors.inactive}> {statusLabel(item.status)}</Text>
+            {elapsedText ? <Text color={themeColors.inactive}>{elapsedText}</Text> : null}
+          </Box>
         </Box>
       </MessageGutter>
-      <MessageGutter tone="muted" marker="" marginTop={0}>
-        <Markdown>{text}</Markdown>
-        {progressLines.length > 0 ? (
-          <Box flexDirection="column" marginTop={progressLines.length > 1 ? 1 : 0}>
-            {progressLines.map((line, index) => (
-              <Text key={`${item.id}-line-${index}`} color={themeColors.inactive} wrap="wrap">
-                {line}
-              </Text>
-            ))}
-          </Box>
-        ) : null}
+      <MessageGutter tone="muted" marker="" backgroundColor={presentation.backgroundColor}>
+        <Box paddingLeft={2} paddingRight={1} paddingBottom={1} width="100%" minWidth={0} flexDirection="column">
+          <Markdown>{truncateMiddleText(item.text, MAX_PANEL_TEXT_CHARS)}</Markdown>
+          {detailLines.length > 0 ? (
+            <Box flexDirection="column" marginTop={1}>
+              {detailLines.map((line, index) => (
+                <Text key={`${item.id}-line-${index}`} color={themeColors.inactive} wrap="wrap">
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          ) : null}
+        </Box>
       </MessageGutter>
-    </React.Fragment>
+    </Box>
   );
 }
 
@@ -137,7 +139,7 @@ function statusLabel(status: MicaUiCommandPanelStatus): string {
 function visibleProgressLines(item: MicaUiCommandPanelItem): string[] {
   const lines = item.lines ?? [];
   if (lines.length <= 1) return [];
-  return lines.filter((line) => line !== item.text).slice(-4);
+  return lines.filter((line) => line !== item.text).slice(-3);
 }
 
 function truncateMiddleText(text: string, maxChars: number): string {
