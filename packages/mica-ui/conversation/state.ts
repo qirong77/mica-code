@@ -30,7 +30,7 @@ export function appendAssistantMessage(content: MicaUiMessageParam['content']): 
 
 export function appendNoticeMessage(
   content: MicaUiMessageParam['content'],
-  options: Pick<MicaUiMessageParam, 'variant' | 'command'> = {},
+  options: Pick<MicaUiMessageParam, 'variant' | 'command' | 'status'> = {},
 ): void {
   appendMessage({ role: 'notice', content, ...options });
 }

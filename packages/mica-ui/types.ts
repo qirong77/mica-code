@@ -18,12 +18,15 @@ export interface MicaUiImageBlockParam {
 
 export type MicaUiContentBlockParam = MicaUiTextBlock | MicaUiImageBlockParam;
 
+export type MicaUiCommandStatus = 'running' | 'success' | 'warning' | 'error' | 'info';
+
 export interface MicaUiMessageParam {
   role: 'user' | 'assistant' | 'notice';
   content: string | MicaUiContentBlockParam[];
   displayContent?: string | MicaUiContentBlockParam[];
   variant?: 'commit' | 'config' | 'compact' | 'error';
   command?: string;
+  status?: MicaUiCommandStatus;
 }
 
 // ── UI state types ──
@@ -66,7 +69,7 @@ export interface MicaUiAgentTurnLogItem {
   component: React.ComponentType;
 }
 
-export type MicaUiCommandPanelStatus = 'running' | 'success' | 'warning' | 'error' | 'info';
+export type MicaUiCommandPanelStatus = MicaUiCommandStatus;
 
 export type MicaUiCommandPanelVariant = 'commit' | 'config' | 'compact' | 'error';
 
@@ -113,6 +116,7 @@ export type MicaUiConversationMessage =
       displayContent?: string | MicaUiContentBlockParam[];
       variant?: 'commit' | 'config' | 'compact' | 'error';
       command?: string;
+      status?: MicaUiCommandStatus;
     };
 
 export interface MicaUiAgentStatusItem {

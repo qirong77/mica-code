@@ -28,6 +28,7 @@ interface YogaNodeLike {
 }
 
 const EXIT_CONFIRM_TIMEOUT_MS = 800;
+const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送';
 
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
@@ -133,14 +134,6 @@ function TerminalInput() {
     !isCommandInput &&
     localText.trim().length > 0 &&
     cursorOffset === localText.length;
-
-  React.useEffect(() => {
-    const nextStatusText = showQueueShortcutTip ? 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送' : '';
-    input.setQueueStatusText(nextStatusText);
-    return () => {
-      if (input.queueStatusText.get() === nextStatusText) input.setQueueStatusText('');
-    };
-  }, [showQueueShortcutTip]);
 
   const submitValue = useCallback((value: string, options?: TerminalInputSubmitOptions) => {
     const trimmed = value.trim();
@@ -370,7 +363,7 @@ function TerminalInput() {
         : showQueueShortcutTip
           ? 'queue'
           : 'default';
-  const frameLabel = frameMode === 'queue' ? 'queue' : '';
+  const frameLabel = frameMode === 'queue' ? QUEUE_SHORTCUT_TIP : '';
 
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>

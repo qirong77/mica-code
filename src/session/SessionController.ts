@@ -1,6 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
-import type { MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
+import type { MicaUiCommandStatus, MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import {
@@ -246,9 +246,14 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
         ? { variant: record.variant }
         : {}),
       ...(typeof record.command === 'string' ? { command: record.command } : {}),
+      ...(isNoticeStatus(record.status) ? { status: record.status } : {}),
     };
   }
   return null;
+}
+
+function isNoticeStatus(value: unknown): value is MicaUiCommandStatus {
+  return value === 'running' || value === 'success' || value === 'warning' || value === 'error' || value === 'info';
 }
 
 function sanitizeConversationContent(value: unknown): MicaUiConversationMessage['content'] | null {

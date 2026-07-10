@@ -75,8 +75,20 @@ describe('SessionController', () => {
       conversationMessages: [
         { role: 'user' as const, content: 'model prompt' },
         { role: 'notice' as const, content: 'saved notice' },
-        { role: 'notice' as const, content: 'saved compact', variant: 'compact' as const, command: '/compact' },
-        { role: 'notice' as const, content: 'saved retry', variant: 'error' as const, command: '/error' },
+        {
+          role: 'notice' as const,
+          content: 'saved compact',
+          variant: 'compact' as const,
+          command: '/compact',
+          status: 'info' as const,
+        },
+        {
+          role: 'notice' as const,
+          content: 'saved retry',
+          variant: 'error' as const,
+          command: '/error',
+          status: 'error' as const,
+        },
       ],
       usageHistory: [],
       lastUsage: undefined,

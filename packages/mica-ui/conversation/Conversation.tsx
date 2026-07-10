@@ -47,6 +47,7 @@ interface LogItem {
   text: string;
   variant?: MicaUiMessageParam['variant'];
   command?: string;
+  status?: MicaUiMessageParam['status'];
 }
 
 type NoticeVariant = NonNullable<MicaUiMessageParam['variant']>;
@@ -54,7 +55,7 @@ type NoticeVariant = NonNullable<MicaUiMessageParam['variant']>;
 type NoticePresentation = {
   tone: MessageGutterTone;
   color: string;
-  backgroundColor: string;
+  backgroundColor?: string;
   title: string;
 };
 
@@ -69,7 +70,6 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
   commit: {
     tone: 'commit',
     color: themeColors.messageCommit,
-    backgroundColor: themeColors.surfaceCommit,
     title: '/commit',
   },
   config: {
@@ -81,7 +81,6 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
   compact: {
     tone: 'compact',
     color: themeColors.messageCompact,
-    backgroundColor: themeColors.surfaceCompact,
     title: '/compact',
   },
   error: {
@@ -93,8 +92,20 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
 };
 
 function noticePresentationFor(item: LogItem): NoticePresentation {
-  const presentation = item.variant ? NOTICE_PRESENTATION_BY_VARIANT[item.variant] : DEFAULT_NOTICE_PRESENTATION;
-  return { ...presentation, title: item.command ?? presentation.title };
+  const base = item.variant ? NOTICE_PRESENTATION_BY_VARIANT[item.variant] : DEFAULT_NOTICE_PRESENTATION;
+  const title = item.command ?? base.title;
+  if (item.status === 'error') {
+    const error = NOTICE_PRESENTATION_BY_VARIANT.error;
+    return { ...error, title };
+  }
+  if (item.status === 'warning' || item.status === 'info') {
+    return { ...base, tone: 'notice', color: themeColors.messageNotice, title };
+  }
+  return { ...base, title };
+}
+
+function formatNoticeTitle(title: string, status: MicaUiMessageParam['status']): string {
+  return status ? `${title} ${status}` : title;
 }
 
 export const Conversation = (): React.ReactNode => {
@@ -109,7 +120,7 @@ export const Conversation = (): React.ReactNode => {
         const text = getTextContent(msg.displayContent ?? msg.content);
         if (!text) return [];
         if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'notice') {
-          return [{ id: i, role: msg.role, text, variant: msg.variant, command: msg.command }];
+          return [{ id: i, role: msg.role, text, variant: msg.variant, command: msg.command, status: msg.status }];
         }
         return [];
       }),
@@ -146,7 +157,7 @@ export const Conversation = (): React.ReactNode => {
                 marginTop={index === 0 ? 0 : 1}
                 backgroundColor={notice.backgroundColor}
               >
-                <Text color={notice.color}>{notice.title}</Text>
+                <Text color={notice.color}>{formatNoticeTitle(notice.title, item.status)}</Text>
               </MessageGutter>
               <MessageGutter tone="muted" marker="" marginTop={1}>
                 <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>

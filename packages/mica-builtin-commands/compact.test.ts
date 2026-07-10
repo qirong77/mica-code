@@ -29,7 +29,6 @@ describe('createCompactCommand', () => {
     expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('**compact complete**'), 'session-1', {
       variant: 'compact',
       command: '/compact',
-      surface: 'command_panel',
       status: 'success',
     });
     expect(services.showMessage).not.toHaveBeenCalled();
@@ -42,16 +41,11 @@ describe('createCompactCommand', () => {
     await command.action('--force --keep-recent=1');
 
     expect(services.compact).not.toHaveBeenCalled();
-    expect(services.showNotice).toHaveBeenCalledWith(
-      'compact: /compact 不支持参数，请直接运行 /compact',
-      'session-1',
-      {
-        variant: 'compact',
-        command: '/compact',
-        surface: 'command_panel',
-        status: 'warning',
-      },
-    );
+    expect(services.showNotice).toHaveBeenCalledWith('compact: /compact 不支持参数，请直接运行 /compact', 'session-1', {
+      variant: 'compact',
+      command: '/compact',
+      status: 'warning',
+    });
   });
 
   it('shows not-needed compaction as a normal message', async () => {
@@ -63,7 +57,6 @@ describe('createCompactCommand', () => {
     expect(services.showNotice).toHaveBeenCalledWith('compact: too small', 'session-1', {
       variant: 'compact',
       command: '/compact',
-      surface: 'command_panel',
       status: 'info',
     });
     expect(String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0])).not.toContain('failed');
@@ -79,7 +72,6 @@ describe('createCompactCommand', () => {
     expect(services.showNotice).toHaveBeenCalledWith('compact: agent is busy; wait or abort first', 'session-1', {
       variant: 'compact',
       command: '/compact',
-      surface: 'command_panel',
       status: 'warning',
     });
   });

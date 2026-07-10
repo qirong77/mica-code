@@ -154,6 +154,7 @@ export type {
   MicaUiAgentTurnLogItem,
   MicaUiCommandPanelItem,
   MicaUiCommandPanelStatus,
+  MicaUiCommandStatus,
   MicaUiCommandPanelVariant,
   MicaUiAgentStatusItem,
   MicaUiStartupBannerState,

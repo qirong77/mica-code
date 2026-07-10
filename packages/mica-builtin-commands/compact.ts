@@ -27,7 +27,12 @@ export function createCompactCommand(
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       if ((rawArgs ?? '').trim()) {
-        showCompactPanelMessage(services, 'compact: /compact 不支持参数，请直接运行 /compact', ownerSessionId, 'warning');
+        showCompactPanelMessage(
+          services,
+          'compact: /compact 不支持参数，请直接运行 /compact',
+          ownerSessionId,
+          'warning',
+        );
         return;
       }
 
@@ -55,7 +60,6 @@ export function createCompactCommand(
         services.showNotice(formatCompactNotice(result), ownerSessionId, {
           variant: 'compact',
           command: '/compact',
-          surface: 'command_panel',
           status: 'success',
         });
       } catch (error) {
@@ -79,7 +83,6 @@ function showCompactPanelMessage(
   services.showNotice(text, ownerSessionId, {
     variant: 'compact',
     command: '/compact',
-    surface: 'command_panel',
     status,
   });
 }

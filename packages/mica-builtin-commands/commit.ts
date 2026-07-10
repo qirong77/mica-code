@@ -54,7 +54,6 @@ function showCommitMessage(
   status: 'info' | 'warning' | 'error' = 'info',
 ) {
   services.showNotice(text, ownerSessionId, {
-    surface: 'command_panel',
     command: '/commit',
     variant: 'commit',
     status,

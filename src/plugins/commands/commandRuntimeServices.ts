@@ -84,6 +84,26 @@ function updateCommandPanelItemForSession(
   }
 }
 
+function removeCommandPanelItemForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  id: string,
+): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  if (!context || !session) {
+    micaUi.panels.removeCommandPanelItem(id);
+    return;
+  }
+
+  const commandPanelItems = session.uiState.commandPanelItems ?? [];
+  const nextItems = commandPanelItems.filter((item) => item.id !== id);
+  if (nextItems.length === commandPanelItems.length) return;
+  session.uiState = normalizeUiState({ ...session.uiState, commandPanelItems: nextItems });
+  if (context.agentSessions.current().id === session.id) {
+    micaUi.panels.setCommandPanelItems(session.uiState.commandPanelItems);
+  }
+}
+
 function setCommandPanelStatusForSession(
   context: ApplicationContext | null,
   ownerSessionId: string | undefined,
@@ -91,18 +111,12 @@ function setCommandPanelStatusForSession(
   options: PluginStatusOptions,
 ): void {
   const command = options.command ?? 'command';
-  const id = commandPanelId(command);
-  const now = Date.now();
-  updateCommandPanelItemForSession(context, ownerSessionId, id, (existing) => ({
-    id,
-    command,
+  removeCommandPanelItemForSession(context, ownerSessionId, commandPanelId(command));
+  upsertNoticeForSession(context, ownerSessionId, text, {
     variant: options.variant,
+    command,
     status: 'running',
-    text,
-    lines: appendCommandPanelLine(existing?.lines ?? [], text),
-    startedAt: existing?.startedAt ?? now,
-    updatedAt: now,
-  }));
+  });
 }
 
 function showCommandPanelNoticeForSession(
@@ -172,18 +186,50 @@ function showNoticeForSession(
     return;
   }
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  if (options.command) {
+    removeCommandPanelItemForSession(context, ownerSessionId, commandPanelId(options.command));
+  }
   const { surface: _surface, status: _status, ...noticeOptions } = options;
-  const message = { role: 'notice' as const, content: text, ...noticeOptions };
+  upsertNoticeForSession(context, ownerSessionId, text, { ...noticeOptions, status: options.status }, true);
+}
+
+function upsertNoticeForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+  options: Pick<MicaUiConversationMessage & { role: 'notice' }, 'variant' | 'command' | 'status'>,
+  save = false,
+): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  const message = { role: 'notice' as const, content: text, ...options };
   if (!context || !session) {
-    micaUi.conversation.appendNoticeMessage(text, noticeOptions);
+    micaUi.conversation.setMessages(upsertCommandNotice(micaUi.conversation.messages.get(), message));
     return;
   }
-  const nextMessages = [...session.uiState.conversationMessages, message];
+  const nextMessages = upsertCommandNotice(session.uiState.conversationMessages, message);
   session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
   }
-  session.sessionController.saveCurrent({ allowEmpty: true });
+  if (save) session.sessionController.saveCurrent({ allowEmpty: true });
+}
+
+function upsertCommandNotice(
+  messages: MicaUiConversationMessage[],
+  message: Extract<MicaUiConversationMessage, { role: 'notice' }>,
+): MicaUiConversationMessage[] {
+  if (!message.command || !message.status) return [...messages, message];
+  const existingIndex = findLastRunningNoticeIndex(messages, message.command);
+  if (existingIndex < 0) return [...messages, message];
+  return [...messages.slice(0, existingIndex), message, ...messages.slice(existingIndex + 1)];
+}
+
+function findLastRunningNoticeIndex(messages: MicaUiConversationMessage[], command: string): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role === 'notice' && message.command === command && message.status === 'running') return i;
+  }
+  return -1;
 }
 
 function showCommitNoticeForSession(
@@ -191,10 +237,9 @@ function showCommitNoticeForSession(
   ownerSessionId: string | undefined,
   text: string,
 ): void {
-  showCommandPanelNoticeForSession(context, ownerSessionId, text, {
+  showNoticeForSession(context, ownerSessionId, text, {
     variant: 'commit',
     command: '/commit',
-    surface: 'command_panel',
     status: 'success',
   });
 }
@@ -444,7 +489,13 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         return await task();
       } finally {
         release();
-        if (options.surface !== 'command_panel') {
+        if (options.surface === 'command_panel') {
+          removeCommandPanelItemForSession(
+            context,
+            options.ownerSessionId,
+            commandPanelId(options.command ?? 'command'),
+          );
+        } else {
           setAgentWorkingStatus(context, target, { type: 'idle' }, options.ownerSessionId);
         }
       }
@@ -503,9 +554,15 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         usageHistory: [],
         lastUsage: undefined,
       });
-      const conversationMessages = hideCompactArtifacts(concreteAgent.toConversationMessages());
+      const compactedConversationMessages = hideCompactArtifacts(concreteAgent.toConversationMessages());
+      const previousUiState = ownerSession?.uiState ?? captureSessionUi();
+      const conversationMessages = hideCompactArtifacts(
+        previousUiState.conversationMessages.length > 0
+          ? previousUiState.conversationMessages
+          : compactedConversationMessages,
+      );
       const nextUiState = normalizeUiState({
-        ...(ownerSession?.uiState ?? captureSessionUi()),
+        ...previousUiState,
         conversationMessages,
         responseText: '',
         pendingInputs: [],
