@@ -53,7 +53,8 @@ if (!result.ok) {
 - 未命中规则时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
 - 规则可通过 `enableEffort: false` 禁用模型族的 effort 选择。
 - 规则仅影响 effort UI 选项过滤和参数展开，不参与 provider 选择。
-- 维护内置规则时优先运行 `bun run update:model-rules`，脚本只从 OpenCode Zen 模型接口同步最新模型 ID。`contextSize` 和 `effortMap` 需要通过搜索工具查证官方或可信资料后手动确认。
+- 维护内置模型 ID 时运行 `bun run update:model-rules`，从 OpenCode Zen 模型接口同步最新 ID。
+- 更新上下文窗口和 reasoning effort 时运行 `bun run update:model-rules:models-dev`，同步策略和数据源说明见 `models-dev/README.md`。自动结果仍应在合并前结合模型厂商官方资料审阅。
 
 ## 目录说明
 
@@ -68,5 +69,6 @@ if (!result.ok) {
 - `validation.ts`：配置校验。
 - `default.json`：首次启动时使用的默认配置模板。
 - `model-rules.json`：模型 effort/contextSize 规则。
+- `models-dev/`：从 Models.dev 同步模型规格和 provider reasoning 配置的脚本及文档。
 - `../../scripts/update-model-rules.mjs`：根据 OpenCode Zen 模型列表同步 `model-rules.json` 中的模型 ID（脚本在仓库外层存在）。
 - `index.ts`：公共 API 聚合导出。

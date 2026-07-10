@@ -58,9 +58,17 @@ export function hasOwnEffort(effortMap: EffortMap, effort: EffortOption): boolea
 
 function findModelRule(modelId: string): ModelRule | undefined {
   const normalizedModelId = modelId.toLowerCase();
-  return MODEL_RULES.find((rule) =>
-    rule.modelKeysIncludes.map((key) => key.toLowerCase()).some((key) => normalizedModelId.includes(key)),
-  );
+  let bestMatch: { rule: ModelRule; keyLength: number } | undefined;
+  for (const rule of MODEL_RULES) {
+    for (const key of rule.modelKeysIncludes) {
+      const normalizedKey = key.toLowerCase();
+      if (!normalizedModelId.includes(normalizedKey)) continue;
+      if (!bestMatch || normalizedKey.length > bestMatch.keyLength) {
+        bestMatch = { rule, keyLength: normalizedKey.length };
+      }
+    }
+  }
+  return bestMatch?.rule;
 }
 
 function parseModelContextSize(value: number | string): number {

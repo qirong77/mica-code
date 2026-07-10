@@ -52,7 +52,8 @@ export function mapProviderEffortValue(
   const effortMap = getEffortMapFromConfig(model);
   if (!effortMap || !hasOwnEffort(effortMap, effort)) return undefined;
 
-  return effortMap[effort] ?? effort;
+  const mapped = effortMap[effort];
+  return mapped === undefined ? effort : mapped;
 }
 
 export function resolveChatCompletionsEffortParams(
@@ -85,7 +86,7 @@ export function resolveResponsesReasoningParams(
   model = firstProviderModel(provider) ?? '',
 ): ResponsesReasoningParams {
   const mapped = mapProviderEffortValue(provider, effort, model);
-  return mapped && mapped !== 'none' ? { reasoning: { effort: mapped } } : {};
+  return mapped ? { reasoning: { effort: mapped } } : {};
 }
 
 function detectProviderEffortParamFormat(

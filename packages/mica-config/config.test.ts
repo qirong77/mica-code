@@ -241,14 +241,27 @@ describe('validateConfig', () => {
     };
 
     expect(configApi.getProviderEffortOptions(openai, 'gpt-5')).toEqual(['minimal', 'low', 'medium', 'high']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.4')).toEqual([
-      'minimal',
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.4')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.4-pro')).toEqual(['medium', 'high', 'xhigh']);
+    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.4-pro')).toBe(1050000);
+    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.2-codex')).toBe(400000);
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.3-codex-spark')).toEqual([
       'low',
       'medium',
       'high',
       'xhigh',
     ]);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5-pro')).toEqual(['medium', 'high', 'xhigh']);
+    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.6-sol')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ]);
+    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.6-terra')).toBe(1050000);
     expect(configApi.getProviderEffortOptions(openai, 'claude-fable-5')).toEqual(['none']);
     expect(configApi.getEffortMapFromConfig('unknown-reasoning-model')).toEqual({
       none: null,
@@ -272,6 +285,13 @@ describe('validateConfig', () => {
     expect(configApi.resolveResponsesReasoningParams(krill, 'xhigh', 'gpt-5.5')).toEqual({
       reasoning: { effort: 'xhigh' },
     });
+    expect(configApi.resolveResponsesReasoningParams(openai, 'max', 'gpt-5.6-luna')).toEqual({
+      reasoning: { effort: 'max' },
+    });
+    expect(configApi.resolveResponsesReasoningParams(openai, 'none', 'gpt-5.6')).toEqual({
+      reasoning: { effort: 'none' },
+    });
+    expect(configApi.resolveResponsesReasoningParams(openai, 'none', 'unknown-reasoning-model')).toEqual({});
   });
 
   it('maps zai glm and kimi model effort variants', () => {

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const;
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
