@@ -53,6 +53,9 @@ export function createActiveSessionControllerProxy(fallback: SessionController):
     getCurrentTitle() {
       return current().getCurrentTitle();
     },
+    getCurrentSessionId() {
+      return current().getCurrentSessionId();
+    },
   };
 }
 

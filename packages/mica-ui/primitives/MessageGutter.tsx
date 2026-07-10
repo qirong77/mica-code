@@ -5,7 +5,6 @@ import { themeColors } from '../theme.js';
 export type MessageGutterTone =
   | 'assistant'
   | 'user'
-  | 'recap'
   | 'commit'
   | 'config'
   | 'compact'
@@ -28,7 +27,6 @@ export interface MessageGutterProps {
 const TONE_COLOR: Record<MessageGutterTone, string> = {
   assistant: themeColors.messageGutter,
   user: themeColors.messageUser,
-  recap: themeColors.messageRecap,
   commit: themeColors.messageCommit,
   config: themeColors.messageConfig,
   compact: themeColors.messageCompact,

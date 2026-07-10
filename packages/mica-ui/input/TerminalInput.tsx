@@ -5,7 +5,14 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { SimpleTextInput } from './CursorInput.js';
 import { useScheduleState } from '../hooks/index.js';
 import * as input from './state.js';
-import { pluginUIs, workingStatus, abortAgent, setPluginUIs, editPendingInput } from '../panels/state.js';
+import {
+  pluginUIs,
+  workingStatus,
+  abortAgent,
+  setPluginUIs,
+  editPendingInput,
+  commandPanelItems,
+} from '../panels/state.js';
 import { pendingInputs } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { MessageBarAPI } from '../panels/MessageBar.js';
@@ -28,6 +35,7 @@ function TerminalInput() {
   const terminalSize = useTerminalSize();
   const columns = Math.max(1, (process.stdout.columns ?? terminalSize?.columns ?? 80) - 6);
   const activePluginUIs = useScheduleState(pluginUIs);
+  const activeCommandPanelItems = useScheduleState(commandPanelItems);
   const status = useScheduleState(workingStatus);
   const placeholder = useScheduleState(input.placeholder);
   const inputDisabled = useScheduleState(input.disabled);
@@ -67,6 +75,7 @@ function TerminalInput() {
     status.type,
     activePluginUIs.length,
     currentPendingInputs.length,
+    activeCommandPanelItems.length,
   ]);
 
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);

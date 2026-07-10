@@ -9,6 +9,7 @@ import type {
   MicaUiPluginUI,
   MicaUiPendingInputQueueMode,
   MicaUiWorkingStatus,
+  MicaUiCommandPanelItem,
 } from '@packages/mica-ui/index.js';
 
 export type TerminalAgentUiState = {
@@ -18,6 +19,7 @@ export type TerminalAgentUiState = {
   pendingQueueMode: MicaUiPendingInputQueueMode | null;
   messageBarMessages: MessageItem[];
   agentTurnLogItems: MicaUiAgentTurnLogItem[];
+  commandPanelItems: MicaUiCommandPanelItem[];
   thinkingText: string;
   pluginUIs: MicaUiPluginUI[];
   workingStatus: MicaUiWorkingStatus;
@@ -60,6 +62,8 @@ const MAX_RESPONSE_TEXT_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const MAX_PENDING_INPUTS = 50;
 const MAX_MESSAGE_BAR_MESSAGES = 8;
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
+const MAX_COMMAND_PANEL_ITEMS = 4;
+const MAX_COMMAND_PANEL_LINES = 8;
 const MAX_THINKING_TEXT_CHARS = runtimeEnv.ui.thinkingTextMaxChars;
 const MAX_UI_MESSAGE_TEXT_CHARS = runtimeEnv.ui.messageTextMaxChars;
 
@@ -215,6 +219,10 @@ export function normalizeUiState(state: TerminalAgentUiState): TerminalAgentUiSt
     pendingQueueMode: pendingInputs.length > 0 ? state.pendingQueueMode : null,
     messageBarMessages: state.messageBarMessages.slice(-MAX_MESSAGE_BAR_MESSAGES),
     agentTurnLogItems: state.agentTurnLogItems.slice(-MAX_AGENT_TURN_LOG_ITEMS),
+    commandPanelItems: (state.commandPanelItems ?? []).slice(-MAX_COMMAND_PANEL_ITEMS).map((item) => ({
+      ...item,
+      lines: (item.lines ?? []).slice(-MAX_COMMAND_PANEL_LINES),
+    })),
     thinkingText: tailText(state.thinkingText, MAX_THINKING_TEXT_CHARS),
     lastTurnOutcome: state.lastTurnOutcome ?? 'idle',
   };
@@ -228,6 +236,7 @@ function createEmptyUiState(): TerminalAgentUiState {
     pendingQueueMode: null,
     messageBarMessages: [],
     agentTurnLogItems: [],
+    commandPanelItems: [],
     thinkingText: '',
     pluginUIs: [],
     workingStatus: { type: 'idle' },

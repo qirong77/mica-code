@@ -16,9 +16,9 @@
 ## 项目定位
 
 - Mica Code 是一个基于 Bun、TypeScript、React 和 Ink 的终端 code agent。
-- 核心目标是把 CLI 启动、runtime turn loop、模型 provider、工具、命令、会话、配置、UI、插件和 skills 分层管理，让 compact、recap、rewind、memory、todo、fork、多 agent、后台任务等长期能力有清晰扩展点。
+- 核心目标是把 CLI 启动、runtime turn loop、模型 provider、工具、命令、会话、配置、UI、插件和 skills 分层管理，让 compact、rewind、memory、todo、fork、多 agent、后台任务等长期能力有清晰扩展点。
 - 仓库结构是 `src/` 应用装配层加 `packages/` 可复用包。新增稳定领域能力优先沉淀到对应 package，`src/` 负责应用级 wiring、生命周期和跨包编排。
-- 设计偏向 append-only 会话历史和稳定 prompt 前缀。默认追加用户消息、助手消息、工具调用、工具输出、notice 和日志；只有上下文压力明显影响继续推进时，才在明确阶段边界 compact 或 recap。
+- 设计偏向 append-only 会话历史和稳定 prompt 前缀。默认追加用户消息、助手消息、工具调用、工具输出、notice 和日志；只有上下文压力明显影响继续推进时，才在明确阶段边界 compact。
 - Mica Code 是终端原生工具，不是网页应用。UI 设计应保持信息密度、低噪音、键盘优先、状态明确，不引入营销式页面或装饰性 UI。
 
 ## 快速命令
@@ -250,7 +250,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 - 命令实现不要直接依赖应用层单例。需要 runtime、session、agent、UI、MCP、日志等能力时，通过 `CommandRuntimeServices` 或 active proxy 注入。
 - 耗时且会修改上下文、文件、配置或 git 状态的命令应通过 runtime exclusive task 执行，防止用户并发发送对话或切换配置。
 - `/provider`、`/model`、`/effort` 必须在打开 selector 前检查 target agent busy 状态，并在选择时保留二次 guard。
-- `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`status`、`context`、`doctor`、`agents`、`new`、`fork`、`exit`、`copy`、`rename`、`task`。
+- `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`status`、`context`、`agents`、`new`、`fork`、`exit`、`rename`、`task`。
 - exclusive task 期间额外允许的命令在 `ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS`，当前是 `status`、`task`、`agents`、`new`。
 
 当前内置命令：
@@ -262,16 +262,13 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/effort`：切换推理强度。
 - `/status`：显示当前 provider/model/effort 状态。
 - `/context`：显示当前上下文占用总览。
-- `/doctor`：诊断环境、配置、MCP、工具和会话状态。
 - `/compact`：压缩当前会话上下文为 checkpoint。
-- `/recap`：生成并保存一条会话回顾；可接收自定义总结指令。
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/agents`：显示当前终端的 agents；`/agents clear` 清除空闲 agent。
 - `/rewind`：回退到上一轮对话之前的状态。
 - `/mcp`：列出 MCP 服务器和工具；`/mcp reconnect <server>` 重连指定服务。
 - `/skills`：列出已安装的 skills。
-- `/copy`：复制最后一条消息的内容到剪贴板。
 - `/rename`：重命名当前会话。
 - `/commit`：分析当前 git 变化，生成提交信息，提交并推送。
 - `/exit`：退出程序。
@@ -347,8 +344,7 @@ AGENT.md
 - `RewindCheckpointManager` 在 turn 前捕获对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
-- `/recap` 生成会话回顾 notice，并随 session 保存，适合在人类阅读和恢复任务时保留阶段摘要。
-- compact、recap、review、commit 等命令如果需要模型调用，应通过 subagent 或 exclusive task 隔离，不要污染当前正在运行的 turn。
+- compact、review、commit 等命令如果需要模型调用，应通过 subagent 或 exclusive task 隔离，不要污染当前正在运行的 turn。
 
 ## Package 依赖边界
 
@@ -397,7 +393,6 @@ AGENT.md
 - `packages/mica-agent/providers/createModelClient.test.ts`
 - `packages/mica-agent/core/retry.test.ts`
 - `packages/mica-builtin-commands/configSwitch.test.ts`
-- `packages/mica-builtin-commands/recap.test.ts`
 - `packages/mica-config/config.test.ts`
 - `packages/mica-config/micaStorage.test.ts`
 - `packages/mica-config/runtimeEnv.test.ts`
@@ -472,7 +467,7 @@ rg --files src packages scripts docs blogs
 - 多 agent：active proxy、owner-aware queue、background agent、session switch。
 - MCP/tools：registry 清理、read-only 标记、输出截断、shell 后台任务。
 - skills：`MICA_HOME`、frontmatter、Skill 工具读取方式。
-- session/rewind/compact/recap：snapshot 版本、UI restore、provider history 与 display state 的边界。
+- session/rewind/compact：snapshot 版本、UI restore、provider history 与 display state 的边界。
 - build/install：本地 `dist/mica` 和已安装 `mica`/`mica-code` 是否一致。
 - docs：本文件、README 和 package README 是否需要同步。
 

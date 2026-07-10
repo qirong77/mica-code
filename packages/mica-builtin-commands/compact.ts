@@ -27,12 +27,12 @@ export function createCompactCommand(
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       if ((rawArgs ?? '').trim()) {
-        services.showMessage('compact: /compact 不支持参数，请直接运行 /compact', 5000, ownerSessionId);
+        showCompactPanelMessage(services, 'compact: /compact 不支持参数，请直接运行 /compact', ownerSessionId, 'warning');
         return;
       }
 
       if (services.isAgentBusy(targetAgent)) {
-        services.showMessage('compact: agent is busy; wait or abort first', 5000, ownerSessionId);
+        showCompactPanelMessage(services, 'compact: agent is busy; wait or abort first', ownerSessionId, 'warning');
         return;
       }
 
@@ -43,20 +43,45 @@ export function createCompactCommand(
         };
         const result = await services.runExclusiveTask(
           targetAgent,
-          { ownerSessionId, statusText: 'compact: preparing context' },
+          {
+            ownerSessionId,
+            statusText: 'compact: preparing context',
+            surface: 'command_panel',
+            command: '/compact',
+            variant: 'compact',
+          },
           () => services.compact(targetAgent, targetSessionController, ownerSessionId, compactOptions),
         );
-        services.showNotice(formatCompactNotice(result), ownerSessionId, { variant: 'compact', command: '/compact' });
+        services.showNotice(formatCompactNotice(result), ownerSessionId, {
+          variant: 'compact',
+          command: '/compact',
+          surface: 'command_panel',
+          status: 'success',
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (isCompactionNotNeededError(error)) {
-          services.showMessage(`compact: ${message}`, 5000, ownerSessionId);
+          showCompactPanelMessage(services, `compact: ${message}`, ownerSessionId, 'info');
           return;
         }
-        services.showMessage(`compact failed: ${message}`, 8000, ownerSessionId);
+        showCompactPanelMessage(services, `compact failed: ${message}`, ownerSessionId, 'error');
       }
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+function showCompactPanelMessage(
+  services: CommandRuntimeServices,
+  text: string,
+  ownerSessionId: string | undefined,
+  status: 'info' | 'warning' | 'error',
+): void {
+  services.showNotice(text, ownerSessionId, {
+    variant: 'compact',
+    command: '/compact',
+    surface: 'command_panel',
+    status,
+  });
 }
 
 function formatCompactNotice(result: CompactResult): string {

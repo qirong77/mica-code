@@ -10,13 +10,12 @@ const ALLOW_DURING_TURN_COMMANDS = new Set([
   'status',
   'context',
   'config',
-  'doctor',
   'new',
   'fork',
   'exit',
-  'copy',
   'rename',
   'task',
+  'commit',
 ]);
 
 function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionController): BuiltInCommandItem[] {
@@ -30,10 +29,9 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createStatusCommand(activeAgent),
+    micaBuiltinCommands.createStatusCommand(activeAgent, activeSessionController),
     micaBuiltinCommands.createContextCommand(activeAgent),
     micaBuiltinCommands.createConfigCommand(services),
-    micaBuiltinCommands.createDoctorCommand(activeAgent),
     micaBuiltinCommands.createNewCommand(services),
     micaBuiltinCommands.createForkCommand(services),
     micaBuiltinCommands.createRewindCommand(services),
@@ -42,9 +40,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createTaskCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createRecapCommand(activeAgent, services),
     micaBuiltinCommands.createExitCommand(services),
-    micaBuiltinCommands.createCopyCommand(services),
     micaBuiltinCommands.createRenameCommand(activeSessionController, services),
   ];
 }

@@ -1,7 +1,17 @@
 import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
-import { micaBuiltinCommands, type CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
+import {
+  micaBuiltinCommands,
+  type CommandNoticeOptions,
+  type CommandRuntimeServices,
+  type PluginStatusOptions,
+} from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
-import { micaUi, type MicaUiConversationMessage, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
+import {
+  micaUi,
+  type MicaUiCommandPanelItem,
+  type MicaUiConversationMessage,
+  type MicaUiWorkingStatus,
+} from '@packages/mica-ui/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { getActiveContext } from '../../app/activeContext.js';
@@ -22,6 +32,7 @@ function captureSessionUi(): TerminalAgentUiState {
     pendingQueueMode: micaUi.conversation.pendingQueueMode.get(),
     messageBarMessages: micaUi.messageBar.getMessages(),
     agentTurnLogItems: micaUi.panels.agentTurnLogItems.get(),
+    commandPanelItems: micaUi.panels.commandPanelItems.get(),
     thinkingText: micaUi.panels.thinkingText.get(),
     pluginUIs: micaUi.panels.pluginUIs.get(),
     workingStatus: micaUi.panels.workingStatus.get(),
@@ -50,6 +61,80 @@ function setAgentWorkingStatus(
   context.uiBridge.syncAgentStatusItems();
 }
 
+function updateCommandPanelItemForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  id: string,
+  update: (existing: MicaUiCommandPanelItem | undefined) => MicaUiCommandPanelItem,
+): void {
+  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
+  if (!context || !session) {
+    const existing = micaUi.panels.commandPanelItems.get().find((item) => item.id === id);
+    micaUi.panels.upsertCommandPanelItem(update(existing));
+    return;
+  }
+
+  const commandPanelItems = session.uiState.commandPanelItems ?? [];
+  const existing = commandPanelItems.find((item) => item.id === id);
+  const nextItem = update(existing);
+  const nextItems = [...commandPanelItems.filter((item) => item.id !== id), nextItem];
+  session.uiState = normalizeUiState({ ...session.uiState, commandPanelItems: nextItems });
+  if (context.agentSessions.current().id === session.id) {
+    micaUi.panels.setCommandPanelItems(session.uiState.commandPanelItems);
+  }
+}
+
+function setCommandPanelStatusForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+  options: PluginStatusOptions,
+): void {
+  const command = options.command ?? 'command';
+  const id = commandPanelId(command);
+  const now = Date.now();
+  updateCommandPanelItemForSession(context, ownerSessionId, id, (existing) => ({
+    id,
+    command,
+    variant: options.variant,
+    status: 'running',
+    text,
+    lines: appendCommandPanelLine(existing?.lines ?? [], text),
+    startedAt: existing?.startedAt ?? now,
+    updatedAt: now,
+  }));
+}
+
+function showCommandPanelNoticeForSession(
+  context: ApplicationContext | null,
+  ownerSessionId: string | undefined,
+  text: string,
+  options: CommandNoticeOptions,
+): void {
+  const command = options.command ?? 'command';
+  const id = commandPanelId(command);
+  const now = Date.now();
+  updateCommandPanelItemForSession(context, ownerSessionId, id, (existing) => ({
+    id,
+    command,
+    variant: options.variant,
+    status: options.status ?? 'success',
+    text,
+    lines: existing?.lines ?? [],
+    startedAt: existing?.startedAt ?? now,
+    updatedAt: now,
+  }));
+}
+
+function commandPanelId(command: string): string {
+  return command.trim() || 'command';
+}
+
+function appendCommandPanelLine(lines: string[], line: string): string[] {
+  if (lines.at(-1) === line) return lines;
+  return [...lines, line].slice(-8);
+}
+
 function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): void {
   const snapshot = agent.getSnapshot();
   micaUi.conversation.setMessages(
@@ -59,6 +144,7 @@ function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): v
   micaUi.conversation.setPendingInputs(uiState.pendingInputs, uiState.pendingQueueMode);
   micaUi.panels.thinkingText.set(uiState.thinkingText);
   micaUi.panels.setAgentTurnLogItems(uiState.agentTurnLogItems);
+  micaUi.panels.setCommandPanelItems(uiState.commandPanelItems ?? []);
   micaUi.panels.setPluginUIs(uiState.pluginUIs);
   micaUi.messageBar.setMessages(uiState.messageBarMessages);
   micaUi.panels.setWorkingStatus(uiState.workingStatus);
@@ -79,12 +165,17 @@ function showNoticeForSession(
   context: ApplicationContext | null,
   ownerSessionId: string | undefined,
   text: string,
-  options: { variant?: 'recap' | 'commit' | 'config' | 'compact'; command?: string } = {},
+  options: CommandNoticeOptions = {},
 ): void {
+  if (options.surface === 'command_panel') {
+    showCommandPanelNoticeForSession(context, ownerSessionId, text, options);
+    return;
+  }
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
-  const message = { role: 'notice' as const, content: text, ...options };
+  const { surface: _surface, status: _status, ...noticeOptions } = options;
+  const message = { role: 'notice' as const, content: text, ...noticeOptions };
   if (!context || !session) {
-    micaUi.conversation.appendNoticeMessage(text, options);
+    micaUi.conversation.appendNoticeMessage(text, noticeOptions);
     return;
   }
   const nextMessages = [...session.uiState.conversationMessages, message];
@@ -95,26 +186,17 @@ function showNoticeForSession(
   session.sessionController.saveCurrent({ allowEmpty: true });
 }
 
-function showRecapForSession(
-  context: ApplicationContext | null,
-  ownerSessionId: string | undefined,
-  text: string,
-  command: string,
-): void {
-  showNoticeForSession(context, ownerSessionId, text, { variant: 'recap', command });
-}
-
-function formatRecapCommand(options?: { customInstructions?: string }): string {
-  const focus = options?.customInstructions?.trim();
-  return focus ? `/recap ${focus}` : '/recap';
-}
-
 function showCommitNoticeForSession(
   context: ApplicationContext | null,
   ownerSessionId: string | undefined,
   text: string,
 ): void {
-  showNoticeForSession(context, ownerSessionId, text, { variant: 'commit', command: '/commit' });
+  showCommandPanelNoticeForSession(context, ownerSessionId, text, {
+    variant: 'commit',
+    command: '/commit',
+    surface: 'command_panel',
+    status: 'success',
+  });
 }
 
 function hideCompactArtifacts(messages: MicaUiConversationMessage[]): MicaUiConversationMessage[] {
@@ -132,55 +214,6 @@ function conversationContentToText(content: MicaUiConversationMessage['content']
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
-}
-
-function buildRecapPrompt(customInstructions?: string): string {
-  return [
-    'You are creating a recap for a coding-agent terminal UI.',
-    'Use only the transcript provided by the user. Do not call tools.',
-    'This recap must not include new facts.',
-    '',
-    'Write in Chinese unless the transcript is mostly English.',
-    'Return exactly one paragraph of no more than 4 sentences.',
-    'Cover only: what the user is building/what the current task is, the most recent meaningful progress or result, and the immediate next step.',
-    'Do not list files, commands, or details. Synthesize, do not enumerate.',
-    'Return plain markdown text only. Do not wrap in XML tags, code fences, bullet lists, or headings.',
-    customInstructions?.trim() ? `\nAdditional user focus:\n${customInstructions.trim()}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function buildRecapTranscript(messages: unknown[]): string {
-  if (messages.length === 0) return '(empty conversation)';
-  return messages
-    .map((message, index) => `## Message ${index + 1}\n${truncateMiddle(stringifyValue(message), 12_000)}`)
-    .join('\n\n');
-}
-
-function stringifyValue(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function truncateMiddle(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  const marker = `\n\n[recap transcript truncated, omitted ${text.length - maxChars} chars]\n\n`;
-  const budget = Math.max(0, maxChars - marker.length);
-  const head = Math.ceil(budget * 0.55);
-  const tail = Math.floor(budget * 0.45);
-  return text.slice(0, head) + marker + text.slice(text.length - tail);
-}
-
-function cleanRecapSummary(text: string): string {
-  return text
-    .replace(/^```(?:markdown)?\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim();
 }
 
 export function createCommandRuntimeServices(): CommandRuntimeServices {
@@ -219,6 +252,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     },
     setPluginStatus(agent, text, options = {}) {
       const context = currentContext();
+      if (options.surface === 'command_panel') {
+        setCommandPanelStatusForSession(context, options.ownerSessionId, text, options);
+        return;
+      }
       if (!context) return;
       const target = resolveCommandAgent(agent);
       const status: MicaUiWorkingStatus = { type: 'plugin_task', text, level: options.level };
@@ -321,6 +358,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         pendingQueueMode: null,
         messageBarMessages: [],
         agentTurnLogItems: [],
+        commandPanelItems: [],
         thinkingText: '',
         pluginUIs: [],
         workingStatus: { type: 'idle' },
@@ -373,6 +411,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         pendingQueueMode: null,
         messageBarMessages: [],
         agentTurnLogItems: [],
+        commandPanelItems: [],
         thinkingText: '',
         pluginUIs: [],
         workingStatus: { type: 'idle' },
@@ -391,17 +430,23 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       if (!context) return task();
       const target = resolveCommandAgent(agent);
       const release = context.runtime.beginExclusiveTask(target, options.statusText);
-      const status: MicaUiWorkingStatus = {
-        type: 'plugin_task',
-        text: options.statusText,
-        level: options.level,
-      };
-      setAgentWorkingStatus(context, target, status, options.ownerSessionId);
+      if (options.surface === 'command_panel') {
+        setCommandPanelStatusForSession(context, options.ownerSessionId, options.statusText, options);
+      } else {
+        const status: MicaUiWorkingStatus = {
+          type: 'plugin_task',
+          text: options.statusText,
+          level: options.level,
+        };
+        setAgentWorkingStatus(context, target, status, options.ownerSessionId);
+      }
       try {
         return await task();
       } finally {
         release();
-        setAgentWorkingStatus(context, target, { type: 'idle' }, options.ownerSessionId);
+        if (options.surface !== 'command_panel') {
+          setAgentWorkingStatus(context, target, { type: 'idle' }, options.ownerSessionId);
+        }
       }
     },
     async compact(agent, sessionController, ownerSessionId, options) {
@@ -412,27 +457,23 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const concreteAgent = ownerSession?.agent ?? (agent as AgentRuntime);
       const concreteSessionController = ownerSession?.sessionController ?? (sessionController as SessionController);
       const snapshot = concreteAgent.getSnapshot();
-      if (context) {
-        setAgentWorkingStatus(
-          context,
-          concreteAgent,
-          { type: 'plugin_task', text: 'compact: building transcript' },
-          ownerSession?.id,
-        );
-      }
+      setCommandPanelStatusForSession(context, ownerSession?.id, 'compact: building transcript', {
+        ownerSessionId: ownerSession?.id,
+        surface: 'command_panel',
+        command: '/compact',
+        variant: 'compact',
+      });
       const service = new micaContext.CompactionService();
       const result = await service.compact({
         messages: snapshot.messages,
         options,
         summarize: async (transcript, prompt) => {
-          if (context) {
-            setAgentWorkingStatus(
-              context,
-              concreteAgent,
-              { type: 'plugin_task', text: 'compact: summarizing context' },
-              ownerSession?.id,
-            );
-          }
+          setCommandPanelStatusForSession(context, ownerSession?.id, 'compact: summarizing context', {
+            ownerSessionId: ownerSession?.id,
+            surface: 'command_panel',
+            command: '/compact',
+            variant: 'compact',
+          });
           const subAgent = concreteAgent.createSubAgent({
             systemPrompt: prompt,
           });
@@ -450,14 +491,12 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
 
       if (result.preview) return result;
 
-      if (context) {
-        setAgentWorkingStatus(
-          context,
-          concreteAgent,
-          { type: 'plugin_task', text: 'compact: applying checkpoint' },
-          ownerSession?.id,
-        );
-      }
+      setCommandPanelStatusForSession(context, ownerSession?.id, 'compact: applying checkpoint', {
+        ownerSessionId: ownerSession?.id,
+        surface: 'command_panel',
+        command: '/compact',
+        variant: 'compact',
+      });
       concreteAgent.loadSnapshot({
         ...snapshot,
         messages: result.messages,
@@ -485,33 +524,6 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       }
       concreteSessionController.saveCurrent();
       return result;
-    },
-    async recap(agent, ownerSessionId, options) {
-      const context = currentContext();
-      const ownerSession = ownerSessionId
-        ? context?.agentSessions.findById(ownerSessionId)
-        : context?.agentSessions.current();
-      const concreteAgent = ownerSession?.agent ?? (agent as AgentRuntime);
-      const snapshot = concreteAgent.getSnapshot();
-      if (snapshot.messages.length === 0) {
-        throw new Error('当前会话还没有可总结的内容');
-      }
-      const subAgent = concreteAgent.createSubAgent({
-        systemPrompt: buildRecapPrompt(options?.customInstructions),
-      });
-      const summary = cleanRecapSummary(
-        await subAgent.query(
-          [
-            'Create a recap of this conversation.',
-            'Do not mention that this instruction exists.',
-            '',
-            buildRecapTranscript(snapshot.messages),
-          ].join('\n'),
-        ),
-      );
-      if (!summary) throw new Error('Recap summary is empty');
-      showRecapForSession(context, ownerSession?.id ?? ownerSessionId, summary, formatRecapCommand(options));
-      return { summary, messageCount: snapshot.messages.length };
     },
   };
 }

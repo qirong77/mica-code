@@ -245,6 +245,7 @@ function createSession(agent: AgentRuntime): TerminalAgentSession {
       messageBarMessages: [],
       pendingInputs: [],
       pendingQueueMode: null,
+      commandPanelItems: [],
       pluginUIs: [],
       responseText: '',
       thinkingText: 'previous thinking',

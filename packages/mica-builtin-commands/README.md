@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/doctor`、`/compact`、`/fork`、`/rewind`、`/commit`、`/copy`、`/new`、`/recap`、`/rename`、`/clear`、`/exit`。
+- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉。
@@ -41,13 +41,11 @@ const commands = [
 - `configSwitch.ts`：配置切换时的辅助函数。
 - `context.tsx`：上下文汇总与展示命令。
 - `exit.ts`：退出命令。
-- `copy.ts`：复制当前会话文本命令。
 - `new.ts`：新建会话命令。
 - `rename.ts`：会话重命名命令。
-- `recap.ts`：会话摘要命令。
 - `resume.ts`：会话恢复命令。
 - `mcp.tsx`、`skills.tsx`：MCP 与 skills 管理命令。
 - `task.tsx`、`fork.ts`、`rewind.tsx`：多任务、分叉与回退相关命令。
 - `compact.ts`：上下文压缩命令。
-- `status.tsx`、`context.tsx`、`doctor.tsx`：状态查看、上下文总览与环境诊断命令。
+- `status.tsx`、`context.tsx`：状态查看与上下文总览命令。
 - `commit.ts`：提交辅助命令。

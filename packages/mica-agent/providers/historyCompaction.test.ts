@@ -35,6 +35,29 @@ describe('compactHistoricalToolResultText', () => {
     expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(MAX_HISTORICAL_TOOL_RESULT_CHARS + 500);
   });
 
+  it('drops non-encrypted Responses reasoning items when loading snapshots', () => {
+    const agent = new ResponsesClient(options('openai_responses'));
+    agent.loadSnapshot({
+      model: 'test-model',
+      messages: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+        { type: 'reasoning', id: 'rs_test', summary: [] },
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          id: 'msg_test',
+          content: [{ type: 'output_text', text: 'hi', annotations: [] }],
+        },
+      ],
+      usageHistory: [],
+      lastUsage: undefined,
+      conversationMessages: [],
+    });
+
+    expect(agent.getSnapshot().messages.map((item) => item.type)).toEqual(['message', 'message']);
+  });
+
   it('compacts Chat Completions tool results when loading snapshots', () => {
     const agent = new ChatCompletionsClient(options('openai_chat_completions'));
     agent.loadSnapshot({

@@ -49,6 +49,7 @@ export type CommandSessionController = {
   saveCurrent(): void;
   renameCurrent(title: string): void;
   getCurrentTitle?(): string | null;
+  getCurrentSessionId?(): string;
 };
 
 export type RunningAgentRecord = {
@@ -77,24 +78,20 @@ export type ClearIdleAgentsResult = {
 export type PluginStatusOptions = {
   ownerSessionId?: string;
   level?: 'info' | 'warn' | 'error';
+  surface?: 'working_status' | 'command_panel';
+  command?: string;
+  variant?: 'commit' | 'config' | 'compact' | 'error';
 };
 
 export type ExclusiveTaskOptions = PluginStatusOptions & {
   statusText: string;
 };
 
-export type RecapOptions = {
-  customInstructions?: string;
-};
-
-export type RecapResult = {
-  summary: string;
-  messageCount: number;
-};
-
 export type CommandNoticeOptions = {
-  variant?: 'recap' | 'commit' | 'config' | 'compact';
+  variant?: 'commit' | 'config' | 'compact' | 'error';
   command?: string;
+  surface?: 'conversation' | 'command_panel';
+  status?: 'success' | 'warning' | 'error' | 'info';
 };
 
 export type CommandRuntimeServices = {
@@ -128,5 +125,4 @@ export type CommandRuntimeServices = {
     ownerSessionId?: string,
     options?: CompactOptions,
   ): Promise<CompactResult>;
-  recap(agent: CommandAgent, ownerSessionId?: string, options?: RecapOptions): Promise<RecapResult>;
 };

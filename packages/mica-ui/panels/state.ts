@@ -6,12 +6,17 @@ import type {
   MicaUiAgentStatusItem,
   MicaUiBackgroundTaskItem,
   MicaUiStartupBannerState,
+  MicaUiCommandPanelItem,
 } from '../types.js';
+
+const MAX_COMMAND_PANEL_ITEMS = 4;
+const MAX_COMMAND_PANEL_LINES = 8;
 
 export const workingStatus = atom<MicaUiWorkingStatus>({ type: 'idle' });
 export const thinkingText = atom('');
 export const agentTurnLogItems = atom<MicaUiAgentTurnLogItem[]>([]);
 export const pluginUIs = atom<MicaUiPluginUI[]>([]);
+export const commandPanelItems = atom<MicaUiCommandPanelItem[]>([]);
 export const contextSize = atom(0);
 export const cachedTokenRate = atom(0);
 export const agentStatusItems = atom<MicaUiAgentStatusItem[]>([]);
@@ -100,6 +105,36 @@ export function clearPluginUIs(): void {
   pluginUIs.set([]);
 }
 
+export function setCommandPanelItems(items: MicaUiCommandPanelItem[]): void {
+  commandPanelItems.set(trimCommandPanelItems(items));
+}
+
+export function upsertCommandPanelItem(item: MicaUiCommandPanelItem): void {
+  const now = item.updatedAt ?? Date.now();
+  const items = commandPanelItems.get();
+  const existing = items.find((entry) => entry.id === item.id);
+  const nextItem: MicaUiCommandPanelItem = {
+    ...existing,
+    ...item,
+    startedAt: item.startedAt ?? existing?.startedAt ?? now,
+    updatedAt: now,
+    lines: trimCommandPanelLines(item.lines ?? existing?.lines ?? []),
+  };
+  setCommandPanelItems([...items.filter((entry) => entry.id !== item.id), nextItem]);
+}
+
+export function removeCommandPanelItem(id: string): boolean {
+  const items = commandPanelItems.get();
+  const nextItems = items.filter((item) => item.id !== id);
+  if (nextItems.length === items.length) return false;
+  commandPanelItems.set(nextItems);
+  return true;
+}
+
+export function clearCommandPanelItems(): void {
+  commandPanelItems.set([]);
+}
+
 export function setAgentStatusItems(items: MicaUiAgentStatusItem[]): void {
   agentStatusItems.set([...items]);
 }
@@ -129,4 +164,15 @@ export function setOnEditPendingInput(cb: () => string | null | undefined): void
 
 export function editPendingInput(): string | null {
   return _onEditPendingInput?.() ?? null;
+}
+
+function trimCommandPanelItems(items: MicaUiCommandPanelItem[]): MicaUiCommandPanelItem[] {
+  return items.slice(-MAX_COMMAND_PANEL_ITEMS).map((item) => ({
+    ...item,
+    lines: trimCommandPanelLines(item.lines ?? []),
+  }));
+}
+
+function trimCommandPanelLines(lines: string[]): string[] {
+  return lines.slice(-MAX_COMMAND_PANEL_LINES);
 }

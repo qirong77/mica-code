@@ -108,6 +108,10 @@ export class SessionController {
     return this.currentTitleOverride;
   }
 
+  getCurrentSessionId(): string {
+    return this.currentSessionId;
+  }
+
   resume(id: string): ResumeSessionResult {
     const session = this.store.load(id);
     if (!session) return { ok: false, message: `Session not found: ${id}` };
@@ -235,8 +239,7 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       role: 'notice',
       content,
       ...display,
-      ...(record.variant === 'recap' ||
-      record.variant === 'commit' ||
+      ...(record.variant === 'commit' ||
       record.variant === 'config' ||
       record.variant === 'compact' ||
       record.variant === 'error'

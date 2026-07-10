@@ -36,6 +36,7 @@ export function clearUI(agent: AgentRuntime, sessionController?: SessionControll
   micaUi.panels.thinkingText.set('');
   micaUi.panels.clearAgentTurnLogItems();
   micaUi.panels.clearPluginUIs();
+  micaUi.panels.clearCommandPanelItems();
   micaUi.messageBar.clearMessages();
   micaUi.panels.contextSize.set(0);
   micaUi.panels.cachedTokenRate.set(0);

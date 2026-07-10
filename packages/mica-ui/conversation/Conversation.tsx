@@ -90,12 +90,6 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
     backgroundColor: themeColors.surfaceError,
     title: '/error',
   },
-  recap: {
-    tone: 'recap',
-    color: themeColors.messageRecap,
-    backgroundColor: themeColors.surfaceRecap,
-    title: '/recap',
-  },
 };
 
 function noticePresentationFor(item: LogItem): NoticePresentation {

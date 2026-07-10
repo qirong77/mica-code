@@ -32,26 +32,33 @@ export function createCommitCommand(agent: CommandAgent, services: CommandRuntim
     description: '分析当前 git 变化，生成提交信息，提交并推送',
     action: async () => {
       const targetAgent = services.getCurrentAgent() ?? agent;
-      if (services.isAgentBusy(targetAgent)) {
-        services.showMessage('Agent is busy; wait or abort before committing');
-        return;
-      }
       const ownerSessionId = services.getCurrentAgentSessionId();
-      await services.runExclusiveTask(
-        targetAgent,
-        { ownerSessionId, statusText: 'commit: analyzing git changes' },
-        () => runCommit(targetAgent, services, ownerSessionId),
-      );
+      await runCommit(targetAgent, services, ownerSessionId);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
 function setCommitStatus(agent: CommandAgent, services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
-  services.setPluginStatus(agent, text, { ownerSessionId });
+  services.setPluginStatus(agent, text, {
+    ownerSessionId,
+    surface: 'command_panel',
+    command: '/commit',
+    variant: 'commit',
+  });
 }
 
-function showTerminalMessage(services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
-  services.showMessage(text, 5000, ownerSessionId);
+function showCommitMessage(
+  services: CommandRuntimeServices,
+  text: string,
+  ownerSessionId?: string,
+  status: 'info' | 'warning' | 'error' = 'info',
+) {
+  services.showNotice(text, ownerSessionId, {
+    surface: 'command_panel',
+    command: '/commit',
+    variant: 'commit',
+    status,
+  });
 }
 
 async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, ownerSessionId?: string) {
@@ -61,11 +68,11 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     const status = git(['status', '--porcelain=v1']);
     const changedFiles = parsePorcelainStatus(status);
     if (!status.trim()) {
-      showTerminalMessage(services, 'commit: 没有可提交的变化', ownerSessionId);
+      showCommitMessage(services, 'commit: 没有可提交的变化', ownerSessionId, 'info');
       return;
     }
     if (hasUnmergedFiles(status)) {
-      showTerminalMessage(services, 'commit: 存在未解决冲突，请先处理', ownerSessionId);
+      showCommitMessage(services, 'commit: 存在未解决冲突，请先处理', ownerSessionId, 'error');
       return;
     }
 
@@ -77,7 +84,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
 
     const stagedStatus = git(['diff', '--cached', '--name-only']);
     if (!stagedStatus.trim()) {
-      showTerminalMessage(services, 'commit: git add 后没有 staged 变化', ownerSessionId);
+      showCommitMessage(services, 'commit: git add 后没有 staged 变化', ownerSessionId, 'warning');
       return;
     }
 
@@ -100,7 +107,7 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     services.showCommitNotice(messageLines.join('\n'), ownerSessionId);
   } catch (error) {
     const message = formatExecError(error);
-    showTerminalMessage(services, `commit failed: ${message}`, ownerSessionId);
+    showCommitMessage(services, `commit failed: ${message}`, ownerSessionId, 'error');
   }
 }
 

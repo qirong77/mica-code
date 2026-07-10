@@ -6,6 +6,7 @@ import { WorkingStatusUI } from '../panels/WorkingStatus.js';
 import { BottomSurface } from '../bottom/BottomSurface.js';
 import { MessageBar } from '../panels/MessageBar.js';
 import { TaskStatusBar } from '../panels/TaskStatusBar.js';
+import { CommandPanelUI } from '../panels/CommandPanel.js';
 // import { StartupBannerUI } from './StartupBanner.js';
 
 export function App(): React.ReactNode {
@@ -16,6 +17,7 @@ export function App(): React.ReactNode {
       {/* <StartupBannerUI.renderFn /> */}
       <ConversationUI.renderFn />
       <TaskStatusBar />
+      <CommandPanelUI.renderFn />
       <TerminalInputUI.renderFn />
       <WorkingStatusUI.renderFn />
       <MessageBar />

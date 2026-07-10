@@ -13,6 +13,7 @@ import { Conversation, ConversationUI } from './conversation/Conversation.js';
 import { Markdown } from './conversation/Markdown.js';
 import { WorkingStatus, WorkingStatusUI } from './panels/WorkingStatus.js';
 import { TaskStatusBar, TaskStatusBarUI } from './panels/TaskStatusBar.js';
+import { CommandPanel, CommandPanelUI } from './panels/CommandPanel.js';
 import { AgentTurnLog, AgentTurnLogUI } from './bottom/AgentTurnLog.js';
 import { BottomSurface, BottomSurfaceUI } from './bottom/BottomSurface.js';
 import { useScheduleState } from './hooks/index.js';
@@ -44,6 +45,8 @@ export const micaUi = {
   WorkingStatusUI,
   TaskStatusBar,
   TaskStatusBarUI,
+  CommandPanel,
+  CommandPanelUI,
   AgentTurnLog,
   AgentTurnLogUI,
   MessageBar,
@@ -149,6 +152,9 @@ export type {
   MicaUiContentBlockParam,
   MicaUiMessageParam,
   MicaUiAgentTurnLogItem,
+  MicaUiCommandPanelItem,
+  MicaUiCommandPanelStatus,
+  MicaUiCommandPanelVariant,
   MicaUiAgentStatusItem,
   MicaUiStartupBannerState,
 } from './types.js';

@@ -22,7 +22,7 @@ export interface MicaUiMessageParam {
   role: 'user' | 'assistant' | 'notice';
   content: string | MicaUiContentBlockParam[];
   displayContent?: string | MicaUiContentBlockParam[];
-  variant?: 'recap' | 'commit' | 'config' | 'compact' | 'error';
+  variant?: 'commit' | 'config' | 'compact' | 'error';
   command?: string;
 }
 
@@ -66,6 +66,21 @@ export interface MicaUiAgentTurnLogItem {
   component: React.ComponentType;
 }
 
+export type MicaUiCommandPanelStatus = 'running' | 'success' | 'warning' | 'error' | 'info';
+
+export type MicaUiCommandPanelVariant = 'commit' | 'config' | 'compact' | 'error';
+
+export interface MicaUiCommandPanelItem {
+  id: string;
+  command: string;
+  variant?: MicaUiCommandPanelVariant;
+  status: MicaUiCommandPanelStatus;
+  text: string;
+  lines?: string[];
+  startedAt?: number;
+  updatedAt?: number;
+}
+
 export interface MicaUiDropdownItem {
   key: string;
   label: string;
@@ -96,7 +111,7 @@ export type MicaUiConversationMessage =
       role: 'notice';
       content: string | MicaUiContentBlockParam[];
       displayContent?: string | MicaUiContentBlockParam[];
-      variant?: 'recap' | 'commit' | 'config' | 'compact' | 'error';
+      variant?: 'commit' | 'config' | 'compact' | 'error';
       command?: string;
     };
 

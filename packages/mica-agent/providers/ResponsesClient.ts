@@ -98,7 +98,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   loadSnapshot(snapshot: AgentSnapshot<ResponseInputItem, ResponsesUsageRecord>) {
     this.turnId = this.loadSnapshotState({
       ...snapshot,
-      messages: compactHistoricalToolResults(repairResponsesToolResults(snapshot.messages)),
+      messages: prepareHistoricalResponsesInput(repairResponsesToolResults(snapshot.messages)),
     });
   }
 
@@ -112,7 +112,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
-    this.messages = compactHistoricalToolResults(this.messages);
+    this.messages = prepareHistoricalResponsesInput(this.messages);
     const content = micaContentToResponsesContent(question);
     const hasCurrentTurn = this.messages.some(
       (item) =>
@@ -143,11 +143,13 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: ResponseInputItem[] = [
-      ...compactHistoricalToolResults(this.messages),
+      ...prepareHistoricalResponsesInput(this.messages),
       { type: 'message', role: 'user', content: micaContentToResponsesContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
-      this.messages = takeNextInput ? messages : compactHistoricalToolResults(messages);
+      this.messages = takeNextInput
+        ? stripUnusableResponseInputItems(messages)
+        : prepareHistoricalResponsesInput(messages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
@@ -388,8 +390,9 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
   switch (item.type) {
     case 'message':
     case 'function_call':
-    case 'reasoning':
       return item;
+    case 'reasoning':
+      return item.encrypted_content ? item : null;
     default:
       return null;
   }
@@ -416,12 +419,16 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
   return repaired;
 }
 
-function compactHistoricalToolResults(messages: ResponseInputItem[]): ResponseInputItem[] {
-  return messages.map((item) => {
+function prepareHistoricalResponsesInput(messages: ResponseInputItem[]): ResponseInputItem[] {
+  return stripUnusableResponseInputItems(messages).map((item) => {
     if (item.type !== 'function_call_output' || typeof item.output !== 'string') return item;
     const compacted = compactHistoricalToolResultText(item.output);
     return compacted === item.output ? item : { ...item, output: compacted };
   });
+}
+
+function stripUnusableResponseInputItems(messages: ResponseInputItem[]): ResponseInputItem[] {
+  return messages.filter((item) => item.type !== 'reasoning' || Boolean(item.encrypted_content));
 }
 
 function interruptedResponsesToolResult(callId: string): ResponseInputItem {
