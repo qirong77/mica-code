@@ -10,11 +10,7 @@ import {
   formatConfigValidationIssues,
   loadProviderModels,
   loadMissingProviderModels,
-  getEffortMapFromConfig,
-  getModelContextWindowSizeFromConfig,
-  getProviderEffortOptions,
-  clampProviderEffort,
-  mapProviderEffortValue,
+  getModelRule,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './config.js';
@@ -51,16 +47,8 @@ export const micaConfig = {
   loadProviderModels,
   /** 为配置中尚未加载模型列表的动态 provider 批量拉取模型。 */
   loadMissingProviderModels,
-  /** 按模型名从内置规则读取 effort 映射；未命中时返回默认四档。 */
-  getEffortMapFromConfig,
-  /** 按模型名从内置规则读取 context window token 数；未命中时返回 256K。 */
-  getModelContextWindowSizeFromConfig,
-  /** 获取当前 provider 实际可选的 effort。 */
-  getProviderEffortOptions,
-  /** 把 effort 修正到当前 provider 支持的最近可用值。 */
-  clampProviderEffort,
-  /** 获取 provider 实际发送的 reasoning effort 值。 */
-  mapProviderEffortValue,
+  /** 按模型名生成固定的模型规则。 */
+  getModelRule,
   /** 把统一 effort 转换为 Chat Completions 请求参数。 */
   resolveChatCompletionsEffortParams,
   /** 把统一 effort 转换为 Responses 请求参数。 */
@@ -92,11 +80,7 @@ export {
   validateConfig,
   assertValidConfig,
   formatConfigValidationIssues,
-  getEffortMapFromConfig,
-  getModelContextWindowSizeFromConfig,
-  getProviderEffortOptions,
-  clampProviderEffort,
-  mapProviderEffortValue,
+  getModelRule,
   providerSupportsModel,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
@@ -116,6 +100,7 @@ export type {
   ConfigValidationResult,
   ConfigValidationSeverity,
 } from './config.js';
+export { isEffortOption, isProviderProtocol } from './types.js';
 export {
   MICA_STORAGE_PATH,
   appendInputHistory,

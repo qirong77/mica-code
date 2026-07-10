@@ -64,10 +64,8 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): {
   if (!provider) return { config, adjustments: [] };
 
   const model = config.model || provider.models?.[0] || '';
-  const effort = isEffortOption(config.effort)
-    ? micaConfig.clampProviderEffort(provider, config.effort, model)
-    : micaConfig.clampProviderEffort(provider, 'medium', model);
-  const contextWindowSize = micaConfig.getModelContextWindowSizeFromConfig(model);
+  const effort = provider.supportsEffort === false ? 'none' : isEffortOption(config.effort) ? config.effort : 'medium';
+  const contextWindowSize = micaConfig.getModelRule(model).contextSize;
   const adjustments: ConfigSwitchAdjustment[] = [];
 
   if (config.effort !== effort) {
@@ -104,16 +102,18 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
   const agentProvider = agent.config.provider;
   const provider = config.providers.find((item) => item.id === agentProvider.id) ?? agentProvider;
   const model = agent.config.model || provider.models?.[0] || '';
-  const effort = isEffortOption(agent.config.effort)
-    ? micaConfig.clampProviderEffort(provider, agent.config.effort, model)
-    : config.effort;
+  const effort = provider.supportsEffort === false
+    ? 'none'
+    : isEffortOption(agent.config.effort)
+      ? agent.config.effort
+      : config.effort;
 
   return {
     ...config,
     provider: provider.id,
     model,
     effort,
-    contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+    contextWindowSize: micaConfig.getModelRule(model).contextSize,
   };
 }
 

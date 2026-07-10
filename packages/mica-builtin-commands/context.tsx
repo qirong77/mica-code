@@ -7,7 +7,6 @@ import {
   type ConversationContentBlock,
   type ConversationItem,
 } from '@packages/mica-agent/index.js';
-import { AnthropicHistoryNormalizer } from '@packages/mica-agent/providers/AnthropicHistoryNormalizer.js';
 import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
 import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
@@ -367,7 +366,6 @@ function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): Con
 }
 
 function getNormalizer(protocol: ProviderProtocol): UnknownNormalizer {
-  if (protocol === 'anthropic_messages') return new AnthropicHistoryNormalizer() as unknown as UnknownNormalizer;
   if (protocol === 'openai_responses') return new ResponsesHistoryNormalizer() as unknown as UnknownNormalizer;
   return new ChatCompletionsHistoryNormalizer() as unknown as UnknownNormalizer;
 }

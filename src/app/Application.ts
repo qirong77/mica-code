@@ -48,7 +48,6 @@ export class Application {
   }
 
   async start(): Promise<void> {
-    micaRuntime.memoryUsageMonitor.start();
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
     });
@@ -119,15 +118,6 @@ export class Application {
           text: gitText,
           formatError: formatExecError,
         },
-        memory: {
-          capture: (label) => micaRuntime.memoryUsageMonitor.capture(label),
-          getSnapshots: () => micaRuntime.memoryUsageMonitor.getSnapshots(),
-          snapshots: micaRuntime.memoryUsageMonitor.snapshots,
-          isRunning: () => micaRuntime.memoryUsageMonitor.isRunning(),
-          getStartedAt: () => micaRuntime.memoryUsageMonitor.getStartedAt(),
-          getIntervalMs: () => micaRuntime.memoryUsageMonitor.getIntervalMs(),
-          getMaxSnapshots: () => micaRuntime.memoryUsageMonitor.getMaxSnapshots(),
-        },
         logger: {
           info() {},
           warn() {},
@@ -187,10 +177,6 @@ export class Application {
   }
 
   private async stopOnce(): Promise<void> {
-    if (micaRuntime.memoryUsageMonitor.isRunning()) {
-      micaRuntime.memoryUsageMonitor.capture('application:stop');
-      micaRuntime.memoryUsageMonitor.stop();
-    }
     micaUi.terminalInput.setOnExitRequested(null);
     this.context?.uiBridge.stop();
     await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });

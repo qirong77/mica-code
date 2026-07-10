@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EffortOption, IMicaConfig, ProviderDefinition } from '@packages/mica-config/index.js';
+import type { IMicaConfig } from '@packages/mica-config/index.js';
 import type {
   AgentQueryContent,
   AgentQueryOptions,
@@ -42,8 +42,7 @@ vi.mock('@packages/mica-config/index.js', async (importOriginal) => {
         return configState;
       },
       assertValid: () => {},
-      clampProviderEffort: (_p: ProviderDefinition, effort: EffortOption) => effort,
-      getModelContextWindowSizeFromConfig: () => 1000,
+      getModelRule: () => ({ contextSize: 1000 }),
     },
   };
 });

@@ -19,8 +19,7 @@ import {
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { ConfigValidationError, validateConfig } from './validation.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
-import { clampProviderEffort } from './effort.js';
-import { getModelContextWindowSizeFromConfig } from './model-rules/index.js';
+import { getModelRule } from './getModelRule.js';
 
 export {
   CONFIG_PATH,
@@ -42,17 +41,8 @@ export type {
   ProviderProtocol,
   ResolvedEffortParams,
 } from './types.js';
+export { getModelRule } from './getModelRule.js';
 export {
-  DEFAULT_EFFORT_MAP,
-  getEffortMapFromConfig,
-  setModelData,
-  clearModelData,
-  getModelContextWindowSizeFromConfig,
-} from './model-rules/index.js';
-export {
-  clampProviderEffort,
-  getProviderEffortOptions,
-  mapProviderEffortValue,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './effort.js';
@@ -173,19 +163,14 @@ function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfi
   const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
   const provider = providers.find((item) => item.id === providerId);
   const model = resolveLastUsedModel(provider, lastUsed.model, lastUsed.providerPreferences?.[providerId]?.model);
-  const effort = resolveLastUsedEffort(
-    provider,
-    lastUsed.effort,
-    model,
-    lastUsed.providerPreferences?.[providerId]?.effort,
-  );
+  const effort = resolveLastUsedEffort(provider, lastUsed.effort, lastUsed.providerPreferences?.[providerId]?.effort);
   return {
     ...config,
     providers,
     provider: providerId,
     model,
     effort,
-    contextWindowSize: getModelContextWindowSizeFromConfig(model),
+    contextWindowSize: getModelRule(model).contextSize,
   };
 }
 
@@ -208,10 +193,9 @@ function resolveLastUsedModel(
 function resolveLastUsedEffort(
   provider: ProviderDefinition | undefined,
   effort: unknown,
-  model: string,
   preferenceEffort?: unknown,
 ): EffortOption {
   const selectedPreference = isEffortOption(preferenceEffort) ? preferenceEffort : undefined;
   const selected = selectedPreference ?? (isEffortOption(effort) ? effort : 'medium');
-  return provider ? clampProviderEffort(provider, selected, model) : selected;
+  return provider?.supportsEffort === false ? 'none' : selected;
 }

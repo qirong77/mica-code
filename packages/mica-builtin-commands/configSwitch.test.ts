@@ -58,9 +58,6 @@ describe('config switch commands', () => {
 
   it('clamps effort when switching to a model with narrower effort support', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
-    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
-    setModelData('gpt-5.5', 256000, { none: null, low: 'low', high: 'high' });
-    setModelData('gpt-5.4', 256000, { none: null, minimal: 'minimal', low: 'low', medium: 'medium', high: 'high' });
     const provider = {
       id: 'openai',
       name: 'OpenAI',
@@ -72,7 +69,7 @@ describe('config switch commands', () => {
     micaConfig.update(() => ({
       provider: provider.id,
       model: 'gpt-5.4',
-      effort: 'minimal',
+      effort: 'low',
       contextWindowSize: 256000,
       providers: [provider],
     }));
@@ -80,7 +77,7 @@ describe('config switch commands', () => {
     const agent = makeAgent([], {
       provider: { ...provider, contextWindowSize: 256000 },
       model: 'gpt-5.4',
-      effort: 'minimal',
+      effort: 'low',
     });
     const session = makeSession();
 
@@ -98,7 +95,7 @@ describe('config switch commands', () => {
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
       expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Model: gpt-5.5; Adjusted defaults: effort minimal -> low',
+        'Model: gpt-5.5',
         undefined,
       );
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
@@ -123,8 +120,6 @@ describe('config switch commands', () => {
 
   it('normalizes effort and context defaults when switching provider', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
-    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
-    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
     const openai = {
       id: 'openai',
       name: 'OpenAI',
@@ -144,7 +139,7 @@ describe('config switch commands', () => {
     micaConfig.update(() => ({
       provider: openai.id,
       model: 'gpt-5.4',
-      effort: 'minimal',
+      effort: 'low',
       contextWindowSize: 256000,
       providers: [openai, deepseek],
     }));
@@ -152,7 +147,7 @@ describe('config switch commands', () => {
     const agent = makeAgent([], {
       provider: { ...openai, contextWindowSize: 256000 },
       model: 'gpt-5.4',
-      effort: 'minimal',
+      effort: 'low',
     });
     const session = makeSession();
 
@@ -171,7 +166,7 @@ describe('config switch commands', () => {
       expect(micaConfig.get()).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-pro',
-        effort: 'high',
+        effort: 'low',
         contextWindowSize: 1000000,
       });
 
@@ -187,11 +182,11 @@ describe('config switch commands', () => {
       expect(micaConfig.get()).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-pro',
-        effort: 'high',
+        effort: 'low',
         contextWindowSize: 1000000,
       });
       expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Provider: deepseek; Adjusted defaults: effort minimal -> high, context 256K -> 1M',
+        'Provider: deepseek',
         3000,
       );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
@@ -203,8 +198,6 @@ describe('config switch commands', () => {
 
   it('uses the target agent provider when the global config belongs to another agent', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
-    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
-    setModelData('gpt-5.5', 256000, { none: null, low: 'low', high: 'high' });
     const deepseek = {
       id: 'deepseek',
       name: 'DeepSeek',
@@ -224,7 +217,7 @@ describe('config switch commands', () => {
     micaConfig.update(() => ({
       provider: deepseek.id,
       model: 'deepseek-v4-pro',
-      effort: 'high',
+      effort: 'low',
       contextWindowSize: 1000000,
       providers: [deepseek, openai],
     }));
@@ -232,7 +225,7 @@ describe('config switch commands', () => {
     const agent = makeAgent([], {
       provider: { ...openai, contextWindowSize: 256000 },
       model: 'gpt-5.4',
-      effort: 'minimal',
+      effort: 'low',
     });
     const session = makeSession();
 
@@ -251,7 +244,7 @@ describe('config switch commands', () => {
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Model: gpt-5.5; Adjusted defaults: effort minimal -> low',
+        'Model: gpt-5.5',
         undefined,
       );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);

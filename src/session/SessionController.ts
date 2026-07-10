@@ -166,6 +166,7 @@ function toPersistedSnapshot(
 ): PersistedRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
+    protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
     messages: snapshot.messages,
@@ -178,6 +179,7 @@ function toPersistedSnapshot(
 function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
+    protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
     messages: snapshot.messages,
@@ -280,8 +282,8 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
       ...config,
       provider: provider.id,
       model,
-      effort: micaConfig.clampProviderEffort(provider, snapshot.effort, model),
-      contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
+      contextWindowSize: micaConfig.getModelRule(model).contextSize,
     };
   });
 }

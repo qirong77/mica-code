@@ -311,7 +311,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
   private get reasoningParams(): Record<string, unknown> {
     if (!this.provider || !this.effort) return {};
-    return resolveResponsesReasoningParams(this.provider, this.effort, this.model);
+    return resolveResponsesReasoningParams(this.provider, this.effort);
   }
 
   private recordUsage(
@@ -388,6 +388,7 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
   switch (item.type) {
     case 'message':
     case 'function_call':
+    case 'reasoning':
       return item;
     default:
       return null;

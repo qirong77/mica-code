@@ -1,7 +1,5 @@
 import { requireProvider, type IMicaConfig } from './types.js';
-import { clampProviderEffort } from './effort.js';
-import { getModelContextWindowSizeFromConfig } from './model-rules/index.js';
-import { loadModelsDevDataForModels } from './model-rules/modelsDevCache.js';
+import { getModelRule } from './getModelRule.js';
 
 export type RuntimeConfigStore = {
   getConfig(): IMicaConfig;
@@ -31,9 +29,6 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
     throw new Error(`Invalid model list for provider ${provider.id}`);
   }
 
-  // Populate per-model context/effort from models.dev
-  await loadModelsDevDataForModels(models);
-
   store.updateRuntimeConfig((config) => {
     const providers = config.providers.map((item) => {
       if (item.id !== providerId) return item;
@@ -48,8 +43,8 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
       ...config,
       providers,
       model,
-      contextWindowSize: current ? getModelContextWindowSizeFromConfig(model) : config.contextWindowSize,
-      effort: current ? clampProviderEffort(current, config.effort, model) : config.effort,
+      contextWindowSize: current ? getModelRule(model).contextSize : config.contextWindowSize,
+      effort: current?.supportsEffort === false ? 'none' : config.effort,
     };
   });
   return models;

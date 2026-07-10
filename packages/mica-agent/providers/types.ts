@@ -11,5 +11,4 @@ export type ModelClientOptions = {
   toolFilter?: ToolFilter;
   toolContext?: unknown;
   systemPrompt?: string;
-  maxTokens?: number;
 };

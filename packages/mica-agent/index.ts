@@ -38,8 +38,6 @@ export type {
 export { createModelClient, createSubAgent } from './providers/createModelClient.js';
 export { ChatCompletionsClient } from './providers/ChatCompletionsClient.js';
 export { ResponsesClient } from './providers/ResponsesClient.js';
-export { AnthropicAgent } from './providers/AnthropicAgent.js';
 export type { ModelClientOptions } from './providers/types.js';
 export type { ChatCompletionsUsageRecord } from './providers/ChatCompletionsClient.js';
 export type { ResponsesUsageRecord } from './providers/ResponsesClient.js';
-export type { AnthropicUsageRecord } from './providers/AnthropicAgent.js';

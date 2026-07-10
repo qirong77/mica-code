@@ -32,11 +32,11 @@ export function showEffortSelector(
   services: CommandRuntimeServices,
   options: { onAfterSelect?: (effort: string) => void | Promise<void> } = {},
 ): void {
-  const effortOptions = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
+  const effortOptions = agent.config.provider.supportsEffort === false ? ['none'] : micaConfig.effortOptions;
   showSelectCommand({
     id: 'select-effort',
     title: 'select effort',
-    current: micaConfig.clampProviderEffort(agent.config.provider, agent.config.effort as EffortOption, agent.config.model),
+    current: agent.config.provider.supportsEffort === false ? 'none' : agent.config.effort,
     options: effortOptions.map((effort) => ({
       name: effort,
       label: effort,
@@ -65,7 +65,7 @@ async function applyEffortSelection(
       );
       return false;
     }
-    const availableEfforts = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
+    const availableEfforts = micaConfig.effortOptions;
     if (!availableEfforts.includes(effort as EffortOption)) {
       services.showMessage(
         `${agent.config.provider.name ?? agent.config.provider.id} supports effort: ${availableEfforts.join(', ')}`,
@@ -88,11 +88,7 @@ async function applyEffortSelection(
       services,
       update: (config) => ({
         ...config,
-        effort: micaConfig.clampProviderEffort(
-          config.providers.find((provider) => provider.id === config.provider) ?? agent.config.provider,
-          effort as EffortOption,
-          config.model,
-        ),
+        effort: effort as EffortOption,
       }),
       successMessage: () => `Effort: ${effort}`,
     });

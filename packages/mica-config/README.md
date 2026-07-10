@@ -47,12 +47,8 @@ if (!result.ok) {
 
 ## 模型规则
 
-Mica 不再维护预编译的 `model-rules.json` 和全量同步脚本。当 provider 配置了 `get_model_url` 时，加载模型列表时会按需从 [Models.dev](https://models.dev) 查找每个模型的 context window 和 reasoning effort 映射。
+所有模型规则都由 `getModelRule.ts` 中的固定函数生成，contextSize 为 1M。effort 固定支持 `none/low/medium/high/xhigh` 五档并直接映射到 OpenAI 请求参数。
 
-- 未命中数据时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
-- Models.dev 数据缓存到 `MICA_HOME/models.dev.json`，每 12 小时刷新一次。
-- 模型匹配逻辑：先按完整 canonical ID 精确匹配，再按 bare model ID（`/` 后最后一段）匹配。
-- Effort 映射从 Models.dev `api.json` 中对应 provider endpoint 的 `reasoning_options` 推导。
 - Provider 可通过设置 `supportsEffort: false` 禁用 effort 选择。
 
 ## 目录说明
@@ -60,13 +56,11 @@ Mica 不再维护预编译的 `model-rules.json` 和全量同步脚本。当 pro
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `effort.ts`：Effort 选项、映射与请求参数转换。
-- `modelRules.ts`：按需 per-model 数据缓存（contextSize + effortMap）。
-- `model-rules/modelsDevCache.ts`：Models.dev 数据拉取、磁盘缓存和按需查找。
+- `getModelRule.ts`：生成所有模型共用的固定规则。
 - `persistence.ts`：配置文件 IO。
-- `providerModels.ts`：模型列表加载、models.dev 数据关联和缓存管理。
+- `providerModels.ts`：模型列表加载与运行时缓存管理。
 - `runtimeEnv.ts`：运行时环境变量读取。
 - `types.ts`：配置与 provider 的类型定义。
 - `validation.ts`：配置校验。
 - `default.json`：首次启动时使用的默认配置模板。
-- `model-rules/modelsDevCache.ts`：Models.dev 数据拉取、缓存和按需查找核心。
 - `index.ts`：公共 API 聚合导出。

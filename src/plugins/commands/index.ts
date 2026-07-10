@@ -39,7 +39,6 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createRewindCommand(services),
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
-    micaBuiltinCommands.createReviewCommand(services),
     micaBuiltinCommands.createCommitCommand(activeAgent, services),
     micaBuiltinCommands.createTaskCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),

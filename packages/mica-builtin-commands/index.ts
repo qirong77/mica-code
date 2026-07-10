@@ -14,7 +14,6 @@ import { createNewCommand } from './new.js';
 import { createProviderCommand } from './provider.js';
 import { createRecapCommand } from './recap.js';
 import { createRenameCommand } from './rename.js';
-import { createReviewCommand } from './review.js';
 import { createResumeCommand } from './resume.js';
 import { createRewindCommand } from './rewind.js';
 import { createSkillsCommand } from './skills.js';
@@ -39,7 +38,6 @@ export const micaBuiltinCommands = {
   createProviderCommand,
   createRecapCommand,
   createRenameCommand,
-  createReviewCommand,
   createResumeCommand,
   createRewindCommand,
   createSkillsCommand,

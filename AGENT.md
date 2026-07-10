@@ -186,7 +186,6 @@ temp/                              临时代码和外部实验，默认不参与
 - `createModelClient` 根据 `provider.protocol` 显式分流：
   - `openai_chat_completions` -> `ChatCompletionsClient`
   - `openai_responses` -> `ResponsesClient`
-  - `anthropic_messages` -> `AnthropicAgent`
 - 不要根据 `api_base` 猜测协议。第三方 provider 是否支持 Responses、Chat Completions、reasoning effort 或特定参数，必须通过配置、官方资料或最小探针确认。
 - provider adapter 负责协议消息结构、history normalizer、usage 归一化、tool-call 格式、请求参数转换和 abort signal。
 - runtime 不直接拼 provider 请求参数。Chat Completions effort 参数通过 `resolveChatCompletionsEffortParams` 生成，Responses reasoning 参数通过 `resolveResponsesReasoningParams` 生成。
@@ -211,7 +210,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 - JSON 解析失败时，旧文件会被重命名为 `config.json.invalid-<timestamp>`，然后写入默认配置。
 - 持久化配置类型是 `PersistedMicaConfig`，主要保存 `providers`、`serperApiKey`、`mcpServers` 等静态配置。
 - 顶层 `provider`、`model`、`effort`、`contextWindowSize` 是运行时合成字段，不应写回 `config.json`。`updateConfig` 会通过 `stripRuntimeFields` 去掉它们。
-- `ProviderDefinition.protocol` 是必填有效值，必须是 `openai_chat_completions`、`openai_responses` 或 `anthropic_messages`。
+- `ProviderDefinition.protocol` 是必填有效值，只支持 `openai_chat_completions` 或 `openai_responses`。
 - 当前 provider 缺少 `api_key` 是 warning，可以启动 UI，但首次发送消息前仍需要可用 key。
 
 ### Storage
@@ -233,9 +232,9 @@ bun test packages/mica-agent/prompt/index.test.ts
 
 ## 模型、Effort 与 Context 规则
 
-- 全局 effort 枚举是 `none/minimal/low/medium/high/xhigh`。
+- 全局 effort 枚举是 `none/low/medium/high/xhigh`，直接映射到 OpenAI 请求参数。
 - 默认 effort map 是 `none -> null`、`low -> low`、`medium -> medium`、`high -> high`。未加载数据的模型默认提供 `none/low/medium/high`。
-- Provider 可通过 `get_model_url` 拉取模型列表；加载模型时会同时从 [Models.dev](https://models.dev) 查找对应模型的 context window 和 reasoning effort 映射。
+- Provider 可通过 `get_model_url` 拉取模型列表；所有模型使用 `getModelRule` 返回的固定 context window 和 reasoning effort 映射。
 - 只有明确配置了 `get_model_url` 的动态 provider 才会触发 on-demand 模型数据查找。
 - context size 默认 256K，实际值由 Models.dev canonical 模型记录的 `limit.context` 决定。
 - 未在 Models.dev 中找到的模型使用默认值：256K context、`none/low/medium/high` effort。
@@ -276,8 +275,6 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/skills`：列出已安装的 skills。
 - `/copy`：复制最后一条消息的内容到剪贴板。
 - `/rename`：重命名当前会话。
-- `/git-diff-context [base|-]`：把 git diff 作为上下文发送给 agent，默认对比 `master`，传 `-` 使用当前工作区变化。
-- `/review`：把当前工作区 git 变化发送给 agent 做代码审查。
 - `/commit`：分析当前 git 变化，生成提交信息，提交并推送。
 - `/exit`：退出程序。
 
@@ -402,8 +399,6 @@ AGENT.md
 - `packages/mica-agent/providers/createModelClient.test.ts`
 - `packages/mica-agent/core/retry.test.ts`
 - `packages/mica-builtin-commands/configSwitch.test.ts`
-- `packages/mica-builtin-commands/gitDiffContext.test.ts`
-- `packages/mica-builtin-commands/review.test.ts`
 - `packages/mica-builtin-commands/recap.test.ts`
 - `packages/mica-config/config.test.ts`
 - `packages/mica-config/micaStorage.test.ts`

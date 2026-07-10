@@ -38,5 +38,4 @@ queue.enqueue({ text: '继续' });
 - `AbortResult.ts`：中止结果。
 - `AbortResult.ts`：中止结果。
 - `MessageQueueService.ts`：运行中输入排队服务。
-- `MemoryUsageMonitor.ts`：运行时内存与进程资源用量采集与快照。
 - `index.ts`：公共 API 聚合导出。

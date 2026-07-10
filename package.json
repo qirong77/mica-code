@@ -18,7 +18,6 @@
     "packages/*/*"
   ],
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.1",
     "@anthropic/ink": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",

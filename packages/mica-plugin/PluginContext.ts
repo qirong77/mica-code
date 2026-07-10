@@ -26,15 +26,6 @@ export type PluginContext = {
     text(args: string[], options?: { timeout?: number }): string;
     formatError(error: unknown): string;
   };
-  memory?: {
-    capture(label?: string): unknown;
-    getSnapshots(): unknown[];
-    isRunning(): boolean;
-    getStartedAt(): number | null;
-    getIntervalMs(): number;
-    getMaxSnapshots(): number;
-    [key: string]: unknown;
-  };
   logger: {
     info(event: string, data?: unknown): void;
     warn(event: string, data?: unknown): void;

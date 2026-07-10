@@ -1,4 +1,3 @@
-import { getProviderEffortOptions } from './effort.js';
 import {
   CONFIG_PATH,
   EFFORT_OPTIONS,
@@ -178,24 +177,12 @@ function validateCurrentProvider(
     );
   }
 
-  const effortOptions =
-    isEffortOption(config.effort) && isNonEmptyString(currentProvider.api_base) && isNonEmptyString(config.model)
-      ? getProviderEffortOptions(currentProvider, config.model)
-      : undefined;
   if (currentProvider.supportsEffort === false && config.effort !== 'none') {
     add(
       'warning',
       'effort_ignored',
       'effort',
       `当前 provider "${currentProvider.id}" 不使用 reasoning effort，运行时会显示为 none。`,
-    );
-  } else if (effortOptions && !effortOptions.includes(config.effort)) {
-    add(
-      'error',
-      'effort_not_supported_by_provider',
-      'effort',
-      `当前 provider "${currentProvider.id}" 的 model "${config.model}" 不支持 effort "${config.effort}"。`,
-      `可用 effort: ${effortOptions.join(' | ')}。`,
     );
   }
 }

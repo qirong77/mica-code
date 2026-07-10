@@ -2,10 +2,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
-import type { EffortOption } from '@packages/mica-config/index.js';
+import {
+  isEffortOption,
+  isProviderProtocol,
+  type EffortOption,
+  type ProviderProtocol,
+} from '@packages/mica-config/index.js';
 
 export type PersistedRuntimeSnapshot = {
   providerId: string;
+  protocol: ProviderProtocol;
   model: string;
   effort: EffortOption;
   messages: unknown[];
@@ -130,7 +136,8 @@ function parseSession(value: unknown): PersistedSession | null {
   if (session.version !== 1) return null;
   if (!session.id || !session.title || !session.createdAt || !session.updatedAt || !session.cwd) return null;
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
-  if (!session.snapshot.providerId || !session.snapshot.model || !session.snapshot.effort) return null;
+  if (!session.snapshot.providerId || !session.snapshot.model) return null;
+  if (!isProviderProtocol(session.snapshot.protocol) || !isEffortOption(session.snapshot.effort)) return null;
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;

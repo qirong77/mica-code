@@ -1,14 +1,14 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-export const EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const;
+export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
+export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses'] as const;
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number];
 export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
-export type EffortMap = Partial<Record<EffortOption, string | null>>;
+export type EffortMap = Record<EffortOption, EffortOption>;
 
 export interface ProviderDefinition {
   id: string;
@@ -36,15 +36,10 @@ export interface IMicaConfig extends PersistedMicaConfig {
 }
 
 export type ModelRule = {
-  name?: string;
+  name: string;
   modelKeysIncludes: string[];
-  modelAliases?: string[];
-  contextSize?: number | string;
-  enableEffort?: boolean;
-  effortMap?: EffortMap;
-  source?: 'models.dev';
-  canonicalModel?: string;
-  runtime?: boolean;
+  contextSize: number;
+  effortMap: EffortMap;
 };
 
 export type ResolvedEffortParams = Record<string, unknown>;

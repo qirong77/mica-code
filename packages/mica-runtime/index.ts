@@ -1,13 +1,11 @@
 import { createRuntimeInput } from './RuntimeInput.js';
 import { RuntimeEventBus } from './RuntimeEventBus.js';
 import { MessageQueueService } from './MessageQueueService.js';
-import { memoryUsageMonitor } from './MemoryUsageMonitor.js';
 
 export const micaRuntime = {
   createRuntimeInput,
   RuntimeEventBus,
   MessageQueueService,
-  memoryUsageMonitor,
 };
 
 export type { RuntimeEventBus } from './RuntimeEventBus.js';
@@ -20,4 +18,3 @@ export type { RuntimeViewSnapshot } from './RuntimeViewSnapshot.js';
 export type { SubmitOptions, SubmitResult } from './SubmitResult.js';
 export type { AbortResult } from './AbortResult.js';
 export type { RewindApplyResult, RewindFileAction, RewindFileChange, RewindPreviewResult } from './Rewind.js';
-export type { MemoryUsageSnapshot, MemoryUsageValues, ResourceUsageValues } from './MemoryUsageMonitor.js';

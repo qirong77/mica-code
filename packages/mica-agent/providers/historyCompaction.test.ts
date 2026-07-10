@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import { AnthropicAgent } from './AnthropicAgent.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { ResponsesClient } from './ResponsesClient.js';
@@ -17,23 +16,6 @@ describe('compactHistoricalToolResultText', () => {
     expect(output.length).toBeLessThanOrEqual(MAX_HISTORICAL_TOOL_RESULT_CHARS);
     expect(output).toContain('历史工具结果已压缩');
     expect(output).toMatch(/省略 \d+ 字符/);
-  });
-
-  it('compacts Anthropic tool results when loading snapshots', () => {
-    const agent = new AnthropicAgent(options('anthropic_messages'));
-    agent.loadSnapshot({
-      model: 'test-model',
-      messages: [
-        { role: 'assistant', content: [{ type: 'tool_use', id: 'tool-1', name: 'read_file', input: {} }] },
-        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: longToolResult() }] },
-      ],
-      usageHistory: [],
-      lastUsage: undefined,
-      conversationMessages: [],
-    });
-
-    expect(JSON.stringify(agent.getSnapshot().messages[1])).toContain('历史工具结果已压缩');
-    expect(JSON.stringify(agent.getSnapshot().messages[1]).length).toBeLessThan(MAX_HISTORICAL_TOOL_RESULT_CHARS + 500);
   });
 
   it('compacts Responses tool results when loading snapshots', () => {

@@ -1,4 +1,9 @@
-import { micaConfig, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
+import {
+  micaConfig,
+  type EffortOption,
+  type ProviderDefinition,
+  type ProviderProtocol,
+} from '@packages/mica-config/index.js';
 import type { ModelClientOptions } from '@packages/mica-agent/index.js';
 
 export type RuntimeProviderDefinition = ProviderDefinition & { contextWindowSize: number };
@@ -11,6 +16,7 @@ export type AgentRuntimeConfig = {
 
 export type AgentRuntimeConfigSnapshot = {
   providerId: string;
+  protocol: ProviderProtocol;
   model: string;
   effort: EffortOption;
 };
@@ -27,7 +33,7 @@ export function readAgentRuntimeConfig(): AgentRuntimeConfig {
   return {
     provider: normalizedProvider,
     model,
-    effort: micaConfig.clampProviderEffort(normalizedProvider, config.effort, model),
+    effort: normalizedProvider.supportsEffort === false ? 'none' : config.effort,
   };
 }
 
@@ -37,12 +43,15 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   if (!provider) {
     throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
   }
+  if (provider.protocol !== snapshot.protocol) {
+    throw new Error(`Session protocol mismatch: ${snapshot.protocol} -> ${provider.protocol}`);
+  }
   const model = snapshot.model;
   const normalizedProvider = normalizeProviderForModel(provider, model);
   return {
     provider: normalizedProvider,
     model,
-    effort: micaConfig.clampProviderEffort(normalizedProvider, snapshot.effort, model),
+    effort: normalizedProvider.supportsEffort === false ? 'none' : snapshot.effort,
   };
 }
 
@@ -51,7 +60,7 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
     apiKey: config.provider.api_key,
     baseURL: config.provider.api_base,
     model: config.model,
-    effort: micaConfig.clampProviderEffort(config.provider, config.effort, config.model),
+    effort: config.provider.supportsEffort === false ? 'none' : config.effort,
     provider: config.provider,
   };
 }
@@ -59,6 +68,6 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
 function normalizeProviderForModel(provider: ProviderDefinition, model: string): RuntimeProviderDefinition {
   return {
     ...provider,
-    contextWindowSize: micaConfig.getModelContextWindowSizeFromConfig(model),
+    contextWindowSize: micaConfig.getModelRule(model).contextSize,
   };
 }

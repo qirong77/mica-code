@@ -94,7 +94,8 @@ function makeInput(text: string): RuntimeInput {
 
 function makeSnapshot(messages: unknown[]): AgentRuntimeSnapshot {
   return {
-    providerId: 'test',
+    providerId: 'openai',
+    protocol: 'openai_chat_completions',
     model: 'test-model',
     effort: 'none',
     messages,

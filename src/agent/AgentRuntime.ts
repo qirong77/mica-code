@@ -8,7 +8,7 @@ import {
   type ModelClientOptions,
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import type { EffortOption } from '@packages/mica-config/index.js';
+import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
   createAgentClientOptions,
@@ -36,6 +36,7 @@ export type AgentRuntimeEvents = {
 
 export type AgentRuntimeSnapshot = {
   providerId: string;
+  protocol: ProviderProtocol;
   model: string;
   effort: EffortOption;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
@@ -141,13 +142,14 @@ export class AgentRuntime {
     if (this.isRunning) {
       throw new Error('Cannot reload config while agent is running');
     }
+    const previousProtocol = this.currentConfig.provider.protocol;
     const previousSnapshot = !resetSession ? this.client?.getSnapshot() : null;
     if (resetSession) {
       this.runId++;
     }
     this.currentConfig = readAgentRuntimeConfig();
     this.recreateClient();
-    if (!resetSession && previousSnapshot && this.client) {
+    if (!resetSession && previousProtocol === this.currentConfig.provider.protocol && previousSnapshot && this.client) {
       this.client.loadSnapshot({
         ...previousSnapshot,
         model: this.currentConfig.model,
@@ -178,6 +180,7 @@ export class AgentRuntime {
     const snapshot = this.client?.getSnapshot();
     return {
       providerId: this.currentConfig.provider.id,
+      protocol: this.currentConfig.provider.protocol,
       model: this.currentConfig.model,
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       messages: snapshot?.messages ?? [],

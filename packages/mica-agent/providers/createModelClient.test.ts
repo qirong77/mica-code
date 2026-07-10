@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import { AnthropicAgent } from './AnthropicAgent.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { ResponsesClient } from './ResponsesClient.js';
 import { createModelClient, createSubAgent } from './createModelClient.js';
@@ -10,7 +9,6 @@ describe('createModelClient', () => {
   it.each([
     ['openai_chat_completions', 'openai_chat_completions', ChatCompletionsClient],
     ['openai_responses', 'openai_responses', ResponsesClient],
-    ['anthropic_messages', 'anthropic_messages', AnthropicAgent],
   ] as const)('routes %s protocol to the matching client', (_label, protocol, ClientClass) => {
     expect(createModelClient(options(protocol))).toBeInstanceOf(ClientClass);
   });

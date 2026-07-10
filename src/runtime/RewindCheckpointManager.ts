@@ -291,6 +291,7 @@ function splitNul(buffer: Buffer): string[] {
 function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
+    protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
     messages: cloneJson(snapshot.messages),

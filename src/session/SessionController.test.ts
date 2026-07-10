@@ -35,7 +35,8 @@ describe('SessionController', () => {
     const saves: PersistedSession[] = [];
     const agent: SessionAgentAdapter = {
       getSnapshot: vi.fn(() => ({
-        providerId: 'test-provider',
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
         model: 'test-model',
         effort: 'none' as const,
         messages: [{ role: 'user', content: 'original prompt' }],
@@ -66,7 +67,8 @@ describe('SessionController', () => {
   it('restores persisted UI conversation messages without loading notices into agent history', async () => {
     const { SessionController } = await import('./SessionController.js');
     const snapshot = {
-      providerId: 'test-provider',
+      providerId: 'openai',
+      protocol: 'openai_chat_completions' as const,
       model: 'test-model',
       effort: 'none' as const,
       messages: [{ role: 'user', content: 'model prompt' }],
@@ -92,6 +94,7 @@ describe('SessionController', () => {
       getSnapshot: vi.fn(
         (): AgentRuntimeSnapshot => ({
           providerId: snapshot.providerId,
+          protocol: snapshot.protocol,
           model: snapshot.model,
           effort: snapshot.effort,
           messages: snapshot.messages,
@@ -121,6 +124,7 @@ describe('SessionController', () => {
     expect(result.ok).toBe(true);
     expect(agent.loadSnapshot).toHaveBeenCalledWith({
       providerId: snapshot.providerId,
+      protocol: snapshot.protocol,
       model: snapshot.model,
       effort: snapshot.effort,
       messages: snapshot.messages,
@@ -132,7 +136,6 @@ describe('SessionController', () => {
 
   it('clamps restored session effort before reloading config', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
-    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
     const { SessionController } = await import('./SessionController.js');
     const provider = {
       id: 'deepseek',
@@ -150,9 +153,6 @@ describe('SessionController', () => {
       providers: [provider],
     }));
 
-    // Set per-model data matching old DeepSeek V4 effort rules
-    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
-
     const session: PersistedSession = {
       version: 1,
       id: 'session-1',
@@ -162,6 +162,7 @@ describe('SessionController', () => {
       cwd: process.cwd(),
       snapshot: {
         providerId: provider.id,
+        protocol: provider.protocol,
         model: 'deepseek-v4-pro',
         effort: 'low',
         messages: [],
@@ -174,6 +175,7 @@ describe('SessionController', () => {
       getSnapshot: vi.fn(
         (): AgentRuntimeSnapshot => ({
           providerId: session.snapshot.providerId,
+          protocol: session.snapshot.protocol,
           model: session.snapshot.model,
           effort: session.snapshot.effort,
           messages: session.snapshot.messages,
@@ -183,7 +185,7 @@ describe('SessionController', () => {
       ),
       loadSnapshot: vi.fn(),
       reloadConfig: vi.fn(() => {
-        expect(micaConfig.get().effort).toBe('high');
+        expect(micaConfig.get().effort).toBe('low');
       }),
       toConversationMessages: vi.fn(() => []),
     };
@@ -202,10 +204,11 @@ describe('SessionController', () => {
     const result = controller.resume(session.id);
 
     expect(result.ok).toBe(true);
-    expect(micaConfig.get().effort).toBe('high');
+    expect(micaConfig.get().effort).toBe('low');
     expect(agent.reloadConfig).toHaveBeenCalledWith(false);
     expect(agent.loadSnapshot).toHaveBeenCalledWith({
       providerId: session.snapshot.providerId,
+      protocol: session.snapshot.protocol,
       model: session.snapshot.model,
       effort: session.snapshot.effort,
       messages: session.snapshot.messages,
