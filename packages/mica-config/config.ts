@@ -20,7 +20,7 @@ import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { ConfigValidationError, validateConfig } from './validation.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 import { clampProviderEffort } from './effort.js';
-import { getModelContextWindowSizeFromConfig, refreshModelRulesFromRemote } from './modelRules.js';
+import { getModelContextWindowSizeFromConfig } from './model-rules/index.js';
 
 export {
   CONFIG_PATH,
@@ -45,9 +45,10 @@ export type {
 export {
   DEFAULT_EFFORT_MAP,
   getEffortMapFromConfig,
+  setModelData,
+  clearModelData,
   getModelContextWindowSizeFromConfig,
-  refreshModelRulesFromRemote,
-} from './modelRules.js';
+} from './model-rules/index.js';
 export {
   clampProviderEffort,
   getProviderEffortOptions,
@@ -101,16 +102,6 @@ export async function loadMissingProviderModels() {
   await loadMissingProviderModelsFromStore({ getConfig, updateRuntimeConfig });
 }
 
-export async function refreshRemoteModelRules(): Promise<boolean> {
-  const refreshed = await refreshModelRulesFromRemote();
-  if (refreshed) {
-    updateRuntimeConfig((config) => ({
-      ...config,
-      contextWindowSize: getModelContextWindowSizeFromConfig(config.model),
-    }));
-  }
-  return refreshed;
-}
 
 function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());

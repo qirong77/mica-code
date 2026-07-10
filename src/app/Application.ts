@@ -55,7 +55,6 @@ export class Application {
 
     try {
       micaConfig.assertValid();
-      void micaConfig.refreshRemoteModelRules();
       await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);

@@ -58,6 +58,9 @@ describe('config switch commands', () => {
 
   it('clamps effort when switching to a model with narrower effort support', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
+    setModelData('gpt-5.5', 256000, { none: null, low: 'low', high: 'high' });
+    setModelData('gpt-5.4', 256000, { none: null, minimal: 'minimal', low: 'low', medium: 'medium', high: 'high' });
     const provider = {
       id: 'openai',
       name: 'OpenAI',
@@ -120,6 +123,8 @@ describe('config switch commands', () => {
 
   it('normalizes effort and context defaults when switching provider', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
+    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
     const openai = {
       id: 'openai',
       name: 'OpenAI',
@@ -198,6 +203,8 @@ describe('config switch commands', () => {
 
   it('uses the target agent provider when the global config belongs to another agent', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
+    setModelData('gpt-5.5', 256000, { none: null, low: 'low', high: 'high' });
     const deepseek = {
       id: 'deepseek',
       name: 'DeepSeek',

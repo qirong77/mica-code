@@ -5,7 +5,7 @@ import {
   type ProviderDefinition,
   type ResolvedEffortParams,
 } from './types.js';
-import { getEffortMapFromConfig, hasOwnEffort } from './modelRules.js';
+import { getEffortMapFromConfig, hasOwnEffort } from './model-rules/index.js';
 
 type ProviderEffortParamFormat = 'openai' | 'deepseek' | 'zai' | 'openrouter';
 export type ResponsesReasoningParams = { reasoning?: { effort: string } };

@@ -13,7 +13,6 @@
 - 校验配置语义并生成可操作提示：`micaConfig.validate(config)`、`micaConfig.assertValid(config)`。
 - 拉取指定 provider 的模型列表并缓存到内存运行态配置：`micaConfig.loadProviderModels(providerId)`。
 - 为动态 provider 批量加载运行时模型列表：`micaConfig.loadMissingProviderModels()`。
-- 从 GitHub 远程刷新模型规则缓存：`micaConfig.refreshRemoteModelRules()`。
 - 读取本地状态：`micaConfig.storage.read()`。
 - 读取共享输入框历史：`micaConfig.inputHistory.read()`。
 - 追加共享输入框历史：`micaConfig.inputHistory.append(text)`。
@@ -48,27 +47,26 @@ if (!result.ok) {
 
 ## 模型规则
 
-`model-rules.json` 维护 model → effort/contextSize 映射规则，按模型名小写后是否包含 `modelKeysIncludes` 中任一项匹配。规则目前仅兼容 OpenCode Zen 模型列表。
+Mica 不再维护预编译的 `model-rules.json` 和全量同步脚本。当 provider 配置了 `get_model_url` 时，加载模型列表时会按需从 [Models.dev](https://models.dev) 查找每个模型的 context window 和 reasoning effort 映射。
 
-- 未命中规则时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
-- 规则可通过 `enableEffort: false` 禁用模型族的 effort 选择。
-- 规则仅影响 effort UI 选项过滤和参数展开，不参与 provider 选择。
-- 维护内置模型 ID 时运行 `bun run update:model-rules`，从 OpenCode Zen 模型接口同步最新 ID。
-- 更新上下文窗口和 reasoning effort 时运行 `bun run update:model-rules:models-dev`，同步策略和数据源说明见 `models-dev/README.md`。自动结果仍应在合并前结合模型厂商官方资料审阅。
+- 未命中数据时，默认支持 `none/low/medium/high` 四档 effort，contextSize 默认 256K。
+- Models.dev 数据缓存到 `MICA_HOME/models.dev.json`，每 12 小时刷新一次。
+- 模型匹配逻辑：先按完整 canonical ID 精确匹配，再按 bare model ID（`/` 后最后一段）匹配。
+- Effort 映射从 Models.dev `api.json` 中对应 provider endpoint 的 `reasoning_options` 推导。
+- Provider 可通过设置 `supportsEffort: false` 禁用 effort 选择。
 
 ## 目录说明
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `effort.ts`：Effort 选项、映射与请求参数转换。
-- `modelRules.ts`：模型规则与远端刷新。
+- `modelRules.ts`：按需 per-model 数据缓存（contextSize + effortMap）。
+- `model-rules/modelsDevCache.ts`：Models.dev 数据拉取、磁盘缓存和按需查找。
 - `persistence.ts`：配置文件 IO。
-- `providerModels.ts`：模型列表加载和缓存管理。
+- `providerModels.ts`：模型列表加载、models.dev 数据关联和缓存管理。
 - `runtimeEnv.ts`：运行时环境变量读取。
 - `types.ts`：配置与 provider 的类型定义。
 - `validation.ts`：配置校验。
 - `default.json`：首次启动时使用的默认配置模板。
-- `model-rules.json`：模型 effort/contextSize 规则。
-- `models-dev/`：从 Models.dev 同步模型规格和 provider reasoning 配置的脚本及文档。
-- `../../scripts/update-model-rules.mjs`：根据 OpenCode Zen 模型列表同步 `model-rules.json` 中的模型 ID（脚本在仓库外层存在）。
+- `model-rules/modelsDevCache.ts`：Models.dev 数据拉取、缓存和按需查找核心。
 - `index.ts`：公共 API 聚合导出。

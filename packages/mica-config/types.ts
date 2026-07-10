@@ -38,9 +38,13 @@ export interface IMicaConfig extends PersistedMicaConfig {
 export type ModelRule = {
   name?: string;
   modelKeysIncludes: string[];
+  modelAliases?: string[];
   contextSize?: number | string;
   enableEffort?: boolean;
   effortMap?: EffortMap;
+  source?: 'models.dev';
+  canonicalModel?: string;
+  runtime?: boolean;
 };
 
 export type ResolvedEffortParams = Record<string, unknown>;

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IMicaConfig } from './config.js';
+import { clearModelData, setModelData } from './model-rules/index.js';
 
 const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;
@@ -13,7 +14,6 @@ let configApi: typeof import('./config.js');
 beforeAll(async () => {
   process.env.HOME = tempHome;
   process.env.MICA_HOME = tempHome;
-  vi.resetModules();
   configApi = (await import('./config.js')) as typeof import('./config.js');
 });
 
@@ -33,6 +33,7 @@ afterAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  clearModelData();
 });
 
 describe('validateConfig', () => {
@@ -193,11 +194,14 @@ describe('validateConfig', () => {
   it('filters and resolves provider-specific effort options', () => {
     const deepseek = baseConfig().providers[0]!;
 
+    // Set per-model data for deepseek-v4-pro
+    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
+
     expect(configApi.getProviderEffortOptions(deepseek, 'deepseek-v4-pro')).toEqual(['none', 'high', 'xhigh']);
     expect(configApi.clampProviderEffort(deepseek, 'low', 'deepseek-v4-pro')).toBe('high');
     expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh', 'deepseek-v4-pro')).toEqual({
       thinking: { type: 'enabled' },
-      reasoning_effort: 'max',
+      reasoning_effort: 'xhigh',
     });
     expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none', 'deepseek-v4-pro')).toEqual({
       thinking: { type: 'disabled' },
@@ -232,7 +236,7 @@ describe('validateConfig', () => {
     );
   });
 
-  it('uses model-specific effort rules before broad family rules', () => {
+  it('uses per-model effort and context data when set via setModelData', () => {
     const krill = baseConfig().providers[1]!;
     const openai = {
       ...krill,
@@ -240,58 +244,43 @@ describe('validateConfig', () => {
       api_base: 'https://api.openai.com/v1',
     };
 
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5')).toEqual(['minimal', 'low', 'medium', 'high']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.4')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.4-pro')).toEqual(['medium', 'high', 'xhigh']);
-    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.4-pro')).toBe(1050000);
-    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.2-codex')).toBe(400000);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.3-codex-spark')).toEqual([
-      'low',
-      'medium',
-      'high',
-      'xhigh',
-    ]);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.5-pro')).toEqual(['medium', 'high', 'xhigh']);
-    expect(configApi.getProviderEffortOptions(openai, 'gpt-5.6-sol')).toEqual([
-      'none',
-      'low',
-      'medium',
-      'high',
-      'xhigh',
-      'max',
-    ]);
-    expect(configApi.getModelContextWindowSizeFromConfig('gpt-5.6-terra')).toBe(1050000);
-    expect(configApi.getProviderEffortOptions(openai, 'claude-fable-5')).toEqual(['none']);
-    expect(configApi.getEffortMapFromConfig('unknown-reasoning-model')).toEqual({
+    // Default fallback: no data set → default effort map, default context (256K)
+    expect(configApi.getProviderEffortOptions(openai, 'unknown-model')).toEqual(['none', 'low', 'medium', 'high']);
+    expect(configApi.getModelContextWindowSizeFromConfig('unknown-model')).toBe(256000);
+
+    // Set per-model data
+    setModelData('known-pro-model', 1050000, { medium: 'medium', high: 'high', xhigh: 'xhigh' });
+    setModelData('known-codex-model', 400000, {
       none: null,
       low: 'low',
       medium: 'medium',
       high: 'high',
+      xhigh: 'xhigh',
     });
-    expect(configApi.getProviderEffortOptions(openai, 'unknown-reasoning-model')).toEqual([
-      'none',
-      'low',
-      'medium',
-      'high',
-    ]);
-    expect(configApi.getModelContextWindowSizeFromConfig('unknown-reasoning-model')).toBe(256000);
-    expect(configApi.resolveChatCompletionsEffortParams(openai, 'xhigh', 'gpt-5.4')).toEqual({
+    setModelData('known-reasoning-model', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
+    setModelData('known-noneffort-model', 256000, null);
+
+    // Read back via configApi
+    expect(configApi.getProviderEffortOptions(openai, 'known-pro-model')).toEqual(['medium', 'high', 'xhigh']);
+    expect(configApi.getModelContextWindowSizeFromConfig('known-pro-model')).toBe(1050000);
+    expect(configApi.getModelContextWindowSizeFromConfig('known-codex-model')).toBe(400000);
+    expect(configApi.getModelContextWindowSizeFromConfig('known-reasoning-model')).toBe(1000000);
+    expect(configApi.getModelContextWindowSizeFromConfig('known-noneffort-model')).toBe(256000);
+
+    // Unknown models still get defaults
+    expect(configApi.getModelContextWindowSizeFromConfig('not-loaded-model')).toBe(256000);
+
+    // effortMap: null → getProviderEffortOptions returns ['none']
+    expect(configApi.getProviderEffortOptions(openai, 'known-noneffort-model')).toEqual(['none']);
+    expect(configApi.getEffortMapFromConfig('known-noneffort-model')).toBeNull();
+
+    // Resolve params with per-model data
+    expect(configApi.resolveChatCompletionsEffortParams(openai, 'xhigh', 'known-reasoning-model')).toEqual({
       reasoning_effort: 'xhigh',
     });
-    expect(configApi.resolveResponsesReasoningParams(openai, 'xhigh', 'gpt-5.4')).toEqual({
+    expect(configApi.resolveResponsesReasoningParams(openai, 'xhigh', 'known-reasoning-model')).toEqual({
       reasoning: { effort: 'xhigh' },
     });
-    expect(configApi.resolveResponsesReasoningParams(krill, 'xhigh', 'gpt-5.5')).toEqual({
-      reasoning: { effort: 'xhigh' },
-    });
-    expect(configApi.resolveResponsesReasoningParams(openai, 'max', 'gpt-5.6-luna')).toEqual({
-      reasoning: { effort: 'max' },
-    });
-    expect(configApi.resolveResponsesReasoningParams(openai, 'none', 'gpt-5.6')).toEqual({
-      reasoning: { effort: 'none' },
-    });
-    expect(configApi.resolveResponsesReasoningParams(openai, 'none', 'unknown-reasoning-model')).toEqual({});
   });
 
   it('maps zai glm and kimi model effort variants', () => {
@@ -312,8 +301,14 @@ describe('validateConfig', () => {
       supportsEffort: false,
     };
 
+    // Set per-model data
+    setModelData('glm-4.7', 1000000, { none: null, low: 'high', medium: 'high', high: 'high', xhigh: 'max' });
+    setModelData('kimi-k2.6', 1000000, { none: null, high: 'high' });
+    setModelData('kimi-k2.5', 1000000, null);
+
+    expect(configApi.getModelContextWindowSizeFromConfig('glm-4.7')).toBe(1000000);
+
     expect(configApi.getProviderEffortOptions(zai, 'glm-4.7')).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
-    expect(configApi.getModelContextWindowSizeFromConfig('deepseek-v4-pro')).toBe(1000000);
     expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh', 'glm-4.7')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
@@ -324,6 +319,8 @@ describe('validateConfig', () => {
   });
 
   it('reports when top-level effort is not supported by the current provider', () => {
+    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
+
     const result = configApi.validateConfig({
       ...baseConfig(),
       effort: 'low',
@@ -373,7 +370,7 @@ describe('validateConfig', () => {
 });
 
 describe('loadProviderModels', () => {
-  it('keeps dynamically fetched models in memory without persisting them to config.json', async () => {
+  it('keeps dynamically fetched models in memory and loads models.dev data', async () => {
     const provider = {
       id: 'kimi',
       name: 'Kimi',
@@ -389,11 +386,13 @@ describe('loadProviderModels', () => {
       contextWindowSize: 256000,
       providers: [provider],
     }));
-    globalThis.fetch = vi.fn(async () => ({
+    globalThis.fetch = vi.fn(async (url: string) => ({
       ok: true,
-      json: async () => ({
-        data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }],
-      }),
+      json: async () => {
+        if (url === 'https://models.dev/api.json') return {};
+        if (url === 'https://models.dev/models.json') return {};
+        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
+      },
       text: async () => '',
     })) as unknown as typeof fetch;
 
@@ -401,6 +400,8 @@ describe('loadProviderModels', () => {
 
     expect(configApi.getConfig().model).toBe('kimi-k2.6');
     expect(configApi.getConfig().providers[0]?.models).toEqual(['kimi-k2.6', 'moonshot-v1-8k']);
+    expect(configApi.getConfig().contextWindowSize).toBe(256000);
+
     const persisted = JSON.parse(readFileSync(configApi.CONFIG_PATH, 'utf-8')) as {
       providers?: Array<Record<string, unknown>>;
     };
@@ -426,11 +427,13 @@ describe('loadProviderModels', () => {
       contextWindowSize: 256000,
       providers: [provider],
     }));
-    globalThis.fetch = vi.fn(async () => ({
+    globalThis.fetch = vi.fn(async (url: string) => ({
       ok: true,
-      json: async () => ({
-        data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }],
-      }),
+      json: async () => {
+        if (url === 'https://models.dev/api.json') return {};
+        if (url === 'https://models.dev/models.json') return {};
+        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
+      },
       text: async () => '',
     })) as unknown as typeof fetch;
 

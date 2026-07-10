@@ -132,6 +132,7 @@ describe('SessionController', () => {
 
   it('clamps restored session effort before reloading config', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { setModelData } = await import('@packages/mica-config/model-rules/index.js');
     const { SessionController } = await import('./SessionController.js');
     const provider = {
       id: 'deepseek',
@@ -148,6 +149,10 @@ describe('SessionController', () => {
       contextWindowSize: 1000000,
       providers: [provider],
     }));
+
+    // Set per-model data matching old DeepSeek V4 effort rules
+    setModelData('deepseek-v4-pro', 1000000, { none: null, high: 'high', xhigh: 'xhigh' });
+
     const session: PersistedSession = {
       version: 1,
       id: 'session-1',
