@@ -49,7 +49,7 @@ export function resolveConfigWebWorkerCommand(
   argv: readonly string[] = process.argv,
   execPath: string = process.execPath,
 ): { executable: string; entryArgs: string[] } {
-  const executable = execPath || argv[0] || process.execPath;
+  const executable = execPath;
   const entry = argv[1];
   if (!entry || entry === argv[0] || isBunCompiledVirtualEntry(entry, executable, argv[0])) {
     return { executable, entryArgs: [] };

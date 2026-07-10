@@ -144,11 +144,6 @@ function commandPanelId(command: string): string {
   return command.trim() || 'command';
 }
 
-function appendCommandPanelLine(lines: string[], line: string): string[] {
-  if (lines.at(-1) === line) return lines;
-  return [...lines, line].slice(-8);
-}
-
 function restoreSessionUi(agent: AgentRuntime, uiState: TerminalAgentUiState): void {
   const snapshot = agent.getSnapshot();
   micaUi.conversation.setMessages(
@@ -185,7 +180,6 @@ function showNoticeForSession(
     showCommandPanelNoticeForSession(context, ownerSessionId, text, options);
     return;
   }
-  const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
   if (options.command) {
     removeCommandPanelItemForSession(context, ownerSessionId, commandPanelId(options.command));
   }

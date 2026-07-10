@@ -67,16 +67,14 @@ export function showSelectCommand(config: SelectCommandConfig) {
         .then((result) => {
           shouldRunAfterSelect = result !== false;
         })
-        .catch((error) => {
-        })
+        .catch(() => {})
         .finally(() => {
           applying.set(false);
           hide();
           if (shouldRunAfterSelect && config.onAfterSelect) {
             void Promise.resolve()
               .then(() => config.onAfterSelect?.(selected.name))
-              .catch((error) => {
-              });
+              .catch(() => {});
           }
         });
     } else {

@@ -112,29 +112,3 @@ function formatCompactNotice(result: CompactResult): string {
   }
   return lines.join('\n');
 }
-
-function resultLog(result: CompactResult) {
-  return {
-    mode: result.mode,
-    strategy: result.strategy,
-    beforeCount: result.beforeCount,
-    afterCount: result.afterCount,
-    summarizedCount: result.summarizedCount,
-    keptCount: result.keptCount,
-    beforeTokenEstimate: result.beforeTokenEstimate,
-    afterTokenEstimate: result.afterTokenEstimate,
-    savedTokenEstimate: result.savedTokenEstimate,
-    savedRatio: result.savedRatio,
-    promptTooLongRetries: result.promptTooLongRetries,
-    forced: result.forced,
-    preview: result.preview,
-    contextWindowSize: result.contextWindowSize,
-    contextUsageRatio: result.contextUsageRatio,
-    lightweightTokenEstimate: result.lightweightTokenEstimate,
-    targetContextRatio: result.targetContextRatio,
-    pruneOnlyThresholdRatio: result.pruneOnlyThresholdRatio,
-    recentTokenEstimate: result.recentTokenEstimate,
-    summaryInputTokenEstimate: result.summaryInputTokenEstimate,
-    reducedRecentRounds: result.reducedRecentRounds,
-  };
-}

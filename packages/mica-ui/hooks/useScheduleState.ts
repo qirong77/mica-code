@@ -6,13 +6,6 @@ interface Readable<T> {
   subscribe(cb: (v: T) => void): () => void;
 }
 
-function uuid(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 const THROTTLE_INTERVAL = runtimeEnv.ui.scheduleStateThrottleMs;
 let lastFlushTime = 0;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -51,7 +44,7 @@ function scheduleFlush(immediate = false) {
 export function useScheduleState<T>(atom: Readable<T>): T {
   const [state, setState] = useState<T>(atom.get());
   const snapRef = useRef(state);
-  const stateUpdaterId = useRef(uuid());
+  const stateUpdaterId = useRef(crypto.randomUUID());
   useEffect(() => {
     const id = stateUpdaterId.current;
     setState(snapRef.current);

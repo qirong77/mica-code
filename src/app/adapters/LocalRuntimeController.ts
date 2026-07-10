@@ -438,7 +438,6 @@ export class LocalRuntimeController implements RuntimeController {
       await this.hooks.emit('turn:before', { runtime: this, input, content });
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
-      let lastError: unknown;
       let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
         if (attempt > 0) {
@@ -510,7 +509,6 @@ export class LocalRuntimeController implements RuntimeController {
           if (error instanceof AgentAbortError) {
             throw error;
           }
-          lastError = error;
           if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
             throw error;
           }

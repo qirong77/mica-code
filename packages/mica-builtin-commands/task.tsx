@@ -45,7 +45,7 @@ export function createTaskCommand(services: CommandRuntimeServices) {
         return;
       }
 
-      const backgroundTasks = filterActiveBackgroundTasks(syncBackgroundTasks());
+      syncBackgroundTasks();
       const agents = services.listRunningAgents();
       micaUi.panels.setAgentStatusItems(agents);
       showTaskPanel(services);

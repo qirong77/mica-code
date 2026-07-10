@@ -1,14 +1,11 @@
-
 import type { CommandRuntimeServices, RunningAgentRecord } from './services.js';
 
 export function submitAgentPromptInBackground({
-  namespace,
   services,
   session,
   prompt,
   startedMessage,
 }: {
-  namespace: 'plugin.new' | 'plugin.fork';
   services: CommandRuntimeServices;
   session: RunningAgentRecord;
   prompt: string;

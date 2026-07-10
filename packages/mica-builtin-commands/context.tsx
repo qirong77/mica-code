@@ -359,8 +359,7 @@ function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): Con
   try {
     const normalizer = getNormalizer(protocol);
     return normalizer.normalize(messages);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch {
     return messages.map((content) => ({ type: 'unknown', content }));
   }
 }

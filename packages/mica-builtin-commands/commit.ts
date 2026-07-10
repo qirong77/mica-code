@@ -65,7 +65,6 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     setCommitStatus(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
-    const changedFiles = parsePorcelainStatus(status);
     if (!status.trim()) {
       showCommitMessage(services, 'commit: 没有可提交的变化', ownerSessionId, 'info');
       return;

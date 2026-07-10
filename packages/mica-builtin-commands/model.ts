@@ -56,7 +56,7 @@ export async function showModelSelector(
     options: provider.models?.sort((a, b) => a.localeCompare(b)).map((model) => ({ name: model, label: model })) || [],
     emptyMessage: 'no models available',
     onSelect: (model) => {
-      return applyModelSelection(agent, sessionController, services, provider.id, model);
+      return applyModelSelection(agent, sessionController, services, model);
     },
     onAfterSelect: options.activateEffortAfterSelect
       ? () => {
@@ -70,7 +70,6 @@ async function applyModelSelection(
   agent: CommandAgent,
   sessionController: CommandSessionController,
   services: CommandRuntimeServices,
-  providerId: string,
   model: string,
 ): Promise<boolean> {
   try {

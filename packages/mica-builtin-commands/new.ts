@@ -11,7 +11,6 @@ export function createNewCommand(services: CommandRuntimeServices) {
       const prompt = arg?.trim();
       if (prompt) {
         submitAgentPromptInBackground({
-          namespace: 'plugin.new',
           services,
           session,
           prompt,

@@ -15,7 +15,6 @@ import {
   type PluginManager,
   type PluginSetupReport,
 } from '@packages/mica-plugin/index.js';
-import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
@@ -223,7 +222,11 @@ function writePluginStatus(filePlugins: FilePluginLoadResult, setupReport: Plugi
       status: setupFailed.has(plugin.pluginId) ? 'failed' : loadedIds.has(plugin.pluginId) ? 'loaded' : 'registered',
       error: setupFailed.get(plugin.pluginId),
     })),
-    loadFailed: filePlugins.failed.map((item) => ({ file: item.file, status: 'failed', error: formatError(item.error) })),
+    loadFailed: filePlugins.failed.map((item) => ({
+      file: item.file,
+      status: 'failed',
+      error: formatError(item.error),
+    })),
   };
   mkdirSync(paths.config, { recursive: true });
   writeFileSync(join(paths.config, 'plugin-status.json'), `${JSON.stringify(status, null, 2)}\n`, 'utf-8');
@@ -237,12 +240,6 @@ async function ensureInitialModelSelection(): Promise<void> {
   if (!provider?.get_model_url) return;
 
   await micaConfig.loadProviderModels(provider.id);
-}
-
-function toLogData(data: unknown): Record<string, unknown> | undefined {
-  if (data == null) return undefined;
-  if (typeof data === 'object' && !Array.isArray(data)) return data as Record<string, unknown>;
-  return { value: data };
 }
 
 function formatError(error: unknown): string {

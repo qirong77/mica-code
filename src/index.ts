@@ -2,8 +2,8 @@
 
 import { createApplication } from './app/index.js';
 import { reportRuntimeError } from './runtime/uiBridge.js';
-import { startConfigWebServer } from '@packages/mica-config-web/server/server.js';
-import { getConfigWebWorkerToken } from '@packages/mica-config-web/server/workerArgs.js';
+import { startConfigWebServer } from '@packages/mica-config-web/src/server/server.js';
+import { getConfigWebWorkerToken } from '@packages/mica-config-web/src/server/workerArgs.js';
 
 const configWebWorkerToken = getConfigWebWorkerToken();
 if (configWebWorkerToken) {

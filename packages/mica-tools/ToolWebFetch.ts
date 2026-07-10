@@ -274,9 +274,7 @@ export class ToolWebFetch extends MicaTool {
       throw new Error(`重定向次数超过 ${MAX_REDIRECTS} 次`);
     }
 
-    const targetUrl = url;
-
-    const response = await fetch(targetUrl, {
+    const response = await fetch(url, {
       signal,
       redirect: 'manual',
       headers: { Accept: 'text/html,text/markdown,text/plain,application/json,*/*' },
@@ -286,7 +284,7 @@ export class ToolWebFetch extends MicaTool {
       const location = response.headers.get('location');
       if (!location) throw new Error('重定向响应缺少 Location 头');
 
-      const redirectUrl = new URL(location, targetUrl).toString();
+      const redirectUrl = new URL(location, url).toString();
 
       return this._fetchWithRedirects(redirectUrl, signal, maxBytes, depth + 1);
     }
@@ -312,7 +310,7 @@ export class ToolWebFetch extends MicaTool {
       status: response.status,
       statusText: response.statusText,
       contentType,
-      finalUrl: targetUrl,
+      finalUrl: url,
     };
   }
 }

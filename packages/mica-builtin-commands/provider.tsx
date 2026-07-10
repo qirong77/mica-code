@@ -68,7 +68,7 @@ async function applyProviderSelection(
     );
     await loadProviderModelsForSwitch(providerId, services);
 
-    const next = applyConfigSwitchUpdate({
+    applyConfigSwitchUpdate({
       agent,
       sessionController,
       services,

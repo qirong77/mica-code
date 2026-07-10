@@ -44,7 +44,6 @@ describe('model configuration', () => {
     expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none')).toEqual({});
   });
 
-
   it('uses the fixed rule for every model', () => {
     const krill = baseConfig().providers[1]!;
     const openai = {
@@ -89,7 +88,6 @@ describe('model configuration', () => {
     });
     expect(configApi.resolveChatCompletionsEffortParams(disabledProvider, 'high')).toEqual({});
   });
-
 });
 
 describe('loadProviderModels', () => {
@@ -109,10 +107,10 @@ describe('loadProviderModels', () => {
       contextWindowSize: 256000,
       providers: [provider],
     }));
-    globalThis.fetch = vi.fn(async (url: string) => ({
+    globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => {
-                return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
+        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
       },
       text: async () => '',
     })) as unknown as typeof fetch;
@@ -148,10 +146,10 @@ describe('loadProviderModels', () => {
       contextWindowSize: 256000,
       providers: [provider],
     }));
-    globalThis.fetch = vi.fn(async (url: string) => ({
+    globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => {
-                return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
+        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
       },
       text: async () => '',
     })) as unknown as typeof fetch;

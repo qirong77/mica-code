@@ -1,4 +1,3 @@
-
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { submitAgentPromptInBackground } from './agentBackground.js';
@@ -12,7 +11,6 @@ export function createForkCommand(services: CommandRuntimeServices) {
       const prompt = arg?.trim();
       if (prompt) {
         submitAgentPromptInBackground({
-          namespace: 'plugin.fork',
           services,
           session: forked,
           prompt,

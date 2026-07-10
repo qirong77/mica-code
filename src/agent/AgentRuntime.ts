@@ -59,14 +59,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
 }
 
-function contentToText(content: AgentQueryContent): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
-}
-
 function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
@@ -251,7 +243,6 @@ export class AgentRuntime {
   async run(question: AgentQueryContent, options: AgentRunOptions = {}): Promise<{ runId: number; text: string }> {
     const runId = ++this.runId;
     const startedAt = Date.now();
-    const questionText = contentToText(question);
 
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
