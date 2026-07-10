@@ -123,10 +123,12 @@ export function summarizeAllSessionUsage(
   sessionController?: CommandSessionController,
 ): TotalSessionUsageSummary {
   const store = micaSession.createStore();
-  const sessions = store
-    .list(Number.MAX_SAFE_INTEGER)
-    .map((summary) => store.load(summary.id))
-    .filter((session): session is PersistedSession => Boolean(session));
+  const sessions = store.listAllForUsage
+    ? store.listAllForUsage()
+    : store
+        .list(Number.MAX_SAFE_INTEGER)
+        .map((summary) => store.load(summary.id))
+        .filter((session): session is PersistedSession => Boolean(session));
   const currentSessionId = sessionController?.getCurrentSessionId?.();
   const currentSnapshot = agent.getSnapshot();
 

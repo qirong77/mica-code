@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
@@ -41,6 +41,7 @@ export type SessionSummary = {
 
 export type SessionStoreLike = {
   list(limit?: number): SessionSummary[];
+  listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
   save(session: PersistedSession): void;
 };
@@ -72,6 +73,15 @@ export class SessionStore implements SessionStoreLike {
       }));
   }
 
+  /** Reads current snapshots plus the legacy message-array format used by older Mica builds. */
+  listAllForUsage(): PersistedSession[] {
+    ensureSessionDir();
+    return readdirSync(SESSION_DIR)
+      .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
+      .map((file) => this.readForUsage(resolve(SESSION_DIR, file)))
+      .filter((session): session is PersistedSession => Boolean(session));
+  }
+
   load(id: string): PersistedSession | null {
     const safeId = sanitizeSessionId(id);
     if (!safeId) return null;
@@ -91,6 +101,16 @@ export class SessionStore implements SessionStoreLike {
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
       return parseSession(data);
+    } catch {
+      return null;
+    }
+  }
+
+  private readForUsage(path: string): PersistedSession | null {
+    try {
+      if (!existsSync(path)) return null;
+      const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+      return parseSession(data) ?? (Array.isArray(data) ? parseLegacySessionForUsage(path, data) : null);
     } catch {
       return null;
     }
@@ -137,9 +157,67 @@ function parseSession(value: unknown): PersistedSession | null {
   if (!session.id || !session.title || !session.createdAt || !session.updatedAt || !session.cwd) return null;
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
   if (!session.snapshot.providerId || !session.snapshot.model) return null;
-  if (!isProviderProtocol(session.snapshot.protocol) || !isEffortOption(session.snapshot.effort)) return null;
+  if (!isProviderProtocol(session.snapshot.protocol)) {
+    const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
+      ?.map((record) => record?.provider)
+      .find(isProviderProtocol);
+    session.snapshot.protocol = provider ?? 'openai_chat_completions';
+  }
+  if (!isEffortOption(session.snapshot.effort)) return null;
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
   return session as PersistedSession;
+}
+
+function parseLegacySessionForUsage(path: string, messages: unknown[]): PersistedSession | null {
+  const usageHistory: AgentUsageRecord[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const raw = (message as { usage?: unknown }).usage;
+    if (!raw || typeof raw !== 'object') continue;
+    const usage = raw as Record<string, unknown>;
+    const uncached = finiteNumber(usage.input_tokens);
+    const cacheRead = finiteNumber(usage.cache_read_input_tokens);
+    const cacheWrite = finiteNumber(usage.cache_creation_input_tokens);
+    const output = finiteNumber(usage.output_tokens);
+    if (uncached + cacheRead + cacheWrite + output === 0) continue;
+    const input = uncached + cacheRead + cacheWrite;
+    usageHistory.push({
+      provider: 'openai_chat_completions',
+      turnId: usageHistory.length + 1,
+      requestIndex: 0,
+      messageCount: messages.length,
+      inputTokens: input,
+      cachedInputTokens: cacheRead,
+      outputTokens: output,
+      totalTokens: input + output,
+      paidTokenRate: input > 0 ? (uncached + cacheWrite) / input : 1,
+    });
+  }
+  if (usageHistory.length === 0) return null;
+  const id = basename(path, '.json');
+  const updatedAt = statSync(path).mtime.toISOString();
+  return {
+    version: 1,
+    id,
+    title: id,
+    createdAt: updatedAt,
+    updatedAt,
+    cwd: '',
+    snapshot: {
+      providerId: 'legacy',
+      protocol: 'openai_chat_completions',
+      model: 'legacy',
+      effort: 'none',
+      messages: [],
+      conversationMessages: [],
+      usageHistory,
+      lastUsage: usageHistory.at(-1),
+    },
+  };
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }

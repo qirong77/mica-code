@@ -105,10 +105,23 @@ describe('status command', () => {
       currentSessionIncluded: true,
     });
   });
+
+  it('uses the usage-specific store scan so legacy sessions are included', () => {
+    const legacy = makeSession('legacy', [makeUsage({ inputTokens: 500, outputTokens: 50, totalTokens: 550 })]);
+    const store = makeStore([legacy]);
+    store.list.mockReturnValue([]);
+    mocks.createStore.mockReturnValue(store);
+
+    const totals = summarizeAllSessionUsage(makeAgent([]));
+
+    expect(store.listAllForUsage).toHaveBeenCalledOnce();
+    expect(totals).toMatchObject({ sessions: 1, records: 1, totalTokens: 550 });
+  });
 });
 
 function makeStore(sessions: PersistedSession[]) {
   return {
+    listAllForUsage: vi.fn(() => sessions),
     list: vi.fn(() =>
       sessions.map((session) => ({
         id: session.id,
