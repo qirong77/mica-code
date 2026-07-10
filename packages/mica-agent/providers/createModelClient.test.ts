@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { ResponsesClient } from './ResponsesClient.js';
-import { createModelClient, createSubAgent } from './createModelClient.js';
+import { createModelClient, createSubAgent, registerModelClient } from './createModelClient.js';
 import type { ModelClientOptions } from './types.js';
 
 describe('createModelClient', () => {
@@ -19,6 +19,25 @@ describe('createModelClient', () => {
     expect(agent).toBeInstanceOf(ChatCompletionsClient);
     expect((agent as ChatCompletionsClient).tools).toBe(false);
     expect((agent as ChatCompletionsClient).effort).toBe('none');
+  });
+
+  it('supports registering a future protocol without changing AgentRuntime', () => {
+    const unregister = registerModelClient(
+      'future_protocol',
+      (clientOptions) => new ChatCompletionsClient(clientOptions),
+    );
+    const futureOptions = options('openai_chat_completions');
+    futureOptions.provider = { ...futureOptions.provider, protocol: 'future_protocol' as ProviderProtocol };
+
+    expect(createModelClient(futureOptions)).toBeInstanceOf(ChatCompletionsClient);
+    unregister();
+    expect(() => createModelClient(futureOptions)).toThrow('Unsupported model client protocol: future_protocol');
+  });
+
+  it('does not silently replace a built-in protocol implementation', () => {
+    expect(() =>
+      registerModelClient('openai_responses', (clientOptions) => new ChatCompletionsClient(clientOptions)),
+    ).toThrow('Model client protocol is already registered: openai_responses');
   });
 });
 

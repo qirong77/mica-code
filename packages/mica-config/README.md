@@ -59,6 +59,8 @@ if (!result.ok) {
 - `getModelRule.ts`：生成所有模型共用的固定规则。
 - `persistence.ts`：配置文件 IO。
 - `providerModels.ts`：模型列表加载与运行时缓存管理。
+
+模型 client 使用协议注册表创建。当前配置只开放两种已实现的 OpenAI 协议；未来接入 Anthropic 等实现时，可新增 client 并通过 `registerModelClient` 注册，无需修改 `AgentRuntime`。
 - `runtimeEnv.ts`：运行时环境变量读取。
 - `types.ts`：配置与 provider 的类型定义。
 - `validation.ts`：配置校验。
