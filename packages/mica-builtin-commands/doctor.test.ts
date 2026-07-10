@@ -106,7 +106,6 @@ describe('doctor command report', () => {
 
     expect(report.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'config-validation', status: 'ok' }),
         expect.objectContaining({
           id: 'provider-api-key',
           status: 'warn',
@@ -147,7 +146,6 @@ describe('doctor command report', () => {
           status: 'error',
           suggestion: expect.stringContaining('Node.js >=22'),
         }),
-        expect.objectContaining({ id: 'config-validation', status: 'error' }),
         expect.objectContaining({ id: 'provider', status: 'error' }),
       ]),
     );

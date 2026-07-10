@@ -74,7 +74,6 @@ export async function buildDoctorReport(
     checkRuntime(versions),
     checkWorkspace(cwd),
     checkReadableWritableFile('config-file', 'Config file', configPath),
-    checkConfigValidation(config, configPath),
     checkProvider(config, provider),
     checkProviderApiKey(provider, configPath),
     checkWebSearch(config, env, configPath),
@@ -213,34 +212,6 @@ function checkReadableWritableFile(id: string, label: string, path: string, opti
   } catch (error) {
     return makeCheck(id, label, 'error', formatError(error), `Check read/write permissions for ${path}.`);
   }
-}
-
-function checkConfigValidation(config: IMicaConfig, configPath: string): DoctorCheck {
-  const validation = micaConfig.validate(config);
-  const issues = validation.issues.filter((issue) => issue.code !== 'provider_api_key_missing');
-  const errors = issues.filter((issue) => issue.severity === 'error');
-  const warnings = issues.filter((issue) => issue.severity === 'warning');
-  const firstIssue = issues[0];
-
-  if (errors.length > 0) {
-    return makeCheck(
-      'config-validation',
-      'Config',
-      'error',
-      `${errors.length} error(s), ${warnings.length} warning(s); ${firstIssue?.message ?? 'invalid config'}`,
-      firstIssue?.suggestion ?? `Edit ${configPath}.`,
-    );
-  }
-  if (warnings.length > 0) {
-    return makeCheck(
-      'config-validation',
-      'Config',
-      'warn',
-      `${warnings.length} warning(s); ${firstIssue?.message ?? 'review config'}`,
-      firstIssue?.suggestion,
-    );
-  }
-  return makeCheck('config-validation', 'Config', 'ok', 'validation passed');
 }
 
 function checkProvider(config: IMicaConfig, provider: ProviderDefinition | undefined): DoctorCheck {

@@ -23,7 +23,6 @@ export type AgentRuntimeConfigSnapshot = {
 
 export function readAgentRuntimeConfig(): AgentRuntimeConfig {
   const config = micaConfig.get();
-  micaConfig.assertValid(config);
   const provider = config.providers.find((item) => item.id === config.provider);
   if (!provider) {
     throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
@@ -60,7 +59,7 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
     apiKey: config.provider.api_key,
     baseURL: config.provider.api_base,
     model: config.model,
-    effort: config.provider.supportsEffort === false ? 'none' : config.effort,
+    effort: config.effort,
     provider: config.provider,
   };
 }

@@ -17,7 +17,6 @@ import {
   type ProviderDefinition,
 } from './types.js';
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
-import { ConfigValidationError, validateConfig } from './validation.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 import { getModelRule } from './getModelRule.js';
 
@@ -29,9 +28,6 @@ export {
   providerSupportsModel,
 } from './types.js';
 export type {
-  ConfigValidationIssue,
-  ConfigValidationResult,
-  ConfigValidationSeverity,
   EffortMap,
   EffortOption,
   IMicaConfig,
@@ -46,7 +42,6 @@ export {
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './effort.js';
-export { ConfigValidationError, formatConfigValidationIssues, validateConfig } from './validation.js';
 
 const configAtom = atom<IMicaConfig>(readConfig());
 
@@ -75,13 +70,6 @@ export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMi
   });
   updateProviderPreference(next.provider, { model: next.model, effort: next.effort });
   return next;
-}
-
-export function assertValidConfig(config: IMicaConfig = getConfig()): void {
-  const result = validateConfig(config);
-  if (!result.ok) {
-    throw new ConfigValidationError(result.issues);
-  }
 }
 
 export async function loadProviderModels(providerId: string): Promise<string[]> {

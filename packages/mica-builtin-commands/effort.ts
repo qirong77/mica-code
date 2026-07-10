@@ -65,13 +65,6 @@ async function applyEffortSelection(
       );
       return false;
     }
-    const availableEfforts = micaConfig.effortOptions;
-    if (!availableEfforts.includes(effort as EffortOption)) {
-      services.showMessage(
-        `${agent.config.provider.name ?? agent.config.provider.id} supports effort: ${availableEfforts.join(', ')}`,
-      );
-      return false;
-    }
     if (effort === agent.config.effort) {
       return true;
     }

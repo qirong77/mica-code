@@ -46,8 +46,6 @@ export function applyConfigSwitchUpdate({
   agent.reloadConfig(false);
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
-  if (adjustments.length > 0) {
-  }
   services.showMessage(formatConfigSwitchSuccess(successMessage(next), adjustments), successTtl);
   return next;
 }

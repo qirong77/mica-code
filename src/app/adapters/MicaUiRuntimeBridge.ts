@@ -14,7 +14,6 @@ import {
 } from '../../agents/terminalAgentSessions.js';
 import { ToolLogController } from '../../runtime/ToolLogController.js';
 import { applyStatus, syncModelDisplay } from '../../runtime/uiBridge.js';
-// import { syncStartupBanner } from '../../runtime/startupBanner.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
 
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
@@ -44,7 +43,6 @@ export class MicaUiRuntimeBridge {
     this.agent = agent;
     this.attachAgentEvents(agent);
     syncModelDisplay(agent);
-    // syncStartupBanner(agent);
     this.syncAgentStatusItems();
   }
 

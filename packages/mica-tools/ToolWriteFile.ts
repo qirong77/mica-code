@@ -18,9 +18,6 @@ export class ToolWriteFile extends MicaTool {
   }
 
   async execute(input: { file_path: string; content: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
-    if (typeof input.content !== 'string') {
-      return `写入失败：content 参数无效（类型为 ${typeof input.content}，预期 string）。可能因为响应被 max_tokens 截断，请尝试简化操作或分步执行。`;
-    }
     await backupFile(input.file_path);
     const dir = dirname(input.file_path);
     await mkdir(dir, { recursive: true });

@@ -78,7 +78,6 @@ src/
     RewindCheckpointManager.ts     turn 前对话和文件状态 checkpoint
     ToolLogController.ts           thinking/tool-call/tool-result 日志聚合
     uiBridge.ts                    provider/model/status 同步辅助
-    startupBanner.ts               startup banner 旧路径；当前 Application 中调用已注释
   session/
     SessionController.ts           session 保存、恢复、重命名和 UI restore 编排
   tools/
@@ -114,7 +113,6 @@ temp/                              临时代码和外部实验，默认不参与
 
 1. `src/index.ts` 注册全局错误处理，然后创建并启动 `Application`。
 2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI。
-3. 启动后先执行 `micaConfig.assertValid()`。配置语义错误应该在 `AgentRuntime` 创建前失败，并通过 UI 展示可操作错误。
 4. 5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
 5. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController` 和 `MicaUiRuntimeBridge`。
 6. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent))` 注册运行时工具上下文。
@@ -467,7 +465,6 @@ rg --files src packages scripts docs blogs
 
 改代码前，先判断本次任务是否触及这些边界：
 
-- 启动与配置校验：`Application.start()`、`micaConfig.assertValid()`、`AgentRuntimeConfig`。
 - provider/model/effort 切换：忙碌检查、config/storage 分离、effort clamp、context size。
 - provider 协议：Chat Completions、Responses、Anthropic Messages 的请求参数和 history normalizer。
 - turn loop：queue、retry、abort、partial response、session save、hooks。

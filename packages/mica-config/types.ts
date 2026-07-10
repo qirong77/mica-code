@@ -44,21 +44,6 @@ export type ModelRule = {
 
 export type ResolvedEffortParams = Record<string, unknown>;
 
-export type ConfigValidationSeverity = 'error' | 'warning';
-
-export type ConfigValidationIssue = {
-  severity: ConfigValidationSeverity;
-  code: string;
-  path: string;
-  message: string;
-  suggestion?: string;
-};
-
-export type ConfigValidationResult = {
-  ok: boolean;
-  issues: ConfigValidationIssue[];
-};
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -99,17 +84,6 @@ export function requireProvider(config: IMicaConfig, providerId: string): Provid
     throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
   return provider;
-}
-
-export function findProvidersForModel(config: IMicaConfig, providers: unknown[]): string[] {
-  if (!isNonEmptyString(config.model)) return [];
-  return providers
-    .flatMap((provider) => {
-      if (!isRecord(provider)) return [];
-      const matchesModel = Array.isArray(provider.models) && provider.models.includes(config.model);
-      return matchesModel ? [provider.id] : [];
-    })
-    .filter(isNonEmptyString);
 }
 
 function resolveMicaHomePath(...parts: string[]): string {

@@ -21,7 +21,6 @@ import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import { SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
-// import { syncStartupBanner } from '../runtime/startupBanner.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
 import type { ApplicationContext } from './ApplicationContext.js';
@@ -53,7 +52,6 @@ export class Application {
     });
 
     try {
-      micaConfig.assertValid();
       await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);
@@ -128,15 +126,12 @@ export class Application {
       syncCommandDropdown(commands, runtime);
 
       uiBridge.start();
-      // syncStartupBanner(agent);
       await runtime.start();
-      // syncStartupBanner(agent);
 
       void micaConfig.loadMissingProviderModels().then(() => {
         if (!agent.isRunning) {
           agent.reloadConfig(false);
           syncModelDisplay(agent);
-          // syncStartupBanner(agent);
         }
       });
 
