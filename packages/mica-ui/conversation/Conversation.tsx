@@ -70,6 +70,7 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
   commit: {
     tone: 'commit',
     color: themeColors.messageCommit,
+    backgroundColor: themeColors.surfaceUser,
     title: '/commit',
   },
   config: {
@@ -81,6 +82,7 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
   compact: {
     tone: 'compact',
     color: themeColors.messageCompact,
+    backgroundColor: themeColors.surfaceUser,
     title: '/compact',
   },
   error: {
@@ -150,19 +152,17 @@ export const Conversation = (): React.ReactNode => {
           const notice = noticePresentationFor(item);
 
           return (
-            <React.Fragment key={item.id}>
-              <MessageGutter
-                tone={notice.tone}
-                marker={'\u258c'}
-                marginTop={index === 0 ? 0 : 1}
-                backgroundColor={notice.backgroundColor}
-              >
-                <Text color={notice.color}>{formatNoticeTitle(notice.title, item.status)}</Text>
-              </MessageGutter>
-              <MessageGutter tone="muted" marker="" marginTop={1}>
-                <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
-              </MessageGutter>
-            </React.Fragment>
+            <MessageGutter
+              key={item.id}
+              tone={notice.tone}
+              marker={'\u258c'}
+              marginTop={index === 0 ? 0 : 1}
+              backgroundColor={notice.backgroundColor}
+            >
+              <Text color={notice.color}>{formatNoticeTitle(notice.title, item.status)}</Text>
+              <Text> </Text>
+              <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
+            </MessageGutter>
           );
         }
         return (
