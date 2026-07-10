@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { disabled as inputDisabled } from '../../input/state.js';
 import { handleDropdownKey, hideQuickCommands, showQuickCommands, setSelectEmitter } from './quickCommandHandler.js';
 import { inputValue, quickCommands, rawInputValue, selection, state } from './state.js';
-import { backgroundTaskItems } from '../../panels/state.js';
+import { agentStatusItems, backgroundTaskItems } from '../../panels/state.js';
 
 function resetDropdownState() {
   state.set({ visible: false, items: [], selectedIndex: 0 });
@@ -10,6 +10,7 @@ function resetDropdownState() {
   inputValue.set('');
   rawInputValue.set('');
   backgroundTaskItems.set([]);
+  agentStatusItems.set([]);
   quickCommands.set([
     { name: 'agents', description: 'show agents', action: vi.fn() },
     { name: 'model', description: 'switch model', action: vi.fn() },
@@ -98,6 +99,68 @@ describe('quick command dropdown', () => {
     showQuickCommands('');
 
     expect(state.get().items.map((item) => item.label)).toEqual(['/task', '/model']);
+  });
+
+  it('prioritizes /task when a background agent exists', () => {
+    quickCommands.set([
+      { name: 'model', description: 'switch model', action: vi.fn() },
+      { name: 'task', description: 'show tasks', action: vi.fn() },
+    ]);
+    agentStatusItems.set([
+      {
+        id: 'agent-1',
+        index: 1,
+        title: 'current agent',
+        cwd: '/tmp/project',
+        providerName: 'provider',
+        model: 'model',
+        status: { type: 'idle' },
+        current: true,
+        startedAt: '2026-01-02T03:04:05.000Z',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      },
+      {
+        id: 'agent-2',
+        index: 2,
+        title: 'background agent',
+        cwd: '/tmp/project',
+        providerName: 'provider',
+        model: 'model',
+        status: { type: 'thinking' },
+        current: false,
+        startedAt: '2026-01-02T03:04:05.000Z',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      },
+    ]);
+
+    showQuickCommands('');
+
+    expect(state.get().items.map((item) => item.label)).toEqual(['/task', '/model']);
+  });
+
+  it('does not prioritize /task for the current agent alone', () => {
+    quickCommands.set([
+      { name: 'model', description: 'switch model', action: vi.fn() },
+      { name: 'task', description: 'show tasks', action: vi.fn() },
+    ]);
+    agentStatusItems.set([
+      {
+        id: 'agent-1',
+        index: 1,
+        title: 'current agent',
+        cwd: '/tmp/project',
+        providerName: 'provider',
+        model: 'model',
+        status: { type: 'idle' },
+        current: true,
+        startedAt: '2026-01-02T03:04:05.000Z',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      },
+    ]);
+
+    showQuickCommands('');
+
+    expect(state.get().items.map((item) => item.label)).toEqual(['/model', '/task']);
   });
 
   it('keeps exact and prefix matches ahead of task priority', () => {

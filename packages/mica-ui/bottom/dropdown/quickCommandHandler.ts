@@ -1,6 +1,6 @@
 import { quickCommands, state, selection, inputValue, rawInputValue } from './state.js';
 import type { MicaUiCommand, MicaUiCommandCompletionItem, MicaUiDropdownItem } from '../../types.js';
-import { backgroundTaskItems } from '../../panels/state.js';
+import { agentStatusItems, backgroundTaskItems } from '../../panels/state.js';
 import { isActiveBackgroundTaskStatus } from '../../panels/BackgroundTaskRow.js';
 
 let _emitSelect: ((item: MicaUiDropdownItem) => void) | null = null;
@@ -145,7 +145,11 @@ function sortCommands(
 
 function getCommandSortPriority(command: MicaUiCommand): number {
   if (command.name !== 'task') return 0;
-  return backgroundTaskItems.get().some((task) => isActiveBackgroundTaskStatus(task.status)) ? 1 : 0;
+  const hasActiveBackgroundTask = backgroundTaskItems
+    .get()
+    .some((task) => isActiveBackgroundTaskStatus(task.status));
+  const hasBackgroundAgent = agentStatusItems.get().some((agent) => !agent.current);
+  return hasActiveBackgroundTask || hasBackgroundAgent ? 1 : 0;
 }
 
 function buildDropdownItems(commands: MicaUiCommand[], parsedQuery: ParsedQuickCommandQuery): MicaUiDropdownItem[] {

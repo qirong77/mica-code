@@ -572,23 +572,30 @@ export class LocalRuntimeController implements RuntimeController {
       hasError = true;
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const messageBarError = { id: `error-${Date.now()}`, text: `请求失败: ${errorMessage}` };
+      const errorNotice = createFinalErrorNoticeMessage(errorMessage);
       if (session) {
         session.uiState = normalizeUiState({
           ...session.uiState,
-          messageBarMessages: [...session.uiState.messageBarMessages, messageBarError],
+          conversationMessages: [...session.uiState.conversationMessages, errorNotice],
           responseText: '',
           thinkingText: '',
-          workingStatus: { type: 'error' },
+          workingStatus: { type: 'idle' },
           lastTurnOutcome: 'error',
         });
       }
       if (this.isActiveAgent(agent)) {
         this.events.publish({ type: 'turn:error', input, error, owner: agent });
+        if (session) {
+          micaUi.conversation.setMessages(session.uiState.conversationMessages);
+        } else {
+          micaUi.conversation.appendNoticeMessage(errorNotice.content, {
+            variant: errorNotice.variant,
+            command: errorNotice.command,
+          });
+        }
         micaUi.conversation.clearResponseText();
         micaUi.panels.thinkingText.set('');
-        micaUi.panels.status.error();
-        micaUi.messageBar.addMessage(messageBarError);
+        micaUi.panels.status.idle();
       }
     } finally {
       agent.events.off('toolCall', markToolCall);
@@ -716,6 +723,15 @@ function createRetryNoticeMessage(
   return {
     role: 'notice',
     content: formatRetryNoticeContent(error, retryAttempt, remainingMs),
+    variant: 'error',
+    command: RETRY_TURN_NOTICE_COMMAND,
+  };
+}
+
+function createFinalErrorNoticeMessage(errorMessage: string): MicaUiNoticeMessage {
+  return {
+    role: 'notice',
+    content: `请求失败: ${errorMessage}`,
     variant: 'error',
     command: RETRY_TURN_NOTICE_COMMAND,
   };

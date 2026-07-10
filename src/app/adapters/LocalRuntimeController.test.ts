@@ -147,7 +147,7 @@ describe('LocalRuntimeController abort display state', () => {
     });
   });
 
-  it('stores failed turn errors in the session message bar', async () => {
+  it('stores failed turn errors as conversation notices above the input', async () => {
     const addMessage = vi.spyOn(micaUi.messageBar, 'addMessage').mockImplementation(() => undefined);
     const error = new Error('provider exploded');
     const agent = {
@@ -187,12 +187,17 @@ describe('LocalRuntimeController abort display state', () => {
 
     await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
 
-    expect(session.uiState.messageBarMessages).toEqual([
-      expect.objectContaining({ text: '请求失败: provider exploded' }),
+    expect(session.uiState.messageBarMessages).toEqual([]);
+    expect(session.uiState.conversationMessages).toEqual([
+      expect.objectContaining({ role: 'user', content: 'hello' }),
+      expect.objectContaining({ role: 'notice', command: '/error', variant: 'error', content: '请求失败: provider exploded' }),
     ]);
     expect(session.uiState.lastTurnOutcome).toBe('error');
-    expect(session.uiState.workingStatus).toEqual({ type: 'error' });
-    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '请求失败: provider exploded' }));
+    expect(session.uiState.workingStatus).toEqual({ type: 'idle' });
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(retryNotices()).toEqual([
+      expect.objectContaining({ content: '请求失败: provider exploded', command: '/error', variant: 'error' }),
+    ]);
   });
 
   it('clears active lower logs after a completed turn', async () => {
