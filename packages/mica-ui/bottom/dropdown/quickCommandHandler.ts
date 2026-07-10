@@ -23,7 +23,6 @@ export function showQuickCommands(query: string): void {
     visible: true,
     items,
     selectedIndex: getInitialSelectedIndex(items, filter),
-    title: '',
     emptyMessage: 'no matching commands',
   });
   inputValue.set(filter);

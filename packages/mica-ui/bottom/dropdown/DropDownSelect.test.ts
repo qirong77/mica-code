@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@anthropic/ink', () => ({
-  Box: ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children),
-  useStdin: () => ({ internal_querier: null }),
   useTerminalSize: () => ({ columns: 80, rows: 24 }),
+}));
+
+vi.mock('@packages/@anthropic/ink/src/hooks/use-stdin.js', () => ({
+  default: () => ({ internal_querier: null }),
 }));
 
 vi.mock('../../hooks/index.js', () => ({
@@ -35,7 +37,13 @@ describe('DropDownSelect', () => {
     expect(html).toContain('data-height="8"');
   });
 
-  it('fills the visible rows below the physical input cursor without overflowing the terminal', () => {
-    expect(resolveDropdownHeight(24, 18, 6)).toBe(15);
+  it.each([
+    { rows: 24, fallbackHeight: 18, cursorRow: null, expected: 8 },
+    { rows: 24, fallbackHeight: 4, cursorRow: null, expected: 4 },
+    { rows: 2, fallbackHeight: 5, cursorRow: null, expected: 1 },
+    { rows: 24, fallbackHeight: 18, cursorRow: 6, expected: 15 },
+    { rows: 24, fallbackHeight: 18, cursorRow: 23, expected: 1 },
+  ])('resolves a safe height from $rows rows and cursor row $cursorRow', (testCase) => {
+    expect(resolveDropdownHeight(testCase.rows, testCase.fallbackHeight, testCase.cursorRow)).toBe(testCase.expected);
   });
 });
