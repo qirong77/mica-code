@@ -1,4 +1,6 @@
 import { useTerminalSize } from '@anthropic/ink';
+import useStdin from '@packages/@anthropic/ink/src/hooks/use-stdin.js';
+import { cursorPosition } from '@packages/@anthropic/ink/src/core/terminal-querier.js';
 import React from 'react';
 import { useScheduleState } from './useScheduleState.js';
 import { inputBottomDistance } from '../input/state.js';
@@ -6,8 +8,11 @@ import { inputBottomDistance } from '../input/state.js';
 const MIN_LOG_VIEW_HEIGHT = 5;
 const BELOW_INPUT_RESERVED_LINES = 2;
 
-function getBottomPanelHeight(rows: number, bottomDistance: number): number {
+export function getBottomPanelHeight(rows: number, bottomDistance: number, cursorRow: number | null = null): number {
   const fallbackHeight = Math.ceil(rows / 3);
+  if (cursorRow !== null) {
+    return Math.max(MIN_LOG_VIEW_HEIGHT, rows - cursorRow - BELOW_INPUT_RESERVED_LINES);
+  }
   const measuredBottomDistance = Math.min(Math.max(0, bottomDistance), Math.max(0, rows));
 
   if (measuredBottomDistance <= 0) {
@@ -18,11 +23,30 @@ function getBottomPanelHeight(rows: number, bottomDistance: number): number {
 }
 
 export function useBottomPanelHeight(extraReservedLines = 0) {
-  const { rows } = useTerminalSize();
+  const { columns, rows } = useTerminalSize();
+  const { internal_querier: querier } = useStdin();
   const bottomDistance = useScheduleState(inputBottomDistance);
-  const nextHeight = getBottomPanelHeight(rows, bottomDistance) - extraReservedLines;
+  const [cursorRow, setCursorRow] = React.useState<number | null>(null);
+  const nextHeight = getBottomPanelHeight(rows, bottomDistance, cursorRow) - extraReservedLines;
   const stableHeightRef = React.useRef(nextHeight);
   const lastRowsRef = React.useRef(rows);
+
+  React.useEffect(() => {
+    if (!querier) {
+      setCursorRow(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCursorRow(null);
+    void Promise.all([querier.send(cursorPosition()), querier.flush()]).then(([response]) => {
+      if (!cancelled && response) setCursorRow(response.row);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bottomDistance, columns, querier, rows]);
 
   if (lastRowsRef.current !== rows) {
     lastRowsRef.current = rows;
