@@ -2,7 +2,6 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { moveSelection } from './commandInput.js';
 
 type SkillsState =
@@ -15,7 +14,6 @@ export function createSkillsCommand() {
     description: '列出已安装的 skills',
     action: () => {
       const skills = micaSkills.reload();
-      micaLogger.logRuntime('plugin.skills', 'opened', { skills: skills.length });
       const panelState = atom<SkillsState>({
         view: 'list',
         selectedIdx: skills.length > 0 ? 0 : 0,
@@ -23,7 +21,6 @@ export function createSkillsCommand() {
 
       function hide() {
         micaUi.panels.clearPluginUIs();
-        micaLogger.logRuntime('plugin.skills', 'closed');
       }
 
       function SkillsPanel() {
@@ -124,9 +121,6 @@ export function createSkillsCommand() {
 
           if (key.escape) {
             if (state.view === 'detail') {
-              micaLogger.logRuntime('plugin.skills', 'view:list', {
-                skill: currentSkills[state.detailSkillIdx]?.name,
-              });
               panelState.set({
                 view: 'list',
                 selectedIdx: state.detailSkillIdx,
@@ -157,9 +151,6 @@ export function createSkillsCommand() {
           }
 
           if (key.return) {
-            micaLogger.logRuntime('plugin.skills', 'view:detail', {
-              skill: currentSkills[state.selectedIdx]?.name,
-            });
             panelState.set({
               view: 'detail',
               selectedIdx: 0,

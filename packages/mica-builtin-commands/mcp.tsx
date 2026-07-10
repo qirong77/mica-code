@@ -2,7 +2,6 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { moveSelection } from './commandInput.js';
 
@@ -46,21 +45,16 @@ export function createMcpCommand(services: CommandRuntimeServices) {
       if (trimmed?.startsWith('reconnect ')) {
         const serverName = trimmed.slice('reconnect '.length).trim();
         if (!serverName) {
-          micaLogger.logRuntime('plugin.mcp', 'reconnect:missing_server', undefined, 'warn');
           services.showMessage('用法: /mcp reconnect <server>');
           return;
         }
-        micaLogger.logRuntime('plugin.mcp', 'reconnect:requested', { server: serverName });
         void reconnectServer(serverName, services);
         return;
       }
-
-      micaLogger.logRuntime('plugin.mcp', 'opened', { servers: micaMcp.servers.get().length });
       const panelState = atom<McpState>({ view: 'list', selectedIdx: 0 });
 
       function hide() {
         micaUi.panels.clearPluginUIs();
-        micaLogger.logRuntime('plugin.mcp', 'closed');
       }
 
       function McpPanel() {
@@ -271,10 +265,6 @@ export function createMcpCommand(services: CommandRuntimeServices) {
 
           if (key.escape) {
             if (state.view === 'detail') {
-              micaLogger.logRuntime('plugin.mcp', 'view:tools', {
-                server: servers[state.serverIdx]?.name,
-                from: 'detail',
-              });
               panelState.set({
                 view: 'tools',
                 serverIdx: state.serverIdx,
@@ -283,10 +273,6 @@ export function createMcpCommand(services: CommandRuntimeServices) {
               return true;
             }
             if (state.view === 'tools') {
-              micaLogger.logRuntime('plugin.mcp', 'view:list', {
-                server: servers[state.serverIdx]?.name,
-                from: 'tools',
-              });
               panelState.set({ view: 'list', selectedIdx: state.serverIdx });
               return true;
             }
@@ -311,10 +297,6 @@ export function createMcpCommand(services: CommandRuntimeServices) {
               return true;
             }
             if (key.return) {
-              micaLogger.logRuntime('plugin.mcp', 'view:tools', {
-                server: servers[state.selectedIdx]?.name,
-                tools: servers[state.selectedIdx]?.tools.length ?? 0,
-              });
               panelState.set({
                 view: 'tools',
                 serverIdx: state.selectedIdx,
@@ -345,10 +327,6 @@ export function createMcpCommand(services: CommandRuntimeServices) {
               return true;
             }
             if (key.return) {
-              micaLogger.logRuntime('plugin.mcp', 'view:detail', {
-                server: servers[state.serverIdx]?.name,
-                tool: servers[state.serverIdx]?.tools[state.selectedIdx]?.name,
-              });
               panelState.set({
                 view: 'detail',
                 serverIdx: state.serverIdx,
@@ -366,21 +344,17 @@ export function createMcpCommand(services: CommandRuntimeServices) {
 }
 
 async function reconnectServer(name: string, services: CommandRuntimeServices) {
-  micaLogger.logRuntime('plugin.mcp', 'reconnect:start', { server: name });
   const config = await micaMcp.loadConfig();
   const server = config[name];
   if (!server) {
-    micaLogger.logRuntime('plugin.mcp', 'reconnect:not_found', { server: name }, 'error');
     services.showMessage(`未找到 MCP 配置: ${name}`, 4000);
     return;
   }
   try {
     const message = await micaMcp.reconnectServer(name, server);
     services.showMessage(message, 4000);
-    micaLogger.logRuntime('plugin.mcp', 'reconnect:done', { server: name, message });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    micaLogger.logRuntime('plugin.mcp', 'reconnect:error', { server: name, message }, 'error');
     services.showMessage(`MCP reconnect failed: ${message}`, 4000);
   }
 }

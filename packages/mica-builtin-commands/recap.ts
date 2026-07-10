@@ -1,4 +1,4 @@
-import { micaLogger } from '@packages/mica-logger/index.js';
+
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 
@@ -24,23 +24,14 @@ export function createRecapCommand(agent: CommandAgent, services: CommandRuntime
         return;
       }
 
-      micaLogger.logRuntime('plugin.recap', 'requested', {
-        hasCustomInstructions: Boolean(args.customInstructions),
-      });
-
       try {
         const result = await services.runExclusiveTask(
           targetAgent,
           { ownerSessionId, statusText: 'recap: summarizing context' },
           () => services.recap(targetAgent, ownerSessionId, args),
         );
-        micaLogger.logRuntime('plugin.recap', 'done', {
-          chars: result.summary.length,
-          messageCount: result.messageCount,
-        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        micaLogger.logRuntime('plugin.recap', 'error', { message }, 'error');
         services.showMessage(`recap failed: ${message}`, 8000, ownerSessionId);
       }
     },

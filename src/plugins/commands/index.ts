@@ -1,5 +1,4 @@
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
@@ -8,7 +7,6 @@ import { createCommandRuntimeServices } from './commandRuntimeServices.js';
 import { registerCommand, type BuiltInCommandItem } from './registerCommand.js';
 
 const ALLOW_DURING_TURN_COMMANDS = new Set([
-  'log',
   'status',
   'context',
   'config',
@@ -39,7 +37,6 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createNewCommand(services),
     micaBuiltinCommands.createForkCommand(services),
     micaBuiltinCommands.createRewindCommand(services),
-    micaBuiltinCommands.createLogCommand(activeAgent, services),
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
     micaBuiltinCommands.createReviewCommand(services),
@@ -71,7 +68,5 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
     for (const command of builtInCommands) {
       registerCommand(ctx, command, { allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name) });
     }
-
-    micaLogger.logRuntime('plugin', 'registered', { count: builtInCommands.length });
   }
 }

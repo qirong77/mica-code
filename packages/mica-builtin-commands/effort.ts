@@ -3,7 +3,6 @@ import type { CommandAgent } from './services.js';
 
 import { micaConfig, type EffortOption } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError } from './configSwitch.js';
 
@@ -33,10 +32,6 @@ export function showEffortSelector(
   services: CommandRuntimeServices,
   options: { onAfterSelect?: (effort: string) => void | Promise<void> } = {},
 ): void {
-  micaLogger.logRuntime('plugin.effort', 'opened', {
-    current: agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none',
-    provider: agent.config.provider.id,
-  });
   const effortOptions = micaConfig.getProviderEffortOptions(agent.config.provider, agent.config.model);
   showSelectCommand({
     id: 'select-effort',
@@ -65,7 +60,6 @@ async function applyEffortSelection(
       return false;
     }
     if (agent.config.provider.supportsEffort === false) {
-      micaLogger.logRuntime('plugin.effort', 'provider_ignores_effort', { provider: agent.config.provider.id }, 'warn');
       services.showMessage(
         `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; status shows none`,
       );
@@ -79,14 +73,8 @@ async function applyEffortSelection(
       return false;
     }
     if (effort === agent.config.effort) {
-      micaLogger.logRuntime('plugin.effort', 'selected_current', { effort });
       return true;
     }
-    micaLogger.logRuntime('plugin.effort', 'selected', {
-      from: agent.config.effort,
-      to: effort,
-      provider: agent.config.provider.id,
-    });
 
     services.showMessage(
       'Effort changed, prompt cache may be invalidated. Consider /compact',
@@ -108,7 +96,6 @@ async function applyEffortSelection(
       }),
       successMessage: () => `Effort: ${effort}`,
     });
-    micaLogger.logRuntime('plugin.effort', 'applied', { effort });
     return true;
   } catch (error) {
     reportConfigSwitchError(services, 'effort', error);

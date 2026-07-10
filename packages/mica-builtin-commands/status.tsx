@@ -8,7 +8,6 @@ import {
   type AgentUsageSummary,
 } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from './services.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { BUILD_TIME } from '../../src/buildMeta.js';
 
 export function createStatusCommand(agent: CommandAgent) {
@@ -23,14 +22,6 @@ export function createStatusCommand(agent: CommandAgent) {
 
       const contextTokens = micaUi.panels.contextSize.get();
       const contextWindowSize = micaUi.panels.modelDisplay.contextWindowSize.get();
-      micaLogger.logRuntime('plugin.status', 'opened', {
-        provider: provider.id,
-        model,
-        effort: provider.supportsEffort !== false ? effort : 'none',
-        messages: snapshot.messages.length,
-        contextTokens,
-        usageRecords: snapshot.usageHistory.length,
-      });
       showStatusPanel(
         formatStatusList([
           ['Model', model],
@@ -54,7 +45,7 @@ function showStatusPanel(text: string) {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    if (micaUi.panels.removePluginUI(panelId)) micaLogger.logRuntime('plugin.status', 'closed');
+    micaUi.panels.removePluginUI(panelId);
   }
 
   function StatusPanel() {

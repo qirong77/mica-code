@@ -1,7 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 import type { CommandSessionController } from './services.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 
 export function createClearCommand(
@@ -17,12 +16,8 @@ export function createClearCommand(
         services.showMessage('Agent is busy; wait or abort before starting a new session');
         return;
       }
-      micaLogger.logRuntime('plugin.clear', 'clear:start', {
-        runId: agent.currentRunId,
-      });
       services.clearUI(agent, sessionController);
       services.showMessage('Started new session');
-      micaLogger.logRuntime('plugin.clear', 'clear:done');
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }

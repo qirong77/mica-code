@@ -18,7 +18,6 @@ import type {
   RuntimeInput,
 } from '@packages/mica-runtime/index.js';
 import { gitBuffer, gitText } from '@packages/mica-common/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 
 type FileSnapshotEntry =
@@ -62,16 +61,6 @@ export class RewindCheckpointManager {
     const snapshot = agent.getSnapshot();
     const snapshotChars = estimateJsonLikeChars(snapshot, MAX_CHECKPOINT_SNAPSHOT_CHARS);
     if (snapshotChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
-      micaLogger.logRuntime(
-        'runtime.rewind',
-        'checkpoint:skipped_large_snapshot',
-        {
-          chars: snapshotChars,
-          limit: MAX_CHECKPOINT_SNAPSHOT_CHARS,
-          messages: snapshot.messages.length,
-        },
-        'warn',
-      );
       return;
     }
 

@@ -1,6 +1,5 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
 
@@ -80,8 +79,6 @@ export class ToolLogController {
       startTime: Date.now(),
       displayText,
     });
-
-    micaLogger.logRuntime('runtime.tool', 'ui:add', { name, id: toolKey });
     this.sink.appendAgentTurnLogItem(
       micaUi.createToolCallLogItem({
         id: toolLogId,
@@ -102,12 +99,6 @@ export class ToolLogController {
     const displayText = activeTool?.displayText ?? `${name} result`;
 
     if (toolKey) this.activeToolCalls.delete(toolKey);
-    micaLogger.logRuntime('runtime.tool', 'ui:complete', {
-      name,
-      id: toolKey,
-      elapsedMs: Date.now() - startTime,
-      resultChars: result.length,
-    });
 
     this.sink.replaceAgentTurnLogItem(
       micaUi.createToolCallLogItem({

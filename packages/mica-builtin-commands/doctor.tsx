@@ -2,7 +2,6 @@ import { accessSync, constants, existsSync, mkdirSync, statSync } from 'node:fs'
 import { Box, Text } from '@anthropic/ink';
 import { gitText as defaultGitText, type GitCommandOptions } from '@packages/mica-common/index.js';
 import { micaConfig, type IMicaConfig, type ProviderDefinition } from '@packages/mica-config/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaMcp, type McpServerConfig, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
@@ -51,9 +50,7 @@ export function createDoctorCommand(agent: CommandAgent) {
     name: 'doctor',
     description: '诊断环境、配置、MCP、工具和会话状态',
     action: async () => {
-      micaLogger.logRuntime('plugin.doctor', 'requested');
       const report = await buildDoctorReport(agent);
-      micaLogger.logRuntime('plugin.doctor', 'opened', report.summary);
       showDoctorPanel(report);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -101,7 +98,7 @@ function showDoctorPanel(report: DoctorReport) {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.doctor', 'closed');
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function DoctorPanel() {

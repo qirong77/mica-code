@@ -1,5 +1,3 @@
-import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { getActiveContext } from '../../app/activeContext.js';
@@ -16,16 +14,8 @@ export function registerCommand(ctx: PluginContext, command: BuiltInCommandItem,
     allowDuringTurn: options.allowDuringTurn,
     pluginId: ctx.pluginId,
     async handler(_commandCtx, args) {
-      if (command.name !== 'log') micaBuiltinCommands.closeLogPanel();
-      micaLogger.logRuntime('plugin', 'action:start', { name: command.name, arg: args });
-      try {
-        await command.action(args || undefined);
-        micaLogger.logRuntime('plugin', 'action:done', { name: command.name });
-        return { ok: true };
-      } catch (error) {
-        micaLogger.logRuntime('plugin', 'action:error', { name: command.name, error: formatError(error) }, 'error');
-        throw error;
-      }
+      await command.action(args || undefined);
+      return { ok: true };
     },
   });
   ctx.onDispose(() => disposable.dispose());
@@ -49,8 +39,4 @@ export function syncQuickCommands(ctx: PluginContext): void {
       },
     })),
   );
-}
-
-function formatError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }

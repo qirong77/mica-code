@@ -5,7 +5,6 @@ import type { SelectItem } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 import type { CommandSessionController } from './services.js';
 import { showSelectCommand } from './selectCommand.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { formatSessionListTime } from '@packages/mica-ui/utils/format.js';
 
@@ -19,19 +18,15 @@ export function createResumeCommand(
     description: '恢复之前的会话',
     action: (arg) => {
       if (services.isAgentBusy(agent)) {
-        micaLogger.logRuntime('plugin.resume', 'blocked:agent_busy', undefined, 'warn');
         services.showMessage('Agent is busy; wait or abort before resuming');
         return;
       }
 
       const id = arg?.trim();
       if (id) {
-        micaLogger.logRuntime('plugin.resume', 'resume_by_id', { id });
         resumeSession(agent, sessionController, services, id);
         return;
       }
-
-      micaLogger.logRuntime('plugin.resume', 'opened');
       showResumeSelector(agent, sessionController, services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -43,7 +38,6 @@ function showResumeSelector(
   services: CommandRuntimeServices,
 ) {
   const sessions = sessionController.list(1000);
-  micaLogger.logRuntime('plugin.resume', 'selector:ready', { sessions: sessions.length });
   showSelectCommand({
     id: 'select-session',
     title: (currentIdx, total) => `resume sessions (${currentIdx + 1} / ${total})`,
@@ -117,19 +111,12 @@ function resumeSession(
   services: CommandRuntimeServices,
   id: string,
 ) {
-  micaLogger.logRuntime('plugin.resume', 'resume:start', { id });
   const result = sessionController.resume(id);
   if (result.ok === false) {
-    micaLogger.logRuntime('plugin.resume', 'resume:error', { id, message: result.message }, 'error');
     services.showMessage(result.message, 5000);
     return;
   }
   services.syncModelDisplay(agent);
   services.refreshCurrentAgentSessionUi();
   services.showMessage(`Resumed: ${result.session.title}`, 4000);
-  micaLogger.logRuntime('plugin.resume', 'resume:done', {
-    id,
-    title: result.session.title,
-    model: result.session.snapshot.model,
-  });
 }

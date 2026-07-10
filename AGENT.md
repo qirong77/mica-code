@@ -98,7 +98,6 @@ packages/
   mica-skills                      用户 skills 扫描、解析和缓存
   mica-plugin                      插件生命周期、hooks、service container
   mica-common                      跨包共享底层工具
-  mica-logger                      运行时日志 store 和格式化
   @anthropic/ink                   本仓库维护的 Ink fork
 
 scripts/                           构建、安装、release installer 脚本
@@ -122,10 +121,10 @@ temp/                              临时代码和外部实验，默认不参与
 7. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent))` 注册运行时工具上下文。
 8. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
 9. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
-10. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和 logger。
+10. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和插件 logger 接口。
 11. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
 12. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-13. 设置输入框 placeholder、退出回调和 runtime 日志。
+13. 设置输入框 placeholder 和退出回调。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
 
@@ -254,8 +253,8 @@ bun test packages/mica-agent/prompt/index.test.ts
 - 命令实现不要直接依赖应用层单例。需要 runtime、session、agent、UI、MCP、日志等能力时，通过 `CommandRuntimeServices` 或 active proxy 注入。
 - 耗时且会修改上下文、文件、配置或 git 状态的命令应通过 runtime exclusive task 执行，防止用户并发发送对话或切换配置。
 - `/provider`、`/model`、`/effort` 必须在打开 selector 前检查 target agent busy 状态，并在选择时保留二次 guard。
-- `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`log`、`status`、`context`、`doctor`、`agents`、`new`、`fork`、`exit`、`copy`、`rename`。
-- exclusive task 期间额外允许的命令在 `ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS`，当前是 `log`、`status`、`agents`、`new`。
+- `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`status`、`context`、`doctor`、`agents`、`new`、`fork`、`exit`、`copy`、`rename`、`task`。
+- exclusive task 期间额外允许的命令在 `ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS`，当前是 `status`、`task`、`agents`、`new`。
 
 当前内置命令：
 
@@ -275,7 +274,6 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/rewind`：回退到上一轮对话之前的状态。
 - `/mcp`：列出 MCP 服务器和工具；`/mcp reconnect <server>` 重连指定服务。
 - `/skills`：列出已安装的 skills。
-- `/log`：展示当前运行日志；`/log export` 导出对话与日志。
 - `/copy`：复制最后一条消息的内容到剪贴板。
 - `/rename`：重命名当前会话。
 - `/git-diff-context [base|-]`：把 git diff 作为上下文发送给 agent，默认对比 `master`，传 `-` 使用当前工作区变化。
@@ -375,7 +373,6 @@ AGENT.md
 - `mica-context` 提供上下文处理能力，不直接操纵 provider adapter。
 - `mica-skills` 只扫描、解析、缓存 skills，不执行 skill 内容。
 - `mica-plugin` 只提供插件机制，不内置具体产品插件。
-- `mica-logger` 只维护日志数据和格式化，不直接渲染 UI。
 
 如果新增代码会导致底层包依赖上层包，不要直接加 import。优先使用类型、回调、service、hook 或 adapter 注入能力。
 
@@ -408,7 +405,6 @@ AGENT.md
 - `packages/mica-agent/core/retry.test.ts`
 - `packages/mica-builtin-commands/configSwitch.test.ts`
 - `packages/mica-builtin-commands/gitDiffContext.test.ts`
-- `packages/mica-builtin-commands/log.test.ts`
 - `packages/mica-builtin-commands/review.test.ts`
 - `packages/mica-builtin-commands/recap.test.ts`
 - `packages/mica-config/config.test.ts`
@@ -463,7 +459,7 @@ rg --files src packages scripts docs blogs
 - `scripts/install.mjs` 默认把二进制安装为 `$HOME/.local/bin/mica`；可用 `MICA_INSTALL_DIR` 和 `MICA_BIN_NAME` 覆盖。
 - release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；推送 `v*` tag 时构建 Linux/macOS x64/arm64 release 二进制，打包自包含 `install.sh` 并上传 release asset。
-- 如果用户报告启动或 `/log`、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个二进制：`~/.local/bin/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
+- 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个二进制：`~/.local/bin/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
 
 ## Git 与工作区安全
 

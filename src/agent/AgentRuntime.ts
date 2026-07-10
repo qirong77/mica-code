@@ -9,7 +9,6 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption } from '@packages/mica-config/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
   createAgentClientOptions,
@@ -95,11 +94,6 @@ export class AgentRuntime {
   constructor() {
     this.currentConfig = readAgentRuntimeConfig();
     this.recreateClient();
-    micaLogger.logRuntime('agent', 'initialized', {
-      provider: this.currentConfig.provider.id,
-      model: this.currentConfig.model,
-      configured: this.isConfigured,
-    });
   }
 
   get config() {
@@ -163,19 +157,12 @@ export class AgentRuntime {
       this.client?.reset();
       this.emitStatus({ type: 'idle' });
     }
-    micaLogger.logRuntime('agent', 'config:reloaded', {
-      provider: this.currentConfig.provider.id,
-      model: this.currentConfig.model,
-      resetSession,
-      configured: this.isConfigured,
-    });
   }
 
   abort() {
     this.runId++;
     this.activeAbortController?.abort();
     this.activeAbortController = null;
-    micaLogger.logRuntime('agent', 'abort', { runId: this.runId }, 'warn');
     this.emitStatus({ type: 'idle' });
   }
 
@@ -184,7 +171,6 @@ export class AgentRuntime {
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.client?.reset();
-    micaLogger.logRuntime('agent', 'session:cleared', { runId: this.runId });
     this.emitStatus({ type: 'idle' });
   }
 
@@ -220,12 +206,6 @@ export class AgentRuntime {
     if (!this.client) return false;
     this.trimAbortedRunUsage();
     const hadCurrentTurn = this.client.preserveAbortedTurn(question, partialAnswer);
-    micaLogger.logRuntime(
-      'agent',
-      hadCurrentTurn ? 'turn:preserved_aborted_complete_iteration' : 'turn:preserved_aborted',
-      { messages: this.client.messages.length, hasPartialAnswer: Boolean(partialAnswer?.trim()) },
-      'warn',
-    );
     return hadCurrentTurn;
   }
 
@@ -259,11 +239,6 @@ export class AgentRuntime {
       lastUsage: snapshot.lastUsage,
       conversationMessages: [],
     });
-    micaLogger.logRuntime('agent', 'snapshot:loaded', {
-      provider: snapshot.providerId,
-      model: snapshot.model,
-      messages: snapshot.messages.length,
-    });
   }
 
   toConversationMessages(): MicaUiConversationMessage[] {
@@ -274,22 +249,10 @@ export class AgentRuntime {
     const runId = ++this.runId;
     const startedAt = Date.now();
     const questionText = contentToText(question);
-    micaLogger.logRuntime('agent', 'run:start', {
-      runId,
-      provider: this.currentConfig.provider.id,
-      model: this.currentConfig.model,
-      chars: questionText.length,
-    });
 
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
       this.emitStatus({ type: 'error', message });
-      micaLogger.logRuntime(
-        'agent',
-        'run:not_configured',
-        { runId, provider: this.currentConfig.provider.id },
-        'error',
-      );
       throw new Error(message);
     }
 
@@ -308,7 +271,6 @@ export class AgentRuntime {
         onIterationComplete: async () => {
           if (!this.isCurrent(runId)) return null;
           this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
-          micaLogger.logRuntime('agent', 'run:iteration_complete', { runId });
           return options.onIterationComplete?.() ?? null;
         },
       });
@@ -318,23 +280,16 @@ export class AgentRuntime {
           startedAt,
           elapsedMs: Date.now() - startedAt,
         });
-        micaLogger.logRuntime('agent', 'run:completed', {
-          runId,
-          elapsedMs: Date.now() - startedAt,
-          chars: text.length,
-        });
       }
       return { runId, text };
     } catch (error) {
       if (!this.isCurrent(runId) || isAbortError(error)) {
         this.abortedRunUsageStartIndex = this.activeRunUsageStartIndex;
         this.abortedRunCompleteUsageLength = this.activeRunCompleteUsageLength;
-        micaLogger.logRuntime('agent', 'run:aborted', { runId }, 'warn');
         throw new AgentAbortError(runId);
       }
       const message = error instanceof Error ? error.message : String(error);
       if (this.isCurrent(runId)) this.emitStatus({ type: 'error', message });
-      micaLogger.logRuntime('agent', 'run:error', { runId, message }, 'error');
       throw error;
     } finally {
       if (this.activeAbortController === abortController) {
@@ -355,15 +310,9 @@ export class AgentRuntime {
   private recreateClient() {
     if (!this.currentConfig.provider.api_key) {
       this.client = null;
-      micaLogger.logRuntime('agent', 'client:disabled', { provider: this.currentConfig.provider.id }, 'warn');
       return;
     }
     this.client = micaAgent.createModelClient(this.clientOptions());
-    micaLogger.logRuntime('agent', 'client:created', {
-      provider: this.currentConfig.provider.id,
-      model: this.currentConfig.model,
-      effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
-    });
     this.client.onText = (text) => {
       this.emitStatus({ type: 'streaming', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('text', text);
@@ -375,22 +324,13 @@ export class AgentRuntime {
     this.client.onToolCall = (name, args, id) => {
       this.emitStatus({ type: 'calling_tool', startedAt: this.activeRunStartedAt ?? undefined, toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
-      micaLogger.logRuntime('agent.tool', 'call', { name, id, argsChars: args.length });
     };
     this.client.onToolResult = (name, result, id) => {
       this.events.emit('toolResult', { name, result, id });
       this.emitStatus({ type: 'connecting', startedAt: this.activeRunStartedAt ?? undefined });
-      micaLogger.logRuntime('agent.tool', 'result', { name, id, resultChars: result.length });
     };
     this.client.onUsage = (usage) => {
       this.events.emit('usage', usage);
-      micaLogger.logRuntime('agent', 'usage', {
-        input: usage.inputTokens,
-        cachedInput: usage.cachedInputTokens ?? 0,
-        output: usage.outputTokens,
-        total: usage.totalTokens,
-        paidTokenRate: usage.paidTokenRate,
-      });
     };
   }
 
@@ -438,12 +378,6 @@ export class AgentRuntime {
     if (completeLength < this.client.usageHistory.length) {
       this.client.usageHistory = this.client.usageHistory.slice(0, completeLength) as typeof this.client.usageHistory;
       this.client.lastUsage = this.client.usageHistory.at(-1);
-      micaLogger.logRuntime(
-        'agent',
-        'run:trim_aborted_usage',
-        { startIndex, completeLength, usage: this.client.usageHistory.length },
-        'warn',
-      );
     }
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;

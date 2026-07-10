@@ -3,7 +3,6 @@ import { Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { SelectItem } from '@packages/mica-ui/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { moveSelection, selectionDirection } from './commandInput.js';
 
 export type SelectOption = {
@@ -31,12 +30,6 @@ export type SelectCommandConfig = {
 };
 
 export function showSelectCommand(config: SelectCommandConfig) {
-  micaLogger.logRuntime('plugin.select', 'opened', {
-    id: config.id,
-    title: config.title,
-    current: config.current,
-    options: config.options.length,
-  });
   const initialIndex = Math.max(
     0,
     config.options.findIndex((option) => option.name === config.current),
@@ -58,7 +51,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
   }
 
   function hide() {
-    micaLogger.logRuntime('plugin.select', 'closed', { id: config.id, title: config.title });
     micaUi.terminalInput.clearText();
     micaUi.panels.clearPluginUIs();
   }
@@ -68,7 +60,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
     const filtered = getFilteredOptions();
     const selected = filtered[selectedIdx.get()];
     if (selected) {
-      micaLogger.logRuntime('plugin.select', 'selected', { id: config.id, title: config.title, value: selected.name });
       applying.set(true);
       let shouldRunAfterSelect = false;
       void Promise.resolve()
@@ -77,16 +68,6 @@ export function showSelectCommand(config: SelectCommandConfig) {
           shouldRunAfterSelect = result !== false;
         })
         .catch((error) => {
-          micaLogger.logRuntime(
-            'plugin.select',
-            'select:error',
-            {
-              id: config.id,
-              title: config.title,
-              error: error instanceof Error ? error.message : String(error),
-            },
-            'error',
-          );
         })
         .finally(() => {
           applying.set(false);
@@ -95,21 +76,10 @@ export function showSelectCommand(config: SelectCommandConfig) {
             void Promise.resolve()
               .then(() => config.onAfterSelect?.(selected.name))
               .catch((error) => {
-                micaLogger.logRuntime(
-                  'plugin.select',
-                  'after_select:error',
-                  {
-                    id: config.id,
-                    title: config.title,
-                    error: error instanceof Error ? error.message : String(error),
-                  },
-                  'error',
-                );
               });
           }
         });
     } else {
-      micaLogger.logRuntime('plugin.select', 'select:empty', { id: config.id, title: config.title }, 'warn');
       hide();
     }
   }
@@ -194,21 +164,18 @@ export function showSelectCommand(config: SelectCommandConfig) {
 
 export function showConfirmPrompt(message: string, defaultYes = true): Promise<boolean> {
   return new Promise((resolve) => {
-    micaLogger.logRuntime('plugin.confirm', 'opened', { message });
     const yesIdx = defaultYes ? 0 : 1;
     const noIdx = defaultYes ? 1 : 0;
     const selectedIdx = atom(yesIdx);
     let resolved = false;
 
     function hide() {
-      micaLogger.logRuntime('plugin.confirm', 'closed', { message });
       micaUi.panels.clearPluginUIs();
     }
 
     function finish(value: boolean) {
       if (resolved) return;
       resolved = true;
-      micaLogger.logRuntime('plugin.confirm', 'resolved', { message, value });
       hide();
       resolve(value);
     }

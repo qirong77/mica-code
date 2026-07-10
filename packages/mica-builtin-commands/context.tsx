@@ -11,7 +11,6 @@ import { AnthropicHistoryNormalizer } from '@packages/mica-agent/providers/Anthr
 import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
 import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { Tool } from '@packages/mica-tools/index.js';
@@ -101,14 +100,6 @@ export function createContextCommand(agent: CommandAgent) {
     action: (arg?: string) => {
       const overview = buildContextOverview(agent);
       const isDetail = arg?.trim().toLowerCase() === 'detail';
-      micaLogger.logRuntime('plugin.context', 'opened', {
-        provider: agent.config.provider.id,
-        model: overview.model,
-        usedTokens: overview.usedTokens,
-        messages: overview.messageCount,
-        toolCalls: overview.toolCalls,
-        detail: isDetail,
-      });
       if (isDetail) {
         showContextDetailPanel(overview);
         return;
@@ -122,7 +113,7 @@ function showContextPanel(overview: ContextOverview) {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.context', 'closed');
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function ContextPanel() {
@@ -166,7 +157,7 @@ function showContextDetailPanel(overview: ContextOverview) {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.context', 'closed');
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function ContextDetailPanel() {
@@ -371,7 +362,6 @@ function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): Con
     return normalizer.normalize(messages);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    micaLogger.logRuntime('plugin.context', 'normalize:error', { message }, 'warn');
     return messages.map((content) => ({ type: 'unknown', content }));
   }
 }

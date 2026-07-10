@@ -1,5 +1,4 @@
 import { formatTokenCount } from '@packages/mica-common/format.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import {
   micaConfig,
   type EffortOption,
@@ -20,7 +19,6 @@ export function reportConfigSwitchError(
   error: unknown,
 ): void {
   const message = error instanceof Error ? error.message : String(error);
-  micaLogger.logRuntime('plugin.config_switch', 'error', { reason, message }, 'error');
   services.showMessage(`Switch ${reason} failed: ${message}`, 6000, services.getCurrentAgentSessionId());
 }
 
@@ -49,11 +47,6 @@ export function applyConfigSwitchUpdate({
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
   if (adjustments.length > 0) {
-    micaLogger.logRuntime('plugin.config_switch', 'normalized', {
-      provider: next.provider,
-      model: next.model,
-      adjustments,
-    });
   }
   services.showMessage(formatConfigSwitchSuccess(successMessage(next), adjustments), successTtl);
   return next;

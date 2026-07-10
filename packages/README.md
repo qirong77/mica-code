@@ -17,7 +17,6 @@
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks 和 service container。
 - `mica-common`：跨包共享的底层工具。
-- `mica-logger`：运行时日志 store 和格式化工具。
 
 ## 包规范
 

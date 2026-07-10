@@ -81,12 +81,6 @@ const mocks = {
   readBackgroundTaskOutput: vi.fn(() => ({ content: 'ready\ntick', size: 10, start: 0, end: 10 })),
 };
 
-vi.mock('@packages/mica-logger/index.js', () => ({
-  micaLogger: {
-    logRuntime: mocks.logRuntime,
-  },
-}));
-
 vi.mock('@packages/mica-tools/index.js', () => ({
   getBackgroundTaskOutputSize: mocks.getBackgroundTaskOutputSize,
   listBackgroundTasks: mocks.listBackgroundTasks,
@@ -138,7 +132,6 @@ const { createTaskCommand } = await import('./task.js');
 
 describe('task command', () => {
   beforeEach(() => {
-    mocks.logRuntime.mockReset();
     mocks.upsertPluginUI.mockReset();
     mocks.removePluginUI.mockReset();
     mocks.setAgentStatusItems.mockReset();
@@ -166,7 +159,6 @@ describe('task command', () => {
     ]);
     expect(services.listRunningAgents).toHaveBeenCalledTimes(1);
     expect(mocks.setAgentStatusItems).toHaveBeenCalledWith(agents);
-    expect(mocks.logRuntime).toHaveBeenCalledWith('plugin.task', 'opened', { backgroundTasks: 1, agents: 1 });
     expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-panel' }));
   });
 
@@ -177,7 +169,6 @@ describe('task command', () => {
     command.action('clear');
 
     expect(services.clearIdleAgents).toHaveBeenCalledTimes(1);
-    expect(mocks.logRuntime).toHaveBeenCalledWith('plugin.task', 'clear:done', { cleared: 1 });
     expect(services.showMessage).toHaveBeenCalledWith('Cleared 1 idle task', 4000);
   });
 

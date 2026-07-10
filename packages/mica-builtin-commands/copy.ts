@@ -1,7 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import { setClipboard } from '@anthropic/ink';
 import type { CommandRuntimeServices } from './services.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { MicaUiMessageParam, MicaUiContentBlockParam } from '@packages/mica-ui/types.js';
 
 export function createCopyCommand(services: CommandRuntimeServices) {
@@ -22,10 +21,8 @@ export function createCopyCommand(services: CommandRuntimeServices) {
         const osc = await setClipboard(lastAssistant);
         process.stdout.write(osc);
         services.showMessage('Copied to clipboard');
-        micaLogger.logRuntime('plugin.copy', 'copied', { length: lastAssistant.length });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        micaLogger.logRuntime('plugin.copy', 'error', { message }, 'error');
         services.showMessage(`Copy failed: ${message}`);
       }
     },

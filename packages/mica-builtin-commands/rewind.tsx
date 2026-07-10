@@ -1,5 +1,4 @@
 import { Box, Text } from '@anthropic/ink';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRuntimeServices, RewindFileChange, RewindPreviewResult } from './services.js';
 
@@ -22,13 +21,6 @@ export function createRewindCommand(services: CommandRuntimeServices) {
         services.showMessage(preview.message, 4000);
         return;
       }
-
-      micaLogger.logRuntime('plugin.rewind', 'confirm:show', {
-        id: preview.id,
-        files: preview.files.length,
-        messagesBefore: preview.messageCountBefore,
-        messagesNow: preview.messageCountNow,
-      });
       showRewindConfirmPanel(preview, services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -45,15 +37,8 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
       const result = services.applyRewind(preview.id);
       const fileText = result.fileStateAvailable ? `${result.files.length} file(s)` : 'conversation only';
       services.showMessage(`rewind: reverted to before "${result.conversationLabel}" (${fileText})`, 6000);
-      micaLogger.logRuntime('plugin.rewind', 'applied', {
-        id: result.id,
-        files: result.files.length,
-        messages: result.messageCount,
-        fileStateAvailable: result.fileStateAvailable,
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      micaLogger.logRuntime('plugin.rewind', 'error', { message }, 'error');
       services.showMessage(`rewind failed: ${message}`, 6000);
     }
   }
@@ -99,7 +84,6 @@ function showRewindConfirmPanel(preview: Extract<RewindPreviewResult, { ok: true
     onInput: (input, key) => {
       if (key.escape) {
         hide();
-        micaLogger.logRuntime('plugin.rewind', 'confirm:cancel', { id: preview.id });
         return true;
       }
       if (input.toLowerCase() === 'y') {

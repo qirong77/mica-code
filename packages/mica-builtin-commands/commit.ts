@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { formatExecError, gitText, gitTextAsync, safeGitText, safeGitTextAsync } from '@packages/mica-common/index.js';
 
 const MAX_SUMMARY_CHARS = 20_000;
@@ -37,7 +36,6 @@ export function createCommitCommand(agent: CommandAgent, services: CommandRuntim
         services.showMessage('Agent is busy; wait or abort before committing');
         return;
       }
-      micaLogger.logRuntime('plugin.commit', 'requested');
       const ownerSessionId = services.getCurrentAgentSessionId();
       await services.runExclusiveTask(
         targetAgent,
@@ -58,45 +56,33 @@ function showTerminalMessage(services: CommandRuntimeServices, text: string, own
 
 async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, ownerSessionId?: string) {
   try {
-    micaLogger.logRuntime('plugin.commit', 'start');
     setCommitStatus(agent, services, 'commit: 正在分析 git 变化...', ownerSessionId);
 
     const status = git(['status', '--porcelain=v1']);
     const changedFiles = parsePorcelainStatus(status);
-    micaLogger.logRuntime('plugin.commit', 'status:loaded', { files: changedFiles.length });
     if (!status.trim()) {
-      micaLogger.logRuntime('plugin.commit', 'status:empty');
       showTerminalMessage(services, 'commit: 没有可提交的变化', ownerSessionId);
       return;
     }
     if (hasUnmergedFiles(status)) {
-      micaLogger.logRuntime('plugin.commit', 'blocked:unmerged_files', undefined, 'warn');
       showTerminalMessage(services, 'commit: 存在未解决冲突，请先处理', ownerSessionId);
       return;
     }
 
     const summary = await buildChangeSummary(status);
-    micaLogger.logRuntime('plugin.commit', 'summary:built', { chars: summary.length });
     const commitMessage = await generateCommitMessage(agent, summary);
-    micaLogger.logRuntime('plugin.commit', 'message:generated', { firstLine: firstLine(commitMessage) });
 
     setCommitStatus(agent, services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
     git(['add', '-A']);
-    micaLogger.logRuntime('plugin.commit', 'git:add_done');
 
     const stagedStatus = git(['diff', '--cached', '--name-only']);
     if (!stagedStatus.trim()) {
-      micaLogger.logRuntime('plugin.commit', 'blocked:no_staged_changes', undefined, 'warn');
       showTerminalMessage(services, 'commit: git add 后没有 staged 变化', ownerSessionId);
       return;
     }
-    micaLogger.logRuntime('plugin.commit', 'staged:ready', {
-      files: stagedStatus.trim().split('\n').filter(Boolean).length,
-    });
 
     commitWithMessage(commitMessage);
     const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
-    micaLogger.logRuntime('plugin.commit', 'git:commit_done', { commit: commitHash });
 
     setCommitStatus(agent, services, `commit: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
     const pushed = await pushCurrentBranch();
@@ -112,20 +98,14 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
       messageLines.push(commitMessage.split('\n').slice(1).join('\n').trim());
     }
     services.showCommitNotice(messageLines.join('\n'), ownerSessionId);
-
-    micaLogger.logRuntime('plugin.commit', pushed ? 'push:done' : 'push:skipped_no_remote_branch', {
-      commit: commitHash,
-    });
   } catch (error) {
     const message = formatExecError(error);
-    micaLogger.logRuntime('plugin.commit', 'error', { message }, 'error');
     showTerminalMessage(services, `commit failed: ${message}`, ownerSessionId);
   }
 }
 
 async function buildChangeSummary(status: string) {
   const changedFiles = parsePorcelainStatus(status);
-  micaLogger.logRuntime('plugin.commit', 'changes:parsed', { files: changedFiles.length });
 
   const [stat, nameStatus, diffSamples] = await Promise.all([
     safeGitTextAsync(['diff', '--stat', '--no-color']).then(
@@ -165,7 +145,6 @@ async function buildChangeSummary(status: string) {
 }
 
 async function generateCommitMessage(agent: CommandAgent, summary: string) {
-  micaLogger.logRuntime('plugin.commit', 'message:generate_start', { summaryChars: summary.length });
   const subAgent = agent.createSubAgent({
     systemPrompt: [
       'You write concise git commit messages.',
@@ -214,13 +193,11 @@ async function buildDiffSamples(files: Array<{ status: string; path: string }>) 
       const sample = truncateByHunks(diff.trim(), Math.min(MAX_DIFF_CHARS_PER_FILE, remaining));
       sections.push(`--- ${file.path}\n${sample}`);
       remaining -= sample.length;
-      micaLogger.logRuntime('plugin.commit', 'diff:sampled', { file: file.path, chars: sample.length });
     }
   }
 
   if (remaining <= 0) {
     sections.push('[diff sample budget exhausted]');
-    micaLogger.logRuntime('plugin.commit', 'diff:budget_exhausted', undefined, 'warn');
   }
 
   return sections.join('\n\n');
@@ -394,7 +371,6 @@ function commitWithMessage(message: string) {
   const messagePath = join(dir, 'message.txt');
   try {
     writeFileSync(messagePath, `${message.trim()}\n`, 'utf-8');
-    micaLogger.logRuntime('plugin.commit', 'git:commit_start', { firstLine: firstLine(message) });
     git(['commit', '-F', messagePath], 120_000);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -404,7 +380,6 @@ function commitWithMessage(message: string) {
 async function pushCurrentBranch() {
   const upstream = safeGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim();
   if (upstream) {
-    micaLogger.logRuntime('plugin.commit', 'push:start', { upstream });
     await gitAsync(['push'], 120_000);
     return true;
   }
@@ -412,11 +387,8 @@ async function pushCurrentBranch() {
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
   const remoteBranch = safeGit(['ls-remote', '--heads', 'origin', branch]).trim();
   if (!remoteBranch) {
-    micaLogger.logRuntime('plugin.commit', 'push:skip_no_remote_branch', { branch }, 'warn');
     return false;
   }
-
-  micaLogger.logRuntime('plugin.commit', 'push:start', { branch, remote: 'origin' });
   await gitAsync(['push', 'origin', branch], 120_000);
   return true;
 }

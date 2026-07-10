@@ -1,7 +1,6 @@
 import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
 import { micaBuiltinCommands, type CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi, type MicaUiConversationMessage, type MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
@@ -330,11 +329,6 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         cachedTokenRate: calculateCachedTokenRate(sourceSnapshot.usageHistory),
       });
       const record = context.agentSessions.list().find((agent) => agent.id === created.id) ?? created;
-      micaLogger.logRuntime('plugin.fork', 'snapshot:loaded', {
-        id: created.id,
-        messages: sourceSnapshot.messages.length,
-        sourceWasRunning,
-      });
       return { ...record, sourceWasRunning };
     },
     switchAgentSession(id) {

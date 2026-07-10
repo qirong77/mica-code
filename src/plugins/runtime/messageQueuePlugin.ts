@@ -2,7 +2,6 @@ import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
 import type { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { LocalRuntimeController } from '../../app/adapters/LocalRuntimeController.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 
 type RuntimeInputHookEvent = {
   runtime: LocalRuntimeController;
@@ -50,11 +49,6 @@ export class MessageQueuePlugin extends micaPlugin.Plugin {
           message:
             queueMode === 'after_turn' ? '消息已排队，将在当前任务完成后发送' : '消息已排队，将在本轮迭代完成后发送',
           owner,
-        });
-        micaLogger.logRuntime('runtime', 'submit:queued', {
-          chars: event.input.text.length,
-          queued: event.runtime.countQueueForAgent(owner),
-          queueMode,
         });
 
         return { action: 'handled', reason: 'queued' };

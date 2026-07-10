@@ -1,6 +1,5 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandSessionController, CommandRuntimeServices } from './services.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 
 export function createRenameCommand(sessionController: CommandSessionController, services: CommandRuntimeServices) {
   return {
@@ -14,7 +13,6 @@ export function createRenameCommand(sessionController: CommandSessionController,
       }
       sessionController.renameCurrent(title);
       services.renameCurrentAgentSession(title);
-      micaLogger.logRuntime('plugin.rename', 'renamed', { title });
       services.showMessage(`Session renamed to: ${title}`);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];

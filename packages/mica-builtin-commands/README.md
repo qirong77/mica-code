@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/log`、`/status`、`/task`、`/context`、`/doctor`、`/compact`、`/fork`、`/rewind`、`/review`、`/commit`、`/copy`、`/new`、`/recap`、`/rename`、`/memoryUsage`、`/git-diff-context`、`/clear`、`/exit`。
+- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/doctor`、`/compact`、`/fork`、`/rewind`、`/review`、`/commit`、`/copy`、`/new`、`/recap`、`/rename`、`/memoryUsage`、`/git-diff-context`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉。
@@ -51,5 +51,5 @@ const commands = [
 - `mcp.tsx`、`skills.tsx`：MCP 与 skills 管理命令。
 - `task.tsx`、`fork.ts`、`rewind.tsx`：多任务、分叉与回退相关命令。
 - `compact.ts`：上下文压缩命令。
-- `log.tsx`、`status.tsx`、`context.tsx`、`doctor.tsx`：日志查看、日志导出、状态查看、上下文总览与环境诊断命令。
+- `status.tsx`、`context.tsx`、`doctor.tsx`：状态查看、上下文总览与环境诊断命令。
 - `review.ts`、`commit.ts`：代码审查与提交辅助命令。

@@ -1,5 +1,4 @@
 import { micaUi } from '@packages/mica-ui/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { formatExecError } from '@packages/mica-common/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { getCurrentBranch, loadCurrentGitChanges, summarizeDiff } from './gitDiffContext.js';
@@ -16,23 +15,18 @@ export function createReviewCommand(services: CommandRuntimeServices) {
 
 function runReview(services: CommandRuntimeServices): void {
   try {
-    micaLogger.logRuntime('plugin.review', 'start');
     const branch = getCurrentBranch();
     const diff = loadCurrentGitChanges({ includeUntracked: true });
-    micaLogger.logRuntime('plugin.review', 'diff:loaded', { branch, chars: diff.length });
 
     if (!diff) {
-      micaLogger.logRuntime('plugin.review', 'diff:empty', { branch });
       services.showMessage(`review: branch ${branch} has no current git changes`, 5000);
       return;
     }
 
     const message = buildReviewMessage(branch, diff);
     micaUi.terminalInput.submit(message, { displayText: buildReviewDisplayMessage(branch, diff) });
-    micaLogger.logRuntime('plugin.review', 'submitted', { branch, chars: message.length });
   } catch (error) {
     const msg = formatExecError(error);
-    micaLogger.logRuntime('plugin.review', 'error', { message: msg }, 'error');
     services.showMessage(`review failed: ${msg}`, 5000);
   }
 }

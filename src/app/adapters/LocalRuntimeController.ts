@@ -1,7 +1,6 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -28,7 +27,7 @@ import {
 } from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 
-const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['log', 'status', 'task', 'agents', 'new']);
+const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['status', 'task', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
 const MAX_TURN_RETRIES = 5;
@@ -333,8 +332,6 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: false, reason: 'busy' };
     }
 
-    micaLogger.logRuntime('runtime', 'submit', { chars: text.length, running: this.runningAgents.has(targetAgent) });
-
     const inputHook = await this.hooks.guard<RuntimeInputHookEvent>('input:received', {
       runtime: this,
       input,
@@ -375,7 +372,6 @@ export class LocalRuntimeController implements RuntimeController {
   async abort(): Promise<AbortResult> {
     if (!this.runningAgents.has(this.agent)) return { ok: false, reason: 'not_running' };
     try {
-      micaLogger.logRuntime('runtime', 'abort:requested', undefined, 'warn');
       this.agent.abort();
       return { ok: true };
     } catch (error) {
@@ -391,8 +387,6 @@ export class LocalRuntimeController implements RuntimeController {
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
-
-    micaLogger.logRuntime('runtime', 'turn:start', { chars: input.text.length });
     micaRuntime.memoryUsageMonitor.capture('turn:start');
     this.rewindCheckpoints.capture(agent, input);
 
@@ -456,17 +450,6 @@ export class LocalRuntimeController implements RuntimeController {
           this.responseBuffers.set(agent, '');
           this.committedResponseBuffers.set(agent, '');
 
-          micaLogger.logRuntime(
-            'runtime',
-            'turn:retry',
-            {
-              attempt,
-              maxRetries: MAX_TURN_RETRIES,
-              error: lastError instanceof Error ? lastError.message : String(lastError),
-            },
-            'warn',
-          );
-
           if (this.isActiveAgent(agent)) {
             micaUi.conversation.clearResponseText();
             micaUi.panels.thinkingText.set('');
@@ -523,7 +506,6 @@ export class LocalRuntimeController implements RuntimeController {
 
           await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
           sessionController.saveCurrent();
-          micaLogger.logRuntime('runtime', 'turn:saved', { runId, chars: (finalText || responseBuffer).length });
           return;
         } catch (error) {
           if (error instanceof AgentAbortError) {
@@ -588,12 +570,6 @@ export class LocalRuntimeController implements RuntimeController {
         micaRuntime.memoryUsageMonitor.capture('turn:abort');
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
         if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
-        micaLogger.logRuntime(
-          'runtime',
-          this.clearingAgents.has(agent) ? 'turn:aborted_cleared' : 'turn:aborted_saved',
-          { runId, chars: responseBuffer.length },
-          'warn',
-        );
         return;
       }
 
@@ -649,7 +625,6 @@ export class LocalRuntimeController implements RuntimeController {
       } finally {
         this.hookAgent = null;
       }
-      micaLogger.logRuntime('runtime', 'turn:finish', { elapsedMs, hasError });
     }
   }
 
@@ -699,7 +674,6 @@ export class LocalRuntimeController implements RuntimeController {
       }
       micaUi.conversation.clearResponseText();
     }
-    micaLogger.logRuntime('runtime', 'submit:queued_iteration', { chars: next.text.length, queued: queue.count() });
     return content;
   }
 

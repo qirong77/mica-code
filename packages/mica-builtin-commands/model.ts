@@ -2,7 +2,6 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from './services.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from './selectCommand.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices, CommandSessionController } from './services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from './configSwitch.js';
 import { showEffortSelector } from './effort.js';
@@ -22,10 +21,6 @@ export function createModelCommand(
         services.showMessage('Agent is busy; wait or abort before switching model');
         return;
       }
-      micaLogger.logRuntime('plugin.model', 'opened', {
-        current: targetAgent.config.model,
-        provider: targetAgent.config.provider.id,
-      });
       void showModelSelector(targetAgent, targetSessionController, services, { activateEffortAfterSelect: true });
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -42,7 +37,6 @@ export async function showModelSelector(
   const providerId = provider.id;
   if (provider.get_model_url && !provider.models?.length) {
     try {
-      micaLogger.logRuntime('plugin.model', 'models:load:start', { provider: providerId });
       await micaConfig.loadProviderModels(providerId);
       provider = micaConfig.get().providers.find((item) => item.id === providerId) ?? provider;
       if (!agent.isRunning) {
@@ -50,26 +44,11 @@ export async function showModelSelector(
         sessionController.saveCurrent();
         services.syncModelDisplay(agent);
       }
-      micaLogger.logRuntime('plugin.model', 'models:load:done', { provider: provider.id });
     } catch (error) {
-      micaLogger.logRuntime(
-        'plugin.model',
-        'models:load:error',
-        {
-          provider: providerId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'error',
-      );
       services.showMessage(error instanceof Error ? error.message : String(error));
       return;
     }
   }
-  micaLogger.logRuntime('plugin.model', 'selector:ready', {
-    provider: provider.id,
-    models: provider.models?.length ?? 0,
-    current: agent.config.model,
-  });
   showSelectCommand({
     id: 'select-model',
     title: 'select model',
@@ -100,10 +79,8 @@ async function applyModelSelection(
       return false;
     }
     if (model === agent.config.model) {
-      micaLogger.logRuntime('plugin.model', 'selected_current', { model });
       return true;
     }
-    micaLogger.logRuntime('plugin.model', 'selected', { from: agent.config.model, to: model, provider: providerId });
     services.showMessage(
       'Model changed, prompt cache may be invalidated. Consider /compact',
       6000,

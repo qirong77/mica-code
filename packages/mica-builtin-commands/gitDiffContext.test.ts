@@ -13,12 +13,6 @@ vi.mock('@packages/mica-common/index.js', () => ({
   gitText: mocks.gitText,
 }));
 
-vi.mock('@packages/mica-logger/index.js', () => ({
-  micaLogger: {
-    logRuntime: mocks.logRuntime,
-  },
-}));
-
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
     dropdown: {

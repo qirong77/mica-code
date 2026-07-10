@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { basename } from 'node:path';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import {
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
@@ -37,7 +36,6 @@ export function createTaskCommand(services: CommandRuntimeServices) {
     action: (arg?: string) => {
       if (arg?.trim().toLowerCase() === 'clear') {
         const result = services.clearIdleAgents();
-        micaLogger.logRuntime('plugin.task', 'clear:done', { cleared: result.cleared.length });
         services.showMessage(
           result.cleared.length > 0
             ? `Cleared ${result.cleared.length} idle task${result.cleared.length === 1 ? '' : 's'}`
@@ -50,10 +48,6 @@ export function createTaskCommand(services: CommandRuntimeServices) {
       const backgroundTasks = filterActiveBackgroundTasks(syncBackgroundTasks());
       const agents = services.listRunningAgents();
       micaUi.panels.setAgentStatusItems(agents);
-      micaLogger.logRuntime('plugin.task', 'opened', {
-        backgroundTasks: backgroundTasks.length,
-        agents: agents.length,
-      });
       showTaskPanel(services);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -70,7 +64,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
   const stateAtom = atom<TaskPanelState>({ selectedIdx: 0, detailTaskId: null });
 
   function hide() {
-    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.task', 'closed');
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function TaskPanel() {

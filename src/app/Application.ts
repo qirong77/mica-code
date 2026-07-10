@@ -6,7 +6,6 @@ import { Box, Text } from '@anthropic/ink';
 import { wrappedRender } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 import {
@@ -131,9 +130,9 @@ export class Application {
           getMaxSnapshots: () => micaRuntime.memoryUsageMonitor.getMaxSnapshots(),
         },
         logger: {
-          info: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data)),
-          warn: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'warn'),
-          error: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'error'),
+          info() {},
+          warn() {},
+          error() {},
         },
       });
       writePluginStatus(filePlugins, setupReport);
@@ -156,7 +155,6 @@ export class Application {
       micaUi.terminalInput.setOnExitRequested(() => {
         void this.requestExit();
       });
-      micaLogger.logRuntime('runtime', 'application:start');
     } catch (error) {
       micaUi.terminalInput.setPlaceholder('启动失败：修复配置后重新运行 mica，按 Ctrl+C 退出');
       reportRuntimeError(error, '启动失败');
@@ -206,16 +204,10 @@ export class Application {
   }
 
   private async useFilePlugins(plugins: PluginManager): Promise<FilePluginLoadResult> {
-    const loaded = await micaPlugin.loadFilePlugins({
-      pluginsDir: createPluginPaths().plugins,
-      logger: {
-        warn: (event, data) => micaLogger.logRuntime('plugin', event, toLogData(data), 'warn'),
-      },
-    });
+    const loaded = await micaPlugin.loadFilePlugins({ pluginsDir: createPluginPaths().plugins });
 
     for (const plugin of loaded.plugins) {
       if (plugins.has(plugin.id)) {
-        micaLogger.logRuntime('plugin', 'file-plugin:duplicate', { pluginId: plugin.id }, 'warn');
         continue;
       }
       plugins.register(plugin);

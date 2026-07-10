@@ -18,12 +18,6 @@ const mocks = {
   calculateUsageCachedTokenRate: vi.fn(() => 0.2),
 };
 
-vi.mock('@packages/mica-logger/index.js', () => ({
-  micaLogger: {
-    logRuntime: mocks.logRuntime,
-  },
-}));
-
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
     Dialog: ({ children }: { children: unknown }) => children,

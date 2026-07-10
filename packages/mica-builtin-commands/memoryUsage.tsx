@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Box, Text } from '@anthropic/ink';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaRuntime, type MemoryUsageSnapshot } from '@packages/mica-runtime/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandRuntimeServices } from './services.js';
@@ -33,10 +32,6 @@ export function createMemoryUsageCommand(services: CommandRuntimeServices) {
       }
 
       micaRuntime.memoryUsageMonitor.capture('command:open');
-      micaLogger.logRuntime('plugin.memoryUsage', 'opened', {
-        snapshots: micaRuntime.memoryUsageMonitor.getSnapshots().length,
-        running: micaRuntime.memoryUsageMonitor.isRunning(),
-      });
       showMemoryUsagePanel();
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -46,7 +41,7 @@ function showMemoryUsagePanel() {
   const initialText = micaUi.terminalInput.text.get();
 
   function hide() {
-    if (micaUi.panels.removePluginUI(PANEL_ID)) micaLogger.logRuntime('plugin.memoryUsage', 'closed');
+    micaUi.panels.removePluginUI(PANEL_ID);
   }
 
   function MemoryUsagePanel() {
@@ -144,7 +139,6 @@ function ResourceSummary({ snapshot }: { snapshot: MemoryUsageSnapshot }) {
 }
 
 function exportMemoryUsageLog(services: CommandRuntimeServices): void {
-  micaLogger.logRuntime('plugin.memoryUsage', 'export:requested');
 
   try {
     const snapshots = micaRuntime.memoryUsageMonitor.getSnapshots();
@@ -195,14 +189,9 @@ function exportMemoryUsageLog(services: CommandRuntimeServices): void {
     writeFileSync(join(exportDir, 'memory-usage-summary.log'), formatSummaryLog(snapshots), 'utf-8');
 
     services.showMessage(`memoryUsage export: 已导出 ${snapshots.length} 条快照 -> ${exportDirName}`, 8000);
-    micaLogger.logRuntime('plugin.memoryUsage', 'export:done', {
-      path: exportDirName,
-      snapshots: snapshots.length,
-    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     services.showMessage(`memoryUsage export: 导出失败：${message}`, 8000);
-    micaLogger.logRuntime('plugin.memoryUsage', 'export:error', { message }, 'error');
   }
 }
 

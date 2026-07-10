@@ -1,6 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
 import { micaUi } from '@packages/mica-ui/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import type { CommandRuntimeServices } from './services.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 
@@ -20,32 +19,19 @@ export function createGitDiffContextCommand(services: CommandRuntimeServices) {
 
 function runGitDiffContext(services: CommandRuntimeServices, target: DiffTarget) {
   try {
-    micaLogger.logRuntime('plugin.git-diff-context', 'start', target);
     const branch = getCurrentBranch();
-    micaLogger.logRuntime('plugin.git-diff-context', 'branch:detected', { branch });
 
     const context = loadDiffContext(target);
-    micaLogger.logRuntime('plugin.git-diff-context', 'diff:loaded', {
-      target: context.label,
-      chars: context.diff.length,
-    });
 
     if (!context.diff) {
-      micaLogger.logRuntime('plugin.git-diff-context', 'diff:empty', { branch, target: context.label });
       services.showMessage(context.emptyMessage(branch), 5000);
       return;
     }
 
     const message = buildMessage(branch, context);
     micaUi.terminalInput.submit(message, { displayText: buildDisplayMessage(branch, context) });
-    micaLogger.logRuntime('plugin.git-diff-context', 'submitted', {
-      branch,
-      target: context.label,
-      chars: message.length,
-    });
   } catch (error) {
     const msg = formatExecError(error);
-    micaLogger.logRuntime('plugin.git-diff-context', 'error', { message: msg }, 'error');
     services.showMessage(`git diff failed: ${msg}`, 5000);
   }
 }

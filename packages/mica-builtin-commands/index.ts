@@ -8,7 +8,6 @@ import { createDoctorCommand } from './doctor.js';
 import { createEffortCommand } from './effort.js';
 import { createExitCommand } from './exit.js';
 import { createForkCommand } from './fork.js';
-import { closeLogPanel, createLogCommand } from './log.js';
 import { createMcpCommand } from './mcp.js';
 import { createModelCommand } from './model.js';
 import { createNewCommand } from './new.js';
@@ -34,8 +33,6 @@ export const micaBuiltinCommands = {
   createEffortCommand,
   createExitCommand,
   createForkCommand,
-  createLogCommand,
-  closeLogPanel,
   createMcpCommand,
   createModelCommand,
   createNewCommand,

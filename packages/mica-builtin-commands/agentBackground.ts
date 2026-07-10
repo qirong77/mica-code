@@ -1,4 +1,4 @@
-import { micaLogger } from '@packages/mica-logger/index.js';
+
 import type { CommandRuntimeServices, RunningAgentRecord } from './services.js';
 
 export function submitAgentPromptInBackground({
@@ -14,15 +14,9 @@ export function submitAgentPromptInBackground({
   prompt: string;
   startedMessage: string;
 }): void {
-  micaLogger.logRuntime(namespace, 'background:start', {
-    id: session.id,
-    index: session.index,
-    chars: prompt.length,
-  });
   services.showMessage(startedMessage, 4000);
 
   const reportError = (reason: string) => {
-    micaLogger.logRuntime(namespace, 'background:error', { id: session.id, index: session.index, reason }, 'error');
     services.showMessage(`Agent #${session.index} failed to start: ${reason}`, 6000);
   };
 

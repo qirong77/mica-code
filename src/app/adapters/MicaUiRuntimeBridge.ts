@@ -1,6 +1,5 @@
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { Disposable } from '@packages/mica-common/index.js';
-import { micaLogger } from '@packages/mica-logger/index.js';
 import { micaUi, type MicaUiBackgroundTaskItem } from '@packages/mica-ui/index.js';
 import {
   getBackgroundTaskOutputSize,
@@ -51,7 +50,6 @@ export class MicaUiRuntimeBridge {
 
   start(): void {
     syncModelDisplay(this.agent);
-    micaLogger.logRuntime('runtime', 'ui_bridge:start');
 
     this.attachAgentEvents(this.agent);
     this.syncAgentStatusItems();
@@ -247,12 +245,6 @@ export class MicaUiRuntimeBridge {
       micaUi.panels.contextSize.set(usage.totalTokens);
       micaUi.panels.cachedTokenRate.set(cachedTokenRate);
     }
-    micaLogger.logRuntime('runtime', 'usage:displayed', {
-      context: usage.totalTokens,
-      cachedInputTokens: usage.cachedInputTokens ?? 0,
-      cachedTokenRate,
-      paidTokenRate: usage.paidTokenRate,
-    });
   }
 
   private attachAgentEvents(agent: AgentRuntime): void {
