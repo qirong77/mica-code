@@ -79,7 +79,6 @@ export function CommandDropdown({
         markerWidth={0}
         marker=""
         height={height}
-        bottomReservedRows={4}
         layout="table"
         renderItem={renderItem}
       />
