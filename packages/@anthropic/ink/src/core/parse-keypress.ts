@@ -43,11 +43,13 @@ const DA2_RE = /^\x1b\[>([\d;]*)c$/;
 // (private ? marker distinguishes from CSI u key events)
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const KITTY_FLAGS_RE = /^\x1b\[\?(\d+)u$/;
-// DECXCPR cursor position: CSI ? row ; col R
+// DECXCPR cursor position: CSI ? row ; col [; page] R
+// VT300+ terminals may include the page parameter; iTerm2 does, while
+// xterm.js and several other emulators omit it.
 // The ? marker disambiguates from modified F3 keys (Shift+F3 = CSI 1;2 R,
 // Ctrl+F3 = CSI 1;5 R, etc.) — plain CSI row;col R is genuinely ambiguous.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const CURSOR_POSITION_RE = /^\x1b\[\?(\d+);(\d+)R$/;
+const CURSOR_POSITION_RE = /^\x1b\[\?(\d+);(\d+)(?:;(\d+))?R$/;
 // OSC response: OSC code ; data (BEL|ST)
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const OSC_RESPONSE_RE = /^\x1b\](\d+);(.*?)(?:\x07|\x1b\\)$/s;
@@ -101,8 +103,8 @@ export type TerminalResponse =
   | { type: 'da2'; params: number[] }
   /** Kitty keyboard protocol: current flags (answer to CSI ? u) */
   | { type: 'kittyKeyboard'; flags: number }
-  /** DSR: cursor position report (answer to CSI 6 n) */
-  | { type: 'cursorPosition'; row: number; col: number }
+  /** DECXCPR: cursor position report (answer to CSI ? 6 n) */
+  | { type: 'cursorPosition'; row: number; col: number; page?: number }
   /** OSC response: generic operating-system-command reply (e.g. OSC 11 bg color) */
   | { type: 'osc'; code: number; data: string }
   /** XTVERSION: terminal name/version string (answer to CSI > 0 q).
@@ -148,6 +150,7 @@ function parseTerminalResponse(s: string): TerminalResponse | null {
         type: 'cursorPosition',
         row: parseInt(m[1]!, 10),
         col: parseInt(m[2]!, 10),
+        ...(m[3] === undefined ? {} : { page: parseInt(m[3], 10) }),
       };
     }
 
@@ -182,6 +185,8 @@ export type KeyParseState = {
   mode: 'NORMAL' | 'IN_PASTE';
   incomplete: string;
   pasteBuffer: string;
+  // Incomplete UTF-8 bytes retained when stdin delivers raw Buffer chunks.
+  _inputByteBuffer?: Buffer;
   // Internal tokenizer instance
   _tokenizer?: Tokenizer;
 };
@@ -192,21 +197,104 @@ export const INITIAL_STATE: KeyParseState = {
   pasteBuffer: '',
 };
 
-function inputToString(input: Buffer | string): string {
-  if (Buffer.isBuffer(input)) {
-    if (input[0]! > 127 && input[1] === undefined) {
-      (input[0] as unknown as number) -= 128;
-      return '\x1b' + String(input);
-    } else {
-      return String(input);
-    }
-  } else if (input !== undefined && typeof input !== 'string') {
-    return String(input);
-  } else if (!input) {
-    return '';
-  } else {
-    return input;
+const C1_TO_7_BIT = new Map<number, string>([
+  [0x8f, '\x1bO'], // SS3
+  [0x90, '\x1bP'], // DCS
+  [0x9b, '\x1b['], // CSI
+  [0x9c, '\x1b\\'], // ST
+  [0x9d, '\x1b]'], // OSC
+  [0x9f, '\x1b_'], // APC
+]);
+
+function utf8SequenceLength(firstByte: number): number {
+  if (firstByte >= 0xc2 && firstByte <= 0xdf) return 2;
+  if (firstByte >= 0xe0 && firstByte <= 0xef) return 3;
+  if (firstByte >= 0xf0 && firstByte <= 0xf4) return 4;
+  return 0;
+}
+
+function hasInvalidUtf8Continuation(bytes: Buffer, offset: number, length: number): boolean {
+  const available = Math.min(length, bytes.length - offset);
+  for (let i = 1; i < available; i++) {
+    const byte = bytes[offset + i]!;
+    if (byte < 0x80 || byte > 0xbf) return true;
   }
+  return false;
+}
+
+function isValidUtf8Sequence(bytes: Buffer, offset: number, length: number): boolean {
+  if (hasInvalidUtf8Continuation(bytes, offset, length)) return false;
+
+  const first = bytes[offset]!;
+  const second = bytes[offset + 1]!;
+  if (first === 0xe0 && second < 0xa0) return false; // overlong
+  if (first === 0xed && second > 0x9f) return false; // surrogate
+  if (first === 0xf0 && second < 0x90) return false; // overlong
+  if (first === 0xf4 && second > 0x8f) return false; // > U+10FFFF
+  return true;
+}
+
+function legacyHighBitByte(byte: number): string {
+  return '\x1b' + String.fromCharCode(byte - 0x80);
+}
+
+/**
+ * Decode raw stdin bytes while preserving DEC's 8-bit C1 controls.
+ * Node's UTF-8 stream decoder turns standalone C1 bytes such as CSI (0x9B)
+ * into U+FFFD before the terminal parser can see them. Valid UTF-8 sequences
+ * still decode normally, including a literal U+009B encoded as C2 9B.
+ */
+function decodeTerminalBytes(bytes: Buffer, flush: boolean): { value: string; pending: Buffer } {
+  let value = '';
+  let i = 0;
+
+  while (i < bytes.length) {
+    const byte = bytes[i]!;
+
+    if (byte < 0x80) {
+      value += String.fromCharCode(byte);
+      i++;
+      continue;
+    }
+
+    const c1 = C1_TO_7_BIT.get(byte);
+    if (c1 !== undefined) {
+      value += c1;
+      i++;
+      continue;
+    }
+
+    const length = utf8SequenceLength(byte);
+    if (length > 0) {
+      if (i + length > bytes.length && !hasInvalidUtf8Continuation(bytes, i, length)) {
+        if (!flush) return { value, pending: Buffer.from(bytes.subarray(i)) };
+        value += legacyHighBitByte(byte);
+        i++;
+        continue;
+      }
+      if (i + length <= bytes.length && isValidUtf8Sequence(bytes, i, length)) {
+        value += bytes.subarray(i, i + length).toString('utf8');
+        i += length;
+        continue;
+      }
+    }
+
+    // Preserve the legacy single-byte Meta encoding used by older terminals.
+    value += legacyHighBitByte(byte);
+    i++;
+  }
+
+  return { value, pending: Buffer.alloc(0) };
+}
+
+function inputToString(prevState: KeyParseState, input: Buffer | string | null): { value: string; pending: Buffer } {
+  const previous = prevState._inputByteBuffer ?? Buffer.alloc(0);
+
+  if (input === null) return decodeTerminalBytes(previous, true);
+  if (Buffer.isBuffer(input)) return decodeTerminalBytes(Buffer.concat([previous, input]), false);
+
+  const prefix = decodeTerminalBytes(previous, true).value;
+  return { value: prefix + (input || ''), pending: Buffer.alloc(0) };
 }
 
 export function parseMultipleKeypresses(
@@ -214,13 +302,14 @@ export function parseMultipleKeypresses(
   input: Buffer | string | null = '',
 ): [ParsedInput[], KeyParseState] {
   const isFlush = input === null;
-  const inputString = isFlush ? '' : inputToString(input);
+  const decodedInput = inputToString(prevState, input);
 
   // Get or create tokenizer
   const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true });
 
   // Tokenize the input
-  const tokens = isFlush ? tokenizer.flush() : tokenizer.feed(inputString);
+  const tokens = tokenizer.feed(decodedInput.value);
+  if (isFlush) tokens.push(...tokenizer.flush());
 
   // Convert tokens to parsed keys, handling paste mode
   const keys: ParsedInput[] = [];
@@ -289,8 +378,9 @@ export function parseMultipleKeypresses(
   // Build new state
   const newState: KeyParseState = {
     mode: inPaste ? 'IN_PASTE' : 'NORMAL',
-    incomplete: tokenizer.buffer(),
+    incomplete: tokenizer.buffer() || (decodedInput.pending.length > 0 ? decodedInput.pending.toString('latin1') : ''),
     pasteBuffer,
+    _inputByteBuffer: decodedInput.pending.length > 0 ? decodedInput.pending : undefined,
     _tokenizer: tokenizer,
   };
 
@@ -303,6 +393,11 @@ const keyName: Record<string, string> = {
   OQ: 'f2',
   OR: 'f3',
   OS: 'f4',
+  /* xterm/kitty modified F1-F4 use CSI 1 ; modifier letter */
+  '[P': 'f1',
+  '[Q': 'f2',
+  '[R': 'f3',
+  '[S': 'f4',
   /* Application keypad mode (numpad digits 0-9) */
   Op: '0',
   Oq: '1',

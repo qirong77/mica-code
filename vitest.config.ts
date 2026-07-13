@@ -38,7 +38,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     fileParallelism: false,
-    include: ['src/**/*.test.ts', 'packages/mica-*/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', 'packages/@anthropic/ink/**'],
+    include: ['src/**/*.test.ts', 'packages/mica-*/**/*.test.ts', 'packages/@anthropic/ink/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'temp/**'],
   },
 });

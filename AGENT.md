@@ -337,6 +337,7 @@ AGENT.md
 - `TerminalAgentSessionManager` 为每个 agent 保存独立 UI snapshot，包括 conversationMessages、responseText、pendingInputs、messageBarMessages、agentTurnLogItems、thinkingText、pluginUIs、workingStatus、contextSize、cachedTokenRate。
 - 多 agent 切换时，UI 要从对应 session.uiState 恢复，不要从当前 active agent 或 provider history 临时拼装。
 - UI hot path 有明确上限：conversation messages、response text、pending inputs、message bar、agent turn log、thinking text 和 message text 都会截断或只保留尾部。
+- Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 `Buffer`；该层负责增量 UTF-8 解码，并把 DEC 8-bit C1 控制字节规范化为 7-bit ESC 序列。不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`，否则 S8C1T 模式下的终端查询响应会损坏并泄漏为输入。
 - 长会话性能问题优先检查 retained buffers、rewind snapshots、Markdown 渲染输入、图片 payload、MCP 输出和 agent turn log，不要直接做大重构。
 
 ## 多 Agent、Session、Rewind、Compact 与 Recap
@@ -389,8 +390,8 @@ AGENT.md
 
 - environment 是 `node`。
 - `fileParallelism: false`。
-- include 是 `src/**/*.test.ts` 和 `packages/mica-*/**/*.test.ts`。
-- exclude 包括 `node_modules`、`dist`、`temp`、`packages/@anthropic/ink`。
+- include 是 `src/**/*.test.ts`、`packages/mica-*/**/*.test.ts` 和 `packages/@anthropic/ink/**/*.test.ts`。
+- exclude 包括 `node_modules`、`dist`、`temp`。
 - 测试插件会把 `bun:bundle` stub 成 `feature() { return false; }`，并允许直接 import `.md`。
 
 常见测试位置：
@@ -410,6 +411,7 @@ AGENT.md
 - `packages/mica-ui/app/StartupBanner.test.ts`
 - `packages/mica-ui/bottom/dropdown/quickCommandHandler.test.ts`
 - `packages/mica-ui/utils/workingStatusDisplay.test.ts`
+- `packages/@anthropic/ink/src/core/parse-keypress.test.ts`
 - `src/agent/AgentRuntime.test.ts`
 - `src/app/adapters/LocalRuntimeController.test.ts`
 - `src/app/adapters/MicaUiRuntimeBridge.test.ts`

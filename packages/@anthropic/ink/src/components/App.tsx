@@ -291,8 +291,6 @@ export default class App extends PureComponent<Props, State> {
       }
     }
 
-    stdin.setEncoding('utf8');
-
     if (isEnabled) {
       // Ensure raw mode is enabled only once
       if (this.rawModeEnabledCount === 0) {
@@ -444,7 +442,7 @@ export default class App extends PureComponent<Props, State> {
     this.lastStdinTime = now;
     try {
       let chunk;
-      while ((chunk = this.props.stdin.read() as string | null) !== null) {
+      while ((chunk = this.props.stdin.read() as Buffer | string | null) !== null) {
         // Process the input chunk
         this.processInput(chunk);
       }
