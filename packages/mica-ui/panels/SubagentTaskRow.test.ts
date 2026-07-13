@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MicaUiSubagentTaskItem } from '../types.js';
-import { formatSubagentTaskAge, isActiveSubagentTaskStatus, shortSubagentTaskId } from './SubagentTaskRow.js';
+import { formatSubagentTaskAge, isActiveSubagentTaskStatus } from './SubagentTaskRow.js';
 
 describe('SubagentTaskRow', () => {
   it('formats active task metadata for the compact status row', () => {
@@ -15,6 +15,5 @@ describe('SubagentTaskRow', () => {
 
     expect(isActiveSubagentTaskStatus(task.status)).toBe(true);
     expect(formatSubagentTaskAge(task, 3_500)).toBe('2.5s');
-    expect(shortSubagentTaskId(task.id)).toBe('…7tr8ef');
   });
 });

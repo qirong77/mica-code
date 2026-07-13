@@ -34,7 +34,6 @@ export function SubagentTaskRow({
             minWidth: 0,
             color: themeColors.text,
           },
-          { key: 'id', content: shortSubagentTaskId(task.id), flexShrink: 0, color: themeColors.dim },
         ]}
       />
     </Box>
@@ -50,11 +49,6 @@ export function formatSubagentTaskAge(task: MicaUiSubagentTaskItem, nowMs: numbe
   if (Number.isNaN(started)) return 'unknown';
   const finished = task.finishedAt ? Date.parse(task.finishedAt) : nowMs;
   return formatElapsed(Math.max(0, (Number.isNaN(finished) ? nowMs : finished) - started));
-}
-
-export function shortSubagentTaskId(id: string): string {
-  const trimmed = id.trim();
-  return trimmed.length <= 8 ? trimmed : `…${trimmed.slice(-6)}`;
 }
 
 function normalizeDescription(description: string): string {
