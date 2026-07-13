@@ -78,22 +78,28 @@ export function ConversationPage({ refreshSignal = 0 }: { refreshSignal?: number
 function ConversationItemCard({ item }: { item: ConfigWebConversationItem }) {
   const label = itemLabel(item);
   const metadata = [item.toolName, item.callId].filter(Boolean).join(' · ');
+  const preview = contentPreview(item.content);
+  const ChevronIcon = appIcons.chevronRight;
 
   return (
     <article className={`conversation-item conversation-item-${item.type}`}>
       <div className="conversation-sequence" aria-label={`第 ${item.sequence} 项`}>
         {item.sequence}
       </div>
-      <div className="conversation-card simple-card">
-        <header className="conversation-card-header">
+      <details className="conversation-card simple-card">
+        <summary className="conversation-card-header">
           <div className="conversation-card-title">
             <Tag tone={itemTone(item.type)}>{label}</Tag>
             {metadata ? <span className="conversation-card-meta">{metadata}</span> : null}
+            <span className="conversation-card-preview">{preview}</span>
           </div>
-          <span className="conversation-kind">{item.type.replace('_', ' ')}</span>
-        </header>
+          <span className="conversation-card-trailing">
+            <span className="conversation-kind">{item.type.replace('_', ' ')}</span>
+            <ChevronIcon className="conversation-chevron" size={15} aria-hidden="true" />
+          </span>
+        </summary>
         <pre className="conversation-content">{item.content || '(empty)'}</pre>
-      </div>
+      </details>
     </article>
   );
 }
@@ -115,4 +121,9 @@ function itemTone(type: ConfigWebConversationItemType): 'default' | 'green' | 'r
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+function contentPreview(content: string): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  return normalized || '(empty)';
 }
