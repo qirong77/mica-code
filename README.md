@@ -1,5 +1,12 @@
 # Mica Code
 
+## Terminal title in VS Code
+
+Mica updates the terminal tab title automatically: `◦ Mica`, `○ Mica`, and
+`◉ Mica` form a breathing animation while running, `✓ Mica` marks a successful
+turn, `✕ Mica` marks an error, and `Mica` is shown while idle. No additional VS
+Code setting is required.
+
 > **MICA — Minimal, Intelligent, Cache-first Agent.**
 >
 > 一个轻量、终端原生、擅长复用上下文的 AI coding agent。

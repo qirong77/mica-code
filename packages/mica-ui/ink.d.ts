@@ -136,6 +136,6 @@ declare module '@anthropic/ink' {
     exitOnCtrlC?: boolean;
     debug?: boolean;
   }): Promise<{ render(node: ReactNode): void; unmount(): void; waitUntilExit(): Promise<void> }>;
-  export function useTerminalTitle(title: string): void;
+  export function useTerminalTitle(title: string | null): void;
   export function setClipboard(text: string): Promise<string>;
 }

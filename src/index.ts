@@ -21,6 +21,10 @@ if (configWebWorkerToken) {
   await new Promise(() => undefined);
 }
 
+// Keep the foreground process identifiable as Mica. Dynamic terminal titles
+// are emitted from the Ink tree, matching Claude Code's title architecture.
+process.title = 'mica';
+
 process.on('uncaughtException', (error) => {
   reportRuntimeError(error, '未捕获异常');
 });
