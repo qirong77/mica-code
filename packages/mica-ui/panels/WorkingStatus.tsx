@@ -12,8 +12,8 @@ import { formatElapsed } from '../utils/format.js';
 import { getWorkingStatusDisplay, getWorkingStatusTotalElapsed } from '../utils/workingStatusDisplay.js';
 import type { MicaUiWorkingStatus } from '../types.js';
 
-const CTX_RATIO_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
-const CTX_TOKEN_THRESHOLDS = [80_000, 112_000, 160_000, 208_000] as const;
+const CTX_RATIO_THRESHOLDS = [0.4, 0.5, 0.6, 0.7] as const;
+const CTX_TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000] as const;
 const CONTEXT_USAGE_COLORS = [
   themeColors.inactive,
   themeColors.statusInfo,
@@ -29,11 +29,13 @@ function getThresholdLevel(value: number, thresholds: readonly number[]): number
   return 0;
 }
 
-export function getContextUsageColorIndex(contextTokens: number, windowSize: number): number {
+export function getContextTokenColorIndex(contextTokens: number): number {
+  return getThresholdLevel(contextTokens, CTX_TOKEN_THRESHOLDS);
+}
+
+export function getContextRatioColorIndex(contextTokens: number, windowSize: number): number {
   const ratio = windowSize > 0 ? contextTokens / windowSize : 0;
-  const ratioLevel = getThresholdLevel(ratio, CTX_RATIO_THRESHOLDS);
-  const tokenLevel = getThresholdLevel(contextTokens, CTX_TOKEN_THRESHOLDS);
-  return Math.max(ratioLevel, tokenLevel);
+  return getThresholdLevel(ratio, CTX_RATIO_THRESHOLDS);
 }
 
 function StatusInfo() {
@@ -56,10 +58,9 @@ function StatusInfo() {
   return (
     <Text wrap="wrap">
       <Text color={themeColors.inactive}>{modelText}</Text>{' '}
-      <Text color={themeColors.inactive}>
-        {tokenStr} (cached {cachedPct}%,{' '}
-      </Text>
-      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens, windowSize)]}>ctx {contextPct}%</Text>
+      <Text color={CONTEXT_USAGE_COLORS[getContextTokenColorIndex(contextTokens)]}>{tokenStr}</Text>
+      <Text color={themeColors.inactive}> (cached {cachedPct}%, </Text>
+      <Text color={CONTEXT_USAGE_COLORS[getContextRatioColorIndex(contextTokens, windowSize)]}>ctx {contextPct}%</Text>
       <Text color={themeColors.inactive}>)</Text>
     </Text>
   );

@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
-import React, { useEffect } from 'react';
-import { Box, Text, useTerminalTitle, wrappedRender } from '@anthropic/ink';
+import { wrappedRender } from '@anthropic/ink';
 import {
   micaUi,
   type MicaUiAgentStatusItem,
@@ -10,37 +9,6 @@ import {
 } from '../index.js';
 
 const DEMO_CWD = process.cwd();
-
-function ExampleTaskApp(): React.ReactNode {
-  useTerminalTitle('Mica UI · Background tasks');
-
-  useEffect(() => {
-    seedDemoTasks(Date.now());
-    return clearDemoTasks;
-  }, []);
-
-  return (
-    <Box flexDirection="column" paddingY={1} width="100%">
-      <Box flexDirection="column" paddingX={2}>
-        <Text bold>Background task UI</Text>
-        <Text dimColor>Production TaskStatusBar with subagents, shell tasks, and background agent sessions.</Text>
-      </Box>
-
-      <micaUi.TaskStatusBar />
-
-      <Box paddingX={1} paddingTop={1}>
-        <Box borderStyle="round" borderColor={micaUi.theme.colors.borderInput} paddingX={1} width="100%">
-          <Text color={micaUi.theme.colors.accent}>› </Text>
-          <Text dimColor>Type a message...</Text>
-        </Box>
-      </Box>
-
-      <Box paddingX={2} paddingTop={1}>
-        <Text dimColor>Elapsed times update automatically · Press Ctrl+C to exit</Text>
-      </Box>
-    </Box>
-  );
-}
 
 function seedDemoTasks(nowMs: number): void {
   micaUi.panels.setSubagentTaskItems(createSubagentTasks(nowMs));
@@ -135,5 +103,11 @@ function iso(timestamp: number): string {
   return new Date(timestamp).toISOString();
 }
 
-const app = await wrappedRender(<ExampleTaskApp />);
-await app.waitUntilExit();
+seedDemoTasks(Date.now());
+const app = await wrappedRender(<micaUi.App />);
+
+try {
+  await app.waitUntilExit();
+} finally {
+  clearDemoTasks();
+}
