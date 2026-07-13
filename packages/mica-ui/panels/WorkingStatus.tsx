@@ -12,7 +12,8 @@ import { formatElapsed } from '../utils/format.js';
 import { getWorkingStatusDisplay, getWorkingStatusTotalElapsed } from '../utils/workingStatusDisplay.js';
 import type { MicaUiWorkingStatus } from '../types.js';
 
-const CTX_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
+const CTX_RATIO_THRESHOLDS = [0.3, 0.45, 0.6, 0.8] as const;
+const CTX_TOKEN_THRESHOLDS = [80_000, 112_000, 160_000, 208_000] as const;
 const CONTEXT_USAGE_COLORS = [
   themeColors.inactive,
   themeColors.statusInfo,
@@ -21,11 +22,18 @@ const CONTEXT_USAGE_COLORS = [
   themeColors.statusError,
 ] as const;
 
-function getContextUsageColorIndex(ratio: number): number {
-  for (let i = CTX_THRESHOLDS.length - 1; i >= 0; i--) {
-    if (ratio >= CTX_THRESHOLDS[i]) return i + 1;
+function getThresholdLevel(value: number, thresholds: readonly number[]): number {
+  for (let i = thresholds.length - 1; i >= 0; i--) {
+    if (value >= thresholds[i]) return i + 1;
   }
   return 0;
+}
+
+export function getContextUsageColorIndex(contextTokens: number, windowSize: number): number {
+  const ratio = windowSize > 0 ? contextTokens / windowSize : 0;
+  const ratioLevel = getThresholdLevel(ratio, CTX_RATIO_THRESHOLDS);
+  const tokenLevel = getThresholdLevel(contextTokens, CTX_TOKEN_THRESHOLDS);
+  return Math.max(ratioLevel, tokenLevel);
 }
 
 function StatusInfo() {
@@ -51,7 +59,7 @@ function StatusInfo() {
       <Text color={themeColors.inactive}>
         {tokenStr} (cached {cachedPct}%,{' '}
       </Text>
-      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextRatio)]}>ctx {contextPct}%</Text>
+      <Text color={CONTEXT_USAGE_COLORS[getContextUsageColorIndex(contextTokens, windowSize)]}>ctx {contextPct}%</Text>
       <Text color={themeColors.inactive}>)</Text>
     </Text>
   );
@@ -124,7 +132,8 @@ export function WorkingStatus() {
       setElapsed(0);
       return;
     }
-    startRef.current = activeStatusStartedAt ?? (activeStatusElapsedMs != null ? Date.now() - activeStatusElapsedMs : Date.now());
+    startRef.current =
+      activeStatusStartedAt ?? (activeStatusElapsedMs != null ? Date.now() - activeStatusElapsedMs : Date.now());
     setElapsed(Date.now() - startRef.current);
     const timer = setInterval(() => setElapsed(Date.now() - startRef.current), runtimeEnv.ui.elapsedRefreshIntervalMs);
     return () => clearInterval(timer);
