@@ -3,6 +3,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import type { MicaUiAgentTurnLogItem } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { TerminalAgentSession } from '../../agents/terminalAgentSessions.js';
+import { SubagentTaskManager } from '../../agents/SubagentTaskManager.js';
 
 const uiMocks = (() => {
   const fn = () => vi.fn();
@@ -23,6 +24,7 @@ const uiMocks = (() => {
     replaceAgentTurnLogItem: fn(),
     setAgentStatusItems: fn(),
     setBackgroundTaskItems: fn(),
+    setSubagentTaskItems: fn(),
     setMessages: fn(),
     setOnAbortAgent: fn(),
     setOnEditPendingInput: fn(),
@@ -65,6 +67,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
       replaceAgentTurnLogItem: uiMocks.replaceAgentTurnLogItem,
       setAgentStatusItems: uiMocks.setAgentStatusItems,
       setBackgroundTaskItems: uiMocks.setBackgroundTaskItems,
+      setSubagentTaskItems: uiMocks.setSubagentTaskItems,
       setOnAbortAgent: uiMocks.setOnAbortAgent,
       setOnEditPendingInput: uiMocks.setOnEditPendingInput,
       status: {
@@ -113,6 +116,42 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     expect(session.uiState.pendingInputs).toEqual(['first queued', 'second queued display']);
     expect(session.uiState.pendingQueueMode).toBe('after_iteration');
     expect(uiMocks.setPendingInputs).toHaveBeenCalledWith(['first queued', 'second queued display'], 'after_iteration');
+  });
+
+  it('syncs only active subagents owned by the current session', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const otherAgent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const tasks = new SubagentTaskManager();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session), tasks);
+
+    bridge.start();
+    const ownTask = tasks.start({
+      owner: agent,
+      description: 'inspect task UI',
+      subagentType: 'Explore',
+      model: 'test-model',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+    tasks.start({
+      owner: otherAgent,
+      description: 'other session task',
+      subagentType: 'Explore',
+      model: 'test-model',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    expect(uiMocks.setSubagentTaskItems).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: ownTask.id, description: 'inspect task UI', status: 'running' }),
+    ]);
+
+    tasks.kill(ownTask.id, agent);
+    expect(uiMocks.setSubagentTaskItems).toHaveBeenLastCalledWith([]);
+    bridge.stop();
   });
 
   it('keeps prior turn logs when a new turn asks to preserve them', async () => {

@@ -47,14 +47,26 @@ export type StartSubagentTaskOptions = {
   getUsage?: () => AgentUsageSummary;
 };
 
+export type TrackSubagentTaskOptions = Omit<StartSubagentTaskOptions, 'run' | 'getUsage'>;
+
+export type TrackedSubagentTask = {
+  task: SubagentTaskRecord;
+  signal: AbortSignal;
+  complete: (result: string, usage?: AgentUsageSummary) => void;
+  fail: (error: unknown, result?: string, usage?: AgentUsageSummary) => void;
+};
+
 export type SubagentTaskManagerOptions = {
   maxConcurrentTasks?: number;
   maxRetainedTasks?: number;
   onTaskFinished?: (task: SubagentTaskRecord, owner: AgentRuntime) => void | Promise<void>;
 };
 
+export type SubagentTaskChangeListener = (task: SubagentTaskRecord, owner: AgentRuntime) => void;
+
 export class SubagentTaskManager {
   private readonly tasks = new Map<string, ManagedSubagentTask>();
+  private readonly changeListeners = new Set<SubagentTaskChangeListener>();
   private readonly maxConcurrentTasks: number;
   private readonly maxRetainedTasks: number;
   private readonly onTaskFinished: SubagentTaskManagerOptions['onTaskFinished'];
@@ -67,6 +79,48 @@ export class SubagentTaskManager {
   }
 
   start(options: StartSubagentTaskOptions): SubagentTaskRecord {
+    const managed = this.createTask(options);
+    const { controller } = managed;
+    managed.promise = Promise.resolve()
+      .then(() => options.run(controller.signal))
+      .then(
+        ({ result, usage }) => this.complete(managed, { status: 'completed', result, usage }),
+        (error: unknown) => {
+          if (managed.record.status !== 'running') return;
+          if (error instanceof AgentMaxTurnsError) {
+            this.complete(managed, {
+              status: 'failed',
+              result: error.partialResult,
+              error: error.message,
+              usage: readTaskUsage(options.getUsage),
+            });
+            return;
+          }
+          this.complete(managed, {
+            status: 'failed',
+            error: formatErrorMessage(error),
+            usage: readTaskUsage(options.getUsage),
+          });
+        },
+      );
+    return cloneRecord(managed.record);
+  }
+
+  track(options: TrackSubagentTaskOptions): TrackedSubagentTask {
+    const managed = this.createTask(options);
+    const finish = (result: Parameters<SubagentTaskManager['complete']>[1]) => {
+      this.complete(managed, result, false);
+      this.tasks.delete(managed.record.id);
+    };
+    return {
+      task: cloneRecord(managed.record),
+      signal: managed.controller.signal,
+      complete: (result, usage) => finish({ status: 'completed', result, usage }),
+      fail: (error, result, usage) => finish({ status: 'failed', error: formatErrorMessage(error), result, usage }),
+    };
+  }
+
+  private createTask(options: TrackSubagentTaskOptions): ManagedSubagentTask {
     if (this.stopping) throw new Error('Subagent task manager is stopping and cannot start new tasks.');
     const activeCount = [...this.tasks.values()].filter(
       (task) => task.owner === options.owner && task.record.status === 'running',
@@ -97,29 +151,8 @@ export class SubagentTaskManager {
       promise: Promise.resolve(),
     };
     this.tasks.set(id, managed);
-    managed.promise = Promise.resolve()
-      .then(() => options.run(controller.signal))
-      .then(
-        ({ result, usage }) => this.complete(managed, { status: 'completed', result, usage }),
-        (error: unknown) => {
-          if (managed.record.status !== 'running') return;
-          if (error instanceof AgentMaxTurnsError) {
-            this.complete(managed, {
-              status: 'failed',
-              result: error.partialResult,
-              error: error.message,
-              usage: readTaskUsage(options.getUsage),
-            });
-            return;
-          }
-          this.complete(managed, {
-            status: 'failed',
-            error: formatErrorMessage(error),
-            usage: readTaskUsage(options.getUsage),
-          });
-        },
-      );
-    return cloneRecord(record);
+    this.emitTaskChanged(managed);
+    return managed;
   }
 
   list(owner: AgentRuntime): SubagentTaskRecord[] {
@@ -132,6 +165,11 @@ export class SubagentTaskManager {
   get(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
     const task = this.tasks.get(id);
     return task?.owner === owner ? cloneRecord(task.record) : undefined;
+  }
+
+  subscribe(listener: SubagentTaskChangeListener): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
   }
 
   kill(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
@@ -190,6 +228,7 @@ export class SubagentTaskManager {
       ...(result.error === undefined ? {} : { error: result.error }),
       ...(result.usage === undefined ? {} : { usage: result.usage }),
     };
+    this.emitTaskChanged(task);
     if (!this.onTaskFinished || this.stopping || !notify) return;
     try {
       void Promise.resolve(this.onTaskFinished(cloneRecord(task.record), task.owner)).catch(() => undefined);
@@ -209,6 +248,18 @@ export class SubagentTaskManager {
     const ownerTaskCount = [...this.tasks.values()].filter((task) => task.owner === owner).length;
     const removeCount = Math.max(0, ownerTaskCount - this.maxRetainedTasks + 1);
     for (const task of completed.slice(0, removeCount)) this.tasks.delete(task.record.id);
+  }
+
+  private emitTaskChanged(task: ManagedSubagentTask): void {
+    if (this.changeListeners.size === 0) return;
+    const record = cloneRecord(task.record);
+    for (const listener of this.changeListeners) {
+      try {
+        listener(record, task.owner);
+      } catch {
+        // A UI/status listener must not affect the delegated task lifecycle.
+      }
+    }
   }
 }
 

@@ -116,10 +116,13 @@ describe('ToolRunShell', () => {
     const readTaskOutput = new ToolReadTaskOutput();
     const cwd = process.cwd();
 
-    const result = await tool.execute({
-      command: bunEval("console.log('background ok')"),
-      run_in_background: true,
-    });
+    const result = await tool.execute(
+      {
+        command: bunEval("console.log('background ok')"),
+        run_in_background: true,
+      },
+      { context: { agent: { taskOwnerId: 'test-agent-owner' } } },
+    );
     const outputPath = parseOutputPath(result);
 
     try {
@@ -128,6 +131,9 @@ describe('ToolRunShell', () => {
       expect(result).toContain('输出上限: 64.0MB');
 
       const taskId = parseTaskId(result);
+      expect(listBackgroundTasks({ status: 'all' }).find((task) => task.id === taskId)?.agent_owner_id).toBe(
+        'test-agent-owner',
+      );
       expect(result).toContain(`查看输出: read_task_output(task_id="${taskId}")`);
       expect(result).toContain(`终止任务: kill_task(task_id="${taskId}")`);
 

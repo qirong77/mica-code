@@ -7,7 +7,10 @@ import { ToolAgent } from './ToolAgent.js';
 describe('ToolAgent', () => {
   it('runs a synchronous child agent with the selected subagent tool filter and inherited effort', async () => {
     const { runtime, createSubAgent, query } = createRuntimeStub();
-    const tool = new ToolAgent(runtime);
+    const taskManager = new SubagentTaskManager();
+    const listener = vi.fn();
+    taskManager.subscribe(listener);
+    const tool = new ToolAgent(runtime, taskManager);
 
     const result = await tool.execute({
       description: 'inspect files',
@@ -15,9 +18,19 @@ describe('ToolAgent', () => {
       prompt: 'Find the config loader.',
     });
 
-    expect(query).toHaveBeenCalledWith('Find the config loader.', { maxTurns: 20, signal: undefined });
+    expect(query).toHaveBeenCalledWith('Find the config loader.', {
+      maxTurns: 20,
+      signal: expect.any(AbortSignal),
+    });
     expect(result).toContain('Subagent: Explore');
     expect(result).toContain('child result');
+    expect(listener).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ description: 'inspect files', status: 'running', subagent_type: 'Explore' }),
+      runtime,
+    );
+    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'completed' }), runtime);
+    expect(taskManager.list(runtime)).toEqual([]);
 
     const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
     expect(options.tools).toBe(true);

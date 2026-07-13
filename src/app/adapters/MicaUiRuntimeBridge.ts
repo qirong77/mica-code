@@ -1,6 +1,6 @@
 import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { Disposable } from '@packages/mica-common/index.js';
-import { micaUi, type MicaUiBackgroundTaskItem } from '@packages/mica-ui/index.js';
+import { micaUi, type MicaUiBackgroundTaskItem, type MicaUiSubagentTaskItem } from '@packages/mica-ui/index.js';
 import {
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
@@ -12,6 +12,7 @@ import {
   toMicaUiWorkingStatus,
   type TerminalAgentSessionManager,
 } from '../../agents/terminalAgentSessions.js';
+import type { SubagentTaskManager, SubagentTaskRecord } from '../../agents/SubagentTaskManager.js';
 import { ToolLogController } from '../../runtime/ToolLogController.js';
 import { applyStatus, syncModelDisplay } from '../../runtime/uiBridge.js';
 import type { LocalRuntimeController } from './LocalRuntimeController.js';
@@ -32,6 +33,7 @@ export class MicaUiRuntimeBridge {
     private agent: AgentRuntime,
     private readonly runtime: LocalRuntimeController,
     private readonly agentSessions: TerminalAgentSessionManager,
+    private readonly subagentTasks?: SubagentTaskManager,
   ) {}
 
   watchAgent(agent: AgentRuntime): void {
@@ -44,6 +46,8 @@ export class MicaUiRuntimeBridge {
     this.attachAgentEvents(agent);
     syncModelDisplay(agent);
     this.syncAgentStatusItems();
+    this.syncSubagentTaskItems();
+    this.syncBackgroundTaskItems();
   }
 
   start(): void {
@@ -51,7 +55,16 @@ export class MicaUiRuntimeBridge {
 
     this.attachAgentEvents(this.agent);
     this.syncAgentStatusItems();
+    this.syncSubagentTaskItems();
     this.startBackgroundTaskSync();
+
+    if (this.subagentTasks) {
+      this.bridgeDisposers.push(
+        this.subagentTasks.subscribe((_task, owner) => {
+          if (this.isActiveAgent(owner)) this.syncSubagentTaskItems();
+        }),
+      );
+    }
 
     this.bridgeDisposers.push(
       this.runtime.events.on('event', (event) => {
@@ -170,7 +183,17 @@ export class MicaUiRuntimeBridge {
   }
 
   syncBackgroundTaskItems(): void {
-    micaUi.panels.setBackgroundTaskItems(listBackgroundTasks({ status: 'all' }).map(toUiBackgroundTask));
+    micaUi.panels.setBackgroundTaskItems(
+      listBackgroundTasks({ status: 'all' })
+        .filter((task) => !task.agent_owner_id || task.agent_owner_id === this.agent.taskOwnerId)
+        .map(toUiBackgroundTask),
+    );
+  }
+
+  syncSubagentTaskItems(): void {
+    micaUi.panels.setSubagentTaskItems(
+      (this.subagentTasks?.list(this.agent) ?? []).filter((task) => task.status === 'running').map(toUiSubagentTask),
+    );
   }
 
   stop(): void {
@@ -342,6 +365,18 @@ function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem 
     pid: task.pid,
     outputPath: task.output_path,
     outputSize: getBackgroundTaskOutputSize(task),
+    status: task.status,
+    startedAt: task.started_at,
+    finishedAt: task.finished_at,
+  };
+}
+
+function toUiSubagentTask(task: SubagentTaskRecord): MicaUiSubagentTaskItem {
+  return {
+    id: task.id,
+    description: task.description,
+    subagentType: task.subagent_type,
+    model: task.model,
     status: task.status,
     startedAt: task.started_at,
     finishedAt: task.finished_at,

@@ -63,6 +63,41 @@ describe('SubagentTaskManager', () => {
     expect(() => startFor(secondOwner)).not.toThrow();
   });
 
+  it('emits task changes with the owning parent on start and completion', async () => {
+    const owner = {} as AgentRuntime;
+    const deferred = createDeferred<{ result: string }>();
+    const listener = vi.fn();
+    const manager = new SubagentTaskManager();
+    const unsubscribe = manager.subscribe(listener);
+
+    const task = manager.start({
+      owner,
+      description: 'inspect the task UI',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => deferred.promise,
+    });
+
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ id: task.id, status: 'running' }), owner);
+
+    deferred.resolve({ result: 'done' });
+    await flushAsyncWork();
+
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ id: task.id, status: 'completed' }), owner);
+
+    unsubscribe();
+    manager.start({
+      owner,
+      description: 'after unsubscribe',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: async () => ({ result: 'done' }),
+    });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it('emits one completion notification with the final result', async () => {
     const owner = {} as AgentRuntime;
     const onTaskFinished = vi.fn();
@@ -143,4 +178,12 @@ describe('SubagentTaskManager', () => {
 
 async function flushAsyncWork(): Promise<void> {
   for (let index = 0; index < 10; index++) await Promise.resolve();
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }

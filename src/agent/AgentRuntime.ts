@@ -10,6 +10,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
+import { micaCommon } from '@packages/mica-common/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
   createAgentClientOptions,
@@ -73,6 +74,7 @@ function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[]
 
 export class AgentRuntime {
   readonly events = mitt<AgentRuntimeEvents>();
+  readonly taskOwnerId = micaCommon.createId('agent-runtime');
   private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
   private activeAbortController: AbortController | null = null;

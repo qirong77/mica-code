@@ -41,6 +41,7 @@ export type BackgroundTaskMeta = {
   output_limit_bytes: number;
   owner_pid?: number;
   owner_id?: string;
+  agent_owner_id?: string;
   error?: string;
 };
 
@@ -122,6 +123,7 @@ export function createBackgroundTaskMeta(params: {
   shell: string;
   outputPath: string;
   outputLimit: number;
+  agentOwnerId?: string;
 }): BackgroundTaskMeta {
   const meta: BackgroundTaskMeta = {
     id: params.id,
@@ -134,6 +136,7 @@ export function createBackgroundTaskMeta(params: {
     output_limit_bytes: params.outputLimit,
     owner_pid: process.pid,
     owner_id: BACKGROUND_TASK_OWNER_ID,
+    ...(params.agentOwnerId ? { agent_owner_id: params.agentOwnerId } : {}),
   };
   writeTaskMeta(meta);
   return meta;

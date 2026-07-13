@@ -144,6 +144,8 @@ export type {
   MicaUiCommand,
   MicaUiBackgroundTaskItem,
   MicaUiBackgroundTaskStatus,
+  MicaUiSubagentTaskItem,
+  MicaUiSubagentTaskStatus,
   MicaUiCommandCompletionItem,
   MicaUiCommandCompletionItems,
   MicaUiConversationMessage,

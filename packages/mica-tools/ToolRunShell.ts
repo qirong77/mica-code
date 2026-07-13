@@ -97,7 +97,7 @@ export class ToolRunShell extends MicaTool {
 
   async execute(input: RunShellInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     if (input.run_in_background) {
-      return this.executeBackground(input);
+      return this.executeBackground(input, callbacks);
     }
     return this.executeForeground(input, callbacks);
   }
@@ -211,7 +211,7 @@ export class ToolRunShell extends MicaTool {
     });
   }
 
-  private async executeBackground(input: RunShellInput): Promise<string> {
+  private async executeBackground(input: RunShellInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const cwdResult = resolveCwd(input.cwd);
     if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
 
@@ -226,6 +226,7 @@ export class ToolRunShell extends MicaTool {
       shell,
       outputPath,
       outputLimit: MAX_BACKGROUND_OUTPUT_BYTES,
+      agentOwnerId: readAgentTaskOwnerId(callbacks?.context),
     });
 
     writeFileSync(
@@ -291,4 +292,12 @@ export class ToolRunShell extends MicaTool {
     }
     return `$ ${truncated}`;
   }
+}
+
+function readAgentTaskOwnerId(context: unknown): string | undefined {
+  if (!context || typeof context !== 'object' || !('agent' in context)) return undefined;
+  const agent = (context as { agent?: unknown }).agent;
+  if (!agent || typeof agent !== 'object' || !('taskOwnerId' in agent)) return undefined;
+  const ownerId = (agent as { taskOwnerId?: unknown }).taskOwnerId;
+  return typeof ownerId === 'string' && ownerId.trim() ? ownerId : undefined;
 }

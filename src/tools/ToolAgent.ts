@@ -35,7 +35,7 @@ export class ToolAgent extends MicaTool {
     super(
       'Agent',
       [
-        '启动和管理 subagent。operation 默认为 run；后台任务可用 list/read/kill 查询结果或停止。',
+        '启动和管理 subagent。operation 默认为 run；后台任务完成后会自动通知，不要轮询；收到通知后可用 read 获取结果，或用 list/kill 查询和停止。',
         'subagent 不继承当前对话，prompt 必须包含完整任务上下文。',
         `可用 subagent_type: ${listSubagents()
           .map((agent) => `${agent.name} (${agent.description})`)
@@ -117,15 +117,30 @@ export class ToolAgent extends MicaTool {
       return [
         `Subagent ${definition.name} 已在后台启动：${description}`,
         `task_id: ${task.id}`,
-        '使用 Agent operation=read 查询结果，或 operation=kill 停止任务；结果仅在当前进程内保留。',
+        '任务完成后系统会自动通知，请勿轮询；收到通知后使用 Agent operation=read 获取结果，或 operation=kill 停止任务。',
+        '结果仅在当前进程内保留。',
       ].join('\n');
     }
 
+    const tracked = this.taskManager.track({
+      owner: parentAgent,
+      description,
+      subagentType: definition.name,
+      model: clientOptions.model,
+      effort,
+      maxTurns: definition.maxTurns,
+    });
+    const signal = callbacks?.signal ? AbortSignal.any([callbacks.signal, tracked.signal]) : tracked.signal;
     try {
-      const result = await child.query(prompt, { signal: callbacks?.signal, maxTurns: definition.maxTurns });
+      const result = await child.query(prompt, { signal, maxTurns: definition.maxTurns });
+      tracked.complete(result, summarizeSubagentUsage(child.usageHistory));
       return formatSubagentResult(definition.name, description, result);
     } catch (error) {
-      if (!(error instanceof AgentMaxTurnsError)) throw error;
+      if (!(error instanceof AgentMaxTurnsError)) {
+        tracked.fail(error, undefined, summarizeSubagentUsage(child.usageHistory));
+        throw error;
+      }
+      tracked.fail(error, error.partialResult, summarizeSubagentUsage(child.usageHistory));
       return formatSubagentResult(
         definition.name,
         description,
@@ -227,6 +242,7 @@ function formatTaskRecord(task: SubagentTaskRecord): string {
     task.finished_at ? `finished_at: ${task.finished_at}` : '',
     task.usage ? `usage: ${JSON.stringify(task.usage)}` : '',
     task.error ? `error: ${task.error}` : '',
+    task.status === 'running' ? '任务仍在后台运行；完成后系统会自动通知，请勿轮询。' : '',
     task.result === undefined ? '' : ['', '<result>', task.result.trim() || '(empty result)', '</result>'].join('\n'),
   ]
     .filter(Boolean)
