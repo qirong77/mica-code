@@ -1,16 +1,20 @@
 import { spawn } from 'node:child_process';
 import { createToken, probeConfigWebState, readConfigWebState } from './singleton.js';
-import type { ConfigWebServerInfo } from '../shared/types.js';
+import type { ConfigWebConversationDetails, ConfigWebServerInfo } from '../shared/types.js';
 
-export async function startConfigWeb(): Promise<ConfigWebServerInfo> {
+export async function startConfigWeb(conversation?: ConfigWebConversationDetails): Promise<ConfigWebServerInfo> {
   const current = readConfigWebState();
   if (current && (await probeConfigWebState(current))) {
-    return {
-      url: toUrl(current.port, current.token),
-      port: current.port,
-      token: current.token,
-      reused: true,
-    };
+    const supportsConversation =
+      !conversation || (await tryUpdateConversation(current.port, current.token, conversation));
+    if (supportsConversation) {
+      return {
+        url: toUrl(current.port, current.token),
+        port: current.port,
+        token: current.token,
+        reused: true,
+      };
+    }
   }
 
   const token = createToken();
@@ -23,12 +27,42 @@ export async function startConfigWeb(): Promise<ConfigWebServerInfo> {
   child.unref();
 
   const state = await waitForServer(token);
+  if (conversation) await updateConfigWebConversation(state.port, state.token, conversation);
   return {
     url: toUrl(state.port, state.token),
     port: state.port,
     token: state.token,
     reused: false,
   };
+}
+
+async function tryUpdateConversation(
+  port: number,
+  token: string,
+  conversation: ConfigWebConversationDetails,
+): Promise<boolean> {
+  try {
+    await updateConfigWebConversation(port, token, conversation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateConfigWebConversation(
+  port: number,
+  token: string,
+  conversation: ConfigWebConversationDetails,
+): Promise<void> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/details/conversation?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(conversation),
+    signal: AbortSignal.timeout(2_000),
+  });
+  if (response.ok) return;
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  throw new Error(payload?.error ?? `同步 Conversation 失败: ${response.status}`);
 }
 
 async function waitForServer(token: string) {

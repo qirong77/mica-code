@@ -3,6 +3,7 @@ import { appIcons } from '../icons.js';
 
 const items = [
   { key: 'config', label: 'Config' },
+  { key: 'conversation', label: 'Conversation' },
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
   { key: 'plugins', label: 'Plugins' },
@@ -23,14 +24,30 @@ export function Sidebar({ section, onChange }: SidebarProps) {
       </div>
       <nav className="nav-menu">
         {items.map((item) => (
-          <SidebarItem key={item.key} currentSection={section} section={item.key} label={item.label} onChange={onChange} />
+          <SidebarItem
+            key={item.key}
+            currentSection={section}
+            section={item.key}
+            label={item.label}
+            onChange={onChange}
+          />
         ))}
       </nav>
     </aside>
   );
 }
 
-function SidebarItem({ currentSection, section, label, onChange }: { currentSection: ConfigWebSection; section: ConfigWebSection; label: string; onChange(section: ConfigWebSection): void }) {
+function SidebarItem({
+  currentSection,
+  section,
+  label,
+  onChange,
+}: {
+  currentSection: ConfigWebSection;
+  section: ConfigWebSection;
+  label: string;
+  onChange(section: ConfigWebSection): void;
+}) {
   const Icon = appIcons[section];
   const active = currentSection === section;
   return (

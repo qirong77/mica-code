@@ -1,4 +1,5 @@
 import type {
+  ConfigWebConversationDetails,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginsDetails,
@@ -36,10 +37,25 @@ export async function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
   return readJson(response);
 }
 
-export function connectHeartbeat(): WebSocket | null {
+export async function readConversationDetails(): Promise<ConfigWebConversationDetails | null> {
+  const response = await fetch(`/api/details/conversation?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export function connectHeartbeat(onEvent?: (event: { type?: string }) => void): WebSocket | null {
   if (!token) return null;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return new WebSocket(`${protocol}//${window.location.host}/api/events?token=${encodeURIComponent(token)}`);
+  const socket = new WebSocket(`${protocol}//${window.location.host}/api/events?token=${encodeURIComponent(token)}`);
+  if (onEvent) {
+    socket.addEventListener('message', (message) => {
+      try {
+        onEvent(JSON.parse(String(message.data)) as { type?: string });
+      } catch {
+        // Ignore malformed server events; the socket still acts as the process heartbeat.
+      }
+    });
+  }
+  return socket;
 }
 
 async function readJson<T>(response: Response): Promise<T> {

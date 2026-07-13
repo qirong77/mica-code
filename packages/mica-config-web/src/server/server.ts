@@ -4,6 +4,7 @@ import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ConfigWebConversationDetails } from '../shared/types.js';
 
 const IDLE_EXIT_DELAY_MS = 30_000;
 
@@ -21,6 +22,7 @@ export type RunningConfigWebServer = {
 export async function startConfigWebServer(options: ConfigWebServerOptions): Promise<RunningConfigWebServer> {
   let clients = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let conversation: ConfigWebConversationDetails | null = null;
 
   const clearIdleTimer = () => {
     if (!idleTimer) return;
@@ -38,9 +40,20 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
   if (!bun) throw new Error('Config web server requires Bun runtime');
 
   if (process.env.MICA_CONFIG_WEB_DEV === '1') {
-    return startDevConfigWebServer(options, bun, clearIdleTimer, scheduleIdleExit, () => clients, (next) => {
-      clients = next;
-    });
+    return startDevConfigWebServer(
+      options,
+      bun,
+      clearIdleTimer,
+      scheduleIdleExit,
+      () => clients,
+      (next) => {
+        clients = next;
+      },
+      () => conversation,
+      (next) => {
+        conversation = next;
+      },
+    );
   }
 
   const webServer = bun.serve({
@@ -48,7 +61,15 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
     port: options.preferredPort ?? 0,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
-      if (url.pathname.startsWith('/api/')) return handleApiRequest(request, server, url, options.token, clients);
+      if (url.pathname.startsWith('/api/')) {
+        return handleApiRequest(request, server, url, options.token, clients, {
+          get: () => conversation,
+          set: (next) => {
+            conversation = next;
+            broadcastWebSocketEvent(server, 'conversation.updated');
+          },
+        });
+      }
       if (url.pathname === '/favicon.ico') return new Response(null, { status: 204 });
       if (url.pathname === '/' || url.pathname === '/index.html') {
         if (!isAuthorized(url, options.token)) return json({ error: 'Unauthorized' }, 401);
@@ -56,7 +77,8 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
       return serveGeneratedStaticAsset(url.pathname) ?? json({ error: 'Config web assets are not built' }, 500);
     },
     websocket: {
-      open() {
+      open(socket: Bun.ServerWebSocket<unknown>) {
+        socket.subscribe('config-web-events');
         clients += 1;
         clearIdleTimer();
       },
@@ -89,6 +111,8 @@ async function startDevConfigWebServer(
   scheduleIdleExit: () => void,
   getClients: () => number,
   setClients: (clients: number) => void,
+  getConversation: () => ConfigWebConversationDetails | null,
+  setConversation: (conversation: ConfigWebConversationDetails) => void,
 ): Promise<RunningConfigWebServer> {
   const apiServer = bun.serve({
     hostname: '127.0.0.1',
@@ -96,10 +120,17 @@ async function startDevConfigWebServer(
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
       if (!isAuthorized(url, options.token)) return json({ error: 'Unauthorized' }, 401);
-      return handleApiRequest(request, server, url, options.token, getClients());
+      return handleApiRequest(request, server, url, options.token, getClients(), {
+        get: getConversation,
+        set: (next) => {
+          setConversation(next);
+          broadcastWebSocketEvent(server, 'conversation.updated');
+        },
+      });
     },
     websocket: {
-      open() {
+      open(socket: Bun.ServerWebSocket<unknown>) {
+        socket.subscribe('config-web-events');
         setClients(getClients() + 1);
         clearIdleTimer();
       },
@@ -152,6 +183,10 @@ async function handleApiRequest(
   url: URL,
   token: string,
   clients: number,
+  conversation: {
+    get(): ConfigWebConversationDetails | null;
+    set(details: ConfigWebConversationDetails): void;
+  },
 ): Promise<Response | undefined> {
   if (!isAuthorized(url, token)) return json({ error: 'Unauthorized' }, 401);
 
@@ -159,6 +194,21 @@ async function handleApiRequest(
   if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
   if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
   if (url.pathname === '/api/details/plugins') return json(getPluginsDetails());
+
+  if (url.pathname === '/api/details/conversation') {
+    if (request.method === 'GET') return json(conversation.get());
+    if (request.method === 'PUT') {
+      try {
+        const body = (await request.json()) as unknown;
+        if (!isConversationDetails(body)) return json({ error: 'Invalid conversation payload' }, 400);
+        conversation.set(body);
+        return json(body);
+      } catch (error) {
+        return json({ error: formatError(error) }, 400);
+      }
+    }
+    return json({ error: 'Method not allowed' }, 405);
+  }
 
   if (url.pathname === '/api/events') {
     if (server.upgrade(request, { data: {} })) return undefined;
@@ -195,4 +245,35 @@ function json(value: unknown, status = 200): Response {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function broadcastWebSocketEvent(server: Bun.Server<unknown>, event: string): void {
+  server.publish('config-web-events', JSON.stringify({ type: event }));
+}
+
+function isConversationDetails(value: unknown): value is ConfigWebConversationDetails {
+  if (!value || typeof value !== 'object') return false;
+  const details = value as Partial<ConfigWebConversationDetails>;
+  return (
+    typeof details.providerId === 'string' &&
+    (details.protocol === 'openai_chat_completions' || details.protocol === 'openai_responses') &&
+    typeof details.model === 'string' &&
+    typeof details.updatedAt === 'string' &&
+    Array.isArray(details.items) &&
+    details.items.every(isConversationItem)
+  );
+}
+
+function isConversationItem(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as ConfigWebConversationDetails['items'][number];
+  return (
+    Number.isInteger(item.sequence) &&
+    item.sequence > 0 &&
+    ['system', 'user', 'assistant', 'tool_call', 'tool_result', 'unknown'].includes(item.type) &&
+    typeof item.content === 'string' &&
+    (item.callId === undefined || typeof item.callId === 'string') &&
+    (item.toolName === undefined || typeof item.toolName === 'string') &&
+    (item.role === undefined || typeof item.role === 'string')
+  );
 }

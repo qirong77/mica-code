@@ -31,7 +31,7 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createStatusCommand(activeAgent, activeSessionController),
     micaBuiltinCommands.createContextCommand(activeAgent),
-    micaBuiltinCommands.createConfigCommand(services),
+    micaBuiltinCommands.createConfigCommand(activeAgent, services),
     micaBuiltinCommands.createNewCommand(services),
     micaBuiltinCommands.createForkCommand(services),
     micaBuiltinCommands.createRewindCommand(services),

@@ -31,7 +31,7 @@ describe('run shell tool output logs', () => {
 });
 
 describe('tool log icons', () => {
-  it('uses a stop icon for kill_task instead of the generic tool icon', () => {
-    expect(getToolIcon('kill_task')).toBe('⏹');
+  it.each(['background_tasks', 'read_task_output', 'kill_task'])('uses a task icon for %s', (toolName) => {
+    expect(getToolIcon(toolName)).toBe('📋');
   });
 });

@@ -1,4 +1,4 @@
-export type ConfigWebSection = 'config' | 'mcp' | 'skills' | 'plugins';
+export type ConfigWebSection = 'config' | 'conversation' | 'mcp' | 'skills' | 'plugins';
 
 export type ConfigWebFilePayload = {
   path: string;
@@ -10,6 +10,25 @@ export type ConfigWebServerInfo = {
   port: number;
   token: string;
   reused: boolean;
+};
+
+export type ConfigWebConversationItemType = 'system' | 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'unknown';
+
+export type ConfigWebConversationItem = {
+  sequence: number;
+  type: ConfigWebConversationItemType;
+  content: string;
+  callId?: string;
+  toolName?: string;
+  role?: string;
+};
+
+export type ConfigWebConversationDetails = {
+  providerId: string;
+  protocol: 'openai_chat_completions' | 'openai_responses';
+  model: string;
+  updatedAt: string;
+  items: ConfigWebConversationItem[];
 };
 
 export type ConfigWebMcpTool = {
