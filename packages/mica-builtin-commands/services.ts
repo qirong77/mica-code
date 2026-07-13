@@ -40,6 +40,7 @@ export type SessionSummary = {
   updatedAt: string;
   cwd: string;
   model: string;
+  uncompleted: boolean;
 };
 
 export type ResumeSessionResult =

@@ -459,6 +459,7 @@ export class LocalRuntimeController implements RuntimeController {
     }
 
     try {
+      sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
       await this.hooks.emit('turn:before', { runtime: this, input, content });
       await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
 
@@ -472,6 +473,7 @@ export class LocalRuntimeController implements RuntimeController {
           }
           this.responseBuffers.set(agent, '');
           this.committedResponseBuffers.set(agent, '');
+          sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
 
           if (this.isActiveAgent(agent)) {
             micaUi.conversation.clearResponseText();
@@ -535,7 +537,7 @@ export class LocalRuntimeController implements RuntimeController {
           }
 
           await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
-          sessionController.saveCurrent();
+          sessionController.saveCurrent({ turnState: 'completed' });
           return;
         } catch (error) {
           this.prependSystemInputs(agent, attemptSystemInputs);
@@ -598,7 +600,7 @@ export class LocalRuntimeController implements RuntimeController {
           });
         }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
-        if (!this.clearingAgents.has(agent)) sessionController.saveCurrent();
+        if (!this.clearingAgents.has(agent)) sessionController.saveCurrent({ turnState: 'aborted' });
         if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
         return;
       }
@@ -632,6 +634,7 @@ export class LocalRuntimeController implements RuntimeController {
         micaUi.panels.thinkingText.set('');
         micaUi.panels.status.idle();
       }
+      sessionController.saveCurrent({ turnState: 'error' });
     } finally {
       agent.events.off('toolCall', markToolCall);
       this.runningAgents.delete(agent);
@@ -722,7 +725,7 @@ export class LocalRuntimeController implements RuntimeController {
     const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
     const responseBuffer = this.responseBuffers.get(agent) ?? '';
     if (!session || !responseBuffer.trim()) {
-      sessionController.saveCurrent();
+      sessionController.saveCurrent({ turnState: 'running' });
       return;
     }
 
@@ -736,7 +739,7 @@ export class LocalRuntimeController implements RuntimeController {
       responseText: '',
     });
     try {
-      sessionController.saveCurrent();
+      sessionController.saveCurrent({ turnState: 'running' });
     } finally {
       session.uiState = previousUiState;
     }

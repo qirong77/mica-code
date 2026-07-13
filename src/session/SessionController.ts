@@ -12,6 +12,7 @@ import {
   micaSession,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
+  type PersistedSessionTurnState,
   type SessionStoreLike,
   type SessionSummary,
 } from '@packages/mica-session/index.js';
@@ -51,6 +52,7 @@ export type SessionControllerOptions = {
 export class SessionController {
   private currentSessionId = micaSession.createId();
   private currentTitleOverride: string | null = null;
+  private currentTurnState: PersistedSessionTurnState = 'completed';
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
   private readonly config: SessionConfigAdapter;
@@ -71,11 +73,13 @@ export class SessionController {
   startNewSession(): void {
     this.currentSessionId = micaSession.createId();
     this.currentTitleOverride = null;
+    this.currentTurnState = 'completed';
   }
 
-  saveCurrent(options: { allowEmpty?: boolean } = {}): void {
+  saveCurrent(options: { allowEmpty?: boolean; turnState?: PersistedSessionTurnState } = {}): void {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
+    this.currentTurnState = options.turnState ?? this.currentTurnState;
     if (snapshot.messages.length === 0 && conversationMessages.length === 0 && !options.allowEmpty) return;
 
     const now = new Date().toISOString();
@@ -87,6 +91,7 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
+      turnState: this.currentTurnState,
       snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
@@ -107,6 +112,7 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
+      turnState: existing?.turnState ?? this.currentTurnState,
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     });
   }
@@ -129,6 +135,7 @@ export class SessionController {
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot, restoredRole));
     this.currentSessionId = session.id;
+    this.currentTurnState = session.turnState ?? 'completed';
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     this.currentTitleOverride = session.title === derivedTitle ? null : session.title;

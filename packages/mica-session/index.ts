@@ -8,4 +8,10 @@ export const micaSession = {
   SessionStore: micaSessionStore.SessionStore,
 };
 
-export type { PersistedRuntimeSnapshot, PersistedSession, SessionStoreLike, SessionSummary } from './sessionStore.js';
+export type {
+  PersistedRuntimeSnapshot,
+  PersistedSession,
+  PersistedSessionTurnState,
+  SessionStoreLike,
+  SessionSummary,
+} from './sessionStore.js';

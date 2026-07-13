@@ -145,6 +145,7 @@ function makeSession(id: string, usageHistory: AgentUsageRecord[]): PersistedSes
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(1000).toISOString(),
     cwd: '/tmp/project',
+    turnState: 'completed',
     snapshot: {
       providerId: 'openai',
       protocol: 'openai_chat_completions',

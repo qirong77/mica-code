@@ -21,6 +21,8 @@ export type PersistedRuntimeSnapshot = {
   lastUsage: AgentUsageRecord | undefined;
 };
 
+export type PersistedSessionTurnState = 'running' | 'completed' | 'aborted' | 'error';
+
 export type PersistedSession = {
   version: 1;
   id: string;
@@ -28,6 +30,7 @@ export type PersistedSession = {
   createdAt: string;
   updatedAt: string;
   cwd: string;
+  turnState: PersistedSessionTurnState;
   snapshot: PersistedRuntimeSnapshot;
 };
 
@@ -38,6 +41,7 @@ export type SessionSummary = {
   cwd: string;
   providerId: string;
   model: string;
+  uncompleted: boolean;
 };
 
 export type SessionStoreLike = {
@@ -71,6 +75,7 @@ export class SessionStore implements SessionStoreLike {
         cwd: session.cwd,
         providerId: session.snapshot.providerId,
         model: session.snapshot.model,
+        uncompleted: session.turnState !== 'completed',
       }));
   }
 
@@ -158,6 +163,7 @@ function parseSession(value: unknown): PersistedSession | null {
   if (!session.id || !session.title || !session.createdAt || !session.updatedAt || !session.cwd) return null;
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
   if (!session.snapshot.providerId || !session.snapshot.model) return null;
+  if (!isPersistedSessionTurnState(session.turnState)) session.turnState = 'completed';
   if (!isProviderProtocol(session.snapshot.protocol)) {
     const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
       ?.map((record) => record?.provider)
@@ -209,6 +215,7 @@ function parseLegacySessionForUsage(path: string, messages: unknown[]): Persiste
     createdAt: updatedAt,
     updatedAt,
     cwd: '',
+    turnState: 'completed',
     snapshot: {
       providerId: 'legacy',
       protocol: 'openai_chat_completions',
@@ -221,6 +228,10 @@ function parseLegacySessionForUsage(path: string, messages: unknown[]): Persiste
       lastUsage: usageHistory.at(-1),
     },
   };
+}
+
+function isPersistedSessionTurnState(value: unknown): value is PersistedSessionTurnState {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error';
 }
 
 function finiteNumber(value: unknown): number {

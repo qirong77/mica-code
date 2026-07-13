@@ -58,11 +58,16 @@ describe('SessionController', () => {
     const controller = new SessionController({ agent, store });
 
     controller.renameCurrent('Manual title');
+    controller.saveCurrent({ turnState: 'running' });
     controller.saveCurrent();
 
     expect(saves.at(-1)?.title).toBe('Manual title');
+    expect(saves.at(-1)?.turnState).toBe('running');
     expect(saves.at(-1)?.snapshot.conversationMessages).toEqual([{ role: 'user', content: 'original prompt' }]);
     expect(controller.getCurrentTitle()).toBe('Manual title');
+
+    controller.saveCurrent({ turnState: 'completed' });
+    expect(saves.at(-1)?.turnState).toBe('completed');
   });
 
   it('restores persisted UI conversation messages without loading notices into agent history', async () => {
@@ -102,6 +107,7 @@ describe('SessionController', () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
       cwd: process.cwd(),
+      turnState: 'completed',
       snapshot,
     };
     const agent: SessionAgentAdapter = {
@@ -176,6 +182,7 @@ describe('SessionController', () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
       cwd: process.cwd(),
+      turnState: 'completed',
       snapshot: {
         providerId: provider.id,
         protocol: provider.protocol,

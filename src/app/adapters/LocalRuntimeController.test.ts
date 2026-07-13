@@ -198,16 +198,20 @@ describe('LocalRuntimeController abort display state', () => {
 
     await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
 
-    expect(sessionController.saveCurrent).toHaveBeenCalledTimes(2);
-    expect(savedConversationMessages[0]).toEqual([
+    expect(sessionController.saveCurrent).toHaveBeenCalledTimes(3);
+    expect(sessionController.saveCurrent).toHaveBeenNthCalledWith(1, { allowEmpty: true, turnState: 'running' });
+    expect(sessionController.saveCurrent).toHaveBeenNthCalledWith(2, { turnState: 'running' });
+    expect(sessionController.saveCurrent).toHaveBeenNthCalledWith(3, { turnState: 'completed' });
+    expect(savedConversationMessages[0]).toEqual([{ role: 'user', content: 'hello', displayContent: undefined }]);
+    expect(savedConversationMessages[1]).toEqual([
       { role: 'user', content: 'hello', displayContent: undefined },
       { role: 'assistant', content: 'checking files' },
     ]);
-    expect(savedConversationMessages[1]).toEqual([
+    expect(savedConversationMessages[2]).toEqual([
       { role: 'user', content: 'hello', displayContent: undefined },
       { role: 'assistant', content: 'checking files\n\ndone' },
     ]);
-    expect(session.uiState.conversationMessages).toEqual(savedConversationMessages[1]);
+    expect(session.uiState.conversationMessages).toEqual(savedConversationMessages[2]);
   });
 
   it('only saves once when a completed turn has no tool iteration', async () => {
@@ -249,7 +253,9 @@ describe('LocalRuntimeController abort display state', () => {
 
     await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
 
-    expect(sessionController.saveCurrent).toHaveBeenCalledOnce();
+    expect(sessionController.saveCurrent).toHaveBeenCalledTimes(2);
+    expect(sessionController.saveCurrent).toHaveBeenNthCalledWith(1, { allowEmpty: true, turnState: 'running' });
+    expect(sessionController.saveCurrent).toHaveBeenNthCalledWith(2, { turnState: 'completed' });
   });
 
   it('stores failed turn errors as conversation notices above the input', async () => {

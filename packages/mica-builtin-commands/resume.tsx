@@ -50,7 +50,7 @@ function showResumeSelector(
     return sessions.filter((session) => {
       if (filter.get() === 'cwd' && session.cwd !== process.cwd()) return false;
       if (!normalizedQuery) return true;
-      return `${session.title} ${basename(session.cwd)} ${session.cwd} ${session.model}`
+      return `${formatResumeSessionTitle(session)} ${basename(session.cwd)} ${session.cwd} ${session.model}`
         .toLowerCase()
         .includes(normalizedQuery);
     });
@@ -75,7 +75,7 @@ function showResumeSelector(
     const visible = visibleSessions();
     const items: SelectItem[] = visible.map((session) => ({
       key: session.id,
-      label: session.title,
+      label: formatResumeSessionTitle(session),
       description: formatSessionListTime(session.updatedAt),
     }));
 
@@ -146,6 +146,10 @@ function showResumeSelector(
       return false;
     },
   });
+}
+
+export function formatResumeSessionTitle(session: Pick<SessionSummary, 'title' | 'uncompleted'>): string {
+  return session.uncompleted ? `（uncompleted）${session.title}` : session.title;
 }
 
 function renderResumeSessionItem(item: SelectItem, isSelected: boolean, index: number): React.ReactNode {
