@@ -20,10 +20,19 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     get isRunning() {
       return current().isRunning;
     },
+    get role() {
+      return current().role;
+    },
     reloadConfig(resetClient?: boolean) {
       current().reloadConfig(resetClient);
     },
-    createSubAgent(options?: { systemPrompt?: string; [key: string]: unknown }) {
+    setRole(roleName: string) {
+      current().setRole(roleName);
+    },
+    buildSystemPrompt() {
+      return current().buildSystemPrompt();
+    },
+    createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }) {
       return current().createSubAgent(options);
     },
     getSnapshot() {

@@ -1,5 +1,10 @@
 import { micaUi } from '@packages/mica-ui/index.js';
-import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-agent/index.js';
+import {
+  DEFAULT_ROLE_NAME,
+  calculateCachedTokenRate,
+  micaAgent,
+  type AgentUsageRecord,
+} from '@packages/mica-agent/index.js';
 import type { MicaUiCommandStatus, MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -13,7 +18,9 @@ import {
 import { getActiveContext } from '../app/activeContext.js';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
-export type ResumeSessionResult = { ok: true; session: PersistedSession } | { ok: false; message: string };
+export type ResumeSessionResult =
+  | { ok: true; session: PersistedSession; roleFallback?: { missing: string; fallback: string } }
+  | { ok: false; message: string };
 
 export type SessionAgentAdapter = {
   getSnapshot(): AgentRuntimeSnapshot;
@@ -116,15 +123,21 @@ export class SessionController {
     const session = this.store.load(id);
     if (!session) return { ok: false, message: `Session not found: ${id}` };
 
+    const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
+    const restoredRole = resolveSnapshotRole(requestedRole);
     this.config.apply(session.snapshot);
     this.agent.reloadConfig(false);
-    this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot));
+    this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot, restoredRole));
     this.currentSessionId = session.id;
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     this.currentTitleOverride = session.title === derivedTitle ? null : session.title;
     this.ui.restore(this.agent, session.snapshot.lastUsage, conversationMessages);
-    return { ok: true, session };
+    return {
+      ok: true,
+      session,
+      ...(requestedRole === restoredRole ? {} : { roleFallback: { missing: requestedRole, fallback: restoredRole } }),
+    };
   }
 }
 
@@ -173,6 +186,7 @@ function toPersistedSnapshot(
     protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
+    role: snapshot.role,
     messages: snapshot.messages,
     conversationMessages,
     usageHistory: snapshot.usageHistory,
@@ -180,16 +194,24 @@ function toPersistedSnapshot(
   };
 }
 
-function fromPersistedSnapshot(snapshot: PersistedRuntimeSnapshot): AgentRuntimeSnapshot {
+function fromPersistedSnapshot(
+  snapshot: PersistedRuntimeSnapshot,
+  role = resolveSnapshotRole(snapshot.role),
+): AgentRuntimeSnapshot {
   return {
     providerId: snapshot.providerId,
     protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
+    role,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
   };
+}
+
+function resolveSnapshotRole(roleName?: string): string {
+  return roleName ? (micaAgent.roles.get(roleName)?.name ?? DEFAULT_ROLE_NAME) : DEFAULT_ROLE_NAME;
 }
 
 function getPersistableConversationMessages(agent: SessionAgentAdapter): MicaUiConversationMessage[] {

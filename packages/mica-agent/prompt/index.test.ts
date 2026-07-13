@@ -86,4 +86,29 @@ describe('buildSystemPrompt', () => {
 
     expect(prompt.indexOf('- alpha: Alpha skill')).toBeLessThan(prompt.indexOf('- zeta: Zeta skill'));
   });
+
+  it('replaces only the base system section for a custom role', () => {
+    const prompt = buildSystemPromptForTest({
+      baseSystemPrompt: 'You are a focused reviewer.',
+      cwd: '/repo',
+      now: new Date('2026-06-17T10:20:30.000Z'),
+      platform: 'darwin',
+      shell: '/bin/zsh',
+      projectInstructions: '- keep project rules',
+      skills: [
+        {
+          name: 'review',
+          description: 'Review code changes',
+          content: 'Full instructions',
+          baseDir: '/skills/review',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('<system>\nYou are a focused reviewer.\n</system>');
+    expect(prompt).toContain('<project-instructions>\n- keep project rules\n</project-instructions>');
+    expect(prompt).toContain('<skills>');
+    expect(prompt).toContain('- review: Review code changes');
+    expect(prompt).toContain('<context>');
+  });
 });

@@ -118,5 +118,8 @@ function resumeSession(
   }
   services.syncModelDisplay(agent);
   services.refreshCurrentAgentSessionUi();
-  services.showMessage(`Resumed: ${result.session.title}`, 4000);
+  const roleMessage = result.roleFallback
+    ? `; role ${result.roleFallback.missing} not found, using ${result.roleFallback.fallback}`
+    : '';
+  services.showMessage(`Resumed: ${result.session.title}${roleMessage}`, roleMessage ? 7000 : 4000);
 }

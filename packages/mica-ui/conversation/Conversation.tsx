@@ -41,6 +41,10 @@ function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null)
   return 'waiting to send';
 }
 
+export function formatPendingNoticeTitle(queueMode: 'after_iteration' | 'after_turn' | null): string {
+  return `waiting queue ( ${formatPendingStatus(queueMode)} · shift + ← to re-edit )`;
+}
+
 interface LogItem {
   id: string | number;
   role: 'user' | 'assistant' | 'notice';
@@ -177,13 +181,15 @@ export const Conversation = (): React.ReactNode => {
         </MessageGutter>
       ) : null}
       {currentPendingInputs.map((text, i) => (
-        <MessageGutter key={`pending-${i}`} tone="pending" marker={'\u258c'} marginTop={1}>
-          <Text color={themeColors.messagePending} italic>
-            {truncateLines(text, MAX_USER_LINES)}
-          </Text>
-          <Text color={themeColors.messagePending}>
-            {'  '}({formatPendingStatus(currentQueueMode)} · shift + ⬅️ to re-edit)
-          </Text>
+        <MessageGutter
+          key={`pending-${i}`}
+          tone="notice"
+          marker={'\u258c'}
+          marginTop={1}
+          backgroundColor={themeColors.surfaceNotice}
+        >
+          <Text color={themeColors.messageNotice}>{formatPendingNoticeTitle(currentQueueMode)}</Text>
+          <Markdown>{truncateLines(text, MAX_USER_LINES)}</Markdown>
         </MessageGutter>
       ))}
     </Box>

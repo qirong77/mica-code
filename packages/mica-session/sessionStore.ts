@@ -14,6 +14,7 @@ export type PersistedRuntimeSnapshot = {
   protocol: ProviderProtocol;
   model: string;
   effort: EffortOption;
+  role: string;
   messages: unknown[];
   conversationMessages: unknown[];
   usageHistory: AgentUsageRecord[];
@@ -164,6 +165,9 @@ function parseSession(value: unknown): PersistedSession | null {
     session.snapshot.protocol = provider ?? 'openai_chat_completions';
   }
   if (!isEffortOption(session.snapshot.effort)) return null;
+  if (typeof session.snapshot.role !== 'string' || !session.snapshot.role.trim()) {
+    session.snapshot.role = 'default';
+  }
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
@@ -210,6 +214,7 @@ function parseLegacySessionForUsage(path: string, messages: unknown[]): Persiste
       protocol: 'openai_chat_completions',
       model: 'legacy',
       effort: 'none',
+      role: 'default',
       messages: [],
       conversationMessages: [],
       usageHistory,

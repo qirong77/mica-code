@@ -69,7 +69,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   tools: boolean;
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
-  systemPrompt: string | undefined;
+  systemPrompt: ModelClientOptions['systemPrompt'];
 
   constructor(options: ModelClientOptions) {
     super();
@@ -143,6 +143,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   async query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string> {
     const turnId = ++this.turnId;
     let requestIndex = 0;
+    const systemPrompt = resolveSystemPrompt(this.systemPrompt);
     const messages: ResponseInputItem[] = [
       ...prepareHistoricalResponsesInput(this.messages),
       { type: 'message', role: 'user', content: micaContentToResponsesContent(question) },
@@ -170,7 +171,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           getClient(this).responses.create(
             {
               model: this.model,
-              instructions: this.systemPrompt ?? buildSystemPrompt(),
+              instructions: systemPrompt,
               input: messages,
               ...(this.tools
                 ? {
@@ -350,6 +351,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     this.usageHistory.push(record);
     this.onUsage?.(record);
   }
+}
+
+function resolveSystemPrompt(source: ModelClientOptions['systemPrompt']): string {
+  if (typeof source === 'function') return source();
+  return source ?? buildSystemPrompt();
 }
 
 function micaContentToResponsesContent(content: AgentQueryContent): ResponseInputMessageContentList {

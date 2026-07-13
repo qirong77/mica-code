@@ -2,7 +2,6 @@ import { Box, Text } from '@anthropic/ink';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
   calculateUsageCachedTokenRate,
-  micaAgent,
   summarizeUsageHistory,
   type ConversationContentBlock,
   type ConversationItem,
@@ -225,7 +224,7 @@ function buildContextOverview(agent: CommandAgent): ContextOverview {
   const usageTotals = summarizeUsageHistory(snapshot.usageHistory);
   const latestUsage = snapshot.lastUsage;
   const tools = micaTools.getDefinitions();
-  const promptBreakdown = estimatePromptBreakdown();
+  const promptBreakdown = estimatePromptBreakdown(agent);
   const toolSchemaBreakdown = estimateToolSchemas(tools, protocol);
   const conversationStats = analyzeConversation(normalizeMessages(protocol, snapshot.messages));
 
@@ -275,8 +274,12 @@ function buildContextOverview(agent: CommandAgent): ContextOverview {
   };
 }
 
-function estimatePromptBreakdown(): { systemTokens: number; skillTokens: number; skillCount: number } {
-  const prompt = micaAgent.buildSystemPrompt();
+function estimatePromptBreakdown(agent: CommandAgent): {
+  systemTokens: number;
+  skillTokens: number;
+  skillCount: number;
+} {
+  const prompt = agent.buildSystemPrompt();
   const skillsBlock = extractPromptSectionBlock(prompt, 'skills');
   const promptWithoutSkills = skillsBlock ? prompt.replace(skillsBlock, '').trim() : prompt;
   return {

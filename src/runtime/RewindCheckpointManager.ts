@@ -294,6 +294,7 @@ function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
     protocol: snapshot.protocol,
     model: snapshot.model,
     effort: snapshot.effort,
+    role: snapshot.role,
     messages: cloneJson(snapshot.messages),
     usageHistory: cloneJson(snapshot.usageHistory),
     lastUsage: cloneJson(snapshot.lastUsage),

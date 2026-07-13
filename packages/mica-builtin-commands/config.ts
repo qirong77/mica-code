@@ -1,4 +1,3 @@
-import { micaAgent } from '@packages/mica-agent/index.js';
 import { buildConfigWebConversationDetails, startConfigWeb } from '@packages/mica-config-web/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 
@@ -13,7 +12,7 @@ export function createConfigCommand(agent: CommandAgent, services: CommandRuntim
           providerId: snapshot.providerId,
           protocol: agent.config.provider.protocol,
           model: snapshot.model,
-          systemPrompt: micaAgent.buildSystemPrompt(),
+          systemPrompt: agent.buildSystemPrompt(),
           messages: snapshot.messages,
         }),
       );

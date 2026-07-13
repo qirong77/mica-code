@@ -56,7 +56,7 @@ export class ChatCompletionsClient extends BaseAgent<
   tools: boolean;
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
-  systemPrompt: string | undefined;
+  systemPrompt: ModelClientOptions['systemPrompt'];
   constructor(options: ModelClientOptions) {
     super();
     this.tools = true;
@@ -127,7 +127,7 @@ export class ChatCompletionsClient extends BaseAgent<
     const turnId = ++this.turnId;
     let requestIndex = 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: this.systemPrompt ?? buildSystemPrompt() },
+      { role: 'system', content: resolveSystemPrompt(this.systemPrompt) },
       ...compactHistoricalToolResults(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
@@ -324,6 +324,11 @@ export class ChatCompletionsClient extends BaseAgent<
     this.usageHistory.push(record);
     this.onUsage?.(record);
   }
+}
+
+function resolveSystemPrompt(source: ModelClientOptions['systemPrompt']): string {
+  if (typeof source === 'function') return source();
+  return source ?? buildSystemPrompt();
 }
 
 function readReasoningContent(delta: unknown): string | undefined {

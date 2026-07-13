@@ -131,7 +131,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `src/app/activeContext.ts` 是应用上下文的唯一全局访问入口。插件、命令和 runtime 辅助代码可以通过它读取当前 `ApplicationContext`。
 - 不要从 package 或底层工具反向 import `Application.ts` 获取状态。需要上层能力时，用 service、hook、adapter、回调或显式参数注入。
 - 多 agent 场景下，命令不能假定构造时传入的 `agent` 永远是当前 agent。命令插件使用 `createActiveAgentProxy` 和 `createActiveSessionControllerProxy` 解决这个问题。
-- provider/model/effort 切换前，要先同步当前 agent 的 config，再打开选择器；切换后要 `agent.reloadConfig(false)`、保存 session、同步 UI。
+- provider/model/effort 切换前，要先同步当前 agent 的 config，再打开选择器；切换后要 `agent.reloadConfig(false)`、保存 session、同步 UI。role 切换同样需要 busy guard 和保存 session，但只重建 client 并保留当前历史。
 
 ## Runtime Turn Loop
 
@@ -160,6 +160,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `MessageQueuePlugin` 在 `input:received` 阶段处理 busy agent 的输入。如果已有排队消息，会提示“已有一条排队消息，等待发送或重新编辑”。
 - queue 操作必须带 owner/agent 语义。后台 agent 或非当前 agent 的输入不能落到当前 active agent 上。
 - UI 展示使用 `RuntimeInput.displayText` 或 `displayContent` 时，只影响展示摘要；`text` 或 `content` 仍保留完整上下文给 agent。
+- pending input 在 conversation 底部使用临时 notice 样式展示，标题包含发送时机和重新编辑快捷键；它仍属于 `pendingInputs` UI 状态，不追加到 `conversationMessages` 或 agent history。
 
 ### Retry 语义
 
@@ -189,8 +190,9 @@ temp/                              临时代码和外部实验，默认不参与
 - provider adapter 负责协议消息结构、history normalizer、usage 归一化、tool-call 格式、请求参数转换和 abort signal。
 - runtime 不直接拼 provider 请求参数。Chat Completions effort 参数通过 `resolveChatCompletionsEffortParams` 生成，Responses reasoning 参数通过 `resolveResponsesReasoningParams` 生成。
 - `createSubAgent` 会复用当前 provider client options，但默认 `effort: 'none'`，并根据传入 options 决定是否启用 tools。
-- `buildSystemPrompt()` 会读取默认 `packages/mica-agent/prompt/system.md`、当前 cwd 下的 `AGENT.md`、skills 索引和环境信息。
+- `buildSystemPrompt()` 默认读取 `packages/mica-agent/prompt/system.md`，当前 agent 选择自定义 role 时只替换 `<system>` 段；当前 cwd 下的 `AGENT.md`、skills 索引和环境信息继续独立注入。
 - system prompt 中的 skills 只是索引；完整 skill 内容只能通过 `Skill` 工具按需读取。
+- role 默认从 `~/.mica/role` 扫描，设置 `MICA_HOME` 时使用 `$MICA_HOME/role`。每个普通文件的文件名就是 role 名；内置 `default` 只展示、不可由目录中的同名文件覆盖。
 
 修改 prompt 时至少运行：
 
@@ -225,7 +227,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 
 - `packages/mica-session/sessionStore.ts` 当前默认使用 `~/.mica/sessions`，由 `homedir()` 拼出，不跟随 `MICA_HOME`。
 - session 文件是 version 1 JSON，保存 `id`、`title`、`createdAt`、`updatedAt`、`cwd` 和 `snapshot`。
-- `snapshot` 包含 providerId、model、effort、provider history messages、UI conversationMessages、usageHistory、lastUsage。
+- `snapshot` 包含 providerId、model、effort、role、provider history messages、UI conversationMessages、usageHistory、lastUsage。旧 snapshot 缺少 role 时按 `default` 读取，自定义 role 文件缺失时恢复也回退到 `default`。
 - `SessionController` 负责把 `AgentRuntime` snapshot 转为 persisted snapshot，恢复时先 apply config，再 reload agent，再 load snapshot，最后 restore UI。
 - 新增 session 字段必须有明确版本策略、默认值和 sanitize/parse 逻辑。
 
@@ -261,7 +263,8 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/provider`：切换 AI 服务提供商。
 - `/model`：切换当前 provider 的模型。
 - `/effort`：切换推理强度。
-- `/status`：显示当前 provider/model/effort 状态。
+- `/role`：切换当前 agent 的系统提示词；自定义文件来自 `~/.mica/role` 或 `$MICA_HOME/role`。
+- `/status`：显示当前 provider/model/effort/role 状态。
 - `/context`：显示当前上下文占用总览。
 - `/compact`：压缩当前会话上下文为 checkpoint。
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
@@ -341,7 +344,7 @@ AGENT.md
 - `TerminalAgentSessionManager` 管理同一终端内多个 agent session。`/new` 创建独立 agent，`/fork` 基于当前历史创建分叉 agent。
 - 主 runtime 维护 per-agent queue、response buffer、committed buffer、session controller 和运行状态。
 - `switchSession(agent, sessionController)` 必须同步 runtime 当前 agent、session controller、queue UI 和 UI bridge 当前 agent。
-- `/fork` 和后台 agent 相关命令要注意 provider/model/effort 与 UI snapshot 的一致性。
+- `/fork` 和后台 agent 相关命令要注意 provider/model/effort/role 与 UI snapshot 的一致性。
 - `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
 - subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。
 - `RewindCheckpointManager` 在 turn 前捕获对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
@@ -465,7 +468,7 @@ rg --files src packages scripts docs blogs
 
 改代码前，先判断本次任务是否触及这些边界：
 
-- provider/model/effort 切换：忙碌检查、config/storage 分离、effort clamp、context size。
+- provider/model/effort/role 切换：忙碌检查、config/storage 分离、effort clamp、context size、role snapshot 继承与缺失回退。
 - provider 协议：Chat Completions、Responses、Anthropic Messages 的请求参数和 history normalizer。
 - turn loop：queue、retry、abort、partial response、session save、hooks。
 - UI 状态：`TerminalAgentSession.uiState`、conversationMessages、responseText、thinkingText、workingStatus。

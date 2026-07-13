@@ -39,6 +39,7 @@ describe('SessionController', () => {
         protocol: 'openai_chat_completions' as const,
         model: 'test-model',
         effort: 'none' as const,
+        role: 'default',
         messages: [{ role: 'user', content: 'original prompt' }],
         usageHistory: [],
         lastUsage: undefined,
@@ -71,6 +72,7 @@ describe('SessionController', () => {
       protocol: 'openai_chat_completions' as const,
       model: 'test-model',
       effort: 'none' as const,
+      role: 'default',
       messages: [{ role: 'user', content: 'model prompt' }],
       conversationMessages: [
         { role: 'user' as const, content: 'model prompt' },
@@ -109,6 +111,7 @@ describe('SessionController', () => {
           protocol: snapshot.protocol,
           model: snapshot.model,
           effort: snapshot.effort,
+          role: snapshot.role,
           messages: snapshot.messages,
           usageHistory: snapshot.usageHistory,
           lastUsage: snapshot.lastUsage,
@@ -139,6 +142,7 @@ describe('SessionController', () => {
       protocol: snapshot.protocol,
       model: snapshot.model,
       effort: snapshot.effort,
+      role: snapshot.role,
       messages: snapshot.messages,
       usageHistory: snapshot.usageHistory,
       lastUsage: snapshot.lastUsage,
@@ -177,6 +181,7 @@ describe('SessionController', () => {
         protocol: provider.protocol,
         model: 'deepseek-v4-pro',
         effort: 'low',
+        role: 'default',
         messages: [],
         conversationMessages: [],
         usageHistory: [],
@@ -190,6 +195,7 @@ describe('SessionController', () => {
           protocol: session.snapshot.protocol,
           model: session.snapshot.model,
           effort: session.snapshot.effort,
+          role: session.snapshot.role ?? 'default',
           messages: session.snapshot.messages,
           usageHistory: session.snapshot.usageHistory,
           lastUsage: session.snapshot.lastUsage,
@@ -223,10 +229,54 @@ describe('SessionController', () => {
       protocol: session.snapshot.protocol,
       model: session.snapshot.model,
       effort: session.snapshot.effort,
+      role: session.snapshot.role,
       messages: session.snapshot.messages,
       usageHistory: session.snapshot.usageHistory,
       lastUsage: session.snapshot.lastUsage,
     });
     expect(restore).toHaveBeenCalled();
+  });
+
+  it('restores legacy sessions without a role as default', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const snapshot = {
+      providerId: 'openai',
+      protocol: 'openai_chat_completions' as const,
+      model: 'test-model',
+      effort: 'none' as const,
+      messages: [],
+      conversationMessages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    const session = {
+      version: 1 as const,
+      id: 'legacy-without-role',
+      title: 'legacy',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      cwd: process.cwd(),
+      snapshot,
+    };
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({ ...snapshot, role: 'default' })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      load: vi.fn(() => session as unknown as PersistedSession),
+      save: vi.fn(),
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: vi.fn() },
+      ui: { restore: vi.fn() },
+    });
+
+    expect(controller.resume(session.id).ok).toBe(true);
+    expect(agent.loadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ role: 'default' }));
   });
 });

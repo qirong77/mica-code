@@ -106,7 +106,12 @@ function makeAgent(): CommandAgent {
     },
     currentRunId: 0,
     isRunning: false,
+    role: 'default',
     reloadConfig() {},
+    setRole() {},
+    buildSystemPrompt() {
+      return mocks.buildSystemPrompt();
+    },
     createSubAgent() {
       return { query: async () => '' };
     },
@@ -126,6 +131,7 @@ function makeAgent(): CommandAgent {
         providerId: 'test',
         model: 'gpt-5',
         effort: 'medium',
+        role: 'default',
         usageHistory: [lastUsage],
         lastUsage,
         messages: [

@@ -37,7 +37,16 @@ export function createStatusCommand(agent: CommandAgent, sessionController?: Com
       const contextTokens = micaUi.panels.contextSize.get();
       const contextWindowSize = micaUi.panels.modelDisplay.contextWindowSize.get();
       showStatusPanel(
-        formatCurrentStatusList(provider, model, effort, contextTokens, contextWindowSize, usageTotals, latestUsage),
+        formatCurrentStatusList(
+          provider,
+          model,
+          effort,
+          agent.role,
+          contextTokens,
+          contextWindowSize,
+          usageTotals,
+          latestUsage,
+        ),
       );
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -85,6 +94,7 @@ function formatCurrentStatusList(
   provider: CommandAgent['config']['provider'],
   model: string,
   effort: string,
+  role: string,
   contextTokens: number,
   contextWindowSize: number,
   usageTotals: AgentUsageSummary,
@@ -94,6 +104,7 @@ function formatCurrentStatusList(
     ['Model', model],
     ['Effort', provider.supportsEffort !== false ? effort : 'none'],
     ['Provider', provider.name ?? provider.id],
+    ['Role', role],
     ['Cwd', process.cwd()],
     ['Context', formatContextUsage(contextTokens, contextWindowSize)],
     ['Total input tokens', formatTokenValue(usageTotals.inputTokens, usageTotals.records)],

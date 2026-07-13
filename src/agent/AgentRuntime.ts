@@ -1,5 +1,6 @@
 import mitt from 'mitt';
 import {
+  DEFAULT_ROLE_NAME,
   micaAgent,
   type AgentQueryContent,
   type AgentSnapshot,
@@ -39,6 +40,7 @@ export type AgentRuntimeSnapshot = {
   protocol: ProviderProtocol;
   model: string;
   effort: EffortOption;
+  role: string;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
@@ -79,6 +81,7 @@ export class AgentRuntime {
   private abortedRunUsageStartIndex: number | null = null;
   private abortedRunCompleteUsageLength: number | null = null;
   private currentConfig: AgentRuntimeConfig;
+  private currentRole = DEFAULT_ROLE_NAME;
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -91,6 +94,10 @@ export class AgentRuntime {
 
   get config() {
     return this.currentConfig;
+  }
+
+  get role() {
+    return this.resolveCurrentRole().name;
   }
 
   get currentRunId() {
@@ -124,6 +131,7 @@ export class AgentRuntime {
     return mergeDefined(
       {
         ...createAgentClientOptions(this.currentConfig),
+        systemPrompt: () => this.buildSystemPrompt(),
         toolContext: {
           agent: this,
           createClientOptions: this.createClientOptions.bind(this),
@@ -131,6 +139,26 @@ export class AgentRuntime {
       },
       overrides,
     );
+  }
+
+  buildSystemPrompt(): string {
+    return micaAgent.buildSystemPrompt({ baseSystemPrompt: this.resolveCurrentRole().prompt });
+  }
+
+  setRole(roleName: string): void {
+    if (this.isRunning) {
+      throw new Error('Cannot switch role while agent is running');
+    }
+    const role = micaAgent.roles.get(roleName);
+    if (!role) throw new Error(`Role not found: ${roleName || '(empty)'}`);
+    if (role.name === this.currentRole) return;
+
+    const previousSnapshot = this.client?.getSnapshot();
+    this.currentRole = role.name;
+    this.recreateClient();
+    if (previousSnapshot && this.client) {
+      this.client.loadSnapshot(previousSnapshot);
+    }
   }
 
   reloadConfig(resetSession = true) {
@@ -178,6 +206,7 @@ export class AgentRuntime {
       protocol: this.currentConfig.provider.protocol,
       model: this.currentConfig.model,
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+      role: this.role,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
@@ -229,6 +258,7 @@ export class AgentRuntime {
     }
     this.runId++;
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
+    this.currentRole = micaAgent.roles.get(snapshot.role)?.name ?? DEFAULT_ROLE_NAME;
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,
@@ -333,6 +363,13 @@ export class AgentRuntime {
 
   private clientOptions(): ModelClientOptions {
     return this.createClientOptions();
+  }
+
+  private resolveCurrentRole() {
+    const role = micaAgent.roles.get(this.currentRole) ?? micaAgent.roles.get(DEFAULT_ROLE_NAME);
+    if (!role) throw new Error('Built-in default role is unavailable');
+    this.currentRole = role.name;
+    return role;
   }
 
   private emitStatus(status: AgentRuntimeStatus): void {

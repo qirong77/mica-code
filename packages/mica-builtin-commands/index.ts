@@ -13,6 +13,7 @@ import { createProviderCommand } from './provider.js';
 import { createRenameCommand } from './rename.js';
 import { createResumeCommand } from './resume.js';
 import { createRewindCommand } from './rewind.js';
+import { createRoleCommand } from './role.js';
 import { createSkillsCommand } from './skills.js';
 import { createStatusCommand } from './status.js';
 import { syncConfigFromAgent } from './configSwitch.js';
@@ -34,6 +35,7 @@ export const micaBuiltinCommands = {
   createRenameCommand,
   createResumeCommand,
   createRewindCommand,
+  createRoleCommand,
   createSkillsCommand,
   createStatusCommand,
   createTaskCommand,

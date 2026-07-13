@@ -16,14 +16,18 @@ export type CommandAgent = {
   };
   readonly currentRunId: number;
   readonly isRunning: boolean;
+  readonly role: string;
   reloadConfig(resetClient?: boolean): void;
-  createSubAgent(options?: { systemPrompt?: string; [key: string]: unknown }): {
+  setRole(roleName: string): void;
+  buildSystemPrompt(): string;
+  createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
     query(input: string): Promise<string>;
   };
   getSnapshot(): {
     providerId: string;
     model: string;
     effort: string;
+    role: string;
     messages: unknown[];
     lastUsage?: AgentUsageRecord;
     usageHistory: AgentUsageRecord[];
@@ -39,7 +43,11 @@ export type SessionSummary = {
 };
 
 export type ResumeSessionResult =
-  | { ok: true; session: { title: string; snapshot: { model: string } } }
+  | {
+      ok: true;
+      session: { title: string; snapshot: { model: string } };
+      roleFallback?: { missing: string; fallback: string };
+    }
   | { ok: false; message: string };
 
 export type CommandSessionController = {

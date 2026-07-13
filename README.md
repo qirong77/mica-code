@@ -42,3 +42,9 @@ curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/instal
 ```
 
 `protocol` 可选：`openai_chat_completions` 或 `openai_responses`。如果 provider 配置了 `get_model_url`，模型列表会按 OpenAI `/models` 响应格式在运行时获取；没有动态模型接口时，可以直接配置静态 `models` 数组。
+
+## 自定义 Role
+
+使用 `/role` 可以切换当前 agent 的系统提示词。自定义 role 默认放在 `~/.mica/role`，每个普通文件的文件名就是 role 名称，文件内容就是对应的系统提示词；设置 `MICA_HOME` 时目录改为 `$MICA_HOME/role`。
+
+内置 `default` 始终显示在 role 列表中，使用 Mica 自带提示词，不会出现在 role 目录里，也不能被同名文件覆盖。切换 role 只替换系统提示词主体，项目说明、skills 索引和环境 context 等注入保持不变。role 名称会随 session snapshot 保存，`/resume`、`/fork` 和 `/rewind` 都会恢复或继承它；旧 session 或已删除的自定义 role 会回退到 `default`。

@@ -117,6 +117,38 @@ describe('AgentRuntime tool status', () => {
       vi.useRealTimers();
     }
   });
+
+  it('switches role without dropping the existing client snapshot', async () => {
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    const createModelClient = vi.mocked(micaAgent.createModelClient);
+    const reviewerClient = createModelClientStub();
+    createModelClient.mockReturnValueOnce(modelClient).mockReturnValueOnce(reviewerClient);
+    vi.spyOn(micaAgent.roles, 'get').mockImplementation((name: string) =>
+      name === 'reviewer'
+        ? { name: 'reviewer', prompt: 'Review carefully.', builtIn: false, path: '/tmp/role/reviewer' }
+        : { name: 'default', prompt: 'Default prompt.', builtIn: true },
+    );
+    modelClient.getSnapshot = vi.fn(() => ({
+      model: 'test-model',
+      messages: [{ role: 'user', content: 'keep this' }],
+      usageHistory: [],
+      lastUsage: undefined,
+      conversationMessages: [],
+    }));
+
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    agent.setRole('reviewer');
+
+    expect(agent.role).toBe('reviewer');
+    expect(reviewerClient.loadSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: [{ role: 'user', content: 'keep this' }] }),
+    );
+    expect(agent.getSnapshot().role).toBe('reviewer');
+    const options = createModelClient.mock.calls.at(-1)?.[0];
+    expect(typeof options?.systemPrompt).toBe('function');
+    expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
+  });
 });
 
 function createModelClientStub(): IAgent<ModelClientOptions> & {

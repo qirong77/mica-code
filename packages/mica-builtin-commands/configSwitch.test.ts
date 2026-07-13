@@ -94,10 +94,7 @@ describe('config switch commands', () => {
       expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
-      expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Model: gpt-5.5',
-        undefined,
-      );
+      expect(services.showMessage).toHaveBeenLastCalledWith('Model: gpt-5.5', undefined);
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
       const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
         lastUsedByDirectory?: Record<string, Record<string, unknown>>;
@@ -185,10 +182,7 @@ describe('config switch commands', () => {
         effort: 'low',
         contextWindowSize: 1000000,
       });
-      expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Provider: deepseek',
-        3000,
-      );
+      expect(services.showMessage).toHaveBeenLastCalledWith('Provider: deepseek', 3000);
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -243,10 +237,7 @@ describe('config switch commands', () => {
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
-      expect(services.showMessage).toHaveBeenLastCalledWith(
-        'Model: gpt-5.5',
-        undefined,
-      );
+      expect(services.showMessage).toHaveBeenLastCalledWith('Model: gpt-5.5', undefined);
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -304,12 +295,16 @@ function makeAgent(
     },
     currentRunId: 0,
     isRunning: false,
+    role: 'default',
     reloadConfig,
+    setRole: vi.fn(),
+    buildSystemPrompt: () => '<system>test</system>',
     createSubAgent: () => ({ query: async () => '' }),
     getSnapshot: () => ({
       providerId: currentConfig.provider.id,
       model: currentConfig.model,
       effort: currentConfig.effort,
+      role: 'default',
       messages,
       usageHistory: [],
     }),

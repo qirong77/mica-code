@@ -3,11 +3,15 @@ import { join } from 'node:path';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
+export { DEFAULT_ROLE_NAME, getAgentRole, getRolesDirectory, listAgentRoles } from './roles.js';
+export type { AgentRole } from './roles.js';
+
 type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';
 
 const PROJECT_INSTRUCTIONS_PATH = join(process.cwd(), 'AGENT.md');
 
 export type BuildSystemPromptOptions = {
+  baseSystemPrompt?: string;
   cwd?: string;
   now?: Date;
   platform?: NodeJS.Platform;
@@ -20,7 +24,7 @@ class SystemPromptBuilder {
   private prompt = '';
 
   constructor(options: BuildSystemPromptOptions = {}) {
-    this.prompt = wrapSection('system', DEFAULT_SYSTEM_PROMPT);
+    this.prompt = wrapSection('system', options.baseSystemPrompt ?? DEFAULT_SYSTEM_PROMPT);
 
     const projectInstructions =
       options.projectInstructions === undefined
@@ -64,8 +68,8 @@ class SystemPromptBuilder {
   }
 }
 
-export function buildSystemPrompt(): string {
-  return new SystemPromptBuilder().value;
+export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
+  return new SystemPromptBuilder(options).value;
 }
 
 export function buildSystemPromptForTest(options: BuildSystemPromptOptions): string {

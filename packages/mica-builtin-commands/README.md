@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
+- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉。
@@ -36,7 +36,7 @@ const commands = [
 
 - `index.ts`：内置命令创建工厂导出。
 - `services.ts`：命令依赖的服务接口定义。
-- `model.ts`、`provider.tsx`：模型与 provider 切换命令。
+- `model.ts`、`provider.tsx`、`role.ts`：模型、provider 与系统提示词 role 切换命令。
 - `effort.ts`：effort 切换命令。
 - `configSwitch.ts`：配置切换时的辅助函数。
 - `context.tsx`：上下文汇总与展示命令。

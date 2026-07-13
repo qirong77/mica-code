@@ -10,5 +10,5 @@ export type ModelClientOptions = {
   tools?: boolean;
   toolFilter?: ToolFilter;
   toolContext?: unknown;
-  systemPrompt?: string;
+  systemPrompt?: string | (() => string);
 };

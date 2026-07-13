@@ -98,6 +98,7 @@ function makeSnapshot(messages: unknown[]): AgentRuntimeSnapshot {
     protocol: 'openai_chat_completions',
     model: 'test-model',
     effort: 'none',
+    role: 'default',
     messages,
     usageHistory: [],
     lastUsage: undefined,

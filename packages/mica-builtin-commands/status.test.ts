@@ -150,6 +150,7 @@ function makeSession(id: string, usageHistory: AgentUsageRecord[]): PersistedSes
       protocol: 'openai_chat_completions',
       model: 'gpt-5',
       effort: 'medium',
+      role: 'default',
       messages: [],
       conversationMessages: [],
       usageHistory,
@@ -189,7 +190,12 @@ function makeAgent(usageHistory: AgentUsageRecord[]): CommandAgent {
     },
     currentRunId: 0,
     isRunning: false,
+    role: 'default',
     reloadConfig() {},
+    setRole() {},
+    buildSystemPrompt() {
+      return '<system>test</system>';
+    },
     createSubAgent() {
       return { query: async () => '' };
     },
@@ -198,6 +204,7 @@ function makeAgent(usageHistory: AgentUsageRecord[]): CommandAgent {
         providerId: 'openai',
         model: 'gpt-5',
         effort: 'medium',
+        role: 'default',
         messages: [],
         usageHistory,
         lastUsage: usageHistory.at(-1),
