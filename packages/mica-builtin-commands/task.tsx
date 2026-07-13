@@ -16,6 +16,7 @@ import {
   isActiveBackgroundTaskStatus,
   statusColor,
 } from '@packages/mica-ui/panels/BackgroundTaskRow.js';
+import { formatElapsed, formatSessionListTime } from '@packages/mica-ui/utils/format.js';
 import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDisplay.js';
 import type { CommandRuntimeServices } from './services.js';
 import { moveSelection } from './commandInput.js';
@@ -25,6 +26,9 @@ type TaskListItem = { key: string; label: string; kind: 'background' | 'agent'; 
 
 const PANEL_ID = 'task-panel';
 const DETAIL_OUTPUT_BYTES = 4000;
+const TASK_STATUS_MIN_WIDTH = 12;
+const TASK_STATUS_MAX_WIDTH = 18;
+const TASK_TIME_WIDTH = 16;
 
 export function createTaskCommand(services: CommandRuntimeServices) {
   return {
@@ -80,9 +84,9 @@ function showTaskPanel(services: CommandRuntimeServices) {
         micaUi.getOneLineColumnWidth(
           [
             ...activeBackgroundTasks.map((task) => formatTaskStatus(task.status)),
-            ...agents.map((agent) => getWorkingStatusDisplay(agent.status).text),
+            ...agents.map((agent) => formatAgentStatusLabel(agent)),
           ],
-          { min: 12, padding: 1 },
+          { min: TASK_STATUS_MIN_WIDTH, max: TASK_STATUS_MAX_WIDTH, padding: 1 },
         ),
       [activeBackgroundTasks, agents],
     );
@@ -115,6 +119,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
           selectedIdx={selectedIdx}
           itemGap={0}
           markerWidth={1}
+          layout="table"
           empty={<Text dimColor>{state.query ? 'No matching tasks' : 'No tasks'}</Text>}
           renderItem={(item, isSelected, index) => {
             if (item.kind === 'background') {
@@ -133,7 +138,15 @@ function showTaskPanel(services: CommandRuntimeServices) {
 
             const agent = agents.find((candidate) => candidate.id === item.taskId);
             if (!agent) return null;
-            return <TaskListAgentRow agent={agent} selected={isSelected} />;
+            return (
+              <TaskListAgentRow
+                agent={agent}
+                selected={isSelected}
+                index={index}
+                statusWidth={statusWidth}
+                nowMs={nowMs}
+              />
+            );
           }}
         />
       </micaUi.Dialog>
@@ -239,14 +252,23 @@ function TaskListBackgroundRow({
             key: 'status',
             content: formatTaskStatus(task.status),
             width: statusWidth,
+            flexShrink: 0,
             color: statusColor(task.status),
           },
-          { key: 'time', content: formatTaskAge(task, nowMs), width: 12, dimColor: !selected },
+          {
+            key: 'time',
+            content: formatTaskAge(task, nowMs),
+            width: TASK_TIME_WIDTH,
+            flexShrink: 0,
+            color: selected ? micaUi.theme.colors.accent : undefined,
+            dimColor: !selected,
+          },
           {
             key: 'title',
             content: formatTaskTitle(task.command),
             flexGrow: 1,
-            minWidth: 18,
+            flexShrink: 1,
+            minWidth: 20,
             color: selected ? micaUi.theme.colors.accent : undefined,
             bold: selected,
           },
@@ -256,28 +278,79 @@ function TaskListBackgroundRow({
   );
 }
 
-function TaskListAgentRow({ agent, selected }: { agent: MicaUiAgentStatusItem; selected: boolean }) {
-  return <micaUi.OneLineItem cells={buildTaskListAgentCells(agent, selected)} />;
+function TaskListAgentRow({
+  agent,
+  selected,
+  index,
+  statusWidth,
+  nowMs,
+}: {
+  agent: MicaUiAgentStatusItem;
+  selected: boolean;
+  index: number;
+  statusWidth: number;
+  nowMs: number;
+}) {
+  return (
+    <TaskListRowSurface selected={selected} index={index}>
+      <micaUi.OneLineItem cells={buildTaskListAgentCells(agent, selected, { statusWidth, nowMs })} />
+    </TaskListRowSurface>
+  );
 }
 
-export function buildTaskListAgentCells(agent: MicaUiAgentStatusItem, selected: boolean) {
+export function buildTaskListAgentCells(
+  agent: MicaUiAgentStatusItem,
+  selected: boolean,
+  options: { statusWidth: number; nowMs?: number } = { statusWidth: TASK_STATUS_MIN_WIDTH },
+) {
   const status = getWorkingStatusDisplay(agent.status);
+  const highlight = selected || agent.current;
   return [
     {
       key: 'status',
-      content: status.spinning ? `${status.text}...` : status.text,
+      content: formatAgentStatusLabel(agent),
+      width: options.statusWidth,
       flexShrink: 0,
       color: status.color,
     },
     {
+      key: 'time',
+      content: formatAgentListTime(agent, options.nowMs ?? Date.now()),
+      width: TASK_TIME_WIDTH,
+      flexShrink: 0,
+      color: highlight ? micaUi.theme.colors.accent : undefined,
+      dimColor: !highlight,
+    },
+    {
       key: 'title',
-      content: `# ${agent.title}`,
+      content: formatAgentListTitle(agent),
       flexGrow: 1,
-      minWidth: 0,
-      color: selected || agent.current ? micaUi.theme.colors.accent : undefined,
+      flexShrink: 1,
+      minWidth: 20,
+      color: highlight ? micaUi.theme.colors.accent : undefined,
       bold: selected,
     },
   ];
+}
+
+function formatAgentStatusLabel(agent: MicaUiAgentStatusItem): string {
+  const status = getWorkingStatusDisplay(agent.status);
+  return status.spinning ? `${status.text}...` : status.text;
+}
+
+function formatAgentListTitle(agent: MicaUiAgentStatusItem): string {
+  return `#${agent.index} ${agent.title}`;
+}
+
+function formatAgentListTime(agent: MicaUiAgentStatusItem, nowMs: number): string {
+  const status = getWorkingStatusDisplay(agent.status);
+  if (status.spinning) {
+    const startedMs = new Date(agent.startedAt).getTime();
+    if (!Number.isNaN(startedMs)) {
+      return formatElapsed(Math.max(0, nowMs - startedMs));
+    }
+  }
+  return formatSessionListTime(agent.updatedAt, new Date(nowMs));
 }
 
 function TaskListRowSurface({ selected, index, children }: { selected: boolean; index: number; children: ReactNode }) {

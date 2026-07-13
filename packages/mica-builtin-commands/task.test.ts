@@ -166,18 +166,28 @@ describe('task command', () => {
     expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-panel' }));
   });
 
-  it('keeps the running status visible and only prefixes the title with #', () => {
+  it('aligns agent rows with fixed status/time columns like /resume', () => {
     const cells = buildTaskListAgentCells(
       {
         ...agents[0],
         status: { type: 'connecting' },
+        startedAt: '2026-01-02T03:04:05.000Z',
+        updatedAt: '2026-01-02T03:05:05.000Z',
       },
       true,
+      { statusWidth: 14, nowMs: Date.parse('2026-01-02T03:05:05.000Z') },
     );
 
-    expect(cells.map((cell) => cell.key)).toEqual(['status', 'title']);
-    expect(cells[0]).toEqual(expect.objectContaining({ content: 'waiting_model...', flexShrink: 0 }));
-    expect(cells[1]).toEqual(expect.objectContaining({ content: '# Build UI', flexGrow: 1, minWidth: 0 }));
+    expect(cells.map((cell) => cell.key)).toEqual(['status', 'time', 'title']);
+    expect(cells[0]).toEqual(
+      expect.objectContaining({ content: 'waiting_model...', width: 14, flexShrink: 0 }),
+    );
+    expect(cells[1]).toEqual(
+      expect.objectContaining({ content: '60000ms', width: 16, flexShrink: 0 }),
+    );
+    expect(cells[2]).toEqual(
+      expect.objectContaining({ content: '#1 Build UI', flexGrow: 1, minWidth: 20 }),
+    );
   });
 
   it('clears idle terminal tasks', () => {

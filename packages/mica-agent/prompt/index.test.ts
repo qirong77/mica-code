@@ -111,4 +111,20 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('- review: Review code changes');
     expect(prompt).toContain('<context>');
   });
+
+  it('grounds tool names and distinguishes shell executables', () => {
+    const prompt = buildSystemPromptForTest({
+      cwd: '/repo',
+      now: new Date('2026-06-17T10:20:30.000Z'),
+      platform: 'darwin',
+      shell: '/bin/zsh',
+      projectInstructions: null,
+      skills: [],
+    });
+
+    expect(prompt).toContain('当前工具 schema 是工具名称、参数和能力的最终事实来源');
+    expect(prompt).toContain('`rg` 不是独立工具，也不保证已安装');
+    expect(prompt).toContain('使用 `read_task_output` 查看输出');
+    expect(prompt).not.toContain('在 shell 中搜索文本优先用 `rg`');
+  });
 });

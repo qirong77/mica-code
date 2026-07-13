@@ -88,7 +88,7 @@ export class ToolRunShell extends MicaTool {
         run_in_background: {
           type: 'boolean',
           description:
-            '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。输出写入临时文件，后续用 read_file 查看。',
+            '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。后续用 read_task_output 查看输出、background_tasks 查询状态、kill_task 终止任务。',
         },
       },
       required: ['command'],
