@@ -10,11 +10,19 @@ describe('getTerminalTitle', () => {
     { type: 'calling_tool' },
     { type: 'plugin_task', text: 'working' },
   ] satisfies MicaUiWorkingStatus[])('shows the running animation for $type', (status) => {
-    expect(getTerminalTitle(status, 0)).toBe('◦ Mica');
-    expect(getTerminalTitle(status, 1)).toBe('○ Mica');
-    expect(getTerminalTitle(status, 2)).toBe('◉ Mica');
-    expect(getTerminalTitle(status, 3)).toBe('○ Mica');
-    expect(getTerminalTitle(status, 4)).toBe('◦ Mica');
+    expect(Array.from({ length: 11 }, (_, frame) => getTerminalTitle(status, frame))).toEqual([
+      '⠋ Mica',
+      '⠙ Mica',
+      '⠹ Mica',
+      '⠸ Mica',
+      '⠼ Mica',
+      '⠴ Mica',
+      '⠦ Mica',
+      '⠧ Mica',
+      '⠇ Mica',
+      '⠏ Mica',
+      '⠋ Mica',
+    ]);
   });
 
   it('shows the finished title after successful completion', () => {

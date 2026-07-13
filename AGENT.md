@@ -149,7 +149,7 @@ temp/                              临时代码和外部实验，默认不参与
 7. turn 开始时捕获 rewind checkpoint，解析图片引用，写入 UI conversation message，清空当前 response buffer。
 8. 触发 `turn:before` 和 `prompt:build` hooks，然后调用 `agent.run(content, { onIterationComplete })`。
 9. agent 每次完成一轮工具迭代时，`takeQueuedIterationInput` 可以取出 `queueMode: 'after_iteration'` 的排队输入并追加到同一次 provider loop。
-10. 成功后把 response buffer 或 final text 写入 assistant message，触发 `turn:beforePersist`，并 `sessionController.saveCurrent()`。
+10. 每次工具 iteration 完成后先 `sessionController.saveCurrent()` 保存可恢复 checkpoint；整个 turn 成功后再把 response buffer 或 final text 写入 assistant message，触发 `turn:beforePersist`，并保存最终快照。
 11. 失败时按 retry 策略处理；不可重试或重试耗尽后写入 error UI 状态。
 12. abort 时保留已经展示的部分回复，裁剪 aborted run 的 usage，并保存可用的中止后会话状态。
 13. finally 中释放 running 状态，触发 `turn:after`，然后 message queue 插件可以提交 `after_turn` 排队输入。

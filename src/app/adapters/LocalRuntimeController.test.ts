@@ -147,6 +147,111 @@ describe('LocalRuntimeController abort display state', () => {
     });
   });
 
+  it('saves a resumable checkpoint after a tool iteration and still saves the completed turn', async () => {
+    let controller: LocalRuntimeController;
+    const savedConversationMessages: TerminalAgentSession['uiState']['conversationMessages'][] = [];
+    const sessionController = {
+      saveCurrent: vi.fn(() => {
+        savedConversationMessages.push(structuredClone(session.uiState.conversationMessages));
+      }),
+    } as unknown as SessionController;
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async (_content: AgentQueryContent, options?: AgentQueryOptions) => {
+        controller.appendResponseTextFor(agent as unknown as AgentRuntime, 'checking files');
+        await options?.onIterationComplete?.();
+        expect(session.uiState.conversationMessages).toEqual([{ role: 'user', content: 'hello' }]);
+        controller.appendResponseTextFor(agent as unknown as AgentRuntime, '\n\ndone');
+        return { runId: 1, text: 'checking files\n\ndone' };
+      }),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    session.sessionController = sessionController;
+    controller = new LocalRuntimeController(
+      agent,
+      sessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
+
+    expect(sessionController.saveCurrent).toHaveBeenCalledTimes(2);
+    expect(savedConversationMessages[0]).toEqual([
+      { role: 'user', content: 'hello', displayContent: undefined },
+      { role: 'assistant', content: 'checking files' },
+    ]);
+    expect(savedConversationMessages[1]).toEqual([
+      { role: 'user', content: 'hello', displayContent: undefined },
+      { role: 'assistant', content: 'checking files\n\ndone' },
+    ]);
+    expect(session.uiState.conversationMessages).toEqual(savedConversationMessages[1]);
+  });
+
+  it('only saves once when a completed turn has no tool iteration', async () => {
+    const sessionController = { saveCurrent: vi.fn() } as unknown as SessionController;
+    const agent = {
+      abort: vi.fn(),
+      captureClientSnapshot: vi.fn(() => null),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => ({
+        effort: 'none',
+        lastUsage: undefined,
+        messages: [],
+        model: 'test-model',
+        providerId: 'test-provider',
+        usageHistory: [],
+      })),
+      isCurrent: vi.fn(() => true),
+      restoreClientSnapshot: vi.fn(),
+      run: vi.fn(async () => ({ runId: 1, text: 'done' })),
+      toConversationMessages: vi.fn(() => []),
+    } as unknown as AgentRuntime;
+    const session = createSession(agent);
+    session.sessionController = sessionController;
+    const controller = new LocalRuntimeController(
+      agent,
+      sessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    setActiveContext({
+      agentSessions: {
+        findByAgent: vi.fn((candidate: AgentRuntime) => (candidate === agent ? session : undefined)),
+      },
+      uiBridge: {
+        syncAgentStatusItems: vi.fn(),
+      },
+    });
+
+    await expect(controller.submit('hello')).resolves.toEqual({ ok: true });
+
+    expect(sessionController.saveCurrent).toHaveBeenCalledOnce();
+  });
+
   it('stores failed turn errors as conversation notices above the input', async () => {
     const addMessage = vi.spyOn(micaUi.messageBar, 'addMessage').mockImplementation(() => undefined);
     const error = new Error('provider exploded');

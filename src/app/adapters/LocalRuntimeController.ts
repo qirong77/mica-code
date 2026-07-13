@@ -501,7 +501,10 @@ export class LocalRuntimeController implements RuntimeController {
 
         try {
           const result = await agent.run(content, {
-            onIterationComplete: () => this.takeQueuedIterationInput(agent, attemptSystemInputs),
+            onIterationComplete: () => {
+              this.saveIterationCheckpoint(agent, sessionController);
+              return this.takeQueuedIterationInput(agent, attemptSystemInputs);
+            },
           });
           runId = result.runId;
           const finalText = result.text;
@@ -713,6 +716,30 @@ export class LocalRuntimeController implements RuntimeController {
       micaUi.conversation.clearResponseText();
     }
     return content;
+  }
+
+  private saveIterationCheckpoint(agent: AgentRuntime, sessionController: SessionController): void {
+    const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+    const responseBuffer = this.responseBuffers.get(agent) ?? '';
+    if (!session || !responseBuffer.trim()) {
+      sessionController.saveCurrent();
+      return;
+    }
+
+    const previousUiState = session.uiState;
+    session.uiState = normalizeUiState({
+      ...previousUiState,
+      conversationMessages: appendAssistantResponseForDisplay(
+        previousUiState.conversationMessages,
+        responseBuffer,
+      ),
+      responseText: '',
+    });
+    try {
+      sessionController.saveCurrent();
+    } finally {
+      session.uiState = previousUiState;
+    }
   }
 
   private isActiveAgent(agent: AgentRuntime): boolean {

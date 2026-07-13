@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useTerminalTitle } from '@anthropic/ink';
+import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { workingStatus } from '../panels/state.js';
 import type { MicaUiWorkingStatus } from '../types.js';
 
 const VSCODE_AGENT_CLI_PROBE_TITLE = 'Claude Code';
-const RUNNING_TITLE_FRAME_INTERVAL_MS = 500;
-const RUNNING_TITLE_FRAMES = ['◦ Mica', '○ Mica', '◉ Mica', '○ Mica'] as const;
+const RUNNING_TITLE_FRAMES = [
+  '⠋ Mica',
+  '⠙ Mica',
+  '⠹ Mica',
+  '⠸ Mica',
+  '⠼ Mica',
+  '⠴ Mica',
+  '⠦ Mica',
+  '⠧ Mica',
+  '⠇ Mica',
+  '⠏ Mica',
+] as const;
 
 const RUNNING_STATUS_TYPES = new Set<MicaUiWorkingStatus['type']>([
   'connecting',
@@ -38,7 +49,7 @@ export function TerminalTitle(): null {
     setAnimationFrame(0);
     const timer = setInterval(
       () => setAnimationFrame((frame) => (frame + 1) % RUNNING_TITLE_FRAMES.length),
-      RUNNING_TITLE_FRAME_INTERVAL_MS,
+      runtimeEnv.ui.spinnerFrameIntervalMs,
     );
     return () => clearInterval(timer);
   }, [running]);
