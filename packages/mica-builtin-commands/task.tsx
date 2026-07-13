@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import { basename } from 'node:path';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import {
@@ -21,7 +20,7 @@ import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDi
 import type { CommandRuntimeServices } from './services.js';
 import { moveSelection } from './commandInput.js';
 
-type TaskPanelState = { selectedIdx: number; detailTaskId: string | null };
+type TaskPanelState = { selectedIdx: number; detailTaskId: string | null; query: string };
 type TaskListItem = { key: string; label: string; kind: 'background' | 'agent'; taskId: string };
 
 const PANEL_ID = 'task-panel';
@@ -59,8 +58,7 @@ export function syncBackgroundTasks(): MicaUiBackgroundTaskItem[] {
 }
 
 function showTaskPanel(services: CommandRuntimeServices) {
-  const initialText = micaUi.terminalInput.text.get();
-  const stateAtom = atom<TaskPanelState>({ selectedIdx: 0, detailTaskId: null });
+  const stateAtom = atom<TaskPanelState>({ selectedIdx: 0, detailTaskId: null, query: '' });
 
   function hide() {
     micaUi.panels.removePluginUI(PANEL_ID);
@@ -73,7 +71,21 @@ function showTaskPanel(services: CommandRuntimeServices) {
     const [nowMs, setNowMs] = useState(() => Date.now());
     const activeBackgroundTasks = useMemo(() => filterActiveBackgroundTasks(backgroundTasks), [backgroundTasks]);
     const hasActiveBackgroundTasks = activeBackgroundTasks.length > 0;
-    const items = useMemo(() => buildTaskListItems(activeBackgroundTasks, agents), [activeBackgroundTasks, agents]);
+    const items = useMemo(
+      () => filterTaskListItems(buildTaskListItems(activeBackgroundTasks, agents), state.query),
+      [activeBackgroundTasks, agents, state.query],
+    );
+    const statusWidth = useMemo(
+      () =>
+        micaUi.getOneLineColumnWidth(
+          [
+            ...activeBackgroundTasks.map((task) => formatTaskStatus(task.status)),
+            ...agents.map((agent) => getWorkingStatusDisplay(agent.status).text),
+          ],
+          { min: 12, padding: 1 },
+        ),
+      [activeBackgroundTasks, agents],
+    );
     const selectedIdx = clampIndex(state.selectedIdx, items.length);
     const detailTask = state.detailTaskId ? backgroundTasks.find((task) => task.id === state.detailTaskId) : undefined;
 
@@ -96,19 +108,27 @@ function showTaskPanel(services: CommandRuntimeServices) {
       <micaUi.Dialog
         title={`tasks (${items.length})`}
         paddingX={0}
-        footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ open/switch', 'esc close']} />}
+        footer={<micaUi.KeyHints hints={['type to search', '↑↓ navigate', '↵ open/switch', 'esc close']} />}
       >
         <micaUi.SelectList
           items={items}
           selectedIdx={selectedIdx}
           itemGap={0}
           markerWidth={1}
-          empty={<Text dimColor>No tasks</Text>}
-          renderItem={(item, isSelected) => {
+          empty={<Text dimColor>{state.query ? 'No matching tasks' : 'No tasks'}</Text>}
+          renderItem={(item, isSelected, index) => {
             if (item.kind === 'background') {
               const task = activeBackgroundTasks.find((candidate) => candidate.id === item.taskId);
               if (!task) return null;
-              return <TaskListBackgroundRow task={task} selected={isSelected} nowMs={nowMs} />;
+              return (
+                <TaskListBackgroundRow
+                  task={task}
+                  selected={isSelected}
+                  index={index}
+                  nowMs={nowMs}
+                  statusWidth={statusWidth}
+                />
+              );
             }
 
             const agent = agents.find((candidate) => candidate.id === item.taskId);
@@ -128,7 +148,10 @@ function showTaskPanel(services: CommandRuntimeServices) {
       const state = stateAtom.get();
       const backgroundTasks = micaUi.panels.backgroundTaskItems.get();
       const agents = micaUi.panels.agentStatusItems.get();
-      const items = buildTaskListItems(filterActiveBackgroundTasks(backgroundTasks), agents);
+      const items = filterTaskListItems(
+        buildTaskListItems(filterActiveBackgroundTasks(backgroundTasks), agents),
+        state.query,
+      );
 
       if (key.escape) {
         if (state.detailTaskId) {
@@ -160,8 +183,8 @@ function showTaskPanel(services: CommandRuntimeServices) {
       return false;
     },
     onTextChange: (value) => {
-      if (value !== initialText) hide();
-      return false;
+      stateAtom.set({ ...stateAtom.get(), selectedIdx: 0, query: value });
+      return true;
     },
   });
 }
@@ -198,37 +221,38 @@ function BackgroundTaskDetail({ task, nowMs }: { task: MicaUiBackgroundTaskItem;
 function TaskListBackgroundRow({
   task,
   selected,
+  index,
   nowMs,
+  statusWidth,
 }: {
   task: MicaUiBackgroundTaskItem;
   selected: boolean;
+  index: number;
   nowMs: number;
+  statusWidth: number;
 }) {
   return (
-    <micaUi.OneLineItem
-      cells={[
-        { key: 'kind', content: '$', width: 2, color: micaUi.theme.colors.toolShell },
-        { key: 'status', content: formatTaskStatus(task.status), width: 12, color: statusColor(task.status) },
-        {
-          key: 'title',
-          content: formatTaskTitle(task.command),
-          flexGrow: 1,
-          minWidth: 18,
-          color: selected ? micaUi.theme.colors.accent : undefined,
-          bold: selected,
-        },
-        { key: 'workspace', content: basename(task.cwd) || task.cwd, width: 18, dimColor: !selected },
-        { key: 'time', content: formatTaskAge(task, nowMs), width: 10, dimColor: !selected },
-        { key: 'meta', content: formatOutputSize(task.outputSize), width: 10, dimColor: !selected },
-        {
-          key: 'id',
-          content: task.id,
-          width: 12,
-          color: selected ? micaUi.theme.colors.accent : undefined,
-          dimColor: !selected,
-        },
-      ]}
-    />
+    <TaskListRowSurface selected={selected} index={index}>
+      <micaUi.OneLineItem
+        cells={[
+          {
+            key: 'status',
+            content: formatTaskStatus(task.status),
+            width: statusWidth,
+            color: statusColor(task.status),
+          },
+          { key: 'time', content: formatTaskAge(task, nowMs), width: 12, dimColor: !selected },
+          {
+            key: 'title',
+            content: formatTaskTitle(task.command),
+            flexGrow: 1,
+            minWidth: 18,
+            color: selected ? micaUi.theme.colors.accent : undefined,
+            bold: selected,
+          },
+        ]}
+      />
+    </TaskListRowSurface>
   );
 }
 
@@ -254,6 +278,14 @@ export function buildTaskListAgentCells(agent: MicaUiAgentStatusItem, selected: 
       bold: selected,
     },
   ];
+}
+
+function TaskListRowSurface({ selected, index, children }: { selected: boolean; index: number; children: ReactNode }) {
+  return (
+    <Box width="100%" backgroundColor={selected ? '#3A3A3A' : index % 2 ? '#303030' : '#292929'}>
+      {children}
+    </Box>
+  );
 }
 
 function DetailLine({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -311,6 +343,12 @@ function buildTaskListItems(
 
 function filterActiveBackgroundTasks(tasks: readonly MicaUiBackgroundTaskItem[]): readonly MicaUiBackgroundTaskItem[] {
   return tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
+}
+
+function filterTaskListItems(items: TaskListItem[], query: string): TaskListItem[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return items;
+  return items.filter((item) => item.label.toLowerCase().includes(normalizedQuery));
 }
 
 function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem {
