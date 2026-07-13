@@ -11,9 +11,20 @@ export class McpPlugin extends micaPlugin.Plugin {
   }
 
   setup(ctx: PluginContext): void {
+    let started = false;
+    const shutdown = async () => {
+      try {
+        await micaMcp.shutdown();
+      } catch (error) {
+        reportRuntimeError(error, 'MCP 关闭失败');
+      } finally {
+        started = false;
+      }
+    };
     const startDisposable = ctx.hooks.on(
       'runtime:start',
       async () => {
+        started = true;
         try {
           await micaMcp.init();
         } catch (error) {
@@ -22,15 +33,19 @@ export class McpPlugin extends micaPlugin.Plugin {
       },
       { pluginId: ctx.pluginId },
     );
-    ctx.onDispose(() => startDisposable.dispose());
 
     const stopDisposable = ctx.hooks.on(
       'runtime:stop',
       async () => {
-        await micaMcp.shutdown();
+        await shutdown();
       },
       { pluginId: ctx.pluginId },
     );
-    ctx.onDispose(() => stopDisposable.dispose());
+    ctx.onDispose(async () => {
+      startDisposable.dispose();
+      stopDisposable.dispose();
+      if (!started) return;
+      await shutdown();
+    });
   }
 }

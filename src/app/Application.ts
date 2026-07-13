@@ -1,5 +1,4 @@
 import React from 'react';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Box, Text } from '@anthropic/ink';
@@ -8,13 +7,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
-import {
-  micaPlugin,
-  type FilePluginLoadResult,
-  type MicaPlugin,
-  type PluginManager,
-  type PluginSetupReport,
-} from '@packages/mica-plugin/index.js';
+import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
@@ -31,6 +24,7 @@ import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
+import setupFilePlugins, { writeFilePluginStatus } from '../../buildin-plugins/file-plugins.mjs';
 import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
 
 export class Application {
@@ -58,7 +52,8 @@ export class Application {
     });
 
     try {
-      validateConfigPlugin({ paths: createPluginPaths() });
+      const pluginPaths = createPluginPaths();
+      validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
       await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);
@@ -95,10 +90,15 @@ export class Application {
       setActiveContext(this.context);
 
       useBuiltinPlugins(this, agent, sessionController);
-      const filePlugins = await this.useFilePlugins(plugins);
+      const filePlugins = await setupFilePlugins({
+        paths: pluginPaths,
+        plugins,
+        loadFilePlugins: micaPlugin.loadFilePlugins,
+        logger: pluginLogger,
+      });
 
       const setupReport = await plugins.setupAll({
-        paths: createPluginPaths(),
+        paths: pluginPaths,
         services,
         hooks,
         commands,
@@ -130,13 +130,9 @@ export class Application {
           text: gitText,
           formatError: formatExecError,
         },
-        logger: {
-          info() {},
-          warn() {},
-          error() {},
-        },
+        logger: pluginLogger,
       });
-      writePluginStatus(filePlugins, setupReport);
+      writeFilePluginStatus({ paths: pluginPaths, logger: pluginLogger }, filePlugins, setupReport);
       syncCommandDropdown(commands, runtime);
 
       uiBridge.start();
@@ -208,18 +204,6 @@ export class Application {
     if (this.context) clearActiveContext(this.context);
     this.context = null;
   }
-
-  private async useFilePlugins(plugins: PluginManager): Promise<FilePluginLoadResult> {
-    const loaded = await micaPlugin.loadFilePlugins({ pluginsDir: createPluginPaths().plugins });
-
-    for (const plugin of loaded.plugins) {
-      if (plugins.has(plugin.id)) {
-        continue;
-      }
-      plugins.register(plugin);
-    }
-    return loaded;
-  }
 }
 
 function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {
@@ -236,29 +220,6 @@ function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeCon
   );
 }
 
-function writePluginStatus(filePlugins: FilePluginLoadResult, setupReport: PluginSetupReport): void {
-  const paths = createPluginPaths();
-  const setupFailed = new Map(setupReport.failed.map((item) => [item.pluginId, formatError(item.error)]));
-  const loadedIds = new Set(setupReport.loaded);
-  const status = {
-    root: paths.plugins,
-    updatedAt: new Date().toISOString(),
-    plugins: filePlugins.loaded.map((plugin) => ({
-      id: plugin.pluginId,
-      file: plugin.file,
-      status: setupFailed.has(plugin.pluginId) ? 'failed' : loadedIds.has(plugin.pluginId) ? 'loaded' : 'registered',
-      error: setupFailed.get(plugin.pluginId),
-    })),
-    loadFailed: filePlugins.failed.map((item) => ({
-      file: item.file,
-      status: 'failed',
-      error: formatError(item.error),
-    })),
-  };
-  mkdirSync(paths.config, { recursive: true });
-  writeFileSync(join(paths.config, 'plugin-status.json'), `${JSON.stringify(status, null, 2)}\n`, 'utf-8');
-}
-
 async function ensureInitialModelSelection(): Promise<void> {
   const config = micaConfig.get();
   if (config.model) return;
@@ -267,10 +228,6 @@ async function ensureInitialModelSelection(): Promise<void> {
   if (!provider?.get_model_url) return;
 
   await micaConfig.loadProviderModels(provider.id);
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function showPluginMessage(text: string, ttl: number): void {
@@ -288,3 +245,9 @@ function createPluginPaths() {
     plugins: join(config, 'plugins'),
   };
 }
+
+const pluginLogger = {
+  info() {},
+  warn() {},
+  error() {},
+};

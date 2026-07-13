@@ -113,17 +113,19 @@ temp/                              临时代码和外部实验，默认不参与
 
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
-1. `src/index.ts` 先调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值，再加载依赖配置快照的应用模块、注册全局错误处理并创建 `Application`。
-2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过同一个单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。
-3. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
-4. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
-5. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
-6. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
-7. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。
-8. `plugins.setupAll(...)` 初始化插件，并注入 services、hooks、commands、runtime events 和插件 logger 接口。
-9. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
-10. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-11. 设置输入框 placeholder 和退出回调。
+1. `src/index.ts` 先调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值。
+2. `buildin-plugins/config-web-worker.mjs` 判断当前进程是否为 Config Web worker；worker 模式只启动 Web server，不加载终端应用。
+3. 前台模式加载应用和 UI 模块，再由 `buildin-plugins/process-diagnostics.mjs` 设置进程标题、注册全局错误桥；应用结束时释放监听。
+4. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过 validate-config 单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。
+5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
+6. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
+7. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
+8. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
+9. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。`McpPlugin` 随 runtime start/stop 建立和关闭 MCP 连接，并在插件 dispose 时兜底清理。
+10. `buildin-plugins/file-plugins.mjs` 扫描并注册 `$MICA_HOME/plugins` 中的用户插件，`plugins.setupAll(...)` 初始化全部运行期插件，再写入 `plugin-status.json` 供 Config Web 诊断。
+11. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
+12. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
+13. 设置输入框 placeholder 和退出回调。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
 
@@ -379,7 +381,7 @@ AGENT.md
 - 根 tsconfig 配置了 `@packages/*` alias，映射到 `./packages/*`。
 - `src/` 中引用 package 统一使用 `@packages/<name>/index.js`，除非需要访问该 package 明确公开的相邻模块或测试目标。
 - 每个 package 的公共 API 通过 `index.ts` 聚合导出；新增公共能力时同步更新导出入口和 README。
-- 不使用动态 import。
+- 默认不使用动态 import。启动入口为确保 `validate-config` 在 `mica-config` 创建模块级快照前运行，可以在明确的进程模式分派边界延迟加载应用或 Config Web server。
 - import 路径风格保持与所在文件周边一致。
 - 不把应用装配逻辑塞进 package；package 需要上层能力时，通过抽象注入。
 - TypeScript 使用 strict、isolatedModules、verbatimModuleSyntax。类型导入应使用 `import type`。

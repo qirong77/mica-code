@@ -2,36 +2,22 @@
 
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import startConfigWebWorker from '../buildin-plugins/config-web-worker.mjs';
+import setupProcessDiagnostics from '../buildin-plugins/process-diagnostics.mjs';
 import { applyConfigDefaultsToFile } from '../buildin-plugins/validate-config.mjs';
 
 const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
 applyConfigDefaultsToFile(resolve(micaHome, 'config.json'));
 
-const [{ createApplication }, { reportRuntimeError }, { startConfigWebServer }, { getConfigWebWorkerToken }] =
-  await Promise.all([
-    import('./app/index.js'),
-    import('./runtime/uiBridge.js'),
-    import('@packages/mica-config-web/src/server/server.js'),
-    import('@packages/mica-config-web/src/server/workerArgs.js'),
-  ]);
-
-const configWebWorkerToken = getConfigWebWorkerToken();
-if (configWebWorkerToken) {
-  await startConfigWebServer({ token: configWebWorkerToken });
+if (await startConfigWebWorker()) {
   await new Promise(() => undefined);
 }
 
-// Keep the foreground process identifiable as Mica. Dynamic terminal titles
-// are emitted from the Ink tree, matching Claude Code's title architecture.
-process.title = 'mica';
-
-process.on('uncaughtException', (error) => {
-  reportRuntimeError(error, '未捕获异常');
-});
-
-process.on('unhandledRejection', (error) => {
-  reportRuntimeError(error, '未处理的异步错误');
-});
+const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
+  import('./app/index.js'),
+  import('./runtime/uiBridge.js'),
+]);
+const processDiagnostics = setupProcessDiagnostics({ reportError: reportRuntimeError });
 
 const app = createApplication();
 
@@ -62,6 +48,10 @@ process.once('SIGINT', requestSignalExit);
 process.once('SIGTERM', requestSignalExit);
 process.once('SIGHUP', requestSignalExit);
 
-await app.start();
-await app.waitUntilExit();
-await app.stop();
+try {
+  await app.start();
+  await app.waitUntilExit();
+  await app.stop();
+} finally {
+  processDiagnostics.dispose();
+}
