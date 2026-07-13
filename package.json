@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
+    "example:task": "bun run packages/mica-ui/examples/example-task.tsx",
     "build:config-web": "vite build --config packages/mica-config-web/web/vite.config.ts && bun scripts/generate-config-web-assets.mjs",
     "build": "MICA_PREBUILD_DONE=1 bun scripts/build.mjs",
     "prebuild": "bunx tsc --noEmit",
