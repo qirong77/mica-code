@@ -93,7 +93,11 @@ vi.mock('@packages/mica-ui/utils/format.js', () => ({
 }));
 
 vi.mock('@packages/mica-ui/utils/workingStatusDisplay.js', () => ({
-  getWorkingStatusDisplay: (status: { type: string }) => ({ text: status.type, color: 'status', spinning: false }),
+  getWorkingStatusDisplay: (status: { type: string }) => ({
+    text: status.type === 'connecting' ? 'waiting_model' : status.type,
+    color: 'status',
+    spinning: ['connecting', 'thinking', 'streaming', 'calling_tool'].includes(status.type),
+  }),
 }));
 
 vi.mock('@packages/mica-ui/panels/BackgroundTaskRow.js', () => ({
@@ -128,7 +132,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
   },
 }));
 
-const { createTaskCommand } = await import('./task.js');
+const { buildTaskListAgentCells, createTaskCommand } = await import('./task.js');
 
 describe('task command', () => {
   beforeEach(() => {
@@ -160,6 +164,20 @@ describe('task command', () => {
     expect(services.listRunningAgents).toHaveBeenCalledTimes(1);
     expect(mocks.setAgentStatusItems).toHaveBeenCalledWith(agents);
     expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-panel' }));
+  });
+
+  it('keeps the running status visible and only prefixes the title with #', () => {
+    const cells = buildTaskListAgentCells(
+      {
+        ...agents[0],
+        status: { type: 'connecting' },
+      },
+      true,
+    );
+
+    expect(cells.map((cell) => cell.key)).toEqual(['status', 'title']);
+    expect(cells[0]).toEqual(expect.objectContaining({ content: 'waiting_model...', flexShrink: 0 }));
+    expect(cells[1]).toEqual(expect.objectContaining({ content: '# Build UI', flexGrow: 1, minWidth: 0 }));
   });
 
   it('clears idle terminal tasks', () => {

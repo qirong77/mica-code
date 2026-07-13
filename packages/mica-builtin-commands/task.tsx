@@ -18,7 +18,6 @@ import {
   statusColor,
 } from '@packages/mica-ui/panels/BackgroundTaskRow.js';
 import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDisplay.js';
-import { formatSessionListTime } from '@packages/mica-ui/utils/format.js';
 import type { CommandRuntimeServices } from './services.js';
 import { moveSelection } from './commandInput.js';
 
@@ -234,26 +233,27 @@ function TaskListBackgroundRow({
 }
 
 function TaskListAgentRow({ agent, selected }: { agent: MicaUiAgentStatusItem; selected: boolean }) {
+  return <micaUi.OneLineItem cells={buildTaskListAgentCells(agent, selected)} />;
+}
+
+export function buildTaskListAgentCells(agent: MicaUiAgentStatusItem, selected: boolean) {
   const status = getWorkingStatusDisplay(agent.status);
-  return (
-    <micaUi.OneLineItem
-      cells={[
-        { key: 'kind', content: '#', width: 2, color: micaUi.theme.colors.accent },
-        { key: 'status', content: status.text, width: 12, color: status.color },
-        {
-          key: 'title',
-          content: `#${agent.index} ${agent.title}`,
-          flexGrow: 1,
-          minWidth: 18,
-          color: selected || agent.current ? micaUi.theme.colors.accent : undefined,
-          bold: selected,
-        },
-        { key: 'workspace', content: formatAgentWorkspace(agent), width: 18, dimColor: !selected && !agent.current },
-        { key: 'time', content: formatSessionListTime(agent.updatedAt), width: 10, dimColor: !selected },
-        { key: 'meta', content: agent.model, width: 20, dimColor: !selected },
-      ]}
-    />
-  );
+  return [
+    {
+      key: 'status',
+      content: status.spinning ? `${status.text}...` : status.text,
+      flexShrink: 0,
+      color: status.color,
+    },
+    {
+      key: 'title',
+      content: `# ${agent.title}`,
+      flexGrow: 1,
+      minWidth: 0,
+      color: selected || agent.current ? micaUi.theme.colors.accent : undefined,
+      bold: selected,
+    },
+  ];
 }
 
 function DetailLine({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -311,11 +311,6 @@ function buildTaskListItems(
 
 function filterActiveBackgroundTasks(tasks: readonly MicaUiBackgroundTaskItem[]): readonly MicaUiBackgroundTaskItem[] {
   return tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
-}
-
-function formatAgentWorkspace(agent: MicaUiAgentStatusItem): string {
-  const workspace = basename(agent.cwd) || agent.cwd;
-  return agent.current ? `${workspace} · current` : workspace;
 }
 
 function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem {
