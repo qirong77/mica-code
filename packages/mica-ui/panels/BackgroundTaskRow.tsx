@@ -5,6 +5,7 @@ import { themeColors } from '../theme.js';
 import { OneLineItem } from '../primitives/OneLineItem.js';
 import { formatElapsed } from '../utils/format.js';
 import type { MicaUiBackgroundTaskItem, MicaUiBackgroundTaskStatus } from '../types.js';
+import { COMPACT_TASK_KIND_WIDTH, COMPACT_TASK_STATUS_WIDTH, formatShellTaskKind } from './taskRowFormat.js';
 
 export function BackgroundTaskRow({
   task,
@@ -25,8 +26,20 @@ export function BackgroundTaskRow({
       <Box paddingTop={1} width="100%" minWidth={0}>
         <OneLineItem
           cells={[
-            { key: 'marker', content: '$', flexShrink: 0, color: themeColors.toolShell },
-            { key: 'status', content: formatTaskStatus(task.status), flexShrink: 0, color: statusColor(task.status) },
+            {
+              key: 'kind',
+              content: formatShellTaskKind(task.shell),
+              width: COMPACT_TASK_KIND_WIDTH,
+              flexShrink: 0,
+              color: themeColors.toolShell,
+            },
+            {
+              key: 'status',
+              content: formatTaskStatus(task.status),
+              width: COMPACT_TASK_STATUS_WIDTH,
+              flexShrink: 0,
+              color: statusColor(task.status),
+            },
             { key: 'runtime', content: active ? <Text dimColor>{formatTaskAge(task, nowMs)}</Text> : undefined },
             { key: 'id', content: task.id, flexShrink: 0, color: themeColors.accent },
             {
@@ -46,7 +59,7 @@ export function BackgroundTaskRow({
   return (
     <OneLineItem
       cells={[
-        { key: 'type', content: '$', width: 2, color: themeColors.toolShell },
+        { key: 'type', content: formatShellTaskKind(task.shell), width: 12, color: themeColors.toolShell },
         { key: 'status', content: formatTaskStatus(task.status), width: 12, color: statusColor(task.status) },
         {
           key: 'title',
@@ -59,7 +72,13 @@ export function BackgroundTaskRow({
         { key: 'workspace', content: basename(task.cwd) || task.cwd, width: 18, dimColor: !selected },
         { key: 'age', content: formatTaskAge(task, nowMs), width: 10, dimColor: !selected },
         { key: 'output', content: formatOutputSize(task.outputSize), width: 9, dimColor: !selected },
-        { key: 'id', content: task.id, width: 12, color: selected ? themeColors.accent : undefined, dimColor: !selected },
+        {
+          key: 'id',
+          content: task.id,
+          width: 12,
+          color: selected ? themeColors.accent : undefined,
+          dimColor: !selected,
+        },
       ]}
     />
   );

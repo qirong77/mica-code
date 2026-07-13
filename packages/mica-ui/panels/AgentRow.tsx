@@ -7,6 +7,7 @@ import { OneLineItem, getOneLineColumnWidth } from '../primitives/OneLineItem.js
 import { getWorkingStatusDisplay } from '../utils/workingStatusDisplay.js';
 import { formatElapsed, formatSessionListTime } from '../utils/format.js';
 import type { MicaUiAgentStatusItem } from '../types.js';
+import { COMPACT_TASK_KIND_WIDTH, SESSION_TASK_KIND } from './taskRowFormat.js';
 
 export type AgentRowLayout = {
   workspaceWidth: number;
@@ -60,7 +61,8 @@ export function AgentRow({
           cells={[
             {
               key: 'marker',
-              content: `🤖`,
+              content: SESSION_TASK_KIND,
+              width: COMPACT_TASK_KIND_WIDTH,
               flexShrink: 0,
             },
             {

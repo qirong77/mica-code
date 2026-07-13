@@ -4,6 +4,7 @@ import { OneLineItem } from '../primitives/OneLineItem.js';
 import { themeColors } from '../theme.js';
 import type { MicaUiSubagentTaskItem, MicaUiSubagentTaskStatus } from '../types.js';
 import { formatElapsed } from '../utils/format.js';
+import { COMPACT_TASK_KIND_WIDTH, COMPACT_TASK_STATUS_WIDTH, SUBAGENT_TASK_KIND } from './taskRowFormat.js';
 
 export function SubagentTaskRow({
   task,
@@ -16,8 +17,14 @@ export function SubagentTaskRow({
     <Box paddingTop={1} width="100%" minWidth={0}>
       <OneLineItem
         cells={[
-          { key: 'marker', content: '🤖', flexShrink: 0 },
-          { key: 'status', content: task.status, flexShrink: 0, color: subagentStatusColor(task.status) },
+          { key: 'kind', content: SUBAGENT_TASK_KIND, width: COMPACT_TASK_KIND_WIDTH, flexShrink: 0 },
+          {
+            key: 'status',
+            content: task.status,
+            width: COMPACT_TASK_STATUS_WIDTH,
+            flexShrink: 0,
+            color: subagentStatusColor(task.status),
+          },
           { key: 'runtime', content: <Text dimColor>{formatSubagentTaskAge(task, nowMs)}</Text>, flexShrink: 0 },
           { key: 'type', content: task.subagentType, flexShrink: 0, color: themeColors.accent },
           {
