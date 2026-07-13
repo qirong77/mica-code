@@ -41,7 +41,7 @@ curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/instal
 }
 ```
 
-`protocol` 可选：`openai_chat_completions` 或 `openai_responses`。如果 provider 配置了 `get_model_url`，模型列表会按 OpenAI `/models` 响应格式在运行时获取；没有动态模型接口时，可以直接配置静态 `models` 数组。
+`protocol` 可选：`openai_chat_completions` 或 `openai_responses`；旧配置缺少该字段时，启动阶段会自动补为 `openai_chat_completions`。如果 provider 配置了 `get_model_url`，模型列表会按 OpenAI `/models` 响应格式在运行时获取；没有动态模型接口时，可以直接配置静态 `models` 数组。
 
 ## 自定义 Role
 

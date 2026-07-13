@@ -104,6 +104,7 @@ scripts/                           构建、安装、release installer 脚本
 docs/                              设计草案和长期能力规划
 blogs/                             开发过程记录
 skills/                            仓库内 skill 资料
+buildin-plugins/                   启动阶段使用的单文件内置插件
 temp/                              临时代码和外部实验，默认不参与搜索/测试/格式化
 .backups/                          临时备份痕迹，默认不作为实现或验证输入
 ```
@@ -112,8 +113,8 @@ temp/                              临时代码和外部实验，默认不参与
 
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
-1. `src/index.ts` 注册全局错误处理，然后创建并启动 `Application`。
-2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI。
+1. `src/index.ts` 先调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值，再加载依赖配置快照的应用模块、注册全局错误处理并创建 `Application`。
+2. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过同一个单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。
 3. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
 4. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
 5. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
@@ -211,7 +212,8 @@ bun test packages/mica-agent/prompt/index.test.ts
 - JSON 解析失败时，旧文件会被重命名为 `config.json.invalid-<timestamp>`，然后写入默认配置。
 - 持久化配置类型是 `PersistedMicaConfig`，主要保存 `providers`、`serperApiKey`、`mcpServers` 等静态配置。
 - 顶层 `provider`、`model`、`effort`、`contextWindowSize` 是运行时合成字段，不应写回 `config.json`。`updateConfig` 会通过 `stripRuntimeFields` 去掉它们。
-- `ProviderDefinition.protocol` 是必填有效值，只支持 `openai_chat_completions` 或 `openai_responses`。
+- `ProviderDefinition.protocol` 只支持 `openai_chat_completions` 或 `openai_responses`；旧配置缺失该字段时，`buildin-plugins/validate-config.mjs` 会在配置模块首次读取前补为 `openai_chat_completions`。
+- config 的启动迁移和语义校验统一放在 `buildin-plugins/validate-config.mjs`。配置 Web 保存也复用该文件，不要在应用或 package 中另建一套校验规则。
 - 当前 provider 缺少 `api_key` 是 warning，可以启动 UI，但首次发送消息前仍需要可用 key。
 
 ### Storage

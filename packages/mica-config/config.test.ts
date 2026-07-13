@@ -1,8 +1,15 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IMicaConfig } from './config.js';
+import {
+  DEFAULT_PROVIDER_PROTOCOL,
+  ConfigValidationError,
+  applyConfigDefaultsToFile,
+  assertValidConfig,
+  validateConfig,
+} from '../../buildin-plugins/validate-config.mjs';
 
 const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;
@@ -32,6 +39,60 @@ afterAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe('startup config validation', () => {
+  it('fills a missing provider protocol and persists the migrated config', () => {
+    const configPath = join(tempHome, 'legacy-config.json');
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ providers: [{ id: 'legacy', api_base: 'https://example.com' }] })}\n`,
+      'utf-8',
+    );
+
+    const result = applyConfigDefaultsToFile(configPath);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      providers: Array<{ protocol?: string }>;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(persisted.providers[0]?.protocol).toBe(DEFAULT_PROVIDER_PROTOCOL);
+  });
+
+  it('reports invalid provider fields and throws a readable startup error', () => {
+    const result = validateConfig({
+      providers: [{ id: 'broken', api_base: '', protocol: 'unsupported' }],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'provider_api_base_empty', path: 'providers[0].api_base' }),
+        expect.objectContaining({ code: 'provider_protocol_invalid', path: 'providers[0].protocol' }),
+      ]),
+    );
+    expect(() => assertValidConfig(result, '/tmp/config.json')).toThrow(ConfigValidationError);
+    expect(() => assertValidConfig(result, '/tmp/config.json')).toThrow('配置文件有问题：/tmp/config.json');
+  });
+
+  it('validates MCP server shapes while keeping a missing provider API key non-blocking', () => {
+    const result = validateConfig({
+      providers: [{ id: 'local', api_base: 'https://example.com' }],
+      mcpServers: {
+        broken: { command: '', args: [1] },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ severity: 'warning', code: 'provider_api_key_missing' }),
+        expect.objectContaining({ severity: 'error', code: 'mcp_server_command_invalid' }),
+        expect.objectContaining({ severity: 'error', code: 'mcp_server_args_invalid' }),
+      ]),
+    );
+  });
 });
 
 describe('model configuration', () => {

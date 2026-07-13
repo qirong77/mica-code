@@ -1,9 +1,19 @@
 #!/usr/bin/env bun
 
-import { createApplication } from './app/index.js';
-import { reportRuntimeError } from './runtime/uiBridge.js';
-import { startConfigWebServer } from '@packages/mica-config-web/src/server/server.js';
-import { getConfigWebWorkerToken } from '@packages/mica-config-web/src/server/workerArgs.js';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+import { applyConfigDefaultsToFile } from '../buildin-plugins/validate-config.mjs';
+
+const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
+applyConfigDefaultsToFile(resolve(micaHome, 'config.json'));
+
+const [{ createApplication }, { reportRuntimeError }, { startConfigWebServer }, { getConfigWebWorkerToken }] =
+  await Promise.all([
+    import('./app/index.js'),
+    import('./runtime/uiBridge.js'),
+    import('@packages/mica-config-web/src/server/server.js'),
+    import('@packages/mica-config-web/src/server/workerArgs.js'),
+  ]);
 
 const configWebWorkerToken = getConfigWebWorkerToken();
 if (configWebWorkerToken) {

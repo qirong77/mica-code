@@ -31,6 +31,7 @@ import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
+import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
 
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
@@ -57,6 +58,7 @@ export class Application {
     });
 
     try {
+      validateConfigPlugin({ paths: createPluginPaths() });
       await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);

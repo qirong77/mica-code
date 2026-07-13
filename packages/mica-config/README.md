@@ -27,7 +27,6 @@ micaConfig.update((current) => ({
   ...current,
   model: 'gpt-5.4',
 }));
-
 ```
 
 ## 设计约束
@@ -36,6 +35,7 @@ micaConfig.update((current) => ({
 - userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
 - `config.json` 不保存最后一次使用的 provider/model/effort；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
 - provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
+- 启动配置迁移与语义校验集中在根目录 `buildin-plugins/validate-config.mjs`；缺失的 provider `protocol` 会自动补为 `openai_chat_completions`。
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 
@@ -55,8 +55,8 @@ micaConfig.update((current) => ({
 - `providerModels.ts`：模型列表加载与运行时缓存管理。
 
 模型 client 使用协议注册表创建。当前配置只开放两种已实现的 OpenAI 协议；未来接入 Anthropic 等实现时，可新增 client 并通过 `registerModelClient` 注册，无需修改 `AgentRuntime`。
+
 - `runtimeEnv.ts`：运行时环境变量读取。
 - `types.ts`：配置与 provider 的类型定义。
-- `validation.ts`：配置校验。
 - `default.json`：首次启动时使用的默认配置模板。
 - `index.ts`：公共 API 聚合导出。
