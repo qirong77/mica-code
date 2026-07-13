@@ -23,7 +23,7 @@ export type SelectCommandConfig = {
   options: SelectOption[];
   emptyMessage?: string;
   itemGap?: number;
-  renderItem?: (item: SelectItem, isSelected: boolean) => React.ReactNode;
+  renderItem?: (item: SelectItem, isSelected: boolean, index: number) => React.ReactNode;
   onSelect: (name: string) => void | boolean | Promise<void | boolean>;
   onAfterSelect?: (name: string) => void | Promise<void>;
   filterable?: boolean;

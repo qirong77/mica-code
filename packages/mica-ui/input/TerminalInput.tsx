@@ -86,7 +86,9 @@ function TerminalInput() {
   const quickCommandVisible = quickCommandDropdown.visible;
   const selectedQuickCommand = quickCommandDropdown.items[quickCommandDropdown.selectedIndex];
   const quickCommandSuggestion =
-    quickCommandVisible && selectedQuickCommand?.insertText?.startsWith(localText) ? selectedQuickCommand.insertText : undefined;
+    quickCommandVisible && selectedQuickCommand?.insertText?.startsWith(localText)
+      ? selectedQuickCommand.insertText
+      : undefined;
 
   React.useEffect(() => {
     return DropDownUI.onSelect((item) => {
@@ -244,6 +246,8 @@ function TerminalInput() {
 
     for (const ui of activePluginUIs) {
       if (ui.onInput?.(_input, key)) {
+        event?.preventDefault?.();
+        event?.stopImmediatePropagation?.();
         if (!ui.preserveInput) {
           input.text.set('');
           setLocalText('');
@@ -316,10 +320,13 @@ function TerminalInput() {
     [activePluginUIs],
   );
 
-  const shouldIgnoreTextInput = useCallback((_input: string, key: any) => {
-    if (!DropDownUI.atomData.dropdown.get().visible) return false;
-    return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
-  }, []);
+  const shouldIgnoreTextInput = useCallback(
+    (_input: string, key: any) => {
+      if (!DropDownUI.atomData.dropdown.get().visible && !hasActiveInputPlugin) return false;
+      return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
+    },
+    [hasActiveInputPlugin],
+  );
 
   const onHistoryUp = useCallback(() => {
     if (input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || preserveInputOnPluginHandle) return;

@@ -33,7 +33,7 @@ export interface SelectListProps<T extends SelectItem> {
   height?: number;
   maxHeight?: number;
   bottomReservedRows?: number;
-  renderItem?: (item: T, isSelected: boolean) => React.ReactNode;
+  renderItem?: (item: T, isSelected: boolean, index: number) => React.ReactNode;
 }
 
 function renderItems<T extends SelectItem>(
@@ -46,7 +46,7 @@ function renderItems<T extends SelectItem>(
   showIndex: boolean,
   highlightText: string | undefined,
   selectedItemRef: (el: DOMElement | null) => void,
-  renderItem?: (item: T, isSelected: boolean) => React.ReactNode,
+  renderItem?: (item: T, isSelected: boolean, index: number) => React.ReactNode,
 ) {
   const indexWidth = showIndex ? String(items.length).length + 2 : 0;
 
@@ -66,7 +66,7 @@ function renderItems<T extends SelectItem>(
         </Box>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {renderItem ? (
-            renderItem(item, isSelected)
+            renderItem(item, isSelected, index)
           ) : (
             <DefaultSelectItem
               item={item}
