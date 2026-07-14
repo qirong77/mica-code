@@ -483,6 +483,74 @@ describe('LocalRuntimeController abort display state', () => {
     expect(controller.countQueueForAgent(agent)).toBe(0);
   });
 
+  it('only clears queued input and response text after rewind succeeds', () => {
+    let snapshot = {
+      effort: 'none',
+      lastUsage: undefined,
+      messages: [{ role: 'user', content: 'before' }],
+      model: 'test-model',
+      protocol: 'openai_chat_completions',
+      providerId: 'test-provider',
+      role: 'default',
+      usageHistory: [],
+    };
+    const agent = {
+      abort: vi.fn(),
+      events: { off: vi.fn(), on: vi.fn() },
+      getSnapshot: vi.fn(() => snapshot),
+      loadSnapshot: vi.fn((next: typeof snapshot) => {
+        snapshot = next;
+      }),
+    } as unknown as AgentRuntime;
+    const controller = new LocalRuntimeController(
+      agent,
+      { saveCurrent: vi.fn() } as unknown as SessionController,
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+    );
+    const checkpointManager = (
+      controller as unknown as {
+        rewindCheckpoints: { capture(owner: AgentRuntime, input: ReturnType<typeof micaRuntime.createRuntimeInput>): void };
+      }
+    ).rewindCheckpoints;
+    checkpointManager.capture(agent, micaRuntime.createRuntimeInput('retry this input', 'ui'));
+    snapshot = {
+      ...snapshot,
+      messages: [
+        { role: 'user', content: 'before' },
+        { role: 'user', content: 'retry this input' },
+        { role: 'assistant', content: 'answer' },
+      ],
+    };
+    controller.appendResponseTextFor(agent, 'partial response');
+    controller.enqueueForAgent(agent, micaRuntime.createRuntimeInput('queued input', 'ui'));
+
+    const [summary] = controller.listRewindCheckpoints();
+    expect(summary?.conversationLabel).toBe('retry this input');
+    const preview = controller.getRewindPreview(summary?.id);
+    if (!preview.ok) throw new Error(preview.message);
+
+    expect(() =>
+      controller.applyRewind({
+        id: preview.id,
+        mode: 'conversation_and_files',
+        previewToken: 'stale-token',
+      }),
+    ).toThrow(/rewind stale preview/);
+    expect(controller.getResponseBufferFor(agent)).toBe('partial response');
+    expect(controller.countQueueForAgent(agent)).toBe(1);
+
+    const result = controller.applyRewind({
+      id: preview.id,
+      mode: 'conversation_only',
+      previewToken: preview.previewToken,
+    });
+    expect(result.inputText).toBe('retry this input');
+    expect(controller.getResponseBufferFor(agent)).toBe('');
+    expect(controller.countQueueForAgent(agent)).toBe(0);
+  });
+
   it('feeds a background subagent notification into a running parent at the next iteration', async () => {
     let controller: LocalRuntimeController;
     const agent = {

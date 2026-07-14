@@ -191,6 +191,7 @@ function resumeSession(
     services.showMessage(result.message, 5000);
     return;
   }
+  services.clearRewindCheckpoints?.();
   services.syncModelDisplay(agent);
   services.refreshCurrentAgentSessionUi();
   const roleMessage = result.roleFallback

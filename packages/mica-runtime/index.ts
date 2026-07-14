@@ -17,7 +17,15 @@ export type { RuntimeStatus } from './RuntimeStatus.js';
 export type { RuntimeViewSnapshot } from './RuntimeViewSnapshot.js';
 export type { SubmitOptions, SubmitResult } from './SubmitResult.js';
 export type { AbortResult } from './AbortResult.js';
-export type { RewindApplyResult, RewindFileAction, RewindFileChange, RewindPreviewResult } from './Rewind.js';
+export type {
+  RewindApplyRequest,
+  RewindApplyResult,
+  RewindCheckpointSummary,
+  RewindFileAction,
+  RewindFileChange,
+  RewindMode,
+  RewindPreviewResult,
+} from './Rewind.js';
 export type { RunJsonEvent, RunJsonStatus, RunJsonTokenUsage, RunJsonWriter } from './runJson.js';
 export {
   chunkRunJsonText,

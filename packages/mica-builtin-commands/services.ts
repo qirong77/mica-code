@@ -1,10 +1,23 @@
 import type { ProviderDefinition } from '@packages/mica-config/index.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { CompactOptions, CompactResult } from '@packages/mica-context/index.js';
-import type { RewindApplyResult, RewindPreviewResult, SubmitResult } from '@packages/mica-runtime/index.js';
+import type {
+  RewindApplyRequest,
+  RewindApplyResult,
+  RewindCheckpointSummary,
+  RewindPreviewResult,
+  SubmitResult,
+} from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 
-export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
+export type {
+  RewindApplyRequest,
+  RewindApplyResult,
+  RewindCheckpointSummary,
+  RewindFileChange,
+  RewindMode,
+  RewindPreviewResult,
+} from '@packages/mica-runtime/index.js';
 
 export type CommandProvider = ProviderDefinition & { contextWindowSize: number };
 
@@ -114,6 +127,7 @@ export type CommandRuntimeServices = {
   syncModelDisplay(agent: CommandAgent): void;
   isAgentRunning(): boolean;
   isAgentBusy(agent?: CommandAgent): boolean;
+  hasBusyAgents?(): boolean;
   getCurrentAgentSessionId(): string | undefined;
   getCurrentAgent(): CommandAgent | undefined;
   getCurrentSessionController(): CommandSessionController | undefined;
@@ -126,8 +140,10 @@ export type CommandRuntimeServices = {
   forkCurrentAgent(): ForkAgentResult;
   switchAgentSession(id: string): RunningAgentRecord;
   refreshCurrentAgentSessionUi(): void;
-  getRewindPreview(): RewindPreviewResult;
-  applyRewind(id: string): RewindApplyResult;
+  listRewindCheckpoints(): RewindCheckpointSummary[];
+  getRewindPreview(id?: string): RewindPreviewResult;
+  applyRewind(request: RewindApplyRequest): RewindApplyResult;
+  clearRewindCheckpoints?(): void;
   runExclusiveTask<T>(agent: CommandAgent, options: ExclusiveTaskOptions, task: () => Promise<T>): Promise<T>;
   compact(
     agent: CommandAgent,

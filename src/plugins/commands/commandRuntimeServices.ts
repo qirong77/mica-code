@@ -320,6 +320,14 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const target = agent ? resolveCommandAgent(agent) : context.agentSessions.current().agent;
       return context.runtime.isAgentBusy(target);
     },
+    hasBusyAgents() {
+      const context = currentContext();
+      if (!context) return false;
+      return context.agentSessions.list().some((record) => {
+        const session = context.agentSessions.findById(record.id);
+        return session ? context.runtime.isAgentBusy(session.agent) : false;
+      });
+    },
     getCurrentAgentSessionId() {
       return currentContext()?.agentSessions.current().id;
     },
@@ -432,38 +440,50 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       session.uiState = normalizeUiState(captureSessionUi());
       context?.uiBridge.syncAgentStatusItems();
     },
-    getRewindPreview() {
+    listRewindCheckpoints() {
+      return currentContext()?.runtime.listRewindCheckpoints() ?? [];
+    },
+    getRewindPreview(id) {
       const runtime = currentContext()?.runtime;
       if (!runtime) return { ok: false, message: 'rewind: Application is not ready' };
-      return runtime.getRewindPreview();
+      return runtime.getRewindPreview(id);
     },
-    applyRewind(id) {
+    applyRewind(request) {
       const context = currentContext();
       if (!context) throw new Error('Application is not ready');
-      const result = context.runtime.applyRewind(id);
-      const session = context.agentSessions.current();
-      const snapshot = session.agent.getSnapshot();
-      session.uiState = normalizeUiState({
-        ...session.uiState,
-        conversationMessages: session.agent.toConversationMessages(),
-        responseText: '',
-        pendingInputs: [],
-        pendingQueueMode: null,
-        messageBarMessages: [],
-        agentTurnLogItems: [],
-        commandPanelItems: [],
-        thinkingText: '',
-        pluginUIs: [],
-        workingStatus: { type: 'idle' },
-        lastTurnOutcome: 'idle',
-        contextSize: snapshot.lastUsage?.totalTokens ?? 0,
-        cachedTokenRate: calculateCachedTokenRate(snapshot.usageHistory),
-      });
-      restoreSessionUi(session.agent, session.uiState);
-      syncModelDisplay(session.agent);
-      session.sessionController.saveCurrent({ allowEmpty: true });
-      context.uiBridge.syncAgentStatusItems();
-      return result;
+      const result = context.runtime.applyRewind(request);
+      try {
+        const session = context.agentSessions.current();
+        const snapshot = session.agent.getSnapshot();
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages: result.conversationMessagesBefore as MicaUiConversationMessage[],
+          responseText: '',
+          pendingInputs: [],
+          pendingQueueMode: null,
+          messageBarMessages: [],
+          agentTurnLogItems: [],
+          commandPanelItems: [],
+          thinkingText: '',
+          pluginUIs: [],
+          workingStatus: { type: 'idle' },
+          lastTurnOutcome: 'idle',
+          contextSize: snapshot.lastUsage?.totalTokens ?? 0,
+          cachedTokenRate: calculateCachedTokenRate(snapshot.usageHistory),
+        });
+        restoreSessionUi(session.agent, session.uiState);
+        micaBuiltinCommands.syncConfigFromAgent(session.agent);
+        syncModelDisplay(session.agent);
+        session.sessionController.saveCurrent({ allowEmpty: true, turnState: 'completed' });
+        context.uiBridge.syncAgentStatusItems();
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ...result, postApplyWarning: `rewind completed, but UI/session sync failed: ${message}` };
+      }
+    },
+    clearRewindCheckpoints() {
+      currentContext()?.runtime.clearRewindCheckpoints();
     },
     async runExclusiveTask(agent, options, task) {
       const context = currentContext();

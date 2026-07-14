@@ -17,6 +17,7 @@ import {
   type SubmitOptions,
   type SubmitResult,
 } from '@packages/mica-runtime/index.js';
+import type { RewindApplyRequest, RewindCheckpointSummary } from '@packages/mica-runtime/Rewind.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { getActiveContext } from '../activeContext.js';
@@ -249,12 +250,20 @@ export class LocalRuntimeController implements RuntimeController {
     return input?.text ?? null;
   }
 
-  getRewindPreview(): RewindPreviewResult {
-    return this.rewindCheckpoints.preview(this.agent);
+  listRewindCheckpoints(): RewindCheckpointSummary[] {
+    return this.rewindCheckpoints.list(this.agent);
   }
 
-  applyRewind(id: string): RewindApplyResult {
-    const result = this.rewindCheckpoints.apply(this.agent, id);
+  getRewindPreview(id?: string): RewindPreviewResult {
+    return this.rewindCheckpoints.preview(this.agent, id);
+  }
+
+  clearRewindCheckpoints(): void {
+    this.rewindCheckpoints.clear(this.agent);
+  }
+
+  applyRewind(request: RewindApplyRequest): RewindApplyResult {
+    const result = this.rewindCheckpoints.apply(this.agent, request);
     this.responseBuffers.set(this.agent, '');
     this.queue.clear();
     this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
@@ -408,8 +417,6 @@ export class LocalRuntimeController implements RuntimeController {
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
-    if (input.source !== 'system') this.rewindCheckpoints.capture(agent, input);
-
     // Capture pre-turn client state so we can restore it before each retry.
     const preTurnSnapshot = agent.captureClientSnapshot();
     let hadNonRetryableToolCall = false;
@@ -426,6 +433,9 @@ export class LocalRuntimeController implements RuntimeController {
     const session = activeContext?.agentSessions.findByAgent(agent);
     const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
     const previousConversationMessages = displayConversationMessages(session, agent);
+    if (input.source !== 'system') {
+      this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
+    }
     if (session) {
       session.uiState = normalizeUiState({
         ...session.uiState,

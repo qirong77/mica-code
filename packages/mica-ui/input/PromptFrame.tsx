@@ -48,7 +48,7 @@ const PROMPT_FRAME_VISUAL: Record<PromptFrameMode, { borderColor: string; marker
 
 export function PromptFrame({ mode, label, role, children }: PromptFrameProps): React.ReactNode {
   const visual = PROMPT_FRAME_VISUAL[mode];
-  const marker = role && role !== 'default' ? `${role} ${visual.marker}` : visual.marker;
+  const roleLabel = role && role !== 'default' ? role : undefined;
   const borderText: BorderTextOptions | undefined = label
     ? {
         content: ` ${label} `,
@@ -72,8 +72,9 @@ export function PromptFrame({ mode, label, role, children }: PromptFrameProps): 
       borderText={borderText}
     >
       <Box marginLeft={1} marginRight={1} flexShrink={0}>
+        {roleLabel ? <Text color={visual.markerColor}>{roleLabel} </Text> : null}
         <Text color={visual.markerColor} bold={mode !== 'disabled'}>
-          {marker}
+          {visual.marker}
         </Text>
       </Box>
       <Box flexGrow={1} flexShrink={1}>
