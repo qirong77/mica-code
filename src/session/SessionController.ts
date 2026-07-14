@@ -17,6 +17,7 @@ import {
   type SessionSummary,
 } from '@packages/mica-session/index.js';
 import { getActiveContext } from '../app/activeContext.js';
+import { micaContext } from '@packages/mica-context/index.js';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult =
@@ -67,7 +68,12 @@ export class SessionController {
   }
 
   list(limit = 20): SessionSummary[] {
-    return this.store.list(limit);
+    return this.store.list(limit).map((summary) => {
+      if (!isInternalCompactText(summary.title)) return summary;
+      const session = this.store.load(summary.id);
+      if (!session) return summary;
+      return { ...summary, title: deriveTitle(getPersistedConversationMessages(session.snapshot)) };
+    });
   }
 
   startNewSession(): void {
@@ -138,11 +144,13 @@ export class SessionController {
     this.currentTurnState = session.turnState ?? 'completed';
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
-    this.currentTitleOverride = session.title === derivedTitle ? null : session.title;
+    const restoredTitle = isInternalCompactText(session.title) ? derivedTitle : session.title;
+    const restoredSession = restoredTitle === session.title ? session : { ...session, title: restoredTitle };
+    this.currentTitleOverride = restoredTitle === derivedTitle ? null : restoredTitle;
     this.ui.restore(this.agent, session.snapshot.lastUsage, conversationMessages);
     return {
       ok: true,
-      session,
+      session: restoredSession,
       ...(requestedRole === restoredRole ? {} : { roleFallback: { missing: requestedRole, fallback: restoredRole } }),
     };
   }
@@ -238,7 +246,10 @@ function getTitleConversationMessages(
   fallbackMessages: MicaUiConversationMessage[],
 ): MicaUiConversationMessage[] {
   const historyMessages = sanitizeConversationMessages(agent.toConversationMessages());
-  return historyMessages.length ? historyMessages : fallbackMessages;
+  // Compact rewrites model history so that it starts with synthetic user
+  // messages. The UI conversation still contains the original prompt and is
+  // therefore the authoritative title source when one is available.
+  return fallbackMessages.some(isTitleUserMessage) ? fallbackMessages : historyMessages;
 }
 
 function sanitizeConversationMessages(value: unknown): MicaUiConversationMessage[] {
@@ -326,11 +337,25 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
 }
 
 function deriveTitle(messages: MicaUiConversationMessage[]): string {
-  const firstUserMessage = messages.find((message) => message.role === 'user');
+  const firstUserMessage = messages.find(isTitleUserMessage);
   const text = firstUserMessage ? contentToText(firstUserMessage.content) : '';
   const title = text.replace(/\s+/g, ' ').trim();
   if (!title) return 'Untitled session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
+}
+
+function isTitleUserMessage(message: MicaUiConversationMessage): boolean {
+  if (message.role !== 'user') return false;
+  const text = contentToText(message.content).trimStart();
+  return !isInternalCompactText(text);
+}
+
+function isInternalCompactText(text: string): boolean {
+  const normalized = text.trimStart();
+  return (
+    normalized.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) ||
+    normalized.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)
+  );
 }
 
 function contentToText(content: MicaUiConversationMessage['content']): string {

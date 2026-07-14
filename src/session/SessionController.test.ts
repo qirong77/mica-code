@@ -70,6 +70,91 @@ describe('SessionController', () => {
     expect(saves.at(-1)?.turnState).toBe('completed');
   });
 
+  it('ignores compact metadata messages when deriving the session title', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [{ role: 'user', content: '[Mica compact boundary]\n\n{"mode":"pruned"}' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [
+        { role: 'user' as const, content: '[Mica compact boundary]\n\n{"mode":"pruned"}' },
+        { role: 'user' as const, content: '[Mica compact checkpoint]\n\nsummary' },
+        { role: 'user' as const, content: 'Fix the resume session title' },
+      ]),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.saveCurrent();
+
+    expect(saves.at(-1)?.title).toBe('Fix the resume session title');
+  });
+
+  it('repairs previously persisted compact metadata titles in session lists', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const session: PersistedSession = {
+      version: 1,
+      id: 'compacted-session',
+      title: '[Mica compact boundary] {"mode":"pruned"}',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      cwd: process.cwd(),
+      turnState: 'completed',
+      snapshot: {
+        providerId: 'openai',
+        protocol: 'openai_chat_completions',
+        model: 'test-model',
+        effort: 'none',
+        role: 'default',
+        messages: [],
+        conversationMessages: [{ role: 'user', content: 'Original user prompt' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    };
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({ ...session.snapshot, messages: [] })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => [
+        {
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          cwd: session.cwd,
+          providerId: session.snapshot.providerId,
+          model: session.snapshot.model,
+          uncompleted: false,
+        },
+      ]),
+      load: vi.fn(() => session),
+      save: vi.fn(),
+    };
+
+    const controller = new SessionController({ agent, store });
+
+    expect(controller.list()).toEqual([expect.objectContaining({ title: 'Original user prompt' })]);
+  });
+
   it('restores persisted UI conversation messages without loading notices into agent history', async () => {
     const { SessionController } = await import('./SessionController.js');
     const snapshot = {
