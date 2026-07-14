@@ -1,4 +1,5 @@
 import type { Tool } from './types.js';
+import type { Disposable } from '@packages/mica-common/index.js';
 
 import { ToolReadFile } from './ToolReadFile.js';
 import { ToolWriteFile } from './ToolWriteFile.js';
@@ -17,6 +18,18 @@ import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
 export type ToolFilter = (name: string) => boolean;
 
+export type ToolExecutionEvent = {
+  name: string;
+  input: ToolInput;
+  callbacks?: ToolExecuteCallbacks;
+  readOnly: boolean;
+};
+
+export type ToolExecutionObserver = {
+  before?(event: ToolExecutionEvent): unknown | Promise<unknown>;
+  after?(event: ToolExecutionEvent & { result?: string; error?: unknown; state?: unknown }): void | Promise<void>;
+};
+
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),
   new ToolWriteFile(),
@@ -34,6 +47,16 @@ const builtinTools: MicaTool[] = [
 
 let mcpTools: MicaTool[] = [];
 let runtimeTools: MicaTool[] = [];
+const executionObservers = new Set<ToolExecutionObserver>();
+
+export function observeToolExecution(observer: ToolExecutionObserver): Disposable {
+  executionObservers.add(observer);
+  return {
+    dispose: () => {
+      executionObservers.delete(observer);
+    },
+  };
+}
 
 export function registerMcpTools(tools: MicaTool[]): void {
   mcpTools = tools;
@@ -108,7 +131,36 @@ export async function executeTool(
     return `工具 ${name} 输入校验失败：${validation.message}`;
   }
 
-  return await tool.executeTimed(input, callbacks);
+  const event: ToolExecutionEvent = { name: tool.name, input, callbacks, readOnly: tool.readOnly };
+  const observations = await Promise.all(
+    [...executionObservers].map(async (observer) => {
+      try {
+        return { observer, state: await observer.before?.(event) };
+      } catch {
+        return { observer, state: undefined };
+      }
+    }),
+  );
+
+  let result: string | undefined;
+  let error: unknown;
+  try {
+    result = await tool.executeTimed(input, callbacks);
+    return result;
+  } catch (caught) {
+    error = caught;
+    throw caught;
+  } finally {
+    await Promise.all(
+      observations.map(async ({ observer, state }) => {
+        try {
+          await observer.after?.({ ...event, result, error, state });
+        } catch {
+          // Observers are diagnostic extensions and must not break tool execution.
+        }
+      }),
+    );
+  }
 }
 
 export function getToolDisplayText(name: string, input: ToolInput): string {

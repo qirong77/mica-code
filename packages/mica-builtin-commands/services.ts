@@ -9,6 +9,7 @@ export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@
 export type CommandProvider = ProviderDefinition & { contextWindowSize: number };
 
 export type CommandAgent = {
+  readonly taskOwnerId?: string;
   readonly config: {
     provider: CommandProvider;
     model: string;

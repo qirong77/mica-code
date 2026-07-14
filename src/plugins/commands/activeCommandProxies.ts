@@ -11,6 +11,9 @@ function currentContext(): ApplicationContext | null {
 export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
   const current = () => currentContext()?.agentSessions.current().agent ?? fallback;
   return {
+    get taskOwnerId() {
+      return current().taskOwnerId;
+    },
     get config() {
       return current().config;
     },

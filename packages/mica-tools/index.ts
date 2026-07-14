@@ -10,6 +10,7 @@ import {
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
+  observeToolExecution,
 } from './registry.js';
 
 export const micaTools = {
@@ -33,12 +34,15 @@ export const micaTools = {
   getDisplayText: getToolDisplayText,
   /** 判断工具是否声明为只读。 */
   isReadOnly: isToolReadOnly,
+  /** 观察所有工具执行，用于审计、变更追踪等横切能力。 */
+  observeExecution: observeToolExecution,
   MicaTool,
 };
 
 export { MicaTool } from './MicaTool.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { ToolFilter } from './registry.js';
+export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
 export type { Tool } from './types.js';
 export {
   getBackgroundTaskOutputSize,

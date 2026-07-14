@@ -4,6 +4,7 @@ import { createCompactCommand } from './compact.js';
 import { createConfigCommand } from './config.js';
 import { createContextCommand } from './context.js';
 import { createEffortCommand } from './effort.js';
+import { createDiffCommand } from './diff.js';
 import { createExitCommand } from './exit.js';
 import { createForkCommand } from './fork.js';
 import { createMcpCommand } from './mcp.js';
@@ -18,6 +19,7 @@ import { createSkillsCommand } from './skills.js';
 import { createStatusCommand } from './status.js';
 import { syncConfigFromAgent } from './configSwitch.js';
 import { createTaskCommand } from './task.js';
+import { AgentChangeTracker } from './agentChangeTracker.js';
 
 export const micaBuiltinCommands = {
   createClearCommand,
@@ -26,6 +28,7 @@ export const micaBuiltinCommands = {
   createConfigCommand,
   createContextCommand,
   createEffortCommand,
+  createDiffCommand,
   createExitCommand,
   createForkCommand,
   createMcpCommand,
@@ -39,6 +42,7 @@ export const micaBuiltinCommands = {
   createSkillsCommand,
   createStatusCommand,
   createTaskCommand,
+  AgentChangeTracker,
   syncConfigFromAgent,
 };
 
@@ -56,3 +60,4 @@ export type {
   SessionSummary,
 } from './services.js';
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
+export { AgentChangeTracker } from './agentChangeTracker.js';

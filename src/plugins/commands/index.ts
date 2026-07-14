@@ -1,5 +1,6 @@
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { createActiveAgentProxy, createActiveSessionControllerProxy } from './activeCommandProxies.js';
@@ -16,9 +17,14 @@ const ALLOW_DURING_TURN_COMMANDS = new Set([
   'rename',
   'task',
   'commit',
+  'diff',
 ]);
 
-function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionController): BuiltInCommandItem[] {
+function createBuiltInCommands(
+  agent: AgentRuntime,
+  sessionController: SessionController,
+  tracker: InstanceType<typeof micaBuiltinCommands.AgentChangeTracker>,
+): BuiltInCommandItem[] {
   const services = createCommandRuntimeServices();
   const activeAgent = createActiveAgentProxy(agent);
   const activeSessionController = createActiveSessionControllerProxy(sessionController);
@@ -38,7 +44,8 @@ function createBuiltInCommands(agent: AgentRuntime, sessionController: SessionCo
     micaBuiltinCommands.createRewindCommand(services),
     micaBuiltinCommands.createMcpCommand(services),
     micaBuiltinCommands.createSkillsCommand(),
-    micaBuiltinCommands.createCommitCommand(activeAgent, services),
+    micaBuiltinCommands.createDiffCommand(activeAgent, services, tracker),
+    micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
     micaBuiltinCommands.createTaskCommand(services),
     micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
     micaBuiltinCommands.createExitCommand(services),
@@ -59,7 +66,10 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
   }
 
   setup(ctx: PluginContext): void {
-    const builtInCommands = createBuiltInCommands(this.agent, this.sessionController);
+    const tracker = new micaBuiltinCommands.AgentChangeTracker();
+    const observer = micaTools.observeExecution(tracker.createObserver());
+    ctx.onDispose(() => observer.dispose());
+    const builtInCommands = createBuiltInCommands(this.agent, this.sessionController, tracker);
 
     for (const command of builtInCommands) {
       registerCommand(ctx, command, { allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name) });

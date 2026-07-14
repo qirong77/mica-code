@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
+- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/diff`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉。
@@ -48,4 +48,5 @@ const commands = [
 - `task.tsx`、`fork.ts`、`rewind.tsx`：多任务、分叉与回退相关命令。
 - `compact.ts`：上下文压缩命令。
 - `status.tsx`、`context.tsx`：状态查看与上下文总览命令。
-- `commit.ts`：提交辅助命令。
+- `diff.ts`、`agentChangeTracker.ts`：展示 Git 变更文件并追踪当前 Agent 的增量。
+- `commit.ts`：提交辅助命令；`/commit agent` 仅提交当前 Agent 的增量。

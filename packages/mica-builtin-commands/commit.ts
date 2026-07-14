@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from './services.js';
 import { formatExecError, gitText, gitTextAsync, safeGitText, safeGitTextAsync } from '@packages/mica-common/index.js';
+import type { AgentChangeTracker } from './agentChangeTracker.js';
 
 const MAX_SUMMARY_CHARS = 20_000;
 const MAX_TOTAL_DIFF_CHARS = 12_000;
@@ -26,16 +28,91 @@ const COMMIT_TYPES = [
   'ci: CI 配置 👷',
 ];
 
-export function createCommitCommand(agent: CommandAgent, services: CommandRuntimeServices) {
+export function createCommitCommand(
+  agent: CommandAgent,
+  services: CommandRuntimeServices,
+  tracker?: AgentChangeTracker,
+) {
   return {
     name: 'commit',
-    description: '分析当前 git 变化，生成提交信息，提交并推送',
-    action: async () => {
+    description: '分析 Git 变化并提交；使用 `agent` 参数仅提交当前 Agent 的改动',
+    completionItems: [{ arg: 'agent', description: '仅提交当前 Agent 的改动' }],
+    action: async (arg?: string) => {
       const targetAgent = services.getCurrentAgent() ?? agent;
       const ownerSessionId = services.getCurrentAgentSessionId();
+      const mode = arg?.trim().toLowerCase();
+      if (mode && mode !== 'agent') {
+        showCommitMessage(services, `commit: 不支持参数 ${arg}`, ownerSessionId, 'error');
+        return;
+      }
+      if (mode === 'agent') {
+        await runAgentCommit(targetAgent, services, tracker, ownerSessionId);
+        return;
+      }
       await runCommit(targetAgent, services, ownerSessionId);
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+}
+
+async function runAgentCommit(
+  agent: CommandAgent,
+  services: CommandRuntimeServices,
+  tracker: AgentChangeTracker | undefined,
+  ownerSessionId?: string,
+) {
+  if (!tracker || !agent.taskOwnerId) {
+    showCommitMessage(services, 'commit: Agent 变更追踪器不可用', ownerSessionId, 'error');
+    return;
+  }
+
+  let prepared: ReturnType<AgentChangeTracker['prepareIndex']> | undefined;
+  try {
+    setCommitStatus(agent, services, 'commit agent: 正在整理当前 Agent 的改动...', ownerSessionId);
+    prepared = tracker.prepareIndex(agent.taskOwnerId);
+    const summary = buildAgentChangeSummary(prepared.indexPath, prepared.files);
+    const commitMessage = await generateCommitMessage(agent, summary);
+    setCommitStatus(agent, services, `commit agent: ${firstLine(commitMessage)}`, ownerSessionId);
+    commitWithMessage(commitMessage, prepared.indexPath);
+    prepared.finish();
+
+    const commitHash = git(['rev-parse', '--short', 'HEAD']).trim();
+    setCommitStatus(agent, services, `commit agent: 已提交 ${commitHash}，正在 push...`, ownerSessionId);
+    const pushed = await pushCurrentBranch();
+    const subject = firstLine(commitMessage);
+    services.showCommitNotice(
+      pushed ? `已提交并推送 \`${commitHash}\`  ${subject}` : `已提交 \`${commitHash}\`，未找到远程分支  ${subject}`,
+      ownerSessionId,
+    );
+  } catch (error) {
+    showCommitMessage(services, `commit agent failed: ${formatExecError(error)}`, ownerSessionId, 'error');
+  } finally {
+    prepared?.dispose();
+  }
+}
+
+function buildAgentChangeSummary(indexPath: string, files: string[]): string {
+  const env = { ...process.env, GIT_INDEX_FILE: indexPath };
+  const run = (args: string[]) =>
+    execFileSync('git', args, { encoding: 'utf8', env, maxBuffer: 10 * 1024 * 1024 }).trim();
+  return truncate(
+    [
+      'Git status summary:',
+      `total files: ${files.length}`,
+      '',
+      'Changed files:',
+      files.join('\n'),
+      '',
+      'Diff stat:',
+      run(['diff', '--cached', '--stat', '--no-color']) || '(empty)',
+      '',
+      'Name status:',
+      run(['diff', '--cached', '--name-status', '--no-color']) || '(empty)',
+      '',
+      'Compact diff samples:',
+      truncate(run(['diff', '--cached', '--unified=0', '--no-color']), MAX_TOTAL_DIFF_CHARS),
+    ].join('\n'),
+    MAX_SUMMARY_CHARS,
+  );
 }
 
 function setCommitStatus(agent: CommandAgent, services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
@@ -371,12 +448,21 @@ function readUntrackedFileSample(path: string) {
   }
 }
 
-function commitWithMessage(message: string) {
+function commitWithMessage(message: string, indexPath?: string) {
   const dir = mkdtempSync(join(tmpdir(), 'mica-commit-'));
   const messagePath = join(dir, 'message.txt');
   try {
     writeFileSync(messagePath, `${message.trim()}\n`, 'utf-8');
-    git(['commit', '-F', messagePath], 120_000);
+    if (indexPath) {
+      execFileSync('git', ['commit', '-F', messagePath], {
+        encoding: 'utf8',
+        env: { ...process.env, GIT_INDEX_FILE: indexPath },
+        timeout: 120_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    } else {
+      git(['commit', '-F', messagePath], 120_000);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
