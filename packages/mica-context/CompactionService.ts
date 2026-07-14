@@ -554,6 +554,12 @@ function pruneOldValue(value: unknown, maxStringChars: number, placeholder: stri
 
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) {
+    // Responses API reasoning payloads are opaque, authenticated ciphertext.
+    // Changing them makes the next request fail with invalid_encrypted_content.
+    if (key === 'encrypted_content') {
+      next[key] = child;
+      continue;
+    }
     if (key === 'toolUseResult') {
       next[key] = placeholder;
       continue;
@@ -637,6 +643,10 @@ function pruneKeptValue(value: unknown, maxStringChars: number): unknown {
 
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) {
+    if (key === 'encrypted_content') {
+      next[key] = child;
+      continue;
+    }
     if (key === 'toolUseResult') continue;
     if (key === 'data' && typeof child === 'string' && child.length > maxStringChars) {
       next[key] = `[omitted base64 data: ${child.length} chars]`;

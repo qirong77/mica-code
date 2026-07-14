@@ -206,6 +206,48 @@ describe('CompactionService', () => {
     expect(serialized).not.toContain(IMAGE_BASE64);
   });
 
+  it('preserves opaque Responses encrypted reasoning during lightweight prune-only compact', async () => {
+    const service = new CompactionService();
+    const encryptedContent = 'A'.repeat(8_000);
+    const messages = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'inspect the project' }] },
+      {
+        type: 'reasoning',
+        id: 'rs_test',
+        summary: [],
+        encrypted_content: encryptedContent,
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: 'done', annotations: [] }],
+      },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'what next?' }] },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: {
+        force: true,
+        aggressive: true,
+        lightweightPrune: true,
+        contextWindowSize: 100_000,
+      },
+      summarize: vi.fn(async () => FULL_SUMMARY),
+    });
+
+    expect(result.strategy).toBe('prune_only');
+    expect(result.messages).toContainEqual(
+      expect.objectContaining({
+        type: 'reasoning',
+        id: 'rs_test',
+        encrypted_content: encryptedContent,
+      }),
+    );
+    expect(JSON.stringify(result.messages)).not.toContain('[omitted base64 data:');
+  });
+
   it('summarizes sanitized history when lightweight compact is still above threshold', async () => {
     const service = new CompactionService();
     let summaryTranscript = '';
