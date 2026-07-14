@@ -22,7 +22,7 @@ export function reportConfigSwitchError(
   services.showMessage(`Switch ${reason} failed: ${message}`, 6000, services.getCurrentAgentSessionId());
 }
 
-export function applyConfigSwitchUpdate({
+export async function applyConfigSwitchUpdate({
   agent,
   sessionController,
   services,
@@ -36,8 +36,10 @@ export function applyConfigSwitchUpdate({
   update: (config: IMicaConfig) => IMicaConfig;
   successMessage: (config: IMicaConfig) => string;
   successTtl?: number;
-}): IMicaConfig {
+}): Promise<IMicaConfig> {
   let adjustments: ConfigSwitchAdjustment[] = [];
+  const candidate = update(configForAgent(micaConfig.get(), agent));
+  await micaConfig.ensureModelRule(candidate.model);
   const next = micaConfig.update((config) => {
     const normalized = normalizeConfigSwitchSelection(update(configForAgent(config, agent)));
     adjustments = normalized.adjustments;
@@ -63,9 +65,7 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): {
 
   const model = config.model || provider.models?.[0] || '';
   const selectedEffort = isEffortOption(config.effort) ? config.effort : 'medium';
-  const effort = provider.supportsEffort === false
-    ? 'none'
-    : micaConfig.normalizeModelEffort(model, selectedEffort);
+  const effort = provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, selectedEffort);
   const contextWindowSize = micaConfig.getModelRule(model).contextSize;
   const adjustments: ConfigSwitchAdjustment[] = [];
 
@@ -103,11 +103,12 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
   const agentProvider = agent.config.provider;
   const provider = config.providers.find((item) => item.id === agentProvider.id) ?? agentProvider;
   const model = agent.config.model || provider.models?.[0] || '';
-  const effort = provider.supportsEffort === false
-    ? 'none'
-    : isEffortOption(agent.config.effort)
-      ? agent.config.effort
-      : config.effort;
+  const effort =
+    provider.supportsEffort === false
+      ? 'none'
+      : isEffortOption(agent.config.effort)
+        ? agent.config.effort
+        : config.effort;
 
   return {
     ...config,

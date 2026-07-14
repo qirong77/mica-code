@@ -40,16 +40,15 @@ export type {
   ResolvedEffortParams,
 } from './types.js';
 export {
+  ensureModelRule,
   getModelEffortOptions,
   getModelRule,
   normalizeModelEffort,
+  registerModelRuleResolver,
   registerModelRules,
   resolveModelRequestPatch,
 } from './getModelRule.js';
-export {
-  resolveChatCompletionsEffortParams,
-  resolveResponsesReasoningParams,
-} from './effort.js';
+export { resolveChatCompletionsEffortParams, resolveResponsesReasoningParams } from './effort.js';
 
 const configAtom = atom<IMicaConfig>(readConfig());
 
@@ -87,7 +86,6 @@ export async function loadProviderModels(providerId: string): Promise<string[]> 
 export async function loadMissingProviderModels() {
   await loadMissingProviderModelsFromStore({ getConfig, updateRuntimeConfig });
 }
-
 
 function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());

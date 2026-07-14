@@ -85,7 +85,7 @@ async function applyModelSelection(
       6000,
       services.getCurrentAgentSessionId(),
     );
-    applyConfigSwitchUpdate({
+    await applyConfigSwitchUpdate({
       agent,
       sessionController,
       services,

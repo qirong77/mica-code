@@ -57,6 +57,7 @@ export class Application {
       validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
       setupModelEffortContext();
       await ensureInitialModelSelection();
+      await micaConfig.ensureModelRule(micaConfig.get().model);
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);
       const commands = new micaCommands.CommandRegistry();

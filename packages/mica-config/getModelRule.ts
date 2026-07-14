@@ -1,8 +1,11 @@
 import { EFFORT_OPTIONS, type EffortOption, type ModelRule, type ProviderProtocol } from './types.js';
 
 type RegisteredModelRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
+type ModelRuleResolver = (modelName: string) => Promise<RegisteredModelRule>;
 
 const registeredRules = new Map<string, RegisteredModelRule>();
+const pendingRules = new Map<string, Promise<ModelRule>>();
+let modelRuleResolver: ModelRuleResolver | undefined;
 
 export function registerModelRules(rules: Record<string, RegisteredModelRule>): () => void {
   const registered = Object.keys(rules);
@@ -10,6 +13,30 @@ export function registerModelRules(rules: Record<string, RegisteredModelRule>): 
   return () => {
     for (const model of registered) registeredRules.delete(model);
   };
+}
+
+export function registerModelRuleResolver(resolver: ModelRuleResolver): () => void {
+  modelRuleResolver = resolver;
+  return () => {
+    if (modelRuleResolver === resolver) modelRuleResolver = undefined;
+  };
+}
+
+export async function ensureModelRule(modelName: string): Promise<ModelRule> {
+  if (registeredRules.has(modelName)) return getModelRule(modelName);
+  if (!modelRuleResolver) return getModelRule(modelName);
+
+  const existing = pendingRules.get(modelName);
+  if (existing) return existing;
+
+  const pending = modelRuleResolver(modelName)
+    .then((rule) => {
+      registeredRules.set(modelName, rule);
+      return getModelRule(modelName);
+    })
+    .finally(() => pendingRules.delete(modelName));
+  pendingRules.set(modelName, pending);
+  return pending;
 }
 
 export function getModelRule(modelName: string): ModelRule {

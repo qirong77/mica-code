@@ -32,9 +32,8 @@ export function showEffortSelector(
   services: CommandRuntimeServices,
   options: { onAfterSelect?: (effort: string) => void | Promise<void> } = {},
 ): void {
-  const effortOptions = agent.config.provider.supportsEffort === false
-    ? ['none']
-    : micaConfig.getModelEffortOptions(agent.config.model);
+  const effortOptions =
+    agent.config.provider.supportsEffort === false ? ['none'] : micaConfig.getModelEffortOptions(agent.config.model);
   showSelectCommand({
     id: 'select-effort',
     title: 'select effort',
@@ -77,7 +76,7 @@ async function applyEffortSelection(
       services.getCurrentAgentSessionId(),
     );
 
-    applyConfigSwitchUpdate({
+    await applyConfigSwitchUpdate({
       agent,
       sessionController,
       services,

@@ -1,5 +1,5 @@
 import { requireProvider, type IMicaConfig } from './types.js';
-import { getModelRule, normalizeModelEffort } from './getModelRule.js';
+import { ensureModelRule, getModelRule, normalizeModelEffort } from './getModelRule.js';
 
 export type RuntimeConfigStore = {
   getConfig(): IMicaConfig;
@@ -29,6 +29,12 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
     throw new Error(`Invalid model list for provider ${provider.id}`);
   }
 
+  const currentConfig = store.getConfig();
+  if (currentConfig.provider === providerId) {
+    const model = models.includes(currentConfig.model) ? currentConfig.model : models[0]!;
+    await ensureModelRule(model);
+  }
+
   store.updateRuntimeConfig((config) => {
     const providers = config.providers.map((item) => {
       if (item.id !== providerId) return item;
@@ -44,7 +50,12 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
       providers,
       model,
       contextWindowSize: current ? getModelRule(model).contextSize : config.contextWindowSize,
-      effort: current?.supportsEffort === false ? 'none' : current ? normalizeModelEffort(model, config.effort) : config.effort,
+      effort:
+        current?.supportsEffort === false
+          ? 'none'
+          : current
+            ? normalizeModelEffort(model, config.effort)
+            : config.effort,
     };
   });
   return models;
