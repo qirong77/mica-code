@@ -8,6 +8,7 @@
 - 定义用户输入、提交结果、终止结果和运行状态。
 - `RuntimeInput` 可携带 `displayText`，用于让 UI 展示更友好的输入摘要，同时保留完整 `text` 发送给 agent。
 - 定义 runtime event 与 event bus。
+- 定义 headless OpenCode/DevEco-compatible run JSON 事件 schema 与编码辅助。
 - 定义可用于 UI 同步或会话保存的 view snapshot。
 - 提供 `MessageQueueService` 管理运行中输入排队状态。
 
@@ -36,6 +37,6 @@ queue.enqueue({ text: '继续' });
 - `RuntimeViewSnapshot.ts`：运行时视图快照。
 - `SubmitResult.ts`：提交结果。
 - `AbortResult.ts`：中止结果。
-- `AbortResult.ts`：中止结果。
 - `MessageQueueService.ts`：运行中输入排队服务。
+- `runJson.ts`：`run --format json` NDJSON 事件类型、编码、文本分块、输出上限和结果退出码。
 - `index.ts`：公共 API 聚合导出。

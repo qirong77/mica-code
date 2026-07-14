@@ -11,10 +11,27 @@ afterEach(() => {
 });
 
 describe('model-effort-context', () => {
+  it('forwards headless cancellation to the models.dev request', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, options?: { signal?: AbortSignal }) =>
+        await new Promise<Response>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    dispose = setupModelEffortContext();
+    const controller = new AbortController();
+    const pending = ensureModelRule('cancelled-model', controller.signal);
+    controller.abort(new Error('cancelled'));
+
+    await expect(pending).rejects.toThrow('cancelled');
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
   it('loads context sizes and dynamic effort options on demand', async () => {
     mockModelsDev();
     dispose = setupModelEffortContext();
-    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5', 'grok-4.5'].map(ensureModelRule));
+    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5', 'grok-4.5'].map((model) => ensureModelRule(model)));
 
     expect(getModelRule('kimi-k2.6').contextSize).toBe(262144);
     expect(getModelRule('deepseek-v4-pro').contextSize).toBe(1000000);
@@ -27,7 +44,7 @@ describe('model-effort-context', () => {
   it('resolves protocol-specific request patches without provider matching', async () => {
     mockModelsDev();
     dispose = setupModelEffortContext();
-    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5'].map(ensureModelRule));
+    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5'].map((model) => ensureModelRule(model)));
 
     expect(resolveModelRequestPatch('kimi-k2.6', 'none', 'openai_chat_completions')).toEqual({
       thinking: { type: 'disabled' },

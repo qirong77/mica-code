@@ -19,8 +19,8 @@ class McpProxyTool extends micaTools.MicaTool {
     super(name, description, inputSchema);
   }
 
-  async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
-    return callMcpTool(this.serverName, this.toolName, input);
+  async execute(input: Record<string, unknown>, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    return callMcpTool(this.serverName, this.toolName, input, callbacks?.signal);
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
@@ -37,8 +37,12 @@ class McpProxyTool extends micaTools.MicaTool {
 
 export async function fetchToolsForServer(
   server: ConnectedMcpServer,
+  signal?: AbortSignal,
 ): Promise<InstanceType<typeof micaTools.MicaTool>[]> {
-  const result = await server.client.request({ method: 'tools/list' }, ListToolsResultSchema, { timeout: 15_000 });
+  const result = await server.client.request({ method: 'tools/list' }, ListToolsResultSchema, {
+    timeout: 15_000,
+    signal,
+  });
   const usedNames = new Set<string>();
 
   return result.tools.map(
@@ -53,21 +57,26 @@ export async function fetchToolsForServer(
   );
 }
 
-async function callMcpTool(serverName: string, toolName: string, args: Record<string, unknown>): Promise<string> {
+async function callMcpTool(
+  serverName: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<string> {
   const server = connections.get(serverName);
   if (!server) {
     throw new Error(`MCP 服务器 "${serverName}" 未连接`);
   }
 
   try {
-    return await doCallMcpTool(server, toolName, args);
+    return await doCallMcpTool(server, toolName, args, signal);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes('Session not found')) throw error;
+    if (!message.includes('Session not found') || signal?.aborted) throw error;
     connections.delete(serverName);
     await server.cleanup();
-    const reconnected = await connectToServer(serverName, server.config);
-    return doCallMcpTool(reconnected, toolName, args);
+    const reconnected = await connectToServer(serverName, server.config, signal);
+    return doCallMcpTool(reconnected, toolName, args, signal);
   }
 }
 
@@ -75,9 +84,11 @@ async function doCallMcpTool(
   server: ConnectedMcpServer,
   toolName: string,
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const result = await server.client.callTool({ name: toolName, arguments: args }, CallToolResultSchema, {
     timeout: 120_000,
+    signal,
   });
   const content = result.content as ContentItem[];
 

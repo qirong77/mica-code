@@ -16,6 +16,7 @@ import {
   createAgentClientOptions,
   readAgentRuntimeConfig,
   type AgentRuntimeConfig,
+  type AgentRuntimeConfigOverride,
 } from './AgentRuntimeConfig.js';
 
 export type AgentRuntimeStatus =
@@ -49,10 +50,11 @@ export type AgentRuntimeSnapshot = {
 
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
+  maxTurns?: number;
 };
 
 export class AgentAbortError extends Error {
-  constructor(readonly runId: number) {
+  constructor(readonly runId = -1) {
     super('Agent run aborted');
     this.name = 'AgentAbortError';
   }
@@ -89,8 +91,8 @@ export class AgentRuntime {
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
 
-  constructor() {
-    this.currentConfig = readAgentRuntimeConfig();
+  constructor(configOverride: AgentRuntimeConfigOverride = {}) {
+    this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
   }
 
@@ -183,6 +185,30 @@ export class AgentRuntime {
     if (resetSession) {
       this.client?.reset();
       this.emitStatus({ type: 'idle' });
+    }
+  }
+
+  configureForRun(override: AgentRuntimeConfigOverride, preserveSession = true): void {
+    if (this.isRunning) {
+      throw new Error('Cannot configure agent while it is running');
+    }
+    const previousSnapshot = preserveSession ? this.client?.getSnapshot() : null;
+    const previousProtocol = this.currentConfig.provider.protocol;
+    const providerId = override.providerId ?? this.currentConfig.provider.id;
+    const next = readAgentRuntimeConfig({
+      providerId,
+      model: override.model ?? (providerId === this.currentConfig.provider.id ? this.currentConfig.model : undefined),
+      effort: override.effort ?? this.currentConfig.effort,
+    });
+    if (previousSnapshot && previousProtocol !== next.provider.protocol) {
+      throw new Error(
+        `Cannot resume a ${previousProtocol} session with ${next.provider.protocol}; start a fresh session instead.`,
+      );
+    }
+    this.currentConfig = next;
+    this.recreateClient();
+    if (previousSnapshot && this.client) {
+      this.client.loadSnapshot({ ...previousSnapshot, model: next.model });
     }
   }
 
@@ -297,6 +323,7 @@ export class AgentRuntime {
       const text = await this.client.query(question, {
         signal: abortController.signal,
         shouldContinue: () => this.isCurrent(runId),
+        maxTurns: options.maxTurns,
         onIterationComplete: async () => {
           if (!this.isCurrent(runId)) return null;
           this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;

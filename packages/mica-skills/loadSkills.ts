@@ -3,9 +3,17 @@ import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Skill } from './types.js';
 
-function getUserSkillsDirs(): string[] {
+function getSkillsDirs(): string[] {
   const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(homedir(), '.mica');
-  return [join(micaHome, 'skills')];
+  const cwd = process.cwd();
+  return [
+    join(cwd, '.mica', 'skills'),
+    join(cwd, '.agents', 'skills'),
+    join(cwd, '.deveco', 'skills'),
+    join(cwd, '.agent_context', 'skills'),
+    join(micaHome, 'skills'),
+    ...(process.env.MICA_HOME ? [] : [join(homedir(), '.config', 'deveco', 'skills')]),
+  ];
 }
 
 function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; content: string } {
@@ -123,7 +131,7 @@ export function getLoadedSkills(): Skill[] {
   loadedSkills = [];
   const seen = new Set<string>();
 
-  for (const skillsDir of getUserSkillsDirs()) {
+  for (const skillsDir of getSkillsDirs()) {
     if (!existsSync(skillsDir) || !statSync(skillsDir).isDirectory()) {
       continue;
     }

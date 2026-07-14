@@ -1,7 +1,7 @@
 import { EFFORT_OPTIONS, type EffortOption, type ModelRule, type ProviderProtocol } from './types.js';
 
 type RegisteredModelRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
-type ModelRuleResolver = (modelName: string) => Promise<RegisteredModelRule>;
+type ModelRuleResolver = (modelName: string, signal?: AbortSignal) => Promise<RegisteredModelRule>;
 
 const registeredRules = new Map<string, RegisteredModelRule>();
 const pendingRules = new Map<string, Promise<ModelRule>>();
@@ -22,14 +22,14 @@ export function registerModelRuleResolver(resolver: ModelRuleResolver): () => vo
   };
 }
 
-export async function ensureModelRule(modelName: string): Promise<ModelRule> {
+export async function ensureModelRule(modelName: string, signal?: AbortSignal): Promise<ModelRule> {
   if (registeredRules.has(modelName)) return getModelRule(modelName);
   if (!modelRuleResolver) return getModelRule(modelName);
 
   const existing = pendingRules.get(modelName);
   if (existing) return existing;
 
-  const pending = modelRuleResolver(modelName)
+  const pending = modelRuleResolver(modelName, signal)
     .then((rule) => {
       registeredRules.set(modelName, rule);
       return getModelRule(modelName);

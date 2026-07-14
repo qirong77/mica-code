@@ -51,7 +51,7 @@ export type SessionStoreLike = {
   save(session: PersistedSession): void;
 };
 
-export const SESSION_DIR = resolve(homedir(), '.mica', 'sessions');
+export const SESSION_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'sessions');
 
 export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {

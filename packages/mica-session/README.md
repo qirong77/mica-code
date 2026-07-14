@@ -2,7 +2,7 @@
 
 `mica-session` 是 Mica Code 的会话持久化包，负责保存、读取和列出 agent runtime 快照。
 
-会话文件默认保存到：`~/.mica/sessions`。
+会话文件默认保存到：`~/.mica/sessions`；设置 `MICA_HOME` 时保存到 `$MICA_HOME/sessions`。
 
 ## 主要能力
 

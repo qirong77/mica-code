@@ -10,11 +10,11 @@ let modelsRequest;
  * therefore the model author's provider; if that cannot be inferred, the most
  * common definition among exact-name matches is used.
  */
-export async function getModelRule(modelName = '') {
+export async function getModelRule(modelName = '', signal) {
   const requestedName = modelName.trim();
   if (!requestedName) throw new TypeError('modelName must be a non-empty string');
 
-  const providers = await loadModels();
+  const providers = await loadModels(signal);
   const matches = findMatches(providers, requestedName);
   if (matches.length === 0) throw new Error(`Model not found on models.dev: ${requestedName}`);
 
@@ -42,8 +42,9 @@ export async function getModelRule(modelName = '') {
   };
 }
 
-async function loadModels() {
-  modelsRequest ??= fetch(MODELS_URL).then(async (response) => {
+async function loadModels(signal) {
+  const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
+  modelsRequest ??= fetch(MODELS_URL, { signal: requestSignal }).then(async (response) => {
     if (!response.ok) throw new Error(`models.dev request failed: ${response.status} ${response.statusText}`);
     return response.json();
   });

@@ -149,6 +149,23 @@ describe('AgentRuntime tool status', () => {
     expect(typeof options?.systemPrompt).toBe('function');
     expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
   });
+
+  it('applies a daemon-selected model without mutating global config and forwards maxTurns', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime({ model: 'daemon-model', effort: 'high' });
+    let queryOptions: AgentQueryOptions | undefined;
+    modelClient.queryImpl = async (_question, options) => {
+      queryOptions = options;
+      return 'ok';
+    };
+
+    await agent.run('hello', { maxTurns: 4 });
+    agent.configureForRun({ effort: 'low' });
+
+    expect(agent.config.model).toBe('daemon-model');
+    expect(configState?.model).toBe('test-model');
+    expect(queryOptions?.maxTurns).toBe(4);
+  });
 });
 
 function createModelClientStub(): IAgent<ModelClientOptions> & {

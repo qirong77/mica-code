@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildSystemPromptForTest } from './index.js';
+import { buildSystemPromptForTest, readProjectInstructions } from './index.js';
 
 describe('buildSystemPrompt', () => {
   it('keeps stable sections in priority order with dynamic context last', () => {
@@ -126,5 +129,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('`rg` 不是独立工具，也不保证已安装');
     expect(prompt).toContain('使用 `read_task_output` 查看输出');
     expect(prompt).not.toContain('在 shell 中搜索文本优先用 `rg`');
+  });
+
+  it('reads AGENT.md and Multica-compatible AGENTS.md from the requested cwd', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'mica-project-instructions-'));
+    try {
+      writeFileSync(join(cwd, 'AGENT.md'), 'repository rule', 'utf-8');
+      writeFileSync(join(cwd, 'AGENTS.md'), 'multica runtime brief', 'utf-8');
+
+      const instructions = readProjectInstructions(cwd);
+      expect(instructions).toContain('# AGENT.md\n\nrepository rule');
+      expect(instructions).toContain('# AGENTS.md\n\nmultica runtime brief');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

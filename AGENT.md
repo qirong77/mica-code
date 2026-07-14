@@ -53,8 +53,12 @@ git diff --check
 
 ```text
 src/
-  index.ts                         CLI 入口：全局错误钩子、Application 启停
+  index.ts                         CLI 入口：模式分派、全局错误钩子、Application 启停
   buildMeta.ts                     构建元信息
+  cli/
+    args.ts                        `run` / `models` / `--version` argv 解析
+    modelCatalog.ts                Multica runtime 模型 ID 列举与解析
+    runHeadless.ts                 无 UI headless 执行与资源生命周期
   agent/
     AgentRuntime.ts                provider client 生命周期、run/abort/snapshot/config reload
     AgentRuntimeConfig.ts          从 mica-config 读取并夹紧 provider/model/effort
@@ -78,6 +82,7 @@ src/
   runtime/
     RewindCheckpointManager.ts     turn 前对话和文件状态 checkpoint
     ToolLogController.ts           thinking/tool-call/tool-result 日志聚合
+    RunJsonProjector.ts            AgentRuntime 到 OpenCode/DevEco run JSON 投影
     uiBridge.ts                    provider/model/status 同步辅助
   session/
     SessionController.ts           session 保存、恢复、重命名和 UI restore 编排
@@ -113,9 +118,9 @@ temp/                              临时代码和外部实验，默认不参与
 
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
-1. `src/index.ts` 先调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值。
-2. `buildin-plugins/config-web-worker.mjs` 判断当前进程是否为 Config Web worker；worker 模式只启动 Web server，不加载终端应用。
-3. 前台模式加载应用和 UI 模块，再由 `buildin-plugins/process-diagnostics.mjs` 设置进程标题、注册全局错误桥；应用结束时释放监听。
+1. `buildin-plugins/config-web-worker.mjs` 先判断当前进程是否为 Config Web worker；worker 模式只启动 Web server，不加载终端应用。
+2. `src/index.ts` 在加载 config/runtime 模块前分派 `--version`、`models`、headless `run --format json` 和交互模式；headless 的 `--dir` 也在动态加载运行模块前生效。
+3. 非 version/help 模式调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值；交互模式再加载应用和 UI 模块，由 `buildin-plugins/process-diagnostics.mjs` 设置进程标题、注册全局错误桥。
 4. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过 validate-config 单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。
 5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
 6. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
@@ -193,7 +198,7 @@ temp/                              临时代码和外部实验，默认不参与
 - provider adapter 负责协议消息结构、history normalizer、usage 归一化、tool-call 格式、请求参数转换和 abort signal。
 - runtime 不直接拼 provider 请求参数。Chat Completions effort 参数通过 `resolveChatCompletionsEffortParams` 生成，Responses reasoning 参数通过 `resolveResponsesReasoningParams` 生成。
 - `createSubAgent` 会复用当前 provider client options，但默认 `effort: 'none'`，并根据传入 options 决定是否启用 tools。
-- `buildSystemPrompt()` 默认读取 `packages/mica-agent/prompt/system.md`，当前 agent 选择自定义 role 时只替换 `<system>` 段；当前 cwd 下的 `AGENT.md`、skills 索引和环境信息继续独立注入。
+- `buildSystemPrompt()` 默认读取 `packages/mica-agent/prompt/system.md`，当前 agent 选择自定义 role 时只替换 `<system>` 段；当前 cwd 下的 `AGENT.md` 和 `AGENTS.md` 会合并，skills 索引和环境信息继续独立注入。读取路径必须在 prompt 构建时按 live cwd 解析，不能在模块加载时冻结。
 - system prompt 中的 skills 只是索引；完整 skill 内容只能通过 `Skill` 工具按需读取。
 - role 默认从 `~/.mica/role` 扫描，设置 `MICA_HOME` 时使用 `$MICA_HOME/role`。每个普通文件的文件名就是 role 名；内置 `default` 只展示、不可由目录中的同名文件覆盖。
 
@@ -229,7 +234,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 
 ### Session
 
-- `packages/mica-session/sessionStore.ts` 当前默认使用 `~/.mica/sessions`，由 `homedir()` 拼出，不跟随 `MICA_HOME`。
+- `packages/mica-session/sessionStore.ts` 默认使用 `~/.mica/sessions`，设置 `MICA_HOME` 时跟随 `$MICA_HOME/sessions`。
 - session 文件是 version 1 JSON，保存 `id`、`title`、`createdAt`、`updatedAt`、`cwd` 和 `snapshot`。
 - `snapshot` 包含 providerId、model、effort、role、provider history messages、UI conversationMessages、usageHistory、lastUsage。旧 snapshot 缺少 role 时按 `default` 读取，自定义 role 文件缺失时恢复也回退到 `default`。
 - `SessionController` 负责把 `AgentRuntime` snapshot 转为 persisted snapshot，恢复时先 apply config，再 reload agent，再 load snapshot，最后 restore UI。
@@ -240,7 +245,8 @@ bun test packages/mica-agent/prompt/index.test.ts
 - 全局 effort 枚举是 `none/low/medium/high/xhigh`，直接映射到 OpenAI 请求参数。
 - 默认 effort map 是 `none -> null`、`low -> low`、`medium -> medium`、`high -> high`。未加载数据的模型默认提供 `none/low/medium/high`。
 - Provider 可通过 `get_model_url` 拉取模型列表；所有模型使用 `getModelRule` 返回的固定 context window 和 reasoning effort 映射。
-- 只有明确配置了 `get_model_url` 的动态 provider 才会触发 on-demand 模型数据查找。
+- 交互和 headless 模式都必须先注册 `buildin-plugins/model-effort-context` resolver，再调用 `ensureModelRule`；headless 获取不到 metadata 时只写 stderr 并使用通用 rule，不能污染协议 stdout。
+- 只有明确配置了 `get_model_url` 的动态 provider 才会触发 provider 模型列表查找；模型 context/effort metadata 则来自 Models.dev resolver。
 - context size 默认 256K，实际值由 Models.dev canonical 模型记录的 `limit.context` 决定。
 - 未在 Models.dev 中找到的模型使用默认值：256K context、`none/low/medium/high` effort。
 - provider 可设置 `supportsEffort: false`，这时状态显示为 `none`，请求不发送 reasoning effort。
@@ -313,6 +319,7 @@ AGENT.md
 
 - `packages/mica-mcp` 管理 MCP server 生命周期：读取配置、连接 server、注册远端 tools、重连、关闭和清理工具。
 - MCP 配置来自 `~/.mica/config.json` 或 `$MICA_HOME/config.json` 的 `mcpServers`。
+- Headless run 会显式初始化/关闭 MCP；`--mcp-config <path>` 可加载额外配置，`--strict-mcp-config` 禁止混入本地配置。
 - 远端工具必须通过 `micaTools.registerMcp()` 接入；server 断开、重连失败或关闭时要同步清理对应工具。
 - `/mcp reconnect <server>` 失败后也要刷新注册工具列表，避免 registry 中残留 stale tools。
 
@@ -325,7 +332,7 @@ AGENT.md
 ### Skills
 
 - `packages/mica-skills` 只负责扫描、解析和缓存 skills，不执行 skill 内容。
-- 默认扫描 `~/.mica/skills`；设置 `MICA_HOME` 时扫描 `$MICA_HOME/skills`。
+- 用户级默认扫描 `~/.mica/skills`；设置 `MICA_HOME` 时扫描 `$MICA_HOME/skills`。项目级还扫描 `.mica/skills`、`.agents/skills`、`.deveco/skills` 和 `.agent_context/skills`，用于 Multica 等运行时注入。未设置 `MICA_HOME` 时兼容扫描 `~/.config/deveco/skills`。
 - 每个 skill 是一个目录，目录内必须包含 `SKILL.md`。
 - frontmatter 支持简单 key/value、boolean 和列表；列表值会被规范化为分号连接的字符串。
 - `Skill` 工具会把 skill baseDir 和完整内容包在 `<skill-instructions>` 中返回，并支持简单 `$var` 参数替换。
@@ -364,7 +371,7 @@ AGENT.md
 - `mica-common` 不依赖任何产品业务包。
 - `mica-agent` 不依赖 UI、session、commands 或应用入口。
 - `mica-ui` 不直接调用模型 provider，不持有 agent 运行逻辑。
-- `mica-runtime` 只定义协议和状态原语，不做具体 turn loop 编排。
+- `mica-runtime` 只定义协议和状态原语，不做具体 turn loop 编排；headless OpenCode/DevEco-compatible run JSON schema 属于协议层，可被 CLI/adapter 复用。它不是 Claude SDK stream-json。
 - `mica-commands` 只放通用命令机制，产品命令放在 `mica-builtin-commands`。
 - `mica-builtin-commands` 通过 services 注入外部能力，避免直接导入应用层单例。
 - `mica-tools` 统一管理工具定义和执行，MCP 工具也必须通过它注册。

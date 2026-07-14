@@ -48,7 +48,11 @@ function getConfigLabel(config: McpServerConfig): string {
   return 'url' in config ? config.url : `${config.command} ${(config.args ?? []).join(' ')}`.trim();
 }
 
-export async function connectToServer(name: string, config: McpServerConfig): Promise<ConnectedMcpServer> {
+export async function connectToServer(
+  name: string,
+  config: McpServerConfig,
+  signal?: AbortSignal,
+): Promise<ConnectedMcpServer> {
   const existing = connections.get(name);
   if (existing) return existing;
 
@@ -61,21 +65,10 @@ export async function connectToServer(name: string, config: McpServerConfig): Pr
     tools: [],
   });
 
-  const transport =
-    'url' in config
-      ? new StreamableHTTPClientTransport(new URL(config.url), {
-          requestInit: config.headers ? { headers: config.headers as Record<string, string> } : undefined,
-        })
-      : new StdioClientTransport({
-          command: config.command,
-          args: config.args ?? [],
-          env: config.env,
-          stderr: (config.stderr ?? 'pipe') as IOType,
-          cwd: config.cwd,
-        });
+  const transport = createTransport(config);
 
   const client = new Client({ name: 'mica-code', version: '0.1.0' }, { capabilities: {} });
-  await client.connect(transport, { timeout: 15_000 });
+  await client.connect(transport, { timeout: 15_000, signal });
 
   const server: ConnectedMcpServer = {
     name,
@@ -89,6 +82,25 @@ export async function connectToServer(name: string, config: McpServerConfig): Pr
 
   connections.set(name, server);
   return server;
+}
+
+function createTransport(config: McpServerConfig): StreamableHTTPClientTransport | StdioClientTransport {
+  if ('url' in config) {
+    return new StreamableHTTPClientTransport(new URL(config.url), {
+      requestInit: config.headers ? { headers: config.headers as Record<string, string> } : undefined,
+    });
+  }
+  const transport = new StdioClientTransport({
+    command: config.command,
+    args: config.args ?? [],
+    env: config.env,
+    stderr: (config.stderr ?? 'pipe') as IOType,
+    cwd: config.cwd,
+  });
+  // The SDK exposes piped stderr through a PassThrough but does not consume it.
+  // Drain the stream so a verbose MCP server cannot deadlock on a full buffer.
+  (transport.stderr as { resume?: () => void } | null)?.resume?.();
+  return transport;
 }
 
 export function markServerConnected(name: string, url: string, toolCount: number, tools: McpToolInfo[]) {

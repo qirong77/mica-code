@@ -8,7 +8,7 @@ export type { AgentRole } from './roles.js';
 
 type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';
 
-const PROJECT_INSTRUCTIONS_PATH = join(process.cwd(), 'AGENT.md');
+const PROJECT_INSTRUCTION_FILES = ['AGENT.md', 'AGENTS.md'] as const;
 
 export type BuildSystemPromptOptions = {
   baseSystemPrompt?: string;
@@ -28,7 +28,7 @@ class SystemPromptBuilder {
 
     const projectInstructions =
       options.projectInstructions === undefined
-        ? readOptionalText(PROJECT_INSTRUCTIONS_PATH)
+        ? readProjectInstructions(options.cwd ?? process.cwd())
         : (options.projectInstructions ?? undefined);
     if (projectInstructions) {
       this.append('project-instructions', projectInstructions);
@@ -84,6 +84,16 @@ function readOptionalText(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   const text = readFileSync(path, 'utf-8').trim();
   return text.length > 0 ? text : undefined;
+}
+
+export function readProjectInstructions(cwd = process.cwd()): string | undefined {
+  const found = PROJECT_INSTRUCTION_FILES.flatMap((name) => {
+    const content = readOptionalText(join(cwd, name));
+    return content ? [{ name, content }] : [];
+  });
+  if (found.length === 0) return undefined;
+  if (found.length === 1) return found[0]!.content;
+  return found.map(({ name, content }) => `# ${name}\n\n${content}`).join('\n\n');
 }
 
 function buildContextBlock(options: BuildSystemPromptOptions = {}): string {

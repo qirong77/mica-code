@@ -50,4 +50,27 @@ describe('loadSkills', () => {
       baseDir: skillDir,
     });
   });
+
+  it('loads Multica-injected project skills from .deveco/skills', async () => {
+    const previousCwd = process.cwd();
+    const projectDir = mkdtempSync(join(tmpdir(), 'mica-project-skills-'));
+    const skillDir = join(projectDir, '.deveco', 'skills', 'multica-task');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      ['---', 'name: multica-task', 'description: Follow the task workflow', '---', '', '# Instructions'].join('\n'),
+      'utf-8',
+    );
+
+    try {
+      process.chdir(projectDir);
+      const { reloadSkills } = (await import('./loadSkills.js')) as typeof import('./loadSkills.js');
+      const skill = reloadSkills().find((item) => item.name === 'multica-task');
+      expect(skill).toBeDefined();
+      expect(skill?.baseDir).toMatch(/\.deveco\/skills\/multica-task$/);
+    } finally {
+      process.chdir(previousCwd);
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 });

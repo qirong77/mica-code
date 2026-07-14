@@ -8,7 +8,7 @@
 - `mica-tools`：内置工具、工具 registry、MCP 工具接入。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。
-- `mica-runtime`：运行时协议、事件、状态、输入和消息队列。
+- `mica-runtime`：运行时协议、事件、状态、输入、消息队列和 OpenCode/DevEco-compatible run JSON schema。
 - `mica-session`：会话快照的本地保存、读取和列表。
 - `mica-config`：本地配置读写和 provider 模型列表加载。
 - `mica-commands`：通用斜杠命令注册与分发。

@@ -1,8 +1,8 @@
 # mica-skills
 
-`mica-skills` 负责加载用户自定义 skills。Skill 以目录形式存放，每个 skill 目录下需要包含 `SKILL.md`。
+`mica-skills` 负责加载用户和项目自定义 skills。Skill 以目录形式存放，每个 skill 目录下需要包含 `SKILL.md`。
 
-默认扫描目录：`~/.mica/skills`，可通过 `MICA_HOME` 覆盖。
+用户级默认扫描 `~/.mica/skills`，可通过 `MICA_HOME` 覆盖。项目级扫描当前 cwd 下的 `.mica/skills`、`.agents/skills`、`.deveco/skills` 和 `.agent_context/skills`；未设置 `MICA_HOME` 时还兼容扫描 `~/.config/deveco/skills`。
 
 ## 主要能力
 

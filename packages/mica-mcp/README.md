@@ -8,6 +8,7 @@
 - 重新连接指定 server：`micaMcp.reconnectServer(...)`。
 - 关闭连接并清理工具注册：`micaMcp.shutdown()`。
 - 读取 MCP 配置：`micaMcp.loadConfig()`。
+- 从显式路径严格读取 MCP 配置：`micaMcp.readConfig(path)`。
 - 暴露 MCP server 状态 store：`micaMcp.servers`。
 
 ## 使用入口
@@ -16,6 +17,15 @@
 import { micaMcp } from '../packages/mica-mcp/index.js';
 
 await micaMcp.init();
+
+// Headless/managed runtime: explicit servers override local servers.
+await micaMcp.init({ configPath: '/tmp/mcp.json' });
+
+// Strict mode does not merge ~/.mica/config.json.
+await micaMcp.init({ configPath: '/tmp/mcp.json', strict: true });
+
+// Headless cancellation is forwarded to connect/list/call requests.
+await micaMcp.init({ signal: abortController.signal });
 ```
 
 ## 设计约束
@@ -24,6 +34,9 @@ await micaMcp.init();
 - 远端工具必须通过 `mica-tools` 的注册入口接入，不绕开工具 registry。
 - 重连或关闭 server 时需要同步清理对应工具，避免留下失效工具定义。
 - 配置读取与连接状态更新应保持可观测，便于 `/mcp` 命令展示。
+- `loadConfig` 对缺失/损坏配置保持空集合回退；`readConfig(path)` 会把显式托管文件错误交给调用方处理。
+- MCP connect、tools/list 和 tools/call 都应传递 agent 的 AbortSignal；不要让 headless 取消等待默认超时。
+- stdio server 使用 pipe 隐藏 stderr 时仍必须持续 drain；否则服务端大量诊断输出会填满 pipe 并阻塞协议进程。
 
 ## 目录说明
 

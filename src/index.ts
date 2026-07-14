@@ -5,12 +5,104 @@ import { resolve } from 'node:path';
 import startConfigWebWorker from '../buildin-plugins/config-web-worker.mjs';
 import setupProcessDiagnostics from '../buildin-plugins/process-diagnostics.mjs';
 import { applyConfigDefaultsToFile } from '../buildin-plugins/validate-config.mjs';
+import { CLI_USAGE, parseCliArgs } from './cli/args.js';
+import { VERSION } from './buildMeta.js';
+
+if (await startConfigWebWorker()) {
+  await new Promise(() => undefined);
+}
+
+const invocation = parseCliArgs(process.argv.slice(2));
+if (invocation.mode === 'error') {
+  console.error(invocation.message);
+  process.exit(2);
+}
+if (invocation.mode === 'help') {
+  console.log(CLI_USAGE);
+  await exitAfterStdoutFlush(0);
+}
+if (invocation.mode === 'version') {
+  console.log(`mica-code ${VERSION}`);
+  await exitAfterStdoutFlush(0);
+}
+
+if (invocation.mode === 'run' && invocation.cwd) {
+  const cwd = resolve(invocation.cwd);
+  try {
+    process.chdir(cwd);
+    invocation.cwd = cwd;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        timestamp: Date.now(),
+        part: { type: 'error' },
+        error: { name: 'WorkingDirectoryError', data: { message } },
+      })}\n`,
+    );
+    console.error(message);
+    await exitAfterStdoutFlush(2);
+  }
+}
 
 const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
 applyConfigDefaultsToFile(resolve(micaHome, 'config.json'));
 
-if (await startConfigWebWorker()) {
-  await new Promise(() => undefined);
+if (invocation.mode === 'models') {
+  const { listRuntimeModelIds } = await import('./cli/modelCatalog.js');
+  const models = await listRuntimeModelIds();
+  if (models.length > 0) process.stdout.write(`${models.join('\n')}\n`);
+  await exitAfterStdoutFlush(0);
+}
+
+if (invocation.mode === 'run') {
+  const [{ runHeadless }, { createStdoutRunJsonWriter }] = await Promise.all([
+    import('./cli/runHeadless.js'),
+    import('@packages/mica-runtime/index.js'),
+  ]);
+  const writer = createStdoutRunJsonWriter();
+  const processDiagnostics = setupProcessDiagnostics({
+    reportError: (error: unknown, prefix?: string) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(prefix ? `${prefix}: ${message}` : message);
+    },
+  });
+
+  const abortController = new AbortController();
+  const requestAbort = () => abortController.abort();
+  process.once('SIGINT', requestAbort);
+  process.once('SIGTERM', requestAbort);
+  process.once('SIGHUP', requestAbort);
+
+  try {
+    const result = await runHeadless({
+      prompt: invocation.prompt,
+      sessionId: invocation.sessionId,
+      cwd: invocation.cwd,
+      model: invocation.model,
+      variant: invocation.variant,
+      maxTurns: invocation.maxTurns,
+      mcpConfigPath: invocation.mcpConfigPath,
+      strictMcpConfig: invocation.strictMcpConfig,
+      writer,
+      signal: abortController.signal,
+    });
+    process.exitCode = result.exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writer.write({
+      type: 'error',
+      timestamp: Date.now(),
+      part: { type: 'error' },
+      error: { name: error instanceof Error ? error.name : 'MicaRuntimeError', data: { message } },
+    });
+    console.error(message);
+    process.exitCode = 1;
+  } finally {
+    processDiagnostics.dispose();
+  }
+  await exitAfterStdoutFlush(process.exitCode ?? 0);
 }
 
 const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
@@ -54,4 +146,20 @@ try {
   await app.stop();
 } finally {
   processDiagnostics.dispose();
+}
+
+async function exitAfterStdoutFlush(exitCode: number): Promise<never> {
+  await new Promise<void>((done) => {
+    if (process.stdout.destroyed || !process.stdout.writable) {
+      done();
+      return;
+    }
+    const finish = () => {
+      process.stdout.off('error', finish);
+      done();
+    };
+    process.stdout.once('error', finish);
+    process.stdout.end(finish);
+  });
+  process.exit(exitCode);
 }

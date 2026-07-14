@@ -16,7 +16,7 @@ required.
 ## 核心优势
 
 - **Cache-first**：会话历史默认追加演进，尽量保持请求前缀稳定，更容易命中 provider prompt cache。
-- **Provider 选择灵活**：支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages，以及 DeepSeek、Moonshot、OpenAI 兼容网关和自建 provider。
+- **Provider 选择灵活**：支持 OpenAI Chat Completions、OpenAI Responses，以及 DeepSeek、Moonshot、OpenAI 兼容网关和自建 provider。
 - **上下文透明**：可查看 context window、token 使用、cached token rate，以及系统提示词、对话、工具输出、skills 等上下文占用。
 - **更容易恢复**：本地保存 session snapshot，长会话可 `/compact`，误操作可 `/rewind`。
 - **扩展友好**：内置文件、搜索、shell、网页、skills 等工具，也能通过 MCP 接入团队或个人工具。
@@ -30,6 +30,38 @@ required.
 ```bash
 curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
 ```
+
+## Headless run JSON
+
+无 UI 执行一轮任务，并向 stdout 输出与 OpenCode/DevEco 兼容的 NDJSON 事件流：
+
+```bash
+mica run --format json "fix the failing tests"
+mica run --format json --session <id> "continue"
+mica run --format json --dir /work --model deepseek/deepseek-chat "fix tests"
+```
+
+事件包括 `step_start`、`text`、`tool_use`、`error`、`step_finish`。成功退出码为 `0`，错误为 `1`，中断为 `130`。stdout 只承载 JSON，诊断写入 stderr。
+
+辅助探测命令：
+
+```bash
+mica --version
+mica models
+```
+
+### 接入 Multica
+
+Mica 复用 Multica 已有的 `deveco` protocol family：
+
+```bash
+multica runtime profile create \
+  --protocol-family deveco \
+  --command-name mica-code \
+  --display-name "Mica Code"
+```
+
+不要把 Mica 注册成 `claude`：Claude SDK 的双向 stream-json 是另一套协议。完整协议说明、能力边界和绝对路径配置见 [Multica runtime compatibility](./docs/multica-runtime.md)。
 
 ## 配置模型
 

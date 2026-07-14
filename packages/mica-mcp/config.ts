@@ -23,12 +23,19 @@ type McpConfig = {
 
 export const MCP_CONFIG_PATH = micaConfig.path;
 
-export async function loadMcpConfig(): Promise<Record<string, McpServerConfig>> {
+export async function loadMcpConfig(path = MCP_CONFIG_PATH): Promise<Record<string, McpServerConfig>> {
   try {
-    const raw = await readFile(MCP_CONFIG_PATH, 'utf-8');
-    const parsed = JSON.parse(raw) as McpConfig;
-    return parsed.mcpServers ?? {};
+    return await readMcpConfig(path);
   } catch {
     return {};
   }
+}
+
+export async function readMcpConfig(path: string): Promise<Record<string, McpServerConfig>> {
+  const raw = await readFile(path, 'utf-8');
+  const parsed = JSON.parse(raw) as McpConfig;
+  if (!parsed || typeof parsed !== 'object' || !parsed.mcpServers || typeof parsed.mcpServers !== 'object') {
+    return {};
+  }
+  return parsed.mcpServers;
 }

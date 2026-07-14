@@ -21,18 +21,30 @@ export type AgentRuntimeConfigSnapshot = {
   effort: EffortOption;
 };
 
-export function readAgentRuntimeConfig(): AgentRuntimeConfig {
+export type AgentRuntimeConfigOverride = {
+  providerId?: string;
+  model?: string;
+  effort?: EffortOption;
+};
+
+export function readAgentRuntimeConfig(override: AgentRuntimeConfigOverride = {}): AgentRuntimeConfig {
   const config = micaConfig.get();
-  const provider = config.providers.find((item) => item.id === config.provider);
+  const providerId = override.providerId ?? config.provider;
+  const provider = config.providers.find((item) => item.id === providerId);
   if (!provider) {
-    throw new Error(`Provider not found: ${config.provider || '(empty)'}`);
+    throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
-  const model = config.model;
+  const model = override.model ?? (provider.id === config.provider ? config.model : (provider.models?.[0] ?? ''));
+  if (!model) {
+    throw new Error(`Model not configured for provider: ${provider.id}`);
+  }
   const normalizedProvider = normalizeProviderForModel(provider, model);
+  const requestedEffort = override.effort ?? config.effort;
   return {
     provider: normalizedProvider,
     model,
-    effort: normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, config.effort),
+    effort:
+      normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, requestedEffort),
   };
 }
 
@@ -50,7 +62,8 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   return {
     provider: normalizedProvider,
     model,
-    effort: normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
+    effort:
+      normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
   };
 }
 
