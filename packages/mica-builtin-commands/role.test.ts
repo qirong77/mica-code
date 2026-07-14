@@ -40,14 +40,16 @@ describe('role command', () => {
     const setRole = vi.fn();
     const saveCurrent = vi.fn();
     const showMessage = vi.fn();
+    const syncModelDisplay = vi.fn();
     const agent = makeAgent({ setRole });
     const session = makeSession({ saveCurrent });
-    const services = makeServices({ agent, session, showMessage });
+    const services = makeServices({ agent, session, showMessage, syncModelDisplay });
 
     createRoleCommand(agent, session, services).action('reviewer');
 
     expect(setRole).toHaveBeenCalledWith('reviewer');
     expect(saveCurrent).toHaveBeenCalledOnce();
+    expect(syncModelDisplay).toHaveBeenCalledWith(agent);
     expect(showMessage).toHaveBeenCalledWith('Role: reviewer', 3000, 'agent-1');
   });
 
@@ -112,6 +114,7 @@ function makeServices(options: {
   agent: CommandAgent;
   session: CommandSessionController;
   showMessage: CommandRuntimeServices['showMessage'];
+  syncModelDisplay?: CommandRuntimeServices['syncModelDisplay'];
 }): CommandRuntimeServices {
   return {
     isAgentBusy: () => false,
@@ -119,5 +122,6 @@ function makeServices(options: {
     getCurrentSessionController: () => options.session,
     getCurrentAgentSessionId: () => 'agent-1',
     showMessage: options.showMessage,
+    syncModelDisplay: options.syncModelDisplay ?? (() => undefined),
   } as unknown as CommandRuntimeServices;
 }

@@ -25,6 +25,7 @@ export function syncModelDisplay(agent: AgentRuntime) {
   micaUi.panels.modelDisplay.name.set(agent.config.model);
   micaUi.panels.modelDisplay.effort.set(agent.config.provider.supportsEffort !== false ? agent.config.effort : 'none');
   micaUi.panels.modelDisplay.contextWindowSize.set(agent.config.provider.contextWindowSize);
+  micaUi.terminalInput.role.set(agent.role);
 }
 
 export function clearUI(agent: AgentRuntime, sessionController?: SessionController) {

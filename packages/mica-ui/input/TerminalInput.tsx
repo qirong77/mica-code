@@ -1,4 +1,4 @@
-import { Box, useInput, useTerminalSize } from '@anthropic/ink';
+import { Box, stringWidth, useInput, useTerminalSize } from '@anthropic/ink';
 import { micaConfig } from '@packages/mica-config/index.js';
 import React from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
@@ -34,7 +34,9 @@ function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const terminalSize = useTerminalSize();
-  const columns = Math.max(1, (process.stdout.columns ?? terminalSize?.columns ?? 80) - 6);
+  const role = useScheduleState(input.role);
+  const rolePrefixWidth = role === 'default' ? 0 : stringWidth(role) + 1;
+  const columns = Math.max(1, (process.stdout.columns ?? terminalSize?.columns ?? 80) - 6 - rolePrefixWidth);
   const activePluginUIs = useScheduleState(pluginUIs);
   const activeCommandPanelItems = useScheduleState(commandPanelItems);
   const status = useScheduleState(workingStatus);
@@ -374,7 +376,7 @@ function TerminalInput() {
 
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
-      <PromptFrame mode={frameMode} label={frameLabel}>
+      <PromptFrame mode={frameMode} label={frameLabel} role={role}>
         <SimpleTextInput
           value={localText}
           onChange={handleChange}

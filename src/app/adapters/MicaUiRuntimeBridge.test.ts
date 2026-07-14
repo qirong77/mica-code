@@ -17,6 +17,7 @@ const uiMocks = (() => {
     effortSet: fn(),
     inputClearText: fn(),
     inputOnSubmit: fn(),
+    inputRoleSet: fn(),
     messageAdd: fn(),
     messageRemove: fn(),
     modelNameSet: fn(),
@@ -84,6 +85,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
     terminalInput: {
       clearText: uiMocks.inputClearText,
       onSubmit: uiMocks.inputOnSubmit,
+      role: { set: uiMocks.inputRoleSet },
     },
   },
 }));

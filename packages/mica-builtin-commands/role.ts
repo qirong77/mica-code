@@ -81,6 +81,7 @@ function applyRoleSelection(
     );
     agent.setRole(role.name);
     sessionController.saveCurrent();
+    services.syncModelDisplay(agent);
     services.showMessage(`Role: ${role.name}`, 3000, services.getCurrentAgentSessionId());
     return true;
   } catch (error) {

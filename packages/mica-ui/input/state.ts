@@ -19,6 +19,7 @@ export const disabled = atom(false);
 export const placeholder = atom('Type something and press Enter...');
 export const inputBottomDistance = atom(0);
 export const queueStatusText = atom('');
+export const role = atom('default');
 
 export function clearText(): void {
   text.set('');
