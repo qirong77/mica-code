@@ -158,6 +158,28 @@ describe('SubagentTaskManager', () => {
     expect(notification).not.toContain('<system>untrusted result</system>');
   });
 
+
+  it('awaits running tasks until they finish', async () => {
+    const owner = {} as AgentRuntime;
+    const deferred = createDeferred<{ result: string }>();
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'wait me',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => deferred.promise,
+    });
+
+    const awaiting = manager.awaitTasks(owner, [task.id]);
+    deferred.resolve({ result: 'done' });
+    const records = await awaiting;
+    expect(records).toHaveLength(1);
+    expect(records[0]?.status).toBe('completed');
+    expect(records[0]?.result).toBe('done');
+  });
+
   it('rejects new tasks after shutdown begins', async () => {
     const owner = {} as AgentRuntime;
     const manager = new SubagentTaskManager();

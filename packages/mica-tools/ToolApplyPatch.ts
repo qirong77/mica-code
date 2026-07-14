@@ -4,6 +4,7 @@ import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
 import { backupFile } from './utils/fileHistory.js';
+import { assertWritablePath } from './utils/pathOwnership.js';
 
 const BEGIN_MARKER = '*** Begin Patch';
 const END_MARKER = '*** End Patch';
@@ -24,10 +25,7 @@ type PatchHunk = {
   lines: HunkLine[];
 };
 
-type HunkLine =
-  | { type: 'context'; text: string }
-  | { type: 'remove'; text: string }
-  | { type: 'add'; text: string };
+type HunkLine = { type: 'context'; text: string } | { type: 'remove'; text: string } | { type: 'add'; text: string };
 
 type AppliedChange =
   | { type: 'add'; path: string }
@@ -51,11 +49,18 @@ export class ToolApplyPatch extends MicaTool {
     });
   }
 
-  async execute(input: { patch: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: { patch: string }, callbacks?: ToolExecuteCallbacks): Promise<string> {
     if (!input.patch.trim()) return 'apply_patch 失败：patch 不能为空';
 
     const operations = parsePatch(input.patch);
     if (operations.length === 0) return 'apply_patch 失败：补丁中没有文件操作';
+
+    for (const operation of operations) {
+      assertWritablePath(operation.path, callbacks?.context);
+      if (operation.type === 'update' && operation.moveTo) {
+        assertWritablePath(operation.moveTo, callbacks?.context);
+      }
+    }
 
     const { pendingFiles, changes } = await preparePatchApplication(operations);
     for (const [filePath, content] of pendingFiles) {

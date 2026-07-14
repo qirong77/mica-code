@@ -21,6 +21,7 @@ export type SubagentTaskRecord = {
   model: string;
   effort: EffortOption;
   max_turns?: number;
+  owned_paths?: string[];
   status: SubagentTaskStatus;
   started_at: string;
   finished_at?: string;
@@ -43,6 +44,7 @@ export type StartSubagentTaskOptions = {
   model: string;
   effort: EffortOption;
   maxTurns?: number;
+  ownedPaths?: string[];
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
 };
@@ -141,6 +143,7 @@ export class SubagentTaskManager {
       model: options.model,
       effort: options.effort,
       ...(options.maxTurns === undefined ? {} : { max_turns: options.maxTurns }),
+      ...(options.ownedPaths && options.ownedPaths.length > 0 ? { owned_paths: [...options.ownedPaths] } : {}),
       status: 'running',
       started_at: new Date().toISOString(),
     };
@@ -165,6 +168,50 @@ export class SubagentTaskManager {
   get(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
     const task = this.tasks.get(id);
     return task?.owner === owner ? cloneRecord(task.record) : undefined;
+  }
+
+  async awaitTasks(
+    owner: AgentRuntime,
+    taskIds: string[],
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<SubagentTaskRecord[]> {
+    const uniqueIds = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) throw new Error('await requires at least one task_id.');
+
+    const timeoutMs = options.timeoutMs;
+    const startedAt = Date.now();
+
+    while (true) {
+      if (options.signal?.aborted) throw new Error('await aborted.');
+      const tasks = uniqueIds.map((id) => {
+        const task = this.get(id, owner);
+        if (!task) throw new Error(`Subagent task not found: ${id}`);
+        return task;
+      });
+      if (tasks.every((task) => task.status !== 'running')) return tasks;
+
+      if (timeoutMs !== undefined && Date.now() - startedAt >= timeoutMs) {
+        return tasks;
+      }
+
+      const pending = uniqueIds
+        .map((id) => this.tasks.get(id))
+        .filter((task): task is ManagedSubagentTask =>
+          Boolean(task && task.owner === owner && task.record.status === 'running'),
+        );
+      if (pending.length === 0) {
+        return uniqueIds.map((id) => {
+          const task = this.get(id, owner);
+          if (!task) throw new Error(`Subagent task not found: ${id}`);
+          return task;
+        });
+      }
+
+      await Promise.race([
+        ...pending.map((task) => task.promise),
+        sleep(Math.min(250, timeoutMs ?? 250), options.signal),
+      ]);
+    }
   }
 
   subscribe(listener: SubagentTaskChangeListener): () => void {
@@ -293,7 +340,11 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 }
 
 function cloneRecord(record: SubagentTaskRecord): SubagentTaskRecord {
-  return { ...record, ...(record.usage ? { usage: { ...record.usage } } : {}) };
+  return {
+    ...record,
+    ...(record.usage ? { usage: { ...record.usage } } : {}),
+    ...(record.owned_paths ? { owned_paths: [...record.owned_paths] } : {}),
+  };
 }
 
 function tailText(text: string, maxChars: number): string {
@@ -333,4 +384,23 @@ async function waitForTasks(tasks: Promise<void>[], timeoutMs: number): Promise<
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('await aborted.'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    timer.unref?.();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('await aborted.'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }

@@ -24,6 +24,7 @@ import {
   largeOutputHint,
   MAX_STREAM_CHARS,
 } from './ToolRunShellOutput.js';
+import { assertShellPathAccess } from './utils/pathOwnership.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MIN_TIMEOUT_MS = 250;
@@ -103,6 +104,12 @@ export class ToolRunShell extends MicaTool {
   }
 
   private async executeForeground(input: RunShellInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    try {
+      assertShellPathAccess(input.cwd, callbacks?.context);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return `工具 run_shell 输入校验失败：${message}`;
+    }
     const cwdResult = resolveCwd(input.cwd);
     if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
 
@@ -212,6 +219,12 @@ export class ToolRunShell extends MicaTool {
   }
 
   private async executeBackground(input: RunShellInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    try {
+      assertShellPathAccess(input.cwd, callbacks?.context);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return `工具 run_shell 输入校验失败：${message}`;
+    }
     const cwdResult = resolveCwd(input.cwd);
     if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
 

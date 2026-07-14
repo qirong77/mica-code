@@ -357,8 +357,13 @@ AGENT.md
 - 主 runtime 维护 per-agent queue、response buffer、committed buffer、session controller 和运行状态。
 - `switchSession(agent, sessionController)` 必须同步 runtime 当前 agent、session controller、queue UI 和 UI bridge 当前 agent。
 - `/fork` 和后台 agent 相关命令要注意 provider/model/effort/role 与 UI snapshot 的一致性。
-- `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
+- `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取，也可用 `operation=await` 等待完成；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
 - subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。
+- subagent 默认不继承完整对话历史，而是按 `context_mode`（`none|brief|recent|files`）注入 `<delegated-context>` 任务包；默认 `brief`。
+- 可写 subagent 支持 `owned_paths` 路径租约；`Implementer` / `Tester` / `Proposal` 必填。写工具（`write_file` / `apply_patch`）和 `run_shell` cwd 会校验路径所有权，重叠租约会在启动时拒绝。
+- `Agent` 支持 `operation=run_many`（`tasks` + `depends_on` + `max_parallel`）和 `operation=join` 汇总多个 task 结果。
+- `Proposal` 为不落盘提案模式，只返回 patch 文本供 parent 审查后 apply。
+- 当前内置 subagent 类型：`general-purpose`、`Explore`、`Implementer`、`Reviewer`、`Tester`、`Planner`、`Proposal`。
 - `RewindCheckpointManager` 在 turn 前捕获对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。

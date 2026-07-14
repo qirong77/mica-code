@@ -4,6 +4,7 @@ import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { backupFile } from './utils/fileHistory.js';
 import { truncateDisplayText } from './utils/display.js';
+import { assertWritablePath } from './utils/pathOwnership.js';
 
 export class ToolWriteFile extends MicaTool {
   constructor() {
@@ -17,7 +18,8 @@ export class ToolWriteFile extends MicaTool {
     });
   }
 
-  async execute(input: { file_path: string; content: string }, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: { file_path: string; content: string }, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    assertWritablePath(input.file_path, callbacks?.context);
     await backupFile(input.file_path);
     const dir = dirname(input.file_path);
     await mkdir(dir, { recursive: true });

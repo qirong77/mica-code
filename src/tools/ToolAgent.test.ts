@@ -18,11 +18,14 @@ describe('ToolAgent', () => {
       prompt: 'Find the config loader.',
     });
 
-    expect(query).toHaveBeenCalledWith('Find the config loader.', {
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), {
       maxTurns: 20,
       signal: expect.any(AbortSignal),
     });
+    const firstCall = query.mock.calls.at(0) as unknown as [string, unknown] | undefined;
+    expect(firstCall?.[0]).toContain('<delegated-context>');
     expect(result).toContain('Subagent: Explore');
+    expect(result).toContain('## Summary');
     expect(result).toContain('child result');
     expect(listener).toHaveBeenNthCalledWith(
       1,
@@ -96,7 +99,7 @@ describe('ToolAgent', () => {
     const completed = await tool.execute({ operation: 'read', task_id: taskId });
     expect(completed).toContain('status: completed');
     expect(completed).toContain('child result');
-    expect(query).toHaveBeenCalledWith('Find the config loader.', {
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), {
       maxTurns: 30,
       signal: expect.any(AbortSignal),
     });
@@ -121,6 +124,103 @@ describe('ToolAgent', () => {
     expect(failed).toContain('status: failed');
     expect(failed).toContain('partial child result');
     expect(failed).toContain('maximum of 30 turns');
+  });
+
+  it('requires owned_paths for Implementer and injects them into tool context', async () => {
+    const { runtime, createSubAgent } = createRuntimeStub();
+    const tool = new ToolAgent(runtime);
+
+    await expect(
+      tool.execute({
+        description: 'write code',
+        prompt: 'Implement the change.',
+        subagent_type: 'Implementer',
+      }),
+    ).rejects.toThrow('requires non-empty owned_paths');
+
+    await tool.execute({
+      description: 'write code',
+      prompt: 'Implement the change.',
+      subagent_type: 'Implementer',
+      owned_paths: ['src/tools'],
+      context_mode: 'none',
+    });
+
+    const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
+    expect(options.toolContext).toMatchObject({
+      ownedPaths: [expect.stringContaining('src/tools')],
+    });
+  });
+
+  it('awaits background tasks until completion', async () => {
+    const deferred = createDeferred<string>();
+    const query = vi.fn(() => deferred.promise);
+    const { runtime } = createRuntimeStub(query);
+    const tool = new ToolAgent(runtime, new SubagentTaskManager());
+    const started = await tool.execute({
+      description: 'bg',
+      prompt: 'Work',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1];
+    expect(taskId).toBeTruthy();
+
+    const awaiting = tool.execute({ operation: 'await', task_id: taskId });
+    deferred.resolve('done');
+    const result = await awaiting;
+    expect(result).toContain('status: completed');
+    expect(result).toContain('done');
+  });
+
+  it('run_many executes dependency waves and join summarizes results', async () => {
+    const query = vi.fn(async (prompt: string) => `result for ${prompt}`);
+    const { runtime } = createRuntimeStub(query);
+    const tool = new ToolAgent(runtime, new SubagentTaskManager());
+
+    const many = await tool.execute({
+      operation: 'run_many',
+      max_parallel: 2,
+      tasks: [
+        {
+          id: 'explore',
+          description: 'explore ui',
+          prompt: 'Explore UI',
+          subagent_type: 'Explore',
+          context_mode: 'none',
+        },
+        {
+          id: 'impl',
+          description: 'implement ui',
+          prompt: 'Implement UI',
+          subagent_type: 'Implementer',
+          owned_paths: ['packages/mica-ui'],
+          depends_on: ['explore'],
+          context_mode: 'none',
+        },
+      ],
+    });
+
+    expect(many).toContain('run_many finished 2 task(s)');
+    expect(many).toContain('## explore: explore ui');
+    expect(many).toContain('## impl: implement ui');
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts proposal subagents without write tools', async () => {
+    const { runtime, createSubAgent } = createRuntimeStub();
+    const tool = new ToolAgent(runtime);
+    await tool.execute({
+      description: 'propose patch',
+      prompt: 'Return a patch only.',
+      subagent_type: 'Proposal',
+      owned_paths: ['src/tools'],
+      context_mode: 'none',
+    });
+    const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
+    expect(options.toolFilter?.('write_file')).toBe(false);
+    expect(options.toolFilter?.('apply_patch')).toBe(false);
+    expect(options.toolContext).toMatchObject({ writeMode: 'proposal' });
   });
 
   it('kills a background task with its independent signal', async () => {
@@ -161,6 +261,8 @@ function createRuntimeStub(query = vi.fn(async () => 'child result')) {
   const runtime = {
     createSubAgent,
     createClientOptions,
+    taskOwnerId: 'owner-1',
+    getSnapshot: () => ({ messages: [{ role: 'user', content: 'parent history context' }] }),
   } as unknown as AgentRuntime;
   return { runtime, createSubAgent, createClientOptions, query };
 }
