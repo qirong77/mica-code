@@ -1,25 +1,25 @@
-import { createClearCommand } from './clear.js';
-import { createCommitCommand } from './commit.js';
-import { createCompactCommand } from './compact.js';
-import { createConfigCommand } from './config.js';
-import { createContextCommand } from './context.js';
-import { createEffortCommand } from './effort.js';
-import { createDiffCommand } from './diff.js';
-import { createExitCommand } from './exit.js';
-import { createForkCommand } from './fork.js';
-import { createMcpCommand } from './mcp.js';
-import { createModelCommand } from './model.js';
-import { createNewCommand } from './new.js';
-import { createProviderCommand } from './provider.js';
-import { createRenameCommand } from './rename.js';
-import { createResumeCommand } from './resume.js';
-import { createRewindCommand } from './rewind.js';
-import { createRoleCommand } from './role.js';
-import { createSkillsCommand } from './skills.js';
-import { createStatusCommand } from './status.js';
-import { syncConfigFromAgent } from './configSwitch.js';
-import { createTaskCommand } from './task.js';
-import { AgentChangeTracker } from './agentChangeTracker.js';
+import { createClearCommand } from './commands/clear.js';
+import { createCommitCommand } from './commands/commit.js';
+import { createCompactCommand } from './commands/compact.js';
+import { createConfigCommand } from './commands/config.js';
+import { createContextCommand } from './commands/context.js';
+import { createEffortCommand } from './commands/effort.js';
+import { createDiffCommand } from './commands/diff.js';
+import { createExitCommand } from './commands/exit.js';
+import { createForkCommand } from './commands/fork.js';
+import { createMcpCommand } from './commands/mcp.js';
+import { createModelCommand } from './commands/model.js';
+import { createNewCommand } from './commands/new.js';
+import { createProviderCommand } from './commands/provider.js';
+import { createRenameCommand } from './commands/rename.js';
+import { createResumeCommand } from './commands/resume.js';
+import { createRewindCommand } from './commands/rewind.js';
+import { createRoleCommand } from './commands/role.js';
+import { createSkillsCommand } from './commands/skills.js';
+import { createStatusCommand } from './commands/status.js';
+import { syncConfigFromAgent } from './shared/configSwitch.js';
+import { createTaskCommand } from './commands/task.js';
+import { AgentChangeTracker } from './git/agentChangeTracker.js';
 
 export const micaBuiltinCommands = {
   createClearCommand,
@@ -60,4 +60,4 @@ export type {
   SessionSummary,
 } from './services.js';
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
-export { AgentChangeTracker } from './agentChangeTracker.js';
+export { AgentChangeTracker } from './git/agentChangeTracker.js';

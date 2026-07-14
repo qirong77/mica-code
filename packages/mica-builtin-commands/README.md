@@ -34,19 +34,25 @@ const commands = [
 
 ## 目录说明
 
-- `index.ts`：内置命令创建工厂导出。
-- `services.ts`：命令依赖的服务接口定义。
-- `model.ts`、`provider.tsx`、`role.ts`：模型、provider 与系统提示词 role 切换命令。
-- `effort.ts`：effort 切换命令。
-- `configSwitch.ts`：配置切换时的辅助函数。
-- `context.tsx`：上下文汇总与展示命令。
-- `exit.ts`：退出命令。
-- `new.ts`：新建会话命令。
-- `rename.ts`：会话重命名命令。
-- `resume.ts`：会话恢复命令。
-- `mcp.tsx`、`skills.tsx`：MCP 与 skills 管理命令。
-- `task.tsx`、`fork.ts`、`rewind.tsx`：多任务、分叉与回退相关命令。
-- `compact.ts`：上下文压缩命令。
-- `status.tsx`、`context.tsx`：状态查看与上下文总览命令。
-- `diff.ts`、`agentChangeTracker.ts`：展示 Git 变更文件并追踪当前 Agent 的增量。
-- `commit.ts`：提交辅助命令；`/commit agent` 仅提交当前 Agent 的增量。
+```text
+packages/mica-builtin-commands/
+  index.ts                 公共 API：命令工厂、AgentChangeTracker、services 类型
+  services.ts              命令依赖的服务接口定义
+  README.md
+  commands/                各内置斜杠命令实现
+  shared/                  命令间共享辅助逻辑
+  git/                     Git 变更追踪与 diff 展示辅助
+  tests/                   包内全部测试
+```
+
+- `commands/`：`clear`、`commit`、`compact`、`config`、`context`、`diff`、`effort`、`exit`、`fork`、`mcp`、`model`、`new`、`provider`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task` 等命令工厂。
+- `shared/`：
+  - `commandInput.ts`：列表选择键盘导航。
+  - `selectCommand.tsx`：通用选择面板。
+  - `configSwitch.ts`：provider/model/effort 切换辅助。
+  - `agentBackground.ts`：后台 agent 提交辅助。
+- `git/`：
+  - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
+  - `gitDiff.ts`：unified/side-by-side diff 解析与加载。
+- `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
+- `index.ts`：稳定公共导出入口；应用层只应从这里引用。
