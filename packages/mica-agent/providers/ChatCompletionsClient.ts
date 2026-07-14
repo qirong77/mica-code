@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
   resolveChatCompletionsEffortParams,
+  resolveModelRequestPatch,
   type EffortOption,
   type ProviderDefinition,
 } from '@packages/mica-config/index.js';
@@ -288,7 +289,9 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   private get reasoningParams(): Record<string, unknown> {
-    return resolveChatCompletionsEffortParams(this.provider, this.effort ?? 'none');
+    const effort = this.effort ?? 'none';
+    return resolveModelRequestPatch(this.model, effort, 'openai_chat_completions')
+      ?? resolveChatCompletionsEffortParams(this.provider, effort);
   }
 
   private recordUsage(

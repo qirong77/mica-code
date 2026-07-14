@@ -31,13 +31,21 @@ export type {
   EffortMap,
   EffortOption,
   IMicaConfig,
+  ModelEffortRule,
+  ModelRequestPatch,
   ModelRule,
   PersistedMicaConfig,
   ProviderDefinition,
   ProviderProtocol,
   ResolvedEffortParams,
 } from './types.js';
-export { getModelRule } from './getModelRule.js';
+export {
+  getModelEffortOptions,
+  getModelRule,
+  normalizeModelEffort,
+  registerModelRules,
+  resolveModelRequestPatch,
+} from './getModelRule.js';
 export {
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,

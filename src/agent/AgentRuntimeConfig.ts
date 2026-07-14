@@ -32,7 +32,7 @@ export function readAgentRuntimeConfig(): AgentRuntimeConfig {
   return {
     provider: normalizedProvider,
     model,
-    effort: normalizedProvider.supportsEffort === false ? 'none' : config.effort,
+    effort: normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, config.effort),
   };
 }
 
@@ -50,7 +50,7 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   return {
     provider: normalizedProvider,
     model,
-    effort: normalizedProvider.supportsEffort === false ? 'none' : snapshot.effort,
+    effort: normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
   };
 }
 

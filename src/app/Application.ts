@@ -26,6 +26,7 @@ import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import setupFilePlugins, { writeFilePluginStatus } from '../../buildin-plugins/file-plugins.mjs';
 import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
+import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
 
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
@@ -54,6 +55,7 @@ export class Application {
     try {
       const pluginPaths = createPluginPaths();
       validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
+      setupModelEffortContext();
       await ensureInitialModelSelection();
       const agent = new AgentRuntime();
       const sessionController = new SessionController(agent);

@@ -319,7 +319,7 @@ function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
       ...config,
       provider: provider.id,
       model,
-      effort: provider.supportsEffort === false ? 'none' : snapshot.effort,
+      effort: provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
       contextWindowSize: micaConfig.getModelRule(model).contextSize,
     };
   });

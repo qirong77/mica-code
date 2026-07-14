@@ -9,6 +9,8 @@ export const CONFIG_PATH = resolveMicaHomePath('config.json');
 export type EffortOption = (typeof EFFORT_OPTIONS)[number];
 export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 export type EffortMap = Record<EffortOption, EffortOption>;
+export type ModelRequestPatch = Record<string, unknown>;
+export type ModelEffortRule = Partial<Record<ProviderProtocol, ModelRequestPatch>>;
 
 export interface ProviderDefinition {
   id: string;
@@ -39,7 +41,8 @@ export type ModelRule = {
   name: string;
   modelKeysIncludes: string[];
   contextSize: number;
-  effortMap: EffortMap;
+  defaultEffort: EffortOption;
+  efforts: Partial<Record<EffortOption, ModelEffortRule>>;
 };
 
 export type ResolvedEffortParams = Record<string, unknown>;

@@ -62,7 +62,10 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): {
   if (!provider) return { config, adjustments: [] };
 
   const model = config.model || provider.models?.[0] || '';
-  const effort = provider.supportsEffort === false ? 'none' : isEffortOption(config.effort) ? config.effort : 'medium';
+  const selectedEffort = isEffortOption(config.effort) ? config.effort : 'medium';
+  const effort = provider.supportsEffort === false
+    ? 'none'
+    : micaConfig.normalizeModelEffort(model, selectedEffort);
   const contextWindowSize = micaConfig.getModelRule(model).contextSize;
   const adjustments: ConfigSwitchAdjustment[] = [];
 

@@ -1,5 +1,5 @@
 import { requireProvider, type IMicaConfig } from './types.js';
-import { getModelRule } from './getModelRule.js';
+import { getModelRule, normalizeModelEffort } from './getModelRule.js';
 
 export type RuntimeConfigStore = {
   getConfig(): IMicaConfig;
@@ -44,7 +44,7 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
       providers,
       model,
       contextWindowSize: current ? getModelRule(model).contextSize : config.contextWindowSize,
-      effort: current?.supportsEffort === false ? 'none' : config.effort,
+      effort: current?.supportsEffort === false ? 'none' : current ? normalizeModelEffort(model, config.effort) : config.effort,
     };
   });
   return models;

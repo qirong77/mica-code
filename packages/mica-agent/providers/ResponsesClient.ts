@@ -12,6 +12,7 @@ import type {
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
   resolveResponsesReasoningParams,
+  resolveModelRequestPatch,
   type EffortOption,
   type ProviderDefinition,
 } from '@packages/mica-config/index.js';
@@ -316,7 +317,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
   private get reasoningParams(): Record<string, unknown> {
     if (!this.provider || !this.effort) return {};
-    return resolveResponsesReasoningParams(this.provider, this.effort);
+    return resolveModelRequestPatch(this.model, this.effort, 'openai_responses')
+      ?? resolveResponsesReasoningParams(this.provider, this.effort);
   }
 
   private recordUsage(

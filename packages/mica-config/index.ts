@@ -8,6 +8,10 @@ import {
   loadProviderModels,
   loadMissingProviderModels,
   getModelRule,
+  getModelEffortOptions,
+  normalizeModelEffort,
+  registerModelRules,
+  resolveModelRequestPatch,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './config.js';
@@ -40,6 +44,14 @@ export const micaConfig = {
   loadMissingProviderModels,
   /** 按模型名生成固定的模型规则。 */
   getModelRule,
+  /** 返回当前模型支持的 effort 选项。 */
+  getModelEffortOptions,
+  /** 将不受模型支持的 effort 校正为模型默认值。 */
+  normalizeModelEffort,
+  /** 注册数据驱动的模型规则。 */
+  registerModelRules,
+  /** 解析模型在指定协议下的请求参数。 */
+  resolveModelRequestPatch,
   /** 把统一 effort 转换为 Chat Completions 请求参数。 */
   resolveChatCompletionsEffortParams,
   /** 把统一 effort 转换为 Responses 请求参数。 */
@@ -67,8 +79,12 @@ export const micaConfig = {
 };
 
 export {
+  getModelEffortOptions,
   getModelRule,
+  normalizeModelEffort,
   providerSupportsModel,
+  registerModelRules,
+  resolveModelRequestPatch,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './config.js';
@@ -78,6 +94,8 @@ export type {
   EffortOption,
   EffortMap,
   ModelRule,
+  ModelEffortRule,
+  ModelRequestPatch,
   ProviderProtocol,
   ResolvedEffortParams,
   IMicaConfig,
