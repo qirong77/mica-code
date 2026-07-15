@@ -14,7 +14,7 @@ import { createProviderCommand } from './commands/provider.js';
 import { createRenameCommand } from './commands/rename.js';
 import { createResumeCommand } from './commands/resume.js';
 import { createRewindCommand } from './commands/rewind.js';
-import { createRoleCommand } from './commands/role.js';
+import { createRoleCommand, cycleNextRole } from './commands/role.js';
 import { createSkillsCommand } from './commands/skills.js';
 import { createStatusCommand } from './commands/status.js';
 import { syncConfigFromAgent } from './shared/configSwitch.js';
@@ -22,6 +22,7 @@ import { createTaskCommand } from './commands/task.js';
 import { AgentChangeTracker } from './git/agentChangeTracker.js';
 
 export const micaBuiltinCommands = {
+  cycleNextRole,
   createClearCommand,
   createCommitCommand,
   createCompactCommand,

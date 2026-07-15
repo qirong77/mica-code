@@ -1,4 +1,5 @@
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
@@ -24,33 +25,43 @@ function createBuiltInCommands(
   agent: AgentRuntime,
   sessionController: SessionController,
   tracker: InstanceType<typeof micaBuiltinCommands.AgentChangeTracker>,
-): BuiltInCommandItem[] {
+): {
+  commands: BuiltInCommandItem[];
+  services: ReturnType<typeof createCommandRuntimeServices>;
+  activeAgent: ReturnType<typeof createActiveAgentProxy>;
+  activeSessionController: ReturnType<typeof createActiveSessionControllerProxy>;
+} {
   const services = createCommandRuntimeServices();
   const activeAgent = createActiveAgentProxy(agent);
   const activeSessionController = createActiveSessionControllerProxy(sessionController);
 
-  return [
-    micaBuiltinCommands.createClearCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createResumeCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createRoleCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createStatusCommand(activeAgent, activeSessionController),
-    micaBuiltinCommands.createContextCommand(activeAgent),
-    micaBuiltinCommands.createConfigCommand(activeAgent, services),
-    micaBuiltinCommands.createNewCommand(services),
-    micaBuiltinCommands.createForkCommand(services),
-    micaBuiltinCommands.createRewindCommand(services),
-    micaBuiltinCommands.createMcpCommand(services),
-    micaBuiltinCommands.createSkillsCommand(),
-    micaBuiltinCommands.createDiffCommand(activeAgent, services, tracker),
-    micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
-    micaBuiltinCommands.createTaskCommand(services),
-    micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
-    micaBuiltinCommands.createExitCommand(services),
-    micaBuiltinCommands.createRenameCommand(activeSessionController, services),
-  ];
+  return {
+    services,
+    activeAgent,
+    activeSessionController,
+    commands: [
+      micaBuiltinCommands.createClearCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createResumeCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createRoleCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createStatusCommand(activeAgent, activeSessionController),
+      micaBuiltinCommands.createContextCommand(activeAgent),
+      micaBuiltinCommands.createConfigCommand(activeAgent, services),
+      micaBuiltinCommands.createNewCommand(services),
+      micaBuiltinCommands.createForkCommand(services),
+      micaBuiltinCommands.createRewindCommand(services),
+      micaBuiltinCommands.createMcpCommand(services),
+      micaBuiltinCommands.createSkillsCommand(),
+      micaBuiltinCommands.createDiffCommand(activeAgent, services, tracker),
+      micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
+      micaBuiltinCommands.createTaskCommand(services),
+      micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
+      micaBuiltinCommands.createExitCommand(services),
+      micaBuiltinCommands.createRenameCommand(activeSessionController, services),
+    ],
+  };
 }
 
 export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
@@ -69,10 +80,21 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
     const tracker = new micaBuiltinCommands.AgentChangeTracker();
     const observer = micaTools.observeExecution(tracker.createObserver());
     ctx.onDispose(() => observer.dispose());
-    const builtInCommands = createBuiltInCommands(this.agent, this.sessionController, tracker);
+    const { commands, services, activeAgent, activeSessionController } = createBuiltInCommands(
+      this.agent,
+      this.sessionController,
+      tracker,
+    );
 
-    for (const command of builtInCommands) {
+    for (const command of commands) {
       registerCommand(ctx, command, { allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name) });
     }
+
+    micaUi.terminalInput.setOnCycleRole(() => {
+      micaBuiltinCommands.cycleNextRole(activeAgent, activeSessionController, services);
+    });
+    ctx.onDispose(() => {
+      micaUi.terminalInput.setOnCycleRole(null);
+    });
   }
 }

@@ -82,6 +82,10 @@ export const micaUi = {
     offSubmit: input.offSubmit,
     /** 触发一次终端输入提交。 */
     submit: input.submit,
+    /** 设置 Shift+Tab 切换 role 的回调。 */
+    setOnCycleRole: input.setOnCycleRole,
+    /** 触发一次 role 循环切换。 */
+    cycleRole: input.cycleRole,
   },
   dropdown: {
     ...dropdown,

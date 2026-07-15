@@ -22,7 +22,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
   },
 }));
 
-const { createRoleCommand } = await import('../commands/role.js');
+const { createRoleCommand, cycleNextRole } = await import('../commands/role.js');
 
 describe('role command', () => {
   beforeEach(() => {
@@ -68,9 +68,51 @@ describe('role command', () => {
     expect(saveCurrent).not.toHaveBeenCalled();
     expect(showMessage).toHaveBeenCalledWith('Role not found: missing', 5000, 'agent-1');
   });
+
+  it('cycles to the next available role', () => {
+    mocks.listRoles.mockReturnValue([
+      { name: 'default', prompt: 'default', builtIn: true },
+      { name: 'reviewer', prompt: 'Review carefully.', builtIn: false, path: '/tmp/.mica/role/reviewer' },
+      { name: 'writer', prompt: 'Write carefully.', builtIn: false, path: '/tmp/.mica/role/writer' },
+    ]);
+    mocks.getRole.mockImplementation((name: string) =>
+      mocks.listRoles().find((role: { name: string }) => role.name === name),
+    );
+    const setRole = vi.fn();
+    const saveCurrent = vi.fn();
+    const showMessage = vi.fn();
+    const syncModelDisplay = vi.fn();
+    const agent = makeAgent({ setRole, role: 'default' });
+    const session = makeSession({ saveCurrent });
+    const services = makeServices({ agent, session, showMessage, syncModelDisplay });
+
+    expect(cycleNextRole(agent, session, services)).toBe(true);
+
+    expect(setRole).toHaveBeenCalledWith('reviewer');
+    expect(saveCurrent).toHaveBeenCalledOnce();
+    expect(syncModelDisplay).toHaveBeenCalledWith(agent);
+    expect(showMessage).toHaveBeenCalledWith('Role: reviewer', 3000, 'agent-1');
+  });
+
+  it('wraps role cycle from the last role back to default', () => {
+    mocks.listRoles.mockReturnValue([
+      { name: 'default', prompt: 'default', builtIn: true },
+      { name: 'reviewer', prompt: 'Review carefully.', builtIn: false, path: '/tmp/.mica/role/reviewer' },
+    ]);
+    mocks.getRole.mockImplementation((name: string) =>
+      mocks.listRoles().find((role: { name: string }) => role.name === name),
+    );
+    const setRole = vi.fn();
+    const agent = makeAgent({ setRole, role: 'reviewer' });
+    const session = makeSession({ saveCurrent: vi.fn() });
+    const services = makeServices({ agent, session, showMessage: vi.fn() });
+
+    expect(cycleNextRole(agent, session, services)).toBe(true);
+    expect(setRole).toHaveBeenCalledWith('default');
+  });
 });
 
-function makeAgent(options: { setRole: (roleName: string) => void }): CommandAgent {
+function makeAgent(options: { setRole: (roleName: string) => void; role?: string }): CommandAgent {
   return {
     config: {
       provider: {
@@ -84,7 +126,7 @@ function makeAgent(options: { setRole: (roleName: string) => void }): CommandAge
     },
     currentRunId: 0,
     isRunning: false,
-    role: 'default',
+    role: options.role ?? 'default',
     reloadConfig() {},
     setRole: options.setRole,
     buildSystemPrompt: () => '<system>test</system>',
@@ -93,7 +135,7 @@ function makeAgent(options: { setRole: (roleName: string) => void }): CommandAge
       providerId: 'test',
       model: 'test-model',
       effort: 'none',
-      role: 'default',
+      role: options.role ?? 'default',
       messages: [],
       usageHistory: [],
     }),

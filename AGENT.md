@@ -274,7 +274,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/provider`：切换 AI 服务提供商。
 - `/model`：切换当前 provider 的模型。
 - `/effort`：切换推理强度。
-- `/role`：切换当前 agent 的系统提示词；自定义文件来自 `~/.mica/role` 或 `$MICA_HOME/role`。
+- `/role`：切换当前 agent 的系统提示词；自定义文件来自 `~/.mica/role` 或 `$MICA_HOME/role`。输入框中也可使用 `Shift+Tab` 按列表顺序循环切换 role（agent busy 时拒绝，与 `/role` 一致）；当 agent 运行中且输入已进入 queue 快捷提示时，`Shift+Tab` 仍表示 after_iteration 排队发送。
 - `/status`：显示当前 provider/model/effort/role 状态。
 - `/context`：显示当前上下文占用总览。
 - `/compact`：压缩当前会话上下文为 checkpoint。

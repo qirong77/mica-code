@@ -35,6 +35,24 @@ export function createRoleCommand(
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
 }
 
+export function cycleNextRole(
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  services: CommandRuntimeServices,
+): boolean {
+  const targetAgent = services.getCurrentAgent() ?? agent;
+  const targetSessionController = services.getCurrentSessionController() ?? sessionController;
+  const roles = micaAgent.roles.list();
+  if (roles.length === 0) return false;
+
+  const currentIndex = roles.findIndex((role) => role.name === targetAgent.role);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % roles.length : 0;
+  const nextRole = roles[nextIndex];
+  if (!nextRole) return false;
+
+  return applyRoleSelection(targetAgent, targetSessionController, services, nextRole.name);
+}
+
 function showRoleSelector(
   agent: CommandAgent,
   sessionController: CommandSessionController,

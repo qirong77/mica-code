@@ -212,6 +212,13 @@ function TerminalInput() {
       return;
     }
 
+    if (key.tab && key.shift && !hasActiveInputPlugin && !quickCommandVisible) {
+      event?.preventDefault?.();
+      event?.stopImmediatePropagation?.();
+      input.cycleRole();
+      return;
+    }
+
     if (key.shift && key.leftArrow && localText.length === 0 && !hasActiveInputPlugin) {
       const pendingInput = editPendingInput();
       if (pendingInput) {

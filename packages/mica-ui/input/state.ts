@@ -13,6 +13,7 @@ type Events = { submit: SubmitEvent };
 const emitter = mitt<Events>();
 const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>();
 let exitRequestedHandler: (() => void) | null = null;
+let cycleRoleHandler: (() => void) | null = null;
 
 export const text = atom('');
 export const disabled = atom(false);
@@ -64,4 +65,12 @@ export function requestExit(): void {
     return;
   }
   process.exit(0);
+}
+
+export function setOnCycleRole(cb: (() => void) | null): void {
+  cycleRoleHandler = cb;
+}
+
+export function cycleRole(): void {
+  cycleRoleHandler?.();
 }
