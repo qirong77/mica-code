@@ -257,10 +257,11 @@ export class ChatCompletionsClient extends BaseAgent<
           this.onText?.('\n\n');
         }
         messages.push(message);
+        const toolImageContent: AgentContentBlockParam[] = [];
         for (const tc of message.tool_calls) {
           throwIfQueryStopped(options);
           if (tc.type !== 'function') continue;
-          const { result } = await executeProviderToolCall({
+          const { result, images } = await executeProviderToolCall({
             name: tc.function.name,
             argsText: tc.function.arguments,
             id: tc.id,
@@ -277,6 +278,18 @@ export class ChatCompletionsClient extends BaseAgent<
             tool_call_id: tc.id,
             content: result,
           });
+          if (images.length > 0) {
+            toolImageContent.push(
+              { type: 'text', text: `Image output from ${tc.function.name} (tool call ${tc.id}):` },
+              ...images,
+            );
+          }
+        }
+        if (toolImageContent.length > 0) {
+          messages.push({
+            role: 'user',
+            content: micaContentToOpenAIContent(toolImageContent),
+          });
         }
         await commitCompleteIteration(true);
       }
@@ -290,8 +303,10 @@ export class ChatCompletionsClient extends BaseAgent<
 
   private get reasoningParams(): Record<string, unknown> {
     const effort = this.effort ?? 'none';
-    return resolveModelRequestPatch(this.model, effort, 'openai_chat_completions')
-      ?? resolveChatCompletionsEffortParams(this.provider, effort);
+    return (
+      resolveModelRequestPatch(this.model, effort, 'openai_chat_completions') ??
+      resolveChatCompletionsEffortParams(this.provider, effort)
+    );
   }
 
   private recordUsage(

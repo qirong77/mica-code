@@ -43,7 +43,15 @@ export { MicaTool } from './MicaTool.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { ToolFilter } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
-export type { Tool } from './types.js';
+export { toolResultToText } from './types.js';
+export type {
+  Tool,
+  ToolImageMediaType,
+  ToolResult,
+  ToolResultBlock,
+  ToolResultImageBlock,
+  ToolResultTextBlock,
+} from './types.js';
 export {
   getBackgroundTaskOutputSize,
   listBackgroundTasks,

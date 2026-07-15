@@ -1,4 +1,4 @@
-import type { Tool } from './types.js';
+import type { Tool, ToolResult } from './types.js';
 import type { Disposable } from '@packages/mica-common/index.js';
 
 import { ToolReadFile } from './ToolReadFile.js';
@@ -14,6 +14,7 @@ import { ToolRunShell } from './ToolRunShell.js';
 import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
 import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
 import { ToolKillTask } from './ToolKillTask.js';
+import { ToolReadImage } from './ToolReadImage.js';
 import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
 export type ToolFilter = (name: string) => boolean;
@@ -27,11 +28,12 @@ export type ToolExecutionEvent = {
 
 export type ToolExecutionObserver = {
   before?(event: ToolExecutionEvent): unknown | Promise<unknown>;
-  after?(event: ToolExecutionEvent & { result?: string; error?: unknown; state?: unknown }): void | Promise<void>;
+  after?(event: ToolExecutionEvent & { result?: ToolResult; error?: unknown; state?: unknown }): void | Promise<void>;
 };
 
 const builtinTools: MicaTool[] = [
   new ToolReadFile(),
+  new ToolReadImage(),
   new ToolWriteFile(),
   new ToolApplyPatch(),
   new ToolListFiles(),
@@ -121,7 +123,7 @@ export async function executeTool(
   input: ToolInput,
   callbacks?: ToolExecuteCallbacks,
   filter?: ToolFilter,
-): Promise<string> {
+): Promise<ToolResult> {
   const tool = findTool(name);
   if (!tool) return `未知工具: ${name}`;
   if (!toolAllowed(tool, name, filter)) return `工具 ${name} 不在当前 agent 的允许工具范围内。`;
@@ -142,7 +144,7 @@ export async function executeTool(
     }),
   );
 
-  let result: string | undefined;
+  let result: ToolResult | undefined;
   let error: unknown;
   try {
     result = await tool.executeTimed(input, callbacks);

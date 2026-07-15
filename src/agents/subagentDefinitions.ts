@@ -40,6 +40,7 @@ const SUBAGENT_INSTRUCTIONS = [
 
 const READ_ONLY_TOOLS = [
   'read_file',
+  'read_image',
   'list_files',
   'grep_search',
   'background_tasks',

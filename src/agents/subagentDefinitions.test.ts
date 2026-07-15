@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSubagentSystemPrompt, getSubagent } from './subagentDefinitions.js';
+import { buildSubagentSystemPrompt, buildSubagentToolFilter, getSubagent } from './subagentDefinitions.js';
 
 describe('subagent definitions', () => {
   it('rejects unknown subagent names instead of falling back', () => {
@@ -13,5 +13,10 @@ describe('subagent definitions', () => {
     expect(prompt).toContain('<subagent-instructions>');
     expect(prompt).toContain('<context>');
     expect(prompt).toContain(definition.systemPrompt);
+  });
+
+  it('allows read-only subagents to inspect image paths and URLs', () => {
+    expect(buildSubagentToolFilter(getSubagent('Explore'))('read_image')).toBe(true);
+    expect(buildSubagentToolFilter(getSubagent('Reviewer'))('read_image')).toBe(true);
   });
 });

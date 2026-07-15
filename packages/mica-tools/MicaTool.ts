@@ -1,4 +1,5 @@
 import { formatError } from './utils/formatError.js';
+import type { ToolResult } from './types.js';
 
 export interface ToolExecuteCallbacks {
   onChunk?: (chunk: string) => void;
@@ -66,10 +67,10 @@ export abstract class MicaTool {
     return { valid: true };
   }
 
-  abstract execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string>;
+  abstract execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<ToolResult>;
   abstract onToolUseDisplayText(input: ToolInput): string;
 
-  async executeTimed(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async executeTimed(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<ToolResult> {
     try {
       return await this.execute(input, callbacks);
     } catch (error) {

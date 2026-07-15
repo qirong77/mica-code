@@ -1,4 +1,10 @@
-import { micaTools, type ToolInput } from '@packages/mica-tools/index.js';
+import {
+  micaTools,
+  toolResultToText,
+  type ToolInput,
+  type ToolResult,
+  type ToolResultImageBlock,
+} from '@packages/mica-tools/index.js';
 import type { AgentCallbacks } from '../core/Agent.js';
 import { throwIfQueryStopped } from '../core/retry.js';
 import type { ModelClientOptions } from './types.js';
@@ -23,12 +29,12 @@ export async function executeProviderToolCall(params: {
   toolFilter: ModelClientOptions['toolFilter'];
   onToolCall?: AgentCallbacks['onToolCall'];
   onToolResult?: AgentCallbacks['onToolResult'];
-}): Promise<{ result: string; isError: boolean }> {
+}): Promise<{ result: string; images: ToolResultImageBlock[]; isError: boolean }> {
   params.onToolCall?.(params.name, params.argsText, params.id);
-  let result: string;
+  let rawResult: ToolResult;
   let isError = false;
   try {
-    result = await micaTools.execute(
+    rawResult = await micaTools.execute(
       params.name,
       params.parseArgs(),
       { signal: params.signal, context: params.context },
@@ -36,8 +42,13 @@ export async function executeProviderToolCall(params: {
     );
   } catch (error) {
     isError = true;
-    result = `工具执行失败: ${error instanceof Error ? error.message : String(error)}`;
+    rawResult = `工具执行失败: ${error instanceof Error ? error.message : String(error)}`;
   }
+  const result = toolResultToText(rawResult);
+  const images =
+    typeof rawResult === 'string'
+      ? []
+      : rawResult.filter((block): block is ToolResultImageBlock => block.type === 'image');
   params.onToolResult?.(params.name, result, params.id);
-  return { result, isError };
+  return { result, images, isError };
 }

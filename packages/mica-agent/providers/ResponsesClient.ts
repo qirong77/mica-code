@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import type {
   FunctionTool,
   Response,
+  ResponseFunctionCallOutputItemList,
   ResponseInputItem,
   ResponseInputMessageContentList,
   ResponseOutputItem,
@@ -292,7 +293,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
       for (const toolCall of completedToolCalls) {
         throwIfQueryStopped(options);
-        const { result } = await executeProviderToolCall({
+        const { result, images } = await executeProviderToolCall({
           name: toolCall.name,
           argsText: toolCall.arguments,
           id: toolCall.callId,
@@ -307,7 +308,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         messages.push({
           type: 'function_call_output',
           call_id: toolCall.callId,
-          output: result,
+          output: responsesToolOutput(result, images),
         });
       }
 
@@ -317,8 +318,10 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
   private get reasoningParams(): Record<string, unknown> {
     if (!this.provider || !this.effort) return {};
-    return resolveModelRequestPatch(this.model, this.effort, 'openai_responses')
-      ?? resolveResponsesReasoningParams(this.provider, this.effort);
+    return (
+      resolveModelRequestPatch(this.model, this.effort, 'openai_responses') ??
+      resolveResponsesReasoningParams(this.provider, this.effort)
+    );
   }
 
   private recordUsage(
@@ -371,6 +374,21 @@ function micaContentToResponsesContent(content: AgentQueryContent): ResponseInpu
       image_url: `data:${part.source.media_type};base64,${part.source.data}`,
     };
   });
+}
+
+function responsesToolOutput(
+  text: string,
+  images: Array<Extract<AgentContentBlockParam, { type: 'image' }>>,
+): string | ResponseFunctionCallOutputItemList {
+  if (images.length === 0) return text;
+  return [
+    { type: 'input_text', text },
+    ...images.map((image) => ({
+      type: 'input_image' as const,
+      detail: 'auto' as const,
+      image_url: `data:${image.source.media_type};base64,${image.source.data}`,
+    })),
+  ];
 }
 
 type ResponseMessageContentPart = ResponseInputMessageContentList[number] | ResponseOutputMessage['content'][number];

@@ -13,6 +13,7 @@
 ## 内置工具
 
 - `read_file`：读取文件内容。
+- `read_image`：读取本地图片或网络图片 URL，并嵌入模型对话。
 - `write_file`：写入或覆盖文件。
 - `apply_patch`：应用文件补丁。
 - `list_files`：按 glob 模式列出文件。
@@ -37,6 +38,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 ## 设计约束
 
 - 所有工具统一通过 registry 暴露给模型和运行时。
+- 工具结果可以是字符串或文本/图片内容块；UI 和日志消费文本投影，provider adapter 负责嵌入图片。
 - 新增工具优先继承 `MicaTool` 并提供参数校验、展示文案和错误格式化。
 - 文件、shell、网络类工具需要保留边界检查和输出限制。
 - MCP 工具只能通过注册接口接入，便于 server 断开后清理。
@@ -51,6 +53,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `ToolKillTask.ts`：终止后台任务。
 - `ToolListFiles.ts`：按 glob 列文件。
 - `ToolReadFile.ts`：读取文件。
+- `ToolReadImage.ts`：读取并返回本地或网络图片。
 - `ToolReadTaskOutput.ts`：读取后台任务输出。
 - `ToolRunShell.ts`：执行 shell 命令。
 - `ToolRunShellBackground.ts`：后台 shell 输出与任务控制支持。

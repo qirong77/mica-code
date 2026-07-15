@@ -196,6 +196,7 @@ temp/                              临时代码和外部实验，默认不参与
   - `openai_responses` -> `ResponsesClient`
 - 不要根据 `api_base` 猜测协议。第三方 provider 是否支持 Responses、Chat Completions、reasoning effort 或特定参数，必须通过配置、官方资料或最小探针确认。
 - provider adapter 负责协议消息结构、history normalizer、usage 归一化、tool-call 格式、请求参数转换和 abort signal。
+- 工具结果可以是纯文本，也可以是文本/图片内容块。Chat Completions 必须先追加全部 `tool` 文本结果，再用一条 `user` 多模态消息承载工具图片；Responses 则使用原生多模态 `function_call_output`。UI、日志和 run JSON 只接收文本投影，不得输出 Base64。
 - runtime 不直接拼 provider 请求参数。Chat Completions effort 参数通过 `resolveChatCompletionsEffortParams` 生成，Responses reasoning 参数通过 `resolveResponsesReasoningParams` 生成。
 - `createSubAgent` 会复用当前 provider client options，但默认 `effort: 'none'`，并根据传入 options 决定是否启用 tools。
 - `buildSystemPrompt()` 默认读取 `packages/mica-agent/prompt/system.md`，当前 agent 选择自定义 role 时只替换 `<system>` 段；当前 cwd 下的 `AGENT.md` 和 `AGENTS.md` 会合并，skills 索引和环境信息继续独立注入。读取路径必须在 prompt 构建时按 live cwd 解析，不能在模块加载时冻结。
@@ -305,12 +306,13 @@ AGENT.md
 - `packages/mica-tools` 是唯一工具 registry。内置工具和 MCP 工具都必须通过它暴露给模型和 runtime。
 - 新增工具优先继承 `MicaTool`，提供参数 schema、执行逻辑、展示文案、错误格式化和只读属性。
 - 文件、shell、网络类工具必须保留边界检查、输出限制和清晰错误。
+- `read_image` 读取本地路径或 HTTP(S) URL，经过 `mica-common` 的格式识别、缩放和压缩后返回图片内容块；它是只读工具，也应加入只读 subagent 的允许列表。
 - `run_shell` 的前后台执行、cwd 校验、输出截断、后台任务读取和终止逻辑应保留在 `packages/mica-tools` 内相邻模块，不分散到应用层。
 - 判断 retry 是否可重放依赖 `micaTools.isReadOnly(toolName)`；新增工具要认真设置 read-only 语义。
 
 当前内置工具包括：
 
-- `read_file`、`write_file`、`apply_patch`
+- `read_file`、`read_image`、`write_file`、`apply_patch`
 - `list_files`、`grep_search`
 - `run_shell`、`background_tasks`、`read_task_output`、`kill_task`
 - `web_fetch`、`web_search`
@@ -375,6 +377,7 @@ AGENT.md
 所有 package 都通过 `index.ts` 暴露公共 API。应用层优先从 `@packages/<name>/index.js` 引用。
 
 - `mica-common` 不依赖任何产品业务包。
+- 共享图片格式识别、缩放和 API 载荷压缩位于 `mica-common/image.ts`，由 UI 图片输入和 `read_image` 工具共同复用。
 - `mica-agent` 不依赖 UI、session、commands 或应用入口。
 - `mica-ui` 不直接调用模型 provider，不持有 agent 运行逻辑。
 - `mica-runtime` 只定义协议和状态原语，不做具体 turn loop 编排；headless OpenCode/DevEco-compatible run JSON schema 属于协议层，可被 CLI/adapter 复用。它不是 Claude SDK stream-json。

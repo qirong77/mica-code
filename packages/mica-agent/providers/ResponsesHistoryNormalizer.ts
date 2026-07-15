@@ -1,4 +1,5 @@
 import type {
+  ResponseFunctionCallOutputItemList,
   ResponseInputItem,
   ResponseInputMessageContentList,
   ResponseOutputMessage,
@@ -38,12 +39,25 @@ function responseItemToConversationItem(item: ResponseInputItem): ConversationIt
     return {
       type: 'tool_result',
       id: item.call_id,
-      content: typeof item.output === 'string' ? item.output : JSON.stringify(item.output),
+      content: responseToolOutputToText(item.output),
       providerMetadata: item,
     };
   }
 
   return { type: 'unknown', content: item, providerMetadata: item };
+}
+
+function responseToolOutputToText(output: string | ResponseFunctionCallOutputItemList): string {
+  if (typeof output === 'string') return output;
+  return output
+    .map((part) => {
+      if (part.type === 'input_text') return part.text;
+      if (part.type === 'input_image') return '[Image]';
+      if (part.type === 'input_file') return '[File]';
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 function responseMessageContentToBlocks(
