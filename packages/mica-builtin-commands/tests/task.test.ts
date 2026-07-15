@@ -49,6 +49,7 @@ const mocks = {
   removePluginUI: vi.fn(),
   setAgentStatusItems: vi.fn(),
   setBackgroundTaskItems: vi.fn(),
+  terminalClearText: vi.fn(),
   terminalTextGet: vi.fn(() => ''),
   agentStatusItemsGet: vi.fn(() => agents),
   backgroundTaskItemsGet: vi.fn(() => [
@@ -128,6 +129,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
     },
     terminalInput: {
       text: { get: mocks.terminalTextGet },
+      clearText: mocks.terminalClearText,
     },
   },
 }));
@@ -140,6 +142,7 @@ describe('task command', () => {
     mocks.removePluginUI.mockReset();
     mocks.setAgentStatusItems.mockReset();
     mocks.setBackgroundTaskItems.mockReset();
+    mocks.terminalClearText.mockReset();
     mocks.terminalTextGet.mockClear();
     mocks.agentStatusItemsGet.mockClear();
     mocks.backgroundTaskItemsGet.mockClear();
@@ -157,10 +160,7 @@ describe('task command', () => {
     expect(command.name).toBe('task');
     expect(command.completionItems).toEqual([{ arg: 'clear', description: '清除空闲任务' }]);
     expect(mocks.listBackgroundTasks).toHaveBeenCalledWith({ status: 'all' });
-    expect(mocks.setBackgroundTaskItems).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'abc123def456', outputSize: 42, status: 'running' }),
-      expect.objectContaining({ id: 'finished1234', outputSize: 42, status: 'finished' }),
-    ]);
+    expect(mocks.setBackgroundTaskItems).not.toHaveBeenCalled();
     expect(services.listRunningAgents).toHaveBeenCalledTimes(1);
     expect(mocks.setAgentStatusItems).toHaveBeenCalledWith(agents);
     expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-panel' }));
@@ -179,15 +179,9 @@ describe('task command', () => {
     );
 
     expect(cells.map((cell) => cell.key)).toEqual(['status', 'time', 'title']);
-    expect(cells[0]).toEqual(
-      expect.objectContaining({ content: 'waiting_model...', width: 14, flexShrink: 0 }),
-    );
-    expect(cells[1]).toEqual(
-      expect.objectContaining({ content: '60000ms', width: 16, flexShrink: 0 }),
-    );
-    expect(cells[2]).toEqual(
-      expect.objectContaining({ content: '#1 Build UI', flexGrow: 1, minWidth: 20 }),
-    );
+    expect(cells[0]).toEqual(expect.objectContaining({ content: 'waiting_model...', width: 14, flexShrink: 0 }));
+    expect(cells[1]).toEqual(expect.objectContaining({ content: '60000ms', width: 16, flexShrink: 0 }));
+    expect(cells[2]).toEqual(expect.objectContaining({ content: '#1 Build UI', flexGrow: 1, minWidth: 20 }));
   });
 
   it('clears idle terminal tasks', () => {
@@ -200,7 +194,7 @@ describe('task command', () => {
     expect(services.showMessage).toHaveBeenCalledWith('Cleared 1 idle task', 4000);
   });
 
-  it('opens detail for the selected background task from the panel', () => {
+  it('switches to the selected terminal task from the panel', () => {
     const services = makeServices();
     const command = createTaskCommand(services);
     command.action();
@@ -208,10 +202,11 @@ describe('task command', () => {
     const panel = mocks.upsertPluginUI.mock.calls[0]?.[0];
     panel.onInput('', { return: true });
 
-    expect(services.switchAgentSession).not.toHaveBeenCalled();
+    expect(services.switchAgentSession).toHaveBeenCalledWith('agent-1');
+    expect(services.showMessage).toHaveBeenCalledWith('Switched to #1: Build UI', 4000);
   });
 
-  it('switches to the selected terminal task from the panel', () => {
+  it('opens detail for the selected background task from the panel', () => {
     const services = makeServices();
     const command = createTaskCommand(services);
     command.action();
@@ -220,14 +215,15 @@ describe('task command', () => {
     panel.onInput('', { downArrow: true });
     panel.onInput('', { return: true });
 
-    expect(services.switchAgentSession).toHaveBeenCalledWith('agent-1');
-    expect(services.showMessage).toHaveBeenCalledWith('Switched to #1: Build UI', 4000);
+    expect(services.switchAgentSession).not.toHaveBeenCalled();
   });
 });
 
 function makeServices(options: { cleared?: RunningAgentRecord[] } = {}): CommandRuntimeServices {
   return {
     listRunningAgents: vi.fn(() => agents),
+    listSubagentTasks: vi.fn(() => []),
+    getSubagentTask: vi.fn(() => undefined),
     clearIdleAgents: vi.fn(() => ({ cleared: options.cleared ?? [], remaining: agents })),
     switchAgentSession: vi.fn((id: string) => {
       const agent = agents.find((candidate) => candidate.id === id);

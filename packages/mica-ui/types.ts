@@ -121,6 +121,7 @@ export type MicaUiConversationMessage =
 
 export interface MicaUiAgentStatusItem {
   id: string;
+  taskOwnerId?: string;
   index: number;
   title: string;
   cwd: string;
@@ -136,6 +137,7 @@ export type MicaUiBackgroundTaskStatus = 'starting' | 'running' | 'finished' | '
 
 export interface MicaUiBackgroundTaskItem {
   id: string;
+  agentOwnerId?: string;
   command: string;
   cwd: string;
   shell: string;

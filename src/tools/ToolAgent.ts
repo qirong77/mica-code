@@ -290,6 +290,10 @@ export class ToolAgent extends MicaTool {
         model: clientOptions.model,
         effort,
         maxTurns: definition.maxTurns,
+        prompt,
+        contextMode,
+        contextFiles,
+        writeMode,
         ownedPaths,
         getUsage: () => summarizeSubagentUsage(child.usageHistory),
         run: async (signal) => {
@@ -335,6 +339,10 @@ export class ToolAgent extends MicaTool {
       model: clientOptions.model,
       effort,
       maxTurns: definition.maxTurns,
+      prompt,
+      contextMode,
+      contextFiles,
+      writeMode,
       ownedPaths,
     });
     if (ownedPaths.length > 0) {
@@ -350,30 +358,34 @@ export class ToolAgent extends MicaTool {
       }
     }
     const signal = callbacks?.signal ? AbortSignal.any([callbacks.signal, tracked.signal]) : tracked.signal;
-    try {
-      const result = await child.query(delegatedPrompt, { signal, maxTurns: definition.maxTurns });
-      tracked.complete(result, summarizeSubagentUsage(child.usageHistory));
-      return formatStructuredSubagentResult({
-        type: definition.name,
-        description,
-        result,
-        status: 'completed',
-      });
-    } catch (error) {
-      if (!(error instanceof AgentMaxTurnsError)) {
-        tracked.fail(error, undefined, summarizeSubagentUsage(child.usageHistory));
-        throw error;
+    const execution = (async () => {
+      try {
+        const result = await child.query(delegatedPrompt, { signal, maxTurns: definition.maxTurns });
+        tracked.complete(result, summarizeSubagentUsage(child.usageHistory));
+        return formatStructuredSubagentResult({
+          type: definition.name,
+          description,
+          result,
+          status: 'completed',
+        });
+      } catch (error) {
+        if (!(error instanceof AgentMaxTurnsError)) {
+          tracked.fail(error, undefined, summarizeSubagentUsage(child.usageHistory));
+          throw error;
+        }
+        tracked.fail(error, error.partialResult, summarizeSubagentUsage(child.usageHistory));
+        return formatStructuredSubagentResult({
+          type: definition.name,
+          description,
+          result: [error.partialResult, '', `[Stopped: ${error.message}]`].filter(Boolean).join('\n'),
+          status: 'partial',
+        });
+      } finally {
+        this.pathLeases.release(tracked.task.id);
       }
-      tracked.fail(error, error.partialResult, summarizeSubagentUsage(child.usageHistory));
-      return formatStructuredSubagentResult({
-        type: definition.name,
-        description,
-        result: [error.partialResult, '', `[Stopped: ${error.message}]`].filter(Boolean).join('\n'),
-        status: 'partial',
-      });
-    } finally {
-      this.pathLeases.release(tracked.task.id);
-    }
+    })();
+    tracked.attachExecution(execution);
+    return execution;
   }
 
   private listTasks(parentAgent: AgentRuntime): string {

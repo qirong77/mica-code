@@ -341,6 +341,8 @@ function makeServices(): CommandRuntimeServices {
     getCurrentSessionController: () => undefined,
     renameCurrentAgentSession: vi.fn(),
     listRunningAgents: () => [],
+    listSubagentTasks: () => [],
+    getSubagentTask: () => undefined,
     clearIdleAgents: () => ({ cleared: [], remaining: [] }),
     requestExit: vi.fn(),
     newAgentSession: makeRunningAgent,

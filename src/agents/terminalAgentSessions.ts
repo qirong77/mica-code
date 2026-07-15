@@ -32,6 +32,7 @@ export type TerminalAgentTurnOutcome = 'idle' | 'running' | 'completed' | 'error
 
 export type TerminalAgentSessionRecord = {
   id: string;
+  taskOwnerId: string;
   index: number;
   title: string;
   cwd: string;
@@ -187,6 +188,7 @@ export class TerminalAgentSessionManager {
     const { provider, model } = session.agent.config;
     return {
       id: session.id,
+      taskOwnerId: session.agent.taskOwnerId,
       index: session.index,
       title:
         session.titleOverride ??

@@ -359,6 +359,7 @@ export class MicaUiRuntimeBridge {
 function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem {
   return {
     id: task.id,
+    agentOwnerId: task.agent_owner_id,
     command: task.command,
     cwd: task.cwd,
     shell: task.shell,

@@ -4,6 +4,9 @@ import {
   type CommandNoticeOptions,
   type CommandRuntimeServices,
   type PluginStatusOptions,
+  type SubagentTaskDetail,
+  type SubagentTaskOwner,
+  type SubagentTaskSummary,
 } from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import {
@@ -14,6 +17,7 @@ import {
 } from '@packages/mica-ui/index.js';
 import { normalizeUiState, type TerminalAgentUiState } from '../../agents/terminalAgentSessions.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
+import type { SubagentTaskRecord } from '../../agents/SubagentTaskManager.js';
 import { getActiveContext } from '../../app/activeContext.js';
 import type { ApplicationContext } from '../../app/ApplicationContext.js';
 import type { SessionController } from '../../session/SessionController.js';
@@ -255,6 +259,42 @@ function conversationContentToText(content: MicaUiConversationMessage['content']
     .join('\n');
 }
 
+type SubagentTaskRecordWithDetail = SubagentTaskRecord & {
+  prompt?: string;
+  context_mode?: SubagentTaskDetail['contextMode'];
+  context_files?: string[];
+  write_mode?: SubagentTaskDetail['writeMode'];
+};
+
+function toSubagentTaskSummary(task: SubagentTaskRecord, owner: SubagentTaskOwner): SubagentTaskSummary {
+  return {
+    id: task.id,
+    description: task.description,
+    subagentType: task.subagent_type,
+    model: task.model,
+    effort: task.effort,
+    status: task.status,
+    startedAt: task.started_at,
+    ...(task.finished_at === undefined ? {} : { finishedAt: task.finished_at }),
+    owner,
+  };
+}
+
+function toSubagentTaskDetail(task: SubagentTaskRecordWithDetail, owner: SubagentTaskOwner): SubagentTaskDetail {
+  return {
+    ...toSubagentTaskSummary(task, owner),
+    ...(task.prompt === undefined ? {} : { prompt: task.prompt }),
+    ...(task.max_turns === undefined ? {} : { maxTurns: task.max_turns }),
+    ...(task.context_mode === undefined ? {} : { contextMode: task.context_mode }),
+    contextFiles: [...(task.context_files ?? [])],
+    ownedPaths: [...(task.owned_paths ?? [])],
+    ...(task.write_mode === undefined ? {} : { writeMode: task.write_mode }),
+    ...(task.usage === undefined ? {} : { usage: { ...task.usage } }),
+    ...(task.error === undefined ? {} : { error: task.error }),
+    ...(task.result === undefined ? {} : { result: task.result }),
+  };
+}
+
 export function createCommandRuntimeServices(): CommandRuntimeServices {
   return {
     clearUI(agent, sessionController) {
@@ -345,6 +385,38 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     },
     listRunningAgents() {
       return currentContext()?.agentSessions.list() ?? [];
+    },
+    listSubagentTasks() {
+      const context = currentContext();
+      if (!context) return [];
+      return context.agentSessions.list().flatMap((record) => {
+        const session = context.agentSessions.findById(record.id);
+        if (!session) return [];
+        const owner: SubagentTaskOwner = {
+          sessionId: record.id,
+          index: record.index,
+          title: record.title,
+          current: record.current,
+        };
+        return context.subagentTasks.list(session.agent).map((task) => toSubagentTaskSummary(task, owner));
+      });
+    },
+    getSubagentTask(id) {
+      const context = currentContext();
+      if (!context) return undefined;
+      for (const record of context.agentSessions.list()) {
+        const session = context.agentSessions.findById(record.id);
+        if (!session) continue;
+        const task = context.subagentTasks.get(id, session.agent);
+        if (!task) continue;
+        return toSubagentTaskDetail(task, {
+          sessionId: record.id,
+          index: record.index,
+          title: record.title,
+          current: record.current,
+        });
+      }
+      return undefined;
     },
     clearIdleAgents() {
       const context = currentContext();

@@ -33,7 +33,14 @@ describe('ToolAgent', () => {
       runtime,
     );
     expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'completed' }), runtime);
-    expect(taskManager.list(runtime)).toEqual([]);
+    expect(taskManager.list(runtime)).toEqual([
+      expect.objectContaining({
+        description: 'inspect files',
+        prompt: 'Find the config loader.',
+        context_mode: 'brief',
+        status: 'completed',
+      }),
+    ]);
 
     const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
     expect(options.tools).toBe(true);

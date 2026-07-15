@@ -1,5 +1,5 @@
-import type { ProviderDefinition } from '@packages/mica-config/index.js';
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { AgentUsageRecord, AgentUsageSummary } from '@packages/mica-agent/index.js';
+import type { EffortOption, ProviderDefinition } from '@packages/mica-config/index.js';
 import type { CompactOptions, CompactResult } from '@packages/mica-context/index.js';
 import type {
   RewindApplyRequest,
@@ -77,6 +77,7 @@ export type CommandSessionController = {
 
 export type RunningAgentRecord = {
   id: string;
+  taskOwnerId?: string;
   index: number;
   title: string;
   cwd: string;
@@ -87,6 +88,39 @@ export type RunningAgentRecord = {
   current: boolean;
   startedAt: string;
   updatedAt: string;
+};
+
+export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
+
+export type SubagentTaskOwner = {
+  sessionId: string;
+  index: number;
+  title: string;
+  current: boolean;
+};
+
+export type SubagentTaskSummary = {
+  id: string;
+  description: string;
+  subagentType: string;
+  model: string;
+  effort: EffortOption;
+  status: SubagentTaskStatus;
+  startedAt: string;
+  finishedAt?: string;
+  owner: SubagentTaskOwner;
+};
+
+export type SubagentTaskDetail = SubagentTaskSummary & {
+  prompt?: string;
+  maxTurns?: number;
+  contextMode?: 'none' | 'brief' | 'recent' | 'files';
+  contextFiles: string[];
+  ownedPaths: string[];
+  writeMode?: 'none' | 'owned_paths' | 'proposal' | 'unrestricted';
+  usage?: AgentUsageSummary;
+  error?: string;
+  result?: string;
 };
 
 export type ForkAgentResult = RunningAgentRecord & {
@@ -133,6 +167,8 @@ export type CommandRuntimeServices = {
   getCurrentSessionController(): CommandSessionController | undefined;
   renameCurrentAgentSession(title: string): void;
   listRunningAgents(): RunningAgentRecord[];
+  listSubagentTasks(): SubagentTaskSummary[];
+  getSubagentTask(id: string): SubagentTaskDetail | undefined;
   clearIdleAgents(): ClearIdleAgentsResult;
   requestExit(exitCode?: number): Promise<void>;
   newAgentSession(): RunningAgentRecord;

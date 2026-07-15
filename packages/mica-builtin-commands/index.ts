@@ -59,6 +59,10 @@ export type {
   ResumeSessionResult,
   RunningAgentRecord,
   SessionSummary,
+  SubagentTaskDetail,
+  SubagentTaskOwner,
+  SubagentTaskStatus,
+  SubagentTaskSummary,
 } from './services.js';
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
 export { AgentChangeTracker } from './git/agentChangeTracker.js';

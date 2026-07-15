@@ -7,6 +7,7 @@ import {
 import { micaCommon } from '@packages/mica-common/index.js';
 import type { EffortOption } from '@packages/mica-config/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import type { SubagentContextMode, SubagentWriteMode } from './subagentDefinitions.js';
 
 const DEFAULT_MAX_CONCURRENT_TASKS = 4;
 const DEFAULT_MAX_RETAINED_TASKS = 100;
@@ -17,10 +18,14 @@ export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
 export type SubagentTaskRecord = {
   id: string;
   description: string;
+  prompt?: string;
   subagent_type: string;
   model: string;
   effort: EffortOption;
   max_turns?: number;
+  context_mode?: SubagentContextMode;
+  context_files?: string[];
+  write_mode?: SubagentWriteMode;
   owned_paths?: string[];
   status: SubagentTaskStatus;
   started_at: string;
@@ -35,6 +40,7 @@ type ManagedSubagentTask = {
   owner: AgentRuntime;
   controller: AbortController;
   promise: Promise<void>;
+  resolvePromise: () => void;
 };
 
 export type StartSubagentTaskOptions = {
@@ -44,6 +50,10 @@ export type StartSubagentTaskOptions = {
   model: string;
   effort: EffortOption;
   maxTurns?: number;
+  prompt?: string;
+  contextMode?: SubagentContextMode;
+  contextFiles?: string[];
+  writeMode?: SubagentWriteMode;
   ownedPaths?: string[];
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
@@ -54,6 +64,7 @@ export type TrackSubagentTaskOptions = Omit<StartSubagentTaskOptions, 'run' | 'g
 export type TrackedSubagentTask = {
   task: SubagentTaskRecord;
   signal: AbortSignal;
+  attachExecution: (promise: Promise<unknown>) => void;
   complete: (result: string, usage?: AgentUsageSummary) => void;
   fail: (error: unknown, result?: string, usage?: AgentUsageSummary) => void;
 };
@@ -68,6 +79,7 @@ export type SubagentTaskChangeListener = (task: SubagentTaskRecord, owner: Agent
 
 export class SubagentTaskManager {
   private readonly tasks = new Map<string, ManagedSubagentTask>();
+  private readonly pendingExecutions = new Set<Promise<void>>();
   private readonly changeListeners = new Set<SubagentTaskChangeListener>();
   private readonly maxConcurrentTasks: number;
   private readonly maxRetainedTasks: number;
@@ -83,7 +95,7 @@ export class SubagentTaskManager {
   start(options: StartSubagentTaskOptions): SubagentTaskRecord {
     const managed = this.createTask(options);
     const { controller } = managed;
-    managed.promise = Promise.resolve()
+    const execution = Promise.resolve()
       .then(() => options.run(controller.signal))
       .then(
         ({ result, usage }) => this.complete(managed, { status: 'completed', result, usage }),
@@ -105,6 +117,7 @@ export class SubagentTaskManager {
           });
         },
       );
+    this.attachExecution(execution);
     return cloneRecord(managed.record);
   }
 
@@ -112,11 +125,13 @@ export class SubagentTaskManager {
     const managed = this.createTask(options);
     const finish = (result: Parameters<SubagentTaskManager['complete']>[1]) => {
       this.complete(managed, result, false);
-      this.tasks.delete(managed.record.id);
     };
     return {
       task: cloneRecord(managed.record),
       signal: managed.controller.signal,
+      attachExecution: (promise) => {
+        this.attachExecution(promise);
+      },
       complete: (result, usage) => finish({ status: 'completed', result, usage }),
       fail: (error, result, usage) => finish({ status: 'failed', error: formatErrorMessage(error), result, usage }),
     };
@@ -136,13 +151,21 @@ export class SubagentTaskManager {
     this.pruneCompletedTasks(options.owner);
     const id = micaCommon.createId('agent-task');
     const controller = new AbortController();
+    let resolvePromise: () => void = () => undefined;
+    const promise = new Promise<void>((resolve) => {
+      resolvePromise = resolve;
+    });
     const record: SubagentTaskRecord = {
       id,
       description: options.description,
+      ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
       subagent_type: options.subagentType,
       model: options.model,
       effort: options.effort,
       ...(options.maxTurns === undefined ? {} : { max_turns: options.maxTurns }),
+      ...(options.contextMode === undefined ? {} : { context_mode: options.contextMode }),
+      ...(options.contextFiles === undefined ? {} : { context_files: [...options.contextFiles] }),
+      ...(options.writeMode === undefined ? {} : { write_mode: options.writeMode }),
       ...(options.ownedPaths && options.ownedPaths.length > 0 ? { owned_paths: [...options.ownedPaths] } : {}),
       status: 'running',
       started_at: new Date().toISOString(),
@@ -151,7 +174,8 @@ export class SubagentTaskManager {
       record,
       owner: options.owner,
       controller,
-      promise: Promise.resolve(),
+      promise,
+      resolvePromise,
     };
     this.tasks.set(id, managed);
     this.emitTaskChanged(managed);
@@ -245,15 +269,24 @@ export class SubagentTaskManager {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    const activePromises: Promise<void>[] = [];
     for (const task of this.tasks.values()) {
       if (task.record.status !== 'running') continue;
       task.controller.abort();
       this.complete(task, { status: 'killed', error: 'Application is stopping.' });
-      activePromises.push(task.promise);
     }
+    const activePromises = [...this.pendingExecutions];
     if (activePromises.length > 0) await waitForTasks(activePromises, 5_000);
     this.tasks.clear();
+    this.pendingExecutions.clear();
+  }
+
+  private attachExecution(promise: Promise<unknown>): void {
+    const execution = promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.pendingExecutions.add(execution);
+    void execution.then(() => this.pendingExecutions.delete(execution));
   }
 
   private complete(
@@ -275,6 +308,7 @@ export class SubagentTaskManager {
       ...(result.error === undefined ? {} : { error: result.error }),
       ...(result.usage === undefined ? {} : { usage: result.usage }),
     };
+    task.resolvePromise();
     this.emitTaskChanged(task);
     if (!this.onTaskFinished || this.stopping || !notify) return;
     try {
@@ -343,6 +377,7 @@ function cloneRecord(record: SubagentTaskRecord): SubagentTaskRecord {
   return {
     ...record,
     ...(record.usage ? { usage: { ...record.usage } } : {}),
+    ...(record.context_files ? { context_files: [...record.context_files] } : {}),
     ...(record.owned_paths ? { owned_paths: [...record.owned_paths] } : {}),
   };
 }
