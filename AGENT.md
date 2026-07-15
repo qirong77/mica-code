@@ -281,7 +281,7 @@ bun test packages/mica-agent/prompt/index.test.ts
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/agents`：显示当前终端的 agents；`/agents clear` 清除空闲 agent。
-- `/rewind`：回退到上一轮对话之前的状态。
+- `/rewind`：选择一轮对话，回退到该节点完成时的对话和文件状态。
 - `/mcp`：列出 MCP 服务器和工具；`/mcp reconnect <server>` 重连指定服务。
 - `/skills`：列出已安装的 skills。
 - `/rename`：重命名当前会话。
@@ -365,7 +365,7 @@ AGENT.md
 - `Agent` 支持 `operation=run_many`（`tasks` + `depends_on` + `max_parallel`）和 `operation=join` 汇总多个 task 结果。
 - `Proposal` 为不落盘提案模式，只返回 patch 文本供 parent 审查后 apply。
 - 当前内置 subagent 类型：`general-purpose`、`Explore`、`Implementer`、`Reviewer`、`Tester`、`Planner`、`Proposal`。
-- `RewindCheckpointManager` 在 turn 前捕获对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
+- `RewindCheckpointManager` 在 turn 前创建 checkpoint，并在 turn 结束后将其更新为该节点完成时的对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
 - compact、review、commit 等命令如果需要模型调用，应通过 subagent 或 exclusive task 隔离，不要污染当前正在运行的 turn。
@@ -403,51 +403,7 @@ AGENT.md
 
 ## 测试与验证
 
-项目测试使用 Vitest，根配置在 `vitest.config.ts`：
-
-- environment 是 `node`。
-- `fileParallelism: false`。
-- include 是 `src/**/*.test.ts`、`packages/mica-*/**/*.test.ts` 和 `packages/@anthropic/ink/**/*.test.ts`。
-- exclude 包括 `node_modules`、`dist`、`temp`。
-- 测试插件会把 `bun:bundle` stub 成 `feature() { return false; }`，并允许直接 import `.md`。
-
-常见测试位置：
-
-- `packages/mica-agent/prompt/index.test.ts`
-- `packages/mica-agent/providers/createModelClient.test.ts`
-- `packages/mica-agent/core/retry.test.ts`
-- `packages/mica-builtin-commands/tests/configSwitch.test.ts`
-- `packages/mica-config/config.test.ts`
-- `packages/mica-config/micaStorage.test.ts`
-- `packages/mica-config/runtimeEnv.test.ts`
-- `packages/mica-skills/loadSkills.test.ts`
-- `packages/mica-tools/tests/MicaTool.test.ts`
-- `packages/mica-tools/tests/ToolApplyPatch.test.ts`
-- `packages/mica-tools/tests/ToolRunShell.test.ts`
-- `packages/mica-ui/agentTurnLogItems.test.ts`
-- `packages/mica-ui/app/StartupBanner.test.ts`
-- `packages/mica-ui/bottom/dropdown/quickCommandHandler.test.ts`
-- `packages/mica-ui/utils/workingStatusDisplay.test.ts`
-- `packages/@anthropic/ink/src/core/parse-keypress.test.ts`
-- `src/agent/AgentRuntime.test.ts`
-- `src/app/adapters/LocalRuntimeController.test.ts`
-- `src/app/adapters/MicaUiRuntimeBridge.test.ts`
-- `src/agents/SubagentTaskManager.test.ts`
-- `src/agents/subagentDefinitions.test.ts`
-- `src/plugins/runtime/messageQueuePlugin.test.ts`
-- `src/runtime/RewindCheckpointManager.test.ts`
-- `src/session/SessionController.test.ts`
-- `src/tools/ToolAgent.test.ts`
-
-验证选择原则：
-
-- 文档-only 修改：运行 `bunx prettier --check <file>` 或 `bunx prettier --write <file>` 后再 `git diff --check`。
-- package 公共 API、runtime、provider、config、commands 或 UI store 修改：至少运行 `bun run typecheck`，并补充相关局部测试。
-- prompt 修改：至少运行 `bun test packages/mica-agent/prompt/index.test.ts`。
-- config/storage/skills 修改：优先使用临时 `MICA_HOME`，并运行对应 tests。
-- queue、abort、retry、session restore、多 agent 修改：运行相关 runtime/session/UI bridge/message queue tests。
-- build/install 或 release 脚本修改：运行 `bun run build` 或针对脚本的最小可行验证，并注意本地 installed binary 可能是旧的。
-- 任何修改最后都建议运行 `git diff --check`，避免 whitespace 和 patch 伪影。
+不运行测试文件，也不需要补充测试文件，打包通过即可。
 
 ## 命令范围与临时目录
 

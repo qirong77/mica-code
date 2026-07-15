@@ -417,6 +417,7 @@ export class LocalRuntimeController implements RuntimeController {
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
+    let rewindCheckpointId: string | null = null;
     // Capture pre-turn client state so we can restore it before each retry.
     const preTurnSnapshot = agent.captureClientSnapshot();
     let hadNonRetryableToolCall = false;
@@ -434,7 +435,7 @@ export class LocalRuntimeController implements RuntimeController {
     const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
     const previousConversationMessages = displayConversationMessages(session, agent);
     if (input.source !== 'system') {
-      this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
+      rewindCheckpointId = this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
     }
     if (session) {
       session.uiState = normalizeUiState({
@@ -663,6 +664,9 @@ export class LocalRuntimeController implements RuntimeController {
           micaUi.panels.clearAgentTurnLogItems();
           micaUi.panels.thinkingText.set('');
         }
+      }
+      if (rewindCheckpointId) {
+        this.rewindCheckpoints.finalize(agent, rewindCheckpointId, displayConversationMessages(session, agent));
       }
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });

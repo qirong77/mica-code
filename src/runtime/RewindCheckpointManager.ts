@@ -92,7 +92,7 @@ export class RewindCheckpointManager {
   private readonly previewPlans = new WeakMap<AgentRuntime, Map<string, RewindPreviewPlan>>();
   private nextCheckpointId = 1;
 
-  capture(agent: AgentRuntime, input: RuntimeInput, conversationMessages: unknown[] = []): void {
+  capture(agent: AgentRuntime, input: RuntimeInput, conversationMessages: unknown[] = []): string | null {
     try {
       const snapshot = agent.getSnapshot();
       const checkpointChars =
@@ -101,7 +101,7 @@ export class RewindCheckpointManager {
         estimateJsonLikeChars(conversationMessages, MAX_CHECKPOINT_SNAPSHOT_CHARS);
       if (checkpointChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
         this.previewPlans.delete(agent);
-        return;
+        return null;
       }
 
       const checkpoint: RewindCheckpoint = {
@@ -116,8 +116,35 @@ export class RewindCheckpointManager {
       const next = [...(this.checkpoints.get(agent) ?? []), checkpoint].slice(-MAX_CHECKPOINTS_PER_AGENT);
       this.checkpoints.set(agent, next);
       this.previewPlans.delete(agent);
+      return checkpoint.id;
     } catch {
       this.previewPlans.delete(agent);
+      return null;
+    }
+  }
+
+  finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): void {
+    const stack = this.checkpoints.get(agent);
+    const checkpoint = stack?.find((candidate) => candidate.id === id);
+    if (!stack || !checkpoint) return;
+
+    try {
+      const snapshot = agent.getSnapshot();
+      const checkpointChars =
+        estimateJsonLikeChars(snapshot, MAX_CHECKPOINT_SNAPSHOT_CHARS) +
+        estimateJsonLikeChars(checkpoint.inputText, MAX_CHECKPOINT_SNAPSHOT_CHARS) +
+        estimateJsonLikeChars(conversationMessages, MAX_CHECKPOINT_SNAPSHOT_CHARS);
+      if (checkpointChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
+        this.remove(agent, stack, id);
+        return;
+      }
+
+      checkpoint.snapshot = cloneSnapshot(snapshot);
+      checkpoint.conversationMessages = cloneJson(conversationMessages);
+      checkpoint.fileState = captureFileState();
+      this.previewPlans.delete(agent);
+    } catch {
+      this.remove(agent, stack, id);
     }
   }
 
@@ -209,7 +236,7 @@ export class RewindCheckpointManager {
       const prefix = files.length > 0 ? 'rewind files changed, but conversation restore failed' : 'rewind failed';
       throw new Error(`${prefix}: ${errorMessage(error)}`);
     }
-    this.checkpoints.set(agent, stack.slice(0, index));
+    this.checkpoints.set(agent, stack.slice(0, index + 1));
     this.previewPlans.delete(agent);
 
     return {
@@ -233,6 +260,14 @@ export class RewindCheckpointManager {
 
   private latest(agent: AgentRuntime): RewindCheckpoint | null {
     return this.checkpoints.get(agent)?.at(-1) ?? null;
+  }
+
+  private remove(agent: AgentRuntime, stack: RewindCheckpoint[], id: string): void {
+    this.checkpoints.set(
+      agent,
+      stack.filter((checkpoint) => checkpoint.id !== id),
+    );
+    this.previewPlans.delete(agent);
   }
 }
 
@@ -340,7 +375,7 @@ function captureCurrentFileState(checkpointId: string, root: string): CurrentFil
     if (dirtyPaths.length > MAX_DIRTY_FILES) {
       throw new Error(`too many dirty files for rewind preview: ${dirtyPaths.length} > ${MAX_DIRTY_FILES}`);
     }
-    const headPaths = new Set(dirtyPaths.filter((path) => pathExistsInHead(root, path)));
+    const headPaths = pathsExistingInHead(root, dirtyPaths);
     const indexPaths = new Set(
       dirtyPaths.length === 0
         ? []
@@ -592,12 +627,13 @@ function pruneEmptyParents(start: string, root: string): void {
   }
 }
 
-function pathExistsInHead(root: string, path: string): boolean {
-  const output = gitBuffer(['ls-tree', '-z', '--name-only', 'HEAD', '--', path], {
+function pathsExistingInHead(root: string, paths: string[]): Set<string> {
+  if (paths.length === 0) return new Set();
+  const output = gitBuffer(['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', ...paths], {
     cwd: root,
     maxBuffer: GIT_MAX_BUFFER,
   });
-  return splitNul(output).includes(path);
+  return new Set(splitNul(output));
 }
 
 function safePath(root: string, path: string): string {

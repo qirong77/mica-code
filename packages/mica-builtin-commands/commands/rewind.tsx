@@ -17,11 +17,12 @@ const MAX_VISIBLE_FILES = 14;
 
 type RewindPhase = 'checkpoint' | 'scope';
 type SuccessfulPreview = Extract<RewindPreviewResult, { ok: true }>;
+type FileActionCounts = Record<RewindFileChange['action'], number>;
 
 export function createRewindCommand(services: CommandRuntimeServices) {
   return {
     name: 'rewind',
-    description: '选择一轮对话回退，并将原输入恢复到输入框',
+    description: '选择一轮对话，并回退到该节点完成时的状态',
     action: (rawArgs?: string) => {
       if ((rawArgs ?? '').trim()) {
         services.showMessage('rewind: /rewind 不支持参数，请直接运行 /rewind', 5000);
@@ -52,40 +53,27 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     micaUi.panels.removePluginUI(PANEL_ID);
   }
 
-  function modesFor(current: SuccessfulPreview): RewindMode[] {
-    return current.fileStateAvailable ? ['conversation_only', 'conversation_and_files'] : ['conversation_only'];
-  }
-
-  function chooseSafeDefault(current: SuccessfulPreview): void {
-    const hasDelete = current.files.some((file) => file.action === 'delete');
-    modeIndex.set(current.fileStateAvailable && !hasDelete ? 1 : 0);
+  function setPreview(result: RewindPreviewResult, stale = false): boolean {
+    if (!result.ok) {
+      feedback.set(result.message);
+      preview.set(null);
+      phase.set('checkpoint');
+      return false;
+    }
+    preview.set(result);
+    modeIndex.set(defaultModeIndex(result));
+    feedback.set(stale ? '工作区在预览后发生了变化。文件列表已刷新，请重新确认。' : null);
+    phase.set('scope');
+    return true;
   }
 
   function openSelectedCheckpoint(): void {
     const selected = checkpoints[checkpointIndex.get()];
-    if (!selected) return;
-    const result = services.getRewindPreview(selected.id);
-    if (!result.ok) {
-      feedback.set(result.message);
-      return;
-    }
-    preview.set(result);
-    chooseSafeDefault(result);
-    feedback.set(null);
-    phase.set('scope');
+    if (selected) setPreview(services.getRewindPreview(selected.id));
   }
 
   function refreshStalePreview(id: string): void {
-    const refreshed = services.getRewindPreview(id);
-    if (!refreshed.ok) {
-      feedback.set(refreshed.message);
-      phase.set('checkpoint');
-      preview.set(null);
-      return;
-    }
-    preview.set(refreshed);
-    chooseSafeDefault(refreshed);
-    feedback.set('工作区在预览后发生了变化。文件列表已刷新，请重新确认。');
+    setPreview(services.getRewindPreview(id), true);
   }
 
   function confirmSelectedMode(): void {
@@ -93,7 +81,7 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     if (showBusyMessage(services)) return;
     const current = preview.get();
     if (!current) return;
-    const mode = modesFor(current)[modeIndex.get()];
+    const mode = rewindModes(current)[modeIndex.get()];
     if (!mode) return;
 
     applying.set(true);
@@ -117,7 +105,6 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     }
 
     hide();
-    micaUi.terminalInput.text.set(result.inputText);
     try {
       services.showNotice(formatSuccessNotice(result), ownerSessionId, {
         command: '/rewind',
@@ -153,7 +140,8 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     const selectedIndex = micaUi.useScheduleState(modeIndex);
     const currentFeedback = micaUi.useScheduleState(feedback);
     const isApplying = micaUi.useScheduleState(applying);
-    const modes = modesFor(current);
+    const modes = rewindModes(current);
+    const actionCounts = countFileActions(current.files);
     const items: SelectItem[] = modes.map((mode) => ({
       key: mode,
       label:
@@ -164,19 +152,19 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
             : '回退对话和文件',
       description:
         mode === 'conversation_only'
-          ? '原输入将恢复到输入框'
-          : `restore ${countActions(current.files, 'restore')} · delete ${countActions(current.files, 'delete')}`,
+          ? '对话停在所选节点，文件保持当前状态'
+          : `restore ${actionCounts.restore} · delete ${actionCounts.delete}`,
     }));
     const visibleFiles = current.files.slice(0, MAX_VISIBLE_FILES);
     const hiddenCount = current.files.length - visibleFiles.length;
 
     return (
       <micaUi.Dialog
-        title={isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」之前`}
+        title={isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」`}
         footer={<micaUi.KeyHints hints={['↑↓ choose scope', '↵ rewind', 'esc back']} />}
       >
         <Text color={micaUi.theme.colors.dim}>
-          messages: {current.messageCountNow} -&gt; {current.messageCountBefore}；原输入将恢复到输入框
+          messages: {current.messageCountNow} -&gt; {current.messageCountBefore}
         </Text>
         {!current.fileStateAvailable ? (
           <Text color={micaUi.theme.colors.warning}>
@@ -245,7 +233,7 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
           checkpointIndex.set(moveSelection(checkpointIndex.get(), checkpoints.length, direction));
         } else {
           const current = preview.get();
-          if (current) modeIndex.set(moveSelection(modeIndex.get(), modesFor(current).length, direction));
+          if (current) modeIndex.set(moveSelection(modeIndex.get(), rewindModes(current).length, direction));
         }
         return true;
       }
@@ -255,18 +243,17 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
 }
 
 function formatSuccessNotice(result: ReturnType<CommandRuntimeServices['applyRewind']>): string {
+  const actionCounts = countFileActions(result.files);
   const lines = [
-    `**已回退到「${result.conversationLabel}」之前**`,
+    `**已回退到「${result.conversationLabel}」**`,
     '',
     `- 对话：${result.messageCountNow} -> ${result.messageCountBefore}`,
-    '- 原输入已恢复到输入框',
+    '- 对话已停在所选节点',
   ];
   if (result.mode === 'conversation_only') {
     lines.push('- 文件：保留当前修改');
   } else {
-    lines.push(
-      `- 文件：恢复 ${countActions(result.files, 'restore')} 个，删除 ${countActions(result.files, 'delete')} 个`,
-    );
+    lines.push(`- 文件：恢复 ${actionCounts.restore} 个，删除 ${actionCounts.delete} 个`);
   }
   if (result.postApplyWarning) lines.push(`- 警告：${result.postApplyWarning}`);
   return lines.join('\n');
@@ -276,8 +263,18 @@ function formatFileChange(file: RewindFileChange): string {
   return `${file.action} ${file.path}`;
 }
 
-function countActions(files: RewindFileChange[], action: RewindFileChange['action']): number {
-  return files.filter((file) => file.action === action).length;
+function rewindModes(preview: SuccessfulPreview): RewindMode[] {
+  return preview.fileStateAvailable ? ['conversation_only', 'conversation_and_files'] : ['conversation_only'];
+}
+
+function defaultModeIndex(preview: SuccessfulPreview): number {
+  return preview.fileStateAvailable && preview.files.every((file) => file.action !== 'delete') ? 1 : 0;
+}
+
+function countFileActions(files: RewindFileChange[]): FileActionCounts {
+  const counts: FileActionCounts = { restore: 0, delete: 0 };
+  for (const file of files) counts[file.action] += 1;
+  return counts;
 }
 
 function showBusyMessage(services: CommandRuntimeServices): boolean {
