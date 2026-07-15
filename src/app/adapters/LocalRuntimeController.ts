@@ -407,13 +407,20 @@ export class LocalRuntimeController implements RuntimeController {
 
   private async runTurn(input: RuntimeInput, agent: AgentRuntime, sessionController: SessionController): Promise<void> {
     this.runningAgents.add(agent);
+    const reservedRunId = agent.reserveRunId();
     const startedAt = Date.now();
     const initialSystemInputs = input.source === 'system' ? [] : this.takeAllSystemInputs(agent);
     const inputContent =
-      input.source === 'system' ? input.text : (micaUi.parseImageRefs(input.text) as AgentQueryContent);
+      input.source === 'system' ? input.text : ((await micaUi.parseImageRefs(input.text)) as AgentQueryContent);
     const content = appendSystemInputs(inputContent, initialSystemInputs);
     const displayedUserContent = input.source === 'system' ? content : inputContent;
-    const displayContent = parseDisplayContent(input);
+    const displayContent = await parseDisplayContent(input, inputContent);
+    if (!agent.isCurrent(reservedRunId)) {
+      this.prependSystemInputs(agent, initialSystemInputs);
+      this.runningAgents.delete(agent);
+      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
+      return;
+    }
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
@@ -514,6 +521,7 @@ export class LocalRuntimeController implements RuntimeController {
 
         try {
           const result = await agent.run(content, {
+            reservedRunId: attempt === 0 ? reservedRunId : undefined,
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);
               return this.takeQueuedIterationInput(agent, attemptSystemInputs);
@@ -607,12 +615,16 @@ export class LocalRuntimeController implements RuntimeController {
             ...session.uiState,
             conversationMessages,
             responseText: '',
+            workingStatus: { type: 'idle' },
             lastTurnOutcome: 'aborted',
           });
         }
         await this.hooks.emit('turn:abort', { runtime: this, input, content, error });
         if (!this.clearingAgents.has(agent)) sessionController.saveCurrent({ turnState: 'aborted' });
-        if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
+        if (this.isActiveAgent(agent)) {
+          micaUi.panels.status.idle();
+          this.events.publish({ type: 'turn:aborted', input, owner: agent });
+        }
         return;
       }
 
@@ -679,10 +691,10 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
-  private takeQueuedIterationInput(
+  private async takeQueuedIterationInput(
     agent: AgentRuntime,
     consumedSystemInputs: RuntimeInput[],
-  ): AgentQueryContent | null {
+  ): Promise<AgentQueryContent | null> {
     const queue = this.queueFor(agent);
     this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
     const systemQueue = this.systemQueues.get(agent);
@@ -715,8 +727,9 @@ export class LocalRuntimeController implements RuntimeController {
       }
     }
 
-    const content = next.source === 'system' ? next.text : (micaUi.parseImageRefs(next.text) as AgentQueryContent);
-    const displayContent = parseDisplayContent(next);
+    const content =
+      next.source === 'system' ? next.text : ((await micaUi.parseImageRefs(next.text)) as AgentQueryContent);
+    const displayContent = await parseDisplayContent(next, content);
     const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
     if (session && next.source !== 'system') {
       session.uiState = normalizeUiState({
@@ -746,10 +759,7 @@ export class LocalRuntimeController implements RuntimeController {
     const previousUiState = session.uiState;
     session.uiState = normalizeUiState({
       ...previousUiState,
-      conversationMessages: appendAssistantResponseForDisplay(
-        previousUiState.conversationMessages,
-        responseBuffer,
-      ),
+      conversationMessages: appendAssistantResponseForDisplay(previousUiState.conversationMessages, responseBuffer),
       responseText: '',
     });
     try {
@@ -821,8 +831,13 @@ function displayConversationMessages(
     : agent.toConversationMessages();
 }
 
-function parseDisplayContent(input: RuntimeInput): AgentQueryContent | undefined {
-  return input.displayText ? (micaUi.parseImageRefs(input.displayText) as AgentQueryContent) : undefined;
+async function parseDisplayContent(
+  input: RuntimeInput,
+  parsedInputContent: AgentQueryContent,
+): Promise<AgentQueryContent | undefined> {
+  if (!input.displayText) return undefined;
+  if (input.displayText === input.text) return parsedInputContent;
+  return (await micaUi.parseImageRefs(input.displayText)) as AgentQueryContent;
 }
 
 function createRetryNoticeMessage(

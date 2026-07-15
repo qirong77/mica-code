@@ -51,6 +51,7 @@ export type AgentRuntimeSnapshot = {
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   maxTurns?: number;
+  reservedRunId?: number;
 };
 
 export class AgentAbortError extends Error {
@@ -219,6 +220,10 @@ export class AgentRuntime {
     this.emitStatus({ type: 'idle' });
   }
 
+  reserveRunId(): number {
+    return ++this.runId;
+  }
+
   clearSession() {
     this.runId++;
     this.activeAbortController?.abort();
@@ -302,8 +307,10 @@ export class AgentRuntime {
   }
 
   async run(question: AgentQueryContent, options: AgentRunOptions = {}): Promise<{ runId: number; text: string }> {
-    const runId = ++this.runId;
+    const runId = options.reservedRunId ?? ++this.runId;
     const startedAt = Date.now();
+
+    if (!this.isCurrent(runId)) throw new AgentAbortError(runId);
 
     if (!this.client || !this.isConfigured) {
       const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;

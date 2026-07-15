@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { prepareImageForApi, type SupportedImageMediaType } from './imageResize.js';
 
 const IMAGES_DIR = resolve(homedir(), '.mica', 'images');
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -35,11 +35,12 @@ export function saveClipboardImage(): string | null {
 
 const IMAGE_REF_RE = /\[Image\]\(([^)]+)\)/g;
 
-export function parseImageRefs(text: string): string | import('../types.js').MicaUiContentBlockParam[] {
+export async function parseImageRefs(text: string): Promise<string | import('../types.js').MicaUiContentBlockParam[]> {
   const blocks: import('../types.js').MicaUiContentBlockParam[] = [];
+  const imageRefRe = new RegExp(IMAGE_REF_RE.source, IMAGE_REF_RE.flags);
   let lastIndex = 0,
     match: RegExpExecArray | null;
-  while ((match = IMAGE_REF_RE.exec(text)) !== null) {
+  while ((match = imageRefRe.exec(text)) !== null) {
     const [full, imgPath] = match,
       idx = match.index;
     if (idx > lastIndex) blocks.push({ type: 'text', text: text.slice(lastIndex, idx) });
@@ -51,24 +52,27 @@ export function parseImageRefs(text: string): string | import('../types.js').Mic
         lastIndex = idx + full.length;
         continue;
       }
-      if (stat.size > MAX_IMAGE_BYTES) {
-        blocks.push({ type: 'text', text: `${full} [image omitted: file exceeds ${formatBytes(MAX_IMAGE_BYTES)}]` });
-        lastIndex = idx + full.length;
-        continue;
-      }
       const mediaType = mediaTypeFromPath(resolved);
       if (!mediaType) {
         blocks.push({ type: 'text', text: `${full} [image omitted: unsupported image type]` });
         lastIndex = idx + full.length;
         continue;
       }
-      const buffer = readFileSync(resolved);
+      const processed = await prepareImageForApi(readFileSync(resolved));
       blocks.push(
         { type: 'text', text: full },
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: buffer.toString('base64') } },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: processed.mediaType,
+            data: processed.buffer.toString('base64'),
+          },
+        },
       );
-    } catch {
-      blocks.push({ type: 'text', text: full });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      blocks.push({ type: 'text', text: `${full} [image omitted: ${reason}]` });
     }
     lastIndex = idx + full.length;
   }
@@ -79,13 +83,7 @@ export function parseImageRefs(text: string): string | import('../types.js').Mic
   return blocks;
 }
 
-function mediaTypeFromPath(path: string): (typeof SUPPORTED_IMAGE_TYPES)[keyof typeof SUPPORTED_IMAGE_TYPES] | null {
+function mediaTypeFromPath(path: string): SupportedImageMediaType | null {
   const ext = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] as keyof typeof SUPPORTED_IMAGE_TYPES | undefined;
   return ext ? (SUPPORTED_IMAGE_TYPES[ext] ?? null) : null;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
