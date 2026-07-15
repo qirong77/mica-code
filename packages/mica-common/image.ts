@@ -1,4 +1,18 @@
-import sharp from 'sharp';
+type SharpInstance = typeof import('sharp').default;
+
+let sharpModulePromise: Promise<SharpInstance> | null = null;
+
+async function getSharp(): Promise<SharpInstance> {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import('sharp')
+      .then((mod) => mod.default)
+      .catch((error) => {
+        sharpModulePromise = null;
+        throw error;
+      });
+  }
+  return sharpModulePromise;
+}
 
 export const API_IMAGE_MAX_BASE64_SIZE = 5 * 1024 * 1024;
 export const IMAGE_TARGET_RAW_SIZE = Math.floor((API_IMAGE_MAX_BASE64_SIZE * 3) / 4);
@@ -45,7 +59,7 @@ export async function prepareImageForApi(
   };
   let safeOriginal: ProcessedImage | null = null;
   try {
-    const metadata = await sharp(imageBuffer).metadata();
+    const metadata = await (await getSharp())(imageBuffer).metadata();
     const mediaType = mediaTypeFromFormat(metadata.format) ?? detectImageMediaType(imageBuffer);
     if (!mediaType) throw new Error(`unsupported image format: ${metadata.format ?? 'unknown'}`);
     if (!metadata.width || !metadata.height) {
@@ -86,7 +100,7 @@ export async function prepareImageForApi(
       if (compressed) return { ...compressed, width: originalWidth, height: originalHeight, resized: true };
     }
 
-    const resizedBuffer = await sharp(imageBuffer)
+    const resizedBuffer = await (await getSharp())(imageBuffer)
       .resize(dimensions.width, dimensions.height, { fit: 'inside', withoutEnlargement: true })
       .toBuffer();
     if (resizedBuffer.length <= resolvedLimits.targetRawSize) {
@@ -103,7 +117,7 @@ export async function prepareImageForApi(
     if (compressed) return { ...compressed, ...dimensions, resized: true };
 
     const smaller = fitInside(dimensions.width, dimensions.height, 1000, resolvedLimits.maxHeight);
-    const buffer = await sharp(imageBuffer)
+    const buffer = await (await getSharp())(imageBuffer)
       .resize(smaller.width, smaller.height, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 20 })
       .toBuffer();
@@ -125,20 +139,20 @@ async function compressToTarget(
   targetBytes: number,
   dimensions?: { width: number; height: number },
 ): Promise<Pick<ProcessedImage, 'buffer' | 'mediaType'> | null> {
-  const pipeline = () => {
-    const image = sharp(imageBuffer);
+  const pipeline = async () => {
+    const image = (await getSharp())(imageBuffer);
     return dimensions
       ? image.resize(dimensions.width, dimensions.height, { fit: 'inside', withoutEnlargement: true })
       : image;
   };
 
   if (mediaType === 'image/png') {
-    const buffer = await pipeline().png({ compressionLevel: 9, palette: true }).toBuffer();
+    const buffer = await (await pipeline()).png({ compressionLevel: 9, palette: true }).toBuffer();
     if (buffer.length <= targetBytes) return { buffer, mediaType: 'image/png' };
   }
 
   for (const quality of JPEG_QUALITIES) {
-    const buffer = await pipeline().jpeg({ quality }).toBuffer();
+    const buffer = await (await pipeline()).jpeg({ quality }).toBuffer();
     if (buffer.length <= targetBytes) return { buffer, mediaType: 'image/jpeg' };
   }
   return null;

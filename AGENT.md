@@ -31,7 +31,7 @@ bun run dev             # 开发运行：bun run src/index.ts
 bun run typecheck       # 类型检查：bunx tsc --noEmit
 bun run test            # 运行 Vitest 测试：vitest run
 bun run test:watch      # 运行 Vitest watch
-bun run build           # 先 typecheck，再 bun build --compile，postbuild 安装本地二进制
+bun run build           # 先 typecheck，再 compile 二进制并打包 sharp runtime，postbuild 安装本地入口
 bun run format          # 格式化 README、AGENT、src、packages、scripts、docs、blogs
 ```
 
@@ -428,11 +428,13 @@ rg --files src packages scripts docs blogs
 - `bun run build` 实际运行 `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`。
 - `prebuild` 是 `bunx tsc --noEmit`。
 - `postbuild` 是 `bun scripts/install.mjs`。
-- `scripts/build.mjs` 使用 `bun build --compile` 构建本地二进制，默认输出 `dist/mica`。
-- `scripts/install.mjs` 默认把二进制安装为 `$HOME/.local/bin/mica`；可用 `MICA_INSTALL_DIR` 和 `MICA_BIN_NAME` 覆盖。
-- release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。
+- `scripts/build.mjs` 使用 `bun build --compile --compile-autoload-package-json --external sharp` 构建本地二进制，默认输出 `dist/mica`。
+- Bun 单文件目前无法可靠嵌入 `sharp` 的平台原生 addon；构建会额外通过 `scripts/package-sharp-runtime.mjs` 生成 `dist/sharp-runtime/`（`package.json` + `node_modules/sharp` 及当前平台 `@img/sharp-*` / libvips）。
+- `packages/mica-common/image.ts` 对 `sharp` 使用懒加载。缺少原生运行时时，应用仍可启动；只有图片缩放/压缩会失败并回退到“可安全发送的原图或明确错误”。
+- `scripts/install.mjs` 默认把二进制和 sharp runtime 安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写一个薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME`、`MICA_SHARP_RUNTIME_DIR` 覆盖。
+- release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。当前 release 交叉编译仍主要产出二进制本身；跨平台 sharp runtime 需要在对应 OS/CPU 上打包，不能只在 Ubuntu runner 上装一次依赖后交叉“假装”带齐原生库。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；推送 `v*` tag 时构建 Linux/macOS x64/arm64 release 二进制，打包自包含 `install.sh` 并上传 release asset。
-- 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个二进制：`~/.local/bin/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
+- 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
 
 ## Git 与工作区安全
 
