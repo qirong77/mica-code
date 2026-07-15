@@ -18,7 +18,7 @@ import {
   isActiveBackgroundTaskStatus,
   statusColor,
 } from '@packages/mica-ui/panels/BackgroundTaskRow.js';
-import { formatElapsed, formatSessionListTime } from '@packages/mica-ui/utils/format.js';
+import { formatElapsed } from '@packages/mica-ui/utils/format.js';
 import { getWorkingStatusDisplay } from '@packages/mica-ui/utils/workingStatusDisplay.js';
 import type {
   CommandRuntimeServices,
@@ -37,17 +37,13 @@ type TaskListItem = {
   taskId: string;
   searchText: string;
   groupId: string;
-  nested: boolean;
+  treePrefix: string;
 };
 
 const PANEL_ID = 'task-panel';
 const DETAIL_OUTPUT_BYTES = 4000;
 const PROMPT_PREVIEW_CHARS = 12_000;
 const RESULT_PREVIEW_CHARS = 40_000;
-const TASK_KIND_WIDTH = 8;
-const TASK_STATUS_MIN_WIDTH = 12;
-const TASK_STATUS_MAX_WIDTH = 18;
-const TASK_TIME_WIDTH = 16;
 
 export function createTaskCommand(services: CommandRuntimeServices) {
   return {
@@ -116,18 +112,6 @@ function showTaskPanel(services: CommandRuntimeServices) {
       [activeBackgroundTasks],
     );
     const subagentTaskById = useMemo(() => new Map(subagentTasks.map((task) => [task.id, task])), [subagentTasks]);
-    const statusWidth = useMemo(
-      () =>
-        micaUi.getOneLineColumnWidth(
-          [
-            ...activeBackgroundTasks.map((task) => formatTaskStatus(task.status)),
-            ...agents.map((agent) => formatAgentStatusLabel(agent)),
-            ...subagentTasks.map((task) => task.status),
-          ],
-          { min: TASK_STATUS_MIN_WIDTH, max: TASK_STATUS_MAX_WIDTH, padding: 1 },
-        ),
-      [activeBackgroundTasks, agents, subagentTasks],
-    );
     const selectedIdx = clampIndex(state.selectedIdx, items.length);
 
     useEffect(() => {
@@ -175,51 +159,26 @@ function showTaskPanel(services: CommandRuntimeServices) {
           items={items}
           selectedIdx={selectedIdx}
           itemGap={0}
-          markerWidth={1}
+          marker=""
+          markerWidth={0}
           layout="table"
           empty={<Text dimColor>{state.query ? 'No matching tasks' : 'No tasks'}</Text>}
-          renderItem={(item, isSelected, index) => {
+          renderItem={(item, isSelected) => {
             if (item.kind === 'background') {
               const task = backgroundTaskById.get(item.taskId);
               if (!task) return null;
-              return (
-                <TaskListBackgroundRow
-                  task={task}
-                  selected={isSelected}
-                  index={index}
-                  nowMs={nowMs}
-                  statusWidth={statusWidth}
-                  nested={item.nested}
-                />
-              );
+              return <TaskListBackgroundRow task={task} selected={isSelected} treePrefix={item.treePrefix} />;
             }
 
             if (item.kind === 'session') {
               const agent = agents.find((candidate) => candidate.id === item.taskId);
               if (!agent) return null;
-              return (
-                <TaskListAgentRow
-                  agent={agent}
-                  selected={isSelected}
-                  index={index}
-                  statusWidth={statusWidth}
-                  nowMs={nowMs}
-                />
-              );
+              return <TaskListAgentRow agent={agent} selected={isSelected} treePrefix={item.treePrefix} />;
             }
 
             const task = subagentTaskById.get(item.taskId);
             if (!task) return null;
-            return (
-              <TaskListSubagentRow
-                task={task}
-                selected={isSelected}
-                index={index}
-                statusWidth={statusWidth}
-                nowMs={nowMs}
-                nested={item.nested}
-              />
-            );
+            return <TaskListSubagentRow task={task} selected={isSelected} treePrefix={item.treePrefix} />;
           }}
         />
       </micaUi.Dialog>
@@ -345,7 +304,7 @@ function SubagentTaskDetailView({
       footer={<micaUi.KeyHints hints={['↑↓/pgup/pgdn scroll', 'esc back']} />}
     >
       <micaUi.BottomScrollBox ref={scrollRef}>
-        <WrappedDetailLine label="status" value={task.status} color={subagentStatusColor(task.status)} />
+        <WrappedDetailLine label="status" value={task.status} color={subagentStatusAppearance(task.status).color} />
         <WrappedDetailLine label="owner" value={formatSubagentOwner(task)} />
         <WrappedDetailLine label="task id" value={task.id} />
         <WrappedDetailLine label="elapsed" value={formatSubagentTaskAge(task, nowMs)} />
@@ -380,45 +339,24 @@ function MissingTaskDetail({ taskId }: { taskId: string }) {
 function TaskListBackgroundRow({
   task,
   selected,
-  index,
-  nowMs,
-  statusWidth,
-  nested,
+  treePrefix,
 }: {
   task: MicaUiBackgroundTaskItem;
   selected: boolean;
-  index: number;
-  nowMs: number;
-  statusWidth: number;
-  nested: boolean;
+  treePrefix: string;
 }) {
   return (
-    <TaskListRowSurface selected={selected} index={index}>
+    <TaskListRowSurface selected={selected}>
       <micaUi.OneLineItem
         cells={[
-          buildTaskKindCell('shell'),
-          {
-            key: 'status',
-            content: formatTaskStatus(task.status),
-            width: statusWidth,
-            flexShrink: 0,
-            color: statusColor(task.status),
-          },
-          {
-            key: 'time',
-            content: formatTaskAge(task, nowMs),
-            width: TASK_TIME_WIDTH,
-            flexShrink: 0,
-            color: selected ? micaUi.theme.colors.accent : undefined,
-            dimColor: !selected,
-          },
+          buildStatusMarkerCell(treePrefix, backgroundStatusAppearance(task.status)),
           {
             key: 'title',
-            content: formatTaskListTitle(formatTaskTitle(task.command), nested),
+            content: `$ ${formatTaskTitle(task.command)}`,
             flexGrow: 1,
             flexShrink: 1,
-            minWidth: 20,
-            color: selected ? micaUi.theme.colors.accent : undefined,
+            minWidth: 0,
+            color: selected ? micaUi.theme.colors.accent : micaUi.theme.colors.toolShell,
             bold: selected,
           },
         ]}
@@ -430,21 +368,15 @@ function TaskListBackgroundRow({
 function TaskListAgentRow({
   agent,
   selected,
-  index,
-  statusWidth,
-  nowMs,
+  treePrefix,
 }: {
   agent: MicaUiAgentStatusItem;
   selected: boolean;
-  index: number;
-  statusWidth: number;
-  nowMs: number;
+  treePrefix: string;
 }) {
   return (
-    <TaskListRowSurface selected={selected} index={index}>
-      <micaUi.OneLineItem
-        cells={[buildTaskKindCell('session'), ...buildTaskListAgentCells(agent, selected, { statusWidth, nowMs })]}
-      />
+    <TaskListRowSurface selected={selected}>
+      <micaUi.OneLineItem cells={buildTaskListAgentCells(agent, selected, treePrefix)} />
     </TaskListRowSurface>
   );
 }
@@ -452,44 +384,23 @@ function TaskListAgentRow({
 function TaskListSubagentRow({
   task,
   selected,
-  index,
-  statusWidth,
-  nowMs,
-  nested,
+  treePrefix,
 }: {
   task: SubagentTaskSummary;
   selected: boolean;
-  index: number;
-  statusWidth: number;
-  nowMs: number;
-  nested: boolean;
+  treePrefix: string;
 }) {
   return (
-    <TaskListRowSurface selected={selected} index={index}>
+    <TaskListRowSurface selected={selected}>
       <micaUi.OneLineItem
         cells={[
-          buildTaskKindCell('agent'),
-          {
-            key: 'status',
-            content: task.status,
-            width: statusWidth,
-            flexShrink: 0,
-            color: subagentStatusColor(task.status),
-          },
-          {
-            key: 'time',
-            content: formatSubagentTaskAge(task, nowMs),
-            width: TASK_TIME_WIDTH,
-            flexShrink: 0,
-            color: selected ? micaUi.theme.colors.accent : undefined,
-            dimColor: !selected,
-          },
+          buildStatusMarkerCell(treePrefix, subagentStatusAppearance(task.status)),
           {
             key: 'title',
-            content: formatTaskListTitle(formatSubagentListTitle(task), nested),
+            content: formatSubagentListTitle(task),
             flexGrow: 1,
             flexShrink: 1,
-            minWidth: 20,
+            minWidth: 0,
             color: selected ? micaUi.theme.colors.accent : undefined,
             bold: selected,
           },
@@ -499,82 +410,33 @@ function TaskListSubagentRow({
   );
 }
 
-export function buildTaskListAgentCells(
-  agent: MicaUiAgentStatusItem,
-  selected: boolean,
-  options: { statusWidth: number; nowMs?: number } = { statusWidth: TASK_STATUS_MIN_WIDTH },
-) {
-  const status = getWorkingStatusDisplay(agent.status);
+export function buildTaskListAgentCells(agent: MicaUiAgentStatusItem, selected: boolean, treePrefix = '') {
   const highlight = selected || agent.current;
   return [
-    {
-      key: 'status',
-      content: formatAgentStatusLabel(agent),
-      width: options.statusWidth,
-      flexShrink: 0,
-      color: status.color,
-    },
-    {
-      key: 'time',
-      content: formatAgentListTime(agent, options.nowMs ?? Date.now()),
-      width: TASK_TIME_WIDTH,
-      flexShrink: 0,
-      color: highlight ? micaUi.theme.colors.accent : undefined,
-      dimColor: !highlight,
-    },
+    buildStatusMarkerCell(treePrefix, agentStatusAppearance(agent)),
     {
       key: 'title',
       content: formatAgentListTitle(agent),
       flexGrow: 1,
       flexShrink: 1,
-      minWidth: 20,
+      minWidth: 0,
       color: highlight ? micaUi.theme.colors.accent : undefined,
       bold: selected,
     },
   ];
 }
 
-function formatAgentStatusLabel(agent: MicaUiAgentStatusItem): string {
-  const status = getWorkingStatusDisplay(agent.status);
-  return status.spinning ? `${status.text}...` : status.text;
-}
-
 function formatAgentListTitle(agent: MicaUiAgentStatusItem): string {
   return `#${agent.index} ${agent.title}`;
-}
-
-function formatAgentListTime(agent: MicaUiAgentStatusItem, nowMs: number): string {
-  const status = getWorkingStatusDisplay(agent.status);
-  if (status.spinning) {
-    const startedMs = new Date(agent.startedAt).getTime();
-    if (!Number.isNaN(startedMs)) {
-      return formatElapsed(Math.max(0, nowMs - startedMs));
-    }
-  }
-  return formatSessionListTime(agent.updatedAt, new Date(nowMs));
 }
 
 function isActiveAgentSession(agent: MicaUiAgentStatusItem): boolean {
   return getWorkingStatusDisplay(agent.status).spinning || agent.status.type === 'plugin_task';
 }
 
-function buildTaskKindCell(kind: 'session' | 'agent' | 'shell') {
-  const color =
-    kind === 'shell'
-      ? micaUi.theme.colors.toolShell
-      : kind === 'agent'
-        ? micaUi.theme.colors.statusInfo
-        : micaUi.theme.colors.accent;
-  return { key: 'kind', content: kind, width: TASK_KIND_WIDTH, flexShrink: 0, color };
-}
-
-function formatTaskListTitle(title: string, nested: boolean): string {
-  return nested ? `  ${title}` : title;
-}
-
 function formatSubagentListTitle(task: SubagentTaskSummary): string {
   const description = task.description.trim().replace(/\s+/g, ' ') || '(untitled task)';
-  return `${task.subagentType}: ${description}`;
+  return `${task.subagentType} · ${description}`;
 }
 
 function formatSubagentTaskAge(task: Pick<SubagentTaskSummary, 'startedAt' | 'finishedAt'>, nowMs: number): string {
@@ -584,15 +446,83 @@ function formatSubagentTaskAge(task: Pick<SubagentTaskSummary, 'startedAt' | 'fi
   return formatElapsed(Math.max(0, (Number.isNaN(finishedAt) ? nowMs : finishedAt) - startedAt));
 }
 
-function subagentStatusColor(status: SubagentTaskStatus): string {
-  if (status === 'running') return micaUi.theme.colors.statusInfo;
-  if (status === 'completed') return micaUi.theme.colors.statusSuccess;
-  return micaUi.theme.colors.statusError;
+type TaskStatusAppearance = {
+  spinning: boolean;
+  glyph: string;
+  color: string;
+};
+
+function buildStatusMarkerCell(treePrefix: string, appearance: TaskStatusAppearance) {
+  return {
+    key: 'marker',
+    content: <TaskStatusMarker treePrefix={treePrefix} appearance={appearance} />,
+    flexShrink: 0,
+  };
 }
 
-function TaskListRowSurface({ selected, index, children }: { selected: boolean; index: number; children: ReactNode }) {
+function TaskStatusMarker({ treePrefix, appearance }: { treePrefix: string; appearance: TaskStatusAppearance }) {
+  return appearance.spinning ? (
+    <SpinningTaskStatusMarker treePrefix={treePrefix} color={appearance.color} />
+  ) : (
+    <StatusMarkerContent treePrefix={treePrefix} glyph={appearance.glyph} color={appearance.color} />
+  );
+}
+
+function SpinningTaskStatusMarker({ treePrefix, color }: { treePrefix: string; color: string }) {
+  const glyph = micaUi.useSpinner();
+  return <StatusMarkerContent treePrefix={treePrefix} glyph={glyph} color={color} />;
+}
+
+function StatusMarkerContent({ treePrefix, glyph, color }: { treePrefix: string; glyph: string; color: string }) {
   return (
-    <Box width="100%" backgroundColor={selected ? '#3A3A3A' : index % 2 ? '#303030' : '#292929'}>
+    <Text>
+      {treePrefix ? <Text color={micaUi.theme.colors.textSecondary}>{treePrefix}</Text> : null}
+      <Text color={color}>{glyph}</Text>
+    </Text>
+  );
+}
+
+function agentStatusAppearance(agent: MicaUiAgentStatusItem): TaskStatusAppearance {
+  const display = getWorkingStatusDisplay(agent.status);
+  if (display.spinning) return { spinning: true, glyph: '', color: display.color };
+  if (agent.status.type === 'completed') {
+    return { spinning: false, glyph: '✓', color: micaUi.theme.colors.statusSuccess };
+  }
+  if (agent.status.type === 'error') {
+    return { spinning: false, glyph: '×', color: micaUi.theme.colors.statusError };
+  }
+  return { spinning: false, glyph: '○', color: micaUi.theme.colors.inactive };
+}
+
+function subagentStatusAppearance(status: SubagentTaskStatus): TaskStatusAppearance {
+  if (status === 'running') {
+    return { spinning: true, glyph: '', color: micaUi.theme.colors.statusRunning };
+  }
+  if (status === 'completed') {
+    return { spinning: false, glyph: '✓', color: micaUi.theme.colors.statusSuccess };
+  }
+  if (status === 'failed') {
+    return { spinning: false, glyph: '×', color: micaUi.theme.colors.statusError };
+  }
+  return { spinning: false, glyph: '■', color: micaUi.theme.colors.inactive };
+}
+
+function backgroundStatusAppearance(status: MicaUiBackgroundTaskItem['status']): TaskStatusAppearance {
+  if (isActiveBackgroundTaskStatus(status)) {
+    return { spinning: true, glyph: '', color: micaUi.theme.colors.statusRunning };
+  }
+  if (status === 'finished') {
+    return { spinning: false, glyph: '✓', color: micaUi.theme.colors.statusSuccess };
+  }
+  if (status === 'failed') {
+    return { spinning: false, glyph: '×', color: micaUi.theme.colors.statusError };
+  }
+  return { spinning: false, glyph: '■', color: micaUi.theme.colors.inactive };
+}
+
+function TaskListRowSurface({ selected, children }: { selected: boolean; children: ReactNode }) {
+  return (
+    <Box width="100%" backgroundColor={selected ? '#3A3A3A' : undefined}>
       {children}
     </Box>
   );
@@ -706,6 +636,7 @@ function buildTaskListItems(
   const backgroundTasksByOwner = groupBy(backgroundTasks, (task) => task.agentOwnerId ?? '');
 
   for (const agent of agents) {
+    const children: TaskListItem[] = [];
     items.push({
       key: `session:${agent.id}`,
       label: formatAgentListTitle(agent),
@@ -718,39 +649,42 @@ function buildTaskListItems(
         agent.cwd,
         agent.providerName,
         agent.model,
-        formatAgentStatusLabel(agent),
+        getWorkingStatusDisplay(agent.status).text,
       ].join('\n'),
       groupId: agent.id,
-      nested: false,
+      treePrefix: '',
     });
 
     for (const task of subagentsByOwner.get(agent.id) ?? []) {
       matchedSubagentIds.add(task.id);
-      items.push(toSubagentListItem(task, true, agent.id));
+      children.push(toSubagentListItem(task, agent.id));
     }
 
-    if (!agent.taskOwnerId) continue;
-    for (const task of backgroundTasksByOwner.get(agent.taskOwnerId) ?? []) {
-      matchedBackgroundTaskIds.add(task.id);
-      items.push(toBackgroundListItem(task, true, agent.id));
+    if (agent.taskOwnerId) {
+      for (const task of backgroundTasksByOwner.get(agent.taskOwnerId) ?? []) {
+        matchedBackgroundTaskIds.add(task.id);
+        children.push(toBackgroundListItem(task, agent.id));
+      }
     }
+
+    appendTreeChildren(items, children);
   }
 
   for (const task of subagentTasks) {
     if (!matchedSubagentIds.has(task.id)) {
-      items.push(toSubagentListItem(task, false, `subagent:${task.id}`));
+      items.push(toSubagentListItem(task, `subagent:${task.id}`));
     }
   }
   for (const task of backgroundTasks) {
     if (!matchedBackgroundTaskIds.has(task.id)) {
-      items.push(toBackgroundListItem(task, false, `background:${task.id}`));
+      items.push(toBackgroundListItem(task, `background:${task.id}`));
     }
   }
 
   return items;
 }
 
-function toSubagentListItem(task: SubagentTaskSummary, nested: boolean, groupId: string): TaskListItem {
+function toSubagentListItem(task: SubagentTaskSummary, groupId: string): TaskListItem {
   const label = formatSubagentListTitle(task);
   return {
     key: `subagent:${task.id}`,
@@ -769,12 +703,12 @@ function toSubagentListItem(task: SubagentTaskSummary, nested: boolean, groupId:
       task.owner.sessionId,
     ].join('\n'),
     groupId,
-    nested,
+    treePrefix: '',
   };
 }
 
-function toBackgroundListItem(task: MicaUiBackgroundTaskItem, nested: boolean, groupId: string): TaskListItem {
-  const label = formatTaskTitle(task.command);
+function toBackgroundListItem(task: MicaUiBackgroundTaskItem, groupId: string): TaskListItem {
+  const label = `$ ${formatTaskTitle(task.command)}`;
   return {
     key: `background:${task.id}`,
     label,
@@ -782,8 +716,15 @@ function toBackgroundListItem(task: MicaUiBackgroundTaskItem, nested: boolean, g
     taskId: task.id,
     searchText: [task.command, task.id, task.status, task.cwd, task.shell].join('\n'),
     groupId,
-    nested,
+    treePrefix: '',
   };
+}
+
+function appendTreeChildren(target: TaskListItem[], children: readonly TaskListItem[]): void {
+  const lastIndex = children.length - 1;
+  children.forEach((child, index) => {
+    target.push({ ...child, treePrefix: index === lastIndex ? '  └─ ' : '  ├─ ' });
+  });
 }
 
 function filterActiveBackgroundTasks(tasks: readonly MicaUiBackgroundTaskItem[]): readonly MicaUiBackgroundTaskItem[] {
