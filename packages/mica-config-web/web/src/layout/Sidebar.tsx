@@ -3,7 +3,8 @@ import { appIcons } from '../icons.js';
 
 const items = [
   { key: 'config', label: 'Config' },
-  { key: 'conversation', label: 'Conversation' },
+  { key: 'sessions', label: 'Sessions' },
+  { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
   { key: 'plugins', label: 'Plugins' },

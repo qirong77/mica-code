@@ -423,6 +423,155 @@ textarea {
   white-space: pre;
 }
 
+.session-preview {
+  max-height: 720px;
+}
+
+.session-loading {
+  padding: 32px 0;
+  color: var(--text-faint);
+  font-size: 13px;
+  text-align: center;
+}
+
+.session-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.session-toolbar,
+.session-summary {
+  padding: 14px;
+}
+
+.session-toolbar,
+.session-summary-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.session-selector {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+.session-selector > span {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.session-selector select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.session-selector select:focus {
+  border-color: var(--accent);
+}
+
+.session-view-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.session-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.session-summary-title h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.session-summary-title > div:first-child > span {
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.role-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  min-height: 720px;
+  gap: 16px;
+}
+
+.role-list,
+.role-editor-pane {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.role-list {
+  align-content: start;
+  display: grid;
+  gap: 4px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.role-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.role-list-item:hover,
+.role-list-item-active {
+  border-color: var(--line);
+  background: var(--panel-muted);
+}
+
+.role-list-item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-editor-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.role-editor-pane .editor-pane-header {
+  min-height: 48px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.role-editor-host {
+  min-height: 670px;
+  border: 0;
+  border-radius: 0;
+}
+
 .ui-empty-wrap {
   display: grid;
   place-items: center;
@@ -676,6 +825,25 @@ textarea {
 
   .conversation-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .role-layout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .role-list {
+    max-height: 220px;
+  }
+
+  .session-toolbar,
+  .session-summary-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-view-toggle .ui-button {
+    flex: 1;
   }
 
   .conversation-overview > div {

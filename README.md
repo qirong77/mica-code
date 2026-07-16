@@ -84,6 +84,6 @@ multica runtime profile create \
 
 ## 自定义 Role
 
-使用 `/role` 或输入框中的 `Shift+Tab` 可以切换当前 agent 的系统提示词。`Shift+Tab` 会按 role 列表顺序循环切换；自定义 role 默认放在 `~/.mica/role`，每个普通文件的文件名就是 role 名称，文件内容就是对应的系统提示词；设置 `MICA_HOME` 时目录改为 `$MICA_HOME/role`。
+使用 `/role` 或输入框中的 `Shift+Tab` 可以切换当前 agent 的系统提示词。`Shift+Tab` 会按 role 列表顺序循环切换；自定义 role 默认以 `.md` 文件放在 `~/.mica/role`，文件名去掉扩展名后就是 role 名称，文件内容就是对应的系统提示词；设置 `MICA_HOME` 时目录改为 `$MICA_HOME/role`。其他格式的文件不会被加载。
 
 内置 `default` 始终显示在 role 列表中，使用 Mica 自带提示词，不会出现在 role 目录里，也不能被同名文件覆盖。切换 role 只替换系统提示词主体，项目说明、skills 索引和环境 context 等注入保持不变。role 名称会随 session snapshot 保存，`/resume`、`/fork` 和 `/rewind` 都会恢复或继承它；旧 session 或已删除的自定义 role 会回退到 `default`。

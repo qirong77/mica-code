@@ -22,12 +22,13 @@ describe('agent roles', () => {
     expect(getRolesDirectory()).toBe(join(home, 'role'));
   });
 
-  it('uses each file name as a role name and reserves default for Mica', () => {
+  it('loads markdown file stems as role names and reserves default for Mica', () => {
     const home = createTempHome();
     const roleDir = join(home, 'role');
     mkdirSync(roleDir, { recursive: true });
-    writeFileSync(join(roleDir, 'reviewer'), 'Review every change.', 'utf-8');
-    writeFileSync(join(roleDir, 'default'), 'Do not override Mica.', 'utf-8');
+    writeFileSync(join(roleDir, 'reviewer.md'), 'Review every change.', 'utf-8');
+    writeFileSync(join(roleDir, 'ignored.txt'), 'Ignore this file.', 'utf-8');
+    writeFileSync(join(roleDir, 'default.md'), 'Do not override Mica.', 'utf-8');
     mkdirSync(join(roleDir, 'ignored-directory'));
 
     const roles = listAgentRoles();
@@ -38,8 +39,9 @@ describe('agent roles', () => {
       name: 'reviewer',
       prompt: 'Review every change.',
       builtIn: false,
-      path: join(roleDir, 'reviewer'),
+      path: join(roleDir, 'reviewer.md'),
     });
+    expect(getAgentRole('reviewer.md')?.name).toBe('reviewer');
   });
 });
 

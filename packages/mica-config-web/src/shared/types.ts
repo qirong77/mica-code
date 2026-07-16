@@ -1,4 +1,4 @@
-export type ConfigWebSection = 'config' | 'conversation' | 'mcp' | 'skills' | 'plugins';
+export type ConfigWebSection = 'config' | 'sessions' | 'roles' | 'mcp' | 'skills' | 'plugins';
 
 export type ConfigWebFilePayload = {
   path: string;
@@ -83,4 +83,44 @@ export type ConfigWebPlugin = {
 export type ConfigWebPluginsDetails = {
   root: string;
   plugins: ConfigWebPlugin[];
+};
+
+export type ConfigWebSession = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  cwd: string;
+  turnState: 'running' | 'completed' | 'aborted' | 'error';
+  providerId: string;
+  model: string;
+  role: string;
+};
+
+export type ConfigWebSessionDetails = ConfigWebSession & {
+  content: string;
+  conversation: ConfigWebConversationDetails;
+};
+
+export type ConfigWebSessionOption = {
+  id: string;
+  title: string;
+  updatedAt: string;
+};
+
+export type ConfigWebSessionsDetails = {
+  root: string;
+  sessions: ConfigWebSessionOption[];
+};
+
+export type ConfigWebRole = {
+  name: string;
+  content: string;
+  builtIn: boolean;
+  path?: string;
+};
+
+export type ConfigWebRolesDetails = {
+  root: string;
+  roles: ConfigWebRole[];
 };

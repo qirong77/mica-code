@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
 export const DEFAULT_ROLE_NAME = 'default';
@@ -24,13 +24,18 @@ export function listAgentRoles(): AgentRole[] {
 
   try {
     const customRoles = readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name !== DEFAULT_ROLE_NAME)
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          extname(entry.name) === '.md' &&
+          basename(entry.name, extname(entry.name)) !== DEFAULT_ROLE_NAME,
+      )
       .flatMap((entry) => {
         const path = join(directory, entry.name);
         try {
           return [
             {
-              name: entry.name,
+              name: basename(entry.name, extname(entry.name)),
               prompt: readFileSync(path, 'utf-8'),
               builtIn: false,
               path,
@@ -50,7 +55,7 @@ export function listAgentRoles(): AgentRole[] {
 }
 
 export function getAgentRole(name: string): AgentRole | undefined {
-  const normalizedName = name.trim();
+  const normalizedName = name.trim().replace(/\.md$/i, '');
   if (!normalizedName) return undefined;
   return listAgentRoles().find((role) => role.name === normalizedName);
 }

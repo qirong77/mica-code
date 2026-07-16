@@ -3,6 +3,9 @@ import type {
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginsDetails,
+  ConfigWebRolesDetails,
+  ConfigWebSessionDetails,
+  ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../../src/shared/types.js';
 
@@ -34,6 +37,39 @@ export async function readSkillsDetails(): Promise<ConfigWebSkillsDetails> {
 
 export async function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
   const response = await fetch(`/api/details/plugins?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readSessionsDetails(): Promise<ConfigWebSessionsDetails> {
+  const response = await fetch(`/api/details/sessions?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readSessionDetails(id: string): Promise<ConfigWebSessionDetails> {
+  const response = await fetch(`/api/details/session?token=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}`);
+  return readJson(response);
+}
+
+export async function readRolesDetails(): Promise<ConfigWebRolesDetails> {
+  const response = await fetch(`/api/details/roles?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function writeRole(name: string, content: string): Promise<ConfigWebRolesDetails> {
+  const response = await fetch(`/api/files/role?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content }),
+  });
+  return readJson(response);
+}
+
+export async function createRole(name: string): Promise<ConfigWebRolesDetails> {
+  const response = await fetch(`/api/files/role?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content: '' }),
+  });
   return readJson(response);
 }
 

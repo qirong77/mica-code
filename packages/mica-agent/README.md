@@ -9,7 +9,7 @@
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
-- 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载用户 role，并保留不可覆盖的内置 `default`。
+- 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载 `.md` 用户 role，以文件名（不含扩展名）作为 role 名，并保留不可覆盖的内置 `default`。
 
 ## 使用入口
 

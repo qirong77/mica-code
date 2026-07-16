@@ -201,7 +201,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `createSubAgent` 会复用当前 provider client options，但默认 `effort: 'none'`，并根据传入 options 决定是否启用 tools。
 - `buildSystemPrompt()` 默认读取 `packages/mica-agent/prompt/system.md`，当前 agent 选择自定义 role 时只替换 `<system>` 段；当前 cwd 下的 `AGENT.md` 和 `AGENTS.md` 会合并，skills 索引和环境信息继续独立注入。读取路径必须在 prompt 构建时按 live cwd 解析，不能在模块加载时冻结。
 - system prompt 中的 skills 只是索引；完整 skill 内容只能通过 `Skill` 工具按需读取。
-- role 默认从 `~/.mica/role` 扫描，设置 `MICA_HOME` 时使用 `$MICA_HOME/role`。每个普通文件的文件名就是 role 名；内置 `default` 只展示、不可由目录中的同名文件覆盖。
+- role 默认从 `~/.mica/role` 扫描，设置 `MICA_HOME` 时使用 `$MICA_HOME/role`。只加载 `.md` 文件，文件名去掉扩展名后作为 role 名；内置 `default` 只展示、不可由目录中的同名文件覆盖。
 
 修改 prompt 时至少运行：
 

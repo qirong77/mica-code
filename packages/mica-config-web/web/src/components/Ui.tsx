@@ -11,8 +11,16 @@ type ButtonProps = {
 
 export function Button({ children, icon, loading = false, variant = 'default', title, onClick }: ButtonProps) {
   return (
-    <button className={`ui-button ${variant === 'primary' ? 'ui-button-primary' : ''}`} type="button" title={title} disabled={loading} onClick={onClick}>
-      <span className="ui-button-icon">{loading ? <span className="ui-button-spinner" aria-hidden="true" /> : icon}</span>
+    <button
+      className={`ui-button ${variant === 'primary' ? 'ui-button-primary' : ''}`}
+      type="button"
+      title={title}
+      disabled={loading}
+      onClick={onClick}
+    >
+      <span className="ui-button-icon">
+        {loading ? <span className="ui-button-spinner" aria-hidden="true" /> : icon}
+      </span>
       {children ? <span>{children}</span> : null}
     </button>
   );
@@ -30,7 +38,13 @@ export function Empty({ description }: { description: string }) {
   );
 }
 
-export function Tag({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'green' | 'red' | 'blue' }) {
+export function Tag({
+  children,
+  tone = 'default',
+}: {
+  children: ReactNode;
+  tone?: 'default' | 'green' | 'red' | 'blue';
+}) {
   return <span className={`ui-tag ui-tag-${tone}`}>{children}</span>;
 }
 
@@ -56,4 +70,3 @@ export function CollapsiblePanel({ title, subtitle, meta, children, defaultOpen 
     </details>
   );
 }
-

@@ -1,6 +1,20 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, extname, join } from 'node:path';
+import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
+import { micaSession } from '@packages/mica-session/index.js';
+import { buildConfigWebConversationDetails } from '../conversation.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
@@ -9,6 +23,9 @@ import type {
   ConfigWebMcpDetails,
   ConfigWebMcpServer,
   ConfigWebPluginsDetails,
+  ConfigWebRolesDetails,
+  ConfigWebSessionDetails,
+  ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
 
@@ -87,7 +104,112 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
   };
 }
 
-function readPluginStatusByFile(): Map<string, { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string }> {
+export function getSessionsDetails(): ConfigWebSessionsDetails {
+  return { root: micaSession.dir, sessions: listRecentSessions() };
+}
+
+export function getSessionDetails(id: string): ConfigWebSessionDetails {
+  const session = micaSession.createStore().load(id);
+  if (!session) throw new Error(`Session not found: ${id}`);
+  const role = micaAgent.roles.get(session.snapshot.role);
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    cwd: session.cwd,
+    turnState: session.turnState,
+    providerId: session.snapshot.providerId,
+    model: session.snapshot.model,
+    role: session.snapshot.role,
+    content: JSON.stringify(session, null, 2),
+    conversation: buildConfigWebConversationDetails(
+      {
+        providerId: session.snapshot.providerId,
+        protocol: session.snapshot.protocol,
+        model: session.snapshot.model,
+        systemPrompt: role?.prompt ?? '',
+        messages: session.snapshot.messages,
+      },
+      new Date(session.updatedAt),
+    ),
+  };
+}
+
+function listRecentSessions(): ConfigWebSessionsDetails['sessions'] {
+  if (!existsSync(micaSession.dir)) return [];
+  return readdirSync(micaSession.dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .flatMap((entry) => {
+      const id = basename(entry.name, '.json');
+      const path = join(micaSession.dir, entry.name);
+      try {
+        return [{ id, title: readSessionTitle(path) ?? id, updatedAt: statSync(path).mtime.toISOString() }];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function readSessionTitle(path: string): string | undefined {
+  const handle = openSync(path, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(4096);
+    const length = readSync(handle, buffer, 0, buffer.length, 0);
+    const match = buffer.toString('utf-8', 0, length).match(/"title"\s*:\s*("(?:\\.|[^"\\])*")/);
+    return match ? (JSON.parse(match[1]) as string) : undefined;
+  } finally {
+    closeSync(handle);
+  }
+}
+
+export function getRolesDetails(): ConfigWebRolesDetails {
+  return {
+    root: micaAgent.roles.directory(),
+    roles: micaAgent.roles.list().map((role) => ({
+      name: role.name,
+      content: role.prompt,
+      builtIn: role.builtIn,
+      path: role.path,
+    })),
+  };
+}
+
+export function writeRole(name: string, content: string): ConfigWebRolesDetails {
+  const role = micaAgent.roles.get(name);
+  if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
+  if (basename(role.path) !== `${name}.md`) throw new Error('Invalid role path');
+
+  const temporaryPath = `${role.path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, content, 'utf-8');
+  renameSync(temporaryPath, role.path);
+  return getRolesDetails();
+}
+
+export function createRole(name: string, content = ''): ConfigWebRolesDetails {
+  const normalizedName = normalizeRoleName(name);
+  if (normalizedName === 'default') throw new Error('The default role is built in');
+
+  const directory = micaAgent.roles.directory();
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${normalizedName}.md`);
+  writeFileSync(path, content, { encoding: 'utf-8', flag: 'wx' });
+  return getRolesDetails();
+}
+
+function normalizeRoleName(name: string): string {
+  const trimmed = name.trim().replace(/\.md$/i, '');
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
+    throw new Error('Role name may only contain letters, numbers, dots, underscores, and hyphens');
+  }
+  return trimmed;
+}
+
+function readPluginStatusByFile(): Map<
+  string,
+  { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string }
+> {
   const path = getPluginStatusPath();
   if (!existsSync(path)) return new Map();
   try {
@@ -109,7 +231,10 @@ function normalizePluginStatus(value: string | undefined): 'loaded' | 'registere
   return value === 'loaded' || value === 'registered' || value === 'failed' ? value : 'unknown';
 }
 
-function describeMcpConfig(name: string, config: McpServerConfig): Omit<ConfigWebMcpServer, 'status' | 'toolCount' | 'tools'> {
+function describeMcpConfig(
+  name: string,
+  config: McpServerConfig,
+): Omit<ConfigWebMcpServer, 'status' | 'toolCount' | 'tools'> {
   if ('url' in config) {
     return {
       name,

@@ -1,5 +1,14 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
-import { getMcpDetails, getPluginsDetails, getSkillsDetails } from './details.js';
+import {
+  createRole,
+  getMcpDetails,
+  getPluginsDetails,
+  getRolesDetails,
+  getSessionDetails,
+  getSessionsDetails,
+  getSkillsDetails,
+  writeRole,
+} from './details.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { dirname, resolve } from 'node:path';
@@ -194,6 +203,35 @@ async function handleApiRequest(
   if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
   if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
   if (url.pathname === '/api/details/plugins') return json(getPluginsDetails());
+  if (url.pathname === '/api/details/sessions') return json(getSessionsDetails());
+  if (url.pathname === '/api/details/session') {
+    try {
+      return json(getSessionDetails(url.searchParams.get('id') ?? ''));
+    } catch (error) {
+      return json({ error: formatError(error) }, 404);
+    }
+  }
+  if (url.pathname === '/api/details/roles') return json(getRolesDetails());
+
+  if (url.pathname === '/api/files/role') {
+    try {
+      const body = (await request.json()) as { name?: unknown; content?: unknown };
+      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
+      if (request.method === 'POST') {
+        if (body.content !== undefined && typeof body.content !== 'string') {
+          return json({ error: 'content must be string' }, 400);
+        }
+        return json(createRole(body.name, body.content ?? ''));
+      }
+      if (request.method === 'PUT') {
+        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
+        return json(writeRole(body.name, body.content));
+      }
+      return json({ error: 'Method not allowed' }, 405);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
 
   if (url.pathname === '/api/details/conversation') {
     if (request.method === 'GET') return json(conversation.get());
