@@ -4,20 +4,24 @@ import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js
 import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
 import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
 import setupCommandCompact from '../../buildin-plugins/command-compact.mjs';
+import setupCommandExit from '../../buildin-plugins/command-exit.mjs';
 import setupCommandFork from '../../buildin-plugins/command-fork.mjs';
 import setupCommandNew from '../../buildin-plugins/command-new.mjs';
 import setupCommandRename from '../../buildin-plugins/command-rename.mjs';
 import setupCommandResume from '../../buildin-plugins/command-resume.mjs';
+import setupCommandRewind from '../../buildin-plugins/command-rewind.mjs';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 
 const FILE_COMMANDS = [
   ['cd', setupCommandCd, undefined],
   ['clear', setupCommandClear, undefined],
   ['compact', setupCommandCompact, undefined],
+  ['exit', setupCommandExit, true],
   ['fork', setupCommandFork, true],
   ['new', setupCommandNew, true],
   ['rename', setupCommandRename, true],
   ['resume', setupCommandResume, undefined],
+  ['rewind', setupCommandRewind, undefined],
 ] as const;
 
 describe('built-in command file plugins', () => {

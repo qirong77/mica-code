@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandRuntimeServices } from '../services.js';
 
-const { createExitCommand } = await import('../commands/exit.js');
+const { createExitCommand } = await import('../../../buildin-plugins/command-exit.mjs');
 
 describe('exit command', () => {
   it('requests application exit through runtime services', async () => {

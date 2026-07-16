@@ -4,8 +4,8 @@
 
 ## 主要能力
 
-- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/provider`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/rewind`、`/diff`、`/commit`、`/exit`。
-- 通过 `CommandHostService` 支持 `buildin-plugins` 中的 `/cd`、`/clear`、`/compact`、`/fork`、`/new`、`/rename`、`/resume` 单文件插件。
+- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/provider`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/diff`、`/commit`。
+- 通过 `CommandHostService` 支持 `buildin-plugins` 中的 `/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/new`、`/rename`、`/resume`、`/rewind` 单文件插件。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
@@ -48,7 +48,7 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：`commit`、`config`、`context`、`diff`、`effort`、`exit`、`mcp`、`model`、`provider`、`rewind`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
+- `commands/`：`commit`、`config`、`context`、`diff`、`effort`、`mcp`、`model`、`provider`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。

@@ -7,10 +7,12 @@ import { MessageQueuePlugin } from '../plugins/runtime/index.js';
 import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
 import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
 import setupCommandCompact from '../../buildin-plugins/command-compact.mjs';
+import setupCommandExit from '../../buildin-plugins/command-exit.mjs';
 import setupCommandFork from '../../buildin-plugins/command-fork.mjs';
 import setupCommandNew from '../../buildin-plugins/command-new.mjs';
 import setupCommandRename from '../../buildin-plugins/command-rename.mjs';
 import setupCommandResume from '../../buildin-plugins/command-resume.mjs';
+import setupCommandRewind from '../../buildin-plugins/command-rewind.mjs';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;
@@ -31,10 +33,12 @@ function builtinCommandFilePlugins(): MicaPlugin[] {
     createBuiltinCommandFilePlugin('cd', setupCommandCd),
     createBuiltinCommandFilePlugin('clear', setupCommandClear),
     createBuiltinCommandFilePlugin('compact', setupCommandCompact),
+    createBuiltinCommandFilePlugin('exit', setupCommandExit),
     createBuiltinCommandFilePlugin('fork', setupCommandFork),
     createBuiltinCommandFilePlugin('new', setupCommandNew),
     createBuiltinCommandFilePlugin('rename', setupCommandRename),
     createBuiltinCommandFilePlugin('resume', setupCommandResume),
+    createBuiltinCommandFilePlugin('rewind', setupCommandRewind),
   ];
 }
 

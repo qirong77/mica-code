@@ -36,7 +36,7 @@ vi.mock('@packages/mica-ui/utils/format.js', () => ({
   formatSessionListTime: (value: string) => value,
 }));
 
-const { createRewindCommand } = await import('../commands/rewind.js');
+const { createRewindCommand } = await import('../../../buildin-plugins/command-rewind.mjs');
 
 describe('rewind command', () => {
   beforeEach(() => {
@@ -66,11 +66,10 @@ describe('rewind command', () => {
       previewToken: 'token-c2',
     });
     expect(mocks.terminalTextSet).toHaveBeenCalledWith('second raw input');
-    expect(services.showNotice).toHaveBeenCalledWith(
-      expect.stringContaining('原输入已恢复到输入框'),
-      'session-1',
-      { command: '/rewind', status: 'success' },
-    );
+    expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('原输入已恢复到输入框'), 'session-1', {
+      command: '/rewind',
+      status: 'success',
+    });
   });
 
   it('defaults to conversation-only when the preview will delete a file', () => {
@@ -130,6 +129,25 @@ describe('rewind command', () => {
       previewToken: 'new-token',
     });
     expect(mocks.terminalTextSet).toHaveBeenCalledWith('second raw input');
+  });
+
+  it('still reports a completed rewind when restoring the input fails', () => {
+    const services = makeServices({ preview: makePreview() });
+    mocks.terminalTextSet.mockImplementationOnce(() => {
+      throw new Error('input unavailable');
+    });
+
+    createRewindCommand(services).action();
+    const panel = currentPanel();
+    panel.onInput('', { return: true });
+    panel.onInput('', { return: true });
+
+    expect(services.applyRewind).toHaveBeenCalledOnce();
+    expect(services.showNotice).toHaveBeenCalledWith(
+      expect.stringContaining('原输入恢复失败：input unavailable'),
+      'session-1',
+      { command: '/rewind', status: 'warning' },
+    );
   });
 });
 

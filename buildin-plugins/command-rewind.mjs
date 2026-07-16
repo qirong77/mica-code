@@ -1,29 +1,25 @@
+import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
-import { micaUi } from '@packages/mica-ui/index.js';
-import type { SelectItem } from '@packages/mica-ui/index.js';
-import { formatSessionListTime } from '@packages/mica-ui/utils/format.js';
-import type {
-  CommandRuntimeServices,
-  RewindCheckpointSummary,
-  RewindFileChange,
-  RewindMode,
-  RewindPreviewResult,
-} from '../services.js';
-import { moveSelection, selectionDirection } from '../shared/commandInput.js';
+import { micaUi } from '../packages/mica-ui/index.js';
+import { formatSessionListTime } from '../packages/mica-ui/utils/format.js';
+import { commandHostToken } from '../packages/mica-builtin-commands/commandHost.js';
+import { moveSelection, selectionDirection } from '../packages/mica-builtin-commands/shared/commandInput.js';
 
 const PANEL_ID = 'rewind-panel';
 const MAX_VISIBLE_FILES = 14;
+const element = React.createElement;
 
-type RewindPhase = 'checkpoint' | 'scope';
-type SuccessfulPreview = Extract<RewindPreviewResult, { ok: true }>;
-type FileActionCounts = Record<RewindFileChange['action'], number>;
+export default function setupCommandRewind(ctx) {
+  const host = ctx.services.get(commandHostToken);
+  host.registerCommand(ctx, createRewindCommand(host.services));
+}
 
-export function createRewindCommand(services: CommandRuntimeServices) {
+export function createRewindCommand(services) {
   return {
     name: 'rewind',
     description: '选择一轮对话，并回退到该节点完成时的状态',
-    action: (rawArgs?: string) => {
+    action(rawArgs) {
       if ((rawArgs ?? '').trim()) {
         services.showMessage('rewind: /rewind 不支持参数，请直接运行 /rewind', 5000);
         return;
@@ -37,23 +33,23 @@ export function createRewindCommand(services: CommandRuntimeServices) {
       }
       showRewindPanel(checkpoints, services);
     },
-  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+  };
 }
 
-function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: CommandRuntimeServices): void {
-  const phase = atom<RewindPhase>('checkpoint');
+function showRewindPanel(checkpoints, services) {
+  const phase = atom('checkpoint');
   const checkpointIndex = atom(0);
   const modeIndex = atom(0);
-  const preview = atom<SuccessfulPreview | null>(null);
-  const feedback = atom<string | null>(null);
+  const preview = atom(null);
+  const feedback = atom(null);
   const applying = atom(false);
   const ownerSessionId = services.getCurrentAgentSessionId();
 
-  function hide(): void {
+  function hide() {
     micaUi.panels.removePluginUI(PANEL_ID);
   }
 
-  function setPreview(result: RewindPreviewResult, stale = false): boolean {
+  function setPreview(result, stale = false) {
     if (!result.ok) {
       feedback.set(result.message);
       preview.set(null);
@@ -67,16 +63,16 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     return true;
   }
 
-  function openSelectedCheckpoint(): void {
+  function openSelectedCheckpoint() {
     const selected = checkpoints[checkpointIndex.get()];
     if (selected) setPreview(services.getRewindPreview(selected.id));
   }
 
-  function refreshStalePreview(id: string): void {
+  function refreshStalePreview(id) {
     setPreview(services.getRewindPreview(id), true);
   }
 
-  function confirmSelectedMode(): void {
+  function confirmSelectedMode() {
     if (applying.get()) return;
     if (showBusyMessage(services)) return;
     const current = preview.get();
@@ -86,7 +82,7 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
 
     applying.set(true);
     feedback.set(null);
-    let result: ReturnType<CommandRuntimeServices['applyRewind']>;
+    let result;
     try {
       result = services.applyRewind({
         id: current.id,
@@ -105,10 +101,16 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     }
 
     hide();
+    let inputRestoreError;
     try {
-      services.showNotice(formatSuccessNotice(result), ownerSessionId, {
+      micaUi.terminalInput.text.set(result.inputText);
+    } catch (error) {
+      inputRestoreError = error instanceof Error ? error.message : String(error);
+    }
+    try {
+      services.showNotice(formatSuccessNotice(result, inputRestoreError), ownerSessionId, {
         command: '/rewind',
-        status: result.postApplyWarning ? 'warning' : 'success',
+        status: result.postApplyWarning || inputRestoreError ? 'warning' : 'success',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -120,29 +122,29 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
   function CheckpointPanel() {
     const selectedIndex = micaUi.useScheduleState(checkpointIndex);
     const currentFeedback = micaUi.useScheduleState(feedback);
-    const items: SelectItem[] = checkpoints.map((checkpoint) => ({
+    const items = checkpoints.map((checkpoint) => ({
       key: checkpoint.id,
       label: checkpoint.conversationLabel,
       description: formatSessionListTime(checkpoint.createdAt),
     }));
-    return (
-      <micaUi.Dialog
-        title={`rewind · 选择要回到的用户输入 (${items.length})`}
-        footer={<micaUi.KeyHints hints={['↑↓ navigate', '↵ continue', 'esc cancel']} />}
-      >
-        <micaUi.SelectList items={items} selectedIdx={selectedIndex} layout="table" itemGap={0} />
-        {currentFeedback ? <Text color={micaUi.theme.colors.warning}>{currentFeedback}</Text> : null}
-      </micaUi.Dialog>
+    return element(
+      micaUi.Dialog,
+      {
+        title: `rewind · 选择要回到的用户输入 (${items.length})`,
+        footer: element(micaUi.KeyHints, { hints: ['↑↓ navigate', '↵ continue', 'esc cancel'] }),
+      },
+      element(micaUi.SelectList, { items, selectedIdx: selectedIndex, layout: 'table', itemGap: 0 }),
+      currentFeedback ? element(Text, { color: micaUi.theme.colors.warning }, currentFeedback) : null,
     );
   }
 
-  function ScopePanel({ current }: { current: SuccessfulPreview }) {
+  function ScopePanel({ current }) {
     const selectedIndex = micaUi.useScheduleState(modeIndex);
     const currentFeedback = micaUi.useScheduleState(feedback);
     const isApplying = micaUi.useScheduleState(applying);
     const modes = rewindModes(current);
     const actionCounts = countFileActions(current.files);
-    const items: SelectItem[] = modes.map((mode) => ({
+    const items = modes.map((mode) => ({
       key: mode,
       label:
         mode === 'conversation_only'
@@ -158,52 +160,33 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
     const visibleFiles = current.files.slice(0, MAX_VISIBLE_FILES);
     const hiddenCount = current.files.length - visibleFiles.length;
 
-    return (
-      <micaUi.Dialog
-        title={isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」`}
-        footer={<micaUi.KeyHints hints={['↑↓ choose scope', '↵ rewind', 'esc back']} />}
-      >
-        <Text color={micaUi.theme.colors.dim}>
-          messages: {current.messageCountNow} -&gt; {current.messageCountBefore}
-        </Text>
-        {!current.fileStateAvailable ? (
-          <Text color={micaUi.theme.colors.warning}>
-            文件状态不可用，本次只能回退对话：{current.fileStateError ?? 'unknown error'}
-          </Text>
-        ) : visibleFiles.length > 0 ? (
-          <Box flexDirection="column" marginTop={1}>
-            <Text color={micaUi.theme.colors.primary}>文件影响：</Text>
-            <Text color={micaUi.theme.colors.warning}>文件回退会覆盖内容，并重置这些文件当前的暂存状态。</Text>
-            {visibleFiles.map((file) => (
-              <Text
-                key={file.path}
-                color={file.action === 'delete' ? micaUi.theme.colors.warning : undefined}
-                wrap="truncate"
-              >
-                {formatFileChange(file)}
-              </Text>
-            ))}
-            {hiddenCount > 0 ? <Text color={micaUi.theme.colors.dim}>... and {hiddenCount} more</Text> : null}
-          </Box>
-        ) : (
-          <Text color={micaUi.theme.colors.dim}>没有文件变化</Text>
-        )}
-        <Box flexDirection="column" marginTop={1}>
-          <micaUi.SelectList items={items} selectedIdx={selectedIndex} layout="table" itemGap={0} />
-        </Box>
-        {currentFeedback ? <Text color={micaUi.theme.colors.warning}>{currentFeedback}</Text> : null}
-      </micaUi.Dialog>
+    return element(
+      micaUi.Dialog,
+      {
+        title: isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」`,
+        footer: element(micaUi.KeyHints, { hints: ['↑↓ choose scope', '↵ rewind', 'esc back'] }),
+      },
+      element(
+        Text,
+        { color: micaUi.theme.colors.dim },
+        `messages: ${current.messageCountNow} -> ${current.messageCountBefore}`,
+      ),
+      renderFileImpact(current, visibleFiles, hiddenCount),
+      element(
+        Box,
+        { flexDirection: 'column', marginTop: 1 },
+        element(micaUi.SelectList, { items, selectedIdx: selectedIndex, layout: 'table', itemGap: 0 }),
+      ),
+      currentFeedback ? element(Text, { color: micaUi.theme.colors.warning }, currentFeedback) : null,
     );
   }
 
   function RewindPanel() {
     const currentPhase = micaUi.useScheduleState(phase);
     const currentPreview = micaUi.useScheduleState(preview);
-    return currentPhase === 'scope' && currentPreview ? (
-      <ScopePanel current={currentPreview} />
-    ) : (
-      <CheckpointPanel />
-    );
+    return currentPhase === 'scope' && currentPreview
+      ? element(ScopePanel, { current: currentPreview })
+      : element(CheckpointPanel);
   }
 
   micaUi.panels.setExclusivePluginUI({
@@ -242,7 +225,38 @@ function showRewindPanel(checkpoints: RewindCheckpointSummary[], services: Comma
   });
 }
 
-function formatSuccessNotice(result: ReturnType<CommandRuntimeServices['applyRewind']>): string {
+function renderFileImpact(current, visibleFiles, hiddenCount) {
+  if (!current.fileStateAvailable) {
+    return element(
+      Text,
+      { color: micaUi.theme.colors.warning },
+      `文件状态不可用，本次只能回退对话：${current.fileStateError ?? 'unknown error'}`,
+    );
+  }
+  if (visibleFiles.length === 0) {
+    return element(Text, { color: micaUi.theme.colors.dim }, '没有文件变化');
+  }
+  return element(
+    Box,
+    { flexDirection: 'column', marginTop: 1 },
+    element(Text, { color: micaUi.theme.colors.primary }, '文件影响：'),
+    element(Text, { color: micaUi.theme.colors.warning }, '文件回退会覆盖内容，并重置这些文件当前的暂存状态。'),
+    ...visibleFiles.map((file) =>
+      element(
+        Text,
+        {
+          key: file.path,
+          color: file.action === 'delete' ? micaUi.theme.colors.warning : undefined,
+          wrap: 'truncate',
+        },
+        formatFileChange(file),
+      ),
+    ),
+    hiddenCount > 0 ? element(Text, { color: micaUi.theme.colors.dim }, `... and ${hiddenCount} more`) : null,
+  );
+}
+
+function formatSuccessNotice(result, inputRestoreError) {
   const actionCounts = countFileActions(result.files);
   const lines = [
     `**已回退到「${result.conversationLabel}」**`,
@@ -250,6 +264,8 @@ function formatSuccessNotice(result: ReturnType<CommandRuntimeServices['applyRew
     `- 对话：${result.messageCountNow} -> ${result.messageCountBefore}`,
     '- 对话已停在所选节点',
   ];
+  if (inputRestoreError) lines.push(`- 警告：原输入恢复失败：${inputRestoreError}`);
+  else lines.push('- 原输入已恢复到输入框');
   if (result.mode === 'conversation_only') {
     lines.push('- 文件：保留当前修改');
   } else {
@@ -259,25 +275,25 @@ function formatSuccessNotice(result: ReturnType<CommandRuntimeServices['applyRew
   return lines.join('\n');
 }
 
-function formatFileChange(file: RewindFileChange): string {
+function formatFileChange(file) {
   return `${file.action} ${file.path}`;
 }
 
-function rewindModes(preview: SuccessfulPreview): RewindMode[] {
-  return preview.fileStateAvailable ? ['conversation_only', 'conversation_and_files'] : ['conversation_only'];
+function rewindModes(currentPreview) {
+  return currentPreview.fileStateAvailable ? ['conversation_only', 'conversation_and_files'] : ['conversation_only'];
 }
 
-function defaultModeIndex(preview: SuccessfulPreview): number {
-  return preview.fileStateAvailable && preview.files.every((file) => file.action !== 'delete') ? 1 : 0;
+function defaultModeIndex(currentPreview) {
+  return currentPreview.fileStateAvailable && currentPreview.files.every((file) => file.action !== 'delete') ? 1 : 0;
 }
 
-function countFileActions(files: RewindFileChange[]): FileActionCounts {
-  const counts: FileActionCounts = { restore: 0, delete: 0 };
+function countFileActions(files) {
+  const counts = { restore: 0, delete: 0 };
   for (const file of files) counts[file.action] += 1;
   return counts;
 }
 
-function showBusyMessage(services: CommandRuntimeServices): boolean {
+function showBusyMessage(services) {
   if (services.hasBusyAgents?.()) {
     services.showMessage('rewind: agent task still running; wait or abort before rewinding', 5000);
     return true;
@@ -288,6 +304,6 @@ function showBusyMessage(services: CommandRuntimeServices): boolean {
   return true;
 }
 
-function isRunningStatus(status: { type: string }): boolean {
+function isRunningStatus(status) {
   return status.type !== 'idle' && status.type !== 'completed' && status.type !== 'error';
 }
