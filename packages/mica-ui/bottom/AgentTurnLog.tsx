@@ -11,7 +11,7 @@ export function AgentTurnLog(): React.ReactNode {
   if (status.type === 'idle' && items.length === 0) return null;
 
   return (
-    <BottomScrollBox stickyScroll bottomReservedRows={0}>
+    <BottomScrollBox stickyScroll paddingTop={1} bottomReservedRows={0}>
       {items.map((item) => (
         <Box key={item.id}>
           <item.component />
