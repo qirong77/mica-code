@@ -50,6 +50,7 @@ describe('SessionController', () => {
     };
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
       save: vi.fn((session: PersistedSession) => {
         saves.push(session);
@@ -94,6 +95,7 @@ describe('SessionController', () => {
     };
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
       save: vi.fn((session: PersistedSession) => {
         saves.push(session);
@@ -146,6 +148,7 @@ describe('SessionController', () => {
           uncompleted: false,
         },
       ]),
+      listRecent: vi.fn(() => []),
       load: vi.fn(() => session),
       save: vi.fn(),
     };
@@ -214,6 +217,7 @@ describe('SessionController', () => {
     };
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => (id === session.id ? session : null)),
       save: vi.fn(),
     };
@@ -301,6 +305,7 @@ describe('SessionController', () => {
     };
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => (id === session.id ? session : null)),
       save: vi.fn(),
     };
@@ -358,6 +363,7 @@ describe('SessionController', () => {
     };
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
       load: vi.fn(() => session as unknown as PersistedSession),
       save: vi.fn(),
     };

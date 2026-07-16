@@ -217,6 +217,7 @@ function makeAgent(usageHistory: AgentUsageRecord[]): CommandAgent {
 function makeSessionController(id: string): CommandSessionController {
   return {
     list: vi.fn(() => []),
+    listRecent: vi.fn(() => []),
     resume: vi.fn((_sessionId: string) => ({ ok: false as const, message: 'not implemented' })),
     startNewSession: vi.fn(),
     saveCurrent: vi.fn(),

@@ -318,6 +318,7 @@ function waitForSelectCommand(): Promise<void> {
 function makeSession(): CommandSessionController {
   return {
     list: () => [],
+    listRecent: () => [],
     resume: () => ({ ok: false, message: 'not found' }),
     startNewSession: vi.fn(),
     saveCurrent: vi.fn(),

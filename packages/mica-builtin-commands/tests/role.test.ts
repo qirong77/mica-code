@@ -145,6 +145,7 @@ function makeAgent(options: { setRole: (roleName: string) => void; role?: string
 function makeSession(options: { saveCurrent: () => void }): CommandSessionController {
   return {
     list: () => [],
+    listRecent: () => [],
     resume: () => ({ ok: false, message: 'not found' }),
     startNewSession() {},
     saveCurrent: options.saveCurrent,

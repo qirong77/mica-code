@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/diff`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
+- 注册产品内置命令，例如：`/cd`、`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/diff`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
@@ -46,7 +46,7 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：`clear`、`commit`、`compact`、`config`、`context`、`diff`、`effort`、`exit`、`fork`、`mcp`、`model`、`new`、`provider`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task` 等命令工厂。
+- `commands/`：`cd`、`clear`、`commit`、`compact`、`config`、`context`、`diff`、`effort`、`exit`、`fork`、`mcp`、`model`、`new`、`provider`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task` 等命令工厂。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。

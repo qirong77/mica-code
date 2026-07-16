@@ -103,6 +103,7 @@ function makeAgent(): CommandAgent {
 function makeSession(): CommandSessionController {
   return {
     list: vi.fn(() => []),
+    listRecent: vi.fn(() => []),
     resume: vi.fn(() => ({ ok: false as const, message: 'not found' })),
     startNewSession: vi.fn(),
     saveCurrent: vi.fn(),

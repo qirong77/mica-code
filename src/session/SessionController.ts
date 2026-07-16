@@ -76,6 +76,15 @@ export class SessionController {
     });
   }
 
+  listRecent(limit = 20): SessionSummary[] {
+    return this.store.listRecent(limit).map((summary) => {
+      if (!isInternalCompactText(summary.title)) return summary;
+      const session = this.store.load(summary.id);
+      if (!session) return summary;
+      return { ...summary, title: deriveTitle(getPersistedConversationMessages(session.snapshot)) };
+    });
+  }
+
   startNewSession(): void {
     this.currentSessionId = micaSession.createId();
     this.currentTitleOverride = null;

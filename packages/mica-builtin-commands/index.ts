@@ -1,4 +1,5 @@
 import { createClearCommand } from './commands/clear.js';
+import { createCdCommand } from './commands/cd.js';
 import { createCommitCommand } from './commands/commit.js';
 import { createCompactCommand } from './commands/compact.js';
 import { createConfigCommand } from './commands/config.js';
@@ -23,6 +24,7 @@ import { AgentChangeTracker } from './git/agentChangeTracker.js';
 
 export const micaBuiltinCommands = {
   cycleNextRole,
+  createCdCommand,
   createClearCommand,
   createCommitCommand,
   createCompactCommand,

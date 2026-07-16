@@ -67,6 +67,7 @@ export type ResumeSessionResult =
 
 export type CommandSessionController = {
   list(limit?: number): SessionSummary[];
+  listRecent(limit?: number): SessionSummary[];
   resume(id: string): ResumeSessionResult;
   startNewSession(): void;
   saveCurrent(): void;

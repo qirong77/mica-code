@@ -46,6 +46,7 @@ export type SessionSummary = {
 
 export type SessionStoreLike = {
   list(limit?: number): SessionSummary[];
+  listRecent(limit?: number): SessionSummary[];
   listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
   save(session: PersistedSession): void;
@@ -77,6 +78,17 @@ export class SessionStore implements SessionStoreLike {
         model: session.snapshot.model,
         uncompleted: session.turnState !== 'completed',
       }));
+  }
+
+  listRecent(limit = 20): SessionSummary[] {
+    ensureSessionDir();
+    return readdirSync(SESSION_DIR)
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => this.read(resolve(SESSION_DIR, file)))
+      .filter((session): session is PersistedSession => Boolean(session))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit)
+      .map(toSessionSummary);
   }
 
   /** Reads current snapshots plus the legacy message-array format used by older Mica builds. */
@@ -137,6 +149,18 @@ export function createSessionId(date = new Date()): string {
     .replace(/\.\d{3}Z$/, 'Z');
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${suffix}`;
+}
+
+function toSessionSummary(session: PersistedSession): SessionSummary {
+  return {
+    id: session.id,
+    title: session.title,
+    updatedAt: session.updatedAt,
+    cwd: session.cwd,
+    providerId: session.snapshot.providerId,
+    model: session.snapshot.model,
+    uncompleted: session.turnState !== 'completed',
+  };
 }
 
 function createSessionStore(): SessionStore {

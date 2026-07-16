@@ -40,6 +40,7 @@ function createBuiltInCommands(
     activeAgent,
     activeSessionController,
     commands: [
+      micaBuiltinCommands.createCdCommand(activeSessionController, services),
       micaBuiltinCommands.createClearCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createResumeCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
