@@ -4,18 +4,20 @@ type ButtonProps = {
   children?: ReactNode;
   icon?: ReactNode;
   loading?: boolean;
+  pressed?: boolean;
   variant?: 'primary' | 'default';
   title?: string;
   onClick(): void;
 };
 
-export function Button({ children, icon, loading = false, variant = 'default', title, onClick }: ButtonProps) {
+export function Button({ children, icon, loading = false, pressed, variant = 'default', title, onClick }: ButtonProps) {
   return (
     <button
       className={`ui-button ${variant === 'primary' ? 'ui-button-primary' : ''}`}
       type="button"
       title={title}
       disabled={loading}
+      aria-pressed={pressed}
       onClick={onClick}
     >
       <span className="ui-button-icon">

@@ -73,4 +73,22 @@ describe('buildConfigWebConversationDetails', () => {
       content: 'all tests passed',
     });
   });
+
+  it('omits internal Responses reasoning items from the visualized conversation', () => {
+    const details = buildConfigWebConversationDetails({
+      providerId: 'responses',
+      protocol: 'openai_responses',
+      model: 'gpt-5',
+      systemPrompt: 'system instructions',
+      messages: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Inspect this' }] },
+        { type: 'reasoning', id: 'rs_1', content: [], encrypted_content: 'private-provider-payload' },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] },
+      ],
+    });
+
+    expect(details.items.map((item) => item.type)).toEqual(['system', 'user', 'assistant']);
+    expect(details.items.map((item) => item.sequence)).toEqual([1, 2, 3]);
+    expect(JSON.stringify(details.items)).not.toContain('private-provider-payload');
+  });
 });

@@ -31,6 +31,8 @@ export function buildConfigWebConversationDetails(
   ];
 
   for (const item of normalized) {
+    if (isInternalReasoningItem(item)) continue;
+
     if (item.type === 'system' || item.type === 'user' || item.type === 'assistant') {
       items.push({
         sequence: items.length + 1,
@@ -78,6 +80,11 @@ export function buildConfigWebConversationDetails(
     updatedAt: now.toISOString(),
     items,
   };
+}
+
+function isInternalReasoningItem(item: ConversationItem): boolean {
+  if (item.type !== 'unknown' || !item.content || typeof item.content !== 'object') return false;
+  return 'type' in item.content && item.content.type === 'reasoning';
 }
 
 function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): ConversationItem[] {
