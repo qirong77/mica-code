@@ -16,7 +16,7 @@
 - `mica-context`：上下文管理能力，当前主要是 compact。
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks 和 service container。
-- `mica-common`：跨包共享的底层工具，包括图片格式识别、缩放和压缩。
+- `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
 
 ## 包规范
 

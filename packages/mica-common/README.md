@@ -9,7 +9,7 @@
 - JSON 值类型定义。
 - `Result` 成功/失败结果类型。
 - `ID` 生成、token 格式化、Git 命令执行与错误格式化工具。
-- 共享的图片格式识别、缩放与 API 载荷压缩工具。
+- 共享的图片格式、尺寸识别与原图载荷工具。
 
 ## 使用入口
 
@@ -42,5 +42,5 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `ids.ts`：ID 生成。
 - `format.ts`：token 数量格式化。
 - `git.ts`：git 命令执行与错误格式化。
-- `image.ts`：图片格式识别、缩放和压缩。
+- `image.ts`：图片格式和尺寸识别，保留原始图片字节供 provider 发送。
 - `index.ts`：公共 API 聚合导出。

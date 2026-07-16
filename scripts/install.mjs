@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
-import { appendFileSync, chmodSync, cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const outFile = process.env.MICA_BUILD_OUTFILE ?? join('dist', process.env.MICA_BUILD_NAME ?? 'mica');
 if (!existsSync(outFile)) {
@@ -10,10 +10,9 @@ if (!existsSync(outFile)) {
 
 const home = homedir();
 const binName = process.env.MICA_BIN_NAME ?? 'mica';
-// Keep the binary and sharp runtime together. A thin launcher goes into PATH.
+// Keep the compiled binary in a stable location and expose it through a thin launcher.
 const packageDir = process.env.MICA_INSTALL_PACKAGE_DIR ?? resolve(home, '.local/lib/mica');
 const binDir = process.env.MICA_INSTALL_DIR ?? resolve(home, '.local/bin');
-const runtimeSource = process.env.MICA_SHARP_RUNTIME_DIR ?? join(dirname(outFile), 'sharp-runtime');
 
 try {
   if (!existsSync(packageDir)) mkdirSync(packageDir, { recursive: true });
@@ -23,22 +22,12 @@ try {
   copyFileSync(outFile, packagedBinary);
   chmodSync(packagedBinary, 0o755);
 
-  if (existsSync(runtimeSource)) {
-    for (const name of ['package.json', 'node_modules']) {
-      const source = join(runtimeSource, name);
-      const target = join(packageDir, name);
-      if (!existsSync(source)) continue;
-      if (existsSync(target)) rmSync(target, { recursive: true, force: true });
-      cpSync(source, target, { recursive: true, dereference: true });
-    }
-    console.log(`Installed sharp runtime into ${packageDir}`);
-  } else {
-    console.log(`Warning: sharp runtime not found at ${runtimeSource}; image resize may be unavailable.`);
+  // Remove native image runtime files left by versions that depended on sharp.
+  for (const legacyPath of [join(packageDir, 'node_modules'), join(packageDir, 'package.json')]) {
+    if (existsSync(legacyPath)) rmSync(legacyPath, { recursive: true, force: true });
   }
 
   const launcher = join(binDir, binName);
-  // Always exec the packaged binary by absolute path so Bun resolves external
-  // sharp modules from packageDir, not from the PATH launcher location.
   writeFileSync(
     launcher,
     `#!/bin/sh\nexec "${packagedBinary}" "$@"\n`,

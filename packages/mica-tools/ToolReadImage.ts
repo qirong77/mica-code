@@ -54,7 +54,7 @@ export class ToolReadImage extends MicaTool {
       `Image loaded from ${sourceDescription}`,
       `Format: ${processed.mediaType}`,
       `Dimensions: ${dimensions}`,
-      `API payload size: ${formatSize(processed.buffer.length)}${processed.resized ? ' (resized/compressed)' : ''}`,
+      `API payload size: ${formatSize(processed.buffer.length)} (original)`,
     ].join('\n');
 
     return [

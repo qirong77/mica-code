@@ -31,7 +31,7 @@ bun run dev             # 开发运行：bun run src/index.ts
 bun run typecheck       # 类型检查：bunx tsc --noEmit
 bun run test            # 运行 Vitest 测试：vitest run
 bun run test:watch      # 运行 Vitest watch
-bun run build           # 先 typecheck，再 compile 二进制并打包 sharp runtime，postbuild 安装本地入口
+bun run build           # 先 typecheck，再 compile 单二进制，postbuild 安装本地入口
 bun run format          # 格式化 README、AGENT、src、packages、scripts、docs、blogs
 ```
 
@@ -306,7 +306,7 @@ AGENT.md
 - `packages/mica-tools` 是唯一工具 registry。内置工具和 MCP 工具都必须通过它暴露给模型和 runtime。
 - 新增工具优先继承 `MicaTool`，提供参数 schema、执行逻辑、展示文案、错误格式化和只读属性。
 - 文件、shell、网络类工具必须保留边界检查、输出限制和清晰错误。
-- `read_image` 读取本地路径或 HTTP(S) URL，经过 `mica-common` 的格式识别、缩放和压缩后返回图片内容块；它是只读工具，也应加入只读 subagent 的允许列表。
+- `read_image` 读取本地路径或 HTTP(S) URL，经过 `mica-common` 的格式识别后将原图作为图片内容块返回；它是只读工具，也应加入只读 subagent 的允许列表。
 - `run_shell` 的前后台执行、cwd 校验、输出截断、后台任务读取和终止逻辑应保留在 `packages/mica-tools` 内相邻模块，不分散到应用层。
 - 判断 retry 是否可重放依赖 `micaTools.isReadOnly(toolName)`；新增工具要认真设置 read-only 语义。
 
@@ -378,7 +378,7 @@ AGENT.md
 所有 package 都通过 `index.ts` 暴露公共 API。应用层优先从 `@packages/<name>/index.js` 引用。
 
 - `mica-common` 不依赖任何产品业务包。
-- 共享图片格式识别、缩放和 API 载荷压缩位于 `mica-common/image.ts`，由 UI 图片输入和 `read_image` 工具共同复用。
+- 共享图片格式与尺寸识别位于 `mica-common/image.ts`，由 UI 图片输入和 `read_image` 工具共同复用；图片原始字节直接传给 provider。
 - `mica-agent` 不依赖 UI、session、commands 或应用入口。
 - `mica-ui` 不直接调用模型 provider，不持有 agent 运行逻辑。
 - `mica-runtime` 只定义协议和状态原语，不做具体 turn loop 编排；headless OpenCode/DevEco-compatible run JSON schema 属于协议层，可被 CLI/adapter 复用。它不是 Claude SDK stream-json。
@@ -428,11 +428,10 @@ rg --files src packages scripts docs blogs
 - `bun run build` 实际运行 `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`。
 - `prebuild` 是 `bunx tsc --noEmit`。
 - `postbuild` 是 `bun scripts/install.mjs`。
-- `scripts/build.mjs` 使用 `bun build --compile --compile-autoload-package-json --external sharp` 构建本地二进制，默认输出 `dist/mica`。
-- Bun 单文件目前无法可靠嵌入 `sharp` 的平台原生 addon；构建会额外通过 `scripts/package-sharp-runtime.mjs` 生成 `dist/sharp-runtime/`（`package.json` + `node_modules/sharp` 及当前平台 `@img/sharp-*` / libvips）。
-- `packages/mica-common/image.ts` 对 `sharp` 使用懒加载。缺少原生运行时时，应用仍可启动；只有图片缩放/压缩会失败并回退到“可安全发送的原图或明确错误”。
-- `scripts/install.mjs` 默认把二进制和 sharp runtime 安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写一个薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME`、`MICA_SHARP_RUNTIME_DIR` 覆盖。
-- release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。当前 release 交叉编译仍主要产出二进制本身；跨平台 sharp runtime 需要在对应 OS/CPU 上打包，不能只在 Ubuntu runner 上装一次依赖后交叉“假装”带齐原生库。
+- `scripts/build.mjs` 使用 `bun build --compile --compile-autoload-package-json` 构建无外部运行时依赖的本地二进制，默认输出 `dist/mica`。
+- `packages/mica-common/image.ts` 校验 JPEG、PNG、GIF、WebP 文件签名，并尽可能读取尺寸；不缩放或重编码图片，原始字节由 provider 发送给上游模型 API。
+- `scripts/install.mjs` 默认把二进制安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写一个薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。
+- release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；推送 `v*` tag 时构建 Linux/macOS x64/arm64 release 二进制，打包自包含 `install.sh` 并上传 release asset。
 - 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
 

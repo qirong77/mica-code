@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import sharp from 'sharp';
+import { prepareImageForApi } from '@packages/mica-common/index.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolReadImage } from '../ToolReadImage.js';
 import type { ToolResultImageBlock } from '../types.js';
@@ -10,13 +10,12 @@ import { getToolDefinitions, isToolReadOnly } from '../registry.js';
 let tempDir: string;
 let pngBuffer: Buffer;
 
-beforeEach(async () => {
+beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mica-read-image-'));
-  pngBuffer = await sharp({
-    create: { width: 3, height: 2, channels: 4, background: { r: 12, g: 34, b: 56, alpha: 1 } },
-  })
-    .png()
-    .toBuffer();
+  pngBuffer = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWPgUbL4D8MMyBwAZBMIX+YAdV0AAAAASUVORK5CYII=',
+    'base64',
+  );
 });
 
 afterEach(() => {
@@ -40,6 +39,14 @@ describe('ToolReadImage', () => {
     expect(image.source.media_type).toBe('image/png');
     expect(Buffer.from(image.source.data, 'base64')).toEqual(pngBuffer);
     expect(JSON.stringify(result)).toContain('Dimensions: 3x2');
+  });
+
+  it('preserves an original image larger than the previous API payload limit', async () => {
+    const original = Buffer.concat([pngBuffer, Buffer.alloc(6 * 1024 * 1024)]);
+    const result = await prepareImageForApi(original);
+
+    expect(result.buffer).toBe(original);
+    expect(result.resized).toBe(false);
   });
 
   it('resolves relative paths against the tool context cwd', async () => {

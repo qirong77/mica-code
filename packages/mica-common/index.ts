@@ -33,11 +33,5 @@ export type { Result } from './result.js';
 export { formatTokenCount } from './format.js';
 export { formatExecError, gitBuffer, gitBufferAsync, gitText, gitTextAsync, safeGitText, safeGitTextAsync };
 export type { GitCommandOptions } from './git.js';
-export {
-  API_IMAGE_MAX_BASE64_SIZE,
-  IMAGE_MAX_HEIGHT,
-  IMAGE_MAX_WIDTH,
-  IMAGE_TARGET_RAW_SIZE,
-  prepareImageForApi,
-} from './image.js';
+export { prepareImageForApi } from './image.js';
 export type { ProcessedImage, SupportedImageMediaType } from './image.js';

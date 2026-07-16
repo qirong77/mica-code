@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
@@ -24,14 +23,13 @@ vi.mock('openai', () => ({
 let tempDir: string;
 let imagePath: string;
 
-beforeEach(async () => {
+beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mica-provider-image-'));
   imagePath = join(tempDir, 'sample.png');
-  const png = await sharp({
-    create: { width: 2, height: 2, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } },
-  })
-    .png()
-    .toBuffer();
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWPgEpH7D8IMMAYAJowE7bwlVOYAAAAASUVORK5CYII=',
+    'base64',
+  );
   writeFileSync(imagePath, png);
 });
 

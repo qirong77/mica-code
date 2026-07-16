@@ -10,7 +10,7 @@
 - 基础组件：`Dialog`、`KeyHints`、`SelectList`、`Spin`。
 - 状态入口：`conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
 - 会话消息支持 `displayContent`，可在不改变实际上下文内容的情况下展示更易读的输入摘要。
-- 文本和图片输入处理：异步 `parseImageRefs` 会在生成多模态 content block 前自动缩放和压缩超限图片。
+- 文本和图片输入处理：异步 `parseImageRefs` 会校验图片格式，并以原始字节生成多模态 content block。
 
 ## 使用入口
 

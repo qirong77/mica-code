@@ -1,7 +1,6 @@
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { packageSharpRuntime } from './package-sharp-runtime.mjs';
 
 if (process.env.MICA_PREBUILD_DONE === '1') {
   console.log('Prebuild checks completed.\n');
@@ -32,20 +31,18 @@ const target = process.env.MICA_BUILD_TARGET;
 
 const targetDir = dirname(outFile);
 if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+const legacySharpRuntimeDir = join(targetDir, 'sharp-runtime');
+if (existsSync(legacySharpRuntimeDir)) rmSync(legacySharpRuntimeDir, { recursive: true, force: true });
 
 console.log('Building config web assets...\n');
 execSync('bun run build:config-web', { stdio: 'inherit' });
 
-// sharp ships platform-specific N-API addons. Bun --compile cannot reliably
-// embed them as a true single file, so keep sharp external and stage a runtime.
 execFileSync(
   'bun',
   [
     'build',
     '--compile',
     '--compile-autoload-package-json',
-    '--external',
-    'sharp',
     ...(target ? ['--target', target] : []),
     '--define',
     `__MICA_BUILD_TIME__=${JSON.stringify(buildTime)}`,
@@ -60,8 +57,3 @@ execFileSync(
   },
 );
 console.log(`Built native binary: ${outFile}`);
-
-// Stage sharp next to the binary. install.mjs copies this runtime with the binary.
-const runtimeDir = process.env.MICA_SHARP_RUNTIME_DIR ?? join(dirname(outFile), 'sharp-runtime');
-const runtime = packageSharpRuntime(runtimeDir);
-console.log(`Packaged sharp runtime: ${runtime.targetDir} (${runtime.platformPkgName})`);
