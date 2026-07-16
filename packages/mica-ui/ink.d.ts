@@ -44,7 +44,6 @@ declare module '@anthropic/ink' {
     [key: string]: unknown;
   }
   export const Box: ComponentType<InkBoxProps>;
-  export const AlternateScreen: ComponentType<{ children?: ReactNode; mouseTracking?: boolean }>;
 
   interface InkTextProps {
     children?: ReactNode;

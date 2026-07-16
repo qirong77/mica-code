@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import React, { useMemo } from 'react';
-import { Box, Ansi, stringWidth, wrapAnsi } from '@anthropic/ink';
+import { Box, Ansi, stringWidth, useTerminalSize, wrapAnsi } from '@anthropic/ink';
 import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
@@ -576,6 +576,7 @@ function cachedLexer(content: string): Token[] {
 
 export function Markdown({ children, dimColor }: MarkdownProps): React.ReactNode {
   configureMarked();
+  const { columns } = useTerminalSize();
 
   const elements = useMemo(() => {
     const tokens = cachedLexer(children);
@@ -596,7 +597,14 @@ export function Markdown({ children, dimColor }: MarkdownProps): React.ReactNode
     for (const token of tokens) {
       if (token.type === 'table') {
         flushNonTableContent();
-        elements.push(<MarkdownTable key={elements.length} token={token as Tokens.Table} highlight={highlight} />);
+        elements.push(
+          <MarkdownTable
+            key={elements.length}
+            token={token as Tokens.Table}
+            highlight={highlight}
+            forceWidth={columns}
+          />,
+        );
       } else {
         nonTableContent += formatToken(token, 0, null, null, highlight);
       }
@@ -604,7 +612,7 @@ export function Markdown({ children, dimColor }: MarkdownProps): React.ReactNode
 
     flushNonTableContent();
     return elements;
-  }, [children, dimColor]);
+  }, [children, columns, dimColor]);
 
   return (
     <Box flexDirection="column" gap={1}>

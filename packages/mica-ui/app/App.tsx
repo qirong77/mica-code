@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlternateScreen, Box } from '@anthropic/ink';
+import { Box } from '@anthropic/ink';
 import { ConversationUI } from '../conversation/Conversation.js';
 import { TerminalInputUI } from '../input/TerminalInput.js';
 import { WorkingStatusUI } from '../panels/WorkingStatus.js';
@@ -12,21 +12,19 @@ import { TerminalTitle } from './TerminalTitle.js';
 
 export function App(): React.ReactNode {
   return (
-    <AlternateScreen mouseTracking={false}>
-      <Box flexDirection="column" height="100%">
-        <TerminalTitle />
-        {/* <StartupBannerUI.renderFn /> */}
-        <ConversationUI.renderFn />
-        <TaskStatusBar />
-        <CommandPanelUI.renderFn />
-        <TerminalInputUI.renderFn />
-        <WorkingStatusUI.renderFn />
-        <MessageBar />
-        <Box flexGrow={1}>
-          <BottomSurface />
-        </Box>
-        {/* <Box paddingBottom={1} /> */}
+    <Box flexDirection="column" height="100%">
+      <TerminalTitle />
+      {/* <StartupBannerUI.renderFn /> */}
+      <ConversationUI.renderFn />
+      <TaskStatusBar />
+      <CommandPanelUI.renderFn />
+      <TerminalInputUI.renderFn />
+      <WorkingStatusUI.renderFn />
+      <MessageBar />
+      <Box flexGrow={1}>
+        <BottomSurface />
       </Box>
-    </AlternateScreen>
+      {/* <Box paddingBottom={1} /> */}
+    </Box>
   );
 }
