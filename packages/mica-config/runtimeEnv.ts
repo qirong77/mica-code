@@ -24,7 +24,7 @@ export function readRuntimeEnvConfig(env: RuntimeEnvSource = process.env) {
       // 控制加载动画帧切换间隔。
       spinnerFrameIntervalMs: intEnv(env, 'MICA_UI_SPINNER_FRAME_INTERVAL_MS', 80, { min: 20, max: 2000 }),
       // shell 命令超过该耗时后才展示更详细的执行日志。
-      runShellVerboseLogThresholdMs: intEnv(env, 'MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS', 2000, {
+      runShellVerboseLogThresholdMs: intEnv(env, 'MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS', 10000, {
         min: 0,
         max: 60_000,
       }),

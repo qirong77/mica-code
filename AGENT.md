@@ -362,6 +362,7 @@ AGENT.md
 - `/fork` 和后台 agent 相关命令要注意 provider/model/effort/role 与 UI snapshot 的一致性。
 - `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取，也可用 `operation=await` 等待完成；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
 - foreground 和 background subagent 的任务记录都会留在 `SubagentTaskManager` 中供 `/task` 查看；每个 parent 最多保留 100 条，结果只在当前进程内存在。`/task` 的列表只保存轻量 summary，完整 prompt、context、usage、error 和 result 在打开详情时按 ID 获取。
+- 输入框上方 `TaskStatusBar` 展示 active subagent 时使用树形摘要：主行保留 kind/status/时长/type/description；子行用 `⎿` 展示并行 in-flight tool 摘要；嵌套 subagent 通过 `parent_task_id` 挂到父任务下。activity 只保留进行中的摘要，并对短工具调用保留最短可见时长（约 900ms）以减少闪烁；任务结束即清空。
 - subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。
 - subagent 默认不继承完整对话历史，而是按 `context_mode`（`none|brief|recent|files`）注入 `<delegated-context>` 任务包；默认 `brief`。
 - 可写 subagent 支持 `owned_paths` 路径租约；`Implementer` / `Tester` / `Proposal` 必填。写工具（`write_file` / `apply_patch`）和 `run_shell` cwd 会校验路径所有权，重叠租约会在启动时拒绝。

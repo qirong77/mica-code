@@ -1,6 +1,6 @@
 import { AgentMaxTurnsError, type ModelClientOptions } from '@packages/mica-agent/index.js';
 import { isEffortOption, type EffortOption } from '@packages/mica-config/index.js';
-import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { micaTools, MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import {
   buildSubagentSystemPrompt,
@@ -23,6 +23,7 @@ type AgentToolContext = {
   ownedPaths?: string[];
   cwd?: string;
   taskId?: string;
+  parentTaskId?: string;
   writeMode?: SubagentWriteMode;
 };
 
@@ -258,19 +259,22 @@ export class ToolAgent extends MicaTool {
       parentAgent,
     });
 
+    const parentContext = isAgentToolContext(callbacks?.context) ? callbacks.context : undefined;
+    const parentTaskId = parentContext?.taskId;
+    const toolContext: AgentToolContext = {
+      agent: parentAgent,
+      createClientOptions,
+      ownedPaths,
+      cwd: process.cwd(),
+      writeMode,
+    };
     const clientOptions = createClientOptions({
       model: definition.model,
       effort,
       systemPrompt: buildSubagentSystemPrompt(definition),
       tools: true,
       toolFilter,
-      toolContext: {
-        agent: parentAgent,
-        createClientOptions,
-        ownedPaths,
-        cwd: process.cwd(),
-        writeMode,
-      } satisfies AgentToolContext,
+      toolContext,
     });
     const child = parentAgent.createSubAgent(clientOptions);
 
@@ -295,13 +299,28 @@ export class ToolAgent extends MicaTool {
         contextFiles,
         writeMode,
         ownedPaths,
+        ...(parentTaskId ? { parentTaskId } : {}),
         getUsage: () => summarizeSubagentUsage(child.usageHistory),
         run: async (signal) => {
           try {
-            const result = await child.query(delegatedPrompt, { signal, maxTurns: definition.maxTurns });
+            toolContext.taskId = taskId || task.id;
+            const activityTracking = attachSubagentActivityTracking({
+              child,
+              taskId: taskId || task.id,
+              owner: parentAgent,
+              taskManager: this.taskManager,
+            });
+            const result = await child.query(delegatedPrompt, {
+              signal,
+              maxTurns: definition.maxTurns,
+              onIterationComplete: activityTracking.onIterationComplete,
+            });
             return { result, usage: summarizeSubagentUsage(child.usageHistory) };
           } finally {
-            if (taskId) this.pathLeases.release(taskId);
+            if (taskId) {
+              this.taskManager.clearActivities(taskId, parentAgent);
+              this.pathLeases.release(taskId);
+            }
           }
         },
       });
@@ -344,6 +363,7 @@ export class ToolAgent extends MicaTool {
       contextFiles,
       writeMode,
       ownedPaths,
+      ...(parentTaskId ? { parentTaskId } : {}),
     });
     if (ownedPaths.length > 0) {
       try {
@@ -358,9 +378,20 @@ export class ToolAgent extends MicaTool {
       }
     }
     const signal = callbacks?.signal ? AbortSignal.any([callbacks.signal, tracked.signal]) : tracked.signal;
+    toolContext.taskId = tracked.task.id;
+    const activityTracking = attachSubagentActivityTracking({
+      child,
+      taskId: tracked.task.id,
+      owner: parentAgent,
+      taskManager: this.taskManager,
+    });
     const execution = (async () => {
       try {
-        const result = await child.query(delegatedPrompt, { signal, maxTurns: definition.maxTurns });
+        const result = await child.query(delegatedPrompt, {
+          signal,
+          maxTurns: definition.maxTurns,
+          onIterationComplete: activityTracking.onIterationComplete,
+        });
         tracked.complete(result, summarizeSubagentUsage(child.usageHistory));
         return formatStructuredSubagentResult({
           type: definition.name,
@@ -381,6 +412,7 @@ export class ToolAgent extends MicaTool {
           status: 'partial',
         });
       } finally {
+        this.taskManager.clearActivities(tracked.task.id, parentAgent);
         this.pathLeases.release(tracked.task.id);
       }
     })();
@@ -460,6 +492,116 @@ function toRunRequest(task: PlannedSubagentRun): RunRequest {
     ownedPaths: task.owned_paths,
     runInBackground: task.run_in_background,
   };
+}
+
+function attachSubagentActivityTracking(options: {
+  child: {
+    onText?: ((text: string) => void) | undefined;
+    onThinking?: ((thinking: string) => void) | undefined;
+    onToolCall?: ((name: string, args: string, id?: string) => void) | undefined;
+    onToolResult?: ((name: string, result: string, id?: string) => void) | undefined;
+  };
+  taskId: string;
+  owner: AgentRuntime;
+  taskManager: SubagentTaskManager;
+}): { onIterationComplete: () => undefined } {
+  const activityId = 'current-iteration';
+  const previousOnText = options.child.onText;
+  const previousOnThinking = options.child.onThinking;
+  const previousOnToolCall = options.child.onToolCall;
+  const previousOnToolResult = options.child.onToolResult;
+  let assistantText = '';
+  let toolCalls: Array<{ name: string; args: string }> = [];
+
+  const setSummary = (summary: string) => {
+    options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary });
+  };
+  const resetIteration = () => {
+    assistantText = '';
+    toolCalls = [];
+    setSummary('thinking');
+  };
+
+  options.child.onText = (text) => {
+    previousOnText?.(text);
+    assistantText += text;
+    const summary = summarizeAssistantActivity(assistantText);
+    if (summary) setSummary(summary);
+  };
+  options.child.onThinking = (thinking) => {
+    previousOnThinking?.(thinking);
+    if (!assistantText.trim() && toolCalls.length === 0) setSummary('thinking');
+  };
+  options.child.onToolCall = (name, args, id) => {
+    previousOnToolCall?.(name, args, id);
+    if (name === 'Agent') return;
+    toolCalls.push({ name, args });
+    setSummary(summarizeAssistantActivity(assistantText) || summarizeToolBatch(toolCalls));
+  };
+  options.child.onToolResult = (name, result, id) => {
+    previousOnToolResult?.(name, result, id);
+  };
+  resetIteration();
+  return {
+    onIterationComplete: () => {
+      resetIteration();
+      return undefined;
+    },
+  };
+}
+
+function summarizeToolBatch(toolCalls: Array<{ name: string; args: string }>): string {
+  if (toolCalls.length === 1) {
+    const tool = toolCalls[0];
+    return tool ? summarizeToolActivity(tool.name, tool.args) : 'working';
+  }
+  const counts = new Map<string, number>();
+  for (const tool of toolCalls) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+  const parts = [...counts].map(([name, count]) => `${formatToolName(name)}${count > 1 ? ` ×${count}` : ''}`);
+  return parts.join('、');
+}
+
+function summarizeToolActivity(name: string, argsText: string): string {
+  try {
+    return micaTools.getDisplayText(name, JSON.parse(argsText));
+  } catch {
+    try {
+      const parsed = JSON.parse(argsText) as Record<string, unknown>;
+      if (typeof parsed.file_path === 'string') return `${name} ${parsed.file_path}`;
+      if (typeof parsed.path === 'string') return `${name} ${parsed.path}`;
+      if (typeof parsed.command === 'string') return `${name} ${parsed.command}`;
+      if (typeof parsed.description === 'string') return `${name} ${parsed.description}`;
+    } catch {
+      // fall through
+    }
+    const compact = argsText.replace(/\s+/g, ' ').trim();
+    return compact ? `${name} ${compact.slice(0, 80)}` : name;
+  }
+}
+
+function summarizeAssistantActivity(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^[\s>*#-]+/gm, '')
+    .replace(/^(?:我(?:会|将)?(?:先|要|来)?|接下来|现在|首先|下一步)[，,:：\s]*/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+function formatToolName(name: string): string {
+  const labels: Record<string, string> = {
+    read_file: '读取文件',
+    read_image: '查看图片',
+    grep_search: '搜索代码',
+    list_files: '查找文件',
+    apply_patch: '修改文件',
+    write_file: '写入文件',
+    run_shell: '执行命令',
+    web_search: '搜索网页',
+    web_fetch: '读取网页',
+  };
+  return labels[name] ?? name;
 }
 
 function isAgentToolContext(value: unknown): value is AgentToolContext {

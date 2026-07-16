@@ -379,6 +379,13 @@ function toUiSubagentTask(task: SubagentTaskRecord): MicaUiSubagentTaskItem {
     subagentType: task.subagent_type,
     model: task.model,
     status: task.status,
+    ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),
+    activities: (task.activities ?? []).map((activity) => ({
+      id: activity.id,
+      summary: activity.summary,
+      ...(activity.toolName ? { toolName: activity.toolName } : {}),
+      startedAt: activity.startedAt,
+    })),
     startedAt: task.started_at,
     finishedAt: task.finished_at,
   };

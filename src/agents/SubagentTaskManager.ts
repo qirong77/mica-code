@@ -15,6 +15,13 @@ const MAX_RETAINED_RESULT_CHARS = 200_000;
 
 export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
 
+export type SubagentTaskActivity = {
+  id: string;
+  summary: string;
+  toolName?: string;
+  startedAt: string;
+};
+
 export type SubagentTaskRecord = {
   id: string;
   description: string;
@@ -28,6 +35,8 @@ export type SubagentTaskRecord = {
   write_mode?: SubagentWriteMode;
   owned_paths?: string[];
   status: SubagentTaskStatus;
+  parent_task_id?: string;
+  activities?: SubagentTaskActivity[];
   started_at: string;
   finished_at?: string;
   result?: string;
@@ -55,6 +64,7 @@ export type StartSubagentTaskOptions = {
   contextFiles?: string[];
   writeMode?: SubagentWriteMode;
   ownedPaths?: string[];
+  parentTaskId?: string;
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
 };
@@ -168,6 +178,8 @@ export class SubagentTaskManager {
       ...(options.writeMode === undefined ? {} : { write_mode: options.writeMode }),
       ...(options.ownedPaths && options.ownedPaths.length > 0 ? { owned_paths: [...options.ownedPaths] } : {}),
       status: 'running',
+      ...(options.parentTaskId ? { parent_task_id: options.parentTaskId } : {}),
+      activities: [],
       started_at: new Date().toISOString(),
     };
     const managed: ManagedSubagentTask = {
@@ -192,6 +204,43 @@ export class SubagentTaskManager {
   get(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
     const task = this.tasks.get(id);
     return task?.owner === owner ? cloneRecord(task.record) : undefined;
+  }
+
+  setActivity(
+    id: string,
+    owner: AgentRuntime,
+    activity: { id: string; summary: string; toolName?: string },
+  ): SubagentTaskRecord | undefined {
+    const task = this.tasks.get(id);
+    if (!task || task.owner !== owner || task.record.status !== 'running') return undefined;
+    const activities = [...(task.record.activities ?? [])];
+    const index = activities.findIndex((item) => item.id === activity.id);
+    const next: SubagentTaskActivity = {
+      id: activity.id,
+      summary: activity.summary.trim() || activity.toolName || 'working',
+      ...(activity.toolName ? { toolName: activity.toolName } : {}),
+      startedAt: index >= 0 ? (activities[index]?.startedAt ?? new Date().toISOString()) : new Date().toISOString(),
+    };
+    if (index >= 0) activities[index] = next;
+    else activities.push(next);
+    task.record = { ...task.record, activities };
+    this.emitTaskChanged(task);
+    return cloneRecord(task.record);
+  }
+
+  clearActivity(id: string, owner: AgentRuntime, activityId: string): SubagentTaskRecord | undefined {
+    const task = this.tasks.get(id);
+    if (!task || task.owner !== owner) return undefined;
+    return this.removeActivityNow(task, activityId);
+  }
+
+  clearActivities(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
+    const task = this.tasks.get(id);
+    if (!task || task.owner !== owner) return undefined;
+    if ((task.record.activities ?? []).length === 0) return cloneRecord(task.record);
+    task.record = { ...task.record, activities: [] };
+    this.emitTaskChanged(task);
+    return cloneRecord(task.record);
   }
 
   async awaitTasks(
@@ -303,6 +352,7 @@ export class SubagentTaskManager {
     task.record = {
       ...task.record,
       status: result.status,
+      activities: [],
       finished_at: new Date().toISOString(),
       ...(result.result === undefined ? {} : { result: tailText(result.result, MAX_RETAINED_RESULT_CHARS) }),
       ...(result.error === undefined ? {} : { error: result.error }),
@@ -329,6 +379,14 @@ export class SubagentTaskManager {
     const ownerTaskCount = [...this.tasks.values()].filter((task) => task.owner === owner).length;
     const removeCount = Math.max(0, ownerTaskCount - this.maxRetainedTasks + 1);
     for (const task of completed.slice(0, removeCount)) this.tasks.delete(task.record.id);
+  }
+
+  private removeActivityNow(task: ManagedSubagentTask, activityId: string): SubagentTaskRecord {
+    const activities = (task.record.activities ?? []).filter((item) => item.id !== activityId);
+    if (activities.length === (task.record.activities ?? []).length) return cloneRecord(task.record);
+    task.record = { ...task.record, activities };
+    this.emitTaskChanged(task);
+    return cloneRecord(task.record);
   }
 
   private emitTaskChanged(task: ManagedSubagentTask): void {
@@ -376,6 +434,7 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 function cloneRecord(record: SubagentTaskRecord): SubagentTaskRecord {
   return {
     ...record,
+    ...(record.activities ? { activities: record.activities.map((activity) => ({ ...activity })) } : {}),
     ...(record.usage ? { usage: { ...record.usage } } : {}),
     ...(record.context_files ? { context_files: [...record.context_files] } : {}),
     ...(record.owned_paths ? { owned_paths: [...record.owned_paths] } : {}),

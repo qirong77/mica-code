@@ -18,10 +18,11 @@ describe('ToolAgent', () => {
       prompt: 'Find the config loader.',
     });
 
-    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), {
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
       maxTurns: 20,
       signal: expect.any(AbortSignal),
-    });
+      onIterationComplete: expect.any(Function),
+    }));
     const firstCall = query.mock.calls.at(0) as unknown as [string, unknown] | undefined;
     expect(firstCall?.[0]).toContain('<delegated-context>');
     expect(result).toContain('Subagent: Explore');
@@ -32,7 +33,7 @@ describe('ToolAgent', () => {
       expect.objectContaining({ description: 'inspect files', status: 'running', subagent_type: 'Explore' }),
       runtime,
     );
-    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'completed' }), runtime);
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'completed' }), runtime);
     expect(taskManager.list(runtime)).toEqual([
       expect.objectContaining({
         description: 'inspect files',
@@ -106,10 +107,11 @@ describe('ToolAgent', () => {
     const completed = await tool.execute({ operation: 'read', task_id: taskId });
     expect(completed).toContain('status: completed');
     expect(completed).toContain('child result');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), {
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
       maxTurns: 30,
       signal: expect.any(AbortSignal),
-    });
+      onIterationComplete: expect.any(Function),
+    }));
   });
 
   it('reports failed background tasks and preserves partial results from maxTurns', async () => {
@@ -251,10 +253,52 @@ describe('ToolAgent', () => {
     expect(killed).toContain('status: killed');
     expect(childSignal?.aborted).toBe(true);
   });
+
+  it('derives one iteration activity locally without another agent query', async () => {
+    const deferred = createDeferred<string>();
+    const query = vi.fn((_prompt: string, _options?: { onIterationComplete?: () => unknown }) => deferred.promise);
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'inspect rules',
+      prompt: 'Inspect the rules module.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('thinking');
+    child.onText?.('我会先检查规则编辑器和接口定义。');
+    child.onToolCall?.('grep_search', '{"pattern":"RuleEditor","path":"packages/rules"}', 'tool-1');
+    child.onToolCall?.('read_file', '{"file_path":"packages/rules/RuleEditor.tsx"}', 'tool-2');
+
+    expect(taskManager.get(taskId, runtime)?.activities).toEqual([
+      expect.objectContaining({ id: 'current-iteration', summary: '检查规则编辑器和接口定义。' }),
+    ]);
+    expect(query).toHaveBeenCalledTimes(1);
+
+    const queryOptions = query.mock.calls[0]?.[1] as { onIterationComplete?: () => unknown } | undefined;
+    queryOptions?.onIterationComplete?.();
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('thinking');
+    expect(query).toHaveBeenCalledTimes(1);
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+  });
 });
 
 function createRuntimeStub(query = vi.fn(async () => 'child result')) {
-  const createSubAgent = vi.fn((_: ModelClientOptions) => ({ query, usageHistory: [] }));
+  const child: {
+    query: typeof query;
+    usageHistory: [];
+    onText?: (text: string) => void;
+    onThinking?: (thinking: string) => void;
+    onToolCall?: (name: string, args: string, id?: string) => void;
+    onToolResult?: (name: string, result: string, id?: string) => void;
+  } = { query, usageHistory: [] };
+  const createSubAgent = vi.fn((_: ModelClientOptions) => child);
   const createClientOptions = vi.fn((overrides: Partial<ModelClientOptions> = {}) => ({
     model: 'parent-model',
     effort: 'medium' as const,
@@ -271,7 +315,7 @@ function createRuntimeStub(query = vi.fn(async () => 'child result')) {
     taskOwnerId: 'owner-1',
     getSnapshot: () => ({ messages: [{ role: 'user', content: 'parent history context' }] }),
   } as unknown as AgentRuntime;
-  return { runtime, createSubAgent, createClientOptions, query };
+  return { runtime, child, createSubAgent, createClientOptions, query };
 }
 
 function createDeferred<T>() {

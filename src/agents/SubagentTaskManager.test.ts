@@ -180,6 +180,58 @@ describe('SubagentTaskManager', () => {
     expect(records[0]?.result).toBe('done');
   });
 
+  it('tracks parallel in-flight activities and clears them on completion', async () => {
+    const owner = {} as AgentRuntime;
+    const deferred = createDeferred<{ result: string }>();
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'activity task',
+      subagentType: 'Implementer',
+      model: 'm',
+      effort: 'none',
+      parentTaskId: 'parent-1',
+      run: () => deferred.promise,
+    });
+
+    expect(task.parent_task_id).toBe('parent-1');
+    manager.setActivity(task.id, owner, { id: 'tool-1', summary: 'reading a.ts', toolName: 'read_file' });
+    manager.setActivity(task.id, owner, { id: 'tool-2', summary: 'writing b.ts', toolName: 'write_file' });
+    let current = manager.get(task.id, owner);
+    expect(current?.activities?.map((item) => item.id)).toEqual(['tool-1', 'tool-2']);
+
+    manager.clearActivity(task.id, owner, 'tool-1');
+    current = manager.get(task.id, owner);
+    expect(current?.activities?.map((item) => item.id)).toEqual(['tool-2']);
+
+    deferred.resolve({ result: 'done' });
+    await flushAsyncWork();
+    current = manager.get(task.id, owner);
+    expect(current?.status).toBe('completed');
+    expect(current?.activities).toEqual([]);
+  });
+
+  it('clears activities immediately without UI hold timers', async () => {
+    const owner = {} as AgentRuntime;
+    const deferred = createDeferred<{ result: string }>();
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'quick tools',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => deferred.promise,
+    });
+
+    manager.setActivity(task.id, owner, { id: 'tool-1', summary: 'reading a.ts', toolName: 'read_file' });
+    manager.clearActivity(task.id, owner, 'tool-1');
+    expect(manager.get(task.id, owner)?.activities ?? []).toEqual([]);
+
+    deferred.resolve({ result: 'done' });
+    await flushAsyncWork();
+  });
+
   it('rejects new tasks after shutdown begins', async () => {
     const owner = {} as AgentRuntime;
     const manager = new SubagentTaskManager();

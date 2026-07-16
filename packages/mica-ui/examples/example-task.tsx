@@ -26,19 +26,50 @@ function createSubagentTasks(nowMs: number): MicaUiSubagentTaskItem[] {
   return [
     {
       id: 'agent-task-1783932834549-7tr8ef',
-      description: '梳理后台任务 UI 与 session 状态链路',
-      subagentType: 'Explore',
+      description: '实现商户侧规则中心完整可运行前端',
+      subagentType: 'Implementer',
       model: 'gpt-5.4',
       status: 'running',
-      startedAt: iso(nowMs - 8_200),
+      startedAt: iso(nowMs - 927_000),
+      activities: [
+        {
+          id: 'act-1',
+          summary: 'reading RuleList.tsx',
+          toolName: 'read_file',
+          startedAt: iso(nowMs - 4_200),
+        },
+        {
+          id: 'act-2',
+          summary: 'writing RuleEditor.tsx',
+          toolName: 'write_file',
+          startedAt: iso(nowMs - 1_800),
+        },
+      ],
     },
     {
       id: 'agent-task-1783932841872-p91c2a',
+      description: '查规则中心接口定义',
+      subagentType: 'Explore',
+      model: 'gpt-5.4',
+      status: 'running',
+      parentTaskId: 'agent-task-1783932834549-7tr8ef',
+      startedAt: iso(nowMs - 3_700),
+      activities: [
+        {
+          id: 'act-3',
+          summary: 'reading api.ts',
+          toolName: 'read_file',
+          startedAt: iso(nowMs - 900),
+        },
+      ],
+    },
+    {
+      id: 'agent-task-1783932850000-root2',
       description: '补充任务状态同步和 owner 隔离测试',
       subagentType: 'general-purpose',
       model: 'gpt-5.4',
       status: 'running',
-      startedAt: iso(nowMs - 3_700),
+      startedAt: iso(nowMs - 2_100),
     },
   ];
 }
