@@ -9,6 +9,7 @@ export const RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS = runtimeEnv.ui.runShellVerboseL
 const MAX_RUN_SHELL_LOG_LINES = runtimeEnv.ui.runShellLogMaxLines;
 const TOOL_ICONS: Record<string, string> = {
   read_file: '📖',
+  read_image: '📷',
   write_file: '✍️',
   list_files: '📂',
   grep_search: '📊',

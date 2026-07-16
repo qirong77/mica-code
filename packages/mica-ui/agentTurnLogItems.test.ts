@@ -34,4 +34,8 @@ describe('tool log icons', () => {
   it.each(['background_tasks', 'read_task_output', 'kill_task'])('uses a task icon for %s', (toolName) => {
     expect(getToolIcon(toolName)).toBe('📋');
   });
+
+  it('uses a camera icon for read_image', () => {
+    expect(getToolIcon('read_image')).toBe('📷');
+  });
 });
