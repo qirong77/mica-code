@@ -73,6 +73,69 @@ export async function createRole(name: string): Promise<ConfigWebRolesDetails> {
   return readJson(response);
 }
 
+export async function deleteRole(name: string): Promise<ConfigWebRolesDetails> {
+  const response = await fetch(`/api/files/role?token=${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return readJson(response);
+}
+
+export async function writeMcpServer(name: string, content: string): Promise<ConfigWebMcpDetails> {
+  const response = await fetch(`/api/files/mcp?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content }),
+  });
+  return readJson(response);
+}
+
+export async function createMcpServer(name: string): Promise<ConfigWebMcpDetails> {
+  const response = await fetch(`/api/files/mcp?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content: '' }),
+  });
+  return readJson(response);
+}
+
+export async function deleteMcpServer(name: string): Promise<ConfigWebMcpDetails> {
+  const response = await fetch(`/api/files/mcp?token=${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return readJson(response);
+}
+
+export async function writeSkill(name: string, content: string): Promise<ConfigWebSkillsDetails> {
+  const response = await fetch(`/api/files/skill?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content }),
+  });
+  return readJson(response);
+}
+
+export async function createSkill(name: string): Promise<ConfigWebSkillsDetails> {
+  const response = await fetch(`/api/files/skill?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, content: '' }),
+  });
+  return readJson(response);
+}
+
+export async function deleteSkill(name: string): Promise<ConfigWebSkillsDetails> {
+  const response = await fetch(`/api/files/skill?token=${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return readJson(response);
+}
+
 export async function readConversationDetails(): Promise<ConfigWebConversationDetails | null> {
   const response = await fetch(`/api/details/conversation?token=${encodeURIComponent(token)}`);
   return readJson(response);

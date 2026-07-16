@@ -42,6 +42,7 @@ export type ConfigWebMcpServer = {
   target: string;
   status: 'configured' | 'connecting' | 'connected' | 'failed';
   configPath: string;
+  config: string;
   toolCount: number;
   tools: ConfigWebMcpTool[];
   error?: string;
@@ -60,7 +61,8 @@ export type ConfigWebSkill = {
   whenToUse?: string;
   argumentHint?: string;
   baseDir: string;
-  contentPreview: string;
+  content: string;
+  editable: boolean;
 };
 
 export type ConfigWebSkillsDetails = {

@@ -1,13 +1,20 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
 import {
+  createMcpServer,
   createRole,
+  createSkill,
+  deleteMcpServer,
+  deleteRole,
+  deleteSkill,
   getMcpDetails,
   getPluginsDetails,
   getRolesDetails,
   getSessionDetails,
   getSessionsDetails,
   getSkillsDetails,
+  writeMcpServer,
   writeRole,
+  writeSkill,
 } from './details.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
@@ -226,6 +233,55 @@ async function handleApiRequest(
       if (request.method === 'PUT') {
         if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
         return json(writeRole(body.name, body.content));
+      }
+      if (request.method === 'DELETE') {
+        return json(deleteRole(body.name));
+      }
+      return json({ error: 'Method not allowed' }, 405);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
+  if (url.pathname === '/api/files/mcp') {
+    try {
+      const body = (await request.json()) as { name?: unknown; content?: unknown };
+      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
+      if (request.method === 'POST') {
+        if (body.content !== undefined && typeof body.content !== 'string') {
+          return json({ error: 'content must be string' }, 400);
+        }
+        return json(await createMcpServer(body.name, body.content ?? ''));
+      }
+      if (request.method === 'PUT') {
+        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
+        return json(await writeMcpServer(body.name, body.content));
+      }
+      if (request.method === 'DELETE') {
+        return json(await deleteMcpServer(body.name));
+      }
+      return json({ error: 'Method not allowed' }, 405);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
+  if (url.pathname === '/api/files/skill') {
+    try {
+      const body = (await request.json()) as { name?: unknown; content?: unknown };
+      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
+      if (request.method === 'POST') {
+        if (body.content !== undefined && typeof body.content !== 'string') {
+          return json({ error: 'content must be string' }, 400);
+        }
+        return json(createSkill(body.name, body.content ?? ''));
+      }
+      if (request.method === 'PUT') {
+        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
+        return json(writeSkill(body.name, body.content));
+      }
+      if (request.method === 'DELETE') {
+        return json(deleteSkill(body.name));
       }
       return json({ error: 'Method not allowed' }, 405);
     } catch (error) {

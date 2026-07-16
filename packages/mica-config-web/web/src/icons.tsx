@@ -13,6 +13,7 @@ import {
   Save,
   Search,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 
 export const appIcons = {
@@ -29,4 +30,5 @@ export const appIcons = {
   refresh: RefreshCw,
   save: Save,
   search: Search,
+  trash: Trash2,
 } satisfies Record<string, LucideIcon>;

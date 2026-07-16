@@ -7,13 +7,15 @@ import {
   readSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { buildConfigWebConversationDetails } from '../conversation.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
@@ -56,20 +58,100 @@ export async function getMcpDetails(): Promise<ConfigWebMcpDetails> {
   };
 }
 
+export async function writeMcpServer(name: string, content: string): Promise<ConfigWebMcpDetails> {
+  const normalizedName = normalizeMcpName(name);
+  const servers = await micaMcp.loadConfig();
+  if (!(normalizedName in servers)) throw new Error(`MCP server not found: ${normalizedName}`);
+  servers[normalizedName] = parseMcpServerConfig(content, normalizedName);
+  await persistMcpServers(servers);
+  return getMcpDetails();
+}
+
+export async function createMcpServer(name: string, content = ''): Promise<ConfigWebMcpDetails> {
+  const normalizedName = normalizeMcpName(name);
+  const servers = await micaMcp.loadConfig();
+  if (normalizedName in servers) throw new Error(`MCP server already exists: ${normalizedName}`);
+  const configText =
+    content.trim() ||
+    JSON.stringify(
+      {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+      },
+      null,
+      2,
+    );
+  servers[normalizedName] = parseMcpServerConfig(configText, normalizedName);
+  await persistMcpServers(servers);
+  return getMcpDetails();
+}
+
+export async function deleteMcpServer(name: string): Promise<ConfigWebMcpDetails> {
+  const normalizedName = normalizeMcpName(name);
+  const servers = await micaMcp.loadConfig();
+  if (!(normalizedName in servers)) throw new Error(`MCP server not found: ${normalizedName}`);
+  delete servers[normalizedName];
+  await persistMcpServers(servers);
+  return getMcpDetails();
+}
+
 export function getSkillsDetails(): ConfigWebSkillsDetails {
   const root = getSkillsRootPath();
-  const skills: Skill[] = existsSync(root) ? micaSkills.reload() : micaSkills.getLoaded();
+  const skills: Skill[] = micaSkills.reload();
   return {
     root,
-    skills: skills.map((skill) => ({
-      name: skill.name,
-      description: skill.description,
-      whenToUse: skill.whenToUse,
-      argumentHint: skill.argumentHint,
-      baseDir: skill.baseDir,
-      contentPreview: skill.content.trim().slice(0, 800),
-    })),
+    skills: skills.map((skill) => {
+      const skillFile = join(skill.baseDir, 'SKILL.md');
+      const content = existsSync(skillFile) ? readFileSync(skillFile, 'utf-8') : skill.content;
+      return {
+        name: skill.name,
+        description: skill.description,
+        whenToUse: skill.whenToUse,
+        argumentHint: skill.argumentHint,
+        baseDir: skill.baseDir,
+        content,
+        editable: isPathInside(skill.baseDir, root),
+      };
+    }),
   };
+}
+
+export function writeSkill(name: string, content: string): ConfigWebSkillsDetails {
+  const skill = findEditableSkill(name);
+  const skillFile = join(skill.baseDir, 'SKILL.md');
+  writeTextFileAtomic(skillFile, content);
+  micaSkills.reload();
+  return getSkillsDetails();
+}
+
+export function createSkill(name: string, content = ''): ConfigWebSkillsDetails {
+  const normalizedName = normalizeSkillName(name);
+  const root = getSkillsRootPath();
+  mkdirSync(root, { recursive: true });
+  const baseDir = join(root, normalizedName);
+  if (existsSync(baseDir)) throw new Error(`Skill already exists: ${normalizedName}`);
+  mkdirSync(baseDir, { recursive: true });
+  const skillContent =
+    content.trim() ||
+    `---
+name: ${normalizedName}
+description: ${normalizedName}
+---
+
+# ${normalizedName}
+
+Describe how to use this skill.
+`;
+  writeTextFileAtomic(join(baseDir, 'SKILL.md'), skillContent);
+  micaSkills.reload();
+  return getSkillsDetails();
+}
+
+export function deleteSkill(name: string): ConfigWebSkillsDetails {
+  const skill = findEditableSkill(name);
+  rmSync(skill.baseDir, { recursive: true, force: true });
+  micaSkills.reload();
+  return getSkillsDetails();
 }
 
 export function getPluginsDetails(): ConfigWebPluginsDetails {
@@ -198,6 +280,14 @@ export function createRole(name: string, content = ''): ConfigWebRolesDetails {
   return getRolesDetails();
 }
 
+export function deleteRole(name: string): ConfigWebRolesDetails {
+  const role = micaAgent.roles.get(name);
+  if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
+  if (basename(role.path) !== `${name}.md`) throw new Error('Invalid role path');
+  rmSync(role.path, { force: true });
+  return getRolesDetails();
+}
+
 function normalizeRoleName(name: string): string {
   const trimmed = name.trim().replace(/\.md$/i, '');
   if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
@@ -241,6 +331,7 @@ function describeMcpConfig(
       type: 'http',
       target: config.url,
       configPath: micaMcp.configPath,
+      config: JSON.stringify(config, null, 2),
       envKeys: config.headers ? Object.keys(config.headers) : [],
     };
   }
@@ -250,9 +341,111 @@ function describeMcpConfig(
     type: 'stdio',
     target: `${config.command} ${(config.args ?? []).join(' ')}`.trim(),
     configPath: micaMcp.configPath,
+    config: JSON.stringify(config, null, 2),
     cwd: config.cwd,
     envKeys: config.env ? Object.keys(config.env) : [],
   };
+}
+
+async function persistMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
+  const path = micaConfig.path;
+  const current = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : {};
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    throw new Error('Invalid config file');
+  }
+  const next = { ...(current as Record<string, unknown>), mcpServers: servers };
+  writeTextFileAtomic(path, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+function parseMcpServerConfig(content: string, name: string): McpServerConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Invalid MCP server JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`MCP server "${name}" must be a JSON object`);
+  }
+  const server = parsed as Record<string, unknown>;
+  if ('url' in server) {
+    if (typeof server.url !== 'string' || !server.url.trim()) {
+      throw new Error(`MCP server "${name}" url must be a non-empty string`);
+    }
+    if (server.type !== undefined && server.type !== 'http') {
+      throw new Error(`MCP server "${name}" type must be http`);
+    }
+    if (server.headers !== undefined && !isStringRecord(server.headers)) {
+      throw new Error(`MCP server "${name}" headers must be a string record`);
+    }
+    return server as unknown as McpServerConfig;
+  }
+  if (typeof server.command !== 'string' || !server.command.trim()) {
+    throw new Error(`MCP server "${name}" command must be a non-empty string`);
+  }
+  if (server.args !== undefined && !isStringArray(server.args)) {
+    throw new Error(`MCP server "${name}" args must be a string array`);
+  }
+  if (server.env !== undefined && !isStringRecord(server.env)) {
+    throw new Error(`MCP server "${name}" env must be a string record`);
+  }
+  for (const field of ['stderr', 'cwd'] as const) {
+    if (server[field] !== undefined && typeof server[field] !== 'string') {
+      throw new Error(`MCP server "${name}" ${field} must be a string`);
+    }
+  }
+  return server as unknown as McpServerConfig;
+}
+
+function findEditableSkill(name: string): Skill {
+  const normalizedName = normalizeSkillName(name);
+  const root = getSkillsRootPath();
+  const skill = micaSkills.reload().find((item) => item.name === normalizedName || basename(item.baseDir) === normalizedName);
+  if (!skill) throw new Error(`Skill not found: ${normalizedName}`);
+  if (!isPathInside(skill.baseDir, root)) throw new Error(`Skill is not editable: ${normalizedName}`);
+  return skill;
+}
+
+function normalizeMcpName(name: string): string {
+  const trimmed = name.trim();
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
+    throw new Error('MCP name may only contain letters, numbers, dots, underscores, and hyphens');
+  }
+  return trimmed;
+}
+
+function normalizeSkillName(name: string): string {
+  const trimmed = name.trim().replace(/\/+$/, '');
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
+    throw new Error('Skill name may only contain letters, numbers, dots, underscores, and hyphens');
+  }
+  return trimmed;
+}
+
+function writeTextFileAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, content, 'utf-8');
+  renameSync(temporaryPath, path);
+}
+
+function isPathInside(target: string, root: string): boolean {
+  const resolvedTarget = resolve(target);
+  const resolvedRoot = resolve(root);
+  return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(`${resolvedRoot}${sep}`);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    Boolean(value) &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((item) => typeof item === 'string')
+  );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
 function isPluginFile(fileName: string): boolean {

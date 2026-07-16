@@ -11,11 +11,24 @@ import type { ConfigWebSection } from '../../src/shared/types.js';
 
 export function App() {
   const [section, setSection] = useState<ConfigWebSection>('config');
-  const [roleDirty, setRoleDirty] = useState(false);
+  const [dirtySection, setDirtySection] = useState<ConfigWebSection | null>(null);
 
   function changeSection(nextSection: ConfigWebSection) {
-    if (section === 'roles' && roleDirty && !window.confirm('当前 Role 有未保存的修改，确定要离开吗？')) return;
+    if (
+      dirtySection &&
+      dirtySection !== nextSection &&
+      !window.confirm('当前页面有未保存的修改，确定要离开吗？')
+    ) {
+      return;
+    }
     setSection(nextSection);
+  }
+
+  function handleDirtyChange(current: ConfigWebSection, dirty: boolean) {
+    setDirtySection((prev) => {
+      if (dirty) return current;
+      return prev === current ? null : prev;
+    });
   }
 
   useEffect(() => {
@@ -29,9 +42,9 @@ export function App() {
       <div className="content-shell">
         {section === 'config' ? <ConfigPage /> : null}
         {section === 'sessions' ? <SessionsPage /> : null}
-        {section === 'roles' ? <RolesPage onDirtyChange={setRoleDirty} /> : null}
-        {section === 'mcp' ? <McpPage /> : null}
-        {section === 'skills' ? <SkillsPage /> : null}
+        {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
+        {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
+        {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
         {section === 'plugins' ? <PluginsPage /> : null}
       </div>
     </main>

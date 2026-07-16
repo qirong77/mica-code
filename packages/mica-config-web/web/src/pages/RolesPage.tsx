@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createRole, readRolesDetails, writeRole } from '../api.js';
+import { createRole, deleteRole, readRolesDetails, writeRole } from '../api.js';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
@@ -22,6 +22,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
   const RefreshIcon = appIcons.refresh;
   const SaveIcon = appIcons.save;
   const AddIcon = appIcons.add;
+  const TrashIcon = appIcons.trash;
 
   function applyDetails(next: ConfigWebRolesDetails, preferredName = selectedName) {
     const selected = next.roles.find((role) => role.name === preferredName) ?? next.roles[0];
@@ -71,6 +72,21 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
     }
   }
 
+  async function removeRole() {
+    if (!selectedRole || selectedRole.builtIn || saving) return;
+    if (!window.confirm(`确定删除 Role "${selectedRole.name}" 吗？此操作不可撤销。`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      applyDetails(await deleteRole(selectedRole.name));
+      setSaved(false);
+    } catch (deleteError) {
+      setError(formatError(deleteError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function selectRole(name: string) {
     if (saving || name === selectedName || !confirmDiscardChanges()) return;
     const role = details?.roles.find((item) => item.name === name);
@@ -111,6 +127,11 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
           <Button icon={<AddIcon size={15} />} onClick={addRole}>
             新建
           </Button>
+          {!selectedRole?.builtIn ? (
+            <Button icon={<TrashIcon size={15} />} title="删除" onClick={removeRole} loading={saving}>
+              删除
+            </Button>
+          ) : null}
           {!selectedRole?.builtIn ? (
             <Button variant="primary" icon={<SaveIcon size={15} />} onClick={save} loading={saving}>
               保存

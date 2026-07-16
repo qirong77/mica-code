@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createRole, getRolesDetails, writeRole } from './details.js';
+import { createRole, deleteRole, getRolesDetails, writeRole } from './details.js';
 
 let home = '';
 let previousMicaHome: string | undefined;
@@ -41,5 +41,13 @@ describe('config web roles', () => {
     expect(() => createRole('reviewer')).toThrow();
     expect(() => createRole('../escape')).toThrow('Role name may only contain');
     expect(getRolesDetails().roles).toHaveLength(2);
+  });
+
+  it('deletes custom roles and keeps the built-in role', () => {
+    createRole('reviewer', 'Review carefully.');
+    const details = deleteRole('reviewer');
+
+    expect(details.roles.map((role) => role.name)).toEqual(['default']);
+    expect(() => deleteRole('default')).toThrow('Editable role not found');
   });
 });
