@@ -1,11 +1,14 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { BuiltInCommandItem } from '@packages/mica-builtin-commands/commandHost.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { getActiveContext } from '../../app/activeContext.js';
 import type { ApplicationContext } from '../../app/ApplicationContext.js';
 
-export type BuiltInCommandItem = Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
-
-export function registerCommand(ctx: PluginContext, command: BuiltInCommandItem, options: { allowDuringTurn?: boolean } = {}): void {
+export function registerCommand(
+  ctx: PluginContext,
+  command: BuiltInCommandItem,
+  options: { allowDuringTurn?: boolean } = {},
+): void {
   const disposable = ctx.commands.register({
     name: command.name,
     description: command.description,

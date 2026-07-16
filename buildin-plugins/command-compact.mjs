@@ -1,9 +1,8 @@
-import { isCompactionNotNeededError, type CompactOptions, type CompactResult } from '@packages/mica-context/index.js';
-import { formatTokenCount } from '@packages/mica-common/format.js';
-import { micaUi } from '@packages/mica-ui/index.js';
-import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
+import { formatTokenCount } from '../packages/mica-common/format.js';
+import { isCompactionNotNeededError } from '../packages/mica-context/index.js';
+import { commandHostToken } from '../packages/mica-builtin-commands/commandHost.js';
 
-const MANUAL_COMPACT_OPTIONS: CompactOptions = {
+const MANUAL_COMPACT_OPTIONS = {
   aggressive: true,
   force: true,
   lightweightPrune: true,
@@ -14,15 +13,16 @@ const MANUAL_COMPACT_OPTIONS: CompactOptions = {
   maxRecentRounds: 3,
 };
 
-export function createCompactCommand(
-  agent: CommandAgent,
-  sessionController: CommandSessionController,
-  services: CommandRuntimeServices,
-) {
+export default function setupCommandCompact(ctx) {
+  const host = ctx.services.get(commandHostToken);
+  host.registerCommand(ctx, createCompactCommand(host.agent, host.sessionController, host.services));
+}
+
+export function createCompactCommand(agent, sessionController, services) {
   return {
     name: 'compact',
     description: '压缩当前会话上下文为 checkpoint',
-    action: async (rawArgs?: string) => {
+    async action(rawArgs) {
       const ownerSessionId = services.getCurrentAgentSessionId();
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
@@ -42,7 +42,7 @@ export function createCompactCommand(
       }
 
       try {
-        const compactOptions: CompactOptions = {
+        const compactOptions = {
           ...MANUAL_COMPACT_OPTIONS,
           contextWindowSize: targetAgent.config.provider.contextWindowSize,
         };
@@ -71,15 +71,10 @@ export function createCompactCommand(
         showCompactPanelMessage(services, `compact failed: ${message}`, ownerSessionId, 'error');
       }
     },
-  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+  };
 }
 
-function showCompactPanelMessage(
-  services: CommandRuntimeServices,
-  text: string,
-  ownerSessionId: string | undefined,
-  status: 'info' | 'warning' | 'error',
-): void {
+function showCompactPanelMessage(services, text, ownerSessionId, status) {
   services.showNotice(text, ownerSessionId, {
     variant: 'compact',
     command: '/compact',
@@ -87,7 +82,7 @@ function showCompactPanelMessage(
   });
 }
 
-function formatCompactNotice(result: CompactResult): string {
+function formatCompactNotice(result) {
   const prefix = result.preview ? 'compact preview' : 'compact';
   const saved = formatTokenCount(result.savedTokenEstimate, { compactLowercase: true });
   const ratio = Math.round(result.savedRatio * 100);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createClearCommand } from '../commands/clear.js';
+import { createClearCommand } from '../../../buildin-plugins/command-clear.mjs';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('createClearCommand', () => {

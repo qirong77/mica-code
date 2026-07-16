@@ -1,4 +1,5 @@
 import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
+import { commandHostToken, type BuiltInCommandItem } from '@packages/mica-builtin-commands/commandHost.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
@@ -6,20 +7,9 @@ import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { createActiveAgentProxy, createActiveSessionControllerProxy } from './activeCommandProxies.js';
 import { createCommandRuntimeServices } from './commandRuntimeServices.js';
-import { registerCommand, type BuiltInCommandItem } from './registerCommand.js';
+import { registerCommand } from './registerCommand.js';
 
-const ALLOW_DURING_TURN_COMMANDS = new Set([
-  'status',
-  'context',
-  'config',
-  'new',
-  'fork',
-  'exit',
-  'rename',
-  'task',
-  'commit',
-  'diff',
-]);
+const ALLOW_DURING_TURN_COMMANDS = new Set(['status', 'context', 'config', 'exit', 'task', 'commit', 'diff']);
 
 function createBuiltInCommands(
   agent: AgentRuntime,
@@ -40,9 +30,6 @@ function createBuiltInCommands(
     activeAgent,
     activeSessionController,
     commands: [
-      micaBuiltinCommands.createCdCommand(activeSessionController, services),
-      micaBuiltinCommands.createClearCommand(activeAgent, activeSessionController, services),
-      micaBuiltinCommands.createResumeCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
@@ -50,17 +37,13 @@ function createBuiltInCommands(
       micaBuiltinCommands.createStatusCommand(activeAgent, activeSessionController),
       micaBuiltinCommands.createContextCommand(activeAgent),
       micaBuiltinCommands.createConfigCommand(activeAgent, services),
-      micaBuiltinCommands.createNewCommand(services),
-      micaBuiltinCommands.createForkCommand(services),
       micaBuiltinCommands.createRewindCommand(services),
       micaBuiltinCommands.createMcpCommand(services),
       micaBuiltinCommands.createSkillsCommand(),
       micaBuiltinCommands.createDiffCommand(activeAgent, services, tracker),
       micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
       micaBuiltinCommands.createTaskCommand(services),
-      micaBuiltinCommands.createCompactCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createExitCommand(services),
-      micaBuiltinCommands.createRenameCommand(activeSessionController, services),
     ],
   };
 }
@@ -73,6 +56,7 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
     super({
       id: 'builtin.commands',
       name: 'Built-in Commands',
+      priority: -1000,
       required: true,
     });
   }
@@ -86,6 +70,13 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
       this.sessionController,
       tracker,
     );
+    const hostRegistration = ctx.services.register(commandHostToken, {
+      agent: activeAgent,
+      sessionController: activeSessionController,
+      services,
+      registerCommand,
+    });
+    ctx.onDispose(() => hostRegistration.dispose());
 
     for (const command of commands) {
       registerCommand(ctx, command, { allowDuringTurn: ALLOW_DURING_TURN_COMMANDS.has(command.name) });

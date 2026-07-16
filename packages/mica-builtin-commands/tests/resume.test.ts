@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createResumeCommand, formatResumeSessionTitle } from '../commands/resume.js';
+import { createResumeCommand, formatResumeSessionTitle } from '../../../buildin-plugins/command-resume.mjs';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('formatResumeSessionTitle', () => {
   it('prefixes sessions whose last turn did not complete', () => {
-    expect(formatResumeSessionTitle({ title: 'Fix checkout', uncompleted: true })).toBe(
-      '（uncompleted）Fix checkout',
-    );
+    expect(formatResumeSessionTitle({ title: 'Fix checkout', uncompleted: true })).toBe('（uncompleted）Fix checkout');
   });
 
   it('keeps completed session titles unchanged', () => {

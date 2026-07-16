@@ -1,15 +1,19 @@
 import { basename } from 'node:path';
-import { micaUi } from '@packages/mica-ui/index.js';
-import type { CommandRuntimeServices, CommandSessionController, SessionSummary } from '../services.js';
-import { showSelectCommand } from '../shared/selectCommand.js';
+import { commandHostToken } from '../packages/mica-builtin-commands/commandHost.js';
+import { showSelectCommand } from '../packages/mica-builtin-commands/shared/selectCommand.js';
 
 const RECENT_SESSION_LIMIT = 300;
 
-export function createCdCommand(sessionController: CommandSessionController, services: CommandRuntimeServices) {
+export default function setupCommandCd(ctx) {
+  const host = ctx.services.get(commandHostToken);
+  host.registerCommand(ctx, createCdCommand(host.sessionController, host.services));
+}
+
+export function createCdCommand(sessionController, services) {
   return {
     name: 'cd',
     description: '切换到最近 session 使用过的工作目录',
-    action: () => {
+    action() {
       const current = process.cwd();
       const directories = collectRecentCwds(sessionController.listRecent(RECENT_SESSION_LIMIT));
 
@@ -29,14 +33,14 @@ export function createCdCommand(sessionController: CommandSessionController, ser
         onSelect: (cwd) => changeWorkingDirectory(cwd, services),
       });
     },
-  } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
+  };
 }
 
-export function collectRecentCwds(sessions: Pick<SessionSummary, 'cwd'>[]): string[] {
+export function collectRecentCwds(sessions) {
   return [...new Set(sessions.map((session) => session.cwd).filter(Boolean))];
 }
 
-function changeWorkingDirectory(cwd: string, services: CommandRuntimeServices): boolean {
+function changeWorkingDirectory(cwd, services) {
   try {
     process.chdir(cwd);
     services.showMessage(`Working directory: ${process.cwd()}`, 4000);

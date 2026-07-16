@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CompactionNotNeededError, type CompactResult } from '@packages/mica-context/index.js';
-import { createCompactCommand } from '../commands/compact.js';
+import { createCompactCommand } from '../../../buildin-plugins/command-compact.mjs';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('createCompactCommand', () => {

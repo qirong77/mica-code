@@ -4,6 +4,13 @@ import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
 import { McpPlugin } from '../plugins/mcp/index.js';
 import { MessageQueuePlugin } from '../plugins/runtime/index.js';
+import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
+import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
+import setupCommandCompact from '../../buildin-plugins/command-compact.mjs';
+import setupCommandFork from '../../buildin-plugins/command-fork.mjs';
+import setupCommandNew from '../../buildin-plugins/command-new.mjs';
+import setupCommandRename from '../../buildin-plugins/command-rename.mjs';
+import setupCommandResume from '../../buildin-plugins/command-resume.mjs';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;
@@ -14,8 +21,29 @@ export function useBuiltinPlugins(
   agent: AgentRuntime,
   sessionController: SessionController,
 ): PluginHost {
-  return app
-    .use(new BuiltInCommandsPlugin(agent, sessionController))
-    .use(new MessageQueuePlugin())
-    .use(new McpPlugin());
+  app.use(new BuiltInCommandsPlugin(agent, sessionController));
+  for (const plugin of builtinCommandFilePlugins()) app.use(plugin);
+  return app.use(new MessageQueuePlugin()).use(new McpPlugin());
+}
+
+function builtinCommandFilePlugins(): MicaPlugin[] {
+  return [
+    createBuiltinCommandFilePlugin('cd', setupCommandCd),
+    createBuiltinCommandFilePlugin('clear', setupCommandClear),
+    createBuiltinCommandFilePlugin('compact', setupCommandCompact),
+    createBuiltinCommandFilePlugin('fork', setupCommandFork),
+    createBuiltinCommandFilePlugin('new', setupCommandNew),
+    createBuiltinCommandFilePlugin('rename', setupCommandRename),
+    createBuiltinCommandFilePlugin('resume', setupCommandResume),
+  ];
+}
+
+function createBuiltinCommandFilePlugin(name: string, setup: MicaPlugin['setup']): MicaPlugin {
+  return {
+    id: `builtin.command.${name}`,
+    name: `Built-in /${name} Command`,
+    dependencies: ['builtin.commands'],
+    required: true,
+    setup,
+  };
 }

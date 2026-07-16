@@ -1,10 +1,11 @@
 # mica-builtin-commands
 
-`mica-builtin-commands` 是 Mica Code 的内置斜杠命令包。它只定义命令实现与命令组装逻辑，具体运行时能力通过 command services 注入，避免直接依赖应用入口或 UI 内部状态。
+`mica-builtin-commands` 是 Mica Code 的内置斜杠命令基础包。它定义共享命令实现、command host 契约与运行时服务类型；已经插件化的命令实现位于仓库根目录的 `buildin-plugins/*.mjs`。
 
 ## 主要能力
 
-- 注册产品内置命令，例如：`/cd`、`/model`、`/provider`、`/effort`、`/role`、`/resume`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/compact`、`/fork`、`/rewind`、`/diff`、`/commit`、`/new`、`/rename`、`/clear`、`/exit`。
+- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/provider`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/rewind`、`/diff`、`/commit`、`/exit`。
+- 通过 `CommandHostService` 支持 `buildin-plugins` 中的 `/cd`、`/clear`、`/compact`、`/fork`、`/new`、`/rename`、`/resume` 单文件插件。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
@@ -38,6 +39,7 @@ const commands = [
 ```text
 packages/mica-builtin-commands/
   index.ts                 公共 API：命令工厂、AgentChangeTracker、services 类型
+  commandHost.ts           单文件命令插件使用的宿主服务契约
   services.ts              命令依赖的服务接口定义
   README.md
   commands/                各内置斜杠命令实现
@@ -46,14 +48,14 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：`cd`、`clear`、`commit`、`compact`、`config`、`context`、`diff`、`effort`、`exit`、`fork`、`mcp`、`model`、`new`、`provider`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task` 等命令工厂。
+- `commands/`：`commit`、`config`、`context`、`diff`、`effort`、`exit`、`mcp`、`model`、`provider`、`rewind`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。
   - `configSwitch.ts`：provider/model/effort 切换辅助。
-  - `agentBackground.ts`：后台 agent 提交辅助。
 - `git/`：
   - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
   - `gitDiff.ts`：unified/side-by-side diff 解析与加载。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
+- `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。
