@@ -68,6 +68,7 @@ export type ResumeSessionResult =
 export type CommandSessionController = {
   list(limit?: number): SessionSummary[];
   listRecent(limit?: number): SessionSummary[];
+  load?(id: string): { snapshot: { model: string } } | null;
   resume(id: string): ResumeSessionResult;
   startNewSession(): void;
   saveCurrent(): void;
@@ -160,6 +161,7 @@ export type CommandRuntimeServices = {
   setPluginStatus(agent: CommandAgent, text: string, options?: PluginStatusOptions): void;
   clearPluginStatus(agent: CommandAgent, ownerSessionId?: string): void;
   syncModelDisplay(agent: CommandAgent): void;
+  ensureModelRule?(model: string): Promise<void>;
   isAgentRunning(): boolean;
   isAgentBusy(agent?: CommandAgent): boolean;
   hasBusyAgents?(): boolean;

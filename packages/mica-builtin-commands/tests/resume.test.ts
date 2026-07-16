@@ -11,9 +11,10 @@ describe('formatResumeSessionTitle', () => {
     expect(formatResumeSessionTitle({ title: 'Fix checkout', uncompleted: false })).toBe('Fix checkout');
   });
 
-  it('clears rewind checkpoints after resuming another persisted session', () => {
+  it('loads the target model rule before resuming another persisted session', async () => {
     const clearRewindCheckpoints = vi.fn();
     const sessionController = {
+      load: vi.fn(() => ({ snapshot: { model: 'test-model' } })),
       resume: vi.fn(() => ({
         ok: true as const,
         session: { title: 'Other session', snapshot: { model: 'test-model' } },
@@ -22,13 +23,16 @@ describe('formatResumeSessionTitle', () => {
     const services = {
       isAgentBusy: () => false,
       clearRewindCheckpoints,
+      ensureModelRule: vi.fn().mockResolvedValue(undefined),
       syncModelDisplay: vi.fn(),
       refreshCurrentAgentSessionUi: vi.fn(),
       showMessage: vi.fn(),
     } as unknown as CommandRuntimeServices;
 
-    createResumeCommand({} as CommandAgent, sessionController, services).action('session-2');
+    await createResumeCommand({} as CommandAgent, sessionController, services).action('session-2');
 
+    expect(services.ensureModelRule).toHaveBeenCalledWith('test-model');
+    expect(sessionController.resume).toHaveBeenCalledWith('session-2');
     expect(clearRewindCheckpoints).toHaveBeenCalledOnce();
   });
 });

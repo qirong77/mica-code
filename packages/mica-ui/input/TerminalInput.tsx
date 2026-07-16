@@ -174,7 +174,7 @@ function TerminalInput() {
 
     if (exitConfirmExpiresAtRef.current > now) {
       clearExitConfirmation();
-      input.requestExit();
+      void input.requestExit();
       return;
     }
 

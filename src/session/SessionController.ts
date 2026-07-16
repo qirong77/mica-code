@@ -85,6 +85,10 @@ export class SessionController {
     });
   }
 
+  load(id: string): PersistedSession | null {
+    return this.store.load(id);
+  }
+
   startNewSession(): void {
     this.currentSessionId = micaSession.createId();
     this.currentTitleOverride = null;
@@ -144,6 +148,10 @@ export class SessionController {
     const session = this.store.load(id);
     if (!session) return { ok: false, message: `Session not found: ${id}` };
 
+    return this.resumeLoaded(session);
+  }
+
+  resumeLoaded(session: PersistedSession): ResumeSessionResult {
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
     const restoredRole = resolveSnapshotRole(requestedRole);
     this.config.apply(session.snapshot);
@@ -328,7 +336,7 @@ function sanitizeConversationContent(value: unknown): MicaUiConversationMessage[
   return '';
 }
 
-function applySessionConfig(snapshot: PersistedRuntimeSnapshot) {
+export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): void {
   micaConfig.update((config) => {
     const provider = config.providers.find((item) => item.id === snapshot.providerId);
     if (!provider) {

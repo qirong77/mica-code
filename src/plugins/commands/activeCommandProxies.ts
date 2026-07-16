@@ -53,6 +53,9 @@ export function createActiveSessionControllerProxy(fallback: SessionController):
     listRecent(limit?: number) {
       return current().listRecent(limit);
     },
+    load(id: string) {
+      return current().load(id);
+    },
     resume(id: string) {
       return current().resume(id);
     },

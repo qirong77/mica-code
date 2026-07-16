@@ -36,9 +36,9 @@ export const startupBanner = atom<MicaUiStartupBannerState>({
 });
 
 export const modelDisplay = {
-  name: atom('claude-sonnet-4-6'),
-  effort: atom('low'),
-  contextWindowSize: atom(100000),
+  name: atom('-'),
+  effort: atom('-'),
+  contextWindowSize: atom(0),
 };
 
 export function setWorkingStatus(status: MicaUiWorkingStatus): void {

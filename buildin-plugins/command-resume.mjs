@@ -18,7 +18,7 @@ export function createResumeCommand(agent, sessionController, services) {
   return {
     name: 'resume',
     description: '恢复之前的会话',
-    action(arg) {
+    async action(arg) {
       if (services.isAgentBusy(agent)) {
         services.showMessage('Agent is busy; wait or abort before resuming');
         return;
@@ -26,7 +26,7 @@ export function createResumeCommand(agent, sessionController, services) {
 
       const id = arg?.trim();
       if (id) {
-        resumeSession(agent, sessionController, services, id);
+        await resumeSession(agent, sessionController, services, id);
         return;
       }
       showResumeSelector(agent, sessionController, services);
@@ -60,7 +60,7 @@ function showResumeSelector(agent, sessionController, services) {
     const session = visibleSessions()[selectedIdx.get()];
     if (!session) return;
     hide();
-    resumeSession(agent, sessionController, services, session.id);
+    void resumeSession(agent, sessionController, services, session.id);
   }
 
   function ResumePanel() {
@@ -185,7 +185,20 @@ function renderResumeSessionItem(item, isSelected, index) {
   );
 }
 
-function resumeSession(agent, sessionController, services, id) {
+async function resumeSession(agent, sessionController, services, id) {
+  const session = sessionController.load?.(id);
+  if (sessionController.load && !session) {
+    services.showMessage(`Session not found: ${id}`, 5000);
+    return;
+  }
+  if (session && services.ensureModelRule) {
+    try {
+      await services.ensureModelRule(session.snapshot.model);
+    } catch (error) {
+      services.showMessage(error instanceof Error ? error.message : String(error), 5000);
+      return;
+    }
+  }
   const result = sessionController.resume(id);
   if (result.ok === false) {
     services.showMessage(result.message, 5000);

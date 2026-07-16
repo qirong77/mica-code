@@ -9,6 +9,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
+import { micaSession, type PersistedSession } from '@packages/mica-session/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
@@ -17,7 +18,7 @@ import {
   formatSubagentTaskNotification,
   SubagentTaskManager,
 } from '../agents/SubagentTaskManager.js';
-import { SessionController } from '../session/SessionController.js';
+import { applySessionConfig, SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
@@ -51,18 +52,30 @@ export class Application {
   }
 
   async start(): Promise<void> {
+    const sessionStore = micaSession.createStore();
+    const startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
+    seedStartupModelDisplay(startupSession);
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
     });
+    micaUi.terminalInput.setOnExitRequested((exitCode) => this.requestExit(exitCode));
 
     try {
+      if (this.options.sessionId && !startupSession) {
+        throw new Error(`Session not found: ${this.options.sessionId}`);
+      }
       const pluginPaths = createPluginPaths();
       validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
       setupModelEffortContext();
-      await ensureInitialModelSelection();
-      await micaConfig.ensureModelRule(micaConfig.get().model);
+      if (startupSession) {
+        await micaConfig.ensureModelRule(startupSession.snapshot.model);
+        applySessionConfig(startupSession.snapshot);
+      } else {
+        await ensureInitialModelSelection();
+        await micaConfig.ensureModelRule(micaConfig.get().model);
+      }
       const agent = new AgentRuntime();
-      const sessionController = new SessionController(agent);
+      const sessionController = new SessionController({ agent, store: sessionStore });
       const commands = new micaCommands.CommandRegistry();
       const hooks = new micaPlugin.HookRegistry();
       const services = new micaPlugin.ServiceContainer();
@@ -141,12 +154,11 @@ export class Application {
       writeFilePluginStatus({ paths: pluginPaths, logger: pluginLogger }, filePlugins, setupReport);
       syncCommandDropdown(commands, runtime);
 
+      const resumed = startupSession ? sessionController.resumeLoaded(startupSession) : null;
       uiBridge.start();
       await runtime.start();
 
-      if (this.options.sessionId) {
-        const resumed = sessionController.resume(this.options.sessionId);
-        if (!resumed.ok) throw new Error(resumed.message);
+      if (resumed?.ok) {
         showPluginMessage(`Resumed: ${resumed.session.title}`, 4000);
       }
 
@@ -158,9 +170,6 @@ export class Application {
       });
 
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');
-      micaUi.terminalInput.setOnExitRequested(() => {
-        void this.requestExit();
-      });
     } catch (error) {
       micaUi.terminalInput.setPlaceholder('启动失败：修复配置后重新运行 mica，按 Ctrl+C 退出');
       reportRuntimeError(error, '启动失败');
@@ -222,6 +231,21 @@ export class Application {
     if (this.context) clearActiveContext(this.context);
     this.context = null;
   }
+}
+
+function seedStartupModelDisplay(session: PersistedSession | null): void {
+  const config = micaConfig.get();
+  const model = session?.snapshot.model || config.model;
+  const providerId = session?.snapshot.providerId ?? config.provider;
+  const provider = config.providers.find((item) => item.id === providerId);
+  micaUi.panels.modelDisplay.name.set(model || '-');
+  micaUi.panels.modelDisplay.effort.set(
+    !model ? '-' : provider?.supportsEffort === false ? 'none' : (session?.snapshot.effort ?? config.effort ?? '-'),
+  );
+  micaUi.panels.modelDisplay.contextWindowSize.set(
+    session && model ? micaConfig.getModelRule(model).contextSize : config.contextWindowSize,
+  );
+  micaUi.terminalInput.role.set(session?.snapshot.role ?? 'default');
 }
 
 function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {

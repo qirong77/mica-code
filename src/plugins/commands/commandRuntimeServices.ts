@@ -9,6 +9,7 @@ import {
   type SubagentTaskSummary,
 } from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import {
   micaUi,
   type MicaUiCommandPanelItem,
@@ -351,6 +352,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       if (session && target instanceof AgentRuntime && session.agent !== target) return;
       syncModelDisplay(session?.agent ?? target);
     },
+    async ensureModelRule(model) {
+      await micaConfig.ensureModelRule(model);
+    },
     isAgentRunning() {
       return currentContext()?.runtime.getStatus().running ?? false;
     },
@@ -432,9 +436,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       return result;
     },
     async requestExit(exitCode = 0) {
-      process.exitCode = exitCode;
-      micaUi.terminalInput.requestExit();
-      process.exit(exitCode);
+      await micaUi.terminalInput.requestExit(exitCode);
     },
     newAgentSession() {
       const context = currentContext();

@@ -12,7 +12,8 @@ type SubmitEvent = { text: string; options?: TerminalInputSubmitOptions };
 type Events = { submit: SubmitEvent };
 const emitter = mitt<Events>();
 const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>();
-let exitRequestedHandler: (() => void) | null = null;
+type ExitRequestedHandler = (exitCode: number) => void | Promise<void>;
+let exitRequestedHandler: ExitRequestedHandler | null = null;
 let cycleRoleHandler: (() => void) | null = null;
 
 export const text = atom('');
@@ -55,16 +56,16 @@ export function offSubmit(cb: SubmitHandler) {
   submitHandlers.delete(cb);
 }
 
-export function setOnExitRequested(cb: (() => void) | null): void {
+export function setOnExitRequested(cb: ExitRequestedHandler | null): void {
   exitRequestedHandler = cb;
 }
 
-export function requestExit(): void {
+export async function requestExit(exitCode = 0): Promise<void> {
   if (exitRequestedHandler) {
-    exitRequestedHandler();
+    await exitRequestedHandler(exitCode);
     return;
   }
-  process.exit(0);
+  process.exit(exitCode);
 }
 
 export function setOnCycleRole(cb: (() => void) | null): void {
