@@ -111,7 +111,7 @@ const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
 ]);
 const processDiagnostics = setupProcessDiagnostics({ reportError: reportRuntimeError });
 
-const app = createApplication();
+const app = createApplication({ sessionId: invocation.mode === 'interactive' ? invocation.sessionId : undefined });
 
 const SIGNAL_EXIT_FORCE_TIMEOUT_MS = 10_000;
 let signalExitStarted = false;

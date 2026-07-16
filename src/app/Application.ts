@@ -1,4 +1,5 @@
 import React from 'react';
+import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Box, Text } from '@anthropic/ink';
@@ -33,6 +34,8 @@ export class Application {
   private context: ApplicationContext | null = null;
   private stopPromise: Promise<void> | null = null;
   private subagentTasks: SubagentTaskManager | null = null;
+
+  constructor(private readonly options: { sessionId?: string } = {}) {}
 
   get activeContext(): ApplicationContext | null {
     return this.context;
@@ -141,6 +144,12 @@ export class Application {
       uiBridge.start();
       await runtime.start();
 
+      if (this.options.sessionId) {
+        const resumed = sessionController.resume(this.options.sessionId);
+        if (!resumed.ok) throw new Error(resumed.message);
+        showPluginMessage(`Resumed: ${resumed.session.title}`, 4000);
+      }
+
       void micaConfig.loadMissingProviderModels().then(() => {
         if (!agent.isRunning) {
           agent.reloadConfig(false);
@@ -181,8 +190,14 @@ export class Application {
 
   async requestExit(exitCode = 0): Promise<void> {
     process.exitCode = exitCode;
+    const sessionController = this.context?.agentSessions.current().sessionController;
+    sessionController?.saveCurrent({ allowEmpty: true });
+    const sessionId = sessionController?.getCurrentSessionId();
     await this.stop();
     this.renderInstance?.unmount();
+    if (sessionId && process.stdout.isTTY) {
+      writeSync(1, `\nResume this session with:\n mica --resume ${sessionId}\n\n`);
+    }
     process.exit(exitCode);
   }
 

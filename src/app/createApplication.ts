@@ -1,5 +1,5 @@
 import { Application } from './Application.js';
 
-export function createApplication(): Application {
-  return new Application();
+export function createApplication(options: { sessionId?: string } = {}): Application {
+  return new Application(options);
 }

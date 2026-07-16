@@ -1,4 +1,4 @@
-import { Box, stringWidth, useInput, useTerminalSize } from '@anthropic/ink';
+import { Box, Text, stringWidth, useInput, useTerminalSize } from '@anthropic/ink';
 import { micaConfig } from '@packages/mica-config/index.js';
 import React from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
@@ -15,7 +15,6 @@ import {
 } from '../panels/state.js';
 import { pendingInputs } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
-import { MessageBarAPI } from '../panels/MessageBar.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
 import { PromptFrame } from './PromptFrame.js';
 import type { DOMElement } from '@anthropic/ink';
@@ -27,7 +26,7 @@ interface YogaNodeLike {
   getComputedHeight(): number;
 }
 
-const EXIT_CONFIRM_TIMEOUT_MS = 800;
+const EXIT_CONFIRM_TIMEOUT_MS = 2000;
 const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送';
 
 function TerminalInput() {
@@ -49,7 +48,7 @@ function TerminalInput() {
   }, []);
   const exitConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitConfirmExpiresAtRef = useRef(0);
-  const exitConfirmMessageIdRef = useRef<string | null>(null);
+  const [exitConfirmText, setExitConfirmText] = useState('');
   const lastCtrlCHandledAtRef = useRef(0);
 
   const [localText, setLocalText] = useState(input.text.get());
@@ -117,10 +116,7 @@ function TerminalInput() {
       clearTimeout(exitConfirmTimerRef.current);
       exitConfirmTimerRef.current = null;
     }
-    if (exitConfirmMessageIdRef.current) {
-      MessageBarAPI.removeMessage(exitConfirmMessageIdRef.current);
-      exitConfirmMessageIdRef.current = null;
-    }
+    setExitConfirmText('');
   }, []);
 
   React.useEffect(() => clearExitConfirmation, [clearExitConfirmation]);
@@ -160,15 +156,10 @@ function TerminalInput() {
   const armExitConfirmation = useCallback(
     (text: string) => {
       clearExitConfirmation();
-      const id = `exit-confirm-${Date.now()}`;
       exitConfirmExpiresAtRef.current = Date.now() + EXIT_CONFIRM_TIMEOUT_MS;
-      exitConfirmMessageIdRef.current = id;
-      MessageBarAPI.addMessage({ id, text });
+      setExitConfirmText(text);
       exitConfirmTimerRef.current = setTimeout(() => {
-        if (exitConfirmMessageIdRef.current === id) {
-          MessageBarAPI.removeMessage(id);
-          exitConfirmMessageIdRef.current = null;
-        }
+        setExitConfirmText('');
         exitConfirmTimerRef.current = null;
         exitConfirmExpiresAtRef.current = 0;
       }, EXIT_CONFIRM_TIMEOUT_MS);
@@ -196,7 +187,7 @@ function TerminalInput() {
       return;
     }
 
-    armExitConfirmation('再按一次 Ctrl+C 退出');
+    armExitConfirmation('Press Ctrl-C again to exit');
   }, [armExitConfirmation, clearExitConfirmation, isAgentRunning]);
 
   useInput((_input, key, event) => {
@@ -402,6 +393,11 @@ function TerminalInput() {
           suggestion={quickCommandSuggestion}
         />
       </PromptFrame>
+      {exitConfirmText ? (
+        <Box paddingLeft={2}>
+          <Text dimColor>{exitConfirmText}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

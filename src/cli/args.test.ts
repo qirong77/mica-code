@@ -6,6 +6,12 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([])).toEqual({ mode: 'interactive' });
   });
 
+  it('parses interactive session resume flags', () => {
+    expect(parseCliArgs(['--resume', 'session-1'])).toEqual({ mode: 'interactive', sessionId: 'session-1' });
+    expect(parseCliArgs(['--resume=session-2'])).toEqual({ mode: 'interactive', sessionId: 'session-2' });
+    expect(parseCliArgs(['--resume'])).toMatchObject({ mode: 'error' });
+  });
+
   it('parses the exact argv shape used by Multica deveco runtimes', () => {
     expect(
       parseCliArgs([

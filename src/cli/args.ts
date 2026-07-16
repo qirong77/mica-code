@@ -13,7 +13,7 @@ export type RunCliInvocation = {
 };
 
 export type CliInvocation =
-  | { mode: 'interactive' }
+  | { mode: 'interactive'; sessionId?: string }
   | RunCliInvocation
   | { mode: 'models'; verbose: boolean }
   | { mode: 'version' }
@@ -23,6 +23,7 @@ export type CliInvocation =
 export const CLI_USAGE = [
   'Usage:',
   '  mica',
+  '  mica --resume <session-id>',
   '  mica --version',
   '  mica models',
   '  mica run --format json [options] "<prompt>"',
@@ -40,6 +41,18 @@ export const CLI_USAGE = [
 
 export function parseCliArgs(argv: string[]): CliInvocation {
   if (argv.length === 0) return { mode: 'interactive' };
+  if (argv[0] === '--resume') {
+    const value = takeValue(argv, 1, '--resume');
+    if (!value.ok) return value.error;
+    if (argv.length !== 2) return cliError(`Unknown option: ${argv.slice(2).join(' ')}`);
+    return { mode: 'interactive', sessionId: value.value };
+  }
+  if (argv[0]?.startsWith('--resume=')) {
+    const sessionId = argv[0].slice('--resume='.length);
+    if (!sessionId) return cliError('Missing value for --resume.');
+    if (argv.length !== 1) return cliError(`Unknown option: ${argv.slice(1).join(' ')}`);
+    return { mode: 'interactive', sessionId };
+  }
   if (argv[0] === '--version' || argv[0] === '-v' || argv[0] === 'version') return { mode: 'version' };
   if (argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') return { mode: 'help' };
   if (argv[0] === 'models') {
