@@ -10,13 +10,10 @@ import type {
   ConfigWebSessionsDetails,
 } from '../../../src/shared/types.js';
 
-type SessionView = 'raw' | 'conversation';
-
 export function SessionsPage() {
   const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [session, setSession] = useState<ConfigWebSessionDetails | null>(null);
-  const [view, setView] = useState<SessionView>('raw');
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,32 +78,11 @@ export function SessionsPage() {
         <div className="session-layout">
           <div className="session-toolbar simple-card">
             <SessionPicker sessions={index.sessions} value={selectedId} onChange={selectSession} />
-            <div className="session-view-toggle" role="group" aria-label="Session 查看方式">
-              <Button
-                variant={view === 'raw' ? 'primary' : 'default'}
-                pressed={view === 'raw'}
-                onClick={() => setView('raw')}
-              >
-                原始数据
-              </Button>
-              <Button
-                variant={view === 'conversation' ? 'primary' : 'default'}
-                pressed={view === 'conversation'}
-                onClick={() => setView('conversation')}
-              >
-                可视化查看
-              </Button>
-            </div>
           </div>
 
           {sessionLoading ? <div className="session-loading">正在加载 Session…</div> : null}
           {session ? <SessionHeader session={session} /> : null}
-          {session && view === 'raw' ? (
-            <pre className="code-preview session-preview">
-              <code>{session.content}</code>
-            </pre>
-          ) : null}
-          {session && view === 'conversation' ? <ConversationView details={session.conversation} /> : null}
+          {session ? <ConversationView details={session.conversation} /> : null}
         </div>
       )}
     </PageFrame>

@@ -71,7 +71,17 @@ textarea {
 }
 
 .brand-block {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 4px 0;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  color: #1677ff;
 }
 
 .brand {
@@ -423,10 +433,6 @@ textarea {
   white-space: pre;
 }
 
-.session-preview {
-  max-height: 720px;
-}
-
 .session-loading {
   padding: 32px 0;
   color: var(--text-faint);
@@ -452,10 +458,7 @@ textarea {
 }
 
 .session-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
+  display: block;
 }
 
 .session-selector {
@@ -657,11 +660,6 @@ textarea {
   color: var(--text-faint);
   font-size: 13px;
   text-align: center;
-}
-
-.session-view-toggle {
-  display: flex;
-  gap: 6px;
 }
 
 .session-summary {
@@ -1038,14 +1036,9 @@ textarea {
     max-height: 220px;
   }
 
-  .session-toolbar,
   .session-summary-title {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .session-toolbar {
-    grid-template-columns: 1fr;
   }
 
   .session-selector {
@@ -1055,10 +1048,6 @@ textarea {
 
   .session-picker-popover {
     min-width: 0;
-  }
-
-  .session-view-toggle .ui-button {
-    flex: 1;
   }
 
   .conversation-overview > div {
