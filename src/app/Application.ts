@@ -26,6 +26,7 @@ import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
+import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
 import setupFilePlugins, { writeFilePluginStatus } from '../../buildin-plugins/file-plugins.mjs';
 import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
 import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
@@ -203,7 +204,7 @@ export class Application {
     sessionController?.saveCurrent({ allowEmpty: true });
     const sessionId = sessionController?.getCurrentSessionId();
     await this.stop();
-    this.renderInstance?.unmount();
+    finalizeInteractiveUi(this.renderInstance);
     if (sessionId && process.stdout.isTTY) {
       writeSync(1, `\nResume this session with:\n mica --resume ${sessionId}\n\n`);
     }

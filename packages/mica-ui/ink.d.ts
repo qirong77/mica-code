@@ -113,7 +113,12 @@ declare module '@anthropic/ink' {
   export function wrappedRender(
     node: ReactNode,
     options?: { patchConsole?: boolean; exitOnCtrlC?: boolean; debug?: boolean },
-  ): { unmount: () => void; waitUntilExit: () => Promise<void> };
+  ): Promise<{
+    rerender(node: ReactNode): void;
+    unmount(): void;
+    waitUntilExit(): Promise<void>;
+    cleanup(): void;
+  }>;
 
   // ScrollBox
   export interface ScrollBoxHandle {
