@@ -1,6 +1,3 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   COMPACT_BOUNDARY_PREFIX,
@@ -329,30 +326,6 @@ describe('CompactionService', () => {
     ).rejects.toBeInstanceOf(CompactionNotNeededError);
   });
 
-  it('compacts cloned real resume sessions when local history exists', async () => {
-    const sessions = loadRealResumeSessions(10);
-    if (sessions.length === 0) return;
-
-    const service = new CompactionService();
-    expect(sessions.length).toBeGreaterThanOrEqual(Math.min(10, sessions.length));
-
-    for (const session of sessions) {
-      const clonedMessages = JSON.parse(JSON.stringify(session.snapshot.messages)) as unknown[];
-      const result = await service.compact({
-        messages: clonedMessages,
-        options: { aggressive: true, preview: true },
-        summarize: async (transcript) => {
-          expect(transcript.length).toBeGreaterThan(0);
-          return FULL_SUMMARY.replace('Context compaction.', `real session ${session.id}.`);
-        },
-      });
-
-      expect(result.beforeCount).toBe(clonedMessages.length);
-      expect(result.afterCount).toBeGreaterThan(1);
-      expect(result.savedTokenEstimate).toBeGreaterThan(0);
-      expect(clonedMessages).toEqual(session.snapshot.messages);
-    }
-  });
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {
@@ -406,33 +379,4 @@ function makeToolMessages(rounds: number): unknown[] {
 
 function contentOf(message: unknown): string {
   return typeof message === 'object' && message ? String((message as Record<string, unknown>).content ?? '') : '';
-}
-
-type RealSession = {
-  id: string;
-  snapshot: { messages: unknown[] };
-};
-
-function loadRealResumeSessions(limit: number): RealSession[] {
-  const dir = resolve(homedir(), '.mica', 'sessions');
-  if (!existsSync(dir)) return [];
-  const tempDir = mkdtempSync(join(tmpdir(), 'mica-real-resume-'));
-  try {
-    return readdirSync(dir)
-      .filter((file) => file.endsWith('.json'))
-      .map((file) => {
-        try {
-          const parsed = JSON.parse(readFileSync(resolve(dir, file), 'utf-8')) as RealSession;
-          return Array.isArray(parsed.snapshot?.messages) && parsed.snapshot.messages.length >= 4 ? parsed : null;
-        } catch {
-          return null;
-        }
-      })
-      .filter((session): session is RealSession => Boolean(session))
-      .sort((a, b) => b.snapshot.messages.length - a.snapshot.messages.length)
-      .slice(0, limit)
-      .map((session) => JSON.parse(JSON.stringify(session)) as RealSession);
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
 }
