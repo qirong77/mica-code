@@ -8,7 +8,6 @@ export type ConfigWebFilePayload = {
 export type ConfigWebServerInfo = {
   url: string;
   port: number;
-  token: string;
   reused: boolean;
 };
 

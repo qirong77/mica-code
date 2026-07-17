@@ -1,48 +1,44 @@
 import { spawn } from 'node:child_process';
-import { createToken, probeConfigWebState, readConfigWebState } from './singleton.js';
+import { probeConfigWebState, readConfigWebState } from './singleton.js';
 import type { ConfigWebConversationDetails, ConfigWebServerInfo } from '../shared/types.js';
 
 export async function startConfigWeb(conversation?: ConfigWebConversationDetails): Promise<ConfigWebServerInfo> {
   const current = readConfigWebState();
   if (current && (await probeConfigWebState(current))) {
     const supportsConversation =
-      !conversation || (await tryUpdateConversation(current.port, current.token, conversation));
+      !conversation || (await tryUpdateConversation(current.port, conversation));
     if (supportsConversation) {
       return {
-        url: toUrl(current.port, current.token),
+        url: toUrl(current.port),
         port: current.port,
-        token: current.token,
         reused: true,
       };
     }
   }
 
-  const token = createToken();
   const workerCommand = resolveConfigWebWorkerCommand();
-  const child = spawn(workerCommand.executable, [...workerCommand.entryArgs, '--config-web-worker', token], {
+  const child = spawn(workerCommand.executable, [...workerCommand.entryArgs, '--config-web-worker'], {
     detached: true,
     stdio: 'ignore',
     env: process.env,
   });
   child.unref();
 
-  const state = await waitForServer(token);
-  if (conversation) await updateConfigWebConversation(state.port, state.token, conversation);
+  const state = await waitForServer();
+  if (conversation) await updateConfigWebConversation(state.port, conversation);
   return {
-    url: toUrl(state.port, state.token),
+    url: toUrl(state.port),
     port: state.port,
-    token: state.token,
     reused: false,
   };
 }
 
 async function tryUpdateConversation(
   port: number,
-  token: string,
   conversation: ConfigWebConversationDetails,
 ): Promise<boolean> {
   try {
-    await updateConfigWebConversation(port, token, conversation);
+    await updateConfigWebConversation(port, conversation);
     return true;
   } catch {
     return false;
@@ -51,10 +47,9 @@ async function tryUpdateConversation(
 
 export async function updateConfigWebConversation(
   port: number,
-  token: string,
   conversation: ConfigWebConversationDetails,
 ): Promise<void> {
-  const response = await fetch(`http://127.0.0.1:${port}/api/details/conversation?token=${encodeURIComponent(token)}`, {
+  const response = await fetch(`http://127.0.0.1:${port}/api/details/conversation`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(conversation),
@@ -65,18 +60,18 @@ export async function updateConfigWebConversation(
   throw new Error(payload?.error ?? `同步 Conversation 失败: ${response.status}`);
 }
 
-async function waitForServer(token: string) {
+async function waitForServer() {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const state = readConfigWebState();
-    if (state?.token === token && (await probeConfigWebState(state))) return state;
+    if (state && (await probeConfigWebState(state))) return state;
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
   throw new Error('启动配置页面超时');
 }
 
-function toUrl(port: number, token: string): string {
-  return `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`;
+function toUrl(port: number): string {
+  return `http://127.0.0.1:${port}`;
 }
 
 export function resolveConfigWebWorkerCommand(

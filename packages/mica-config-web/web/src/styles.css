@@ -1361,10 +1361,8 @@ textarea {
   display: grid;
   align-content: start;
   gap: 12px;
-  padding: 16px;
-  background:
-    linear-gradient(180deg, rgb(249 250 251 / 80%), transparent 48px),
-    var(--panel);
+  padding: 20px 16px 28px;
+  background: #fff;
 }
 
 .chat-bubble {
@@ -1545,4 +1543,224 @@ textarea {
   .chat-sidebar {
     max-height: 280px;
   }
+}
+
+
+/* Chat transcript (ChatGPT-like) */
+
+.chat-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: min(820px, 100%);
+  margin: 0 auto;
+  padding: 8px 8px 24px;
+}
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-turn-user {
+  align-items: flex-end;
+}
+
+.chat-turn-assistant {
+  align-items: stretch;
+}
+
+.chat-user-bubble {
+  max-width: min(680px, 92%);
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: #f3f4f6;
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-assistant-text {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-assistant-muted,
+.chat-pending-line {
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+.chat-pending-line {
+  font-style: italic;
+}
+
+.chat-thinking,
+.chat-tool-step,
+.chat-system-block {
+  border: 0;
+  background: transparent;
+}
+
+.chat-thinking {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.chat-thinking summary,
+.chat-tool-step summary,
+.chat-system-block summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.chat-thinking summary::-webkit-details-marker,
+.chat-tool-step summary::-webkit-details-marker,
+.chat-system-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-thinking summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.chat-thinking summary::before {
+  content: '▸';
+  font-size: 11px;
+}
+
+.chat-thinking[open] summary::before {
+  content: '▾';
+}
+
+.chat-thinking pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f9fafb;
+  color: #4b5563;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-tool-list {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-tool-step {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.chat-tool-step > summary,
+.chat-tool-step.chat-tool-done:not(details),
+.chat-tool-step.chat-tool-error:not(details),
+.chat-tool-step.chat-tool-pending:not(details) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 0;
+}
+
+.chat-tool-step:not(details) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-tool-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  color: #16a34a;
+  font-size: 12px;
+  text-align: center;
+}
+
+.chat-tool-error .chat-tool-mark {
+  color: #dc2626;
+}
+
+.chat-tool-pending .chat-tool-mark {
+  color: #2563eb;
+}
+
+.chat-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tool-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  margin-left: 22px;
+}
+
+.chat-tool-body section header {
+  margin-bottom: 4px;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.chat-tool-body pre,
+.chat-unknown-content,
+.chat-system-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f9fafb;
+  color: #374151;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-assistant-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.chat-system-block {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.chat-system-block summary {
+  color: #9ca3af;
+}
+
+/* soften old bubble styles if leftover classes appear */
+.chat-messages .conversation-layout,
+.chat-messages .conversation-overview,
+.chat-messages .conversation-timeline::before,
+.chat-messages .conversation-sequence {
+  display: none;
 }

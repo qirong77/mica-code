@@ -35,6 +35,7 @@ import type { ConfigWebConversationDetails } from '../shared/types.js';
 
 const IDLE_EXIT_DELAY_MS = 30_000;
 
+const DEFAULT_PORT = 13987;
 function readPreferredPort(): number | undefined {
   const raw = process.env.MICA_CONFIG_WEB_PORT?.trim();
   if (!raw) return undefined;
@@ -46,7 +47,6 @@ function readPreferredPort(): number | undefined {
 }
 
 export type ConfigWebServerOptions = {
-  token: string;
   preferredPort?: number;
 };
 
@@ -58,7 +58,6 @@ export type RunningConfigWebServer = {
 
 export async function startConfigWebServer(options: ConfigWebServerOptions): Promise<RunningConfigWebServer> {
   const preferredPort = options.preferredPort ?? readPreferredPort();
-  const resolvedOptions = { ...options, preferredPort };
   let clients = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let conversation: ConfigWebConversationDetails | null = null;
@@ -82,7 +81,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
   if (process.env.MICA_CONFIG_WEB_DEV === '1') {
     return startDevConfigWebServer(
-      resolvedOptions,
+      preferredPort,
       bun,
       clearIdleTimer,
       scheduleIdleExit,
@@ -99,11 +98,11 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
   const webServer = bun.serve({
     hostname: '127.0.0.1',
-    port: preferredPort ?? 0,
+    port: preferredPort ?? DEFAULT_PORT,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) {
-        return handleApiRequest(request, server, url, options.token, clients, {
+        return handleApiRequest(request, server, url, clients, {
           get: () => conversation,
           set: (next) => {
             conversation = next;
@@ -112,9 +111,6 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
         });
       }
       if (url.pathname === '/favicon.ico') return new Response(null, { status: 204 });
-      if (url.pathname === '/' || url.pathname === '/index.html') {
-        if (!isAuthorized(url, options.token)) return json({ error: 'Unauthorized' }, 401);
-      }
       return serveGeneratedStaticAsset(url.pathname) ?? json({ error: 'Config web assets are not built' }, 500);
     },
     websocket: {
@@ -131,13 +127,13 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
   });
   const webPort = webServer.port;
 
-  const state = { pid: process.pid, port: webPort, token: options.token };
+  const state = { pid: process.pid, port: webPort };
   writeConfigWebState(state);
   scheduleIdleExit();
 
   return {
     port: webPort,
-    url: `http://127.0.0.1:${webPort}/?token=${encodeURIComponent(options.token)}`,
+    url: `http://127.0.0.1:${webPort}`,
     stop() {
       clearIdleTimer();
       webServer.stop(true);
@@ -146,7 +142,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 }
 
 async function startDevConfigWebServer(
-  options: ConfigWebServerOptions,
+  preferredPort: number | undefined,
   bun: NonNullable<typeof globalThis.Bun>,
   clearIdleTimer: () => void,
   scheduleIdleExit: () => void,
@@ -160,8 +156,7 @@ async function startDevConfigWebServer(
     port: 0,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
-      if (!isAuthorized(url, options.token)) return json({ error: 'Unauthorized' }, 401);
-      return handleApiRequest(request, server, url, options.token, getClients(), {
+      return handleApiRequest(request, server, url, getClients(), {
         get: getConversation,
         set: (next) => {
           setConversation(next);
@@ -190,7 +185,7 @@ async function startDevConfigWebServer(
     configFile: resolve(root, 'vite.config.ts'),
     server: {
       host: '127.0.0.1',
-      port: options.preferredPort ?? 5177,
+      port: preferredPort ?? DEFAULT_PORT,
       strictPort: false,
       proxy: {
         '/api': {
@@ -205,12 +200,12 @@ async function startDevConfigWebServer(
 
   const webAddress = viteServer.httpServer?.address();
   const webPort = typeof webAddress === 'object' && webAddress ? webAddress.port : apiServer.port;
-  writeConfigWebState({ pid: process.pid, port: webPort, token: options.token });
+  writeConfigWebState({ pid: process.pid, port: webPort });
   scheduleIdleExit();
 
   return {
     port: webPort,
-    url: `http://127.0.0.1:${webPort}/?token=${encodeURIComponent(options.token)}`,
+    url: `http://127.0.0.1:${webPort}`,
     stop() {
       clearIdleTimer();
       apiServer.stop(true);
@@ -223,15 +218,12 @@ async function handleApiRequest(
   request: Request,
   server: Bun.Server<unknown>,
   url: URL,
-  token: string,
   clients: number,
   conversation: {
     get(): ConfigWebConversationDetails | null;
     set(details: ConfigWebConversationDetails): void;
   },
 ): Promise<Response | undefined> {
-  if (!isAuthorized(url, token)) return json({ error: 'Unauthorized' }, 401);
-
   if (url.pathname === '/api/ping') return json({ ok: true, clients });
   if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
   if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
@@ -444,10 +436,6 @@ async function handleApiRequest(
   }
 
   return json({ error: 'Not found' }, 404);
-}
-
-function isAuthorized(url: URL, token: string): boolean {
-  return url.searchParams.get('token') === token;
 }
 
 function json(value: unknown, status = 200): Response {

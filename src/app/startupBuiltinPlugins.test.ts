@@ -86,13 +86,13 @@ describe('config-web-worker startup plugin', () => {
     expect(startServer).not.toHaveBeenCalled();
   });
 
-  it('starts Config Web with the worker token', async () => {
+  it('starts Config Web in worker mode', async () => {
     const startServer = vi.fn(async () => undefined);
 
     await expect(
-      startConfigWebWorker({ argv: ['/usr/bin/mica', '--config-web-worker', 'secret-token'], startServer }),
+      startConfigWebWorker({ argv: ['/usr/bin/mica', '--config-web-worker'], startServer }),
     ).resolves.toBe(true);
-    expect(startServer).toHaveBeenCalledWith({ token: 'secret-token' });
+    expect(startServer).toHaveBeenCalledWith();
   });
 });
 

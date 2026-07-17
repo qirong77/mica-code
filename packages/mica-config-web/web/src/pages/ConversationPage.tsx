@@ -11,7 +11,7 @@ import {
   readSessionDetails,
   sendConversationMessage,
 } from '../api.js';
-import { ConversationView } from '../components/ConversationView.js';
+import { ChatTranscript } from '../components/ChatTranscript.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
@@ -467,10 +467,10 @@ export function ConversationPage() {
 
                 <div className="chat-messages">
                   {sessionLoading ? <div className="session-loading">正在加载对话…</div> : null}
-                  {session.conversation.items.length === 0 ? (
+                  {!sessionLoading && session.conversation.items.filter((item) => item.type !== 'system').length === 0 ? (
                     <Empty description="还没有消息，开始聊吧" />
                   ) : (
-                    <ConversationView details={session.conversation} />
+                    <ChatTranscript details={session.conversation} pending={sending} />
                   )}
                 </div>
 

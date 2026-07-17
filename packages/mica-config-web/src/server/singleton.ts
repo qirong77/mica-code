@@ -5,7 +5,6 @@ import { getConfigWebStatePath } from './paths.js';
 export type ConfigWebState = {
   pid: number;
   port: number;
-  token: string;
 };
 
 export function readConfigWebState(): ConfigWebState | null {
@@ -13,7 +12,7 @@ export function readConfigWebState(): ConfigWebState | null {
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as ConfigWebState;
-    if (!parsed.pid || !parsed.port || !parsed.token) return null;
+    if (!parsed.pid || !parsed.port) return null;
     return parsed;
   } catch {
     return null;
@@ -28,15 +27,11 @@ export function writeConfigWebState(state: ConfigWebState): void {
 
 export async function probeConfigWebState(state: ConfigWebState): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${state.port}/api/ping?token=${encodeURIComponent(state.token)}`, {
+    const response = await fetch(`http://127.0.0.1:${state.port}/api/ping`, {
       signal: AbortSignal.timeout(500),
     });
     return response.ok;
   } catch {
     return false;
   }
-}
-
-export function createToken(): string {
-  return crypto.randomUUID().replaceAll('-', '');
 }

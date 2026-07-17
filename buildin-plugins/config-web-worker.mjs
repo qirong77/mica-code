@@ -1,4 +1,4 @@
-import { getConfigWebWorkerToken } from '../packages/mica-config-web/src/server/workerArgs.js';
+import { isConfigWebWorker } from '../packages/mica-config-web/src/server/workerArgs.js';
 
 /**
  * Starts Config Web when this process was spawned in worker mode. The server
@@ -6,15 +6,14 @@ import { getConfigWebWorkerToken } from '../packages/mica-config-web/src/server/
  * Config Web, and worker startup does not initialize the terminal application.
  */
 export default async function startConfigWebWorker(ctx = {}) {
-  const token = getConfigWebWorkerToken(ctx.argv ?? process.argv);
-  if (!token) return false;
+  if (!isConfigWebWorker(ctx.argv ?? process.argv)) return false;
 
   const startServer = ctx.startServer ?? defaultStartServer;
-  await startServer({ token });
+  await startServer();
   return true;
 }
 
-async function defaultStartServer(options) {
+async function defaultStartServer() {
   const { startConfigWebServer } = await import('../packages/mica-config-web/src/server/server.js');
-  return startConfigWebServer(options);
+  return startConfigWebServer({});
 }

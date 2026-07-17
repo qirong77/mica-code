@@ -34,7 +34,7 @@ describe('resolveConfigWebWorkerCommand', () => {
     });
   });
 
-  it('pushes conversation details to the token-protected local endpoint', async () => {
+  it('pushes conversation details to the local endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
     const conversation = {
       providerId: 'openai',
@@ -44,10 +44,10 @@ describe('resolveConfigWebWorkerCommand', () => {
       items: [{ sequence: 1, type: 'system' as const, content: 'system prompt' }],
     };
 
-    await updateConfigWebConversation(39127, 'secret token', conversation);
+    await updateConfigWebConversation(39127, conversation);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:39127/api/details/conversation?token=secret%20token',
+      'http://127.0.0.1:39127/api/details/conversation',
       expect.objectContaining({
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -65,7 +65,7 @@ describe('resolveConfigWebWorkerCommand', () => {
     );
 
     await expect(
-      updateConfigWebConversation(39127, 'token', {
+      updateConfigWebConversation(39127, {
         providerId: 'openai',
         protocol: 'openai_chat_completions',
         model: 'gpt-5',
