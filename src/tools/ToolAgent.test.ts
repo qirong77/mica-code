@@ -270,12 +270,22 @@ describe('ToolAgent', () => {
     await flushAsyncWork();
 
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('thinking');
-    child.onText?.('我会先检查规则编辑器和接口定义。');
+    child.onThinking?.('先看目录结构\n再检查规则编辑器相关代码');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('再检查规则编辑器相关代码');
+
+    child.onText?.('我会先检查规则编辑器和接口定义。\n接着读取关键实现。');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
+
     child.onToolCall?.('grep_search', '{"pattern":"RuleEditor","path":"packages/rules"}', 'tool-1');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/RuleEditor.tsx"}', 'tool-2');
+    child.onToolCall?.('read_file', '{"file_path":"packages/rules/index.ts"}', 'tool-3');
 
+    const summary = taskManager.get(taskId, runtime)?.activities?.[0]?.summary ?? '';
+    expect(summary).toContain('搜索代码');
+    expect(summary).toContain('读取文件');
+    expect(summary).toContain('等2个');
     expect(taskManager.get(taskId, runtime)?.activities).toEqual([
-      expect.objectContaining({ id: 'current-iteration', summary: '检查规则编辑器和接口定义。' }),
+      expect.objectContaining({ id: 'current-iteration' }),
     ]);
     expect(query).toHaveBeenCalledTimes(1);
 

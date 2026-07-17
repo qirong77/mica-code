@@ -510,33 +510,53 @@ function attachSubagentActivityTracking(options: {
   const previousOnThinking = options.child.onThinking;
   const previousOnToolCall = options.child.onToolCall;
   const previousOnToolResult = options.child.onToolResult;
+  let thinkingText = '';
   let assistantText = '';
   let toolCalls: Array<{ name: string; args: string }> = [];
+  let lastSummary = '';
 
   const setSummary = (summary: string) => {
-    options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary });
+    const next = summary.trim() || 'thinking';
+    if (next === lastSummary) return;
+    lastSummary = next;
+    options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary: next });
+  };
+  const publishActivity = () => {
+    if (toolCalls.length > 0) {
+      setSummary(summarizeToolBatch(toolCalls));
+      return;
+    }
+    const textSummary = summarizeLastLine(assistantText);
+    if (textSummary) {
+      setSummary(textSummary);
+      return;
+    }
+    const thinkingSummary = summarizeLastLine(thinkingText);
+    setSummary(thinkingSummary || 'thinking');
   };
   const resetIteration = () => {
+    thinkingText = '';
     assistantText = '';
     toolCalls = [];
-    setSummary('thinking');
+    lastSummary = '';
+    publishActivity();
   };
 
   options.child.onText = (text) => {
     previousOnText?.(text);
     assistantText += text;
-    const summary = summarizeAssistantActivity(assistantText);
-    if (summary) setSummary(summary);
+    publishActivity();
   };
   options.child.onThinking = (thinking) => {
     previousOnThinking?.(thinking);
-    if (!assistantText.trim() && toolCalls.length === 0) setSummary('thinking');
+    thinkingText += thinking;
+    publishActivity();
   };
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
     if (name === 'Agent') return;
     toolCalls.push({ name, args });
-    setSummary(summarizeAssistantActivity(assistantText) || summarizeToolBatch(toolCalls));
+    publishActivity();
   };
   options.child.onToolResult = (name, result, id) => {
     previousOnToolResult?.(name, result, id);
@@ -555,38 +575,92 @@ function summarizeToolBatch(toolCalls: Array<{ name: string; args: string }>): s
     const tool = toolCalls[0];
     return tool ? summarizeToolActivity(tool.name, tool.args) : 'working';
   }
-  const counts = new Map<string, number>();
-  for (const tool of toolCalls) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
-  const parts = [...counts].map(([name, count]) => `${formatToolName(name)}${count > 1 ? ` ×${count}` : ''}`);
-  return parts.join('、');
+  const counts = new Map<string, { label: string; count: number; sample?: string }>();
+  for (const tool of toolCalls) {
+    const current = counts.get(tool.name);
+    if (current) {
+      current.count += 1;
+      continue;
+    }
+    counts.set(tool.name, {
+      label: formatToolName(tool.name),
+      count: 1,
+      sample: extractToolTarget(tool.args),
+    });
+  }
+  const parts = [...counts.values()].map((item) => {
+    if (item.count === 1 && item.sample) return `${item.label} ${item.sample}`;
+    if (item.count > 1 && item.sample) return `${item.label} ${item.sample} 等${item.count}个`;
+    return `${item.label}${item.count > 1 ? ` ×${item.count}` : ''}`;
+  });
+  return clampOneLine(parts.join(' · '));
 }
 
 function summarizeToolActivity(name: string, argsText: string): string {
   try {
-    return micaTools.getDisplayText(name, JSON.parse(argsText));
+    return clampOneLine(micaTools.getDisplayText(name, JSON.parse(argsText)));
   } catch {
     try {
       const parsed = JSON.parse(argsText) as Record<string, unknown>;
-      if (typeof parsed.file_path === 'string') return `${name} ${parsed.file_path}`;
-      if (typeof parsed.path === 'string') return `${name} ${parsed.path}`;
-      if (typeof parsed.command === 'string') return `${name} ${parsed.command}`;
-      if (typeof parsed.description === 'string') return `${name} ${parsed.description}`;
+      const target = extractToolTargetFromArgs(parsed);
+      if (target) return clampOneLine(`${formatToolName(name)} ${target}`);
     } catch {
       // fall through
     }
     const compact = argsText.replace(/\s+/g, ' ').trim();
-    return compact ? `${name} ${compact.slice(0, 80)}` : name;
+    return clampOneLine(compact ? `${formatToolName(name)} ${compact}` : formatToolName(name));
   }
 }
 
-function summarizeAssistantActivity(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
+function summarizeLastLine(text: string): string {
+  const normalized = text
+    .replace(/\r\n/g, '\n')
+    .replace(/```[\s\S]*?```/g, '\n')
     .replace(/^[\s>*#-]+/gm, '')
-    .replace(/^(?:我(?:会|将)?(?:先|要|来)?|接下来|现在|首先|下一步)[，,:：\s]*/u, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160);
+    .trim();
+  if (!normalized) return '';
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const lastLine = lines[lines.length - 1] ?? '';
+  return clampOneLine(lastLine, 120, 'tail');
+}
+
+function extractToolTarget(argsText: string): string | undefined {
+  try {
+    return extractToolTargetFromArgs(JSON.parse(argsText) as Record<string, unknown>);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractToolTargetFromArgs(args: Record<string, unknown>): string | undefined {
+  const candidates = [
+    args.file_path,
+    args.path,
+    args.command,
+    args.pattern,
+    args.query,
+    args.url,
+    args.description,
+    args.skill,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const value = candidate.replace(/\s+/g, ' ').trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function clampOneLine(text: string, maxChars = 120, mode: 'head' | 'tail' = 'head'): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  if (mode === 'tail') {
+    return `…${compact.slice(Math.max(0, compact.length - (maxChars - 1)))}`;
+  }
+  return `${compact.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
 function formatToolName(name: string): string {

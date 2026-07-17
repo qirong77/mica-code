@@ -8,27 +8,19 @@
 
 ## 核心优势
 
-- **Cache-first**：会话历史默认追加演进，尽量保持请求前缀稳定，缓存命中率 95% 以上。
-
-- **扩展友好**：内置文件、搜索、shell、网页、skills 等工具，也能通过 MCP 接入团队或个人工具。
+- ⚡ **前缀稳定，缓存优先**：会话默认 append-only，尽量锁住 system / history 前缀，长对话仍可维持 96%+ 缓存命中
+- ⌨️ **终端原生，不离开 shell**：Ink TUI，信息密度高、键盘优先；多 agent、后台任务、状态一眼可见
+- 🎭 **Role 即工作流**：`/role` 整段替换 system prompt，写码、审查、规划各用一套人格
+- 🧩 **工具可拼装**：文件 / 搜索 / shell / 网页 / skills 开箱即用，MCP 接个人脚本与团队服务
+- ⏪ **可回退、可压缩**：`/rewind` 回到明确检查点，`/compact` 在上下文吃紧时收束历史
 
 ## 快速开始
 
 ### 从 GitHub Release 安装
 
-产品名是 **Mica Code**（`mica-code`），启动命令是 `mica`。
-
-`install.sh` 只下载当前平台压缩包（约 25MB），并校验 SHA256：
-
 ```bash
 curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
 mica
-```
-
-指定版本：
-
-```bash
-curl -fsSL https://github.com/qirong77/mica-code/releases/download/v0.1.0/install.sh | sh -s -- v0.1.0
 ```
 
 ## 配置模型

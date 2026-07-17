@@ -82,11 +82,14 @@ jobs:
           TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
           RELEASE_TITLE: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest' }}
         run: |
-          gh release view "$TAG_NAME" >/dev/null 2>&1 || \
-            gh release create "$TAG_NAME" --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "Release $RELEASE_TITLE"
-
-          gh release upload "$TAG_NAME" \
+          # Recreate the mutable release so old bare binaries / payload assets do not linger.
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release delete "$TAG_NAME" --yes --cleanup-tag
+          fi
+          gh release create "$TAG_NAME" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes "Release $RELEASE_TITLE" \
             install.sh \
             dist/packages/*.tar.gz \
-            dist/packages/sha256sums.txt \
-            --clobber
+            dist/packages/sha256sums.txt

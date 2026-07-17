@@ -427,6 +427,7 @@ rg --files src packages scripts docs blogs
 - `scripts/install.mjs` 默认把二进制安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写一个薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。
 - 产品名是 Mica Code / `mica-code`；release installer 模板是 `scripts/install.sh`，默认安装启动命令为 `mica`（可用 `MICA_BIN_NAME` 覆盖）。
 - release 安装采用按平台下载：`install.sh` 自身很小，探测 os/arch 后只下载对应 `mica-code-<platform>-<cpu>.tar.gz`，并用 `sha256sums.txt` 校验；不再把全部平台二进制 base64 嵌入安装脚本。
+- GitHub Actions 页面上的 `mica-code-release` artifact 是 4 个平台压缩包的 CI 汇总包，不是用户安装路径；用户只下载 `install.sh` + 当前平台 `.tar.gz`。可变 `latest` release 每次重建，避免残留旧 bare binary。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；在 `main` 或 `v*` tag 上构建 Linux/macOS x64/arm64 release 二进制，打包单平台 `tar.gz`（`GZIP=-9`）、薄 `install.sh` 与 `sha256sums.txt` 后上传 release asset。
 - 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`dist/mica` 可能不一致。
 
