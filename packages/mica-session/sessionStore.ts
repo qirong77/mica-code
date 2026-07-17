@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
@@ -50,6 +50,7 @@ export type SessionStoreLike = {
   listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
   save(session: PersistedSession): void;
+  delete(id: string): boolean;
 };
 
 export const SESSION_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'sessions');
@@ -112,6 +113,15 @@ export class SessionStore implements SessionStoreLike {
     const tmpPath = `${path}.${process.pid}.tmp`;
     writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, 'utf-8');
     renameSync(tmpPath, path);
+  }
+
+  delete(id: string): boolean {
+    const safeId = sanitizeSessionId(id);
+    if (!safeId) return false;
+    const path = sessionPath(safeId);
+    if (!existsSync(path)) return false;
+    rmSync(path, { force: true });
+    return true;
   }
 
   private read(path: string): PersistedSession | null {

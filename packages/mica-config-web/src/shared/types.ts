@@ -31,6 +31,68 @@ export type ConfigWebConversationDetails = {
   items: ConfigWebConversationItem[];
 };
 
+
+export type ConfigWebConversationFolder = {
+  id: string;
+  name: string;
+  collapsed: boolean;
+};
+
+export type ConfigWebConversationSummary = {
+  id: string;
+  title: string;
+  folderId: string | null;
+  updatedAt: string;
+  createdAt: string;
+  cwd: string;
+  turnState: 'running' | 'completed' | 'aborted' | 'error';
+  providerId: string;
+  model: string;
+  effort: string;
+  role: string;
+  pinned?: boolean;
+};
+
+export type ConfigWebConversationWorkspace = {
+  root: string;
+  folders: ConfigWebConversationFolder[];
+  conversations: ConfigWebConversationSummary[];
+};
+
+export type ConfigWebConversationCreateInput = {
+  title?: string;
+  folderId?: string | null;
+  providerId?: string;
+  model?: string;
+  effort?: string;
+  role?: string;
+};
+
+export type ConfigWebConversationPatchInput = {
+  id: string;
+  title?: string;
+  folderId?: string | null;
+  pinned?: boolean;
+  providerId?: string;
+  model?: string;
+  effort?: string;
+  role?: string;
+};
+
+export type ConfigWebConversationFolderInput = {
+  id?: string;
+  name?: string;
+  collapsed?: boolean;
+};
+
+export type ConfigWebConversationSendInput = {
+  id: string;
+  content: string;
+};
+
+export type ConfigWebConversationClearInput = {
+  id: string;
+};
 export type ConfigWebMcpTool = {
   name: string;
   description?: string;

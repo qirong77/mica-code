@@ -16,6 +16,17 @@ import {
   writeRole,
   writeSkill,
 } from './details.js';
+import {
+  clearConversation,
+  createConversation,
+  createConversationFolder,
+  deleteConversation,
+  deleteConversationFolder,
+  getConversationWorkspace,
+  patchConversation,
+  patchConversationFolder,
+  sendConversationMessage,
+} from './conversationWorkspace.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { dirname, resolve } from 'node:path';
@@ -234,6 +245,100 @@ async function handleApiRequest(
     }
   }
   if (url.pathname === '/api/details/roles') return json(getRolesDetails());
+
+  if (url.pathname === '/api/conversation/workspace') {
+    if (request.method === 'GET') return json(getConversationWorkspace());
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
+  if (url.pathname === '/api/conversation') {
+    try {
+      if (request.method === 'POST') {
+        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+        return json(createConversation({
+          title: typeof body.title === 'string' ? body.title : undefined,
+          folderId: 'folderId' in body ? (body.folderId as string | null) : undefined,
+          providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+          model: typeof body.model === 'string' ? body.model : undefined,
+          effort: typeof body.effort === 'string' ? body.effort : undefined,
+          role: typeof body.role === 'string' ? body.role : undefined,
+        }));
+      }
+      if (request.method === 'PUT') {
+        const body = (await request.json()) as Record<string, unknown>;
+        if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+        return json(patchConversation({
+          id: body.id,
+          title: typeof body.title === 'string' ? body.title : undefined,
+          folderId: 'folderId' in body ? (body.folderId as string | null) : undefined,
+          pinned: typeof body.pinned === 'boolean' ? body.pinned : undefined,
+          providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+          model: typeof body.model === 'string' ? body.model : undefined,
+          effort: typeof body.effort === 'string' ? body.effort : undefined,
+          role: typeof body.role === 'string' ? body.role : undefined,
+        }));
+      }
+      if (request.method === 'DELETE') {
+        const body = (await request.json()) as { id?: unknown };
+        if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+        return json(deleteConversation(body.id));
+      }
+      return json({ error: 'Method not allowed' }, 405);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
+  if (url.pathname === '/api/conversation/clear') {
+    try {
+      if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+      const body = (await request.json()) as { id?: unknown };
+      if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+      return json(clearConversation(body.id));
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
+  if (url.pathname === '/api/conversation/send') {
+    try {
+      if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+      const body = (await request.json()) as { id?: unknown; content?: unknown };
+      if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+      if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
+      return json(await sendConversationMessage({ id: body.id, content: body.content }));
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
+  if (url.pathname === '/api/conversation/folder') {
+    try {
+      if (request.method === 'POST') {
+        const body = (await request.json().catch(() => ({}))) as { name?: unknown };
+        return json(createConversationFolder({
+          name: typeof body.name === 'string' ? body.name : undefined,
+        }));
+      }
+      if (request.method === 'PUT') {
+        const body = (await request.json()) as { id?: unknown; name?: unknown; collapsed?: unknown };
+        if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+        return json(patchConversationFolder({
+          id: body.id,
+          name: typeof body.name === 'string' ? body.name : undefined,
+          collapsed: typeof body.collapsed === 'boolean' ? body.collapsed : undefined,
+        }));
+      }
+      if (request.method === 'DELETE') {
+        const body = (await request.json()) as { id?: unknown };
+        if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+        return json(deleteConversationFolder(body.id));
+      }
+      return json({ error: 'Method not allowed' }, 405);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
 
   if (url.pathname === '/api/files/role') {
     try {

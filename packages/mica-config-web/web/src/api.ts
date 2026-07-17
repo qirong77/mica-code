@@ -1,5 +1,6 @@
 import type {
   ConfigWebConversationDetails,
+  ConfigWebConversationWorkspace,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginsDetails,
@@ -138,6 +139,103 @@ export async function deleteSkill(name: string): Promise<ConfigWebSkillsDetails>
 
 export async function readConversationDetails(): Promise<ConfigWebConversationDetails | null> {
   const response = await fetch(`/api/details/conversation?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function readConversationWorkspace(): Promise<ConfigWebConversationWorkspace> {
+  const response = await fetch(`/api/conversation/workspace?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
+export async function createConversation(input: {
+  title?: string;
+  folderId?: string | null;
+  providerId?: string;
+  model?: string;
+  effort?: string;
+  role?: string;
+} = {}): Promise<ConfigWebSessionDetails> {
+  const response = await fetch(`/api/conversation?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson(response);
+}
+
+export async function patchConversation(input: {
+  id: string;
+  title?: string;
+  folderId?: string | null;
+  pinned?: boolean;
+  providerId?: string;
+  model?: string;
+  effort?: string;
+  role?: string;
+}): Promise<ConfigWebSessionDetails> {
+  const response = await fetch(`/api/conversation?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson(response);
+}
+
+export async function deleteConversation(id: string): Promise<ConfigWebConversationWorkspace> {
+  const response = await fetch(`/api/conversation?token=${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  return readJson(response);
+}
+
+export async function clearConversation(id: string): Promise<ConfigWebSessionDetails> {
+  const response = await fetch(`/api/conversation/clear?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  return readJson(response);
+}
+
+export async function sendConversationMessage(id: string, content: string): Promise<ConfigWebSessionDetails> {
+  const response = await fetch(`/api/conversation/send?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, content }),
+  });
+  return readJson(response);
+}
+
+export async function createConversationFolder(name?: string): Promise<ConfigWebConversationWorkspace> {
+  const response = await fetch(`/api/conversation/folder?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return readJson(response);
+}
+
+export async function patchConversationFolder(input: {
+  id: string;
+  name?: string;
+  collapsed?: boolean;
+}): Promise<ConfigWebConversationWorkspace> {
+  const response = await fetch(`/api/conversation/folder?token=${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson(response);
+}
+
+export async function deleteConversationFolder(id: string): Promise<ConfigWebConversationWorkspace> {
+  const response = await fetch(`/api/conversation/folder?token=${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
   return readJson(response);
 }
 

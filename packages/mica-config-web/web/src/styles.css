@@ -1009,7 +1009,17 @@ textarea {
 
 
 
-/* Conversation workspace (mock) */
+/* Conversation workspace */
+.chat-notice {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 13px;
+}
+
 .chat-workspace {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -1072,6 +1082,10 @@ textarea {
 .chat-folder {
   display: grid;
   gap: 4px;
+}
+
+.chat-folder > .chat-conv-row {
+  margin-left: 8px;
 }
 
 .chat-folder-row {
@@ -1330,6 +1344,15 @@ textarea {
 
 .chat-header-actions {
   flex: 0 0 auto;
+}
+
+.chat-header-actions .chat-conv-more {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-muted);
 }
 
 .chat-messages {
