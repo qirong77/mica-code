@@ -123,7 +123,7 @@ export class AgentRuntime {
 
   createSubAgent(options: Partial<ModelClientOptions> = {}) {
     if (!this.isConfigured) {
-      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
+      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
       throw new Error(message);
     }
     return micaAgent.createSubAgent({
@@ -313,7 +313,7 @@ export class AgentRuntime {
     if (!this.isCurrent(runId)) throw new AgentAbortError(runId);
 
     if (!this.client || !this.isConfigured) {
-      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key`;
+      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
       this.emitStatus({ type: 'error', message });
       throw new Error(message);
     }

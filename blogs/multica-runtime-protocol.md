@@ -1,13 +1,13 @@
 # Agent Runtime 协议：Mica 为什么选择 DevEco
 
-> 本文是 [mica-code](https://github.com/qirong77/mica-code) 系列文章之一。mica-code 是一个从零搭建的 CLI code agent，基于 Bun + TypeScript + React（Ink）+ Anthropic SDK，目标是搞清楚 Claude Code 这类工具底层到底怎么工作。
+> 本文是 [mica](https://github.com/qirong77/mica) 系列文章之一。mica 是一个从零搭建的 CLI code agent，基于 Bun + TypeScript + React（Ink）+ Anthropic SDK，目标是搞清楚 Claude Code 这类工具底层到底怎么工作。
 
 把 Mica 接进 Multica，最开始看起来只是一个进程启动问题。
 
 Multica 拿到任务，执行：
 
 ```bash
-mica-code "fix the failing tests"
+mica "fix the failing tests"
 ```
 
 Mica 完成任务，退出。事情似乎就结束了。
@@ -27,7 +27,7 @@ Mica 完成任务，退出。事情似乎就结束了。
 假设没有任何协议，Multica 只能把 Mica 当成一个普通子进程：
 
 ```text
-spawn mica-code
+spawn mica
       │
       ├── stdout: 一些文本
       ├── stderr: 一些错误
@@ -310,7 +310,7 @@ Multica devecoBackend
           │
           │ run --format json
           ▼
-      mica-code
+      mica
 ```
 
 ### 3.2 它和 Mica 的生命周期一致
@@ -374,13 +374,13 @@ Mica 对 Multica 暴露三类入口。
 第一类是版本探测：
 
 ```bash
-mica-code --version
+mica --version
 ```
 
 第二类是模型发现：
 
 ```bash
-mica-code models
+mica models
 ```
 
 输出一行一个模型：
@@ -393,7 +393,7 @@ openrouter/openai/gpt-5
 第三类是真正执行任务：
 
 ```bash
-mica-code run \
+mica run \
   --format json \
   --dangerously-skip-permissions \
   --dir /work/task \
@@ -423,14 +423,14 @@ mica-code run \
 
 ### 4.1 协议兼容不等于自动发现
 
-Mica 实现 DevEco 协议之后，Multica 仍然不会仅凭 `mica-code` 这个命令名自动判断它支持 DevEco。
+Mica 实现 DevEco 协议之后，Multica 仍然不会仅凭 `mica` 这个命令名自动判断它支持 DevEco。
 
 Multica 的自动发现不是能力协商，也不会扫描 PATH 中所有程序并试探协议。内置 Agent 依赖硬编码命令名；对于 Mica，需要通过 Custom Runtime Profile 明确声明：
 
 ```bash
 multica runtime profile create \
   --protocol-family deveco \
-  --command-name mica-code \
+  --command-name mica \
   --display-name "Mica Code"
 ```
 
@@ -444,7 +444,7 @@ protocol_family  = 怎样和它通信
 所以当前实际组合是：
 
 ```text
-Executable：mica-code
+Executable：mica
 Backend：   devecoBackend
 Protocol：  DevEco/OpenCode run JSON
 ```
