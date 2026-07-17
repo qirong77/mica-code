@@ -15,6 +15,7 @@ const DEFAULT_SUMMARY_INPUT_TOKENS = 80_000;
 const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
 const MIN_SUMMARY_INPUT_TOKENS = 8_000;
 const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
+const TOOL_ARGUMENTS_PLACEHOLDER = '{"_truncated":true,"note":"tool arguments cleared during compact"}';
 
 export type CompactInput = {
   messages: unknown[];
@@ -540,17 +541,31 @@ function clampRatio(value: unknown, fallback: number): number {
 
 function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
-  return messages.map((message) => pruneOldValue(message, OLD_MESSAGE_STRING_CHARS, placeholder));
+  return messages.map((message) => pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }));
 }
 
-function pruneOldValue(value: unknown, maxStringChars: number, placeholder: string): unknown {
-  if (typeof value === 'string') return pruneOldString(value, maxStringChars);
-  if (Array.isArray(value)) return value.map((item) => pruneOldValue(item, maxStringChars, placeholder));
+type PruneMode = 'old' | 'kept';
+
+type PruneOptions = {
+  maxStringChars: number;
+  placeholder?: string;
+  mode: PruneMode;
+};
+
+function pruneValue(value: unknown, options: PruneOptions): unknown {
+  if (typeof value === 'string') {
+    return options.mode === 'old' ? pruneOldString(value, options.maxStringChars) : pruneString(value, options.maxStringChars);
+  }
+  if (Array.isArray(value)) return value.map((item) => pruneValue(item, options));
   if (!value || typeof value !== 'object') return value;
 
   const record = value as Record<string, unknown>;
   const mediaReplacement = mediaPlaceholder(record);
   if (mediaReplacement) return mediaReplacement;
+
+  if (isProtocolSensitiveRecord(record)) {
+    return pruneProtocolSensitiveRecord(record, options);
+  }
 
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) {
@@ -561,30 +576,176 @@ function pruneOldValue(value: unknown, maxStringChars: number, placeholder: stri
       continue;
     }
     if (key === 'toolUseResult') {
-      next[key] = placeholder;
+      if (options.mode === 'old') {
+        next[key] = options.placeholder ?? TOOL_RESULT_PLACEHOLDER;
+      }
       continue;
     }
-    if (isToolResultRecord(record) && (key === 'content' || key === 'output')) {
-      next[key] = placeholder;
+    if (options.mode === 'old' && isToolResultRecord(record) && (key === 'content' || key === 'output')) {
+      next[key] = options.placeholder ?? TOOL_RESULT_PLACEHOLDER;
       continue;
     }
-    if (key === 'data' && typeof child === 'string' && shouldOmitBase64String(child)) {
-      next[key] = `[omitted base64 data: ${child.length} chars]`;
-      continue;
+    if (key === 'data' && typeof child === 'string') {
+      if (options.mode === 'old' && shouldOmitBase64String(child)) {
+        next[key] = `[omitted base64 data: ${child.length} chars]`;
+        continue;
+      }
+      if (options.mode === 'kept' && child.length > options.maxStringChars) {
+        next[key] = `[omitted base64 data: ${child.length} chars]`;
+        continue;
+      }
     }
-    if ((key === 'url' || key === 'image_url') && typeof child === 'string' && isDataUrl(child)) {
+    if (options.mode === 'old' && (key === 'url' || key === 'image_url') && typeof child === 'string' && isDataUrl(child)) {
       next[key] = `[omitted data url: ${child.length} chars]`;
       continue;
     }
-    next[key] = pruneOldValue(child, maxStringChars, placeholder);
+    if (options.mode === 'kept' && key === 'image_url' && typeof child === 'string' && child.length > options.maxStringChars) {
+      next[key] = `[omitted image url: ${child.length} chars]`;
+      continue;
+    }
+    if (isProtocolSensitiveKey(key)) {
+      next[key] = preserveProtocolSensitiveValue(child, options, key);
+      continue;
+    }
+    next[key] = pruneValue(child, options);
   }
   return next;
 }
 
-function mediaPlaceholder(record: Record<string, unknown>): Record<string, string> | null {
+function isProtocolSensitiveRecord(record: Record<string, unknown>): boolean {
+  return (
+    record.type === 'function_call' ||
+    record.type === 'tool_use' ||
+    record.type === 'function' ||
+    (Array.isArray(record.tool_calls) && (record.role === 'assistant' || record.role === undefined)) ||
+    // Chat Completions tool_calls[] entries look like { id, type, function: { name, arguments } }.
+    (record.type === 'function' && typeof record.function === 'object') ||
+    (typeof record.function === 'object' && record.function !== null && 'arguments' in (record.function as object))
+  );
+}
+
+function pruneProtocolSensitiveRecord(record: Record<string, unknown>, options: PruneOptions): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'encrypted_content') {
+      next[key] = child;
+      continue;
+    }
+    if (key === 'tool_calls' && Array.isArray(child)) {
+      next[key] = child.map((item) => pruneValue(item, options));
+      continue;
+    }
+    if (key === 'function') {
+      next[key] = preserveProtocolSensitiveValue(child, options, key);
+      continue;
+    }
+    if (isProtocolSensitiveKey(key)) {
+      next[key] = preserveProtocolSensitiveValue(child, options, key);
+      continue;
+    }
+    // Keep assistant text/refusal/content structure intact when tool_calls exist,
+    // but still allow media placeholders and soft string truncation on free text.
+    if (key === 'content' || key === 'refusal') {
+      next[key] = pruneValue(child, options);
+      continue;
+    }
+    next[key] = pruneValue(child, options);
+  }
+  return next;
+}
+
+function isProtocolSensitiveKey(key: string): boolean {
+  return (
+    key === 'arguments' ||
+    key === 'input' ||
+    key === 'id' ||
+    key === 'call_id' ||
+    key === 'tool_call_id' ||
+    key === 'tool_use_id' ||
+    key === 'name' ||
+    key === 'type'
+  );
+}
+
+function preserveProtocolSensitiveValue(value: unknown, options: PruneOptions, key?: string): unknown {
+  if (typeof value === 'string') {
+    if (key === 'arguments') return preserveToolArguments(value, options.maxStringChars);
+    // IDs/names/types must stay exact; free-text truncation would break tool pairing.
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => preserveProtocolSensitiveValue(item, options));
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  // Anthropic tool_use.input is structured JSON. Keep object shape valid; only drop huge leaf strings carefully.
+  if (key === 'input') {
+    return preserveToolInput(value, options);
+  }
+
+  const record = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  for (const [childKey, child] of Object.entries(record)) {
+    if (isProtocolSensitiveKey(childKey) || childKey === 'function' || childKey === 'tool_calls' || key === 'function') {
+      next[childKey] = preserveProtocolSensitiveValue(child, options, childKey);
+      continue;
+    }
+    next[childKey] = pruneValue(child, options);
+  }
+  return next;
+}
+
+function preserveToolArguments(value: string, maxStringChars: number): string {
+  // Chat Completions / Responses tool-call arguments must remain valid JSON strings.
+  // Free-form head/tail truncation makes the next provider request 400.
+  if (isValidJsonText(value)) {
+    return value.length <= maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
+  }
+  return TOOL_ARGUMENTS_PLACEHOLDER;
+}
+
+function preserveToolInput(value: unknown, options: PruneOptions): unknown {
+  if (typeof value === 'string') {
+    if (isValidJsonText(value)) {
+      return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
+    }
+    return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
+  }
+  if (Array.isArray(value)) return value.map((item) => preserveToolInput(item, options));
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  for (const [childKey, child] of Object.entries(record)) {
+    if (typeof child === 'string' && child.length > options.maxStringChars) {
+      next[childKey] = `[omitted tool input field: ${child.length} chars]`;
+      continue;
+    }
+    next[childKey] = preserveToolInput(child, options);
+  }
+  return next;
+}
+
+function isValidJsonText(value: string): boolean {
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mediaPlaceholder(record: Record<string, unknown>): Record<string, unknown> | null {
   if (record.type === 'image') return { type: 'text', text: '[image omitted during compact]' };
   if (record.type === 'document') return { type: 'text', text: '[document omitted during compact]' };
-  if (record.type === 'image_url') return { type: 'text', text: '[image omitted during compact]' };
+  // Keep OpenAI content-part shape (`type: image_url`) instead of rewriting the part type.
+  // Some gateways reject mixed/unexpected content part schemas after compact.
+  if (record.type === 'image_url') {
+    return {
+      type: 'image_url',
+      image_url: { url: '[image omitted during compact]' },
+    };
+  }
   if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
   if (record.type === 'file') return { type: 'text', text: '[document omitted during compact]' };
   if (record.type === 'resource') return { type: 'text', text: '[document omitted during compact]' };
@@ -623,51 +784,12 @@ function compactKeptMessages(messages: unknown[], options: CompactOptions, token
   if (estimateMessagesTokens(messages) <= budget) return cloneJson(messages);
 
   for (const maxStringChars of options.aggressive ? [6_000, 2_000, 800] : [12_000, 4_000, 1_200]) {
-    const compacted = messages.map((message) => pruneKeptValue(message, maxStringChars));
+    const compacted = messages.map((message) => pruneValue(message, { maxStringChars, mode: 'kept' }));
     if (estimateMessagesTokens(compacted) <= Math.ceil(budget * 1.25) || maxStringChars <= 1_200) {
       return compacted;
     }
   }
   return cloneJson(messages);
-}
-
-function pruneKeptValue(value: unknown, maxStringChars: number): unknown {
-  if (typeof value === 'string') return pruneString(value, maxStringChars);
-  if (Array.isArray(value)) return value.map((item) => pruneContentBlock(item, maxStringChars));
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  if (record.type === 'image' || record.type === 'document')
-    return { type: 'text', text: `[${record.type} omitted during compact]` };
-  if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
-
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    if (key === 'encrypted_content') {
-      next[key] = child;
-      continue;
-    }
-    if (key === 'toolUseResult') continue;
-    if (key === 'data' && typeof child === 'string' && child.length > maxStringChars) {
-      next[key] = `[omitted base64 data: ${child.length} chars]`;
-      continue;
-    }
-    if (key === 'image_url' && typeof child === 'string' && child.length > maxStringChars) {
-      next[key] = `[omitted image url: ${child.length} chars]`;
-      continue;
-    }
-    next[key] = pruneKeptValue(child, maxStringChars);
-  }
-  return next;
-}
-
-function pruneContentBlock(value: unknown, maxStringChars: number): unknown {
-  if (!value || typeof value !== 'object') return pruneKeptValue(value, maxStringChars);
-  const record = value as Record<string, unknown>;
-  if (record.type === 'image' || record.type === 'document')
-    return { type: 'text', text: `[${record.type} omitted during compact]` };
-  if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
-  return pruneKeptValue(value, maxStringChars);
 }
 
 function pruneString(value: string, maxChars: number): string {

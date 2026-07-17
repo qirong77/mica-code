@@ -365,6 +365,7 @@ AGENT.md
 - `RewindCheckpointManager` 在 turn 前创建 checkpoint，并在 turn 结束后将其更新为该节点完成时的对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
+- compact 可以裁剪 tool result、媒体和 base64，但绝不能把 tool-call `arguments` 截成自由文本；过长或损坏参数必须改写成合法 JSON 占位，否则后续 provider 请求会 400。
 - compact、review、commit 等命令如果需要模型调用，应通过 subagent 或 exclusive task 隔离，不要污染当前正在运行的 turn。
 
 ## Package 依赖边界

@@ -201,6 +201,7 @@ describe('CompactionService', () => {
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_1');
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_5');
     expect(serialized).not.toContain(IMAGE_BASE64);
+    assertValidJsonArguments(result.messages);
   });
 
   it('preserves opaque Responses encrypted reasoning during lightweight prune-only compact', async () => {
@@ -326,6 +327,204 @@ describe('CompactionService', () => {
     ).rejects.toBeInstanceOf(CompactionNotNeededError);
   });
 
+  it('keeps Chat Completions and Responses tool-call arguments as valid JSON during prune-only compact', async () => {
+    const service = new CompactionService();
+    const hugeArgs = JSON.stringify({ command: 'python3 - <<\'PY\'\n' + 'print("x")\n'.repeat(400) + 'PY' });
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'check image' },
+          {
+            type: 'image_url',
+            image_url: { url: `data:image/png;base64,${IMAGE_BASE64}` },
+          },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: null,
+        refusal: null,
+        tool_calls: [
+          {
+            id: 'fc_huge_0',
+            type: 'function',
+            function: {
+              name: 'run_shell',
+              arguments: hugeArgs,
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'fc_huge_0',
+        content: `RAW_TOOL_RESULT: ${'z'.repeat(5_000)}`,
+      },
+      {
+        type: 'function_call',
+        call_id: 'responses-huge',
+        name: 'run_shell',
+        arguments: hugeArgs,
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'responses-huge',
+        output: `RAW_RESPONSES_RESULT: ${'y'.repeat(5_000)}`,
+      },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'done' },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: {
+        force: true,
+        aggressive: true,
+        lightweightPrune: true,
+        contextWindowSize: 100_000,
+      },
+      summarize: vi.fn(async () => FULL_SUMMARY),
+    });
+
+    expect(result.strategy).toBe('prune_only');
+    assertValidJsonArguments(result.messages);
+
+    const assistant = result.messages.find(
+      (message) =>
+        message &&
+        typeof message === 'object' &&
+        (message as Record<string, unknown>).role === 'assistant' &&
+        Array.isArray((message as Record<string, unknown>).tool_calls),
+    ) as Record<string, unknown>;
+    const toolCalls = assistant.tool_calls as Array<Record<string, unknown>>;
+    const chatArgs = ((toolCalls[0]!.function as Record<string, unknown>).arguments as string);
+    expect(JSON.parse(chatArgs)).toEqual({
+      _truncated: true,
+      note: 'tool arguments cleared during compact',
+    });
+
+    const functionCall = result.messages.find(
+      (message) => message && typeof message === 'object' && (message as Record<string, unknown>).type === 'function_call',
+    ) as Record<string, unknown>;
+    expect(JSON.parse(String(functionCall.arguments))).toEqual({
+      _truncated: true,
+      note: 'tool arguments cleared during compact',
+    });
+
+    const imageUser = result.messages.find((message) => {
+      if (!message || typeof message !== 'object') return false;
+      const content = (message as Record<string, unknown>).content;
+      return (
+        Array.isArray(content) &&
+        content.some((part) => part && typeof part === 'object' && (part as Record<string, unknown>).type === 'image_url')
+      );
+    }) as Record<string, unknown> | undefined;
+    expect(imageUser).toBeTruthy();
+    const content = imageUser!.content as Array<Record<string, unknown>>;
+    const imagePart = content.find((part) => part.type === 'image_url') as Record<string, unknown>;
+    expect(imagePart).toMatchObject({
+      type: 'image_url',
+      image_url: { url: '[image omitted during compact]' },
+    });
+    expect(JSON.stringify(result.messages)).not.toContain(IMAGE_BASE64);
+    expect(JSON.stringify(result.messages)).not.toContain('[truncated:');
+  });
+
+  it('repairs already-corrupted tool-call arguments into valid JSON placeholders', async () => {
+    const service = new CompactionService();
+    const corrupted =
+      '[truncated: original 4520 chars, kept about 4000 chars]\n--- head ---\n{"command":"echo hi"';
+    const result = await service.compact({
+      messages: [
+        { role: 'user', content: 'fix corrupted history' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'fc_bad_0',
+              type: 'function',
+              function: { name: 'run_shell', arguments: corrupted },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'fc_bad_0', content: 'ok' },
+        { role: 'user', content: 'next' },
+        { role: 'assistant', content: 'done' },
+      ],
+      options: {
+        force: true,
+        aggressive: true,
+        lightweightPrune: true,
+        contextWindowSize: 100_000,
+      },
+      summarize: vi.fn(async () => FULL_SUMMARY),
+    });
+
+    assertValidJsonArguments(result.messages);
+    const assistant = result.messages.find(
+      (message) =>
+        message &&
+        typeof message === 'object' &&
+        (message as Record<string, unknown>).role === 'assistant' &&
+        Array.isArray((message as Record<string, unknown>).tool_calls),
+    ) as Record<string, unknown>;
+    const args = (((assistant.tool_calls as Array<Record<string, unknown>>)[0]!.function as Record<string, unknown>)
+      .arguments as string);
+    expect(JSON.parse(args)).toEqual({
+      _truncated: true,
+      note: 'tool arguments cleared during compact',
+    });
+  });
+
+  it('keeps tool-call arguments valid when recent kept messages are aggressively compacted', async () => {
+    const service = new CompactionService();
+    const hugeArgs = JSON.stringify({ command: 'echo ' + 'x'.repeat(20_000) });
+    const messages = [
+      ...makeMessages(6),
+      {
+        role: 'user',
+        content: 'run a large shell command',
+      },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'fc_recent_0',
+            type: 'function',
+            function: { name: 'run_shell', arguments: hugeArgs },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'fc_recent_0',
+        content: 'done',
+      },
+      {
+        role: 'assistant',
+        content: 'finished recent tool call',
+      },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 1,
+        maxRecentTokens: 200,
+      },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    expect(result.mode).toBe('summarized');
+    assertValidJsonArguments(result.messages);
+    expect(JSON.stringify(result.messages)).not.toContain('[truncated:');
+  });
+
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {
@@ -375,6 +574,35 @@ function makeToolMessages(rounds: number): unknown[] {
       output: `RAW_RESPONSES_RESULT_${turn}: ${'y'.repeat(4_000)}`,
     },
   ]);
+}
+
+function collectToolArguments(messages: unknown[]): string[] {
+  const args: string[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const record = message as Record<string, unknown>;
+    if (Array.isArray(record.tool_calls)) {
+      for (const toolCall of record.tool_calls) {
+        if (!toolCall || typeof toolCall !== 'object') continue;
+        const fn = (toolCall as Record<string, unknown>).function;
+        if (fn && typeof fn === 'object' && typeof (fn as Record<string, unknown>).arguments === 'string') {
+          args.push((fn as Record<string, string>).arguments);
+        }
+      }
+    }
+    if (record.type === 'function_call' && typeof record.arguments === 'string') {
+      args.push(record.arguments);
+    }
+  }
+  return args;
+}
+
+function assertValidJsonArguments(messages: unknown[]) {
+  for (const value of collectToolArguments(messages)) {
+    expect(() => JSON.parse(value)).not.toThrow();
+    expect(value).not.toContain('[truncated:');
+    expect(value).not.toContain('--- head ---');
+  }
 }
 
 function contentOf(message: unknown): string {
