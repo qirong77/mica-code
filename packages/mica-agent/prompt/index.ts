@@ -72,10 +72,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
   return new SystemPromptBuilder(options).value;
 }
 
-export function buildSystemPromptForTest(options: BuildSystemPromptOptions): string {
-  return new SystemPromptBuilder(options).value;
-}
-
 function wrapSection(section: PromptSection, content: string): string {
   return `<${section}>\n${content}\n</${section}>`;
 }
