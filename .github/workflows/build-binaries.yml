@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build install.sh
+    name: Build release assets
     runs-on: ubuntu-latest
 
     steps:
@@ -46,31 +46,25 @@ jobs:
 
           chmod 755 dist/release/mica-code-*
 
-      - name: Build installer
-        run: |
-          tar -czf dist/mica-code-payload.tar.gz -C dist/release .
-          base64 < dist/mica-code-payload.tar.gz > dist/mica-code-payload.tar.gz.b64
-
-          awk '
-            /^__MICA_PAYLOAD__$/ {
-              while ((getline line < "dist/mica-code-payload.tar.gz.b64") > 0) print line
-              next
-            }
-            { print }
-          ' scripts/install.sh > install.sh
-
-          chmod 755 install.sh
-
       - name: Package release archives
         run: |
           mkdir -p dist/packages
 
           for binary in dist/release/mica-code-*; do
             name="$(basename "$binary")"
-            tar -czf "dist/packages/$name.tar.gz" -C dist/release "$name"
+            # Maximum portable gzip compression for release downloads.
+            GZIP=-9 tar -czf "dist/packages/${name}.tar.gz" -C dist/release "$name"
           done
 
-          sha256sum install.sh dist/packages/*.tar.gz > dist/packages/sha256sums.txt
+          # Ship the thin installer as-is. It downloads only the current platform archive.
+          cp scripts/install.sh install.sh
+          chmod 755 install.sh
+
+          (
+            cd dist/packages
+            sha256sum *.tar.gz
+          ) > dist/packages/sha256sums.txt
+          sha256sum install.sh >> dist/packages/sha256sums.txt
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -91,4 +85,8 @@ jobs:
           gh release view "$TAG_NAME" >/dev/null 2>&1 || \
             gh release create "$TAG_NAME" --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "Release $RELEASE_TITLE"
 
-          gh release upload "$TAG_NAME" install.sh dist/packages/*.tar.gz dist/packages/sha256sums.txt --clobber
+          gh release upload "$TAG_NAME" \
+            install.sh \
+            dist/packages/*.tar.gz \
+            dist/packages/sha256sums.txt \
+            --clobber

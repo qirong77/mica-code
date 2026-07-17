@@ -16,11 +16,19 @@
 
 ### 从 GitHub Release 安装
 
-产品名是 **Mica Code**（`mica-code`），安装后的启动命令是 `mica`：
+产品名是 **Mica Code**（`mica-code`），启动命令是 `mica`。
+
+`install.sh` 只下载当前平台压缩包（约 25MB），并校验 SHA256：
 
 ```bash
 curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
 mica
+```
+
+指定版本：
+
+```bash
+curl -fsSL https://github.com/qirong77/mica-code/releases/download/v0.1.0/install.sh | sh -s -- v0.1.0
 ```
 
 ## 配置模型
