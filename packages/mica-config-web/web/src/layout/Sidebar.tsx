@@ -4,7 +4,6 @@ import { appIcons } from '../icons.js';
 const items = [
   { key: 'config', label: 'Config' },
   { key: 'sessions', label: 'Sessions' },
-  { key: 'conversation', label: 'Conversation' },
   { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
