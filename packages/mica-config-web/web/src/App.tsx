@@ -11,7 +11,7 @@ import { connectHeartbeat } from './api.js';
 import type { ConfigWebSection } from '../../src/shared/types.js';
 
 export function App() {
-  const [section, setSection] = useState<ConfigWebSection>('config');
+  const [section, setSection] = useState<ConfigWebSection>(readInitialSection);
   const [dirtySection, setDirtySection] = useState<ConfigWebSection | null>(null);
 
   function changeSection(nextSection: ConfigWebSection) {
@@ -23,6 +23,9 @@ export function App() {
       return;
     }
     setSection(nextSection);
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', nextSection);
+    window.history.replaceState(null, '', url);
   }
 
   function handleDirtyChange(current: ConfigWebSection, dirty: boolean) {
@@ -38,7 +41,7 @@ export function App() {
   }, []);
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${section === 'conversation' ? ' app-shell-terminal' : ''}`}>
       <Sidebar section={section} onChange={changeSection} />
       <div className="content-shell">
         {section === 'config' ? <ConfigPage /> : null}
@@ -51,4 +54,11 @@ export function App() {
       </div>
     </main>
   );
+}
+
+function readInitialSection(): ConfigWebSection {
+  const candidate = new URLSearchParams(window.location.search).get('section');
+  return candidate && ['config', 'sessions', 'conversation', 'roles', 'mcp', 'skills', 'plugins'].includes(candidate)
+    ? (candidate as ConfigWebSection)
+    : 'config';
 }

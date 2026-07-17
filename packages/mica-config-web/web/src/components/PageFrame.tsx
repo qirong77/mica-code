@@ -5,9 +5,18 @@ type PageFrameProps = {
   path?: string;
   actions?: ReactNode;
   children: ReactNode;
+  immersive?: boolean;
 };
 
-export function PageFrame({ title, path, actions, children }: PageFrameProps) {
+export function PageFrame({ title, path, actions, children, immersive = false }: PageFrameProps) {
+  if (immersive) {
+    return (
+      <main className="page-frame page-frame-immersive">
+        <section className="page-panel page-panel-immersive">{children}</section>
+      </main>
+    );
+  }
+
   return (
     <section className="page-frame">
       <header className="page-hero">

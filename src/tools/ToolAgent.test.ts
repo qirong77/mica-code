@@ -19,7 +19,7 @@ describe('ToolAgent', () => {
     });
 
     expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
-      maxTurns: 20,
+      maxTurns: 50,
       signal: expect.any(AbortSignal),
       onIterationComplete: expect.any(Function),
     }));
@@ -108,7 +108,7 @@ describe('ToolAgent', () => {
     expect(completed).toContain('status: completed');
     expect(completed).toContain('child result');
     expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
-      maxTurns: 30,
+      maxTurns: 50,
       signal: expect.any(AbortSignal),
       onIterationComplete: expect.any(Function),
     }));
@@ -116,7 +116,7 @@ describe('ToolAgent', () => {
 
   it('reports failed background tasks and preserves partial results from maxTurns', async () => {
     const query = vi.fn(async () => {
-      throw new AgentMaxTurnsError(30, 'partial child result');
+      throw new AgentMaxTurnsError(50, 'partial child result');
     });
     const { runtime } = createRuntimeStub(query);
     const tool = new ToolAgent(runtime, new SubagentTaskManager());
@@ -132,7 +132,7 @@ describe('ToolAgent', () => {
 
     expect(failed).toContain('status: failed');
     expect(failed).toContain('partial child result');
-    expect(failed).toContain('maximum of 30 turns');
+    expect(failed).toContain('maximum of 50 turns');
   });
 
   it('requires owned_paths for Implementer and injects them into tool context', async () => {

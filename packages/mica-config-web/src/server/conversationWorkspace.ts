@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { micaAgent } from '@packages/mica-agent/index.js';
+import type { AgentCallbacks } from '@packages/mica-agent/core/Agent.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import type { EffortOption, ProviderDefinition } from '@packages/mica-config/index.js';
 import { micaSession, type PersistedSession } from '@packages/mica-session/index.js';
@@ -30,6 +31,19 @@ type WorkspaceFile = {
   >;
 };
 
+const activeConversationSends = new Set<string>();
+
+export class ConversationMessageError extends Error {
+  constructor(
+    message: string,
+    readonly session: ConfigWebSessionDetails,
+    readonly inputCommitted: boolean,
+  ) {
+    super(message);
+    this.name = 'ConversationMessageError';
+  }
+}
+
 const DEFAULT_WORKSPACE: WorkspaceFile = {
   version: 1,
   folders: [],
@@ -41,20 +55,19 @@ export function getConversationWorkspace(): ConfigWebConversationWorkspace {
   const store = micaSession.createStore();
   const sessions = store.listRecent(500);
   const summaries: ConfigWebConversationSummary[] = sessions.map((session) => {
-    const full = store.load(session.id);
     const meta = workspace.conversations[session.id] ?? { folderId: null };
     return {
       id: session.id,
       title: session.title,
       folderId: sanitizeFolderId(meta.folderId, workspace.folders),
       updatedAt: session.updatedAt,
-      createdAt: full?.createdAt ?? session.updatedAt,
+      createdAt: session.createdAt ?? session.updatedAt,
       cwd: session.cwd,
-      turnState: full?.turnState ?? (session.uncompleted ? 'running' : 'completed'),
+      turnState: session.turnState ?? (session.uncompleted ? 'running' : 'completed'),
       providerId: session.providerId,
       model: session.model,
-      effort: full?.snapshot.effort ?? 'none',
-      role: full?.snapshot.role ?? 'default',
+      effort: session.effort ?? 'none',
+      role: session.role ?? 'default',
       pinned: Boolean(meta.pinned),
     };
   });
@@ -221,7 +234,25 @@ export function deleteConversationFolder(id: string): ConfigWebConversationWorks
   return getConversationWorkspace();
 }
 
-export async function sendConversationMessage(input: ConfigWebConversationSendInput): Promise<ConfigWebSessionDetails> {
+export async function sendConversationMessage(
+  input: ConfigWebConversationSendInput,
+  options: AgentCallbacks & { signal?: AbortSignal } = {},
+): Promise<ConfigWebSessionDetails> {
+  const id = typeof input.id === 'string' ? input.id.trim() : '';
+  if (!id) throw new Error('id is required');
+  if (activeConversationSends.has(id)) throw new Error('This conversation is already running');
+  activeConversationSends.add(id);
+  try {
+    return await sendConversationMessageUnlocked(input, options);
+  } finally {
+    activeConversationSends.delete(id);
+  }
+}
+
+async function sendConversationMessageUnlocked(
+  input: ConfigWebConversationSendInput,
+  options: AgentCallbacks & { signal?: AbortSignal },
+): Promise<ConfigWebSessionDetails> {
   const content = typeof input.content === 'string' ? input.content.trim() : '';
   if (!content) throw new Error('content must not be empty');
 
@@ -234,7 +265,10 @@ export async function sendConversationMessage(input: ConfigWebConversationSendIn
   const model = resolveModel(provider, session.snapshot.model);
   const effort = resolveEffort(provider, model, session.snapshot.effort);
   const role = micaAgent.roles.get(session.snapshot.role) ?? micaAgent.roles.get('default');
-  const systemPrompt = role?.prompt ?? '';
+  const systemPrompt = micaAgent.buildSystemPrompt({
+    baseSystemPrompt: role?.prompt,
+    cwd: session.cwd,
+  });
 
   session.turnState = 'running';
   session.updatedAt = new Date().toISOString();
@@ -246,9 +280,22 @@ export async function sendConversationMessage(input: ConfigWebConversationSendIn
     baseURL: provider.api_base,
     effort,
     provider,
-    tools: false,
+    // The default coding prompt explicitly asks the model to use tools. When
+    // tools are disabled, some providers emit pseudo XML such as <use_tool>
+    // into assistant text instead of making a structured call.
+    tools: true,
+    toolContext: { cwd: session.cwd },
     systemPrompt,
   });
+  let streamedText = '';
+  client.onText = (delta) => {
+    streamedText += delta;
+    options.onText?.(delta);
+  };
+  client.onThinking = options.onThinking;
+  client.onToolCall = options.onToolCall;
+  client.onToolResult = options.onToolResult;
+  client.onUsage = options.onUsage;
   client.loadSnapshot({
     model: session.snapshot.model,
     messages: session.snapshot.messages as never[],
@@ -258,7 +305,7 @@ export async function sendConversationMessage(input: ConfigWebConversationSendIn
   });
 
   try {
-    await client.query(content);
+    await client.query(content, { signal: options.signal });
     const snapshot = client.getSnapshot();
     session.snapshot.model = snapshot.model;
     session.snapshot.messages = snapshot.messages as unknown[];
@@ -276,15 +323,23 @@ export async function sendConversationMessage(input: ConfigWebConversationSendIn
     store.save(session);
     return toSessionDetails(session);
   } catch (error) {
+    const originalMessageCount = session.snapshot.messages.length;
+    if (options.signal?.aborted && client.getSnapshot().messages.length === originalMessageCount) {
+      client.preserveAbortedTurn(content, streamedText || undefined);
+    }
     const snapshot = client.getSnapshot();
     session.snapshot.messages = snapshot.messages as unknown[];
     session.snapshot.usageHistory = snapshot.usageHistory;
     session.snapshot.lastUsage = snapshot.lastUsage;
     session.snapshot.conversationMessages = snapshot.conversationMessages as unknown[];
-    session.turnState = 'error';
+    session.turnState = options.signal?.aborted ? 'aborted' : 'error';
     session.updatedAt = new Date().toISOString();
     store.save(session);
-    throw error instanceof Error ? error : new Error(String(error));
+    throw new ConversationMessageError(
+      error instanceof Error ? error.message : String(error),
+      toSessionDetails(session),
+      snapshot.messages.length > originalMessageCount,
+    );
   }
 }
 

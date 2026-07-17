@@ -37,11 +37,15 @@ export type PersistedSession = {
 export type SessionSummary = {
   id: string;
   title: string;
+  createdAt?: string;
   updatedAt: string;
   cwd: string;
   providerId: string;
   model: string;
   uncompleted: boolean;
+  turnState?: PersistedSessionTurnState;
+  effort?: EffortOption;
+  role?: string;
 };
 
 export type SessionStoreLike = {
@@ -73,11 +77,15 @@ export class SessionStore implements SessionStoreLike {
       .map((session) => ({
         id: session.id,
         title: session.title,
+        createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         cwd: session.cwd,
         providerId: session.snapshot.providerId,
         model: session.snapshot.model,
         uncompleted: session.turnState !== 'completed',
+        turnState: session.turnState,
+        effort: session.snapshot.effort,
+        role: session.snapshot.role,
       }));
   }
 
@@ -165,11 +173,15 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
   return {
     id: session.id,
     title: session.title,
+    createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     cwd: session.cwd,
     providerId: session.snapshot.providerId,
     model: session.snapshot.model,
     uncompleted: session.turnState !== 'completed',
+    turnState: session.turnState,
+    effort: session.snapshot.effort,
+    role: session.snapshot.role,
   };
 }
 

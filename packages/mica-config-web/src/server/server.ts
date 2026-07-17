@@ -18,6 +18,7 @@ import {
 } from './details.js';
 import {
   clearConversation,
+  ConversationMessageError,
   createConversation,
   createConversationFolder,
   deleteConversation,
@@ -31,7 +32,7 @@ import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ConfigWebConversationDetails } from '../shared/types.js';
+import type { ConfigWebConversationDetails, ConfigWebConversationStreamEvent } from '../shared/types.js';
 
 const IDLE_EXIT_DELAY_MS = 30_000;
 
@@ -304,6 +305,18 @@ async function handleApiRequest(
     }
   }
 
+  if (url.pathname === '/api/conversation/send-stream') {
+    try {
+      if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+      const body = (await request.json()) as { id?: unknown; content?: unknown };
+      if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
+      if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
+      return streamConversationMessage(request, body.id, body.content);
+    } catch (error) {
+      return json({ error: formatError(error) }, 400);
+    }
+  }
+
   if (url.pathname === '/api/conversation/folder') {
     try {
       if (request.method === 'POST') {
@@ -442,6 +455,77 @@ function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
+function streamConversationMessage(request: Request, id: string, content: string): Response {
+  const encoder = new TextEncoder();
+  const abortController = new AbortController();
+  let closed = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const emit = (event: ConfigWebConversationStreamEvent) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      };
+      const fallbackCallIds = new Map<string, string[]>();
+      const onRequestAbort = () => abortController.abort();
+      request.signal.addEventListener('abort', onRequestAbort, { once: true });
+
+      void sendConversationMessage(
+        { id, content },
+        {
+          signal: abortController.signal,
+          onThinking: (delta) => emit({ type: 'thinking_delta', content: delta }),
+          onText: (delta) => emit({ type: 'text_delta', content: delta }),
+          onToolCall: (toolName, args, callId) => {
+            const resolvedCallId = callId ?? crypto.randomUUID();
+            if (!callId) {
+              const queued = fallbackCallIds.get(toolName) ?? [];
+              queued.push(resolvedCallId);
+              fallbackCallIds.set(toolName, queued);
+            }
+            emit({ type: 'tool_call', callId: resolvedCallId, toolName, arguments: args });
+          },
+          onToolResult: (toolName, result, callId) => {
+            const queued = fallbackCallIds.get(toolName);
+            const resolvedCallId = callId ?? queued?.shift() ?? '';
+            emit({ type: 'tool_result', callId: resolvedCallId, toolName, content: result });
+          },
+        },
+      )
+        .then((session) => emit({ type: 'done', session }))
+        .catch((error) =>
+          emit(
+            error instanceof ConversationMessageError
+              ? {
+                  type: 'error',
+                  message: error.message,
+                  session: error.session,
+                  inputCommitted: error.inputCommitted,
+                }
+              : { type: 'error', message: formatError(error) },
+          ),
+        )
+        .finally(() => {
+          request.signal.removeEventListener('abort', onRequestAbort);
+          if (!closed) controller.close();
+          closed = true;
+        });
+    },
+    cancel() {
+      closed = true;
+      abortController.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      'x-content-type-options': 'nosniff',
+    },
   });
 }
 

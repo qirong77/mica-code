@@ -92,6 +92,14 @@ export type ConfigWebConversationSendInput = {
 export type ConfigWebConversationClearInput = {
   id: string;
 };
+
+export type ConfigWebConversationStreamEvent =
+  | { type: 'thinking_delta'; content: string }
+  | { type: 'text_delta'; content: string }
+  | { type: 'tool_call'; callId: string; toolName: string; arguments: string }
+  | { type: 'tool_result'; callId: string; toolName: string; content: string }
+  | { type: 'done'; session: ConfigWebSessionDetails }
+  | { type: 'error'; message: string; session?: ConfigWebSessionDetails; inputCommitted?: boolean };
 export type ConfigWebMcpTool = {
   name: string;
   description?: string;
