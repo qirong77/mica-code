@@ -1,4 +1,4 @@
-export type ConfigWebSection = 'config' | 'sessions' | 'roles' | 'mcp' | 'skills' | 'plugins';
+export type ConfigWebSection = 'config' | 'sessions' | 'conversation' | 'roles' | 'mcp' | 'skills' | 'plugins';
 
 export type ConfigWebFilePayload = {
   path: string;

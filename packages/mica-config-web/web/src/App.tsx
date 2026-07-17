@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from './layout/Sidebar.js';
 import { ConfigPage } from './pages/ConfigPage.js';
+import { ConversationPage } from './pages/ConversationPage.js';
 import { McpPage } from './pages/McpPage.js';
 import { PluginsPage } from './pages/PluginsPage.js';
 import { RolesPage } from './pages/RolesPage.js';
@@ -42,6 +43,7 @@ export function App() {
       <div className="content-shell">
         {section === 'config' ? <ConfigPage /> : null}
         {section === 'sessions' ? <SessionsPage /> : null}
+        {section === 'conversation' ? <ConversationPage /> : null}
         {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
         {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
         {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
