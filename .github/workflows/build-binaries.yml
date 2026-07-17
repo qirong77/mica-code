@@ -52,7 +52,7 @@ jobs:
           base64 < dist/mica-code-payload.tar.gz > dist/mica-code-payload.tar.gz.b64
 
           awk '
-            /^__MICA_CODE_PAYLOAD__$/ {
+            /^__MICA_PAYLOAD__$/ {
               while ((getline line < "dist/mica-code-payload.tar.gz.b64") > 0) print line
               next
             }

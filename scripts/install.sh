@@ -2,7 +2,7 @@
 set -eu
 
 INSTALL_DIR="${MICA_INSTALL_DIR:-$HOME/.local/bin}"
-BIN_NAME="${MICA_BIN_NAME:-mica-code}"
+BIN_NAME="${MICA_BIN_NAME:-mica}"
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -43,12 +43,12 @@ esac
 
 ASSET="mica-code-${PLATFORM}-${CPU}"
 
-TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t mica-code)"
+TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t mica)"
 trap 'rm -rf "$TMP_DIR"' 0 HUP INT TERM
 
-cat > "$TMP_DIR/payload.tar.gz.b64" <<'MICA_CODE_PAYLOAD'
-__MICA_CODE_PAYLOAD__
-MICA_CODE_PAYLOAD
+cat > "$TMP_DIR/payload.tar.gz.b64" <<'MICA_PAYLOAD'
+__MICA_PAYLOAD__
+MICA_PAYLOAD
 
 if base64 --decode "$TMP_DIR/payload.tar.gz.b64" > "$TMP_DIR/payload.tar.gz" 2>/dev/null; then
   :
@@ -57,7 +57,7 @@ elif base64 -d "$TMP_DIR/payload.tar.gz.b64" > "$TMP_DIR/payload.tar.gz" 2>/dev/
 elif base64 -D < "$TMP_DIR/payload.tar.gz.b64" > "$TMP_DIR/payload.tar.gz" 2>/dev/null; then
   :
 else
-  echo "Failed to decode embedded mica-code payload." >&2
+  echo "Failed to decode embedded mica payload." >&2
   exit 1
 fi
 

@@ -17,24 +17,25 @@ interrupted run.
 
 ## Register in Multica
 
-If the release binary is available as `mica-code` on the daemon host:
+If the release binary is available as `mica` on the daemon host:
 
 ```bash
 multica runtime profile create \
   --protocol-family deveco \
-  --command-name mica-code \
+  --command-name mica \
   --display-name "Mica Code"
 ```
 
 If it is not on the daemon's `PATH`, pin the profile to the absolute binary:
 
 ```bash
-multica runtime profile set-path <profile-id> --path /absolute/path/to/mica-code
+multica runtime profile set-path <profile-id> --path /absolute/path/to/mica
 ```
 
 Restart or refresh the Multica daemon after creating or changing the profile.
-The local development build is normally named `mica`; either executable name is
-valid as long as the selected path points to the updated binary.
+The local development build and release installer both default to the `mica`
+command name; either absolute path or PATH lookup is fine as long as it points
+to the updated binary.
 
 ## Protocol layers
 

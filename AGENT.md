@@ -425,9 +425,9 @@ rg --files src packages scripts docs blogs
 - `scripts/build.mjs` 使用 `bun build --compile --compile-autoload-package-json` 构建无外部运行时依赖的本地二进制，默认输出 `dist/mica`。
 - `packages/mica-common/image.ts` 校验 JPEG、PNG、GIF、WebP 文件签名，并尽可能读取尺寸；不缩放或重编码图片，原始字节由 provider 发送给上游模型 API。
 - `scripts/install.mjs` 默认把二进制安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写一个薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。
-- release installer 模板是 `scripts/install.sh`，默认安装为 `mica-code`。
+- 产品名是 Mica Code / `mica-code`；release installer 模板是 `scripts/install.sh`，默认安装启动命令为 `mica`（可用 `MICA_BIN_NAME` 覆盖）。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；推送 `v*` tag 时构建 Linux/macOS x64/arm64 release 二进制，打包自包含 `install.sh` 并上传 release asset。
-- 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`~/.local/bin/mica-code`、`dist/mica` 可能不一致。
+- 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`dist/mica` 可能不一致。
 
 ## Git 与工作区安全
 
@@ -450,7 +450,7 @@ rg --files src packages scripts docs blogs
 - MCP/tools：registry 清理、read-only 标记、输出截断、shell 后台任务。
 - skills：`MICA_HOME`、frontmatter、Skill 工具读取方式。
 - session/rewind/compact：snapshot 版本、UI restore、provider history 与 display state 的边界。
-- build/install：本地 `dist/mica` 和已安装 `mica`/`mica-code` 是否一致。
+- build/install：本地 `dist/mica` 和已安装 `mica` 是否一致。
 - docs：本文件、README 和 package README 是否需要同步。
 
 只要答案是“会影响”，就把文档同步作为本次交付的一部分。
