@@ -55,6 +55,7 @@ describe('SessionController', () => {
       save: vi.fn((session: PersistedSession) => {
         saves.push(session);
       }),
+      delete: vi.fn(() => false),
     };
     const controller = new SessionController({ agent, store });
 
@@ -100,6 +101,7 @@ describe('SessionController', () => {
       save: vi.fn((session: PersistedSession) => {
         saves.push(session);
       }),
+      delete: vi.fn(() => false),
     };
     const controller = new SessionController({ agent, store });
 
@@ -151,6 +153,7 @@ describe('SessionController', () => {
       listRecent: vi.fn(() => []),
       load: vi.fn(() => session),
       save: vi.fn(),
+      delete: vi.fn(() => false),
     };
 
     const controller = new SessionController({ agent, store });
@@ -220,6 +223,7 @@ describe('SessionController', () => {
       listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => (id === session.id ? session : null)),
       save: vi.fn(),
+      delete: vi.fn(() => false),
     };
     const restore = vi.fn();
 
@@ -308,6 +312,7 @@ describe('SessionController', () => {
       listRecent: vi.fn(() => []),
       load: vi.fn((id: string) => (id === session.id ? session : null)),
       save: vi.fn(),
+      delete: vi.fn(() => false),
     };
     const restore = vi.fn();
 
@@ -366,6 +371,7 @@ describe('SessionController', () => {
       listRecent: vi.fn(() => []),
       load: vi.fn(() => session as unknown as PersistedSession),
       save: vi.fn(),
+      delete: vi.fn(() => false),
     };
     const controller = new SessionController({
       agent,
