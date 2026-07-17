@@ -32,6 +32,7 @@ bun run typecheck       # 类型检查：bunx tsc --noEmit
 bun run test            # 运行 Vitest 测试：vitest run
 bun run test:watch      # 运行 Vitest watch
 bun run build           # 先 typecheck，再 compile 单二进制，postbuild 安装本地入口
+bun run dev:config-web  # Config Web Vite 调试：热更新 packages/mica-config-web/web
 bun run format          # 格式化 README、AGENT、src、packages、scripts、docs、blogs
 ```
 

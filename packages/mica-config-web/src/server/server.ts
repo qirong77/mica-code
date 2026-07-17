@@ -24,6 +24,16 @@ import type { ConfigWebConversationDetails } from '../shared/types.js';
 
 const IDLE_EXIT_DELAY_MS = 30_000;
 
+function readPreferredPort(): number | undefined {
+  const raw = process.env.MICA_CONFIG_WEB_PORT?.trim();
+  if (!raw) return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid MICA_CONFIG_WEB_PORT: ${raw}`);
+  }
+  return port;
+}
+
 export type ConfigWebServerOptions = {
   token: string;
   preferredPort?: number;
@@ -36,6 +46,8 @@ export type RunningConfigWebServer = {
 };
 
 export async function startConfigWebServer(options: ConfigWebServerOptions): Promise<RunningConfigWebServer> {
+  const preferredPort = options.preferredPort ?? readPreferredPort();
+  const resolvedOptions = { ...options, preferredPort };
   let clients = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let conversation: ConfigWebConversationDetails | null = null;
@@ -47,6 +59,8 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
   };
 
   const scheduleIdleExit = () => {
+    // Keep the Vite debug server alive while iterating on config-web UI.
+    if (process.env.MICA_CONFIG_WEB_DEV === '1') return;
     clearIdleTimer();
     idleTimer = setTimeout(() => process.exit(0), IDLE_EXIT_DELAY_MS);
     idleTimer.unref?.();
@@ -57,7 +71,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
   if (process.env.MICA_CONFIG_WEB_DEV === '1') {
     return startDevConfigWebServer(
-      options,
+      resolvedOptions,
       bun,
       clearIdleTimer,
       scheduleIdleExit,
@@ -74,7 +88,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
   const webServer = bun.serve({
     hostname: '127.0.0.1',
-    port: options.preferredPort ?? 0,
+    port: preferredPort ?? 0,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) {
@@ -162,9 +176,10 @@ async function startDevConfigWebServer(
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../web');
   const viteServer = await createServer({
     root,
+    configFile: resolve(root, 'vite.config.ts'),
     server: {
       host: '127.0.0.1',
-      port: options.preferredPort ?? 0,
+      port: options.preferredPort ?? 5177,
       strictPort: false,
       proxy: {
         '/api': {
@@ -173,7 +188,7 @@ async function startDevConfigWebServer(
         },
       },
     },
-    logLevel: 'silent',
+    logLevel: 'info',
   });
   await viteServer.listen();
 
