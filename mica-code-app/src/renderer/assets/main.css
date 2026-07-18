@@ -330,13 +330,6 @@ input:focus {
   background: var(--terminal-bg);
 }
 
-.workspace-titlebar {
-  height: var(--titlebar-height);
-  flex-shrink: 0;
-  background: var(--ui-bg-sidebar);
-  border-bottom: 1px solid color-mix(in srgb, var(--ui-base) 12%, transparent);
-}
-
 .workspace-tabs {
   display: flex;
   align-items: stretch;
