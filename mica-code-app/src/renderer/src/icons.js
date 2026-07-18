@@ -21,7 +21,8 @@ const PATHS = {
   refresh: 'M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5',
   file: 'M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5zM14 2v6h6',
   'git-compare': 'M6 3v12M18 9v12M3 6l3-3 3 3M15 18l3 3 3-3M6 12c0-2 2-3 4-3h4',
-  chevron: 'm9 18 6-6-6-6'
+  chevron: 'm9 18 6-6-6-6',
+  'panel-left': 'M3 3h18v18H3zM9 3v18'
 }
 
 /**

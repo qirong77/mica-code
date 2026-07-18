@@ -122,6 +122,11 @@ input:focus {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   height: 100%;
+  transition: grid-template-columns 160ms ease;
+}
+
+.app-shell.is-sidebar-collapsed {
+  grid-template-columns: 0 1fr;
 }
 
 /* ── Sidebar ─────────────────────────────────────────── */
@@ -130,8 +135,49 @@ input:focus {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   border-right: 1px solid color-mix(in srgb, var(--ui-base) 12%, transparent);
   background: var(--ui-bg-sidebar);
+}
+
+.app-shell.is-sidebar-collapsed .sidebar {
+  visibility: hidden;
+  border-right: 0;
+  pointer-events: none;
+}
+
+.titlebar-sidebar-toggle {
+  position: fixed;
+  z-index: 50;
+  top: 6px;
+  left: 86px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--ui-text-secondary) 85%, transparent);
+  cursor: pointer;
+  transition:
+    color 100ms ease,
+    background 100ms ease;
+}
+
+.titlebar-sidebar-toggle:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-control-hover-background);
+}
+
+.titlebar-sidebar-toggle:focus-visible {
+  outline: 1px solid var(--ui-stroke-primary);
+  outline-offset: 1px;
+}
+
+.app-shell.is-sidebar-collapsed .workspace-tabs {
+  padding-left: 120px;
 }
 
 .titlebar-drag {
@@ -524,8 +570,12 @@ input:focus {
 }
 
 .git-compare-view {
+  --git-tree-width: 260px;
+
   display: grid;
-  grid-template-columns: minmax(190px, 26%) minmax(0, 1fr);
+  grid-template-columns:
+    clamp(160px, var(--git-tree-width), calc(100% - 300px)) 5px
+    minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   background: var(--terminal-bg);
@@ -536,8 +586,38 @@ input:focus {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  border-right: 1px solid var(--ui-stroke-secondary);
   background: #111;
+}
+
+.git-pane-resizer {
+  position: relative;
+  z-index: 2;
+  width: 5px;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.git-pane-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--ui-stroke-secondary);
+  transition: background 100ms ease;
+}
+
+.git-pane-resizer:hover::after,
+.git-pane-resizer:focus-visible::after,
+.is-resizing-git-pane .git-pane-resizer::after {
+  background: var(--ui-text-tertiary);
+}
+
+.is-resizing-git-pane {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .git-tree-header {

@@ -78,10 +78,13 @@ export class GitCompareView {
     this.fileEl = document.getElementById('git-diff-file')
     this.statEl = document.getElementById('git-diff-stat')
     this.editorHost = document.getElementById('git-diff-editor')
+    this.viewEl = document.getElementById('git-compare-view')
+    this.resizerEl = document.getElementById('git-pane-resizer')
     this.cwd = null
     this.repository = null
     this.selectedPath = null
     this.editor = null
+    this.editorMode = null
     this.originalModel = null
     this.modifiedModel = null
     this.requestId = 0
@@ -99,6 +102,64 @@ export class GitCompareView {
         'diffEditor.removedLineBackground': '#49242a66'
       }
     })
+    this.bindResizer()
+  }
+
+  bindResizer() {
+    const savedWidth = Number(localStorage.getItem('mica.gitTreeWidth'))
+    if (Number.isFinite(savedWidth) && savedWidth > 0) this.setTreeWidth(savedWidth)
+
+    const resize = (clientX, persist = false) => {
+      const bounds = this.viewEl.getBoundingClientRect()
+      const maximum = Math.max(160, bounds.width - 300)
+      this.setTreeWidth(Math.min(Math.max(clientX - bounds.left, 160), maximum), persist)
+    }
+
+    this.resizerEl.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      this.resizerEl.setPointerCapture(event.pointerId)
+      document.body.classList.add('is-resizing-git-pane')
+    })
+    this.resizerEl.addEventListener('pointermove', (event) => {
+      if (!this.resizerEl.hasPointerCapture(event.pointerId)) return
+      resize(event.clientX)
+    })
+    const finishResize = (event) => {
+      if (!this.resizerEl.hasPointerCapture(event.pointerId)) return
+      resize(event.clientX, true)
+      this.resizerEl.releasePointerCapture(event.pointerId)
+      document.body.classList.remove('is-resizing-git-pane')
+    }
+    this.resizerEl.addEventListener('pointerup', finishResize)
+    this.resizerEl.addEventListener('pointercancel', (event) => {
+      if (this.resizerEl.hasPointerCapture(event.pointerId)) {
+        this.resizerEl.releasePointerCapture(event.pointerId)
+      }
+      document.body.classList.remove('is-resizing-git-pane')
+    })
+    this.resizerEl.addEventListener('dblclick', () => this.setTreeWidth(260, true))
+    this.resizerEl.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+      event.preventDefault()
+      const current = Number.parseFloat(
+        getComputedStyle(this.viewEl).getPropertyValue('--git-tree-width')
+      )
+      this.setTreeWidth(current + (event.key === 'ArrowLeft' ? -16 : 16), true)
+    })
+  }
+
+  setTreeWidth(width, persist = false) {
+    const maximum =
+      this.viewEl.clientWidth > 0
+        ? Math.max(160, this.viewEl.clientWidth - 300)
+        : Math.max(160, width)
+    const normalized = Math.round(Math.min(Math.max(width, 160), maximum))
+    this.viewEl.style.setProperty('--git-tree-width', `${normalized}px`)
+    this.resizerEl.setAttribute('aria-valuenow', String(normalized))
+    this.resizerEl.setAttribute('aria-valuemax', String(Math.round(maximum)))
+    if (persist) localStorage.setItem('mica.gitTreeWidth', String(normalized))
+    this.editor?.layout()
   }
 
   async load(cwd, { quiet = false } = {}) {
@@ -216,7 +277,14 @@ export class GitCompareView {
         this.showMessage('二进制文件无法进行文本对比')
         return
       }
-      this.showDiff(content.original, content.modified, languageFor(file.path))
+      const language = languageFor(file.path)
+      if (file.status === 'added') {
+        this.showSingle(content.modified, language)
+      } else if (file.status === 'deleted') {
+        this.showSingle(content.original, language)
+      } else {
+        this.showDiff(content.original, content.modified, language)
+      }
     } catch (error) {
       this.clearEditor(false)
       this.showMessage(`无法加载文件对比：${error?.message || error}`)
@@ -224,28 +292,63 @@ export class GitCompareView {
   }
 
   showDiff(original, modified, language) {
-    if (!this.editor) {
-      this.editor = monaco.editor.createDiffEditor(this.editorHost, {
-        theme: 'mica-dark',
-        readOnly: true,
-        originalEditable: false,
-        renderSideBySide: true,
-        automaticLayout: true,
-        minimap: { enabled: false },
-        fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
-        fontSize: 12,
-        lineHeight: 20,
-        scrollBeyondLastLine: false,
-        renderOverviewRuler: false,
-        stickyScroll: { enabled: false },
-        padding: { top: 8 }
-      })
-    }
+    this.ensureEditor('diff')
+    this.editor.setModel(null)
     this.originalModel?.dispose()
     this.modifiedModel?.dispose()
     this.originalModel = monaco.editor.createModel(original, language)
     this.modifiedModel = monaco.editor.createModel(modified, language)
     this.editor.setModel({ original: this.originalModel, modified: this.modifiedModel })
+    this.revealEditor()
+  }
+
+  showSingle(content, language) {
+    this.ensureEditor('single')
+    this.editor.setModel(null)
+    this.originalModel?.dispose()
+    this.modifiedModel?.dispose()
+    this.originalModel = null
+    this.modifiedModel = monaco.editor.createModel(content, language)
+    this.editor.setModel(this.modifiedModel)
+    this.revealEditor()
+  }
+
+  ensureEditor(mode) {
+    if (this.editor && this.editorMode === mode) return
+    this.editor?.dispose()
+    this.originalModel?.dispose()
+    this.modifiedModel?.dispose()
+    this.originalModel = null
+    this.modifiedModel = null
+    this.editorMode = mode
+
+    const options = {
+      theme: 'mica-dark',
+      readOnly: true,
+      automaticLayout: true,
+      minimap: { enabled: false },
+      fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
+      fontSize: 12,
+      lineHeight: 20,
+      scrollBeyondLastLine: false,
+      renderOverviewRuler: false,
+      stickyScroll: { enabled: false },
+      padding: { top: 8 }
+    }
+
+    if (mode === 'diff') {
+      this.editor = monaco.editor.createDiffEditor(this.editorHost, {
+        ...options,
+        originalEditable: false,
+        renderSideBySide: true,
+        useInlineViewWhenSpaceIsLimited: false
+      })
+    } else {
+      this.editor = monaco.editor.create(this.editorHost, options)
+    }
+  }
+
+  revealEditor() {
     this.editorHost.hidden = false
     this.statusEl.hidden = true
     requestAnimationFrame(() => this.editor?.layout())

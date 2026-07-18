@@ -7,6 +7,7 @@ import { FileTree } from './file-tree.js'
 import { GitCompareView } from './git-compare.js'
 
 const treeHost = document.getElementById('session-tree')
+const appEl = document.getElementById('app')
 const hostEl = document.getElementById('terminal-host')
 const emptyStateEl = document.getElementById('empty-state')
 const filesViewEl = document.getElementById('files-view')
@@ -51,6 +52,31 @@ function scheduleSave() {
   saveTimer = setTimeout(() => {
     persistWorkspace().catch((error) => console.error('save workspace failed', error))
   }, 200)
+}
+
+function setSidebarCollapsed(collapsed, { persist = true } = {}) {
+  const toggle = document.getElementById('sidebar-toggle')
+  appEl.classList.toggle('is-sidebar-collapsed', collapsed)
+  toggle.setAttribute('aria-expanded', String(!collapsed))
+  toggle.title = collapsed ? '展开侧栏' : '收起侧栏'
+  toggle.setAttribute('aria-label', toggle.title)
+  if (persist) localStorage.setItem('mica.sidebarCollapsed', String(collapsed))
+
+  requestAnimationFrame(() => {
+    fitActiveTerminal()
+    gitCompare?.layout()
+  })
+  window.setTimeout(() => {
+    fitActiveTerminal()
+    gitCompare?.layout()
+  }, 180)
+}
+
+function bindSidebarToggle() {
+  const toggle = document.getElementById('sidebar-toggle')
+  toggle.addEventListener('click', () => {
+    setSidebarCollapsed(!appEl.classList.contains('is-sidebar-collapsed'))
+  })
 }
 
 async function persistWorkspace() {
@@ -798,10 +824,15 @@ function paintToolbarIcons() {
   const termBtn = document.getElementById('btn-new-terminal')
   if (folderBtn) folderBtn.innerHTML = iconHtml('folder-plus', { size: 15 })
   if (termBtn) termBtn.innerHTML = iconHtml('plus', { size: 15 })
+  document.getElementById('sidebar-toggle').innerHTML = iconHtml('panel-left', { size: 16 })
 }
 
 async function bootstrap() {
   paintToolbarIcons()
+  setSidebarCollapsed(localStorage.getItem('mica.sidebarCollapsed') === 'true', {
+    persist: false
+  })
+  bindSidebarToggle()
 
   workspace = await window.mica.workspace.get()
   const nodes = (workspace.nodes || []).map((node) => ({
