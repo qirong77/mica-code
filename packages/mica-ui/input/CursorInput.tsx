@@ -679,6 +679,21 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   const terminalFocus = useTerminalFocus();
 
   const invert = useCallback((text: string) => `\x1b[7m${text}\x1b[27m`, []);
+  const [cursorBlinkOn, setCursorBlinkOn] = React.useState(true);
+  const cursorShouldShow = Boolean(props.focus && props.showCursor !== false && terminalFocus);
+
+  React.useEffect(() => {
+    if (!cursorShouldShow) {
+      setCursorBlinkOn(false);
+      return;
+    }
+    setCursorBlinkOn(true);
+    const interval = setInterval(() => setCursorBlinkOn((prev) => !prev), 530);
+    return () => clearInterval(interval);
+  }, [cursorShouldShow]);
+
+  const showVisualCursor = cursorShouldShow && cursorBlinkOn;
+
 
   const state = buildTextHandler({
     value: props.value,
@@ -688,7 +703,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
     onHistoryUp: props.onHistoryUp,
     onHistoryDown: props.onHistoryDown,
     multiline: props.multiline ?? true,
-    cursorChar: ' ',
+    cursorChar: showVisualCursor ? ' ' : '',
     invert,
     columns: props.columns,
     externalOffset: props.cursorOffset,
@@ -701,7 +716,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   const cursorRef = useDeclaredCursor({
     line: state.cursorLine,
     column: state.cursorColumn,
-    active: Boolean(props.focus && props.showCursor !== false && terminalFocus),
+    active: cursorShouldShow,
   });
 
   useInput(state.onInput, { isActive: props.focus });
@@ -715,12 +730,16 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
         {showPlaceholder ? (
           <Text dimColor>
             {props.placeholder!.length > 0 ? (
-              <>
-                <Text inverse>{props.placeholder![0]}</Text>
-                <Text dimColor>{props.placeholder!.slice(1)}</Text>
-              </>
+              showVisualCursor ? (
+                <>
+                  <Text inverse>{props.placeholder![0]}</Text>
+                  <Text dimColor>{props.placeholder!.slice(1)}</Text>
+                </>
+              ) : (
+                <Text dimColor>{props.placeholder}</Text>
+              )
             ) : (
-              <Text inverse> </Text>
+              showVisualCursor ? <Text inverse> </Text> : <Text> </Text>
             )}
           </Text>
         ) : (
