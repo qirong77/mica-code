@@ -1,6 +1,7 @@
 import { dialog, ipcMain } from 'electron'
 import os from 'os'
-import { existsSync, statSync } from 'fs'
+import { existsSync, readlinkSync, statSync } from 'fs'
+import { execFile } from 'child_process'
 import pty from 'node-pty'
 
 const sessions = new Map()
@@ -9,6 +10,31 @@ let notifyServer = null
 /** 访问被系统拒绝的 cwd 冷却，避免每次建终端都再次触发桌面/文稿权限弹窗 */
 const ACCESS_DENIED_COOLDOWN_MS = 10 * 60 * 1000
 const accessDeniedUntil = new Map()
+
+function readProcessCwd(pid, fallback) {
+  if (process.platform === 'linux') {
+    try {
+      return Promise.resolve(readlinkSync(`/proc/${pid}/cwd`))
+    } catch {
+      return Promise.resolve(fallback)
+    }
+  }
+
+  if (process.platform !== 'win32') {
+    return new Promise((resolve) => {
+      execFile('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], (error, stdout) => {
+        if (error) return resolve(fallback)
+        const cwd = stdout
+          .split('\n')
+          .find((line) => line.startsWith('n'))
+          ?.slice(1)
+        resolve(cwd || fallback)
+      })
+    })
+  }
+
+  return Promise.resolve(fallback)
+}
 
 function getDefaultShell() {
   if (process.platform === 'win32') {
@@ -91,7 +117,7 @@ function createPty(id, sender, options = {}) {
     }
   })
 
-  const session = { id, term, sender }
+  const session = { id, term, sender, cwd }
   sessions.set(id, session)
 
   if (resumeSessionId) {
@@ -151,6 +177,12 @@ export function registerTerminalIpc() {
     if (!session) return false
     session.term.resize(Math.max(cols, 2), Math.max(rows, 1))
     return true
+  })
+
+  ipcMain.handle('terminal:get-cwd', async (_event, { id } = {}) => {
+    const session = sessions.get(id)
+    if (!session) return null
+    return readProcessCwd(session.term.pid, session.cwd)
   })
 
   ipcMain.handle('terminal:dispose', (_event, { id }) => {

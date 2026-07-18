@@ -8,6 +8,10 @@ import { FileTree } from './file-tree.js'
 const treeHost = document.getElementById('session-tree')
 const hostEl = document.getElementById('terminal-host')
 const emptyStateEl = document.getElementById('empty-state')
+const filesViewEl = document.getElementById('files-view')
+const filesListEl = document.getElementById('files-list')
+const filesPathEl = document.getElementById('files-path')
+const filesStatusEl = document.getElementById('files-status')
 
 /** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean }>} */
 const terminals = new Map()
@@ -23,6 +27,9 @@ let windowState = { focused: true, visible: true }
 let notificationAudioContext = null
 /** @type {FileTree | null} */
 let tree = null
+let activeView = 'terminal'
+let filesPath = null
+let filesParentPath = null
 
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -55,6 +62,70 @@ async function persistWorkspace() {
 
 function setEmptyState(visible) {
   emptyStateEl.classList.toggle('hidden', !visible)
+}
+
+function setFilesStatus(message = '') {
+  filesStatusEl.textContent = message
+  filesStatusEl.classList.toggle('is-visible', !!message)
+}
+
+async function loadFiles(path = null) {
+  if (!activeId) {
+    filesListEl.replaceChildren()
+    filesPathEl.textContent = ''
+    setFilesStatus('选择一个终端会话以查看文件')
+    return
+  }
+
+  setFilesStatus('正在读取…')
+  try {
+    const target =
+      path || (await window.mica.terminal.getCwd(activeId)) || resolveTerminalCwd(activeId)
+    const result = await window.mica.files.list(target)
+    filesPath = result.path
+    filesParentPath = result.parentPath
+    filesPathEl.textContent = result.path
+    filesPathEl.title = result.path
+    document.getElementById('files-up').disabled = !result.parentPath
+    filesListEl.replaceChildren()
+
+    for (const entry of result.entries) {
+      const row = document.createElement('div')
+      row.className = 'file-row'
+      row.dataset.type = entry.type
+      row.title = entry.path
+      row.innerHTML = `
+        <span class="file-row-icon">${iconHtml(entry.type === 'directory' ? 'folder' : 'file', { size: 15 })}</span>
+        <span class="file-row-name">${escapeHtml(entry.name)}</span>
+        <span class="file-row-kind">${entry.type === 'directory' ? '文件夹' : ''}</span>
+      `
+      if (entry.type === 'directory') {
+        row.addEventListener('dblclick', () => loadFiles(entry.path))
+      }
+      filesListEl.appendChild(row)
+    }
+    setFilesStatus(result.entries.length ? '' : '这个文件夹是空的')
+  } catch (error) {
+    filesListEl.replaceChildren()
+    setFilesStatus(`无法读取文件夹：${error?.message || error}`)
+  }
+}
+
+function setActiveView(view) {
+  activeView = view === 'files' ? 'files' : 'terminal'
+  hostEl.hidden = activeView !== 'terminal'
+  filesViewEl.hidden = activeView !== 'files'
+  for (const tab of document.querySelectorAll('.workspace-tab')) {
+    const active = tab.dataset.view === activeView
+    tab.classList.toggle('is-active', active)
+    tab.setAttribute('aria-selected', String(active))
+  }
+
+  if (activeView === 'files') {
+    loadFiles().catch((error) => console.error(error))
+  } else {
+    requestAnimationFrame(() => fitActiveTerminal())
+  }
 }
 
 function isWindowReadable() {
@@ -276,10 +347,23 @@ async function activateTerminal(id) {
   if (!entry.ready) {
     const cwd = resolveTerminalCwd(id)
     const sessionId = tree?.getNode(id)?.sessionId || null
+    let initialDimensions = null
+    try {
+      // The view is visible at this point, so fit it before spawning the PTY.
+      // This prevents full-screen/interactive programs from drawing once at the
+      // PTY default of 80x24 and leaving artifacts after the first resize.
+      entry.fit.fit()
+      initialDimensions = entry.fit.proposeDimensions()
+    } catch (error) {
+      console.error(error)
+    }
     await window.mica.terminal.create({
       id,
       ...(cwd ? { cwd } : {}),
-      ...(sessionId ? { resumeSessionId: sessionId } : {})
+      ...(sessionId ? { resumeSessionId: sessionId } : {}),
+      ...(initialDimensions?.cols && initialDimensions?.rows
+        ? { cols: initialDimensions.cols, rows: initialDimensions.rows }
+        : {})
     })
     entry.ready = true
     requestAnimationFrame(() => {
@@ -308,6 +392,7 @@ async function activateTerminal(id) {
   }
 
   scheduleSave()
+  if (activeView === 'files') loadFiles().catch((error) => console.error(error))
 }
 
 async function disposeTerminal(id) {
@@ -485,7 +570,6 @@ async function handleContextAction(action, node) {
   }
 }
 
-
 function bindSearch() {
   const input = document.getElementById('session-search')
   const clearBtn = document.getElementById('session-search-clear')
@@ -537,6 +621,22 @@ function bindToolbar() {
     const selected = tree?.getSelected()
     createTerminal(selected?.id || 'folder-default')
   })
+}
+
+function bindWorkspaceTabs() {
+  for (const icon of document.querySelectorAll('.workspace-tab-icon')) {
+    icon.innerHTML = iconHtml(icon.dataset.icon, { size: 14 })
+  }
+  document.getElementById('workspace-tabs')?.addEventListener('click', (event) => {
+    const tab = event.target instanceof Element ? event.target.closest('.workspace-tab') : null
+    if (tab) setActiveView(tab.dataset.view)
+  })
+  document.getElementById('files-up').innerHTML = iconHtml('arrow-up', { size: 15 })
+  document.getElementById('files-refresh').innerHTML = iconHtml('refresh', { size: 14 })
+  document.getElementById('files-up').addEventListener('click', () => {
+    if (filesParentPath) loadFiles(filesParentPath)
+  })
+  document.getElementById('files-refresh').addEventListener('click', () => loadFiles(filesPath))
 }
 
 function fitActiveTerminal() {
@@ -689,6 +789,7 @@ async function bootstrap() {
 
   bindSearch()
   bindToolbar()
+  bindWorkspaceTabs()
   bindNotifyAndWindowState()
 
   try {

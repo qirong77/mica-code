@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from './terminals'
 import { registerWorkspaceIpc } from './workspace'
 import { createNotifyServer } from './notifyServer'
+import { registerFilesIpc } from './files'
 
 let mainWindow = null
 let notifyServer = null
@@ -115,6 +116,7 @@ app.whenReady().then(async () => {
 
   registerTerminalIpc()
   registerWorkspaceIpc()
+  registerFilesIpc()
 
   ipcMain.handle('app:get-window-state', () => {
     if (!mainWindow || mainWindow.isDestroyed()) {

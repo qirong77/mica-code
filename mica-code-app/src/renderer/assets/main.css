@@ -279,7 +279,9 @@ input:focus {
   color: color-mix(in srgb, var(--ui-text-tertiary) 85%, transparent);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.1s ease-out, color 0.1s ease-out;
+  transition:
+    background 0.1s ease-out,
+    color 0.1s ease-out;
 }
 
 .search-clear:hover {
@@ -335,10 +337,175 @@ input:focus {
   border-bottom: 1px solid color-mix(in srgb, var(--ui-base) 12%, transparent);
 }
 
+.workspace-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ui-stroke-secondary);
+  background: var(--terminal-bg);
+}
+
+.workspace-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 76px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.workspace-tab:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-control-hover-background);
+}
+
+.workspace-tab.is-active {
+  color: var(--ui-text-primary);
+}
+
+.workspace-tab.is-active::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  left: 10px;
+  height: 1px;
+  background: var(--ui-text-primary);
+}
+
+.workspace-tab-icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
 .terminal-host {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.terminal-host[hidden],
+.files-view[hidden] {
+  display: none;
+}
+
+.files-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--terminal-bg);
+}
+
+.files-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ui-stroke-tertiary);
+}
+
+.files-tool-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+
+.files-tool-btn:hover:not(:disabled) {
+  color: var(--ui-text-primary);
+  background: var(--ui-control-hover-background);
+}
+
+.files-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.files-path {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 6px 8px 16px;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--ui-text-secondary);
+  font-size: 0.8125rem;
+  user-select: none;
+}
+
+.file-row[data-type='directory'] {
+  cursor: pointer;
+}
+
+.file-row:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-row-hover-background);
+}
+
+.file-row-icon {
+  display: grid;
+  place-items: center;
+  color: var(--ui-text-tertiary);
+}
+
+.file-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-kind {
+  color: var(--ui-text-quaternary);
+  font-size: 0.6875rem;
+}
+
+.files-status {
+  display: none;
+  padding: 18px;
+  color: var(--ui-text-quaternary);
+  font-size: 0.75rem;
+}
+
+.files-status.is-visible {
+  display: block;
 }
 
 .terminal-view {
@@ -417,7 +584,9 @@ input:focus {
   border-radius: var(--radius-md);
   color: var(--ui-text-secondary);
   cursor: pointer;
-  transition: background 0.1s ease-out, color 0.1s ease-out;
+  transition:
+    background 0.1s ease-out,
+    color 0.1s ease-out;
 }
 
 .ft-row:hover {
@@ -587,7 +756,6 @@ input:focus {
   background: color-mix(in srgb, var(--ui-red) 12%, transparent);
 }
 
-
 /* ── Path hint on folders ────────────────────────────── */
 
 .ft-path-hint {
@@ -693,7 +861,6 @@ input:focus {
 .modal-btn.is-primary:hover {
   background: color-mix(in srgb, var(--ui-base) 12%, transparent);
 }
-
 
 /* Title-bar drag regions for the frameless / hidden-titlebar window. */
 .drag-region {

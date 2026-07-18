@@ -4,6 +4,7 @@ const terminalApi = {
   create: (payload) => ipcRenderer.invoke('terminal:create', payload),
   write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+  getCwd: (id) => ipcRenderer.invoke('terminal:get-cwd', { id }),
   dispose: (id) => ipcRenderer.invoke('terminal:dispose', { id }),
   disposeAll: () => ipcRenderer.invoke('terminal:dispose-all'),
   onData: (callback) => {
@@ -43,10 +44,15 @@ const appApi = {
   }
 }
 
+const filesApi = {
+  list: (path) => ipcRenderer.invoke('files:list', { path })
+}
+
 contextBridge.exposeInMainWorld('mica', {
   terminal: terminalApi,
   workspace: workspaceApi,
   notify: notifyApi,
   app: appApi,
+  files: filesApi,
   platform: process.platform
 })

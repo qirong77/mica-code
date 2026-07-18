@@ -20,8 +20,18 @@
             </div>
           </div>
           <div class="sidebar-actions">
-            <button id="btn-new-folder" class="icon-btn" title="新建文件夹" aria-label="新建文件夹"></button>
-            <button id="btn-new-terminal" class="icon-btn" title="新建终端" aria-label="新建终端"></button>
+            <button
+              id="btn-new-folder"
+              class="icon-btn"
+              title="新建文件夹"
+              aria-label="新建文件夹"
+            ></button>
+            <button
+              id="btn-new-terminal"
+              class="icon-btn"
+              title="新建终端"
+              aria-label="新建终端"
+            ></button>
           </div>
         </div>
         <div class="sidebar-search no-drag">
@@ -50,7 +60,55 @@
 
       <main class="workspace">
         <div class="workspace-titlebar drag-region" aria-hidden="true"></div>
+        <nav
+          id="workspace-tabs"
+          class="workspace-tabs no-drag"
+          role="tablist"
+          aria-label="工作区视图"
+        >
+          <button
+            class="workspace-tab is-active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            data-view="terminal"
+          >
+            <span class="workspace-tab-icon" data-icon="terminal" aria-hidden="true"></span>
+            <span>终端</span>
+          </button>
+          <button
+            class="workspace-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            data-view="files"
+          >
+            <span class="workspace-tab-icon" data-icon="folder" aria-hidden="true"></span>
+            <span>文件夹</span>
+          </button>
+        </nav>
         <section id="terminal-host" class="terminal-host no-drag"></section>
+        <section id="files-view" class="files-view no-drag" hidden>
+          <header class="files-toolbar">
+            <button
+              id="files-up"
+              class="files-tool-btn"
+              type="button"
+              title="返回上级目录"
+              aria-label="返回上级目录"
+            ></button>
+            <div id="files-path" class="files-path" title=""></div>
+            <button
+              id="files-refresh"
+              class="files-tool-btn"
+              type="button"
+              title="刷新"
+              aria-label="刷新"
+            ></button>
+          </header>
+          <div id="files-list" class="files-list"></div>
+          <div id="files-status" class="files-status"></div>
+        </section>
         <div id="empty-state" class="empty-state">选择或新建一个终端会话</div>
       </main>
     </div>
