@@ -13,6 +13,7 @@ import setupCommandNew from '../../buildin-plugins/command-new.mjs';
 import setupCommandRename from '../../buildin-plugins/command-rename.mjs';
 import setupCommandResume from '../../buildin-plugins/command-resume.mjs';
 import setupCommandRewind from '../../buildin-plugins/command-rewind.mjs';
+import setupMicaCodeAppNotify from '../../buildin-plugins/mica-code-app-notify.mjs';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;
@@ -25,7 +26,14 @@ export function useBuiltinPlugins(
 ): PluginHost {
   app.use(new BuiltInCommandsPlugin(agent, sessionController));
   for (const plugin of builtinCommandFilePlugins()) app.use(plugin);
-  return app.use(new MessageQueuePlugin()).use(new McpPlugin());
+  app.use(new MessageQueuePlugin()).use(new McpPlugin());
+  app.use({
+    id: 'builtin.mica-code-app-notify',
+    name: 'Built-in Mica Code App Notify',
+    required: false,
+    setup: setupMicaCodeAppNotify,
+  });
+  return app;
 }
 
 function builtinCommandFilePlugins(): MicaPlugin[] {

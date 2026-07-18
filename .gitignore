@@ -8,3 +8,9 @@ dist/
 temp/
 conversation.json
 log.text
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
