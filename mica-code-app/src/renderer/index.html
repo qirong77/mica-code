@@ -85,6 +85,17 @@
             <span class="workspace-tab-icon" data-icon="folder" aria-hidden="true"></span>
             <span>文件夹</span>
           </button>
+          <button
+            class="workspace-tab no-drag"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            data-view="git-compare"
+          >
+            <span class="workspace-tab-icon" data-icon="git-compare" aria-hidden="true"></span>
+            <span>Git Tree Compare</span>
+            <span id="git-change-count" class="git-change-count" hidden></span>
+          </button>
         </nav>
         <section id="terminal-host" class="terminal-host no-drag"></section>
         <section id="files-view" class="files-view no-drag" hidden>
@@ -107,6 +118,30 @@
           </header>
           <div id="files-list" class="files-list"></div>
           <div id="files-status" class="files-status"></div>
+        </section>
+        <section id="git-compare-view" class="git-compare-view no-drag" hidden>
+          <aside class="git-tree-pane">
+            <header class="git-tree-header">
+              <div class="git-tree-heading">CHANGES</div>
+              <button
+                id="git-refresh"
+                class="files-tool-btn"
+                type="button"
+                title="刷新 Git 变化"
+                aria-label="刷新 Git 变化"
+              ></button>
+            </header>
+            <div id="git-repository-path" class="git-repository-path"></div>
+            <div id="git-change-tree" class="git-change-tree"></div>
+          </aside>
+          <section class="git-diff-pane">
+            <header id="git-diff-header" class="git-diff-header" hidden>
+              <span id="git-diff-file" class="git-diff-file"></span>
+              <span id="git-diff-stat" class="git-diff-stat"></span>
+            </header>
+            <div id="git-diff-editor" class="git-diff-editor"></div>
+            <div id="git-compare-status" class="git-compare-status">选择变化的文件以查看对比</div>
+          </section>
         </section>
         <div id="empty-state" class="empty-state">选择或新建一个终端会话</div>
       </main>

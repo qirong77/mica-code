@@ -6,6 +6,7 @@ import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from './ter
 import { registerWorkspaceIpc } from './workspace'
 import { createNotifyServer } from './notifyServer'
 import { registerFilesIpc } from './files'
+import { registerGitIpc } from './git'
 
 let mainWindow = null
 let notifyServer = null
@@ -117,6 +118,7 @@ app.whenReady().then(async () => {
   registerTerminalIpc()
   registerWorkspaceIpc()
   registerFilesIpc()
+  registerGitIpc()
 
   ipcMain.handle('app:get-window-state', () => {
     if (!mainWindow || mainWindow.isDestroyed()) {

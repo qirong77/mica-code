@@ -48,11 +48,17 @@ const filesApi = {
   list: (path) => ipcRenderer.invoke('files:list', { path })
 }
 
+const gitApi = {
+  summary: (cwd) => ipcRenderer.invoke('git:summary', { cwd }),
+  file: (cwd, filePath) => ipcRenderer.invoke('git:file', { cwd, filePath })
+}
+
 contextBridge.exposeInMainWorld('mica', {
   terminal: terminalApi,
   workspace: workspaceApi,
   notify: notifyApi,
   app: appApi,
   files: filesApi,
+  git: gitApi,
   platform: process.platform
 })

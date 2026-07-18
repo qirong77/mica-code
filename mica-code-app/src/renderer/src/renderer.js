@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css'
 import '../assets/main.css'
 import { iconHtml } from './icons.js'
 import { FileTree } from './file-tree.js'
+import { GitCompareView } from './git-compare.js'
 
 const treeHost = document.getElementById('session-tree')
 const hostEl = document.getElementById('terminal-host')
@@ -12,6 +13,7 @@ const filesViewEl = document.getElementById('files-view')
 const filesListEl = document.getElementById('files-list')
 const filesPathEl = document.getElementById('files-path')
 const filesStatusEl = document.getElementById('files-status')
+const gitCompareViewEl = document.getElementById('git-compare-view')
 
 /** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean }>} */
 const terminals = new Map()
@@ -30,6 +32,7 @@ let tree = null
 let activeView = 'terminal'
 let filesPath = null
 let filesParentPath = null
+let gitCompare = null
 
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -111,10 +114,39 @@ async function loadFiles(path = null) {
   }
 }
 
+function updateGitChangeCount(repository) {
+  const countEl = document.getElementById('git-change-count')
+  const hasChanges = !!repository?.files?.length
+  countEl.hidden = !hasChanges
+  countEl.innerHTML = hasChanges
+    ? `<span class="git-additions">+${repository.additions}</span><span class="git-deletions">−${repository.deletions}</span>`
+    : ''
+}
+
+async function getActiveTerminalCwd() {
+  if (!activeId) return null
+  return (await window.mica.terminal.getCwd(activeId)) || resolveTerminalCwd(activeId)
+}
+
+async function refreshGit({ quiet = false } = {}) {
+  const cwd = await getActiveTerminalCwd()
+  if (activeView === 'git-compare') {
+    await gitCompare?.load(cwd, { quiet })
+    return
+  }
+  if (!cwd) {
+    updateGitChangeCount(null)
+    return
+  }
+  const result = await window.mica.git.summary(cwd)
+  updateGitChangeCount(result.repository)
+}
+
 function setActiveView(view) {
-  activeView = view === 'files' ? 'files' : 'terminal'
+  activeView = ['terminal', 'files', 'git-compare'].includes(view) ? view : 'terminal'
   hostEl.hidden = activeView !== 'terminal'
   filesViewEl.hidden = activeView !== 'files'
+  gitCompareViewEl.hidden = activeView !== 'git-compare'
   for (const tab of document.querySelectorAll('.workspace-tab')) {
     const active = tab.dataset.view === activeView
     tab.classList.toggle('is-active', active)
@@ -123,6 +155,9 @@ function setActiveView(view) {
 
   if (activeView === 'files') {
     loadFiles().catch((error) => console.error(error))
+  } else if (activeView === 'git-compare') {
+    refreshGit().catch((error) => console.error(error))
+    requestAnimationFrame(() => gitCompare?.layout())
   } else {
     requestAnimationFrame(() => fitActiveTerminal())
   }
@@ -393,6 +428,7 @@ async function activateTerminal(id) {
 
   scheduleSave()
   if (activeView === 'files') loadFiles().catch((error) => console.error(error))
+  refreshGit({ quiet: true }).catch((error) => console.error(error))
 }
 
 async function disposeTerminal(id) {
@@ -624,6 +660,7 @@ function bindToolbar() {
 }
 
 function bindWorkspaceTabs() {
+  gitCompare = new GitCompareView({ onSummary: updateGitChangeCount })
   for (const icon of document.querySelectorAll('.workspace-tab-icon')) {
     icon.innerHTML = iconHtml(icon.dataset.icon, { size: 14 })
   }
@@ -637,6 +674,10 @@ function bindWorkspaceTabs() {
     if (filesParentPath) loadFiles(filesParentPath)
   })
   document.getElementById('files-refresh').addEventListener('click', () => loadFiles(filesPath))
+  document.getElementById('git-refresh').innerHTML = iconHtml('refresh', { size: 14 })
+  document.getElementById('git-refresh').addEventListener('click', () => {
+    refreshGit().catch((error) => console.error(error))
+  })
 }
 
 function fitActiveTerminal() {
@@ -834,6 +875,11 @@ async function bootstrap() {
   } else {
     setEmptyState(true)
   }
+
+  window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    refreshGit({ quiet: true }).catch((error) => console.error(error))
+  }, 3000)
 }
 
 bootstrap().catch((error) => {

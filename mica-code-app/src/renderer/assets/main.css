@@ -380,6 +380,27 @@ input:focus {
   height: 14px;
 }
 
+.git-change-count {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+}
+
+.git-change-count[hidden] {
+  display: none;
+}
+
+.git-additions {
+  color: #55b982;
+}
+
+.git-deletions {
+  color: #e06c75;
+}
+
 .terminal-host {
   position: relative;
   flex: 1;
@@ -387,7 +408,8 @@ input:focus {
 }
 
 .terminal-host[hidden],
-.files-view[hidden] {
+.files-view[hidden],
+.git-compare-view[hidden] {
   display: none;
 }
 
@@ -499,6 +521,187 @@ input:focus {
 
 .files-status.is-visible {
   display: block;
+}
+
+.git-compare-view {
+  display: grid;
+  grid-template-columns: minmax(190px, 26%) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  background: var(--terminal-bg);
+}
+
+.git-tree-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--ui-stroke-secondary);
+  background: #111;
+}
+
+.git-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 8px 0 13px;
+}
+
+.git-tree-heading {
+  color: var(--ui-text-tertiary);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.git-repository-path {
+  overflow: hidden;
+  flex-shrink: 0;
+  padding: 0 13px 8px;
+  color: var(--ui-text-quaternary);
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-change-tree {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 2px 7px 14px;
+}
+
+.git-tree-row {
+  display: grid;
+  grid-template-columns: 14px 16px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px 0 calc(4px + var(--tree-depth) * 13px);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-tree-row:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-row-hover-background);
+}
+
+.git-tree-row.is-selected {
+  color: var(--ui-text-primary);
+  background: var(--ui-row-selected-background);
+}
+
+.git-tree-chevron,
+.git-tree-icon,
+.git-tree-spacer {
+  display: grid;
+  place-items: center;
+  color: var(--ui-text-tertiary);
+}
+
+.git-tree-chevron {
+  transition: transform 100ms ease;
+  transform: rotate(90deg);
+}
+
+.git-tree-folder.is-collapsed .git-tree-chevron {
+  transform: rotate(0);
+}
+
+.git-tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-file-state {
+  justify-self: end;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.git-file-state.is-added {
+  color: #55b982;
+}
+
+.git-file-state.is-deleted {
+  color: #e06c75;
+}
+
+.git-file-state.is-modified {
+  color: #d7ae5d;
+}
+
+.git-diff-pane {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.git-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ui-stroke-tertiary);
+  color: var(--ui-text-secondary);
+  font-size: 0.72rem;
+}
+
+.git-diff-file {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff-stat {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+}
+
+.git-diff-editor {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.git-compare-status {
+  position: absolute;
+  inset: 36px 0 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--ui-text-quaternary);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.git-compare-status[hidden],
+.git-diff-editor[hidden],
+.git-diff-header[hidden] {
+  display: none;
 }
 
 .terminal-view {
