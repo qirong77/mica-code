@@ -19,6 +19,8 @@ let activeId = null
 let saveTimer = null
 let markReadTimer = null
 let windowState = { focused: true, visible: true }
+/** @type {AudioContext | null} */
+let notificationAudioContext = null
 /** @type {FileTree | null} */
 let tree = null
 
@@ -547,6 +549,58 @@ function fitActiveTerminal() {
   }
 }
 
+function getNotificationAudioContext() {
+  if (notificationAudioContext) return notificationAudioContext
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextClass) return null
+  notificationAudioContext = new AudioContextClass()
+  return notificationAudioContext
+}
+
+async function unlockNotificationAudio() {
+  const ctx = getNotificationAudioContext()
+  if (ctx?.state === 'suspended') await ctx.resume()
+}
+
+async function playNotificationSound(type) {
+  const ctx = getNotificationAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') await ctx.resume()
+  if (ctx.state !== 'running') return
+
+  const sounds = {
+    'turn.completed': [
+      { frequency: 659.25, offset: 0, duration: 0.11, volume: 0.055 },
+      { frequency: 880, offset: 0.1, duration: 0.16, volume: 0.06 }
+    ],
+    'turn.error': [
+      { frequency: 440, offset: 0, duration: 0.13, volume: 0.055 },
+      { frequency: 349.23, offset: 0.12, duration: 0.18, volume: 0.05 }
+    ],
+    'turn.aborted': [{ frequency: 523.25, offset: 0, duration: 0.14, volume: 0.045 }]
+  }
+  const tones = sounds[type]
+  if (!tones) return
+
+  const start = ctx.currentTime + 0.015
+  for (const tone of tones) {
+    const toneStart = start + tone.offset
+    const toneEnd = toneStart + tone.duration
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(tone.frequency, toneStart)
+    gain.gain.setValueAtTime(0.0001, toneStart)
+    gain.gain.exponentialRampToValueAtTime(tone.volume, toneStart + 0.018)
+    gain.gain.exponentialRampToValueAtTime(0.0001, toneEnd)
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start(toneStart)
+    oscillator.stop(toneEnd + 0.01)
+  }
+}
+
 function bindNotifyAndWindowState() {
   window.mica.notify.onChanged((payload) => {
     if (payload?.type === 'cleared' && payload.terminalId) {
@@ -557,6 +611,11 @@ function bindNotifyAndWindowState() {
     if (payload?.state?.terminalId) {
       const id = payload.state.terminalId
       setUnreadState(id, payload.state)
+      if (['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)) {
+        playNotificationSound(payload.state.lastType).catch((error) => {
+          console.warn('play notification sound failed', error)
+        })
+      }
       return
     }
 
@@ -582,6 +641,14 @@ function bindNotifyAndWindowState() {
     windowState = { ...windowState, focused: true }
     maybeMarkActiveRead('window-focus')
   })
+
+  const unlockAudio = () => {
+    unlockNotificationAudio().catch((error) => {
+      console.warn('unlock notification audio failed', error)
+    })
+  }
+  window.addEventListener('pointerdown', unlockAudio, { once: true, capture: true })
+  window.addEventListener('keydown', unlockAudio, { once: true, capture: true })
 }
 
 function paintToolbarIcons() {
