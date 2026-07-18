@@ -204,9 +204,9 @@ input:focus {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
   background: #1677ff;
   color: #fff;
   font-size: 14px;
