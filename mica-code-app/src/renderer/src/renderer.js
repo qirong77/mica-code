@@ -572,12 +572,7 @@ async function playNotificationSound(type) {
     'turn.completed': [
       { frequency: 659.25, offset: 0, duration: 0.11, volume: 0.055 },
       { frequency: 880, offset: 0.1, duration: 0.16, volume: 0.06 }
-    ],
-    'turn.error': [
-      { frequency: 440, offset: 0, duration: 0.13, volume: 0.055 },
-      { frequency: 349.23, offset: 0.12, duration: 0.18, volume: 0.05 }
-    ],
-    'turn.aborted': [{ frequency: 523.25, offset: 0, duration: 0.14, volume: 0.045 }]
+    ]
   }
   const tones = sounds[type]
   if (!tones) return
@@ -611,8 +606,8 @@ function bindNotifyAndWindowState() {
     if (payload?.state?.terminalId) {
       const id = payload.state.terminalId
       setUnreadState(id, payload.state)
-      if (['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)) {
-        playNotificationSound(payload.state.lastType).catch((error) => {
+      if (payload.type === 'event' && payload.state.lastType === 'turn.completed') {
+        playNotificationSound('turn.completed').catch((error) => {
           console.warn('play notification sound failed', error)
         })
       }
