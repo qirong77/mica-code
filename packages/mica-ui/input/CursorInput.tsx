@@ -681,6 +681,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   const invert = useCallback((text: string) => `\x1b[7m${text}\x1b[27m`, []);
   const [cursorBlinkOn, setCursorBlinkOn] = React.useState(true);
   const cursorShouldShow = Boolean(props.focus && props.showCursor !== false && terminalFocus);
+  const hasContent = Boolean(props.value);
 
   React.useEffect(() => {
     if (!cursorShouldShow) {
@@ -688,9 +689,12 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
       return;
     }
     setCursorBlinkOn(true);
+    if (hasContent) {
+      return;
+    }
     const interval = setInterval(() => setCursorBlinkOn((prev) => !prev), 530);
     return () => clearInterval(interval);
-  }, [cursorShouldShow]);
+  }, [cursorShouldShow, hasContent]);
 
   const showVisualCursor = cursorShouldShow && cursorBlinkOn;
 
