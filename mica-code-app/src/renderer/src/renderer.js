@@ -11,7 +11,7 @@ const emptyStateEl = document.getElementById('empty-state')
 
 /** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean }>} */
 const terminals = new Map()
-/** @type {Map<string, { unread: boolean, lastType?: string | null, lastEventAt?: number | null }>} */
+/** @type {Map<string, { unread: boolean, running: boolean, lastType?: string | null, lastEventAt?: number | null }>} */
 const unreadStates = new Map()
 
 let workspace = null
@@ -61,11 +61,12 @@ function isWindowReadable() {
 
 function setUnreadState(id, state) {
   if (!id) return
-  if (!state || !state.unread) {
+  if (!state || (!state.unread && !state.running)) {
     unreadStates.delete(id)
   } else {
     unreadStates.set(id, {
-      unread: true,
+      unread: !!state.unread,
+      running: !!state.running,
       lastType: state.lastType ?? null,
       lastEventAt: state.lastEventAt ?? Date.now()
     })
@@ -77,9 +78,10 @@ function syncUnreadFromList(list) {
   const next = new Map()
   for (const item of list || []) {
     if (!item?.terminalId) continue
-    if (!item.unread) continue
+    if (!item.unread && !item.running) continue
     next.set(item.terminalId, {
-      unread: true,
+      unread: !!item.unread,
+      running: !!item.running,
       lastType: item.lastType ?? null,
       lastEventAt: item.lastEventAt ?? null
     })
@@ -177,10 +179,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x1b[13;2u')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -195,10 +193,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x01\x0b')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -206,10 +200,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x01')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -217,10 +207,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x05')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -228,10 +214,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x1b\x7f')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -239,10 +221,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, '\x1bd')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -250,10 +228,6 @@ function ensureTerminalView(id) {
       event.preventDefault()
       event.stopImmediatePropagation()
       window.mica.terminal.write(id, key === 'arrowleft' ? '\x1bb' : '\x1bf')
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
   }
@@ -497,10 +471,6 @@ async function handleContextAction(action, node) {
       }
       tree.deleteNode(node.id)
       scheduleSave()
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
     tree.deleteNode(node.id)
@@ -577,37 +547,6 @@ function fitActiveTerminal() {
   }
 }
 
-function playBeep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)()
-    if (ctx.state === 'suspended') ctx.resume()
-
-    const now = ctx.currentTime
-    const duration = 0.08
-    const gap = 0.04
-
-    const playTone = (freq, startTime) => {
-      const osc = ctx.createOscillator()
-      const g = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.value = freq
-      g.gain.setValueAtTime(0, startTime)
-      g.gain.linearRampToValueAtTime(0.15, startTime + 0.01)
-      g.gain.linearRampToValueAtTime(0, startTime + duration)
-      osc.connect(g)
-      g.connect(ctx.destination)
-      osc.start(startTime)
-      osc.stop(startTime + duration + 0.01)
-    }
-
-    playTone(1047, now)
-    playTone(1319, now + duration + gap)
-
-    setTimeout(() => ctx.close(), 600)
-  } catch {
-  }
-}
-
 function bindNotifyAndWindowState() {
   window.mica.notify.onChanged((payload) => {
     if (payload?.type === 'cleared' && payload.terminalId) {
@@ -617,18 +556,7 @@ function bindNotifyAndWindowState() {
 
     if (payload?.state?.terminalId) {
       const id = payload.state.terminalId
-      if (payload.state.unread && id === activeId && isWindowReadable()) {
-        setUnreadState(id, { unread: false })
-        window.mica.notify.markRead(id).catch((error) => {
-          console.error('mark read failed', 'notify-while-active', error)
-        })
-        return
-      }
       setUnreadState(id, payload.state)
-
-      const finishing = !payload.state.running && payload.state.unread
-      const isFinishingEvent = ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state.lastType)
-      if (finishing && isFinishingEvent && !isWindowReadable()) playBeep()
       return
     }
 
@@ -690,6 +618,7 @@ async function bootstrap() {
   })
   tree.load(nodes)
 
+  bindSearch()
   bindToolbar()
   bindNotifyAndWindowState()
 

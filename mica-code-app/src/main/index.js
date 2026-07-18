@@ -111,6 +111,12 @@ app.whenReady().then(async () => {
   stopNotifyBridge = notifyServer.onChange((payload) => {
     broadcastNotifyChange(payload)
     updateBadge()
+    if (
+      payload?.type === 'event' &&
+      ['turn.completed', 'turn.error', 'turn.aborted'].includes(payload.state?.lastType)
+    ) {
+      shell.beep()
+    }
   })
 
   registerTerminalIpc()

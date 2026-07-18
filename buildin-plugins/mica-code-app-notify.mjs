@@ -11,7 +11,9 @@
  * - turn:after  → red "unread" dot (completed / error / aborted)
  */
 
-const REQUEST_TIMEOUT_MS = 300;
+// Keep the turn loop non-blocking, but allow for a temporarily busy Electron
+// main process instead of dropping otherwise valid localhost notifications.
+const REQUEST_TIMEOUT_MS = 1500;
 
 export default function setup(ctx) {
   const env = readNotifyEnv();
