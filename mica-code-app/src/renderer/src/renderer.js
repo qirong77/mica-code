@@ -275,7 +275,12 @@ async function activateTerminal(id) {
 
   if (!entry.ready) {
     const cwd = resolveTerminalCwd(id)
-    await window.mica.terminal.create({ id, ...(cwd ? { cwd } : {}) })
+    const sessionId = tree?.getNode(id)?.sessionId || null
+    await window.mica.terminal.create({
+      id,
+      ...(cwd ? { cwd } : {}),
+      ...(sessionId ? { resumeSessionId: sessionId } : {})
+    })
     entry.ready = true
     requestAnimationFrame(() => {
       try {
@@ -606,6 +611,7 @@ function bindNotifyAndWindowState() {
     if (payload?.state?.terminalId) {
       const id = payload.state.terminalId
       setUnreadState(id, payload.state)
+      if (payload.state.sessionId) tree?.setTerminalSessionId(id, payload.state.sessionId)
       if (payload.type === 'event' && payload.state.lastType === 'turn.completed') {
         playNotificationSound('turn.completed').catch((error) => {
           console.warn('play notification sound failed', error)
@@ -663,6 +669,7 @@ async function bootstrap() {
     text: node.text,
     type: node.type || (node.parent === '#' ? 'folder' : 'terminal'),
     cwd: node.cwd || null,
+    sessionId: node.sessionId || null,
     state: node.state || {}
   }))
 

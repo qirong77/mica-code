@@ -93,6 +93,10 @@ export class LocalRuntimeController implements RuntimeController {
     await this.hooks.emit('runtime:start', { runtime: this });
   }
 
+  getCurrentSessionId(): string {
+    return this.sessionController.getCurrentSessionId();
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
     for (const agent of this.runningAgents) {

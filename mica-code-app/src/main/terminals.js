@@ -61,6 +61,14 @@ function resolveCwd(cwd) {
   return home
 }
 
+function normalizeResumeSessionId(value) {
+  if (typeof value !== 'string') return null
+  const sessionId = value.trim()
+  if (!sessionId || sessionId.length > 200) return null
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(sessionId)) return null
+  return sessionId
+}
+
 function createPty(id, sender, options = {}) {
   const shell = options.shell || getDefaultShell()
   const requestedCwd = typeof options.cwd === 'string' ? options.cwd.trim() : ''
@@ -68,6 +76,7 @@ function createPty(id, sender, options = {}) {
   const cols = options.cols || 80
   const rows = options.rows || 24
   const usedFallback = !!requestedCwd && cwd !== requestedCwd
+  const resumeSessionId = normalizeResumeSessionId(options.resumeSessionId)
 
   const term = pty.spawn(shell, [], {
     name: 'xterm-color',
@@ -85,6 +94,13 @@ function createPty(id, sender, options = {}) {
   const session = { id, term, sender }
   sessions.set(id, session)
 
+  if (resumeSessionId) {
+    const resumeCommand = `mica --resume ${resumeSessionId}`
+    setTimeout(() => {
+      if (sessions.get(id)?.term === term) term.write(`${resumeCommand}\r`)
+    }, 50)
+  }
+
   term.onData((data) => {
     if (!sender.isDestroyed()) {
       sender.send('terminal:data', { id, data })
@@ -99,7 +115,14 @@ function createPty(id, sender, options = {}) {
     }
   })
 
-  return { id, shell, cwd, requestedCwd: requestedCwd || null, usedFallback }
+  return {
+    id,
+    shell,
+    cwd,
+    requestedCwd: requestedCwd || null,
+    usedFallback,
+    resumedSessionId: resumeSessionId
+  }
 }
 
 export function setNotifyServer(server) {

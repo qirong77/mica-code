@@ -24,6 +24,7 @@ export default function setup(ctx) {
 
   let aborted = false;
   let lastErrorSummary = '';
+  let sessionId = '';
 
   const notify = (type, extra = {}) => {
     // Fire-and-forget: never block mica turn loop on local UI notify.
@@ -38,8 +39,20 @@ export default function setup(ctx) {
 
   const beforeDisposable = ctx.hooks.on(
     'turn:before',
-    async () => {
-      notify('turn.started');
+    async (event) => {
+      const currentSessionId = event?.runtime?.getCurrentSessionId?.();
+      sessionId = typeof currentSessionId === 'string' ? currentSessionId.trim() : '';
+      notify('turn.started', sessionId ? { sessionId } : {});
+    },
+    { pluginId: ctx.pluginId, priority: 1000 },
+  );
+
+  const startDisposable = ctx.hooks.on(
+    'runtime:start',
+    async (event) => {
+      const currentSessionId = event?.runtime?.getCurrentSessionId?.();
+      sessionId = typeof currentSessionId === 'string' ? currentSessionId.trim() : '';
+      if (sessionId) notify('session.active', { sessionId });
     },
     { pluginId: ctx.pluginId, priority: 1000 },
   );
@@ -67,20 +80,24 @@ export default function setup(ctx) {
       if (aborted) {
         aborted = false;
         lastErrorSummary = '';
-        notify('turn.aborted');
+        notify('turn.aborted', sessionId ? { sessionId } : {});
         return;
       }
 
       if (event?.hasError) {
         const summary = lastErrorSummary;
         lastErrorSummary = '';
-        notify('turn.error', summary ? { summary } : {});
+        notify('turn.error', {
+          ...(summary ? { summary } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        });
         return;
       }
 
       lastErrorSummary = '';
       notify('turn.completed', {
         elapsedMs: typeof event?.elapsedMs === 'number' ? event.elapsedMs : undefined,
+        ...(sessionId ? { sessionId } : {}),
       });
     },
     { pluginId: ctx.pluginId, priority: 1000 },
@@ -88,6 +105,7 @@ export default function setup(ctx) {
 
   ctx.onDispose(() => {
     beforeDisposable.dispose();
+    startDisposable.dispose();
     afterDisposable.dispose();
     errorDisposable.dispose();
     abortDisposable.dispose();

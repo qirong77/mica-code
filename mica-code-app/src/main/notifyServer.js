@@ -105,14 +105,17 @@ async function handleRequest(req, res, ctx) {
       return
     }
 
+    const isSessionEvent = type === 'session.active'
     const isRunningEvent = type === 'turn.started'
+    const previous = ctx.states.get(terminalId)
     const state = {
       terminalId,
-      unread: !isRunningEvent,
-      running: isRunningEvent,
+      unread: isSessionEvent ? !!previous?.unread : !isRunningEvent,
+      running: isSessionEvent ? !!previous?.running : isRunningEvent,
       lastType: type,
       lastEventAt: Number(body?.ts) > 0 ? Number(body.ts) : Date.now(),
-      summary: typeof body?.summary === 'string' ? body.summary.slice(0, 200) : undefined
+      summary: typeof body?.summary === 'string' ? body.summary.slice(0, 200) : undefined,
+      sessionId: normalizeSessionId(body?.sessionId)
     }
     ctx.states.set(terminalId, state)
     ctx.bus.emit('change', {
@@ -168,11 +171,19 @@ function authorize(req, token) {
 function normalizeEventType(value) {
   if (typeof value !== 'string') return null
   const type = value.trim()
+  if (type === 'session.active') return type
   if (type === 'turn.started') return type
   if (type === 'turn.completed' || type === 'turn.error' || type === 'turn.aborted') return type
   if (type === 'started') return 'turn.started'
   if (type === 'completed' || type === 'error' || type === 'aborted') return `turn.${type}`
   return null
+}
+
+function normalizeSessionId(value) {
+  if (typeof value !== 'string') return undefined
+  const sessionId = value.trim()
+  if (!sessionId || sessionId.length > 200) return undefined
+  return sessionId
 }
 
 function serializeStates(states) {
@@ -183,6 +194,7 @@ function serializeStates(states) {
     lastType: item.lastType ?? null,
     lastEventAt: item.lastEventAt ?? null,
     summary: item.summary,
+    sessionId: item.sessionId,
     readAt: item.readAt ?? null
   }))
 }

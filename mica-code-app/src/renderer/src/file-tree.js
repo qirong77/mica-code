@@ -12,6 +12,7 @@ import { iconHtml } from './icons.js'
  *   text: string,
  *   type: 'folder' | 'terminal',
  *   cwd?: string | null,
+ *   sessionId?: string | null,
  *   state?: { opened?: boolean, selected?: boolean }
  * }} TreeNode
  */
@@ -80,6 +81,10 @@ export class FileTree {
         text: raw.text || '',
         type: raw.type === 'folder' ? 'folder' : 'terminal',
         cwd: raw.type === 'folder' && typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
+        sessionId:
+          raw.type !== 'folder' && typeof raw.sessionId === 'string' && raw.sessionId.trim()
+            ? raw.sessionId.trim()
+            : null,
         state: {
           opened: false,
           selected: !!raw.state?.selected
@@ -129,6 +134,7 @@ export class FileTree {
           }
         }
         if (n.type === 'folder' && n.cwd) item.cwd = n.cwd
+        if (n.type === 'terminal' && n.sessionId) item.sessionId = n.sessionId
         out.push(item)
         walk(id)
       }
@@ -143,6 +149,16 @@ export class FileTree {
 
   getSelected() {
     return this.selectedId ? this.nodes.get(this.selectedId) || null : null
+  }
+
+  setTerminalSessionId(id, sessionId) {
+    const node = this.nodes.get(id)
+    if (!node || node.type !== 'terminal') return false
+    const next = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (!next || node.sessionId === next) return false
+    node.sessionId = next
+    this.handlers.onChange?.()
+    return true
   }
 
   /**
