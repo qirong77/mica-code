@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import '../assets/main.css'
 import { iconHtml } from './icons.js'
+import { FileEditorView } from './file-editor.js'
 import { FileTree } from './file-tree.js'
 import { GitCompareView } from './git-compare.js'
 
@@ -11,9 +12,6 @@ const appEl = document.getElementById('app')
 const hostEl = document.getElementById('terminal-host')
 const emptyStateEl = document.getElementById('empty-state')
 const filesViewEl = document.getElementById('files-view')
-const filesListEl = document.getElementById('files-list')
-const filesPathEl = document.getElementById('files-path')
-const filesStatusEl = document.getElementById('files-status')
 const gitCompareViewEl = document.getElementById('git-compare-view')
 
 /** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean }>} */
@@ -31,8 +29,8 @@ let notificationAudioContext = null
 /** @type {FileTree | null} */
 let tree = null
 let activeView = 'terminal'
-let filesPath = null
-let filesParentPath = null
+let fileEditor = null
+let filesLoadRequest = 0
 let gitCompare = null
 
 function uid(prefix) {
@@ -65,10 +63,12 @@ function setSidebarCollapsed(collapsed, { persist = true } = {}) {
   requestAnimationFrame(() => {
     fitActiveTerminal()
     gitCompare?.layout()
+    fileEditor?.layout()
   })
   window.setTimeout(() => {
     fitActiveTerminal()
     gitCompare?.layout()
+    fileEditor?.layout()
   }, 180)
 }
 
@@ -93,53 +93,6 @@ function setEmptyState(visible) {
   emptyStateEl.classList.toggle('hidden', !visible)
 }
 
-function setFilesStatus(message = '') {
-  filesStatusEl.textContent = message
-  filesStatusEl.classList.toggle('is-visible', !!message)
-}
-
-async function loadFiles(path = null) {
-  if (!activeId) {
-    filesListEl.replaceChildren()
-    filesPathEl.textContent = ''
-    setFilesStatus('选择一个终端会话以查看文件')
-    return
-  }
-
-  setFilesStatus('正在读取…')
-  try {
-    const target =
-      path || (await window.mica.terminal.getCwd(activeId)) || resolveTerminalCwd(activeId)
-    const result = await window.mica.files.list(target)
-    filesPath = result.path
-    filesParentPath = result.parentPath
-    filesPathEl.textContent = result.path
-    filesPathEl.title = result.path
-    document.getElementById('files-up').disabled = !result.parentPath
-    filesListEl.replaceChildren()
-
-    for (const entry of result.entries) {
-      const row = document.createElement('div')
-      row.className = 'file-row'
-      row.dataset.type = entry.type
-      row.title = entry.path
-      row.innerHTML = `
-        <span class="file-row-icon">${iconHtml(entry.type === 'directory' ? 'folder' : 'file', { size: 15 })}</span>
-        <span class="file-row-name">${escapeHtml(entry.name)}</span>
-        <span class="file-row-kind">${entry.type === 'directory' ? '文件夹' : ''}</span>
-      `
-      if (entry.type === 'directory') {
-        row.addEventListener('dblclick', () => loadFiles(entry.path))
-      }
-      filesListEl.appendChild(row)
-    }
-    setFilesStatus(result.entries.length ? '' : '这个文件夹是空的')
-  } catch (error) {
-    filesListEl.replaceChildren()
-    setFilesStatus(`无法读取文件夹：${error?.message || error}`)
-  }
-}
-
 function updateGitChangeCount(repository) {
   const countEl = document.getElementById('git-change-count')
   const hasChanges = !!repository?.files?.length
@@ -152,6 +105,18 @@ function updateGitChangeCount(repository) {
 async function getActiveTerminalCwd() {
   if (!activeId) return null
   return (await window.mica.terminal.getCwd(activeId)) || resolveTerminalCwd(activeId)
+}
+
+async function loadFilesForActiveTerminal() {
+  const requestId = ++filesLoadRequest
+  const terminalId = activeId
+  if (!terminalId) {
+    await fileEditor?.load(null)
+    return
+  }
+  const cwd = (await window.mica.terminal.getCwd(terminalId)) || resolveTerminalCwd(terminalId)
+  if (requestId !== filesLoadRequest || terminalId !== activeId || activeView !== 'files') return
+  await fileEditor?.load(cwd)
 }
 
 async function refreshGit({ quiet = false } = {}) {
@@ -180,7 +145,8 @@ function setActiveView(view) {
   }
 
   if (activeView === 'files') {
-    loadFiles().catch((error) => console.error(error))
+    loadFilesForActiveTerminal().catch((error) => console.error(error))
+    requestAnimationFrame(() => fileEditor?.layout())
   } else if (activeView === 'git-compare') {
     refreshGit().catch((error) => console.error(error))
     requestAnimationFrame(() => gitCompare?.layout())
@@ -453,7 +419,9 @@ async function activateTerminal(id) {
   }
 
   scheduleSave()
-  if (activeView === 'files') loadFiles().catch((error) => console.error(error))
+  if (activeView === 'files') {
+    loadFilesForActiveTerminal().catch((error) => console.error(error))
+  }
   refreshGit({ quiet: true }).catch((error) => console.error(error))
 }
 
@@ -686,6 +654,7 @@ function bindToolbar() {
 }
 
 function bindWorkspaceTabs() {
+  fileEditor = new FileEditorView()
   gitCompare = new GitCompareView({ onSummary: updateGitChangeCount })
   for (const icon of document.querySelectorAll('.workspace-tab-icon')) {
     icon.innerHTML = iconHtml(icon.dataset.icon, { size: 14 })
@@ -694,12 +663,6 @@ function bindWorkspaceTabs() {
     const tab = event.target instanceof Element ? event.target.closest('.workspace-tab') : null
     if (tab) setActiveView(tab.dataset.view)
   })
-  document.getElementById('files-up').innerHTML = iconHtml('arrow-up', { size: 15 })
-  document.getElementById('files-refresh').innerHTML = iconHtml('refresh', { size: 14 })
-  document.getElementById('files-up').addEventListener('click', () => {
-    if (filesParentPath) loadFiles(filesParentPath)
-  })
-  document.getElementById('files-refresh').addEventListener('click', () => loadFiles(filesPath))
   document.getElementById('git-refresh').innerHTML = iconHtml('refresh', { size: 14 })
   document.getElementById('git-refresh').addEventListener('click', () => {
     refreshGit().catch((error) => console.error(error))

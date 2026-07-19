@@ -99,25 +99,53 @@
         </nav>
         <section id="terminal-host" class="terminal-host no-drag"></section>
         <section id="files-view" class="files-view no-drag" hidden>
-          <header class="files-toolbar">
-            <button
-              id="files-up"
-              class="files-tool-btn"
-              type="button"
-              title="返回上级目录"
-              aria-label="返回上级目录"
-            ></button>
-            <div id="files-path" class="files-path" title=""></div>
-            <button
-              id="files-refresh"
-              class="files-tool-btn"
-              type="button"
-              title="刷新"
-              aria-label="刷新"
-            ></button>
-          </header>
-          <div id="files-list" class="files-list"></div>
-          <div id="files-status" class="files-status"></div>
+          <aside class="files-tree-pane" aria-label="文件资源管理器">
+            <header class="files-toolbar">
+              <button
+                id="files-up"
+                class="files-tool-btn"
+                type="button"
+                title="返回上级目录"
+                aria-label="返回上级目录"
+              ></button>
+              <div id="files-path" class="files-path" title=""></div>
+              <button
+                id="files-refresh"
+                class="files-tool-btn"
+                type="button"
+                title="刷新"
+                aria-label="刷新"
+              ></button>
+            </header>
+            <div class="files-tree-body">
+              <div id="files-list" class="files-list" role="tree" aria-label="文件目录"></div>
+              <div id="files-status" class="files-status" role="status"></div>
+            </div>
+          </aside>
+          <div
+            id="files-pane-resizer"
+            class="files-pane-resizer"
+            role="separator"
+            aria-label="调整文件目录宽度"
+            aria-orientation="vertical"
+            aria-valuemin="180"
+            tabindex="0"
+          ></div>
+          <section class="file-editor-pane" aria-label="文件编辑器">
+            <div
+              id="file-editor-tabs"
+              class="file-editor-tabs"
+              role="tablist"
+              aria-label="打开的文件"
+            ></div>
+            <div id="file-editor-breadcrumb" class="file-editor-breadcrumb" hidden></div>
+            <div class="file-editor-body">
+              <div id="file-editor" class="file-editor"></div>
+              <div id="file-editor-status" class="file-editor-status" role="status">
+                从左侧目录选择文件以开始编辑
+              </div>
+            </div>
+          </section>
         </section>
         <section id="git-compare-view" class="git-compare-view no-drag" hidden>
           <aside class="git-tree-pane">

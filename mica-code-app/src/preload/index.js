@@ -45,7 +45,10 @@ const appApi = {
 }
 
 const filesApi = {
-  list: (path) => ipcRenderer.invoke('files:list', { path })
+  list: (path) => ipcRenderer.invoke('files:list', { path }),
+  read: (path) => ipcRenderer.invoke('files:read', { path }),
+  write: (path, content, expectedVersion) =>
+    ipcRenderer.invoke('files:write', { path, content, expectedVersion })
 }
 
 const gitApi = {
