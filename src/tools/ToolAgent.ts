@@ -505,6 +505,7 @@ function attachSubagentActivityTracking(options: {
   owner: AgentRuntime;
   taskManager: SubagentTaskManager;
 }): { onIterationComplete: () => undefined } {
+  const ACTIVITY_UPDATE_INTERVAL_MS = 100;
   const activityId = 'current-iteration';
   const previousOnText = options.child.onText;
   const previousOnThinking = options.child.onThinking;
@@ -514,9 +515,10 @@ function attachSubagentActivityTracking(options: {
   let assistantText = '';
   let toolCalls: Array<{ name: string; args: string }> = [];
   let lastSummary = '';
+  let updateTimer: ReturnType<typeof setTimeout> | undefined;
 
   const setSummary = (summary: string) => {
-    const next = summary.trim() || 'thinking';
+    const next = summary.trim() || '等待模型响应';
     if (next === lastSummary) return;
     lastSummary = next;
     options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary: next });
@@ -528,46 +530,67 @@ function attachSubagentActivityTracking(options: {
     }
     const textSummary = summarizeLastLine(assistantText);
     if (textSummary) {
-      setSummary(textSummary);
+      setSummary(formatAssistantActivity(textSummary));
       return;
     }
     const thinkingSummary = summarizeLastLine(thinkingText);
-    setSummary(thinkingSummary || 'thinking');
+    setSummary(thinkingSummary || '等待模型响应');
   };
-  const resetIteration = () => {
+  const scheduleActivity = () => {
+    if (updateTimer) return;
+    updateTimer = setTimeout(() => {
+      updateTimer = undefined;
+      publishActivity();
+    }, ACTIVITY_UPDATE_INTERVAL_MS);
+    updateTimer.unref?.();
+  };
+  const flushActivity = () => {
+    if (updateTimer) clearTimeout(updateTimer);
+    updateTimer = undefined;
+    publishActivity();
+  };
+  const resetIteration = (showWaiting: boolean) => {
     thinkingText = '';
     assistantText = '';
     toolCalls = [];
-    lastSummary = '';
-    publishActivity();
+    if (showWaiting) setSummary('等待模型响应');
   };
 
   options.child.onText = (text) => {
     previousOnText?.(text);
     assistantText += text;
-    publishActivity();
+    scheduleActivity();
   };
   options.child.onThinking = (thinking) => {
     previousOnThinking?.(thinking);
     thinkingText += thinking;
-    publishActivity();
+    scheduleActivity();
   };
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
     if (name === 'Agent') return;
     toolCalls.push({ name, args });
-    publishActivity();
+    scheduleActivity();
   };
   options.child.onToolResult = (name, result, id) => {
     previousOnToolResult?.(name, result, id);
   };
-  resetIteration();
+  resetIteration(true);
   return {
     onIterationComplete: () => {
-      resetIteration();
+      // Keep the last useful status visible while the next model iteration starts.
+      flushActivity();
+      resetIteration(false);
       return undefined;
     },
   };
+}
+
+function formatAssistantActivity(text: string): string {
+  return text
+    .replace(/^(?:我会|我将|接下来(?:我)?(?:会|将)?|现在(?:我)?(?:会|将)?|让我)\s*/u, '')
+    .replace(/^[，,：:。.!！?？\s]+/u, '')
+    .trim();
 }
 
 function summarizeToolBatch(toolCalls: Array<{ name: string; args: string }>): string {

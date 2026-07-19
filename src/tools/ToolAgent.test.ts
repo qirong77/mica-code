@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentMaxTurnsError, type ModelClientOptions } from '@packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { ToolAgent } from './ToolAgent.js';
 
 describe('ToolAgent', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('runs a synchronous child agent with the selected subagent tool filter and inherited effort', async () => {
     const { runtime, createSubAgent, query } = createRuntimeStub();
     const taskManager = new SubagentTaskManager();
@@ -255,6 +257,7 @@ describe('ToolAgent', () => {
   });
 
   it('derives one iteration activity locally without another agent query', async () => {
+    vi.useFakeTimers();
     const deferred = createDeferred<string>();
     const query = vi.fn((_prompt: string, _options?: { onIterationComplete?: () => unknown }) => deferred.promise);
     const { runtime, child } = createRuntimeStub(query);
@@ -269,16 +272,20 @@ describe('ToolAgent', () => {
     const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
     await flushAsyncWork();
 
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('thinking');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('等待模型响应');
     child.onThinking?.('先看目录结构\n再检查规则编辑器相关代码');
+    vi.advanceTimersByTime(100);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('再检查规则编辑器相关代码');
 
-    child.onText?.('我会先检查规则编辑器和接口定义。\n接着读取关键实现。');
+    child.onText?.('我会先检查规则编辑器和接口定义。\n我将接着读取关键实现。');
+    vi.advanceTimersByTime(100);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
 
     child.onToolCall?.('grep_search', '{"pattern":"RuleEditor","path":"packages/rules"}', 'tool-1');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/RuleEditor.tsx"}', 'tool-2');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/index.ts"}', 'tool-3');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
+    vi.advanceTimersByTime(100);
 
     const summary = taskManager.get(taskId, runtime)?.activities?.[0]?.summary ?? '';
     expect(summary).toContain('搜索代码');
@@ -289,10 +296,17 @@ describe('ToolAgent', () => {
     ]);
     expect(query).toHaveBeenCalledTimes(1);
 
+    child.onToolResult?.('read_file', 'file contents', 'tool-2');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe(summary);
+
     const queryOptions = query.mock.calls[0]?.[1] as { onIterationComplete?: () => unknown } | undefined;
     queryOptions?.onIterationComplete?.();
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('thinking');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe(summary);
     expect(query).toHaveBeenCalledTimes(1);
+
+    child.onThinking?.('继续核对键盘事件');
+    vi.advanceTimersByTime(100);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('继续核对键盘事件');
 
     deferred.resolve('done');
     await flushAsyncWork();
