@@ -48,7 +48,9 @@ const filesApi = {
   list: (path) => ipcRenderer.invoke('files:list', { path }),
   read: (path) => ipcRenderer.invoke('files:read', { path }),
   write: (path, content, expectedVersion) =>
-    ipcRenderer.invoke('files:write', { path, content, expectedVersion })
+    ipcRenderer.invoke('files:write', { path, content, expectedVersion }),
+  find: (root, query) => ipcRenderer.invoke('files:find', { root, query }),
+  search: (root, query) => ipcRenderer.invoke('files:search', { root, query })
 }
 
 const gitApi = {

@@ -193,6 +193,46 @@
       aria-expanded="true"
     ></button>
 
+    <div id="quick-search-overlay" class="quick-search-overlay no-drag" hidden>
+      <section
+        id="quick-search-panel"
+        class="quick-search-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="quick-search-mode"
+      >
+        <div class="quick-search-field">
+          <span id="quick-search-mode" class="quick-search-mode">快速打开</span>
+          <input
+            id="quick-search-input"
+            class="quick-search-input"
+            type="text"
+            placeholder="搜索当前工作区中的文件"
+            aria-label="搜索当前工作区中的文件"
+            aria-controls="quick-search-results"
+            aria-autocomplete="list"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+        <div id="quick-search-body" class="quick-search-body">
+          <div
+            id="quick-search-results"
+            class="quick-search-results"
+            role="listbox"
+            aria-label="搜索结果"
+          ></div>
+          <div id="quick-search-message" class="quick-search-message" role="status"></div>
+        </div>
+        <footer class="quick-search-footer">
+          <span id="quick-search-summary" class="quick-search-summary"></span>
+          <span class="quick-search-shortcuts" aria-hidden="true">
+            <kbd>↑</kbd><kbd>↓</kbd> 选择 <kbd>Enter</kbd> 打开 <kbd>Esc</kbd> 关闭
+          </span>
+        </footer>
+      </section>
+    </div>
+
     <script type="module" src="./src/renderer.js"></script>
   </body>
 </html>

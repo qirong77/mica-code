@@ -459,11 +459,12 @@ export class FileEditorView {
     }
   }
 
-  async openFile(filePath) {
+  async openFile(filePath, position = null) {
     if (!filePath) return
     const existing = this.tabs.get(filePath)
     if (existing) {
       this.activateFile(filePath)
+      this.revealPosition(position)
       return
     }
 
@@ -504,6 +505,7 @@ export class FileEditorView {
       tab.savedAlternativeVersionId = model.getAlternativeVersionId()
       tab.modelSubscription = model.onDidChangeContent(() => this.syncDirty(tab))
       if (this.activePath === filePath) this.activateFile(filePath, { focus: true })
+      if (this.activePath === filePath) this.revealPosition(position)
       this.renderTabs()
     } catch (error) {
       if (this.tabs.get(filePath) !== tab) return
@@ -533,6 +535,15 @@ export class FileEditorView {
         }
       }
     }
+  }
+
+  revealPosition(position) {
+    if (!position || !this.editor.getModel()) return
+    const lineNumber = Math.max(1, Number(position.line) || 1)
+    const column = Math.max(1, Number(position.column) || 1)
+    this.editor.setPosition({ lineNumber, column })
+    this.editor.revealPositionInCenter({ lineNumber, column })
+    this.editor.focus()
   }
 
   activateFile(filePath, { focus = true } = {}) {

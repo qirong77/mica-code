@@ -6,6 +6,7 @@ import { iconHtml } from './icons.js'
 import { FileEditorView } from './file-editor.js'
 import { FileTree } from './file-tree.js'
 import { GitCompareView } from './git-compare.js'
+import { QuickSearch } from './quick-search.js'
 
 const treeHost = document.getElementById('session-tree')
 const appEl = document.getElementById('app')
@@ -655,6 +656,18 @@ function bindToolbar() {
 
 function bindWorkspaceTabs() {
   fileEditor = new FileEditorView()
+  new QuickSearch({
+    getRoot: () => getActiveTerminalCwd().catch(() => resolveTerminalCwd(activeId)),
+    openFile: async (filePath, position) => {
+      setActiveView('files')
+      await fileEditor.openFile(filePath, position)
+    },
+    closeActiveFile: () => {
+      if (activeView !== 'files' || !fileEditor.activePath) return false
+      fileEditor.closeFile(fileEditor.activePath)
+      return true
+    }
+  })
   gitCompare = new GitCompareView({ onSummary: updateGitChangeCount })
   for (const icon of document.querySelectorAll('.workspace-tab-icon')) {
     icon.innerHTML = iconHtml(icon.dataset.icon, { size: 14 })
