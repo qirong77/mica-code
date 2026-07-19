@@ -373,6 +373,8 @@ input:focus {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--terminal-bg);
 }
 
@@ -450,7 +452,9 @@ input:focus {
 .terminal-host {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .terminal-host[hidden],
@@ -1126,10 +1130,6 @@ input:focus {
 .terminal-view .xterm {
   height: 100%;
   padding: 8px 10px;
-}
-
-.terminal-view .xterm-viewport {
-  overflow-y: auto !important;
 }
 
 .empty-state {

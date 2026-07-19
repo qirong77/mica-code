@@ -272,20 +272,22 @@ describe('ToolAgent', () => {
     const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
     await flushAsyncWork();
 
+    expect(taskManager.get(taskId, runtime)?.activities).toEqual([]);
+    vi.advanceTimersByTime(400);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('等待模型响应');
     child.onThinking?.('先看目录结构\n再检查规则编辑器相关代码');
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(800);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('再检查规则编辑器相关代码');
 
     child.onText?.('我会先检查规则编辑器和接口定义。\n我将接着读取关键实现。');
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(800);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
 
     child.onToolCall?.('grep_search', '{"pattern":"RuleEditor","path":"packages/rules"}', 'tool-1');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/RuleEditor.tsx"}', 'tool-2');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/index.ts"}', 'tool-3');
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(180);
 
     const summary = taskManager.get(taskId, runtime)?.activities?.[0]?.summary ?? '';
     expect(summary).toContain('搜索代码');
@@ -305,7 +307,7 @@ describe('ToolAgent', () => {
     expect(query).toHaveBeenCalledTimes(1);
 
     child.onThinking?.('继续核对键盘事件');
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(800);
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('继续核对键盘事件');
 
     deferred.resolve('done');

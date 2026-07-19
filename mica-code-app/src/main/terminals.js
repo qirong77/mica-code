@@ -105,7 +105,7 @@ function createPty(id, sender, options = {}) {
   const resumeSessionId = normalizeResumeSessionId(options.resumeSessionId)
 
   const term = pty.spawn(shell, [], {
-    name: 'xterm-color',
+    name: 'xterm-256color',
     cols,
     rows,
     cwd,
@@ -176,6 +176,13 @@ export function registerTerminalIpc() {
     const session = sessions.get(id)
     if (!session) return false
     session.term.resize(Math.max(cols, 2), Math.max(rows, 1))
+    return true
+  })
+
+  ipcMain.handle('terminal:clear', (_event, { id }) => {
+    const session = sessions.get(id)
+    if (!session) return false
+    session.term.clear()
     return true
   })
 

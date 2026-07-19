@@ -505,7 +505,9 @@ function attachSubagentActivityTracking(options: {
   owner: AgentRuntime;
   taskManager: SubagentTaskManager;
 }): { onIterationComplete: () => undefined } {
-  const ACTIVITY_UPDATE_INTERVAL_MS = 100;
+  const TOOL_BATCH_WINDOW_MS = 180;
+  const MIN_ACTIVITY_VISIBLE_MS = 800;
+  const WAITING_DELAY_MS = 400;
   const activityId = 'current-iteration';
   const previousOnText = options.child.onText;
   const previousOnThinking = options.child.onThinking;
@@ -515,45 +517,78 @@ function attachSubagentActivityTracking(options: {
   let assistantText = '';
   let toolCalls: Array<{ name: string; args: string }> = [];
   let lastSummary = '';
-  let updateTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPriority: 'model' | 'tool' = 'model';
+  let displayedAt = 0;
+  let collectTimer: ReturnType<typeof setTimeout> | undefined;
+  let displayTimer: ReturnType<typeof setTimeout> | undefined;
+  let waitingTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingActivity: { summary: string; priority: 'model' | 'tool' } | undefined;
 
-  const setSummary = (summary: string) => {
+  const showActivity = (summary: string, priority: 'model' | 'tool') => {
     const next = summary.trim() || '等待模型响应';
     if (next === lastSummary) return;
     lastSummary = next;
+    lastPriority = priority;
+    displayedAt = Date.now();
+    pendingActivity = undefined;
+    if (displayTimer) clearTimeout(displayTimer);
+    displayTimer = undefined;
     options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary: next });
+  };
+  const offerActivity = (summary: string, priority: 'model' | 'tool') => {
+    const next = summary.trim();
+    if (!next || next === lastSummary) return;
+
+    const toolInterrupt = priority === 'tool' && lastPriority !== 'tool';
+    const remaining = MIN_ACTIVITY_VISIBLE_MS - (Date.now() - displayedAt);
+    if (!lastSummary || toolInterrupt || remaining <= 0) {
+      showActivity(next, priority);
+      return;
+    }
+
+    // Never let a lower-priority model update replace a queued tool batch.
+    if (pendingActivity?.priority === 'tool' && priority === 'model') return;
+    pendingActivity = { summary: next, priority };
+    if (displayTimer) return;
+    displayTimer = setTimeout(() => {
+      displayTimer = undefined;
+      const pending = pendingActivity;
+      if (pending) showActivity(pending.summary, pending.priority);
+    }, remaining);
+    displayTimer.unref?.();
   };
   const publishActivity = () => {
     if (toolCalls.length > 0) {
-      setSummary(summarizeToolBatch(toolCalls));
+      offerActivity(summarizeToolBatch(toolCalls), 'tool');
       return;
     }
     const textSummary = summarizeLastLine(assistantText);
     if (textSummary) {
-      setSummary(formatAssistantActivity(textSummary));
+      offerActivity(formatAssistantActivity(textSummary), 'model');
       return;
     }
     const thinkingSummary = summarizeLastLine(thinkingText);
-    setSummary(thinkingSummary || '等待模型响应');
+    if (thinkingSummary) offerActivity(thinkingSummary, 'model');
   };
   const scheduleActivity = () => {
-    if (updateTimer) return;
-    updateTimer = setTimeout(() => {
-      updateTimer = undefined;
+    if (waitingTimer) clearTimeout(waitingTimer);
+    waitingTimer = undefined;
+    if (collectTimer) return;
+    collectTimer = setTimeout(() => {
+      collectTimer = undefined;
       publishActivity();
-    }, ACTIVITY_UPDATE_INTERVAL_MS);
-    updateTimer.unref?.();
+    }, TOOL_BATCH_WINDOW_MS);
+    collectTimer.unref?.();
   };
   const flushActivity = () => {
-    if (updateTimer) clearTimeout(updateTimer);
-    updateTimer = undefined;
+    if (collectTimer) clearTimeout(collectTimer);
+    collectTimer = undefined;
     publishActivity();
   };
-  const resetIteration = (showWaiting: boolean) => {
+  const resetIteration = () => {
     thinkingText = '';
     assistantText = '';
     toolCalls = [];
-    if (showWaiting) setSummary('等待模型响应');
   };
 
   options.child.onText = (text) => {
@@ -575,12 +610,18 @@ function attachSubagentActivityTracking(options: {
   options.child.onToolResult = (name, result, id) => {
     previousOnToolResult?.(name, result, id);
   };
-  resetIteration(true);
+  waitingTimer = setTimeout(() => {
+    waitingTimer = undefined;
+    if (!thinkingText && !assistantText && toolCalls.length === 0) {
+      offerActivity('等待模型响应', 'model');
+    }
+  }, WAITING_DELAY_MS);
+  waitingTimer.unref?.();
   return {
     onIterationComplete: () => {
       // Keep the last useful status visible while the next model iteration starts.
       flushActivity();
-      resetIteration(false);
+      resetIteration();
       return undefined;
     },
   };

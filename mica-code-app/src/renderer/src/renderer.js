@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import '../assets/main.css'
 import { iconHtml } from './icons.js'
@@ -15,7 +16,7 @@ const emptyStateEl = document.getElementById('empty-state')
 const filesViewEl = document.getElementById('files-view')
 const gitCompareViewEl = document.getElementById('git-compare-view')
 
-/** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean }>} */
+/** @type {Map<string, { term: Terminal, fit: FitAddon, el: HTMLElement, ready: boolean, lastPtySize: string | null }>} */
 const terminals = new Map()
 /** @type {Map<string, { unread: boolean, running: boolean, lastType?: string | null, lastEventAt?: number | null }>} */
 const unreadStates = new Map()
@@ -55,6 +56,8 @@ function scheduleSave() {
 
 function setSidebarCollapsed(collapsed, { persist = true } = {}) {
   const toggle = document.getElementById('sidebar-toggle')
+  terminalFitSuspended = true
+  clearTimeout(sidebarResizeTimer)
   appEl.classList.toggle('is-sidebar-collapsed', collapsed)
   toggle.setAttribute('aria-expanded', String(!collapsed))
   toggle.title = collapsed ? '展开侧栏' : '收起侧栏'
@@ -62,12 +65,12 @@ function setSidebarCollapsed(collapsed, { persist = true } = {}) {
   if (persist) localStorage.setItem('mica.sidebarCollapsed', String(collapsed))
 
   requestAnimationFrame(() => {
-    fitActiveTerminal()
     gitCompare?.layout()
     fileEditor?.layout()
   })
-  window.setTimeout(() => {
-    fitActiveTerminal()
+  sidebarResizeTimer = window.setTimeout(() => {
+    terminalFitSuspended = false
+    scheduleFitActiveTerminal()
     gitCompare?.layout()
     fileEditor?.layout()
   }, 180)
@@ -152,7 +155,7 @@ function setActiveView(view) {
     refreshGit().catch((error) => console.error(error))
     requestAnimationFrame(() => gitCompare?.layout())
   } else {
-    requestAnimationFrame(() => fitActiveTerminal())
+    scheduleFitActiveTerminal({ focus: true })
   }
 }
 
@@ -222,6 +225,15 @@ function ensureTerminalView(id) {
   el.dataset.id = id
   hostEl.appendChild(el)
 
+  const windowsBuildNumber = window.mica.windowsBuildNumber
+  const windowsPty =
+    window.mica.platform === 'win32' && Number.isInteger(windowsBuildNumber)
+      ? {
+          backend: windowsBuildNumber >= 18309 ? 'conpty' : 'winpty',
+          buildNumber: windowsBuildNumber
+        }
+      : null
+
   const term = new Terminal({
     cursorBlink: true,
     fontSize: 13,
@@ -249,13 +261,17 @@ function ensureTerminalView(id) {
       brightCyan: '#2dd4bf',
       brightWhite: '#ffffff'
     },
-    allowProposedApi: true
+    allowProposedApi: true,
+    ...(windowsPty ? { windowsPty } : {})
   })
   const fit = new FitAddon()
+  const unicode11 = new Unicode11Addon()
   term.loadAddon(fit)
+  term.loadAddon(unicode11)
+  term.unicode.activeVersion = '11'
   term.open(el)
 
-  entry = { term, fit, el, ready: false }
+  entry = { term, fit, el, ready: false, lastPtySize: null }
   terminals.set(id, entry)
 
   term.onData((data) => {
@@ -344,6 +360,9 @@ function ensureTerminalView(id) {
 
     if (mod && !event.altKey && !event.shiftKey && (key === 'k' || key === 'l')) {
       term.clear()
+      window.mica.terminal.clear(id).catch((error) => {
+        console.error('clear terminal failed', error)
+      })
       return false
     }
 
@@ -377,15 +396,17 @@ async function activateTerminal(id) {
     const sessionId = tree?.getNode(id)?.sessionId || null
     let initialDimensions = null
     try {
-      // The view is visible at this point, so fit it before spawning the PTY.
-      // This prevents full-screen/interactive programs from drawing once at the
-      // PTY default of 80x24 and leaving artifacts after the first resize.
-      entry.fit.fit()
-      initialDimensions = entry.fit.proposeDimensions()
+      // A terminal can be selected while the Files or Git view is active. Only
+      // measure visible content; FitAddon clamps a hidden view to 2x1, which
+      // would make interactive programs render at that unusable size.
+      if (isTerminalMeasurable(entry)) {
+        entry.fit.fit()
+        initialDimensions = { cols: entry.term.cols, rows: entry.term.rows }
+      }
     } catch (error) {
       console.error(error)
     }
-    await window.mica.terminal.create({
+    const result = await window.mica.terminal.create({
       id,
       ...(cwd ? { cwd } : {}),
       ...(sessionId ? { resumeSessionId: sessionId } : {}),
@@ -394,29 +415,15 @@ async function activateTerminal(id) {
         : {})
     })
     entry.ready = true
-    requestAnimationFrame(() => {
-      try {
-        entry.fit.fit()
-        const dims = entry.fit.proposeDimensions()
-        if (dims?.cols && dims?.rows) {
-          window.mica.terminal.resize(id, dims.cols, dims.rows)
-        }
-      } catch (error) {
-        console.error(error)
-      }
-      entry.term.focus()
-      maybeMarkActiveRead('activate')
-    })
+    entry.lastPtySize =
+      !result?.reused && initialDimensions
+        ? `${initialDimensions.cols}x${initialDimensions.rows}`
+        : null
+    scheduleFitActiveTerminal({ focus: true })
   } else {
-    requestAnimationFrame(() => {
-      try {
-        entry.fit.fit()
-      } catch {
-        // ignore
-      }
-      entry.term.focus()
-      maybeMarkActiveRead('activate')
-    })
+    // The terminal may have been in the background while the window changed
+    // size. Fit xterm and synchronize the PTY as one operation.
+    scheduleFitActiveTerminal({ focus: true })
   }
 
   scheduleSave()
@@ -682,19 +689,85 @@ function bindWorkspaceTabs() {
   })
 }
 
-function fitActiveTerminal() {
-  if (!activeId) return
-  const entry = terminals.get(activeId)
-  if (!entry) return
+function isTerminalMeasurable(entry) {
+  return (
+    activeView === 'terminal' &&
+    !hostEl.hidden &&
+    entry?.el.classList.contains('active') &&
+    hostEl.clientWidth > 0 &&
+    hostEl.clientHeight > 0 &&
+    entry.el.clientWidth > 0 &&
+    entry.el.clientHeight > 0
+  )
+}
+
+function syncTerminalPtySize(id, entry) {
+  if (!entry.ready) return
+  const cols = entry.term.cols
+  const rows = entry.term.rows
+  if (cols < 2 || rows < 1) return
+
+  const size = `${cols}x${rows}`
+  if (entry.lastPtySize === size) return
+  entry.lastPtySize = size
+  window.mica.terminal
+    .resize(id, cols, rows)
+    .then((resized) => {
+      if (!resized && entry.lastPtySize === size) entry.lastPtySize = null
+    })
+    .catch((error) => {
+      if (entry.lastPtySize === size) entry.lastPtySize = null
+      console.error('resize terminal failed', error)
+    })
+}
+
+function fitActiveTerminal({ focus = false } = {}) {
+  const id = activeId
+  if (!id) return
+  const entry = terminals.get(id)
+  if (!entry || !isTerminalMeasurable(entry)) return
   try {
     entry.fit.fit()
-    const dims = entry.fit.proposeDimensions()
-    if (dims?.cols && dims?.rows) {
-      window.mica.terminal.resize(activeId, dims.cols, dims.rows)
+    syncTerminalPtySize(id, entry)
+    if (focus && id === activeId) {
+      entry.term.focus()
+      maybeMarkActiveRead('activate')
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    console.error('fit terminal failed', error)
   }
+}
+
+let fitAnimationFrame = null
+let focusAfterFit = false
+let terminalFitSuspended = false
+let sidebarResizeTimer = null
+
+function scheduleFitActiveTerminal({ focus = false } = {}) {
+  focusAfterFit ||= focus
+  if (terminalFitSuspended) return
+  if (fitAnimationFrame !== null) return
+  fitAnimationFrame = requestAnimationFrame(() => {
+    fitAnimationFrame = null
+    if (terminalFitSuspended) return
+    const shouldFocus = focusAfterFit
+    focusAfterFit = false
+    fitActiveTerminal({ focus: shouldFocus })
+  })
+}
+
+function bindDevicePixelRatioChanges() {
+  let mediaQuery = null
+  const onChange = () => {
+    bind()
+    scheduleFitActiveTerminal()
+  }
+  const bind = () => {
+    mediaQuery?.removeEventListener('change', onChange)
+    mediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+    mediaQuery.addEventListener('change', onChange, { once: true })
+  }
+  bind()
 }
 
 function getNotificationAudioContext() {
@@ -862,14 +935,16 @@ async function bootstrap() {
     const entry = terminals.get(id)
     if (entry) {
       entry.ready = false
+      entry.lastPtySize = null
       entry.term.writeln('\r\n[process exited]')
     }
   })
 
-  window.addEventListener('resize', () => fitActiveTerminal())
+  window.addEventListener('resize', () => scheduleFitActiveTerminal())
 
-  const resizeObserver = new ResizeObserver(() => fitActiveTerminal())
+  const resizeObserver = new ResizeObserver(() => scheduleFitActiveTerminal())
   resizeObserver.observe(hostEl)
+  bindDevicePixelRatioChanges()
 
   const preferred = workspace.activeId
   const all = tree.getJson()

@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import os from 'os'
 
 const terminalApi = {
   create: (payload) => ipcRenderer.invoke('terminal:create', payload),
   write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+  clear: (id) => ipcRenderer.invoke('terminal:clear', { id }),
   getCwd: (id) => ipcRenderer.invoke('terminal:get-cwd', { id }),
   dispose: (id) => ipcRenderer.invoke('terminal:dispose', { id }),
   disposeAll: () => ipcRenderer.invoke('terminal:dispose-all'),
@@ -65,5 +67,7 @@ contextBridge.exposeInMainWorld('mica', {
   app: appApi,
   files: filesApi,
   git: gitApi,
-  platform: process.platform
+  platform: process.platform,
+  windowsBuildNumber:
+    process.platform === 'win32' ? Number.parseInt(os.release().split('.')[2], 10) || null : null
 })
