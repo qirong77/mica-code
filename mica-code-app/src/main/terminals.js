@@ -1,10 +1,14 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog, ipcMain, shell } from 'electron'
 import os from 'os'
 import { existsSync, readlinkSync, statSync } from 'fs'
+import { stat } from 'fs/promises'
 import { execFile } from 'child_process'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import pty from 'node-pty'
 
 const sessions = new Map()
+const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
 let notifyServer = null
 
 /** 访问被系统拒绝的 cwd 冷却，避免每次建终端都再次触发桌面/文稿权限弹窗 */
@@ -34,6 +38,115 @@ function readProcessCwd(pid, fallback) {
   }
 
   return Promise.resolve(fallback)
+}
+
+async function readSessionCwd(session) {
+  if (session.reportedCwd) return session.cwd
+  if (session.resolvedCwd && Date.now() - session.resolvedCwdAt < 1000) {
+    return session.resolvedCwd
+  }
+  if (session.cwdLookup) return session.cwdLookup
+
+  session.cwdLookup = readProcessCwd(session.term.pid, session.cwd)
+    .then((cwd) => {
+      session.resolvedCwd = cwd
+      session.resolvedCwdAt = Date.now()
+      return cwd
+    })
+    .finally(() => {
+      session.cwdLookup = null
+    })
+  return session.cwdLookup
+}
+
+function updateSessionCwdFromOutput(session, data) {
+  const input = `${session.oscCwdBuffer || ''}${data}`.slice(-8192)
+  // OSC sequences necessarily contain terminal control characters.
+  // eslint-disable-next-line no-control-regex
+  const pattern = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g
+  let consumedThrough = 0
+  let match
+
+  while ((match = pattern.exec(input))) {
+    consumedThrough = pattern.lastIndex
+    try {
+      const url = new URL(match[1])
+      if (url.protocol !== 'file:') continue
+      let cwd = decodeURIComponent(url.pathname)
+      if (process.platform === 'win32' && /^\/[A-Za-z]:\//.test(cwd)) cwd = cwd.slice(1)
+      session.cwd = path.normalize(cwd)
+      session.resolvedCwd = session.cwd
+      session.resolvedCwdAt = Date.now()
+      session.reportedCwd = true
+    } catch {
+      // Ignore malformed shell integration sequences.
+    }
+  }
+
+  session.oscCwdBuffer = consumedThrough ? input.slice(consumedThrough) : input.slice(-1024)
+}
+
+function normalizeLinkPath(value, cwd) {
+  if (typeof value !== 'string') return null
+  let target = value.trim()
+  if (!target || target.length > 4096 || target.includes('\0')) return null
+
+  try {
+    if (target.startsWith('file://')) target = fileURLToPath(target)
+  } catch {
+    return null
+  }
+
+  if (target === '~') {
+    target = os.homedir()
+  } else if (target.startsWith('~/') || target.startsWith('~\\')) {
+    target = path.join(os.homedir(), target.slice(2))
+  }
+
+  return path.normalize(path.isAbsolute(target) ? target : path.resolve(cwd, target))
+}
+
+async function resolveTerminalLinkPath(session, value) {
+  const cwd = await readSessionCwd(session)
+  const absolutePath = normalizeLinkPath(value, cwd)
+  if (!absolutePath) return null
+
+  try {
+    const stats = await stat(absolutePath)
+    if (!stats.isFile() && !stats.isDirectory()) return null
+    return { path: absolutePath, directory: stats.isDirectory() }
+  } catch {
+    return null
+  }
+}
+
+function openFileByVsCode(filePath) {
+  if (!existsSync(VSCODE_APP_PATH)) {
+    dialog.showErrorBox('未找到编辑器', '未检测到 Visual Studio Code，请先安装')
+    return Promise.resolve(false)
+  }
+
+  return new Promise((resolve) => {
+    execFile('open', ['-a', VSCODE_APP_PATH, filePath], (error) => {
+      if (error) {
+        dialog.showErrorBox('打开失败', error.message)
+        resolve(false)
+        return
+      }
+      resolve(true)
+    })
+  })
+}
+
+function assertMainFrame(event) {
+  if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) {
+    throw new Error('IPC request must come from the main frame')
+  }
+}
+
+function assertSessionOwner(event, session) {
+  assertMainFrame(event)
+  if (event.sender !== session.sender) throw new Error('Terminal session access denied')
 }
 
 function getDefaultShell() {
@@ -128,6 +241,7 @@ function createPty(id, sender, options = {}) {
   }
 
   term.onData((data) => {
+    updateSessionCwdFromOutput(session, data)
     if (!sender.isDestroyed()) {
       sender.send('terminal:data', { id, data })
     }
@@ -189,7 +303,43 @@ export function registerTerminalIpc() {
   ipcMain.handle('terminal:get-cwd', async (_event, { id } = {}) => {
     const session = sessions.get(id)
     if (!session) return null
-    return readProcessCwd(session.term.pid, session.cwd)
+    return readSessionCwd(session)
+  })
+
+  ipcMain.handle('terminal:resolve-file-links', async (event, { id, paths } = {}) => {
+    const session = sessions.get(id)
+    if (!session || !Array.isArray(paths)) return []
+    assertSessionOwner(event, session)
+
+    const candidates = [...new Set(paths.filter((value) => typeof value === 'string').slice(0, 50))]
+    const resolved = await Promise.all(
+      candidates.map(async (value) => ({
+        value,
+        result: await resolveTerminalLinkPath(session, value)
+      }))
+    )
+    return resolved.filter((item) => item.result).map((item) => item.value)
+  })
+
+  ipcMain.handle('terminal:open-external', async (event, { url } = {}) => {
+    assertMainFrame(event)
+    if (typeof url !== 'string' || url.length > 8192) throw new Error('Invalid URL')
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Only HTTP and HTTPS links can be opened')
+    }
+    await shell.openExternal(parsed.toString())
+    return true
+  })
+
+  ipcMain.handle('terminal:open-file', async (event, payload = {}) => {
+    const session = sessions.get(payload.id)
+    if (!session) throw new Error('Terminal session not found')
+    assertSessionOwner(event, session)
+    const resolved = await resolveTerminalLinkPath(session, payload.path)
+    if (!resolved) throw new Error('File does not exist')
+
+    return openFileByVsCode(resolved.path)
   })
 
   ipcMain.handle('terminal:dispose', (_event, { id }) => {

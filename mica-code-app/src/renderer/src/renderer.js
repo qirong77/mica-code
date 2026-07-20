@@ -1,6 +1,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import '../assets/main.css'
 import { iconHtml } from './icons.js'
@@ -8,6 +9,7 @@ import { FileEditorView } from './file-editor.js'
 import { FileTree } from './file-tree.js'
 import { GitCompareView } from './git-compare.js'
 import { QuickSearch } from './quick-search.js'
+import { createFileLinkProvider, openWebLink } from './terminal-links.js'
 
 const treeHost = document.getElementById('session-tree')
 const appEl = document.getElementById('app')
@@ -266,10 +268,13 @@ function ensureTerminalView(id) {
   })
   const fit = new FitAddon()
   const unicode11 = new Unicode11Addon()
+  const webLinks = new WebLinksAddon((event, url) => openWebLink(event, url, window.mica.platform))
   term.loadAddon(fit)
   term.loadAddon(unicode11)
+  term.loadAddon(webLinks)
   term.unicode.activeVersion = '11'
   term.open(el)
+  term.registerLinkProvider(createFileLinkProvider(term, id, window.mica.platform))
 
   entry = { term, fit, el, ready: false, lastPtySize: null }
   terminals.set(id, entry)

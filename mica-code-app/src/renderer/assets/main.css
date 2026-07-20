@@ -379,11 +379,12 @@ input:focus {
 }
 
 .workspace-tabs {
+  margin-bottom: 2px;
+  padding: 0;
   display: flex;
   align-items: stretch;
   height: 36px;
   flex-shrink: 0;
-  padding: 0 10px;
   border-bottom: 1px solid var(--ui-stroke-secondary);
   background: var(--terminal-bg);
 }
@@ -1129,7 +1130,6 @@ input:focus {
 
 .terminal-view .xterm {
   height: 100%;
-  padding: 8px 10px;
 }
 
 .empty-state {

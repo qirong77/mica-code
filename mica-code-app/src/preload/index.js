@@ -7,6 +7,10 @@ const terminalApi = {
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
   clear: (id) => ipcRenderer.invoke('terminal:clear', { id }),
   getCwd: (id) => ipcRenderer.invoke('terminal:get-cwd', { id }),
+  resolveFileLinks: (id, paths) => ipcRenderer.invoke('terminal:resolve-file-links', { id, paths }),
+  openExternal: (url) => ipcRenderer.invoke('terminal:open-external', { url }),
+  openFile: (id, path, line, column) =>
+    ipcRenderer.invoke('terminal:open-file', { id, path, line, column }),
   dispose: (id) => ipcRenderer.invoke('terminal:dispose', { id }),
   disposeAll: () => ipcRenderer.invoke('terminal:dispose-all'),
   onData: (callback) => {
