@@ -91,6 +91,8 @@ export interface MicaUiDropdownItem {
   suffix?: { text: string; color?: string };
   commandName?: string;
   insertText?: string;
+  cursorOffset?: number;
+  kind?: 'file';
 }
 
 export interface MicaUiDropdownState {
@@ -99,6 +101,7 @@ export interface MicaUiDropdownState {
   selectedIndex: number;
   title?: string;
   emptyMessage?: string;
+  kind?: 'file';
 }
 
 export type MicaUiConversationMessage =

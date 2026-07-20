@@ -2,6 +2,12 @@ import type { MicaUiDropdownItem } from '../../types.js';
 import { DropDownSelect } from './DropDownSelect.js';
 import { state, selection } from './state.js';
 import { showQuickCommands, hideQuickCommands, handleDropdownKey, setSelectEmitter } from './quickCommandHandler.js';
+import {
+  hideFileMentions,
+  showFileMentionError,
+  showFileMentionLoading,
+  showFileMentions,
+} from './fileMentionHandler.js';
 
 const _selectHandlers: Array<(item: MicaUiDropdownItem) => void> = [];
 setSelectEmitter((item: MicaUiDropdownItem) => {
@@ -19,4 +25,10 @@ export const DropDownUI = {
   },
   atomData: { dropdown: state, selection },
   quickCommand: { show: showQuickCommands, hide: hideQuickCommands, handleKey: handleDropdownKey },
+  fileMention: {
+    showLoading: showFileMentionLoading,
+    show: showFileMentions,
+    showError: showFileMentionError,
+    hide: hideFileMentions,
+  },
 };

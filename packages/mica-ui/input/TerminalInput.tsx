@@ -29,6 +29,17 @@ interface YogaNodeLike {
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
 const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送';
 
+function activeFileMention(value: string, cursorOffset: number): { start: number; query: string } | null {
+  const beforeCursor = value.slice(0, cursorOffset);
+  const match = beforeCursor.match(/@([^\s@]*)$/u);
+  if (!match) return null;
+  return { start: beforeCursor.length - match[0].length, query: match[1] ?? '' };
+}
+
+function mentionPath(path: string): string {
+  return /[\s"]/u.test(path) ? JSON.stringify(path) : path;
+}
+
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -47,6 +58,7 @@ function TerminalInput() {
     inputBoxRef.current = el;
   }, []);
   const exitConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileMentionRequestRef = useRef(0);
   const exitConfirmExpiresAtRef = useRef(0);
   const [exitConfirmText, setExitConfirmText] = useState('');
   const lastCtrlCHandledAtRef = useRef(0);
@@ -83,25 +95,74 @@ function TerminalInput() {
   const preserveInputOnPluginHandle = activePluginUIs.some((ui) => ui.preserveInput);
   const hasActiveInputPlugin = activePluginUIs.some((ui) => ui.onInput);
   const isCommandInput = localText.trimStart().startsWith('/');
-  const quickCommandDropdown = useScheduleState(DropDownUI.atomData.dropdown);
-  const quickCommandVisible = quickCommandDropdown.visible;
-  const selectedQuickCommand = quickCommandDropdown.items[quickCommandDropdown.selectedIndex];
+  const dropdown = useScheduleState(DropDownUI.atomData.dropdown);
+  const dropdownVisible = dropdown.visible;
+  const fileMentionVisible = dropdownVisible && dropdown.kind === 'file';
+  const quickCommandVisible = dropdownVisible && !fileMentionVisible;
+  const selectedQuickCommand = dropdown.items[dropdown.selectedIndex];
   const quickCommandSuggestion =
     quickCommandVisible && selectedQuickCommand?.insertText?.startsWith(localText)
       ? selectedQuickCommand.insertText
       : undefined;
+  const fileMention =
+    !isCommandInput && !hasActiveInputPlugin && input.hasFileMentionProvider()
+      ? activeFileMention(localText, cursorOffset)
+      : null;
 
   React.useEffect(() => {
     return DropDownUI.onSelect((item) => {
       if (!item.insertText) return;
       const nextText = item.insertText;
-      setLocalText(nextText);
-      setCursorOffset(nextText.length);
       input.text.set(nextText);
-      if (nextText.startsWith('/')) DropDownUI.quickCommand.show(nextText.slice(1));
+      setLocalText(nextText);
+      setCursorOffset(item.cursorOffset ?? nextText.length);
+      if (item.kind === 'file') DropDownUI.fileMention.hide();
+      else if (nextText.startsWith('/')) DropDownUI.quickCommand.show(nextText.slice(1));
       else DropDownUI.quickCommand.hide();
     });
   }, []);
+
+  React.useEffect(() => {
+    const request = ++fileMentionRequestRef.current;
+    if (!fileMention) {
+      DropDownUI.fileMention.hide();
+      return;
+    }
+
+    DropDownUI.fileMention.showLoading();
+    const timer = setTimeout(
+      () => {
+        void input
+          .findFileMentions(fileMention.query)
+          .then((items) => {
+            if (request !== fileMentionRequestRef.current) return;
+            const dropdownItems = items.map((item) => {
+              const inserted = `@${mentionPath(item.path)} `;
+              const insertText =
+                localText.slice(0, fileMention.start) + inserted + localText.slice(cursorOffset);
+              return {
+                key: `file:${item.path}`,
+                label: item.label ?? item.path.split('/').at(-1) ?? item.path,
+                description: item.description,
+                insertText,
+                cursorOffset: fileMention.start + inserted.length,
+                kind: 'file' as const,
+              };
+            });
+            DropDownUI.fileMention.show(dropdownItems);
+          })
+          .catch(() => {
+            if (request === fileMentionRequestRef.current) DropDownUI.fileMention.showError();
+          });
+      },
+      fileMention.query ? 100 : 0,
+    );
+
+    return () => {
+      clearTimeout(timer);
+      if (fileMentionRequestRef.current === request) fileMentionRequestRef.current += 1;
+    };
+  }, [cursorOffset, fileMention?.query, fileMention?.start, localText]);
 
   React.useEffect(() => {
     return input.text.subscribe((text) => {
@@ -132,6 +193,7 @@ function TerminalInput() {
     !inputDisabled &&
     !hasActiveInputPlugin &&
     !isCommandInput &&
+    !dropdownVisible &&
     localText.trim().length > 0 &&
     cursorOffset === localText.length;
 
@@ -203,7 +265,7 @@ function TerminalInput() {
       return;
     }
 
-    if (key.tab && key.shift && !hasActiveInputPlugin && !quickCommandVisible) {
+    if (key.tab && key.shift && !hasActiveInputPlugin && !dropdownVisible) {
       event?.preventDefault?.();
       event?.stopImmediatePropagation?.();
       input.cycleRole();

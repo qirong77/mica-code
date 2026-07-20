@@ -140,6 +140,7 @@ export type {
 } from './primitives/index.js';
 export type { MessageItem } from './panels/MessageBar.js';
 export type { MicaUiPendingInputQueueMode } from './conversation/state.js';
+export type { TerminalFileMentionItem, TerminalFileMentionProvider } from './input/state.js';
 export type {
   MicaUiWorkingStatus,
   MicaUiDropdownItem,

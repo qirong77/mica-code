@@ -27,6 +27,7 @@ import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
+import { findFileMentions } from './fileMentionProvider.js';
 import setupFilePlugins, { writeFilePluginStatus } from '../../buildin-plugins/file-plugins.mjs';
 import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
 import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
@@ -56,6 +57,7 @@ export class Application {
     const sessionStore = micaSession.createStore();
     const startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     seedStartupModelDisplay(startupSession);
+    micaUi.terminalInput.setFileMentionProvider((query) => findFileMentions(process.cwd(), query));
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
     });
@@ -219,6 +221,7 @@ export class Application {
 
   private async stopOnce(): Promise<void> {
     micaUi.terminalInput.setOnExitRequested(null);
+    micaUi.terminalInput.setFileMentionProvider(null);
     this.context?.uiBridge.stop();
     const runtimeStop = this.context?.runtime.stop();
     const subagentTasks = this.subagentTasks;

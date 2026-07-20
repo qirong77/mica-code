@@ -192,7 +192,7 @@ export function SessionTree({
               <span
                 className={`size-1.75 shrink-0 rounded-full ring-2 ${
                   state.lastType === 'turn.completed'
-                    ? 'bg-[#55a583] ring-[#55a583]/15'
+                    ? 'bg-[#5aa9ff] ring-[#5aa9ff]/20'
                     : state.lastType === 'turn.aborted'
                       ? 'bg-[#c08532] ring-[#c08532]/15'
                       : 'bg-[#e75e78] ring-[#e75e78]/15'

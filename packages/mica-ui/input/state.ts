@@ -7,6 +7,14 @@ export type TerminalInputSubmitOptions = {
   displayText?: string;
 };
 
+export interface TerminalFileMentionItem {
+  path: string;
+  label?: string;
+  description?: string;
+}
+
+export type TerminalFileMentionProvider = (query: string) => Promise<TerminalFileMentionItem[]>;
+
 type SubmitHandler = (text: string, options?: TerminalInputSubmitOptions) => void;
 type SubmitEvent = { text: string; options?: TerminalInputSubmitOptions };
 type Events = { submit: SubmitEvent };
@@ -15,6 +23,7 @@ const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>(
 type ExitRequestedHandler = (exitCode: number) => void | Promise<void>;
 let exitRequestedHandler: ExitRequestedHandler | null = null;
 let cycleRoleHandler: (() => void) | null = null;
+let fileMentionProvider: TerminalFileMentionProvider | null = null;
 
 export const text = atom('');
 export const disabled = atom(false);
@@ -74,4 +83,16 @@ export function setOnCycleRole(cb: (() => void) | null): void {
 
 export function cycleRole(): void {
   cycleRoleHandler?.();
+}
+
+export function setFileMentionProvider(provider: TerminalFileMentionProvider | null): void {
+  fileMentionProvider = provider;
+}
+
+export function hasFileMentionProvider(): boolean {
+  return fileMentionProvider !== null;
+}
+
+export function findFileMentions(query: string): Promise<TerminalFileMentionItem[]> {
+  return fileMentionProvider?.(query) ?? Promise.resolve([]);
 }

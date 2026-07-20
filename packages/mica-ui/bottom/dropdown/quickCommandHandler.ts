@@ -31,7 +31,7 @@ export function showQuickCommands(query: string): void {
 
 export function hideQuickCommands(): void {
   const s = state.get();
-  if (!s.visible) return;
+  if (!s.visible || s.kind === 'file') return;
   closeAndClear();
 }
 
