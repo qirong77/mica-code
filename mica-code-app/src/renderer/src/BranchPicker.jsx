@@ -185,7 +185,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-[min(760px,calc(100vw-32px))] overflow-hidden rounded-md border border-white/15 bg-[#202021]/98 shadow-[0_18px_70px_rgba(0,0,0,.55)]"
+        className="flex max-h-[calc(100vh-92px)] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden rounded-md border border-white/15 bg-[#202021]/98 shadow-[0_18px_70px_rgba(0,0,0,.55)]"
       >
         <div className="border-b border-white/10 p-2.5">
           <input
@@ -240,7 +240,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
           </div>
         )}
 
-        <div role="listbox" className="max-h-[62vh] overflow-y-auto p-1.5">
+        <div role="listbox" className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">
           {loading && (
             <p className="px-2.5 py-5 text-center text-xs text-white/35">正在读取 Git 分支…</p>
           )}
@@ -269,7 +269,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
                   {item.type === 'action' ? (
                     <>
                       <Icon size={16} className="shrink-0" />
-                      <span className="text-[13px] font-medium">{item.label}</span>
+                      <span className="min-w-0 truncate text-[13px] font-medium">{item.label}</span>
                     </>
                   ) : (
                     <RefRow item={item} />

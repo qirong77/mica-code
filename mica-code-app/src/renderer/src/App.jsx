@@ -639,7 +639,7 @@ export default function App() {
               <span className="grid size-6 shrink-0 place-items-center rounded-[5px] bg-[#1677ff] text-sm font-bold text-white">
                 M
               </span>
-              <span className="text-[13px] font-semibold text-white/95">Mica Code</span>
+              <span className="text-[13px] font-semibold text-white/95"></span>
             </div>
             <div className="flex gap-0.5">
               <button
