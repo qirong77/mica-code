@@ -1,6 +1,7 @@
 import { AgentMaxTurnsError, type ModelClientOptions } from '@packages/mica-agent/index.js';
 import { isEffortOption, type EffortOption } from '@packages/mica-config/index.js';
 import { micaTools, MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { basename } from 'node:path';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import {
   buildSubagentSystemPrompt,
@@ -309,13 +310,18 @@ export class ToolAgent extends MicaTool {
               taskId: taskId || task.id,
               owner: parentAgent,
               taskManager: this.taskManager,
-            });
-            const result = await child.query(delegatedPrompt, {
               signal,
-              maxTurns: definition.maxTurns,
-              onIterationComplete: activityTracking.onIterationComplete,
             });
-            return { result, usage: summarizeSubagentUsage(child.usageHistory) };
+            try {
+              const result = await child.query(delegatedPrompt, {
+                signal,
+                maxTurns: definition.maxTurns,
+                onIterationComplete: activityTracking.onIterationComplete,
+              });
+              return { result, usage: summarizeSubagentUsage(child.usageHistory) };
+            } finally {
+              activityTracking.dispose();
+            }
           } finally {
             if (taskId) {
               this.taskManager.clearActivities(taskId, parentAgent);
@@ -384,6 +390,7 @@ export class ToolAgent extends MicaTool {
       taskId: tracked.task.id,
       owner: parentAgent,
       taskManager: this.taskManager,
+      signal,
     });
     const execution = (async () => {
       try {
@@ -412,6 +419,7 @@ export class ToolAgent extends MicaTool {
           status: 'partial',
         });
       } finally {
+        activityTracking.dispose();
         this.taskManager.clearActivities(tracked.task.id, parentAgent);
         this.pathLeases.release(tracked.task.id);
       }
@@ -504,17 +512,17 @@ function attachSubagentActivityTracking(options: {
   taskId: string;
   owner: AgentRuntime;
   taskManager: SubagentTaskManager;
-}): { onIterationComplete: () => undefined } {
+  signal?: AbortSignal;
+}): { onIterationComplete: () => undefined; dispose: () => void } {
   const TOOL_BATCH_WINDOW_MS = 180;
   const MIN_ACTIVITY_VISIBLE_MS = 800;
   const WAITING_DELAY_MS = 400;
+  const RESPONSE_DELAY_MS = 400;
   const activityId = 'current-iteration';
   const previousOnText = options.child.onText;
   const previousOnThinking = options.child.onThinking;
   const previousOnToolCall = options.child.onToolCall;
   const previousOnToolResult = options.child.onToolResult;
-  let thinkingText = '';
-  let assistantText = '';
   let toolCalls: Array<{ name: string; args: string }> = [];
   let lastSummary = '';
   let lastPriority: 'model' | 'tool' = 'model';
@@ -522,11 +530,20 @@ function attachSubagentActivityTracking(options: {
   let collectTimer: ReturnType<typeof setTimeout> | undefined;
   let displayTimer: ReturnType<typeof setTimeout> | undefined;
   let waitingTimer: ReturnType<typeof setTimeout> | undefined;
+  let waitingTickTimer: ReturnType<typeof setTimeout> | undefined;
+  let responseTimer: ReturnType<typeof setTimeout> | undefined;
+  let waitingStartedAt = 0;
+  let disposed = false;
   let pendingActivity: { summary: string; priority: 'model' | 'tool' } | undefined;
 
   const showActivity = (summary: string, priority: 'model' | 'tool') => {
-    const next = summary.trim() || '等待模型响应';
-    if (next === lastSummary) return;
+    const next = summary.trim() || 'Working…';
+    if (next === lastSummary) {
+      pendingActivity = undefined;
+      if (displayTimer) clearTimeout(displayTimer);
+      displayTimer = undefined;
+      return;
+    }
     lastSummary = next;
     lastPriority = priority;
     displayedAt = Date.now();
@@ -534,6 +551,13 @@ function attachSubagentActivityTracking(options: {
     if (displayTimer) clearTimeout(displayTimer);
     displayTimer = undefined;
     options.taskManager.setActivity(options.taskId, options.owner, { id: activityId, summary: next });
+  };
+  const showModelPhase = (summary: string) => {
+    if (disposed) return;
+    pendingActivity = undefined;
+    if (displayTimer) clearTimeout(displayTimer);
+    displayTimer = undefined;
+    showActivity(summary, 'model');
   };
   const offerActivity = (summary: string, priority: 'model' | 'tool') => {
     const next = summary.trim();
@@ -557,52 +581,98 @@ function attachSubagentActivityTracking(options: {
     }, remaining);
     displayTimer.unref?.();
   };
-  const publishActivity = () => {
-    if (toolCalls.length > 0) {
-      offerActivity(summarizeToolBatch(toolCalls), 'tool');
-      return;
-    }
-    const textSummary = summarizeLastLine(assistantText);
-    if (textSummary) {
-      offerActivity(formatAssistantActivity(textSummary), 'model');
-      return;
-    }
-    const thinkingSummary = summarizeLastLine(thinkingText);
-    if (thinkingSummary) offerActivity(thinkingSummary, 'model');
+  const publishToolActivity = () => {
+    if (toolCalls.length > 0) offerActivity(summarizeToolBatch(toolCalls), 'tool');
   };
   const scheduleActivity = () => {
-    if (waitingTimer) clearTimeout(waitingTimer);
-    waitingTimer = undefined;
+    if (disposed) return;
     if (collectTimer) return;
     collectTimer = setTimeout(() => {
       collectTimer = undefined;
-      publishActivity();
+      publishToolActivity();
     }, TOOL_BATCH_WINDOW_MS);
     collectTimer.unref?.();
   };
   const flushActivity = () => {
     if (collectTimer) clearTimeout(collectTimer);
     collectTimer = undefined;
-    publishActivity();
+    if (toolCalls.length > 0) showActivity(summarizeToolBatch(toolCalls), 'tool');
   };
   const resetIteration = () => {
-    thinkingText = '';
-    assistantText = '';
     toolCalls = [];
+  };
+  const clearWaiting = () => {
+    if (waitingTimer) clearTimeout(waitingTimer);
+    if (waitingTickTimer) clearTimeout(waitingTickTimer);
+    waitingTimer = undefined;
+    waitingTickTimer = undefined;
+    waitingStartedAt = 0;
+  };
+  const clearResponse = () => {
+    if (responseTimer) clearTimeout(responseTimer);
+    responseTimer = undefined;
+  };
+  const renderWaiting = () => {
+    if (disposed || waitingStartedAt === 0) return;
+    const elapsedMs = Math.max(0, Date.now() - waitingStartedAt);
+    showModelPhase(formatModelWait(elapsedMs));
+    const remainder = elapsedMs % 1_000;
+    const nextDelay = elapsedMs < 1_000 ? 1_000 - elapsedMs : Math.max(100, 1_000 - remainder);
+    waitingTickTimer = setTimeout(renderWaiting, nextDelay);
+    waitingTickTimer.unref?.();
+  };
+  const beginWaiting = () => {
+    if (disposed) return;
+    clearWaiting();
+    clearResponse();
+    waitingStartedAt = Date.now();
+    const toolVisibleRemaining =
+      lastPriority === 'tool' ? Math.max(0, MIN_ACTIVITY_VISIBLE_MS - (Date.now() - displayedAt)) : 0;
+    waitingTimer = setTimeout(
+      () => {
+        waitingTimer = undefined;
+        renderWaiting();
+      },
+      Math.max(WAITING_DELAY_MS, toolVisibleRemaining),
+    );
+    waitingTimer.unref?.();
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    options.signal?.removeEventListener('abort', dispose);
+    clearWaiting();
+    clearResponse();
+    if (collectTimer) clearTimeout(collectTimer);
+    if (displayTimer) clearTimeout(displayTimer);
+    collectTimer = undefined;
+    displayTimer = undefined;
+    pendingActivity = undefined;
   };
 
   options.child.onText = (text) => {
     previousOnText?.(text);
-    assistantText += text;
-    scheduleActivity();
+    if (disposed) return;
+    clearWaiting();
+    if (!text.trim() || responseTimer) return;
+    responseTimer = setTimeout(() => {
+      responseTimer = undefined;
+      showModelPhase('Preparing response…');
+    }, RESPONSE_DELAY_MS);
+    responseTimer.unref?.();
   };
   options.child.onThinking = (thinking) => {
     previousOnThinking?.(thinking);
-    thinkingText += thinking;
-    scheduleActivity();
+    if (disposed) return;
+    clearWaiting();
+    clearResponse();
+    if (thinking) showModelPhase('Thinking…');
   };
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
+    if (disposed) return;
+    clearWaiting();
+    clearResponse();
     if (name === 'Agent') return;
     toolCalls.push({ name, args });
     scheduleActivity();
@@ -610,112 +680,106 @@ function attachSubagentActivityTracking(options: {
   options.child.onToolResult = (name, result, id) => {
     previousOnToolResult?.(name, result, id);
   };
-  waitingTimer = setTimeout(() => {
-    waitingTimer = undefined;
-    if (!thinkingText && !assistantText && toolCalls.length === 0) {
-      offerActivity('等待模型响应', 'model');
-    }
-  }, WAITING_DELAY_MS);
-  waitingTimer.unref?.();
+  if (options.signal?.aborted) dispose();
+  else {
+    options.signal?.addEventListener('abort', dispose, { once: true });
+    beginWaiting();
+  }
   return {
     onIterationComplete: () => {
-      // Keep the last useful status visible while the next model iteration starts.
+      if (disposed) return undefined;
       flushActivity();
       resetIteration();
+      beginWaiting();
       return undefined;
     },
+    dispose,
   };
 }
 
-function formatAssistantActivity(text: string): string {
-  return text
-    .replace(/^(?:我会|我将|接下来(?:我)?(?:会|将)?|现在(?:我)?(?:会|将)?|让我)\s*/u, '')
-    .replace(/^[，,：:。.!！?？\s]+/u, '')
-    .trim();
+function formatModelWait(elapsedMs: number): string {
+  if (elapsedMs < 1_000) return 'Waiting for model…';
+  const totalSeconds = Math.floor(elapsedMs / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `Waiting for model… ${minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`}`;
 }
 
 function summarizeToolBatch(toolCalls: Array<{ name: string; args: string }>): string {
-  if (toolCalls.length === 1) {
-    const tool = toolCalls[0];
-    return tool ? summarizeToolActivity(tool.name, tool.args) : 'working';
+  const activities = toolCalls.map((tool) => classifyToolActivity(tool.name, tool.args));
+  const trailing: ToolActivity[] = [];
+  for (let index = activities.length - 1; index >= 0; index--) {
+    const activity = activities[index];
+    if (!activity || (activity.kind !== 'search' && activity.kind !== 'read')) break;
+    trailing.unshift(activity);
   }
-  const counts = new Map<string, { label: string; count: number; sample?: string }>();
-  for (const tool of toolCalls) {
-    const current = counts.get(tool.name);
-    if (current) {
-      current.count += 1;
-      continue;
+  if (trailing.length >= 2) {
+    const searchCount = trailing.filter((activity) => activity.kind === 'search').length;
+    const readCount = trailing.length - searchCount;
+    const parts: string[] = [];
+    if (searchCount > 0) parts.push(`Searching for ${searchCount} ${searchCount === 1 ? 'pattern' : 'patterns'}`);
+    if (readCount > 0) {
+      parts.push(`${parts.length > 0 ? 'reading' : 'Reading'} ${readCount} ${readCount === 1 ? 'file' : 'files'}`);
     }
-    counts.set(tool.name, {
-      label: formatToolName(tool.name),
-      count: 1,
-      sample: extractToolTarget(tool.args),
-    });
+    return `${parts.join(', ')}…`;
   }
-  const parts = [...counts.values()].map((item) => {
-    if (item.count === 1 && item.sample) return `${item.label} ${item.sample}`;
-    if (item.count > 1 && item.sample) return `${item.label} ${item.sample} 等${item.count}个`;
-    return `${item.label}${item.count > 1 ? ` ×${item.count}` : ''}`;
-  });
-  return clampOneLine(parts.join(' · '));
+  return activities.at(-1)?.description ?? 'Working…';
 }
 
-function summarizeToolActivity(name: string, argsText: string): string {
+type ToolActivity = {
+  kind: 'search' | 'read' | 'other';
+  description: string;
+};
+
+function classifyToolActivity(name: string, argsText: string): ToolActivity {
+  let args: Record<string, unknown>;
   try {
-    return clampOneLine(micaTools.getDisplayText(name, JSON.parse(argsText)));
+    args = JSON.parse(argsText) as Record<string, unknown>;
   } catch {
-    try {
-      const parsed = JSON.parse(argsText) as Record<string, unknown>;
-      const target = extractToolTargetFromArgs(parsed);
-      if (target) return clampOneLine(`${formatToolName(name)} ${target}`);
-    } catch {
-      // fall through
+    const compact = clampOneLine(argsText, 72);
+    return {
+      kind: 'other',
+      description: compact ? `Using ${humanizeToolName(name)}: ${compact}…` : `Using ${humanizeToolName(name)}…`,
+    };
+  }
+  if (name === 'read_file') return { kind: 'read', description: `Reading ${fileTarget(args.file_path)}…` };
+  if (name === 'grep_search') {
+    return { kind: 'search', description: `Searching for ${quotedTarget(args.pattern, 'pattern')}…` };
+  }
+  if (name === 'list_files') {
+    const path = compactString(args.path) || '.';
+    return { kind: 'search', description: `Finding files in ${shortPath(path, false)}…` };
+  }
+  if (name === 'read_image') return { kind: 'other', description: `Viewing ${fileTarget(args.source, 'image')}…` };
+  if (name === 'write_file') return { kind: 'other', description: `Writing ${fileTarget(args.file_path)}…` };
+  if (name === 'apply_patch') return { kind: 'other', description: summarizePatchActivity(compactString(args.patch)) };
+  if (name === 'run_shell') {
+    const command = clampOneLine(compactString(args.command) || 'command', 72);
+    return {
+      kind: 'other',
+      description: args.run_in_background ? `Starting ${command} in the background…` : `Running ${command}…`,
+    };
+  }
+  if (name === 'web_search') {
+    return { kind: 'other', description: `Searching the web for ${quotedTarget(args.query, 'query')}…` };
+  }
+  if (name === 'web_fetch') return { kind: 'other', description: `Fetching ${urlTarget(args.url)}…` };
+  if (name === 'Skill') {
+    return { kind: 'other', description: `Using the ${compactString(args.skill) || 'selected'} skill…` };
+  }
+  if (name === 'background_tasks') return { kind: 'other', description: 'Checking background tasks…' };
+  if (name === 'read_task_output') return { kind: 'other', description: 'Checking task output…' };
+  if (name === 'kill_task') return { kind: 'other', description: 'Stopping background task…' };
+
+  try {
+    const display = clampOneLine(micaTools.getDisplayText(name, args), 80);
+    if (display && !display.startsWith('未知工具:')) {
+      return { kind: 'other', description: `${display.replace(/[…\s]+$/u, '')}…` };
     }
-    const compact = argsText.replace(/\s+/g, ' ').trim();
-    return clampOneLine(compact ? `${formatToolName(name)} ${compact}` : formatToolName(name));
-  }
-}
-
-function summarizeLastLine(text: string): string {
-  const normalized = text
-    .replace(/\r\n/g, '\n')
-    .replace(/```[\s\S]*?```/g, '\n')
-    .replace(/^[\s>*#-]+/gm, '')
-    .trim();
-  if (!normalized) return '';
-  const lines = normalized
-    .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-  const lastLine = lines[lines.length - 1] ?? '';
-  return clampOneLine(lastLine, 120, 'tail');
-}
-
-function extractToolTarget(argsText: string): string | undefined {
-  try {
-    return extractToolTargetFromArgs(JSON.parse(argsText) as Record<string, unknown>);
   } catch {
-    return undefined;
+    // Fall back to the humanized tool name below.
   }
-}
-
-function extractToolTargetFromArgs(args: Record<string, unknown>): string | undefined {
-  const candidates = [
-    args.file_path,
-    args.path,
-    args.command,
-    args.pattern,
-    args.query,
-    args.url,
-    args.description,
-    args.skill,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate !== 'string') continue;
-    const value = candidate.replace(/\s+/g, ' ').trim();
-    if (value) return value;
-  }
-  return undefined;
+  return { kind: 'other', description: `Using ${humanizeToolName(name)}…` };
 }
 
 function clampOneLine(text: string, maxChars = 120, mode: 'head' | 'tail' = 'head'): string {
@@ -727,19 +791,49 @@ function clampOneLine(text: string, maxChars = 120, mode: 'head' | 'tail' = 'hea
   return `${compact.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function formatToolName(name: string): string {
-  const labels: Record<string, string> = {
-    read_file: '读取文件',
-    read_image: '查看图片',
-    grep_search: '搜索代码',
-    list_files: '查找文件',
-    apply_patch: '修改文件',
-    write_file: '写入文件',
-    run_shell: '执行命令',
-    web_search: '搜索网页',
-    web_fetch: '读取网页',
-  };
-  return labels[name] ?? name;
+function compactString(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
+function fileTarget(value: unknown, fallback = 'file'): string {
+  const target = compactString(value);
+  return target ? shortPath(target, true) : fallback;
+}
+
+function shortPath(value: string, fileOnly: boolean): string {
+  const normalized = value.replace(/\\/g, '/').replace(/\/$/, '');
+  if (fileOnly) return basename(normalized) || normalized;
+  const cwd = process.cwd().replace(/\\/g, '/').replace(/\/$/, '');
+  return normalized.startsWith(`${cwd}/`) ? normalized.slice(cwd.length + 1) : normalized;
+}
+
+function quotedTarget(value: unknown, fallback: string): string {
+  const target = clampOneLine(compactString(value) || fallback, 48);
+  return `"${target.replace(/"/g, '\\"')}"`;
+}
+
+function urlTarget(value: unknown): string {
+  const raw = compactString(value);
+  if (!raw) return 'web content';
+  try {
+    const url = new URL(raw);
+    return clampOneLine(`${url.hostname}${url.pathname === '/' ? '' : url.pathname}`, 64);
+  } catch {
+    return clampOneLine(raw, 64);
+  }
+}
+
+function summarizePatchActivity(patch: string): string {
+  const matches = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)];
+  const targets = [...new Set(matches.map((match) => basename(match[1]?.trim() ?? '')).filter(Boolean))];
+  if (targets.length === 1) return `Editing ${targets[0]}…`;
+  if (targets.length > 1) return `Editing ${targets.length} files…`;
+  return 'Applying file changes…';
+}
+
+function humanizeToolName(name: string): string {
+  const leaf = name.split('__').at(-1) || name;
+  return leaf.replace(/[_-]+/g, ' ').trim() || 'tool';
 }
 
 function isAgentToolContext(value: unknown): value is AgentToolContext {

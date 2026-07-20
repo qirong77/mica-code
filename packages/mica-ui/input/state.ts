@@ -11,6 +11,7 @@ export interface TerminalFileMentionItem {
   path: string;
   label?: string;
   description?: string;
+  labelHighlights?: number[];
 }
 
 export type TerminalFileMentionProvider = (query: string) => Promise<TerminalFileMentionItem[]>;

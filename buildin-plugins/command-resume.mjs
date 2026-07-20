@@ -159,7 +159,11 @@ function renderResumeSessionItem(item, isSelected, index) {
     Box,
     {
       width: '100%',
-      backgroundColor: isSelected ? '#3A3A3A' : index % 2 ? '#303030' : '#292929',
+      backgroundColor: isSelected
+        ? micaUi.theme.colors.listRowSelected
+        : index % 2
+          ? micaUi.theme.colors.listRowAlternate
+          : micaUi.theme.colors.listRow,
     },
     element(micaUi.OneLineItem, {
       cells: [

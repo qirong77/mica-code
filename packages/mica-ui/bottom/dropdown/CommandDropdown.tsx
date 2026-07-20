@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import { Text } from '@anthropic/ink';
-import { OneLineItem, SelectList, getOneLineColumnWidth } from '../../primitives/index.js';
+import { Box, Text } from '@anthropic/ink';
+import { Dialog, OneLineItem, SelectList, getOneLineColumnWidth } from '../../primitives/index.js';
 import type { SelectItem } from '../../primitives/index.js';
-import type { MicaUiDropdownItem } from '../../types.js';
+import type { MicaUiDropdownItem, MicaUiDropdownState } from '../../types.js';
 import { themeColors } from '../../theme.js';
 
 const MIN_LABEL_COL = 18;
@@ -12,17 +12,19 @@ interface CommandSelectItem extends SelectItem {
 }
 
 export function CommandDropdown({
+  kind,
   items,
   selectedIndex,
   title,
   emptyMessage = 'no matching items',
   height,
 }: {
+  kind?: MicaUiDropdownState['kind'];
   items: MicaUiDropdownItem[];
   selectedIndex: number;
   title?: string;
   emptyMessage?: string;
-  height: number;
+  height?: number;
 }): React.ReactNode {
   const labelWidth = useMemo(
     () =>
@@ -37,8 +39,10 @@ export function CommandDropdown({
     [items],
   );
 
-  const renderItem = (item: CommandSelectItem, isSelected: boolean) => {
+  const renderItem = (item: CommandSelectItem, isSelected: boolean, index: number) => {
     const { source } = item;
+    if (source.kind === 'file') return renderFileItem(source, isSelected, index);
+
     const primaryColor = isSelected ? themeColors.accent : themeColors.textSecondary;
     const secondaryColor = isSelected ? themeColors.accent : themeColors.dim;
     return (
@@ -70,11 +74,11 @@ export function CommandDropdown({
     );
   };
 
-  return (
+  const list = (
     <SelectList
       items={selectItems}
       selectedIdx={selectedIndex}
-      title={title}
+      title={kind === 'file' ? undefined : title}
       empty={<Text dimColor>{emptyMessage}</Text>}
       itemGap={0}
       markerWidth={0}
@@ -83,5 +87,72 @@ export function CommandDropdown({
       layout="table"
       renderItem={renderItem}
     />
+  );
+
+  if (kind === 'file') {
+    return <Dialog title={title ?? ''}>{list}</Dialog>;
+  }
+  return list;
+}
+
+function renderFileItem(source: MicaUiDropdownItem, isSelected: boolean, index: number): React.ReactNode {
+  const primaryColor = isSelected ? themeColors.accent : themeColors.text;
+  return (
+    <Box
+      width="100%"
+      backgroundColor={
+        isSelected ? themeColors.listRowSelected : index % 2 ? themeColors.listRowAlternate : themeColors.listRow
+      }
+    >
+      <OneLineItem
+        gap={1}
+        cells={[
+          {
+            key: 'label',
+            content: highlightedLabel(source.label, source.labelHighlights, primaryColor, isSelected),
+            minWidth: 0,
+            flexGrow: 1,
+            flexShrink: 1,
+          },
+          {
+            key: 'suffix',
+            content: source.suffix?.text,
+            flexShrink: 0,
+            color: isSelected ? (source.suffix?.color ?? themeColors.success) : themeColors.dim,
+            dimColor: !isSelected,
+          },
+        ]}
+      />
+    </Box>
+  );
+}
+
+function highlightedLabel(
+  label: string,
+  highlights: number[] | undefined,
+  color: string,
+  isSelected: boolean,
+): React.ReactNode {
+  const highlighted = new Set(highlights ?? []);
+  if (highlighted.size === 0) {
+    return (
+      <Text color={color} bold={isSelected} wrap="truncate-end">
+        {label}
+      </Text>
+    );
+  }
+
+  return (
+    <Text color={color} bold={isSelected} wrap="truncate-end">
+      {Array.from(label, (character, index) =>
+        highlighted.has(index) ? (
+          <Text key={index} color={themeColors.accent} bold underline={isSelected}>
+            {character}
+          </Text>
+        ) : (
+          character
+        ),
+      )}
+    </Text>
   );
 }

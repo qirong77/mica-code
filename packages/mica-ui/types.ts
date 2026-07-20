@@ -88,6 +88,7 @@ export interface MicaUiDropdownItem {
   key: string;
   label: string;
   description?: string;
+  labelHighlights?: number[];
   suffix?: { text: string; color?: string };
   commandName?: string;
   insertText?: string;

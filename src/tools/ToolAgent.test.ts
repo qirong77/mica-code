@@ -20,11 +20,14 @@ describe('ToolAgent', () => {
       prompt: 'Find the config loader.',
     });
 
-    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
-      maxTurns: 50,
-      signal: expect.any(AbortSignal),
-      onIterationComplete: expect.any(Function),
-    }));
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('Find the config loader.'),
+      expect.objectContaining({
+        maxTurns: 50,
+        signal: expect.any(AbortSignal),
+        onIterationComplete: expect.any(Function),
+      }),
+    );
     const firstCall = query.mock.calls.at(0) as unknown as [string, unknown] | undefined;
     expect(firstCall?.[0]).toContain('<delegated-context>');
     expect(result).toContain('Subagent: Explore');
@@ -109,11 +112,14 @@ describe('ToolAgent', () => {
     const completed = await tool.execute({ operation: 'read', task_id: taskId });
     expect(completed).toContain('status: completed');
     expect(completed).toContain('child result');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining('Find the config loader.'), expect.objectContaining({
-      maxTurns: 50,
-      signal: expect.any(AbortSignal),
-      onIterationComplete: expect.any(Function),
-    }));
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('Find the config loader.'),
+      expect.objectContaining({
+        maxTurns: 50,
+        signal: expect.any(AbortSignal),
+        onIterationComplete: expect.any(Function),
+      }),
+    );
   });
 
   it('reports failed background tasks and preserves partial results from maxTurns', async () => {
@@ -256,7 +262,7 @@ describe('ToolAgent', () => {
     expect(childSignal?.aborted).toBe(true);
   });
 
-  it('derives one iteration activity locally without another agent query', async () => {
+  it('tracks model phases, wait time, and compact tool activity without another agent query', async () => {
     vi.useFakeTimers();
     const deferred = createDeferred<string>();
     const query = vi.fn((_prompt: string, _options?: { onIterationComplete?: () => unknown }) => deferred.promise);
@@ -274,25 +280,26 @@ describe('ToolAgent', () => {
 
     expect(taskManager.get(taskId, runtime)?.activities).toEqual([]);
     vi.advanceTimersByTime(400);
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('等待模型响应');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Waiting for model…');
+    vi.advanceTimersByTime(600);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Waiting for model… 1s');
     child.onThinking?.('先看目录结构\n再检查规则编辑器相关代码');
-    vi.advanceTimersByTime(800);
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('再检查规则编辑器相关代码');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Thinking…');
 
     child.onText?.('我会先检查规则编辑器和接口定义。\n我将接着读取关键实现。');
-    vi.advanceTimersByTime(800);
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
+    vi.advanceTimersByTime(399);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Thinking…');
+    vi.advanceTimersByTime(1);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Preparing response…');
 
     child.onToolCall?.('grep_search', '{"pattern":"RuleEditor","path":"packages/rules"}', 'tool-1');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/RuleEditor.tsx"}', 'tool-2');
     child.onToolCall?.('read_file', '{"file_path":"packages/rules/index.ts"}', 'tool-3');
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('接着读取关键实现。');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Preparing response…');
     vi.advanceTimersByTime(180);
 
     const summary = taskManager.get(taskId, runtime)?.activities?.[0]?.summary ?? '';
-    expect(summary).toContain('搜索代码');
-    expect(summary).toContain('读取文件');
-    expect(summary).toContain('等2个');
+    expect(summary).toBe('Searching for 1 pattern, reading 2 files…');
     expect(taskManager.get(taskId, runtime)?.activities).toEqual([
       expect.objectContaining({ id: 'current-iteration' }),
     ]);
@@ -304,14 +311,146 @@ describe('ToolAgent', () => {
     const queryOptions = query.mock.calls[0]?.[1] as { onIterationComplete?: () => unknown } | undefined;
     queryOptions?.onIterationComplete?.();
     expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe(summary);
+    vi.advanceTimersByTime(799);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe(summary);
+    vi.advanceTimersByTime(1);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Waiting for model…');
     expect(query).toHaveBeenCalledTimes(1);
 
     child.onThinking?.('继续核对键盘事件');
-    vi.advanceTimersByTime(800);
-    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('继续核对键盘事件');
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Thinking…');
 
     deferred.resolve('done');
     await flushAsyncWork();
+  });
+
+  it('shows only the latest heterogeneous tool and restarts aggregation after it', async () => {
+    vi.useFakeTimers();
+    const deferred = createDeferred<string>();
+    const query = vi.fn(() => deferred.promise);
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'inspect files',
+      prompt: 'Inspect and test the files.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    child.onToolCall?.('read_file', '{"file_path":"/workspace/src/FilesView.jsx"}', 'tool-1');
+    vi.advanceTimersByTime(180);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading FilesView.jsx…');
+
+    child.onToolCall?.('run_shell', '{"command":"rg --files build/"}', 'tool-2');
+    vi.advanceTimersByTime(800);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Running rg --files build/…');
+
+    child.onToolCall?.('read_file', '{"file_path":"src/a.ts"}', 'tool-3');
+    child.onToolCall?.('read_file', '{"file_path":"src/b.ts"}', 'tool-4');
+    vi.advanceTimersByTime(800);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading 2 files…');
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+  });
+
+  it('flushes the final tool aggregation before entering the next model wait', async () => {
+    vi.useFakeTimers();
+    const deferred = createDeferred<string>();
+    const query = vi.fn((_prompt: string, _options?: { onIterationComplete?: () => unknown }) => deferred.promise);
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'read files',
+      prompt: 'Read the files.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    child.onToolCall?.('read_file', '{"file_path":"src/a.ts"}', 'tool-1');
+    vi.advanceTimersByTime(180);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading a.ts…');
+
+    child.onToolCall?.('read_file', '{"file_path":"src/b.ts"}', 'tool-2');
+    const queryOptions = query.mock.calls[0]?.[1];
+    queryOptions?.onIterationComplete?.();
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading 2 files…');
+    vi.advanceTimersByTime(799);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading 2 files…');
+    vi.advanceTimersByTime(1);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Waiting for model…');
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+  });
+
+  it('drops a queued tool summary when the final activity returns to the visible summary', async () => {
+    vi.useFakeTimers();
+    const deferred = createDeferred<string>();
+    const query = vi.fn((_prompt: string, _options?: { onIterationComplete?: () => unknown }) => deferred.promise);
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'inspect activity order',
+      prompt: 'Inspect activity order.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    child.onToolCall?.('read_file', '{"file_path":"src/a.ts"}', 'tool-1');
+    vi.advanceTimersByTime(180);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading a.ts…');
+
+    child.onToolCall?.('run_shell', '{"command":"git status"}', 'tool-2');
+    vi.advanceTimersByTime(180);
+    child.onToolCall?.('read_file', '{"file_path":"src/a.ts"}', 'tool-3');
+    query.mock.calls[0]?.[1]?.onIterationComplete?.();
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Reading a.ts…');
+    vi.advanceTimersByTime(800);
+    expect(taskManager.get(taskId, runtime)?.activities?.[0]?.summary).toBe('Waiting for model…');
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+  });
+
+  it('stops model-wait timers as soon as a background task is killed', async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(
+      (_prompt: string, _options?: { onIterationComplete?: () => unknown }) => new Promise<string>(() => undefined),
+    );
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'wait forever',
+      prompt: 'Wait for the model.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    vi.advanceTimersByTime(1_000);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    await tool.execute({ operation: 'kill', task_id: taskId });
+    expect(vi.getTimerCount()).toBe(0);
+
+    child.onText?.('late text');
+    child.onThinking?.('late thinking');
+    child.onToolCall?.('read_file', '{"file_path":"late.ts"}', 'late-tool');
+    query.mock.calls[0]?.[1]?.onIterationComplete?.();
+    vi.advanceTimersByTime(2_000);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
