@@ -7,7 +7,9 @@
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",
+    "icons:sync": "bun scripts/sync-vscode-icons.mjs",
     "lint": "eslint --cache .",
+    "test": "bun test src/renderer/src/fileIconResolver.test.js",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
