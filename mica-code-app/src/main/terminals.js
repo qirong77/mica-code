@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import os from 'os'
 import { existsSync, readlinkSync, statSync } from 'fs'
 import { stat } from 'fs/promises'
@@ -156,6 +156,18 @@ function getDefaultShell() {
   return process.env.SHELL || '/bin/zsh'
 }
 
+function getShellArgs(shellPath) {
+  if (process.platform === 'win32') return []
+
+  // Applications opened from Finder/Dock inherit a minimal environment from
+  // launchd. A login shell runs the system and user profile files that set up
+  // Homebrew, language runtimes, package-manager binaries, and the user's PATH.
+  const shellName = path.basename(shellPath).toLowerCase()
+  if (shellName === 'fish') return ['--login']
+  if (['bash', 'zsh', 'sh', 'ksh', 'dash'].includes(shellName)) return ['-l']
+  return []
+}
+
 function isPermissionError(error) {
   return (
     !!error &&
@@ -210,6 +222,7 @@ function normalizeResumeSessionId(value) {
 
 function createPty(id, sender, options = {}) {
   const shell = options.shell || getDefaultShell()
+  const shellArgs = getShellArgs(shell)
   const requestedCwd = typeof options.cwd === 'string' ? options.cwd.trim() : ''
   const cwd = resolveCwd(requestedCwd)
   const cols = options.cols || 80
@@ -217,7 +230,7 @@ function createPty(id, sender, options = {}) {
   const usedFallback = !!requestedCwd && cwd !== requestedCwd
   const resumeSessionId = normalizeResumeSessionId(options.resumeSessionId)
 
-  const term = pty.spawn(shell, [], {
+  const term = pty.spawn(shell, shellArgs, {
     name: 'xterm-256color',
     cols,
     rows,
@@ -226,6 +239,8 @@ function createPty(id, sender, options = {}) {
       ...process.env,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
+      TERM_PROGRAM: 'Mica Code',
+      TERM_PROGRAM_VERSION: app.getVersion(),
       ...(notifyServer ? notifyServer.getTerminalEnv(id) : {})
     }
   })
