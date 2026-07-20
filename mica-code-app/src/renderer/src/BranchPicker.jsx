@@ -259,8 +259,8 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
                   role="option"
                   aria-selected={index === selected}
                   disabled={busy}
-                  className={`flex w-full items-start gap-2.5 rounded-sm px-2.5 text-left transition-colors ${
-                    item.type === 'action' ? 'min-h-9 items-center' : 'min-h-12 py-1.5'
+                  className={`flex w-full gap-2.5 rounded-sm px-2.5 text-left transition-colors ${
+                    item.type === 'action' ? 'min-h-9 items-center' : 'min-h-12 items-start py-1.5'
                   } ${index === selected ? 'bg-[#075b91] text-white' : 'text-white/75 hover:bg-white/[.06]'}`}
                   onMouseEnter={() => setSelected(index)}
                   onMouseDown={(event) => event.preventDefault()}
