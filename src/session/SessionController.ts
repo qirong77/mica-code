@@ -95,7 +95,9 @@ export class SessionController {
     this.currentTurnState = 'completed';
   }
 
-  saveCurrent(options: { allowEmpty?: boolean; turnState?: PersistedSessionTurnState } = {}): void {
+  saveCurrent(
+    options: { allowEmpty?: boolean; turnState?: PersistedSessionTurnState; preserveTitle?: boolean } = {},
+  ): void {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
@@ -103,10 +105,13 @@ export class SessionController {
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
+    const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
+    const persistedTitle =
+      options.preserveTitle && existing && !isInternalCompactText(existing.title) ? existing.title : undefined;
     const session: PersistedSession = {
       version: 1,
       id: this.currentSessionId,
-      title: this.currentTitleOverride ?? deriveTitle(getTitleConversationMessages(this.agent, conversationMessages)),
+      title: this.currentTitleOverride ?? persistedTitle ?? derivedTitle,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),

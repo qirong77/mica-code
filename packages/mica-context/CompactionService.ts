@@ -1014,6 +1014,7 @@ function cleanSummary(summary: string): string {
   const withoutAnalysis = withoutFences.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
   const match = /<summary>([\s\S]*?)<\/summary>/i.exec(withoutAnalysis);
   const body = match?.[1]?.trim() || withoutAnalysis.replace(/<\/?summary>/gi, '').trim();
+  if (!body) return '';
   return ensureSections(body);
 }
 

@@ -12,7 +12,7 @@ import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { micaSession, type PersistedSession } from '@packages/mica-session/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
-import { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
+import { normalizeUiState, TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 import {
   formatSubagentTaskDisplay,
   formatSubagentTaskNotification,
@@ -158,6 +158,13 @@ export class Application {
       syncCommandDropdown(commands, runtime);
 
       const resumed = startupSession ? sessionController.resumeLoaded(startupSession) : null;
+      if (resumed?.ok) {
+        const currentSession = agentSessions.current();
+        currentSession.uiState = normalizeUiState({
+          ...currentSession.uiState,
+          conversationMessages: micaUi.conversation.messages.get(),
+        });
+      }
       uiBridge.start();
       await runtime.start();
 

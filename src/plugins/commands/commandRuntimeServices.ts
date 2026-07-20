@@ -24,6 +24,7 @@ import type { ApplicationContext } from '../../app/ApplicationContext.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { clearUI, showMessage as showGlobalMessage, syncModelDisplay } from '../../runtime/uiBridge.js';
 import { resolveCommandAgent } from './activeCommandProxies.js';
+import { toCompactedConversationDisplay } from './compactConversation.js';
 
 function currentContext(): ApplicationContext | null {
   return getActiveContext<ApplicationContext>();
@@ -241,23 +242,6 @@ function showCommitNoticeForSession(
     command: '/commit',
     status: 'success',
   });
-}
-
-function hideCompactArtifacts(messages: MicaUiConversationMessage[]): MicaUiConversationMessage[] {
-  return messages.filter((message) => {
-    const text = conversationContentToText(message.content);
-    return (
-      !text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) && !text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)
-    );
-  });
-}
-
-function conversationContentToText(content: MicaUiConversationMessage['content']): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
 }
 
 type SubagentTaskRecordWithDetail = SubagentTaskRecord & {
@@ -637,22 +621,33 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         command: '/compact',
         variant: 'compact',
       });
-      concreteAgent.loadSnapshot({
-        ...snapshot,
-        messages: result.messages,
-        usageHistory: [],
-        lastUsage: undefined,
-      });
-      const compactedConversationMessages = hideCompactArtifacts(concreteAgent.toConversationMessages());
+      if (result.messages.length === 0) {
+        throw new Error('Compact produced an empty model history; the original session was preserved');
+      }
+
+      try {
+        concreteAgent.loadSnapshot({
+          ...snapshot,
+          messages: result.messages,
+          usageHistory: [],
+          lastUsage: undefined,
+        });
+      } catch (error) {
+        concreteAgent.loadSnapshot(snapshot);
+        throw error;
+      }
+
+      const appliedMessages = concreteAgent.getSnapshot().messages;
+      const compactedConversationMessages = toCompactedConversationDisplay(concreteAgent.toConversationMessages());
+      if (appliedMessages.length === 0 || compactedConversationMessages.length === 0) {
+        concreteAgent.loadSnapshot(snapshot);
+        throw new Error('Compact removed all usable conversation content; the original session was restored');
+      }
+
       const previousUiState = ownerSession?.uiState ?? captureSessionUi();
-      const conversationMessages = hideCompactArtifacts(
-        previousUiState.conversationMessages.length > 0
-          ? previousUiState.conversationMessages
-          : compactedConversationMessages,
-      );
       const nextUiState = normalizeUiState({
         ...previousUiState,
-        conversationMessages,
+        conversationMessages: compactedConversationMessages,
         responseText: '',
         pendingInputs: [],
         pendingQueueMode: null,
@@ -661,14 +656,14 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       });
       if (ownerSession) ownerSession.uiState = nextUiState;
       if (!ownerSession || context?.agentSessions.current().id === ownerSession.id) {
-        micaUi.conversation.setMessages(conversationMessages);
+        micaUi.conversation.setMessages(compactedConversationMessages);
         micaUi.conversation.clearResponseText();
         micaUi.conversation.clearPendingInput();
         micaUi.panels.contextSize.set(0);
         micaUi.panels.cachedTokenRate.set(0);
         if (ownerSession) ownerSession.uiState = normalizeUiState(captureSessionUi());
       }
-      concreteSessionController.saveCurrent();
+      concreteSessionController.saveCurrent({ preserveTitle: true });
       return result;
     },
   };

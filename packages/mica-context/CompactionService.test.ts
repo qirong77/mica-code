@@ -139,6 +139,24 @@ describe('CompactionService', () => {
     expect(result.afterCount).toBeLessThan(result.beforeCount);
   });
 
+  it.each(['', '   ', '<summary></summary>', '<analysis>nothing useful</analysis>'])(
+    'rejects an empty compact summary without producing a replacement history: %j',
+    async (emptySummary) => {
+      const service = new CompactionService();
+      const messages = makeMessages(8);
+
+      await expect(
+        service.compact({
+          messages,
+          options: { keepRecentRounds: 2, aggressive: true },
+          summarize: async () => emptySummary,
+        }),
+      ).rejects.toThrow('Compact summary is empty');
+
+      expect(messages).toEqual(makeMessages(8));
+    },
+  );
+
   it('moves the recent boundary backward instead of orphaning Anthropic tool results', async () => {
     const service = new CompactionService();
     const result = await service.compact({

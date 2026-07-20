@@ -110,6 +110,56 @@ describe('SessionController', () => {
     expect(saves.at(-1)?.title).toBe('Fix the resume session title');
   });
 
+  it('preserves the persisted title when compact replaces the visible conversation', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    let compacted = false;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: compacted
+          ? [{ role: 'user', content: '[Mica compact checkpoint]\n\nsummary' }]
+          : [{ role: 'user', content: 'Original task title' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() =>
+        compacted
+          ? [
+              { role: 'user' as const, content: '[Mica compact checkpoint]\n\nsummary' },
+              { role: 'user' as const, content: 'Recent follow-up' },
+            ]
+          : [{ role: 'user' as const, content: 'Original task title' }],
+      ),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.saveCurrent();
+    compacted = true;
+    controller.saveCurrent({ preserveTitle: true });
+
+    expect(saves.at(-1)?.title).toBe('Original task title');
+    expect(saves.at(-1)?.snapshot.conversationMessages).toEqual([
+      { role: 'user', content: '[Mica compact checkpoint]\n\nsummary' },
+      { role: 'user', content: 'Recent follow-up' },
+    ]);
+  });
+
   it('repairs previously persisted compact metadata titles in session lists', async () => {
     const { SessionController } = await import('./SessionController.js');
     const session: PersistedSession = {
