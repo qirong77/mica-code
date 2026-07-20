@@ -4,6 +4,12 @@ import { createCompactCommand } from '../../../buildin-plugins/command-compact.m
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('createCompactCommand', () => {
+  it('advertises the llm argument', () => {
+    const command = createCompactCommand(makeAgent(), makeSession(), makeServices({}));
+
+    expect(command.completionItems).toEqual([{ arg: 'llm', description: '固定使用 LLM 生成摘要' }]);
+  });
+
   it('passes current session controller, owner session, and fixed compact options', async () => {
     const agent = makeAgent();
     const currentAgent = makeAgent();
@@ -34,18 +40,39 @@ describe('createCompactCommand', () => {
     expect(services.showMessage).not.toHaveBeenCalled();
   });
 
-  it('rejects arguments instead of treating them as compact options', async () => {
+  it('forces LLM summarization when the llm argument is used', async () => {
+    const services = makeServices({});
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action(' LLM ');
+
+    expect(services.compact).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'session-1',
+      expect.objectContaining({
+        lightweightPrune: true,
+        forceSummary: true,
+      }),
+    );
+  });
+
+  it('rejects unsupported arguments', async () => {
     const services = makeServices({});
     const command = createCompactCommand(makeAgent(), makeSession(), services);
 
     await command.action('--force --keep-recent=1');
 
     expect(services.compact).not.toHaveBeenCalled();
-    expect(services.showNotice).toHaveBeenCalledWith('compact: /compact 不支持参数，请直接运行 /compact', 'session-1', {
-      variant: 'compact',
-      command: '/compact',
-      status: 'warning',
-    });
+    expect(services.showNotice).toHaveBeenCalledWith(
+      'compact: 不支持参数 --force --keep-recent=1；请使用 /compact 或 /compact llm',
+      'session-1',
+      {
+        variant: 'compact',
+        command: '/compact',
+        status: 'warning',
+      },
+    );
   });
 
   it('shows not-needed compaction as a normal message', async () => {

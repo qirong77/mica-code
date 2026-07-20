@@ -21,15 +21,17 @@ export default function setupCommandCompact(ctx) {
 export function createCompactCommand(agent, sessionController, services) {
   return {
     name: 'compact',
-    description: '压缩当前会话上下文为 checkpoint',
+    description: '压缩当前会话上下文为 checkpoint；使用 `llm` 参数固定生成摘要',
+    completionItems: [{ arg: 'llm', description: '固定使用 LLM 生成摘要' }],
     async action(rawArgs) {
       const ownerSessionId = services.getCurrentAgentSessionId();
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
-      if ((rawArgs ?? '').trim()) {
+      const mode = (rawArgs ?? '').trim().toLowerCase();
+      if (mode && mode !== 'llm') {
         showCompactPanelMessage(
           services,
-          'compact: /compact 不支持参数，请直接运行 /compact',
+          `compact: 不支持参数 ${rawArgs}；请使用 /compact 或 /compact llm`,
           ownerSessionId,
           'warning',
         );
@@ -45,6 +47,7 @@ export function createCompactCommand(agent, sessionController, services) {
         const compactOptions = {
           ...MANUAL_COMPACT_OPTIONS,
           contextWindowSize: targetAgent.config.provider.contextWindowSize,
+          ...(mode === 'llm' ? { forceSummary: true } : {}),
         };
         const result = await services.runExclusiveTask(
           targetAgent,

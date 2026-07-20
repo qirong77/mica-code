@@ -34,6 +34,7 @@ export type CompactOptions = {
   preview?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
+  forceSummary?: boolean;
   summarizeThresholdRatio?: number;
   contextWindowSize?: number;
   toolResultPlaceholder?: string;
@@ -140,6 +141,7 @@ export class CompactionService {
       lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
       const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, budget.contextWindowSize);
       if (
+        !options.forceSummary &&
         prunedMessageCount > 0 &&
         lightweightTokenEstimate < beforeTokenEstimate &&
         budget.contextWindowSize &&

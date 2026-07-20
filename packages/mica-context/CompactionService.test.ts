@@ -224,6 +224,29 @@ describe('CompactionService', () => {
     assertValidJsonArguments(result.messages);
   });
 
+  it('forces an LLM summary after lightweight pruning when requested', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const result = await service.compact({
+      messages: makeToolMessages(5),
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 3,
+        lightweightPrune: true,
+        forceSummary: true,
+        contextWindowSize: 100_000,
+        pruneOnlyThresholdRatio: 0.3,
+      },
+      summarize,
+    });
+
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(result.mode).toBe('summarized');
+    expect(result.strategy).toBe('summary_with_recent');
+    expect(JSON.stringify(result.messages)).toContain(COMPACT_SUMMARY_PREFIX);
+  });
+
   it('preserves opaque Responses encrypted reasoning during lightweight prune-only compact', async () => {
     const service = new CompactionService();
     const encryptedContent = 'A'.repeat(8_000);
