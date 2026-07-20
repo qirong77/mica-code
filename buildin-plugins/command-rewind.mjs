@@ -18,7 +18,7 @@ export default function setupCommandRewind(ctx) {
 export function createRewindCommand(services) {
   return {
     name: 'rewind',
-    description: '选择一轮对话，并回退到该节点完成时的状态',
+    description: '选择一轮对话，并回退到该用户输入之前的状态',
     action(rawArgs) {
       if ((rawArgs ?? '').trim()) {
         services.showMessage('rewind: /rewind 不支持参数，请直接运行 /rewind', 5000);
@@ -154,7 +154,7 @@ function showRewindPanel(checkpoints, services) {
             : '回退对话和文件',
       description:
         mode === 'conversation_only'
-          ? '对话停在所选节点，文件保持当前状态'
+          ? '对话回到所选用户输入之前，文件保持当前状态'
           : `restore ${actionCounts.restore} · delete ${actionCounts.delete}`,
     }));
     const visibleFiles = current.files.slice(0, MAX_VISIBLE_FILES);
@@ -163,7 +163,7 @@ function showRewindPanel(checkpoints, services) {
     return element(
       micaUi.Dialog,
       {
-        title: isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」`,
+        title: isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」之前`,
         footer: element(micaUi.KeyHints, { hints: ['↑↓ choose scope', '↵ rewind', 'esc back'] }),
       },
       element(
@@ -259,10 +259,10 @@ function renderFileImpact(current, visibleFiles, hiddenCount) {
 function formatSuccessNotice(result, inputRestoreError) {
   const actionCounts = countFileActions(result.files);
   const lines = [
-    `**已回退到「${result.conversationLabel}」**`,
+    `**已回退到「${result.conversationLabel}」之前**`,
     '',
     `- 对话：${result.messageCountNow} -> ${result.messageCountBefore}`,
-    '- 对话已停在所选节点',
+    '- 对话已回到所选用户输入之前',
   ];
   if (inputRestoreError) lines.push(`- 警告：原输入恢复失败：${inputRestoreError}`);
   else lines.push('- 原输入已恢复到输入框');

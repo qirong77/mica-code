@@ -11,11 +11,8 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type {
-  RewindFileAction,
-  RewindFileChange,
-  RuntimeInput,
-} from '@packages/mica-runtime/index.js';
+import { micaContext } from '@packages/mica-context/index.js';
+import type { RewindFileAction, RewindFileChange, RuntimeInput } from '@packages/mica-runtime/index.js';
 import type {
   RewindApplyRequest,
   RewindApplyResult,
@@ -93,6 +90,14 @@ export class RewindCheckpointManager {
   private nextCheckpointId = 1;
 
   capture(agent: AgentRuntime, input: RuntimeInput, conversationMessages: unknown[] = []): string | null {
+    if ((this.checkpoints.get(agent)?.length ?? 0) === 0) {
+      try {
+        this.restoreConversationHistory(agent, conversationMessages);
+      } catch {
+        // History recovery is best-effort and must never prevent a new live checkpoint.
+        this.previewPlans.delete(agent);
+      }
+    }
     try {
       const snapshot = agent.getSnapshot();
       const checkpointChars =
@@ -123,34 +128,58 @@ export class RewindCheckpointManager {
     }
   }
 
-  finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): void {
-    const stack = this.checkpoints.get(agent);
-    const checkpoint = stack?.find((candidate) => candidate.id === id);
-    if (!stack || !checkpoint) return;
-
-    try {
-      const snapshot = agent.getSnapshot();
-      const checkpointChars =
-        estimateJsonLikeChars(snapshot, MAX_CHECKPOINT_SNAPSHOT_CHARS) +
-        estimateJsonLikeChars(checkpoint.inputText, MAX_CHECKPOINT_SNAPSHOT_CHARS) +
-        estimateJsonLikeChars(conversationMessages, MAX_CHECKPOINT_SNAPSHOT_CHARS);
-      if (checkpointChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
-        this.remove(agent, stack, id);
-        return;
-      }
-
-      checkpoint.snapshot = cloneSnapshot(snapshot);
-      checkpoint.conversationMessages = cloneJson(conversationMessages);
-      checkpoint.fileState = captureFileState();
-      this.previewPlans.delete(agent);
-    } catch {
-      this.remove(agent, stack, id);
-    }
+  finalize(agent: AgentRuntime, id: string, _conversationMessages: unknown[] = []): void {
+    if (!this.find(agent, id)) return;
+    // Keep the state captured immediately before the user input. Rewinding
+    // therefore removes that input, its tool calls/results, and everything after it.
+    this.previewPlans.delete(agent);
   }
 
   clear(agent: AgentRuntime): void {
     this.checkpoints.delete(agent);
     this.previewPlans.delete(agent);
+  }
+
+  restoreConversationHistory(agent: AgentRuntime, conversationMessages: unknown[] = []): number {
+    const snapshot = agent.getSnapshot();
+    const providerMessages = cloneJson(snapshot.messages);
+    const usageHistory = cloneJson(snapshot.usageHistory);
+    const uiMessages = cloneJson(conversationMessages);
+    const turnBoundaries = visibleUserTurnBoundaries(providerMessages, uiMessages).slice(-MAX_CHECKPOINTS_PER_AGENT);
+    const restored: RewindCheckpoint[] = [];
+    const restoredAt = Date.now();
+
+    for (let turn = 0; turn < turnBoundaries.length; turn++) {
+      const { messageIndex, uiMessageIndex } = turnBoundaries[turn]!;
+      const providerMessage = providerMessages[messageIndex];
+      const uiMessage = uiMessageIndex === undefined ? undefined : uiMessages[uiMessageIndex];
+      const inputText = messageText(uiMessage ?? providerMessage);
+      const displayText = displayMessageText(uiMessage) || inputText;
+      const checkpointUsage = usageBeforeMessage(snapshot.protocol, usageHistory, messageIndex);
+
+      restored.push({
+        id: `history-${restoredAt}-${this.nextCheckpointId++}`,
+        createdAt: new Date(restoredAt - (turnBoundaries.length - turn) * 1000).toISOString(),
+        conversationLabel: labelForInput(displayText),
+        inputText,
+        conversationMessages: uiMessageIndex === undefined ? [] : uiMessages.slice(0, uiMessageIndex),
+        snapshot: {
+          providerId: snapshot.providerId,
+          protocol: snapshot.protocol,
+          model: snapshot.model,
+          effort: snapshot.effort,
+          role: snapshot.role,
+          messages: providerMessages.slice(0, messageIndex),
+          usageHistory: checkpointUsage,
+          lastUsage: checkpointUsage.at(-1),
+        },
+        fileState: unavailableFileState('该节点由现有对话恢复，未记录历史文件状态；本次仅回退对话'),
+      });
+    }
+
+    this.checkpoints.set(agent, restored);
+    this.previewPlans.delete(agent);
+    return restored.length;
   }
 
   list(agent: AgentRuntime): RewindCheckpointSummary[] {
@@ -236,7 +265,7 @@ export class RewindCheckpointManager {
       const prefix = files.length > 0 ? 'rewind files changed, but conversation restore failed' : 'rewind failed';
       throw new Error(`${prefix}: ${errorMessage(error)}`);
     }
-    this.checkpoints.set(agent, stack.slice(0, index + 1));
+    this.checkpoints.set(agent, stack.slice(0, index));
     this.previewPlans.delete(agent);
 
     return {
@@ -260,14 +289,6 @@ export class RewindCheckpointManager {
 
   private latest(agent: AgentRuntime): RewindCheckpoint | null {
     return this.checkpoints.get(agent)?.at(-1) ?? null;
-  }
-
-  private remove(agent: AgentRuntime, stack: RewindCheckpoint[], id: string): void {
-    this.checkpoints.set(
-      agent,
-      stack.filter((checkpoint) => checkpoint.id !== id),
-    );
-    this.previewPlans.delete(agent);
   }
 }
 
@@ -489,6 +510,15 @@ function captureFileState(): FileStateSnapshot {
   }
 }
 
+function unavailableFileState(error: string): FileStateSnapshot {
+  return {
+    available: false,
+    root: process.cwd(),
+    error,
+    entries: new Map(),
+  };
+}
+
 function restoreFileState(
   state: Extract<FileStateSnapshot, { available: true }>,
   files: RewindFileChange[],
@@ -505,9 +535,7 @@ function restoreFileState(
       maxBuffer: GIT_MAX_BUFFER,
     });
   }
-  const indexOnly = files
-    .map((file) => file.path)
-    .filter((path) => indexPaths.has(path) && !headPaths.has(path));
+  const indexOnly = files.map((file) => file.path).filter((path) => indexPaths.has(path) && !headPaths.has(path));
   if (indexOnly.length > 0) {
     gitBuffer(['restore', '--source=HEAD', '--staged', '--', ...indexOnly], {
       cwd: state.root,
@@ -676,6 +704,85 @@ function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
 function cloneJson<T>(value: T): T {
   if (value === undefined) return value;
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function userMessageIndexes(messages: unknown[]): number[] {
+  const indexes: number[] = [];
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (!message || typeof message !== 'object' || !('role' in message) || message.role !== 'user') continue;
+    const text = comparableMessageText(message);
+    if (text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) || text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)) {
+      continue;
+    }
+    indexes.push(index);
+  }
+  return indexes;
+}
+
+function visibleUserTurnBoundaries(
+  providerMessages: unknown[],
+  uiMessages: unknown[],
+): Array<{ messageIndex: number; uiMessageIndex?: number }> {
+  const providerUserIndexes = userMessageIndexes(providerMessages);
+  const uiUserIndexes = userMessageIndexes(uiMessages);
+  if (uiUserIndexes.length === 0) return providerUserIndexes.map((messageIndex) => ({ messageIndex }));
+
+  const reversed: Array<{ messageIndex: number; uiMessageIndex: number }> = [];
+  let uiCursor = uiUserIndexes.length - 1;
+  for (let providerCursor = providerUserIndexes.length - 1; providerCursor >= 0 && uiCursor >= 0; providerCursor--) {
+    const messageIndex = providerUserIndexes[providerCursor]!;
+    const providerText = comparableMessageText(providerMessages[messageIndex]);
+    let matchedUiCursor = -1;
+    for (let candidate = uiCursor; candidate >= 0; candidate--) {
+      const uiMessageIndex = uiUserIndexes[candidate]!;
+      if (comparableMessageText(uiMessages[uiMessageIndex]) === providerText) {
+        matchedUiCursor = candidate;
+        break;
+      }
+    }
+    if (matchedUiCursor === -1) continue;
+    reversed.push({ messageIndex, uiMessageIndex: uiUserIndexes[matchedUiCursor]! });
+    uiCursor = matchedUiCursor - 1;
+  }
+  return reversed.reverse();
+}
+
+function comparableMessageText(message: unknown): string {
+  return messageText(message).replace(/\s+/g, ' ').trim();
+}
+
+function usageBeforeMessage(
+  protocol: AgentRuntimeSnapshot['protocol'],
+  usageHistory: AgentRuntimeSnapshot['usageHistory'],
+  messageIndex: number,
+): AgentRuntimeSnapshot['usageHistory'] {
+  const messageCountLimit = protocol === 'openai_chat_completions' ? messageIndex + 1 : messageIndex;
+  return usageHistory.filter((usage) => usage.messageCount <= messageCountLimit);
+}
+
+function displayMessageText(message: unknown): string {
+  if (!message || typeof message !== 'object' || !('displayContent' in message)) return '';
+  return contentText(message.displayContent);
+}
+
+function messageText(message: unknown): string {
+  if (!message || typeof message !== 'object' || !('content' in message)) return '';
+  return contentText(message.content);
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      if ('text' in part && typeof part.text === 'string') return part.text;
+      if ('type' in part && typeof part.type === 'string' && part.type.includes('image')) return '[Image]';
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 function errorMessage(error: unknown): string {

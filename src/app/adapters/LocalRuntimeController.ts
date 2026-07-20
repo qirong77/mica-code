@@ -255,10 +255,12 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   listRewindCheckpoints(): RewindCheckpointSummary[] {
+    this.ensureRewindConversationHistory(this.agent);
     return this.rewindCheckpoints.list(this.agent);
   }
 
   getRewindPreview(id?: string): RewindPreviewResult {
+    this.ensureRewindConversationHistory(this.agent);
     return this.rewindCheckpoints.preview(this.agent, id);
   }
 
@@ -272,6 +274,20 @@ export class LocalRuntimeController implements RuntimeController {
     this.queue.clear();
     this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
     return result;
+  }
+
+  private ensureRewindConversationHistory(agent: AgentRuntime): void {
+    if (this.rewindCheckpoints.list(agent).length > 0) return;
+    try {
+      const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+      const conversationMessages = session?.uiState.conversationMessages.length
+        ? session.uiState.conversationMessages
+        : agent.toConversationMessages();
+      this.rewindCheckpoints.restoreConversationHistory(agent, conversationMessages);
+    } catch {
+      // History recovery is best-effort; a malformed persisted history must
+      // not break the command or prevent future live checkpoints.
+    }
   }
 
   async submit(rawText: string, options: SubmitOptions = {}): Promise<SubmitResult> {

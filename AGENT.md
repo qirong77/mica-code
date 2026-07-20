@@ -277,7 +277,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/task`：按 terminal session 展示当前终端中的 session、全部 retained subagent 和 active background shell。列表中 `Enter` 切换 session，或打开 subagent/shell 详情；`/task clear` 清除空闲 session。
-- `/rewind`：选择一轮对话，回退到该节点完成时的对话和文件状态。
+- `/rewind`：选择一轮对话，回退到该用户输入之前；对话节点可从当前 provider/UI history 动态恢复，有对应文件 checkpoint 时还可选择恢复文件。
 - `/mcp`：列出 MCP 服务器和工具；`/mcp reconnect <server>` 重连指定服务。
 - `/skills`：列出已安装的 skills。
 - `/rename`：重命名当前会话。
@@ -365,7 +365,7 @@ AGENT.md
 - `Agent` 支持 `operation=run_many`（`tasks` + `depends_on` + `max_parallel`）和 `operation=join` 汇总多个 task 结果。
 - `Proposal` 为不落盘提案模式，只返回 patch 文本供 parent 审查后 apply。
 - 当前内置 subagent 类型：`general-purpose`、`Explore`、`Implementer`、`Reviewer`、`Tester`、`Planner`、`Proposal`。
-- `RewindCheckpointManager` 在 turn 前创建 checkpoint，并在 turn 结束后将其更新为该节点完成时的对话和文件状态；`/rewind` 只回到明确 checkpoint，不做模糊历史重写。
+- `RewindCheckpointManager` 在 turn 前创建对话和文件 checkpoint，并始终保留“用户输入之前”的状态。内存 checkpoint 缺失（例如 `/resume` 后）时，runtime 从仍可对齐的 provider/UI history 动态生成仅对话节点；compact 后无法精确对齐的更早节点不伪造，历史文件状态也不推断。
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
 - compact 可以裁剪 tool result、媒体和 base64，但绝不能把 tool-call `arguments` 截成自由文本；过长或损坏参数必须改写成合法 JSON 占位，否则后续 provider 请求会 400。
