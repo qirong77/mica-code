@@ -113,6 +113,8 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
   const requestRef = useRef(0)
+  const reloadRef = useRef(0)
+  const lifecycleRef = useRef(0)
   const messageTimer = useRef(null)
   const saveActionRef = useRef(null)
   const [tree, setTree] = useState({
@@ -154,8 +156,13 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
     editorRef.current = editor
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActionRef.current?.())
     return () => {
+      lifecycleRef.current += 1
+      reloadRef.current += 1
       clearTimeout(messageTimer.current)
-      for (const tab of tabsRef.current) {
+      const currentTabs = tabsRef.current
+      tabsRef.current = []
+      activeRef.current = null
+      for (const tab of currentTabs) {
         tab.subscription?.dispose()
         tab.model?.dispose()
       }
@@ -234,9 +241,10 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
       setActivePath(path)
       editorRef.current?.setModel(null)
       showMessage(`正在打开 ${tab.name}…`)
+      const generation = lifecycleRef.current
       try {
         const result = await window.mica.files.read(path)
-        if (!tabsRef.current.includes(tab)) return
+        if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
         const model = monaco.editor.createModel(
           result.content,
           languageFor(path),
@@ -345,22 +353,6 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
     [activateFile, setActivePath, setTabs, showMessage]
   )
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      openFile,
-      closeActive() {
-        if (!activeRef.current) return false
-        closeFile(activeRef.current)
-        return true
-      },
-      layout() {
-        editorRef.current?.layout()
-      }
-    }),
-    [closeFile, openFile]
-  )
-
   useEffect(() => {
     const keydown = (event) => {
       if (
@@ -464,6 +456,100 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
         setTree((value) => ({ ...value, status: `无法刷新文件夹：${error?.message || error}` }))
     }
   }, [restoreExpanded, treeRef])
+
+  const reloadAfterGitChange = useCallback(
+    async (nextRoot) => {
+      if (tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)) return false
+      const generation = lifecycleRef.current
+      const request = ++reloadRef.current
+      const snapshot = [...tabsRef.current]
+      const active = activeRef.current
+      const activeTab = snapshot.find((tab) => tab.path === active)
+      if (activeTab?.model && editorRef.current?.getModel() === activeTab.model)
+        activeTab.viewState = editorRef.current.saveViewState()
+
+      const treeTask = loadRoot(nextRoot)
+      const results = await Promise.all(
+        snapshot.map(async (tab) => {
+          try {
+            return { path: tab.path, value: await window.mica.files.read(tab.path) }
+          } catch (error) {
+            return { path: tab.path, error }
+          }
+        })
+      )
+      if (generation !== lifecycleRef.current || request !== reloadRef.current) return false
+
+      const responses = new Map(results.map((result) => [result.path, result]))
+      const removed = []
+      const nextTabs = []
+      for (const tab of tabsRef.current) {
+        const response = responses.get(tab.path)
+        if (!response || tab.dirty || tab.saving) {
+          nextTabs.push(tab)
+          continue
+        }
+        if (response.error) {
+          removed.push(tab)
+          tab.subscription?.dispose()
+          if (editorRef.current?.getModel() === tab.model) editorRef.current.setModel(null)
+          tab.model?.dispose()
+          continue
+        }
+        if (tab.model.getValue() !== response.value.content)
+          tab.model.setValue(response.value.content)
+        nextTabs.push({
+          ...tab,
+          diskVersion: response.value.version,
+          savedVersion: tab.model.getAlternativeVersionId(),
+          dirty: false,
+          loading: false
+        })
+      }
+      setTabs(nextTabs)
+
+      const nextActive = nextTabs.find((tab) => tab.path === active) || nextTabs.at(-1)
+      if (nextActive) {
+        setActivePath(nextActive.path)
+        editorRef.current?.setModel(nextActive.model)
+        if (nextActive.viewState) editorRef.current?.restoreViewState(nextActive.viewState)
+      } else {
+        setActivePath(null)
+        editorRef.current?.setModel(null)
+      }
+      await treeTask
+      if (generation !== lifecycleRef.current || request !== reloadRef.current) return false
+      showMessage(
+        removed.length
+          ? `已重新加载分支内容，${removed.length} 个不存在的文件已关闭`
+          : '已重新加载分支内容',
+        true,
+        removed.length > 0
+      )
+      return true
+    },
+    [loadRoot, setActivePath, setTabs, showMessage]
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openFile,
+      closeActive() {
+        if (!activeRef.current) return false
+        closeFile(activeRef.current)
+        return true
+      },
+      hasDirty() {
+        return tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)
+      },
+      reloadAfterGitChange,
+      layout() {
+        editorRef.current?.layout()
+      }
+    }),
+    [closeFile, openFile, reloadAfterGitChange]
+  )
 
   const toggleDirectory = useCallback(async (node) => {
     if (node.loading) return

@@ -117,7 +117,7 @@ function normalize(item, root, mode) {
       }
 }
 
-export function QuickSearch({ getRoot, openFile, closeActiveFile }) {
+export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = false }) {
   const inputRef = useRef(null)
   const requestRef = useRef(0)
   const [open, setOpen] = useState(false)
@@ -154,6 +154,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile }) {
 
   useEffect(() => {
     const keydown = (event) => {
+      if (disabled) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       const key = event.key.toLocaleLowerCase()
       if (key === 'p' && !event.shiftKey) {
@@ -177,7 +178,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile }) {
     }
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
-  }, [closeActiveFile, hide, open, show])
+  }, [closeActiveFile, disabled, hide, open, show])
 
   useEffect(() => {
     if (!open) return undefined

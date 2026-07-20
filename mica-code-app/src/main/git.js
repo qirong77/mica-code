@@ -83,7 +83,13 @@ async function getSummary(cwd) {
   for (const [filePath, status] of changes) {
     let stat = numstats.get(filePath)
     if (!stat && status === 'added') {
-      const content = await readFile(path.join(root, filePath))
+      let content
+      try {
+        content = await readFile(path.join(root, filePath))
+      } catch {
+        // A staged addition removed again from the worktree has no final diff against HEAD.
+        continue
+      }
       stat = {
         additions: content.includes(0) ? 0 : countLines(content),
         deletions: 0,
@@ -112,10 +118,17 @@ async function getSummary(cwd) {
 
 async function getStatus(cwd) {
   const { root } = await getRepository(cwd)
-  const branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  let branch
+  try {
+    const ref = (await git(root, ['symbolic-ref', '--quiet', 'HEAD'])).trim()
+    branch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
+  } catch {
+    const hash = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim()
+    branch = hash ? `detached@${hash}` : 'detached'
+  }
   return {
     root,
-    branch: branch === 'HEAD' ? 'detached' : branch,
+    branch,
     projectName: path.basename(root)
   }
 }
@@ -128,12 +141,97 @@ function safeFilePath(root, relativePath) {
   return absolutePath
 }
 
+function errorMessage(error) {
+  return error?.stderr?.trim() || error?.message || String(error)
+}
+
+function parseRefs(output, kind) {
+  return output
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [ref, hash, date, author, subject, current, upstream, tracking] = line.split('\0')
+      const prefix = kind === 'branch' ? 'refs/heads/' : 'refs/tags/'
+      return {
+        name: ref.startsWith(prefix) ? ref.slice(prefix.length) : ref,
+        ref,
+        kind,
+        hash,
+        date,
+        author,
+        subject,
+        current: current === '*',
+        upstream: upstream || null,
+        tracking: tracking || null
+      }
+    })
+}
+
+async function getRefs(cwd) {
+  const { root } = await getRepository(cwd)
+  const format = [
+    '%(refname)',
+    '%(objectname:short)',
+    '%(committerdate:relative)',
+    '%(authorname)',
+    '%(subject)',
+    '%(HEAD)',
+    '%(upstream:short)',
+    '%(upstream:track)'
+  ].join('%00')
+  const tagFormat = [
+    '%(refname)',
+    '%(objectname:short)',
+    '%(creatordate:relative)',
+    '%(authorname)',
+    '%(subject)',
+    '',
+    '',
+    ''
+  ].join('%00')
+  const [branchesOutput, tagsOutput] = await Promise.all([
+    git(root, ['for-each-ref', '--sort=-committerdate', `--format=${format}`, 'refs/heads']),
+    git(root, ['for-each-ref', '--sort=-creatordate', `--format=${tagFormat}`, 'refs/tags'])
+  ])
+  const branches = parseRefs(branchesOutput, 'branch').sort(
+    (left, right) => Number(right.current) - Number(left.current)
+  )
+  return { root, branches, tags: parseRefs(tagsOutput, 'tag') }
+}
+
+async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
+  const refs = await getRefs(cwd)
+  const values = [...refs.branches, ...refs.tags]
+  const match = values.find((item) => kinds.includes(item.kind) && item.ref === ref)
+  if (!match) throw new Error('所选 Git 引用已不存在，请刷新后重试')
+  return { root: refs.root, match }
+}
+
+async function createBranch(cwd, name, startRef) {
+  const branch = typeof name === 'string' ? name.trim() : ''
+  if (!branch) throw new Error('请输入分支名称')
+  const { root } = await getRepository(cwd)
+  await git(root, ['check-ref-format', '--branch', branch])
+  let start
+  if (startRef) start = (await resolveRef(root, startRef)).match.ref
+  await git(root, ['checkout', '-b', branch, ...(start ? [start] : [])])
+  return getStatus(root)
+}
+
+async function checkoutBranch(cwd, ref, detached = false) {
+  const { root, match } = await resolveRef(cwd, ref, detached ? ['branch', 'tag'] : ['branch'])
+  if (!detached && match.name.startsWith('-')) throw new Error('不支持签出以连字符开头的分支')
+  if (!detached) await git(root, ['check-ref-format', '--branch', match.name])
+  await git(root, detached ? ['checkout', '--detach', match.ref] : ['checkout', match.name])
+  return getStatus(root)
+}
+
 export function registerGitIpc() {
   ipcMain.handle('git:status', async (_event, { cwd } = {}) => {
     try {
       return { status: await getStatus(cwd), error: null }
     } catch (error) {
-      return { status: null, error: error?.stderr?.trim() || error?.message || String(error) }
+      return { status: null, error: errorMessage(error) }
     }
   })
 
@@ -141,7 +239,31 @@ export function registerGitIpc() {
     try {
       return { repository: await getSummary(cwd), error: null }
     } catch (error) {
-      return { repository: null, error: error?.stderr?.trim() || error?.message || String(error) }
+      return { repository: null, error: errorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:refs', async (_event, { cwd } = {}) => {
+    try {
+      return { refs: await getRefs(cwd), error: null }
+    } catch (error) {
+      return { refs: null, error: errorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:checkout', async (_event, { cwd, ref, detached } = {}) => {
+    try {
+      return { status: await checkoutBranch(cwd, ref, !!detached), error: null }
+    } catch (error) {
+      return { status: null, error: errorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:create-branch', async (_event, { cwd, name, startRef } = {}) => {
+    try {
+      return { status: await createBranch(cwd, name, startRef), error: null }
+    } catch (error) {
+      return { status: null, error: errorMessage(error) }
     }
   })
 

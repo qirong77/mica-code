@@ -186,6 +186,11 @@ export function GitView({ cwd, repository, loading, visible, onRefresh }) {
       return
     }
     if (loading && !repository) {
+      requestRef.current += 1
+      signatureRef.current = null
+      setSelectedPath(null)
+      setSelectedFile(null)
+      clearEditor()
       setMessage('正在读取 Git 工作区…')
       return
     }

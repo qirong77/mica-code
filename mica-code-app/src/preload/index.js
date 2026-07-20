@@ -62,7 +62,12 @@ const filesApi = {
 const gitApi = {
   status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
   summary: (cwd) => ipcRenderer.invoke('git:summary', { cwd }),
-  file: (cwd, filePath) => ipcRenderer.invoke('git:file', { cwd, filePath })
+  file: (cwd, filePath) => ipcRenderer.invoke('git:file', { cwd, filePath }),
+  refs: (cwd) => ipcRenderer.invoke('git:refs', { cwd }),
+  checkout: (cwd, ref, detached = false) =>
+    ipcRenderer.invoke('git:checkout', { cwd, ref, detached }),
+  createBranch: (cwd, name, startRef = null) =>
+    ipcRenderer.invoke('git:create-branch', { cwd, name, startRef })
 }
 
 contextBridge.exposeInMainWorld('mica', {

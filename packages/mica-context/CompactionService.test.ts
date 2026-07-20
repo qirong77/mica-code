@@ -89,6 +89,23 @@ describe('CompactionService', () => {
     expect(contentOf(second.messages[1])).toContain('second compact memory including first');
   });
 
+  it('protects the previous compact checkpoint when the next summary input is budget constrained', async () => {
+    const service = new CompactionService();
+    const previousCheckpoint = {
+      role: 'user',
+      content: `${COMPACT_SUMMARY_PREFIX}\n\nFIRST_COMPACT_MEMORY must survive`,
+    };
+
+    await service.compact({
+      messages: [previousCheckpoint, ...makeMessages(8)],
+      options: { keepRecentRounds: 1, aggressive: true, force: true, summaryInputTokenBudget: 120 },
+      summarize: async (transcript) => {
+        expect(transcript).toContain('FIRST_COMPACT_MEMORY');
+        return FULL_SUMMARY;
+      },
+    });
+  });
+
   it('retries prompt-too-long compaction by dropping oldest rounds', async () => {
     const service = new CompactionService();
     let calls = 0;
@@ -126,6 +143,8 @@ describe('CompactionService', () => {
     const service = new CompactionService();
     const result = await service.compact({
       messages: [
+        { role: 'user', content: 'earlier request' },
+        { role: 'assistant', content: 'earlier answer' },
         { role: 'user', content: 'inspect packages/example.ts' },
         {
           role: 'assistant',
@@ -139,7 +158,8 @@ describe('CompactionService', () => {
       ],
       options: { keepRecentRounds: 1, aggressive: true, force: true },
       summarize: async (transcript) => {
-        expect(transcript).toContain('inspect packages/example.ts');
+        expect(transcript).toContain('earlier request');
+        expect(transcript).not.toContain('inspect packages/example.ts');
         expect(transcript).not.toContain('RAW_TOOL_RESULT');
         return FULL_SUMMARY;
       },
@@ -208,7 +228,14 @@ describe('CompactionService', () => {
     const service = new CompactionService();
     const encryptedContent = 'A'.repeat(8_000);
     const messages = [
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'inspect the project' }] },
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'inspect the project' },
+          { type: 'input_image', detail: 'auto', image_url: `data:image/png;base64,${IMAGE_BASE64}` },
+        ],
+      },
       {
         type: 'reasoning',
         id: 'rs_test',
@@ -267,20 +294,47 @@ describe('CompactionService', () => {
 
     const serialized = JSON.stringify(result.messages);
     expect(result.mode).toBe('summarized');
-    expect(result.strategy).toBe('summary_with_recent');
+    expect(result.strategy).toBe('summary_only_fallback');
     expect(result.summarizedCount).toBeGreaterThan(0);
-    expect(result.keptCount).toBeGreaterThan(0);
+    expect(result.keptCount).toBe(0);
     expect(summaryTranscript).toContain('read_file');
     expect(summaryTranscript).toContain('run_shell');
     expect(summaryTranscript).toContain('[Old tool result content cleared during compact]');
     expect(summaryTranscript).not.toContain('RAW_TOOL_RESULT_1');
     expect(summaryTranscript).not.toContain('RAW_RESPONSES_RESULT_1');
     expect(summaryTranscript).not.toContain(IMAGE_BASE64);
+    expect(summaryTranscript).toContain('user request 5');
     expect(serialized).toContain(COMPACT_SUMMARY_PREFIX);
-    expect(serialized).toContain('user request 5');
     expect(serialized).not.toContain('RAW_TOOL_RESULT_5');
     expect(serialized).not.toContain('RAW_RESPONSES_RESULT_5');
     expect(serialized).not.toContain(IMAGE_BASE64);
+  });
+
+  it('moves reduced recent rounds into the summary instead of silently dropping them', async () => {
+    const service = new CompactionService();
+    const transcripts: string[] = [];
+    const result = await service.compact({
+      messages: makeToolMessages(5),
+      options: {
+        force: true,
+        aggressive: true,
+        keepRecentRounds: 3,
+        lightweightPrune: true,
+        contextWindowSize: 10,
+        summarizeThresholdRatio: 0.3,
+      },
+      summarize: async (transcript) => {
+        transcripts.push(transcript);
+        return `<summary>\n${transcript}\n</summary>`;
+      },
+    });
+
+    expect(result.strategy).toBe('summary_only_fallback');
+    expect(result.keptCount).toBe(0);
+    const finalTranscript = transcripts.at(-1) ?? '';
+    for (let turn = 1; turn <= 5; turn++) {
+      expect(finalTranscript).toContain(`user request ${turn}`);
+    }
   });
 
   it('lightweight compact can prune a short session without an older section to summarize', async () => {
@@ -322,6 +376,21 @@ describe('CompactionService', () => {
           { role: 'assistant', content: 'only answer' },
         ],
         options: { force: true, aggressive: true },
+        summarize: async () => FULL_SUMMARY,
+      }),
+    ).rejects.toBeInstanceOf(CompactionNotNeededError);
+  });
+
+  it('does not report prune-only success when a short text session was not changed', async () => {
+    const service = new CompactionService();
+
+    await expect(
+      service.compact({
+        messages: [
+          { role: 'user', content: 'only request' },
+          { role: 'assistant', content: 'only answer' },
+        ],
+        options: { force: true, aggressive: true, lightweightPrune: true, contextWindowSize: 100_000 },
         summarize: async () => FULL_SUMMARY,
       }),
     ).rejects.toBeInstanceOf(CompactionNotNeededError);
@@ -417,16 +486,18 @@ describe('CompactionService', () => {
       const content = (message as Record<string, unknown>).content;
       return (
         Array.isArray(content) &&
-        content.some((part) => part && typeof part === 'object' && (part as Record<string, unknown>).type === 'image_url')
+        content.some(
+          (part) =>
+            part &&
+            typeof part === 'object' &&
+            (part as Record<string, unknown>).type === 'text' &&
+            (part as Record<string, unknown>).text === '[image omitted during compact]',
+        )
       );
     }) as Record<string, unknown> | undefined;
     expect(imageUser).toBeTruthy();
     const content = imageUser!.content as Array<Record<string, unknown>>;
-    const imagePart = content.find((part) => part.type === 'image_url') as Record<string, unknown>;
-    expect(imagePart).toMatchObject({
-      type: 'image_url',
-      image_url: { url: '[image omitted during compact]' },
-    });
+    expect(content.some((part) => part.type === 'image_url')).toBe(false);
     expect(JSON.stringify(result.messages)).not.toContain(IMAGE_BASE64);
     expect(JSON.stringify(result.messages)).not.toContain('[truncated:');
   });
@@ -434,7 +505,7 @@ describe('CompactionService', () => {
   it('repairs already-corrupted tool-call arguments into valid JSON placeholders', async () => {
     const service = new CompactionService();
     const corrupted =
-      '[truncated: original 4520 chars, kept about 4000 chars]\n--- head ---\n{"command":"echo hi"';
+      '[truncated: original 9520 chars, kept about 4000 chars]\n--- head ---\n{"command":"echo hi"' + 'x'.repeat(5_000);
     const result = await service.compact({
       messages: [
         { role: 'user', content: 'fix corrupted history' },

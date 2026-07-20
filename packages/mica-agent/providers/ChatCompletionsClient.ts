@@ -84,7 +84,7 @@ export class ChatCompletionsClient extends BaseAgent<
     snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, ChatCompletionsUsageRecord>,
   ) {
     this.turnId = this.loadSnapshotState(
-      { ...snapshot, messages: compactHistoricalToolResults(repairChatCompletionsToolResults(snapshot.messages)) },
+      { ...snapshot, messages: prepareHistoricalChatMessages(snapshot.messages) },
       (message) => message.role !== 'system',
     );
   }
@@ -98,7 +98,7 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
-    this.messages = compactHistoricalToolResults(this.messages);
+    this.messages = prepareHistoricalChatMessages(this.messages);
     const hasCurrentTurn = this.messages.some(
       (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
     );
@@ -129,12 +129,12 @@ export class ChatCompletionsClient extends BaseAgent<
     let requestIndex = 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: resolveSystemPrompt(this.systemPrompt) },
-      ...compactHistoricalToolResults(this.messages),
+      ...prepareHistoricalChatMessages(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       const sessionMessages = messages.filter((message) => message.role !== 'system');
-      this.messages = takeNextInput ? sessionMessages : compactHistoricalToolResults(sessionMessages);
+      this.messages = takeNextInput ? sessionMessages : prepareHistoricalChatMessages(sessionMessages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
@@ -361,6 +361,9 @@ function repairChatCompletionsToolResults(
   const repaired: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index]!;
+    // Valid tool results are consumed together with the preceding assistant
+    // call below. A standalone result cannot be sent back to the provider.
+    if (message.role === 'tool') continue;
     if (message.role !== 'assistant' || !message.tool_calls?.length) {
       repaired.push(message);
       continue;
@@ -438,6 +441,41 @@ function compactHistoricalToolResults(
       content: compactHistoricalToolResultText(message.content),
     };
   });
+}
+
+function prepareHistoricalChatMessages(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return sanitizeHistoricalChatMedia(compactHistoricalToolResults(repairChatCompletionsToolResults(messages)));
+}
+
+function sanitizeHistoricalChatMedia(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || !Array.isArray(message.content)) return message;
+    const content = message.content.map((part) => {
+      if (part.type !== 'image_url') return part;
+      const imageUrl =
+        part.image_url && typeof part.image_url === 'object'
+          ? (part.image_url as { url?: unknown }).url
+          : undefined;
+      if (isValidHistoricalImageUrl(imageUrl)) return part;
+      return { type: 'text' as const, text: '[image omitted from invalid historical content]' };
+    });
+    return { ...message, content };
+  });
+}
+
+function isValidHistoricalImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (/^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(value)) return true;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function openAIContentToMicaContent(

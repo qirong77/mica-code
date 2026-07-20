@@ -435,12 +435,15 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
       pending.clear();
     }
 
-    repaired.push(item);
-    if (item.type === 'function_call' && item.call_id) {
-      pending.add(item.call_id);
-    } else if (item.type === 'function_call_output') {
-      pending.delete(item.call_id);
+    if (item.type === 'function_call_output') {
+      // A valid output must correspond to a pending function call. Dropping
+      // orphaned/duplicate outputs repairs older interrupted snapshots.
+      if (pending.delete(item.call_id)) repaired.push(item);
+      continue;
     }
+
+    repaired.push(item);
+    if (item.type === 'function_call' && item.call_id) pending.add(item.call_id);
   }
 
   if (pending.size > 0) repaired.push(...Array.from(pending, interruptedResponsesToolResult));
@@ -448,11 +451,55 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
 }
 
 function prepareHistoricalResponsesInput(messages: ResponseInputItem[]): ResponseInputItem[] {
-  return stripUnusableResponseInputItems(messages).map((item) => {
+  return stripUnusableResponseInputItems(messages).map((rawItem) => {
+    const item = sanitizeHistoricalResponsesMedia(rawItem);
     if (item.type !== 'function_call_output' || typeof item.output !== 'string') return item;
     const compacted = compactHistoricalToolResultText(item.output);
     return compacted === item.output ? item : { ...item, output: compacted };
   });
+}
+
+function sanitizeHistoricalResponsesMedia(item: ResponseInputItem): ResponseInputItem {
+  if (item.type === 'message' && Array.isArray(item.content)) {
+    const replacementType = item.role === 'assistant' ? 'output_text' : 'input_text';
+    const content = item.content.map((part) => sanitizeResponsesImagePart(part, replacementType));
+    return { ...item, content } as ResponseInputItem;
+  }
+  if (item.type === 'function_call_output' && Array.isArray(item.output)) {
+    const output = item.output.map((part) => sanitizeResponsesImagePart(part, 'input_text'));
+    return { ...item, output } as ResponseInputItem;
+  }
+  return item;
+}
+
+function sanitizeResponsesImagePart<T>(
+  part: T,
+  replacementType: 'input_text' | 'output_text',
+): T | { type: 'input_text'; text: string } | { type: 'output_text'; text: string; annotations: [] } {
+  if (!part || typeof part !== 'object') return part;
+  const record = part as Record<string, unknown>;
+  if (
+    record.type !== 'input_image' ||
+    isValidHistoricalImageUrl(record.image_url) ||
+    (typeof record.file_id === 'string' && record.file_id.trim().length > 0)
+  ) {
+    return part;
+  }
+  const text = '[image omitted from invalid historical content]';
+  return replacementType === 'output_text'
+    ? { type: 'output_text', text, annotations: [] }
+    : { type: 'input_text', text };
+}
+
+function isValidHistoricalImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (/^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(value)) return true;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function stripUnusableResponseInputItems(messages: ResponseInputItem[]): ResponseInputItem[] {

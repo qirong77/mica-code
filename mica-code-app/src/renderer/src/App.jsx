@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Folder, FolderPlus, GitCompare, PanelLeft, Plus, SquareTerminal } from 'lucide-react'
+import {
+  Folder,
+  FolderPlus,
+  GitBranch,
+  GitCompare,
+  PanelLeft,
+  Plus,
+  SquareTerminal
+} from 'lucide-react'
+import { BranchPicker } from './BranchPicker'
 import { FilesView } from './FilesView'
 import { GitView } from './GitView'
 import { QuickSearch } from './QuickSearch'
@@ -44,6 +53,11 @@ function TextPrompt({ prompt, onClose }) {
           className="mb-3 h-8 w-full rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-[13px] text-white focus:border-white/30"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'w') {
+              event.preventDefault()
+              onClose(null)
+              return
+            }
             if (event.key === 'Enter') {
               event.preventDefault()
               submit()
@@ -155,7 +169,7 @@ function useNotifications(activeId, onSessionId) {
           .catch((error) => console.error('mark read failed', reason, error))
       }, 120)
     },
-    [activeRef, setTerminalState, statesRef]
+    [activeRef, statesRef]
   )
 
   const audioContext = () => {
@@ -258,6 +272,7 @@ const tabClass =
 export default function App() {
   const terminalRef = useRef(null)
   const filesRef = useRef(null)
+  const branchButtonRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [nodes, setNodes] = useState([])
@@ -271,6 +286,7 @@ export default function App() {
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
   )
   const [prompt, setPrompt] = useState(null)
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -279,7 +295,9 @@ export default function App() {
     status: null,
     loading: false
   })
+  const gitRef = useLatest(git)
   const gitRequest = useRef(0)
+  const cwdRefreshTimer = useRef(null)
 
   useEffect(() => {
     window.mica.workspace
@@ -345,7 +363,7 @@ export default function App() {
   const notifications = useNotifications(activeId, setSessionId)
 
   const refreshGit = useCallback(
-    async ({ quiet = false } = {}) => {
+    async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
       const id = activeRef.current
       const request = ++gitRequest.current
       if (!id) {
@@ -353,17 +371,42 @@ export default function App() {
         return
       }
       if (!quiet) setGit((current) => ({ ...current, loading: true }))
-      const cwd = await terminalRef.current?.getCwd(id)
+      let cwd = requestedCwd || (await terminalRef.current?.getCwd(id))
       if (request !== gitRequest.current || id !== activeRef.current) return
       if (!cwd) {
         setGit({ terminalId: null, cwd: null, repository: null, status: null, loading: false })
         return
       }
+      setGit((current) =>
+        current.terminalId === id && current.cwd === cwd
+          ? current
+          : { terminalId: id, cwd, repository: null, status: null, loading: true }
+      )
       try {
-        const [summary, status] = await Promise.all([
+        let [summary, status] = await Promise.all([
           window.mica.git.summary(cwd),
           window.mica.git.status(cwd)
         ])
+        const fallbackRoot = gitRef.current.status?.root
+        const cwdMissing = /\bENOENT\b|no such file or directory|cannot chdir/i.test(
+          `${summary?.error || ''}\n${status?.error || ''}`
+        )
+        if (
+          !requestedCwd &&
+          !summary?.repository &&
+          !status?.status &&
+          fallbackRoot &&
+          cwd !== fallbackRoot &&
+          cwdMissing
+        ) {
+          cwd = fallbackRoot
+          const fallback = await Promise.all([
+            window.mica.git.summary(cwd),
+            window.mica.git.status(cwd)
+          ])
+          summary = fallback[0]
+          status = fallback[1]
+        }
         if (request === gitRequest.current && id === activeRef.current) {
           setGit({
             terminalId: id,
@@ -380,18 +423,24 @@ export default function App() {
         }
       }
     },
-    [activeRef]
+    [activeRef, gitRef]
   )
 
   useEffect(() => {
     if (ready) refreshGit()
   }, [activeId, ready, refreshGit, view])
+  useEffect(() => setBranchPickerOpen(false), [activeId])
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') refreshGit({ quiet: true })
     }, 3000)
     return () => clearInterval(timer)
   }, [refreshGit])
+  const refreshAfterCommand = useCallback(() => {
+    clearTimeout(cwdRefreshTimer.current)
+    cwdRefreshTimer.current = window.setTimeout(() => refreshGit({ quiet: true }), 120)
+  }, [refreshGit])
+  useEffect(() => () => clearTimeout(cwdRefreshTimer.current), [])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -406,6 +455,21 @@ export default function App() {
     promptResolver.current?.(value)
     promptResolver.current = null
   }
+  const branchChanged = useCallback(
+    async (status) => {
+      setGit((current) => ({
+        ...current,
+        status: status || current.status,
+        repository: null,
+        loading: true
+      }))
+      await Promise.all([
+        refreshGit({ cwd: status?.root || null }),
+        filesRef.current?.reloadAfterGitChange(status?.root || gitRef.current.status?.root)
+      ])
+    },
+    [gitRef, refreshGit]
+  )
 
   const createFolder = useCallback((parent = '#') => {
     const id = uid('folder')
@@ -492,9 +556,7 @@ export default function App() {
       } else if (selectedId === node.id) {
         setSelectedId(activeRef.current)
       }
-      const disposed = await Promise.allSettled(
-        ids.map((id) => terminalRef.current?.dispose(id))
-      )
+      const disposed = await Promise.allSettled(ids.map((id) => terminalRef.current?.dispose(id)))
       for (const result of disposed) {
         if (result.status === 'rejected') console.error('dispose terminal failed', result.reason)
       }
@@ -523,10 +585,6 @@ export default function App() {
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
-  const defaultActiveCwd = useMemo(() => {
-    const node = nodes.find((item) => item.id === activeId)
-    return node ? resolveDefaultCwd(nodes, node.parent) : null
-  }, [activeId, nodes])
   const gitIsCurrent = git.terminalId === activeId
   const repository = gitIsCurrent ? git.repository : null
   const gitCount = repository?.files?.length ? repository : null
@@ -542,6 +600,17 @@ export default function App() {
     () => view === 'files' && !!filesRef.current?.closeActive(),
     [view]
   )
+  const canChangeBranch = useCallback(
+    () =>
+      filesRef.current?.hasDirty()
+        ? '存在尚未保存、正在保存或正在打开的文件，请处理完成后再执行 Git 分支操作。'
+        : '',
+    []
+  )
+  const closeBranchPicker = useCallback(() => {
+    setBranchPickerOpen(false)
+    requestAnimationFrame(() => branchButtonRef.current?.focus())
+  }, [])
   const setCollapsed = () => {
     setSidebarCollapsed((value) => {
       localStorage.setItem('mica.sidebarCollapsed', String(!value))
@@ -674,14 +743,15 @@ export default function App() {
             sidebarCollapsed={sidebarCollapsed}
             resolveCwd={terminalCwd}
             onRead={(id, reason) => notifications.markRead(id, reason)}
+            onCommand={refreshAfterCommand}
           />
           <FilesView
             ref={filesRef}
-            root={gitIsCurrent ? git.cwd || defaultActiveCwd : defaultActiveCwd}
+            root={gitIsCurrent ? git.cwd : null}
             visible={view === 'files'}
           />
           <GitView
-            cwd={gitIsCurrent ? git.cwd : defaultActiveCwd}
+            cwd={gitIsCurrent ? git.cwd : null}
             repository={repository}
             loading={gitIsCurrent ? git.loading : true}
             visible={view === 'git-compare'}
@@ -692,12 +762,21 @@ export default function App() {
               {error || '选择或新建一个终端会话'}
             </div>
           )}
-          {view === 'terminal' && gitIsCurrent && git.status?.projectName && (
+          {gitIsCurrent && git.status?.root && (
             <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
-              <span className="min-w-0 truncate">{git.status.branch || ''}</span>
-              <span className="min-w-0 truncate text-right text-white/35">
-                {git.status.root || git.cwd || ''}
-              </span>
+              <button
+                ref={branchButtonRef}
+                type="button"
+                title="切换或创建 Git 分支"
+                aria-haspopup="dialog"
+                aria-expanded={branchPickerOpen}
+                className="-ml-1.5 flex h-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white"
+                onClick={() => setBranchPickerOpen(true)}
+              >
+                <GitBranch size={13} className="shrink-0" />
+                <span className="truncate">{git.status.branch || 'detached'}</span>
+              </button>
+              <span className="min-w-0 truncate text-right text-white/35">{git.status.root}</span>
             </footer>
           )}
         </main>
@@ -716,7 +795,17 @@ export default function App() {
         getRoot={getSearchRoot}
         openFile={openSearchFile}
         closeActiveFile={closeSearchFile}
+        disabled={branchPickerOpen || !!prompt}
       />
+      {branchPickerOpen && git.cwd && (
+        <BranchPicker
+          cwd={git.cwd}
+          askText={askText}
+          canOperate={canChangeBranch}
+          onChanged={branchChanged}
+          onClose={closeBranchPicker}
+        />
+      )}
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}
     </>
   )

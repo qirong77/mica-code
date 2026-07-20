@@ -114,6 +114,7 @@ export class CompactionService {
     const compactedActiveMessages = options.lightweightPrune
       ? compactMessagesForCheckpoint(activeMessages, options)
       : cloneJson(activeMessages);
+    const prunedMessageCount = countChangedMessages(activeMessages, compactedActiveMessages);
     const budget = getCompactBudget(options, beforeTokenEstimate);
     const pruneOnlyThresholdRatio = getPruneOnlyThresholdRatio(options);
     const targetContextRatio = getTargetContextRatio(options);
@@ -126,7 +127,7 @@ export class CompactionService {
           strategy: 'prune_only',
           beforeCount,
           beforeTokenEstimate,
-          prunedCount: activeMessages.length,
+          prunedCount: prunedMessageCount,
           keptCount: activeMessages.length,
           trigger: 'manual',
           contextWindowSize: budget.contextWindowSize,
@@ -139,6 +140,8 @@ export class CompactionService {
       lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
       const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, budget.contextWindowSize);
       if (
+        prunedMessageCount > 0 &&
+        lightweightTokenEstimate < beforeTokenEstimate &&
         budget.contextWindowSize &&
         lightweightUsageRatio !== undefined &&
         lightweightUsageRatio <= pruneOnlyThresholdRatio
@@ -174,6 +177,10 @@ export class CompactionService {
       }
     }
 
+    if (groupMessagesByRound(activeMessages).length < 2) {
+      throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
+    }
+
     let splitIndex = chooseRecentStartIndex(activeMessages, compactedActiveMessages, options);
     splitIndex = adjustStartForToolPairs(activeMessages, splitIndex);
     if (splitIndex <= 0 && options.force) {
@@ -191,6 +198,7 @@ export class CompactionService {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
+    let summarizedMessageCount = messagesToSummarize.length;
     messagesToSummarize = fitMessagesToSummaryBudget(messagesToSummarize, getSummaryInputTokenBudget(options));
     if (messagesToSummarize.length === 0) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
@@ -202,36 +210,45 @@ export class CompactionService {
     let summary = '';
     let summaryInputTokenEstimate = 0;
 
-    for (;;) {
-      const transcript = buildTranscript(messagesToSummarize);
-      summaryInputTokenEstimate = estimateTokens(transcript);
-      try {
-        summary = cleanSummary(await input.summarize(transcript, prompt));
-      } catch (error) {
-        if (!isPromptTooLongError(error) || promptTooLongRetries >= maxRetries) throw error;
-        promptTooLongRetries++;
-        messagesToSummarize = fitMessagesToSummaryBudget(
-          truncateHeadForPromptTooLongRetry(messagesToSummarize),
-          getSummaryInputTokenBudget(options),
-        );
-        continue;
-      }
+    const shrinkSummaryInput = (): void => {
+      const previousPayload = stringifyValue(stripPromptTooLongRetryMarker(messagesToSummarize));
+      const nextMessages = fitMessagesToSummaryBudget(
+        truncateHeadForPromptTooLongRetry(messagesToSummarize),
+        getSummaryInputTokenBudget(options),
+      );
+      const nextPayload = stringifyValue(stripPromptTooLongRetryMarker(nextMessages));
+      if (nextPayload === previousPayload) throw new CompactionPromptTooLongError();
+      messagesToSummarize = nextMessages;
+    };
 
-      if (looksLikePromptTooLongResponse(summary)) {
-        if (promptTooLongRetries >= maxRetries) {
-          throw new CompactionPromptTooLongError();
+    const summarizeCurrentMessages = async (): Promise<void> => {
+      for (;;) {
+        const transcript = buildTranscript(messagesToSummarize);
+        summaryInputTokenEstimate = estimateTokens(transcript);
+        try {
+          summary = cleanSummary(await input.summarize(transcript, prompt));
+        } catch (error) {
+          if (!isPromptTooLongError(error) || promptTooLongRetries >= maxRetries) throw error;
+          promptTooLongRetries++;
+          shrinkSummaryInput();
+          continue;
         }
-        promptTooLongRetries++;
-        messagesToSummarize = fitMessagesToSummaryBudget(
-          truncateHeadForPromptTooLongRetry(messagesToSummarize),
-          getSummaryInputTokenBudget(options),
-        );
-        continue;
-      }
-      break;
-    }
 
-    if (!summary.trim()) throw new Error('Compact summary is empty');
+        if (looksLikePromptTooLongResponse(summary)) {
+          if (promptTooLongRetries >= maxRetries) {
+            throw new CompactionPromptTooLongError();
+          }
+          promptTooLongRetries++;
+          shrinkSummaryInput();
+          continue;
+        }
+        break;
+      }
+
+      if (!summary.trim()) throw new Error('Compact summary is empty');
+    };
+
+    await summarizeCurrentMessages();
 
     let finalKeptMessages = compactKeptMessages(keptMessages, options, getRecentTokenBudget(options));
     const initialKeptRounds = groupMessagesByRound(finalKeptMessages).length;
@@ -245,7 +262,7 @@ export class CompactionService {
         userMessageTemplate,
         beforeCount,
         beforeTokenEstimate,
-        messagesToSummarize.length,
+        summarizedMessageCount,
         promptTooLongRetries,
         options,
         budget,
@@ -257,11 +274,23 @@ export class CompactionService {
       if (estimateMessagesTokens(candidateMessages) <= budget.targetContextTokens) break;
 
       const nextKeptMessages = dropOldestRecentRound(finalKeptMessages);
-      if (nextKeptMessages.length === 0 || nextKeptMessages.length === finalKeptMessages.length) break;
-      finalKeptMessages = compactKeptMessages(nextKeptMessages, options, Math.floor(getRecentTokenBudget(options) * 0.75));
+      if (nextKeptMessages.length === finalKeptMessages.length) break;
+
+      const movedToSummary = finalKeptMessages.slice(0, finalKeptMessages.length - nextKeptMessages.length);
+      summarizedMessageCount += movedToSummary.length;
+      messagesToSummarize = fitMessagesToSummaryBudget(
+        [createCompactSummaryMessage(summary, true, userMessageTemplate), ...movedToSummary],
+        getSummaryInputTokenBudget(options),
+      );
+      finalKeptMessages = compactKeptMessages(
+        nextKeptMessages,
+        options,
+        Math.floor(getRecentTokenBudget(options) * 0.75),
+      );
       const nextKeptRounds = groupMessagesByRound(finalKeptMessages).length;
       reducedRecentRounds = Math.max(reducedRecentRounds, Math.max(0, initialKeptRounds - nextKeptRounds));
       strategy = finalKeptMessages.length > 0 ? 'summary_with_recent' : 'summary_only_fallback';
+      await summarizeCurrentMessages();
     }
 
     if (finalKeptMessages.length === 0) {
@@ -276,7 +305,7 @@ export class CompactionService {
         strategy,
         beforeCount,
         beforeTokenEstimate,
-        summarizedCount: messagesToSummarize.length,
+        summarizedCount: summarizedMessageCount,
         keptCount: finalKeptMessages.length,
         keptTokenEstimate: estimateMessagesTokens(finalKeptMessages),
         keptCompacted: estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(activeMessages.slice(splitIndex)),
@@ -308,7 +337,7 @@ export class CompactionService {
       strategy,
       beforeCount,
       afterCount: compactMessages.length,
-      summarizedCount: messagesToSummarize.length,
+      summarizedCount: summarizedMessageCount,
       keptCount: finalKeptMessages.length,
       beforeTokenEstimate,
       afterTokenEstimate,
@@ -419,9 +448,10 @@ function getSummaryInputTokenBudget(options: CompactOptions): number {
 function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number): unknown[] {
   let next = messages;
   while (next.length > 1 && estimateTokens(buildTranscript(next)) > tokenBudget) {
+    const before = stringifyValue(next);
     const truncated = truncateHeadForPromptTooLongRetry(next);
     next = truncated;
-    if (truncated.length >= messages.length) break;
+    if (stringifyValue(truncated) === before) break;
   }
   return next;
 }
@@ -544,6 +574,14 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
   return messages.map((message) => pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }));
 }
 
+function countChangedMessages(before: unknown[], after: unknown[]): number {
+  let changed = Math.abs(before.length - after.length);
+  for (let index = 0; index < Math.min(before.length, after.length); index++) {
+    if (stringifyValue(before[index]) !== stringifyValue(after[index])) changed++;
+  }
+  return changed;
+}
+
 type PruneMode = 'old' | 'kept';
 
 type PruneOptions = {
@@ -595,12 +633,10 @@ function pruneValue(value: unknown, options: PruneOptions): unknown {
         continue;
       }
     }
-    if (options.mode === 'old' && (key === 'url' || key === 'image_url') && typeof child === 'string' && isDataUrl(child)) {
-      next[key] = `[omitted data url: ${child.length} chars]`;
-      continue;
-    }
-    if (options.mode === 'kept' && key === 'image_url' && typeof child === 'string' && child.length > options.maxStringChars) {
-      next[key] = `[omitted image url: ${child.length} chars]`;
+    // URL fields are schema-bearing values. Known media parts are replaced as a
+    // whole by mediaPlaceholder(); unknown URLs must remain valid and exact.
+    if ((key === 'url' || key === 'image_url' || key === 'file_url') && typeof child === 'string') {
+      next[key] = child;
       continue;
     }
     if (isProtocolSensitiveKey(key)) {
@@ -738,14 +774,7 @@ function isValidJsonText(value: string): boolean {
 function mediaPlaceholder(record: Record<string, unknown>): Record<string, unknown> | null {
   if (record.type === 'image') return { type: 'text', text: '[image omitted during compact]' };
   if (record.type === 'document') return { type: 'text', text: '[document omitted during compact]' };
-  // Keep OpenAI content-part shape (`type: image_url`) instead of rewriting the part type.
-  // Some gateways reject mixed/unexpected content part schemas after compact.
-  if (record.type === 'image_url') {
-    return {
-      type: 'image_url',
-      image_url: { url: '[image omitted during compact]' },
-    };
-  }
+  if (record.type === 'image_url') return { type: 'text', text: '[image omitted during compact]' };
   if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
   if (record.type === 'file') return { type: 'text', text: '[document omitted during compact]' };
   if (record.type === 'resource') return { type: 'text', text: '[document omitted during compact]' };
@@ -781,15 +810,18 @@ function usageRatio(tokens: number, contextWindowSize: number | undefined): numb
 
 function compactKeptMessages(messages: unknown[], options: CompactOptions, tokenBudget = getRecentTokenBudget(options)): unknown[] {
   const budget = Math.max(1, tokenBudget);
-  if (estimateMessagesTokens(messages) <= budget) return cloneJson(messages);
+  const sanitized = messages.map((message) =>
+    pruneValue(message, { maxStringChars: Number.MAX_SAFE_INTEGER, mode: 'kept' }),
+  );
+  if (estimateMessagesTokens(sanitized) <= budget) return sanitized;
 
   for (const maxStringChars of options.aggressive ? [6_000, 2_000, 800] : [12_000, 4_000, 1_200]) {
-    const compacted = messages.map((message) => pruneValue(message, { maxStringChars, mode: 'kept' }));
+    const compacted = sanitized.map((message) => pruneValue(message, { maxStringChars, mode: 'kept' }));
     if (estimateMessagesTokens(compacted) <= Math.ceil(budget * 1.25) || maxStringChars <= 1_200) {
       return compacted;
     }
   }
-  return cloneJson(messages);
+  return sanitized;
 }
 
 function pruneString(value: string, maxChars: number): string {
@@ -801,7 +833,7 @@ function pruneString(value: string, maxChars: number): string {
 function groupMessagesByRound(messages: unknown[]): Array<{ start: number; end: number }> {
   const starts: number[] = [];
   for (let index = 0; index < messages.length; index++) {
-    if (getRole(messages[index]) === 'user') starts.push(index);
+    if (isConversationUserMessage(messages[index])) starts.push(index);
   }
   if (starts.length === 0 || starts[0] !== 0) starts.unshift(0);
 
@@ -812,6 +844,12 @@ function groupMessagesByRound(messages: unknown[]): Array<{ start: number; end: 
     if (start < end) rounds.push({ start, end });
   }
   return rounds;
+}
+
+function isConversationUserMessage(message: unknown): boolean {
+  if (getRole(message) !== 'user') return false;
+  if (getToolResultIds(message).length > 0) return false;
+  return !getStringContent(message).startsWith('Image output from ');
 }
 
 function buildTranscript(messages: unknown[]): string {
@@ -1043,11 +1081,23 @@ function foldRepeats(text: string): string {
 
 function truncateHeadForPromptTooLongRetry(messages: unknown[]): unknown[] {
   const input = stripPromptTooLongRetryMarker(messages);
-  const rounds = groupMessagesByRound(input);
-  if (rounds.length < 2) throw new CompactionPromptTooLongError();
+  const protectedSummaries = input.filter(isCompactSummary);
+  const ordinaryMessages = input.filter((message) => !isCompactSummary(message));
+  const rounds = groupMessagesByRound(ordinaryMessages);
+  if (rounds.length < 2) {
+    return [
+      { role: 'user', content: '[earlier conversation truncated for compaction retry]' },
+      ...protectedSummaries,
+      ...ordinaryMessages,
+    ];
+  }
   const dropRounds = Math.min(rounds.length - 1, Math.max(1, Math.ceil(rounds.length * RETRY_DROP_RATIO)));
-  const start = rounds[dropRounds]?.start ?? messages.length;
-  return [{ role: 'user', content: '[earlier conversation truncated for compaction retry]' }, ...input.slice(start)];
+  const start = rounds[dropRounds]?.start ?? ordinaryMessages.length;
+  return [
+    { role: 'user', content: '[earlier conversation truncated for compaction retry]' },
+    ...protectedSummaries,
+    ...ordinaryMessages.slice(start),
+  ];
 }
 
 function stripPromptTooLongRetryMarker(messages: unknown[]): unknown[] {
