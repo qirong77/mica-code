@@ -9,6 +9,8 @@ import pty from 'node-pty'
 
 const sessions = new Map()
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
+const PROCESS_POLL_INTERVAL_MS = 500
+const PROCESS_RUNNING_DELAY_MS = 1200
 let notifyServer = null
 
 /** 访问被系统拒绝的 cwd 冷却，避免每次建终端都再次触发桌面/文稿权限弹窗 */
@@ -168,6 +170,68 @@ function getShellArgs(shellPath) {
   return []
 }
 
+function execFileText(file, args) {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: 1000 }, (error, stdout) => {
+      resolve(error ? '' : String(stdout).trim())
+    })
+  })
+}
+
+async function readForegroundProcess(shellPid) {
+  if (process.platform === 'win32') return null
+
+  const processGroups = await execFileText('ps', ['-o', 'pgid=,tpgid=', '-p', String(shellPid)])
+  const [shellGroup, foregroundGroup] = processGroups.split(/\s+/).map(Number)
+  if (!foregroundGroup || foregroundGroup < 0 || foregroundGroup === shellGroup) return null
+
+  const command = await execFileText('ps', ['-o', 'command=', '-p', String(foregroundGroup)])
+  if (!command || /(?:^|\/)mica(?:\s|$)/.test(command)) return null
+  return { pid: foregroundGroup, command }
+}
+
+function startProcessActivityMonitor(session) {
+  if (process.platform === 'win32') return
+
+  const poll = async () => {
+    if (session.activityPolling || sessions.get(session.id) !== session) return
+    session.activityPolling = true
+    try {
+      const foreground = await readForegroundProcess(session.term.pid)
+      const now = Date.now()
+      if (foreground) {
+        if (session.foregroundPid !== foreground.pid) {
+          session.foregroundPid = foreground.pid
+          session.foregroundSince = now
+        }
+        if (!session.processRunning && now - session.foregroundSince >= PROCESS_RUNNING_DELAY_MS) {
+          session.processRunning = true
+          notifyServer?.setProcessRunning(session.id, true)
+        }
+      } else {
+        session.foregroundPid = null
+        session.foregroundSince = 0
+        if (session.processRunning) {
+          session.processRunning = false
+          notifyServer?.setProcessRunning(session.id, false)
+        }
+      }
+    } finally {
+      session.activityPolling = false
+    }
+  }
+
+  session.activityTimer = setInterval(() => void poll(), PROCESS_POLL_INTERVAL_MS)
+  session.activityTimer.unref?.()
+}
+
+function stopProcessActivityMonitor(session) {
+  if (session.activityTimer) clearInterval(session.activityTimer)
+  session.activityTimer = null
+  if (session.processRunning) notifyServer?.setProcessRunning(session.id, false)
+  session.processRunning = false
+}
+
 function isPermissionError(error) {
   return (
     !!error &&
@@ -247,6 +311,7 @@ function createPty(id, sender, options = {}) {
 
   const session = { id, term, sender, cwd }
   sessions.set(id, session)
+  startProcessActivityMonitor(session)
 
   if (resumeSessionId) {
     const resumeCommand = `mica --resume ${resumeSessionId}`
@@ -263,6 +328,7 @@ function createPty(id, sender, options = {}) {
   })
 
   term.onExit(({ exitCode, signal }) => {
+    stopProcessActivityMonitor(session)
     sessions.delete(id)
     notifyServer?.clear(id)
     if (!sender.isDestroyed()) {
@@ -365,6 +431,7 @@ export function registerTerminalIpc() {
     } catch {
       // ignore
     }
+    stopProcessActivityMonitor(session)
     sessions.delete(id)
     notifyServer?.clear(id)
     return true
@@ -377,6 +444,7 @@ export function registerTerminalIpc() {
       } catch {
         // ignore
       }
+      stopProcessActivityMonitor(session)
       sessions.delete(id)
       notifyServer?.clear(id)
     }
@@ -410,6 +478,7 @@ export function registerTerminalIpc() {
 
 export function disposeAllTerminals() {
   for (const session of sessions.values()) {
+    stopProcessActivityMonitor(session)
     try {
       session.term.kill()
     } catch {

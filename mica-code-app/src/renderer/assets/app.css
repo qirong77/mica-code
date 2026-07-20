@@ -1,0 +1,97 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+
+@theme {
+  --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+  body {
+    background: #0e0e0e;
+    color: #eaeaea;
+    font-family:
+      'Segoe WPC',
+      'Segoe UI',
+      -apple-system,
+      BlinkMacSystemFont,
+      'SF Pro Text',
+      system-ui,
+      sans-serif;
+  }
+  button,
+  input {
+    font: inherit;
+  }
+  button:focus,
+  input:focus {
+    outline: none;
+  }
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.terminal-pane .xterm {
+  height: 100%;
+  padding: 6px 8px;
+}
+.terminal-pane .xterm-viewport {
+  scrollbar-width: thin;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: rgb(255 255 255 / 12%);
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 20%);
+}
+
+.pane-resizer {
+  position: relative;
+  touch-action: none;
+}
+.pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 2px;
+  width: 1px;
+  background: rgb(255 255 255 / 10%);
+}
+.pane-resizer:hover::after,
+.pane-resizer:focus-visible::after,
+.pane-resizer[data-resizing='true']::after {
+  background: rgb(255 255 255 / 50%);
+}
+
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+.monaco-editor .scroll-decoration {
+  box-shadow: none !important;
+}

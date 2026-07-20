@@ -60,6 +60,7 @@ const filesApi = {
 }
 
 const gitApi = {
+  status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
   summary: (cwd) => ipcRenderer.invoke('git:summary', { cwd }),
   file: (cwd, filePath) => ipcRenderer.invoke('git:file', { cwd, filePath })
 }

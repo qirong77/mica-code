@@ -110,6 +110,16 @@ async function getSummary(cwd) {
   }
 }
 
+async function getStatus(cwd) {
+  const { root } = await getRepository(cwd)
+  const branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  return {
+    root,
+    branch: branch === 'HEAD' ? 'detached' : branch,
+    projectName: path.basename(root)
+  }
+}
+
 function safeFilePath(root, relativePath) {
   const absolutePath = path.resolve(root, relativePath)
   const relative = path.relative(root, absolutePath)
@@ -119,6 +129,14 @@ function safeFilePath(root, relativePath) {
 }
 
 export function registerGitIpc() {
+  ipcMain.handle('git:status', async (_event, { cwd } = {}) => {
+    try {
+      return { status: await getStatus(cwd), error: null }
+    } catch (error) {
+      return { status: null, error: error?.stderr?.trim() || error?.message || String(error) }
+    }
+  })
+
   ipcMain.handle('git:summary', async (_event, { cwd } = {}) => {
     try {
       return { repository: await getSummary(cwd), error: null }

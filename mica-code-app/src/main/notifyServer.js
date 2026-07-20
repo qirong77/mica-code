@@ -57,6 +57,9 @@ export async function createNotifyServer() {
     markRead(terminalId) {
       return markRead(states, bus, terminalId)
     },
+    setProcessRunning(terminalId, running) {
+      return setProcessRunning(states, bus, terminalId, running)
+    },
     clear(terminalId) {
       if (!states.has(terminalId)) return false
       states.delete(terminalId)
@@ -111,12 +114,14 @@ async function handleRequest(req, res, ctx) {
     const state = {
       terminalId,
       unread: isSessionEvent ? !!previous?.unread : !isRunningEvent,
-      running: isSessionEvent ? !!previous?.running : isRunningEvent,
+      agentRunning: isSessionEvent ? !!previous?.agentRunning : isRunningEvent,
+      processRunning: !!previous?.processRunning,
       lastType: type,
       lastEventAt: Number(body?.ts) > 0 ? Number(body.ts) : Date.now(),
       summary: typeof body?.summary === 'string' ? body.summary.slice(0, 200) : undefined,
       sessionId: normalizeSessionId(body?.sessionId)
     }
+    state.running = state.agentRunning || state.processRunning
     ctx.states.set(terminalId, state)
     ctx.bus.emit('change', {
       type: 'event',
@@ -137,6 +142,32 @@ async function handleRequest(req, res, ctx) {
   }
 
   writeJson(res, 404, { ok: false, error: 'not found' })
+}
+
+function setProcessRunning(states, bus, terminalId, running) {
+  const previous = states.get(terminalId)
+  if (!!previous?.processRunning === running) return previous ?? null
+
+  const state = {
+    terminalId,
+    unread: !!previous?.unread,
+    agentRunning: !!previous?.agentRunning,
+    processRunning: running,
+    running: !!previous?.agentRunning || running,
+    lastType: previous?.lastType ?? null,
+    lastEventAt: previous?.lastEventAt ?? null,
+    summary: previous?.summary,
+    sessionId: previous?.sessionId,
+    readAt: previous?.readAt ?? null
+  }
+  states.set(terminalId, state)
+  bus.emit('change', {
+    type: 'process',
+    terminalId,
+    state,
+    states: serializeStates(states)
+  })
+  return state
 }
 
 function markRead(states, bus, terminalId) {

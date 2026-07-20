@@ -1,6 +1,16 @@
 # mica-code-app
 
-A minimal Electron application with JavaScript
+Mica Code is a compact Electron terminal workspace with session management, file editing, workspace search, and Git diff views.
+
+## Tech stack
+
+- Electron + electron-vite
+- React 19 + React DOM
+- Vite + `@vitejs/plugin-react`
+- Tailwind CSS v4 + `@tailwindcss/vite`
+- xterm.js for terminal rendering
+- Monaco Editor for file editing and Git comparisons
+- lucide-react for product icons
 
 ## Recommended IDE Setup
 
@@ -20,15 +30,21 @@ $ npm install
 $ npm run dev
 ```
 
-### Build
+### Renderer production build
 
 ```bash
-# For windows
+$ npm run build
+```
+
+### Package
+
+```bash
+# Windows
 $ npm run build:win
 
-# For macOS
+# macOS
 $ npm run build:mac
 
-# For Linux
+# Linux
 $ npm run build:linux
 ```

@@ -1,0 +1,678 @@
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { ArrowUp, ChevronRight, File, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
+import { useLatest, usePaneWidth } from './hooks'
+import { editorOptions, fileName, languageFor, monaco } from './monaco'
+
+const makeNode = (entry) => ({
+  name: entry.name,
+  path: entry.path,
+  type: entry.type,
+  expanded: false,
+  loaded: false,
+  loading: false,
+  error: '',
+  children: []
+})
+
+function updateTree(nodes, path, update) {
+  return nodes.map((node) =>
+    node.path === path
+      ? update(node)
+      : node.children?.length
+        ? { ...node, children: updateTree(node.children, path, update) }
+        : node
+  )
+}
+
+function expandedPaths(nodes, output = new Set()) {
+  for (const node of nodes) {
+    if (node.expanded) output.add(node.path)
+    expandedPaths(node.children || [], output)
+  }
+  return output
+}
+
+function relativeParts(rootPath, filePath) {
+  const root = String(rootPath || '')
+    .replaceAll('\\', '/')
+    .replace(/\/$/, '')
+  const target = String(filePath || '').replaceAll('\\', '/')
+  const caseRoot = window.mica.platform === 'win32' ? root.toLowerCase() : root
+  const caseTarget = window.mica.platform === 'win32' ? target.toLowerCase() : target
+  const relative = caseTarget.startsWith(`${caseRoot}/`) ? target.slice(root.length + 1) : target
+  return relative.split('/').filter(Boolean)
+}
+
+function FileTreeRows({ nodes, depth = 0, activePath, onToggle, onOpen }) {
+  return nodes.map((node) => {
+    const directory = node.type === 'directory'
+    return (
+      <div key={node.path}>
+        <button
+          type="button"
+          role="treeitem"
+          aria-expanded={directory ? node.expanded : undefined}
+          title={node.path}
+          className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] hover:text-white ${
+            node.path === activePath ? 'bg-white/[.075] text-white' : 'text-white/70'
+          }`}
+          style={{ paddingLeft: 5 + depth * 13 }}
+          onClick={() => (directory ? onToggle(node) : onOpen(node.path))}
+        >
+          <span
+            className={`grid size-3.5 shrink-0 place-items-center text-white/35 ${node.expanded ? 'rotate-90' : ''}`}
+          >
+            {directory && <ChevronRight size={13} />}
+          </span>
+          <span className="grid size-3.5 shrink-0 place-items-center text-white/50">
+            {directory ? (
+              node.expanded ? (
+                <FolderOpen size={14} />
+              ) : (
+                <Folder size={14} />
+              )
+            ) : (
+              <File size={14} />
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate">{node.name}</span>
+          {node.loading && <span className="text-white/35">…</span>}
+        </button>
+        {directory &&
+          node.expanded &&
+          (node.error ? (
+            <div
+              className="py-1 pr-2 text-[11px] text-[#e75e78]/85"
+              style={{ paddingLeft: 35 + (depth + 1) * 13 }}
+            >
+              无法读取：{node.error}
+            </div>
+          ) : node.loaded && !node.children.length ? (
+            <div
+              className="py-1 pr-2 text-[11px] text-white/30"
+              style={{ paddingLeft: 35 + (depth + 1) * 13 }}
+            >
+              空文件夹
+            </div>
+          ) : (
+            <FileTreeRows
+              nodes={node.children}
+              depth={depth + 1}
+              activePath={activePath}
+              onToggle={onToggle}
+              onOpen={onOpen}
+            />
+          ))}
+      </div>
+    )
+  })
+}
+
+export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
+  const viewRef = useRef(null)
+  const editorHostRef = useRef(null)
+  const editorRef = useRef(null)
+  const requestRef = useRef(0)
+  const messageTimer = useRef(null)
+  const saveActionRef = useRef(null)
+  const [tree, setTree] = useState({
+    root: null,
+    parent: null,
+    children: [],
+    status: '选择一个终端会话以查看文件'
+  })
+  const treeRef = useLatest(tree)
+  const [tabs, setTabsState] = useState([])
+  const tabsRef = useRef([])
+  const [activePath, setActivePathState] = useState(null)
+  const activeRef = useRef(null)
+  const [message, setMessage] = useState({
+    text: '从左侧目录选择文件以开始编辑',
+    transient: false,
+    error: false
+  })
+
+  const setTabs = useCallback((updater) => {
+    const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
+    tabsRef.current = next
+    setTabsState(next)
+  }, [])
+  const setActivePath = useCallback((path) => {
+    activeRef.current = path
+    setActivePathState(path)
+  }, [])
+  const showMessage = useCallback((text, transient = false, error = false) => {
+    clearTimeout(messageTimer.current)
+    setMessage(text ? { text, transient, error } : null)
+    if (transient) {
+      messageTimer.current = window.setTimeout(() => setMessage(null), error ? 4000 : 1800)
+    }
+  }, [])
+
+  useEffect(() => {
+    const editor = monaco.editor.create(editorHostRef.current, { ...editorOptions, model: null })
+    editorRef.current = editor
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActionRef.current?.())
+    return () => {
+      clearTimeout(messageTimer.current)
+      for (const tab of tabsRef.current) {
+        tab.subscription?.dispose()
+        tab.model?.dispose()
+      }
+      editor.dispose()
+      editorRef.current = null
+    }
+  }, [])
+
+  const activateFile = useCallback(
+    (path, focus = true) => {
+      const tab = tabsRef.current.find((item) => item.path === path)
+      if (!tab) return
+      if (activeRef.current === path && editorRef.current?.getModel() === tab.model) {
+        if (tab.model) showMessage('')
+        if (focus) editorRef.current?.focus()
+        return
+      }
+      const previous = tabsRef.current.find((item) => item.path === activeRef.current)
+      if (previous?.model && previous.path !== path)
+        previous.viewState = editorRef.current?.saveViewState()
+      setActivePath(path)
+      if (!tab.model) {
+        editorRef.current?.setModel(null)
+        showMessage(`正在打开 ${tab.name}…`)
+        return
+      }
+      editorRef.current?.setModel(tab.model)
+      if (tab.viewState) editorRef.current?.restoreViewState(tab.viewState)
+      showMessage('')
+      requestAnimationFrame(() => {
+        if (activeRef.current !== path || editorRef.current?.getModel() !== tab.model) return
+        editorRef.current?.layout()
+        if (focus) editorRef.current?.focus()
+      })
+    },
+    [setActivePath, showMessage]
+  )
+
+  const revealPosition = useCallback((position) => {
+    if (!position || !editorRef.current?.getModel()) return
+    const lineNumber = Math.max(1, Number(position.line) || 1)
+    const column = Math.max(1, Number(position.column) || 1)
+    editorRef.current.setPosition({ lineNumber, column })
+    editorRef.current.revealPositionInCenter({ lineNumber, column })
+    editorRef.current.focus()
+  }, [])
+
+  const openFile = useCallback(
+    async (path, position = null) => {
+      if (!path) return
+      const existing = tabsRef.current.find((tab) => tab.path === path)
+      if (existing) {
+        activateFile(path)
+        requestAnimationFrame(() => {
+          if (activeRef.current === path && editorRef.current?.getModel() === existing.model) {
+            revealPosition(position)
+          }
+        })
+        return
+      }
+      const previous = tabsRef.current.find((tab) => tab.path === activeRef.current)
+      if (previous?.model) previous.viewState = editorRef.current?.saveViewState()
+      const tab = {
+        path,
+        name: fileName(path),
+        model: null,
+        subscription: null,
+        viewState: null,
+        savedVersion: null,
+        diskVersion: null,
+        dirty: false,
+        loading: true,
+        saving: false
+      }
+      setTabs((items) => [...items, tab])
+      setActivePath(path)
+      editorRef.current?.setModel(null)
+      showMessage(`正在打开 ${tab.name}…`)
+      try {
+        const result = await window.mica.files.read(path)
+        if (!tabsRef.current.includes(tab)) return
+        const model = monaco.editor.createModel(
+          result.content,
+          languageFor(path),
+          monaco.Uri.file(path)
+        )
+        tab.model = model
+        tab.diskVersion = result.version
+        tab.loading = false
+        tab.savedVersion = model.getAlternativeVersionId()
+        tab.subscription = model.onDidChangeContent(() => {
+          const current = tabsRef.current.find((item) => item.path === path)
+          if (!current?.model) return
+          const dirty = current.model.getAlternativeVersionId() !== current.savedVersion
+          if (dirty !== current.dirty)
+            setTabs((items) => items.map((item) => (item === current ? { ...item, dirty } : item)))
+        })
+        setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
+        if (activeRef.current === path) {
+          editorRef.current?.setModel(model)
+          showMessage('')
+          requestAnimationFrame(() => {
+            if (activeRef.current !== path || editorRef.current?.getModel() !== model) return
+            editorRef.current?.layout()
+            editorRef.current?.focus()
+            revealPosition(position)
+          })
+        }
+      } catch (error) {
+        if (!tabsRef.current.includes(tab)) return
+        const text = `无法打开文件：${error?.message || error}`
+        setTabs((items) => items.filter((item) => item !== tab))
+        if (activeRef.current === path) {
+          const fallback = tabsRef.current.at(-1)
+          if (fallback) {
+            activateFile(fallback.path, false)
+            showMessage(text, true, true)
+          } else {
+            setActivePath(null)
+            editorRef.current?.setModel(null)
+            showMessage(text)
+          }
+        } else {
+          const activeTab = tabsRef.current.find((item) => item.path === activeRef.current)
+          if (activeTab?.model) showMessage(text, true, true)
+          else if (activeTab?.loading) showMessage(`正在打开 ${activeTab.name}…`)
+        }
+      }
+    },
+    [activateFile, revealPosition, setActivePath, setTabs, showMessage]
+  )
+
+  const saveActive = useCallback(async () => {
+    const tab = tabsRef.current.find((item) => item.path === activeRef.current)
+    if (!tab?.model || !tab.dirty || tab.loading || tab.saving) return
+    const content = tab.model.getValue()
+    const savedVersion = tab.model.getAlternativeVersionId()
+    tab.saving = true
+    setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
+    try {
+      const result = await window.mica.files.write(tab.path, content, tab.diskVersion)
+      if (!tabsRef.current.some((item) => item.path === tab.path)) return
+      tab.savedVersion = savedVersion
+      tab.diskVersion = result.version
+      tab.dirty = tab.model.getAlternativeVersionId() !== savedVersion
+      setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
+      showMessage(tab.dirty ? '已保存，文件仍有新的更改' : '已保存', true)
+    } catch (error) {
+      showMessage(`保存失败：${error?.message || error}`, true, true)
+      throw error
+    } finally {
+      tab.saving = false
+      setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
+    }
+  }, [setTabs, showMessage])
+  saveActionRef.current = () =>
+    saveActive().catch((error) => console.error('save file failed', error))
+
+  const closeFile = useCallback(
+    (path) => {
+      const tab = tabsRef.current.find((item) => item.path === path)
+      if (!tab) return false
+      if (tab.saving) {
+        showMessage('文件正在保存，请稍后再关闭', true, true)
+        return false
+      }
+      if (tab.dirty && !window.confirm(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`))
+        return false
+      const paths = tabsRef.current.map((item) => item.path)
+      const index = paths.indexOf(path)
+      const wasActive = activeRef.current === path
+      tab.subscription?.dispose()
+      if (editorRef.current?.getModel() === tab.model) editorRef.current.setModel(null)
+      tab.model?.dispose()
+      const remaining = tabsRef.current.filter((item) => item !== tab)
+      setTabs(remaining)
+      if (wasActive) {
+        const next = remaining[Math.min(index, remaining.length - 1)]
+        if (next) activateFile(next.path, false)
+        else {
+          setActivePath(null)
+          showMessage('从左侧目录选择文件以开始编辑')
+        }
+      }
+      return true
+    },
+    [activateFile, setActivePath, setTabs, showMessage]
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openFile,
+      closeActive() {
+        if (!activeRef.current) return false
+        closeFile(activeRef.current)
+        return true
+      },
+      layout() {
+        editorRef.current?.layout()
+      }
+    }),
+    [closeFile, openFile]
+  )
+
+  useEffect(() => {
+    const keydown = (event) => {
+      if (
+        !visible ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey ||
+        event.key.toLowerCase() !== 's'
+      )
+        return
+      event.preventDefault()
+      saveActionRef.current?.()
+    }
+    const unload = (event) => {
+      if (!tabsRef.current.some((tab) => tab.dirty || tab.saving)) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    document.addEventListener('keydown', keydown)
+    window.addEventListener('beforeunload', unload)
+    return () => {
+      document.removeEventListener('keydown', keydown)
+      window.removeEventListener('beforeunload', unload)
+    }
+  }, [visible])
+
+  const loadRoot = useCallback(async (path) => {
+    const target = typeof path === 'string' && path.trim() ? path : ''
+    const request = ++requestRef.current
+    setTree({
+      root: target || null,
+      parent: null,
+      children: [],
+      status: target ? '正在读取…' : '选择一个终端会话以查看文件'
+    })
+    if (!target) return
+    try {
+      const result = await window.mica.files.list(target)
+      if (request !== requestRef.current) return
+      setTree({
+        root: result.path,
+        parent: result.parentPath,
+        children: result.entries.map(makeNode),
+        status: result.entries.length ? '' : '这个文件夹是空的'
+      })
+    } catch (error) {
+      if (request === requestRef.current)
+        setTree((value) => ({
+          ...value,
+          children: [],
+          status: `无法读取文件夹：${error?.message || error}`
+        }))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (visible) loadRoot(root)
+  }, [loadRoot, root, visible])
+
+  const restoreExpanded = useCallback(async (nodes, paths, request) => {
+    const restored = []
+    for (const node of nodes) {
+      if (request !== requestRef.current || node.type !== 'directory' || !paths.has(node.path)) {
+        restored.push(node)
+        continue
+      }
+      try {
+        const result = await window.mica.files.list(node.path)
+        const children = result.entries.map(makeNode)
+        restored.push({
+          ...node,
+          expanded: true,
+          loaded: true,
+          children: await restoreExpanded(children, paths, request)
+        })
+      } catch (error) {
+        restored.push({ ...node, expanded: true, error: error?.message || String(error) })
+      }
+    }
+    return restored
+  }, [])
+
+  const refresh = useCallback(async () => {
+    const current = treeRef.current
+    if (!current.root) return
+    const paths = expandedPaths(current.children)
+    const request = ++requestRef.current
+    setTree((value) => ({ ...value, status: '正在刷新…' }))
+    try {
+      const result = await window.mica.files.list(current.root)
+      let children = result.entries.map(makeNode)
+      children = await restoreExpanded(children, paths, request)
+      if (request !== requestRef.current) return
+      setTree({
+        root: result.path,
+        parent: result.parentPath,
+        children,
+        status: children.length ? '' : '这个文件夹是空的'
+      })
+    } catch (error) {
+      if (request === requestRef.current)
+        setTree((value) => ({ ...value, status: `无法刷新文件夹：${error?.message || error}` }))
+    }
+  }, [restoreExpanded, treeRef])
+
+  const toggleDirectory = useCallback(async (node) => {
+    if (node.loading) return
+    if (node.expanded || node.loaded) {
+      setTree((value) => ({
+        ...value,
+        children: updateTree(value.children, node.path, (item) => ({
+          ...item,
+          expanded: !item.expanded
+        }))
+      }))
+      return
+    }
+    const request = requestRef.current
+    setTree((value) => ({
+      ...value,
+      children: updateTree(value.children, node.path, (item) => ({
+        ...item,
+        expanded: true,
+        loading: true,
+        error: ''
+      }))
+    }))
+    try {
+      const result = await window.mica.files.list(node.path)
+      if (request !== requestRef.current) return
+      setTree((value) => ({
+        ...value,
+        children: updateTree(value.children, node.path, (item) => ({
+          ...item,
+          loaded: true,
+          loading: false,
+          children: result.entries.map(makeNode)
+        }))
+      }))
+    } catch (error) {
+      if (request === requestRef.current)
+        setTree((value) => ({
+          ...value,
+          children: updateTree(value.children, node.path, (item) => ({
+            ...item,
+            loaded: false,
+            loading: false,
+            error: error?.message || String(error)
+          }))
+        }))
+    }
+  }, [])
+
+  const layout = useCallback(() => editorRef.current?.layout(), [])
+  const { width, separatorProps } = usePaneWidth({
+    storageKey: 'mica.filesTreeWidth',
+    initial: 260,
+    min: 180,
+    minRight: 305,
+    containerRef: viewRef,
+    onLayout: layout
+  })
+  useEffect(() => {
+    if (visible) requestAnimationFrame(layout)
+  }, [layout, visible, width])
+
+  const activeTab = tabs.find((tab) => tab.path === activePath)
+  const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
+
+  return (
+    <section
+      ref={viewRef}
+      className={`min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
+    >
+      <aside
+        className="flex min-h-0 shrink-0 flex-col bg-[#111]"
+        style={{ width }}
+        aria-label="文件资源管理器"
+      >
+        <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-white/[.07] px-2">
+          <button
+            type="button"
+            disabled={!tree.parent}
+            title="返回上级目录"
+            aria-label="返回上级目录"
+            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+            onClick={() => loadRoot(tree.parent)}
+          >
+            <ArrowUp size={15} />
+          </button>
+          <div
+            className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/65"
+            title={tree.root || ''}
+          >
+            {tree.root}
+          </div>
+          <button
+            type="button"
+            title="刷新"
+            aria-label="刷新"
+            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
+            onClick={refresh}
+          >
+            <RefreshCw size={14} />
+          </button>
+        </header>
+        <div className="relative min-h-0 flex-1">
+          <div
+            className="thin-scrollbar h-full overflow-auto px-1.5 py-1 select-none"
+            role="tree"
+            aria-label="文件目录"
+          >
+            <FileTreeRows
+              nodes={tree.children}
+              activePath={activePath}
+              onToggle={toggleDirectory}
+              onOpen={openFile}
+            />
+          </div>
+          {tree.status && (
+            <div
+              role="status"
+              className="absolute inset-0 grid place-items-center bg-[#111] px-4 text-center text-[11px] text-white/35"
+            >
+              {tree.status}
+            </div>
+          )}
+        </div>
+      </aside>
+      <div
+        {...separatorProps}
+        className="pane-resizer z-10 w-1.25 shrink-0 cursor-col-resize"
+        role="separator"
+        aria-label="调整文件目录宽度"
+        aria-orientation="vertical"
+        aria-valuemin="180"
+        aria-valuenow={width}
+        tabIndex={0}
+      />
+      <section className="flex min-w-0 min-h-0 flex-1 flex-col" aria-label="文件编辑器">
+        <div
+          className="thin-scrollbar flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111]"
+          role="tablist"
+          aria-label="打开的文件"
+        >
+          {tabs.map((tab) => (
+            <div
+              key={tab.path}
+              role="tab"
+              tabIndex={tab.path === activePath ? 0 : -1}
+              aria-selected={tab.path === activePath}
+              title={tab.path}
+              className={`group relative flex h-[35px] min-w-28 max-w-55 flex-[0_1_160px] items-center gap-1.5 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/45 hover:bg-white/[.035] hover:text-white/70'}`}
+              onClick={() => activateFile(tab.path)}
+              onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
+              onKeyDown={(event) => ['Enter', ' '].includes(event.key) && activateFile(tab.path)}
+            >
+              <File size={13} className="shrink-0 text-white/40" />
+              <span className="min-w-0 flex-1 truncate">{tab.name}</span>
+              {tab.dirty && (
+                <span
+                  className="size-1.75 shrink-0 rounded-full bg-white/65 group-hover:hidden"
+                  aria-label="未保存"
+                />
+              )}
+              <button
+                type="button"
+                title={`关闭 ${tab.name}`}
+                aria-label={`关闭 ${tab.name}`}
+                className={`${tab.dirty ? 'hidden group-hover:grid' : tab.path === activePath ? 'grid' : 'hidden group-hover:grid'} size-5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  closeFile(tab.path)
+                }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+        {activeTab && (
+          <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-white/[.07] px-3 text-[10px] text-white/40">
+            {breadcrumbs.map((part, index) => (
+              <span key={`${part}-${index}`} className="contents">
+                {index > 0 && <span className="shrink-0 text-sm text-white/25">›</span>}
+                <span
+                  className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/60' : ''}`}
+                >
+                  {part}
+                </span>
+              </span>
+            ))}
+            <span className="ml-auto shrink-0">
+              {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
+            </span>
+          </div>
+        )}
+        <div className="relative min-h-0 flex-1">
+          <div ref={editorHostRef} className="size-full" />
+          {message && (
+            <div
+              role="status"
+              className={
+                message.transient
+                  ? `absolute bottom-3.5 right-4 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`
+                  : 'absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35'
+              }
+            >
+              {message.text}
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
+  )
+})

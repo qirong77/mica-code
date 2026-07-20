@@ -50,6 +50,9 @@ const READ_ONLY_TOOLS = [
   'Skill',
 ];
 
+const INHERITED_SKILL_TOOL = 'Skill';
+const MCP_TOOL_PREFIX = 'mcp__';
+
 export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   {
     name: 'general-purpose',
@@ -212,6 +215,9 @@ export function buildSubagentToolFilter(definition: SubagentDefinition): (toolNa
   const disallowed = new Set(definition.disallowedTools ?? []);
   return (toolName: string) => {
     if (disallowed.has(toolName)) return false;
+    // Skills and MCP servers are process-level capabilities shared with the parent agent.
+    // Every subagent inherits them without weakening its restrictions on other tools.
+    if (toolName === INHERITED_SKILL_TOOL || toolName.startsWith(MCP_TOOL_PREFIX)) return true;
     return allowed.has('*') || allowed.has(toolName);
   };
 }
