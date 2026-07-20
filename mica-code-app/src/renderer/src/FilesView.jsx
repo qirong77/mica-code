@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, File, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
+import { ArrowUp, ChevronRight, RefreshCw, X } from 'lucide-react'
+import { FileIcon, FolderIcon } from './FileIcon'
 import { useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, monaco } from './monaco'
 
@@ -43,6 +44,14 @@ function relativeParts(rootPath, filePath) {
   return relative.split('/').filter(Boolean)
 }
 
+function parentName(path) {
+  const parts = String(path || '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean)
+  return parts.at(-2) || ''
+}
+
 function FileTreeRows({ nodes, depth = 0, activePath, onToggle, onOpen }) {
   return nodes.map((node) => {
     const directory = node.type === 'directory'
@@ -64,15 +73,11 @@ function FileTreeRows({ nodes, depth = 0, activePath, onToggle, onOpen }) {
           >
             {directory && <ChevronRight size={13} />}
           </span>
-          <span className="grid size-3.5 shrink-0 place-items-center text-white/50">
+          <span className="grid size-4 shrink-0 place-items-center text-white/50">
             {directory ? (
-              node.expanded ? (
-                <FolderOpen size={14} />
-              ) : (
-                <Folder size={14} />
-              )
+              <FolderIcon name={node.name} expanded={node.expanded} className="size-4" />
             ) : (
-              <File size={14} />
+              <FileIcon name={node.name} className="size-4" />
             )}
           </span>
           <span className="min-w-0 flex-1 truncate">{node.name}</span>
@@ -112,6 +117,7 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
   const viewRef = useRef(null)
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
+  const tabListRef = useRef(null)
   const requestRef = useRef(0)
   const reloadRef = useRef(0)
   const lifecycleRef = useRef(0)
@@ -612,8 +618,47 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
     if (visible) requestAnimationFrame(layout)
   }, [layout, visible, width])
 
+  useEffect(() => {
+    if (!activePath) return
+    requestAnimationFrame(() => {
+      const activeTabElement = [...(tabListRef.current?.children || [])].find(
+        (element) => element.dataset.path === activePath
+      )
+      activeTabElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    })
+  }, [activePath, tabs.length])
+
+  const handleTabKeyDown = useCallback(
+    (event, path) => {
+      if (['Enter', ' '].includes(event.key)) {
+        event.preventDefault()
+        activateFile(path)
+        return
+      }
+      const items = tabsRef.current
+      const currentIndex = items.findIndex((tab) => tab.path === path)
+      if (currentIndex < 0) return
+      let nextIndex
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + items.length) % items.length
+      else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % items.length
+      else if (event.key === 'Home') nextIndex = 0
+      else if (event.key === 'End') nextIndex = items.length - 1
+      else return
+      event.preventDefault()
+      activateFile(items[nextIndex].path, false)
+      requestAnimationFrame(() => {
+        tabListRef.current?.children[nextIndex]?.querySelector('[role="tab"]')?.focus()
+      })
+    },
+    [activateFile]
+  )
+
   const activeTab = tabs.find((tab) => tab.path === activePath)
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
+  const tabNameCounts = tabs.reduce((counts, tab) => {
+    counts.set(tab.name, (counts.get(tab.name) || 0) + 1)
+    return counts
+  }, new Map())
 
   return (
     <section
@@ -685,8 +730,14 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
         aria-valuenow={width}
         tabIndex={0}
       />
-      <section className="flex min-w-0 min-h-0 flex-1 flex-col" aria-label="文件编辑器">
+      <section
+        id="file-editor-panel"
+        role="tabpanel"
+        className="flex min-w-0 min-h-0 flex-1 flex-col"
+        aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
+      >
         <div
+          ref={tabListRef}
           className="thin-scrollbar flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111]"
           role="tablist"
           aria-label="打开的文件"
@@ -694,35 +745,64 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
           {tabs.map((tab) => (
             <div
               key={tab.path}
-              role="tab"
-              tabIndex={tab.path === activePath ? 0 : -1}
-              aria-selected={tab.path === activePath}
+              data-path={tab.path}
               title={tab.path}
-              className={`group relative flex h-[35px] min-w-28 max-w-55 flex-[0_1_160px] items-center gap-1.5 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/45 hover:bg-white/[.035] hover:text-white/70'}`}
-              onClick={() => activateFile(tab.path)}
+              className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
               onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
-              onKeyDown={(event) => ['Enter', ' '].includes(event.key) && activateFile(tab.path)}
             >
-              <File size={13} className="shrink-0 text-white/40" />
-              <span className="min-w-0 flex-1 truncate">{tab.name}</span>
-              {tab.dirty && (
-                <span
-                  className="size-1.75 shrink-0 rounded-full bg-white/65 group-hover:hidden"
-                  aria-label="未保存"
-                />
+              {tab.path === activePath && (
+                <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[#5aa7e8]" />
               )}
               <button
                 type="button"
-                title={`关闭 ${tab.name}`}
-                aria-label={`关闭 ${tab.name}`}
-                className={`${tab.dirty ? 'hidden group-hover:grid' : tab.path === activePath ? 'grid' : 'hidden group-hover:grid'} size-5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  closeFile(tab.path)
-                }}
+                role="tab"
+                tabIndex={tab.path === activePath ? 0 : -1}
+                aria-selected={tab.path === activePath}
+                aria-controls="file-editor-panel"
+                aria-label={`${tab.name}${tabNameCounts.get(tab.name) > 1 ? `，${parentName(tab.path)} 文件夹` : ''}${tab.dirty ? '，未保存' : ''}${tab.loading ? '，正在打开' : ''}${tab.saving ? '，正在保存' : ''}`}
+                className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-hidden text-left"
+                onClick={() => activateFile(tab.path)}
+                onKeyDown={(event) => handleTabKeyDown(event, tab.path)}
               >
-                <X size={12} />
+                <FileIcon name={tab.name} className="size-4" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+                  <span className="min-w-0 truncate">{tab.name}</span>
+                  {tabNameCounts.get(tab.name) > 1 && (
+                    <span className="shrink truncate text-[9px] text-white/30">
+                      {parentName(tab.path)}
+                    </span>
+                  )}
+                </span>
               </button>
+              <span className="relative grid size-5 shrink-0 place-items-center">
+                {(tab.loading || tab.saving) && (
+                  <span
+                    className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
+                    aria-hidden="true"
+                  />
+                )}
+                {tab.dirty && !tab.loading && !tab.saving && (
+                  <span
+                    className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
+                    aria-hidden="true"
+                  />
+                )}
+                {!tab.loading && !tab.saving && (
+                  <button
+                    type="button"
+                    tabIndex={tab.path === activePath ? 0 : -1}
+                    title={`关闭 ${tab.name}`}
+                    aria-label={`关闭 ${tab.name}`}
+                    className={`${tab.dirty || tab.path !== activePath ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100' : ''} absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeFile(tab.path)
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </span>
             </div>
           ))}
         </div>
