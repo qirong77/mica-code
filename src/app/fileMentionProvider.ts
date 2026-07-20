@@ -2,19 +2,11 @@ import { opendir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { TerminalFileMentionItem } from '@packages/mica-ui/index.js';
 
-const IGNORED_DIRECTORIES = new Set([
-  '.git',
-  '.next',
-  '.turbo',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out',
-]);
+const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out']);
 const MAX_FILES = 50_000;
 const MAX_RESULTS = 100;
 const CACHE_TTL_MS = 3_000;
+const MAX_CACHED_ROOTS = 4;
 
 type CacheEntry = { expiresAt: number; files: Promise<string[]> };
 const cache = new Map<string, CacheEntry>();
@@ -22,24 +14,32 @@ const cache = new Map<string, CacheEntry>();
 export async function findFileMentions(root: string, query: string): Promise<TerminalFileMentionItem[]> {
   const files = await getWorkspaceFiles(root);
   const needle = query.trim().toLocaleLowerCase();
-  return files
-    .filter((path) => fuzzyMatch(path.toLocaleLowerCase(), needle))
-    .sort((left, right) => compareMatches(left, right, needle))
-    .slice(0, MAX_RESULTS)
-    .map((path) => {
-      const parts = path.split('/');
-      return {
-        path,
-        label: parts.at(-1) ?? path,
-        description: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
-      };
-    });
+  const matches = needle
+    ? files
+        .filter((path) => fuzzyMatch(path.toLocaleLowerCase(), needle))
+        .sort((left, right) => compareMatches(left, right, needle))
+        .slice(0, MAX_RESULTS)
+    : files.slice(0, MAX_RESULTS);
+  return matches.map((path) => {
+    const parts = path.split('/');
+    return {
+      path,
+      label: parts.at(-1) ?? path,
+      description: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
+    };
+  });
 }
 
 function getWorkspaceFiles(root: string): Promise<string[]> {
   const now = Date.now();
   const cached = cache.get(root);
   if (cached && cached.expiresAt > now) return cached.files;
+  if (cached) cache.delete(root);
+  while (cache.size >= MAX_CACHED_ROOTS) {
+    const oldestRoot = cache.keys().next().value;
+    if (oldestRoot === undefined) break;
+    cache.delete(oldestRoot);
+  }
 
   const files = walkWorkspaceFiles(root)
     .then((result) => {

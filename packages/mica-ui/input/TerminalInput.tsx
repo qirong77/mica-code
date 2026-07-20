@@ -138,8 +138,7 @@ function TerminalInput() {
             if (request !== fileMentionRequestRef.current) return;
             const dropdownItems = items.map((item) => {
               const inserted = `@${mentionPath(item.path)} `;
-              const insertText =
-                localText.slice(0, fileMention.start) + inserted + localText.slice(cursorOffset);
+              const insertText = localText.slice(0, fileMention.start) + inserted + localText.slice(cursorOffset);
               return {
                 key: `file:${item.path}`,
                 label: item.label ?? item.path.split('/').at(-1) ?? item.path,
@@ -258,6 +257,19 @@ function TerminalInput() {
       return;
     }
 
+    const liveDropdown = DropDownUI.atomData.dropdown.get();
+    if (liveDropdown.visible && DropDownUI.quickCommand.handleKey(key)) {
+      if (liveDropdown.kind === 'file' && key.escape) fileMentionRequestRef.current += 1;
+      event?.preventDefault?.();
+      event?.stopImmediatePropagation?.();
+      if (!DropDownUI.atomData.dropdown.get().visible && liveDropdown.kind !== 'file') {
+        setLocalText('');
+        setCursorOffset(0);
+        input.text.set('');
+      }
+      return;
+    }
+
     if (key.tab && showQueueShortcutTip) {
       event?.preventDefault?.();
       event?.stopImmediatePropagation?.();
@@ -327,17 +339,6 @@ function TerminalInput() {
         setCursorOffset(1);
         input.text.set('/');
       } else {
-        setLocalText('');
-        setCursorOffset(0);
-        input.text.set('');
-      }
-      return;
-    }
-
-    if (DropDownUI.quickCommand.handleKey(key)) {
-      event?.preventDefault?.();
-      event?.stopImmediatePropagation?.();
-      if (!DropDownUI.atomData.dropdown.get().visible) {
         setLocalText('');
         setCursorOffset(0);
         input.text.set('');

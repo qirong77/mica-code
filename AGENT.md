@@ -72,6 +72,7 @@ src/
     activeContext.ts               当前 ApplicationContext 的安全访问入口
     createApplication.ts           Application 创建入口
     builtinPlugins.ts              内置插件注册顺序
+    fileMentionProvider.ts         当前 cwd 文件扫描、缓存与 @ 候选排序
     adapters/
       LocalRuntimeController.ts    turn loop、命令分发、queue、retry、abort、rewind
       MicaUiRuntimeBridge.ts       AgentRuntime/runtime/session 状态到 mica-ui store 的同步
@@ -130,7 +131,7 @@ temp/                              临时代码和外部实验，默认不参与
 10. `buildin-plugins/file-plugins.mjs` 扫描并注册 `$MICA_HOME/plugins` 中的用户插件，`plugins.setupAll(...)` 初始化全部运行期插件，再写入 `plugin-status.json` 供 Config Web 诊断。
 11. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
 12. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-13. 设置输入框 placeholder 和退出回调。
+13. 为输入框注入当前 cwd 的 `@` 文件候选 provider，并设置 placeholder 和退出回调。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
 
@@ -338,6 +339,7 @@ AGENT.md
 ## UI 状态与 Ink 约定
 
 - `packages/mica-ui` 只负责终端 UI 组件和状态 store，不直接调用 provider，不持有 agent 运行逻辑。
+- 输入框在光标前出现 `@query` 时通过应用层注入的 file mention provider 异步获取当前 cwd 文件；候选复用底部 dropdown，支持方向键、Enter/Tab 和 Esc。`mica-ui` 不直接扫描文件系统。
 - Runtime 到 UI 的映射由 `MicaUiRuntimeBridge` 和 `runtime/uiBridge.ts` 完成。
 - 主要状态入口包括 `conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
 - 对话消息可以携带 `displayContent`。它只改变 UI 展示，不改变发给 agent 的真实 `content`。

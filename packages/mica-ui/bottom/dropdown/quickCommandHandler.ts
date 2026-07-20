@@ -145,9 +145,7 @@ function sortCommands(
 
 function getCommandSortPriority(command: MicaUiCommand): number {
   if (command.name !== 'task') return 0;
-  const hasActiveBackgroundTask = backgroundTaskItems
-    .get()
-    .some((task) => isActiveBackgroundTaskStatus(task.status));
+  const hasActiveBackgroundTask = backgroundTaskItems.get().some((task) => isActiveBackgroundTaskStatus(task.status));
   const hasBackgroundAgent = agentStatusItems.get().some((agent) => !agent.current);
   return hasActiveBackgroundTask || hasBackgroundAgent ? 1 : 0;
 }
@@ -188,7 +186,8 @@ function completionItemToDropdownItem(command: MicaUiCommand, item: MicaUiComman
 
 function resolveCompletionItems(command: MicaUiCommand): MicaUiCommandCompletionItem[] {
   try {
-    const completionItems = typeof command.completionItems === 'function' ? command.completionItems() : command.completionItems;
+    const completionItems =
+      typeof command.completionItems === 'function' ? command.completionItems() : command.completionItems;
     return completionItems ?? [];
   } catch {
     return [];
@@ -257,4 +256,3 @@ function selectedCommandArg(selected: MicaUiDropdownItem, commandName: string, r
   }
   return commandArg(raw, commandName);
 }
-
