@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
-import type { PluginContext, PluginStatusItem } from '@packages/mica-plugin/index.js';
+import { micaPlugin, type PluginContext, type PluginStatusItem } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
+import { micaUi, type MicaUiAgentStatusItem } from '@packages/mica-ui/index.js';
 import { parseTodoInput, shouldShowTodoList, TodoPlugin } from './TodoPlugin.js';
 
 describe('parseTodoInput', () => {
@@ -59,41 +60,25 @@ describe('TodoPlugin', () => {
 
   afterEach(async () => {
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
+    micaUi.panels.setAgentStatusItems([]);
   });
 
   it('registers the tool, status component, and command', async () => {
-    const commands = new micaCommands.CommandRegistry();
-    const upsert = vi.fn<(item: PluginStatusItem) => void>();
-    const remove = vi.fn<(id: string) => boolean>(() => true);
-    const registerTool = vi.fn((tool: MicaTool) => {
-      micaTools.registerRuntime(tool);
-      return { dispose: () => micaTools.unregisterRuntime(tool) };
-    });
-    const ctx = {
-      pluginId: 'builtin.todo',
-      commands,
-      events: new micaRuntime.RuntimeEventBus(),
-      tools: { register: registerTool },
-      ui: {
-        submit: vi.fn(),
-        showMessage: vi.fn(),
-        status: { upsert, remove },
-      },
-      onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
-    } as unknown as PluginContext;
+    const harness = createTodoHarness(disposeCallbacks);
 
-    new TodoPlugin().setup(ctx);
-
-    expect(upsert).toHaveBeenCalledWith({
+    expect(harness.upsert).toHaveBeenCalledWith({
       id: 'builtin.todo.list',
       component: expect.any(Function),
     });
-    expect(commands.resolve('/todo show')?.command.name).toBe('todo');
-    expect(registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'TodoWrite' }), {
+    expect(harness.commands.resolve('/todo show')?.command.name).toBe('todo');
+    expect(harness.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'TodoWrite' }), {
       icon: '📝',
       primaryAgentOnly: true,
     });
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'TodoWrite')).toBe(true);
+    expect(micaTools.getDefinitions().find((tool) => tool.name === 'TodoWrite')?.description).toContain(
+      'leave no item in_progress',
+    );
 
     const result = await micaTools.execute('TodoWrite', {
       todos: [
@@ -103,27 +88,16 @@ describe('TodoPlugin', () => {
     });
     expect(result).toBe('Todo list updated: 2 total, 1 completed, 0 pending. Current: Running tests');
 
-    await commands.execute('/todo hide');
-    expect(ctx.ui?.showMessage).toHaveBeenCalledWith('Todo list hidden. Use /todo show to restore it.');
+    await harness.commands.execute('/todo hide');
+    expect(harness.showMessage).toHaveBeenCalledWith('Todo list hidden. Use /todo show to restore it.');
 
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
-    expect(remove).toHaveBeenCalledWith('builtin.todo.list');
+    expect(harness.remove).toHaveBeenCalledWith('builtin.todo.list');
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'TodoWrite')).toBe(false);
   });
 
   it('returns a validation error without replacing the list', async () => {
-    const registerTool = (tool: MicaTool) => {
-      micaTools.registerRuntime(tool);
-      return { dispose: () => micaTools.unregisterRuntime(tool) };
-    };
-    const ctx = {
-      pluginId: 'builtin.todo',
-      commands: new micaCommands.CommandRegistry(),
-      events: new micaRuntime.RuntimeEventBus(),
-      tools: { register: registerTool },
-      onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
-    } as unknown as PluginContext;
-    new TodoPlugin().setup(ctx);
+    createTodoHarness(disposeCallbacks);
 
     const result = await micaTools.execute('TodoWrite', {
       todos: [{ content: 'Test', activeForm: 'Testing', status: 'unknown' }],
@@ -134,29 +108,162 @@ describe('TodoPlugin', () => {
   });
 
   it('clears retained todo state when the session is cleared', async () => {
-    const commands = new micaCommands.CommandRegistry();
-    const events = new micaRuntime.RuntimeEventBus();
-    const showMessage = vi.fn();
-    const registerTool = (tool: MicaTool) => {
-      micaTools.registerRuntime(tool);
-      return { dispose: () => micaTools.unregisterRuntime(tool) };
-    };
-    const ctx = {
-      pluginId: 'builtin.todo',
-      commands,
-      events,
-      tools: { register: registerTool },
-      ui: { showMessage },
-      onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
-    } as unknown as PluginContext;
-    new TodoPlugin().setup(ctx);
+    const harness = createTodoHarness(disposeCallbacks);
 
     await micaTools.execute('TodoWrite', {
       todos: [{ content: 'Test', activeForm: 'Testing', status: 'pending' }],
     });
-    events.publish({ type: 'session:cleared' });
-    await commands.execute('/todo show');
+    harness.events.publish({ type: 'session:cleared' });
+    await harness.commands.execute('/todo show');
 
-    expect(showMessage).toHaveBeenCalledWith('Todo list is empty.');
+    expect(harness.showMessage).toHaveBeenCalledWith('Todo list is empty.');
+  });
+
+  it('clears retained todo state after resume and rewind replace the session history', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const owner = setCurrentTodoOwner('owner-a');
+
+    for (const reason of ['resume', 'rewind'] as const) {
+      await writeTodoForOwner(owner, 'Old task', 'Working on old task');
+      harness.events.publish({ type: 'session:invalidated', reason, owner });
+      await harness.commands.execute('/todo show');
+      expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
+    }
+  });
+
+  it('returns a stale in-progress item to pending when the turn ends', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const owner = setCurrentTodoOwner('owner-a');
+
+    await writeTodoForOwner(owner, 'Finish work', 'Finishing work');
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('test', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      owner,
+    });
+    await harness.commands.execute('/todo show');
+
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+  });
+
+  it('settles errored and aborted turns without claiming completion', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const owner = setCurrentTodoOwner('owner-a');
+
+    await writeTodoForOwner(owner, 'Retry work', 'Retrying work');
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('error', 'ui'),
+      elapsedMs: 10,
+      hasError: true,
+      owner,
+    });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+
+    await writeTodoForOwner(owner, 'Retry work', 'Retrying work');
+    harness.events.publish({ type: 'turn:aborted', input: micaRuntime.createRuntimeInput('abort', 'ui'), owner });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+  });
+
+  it('keeps todo state isolated between top-level agents', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const ownerA = setCurrentTodoOwner('owner-a');
+    const ownerB = { taskOwnerId: 'owner-b' };
+
+    await writeTodoForOwner(ownerA, 'Task A', 'Working on A');
+    await writeTodoForOwner(ownerB, 'Task B', 'Working on B');
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith(
+      'Todo list updated: 1 total, 0 completed, 0 pending. Current: Working on A',
+    );
+
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('background', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      owner: ownerB,
+    });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith(
+      'Todo list updated: 1 total, 0 completed, 0 pending. Current: Working on A',
+    );
+
+    setCurrentTodoOwner('owner-b');
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+  });
+
+  it('drops todo state when a top-level agent session is disposed', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const ownerA = setCurrentTodoOwner('owner-a');
+    const ownerB = { taskOwnerId: 'owner-b' };
+
+    await writeTodoForOwner(ownerA, 'Task A', 'Working on A');
+    await writeTodoForOwner(ownerB, 'Task B', 'Working on B');
+    harness.events.publish({ type: 'session:disposed', owner: ownerB });
+
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith(
+      'Todo list updated: 1 total, 0 completed, 0 pending. Current: Working on A',
+    );
+
+    setCurrentTodoOwner('owner-b');
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
   });
 });
+
+function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) {
+  const commands = new micaCommands.CommandRegistry();
+  const hooks = new micaPlugin.HookRegistry();
+  const events = new micaRuntime.RuntimeEventBus();
+  const showMessage = vi.fn();
+  const upsert = vi.fn<(item: PluginStatusItem) => void>();
+  const remove = vi.fn<(id: string) => boolean>(() => true);
+  const registerTool = vi.fn((tool: MicaTool) => {
+    micaTools.registerRuntime(tool);
+    return { dispose: () => micaTools.unregisterRuntime(tool) };
+  });
+  const ctx = {
+    pluginId: 'builtin.todo',
+    commands,
+    hooks,
+    events,
+    tools: { register: registerTool },
+    ui: { submit: vi.fn(), showMessage, status: { upsert, remove } },
+    onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
+  } as unknown as PluginContext;
+
+  new TodoPlugin().setup(ctx);
+  return { commands, events, hooks, registerTool, remove, showMessage, upsert };
+}
+
+function setCurrentTodoOwner(taskOwnerId: string): { taskOwnerId: string } {
+  const owner = { taskOwnerId };
+  const now = new Date().toISOString();
+  const item: MicaUiAgentStatusItem = {
+    id: `session-${taskOwnerId}`,
+    taskOwnerId,
+    index: 1,
+    title: taskOwnerId,
+    cwd: process.cwd(),
+    providerName: 'test',
+    model: 'test',
+    status: { type: 'idle' },
+    current: true,
+    startedAt: now,
+    updatedAt: now,
+  };
+  micaUi.panels.setAgentStatusItems([item]);
+  return owner;
+}
+
+async function writeTodoForOwner(owner: { taskOwnerId: string }, content: string, activeForm: string): Promise<void> {
+  await micaTools.execute(
+    'TodoWrite',
+    { todos: [{ content, activeForm, status: 'in_progress' }] },
+    { context: { agent: owner } },
+  );
+}

@@ -47,6 +47,7 @@ function TerminalInput() {
   const role = useScheduleState(input.role);
   const rolePrefixWidth = role === 'default' ? 0 : stringWidth(role) + 1;
   const columns = Math.max(1, (process.stdout.columns ?? terminalSize?.columns ?? 80) - 6 - rolePrefixWidth);
+  const maxVisibleInputLines = Math.max(1, Math.min(6, Math.floor(terminalSize.rows / 3)));
   const activePluginUIs = useScheduleState(pluginUIs);
   const activeCommandPanelItems = useScheduleState(commandPanelItems);
   const status = useScheduleState(workingStatus);
@@ -445,6 +446,7 @@ function TerminalInput() {
           onExit={onExit}
           focus={true}
           multiline={true}
+          maxVisibleLines={maxVisibleInputLines}
           placeholder={placeholder}
           columns={columns}
           cursorOffset={cursorOffset}

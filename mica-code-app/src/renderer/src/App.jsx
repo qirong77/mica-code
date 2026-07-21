@@ -13,7 +13,7 @@ import { FilesView } from './FilesView'
 import { GitView } from './GitView'
 import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
-import { TerminalHost } from './TerminalHost'
+import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
 import { useLatest } from './hooks'
 import {
   childMap,
@@ -628,7 +628,8 @@ export default function App() {
   return (
     <>
       <div
-        className={`grid size-full transition-[grid-template-columns] duration-150 ${sidebarCollapsed ? 'grid-cols-[0_1fr]' : 'grid-cols-[260px_1fr]'}`}
+        className={`grid size-full transition-[grid-template-columns] ${sidebarCollapsed ? 'grid-cols-[0_1fr]' : 'grid-cols-[260px_1fr]'}`}
+        style={{ transitionDuration: `${SIDEBAR_TRANSITION_MS}ms` }}
       >
         <aside
           className={`flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#1c1c1d] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
@@ -762,23 +763,25 @@ export default function App() {
               {error || '选择或新建一个终端会话'}
             </div>
           )}
-          {gitIsCurrent && git.status?.root && (
-            <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
-              <button
-                ref={branchButtonRef}
-                type="button"
-                title="切换或创建 Git 分支"
-                aria-haspopup="dialog"
-                aria-expanded={branchPickerOpen}
-                className="-ml-1.5 flex h-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white"
-                onClick={() => setBranchPickerOpen(true)}
-              >
-                <GitBranch size={13} className="shrink-0" />
-                <span className="truncate">{git.status.branch || 'detached'}</span>
-              </button>
-              <span className="min-w-0 truncate text-right text-white/35">{git.status.root}</span>
-            </footer>
-          )}
+          <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
+            {gitIsCurrent && git.status?.root ? (
+              <>
+                <button
+                  ref={branchButtonRef}
+                  type="button"
+                  title="切换或创建 Git 分支"
+                  aria-haspopup="dialog"
+                  aria-expanded={branchPickerOpen}
+                  className="-ml-1.5 flex h-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white"
+                  onClick={() => setBranchPickerOpen(true)}
+                >
+                  <GitBranch size={13} className="shrink-0" />
+                  <span className="truncate">{git.status.branch || 'detached'}</span>
+                </button>
+                <span className="min-w-0 truncate text-right text-white/35">{git.status.root}</span>
+              </>
+            ) : null}
+          </footer>
         </main>
       </div>
       <button

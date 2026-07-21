@@ -1,4 +1,12 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -28,6 +36,9 @@ const terminalTheme = {
   brightCyan: '#2dd4bf',
   brightWhite: '#ffffff'
 }
+
+export const SIDEBAR_TRANSITION_MS = 150
+const SIDEBAR_FIT_SETTLE_MS = SIDEBAR_TRANSITION_MS + 20
 
 function interceptTerminalKey(event, id) {
   const key = event.key.toLowerCase()
@@ -142,6 +153,8 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const onReadRef = useLatest(onRead)
   const frameRef = useRef(null)
   const focusRef = useRef(false)
+  const sidebarCollapsedRef = useRef(sidebarCollapsed)
+  const suppressObservedFitRef = useRef(false)
 
   const measurable = useCallback(
     (entry, id) =>
@@ -286,10 +299,23 @@ export const TerminalHost = forwardRef(function TerminalHost(
     scheduleFit({ focus: visible })
   }, [activeId, scheduleFit, visible])
 
-  useEffect(() => {
-    scheduleFit()
-    const timer = window.setTimeout(() => scheduleFit(), 190)
-    return () => clearTimeout(timer)
+  useLayoutEffect(() => {
+    if (sidebarCollapsedRef.current === sidebarCollapsed) return
+    sidebarCollapsedRef.current = sidebarCollapsed
+    suppressObservedFitRef.current = true
+
+    // The app shell animates its grid columns for 150ms. Fitting on every
+    // ResizeObserver notification would resize the PTY repeatedly and make
+    // full-screen terminal apps repaint for every intermediate column count.
+    const timer = window.setTimeout(() => {
+      suppressObservedFitRef.current = false
+      scheduleFit()
+    }, SIDEBAR_FIT_SETTLE_MS)
+
+    return () => {
+      clearTimeout(timer)
+      suppressObservedFitRef.current = false
+    }
   }, [scheduleFit, sidebarCollapsed])
 
   useEffect(() => {
@@ -310,7 +336,9 @@ export const TerminalHost = forwardRef(function TerminalHost(
   }, [])
 
   useEffect(() => {
-    const observer = new ResizeObserver(() => scheduleFit())
+    const observer = new ResizeObserver(() => {
+      if (!suppressObservedFitRef.current) scheduleFit()
+    })
     if (hostRef.current) observer.observe(hostRef.current)
     let query
     const onRatio = () => {

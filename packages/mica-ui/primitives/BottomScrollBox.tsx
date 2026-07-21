@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollBox, useTerminalSize } from '@anthropic/ink';
+import { ScrollBox } from '@anthropic/ink';
 import type { ScrollBoxHandle, ScrollBoxProps } from '@packages/@anthropic/ink/src/components/ScrollBox.js';
 import { useLogViewHeight } from '../hooks/useLogViewHeight.js';
 
@@ -25,7 +25,6 @@ export function BottomScrollBox({
   minWidth = 0,
   ...props
 }: BottomScrollBoxProps): React.ReactNode {
-  const { columns, rows } = useTerminalSize();
   const logViewHeight = useLogViewHeight();
   const defaultHeight = normalizeHeight(logViewHeight - bottomReservedRows);
   const resolvedHeight =
@@ -35,16 +34,5 @@ export function BottomScrollBox({
     ...(resolvedHeight !== undefined ? { height: resolvedHeight } : {}),
     ...(resolvedMaxHeight !== undefined ? { maxHeight: resolvedMaxHeight } : {}),
   };
-  const scrollKey = `${columns}x${rows}:${String(resolvedHeight ?? '')}:${String(resolvedMaxHeight ?? '')}`;
-
-  return (
-    <ScrollBox
-      key={scrollKey}
-      {...sizeProps}
-      flexDirection={flexDirection}
-      width={width}
-      minWidth={minWidth}
-      {...props}
-    />
-  );
+  return <ScrollBox {...sizeProps} flexDirection={flexDirection} width={width} minWidth={minWidth} {...props} />;
 }

@@ -411,6 +411,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       if (!context) return { cleared: [], remaining: [] };
       const result = context.agentSessions.clearIdleSessions({
         onClear: (session) => {
+          context.events.publish({ type: 'session:disposed', owner: session.agent });
           context.subagentTasks.killForOwner(session.agent);
           context.runtime.disposeAgent(session.agent);
           context.uiBridge.disposeAgent(session.agent);
@@ -492,11 +493,12 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     },
     refreshCurrentAgentSessionUi() {
       const context = currentContext();
-      const session = context?.agentSessions.current();
-      if (!session) return;
+      if (!context) return;
+      const session = context.agentSessions.current();
       session.titleOverride = session.sessionController.getCurrentTitle();
       session.uiState = normalizeUiState(captureSessionUi());
-      context?.uiBridge.syncAgentStatusItems();
+      context.events.publish({ type: 'session:invalidated', reason: 'resume', owner: session.agent });
+      context.uiBridge.syncAgentStatusItems();
     },
     listRewindCheckpoints() {
       return currentContext()?.runtime.listRewindCheckpoints() ?? [];
@@ -509,9 +511,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     applyRewind(request) {
       const context = currentContext();
       if (!context) throw new Error('Application is not ready');
+      const session = context.agentSessions.current();
       const result = context.runtime.applyRewind(request);
+      context.events.publish({ type: 'session:invalidated', reason: 'rewind', owner: session.agent });
       try {
-        const session = context.agentSessions.current();
         const snapshot = session.agent.getSnapshot();
         session.uiState = normalizeUiState({
           ...session.uiState,

@@ -763,8 +763,20 @@ export default class Ink {
     // and no move is emitted.
     const decl = this.cursorDeclaration;
     const rect = decl !== null ? nodeCache.get(decl.node) : undefined;
-    const target =
+    const rawTarget =
       decl !== null && rect !== undefined ? { x: rect.x + decl.relativeX, y: rect.y + decl.relativeY } : null;
+    // Layout nodes can exist outside the rendered frame when fixed children
+    // overflow their root. Do not park at such a declaration: the terminal
+    // would clamp the movement while displayCursor recorded an unreachable
+    // point, making the next main-screen diff start from the wrong position.
+    const target =
+      rawTarget !== null &&
+      rawTarget.x >= 0 &&
+      rawTarget.x < frame.screen.width &&
+      rawTarget.y >= 0 &&
+      rawTarget.y < frame.screen.height
+        ? rawTarget
+        : null;
     const parked = this.displayCursor;
 
     // Preserve the empty-diff zero-write fast path: skip all cursor writes

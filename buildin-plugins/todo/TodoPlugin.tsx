@@ -2,8 +2,9 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
-import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
-import { micaUi } from '@packages/mica-ui/index.js';
+import type { RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
+import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { micaUi, type MicaUiAgentStatusItem } from '@packages/mica-ui/index.js';
 
 const PLUGIN_ID = 'builtin.todo';
 const STATUS_ITEM_ID = 'builtin.todo.list';
@@ -14,6 +15,7 @@ const TODO_KIND = '📝(todo)';
 const TODO_KIND_WIDTH = 12;
 const TODO_STATUS_WIDTH = 8;
 const TODO_ITEM_INDENT = '     ⎿  ';
+const FALLBACK_OWNER_ID = 'builtin.todo.default-owner';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -28,6 +30,8 @@ type TodoViewState = {
   visible: boolean;
 };
 
+type TodoStatesByOwner = ReadonlyMap<string, TodoViewState>;
+
 type ParsedTodos = { ok: true; items: TodoItem[] } | { ok: false; message: string };
 
 export class TodoPlugin implements MicaPlugin {
@@ -36,18 +40,41 @@ export class TodoPlugin implements MicaPlugin {
   readonly required = true;
 
   setup(ctx: PluginContext): void {
-    const state = atom<TodoViewState>({ items: [], visible: true });
-    const tool = new TodoWriteTool((items) => {
-      state.set({ ...state.get(), items });
+    const states = atom<TodoStatesByOwner>(new Map());
+    const activeOwnerId = () => currentTodoOwnerId(micaUi.panels.agentStatusItems.get());
+    const getOwnerState = (ownerId: string) => states.get().get(ownerId) ?? createTodoViewState();
+    const setOwnerState = (ownerId: string, next: TodoViewState) => {
+      const current = states.get();
+      if (current.get(ownerId) === next) return;
+      const updated = new Map(current);
+      updated.set(ownerId, next);
+      states.set(updated);
+    };
+    const deleteOwnerState = (ownerId: string) => {
+      const current = states.get();
+      if (!current.has(ownerId)) return;
+      const updated = new Map(current);
+      updated.delete(ownerId);
+      states.set(updated);
+    };
+    const updateOwnerState = (ownerId: string, update: (current: TodoViewState) => TodoViewState) => {
+      const current = getOwnerState(ownerId);
+      const next = update(current);
+      if (next !== current) setOwnerState(ownerId, next);
+    };
+    const tool = new TodoWriteTool((items, ownerId) => {
+      updateOwnerState(ownerId ?? activeOwnerId(), (current) => ({ ...current, items }));
     });
 
     function TodoStatusList(): React.ReactNode {
-      const current = micaUi.useScheduleState(state);
+      const currentStates = micaUi.useScheduleState(states);
+      const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
+      const current = currentStates.get(currentTodoOwnerId(agents)) ?? createTodoViewState();
       if (!shouldShowTodoList(current)) return null;
 
       const completed = current.items.filter((item) => item.status === 'completed').length;
       const active = current.items.some((item) => item.status === 'in_progress');
-      const status = active ? 'running' : completed === current.items.length ? 'done' : 'pending';
+      const status = active ? 'running' : 'pending';
       const remaining = current.items.length - completed;
       return (
         <Box flexDirection="column" width="100%" minWidth={0} marginTop={1}>
@@ -72,7 +99,7 @@ export class TodoPlugin implements MicaPlugin {
               },
               {
                 key: 'remaining',
-                content: remaining === 0 ? 'all tasks complete' : `${remaining} remaining`,
+                content: `${remaining} remaining`,
                 flexGrow: 1,
                 minWidth: 0,
                 dimColor: true,
@@ -96,9 +123,26 @@ export class TodoPlugin implements MicaPlugin {
     });
 
     const eventSubscription = ctx.events.on('event', (event) => {
-      if (event.type === 'session:cleared') state.set({ items: [], visible: true });
+      const ownerId = todoOwnerId(event.owner) ?? activeOwnerId();
+      if (event.type === 'session:cleared' || event.type === 'session:invalidated') {
+        setOwnerState(ownerId, createTodoViewState());
+      } else if (event.type === 'session:disposed') {
+        deleteOwnerState(ownerId);
+      } else if (event.type === 'turn:aborted') {
+        updateOwnerState(ownerId, pauseInProgressTodo);
+      }
     });
     ctx.onDispose(() => eventSubscription.dispose());
+
+    const turnAfterSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
+      'turn:after',
+      (event) => {
+        const ownerId = todoOwnerId(event.owner) ?? activeOwnerId();
+        updateOwnerState(ownerId, pauseInProgressTodo);
+      },
+      { pluginId: ctx.pluginId },
+    );
+    ctx.onDispose(() => turnAfterSubscription.dispose());
 
     const command = ctx.commands.register({
       name: 'todo',
@@ -113,20 +157,21 @@ export class TodoPlugin implements MicaPlugin {
       pluginId: ctx.pluginId,
       handler: (_commandCtx, args) => {
         const action = args.trim().toLowerCase();
-        const current = state.get();
+        const ownerId = activeOwnerId();
+        const current = getOwnerState(ownerId);
 
         if (!action || action === 'show') {
-          state.set({ ...current, visible: true });
+          setOwnerState(ownerId, { ...current, visible: true });
           ctx.ui?.showMessage(current.items.length === 0 ? 'Todo list is empty.' : formatTodoSummary(current.items));
           return { ok: true };
         }
         if (action === 'hide') {
-          state.set({ ...current, visible: false });
+          setOwnerState(ownerId, { ...current, visible: false });
           ctx.ui?.showMessage('Todo list hidden. Use /todo show to restore it.');
           return { ok: true };
         }
         if (action === 'clear') {
-          state.set({ items: [], visible: current.visible });
+          setOwnerState(ownerId, { items: [], visible: current.visible });
           ctx.ui?.showMessage('Todo list cleared.');
           return { ok: true };
         }
@@ -144,13 +189,14 @@ export function shouldShowTodoList(state: TodoViewState): boolean {
 }
 
 class TodoWriteTool extends MicaTool {
-  constructor(private readonly replace: (items: TodoItem[]) => void) {
+  constructor(private readonly replace: (items: TodoItem[], ownerId?: string) => void) {
     super(
       TOOL_NAME,
       [
         'Create or update the structured todo list for the current coding task.',
         'Use it for tasks with several meaningful steps, and skip it for trivial one-step work.',
         'Send the complete list on every call, keep at most one item in_progress, and update statuses as work advances.',
+        'Before yielding a final response, waiting for user input, or stopping for any reason, leave no item in_progress: mark finished items completed and unfinished items pending.',
         'Use content for the imperative task label and activeForm for the present-progressive label shown while working.',
       ].join(' '),
       {
@@ -196,11 +242,11 @@ class TodoWriteTool extends MicaTool {
     return parsed.ok ? { valid: true } : { valid: false, message: parsed.message };
   }
 
-  async execute(input: ToolInput): Promise<string> {
+  async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const parsed = parseTodoInput(input);
     if (!parsed.ok) throw new Error(parsed.message);
 
-    this.replace(parsed.items);
+    this.replace(parsed.items, todoOwnerIdFromToolContext(callbacks?.context));
     return formatTodoSummary(parsed.items);
   }
 
@@ -208,6 +254,33 @@ class TodoWriteTool extends MicaTool {
     const count = Array.isArray(input.todos) ? input.todos.length : 0;
     return count === 0 ? 'Clearing todo list' : `Updating todo list (${count})`;
   }
+}
+
+function createTodoViewState(): TodoViewState {
+  return { items: [], visible: true };
+}
+
+function pauseInProgressTodo(current: TodoViewState): TodoViewState {
+  if (!current.items.some((item) => item.status === 'in_progress')) return current;
+  // A stopped turn does not prove the task completed; pending is the conservative terminal state.
+  return {
+    ...current,
+    items: current.items.map((item) => (item.status === 'in_progress' ? { ...item, status: 'pending' } : item)),
+  };
+}
+
+function currentTodoOwnerId(agents: readonly MicaUiAgentStatusItem[]): string {
+  return agents.find((agent) => agent.current)?.taskOwnerId ?? FALLBACK_OWNER_ID;
+}
+
+function todoOwnerIdFromToolContext(context: unknown): string | undefined {
+  return isRecord(context) ? todoOwnerId(context.agent) : undefined;
+}
+
+function todoOwnerId(owner: unknown): string | undefined {
+  if (!isRecord(owner)) return undefined;
+  const ownerId = owner.taskOwnerId;
+  return typeof ownerId === 'string' && ownerId.length > 0 ? ownerId : undefined;
 }
 
 function TodoRow({ item }: { item: TodoItem }): React.ReactNode {
@@ -243,9 +316,8 @@ function TodoRow({ item }: { item: TodoItem }): React.ReactNode {
   );
 }
 
-function todoListStatusColor(status: 'running' | 'done' | 'pending'): string {
+function todoListStatusColor(status: 'running' | 'pending'): string {
   if (status === 'running') return micaUi.theme.colors.info;
-  if (status === 'done') return micaUi.theme.colors.success;
   return micaUi.theme.colors.muted;
 }
 
