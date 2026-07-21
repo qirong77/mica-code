@@ -7,23 +7,27 @@ describe('createClearCommand', () => {
     const agent = makeAgent();
     const sessionController = makeSessionController();
     const services = makeServices();
-    const command = createClearCommand(agent, sessionController, services);
+    const onCleared = vi.fn();
+    const command = createClearCommand(agent, sessionController, services, onCleared);
 
     command.action();
 
     expect(services.clearUI).toHaveBeenCalledWith(agent, sessionController);
     expect(services.newAgentSession).not.toHaveBeenCalled();
     expect(services.switchAgentSession).not.toHaveBeenCalled();
+    expect(onCleared).toHaveBeenCalledOnce();
     expect(services.showMessage).toHaveBeenCalledWith('Started new session');
   });
 
   it('does not create a new session while the current agent is busy', () => {
     const services = makeServices({ busy: true });
-    const command = createClearCommand(makeAgent(), makeSessionController(), services);
+    const onCleared = vi.fn();
+    const command = createClearCommand(makeAgent(), makeSessionController(), services, onCleared);
 
     command.action();
 
     expect(services.clearUI).not.toHaveBeenCalled();
+    expect(onCleared).not.toHaveBeenCalled();
     expect(services.showMessage).toHaveBeenCalledWith('Agent is busy; wait or abort before starting a new session');
   });
 });

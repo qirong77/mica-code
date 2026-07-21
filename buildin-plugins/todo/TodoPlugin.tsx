@@ -43,7 +43,7 @@ export class TodoPlugin implements MicaPlugin {
 
     function TodoStatusList(): React.ReactNode {
       const current = micaUi.useScheduleState(state);
-      if (!current.visible || current.items.length === 0) return null;
+      if (!shouldShowTodoList(current)) return null;
 
       const completed = current.items.filter((item) => item.status === 'completed').length;
       const active = current.items.some((item) => item.status === 'in_progress');
@@ -95,6 +95,11 @@ export class TodoPlugin implements MicaPlugin {
       ctx.ui?.status?.remove(STATUS_ITEM_ID);
     });
 
+    const eventSubscription = ctx.events.on('event', (event) => {
+      if (event.type === 'session:cleared') state.set({ items: [], visible: true });
+    });
+    ctx.onDispose(() => eventSubscription.dispose());
+
     const command = ctx.commands.register({
       name: 'todo',
       description: 'Show, hide, or clear the current todo list',
@@ -132,6 +137,10 @@ export class TodoPlugin implements MicaPlugin {
     });
     ctx.onDispose(() => command.dispose());
   }
+}
+
+export function shouldShowTodoList(state: TodoViewState): boolean {
+  return state.visible && state.items.length > 0 && state.items.some((item) => item.status !== 'completed');
 }
 
 class TodoWriteTool extends MicaTool {

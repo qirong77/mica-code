@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import type { PluginContext, PluginStatusItem } from '@packages/mica-plugin/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
-import { parseTodoInput, TodoPlugin } from './TodoPlugin.js';
+import { parseTodoInput, shouldShowTodoList, TodoPlugin } from './TodoPlugin.js';
 
 describe('parseTodoInput', () => {
   it('normalizes a valid replacement list', () => {
@@ -39,6 +40,20 @@ describe('parseTodoInput', () => {
   });
 });
 
+describe('shouldShowTodoList', () => {
+  const item = { content: 'Test', activeForm: 'Testing', status: 'completed' as const };
+
+  it('hides empty and fully completed lists', () => {
+    expect(shouldShowTodoList({ items: [], visible: true })).toBe(false);
+    expect(shouldShowTodoList({ items: [item], visible: true })).toBe(false);
+  });
+
+  it('shows a visible list while work remains', () => {
+    expect(shouldShowTodoList({ items: [{ ...item, status: 'pending' }], visible: true })).toBe(true);
+    expect(shouldShowTodoList({ items: [{ ...item, status: 'pending' }], visible: false })).toBe(false);
+  });
+});
+
 describe('TodoPlugin', () => {
   const disposeCallbacks: Array<() => void | Promise<void>> = [];
 
@@ -57,6 +72,7 @@ describe('TodoPlugin', () => {
     const ctx = {
       pluginId: 'builtin.todo',
       commands,
+      events: new micaRuntime.RuntimeEventBus(),
       tools: { register: registerTool },
       ui: {
         submit: vi.fn(),
@@ -103,6 +119,7 @@ describe('TodoPlugin', () => {
     const ctx = {
       pluginId: 'builtin.todo',
       commands: new micaCommands.CommandRegistry(),
+      events: new micaRuntime.RuntimeEventBus(),
       tools: { register: registerTool },
       onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
     } as unknown as PluginContext;
@@ -114,5 +131,32 @@ describe('TodoPlugin', () => {
 
     expect(result).toContain('TodoWrite 输入校验失败');
     expect(result).toContain('status must be pending, in_progress, or completed');
+  });
+
+  it('clears retained todo state when the session is cleared', async () => {
+    const commands = new micaCommands.CommandRegistry();
+    const events = new micaRuntime.RuntimeEventBus();
+    const showMessage = vi.fn();
+    const registerTool = (tool: MicaTool) => {
+      micaTools.registerRuntime(tool);
+      return { dispose: () => micaTools.unregisterRuntime(tool) };
+    };
+    const ctx = {
+      pluginId: 'builtin.todo',
+      commands,
+      events,
+      tools: { register: registerTool },
+      ui: { showMessage },
+      onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
+    } as unknown as PluginContext;
+    new TodoPlugin().setup(ctx);
+
+    await micaTools.execute('TodoWrite', {
+      todos: [{ content: 'Test', activeForm: 'Testing', status: 'pending' }],
+    });
+    events.publish({ type: 'session:cleared' });
+    await commands.execute('/todo show');
+
+    expect(showMessage).toHaveBeenCalledWith('Todo list is empty.');
   });
 });
