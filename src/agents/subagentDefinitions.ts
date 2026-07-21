@@ -52,6 +52,7 @@ const READ_ONLY_TOOLS = [
 
 const INHERITED_SKILL_TOOL = 'Skill';
 const MCP_TOOL_PREFIX = 'mcp__';
+const PRIMARY_AGENT_ONLY_TOOLS = new Set(['TodoWrite']);
 
 export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   {
@@ -214,6 +215,7 @@ export function buildSubagentToolFilter(definition: SubagentDefinition): (toolNa
   const allowed = new Set(definition.allowedTools ?? ['*']);
   const disallowed = new Set(definition.disallowedTools ?? []);
   return (toolName: string) => {
+    if (PRIMARY_AGENT_ONLY_TOOLS.has(toolName)) return false;
     if (disallowed.has(toolName)) return false;
     // Skills and MCP servers are process-level capabilities shared with the parent agent.
     // Every subagent inherits them without weakening its restrictions on other tools.

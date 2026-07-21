@@ -142,6 +142,10 @@ export class Application {
             upsert: micaUi.panels.upsertPluginUI,
             remove: micaUi.panels.removePluginUI,
           },
+          status: {
+            upsert: micaUi.panels.upsertPluginStatusItem,
+            remove: micaUi.panels.removePluginStatusItem,
+          },
           input: {
             getText: () => micaUi.terminalInput.text.get(),
           },

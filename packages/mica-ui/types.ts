@@ -64,6 +64,12 @@ export interface MicaUiPluginUI {
   onTextChange?: (text: string) => boolean;
 }
 
+/** A non-interactive plugin component that stays visible in the status area. */
+export interface MicaUiPluginStatusItem {
+  id: string;
+  component: React.ComponentType;
+}
+
 export interface MicaUiAgentTurnLogItem {
   id: string;
   component: React.ComponentType;

@@ -146,6 +146,7 @@ export type {
   MicaUiDropdownItem,
   MicaUiDropdownState,
   MicaUiPluginUI,
+  MicaUiPluginStatusItem,
   MicaUiCommand,
   MicaUiBackgroundTaskItem,
   MicaUiBackgroundTaskStatus,

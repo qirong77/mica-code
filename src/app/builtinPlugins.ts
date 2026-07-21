@@ -4,6 +4,7 @@ import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
 import { McpPlugin } from '../plugins/mcp/index.js';
 import { MessageQueuePlugin } from '../plugins/runtime/index.js';
+import { TodoPlugin } from '../plugins/todo/TodoPlugin.js';
 import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
 import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
 import setupCommandCompact from '../../buildin-plugins/command-compact.mjs';
@@ -26,7 +27,7 @@ export function useBuiltinPlugins(
 ): PluginHost {
   app.use(new BuiltInCommandsPlugin(agent, sessionController));
   for (const plugin of builtinCommandFilePlugins()) app.use(plugin);
-  app.use(new MessageQueuePlugin()).use(new McpPlugin());
+  app.use(new MessageQueuePlugin()).use(new McpPlugin()).use(new TodoPlugin());
   app.use({
     id: 'builtin.mica-code-app-notify',
     name: 'Built-in Mica Code App Notify',

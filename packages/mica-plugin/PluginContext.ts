@@ -2,6 +2,12 @@ import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import type { RuntimeEventBus, SubmitOptions, SubmitResult } from '@packages/mica-runtime/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
+import type React from 'react';
+
+export type PluginStatusItem = {
+  id: string;
+  component: React.ComponentType;
+};
 
 export type PluginContext = {
   pluginId: string;
@@ -20,6 +26,10 @@ export type PluginContext = {
   ui?: {
     submit(text: string, options?: { displayText?: string }): void;
     showMessage(text: string, ttl?: number): void;
+    status?: {
+      upsert(item: PluginStatusItem): void;
+      remove(id: string): boolean;
+    };
     [key: string]: unknown;
   };
   git?: {

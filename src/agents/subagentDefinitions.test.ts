@@ -36,4 +36,13 @@ describe('subagent definitions', () => {
     expect(filter('write_file')).toBe(false);
     expect(filter('Agent')).toBe(false);
   });
+
+  it('keeps the primary todo list out of every subagent', () => {
+    const subagentTypes = ['general-purpose', 'Explore', 'Implementer', 'Reviewer', 'Tester', 'Planner', 'Proposal'];
+
+    for (const subagentType of subagentTypes) {
+      const filter = buildSubagentToolFilter(getSubagent(subagentType));
+      expect(filter('TodoWrite'), `${subagentType} should not update the primary todo list`).toBe(false);
+    }
+  });
 });

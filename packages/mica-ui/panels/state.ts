@@ -8,6 +8,7 @@ import type {
   MicaUiSubagentTaskItem,
   MicaUiStartupBannerState,
   MicaUiCommandPanelItem,
+  MicaUiPluginStatusItem,
 } from '../types.js';
 
 const MAX_COMMAND_PANEL_ITEMS = 4;
@@ -17,6 +18,7 @@ export const workingStatus = atom<MicaUiWorkingStatus>({ type: 'idle' });
 export const thinkingText = atom('');
 export const agentTurnLogItems = atom<MicaUiAgentTurnLogItem[]>([]);
 export const pluginUIs = atom<MicaUiPluginUI[]>([]);
+export const pluginStatusItems = atom<MicaUiPluginStatusItem[]>([]);
 export const commandPanelItems = atom<MicaUiCommandPanelItem[]>([]);
 export const contextSize = atom(0);
 export const cachedTokenRate = atom(0);
@@ -105,6 +107,22 @@ export function removePluginUI(id: string): boolean {
 
 export function clearPluginUIs(): void {
   pluginUIs.set([]);
+}
+
+export function upsertPluginStatusItem(item: MicaUiPluginStatusItem): void {
+  pluginStatusItems.set([...pluginStatusItems.get().filter((entry) => entry.id !== item.id), item]);
+}
+
+export function removePluginStatusItem(id: string): boolean {
+  const items = pluginStatusItems.get();
+  const nextItems = items.filter((item) => item.id !== id);
+  if (nextItems.length === items.length) return false;
+  pluginStatusItems.set(nextItems);
+  return true;
+}
+
+export function clearPluginStatusItems(): void {
+  pluginStatusItems.set([]);
 }
 
 export function setCommandPanelItems(items: MicaUiCommandPanelItem[]): void {

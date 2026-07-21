@@ -19,6 +19,7 @@ const TOOL_ICONS: Record<string, string> = {
   Skill: '✨',
   apply_patch: '🩹',
   Agent: '🤖',
+  TodoWrite: '📝',
   background_tasks: '📋',
   read_task_output: '📋',
   kill_task: '📋',

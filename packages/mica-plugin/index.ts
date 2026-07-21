@@ -19,6 +19,7 @@ export type { MicaPlugin } from './Plugin.js';
 export type { PluginManager } from './PluginManager.js';
 export type { PluginSetupReport } from './PluginManager.js';
 export type { PluginContext } from './PluginContext.js';
+export type { PluginStatusItem } from './PluginContext.js';
 export type { HookRegistry } from './HookRegistry.js';
 export type { GuardHookResult, HookExecutionContext, HookHandler, HookKind, HookOptions } from './HookTypes.js';
 export type { ServiceContainer } from './ServiceContainer.js';
