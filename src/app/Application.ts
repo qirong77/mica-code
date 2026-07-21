@@ -27,7 +27,6 @@ import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
-import { findFileMentions } from './fileMentionProvider.js';
 import setupFilePlugins, { writeFilePluginStatus } from '../../buildin-plugins/file-plugins.mjs';
 import validateConfigPlugin from '../../buildin-plugins/validate-config.mjs';
 import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
@@ -57,7 +56,6 @@ export class Application {
     const sessionStore = micaSession.createStore();
     const startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     seedStartupModelDisplay(startupSession);
-    micaUi.terminalInput.setFileMentionProvider((query) => findFileMentions(process.cwd(), query));
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
     });
@@ -127,6 +125,24 @@ export class Application {
         events: runtime.events,
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
+          queue: {
+            isBusy: (owner) => runtime.isAgentBusy(owner as AgentRuntime),
+            enqueue: (owner, input) => runtime.enqueueForAgent(owner as AgentRuntime, input),
+            dequeue: (owner) => runtime.dequeueForAgent(owner as AgentRuntime),
+            list: (owner) => runtime.listQueueForAgent(owner as AgentRuntime),
+          },
+        },
+        tools: {
+          register: (tool, options = {}) => {
+            micaTools.registerRuntime(tool, { primaryAgentOnly: options.primaryAgentOnly });
+            const unregisterIcon = options.icon ? micaUi.registerToolIcon(tool.name, options.icon) : null;
+            return {
+              dispose: () => {
+                micaTools.unregisterRuntime(tool);
+                unregisterIcon?.();
+              },
+            };
+          },
         },
         ui: {
           submit: (text, options) => micaUi.terminalInput.submit(text, options),
@@ -148,6 +164,7 @@ export class Application {
           },
           input: {
             getText: () => micaUi.terminalInput.text.get(),
+            registerFileMentionProvider: (provider) => micaUi.terminalInput.registerFileMentionProvider(provider),
           },
           useScheduleState: micaUi.useScheduleState,
           theme: micaUi.theme,
@@ -232,7 +249,6 @@ export class Application {
 
   private async stopOnce(): Promise<void> {
     micaUi.terminalInput.setOnExitRequested(null);
-    micaUi.terminalInput.setFileMentionProvider(null);
     this.context?.uiBridge.stop();
     const runtimeStop = this.context?.runtime.stop();
     const subagentTasks = this.subagentTasks;

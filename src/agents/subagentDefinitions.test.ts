@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { micaTools, MicaTool } from '@packages/mica-tools/index.js';
 import { buildSubagentSystemPrompt, buildSubagentToolFilter, getSubagent } from './subagentDefinitions.js';
 
 describe('subagent definitions', () => {
@@ -37,12 +38,32 @@ describe('subagent definitions', () => {
     expect(filter('Agent')).toBe(false);
   });
 
-  it('keeps the primary todo list out of every subagent', () => {
+  it('keeps primary-agent-only tools out of every subagent', () => {
+    const tool = new PrimaryAgentTool();
+    micaTools.registerRuntime(tool, { primaryAgentOnly: true });
     const subagentTypes = ['general-purpose', 'Explore', 'Implementer', 'Reviewer', 'Tester', 'Planner', 'Proposal'];
 
-    for (const subagentType of subagentTypes) {
-      const filter = buildSubagentToolFilter(getSubagent(subagentType));
-      expect(filter('TodoWrite'), `${subagentType} should not update the primary todo list`).toBe(false);
+    try {
+      for (const subagentType of subagentTypes) {
+        const filter = buildSubagentToolFilter(getSubagent(subagentType));
+        expect(filter(tool.name), `${subagentType} should not receive primary-agent-only tools`).toBe(false);
+      }
+    } finally {
+      micaTools.unregisterRuntime(tool);
     }
   });
 });
+
+class PrimaryAgentTool extends MicaTool {
+  constructor() {
+    super('PrimaryAgentTool', 'test-only primary agent tool', { type: 'object' });
+  }
+
+  async execute(): Promise<string> {
+    return 'ok';
+  }
+
+  onToolUseDisplayText(): string {
+    return 'Using primary agent tool';
+  }
+}

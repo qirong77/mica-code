@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
-import { MicaTool, micaTools, type ToolInput } from '@packages/mica-tools/index.js';
+import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 
 const PLUGIN_ID = 'builtin.todo';
@@ -86,8 +86,9 @@ export class TodoPlugin implements MicaPlugin {
       );
     }
 
-    micaTools.registerRuntime(tool);
-    ctx.onDispose(() => micaTools.unregisterRuntime(tool));
+    if (!ctx.tools) throw new Error('todo requires ctx.tools');
+    const toolRegistration = ctx.tools.register(tool, { icon: '📝', primaryAgentOnly: true });
+    ctx.onDispose(() => toolRegistration.dispose());
 
     ctx.ui?.status?.upsert({ id: STATUS_ITEM_ID, component: TodoStatusList });
     ctx.onDispose(() => {

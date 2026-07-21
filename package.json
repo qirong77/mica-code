@@ -15,7 +15,7 @@
     "build:app": "cd mica-code-app && bun run build:mac",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"buildin-plugins/**/*.mjs\" \"src/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
+    "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"buildin-plugins/**/*.{ts,tsx,js,mjs,md}\" \"src/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
   },
   "workspaces": [
     "packages/*",

@@ -10,7 +10,9 @@ import {
   type AbortResult,
   type RuntimeController,
   type RuntimeInput,
+  type RuntimeInputReceivedHookEvent,
   type RuntimeStatus,
+  type RuntimeTurnAfterHookEvent,
   type RuntimeViewSnapshot,
   type RewindApplyResult,
   type RewindPreviewResult,
@@ -43,13 +45,6 @@ type RuntimeActiveContext = {
   uiBridge?: {
     syncAgentStatusItems(): void;
   };
-};
-
-type RuntimeInputHookEvent = {
-  runtime: LocalRuntimeController;
-  input: RuntimeInput;
-  isCommand: boolean;
-  owner: AgentRuntime;
 };
 
 type MicaUiNoticeMessage = Extract<MicaUiConversationMessage, { role: 'notice' }>;
@@ -378,8 +373,7 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: false, reason: 'busy' };
     }
 
-    const inputHook = await this.hooks.guard<RuntimeInputHookEvent>('input:received', {
-      runtime: this,
+    const inputHook = await this.hooks.guard<RuntimeInputReceivedHookEvent>('input:received', {
       input,
       isCommand: false,
       owner: targetAgent,
@@ -704,7 +698,7 @@ export class LocalRuntimeController implements RuntimeController {
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
       try {
-        await this.hooks.emit('turn:after', { runtime: this, input, elapsedMs, hasError });
+        await this.hooks.emit<RuntimeTurnAfterHookEvent>('turn:after', { input, elapsedMs, hasError, owner: agent });
       } finally {
         this.hookAgent = null;
       }

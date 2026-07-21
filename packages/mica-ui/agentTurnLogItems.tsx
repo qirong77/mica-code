@@ -7,23 +7,39 @@ import { formatElapsed } from './utils/format.js';
 
 export const RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS = runtimeEnv.ui.runShellVerboseLogThresholdMs;
 const MAX_RUN_SHELL_LOG_LINES = runtimeEnv.ui.runShellLogMaxLines;
-const TOOL_ICONS: Record<string, string> = {
-  read_file: '📖',
-  read_image: '📷',
-  write_file: '✍️',
-  list_files: '📂',
-  grep_search: '📊',
-  run_shell: '⚡️',
-  web_fetch: '🔗',
-  web_search: '🌐',
-  Skill: '✨',
-  apply_patch: '🩹',
-  Agent: '🤖',
-  TodoWrite: '📝',
-  background_tasks: '📋',
-  read_task_output: '📋',
-  kill_task: '📋',
-};
+const DEFAULT_TOOL_ICONS = new Map<string, string>(
+  Object.entries({
+    read_file: '📖',
+    read_image: '📷',
+    write_file: '✍️',
+    list_files: '📂',
+    grep_search: '📊',
+    run_shell: '⚡️',
+    web_fetch: '🔗',
+    web_search: '🌐',
+    Skill: '✨',
+    apply_patch: '🩹',
+    Agent: '🤖',
+    background_tasks: '📋',
+    read_task_output: '📋',
+    kill_task: '📋',
+  }),
+);
+const toolIconRegistrations = new Map<string, Array<{ icon: string }>>();
+
+export function registerToolIcon(name: string, icon: string): () => void {
+  const registration = { icon };
+  const registrations = toolIconRegistrations.get(name) ?? [];
+  registrations.push(registration);
+  toolIconRegistrations.set(name, registrations);
+  return () => {
+    const current = toolIconRegistrations.get(name);
+    if (!current) return;
+    const index = current.indexOf(registration);
+    if (index >= 0) current.splice(index, 1);
+    if (current.length === 0) toolIconRegistrations.delete(name);
+  };
+}
 
 export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurnLogItem {
   function ThinkingLogItem() {
@@ -138,7 +154,7 @@ export function shouldShowToolOutput({
 
 export function getToolIcon(name: string): string {
   if (name.startsWith('mcp__')) return '🔌';
-  return TOOL_ICONS[name] || '⚙️';
+  return toolIconRegistrations.get(name)?.at(-1)?.icon ?? DEFAULT_TOOL_ICONS.get(name) ?? '⚙️';
 }
 
 function useNow(interval = 100): number {

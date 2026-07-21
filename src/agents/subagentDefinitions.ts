@@ -1,4 +1,5 @@
 import { micaAgent } from '@packages/mica-agent/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 
 export type SubagentContextMode = 'none' | 'brief' | 'recent' | 'files';
 export type SubagentWriteMode = 'none' | 'owned_paths' | 'proposal' | 'unrestricted';
@@ -52,8 +53,6 @@ const READ_ONLY_TOOLS = [
 
 const INHERITED_SKILL_TOOL = 'Skill';
 const MCP_TOOL_PREFIX = 'mcp__';
-const PRIMARY_AGENT_ONLY_TOOLS = new Set(['TodoWrite']);
-
 export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   {
     name: 'general-purpose',
@@ -215,7 +214,7 @@ export function buildSubagentToolFilter(definition: SubagentDefinition): (toolNa
   const allowed = new Set(definition.allowedTools ?? ['*']);
   const disallowed = new Set(definition.disallowedTools ?? []);
   return (toolName: string) => {
-    if (PRIMARY_AGENT_ONLY_TOOLS.has(toolName)) return false;
+    if (micaTools.isPrimaryAgentOnly(toolName)) return false;
     if (disallowed.has(toolName)) return false;
     // Skills and MCP servers are process-level capabilities shared with the parent agent.
     // Every subagent inherits them without weakening its restrictions on other tools.

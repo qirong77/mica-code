@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import type { PluginContext, PluginStatusItem } from '@packages/mica-plugin/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
-import { getToolIcon } from '@packages/mica-ui/agentTurnLogItems.js';
+import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
 import { parseTodoInput, TodoPlugin } from './TodoPlugin.js';
 
 describe('parseTodoInput', () => {
@@ -43,10 +42,6 @@ describe('parseTodoInput', () => {
 describe('TodoPlugin', () => {
   const disposeCallbacks: Array<() => void | Promise<void>> = [];
 
-  it('uses a dedicated tool-call icon', () => {
-    expect(getToolIcon('TodoWrite')).toBe('📝');
-  });
-
   afterEach(async () => {
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
   });
@@ -55,9 +50,14 @@ describe('TodoPlugin', () => {
     const commands = new micaCommands.CommandRegistry();
     const upsert = vi.fn<(item: PluginStatusItem) => void>();
     const remove = vi.fn<(id: string) => boolean>(() => true);
+    const registerTool = vi.fn((tool: MicaTool) => {
+      micaTools.registerRuntime(tool);
+      return { dispose: () => micaTools.unregisterRuntime(tool) };
+    });
     const ctx = {
       pluginId: 'builtin.todo',
       commands,
+      tools: { register: registerTool },
       ui: {
         submit: vi.fn(),
         showMessage: vi.fn(),
@@ -73,6 +73,10 @@ describe('TodoPlugin', () => {
       component: expect.any(Function),
     });
     expect(commands.resolve('/todo show')?.command.name).toBe('todo');
+    expect(registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'TodoWrite' }), {
+      icon: '📝',
+      primaryAgentOnly: true,
+    });
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'TodoWrite')).toBe(true);
 
     const result = await micaTools.execute('TodoWrite', {
@@ -92,9 +96,14 @@ describe('TodoPlugin', () => {
   });
 
   it('returns a validation error without replacing the list', async () => {
+    const registerTool = (tool: MicaTool) => {
+      micaTools.registerRuntime(tool);
+      return { dispose: () => micaTools.unregisterRuntime(tool) };
+    };
     const ctx = {
       pluginId: 'builtin.todo',
       commands: new micaCommands.CommandRegistry(),
+      tools: { register: registerTool },
       onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
     } as unknown as PluginContext;
     new TodoPlugin().setup(ctx);

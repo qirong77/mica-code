@@ -19,6 +19,10 @@ import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 
 export type ToolFilter = (name: string) => boolean;
 
+export type RuntimeToolRegistrationOptions = {
+  primaryAgentOnly?: boolean;
+};
+
 export type ToolExecutionEvent = {
   name: string;
   input: ToolInput;
@@ -49,6 +53,7 @@ const builtinTools: MicaTool[] = [
 
 let mcpTools: MicaTool[] = [];
 let runtimeTools: MicaTool[] = [];
+const runtimeToolOptions = new WeakMap<MicaTool, RuntimeToolRegistrationOptions>();
 const executionObservers = new Set<ToolExecutionObserver>();
 
 export function observeToolExecution(observer: ToolExecutionObserver): Disposable {
@@ -68,13 +73,16 @@ export function unregisterMcpTools(): void {
   mcpTools = [];
 }
 
-export function registerRuntimeTool(tool: MicaTool): void {
-  runtimeTools = [...runtimeTools.filter((entry) => entry.name !== tool.name), tool];
+export function registerRuntimeTool(tool: MicaTool, options: RuntimeToolRegistrationOptions = {}): void {
+  runtimeTools = [...runtimeTools.filter((entry) => entry !== tool), tool];
+  runtimeToolOptions.set(tool, options);
 }
 
 export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
-  const name = typeof nameOrTool === 'string' ? nameOrTool : nameOrTool.name;
-  runtimeTools = runtimeTools.filter((tool) => tool.name !== name);
+  runtimeTools =
+    typeof nameOrTool === 'string'
+      ? runtimeTools.filter((tool) => tool.name !== nameOrTool)
+      : runtimeTools.filter((tool) => tool !== nameOrTool);
 }
 
 export function unregisterRuntimeTools(): void {
@@ -82,7 +90,16 @@ export function unregisterRuntimeTools(): void {
 }
 
 function getAllTools(): MicaTool[] {
-  return [...builtinTools, ...runtimeTools, ...mcpTools];
+  return [...builtinTools, ...getActiveRuntimeTools(), ...mcpTools];
+}
+
+function getActiveRuntimeTools(): MicaTool[] {
+  const active = new Map<string, MicaTool>();
+  for (const tool of runtimeTools) {
+    active.delete(tool.name);
+    active.set(tool.name, tool);
+  }
+  return [...active.values()];
 }
 
 function getAllToolsForPrompt(): MicaTool[] {
@@ -110,11 +127,12 @@ export function getToolDefinitions(filter?: ToolFilter): Tool[] {
 }
 
 export function getToolCounts(): { builtin: number; runtime: number; mcp: number; total: number } {
+  const runtimeCount = getActiveRuntimeTools().length;
   return {
     builtin: builtinTools.length,
-    runtime: runtimeTools.length,
+    runtime: runtimeCount,
     mcp: mcpTools.length,
-    total: builtinTools.length + runtimeTools.length + mcpTools.length,
+    total: builtinTools.length + runtimeCount + mcpTools.length,
   };
 }
 
@@ -179,4 +197,9 @@ export function getToolDisplayText(name: string, input: ToolInput): string {
 export function isToolReadOnly(name: string): boolean {
   const tool = findTool(name);
   return tool?.readOnly === true;
+}
+
+export function isToolPrimaryAgentOnly(name: string): boolean {
+  const tool = findTool(name);
+  return tool ? runtimeToolOptions.get(tool)?.primaryAgentOnly === true : false;
 }

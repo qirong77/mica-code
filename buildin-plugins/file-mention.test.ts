@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { findFileMentions } from './fileMentionProvider.js';
+import { findFileMentions } from './file-mention.js';
 
 const workspaces: string[] = [];
 const execFileAsync = promisify(execFile);

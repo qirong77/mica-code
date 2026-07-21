@@ -24,7 +24,8 @@ const submitHandlers = new WeakMap<SubmitHandler, (event: SubmitEvent) => void>(
 type ExitRequestedHandler = (exitCode: number) => void | Promise<void>;
 let exitRequestedHandler: ExitRequestedHandler | null = null;
 let cycleRoleHandler: (() => void) | null = null;
-let fileMentionProvider: TerminalFileMentionProvider | null = null;
+let baseFileMentionProvider: TerminalFileMentionProvider | null = null;
+const fileMentionProviderRegistrations: Array<{ provider: TerminalFileMentionProvider }> = [];
 
 export const text = atom('');
 export const disabled = atom(false);
@@ -87,13 +88,25 @@ export function cycleRole(): void {
 }
 
 export function setFileMentionProvider(provider: TerminalFileMentionProvider | null): void {
-  fileMentionProvider = provider;
+  baseFileMentionProvider = provider;
+}
+
+export function registerFileMentionProvider(provider: TerminalFileMentionProvider): { dispose(): void } {
+  const registration = { provider };
+  fileMentionProviderRegistrations.push(registration);
+  return {
+    dispose: () => {
+      const index = fileMentionProviderRegistrations.indexOf(registration);
+      if (index >= 0) fileMentionProviderRegistrations.splice(index, 1);
+    },
+  };
 }
 
 export function hasFileMentionProvider(): boolean {
-  return fileMentionProvider !== null;
+  return fileMentionProviderRegistrations.length > 0 || baseFileMentionProvider !== null;
 }
 
 export function findFileMentions(query: string): Promise<TerminalFileMentionItem[]> {
-  return fileMentionProvider?.(query) ?? Promise.resolve([]);
+  const provider = fileMentionProviderRegistrations.at(-1)?.provider ?? baseFileMentionProvider;
+  return provider?.(query) ?? Promise.resolve([]);
 }

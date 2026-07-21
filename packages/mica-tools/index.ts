@@ -10,6 +10,7 @@ import {
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
+  isToolPrimaryAgentOnly,
   observeToolExecution,
 } from './registry.js';
 
@@ -34,6 +35,8 @@ export const micaTools = {
   getDisplayText: getToolDisplayText,
   /** 判断工具是否声明为只读。 */
   isReadOnly: isToolReadOnly,
+  /** 判断工具是否只允许顶层 agent 使用。 */
+  isPrimaryAgentOnly: isToolPrimaryAgentOnly,
   /** 观察所有工具执行，用于审计、变更追踪等横切能力。 */
   observeExecution: observeToolExecution,
   MicaTool,
@@ -41,7 +44,7 @@ export const micaTools = {
 
 export { MicaTool } from './MicaTool.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
-export type { ToolFilter } from './registry.js';
+export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
 export { toolResultToText } from './types.js';
 export type {

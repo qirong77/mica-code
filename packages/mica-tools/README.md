@@ -9,6 +9,7 @@
 - 获取可提供给模型的工具定义：`micaTools.getDefinitions()`。
 - 执行指定工具：`micaTools.execute(name, input, callbacks)`。
 - 获取工具调用展示文案：`micaTools.getDisplayText(name, input)`。
+- 运行期工具注册支持 `primaryAgentOnly` 元数据，subagent 工具过滤通过 registry 查询，不硬编码产品工具名。
 
 ## 内置工具
 
@@ -38,6 +39,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 ## 设计约束
 
 - 所有工具统一通过 registry 暴露给模型和运行时。
+- 官方产品插件通过 `PluginContext.tools.register()` 接入；应用 host 将注册转发到本包 registry。
 - 工具结果可以是字符串或文本/图片内容块；UI 和日志消费文本投影，provider adapter 负责嵌入图片。
 - 新增工具优先继承 `MicaTool` 并提供参数校验、展示文案和错误格式化。
 - 文件、shell、网络类工具需要保留边界检查和输出限制。

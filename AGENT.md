@@ -72,14 +72,11 @@ src/
     activeContext.ts               当前 ApplicationContext 的安全访问入口
     createApplication.ts           Application 创建入口
     builtinPlugins.ts              内置插件注册顺序
-    fileMentionProvider.ts         当前 cwd 文件扫描、缓存与 @ 候选排序
     adapters/
       LocalRuntimeController.ts    turn loop、命令分发、queue、retry、abort、rewind
       MicaUiRuntimeBridge.ts       AgentRuntime/runtime/session 状态到 mica-ui store 的同步
   plugins/
-    commands/                      内置命令插件和 active proxy
-    mcp/                           MCP 插件
-    runtime/                       runtime 插件，目前包括 message queue
+    commands/                      内置命令 host adapter 和 active proxy
   runtime/
     RewindCheckpointManager.ts     turn 前对话和文件状态 checkpoint
     ToolLogController.ts           thinking/tool-call/tool-result 日志聚合
@@ -110,7 +107,7 @@ scripts/                           构建、安装、release installer 脚本
 docs/                              设计草案和长期能力规划
 blogs/                             开发过程记录
 skills/                            仓库内 skill 资料
-buildin-plugins/                   启动阶段使用的单文件内置插件
+buildin-plugins/                   官方内置产品插件与启动扩展；包含 Todo、MCP、message queue、文件 mention 和命令
 temp/                              临时代码和外部实验，默认不参与搜索/测试/格式化
 .backups/                          临时备份痕迹，默认不作为实现或验证输入
 ```
@@ -127,13 +124,15 @@ temp/                              临时代码和外部实验，默认不参与
 6. 创建 `AgentRuntime`、`SessionController`、`CommandRegistry`、`HookRegistry`、`ServiceContainer`、`PluginManager`、`TerminalAgentSessionManager`、`LocalRuntimeController`、`MicaUiRuntimeBridge` 和 `SubagentTaskManager`。
 7. 将当前 agent 注册到 `TerminalAgentSessionManager`，并通过 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
 8. 构造 `ApplicationContext`，通过 `setActiveContext` 暴露给命令、插件和 runtime 辅助代码。
-9. `useBuiltinPlugins()` 按顺序注册 `BuiltInCommandsPlugin`、`MessageQueuePlugin`、`McpPlugin`。`McpPlugin` 随 runtime start/stop 建立和关闭 MCP 连接，并在插件 dispose 时兜底清理。
+9. `useBuiltinPlugins()` 按顺序注册 command host，以及 `buildin-plugins` 中的命令、message queue、MCP、Todo 和文件 mention 插件。MCP 插件随 runtime start/stop 建立和关闭连接，并在 dispose 时兜底清理。
 10. `buildin-plugins/file-plugins.mjs` 扫描并注册 `$MICA_HOME/plugins` 中的用户插件，`plugins.setupAll(...)` 初始化全部运行期插件，再写入 `plugin-status.json` 供 Config Web 诊断。
 11. `uiBridge.start()` 开始监听 agent/runtime/session 事件，`runtime.start()` 触发 runtime hooks。
 12. 后台调用 `micaConfig.loadMissingProviderModels()` 加载动态 provider 模型列表。加载成功且 agent 空闲时，`agent.reloadConfig(false)` 并同步模型显示。
-13. 为输入框注入当前 cwd 的 `@` 文件候选 provider，并设置 placeholder 和退出回调。
+13. 文件 mention 插件通过 `ctx.ui.input` 注入当前 cwd 的 `@` 文件候选 provider；应用最后设置 placeholder 和退出回调。
 
 启动失败时，UI 会显示修复配置后重启的提示，`micaTools.unregisterRuntime('Agent')`、插件和 agent session 会被清理，并设置 `process.exitCode = 1`。
+
+插件 setup 期间通过 `ctx.onDispose()` 登记的资源会在 setup 失败时立即逆序回滚；新增 capability 注册必须同步登记 disposer，不能依赖应用最终退出兜底。
 
 ## Active Context 约定
 
@@ -152,7 +151,7 @@ temp/                              临时代码和外部实验，默认不参与
 2. 命令输入走 command registry。exclusive task 或运行中 agent 会阻止不允许并发的命令。
 3. 非命令输入根据 `SubmitOptions` 找到目标 agent，构造 `RuntimeInput`。
 4. 如果目标 agent 正在执行 exclusive task，拒绝输入并发出 notification。
-5. 触发 `input:received` guard hook。`MessageQueuePlugin` 会在 agent busy 时尝试排队输入。
+5. 触发 `input:received` guard hook。`buildin-plugins/message-queue.ts` 会通过公开的 `ctx.runtime.queue` 能力在 agent busy 时尝试排队输入。
 6. 如果没有被 hook 处理，进入 `runTurn(input, agent, sessionController)`。
 7. turn 开始时捕获 rewind checkpoint，解析图片引用，写入 UI conversation message，清空当前 response buffer。
 8. 触发 `turn:before` 和 `prompt:build` hooks，然后调用 `agent.run(content, { onIterationComplete })`。
@@ -166,7 +165,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 - 当前 `packages/mica-runtime/MessageQueueService.ts` 是单槽队列：每个 agent 同时最多保留一条 pending input。
 - `RuntimeQueueMode` 只有 `after_turn` 和 `after_iteration`。
-- `MessageQueuePlugin` 在 `input:received` 阶段处理 busy agent 的输入。如果已有排队消息，会提示“已有一条排队消息，等待发送或重新编辑”。
+- 内置 message queue 插件在 `input:received` 阶段处理 busy agent 的输入。如果已有排队消息，会提示“已有一条排队消息，等待发送或重新编辑”。
 - queue 操作必须带 owner/agent 语义。后台 agent 或非当前 agent 的输入不能落到当前 active agent 上。
 - UI 展示使用 `RuntimeInput.displayText` 或 `displayContent` 时，只影响展示摘要；`text` 或 `content` 仍保留完整上下文给 agent。
 - pending input 在 conversation 底部使用临时 notice 样式展示，标题包含发送时机和重新编辑快捷键；它仍属于 `pendingInputs` UI 状态，不追加到 `conversationMessages` 或 agent history。
@@ -299,6 +298,7 @@ AGENT.md
 ### Tools
 
 - `packages/mica-tools` 是唯一工具 registry。内置工具和 MCP 工具都必须通过它暴露给模型和 runtime。
+- 运行期产品工具优先由内置插件通过 `ctx.tools.register()` 注册；工具可声明 icon 和 `primaryAgentOnly` 元数据，核心和 subagent 策略不要硬编码具体插件工具名。
 - 新增工具优先继承 `MicaTool`，提供参数 schema、执行逻辑、展示文案、错误格式化和只读属性。
 - 文件、shell、网络类工具必须保留边界检查、输出限制和清晰错误。
 - `read_image` 读取本地路径或 HTTP(S) URL，经过 `mica-common` 的格式识别后将原图作为图片内容块返回；它是只读工具，也应加入只读 subagent 的允许列表。
@@ -339,7 +339,7 @@ AGENT.md
 ## UI 状态与 Ink 约定
 
 - `packages/mica-ui` 只负责终端 UI 组件和状态 store，不直接调用 provider，不持有 agent 运行逻辑。
-- 输入框在光标前出现 `@query` 时通过应用层注入的 file mention provider 异步获取当前 cwd 文件；候选复用底部 dropdown，支持方向键、Enter/Tab 和 Esc。`mica-ui` 不直接扫描文件系统。
+- 输入框在光标前出现 `@query` 时通过 `buildin-plugins/file-mention.ts` 注入的 provider 异步获取当前 cwd 文件；候选复用底部 dropdown，支持方向键、Enter/Tab 和 Esc。`mica-ui` 不直接扫描文件系统。
 - Runtime 到 UI 的映射由 `MicaUiRuntimeBridge` 和 `runtime/uiBridge.ts` 完成。
 - 主要状态入口包括 `conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
 - 对话消息可以携带 `displayContent`。它只改变 UI 展示，不改变发给 agent 的真实 `content`。
@@ -388,6 +388,7 @@ AGENT.md
 - `mica-context` 提供上下文处理能力，不直接操纵 provider adapter。
 - `mica-skills` 只扫描、解析、缓存 skills，不执行 skill 内容。
 - `mica-plugin` 只提供插件机制，不内置具体产品插件。
+- `buildin-plugins` 放官方产品策略和流程；运行期插件通过 `PluginContext` 的 commands、hooks、services、runtime queue、tools 和 UI capability 接入，不反向 import `src/**`。
 
 如果新增代码会导致底层包依赖上层包，不要直接加 import。优先使用类型、回调、service、hook 或 adapter 注入能力。
 

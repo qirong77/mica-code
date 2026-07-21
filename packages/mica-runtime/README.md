@@ -11,6 +11,7 @@
 - 定义 headless OpenCode/DevEco-compatible run JSON 事件 schema 与编码辅助。
 - 定义可用于 UI 同步或会话保存的 view snapshot。
 - 提供 `MessageQueueService` 管理运行中输入排队状态。
+- 定义插件可用的 owner-aware queue capability，以及 `input:received`、`turn:after` hook event 类型。
 
 ## 使用入口
 
@@ -38,5 +39,6 @@ queue.enqueue({ text: '继续' });
 - `SubmitResult.ts`：提交结果。
 - `AbortResult.ts`：中止结果。
 - `MessageQueueService.ts`：运行中输入排队服务。
+- `PluginRuntime.ts`：插件 runtime queue capability、opaque owner 和 hook event 类型。
 - `runJson.ts`：`run --format json` NDJSON 事件类型、编码、文本分块、输出上限和结果退出码。
 - `index.ts`：公共 API 聚合导出。

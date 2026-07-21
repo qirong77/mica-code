@@ -8,6 +8,7 @@
 - 管理插件加载、启动和销毁生命周期。
 - 提供 hook registry，用于扩展运行时流程。
 - 提供 service container 和 service token，用于插件间共享能力。
+- 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
 
 ## 使用入口
 
@@ -15,8 +16,13 @@
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 
 class ExamplePlugin extends micaPlugin.Plugin {
-  async activate(context) {
-    context.hooks.register('afterTurn', async () => {});
+  constructor() {
+    super({ id: 'example' });
+  }
+
+  setup(context) {
+    const hook = context.hooks.on('turn:after', async () => {});
+    context.onDispose(() => hook.dispose());
   }
 }
 ```
@@ -25,6 +31,7 @@ class ExamplePlugin extends micaPlugin.Plugin {
 
 - 本包只提供插件机制，不包含具体产品插件。
 - 插件通过 context、hooks 和 services 与外部交互，避免直接耦合应用层单例。
+- 官方运行期插件位于 `buildin-plugins`，不应反向导入 `src/**`。
 - 生命周期中注册的资源需要可释放，避免长期运行中的泄漏。
 
 ## 目录说明

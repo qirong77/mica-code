@@ -35,6 +35,13 @@ export class PluginManager {
         this.disposables.push(...localDisposables.reverse());
         report.loaded.push(plugin.id);
       } catch (error) {
+        for (const disposable of localDisposables.splice(0).reverse()) {
+          try {
+            await disposable.dispose();
+          } catch {
+            // Preserve the setup error as the canonical plugin failure.
+          }
+        }
         report.failed.push({ pluginId: plugin.id, error });
         if (plugin.required) throw error;
       }

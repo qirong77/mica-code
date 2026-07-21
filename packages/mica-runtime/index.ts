@@ -18,6 +18,12 @@ export type { RuntimeViewSnapshot } from './RuntimeViewSnapshot.js';
 export type { SubmitOptions, SubmitResult } from './SubmitResult.js';
 export type { AbortResult } from './AbortResult.js';
 export type {
+  RuntimeInputReceivedHookEvent,
+  RuntimeOwner,
+  RuntimePluginQueue,
+  RuntimeTurnAfterHookEvent,
+} from './PluginRuntime.js';
+export type {
   RewindApplyRequest,
   RewindApplyResult,
   RewindCheckpointSummary,

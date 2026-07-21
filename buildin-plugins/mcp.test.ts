@@ -6,29 +6,23 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 const mocks = vi.hoisted(() => ({
   init: vi.fn<() => Promise<void>>(),
   shutdown: vi.fn<() => Promise<void>>(),
-  reportRuntimeError: vi.fn(),
 }));
 
-vi.mock('@packages/mica-mcp/index.js', () => ({
+vi.mock('../packages/mica-mcp/index.js', () => ({
   micaMcp: {
     init: mocks.init,
     shutdown: mocks.shutdown,
   },
 }));
 
-vi.mock('../../runtime/uiBridge.js', () => ({
-  reportRuntimeError: mocks.reportRuntimeError,
-}));
-
-import { McpPlugin } from './index.js';
+import setupMcp from './mcp.mjs';
 
 beforeEach(() => {
   mocks.init.mockReset().mockResolvedValue(undefined);
   mocks.shutdown.mockReset().mockResolvedValue(undefined);
-  mocks.reportRuntimeError.mockReset();
 });
 
-describe('McpPlugin', () => {
+describe('MCP file plugin', () => {
   it('starts and stops MCP with the runtime lifecycle', async () => {
     const { hooks, dispose } = setupPlugin();
 
@@ -47,45 +41,61 @@ describe('McpPlugin', () => {
   it('reports initialization failures and still shuts down during disposal', async () => {
     const error = new Error('connection failed');
     mocks.init.mockRejectedValueOnce(error);
-    const { hooks, dispose } = setupPlugin();
+    const { hooks, logger, showMessage, dispose } = setupPlugin();
 
     await hooks.emit('runtime:start', {});
 
-    expect(mocks.reportRuntimeError).toHaveBeenCalledWith(error, 'MCP 初始化失败');
+    expect(logger.error).toHaveBeenCalledWith('mcp:init-failed', { error: 'connection failed' });
+    expect(showMessage).toHaveBeenCalledWith('MCP 初始化失败: connection failed');
     await dispose();
     expect(mocks.shutdown).toHaveBeenCalledOnce();
   });
 
-  it('reports shutdown failures without blocking disposal', async () => {
+  it('reports shutdown failures without blocking disposal or shutting down twice', async () => {
     const error = new Error('close failed');
     mocks.shutdown.mockRejectedValueOnce(error);
-    const { hooks, dispose } = setupPlugin();
+    const { hooks, logger, showMessage, dispose } = setupPlugin();
 
     await hooks.emit('runtime:start', {});
     await hooks.emit('runtime:stop', {});
 
-    expect(mocks.reportRuntimeError).toHaveBeenCalledWith(error, 'MCP 关闭失败');
+    expect(logger.error).toHaveBeenCalledWith('mcp:shutdown-failed', { error: 'close failed' });
+    expect(showMessage).toHaveBeenCalledWith('MCP 关闭失败: close failed');
     await expect(dispose()).resolves.toBeUndefined();
     expect(mocks.shutdown).toHaveBeenCalledOnce();
   });
+
+  it('does not require a UI error reporter', async () => {
+    const error = new Error('connection failed');
+    mocks.init.mockRejectedValueOnce(error);
+    const { hooks, logger } = setupPlugin(false);
+
+    await expect(hooks.emit('runtime:start', {})).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith('mcp:init-failed', { error: 'connection failed' });
+  });
 });
 
-function setupPlugin() {
+function setupPlugin(withUi = true) {
   const hooks = new micaPlugin.HookRegistry();
   const disposers: Array<() => void | Promise<void>> = [];
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const showMessage = vi.fn();
   const context: PluginContext = {
     pluginId: 'builtin.mcp',
     hooks,
     commands: new micaCommands.CommandRegistry(),
     services: new micaPlugin.ServiceContainer(),
     events: new micaRuntime.RuntimeEventBus(),
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    logger,
     onDispose: (dispose) => disposers.push(dispose),
+    ...(withUi ? { ui: { submit: vi.fn(), showMessage } } : {}),
   };
 
-  new McpPlugin().setup(context);
+  setupMcp(context);
   return {
     hooks,
+    logger,
+    showMessage,
     async dispose() {
       for (const disposer of disposers.reverse()) await disposer();
     },

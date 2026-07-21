@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { opendir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
+import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type { TerminalFileMentionItem } from '@packages/mica-ui/index.js';
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out']);
@@ -14,6 +15,11 @@ const execFileAsync = promisify(execFile);
 type CacheEntry = { expiresAt: number; files: Promise<string[]> };
 type RankedFile = { path: string; labelHighlights: number[] };
 const cache = new Map<string, CacheEntry>();
+
+export default function setup(ctx: PluginContext): void {
+  const disposable = ctx.ui?.input?.registerFileMentionProvider((query) => findFileMentions(process.cwd(), query));
+  if (disposable) ctx.onDispose(() => disposable.dispose());
+}
 
 export async function findFileMentions(root: string, query: string): Promise<TerminalFileMentionItem[]> {
   const files = await getWorkspaceFiles(root);

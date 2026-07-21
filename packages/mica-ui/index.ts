@@ -31,7 +31,7 @@ import {
   useSpinner,
 } from './primitives/index.js';
 import { parseImageRefs } from './utils/imagePaste.js';
-import { createThinkingLogItem, createToolCallLogItem } from './agentTurnLogItems.js';
+import { createThinkingLogItem, createToolCallLogItem, registerToolIcon } from './agentTurnLogItems.js';
 
 export const micaUi = {
   App,
@@ -73,6 +73,7 @@ export const micaUi = {
   createThinkingLogItem,
   /** 创建 agent 工具调用日志 UI item。 */
   createToolCallLogItem,
+  registerToolIcon,
   conversation: conv,
   terminalInput: {
     ...input,

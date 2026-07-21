@@ -11,7 +11,8 @@
 - 状态入口：`conversation`、`terminalInput`、`dropdown`、`bottom`、`panels`。
 - 会话消息支持 `displayContent`，可在不改变实际上下文内容的情况下展示更易读的输入摘要。
 - 文本和图片输入处理：异步 `parseImageRefs` 会校验图片格式，并以原始字节生成多模态 content block。
-- 输入文件引用：输入 `@` 后展示由应用层 provider 提供的文件列表，支持继续筛选、方向键选择和 Enter/Tab 插入。
+- 输入文件引用：输入 `@` 后展示由插件 provider 提供的文件列表，支持继续筛选、方向键选择和 Enter/Tab 插入。
+- 工具日志图标支持由插件注册并随插件生命周期恢复。
 
 ## 使用入口
 
@@ -24,7 +25,7 @@ micaUi.panels.status.connecting();
 ## 设计约束
 
 - 本包只负责终端 UI 组件和 UI 状态，不直接调用 provider。
-- 文件候选通过 `terminalInput.setFileMentionProvider` 注入；`mica-ui` 不直接扫描工作区文件。
+- 文件候选通过 `terminalInput.registerFileMentionProvider` 注入并返回 disposer；`mica-ui` 不直接扫描工作区文件。
 - Runtime 到 UI 的映射由应用层或 adapter 完成。
 - 组件应尽量通过公开 store 和 props 获取状态，避免隐式耦合应用单例。
 - 新增交互面板优先复用 `bottom/` 和 `primitives/` 中的基础组件。

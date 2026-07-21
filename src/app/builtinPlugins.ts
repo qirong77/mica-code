@@ -2,9 +2,10 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
-import { McpPlugin } from '../plugins/mcp/index.js';
-import { MessageQueuePlugin } from '../plugins/runtime/index.js';
-import { TodoPlugin } from '../plugins/todo/TodoPlugin.js';
+import setupFileMention from '../../buildin-plugins/file-mention.js';
+import setupMcp from '../../buildin-plugins/mcp.mjs';
+import setupMessageQueue from '../../buildin-plugins/message-queue.js';
+import { TodoPlugin } from '../../buildin-plugins/todo/TodoPlugin.js';
 import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
 import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
 import setupCommandCompact from '../../buildin-plugins/command-compact.mjs';
@@ -27,7 +28,11 @@ export function useBuiltinPlugins(
 ): PluginHost {
   app.use(new BuiltInCommandsPlugin(agent, sessionController));
   for (const plugin of builtinCommandFilePlugins()) app.use(plugin);
-  app.use(new MessageQueuePlugin()).use(new McpPlugin()).use(new TodoPlugin());
+  app
+    .use(createBuiltinFilePlugin('runtime.messageQueue', 'Message Queue', setupMessageQueue))
+    .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
+    .use(new TodoPlugin())
+    .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({
     id: 'builtin.mica-code-app-notify',
     name: 'Built-in Mica Code App Notify',
@@ -57,6 +62,15 @@ function createBuiltinCommandFilePlugin(name: string, setup: MicaPlugin['setup']
     name: `Built-in /${name} Command`,
     dependencies: ['builtin.commands'],
     required: true,
+    setup,
+  };
+}
+
+function createBuiltinFilePlugin(id: string, name: string, setup: MicaPlugin['setup'], required = false): MicaPlugin {
+  return {
+    id: `builtin.${id}`,
+    name: `Built-in ${name}`,
+    required,
     setup,
   };
 }
