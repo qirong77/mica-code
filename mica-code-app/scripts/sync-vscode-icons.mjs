@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cp, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const VSCODE_ICONS_COMMIT = '0d1ac3107adba5c0868beaa0db7527f55835a5bd'
+const VSCODE_ICONS_ARCHIVE_SHA256 =
+  '722d341d50e1c98dc5d8eedcb5e1f28ab8c92321814e0070f0cb55477657568d'
 const ARCHIVE_URL = `https://codeload.github.com/vscode-icons/vscode-icons/tar.gz/${VSCODE_ICONS_COMMIT}`
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -16,14 +19,15 @@ const localFileOverrides = {
 }
 
 const sortedObject = (map) =>
-  Object.fromEntries([...map].sort(([left], [right]) => left.localeCompare(right)))
+  Object.fromEntries([...map].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
 
-function addFileNames(target, entry) {
-  for (const filename of entry.extensions ?? []) target.set(filename.toLowerCase(), entry.icon)
+function addEntryMappings(target, entry) {
+  const normalize = (value) => (entry.filename ? value : value.replace(/^\./, '')).toLowerCase()
+  for (const value of entry.extensions ?? []) target.set(normalize(value), entry.icon)
 
   for (const base of entry.filenamesGlob ?? []) {
     for (const extension of entry.extensionsGlob ?? []) {
-      target.set(`${base}.${extension}`.toLowerCase(), entry.icon)
+      target.set(normalize(`${base}.${extension}`), entry.icon)
     }
   }
 }
@@ -36,6 +40,9 @@ function buildManifest(fileCollection, folderCollection) {
   for (const entry of fileCollection.supported) {
     if (entry.disabled) continue
     for (const language of entry.languages ?? []) {
+      for (const filename of language.knownFilenames ?? []) {
+        files.set(filename.toLowerCase(), entry.icon)
+      }
       for (const extension of language.knownExtensions ?? []) {
         extensions.set(extension.toLowerCase().replace(/^\./, ''), entry.icon)
       }
@@ -44,10 +51,7 @@ function buildManifest(fileCollection, folderCollection) {
 
   for (const entry of fileCollection.supported) {
     if (entry.disabled) continue
-    if (entry.filename) addFileNames(files, entry)
-    else
-      for (const extension of entry.extensions ?? [])
-        extensions.set(extension.toLowerCase(), entry.icon)
+    addEntryMappings(entry.filename ? files : extensions, entry)
   }
   for (const [filename, icon] of Object.entries(localFileOverrides)) files.set(filename, icon)
 
@@ -60,7 +64,10 @@ function buildManifest(fileCollection, folderCollection) {
     source: {
       repository: 'https://github.com/vscode-icons/vscode-icons',
       commit: VSCODE_ICONS_COMMIT,
-      license: 'CC BY-SA 4.0'
+      licenses: {
+        icons: 'CC BY-SA 4.0',
+        mappings: 'MIT'
+      }
     },
     defaults: {
       file: fileCollection.default.file.icon,
@@ -97,7 +104,12 @@ async function main() {
     const archivePath = join(temporaryRoot, 'source.tar.gz')
     const response = await fetch(ARCHIVE_URL)
     if (!response.ok) throw new Error(`Failed to download vscode-icons: HTTP ${response.status}`)
-    await writeFile(archivePath, Buffer.from(await response.arrayBuffer()))
+    const archive = Buffer.from(await response.arrayBuffer())
+    const archiveHash = createHash('sha256').update(archive).digest('hex')
+    if (archiveHash !== VSCODE_ICONS_ARCHIVE_SHA256) {
+      throw new Error(`Unexpected vscode-icons archive checksum: ${archiveHash}`)
+    }
+    await writeFile(archivePath, archive)
     execFileSync('tar', ['-xzf', archivePath, '-C', temporaryRoot])
 
     const sourceRoot = join(temporaryRoot, `vscode-icons-${VSCODE_ICONS_COMMIT}`)

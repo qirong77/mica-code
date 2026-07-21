@@ -17,7 +17,7 @@ export function resolveFileIconName(path) {
   if (filenameMatch) return filenameMatch
 
   const parts = name.split('.')
-  for (let index = 1; index < parts.length; index += 1) {
+  for (let index = 0; index < parts.length; index += 1) {
     const extensionMatch = iconManifest.extensions[parts.slice(index).join('.')]
     if (extensionMatch) return extensionMatch
   }

@@ -9,7 +9,13 @@ describe('file icon resolver', () => {
     ['.env', 'dotenv'],
     ['vite.config.ts', 'vite'],
     ['types.d.ts', 'typescriptdef'],
-    ['component.blade.php', 'blade']
+    ['component.blade.php', 'blade'],
+    ['Dockerfile', 'docker'],
+    ['CMakeLists.txt', 'cmake'],
+    ['Makefile', 'gnu'],
+    ['component.test.ts', 'testts'],
+    ['Button.stories.tsx', 'storybook'],
+    ['diagram.drawio.png', 'drawio']
   ])('resolves %s from the generated vscode-icons manifest', (filename, expectedIcon) => {
     expect(resolveFileIconName(filename)).toBe(expectedIcon)
   })
