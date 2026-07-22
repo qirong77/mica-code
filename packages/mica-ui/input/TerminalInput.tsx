@@ -8,6 +8,7 @@ import * as input from './state.js';
 import {
   pluginUIs,
   workingStatus,
+  subagentTaskItems,
   abortAgent,
   setPluginUIs,
   editPendingInput,
@@ -20,6 +21,7 @@ import { PromptFrame } from './PromptFrame.js';
 import type { DOMElement } from '@anthropic/ink';
 import type { TerminalInputQueueMode, TerminalInputSubmitOptions } from './state.js';
 import type { PromptFrameMode } from './PromptFrame.js';
+import type { MicaUiSubagentTaskItem } from '../types.js';
 
 interface YogaNodeLike {
   getComputedTop(): number;
@@ -28,6 +30,10 @@ interface YogaNodeLike {
 
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
 const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送';
+
+export function hasRunningSubagent(tasks: readonly MicaUiSubagentTaskItem[]): boolean {
+  return tasks.some((task) => task.status === 'running');
+}
 
 function activeFileMention(value: string, cursorOffset: number): { start: number; query: string } | null {
   const beforeCursor = value.slice(0, cursorOffset);
@@ -51,6 +57,7 @@ function TerminalInput() {
   const activePluginUIs = useScheduleState(pluginUIs);
   const activeCommandPanelItems = useScheduleState(commandPanelItems);
   const status = useScheduleState(workingStatus);
+  const subagentTasks = useScheduleState(subagentTaskItems);
   const placeholder = useScheduleState(input.placeholder);
   const inputDisabled = useScheduleState(input.disabled);
   const currentPendingInputs = useScheduleState(pendingInputs);
@@ -187,6 +194,7 @@ function TerminalInput() {
     status.type === 'thinking' ||
     status.type === 'streaming' ||
     status.type === 'calling_tool';
+  const hasInterruptibleWork = isAgentRunning || hasRunningSubagent(subagentTasks);
 
   const showQueueShortcutTip =
     isAgentRunning &&
@@ -240,7 +248,7 @@ function TerminalInput() {
       return;
     }
 
-    if (isAgentRunning) {
+    if (hasInterruptibleWork) {
       clearExitConfirmation();
       abortAgent();
       setLocalText('');
@@ -250,7 +258,7 @@ function TerminalInput() {
     }
 
     armExitConfirmation('Press Ctrl-C again to exit');
-  }, [armExitConfirmation, clearExitConfirmation, isAgentRunning]);
+  }, [armExitConfirmation, clearExitConfirmation, hasInterruptibleWork]);
 
   useInput((_input, key, event) => {
     if (key.ctrl && (_input === '\x03' || _input === '' || _input === 'c')) {

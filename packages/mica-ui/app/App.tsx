@@ -15,7 +15,7 @@ export function App(): React.ReactNode {
   const { rows } = useTerminalSize();
 
   return (
-    <Box flexDirection="column" height={getMainScreenHeight(rows)} flexShrink={0}>
+    <Box flexDirection="column" minHeight={getMainScreenHeight(rows)} flexShrink={0}>
       <TerminalTitle />
       {/* <StartupBannerUI.renderFn /> */}
       <ConversationUI.renderFn />

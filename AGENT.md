@@ -264,7 +264,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 当前内置命令：
 
-- `/clear`：新开一个空 session，不清除当前 session 文件内容。
+- `/clear`：终止并移除当前 owner 的 subagent、丢弃待注入的 system queue，然后新开一个空 session；不清除原 session 文件内容。
 - `/resume`：恢复历史会话。
 - `/provider`：切换 AI 服务提供商。
 - `/model`：切换当前 provider 的模型。
@@ -347,6 +347,7 @@ AGENT.md
 - `TerminalAgentSessionManager` 为每个 agent 保存独立 UI snapshot，包括 conversationMessages、responseText、pendingInputs、messageBarMessages、agentTurnLogItems、thinkingText、pluginUIs、workingStatus、contextSize、cachedTokenRate。
 - 多 agent 切换时，UI 要从对应 session.uiState 恢复，不要从当前 active agent 或 provider history 临时拼装。
 - UI hot path 有明确上限：conversation messages、response text、pending inputs、message bar、agent turn log、thinking text 和 message text 都会截断或只保留尾部。
+- 普通终端主界面使用 `rows - 1` 作为最小高度而不是固定高度：短内容保留终端最后一行，长 conversation 必须按自然高度扩展到原生 scrollback，避免 Yoga 收缩后文本越界覆盖后续消息和输入区。
 - Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 `Buffer`；该层负责增量 UTF-8 解码，并把 DEC 8-bit C1 控制字节规范化为 7-bit ESC 序列。不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`，否则 S8C1T 模式下的终端查询响应会损坏并泄漏为输入。
 - 长会话性能问题优先检查 retained buffers、rewind snapshots、Markdown 渲染输入、图片 payload、MCP 输出和 agent turn log，不要直接做大重构。
 
@@ -358,6 +359,7 @@ AGENT.md
 - `/fork` 和后台 agent 相关命令要注意 provider/model/effort/role 与 UI snapshot 的一致性。
 - `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取，也可用 `operation=await` 等待完成；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
 - foreground 和 background subagent 的任务记录都会留在 `SubagentTaskManager` 中供 `/task` 查看；每个 parent 最多保留 100 条，结果只在当前进程内存在。`/task` 的列表只保存轻量 summary，完整 prompt、context、usage、error 和 result 在打开详情时按 ID 获取。
+- Ctrl+C 中止 parent turn 时必须同步 abort 该 owner 的 running subagent，并保留 `killed` 记录供诊断；清理 session/owner 时则终止运行任务并移除其全部 retained subagent 记录。
 - 输入框上方 `TaskStatusBar` 展示 active subagent 时使用树形摘要：主行保留 kind/status/时长/type/description；子行用 `⎿` 展示并行 in-flight tool 摘要；嵌套 subagent 通过 `parent_task_id` 挂到父任务下。activity 只保留进行中的摘要，并对短工具调用保留最短可见时长（约 900ms）以减少闪烁；任务结束即清空。
 - subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。
 - subagent 默认不继承完整对话历史，而是按 `context_mode`（`none|brief|recent|files`）注入 `<delegated-context>` 任务包；默认 `brief`。

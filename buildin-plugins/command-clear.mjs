@@ -19,6 +19,7 @@ export function createClearCommand(agent, sessionController, services, onCleared
         services.showMessage('Agent is busy; wait or abort before starting a new session');
         return;
       }
+      services.clearSubagentTasks?.(agent);
       services.clearUI(agent, sessionController);
       onCleared?.();
       services.showMessage('Started new session');

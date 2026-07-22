@@ -21,6 +21,7 @@ import {
 } from '@packages/mica-runtime/index.js';
 import type { RewindApplyRequest, RewindCheckpointSummary } from '@packages/mica-runtime/Rewind.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
+import type { SubagentTaskManager } from '../../agents/SubagentTaskManager.js';
 import type { SessionController } from '../../session/SessionController.js';
 import { getActiveContext } from '../activeContext.js';
 import {
@@ -79,6 +80,7 @@ export class LocalRuntimeController implements RuntimeController {
     private readonly commands: CommandRegistry,
     private readonly hooks: HookRegistry,
     private readonly services: ServiceContainer,
+    private readonly subagentTasks?: Pick<SubagentTaskManager, 'killRunningForOwner'>,
   ) {
     this.sessionControllers.set(agent, sessionController);
   }
@@ -177,6 +179,7 @@ export class LocalRuntimeController implements RuntimeController {
       this.clearingAgents.delete(this.agent);
     }
     this.queue.clear();
+    this.systemQueues.delete(this.agent);
     this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
   }
 
@@ -410,9 +413,11 @@ export class LocalRuntimeController implements RuntimeController {
   }
 
   async abort(): Promise<AbortResult> {
-    if (!this.runningAgents.has(this.agent)) return { ok: false, reason: 'not_running' };
+    const isRunning = this.runningAgents.has(this.agent);
+    const killedSubagents = this.subagentTasks?.killRunningForOwner(this.agent, 'Parent turn was aborted.') ?? 0;
+    if (!isRunning && killedSubagents === 0) return { ok: false, reason: 'not_running' };
     try {
-      this.agent.abort();
+      if (isRunning) this.agent.abort();
       return { ok: true };
     } catch (error) {
       return { ok: false, reason: 'error', error };

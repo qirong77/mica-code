@@ -302,15 +302,23 @@ export class SubagentTaskManager {
     return cloneRecord(task.record);
   }
 
-  killForOwner(owner: AgentRuntime): number {
+  killRunningForOwner(owner: AgentRuntime, reason = 'Parent agent was aborted.'): number {
     let killed = 0;
-    for (const [id, task] of this.tasks) {
+    for (const task of this.tasks.values()) {
       if (task.owner !== owner) continue;
       if (task.record.status === 'running') {
         task.controller.abort();
-        this.complete(task, { status: 'killed', error: 'Parent agent was disposed.' }, false);
+        this.complete(task, { status: 'killed', error: reason }, false);
         killed++;
       }
+    }
+    return killed;
+  }
+
+  killForOwner(owner: AgentRuntime, reason = 'Parent agent was disposed.'): number {
+    const killed = this.killRunningForOwner(owner, reason);
+    for (const [id, task] of this.tasks) {
+      if (task.owner !== owner) continue;
       this.tasks.delete(id);
     }
     return killed;

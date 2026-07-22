@@ -282,6 +282,14 @@ function toSubagentTaskDetail(task: SubagentTaskRecordWithDetail, owner: Subagen
 
 export function createCommandRuntimeServices(): CommandRuntimeServices {
   return {
+    clearSubagentTasks(agent) {
+      const context = currentContext();
+      if (!context) return 0;
+      const target = resolveCommandAgent(agent);
+      const killed = context.subagentTasks.killForOwner(target, 'Session was cleared.');
+      context.uiBridge.syncSubagentTaskItems();
+      return killed;
+    },
     clearUI(agent, sessionController) {
       const context = currentContext();
       const session = context?.agentSessions.current();

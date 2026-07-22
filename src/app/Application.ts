@@ -82,12 +82,13 @@ export class Application {
       const services = new micaPlugin.ServiceContainer();
       const plugins = new micaPlugin.PluginManager();
       const agentSessions = new TerminalAgentSessionManager();
-      const runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services);
+      let runtime!: LocalRuntimeController;
       const subagentTasks = new SubagentTaskManager({
         onTaskFinished: (task, owner) => {
           runtime.deliverSystemInput(owner, formatSubagentTaskNotification(task), formatSubagentTaskDisplay(task));
         },
       });
+      runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services, subagentTasks);
       const uiBridge = new MicaUiRuntimeBridge(agent, runtime, agentSessions, subagentTasks);
       this.subagentTasks = subagentTasks;
       agentSessions.registerCurrent(agent, sessionController);

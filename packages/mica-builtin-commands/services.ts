@@ -155,6 +155,7 @@ export type CommandNoticeOptions = {
 
 export type CommandRuntimeServices = {
   clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void;
+  clearSubagentTasks?(agent: CommandAgent): number;
   showMessage(text: string, ttl?: number, ownerSessionId?: string): void;
   showNotice(text: string, ownerSessionId?: string, options?: CommandNoticeOptions): void;
   showCommitNotice(text: string, ownerSessionId?: string): void;

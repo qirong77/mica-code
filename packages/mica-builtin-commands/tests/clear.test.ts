@@ -13,6 +13,7 @@ describe('createClearCommand', () => {
     command.action();
 
     expect(services.clearUI).toHaveBeenCalledWith(agent, sessionController);
+    expect(services.clearSubagentTasks).toHaveBeenCalledWith(agent);
     expect(services.newAgentSession).not.toHaveBeenCalled();
     expect(services.switchAgentSession).not.toHaveBeenCalled();
     expect(onCleared).toHaveBeenCalledOnce();
@@ -27,6 +28,7 @@ describe('createClearCommand', () => {
     command.action();
 
     expect(services.clearUI).not.toHaveBeenCalled();
+    expect(services.clearSubagentTasks).not.toHaveBeenCalled();
     expect(onCleared).not.toHaveBeenCalled();
     expect(services.showMessage).toHaveBeenCalledWith('Agent is busy; wait or abort before starting a new session');
   });
@@ -69,6 +71,7 @@ function makeSessionController(): CommandSessionController {
 function makeServices(options: { busy?: boolean } = {}): CommandRuntimeServices {
   return {
     clearUI: vi.fn(),
+    clearSubagentTasks: vi.fn(() => 0),
     showMessage: vi.fn(),
     setPluginStatus: vi.fn(),
     clearPluginStatus: vi.fn(),
