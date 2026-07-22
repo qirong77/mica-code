@@ -22,6 +22,10 @@ export class MessageQueueService {
     return this.dequeue();
   }
 
+  /**
+   * The first boundary only starts the wait. A second boundary proves that a
+   * complete provider/tool iteration ran after this input was queued.
+   */
   dequeueAfterCompletedIteration(allowDequeue = true): RuntimeInput | null {
     if (!this.item || this.item.queueMode !== 'after_iteration') return null;
     if (this.iterationBoundaryInputId !== this.item.id) {

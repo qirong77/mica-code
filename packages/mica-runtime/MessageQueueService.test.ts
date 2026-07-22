@@ -28,6 +28,19 @@ describe('MessageQueueService', () => {
     expect(queue.dequeueAfterCompletedIteration()).toBe(replacement);
   });
 
+  it('resets the observed boundary when the queue is cleared', () => {
+    const queue = new MessageQueueService();
+    const input = createRuntimeInput('follow up', 'ui', { queueMode: 'after_iteration' });
+
+    queue.enqueue(input);
+    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
+    queue.clear();
+    queue.enqueue(input);
+
+    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
+    expect(queue.dequeueAfterCompletedIteration()).toBe(input);
+  });
+
   it('leaves after-turn input untouched at iteration boundaries', () => {
     const queue = new MessageQueueService();
     const input = createRuntimeInput('after turn', 'ui', { queueMode: 'after_turn' });
