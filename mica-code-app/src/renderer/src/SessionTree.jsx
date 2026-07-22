@@ -4,7 +4,7 @@ import { ChevronRight, Folder, FolderOpen, SquareTerminal } from 'lucide-react'
 import { childMap } from './workspace'
 
 const rowClass =
-  'group relative flex min-h-6.5 items-center gap-1.5 rounded-sm pr-2 text-[13px] hover:bg-white/[.045] hover:text-white'
+  'group relative flex min-h-6.5 cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-[13px] hover:bg-white/[.045] hover:text-white active:bg-white/[.07]'
 
 function RenameInput({ node, onCommit, onCancel }) {
   const ref = useRef(null)

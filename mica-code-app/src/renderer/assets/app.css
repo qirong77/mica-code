@@ -36,9 +36,23 @@
   input {
     font: inherit;
   }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  button:active:not(:disabled) {
+    opacity: 0.78;
+  }
   button:focus,
   input:focus {
     outline: none;
+  }
+  button:focus-visible,
+  input:focus-visible {
+    outline: 1px solid rgb(255 255 255 / 42%);
+    outline-offset: -1px;
   }
 }
 
