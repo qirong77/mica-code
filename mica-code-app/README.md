@@ -2,7 +2,7 @@
 
 Mica Code is a compact Electron terminal workspace with session management, file editing, workspace search, and Git diff views.
 
-The Git status bar opens a VS Code-style branch picker for searching and switching local branches, creating branches from the current or a selected ref, and checking out a detached branch or tag.
+The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
 
 ## Tech stack
 

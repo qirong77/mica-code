@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, GitBranch, GitBranchPlus, Plus, Tag, Unplug } from 'lucide-react'
+import { Check, GitBranch, GitBranchPlus, Plus, Tag } from 'lucide-react'
 
 const actions = [
   { id: 'create', label: '创建新分支…', icon: Plus },
-  { id: 'createFrom', label: '从…创建新分支…', icon: GitBranchPlus },
-  { id: 'detached', label: '签出已分离…', icon: Unplug }
+  { id: 'createFrom', label: '从…创建新分支…', icon: GitBranchPlus }
 ]
 
 const searchable = (item) =>
@@ -148,7 +147,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
       if (item.type === 'action') {
         if (item.id === 'create') await create()
         else {
-          setMode(item.id === 'createFrom' ? 'from' : 'detached')
+          setMode('from')
           setQuery('')
           setError('')
           restoreFocus()
@@ -159,22 +158,13 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
         await create(item)
         return
       }
-      if (mode === 'detached') {
-        await operate(() => window.mica.git.checkout(cwd, item.ref, true))
-        return
-      }
       if (item.current) onClose()
       else await operate(() => window.mica.git.checkout(cwd, item.ref))
     },
     [busy, create, cwd, loading, mode, onClose, operate]
   )
 
-  const title =
-    mode === 'from'
-      ? '选择新分支的起点'
-      : mode === 'detached'
-        ? '选择要签出的分支或标签'
-        : '选择要签出的分支'
+  const title = mode === 'from' ? '选择新分支的起点' : '选择要签出的分支'
 
   return (
     <div

@@ -64,8 +64,7 @@ const gitApi = {
   summary: (cwd) => ipcRenderer.invoke('git:summary', { cwd }),
   file: (cwd, filePath) => ipcRenderer.invoke('git:file', { cwd, filePath }),
   refs: (cwd) => ipcRenderer.invoke('git:refs', { cwd }),
-  checkout: (cwd, ref, detached = false) =>
-    ipcRenderer.invoke('git:checkout', { cwd, ref, detached }),
+  checkout: (cwd, ref) => ipcRenderer.invoke('git:checkout', { cwd, ref }),
   createBranch: (cwd, name, startRef = null) =>
     ipcRenderer.invoke('git:create-branch', { cwd, name, startRef })
 }

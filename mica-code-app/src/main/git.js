@@ -218,11 +218,11 @@ async function createBranch(cwd, name, startRef) {
   return getStatus(root)
 }
 
-async function checkoutBranch(cwd, ref, detached = false) {
-  const { root, match } = await resolveRef(cwd, ref, detached ? ['branch', 'tag'] : ['branch'])
-  if (!detached && match.name.startsWith('-')) throw new Error('不支持签出以连字符开头的分支')
-  if (!detached) await git(root, ['check-ref-format', '--branch', match.name])
-  await git(root, detached ? ['checkout', '--detach', match.ref] : ['checkout', match.name])
+async function checkoutBranch(cwd, ref) {
+  const { root, match } = await resolveRef(cwd, ref, ['branch'])
+  if (match.name.startsWith('-')) throw new Error('不支持签出以连字符开头的分支')
+  await git(root, ['check-ref-format', '--branch', match.name])
+  await git(root, ['checkout', match.name])
   return getStatus(root)
 }
 
@@ -251,9 +251,9 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:checkout', async (_event, { cwd, ref, detached } = {}) => {
+  ipcMain.handle('git:checkout', async (_event, { cwd, ref } = {}) => {
     try {
-      return { status: await checkoutBranch(cwd, ref, !!detached), error: null }
+      return { status: await checkoutBranch(cwd, ref), error: null }
     } catch (error) {
       return { status: null, error: errorMessage(error) }
     }
