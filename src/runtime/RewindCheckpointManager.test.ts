@@ -40,11 +40,11 @@ describe('RewindCheckpointManager conversation fallback', () => {
     expect(manager.restoreConversationHistory(agent, conversationMessages)).toBe(2);
     const checkpoints = manager.list(agent);
     expect(checkpoints.map((checkpoint) => checkpoint.conversationLabel)).toEqual([
-      'second formatted request',
       'first request',
+      'second formatted request',
     ]);
 
-    const preview = manager.preview(agent, checkpoints[0]!.id);
+    const preview = manager.preview(agent, checkpoints[1]!.id);
     expect(preview).toMatchObject({ ok: true, fileStateAvailable: false, files: [] });
     if (!preview.ok) throw new Error(preview.message);
     const result = manager.apply(agent, {
@@ -91,8 +91,8 @@ describe('RewindCheckpointManager conversation fallback', () => {
     ]);
 
     expect(manager.list(agent).map((checkpoint) => checkpoint.conversationLabel)).toEqual([
-      'new request',
       'resumed request',
+      'new request',
     ]);
   });
 
@@ -119,8 +119,8 @@ describe('RewindCheckpointManager conversation fallback', () => {
     ]);
 
     expect(manager.list(agent).map((checkpoint) => checkpoint.conversationLabel)).toEqual([
-      'second visible',
       'first visible',
+      'second visible',
     ]);
   });
 

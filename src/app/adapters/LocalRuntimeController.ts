@@ -720,7 +720,8 @@ export class LocalRuntimeController implements RuntimeController {
     const systemInput = systemQueue?.shift() ?? null;
     if (systemQueue?.length === 0) this.systemQueues.delete(agent);
     if (systemInput) consumedSystemInputs.push(systemInput);
-    const next = systemInput ?? queue.dequeueByMode('after_iteration');
+    const queuedInput = queue.dequeueAfterCompletedIteration(!systemInput);
+    const next = systemInput ?? queuedInput;
     if (!systemInput) this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
     if (!next) return null;
 

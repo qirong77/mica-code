@@ -29,7 +29,7 @@ interface YogaNodeLike {
 }
 
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
-const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮迭代后发送';
+const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送';
 
 export function hasRunningSubagent(tasks: readonly MicaUiSubagentTaskItem[]): boolean {
   return tasks.some((task) => task.status === 'running');

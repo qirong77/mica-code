@@ -133,7 +133,13 @@ function showRewindPanel(checkpoints, services) {
         title: `rewind · 选择要回到的用户输入 (${items.length})`,
         footer: element(micaUi.KeyHints, { hints: ['↑↓ navigate', '↵ continue', 'esc cancel'] }),
       },
-      element(micaUi.SelectList, { items, selectedIdx: selectedIndex, layout: 'table', itemGap: 0 }),
+      element(micaUi.SelectList, {
+        items,
+        selectedIdx: selectedIndex,
+        layout: 'table',
+        itemGap: 0,
+        renderItem: renderRewindCheckpointItem,
+      }),
       currentFeedback ? element(Text, { color: micaUi.theme.colors.warning }, currentFeedback) : null,
     );
   }
@@ -223,6 +229,34 @@ function showRewindPanel(checkpoints, services) {
       return true;
     },
   });
+}
+
+function renderRewindCheckpointItem(item, isSelected) {
+  return element(micaUi.OneLineItem, {
+    cells: rewindCheckpointCells(item, isSelected),
+  });
+}
+
+export function rewindCheckpointCells(item, isSelected) {
+  return [
+    {
+      key: 'time',
+      content: item.description,
+      width: 16,
+      flexShrink: 0,
+      color: isSelected ? micaUi.theme.colors.accent : undefined,
+      dimColor: !isSelected,
+    },
+    {
+      key: 'label',
+      content: item.label,
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
+      color: isSelected ? micaUi.theme.colors.accent : undefined,
+      bold: isSelected,
+    },
+  ];
 }
 
 function renderFileImpact(current, visibleFiles, hiddenCount) {

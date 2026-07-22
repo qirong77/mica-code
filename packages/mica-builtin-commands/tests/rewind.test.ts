@@ -36,7 +36,7 @@ vi.mock('@packages/mica-ui/utils/format.js', () => ({
   formatSessionListTime: (value: string) => value,
 }));
 
-const { createRewindCommand } = await import('../../../buildin-plugins/command-rewind.mjs');
+const { createRewindCommand, rewindCheckpointCells } = await import('../../../buildin-plugins/command-rewind.mjs');
 
 describe('rewind command', () => {
   beforeEach(() => {
@@ -45,27 +45,30 @@ describe('rewind command', () => {
     mocks.terminalTextSet.mockReset();
   });
 
-  it('selects the latest checkpoint, rewinds files, and restores the original input', () => {
+  it('selects the earliest checkpoint by default, rewinds files, and restores the original input', () => {
     const preview = makePreview({
-      id: 'c2',
-      conversationLabel: 'second display text',
+      id: 'c1',
+      conversationLabel: 'first display text',
       files: [{ path: 'src/a.ts', action: 'restore' }],
-      previewToken: 'token-c2',
+      previewToken: 'token-c1',
     });
-    const services = makeServices({ preview });
+    const services = makeServices({
+      preview,
+      applyResult: makeApplyResult({ id: 'c1', conversationLabel: 'first display text', inputText: 'first raw input' }),
+    });
 
     createRewindCommand(services).action();
     const panel = currentPanel();
     panel.onInput('', { return: true });
     panel.onInput('', { return: true });
 
-    expect(services.getRewindPreview).toHaveBeenCalledWith('c2');
+    expect(services.getRewindPreview).toHaveBeenCalledWith('c1');
     expect(services.applyRewind).toHaveBeenCalledWith({
-      id: 'c2',
+      id: 'c1',
       mode: 'conversation_and_files',
-      previewToken: 'token-c2',
+      previewToken: 'token-c1',
     });
-    expect(mocks.terminalTextSet).toHaveBeenCalledWith('second raw input');
+    expect(mocks.terminalTextSet).toHaveBeenCalledWith('first raw input');
     expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('原输入已恢复到输入框'), 'session-1', {
       command: '/rewind',
       status: 'success',
@@ -86,15 +89,24 @@ describe('rewind command', () => {
     expect(services.applyRewind).toHaveBeenCalledWith(expect.objectContaining({ mode: 'conversation_only' }));
   });
 
-  it('can choose an older user turn from the checkpoint list', () => {
-    const services = makeServices({ preview: makePreview({ id: 'c1', conversationLabel: 'first' }) });
+  it('can choose a newer user turn from the checkpoint list', () => {
+    const services = makeServices({ preview: makePreview({ id: 'c2', conversationLabel: 'second' }) });
 
     createRewindCommand(services).action();
     const panel = currentPanel();
     panel.onInput('', { downArrow: true });
     panel.onInput('', { return: true });
 
-    expect(services.getRewindPreview).toHaveBeenCalledWith('c1');
+    expect(services.getRewindPreview).toHaveBeenCalledWith('c2');
+  });
+
+  it('aligns checkpoint times in a fixed column before the conversation label', () => {
+    const cells = rewindCheckpointCells({ description: '01/02 12:34', label: 'a much longer user input' }, false);
+
+    expect(cells).toMatchObject([
+      { key: 'time', content: '01/02 12:34', width: 16, flexShrink: 0 },
+      { key: 'label', content: 'a much longer user input', flexGrow: 1, flexShrink: 1, minWidth: 0 },
+    ]);
   });
 
   it('refreshes a stale preview and requires a second confirmation', () => {
@@ -151,19 +163,22 @@ describe('rewind command', () => {
   });
 });
 
-function makeServices(options: { preview: Extract<RewindPreviewResult, { ok: true }> }): CommandRuntimeServices {
+function makeServices(options: {
+  preview: Extract<RewindPreviewResult, { ok: true }>;
+  applyResult?: ReturnType<typeof makeApplyResult>;
+}): CommandRuntimeServices {
   const checkpoints = [
-    {
-      id: 'c2',
-      conversationLabel: 'second',
-      createdAt: '2026-01-02T00:00:00.000Z',
-      messageCountBefore: 2,
-    },
     {
       id: 'c1',
       conversationLabel: 'first',
       createdAt: '2026-01-01T00:00:00.000Z',
       messageCountBefore: 0,
+    },
+    {
+      id: 'c2',
+      conversationLabel: 'second',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      messageCountBefore: 2,
     },
   ];
   return {
@@ -171,7 +186,7 @@ function makeServices(options: { preview: Extract<RewindPreviewResult, { ok: tru
     listRunningAgents: vi.fn(() => []),
     listRewindCheckpoints: vi.fn(() => checkpoints),
     getRewindPreview: vi.fn(() => options.preview),
-    applyRewind: vi.fn((_request: RewindApplyRequest) => makeApplyResult()),
+    applyRewind: vi.fn((_request: RewindApplyRequest) => options.applyResult ?? makeApplyResult()),
     showMessage: vi.fn(),
     showNotice: vi.fn(),
   } as unknown as CommandRuntimeServices;

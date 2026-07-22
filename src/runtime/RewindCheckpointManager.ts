@@ -183,7 +183,7 @@ export class RewindCheckpointManager {
   }
 
   list(agent: AgentRuntime): RewindCheckpointSummary[] {
-    return [...(this.checkpoints.get(agent) ?? [])].reverse().map(checkpointSummary);
+    return (this.checkpoints.get(agent) ?? []).map(checkpointSummary);
   }
 
   preview(agent: AgentRuntime, id?: string): RewindPreviewResult {

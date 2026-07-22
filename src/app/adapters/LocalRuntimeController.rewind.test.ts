@@ -32,7 +32,7 @@ describe('LocalRuntimeController rewind history', () => {
 
     const checkpoints = controller.listRewindCheckpoints();
 
-    expect(checkpoints.map((checkpoint) => checkpoint.conversationLabel)).toEqual(['second', 'first']);
+    expect(checkpoints.map((checkpoint) => checkpoint.conversationLabel)).toEqual(['first', 'second']);
     expect(controller.getRewindPreview(checkpoints[0]!.id)).toMatchObject({
       ok: true,
       fileStateAvailable: false,

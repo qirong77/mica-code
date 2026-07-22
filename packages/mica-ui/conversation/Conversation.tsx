@@ -37,7 +37,7 @@ function truncateMiddleText(text: string, maxChars: number): string {
 
 function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null): string {
   if (queueMode === 'after_turn') return 'waiting to send after current turn';
-  if (queueMode === 'after_iteration') return 'waiting to send after current iteration';
+  if (queueMode === 'after_iteration') return 'waiting to send after a complete tool-call iteration';
   return 'waiting to send';
 }
 

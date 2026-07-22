@@ -693,13 +693,15 @@ textarea {
 .role-layout {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-  min-height: 720px;
+  height: 100%;
+  min-height: 0;
   gap: 16px;
 }
 
 .role-list,
 .role-editor-pane {
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -756,7 +758,7 @@ textarea {
 }
 
 .role-editor-host {
-  min-height: 670px;
+  min-height: 0;
   border: 0;
   border-radius: 0;
 }
@@ -1507,11 +1509,16 @@ textarea {
 
   .role-layout {
     grid-template-columns: 1fr;
+    height: auto;
     min-height: 0;
   }
 
   .role-list {
     max-height: 220px;
+  }
+
+  .role-editor-host {
+    min-height: 560px;
   }
 
   .session-summary-title {
