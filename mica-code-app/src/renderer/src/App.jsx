@@ -297,7 +297,6 @@ export default function App() {
   })
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
-  const cwdRefreshTimer = useRef(null)
 
   useEffect(() => {
     window.mica.workspace
@@ -426,21 +425,15 @@ export default function App() {
     [activeRef, gitRef]
   )
 
-  useEffect(() => {
-    if (ready) refreshGit()
-  }, [activeId, ready, refreshGit, view])
   useEffect(() => setBranchPickerOpen(false), [activeId])
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refreshGit({ quiet: true })
-    }, 3000)
+      if (document.visibilityState === 'visible' && document.hasFocus()) {
+        refreshGit({ quiet: true })
+      }
+    }, 10000)
     return () => clearInterval(timer)
   }, [refreshGit])
-  const refreshAfterCommand = useCallback(() => {
-    clearTimeout(cwdRefreshTimer.current)
-    cwdRefreshTimer.current = window.setTimeout(() => refreshGit({ quiet: true }), 120)
-  }, [refreshGit])
-  useEffect(() => () => clearTimeout(cwdRefreshTimer.current), [])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -463,12 +456,9 @@ export default function App() {
         repository: null,
         loading: true
       }))
-      await Promise.all([
-        refreshGit({ cwd: status?.root || null }),
-        filesRef.current?.reloadAfterGitChange(status?.root || gitRef.current.status?.root)
-      ])
+      await filesRef.current?.reloadAfterGitChange(status?.root || gitRef.current.status?.root)
     },
-    [gitRef, refreshGit]
+    [gitRef]
   )
 
   const createFolder = useCallback((parent = '#') => {
@@ -744,7 +734,6 @@ export default function App() {
             sidebarCollapsed={sidebarCollapsed}
             resolveCwd={terminalCwd}
             onRead={(id, reason) => notifications.markRead(id, reason)}
-            onCommand={refreshAfterCommand}
           />
           <FilesView
             ref={filesRef}
@@ -756,7 +745,6 @@ export default function App() {
             repository={repository}
             loading={gitIsCurrent ? git.loading : true}
             visible={view === 'git-compare'}
-            onRefresh={() => refreshGit()}
           />
           {!activeId && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">

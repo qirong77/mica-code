@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, Folder, RefreshCw } from 'lucide-react'
+import { ChevronRight, File, Folder } from 'lucide-react'
 import { useLatest, usePaneWidth } from './hooks'
 import { editorOptions, languageFor, monaco } from './monaco'
 
@@ -72,7 +72,7 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
   )
 }
 
-export function GitView({ cwd, repository, loading, visible, onRefresh }) {
+export function GitView({ cwd, repository, loading, visible }) {
   const viewRef = useRef(null)
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
@@ -249,20 +249,8 @@ export function GitView({ cwd, repository, loading, visible, onRefresh }) {
       className={`min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <aside className="flex min-h-0 shrink-0 flex-col bg-[#111]" style={{ width }}>
-        <header className="flex h-9 shrink-0 items-center justify-between px-2 pl-3">
+        <header className="flex h-9 shrink-0 items-center px-3">
           <span className="text-[10px] font-semibold tracking-[.08em] text-white/45">CHANGES</span>
-          <button
-            type="button"
-            title="刷新 Git 变化"
-            aria-label="刷新 Git 变化"
-            className="grid size-6.5 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
-            onClick={() => {
-              signatureRef.current = null
-              onRefresh()
-            }}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
         </header>
         <div
           className="truncate px-3 pb-2 font-mono text-[10px] text-white/30"

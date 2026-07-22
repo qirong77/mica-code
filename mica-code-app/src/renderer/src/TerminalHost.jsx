@@ -62,10 +62,9 @@ function interceptTerminalKey(event, id) {
   window.mica.terminal.write(id, data)
 }
 
-function TerminalPane({ id, active, onRegister, onRead, onCommand }) {
+function TerminalPane({ id, active, onRegister, onRead }) {
   const hostRef = useRef(null)
   const onReadRef = useLatest(onRead)
-  const onCommandRef = useLatest(onCommand)
 
   useEffect(() => {
     const host = hostRef.current
@@ -95,7 +94,6 @@ function TerminalPane({ id, active, onRegister, onRead, onCommand }) {
     const input = term.onData((data) => {
       window.mica.terminal.write(id, data)
       onReadRef.current(id, 'input')
-      if (/[\r\n]/.test(data)) onCommandRef.current?.(id)
     })
     const scroll = term.onScroll(() => onReadRef.current(id, 'scroll'))
     const intercept = (event) => interceptTerminalKey(event, id)
@@ -128,7 +126,7 @@ function TerminalPane({ id, active, onRegister, onRead, onCommand }) {
       host.removeEventListener('pointerdown', pointer)
       term.dispose()
     }
-  }, [id, onCommandRef, onReadRef, onRegister])
+  }, [id, onReadRef, onRegister])
 
   return (
     <div
@@ -140,7 +138,7 @@ function TerminalPane({ id, active, onRegister, onRead, onCommand }) {
 }
 
 export const TerminalHost = forwardRef(function TerminalHost(
-  { nodes, activeId, visible, sidebarCollapsed, resolveCwd, onRead, onCommand },
+  { nodes, activeId, visible, sidebarCollapsed, resolveCwd, onRead },
   ref
 ) {
   const hostRef = useRef(null)
@@ -370,7 +368,6 @@ export const TerminalHost = forwardRef(function TerminalHost(
           active={id === activeId}
           onRegister={register}
           onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
-          onCommand={onCommand}
         />
       ))}
     </section>
