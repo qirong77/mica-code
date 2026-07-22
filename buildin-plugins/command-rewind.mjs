@@ -18,7 +18,7 @@ export default function setupCommandRewind(ctx) {
 export function createRewindCommand(services) {
   return {
     name: 'rewind',
-    description: '选择一轮对话，并回退到该用户输入之前的状态',
+    description: '选择一轮对话，并回到该轮完成后的状态',
     action(rawArgs) {
       if ((rawArgs ?? '').trim()) {
         services.showMessage('rewind: /rewind 不支持参数，请直接运行 /rewind', 5000);
@@ -101,16 +101,10 @@ function showRewindPanel(checkpoints, services) {
     }
 
     hide();
-    let inputRestoreError;
     try {
-      micaUi.terminalInput.text.set(result.inputText);
-    } catch (error) {
-      inputRestoreError = error instanceof Error ? error.message : String(error);
-    }
-    try {
-      services.showNotice(formatSuccessNotice(result, inputRestoreError), ownerSessionId, {
+      services.showNotice(formatSuccessNotice(result), ownerSessionId, {
         command: '/rewind',
-        status: result.postApplyWarning || inputRestoreError ? 'warning' : 'success',
+        status: result.postApplyWarning ? 'warning' : 'success',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -160,7 +154,7 @@ function showRewindPanel(checkpoints, services) {
             : '回退对话和文件',
       description:
         mode === 'conversation_only'
-          ? '对话回到所选用户输入之前，文件保持当前状态'
+          ? '保留所选用户输入及该轮回复，文件保持当前状态'
           : `restore ${actionCounts.restore} · delete ${actionCounts.delete}`,
     }));
     const visibleFiles = current.files.slice(0, MAX_VISIBLE_FILES);
@@ -169,7 +163,7 @@ function showRewindPanel(checkpoints, services) {
     return element(
       micaUi.Dialog,
       {
-        title: isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」之前`,
+        title: isApplying ? 'rewind · applying...' : `rewind · 回到「${current.conversationLabel}」`,
         footer: element(micaUi.KeyHints, { hints: ['↑↓ choose scope', '↵ rewind', 'esc back'] }),
       },
       element(
@@ -290,16 +284,14 @@ function renderFileImpact(current, visibleFiles, hiddenCount) {
   );
 }
 
-function formatSuccessNotice(result, inputRestoreError) {
+function formatSuccessNotice(result) {
   const actionCounts = countFileActions(result.files);
   const lines = [
-    `**已回退到「${result.conversationLabel}」之前**`,
+    `**已回到「${result.conversationLabel}」**`,
     '',
     `- 对话：${result.messageCountNow} -> ${result.messageCountBefore}`,
-    '- 对话已回到所选用户输入之前',
+    '- 已保留所选用户输入及该轮回复，删除之后的对话',
   ];
-  if (inputRestoreError) lines.push(`- 警告：原输入恢复失败：${inputRestoreError}`);
-  else lines.push('- 原输入已恢复到输入框');
   if (result.mode === 'conversation_only') {
     lines.push('- 文件：保留当前修改');
   } else {

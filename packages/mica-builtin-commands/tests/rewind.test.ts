@@ -45,7 +45,7 @@ describe('rewind command', () => {
     mocks.terminalTextSet.mockReset();
   });
 
-  it('selects the earliest checkpoint by default, rewinds files, and restores the original input', () => {
+  it('selects the earliest checkpoint by default and rewinds files', () => {
     const preview = makePreview({
       id: 'c1',
       conversationLabel: 'first display text',
@@ -68,8 +68,8 @@ describe('rewind command', () => {
       mode: 'conversation_and_files',
       previewToken: 'token-c1',
     });
-    expect(mocks.terminalTextSet).toHaveBeenCalledWith('first raw input');
-    expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('原输入已恢复到输入框'), 'session-1', {
+    expect(mocks.terminalTextSet).not.toHaveBeenCalled();
+    expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('已保留所选用户输入及该轮回复'), 'session-1', {
       command: '/rewind',
       status: 'success',
     });
@@ -140,26 +140,7 @@ describe('rewind command', () => {
       mode: 'conversation_only',
       previewToken: 'new-token',
     });
-    expect(mocks.terminalTextSet).toHaveBeenCalledWith('second raw input');
-  });
-
-  it('still reports a completed rewind when restoring the input fails', () => {
-    const services = makeServices({ preview: makePreview() });
-    mocks.terminalTextSet.mockImplementationOnce(() => {
-      throw new Error('input unavailable');
-    });
-
-    createRewindCommand(services).action();
-    const panel = currentPanel();
-    panel.onInput('', { return: true });
-    panel.onInput('', { return: true });
-
-    expect(services.applyRewind).toHaveBeenCalledOnce();
-    expect(services.showNotice).toHaveBeenCalledWith(
-      expect.stringContaining('原输入恢复失败：input unavailable'),
-      'session-1',
-      { command: '/rewind', status: 'warning' },
-    );
+    expect(mocks.terminalTextSet).not.toHaveBeenCalled();
   });
 });
 

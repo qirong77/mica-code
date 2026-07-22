@@ -128,11 +128,26 @@ export class RewindCheckpointManager {
     }
   }
 
-  finalize(agent: AgentRuntime, id: string, _conversationMessages: unknown[] = []): void {
-    if (!this.find(agent, id)) return;
-    // Keep the state captured immediately before the user input. Rewinding
-    // therefore removes that input, its tool calls/results, and everything after it.
-    this.previewPlans.delete(agent);
+  finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): void {
+    const checkpoint = this.find(agent, id);
+    if (!checkpoint) return;
+    try {
+      const snapshot = agent.getSnapshot();
+      const checkpointChars =
+        estimateJsonLikeChars(snapshot, MAX_CHECKPOINT_SNAPSHOT_CHARS) +
+        estimateJsonLikeChars(conversationMessages, MAX_CHECKPOINT_SNAPSHOT_CHARS);
+      if (checkpointChars > MAX_CHECKPOINT_SNAPSHOT_CHARS) {
+        this.remove(agent, id);
+        return;
+      }
+      checkpoint.snapshot = cloneSnapshot(snapshot);
+      checkpoint.conversationMessages = cloneJson(conversationMessages);
+      checkpoint.fileState = captureFileState();
+      this.previewPlans.delete(agent);
+    } catch {
+      // Never expose a checkpoint with the old pre-turn semantics.
+      this.remove(agent, id);
+    }
   }
 
   clear(agent: AgentRuntime): void {
@@ -151,25 +166,30 @@ export class RewindCheckpointManager {
 
     for (let turn = 0; turn < turnBoundaries.length; turn++) {
       const { messageIndex, uiMessageIndex } = turnBoundaries[turn]!;
+      const nextBoundary = turnBoundaries[turn + 1];
+      const messageEndIndex = nextBoundary?.messageIndex ?? providerMessages.length;
+      const uiMessageEndIndex = nextBoundary?.uiMessageIndex ?? uiMessages.length;
       const providerMessage = providerMessages[messageIndex];
       const uiMessage = uiMessageIndex === undefined ? undefined : uiMessages[uiMessageIndex];
       const inputText = messageText(uiMessage ?? providerMessage);
       const displayText = displayMessageText(uiMessage) || inputText;
-      const checkpointUsage = usageBeforeMessage(snapshot.protocol, usageHistory, messageIndex);
+      const checkpointUsage = nextBoundary
+        ? usageBeforeMessage(snapshot.protocol, usageHistory, messageEndIndex)
+        : usageHistory;
 
       restored.push({
         id: `history-${restoredAt}-${this.nextCheckpointId++}`,
         createdAt: new Date(restoredAt - (turnBoundaries.length - turn) * 1000).toISOString(),
         conversationLabel: labelForInput(displayText),
         inputText,
-        conversationMessages: uiMessageIndex === undefined ? [] : uiMessages.slice(0, uiMessageIndex),
+        conversationMessages: uiMessageIndex === undefined ? [] : uiMessages.slice(0, uiMessageEndIndex),
         snapshot: {
           providerId: snapshot.providerId,
           protocol: snapshot.protocol,
           model: snapshot.model,
           effort: snapshot.effort,
           role: snapshot.role,
-          messages: providerMessages.slice(0, messageIndex),
+          messages: providerMessages.slice(0, messageEndIndex),
           usageHistory: checkpointUsage,
           lastUsage: checkpointUsage.at(-1),
         },
@@ -265,7 +285,7 @@ export class RewindCheckpointManager {
       const prefix = files.length > 0 ? 'rewind files changed, but conversation restore failed' : 'rewind failed';
       throw new Error(`${prefix}: ${errorMessage(error)}`);
     }
-    this.checkpoints.set(agent, stack.slice(0, index));
+    this.checkpoints.set(agent, stack.slice(0, index + 1));
     this.previewPlans.delete(agent);
 
     return {
@@ -289,6 +309,15 @@ export class RewindCheckpointManager {
 
   private latest(agent: AgentRuntime): RewindCheckpoint | null {
     return this.checkpoints.get(agent)?.at(-1) ?? null;
+  }
+
+  private remove(agent: AgentRuntime, id: string): void {
+    const checkpoints = this.checkpoints.get(agent) ?? [];
+    this.checkpoints.set(
+      agent,
+      checkpoints.filter((checkpoint) => checkpoint.id !== id),
+    );
+    this.previewPlans.delete(agent);
   }
 }
 

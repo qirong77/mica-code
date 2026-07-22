@@ -276,7 +276,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/task`：按 terminal session 展示当前终端中的 session、全部 retained subagent 和 active background shell。列表中 `Enter` 切换 session，或打开 subagent/shell 详情；`/task clear` 清除空闲 session。
-- `/rewind`：选择一轮对话，回退到该用户输入之前；对话节点可从当前 provider/UI history 动态恢复，有对应文件 checkpoint 时还可选择恢复文件。
+- `/rewind`：选择一轮对话，保留该用户输入及该轮回复并删除之后的内容；对话节点可从当前 provider/UI history 动态恢复，有对应文件 checkpoint 时还可选择恢复文件。
 - `/mcp`：列出 MCP 服务器和工具；`/mcp reconnect <server>` 重连指定服务。
 - `/skills`：列出已安装的 skills。
 - `/rename`：重命名当前会话。
