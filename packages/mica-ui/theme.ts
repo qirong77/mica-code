@@ -15,7 +15,9 @@ export const themeColors = {
   subtle: '#666666',
   inactive: '#7b7b7b',
   selection: '#263238',
-  surfaceUser: '#2B2B2B',
+  // Keep user turns visibly distinct from common dark terminal backgrounds
+  // such as VS Code's #1E1E1E / #282828.
+  surfaceUser: '#373737',
   surfaceCommit: '#1a2820',
   surfaceConfig: '#1a2820',
   surfaceCompact: '#211f17',
