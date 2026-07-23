@@ -74,7 +74,7 @@ describe('findFileMentions', () => {
     expect(results.map((item) => item.path)).toEqual(['a.ts', 'z.ts', 'nested/b.ts']);
   });
 
-  it('excludes gitignored files in a Git workspace', async () => {
+  it('includes gitignored files in a Git workspace', async () => {
     const workspace = await createWorkspace(['visible.ts', 'generated/ignored.ts']);
     await writeFile(join(workspace, '.gitignore'), 'generated/\n');
     await execFileAsync('git', ['init', '--quiet'], { cwd: workspace });
@@ -82,7 +82,7 @@ describe('findFileMentions', () => {
     const results = await findFileMentions(workspace, '');
 
     expect(results.map((item) => item.path)).toContain('visible.ts');
-    expect(results.map((item) => item.path)).not.toContain('generated/ignored.ts');
+    expect(results.map((item) => item.path)).toContain('generated/ignored.ts');
   });
 });
 

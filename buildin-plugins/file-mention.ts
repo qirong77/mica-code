@@ -120,7 +120,7 @@ async function listGitWorkspaceFiles(root: string): Promise<string[] | null> {
   try {
     const { stdout } = await execFileAsync(
       'git',
-      ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.'],
+      ['-C', root, 'ls-files', '--cached', '--others', '-z', '--', '.'],
       { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 },
     );
     return stdout.split('\0').filter(Boolean).slice(0, MAX_FILES);
