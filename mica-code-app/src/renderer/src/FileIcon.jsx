@@ -65,3 +65,12 @@ export function FolderIcon({ name, expanded = false, className = '', ...props })
     />
   )
 }
+
+/** Shared icon entry point for anything that renders a file-system node. */
+export function FileSystemIcon({ name, type = 'file', expanded = false, ...props }) {
+  return type === 'directory' ? (
+    <FolderIcon name={name} expanded={expanded} {...props} />
+  ) : (
+    <FileIcon name={name} {...props} />
+  )
+}

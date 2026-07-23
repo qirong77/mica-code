@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, RefreshCw, X } from 'lucide-react'
-import { FileIcon, FolderIcon } from './FileIcon'
+import { FileIcon, FileSystemIcon } from './FileIcon'
 import { useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, monaco } from './monaco'
 
@@ -74,11 +74,12 @@ function FileTreeRows({ nodes, depth = 0, activePath, onToggle, onOpen }) {
             {directory && <ChevronRight size={13} />}
           </span>
           <span className="grid size-4 shrink-0 place-items-center text-white/50">
-            {directory ? (
-              <FolderIcon name={node.name} expanded={node.expanded} className="size-4" />
-            ) : (
-              <FileIcon name={node.name} className="size-4" />
-            )}
+            <FileSystemIcon
+              name={node.name}
+              type={node.type}
+              expanded={node.expanded}
+              className="size-4"
+            />
           </span>
           <span className="min-w-0 flex-1 truncate">{node.name}</span>
           {node.loading && <span className="text-white/35">…</span>}

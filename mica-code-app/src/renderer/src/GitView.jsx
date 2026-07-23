@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, Folder } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
+import { FileSystemIcon } from './FileIcon'
 import { useLatest, usePaneWidth } from './hooks'
 import { editorOptions, languageFor, monaco } from './monaco'
 
@@ -32,7 +33,7 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
               onClick={() => onToggle(key)}
             >
               <ChevronRight size={13} className={`text-white/35 ${closed ? '' : 'rotate-90'}`} />
-              <Folder size={14} className="text-white/45" />
+              <FileSystemIcon name={name} type="directory" expanded={!closed} className="size-4" />
               <span className="truncate">{name}</span>
             </button>
             {!closed && (
@@ -59,7 +60,7 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
           onClick={() => onSelect(file)}
         >
           <span />
-          <File size={14} className="text-white/45" />
+          <FileSystemIcon name={file.name} className="size-4" />
           <span className="truncate">{file.name}</span>
           <span
             className={`justify-self-end font-mono text-[10px] font-semibold ${file.status === 'added' ? 'text-[#55b982]' : file.status === 'deleted' ? 'text-[#e06c75]' : 'text-[#d7ae5d]'}`}
