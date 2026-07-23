@@ -29,8 +29,8 @@ export function syncModelDisplay(agent: AgentRuntime) {
 }
 
 export function clearUI(agent: AgentRuntime, sessionController?: SessionController) {
-  agent.clearSession();
   sessionController?.startNewSession();
+  agent.clearSession();
   micaUi.conversation.clearMessages();
   micaUi.conversation.clearResponseText();
   micaUi.conversation.clearPendingInput();

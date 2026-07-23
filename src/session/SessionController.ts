@@ -53,6 +53,7 @@ export type SessionControllerOptions = {
 export class SessionController {
   private currentSessionId = micaSession.createId();
   private currentTitleOverride: string | null = null;
+  private currentTitleSource: 'derived' | 'auto' | 'manual' = 'derived';
   private currentTurnState: PersistedSessionTurnState = 'completed';
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
@@ -90,18 +91,23 @@ export class SessionController {
   }
 
   startNewSession(): void {
+    this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
     this.currentTitleOverride = null;
+    this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
   }
 
   saveCurrent(
     options: { allowEmpty?: boolean; turnState?: PersistedSessionTurnState; preserveTitle?: boolean } = {},
-  ): void {
+  ): boolean {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
-    if (snapshot.messages.length === 0 && conversationMessages.length === 0 && !options.allowEmpty) return;
+    if (!hasConversation(snapshot.messages, conversationMessages) && !options.allowEmpty) {
+      this.store.delete(this.currentSessionId);
+      return false;
+    }
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
@@ -112,6 +118,7 @@ export class SessionController {
       version: 1,
       id: this.currentSessionId,
       title: this.currentTitleOverride ?? persistedTitle ?? derivedTitle,
+      titleSource: this.currentTitleOverride ? this.currentTitleSource : (existing?.titleSource ?? 'derived'),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
@@ -119,12 +126,14 @@ export class SessionController {
       snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
+    return true;
   }
 
-  renameCurrent(title: string): void {
+  renameCurrent(title: string, source: 'auto' | 'manual' = 'manual'): void {
     const now = new Date().toISOString();
     const nextTitle = normalizeSessionTitle(title);
     this.currentTitleOverride = nextTitle;
+    this.currentTitleSource = source;
 
     const existing = this.store.load(this.currentSessionId);
     const snapshot = this.agent.getSnapshot();
@@ -133,6 +142,7 @@ export class SessionController {
       version: 1,
       id: this.currentSessionId,
       title: nextTitle,
+      titleSource: source,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
@@ -143,6 +153,22 @@ export class SessionController {
 
   getCurrentTitle(): string | null {
     return this.currentTitleOverride;
+  }
+
+  hasManualTitle(): boolean {
+    if (this.currentTitleSource === 'manual') return true;
+    const existing = this.store.load(this.currentSessionId);
+    if (!existing) return false;
+    if (existing.titleSource === 'manual') return true;
+    if (existing.titleSource) return false;
+    const messages = getPersistedConversationMessages(existing.snapshot);
+    return existing.title !== deriveTitle(getTitleConversationMessages(this.agent, messages));
+  }
+
+  tryAutoRename(expectedSessionId: string, title: string): boolean {
+    if (this.currentSessionId !== expectedSessionId || this.hasManualTitle()) return false;
+    this.renameCurrent(title, 'auto');
+    return true;
   }
 
   getCurrentSessionId(): string {
@@ -157,6 +183,7 @@ export class SessionController {
   }
 
   resumeLoaded(session: PersistedSession): ResumeSessionResult {
+    if (session.id !== this.currentSessionId) this.discardCurrentIfEmpty();
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
     const restoredRole = resolveSnapshotRole(requestedRole);
     this.config.apply(session.snapshot);
@@ -168,7 +195,8 @@ export class SessionController {
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     const restoredTitle = isInternalCompactText(session.title) ? derivedTitle : session.title;
     const restoredSession = restoredTitle === session.title ? session : { ...session, title: restoredTitle };
-    this.currentTitleOverride = restoredTitle === derivedTitle ? null : restoredTitle;
+    this.currentTitleSource = session.titleSource ?? (restoredTitle === derivedTitle ? 'derived' : 'manual');
+    this.currentTitleOverride = this.currentTitleSource === 'derived' ? null : restoredTitle;
     this.ui.restore(this.agent, session.snapshot.lastUsage, conversationMessages);
     return {
       ok: true,
@@ -176,6 +204,22 @@ export class SessionController {
       ...(requestedRole === restoredRole ? {} : { roleFallback: { missing: requestedRole, fallback: restoredRole } }),
     };
   }
+
+  private discardCurrentIfEmpty(): boolean {
+    const snapshot = this.agent.getSnapshot();
+    const conversationMessages = getPersistableConversationMessages(this.agent);
+    if (hasConversation(snapshot.messages, conversationMessages)) return false;
+    return this.store.delete(this.currentSessionId);
+  }
+}
+
+function hasConversation(providerMessages: unknown[], conversationMessages: MicaUiConversationMessage[]): boolean {
+  if (conversationMessages.some((message) => message.role === 'user' || message.role === 'assistant')) return true;
+  return providerMessages.some((message) => {
+    if (!message || typeof message !== 'object') return false;
+    const role = (message as { role?: unknown }).role;
+    return role === 'user' || role === 'assistant';
+  });
 }
 
 function normalizeSessionTitle(title: string): string {

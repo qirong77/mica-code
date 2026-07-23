@@ -30,6 +30,79 @@ afterAll(() => {
 });
 
 describe('SessionController', () => {
+  it('does not retain an empty session, including one created by rename', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let persisted: PersistedSession | null = null;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => persisted),
+      save: vi.fn((session: PersistedSession) => {
+        persisted = session;
+      }),
+      delete: vi.fn(() => {
+        const deleted = persisted !== null;
+        persisted = null;
+        return deleted;
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.renameCurrent('Named before chatting');
+    expect((persisted as PersistedSession | null)?.title).toBe('Named before chatting');
+    expect(controller.saveCurrent()).toBe(false);
+    expect(store.delete).toHaveBeenCalledWith(controller.getCurrentSessionId());
+    expect(persisted).toBeNull();
+  });
+
+  it('still allows an explicit empty crash-recovery checkpoint', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const save = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        load: () => null,
+        save,
+        delete: () => false,
+      },
+    });
+
+    expect(controller.saveCurrent({ allowEmpty: true })).toBe(true);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it('preserves a manually renamed current session across later saves', async () => {
     const { SessionController } = await import('./SessionController.js');
     const saves: PersistedSession[] = [];

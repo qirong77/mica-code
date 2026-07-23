@@ -27,6 +27,7 @@ export type PersistedSession = {
   version: 1;
   id: string;
   title: string;
+  titleSource?: 'derived' | 'auto' | 'manual';
   createdAt: string;
   updatedAt: string;
   cwd: string;

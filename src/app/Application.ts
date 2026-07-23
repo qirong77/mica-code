@@ -110,7 +110,7 @@ export class Application {
 
       setActiveContext(this.context);
 
-      useBuiltinPlugins(this, agent, sessionController);
+      useBuiltinPlugins(this, agent, sessionController, agentSessions, () => uiBridge.syncAgentStatusItems());
       const filePlugins = await setupFilePlugins({
         paths: pluginPaths,
         plugins,
@@ -232,8 +232,8 @@ export class Application {
   async requestExit(exitCode = 0): Promise<void> {
     process.exitCode = exitCode;
     const sessionController = this.context?.agentSessions.current().sessionController;
-    sessionController?.saveCurrent({ allowEmpty: true });
-    const sessionId = sessionController?.getCurrentSessionId();
+    const saved = sessionController?.saveCurrent() ?? false;
+    const sessionId = saved ? sessionController?.getCurrentSessionId() : undefined;
     await this.stop();
     finalizeInteractiveUi(this.renderInstance);
     if (sessionId && process.stdout.isTTY) {
