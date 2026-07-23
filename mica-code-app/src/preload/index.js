@@ -56,7 +56,15 @@ const filesApi = {
   write: (path, content, expectedVersion) =>
     ipcRenderer.invoke('files:write', { path, content, expectedVersion }),
   find: (root, query) => ipcRenderer.invoke('files:find', { root, query }),
-  search: (root, query) => ipcRenderer.invoke('files:search', { root, query })
+  search: (root, query) => ipcRenderer.invoke('files:search', { root, query }),
+  create: (directory, name, type) => ipcRenderer.invoke('files:create', { directory, name, type }),
+  rename: (path, name) => ipcRenderer.invoke('files:rename', { path, name }),
+  move: (path, directory) => ipcRenderer.invoke('files:move', { path, directory }),
+  duplicate: (path) => ipcRenderer.invoke('files:duplicate', { path }),
+  delete: (path) => ipcRenderer.invoke('files:delete', { path }),
+  copyPath: (path) => ipcRenderer.invoke('files:copy-path', { path }),
+  copyRelativePath: (root, path) => ipcRenderer.invoke('files:copy-relative-path', { root, path }),
+  reveal: (path) => ipcRenderer.invoke('files:reveal', { path })
 }
 
 const gitApi = {

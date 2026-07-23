@@ -2,7 +2,8 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { moveSelection } from '../shared/commandInput.js';
+import { handleScrollInput, moveSelection } from '../shared/commandInput.js';
+import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
 type SkillsState =
   | { view: 'list'; selectedIdx: number }
@@ -18,6 +19,7 @@ export function createSkillsCommand() {
         view: 'list',
         selectedIdx: skills.length > 0 ? 0 : 0,
       });
+      const detailScroll = createCommandScrollController();
 
       function hide() {
         micaUi.panels.clearPluginUIs();
@@ -82,33 +84,31 @@ export function createSkillsCommand() {
         if (!skill) return null;
 
         return (
-          <micaUi.Dialog title={`/${skill.name}`} footer={<micaUi.KeyHints hints={['esc back']} />}>
-            <micaUi.BottomScrollBox>
-              <Box paddingBottom={1}>
-                <Text>{skill.description}</Text>
-              </Box>
-              {skill.whenToUse ? (
-                <Box flexDirection="column" paddingBottom={1}>
-                  <Text dimColor>when to use</Text>
-                  <Text>{skill.whenToUse}</Text>
-                </Box>
-              ) : null}
-              {skill.argumentHint ? (
-                <Box flexDirection="column" paddingBottom={1}>
-                  <Text dimColor>arguments</Text>
-                  <Text>{skill.argumentHint}</Text>
-                </Box>
-              ) : null}
+          <ScrollableCommandDialog title={`/${skill.name}`} controller={detailScroll} hints={['esc back']}>
+            <Box paddingBottom={1}>
+              <Text>{skill.description}</Text>
+            </Box>
+            {skill.whenToUse ? (
               <Box flexDirection="column" paddingBottom={1}>
-                <Text dimColor>location</Text>
-                <Text>{skill.baseDir}/SKILL.md</Text>
+                <Text dimColor>when to use</Text>
+                <Text>{skill.whenToUse}</Text>
               </Box>
-              <Box flexDirection="column">
-                <Text dimColor>preview</Text>
-                <micaUi.Markdown>{skill.content}</micaUi.Markdown>
+            ) : null}
+            {skill.argumentHint ? (
+              <Box flexDirection="column" paddingBottom={1}>
+                <Text dimColor>arguments</Text>
+                <Text>{skill.argumentHint}</Text>
               </Box>
-            </micaUi.BottomScrollBox>
-          </micaUi.Dialog>
+            ) : null}
+            <Box flexDirection="column" paddingBottom={1}>
+              <Text dimColor>location</Text>
+              <Text>{skill.baseDir}/SKILL.md</Text>
+            </Box>
+            <Box flexDirection="column">
+              <Text dimColor>preview</Text>
+              <micaUi.Markdown>{skill.content}</micaUi.Markdown>
+            </Box>
+          </ScrollableCommandDialog>
         );
       }
 
@@ -131,7 +131,7 @@ export function createSkillsCommand() {
             return true;
           }
 
-          if (state.view !== 'list') return false;
+          if (state.view === 'detail') return handleScrollInput(detailScroll, key);
           if (currentSkills.length === 0) return true;
 
           if (key.upArrow) {

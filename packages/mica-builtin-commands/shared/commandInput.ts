@@ -8,3 +8,27 @@ export function selectionDirection(key: { upArrow?: boolean; downArrow?: boolean
   if (key.downArrow) return 1;
   return null;
 }
+
+type ScrollHandle = {
+  getViewportHeight(): number;
+  scrollBy(offset: number): void;
+};
+
+type ScrollKey = {
+  upArrow?: boolean;
+  downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
+};
+
+/** Route the standard vertical navigation keys to a scrollable command view. */
+export function handleScrollInput(scroll: ScrollHandle | null, key: ScrollKey): boolean {
+  if (!key.upArrow && !key.downArrow && !key.pageUp && !key.pageDown) return false;
+
+  const pageSize = Math.max(1, (scroll?.getViewportHeight() ?? 10) - 1);
+  if (key.upArrow) scroll?.scrollBy(-1);
+  else if (key.downArrow) scroll?.scrollBy(1);
+  else if (key.pageUp) scroll?.scrollBy(-pageSize);
+  else scroll?.scrollBy(pageSize);
+  return true;
+}

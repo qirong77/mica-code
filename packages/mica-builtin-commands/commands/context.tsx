@@ -14,6 +14,8 @@ import { micaTools } from '@packages/mica-tools/index.js';
 import type { Tool } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from '../services.js';
+import { handleScrollInput } from '../shared/commandInput.js';
+import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
 const PANEL_ID = 'context-panel';
 const SOURCE_COL_WIDTH = 15;
@@ -109,6 +111,7 @@ export function createContextCommand(agent: CommandAgent) {
 
 function showContextPanel(overview: ContextOverview) {
   const initialText = micaUi.terminalInput.text.get();
+  const scroll = createCommandScrollController();
 
   function hide() {
     micaUi.panels.removePluginUI(PANEL_ID);
@@ -116,22 +119,26 @@ function showContextPanel(overview: ContextOverview) {
 
   function ContextPanel() {
     return (
-      <micaUi.Dialog title="context map" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <micaUi.BottomScrollBox width={TABLE_WIDTH} maxWidth="100%">
-          <UsageLine overview={overview} />
-          <Text>
-            <Text color={micaUi.theme.colors.dim}>{'       '}</Text>
-            <MapBar ratio={overview.usageRatio} width={MAP_WIDTH} color={usageColor(overview.usageRatio)} />
-          </Text>
+      <ScrollableCommandDialog
+        title="context map"
+        controller={scroll}
+        hints={['esc exit', 'type to close']}
+        width={TABLE_WIDTH}
+        maxWidth="100%"
+      >
+        <UsageLine overview={overview} />
+        <Text>
+          <Text color={micaUi.theme.colors.dim}>{'       '}</Text>
+          <MapBar ratio={overview.usageRatio} width={MAP_WIDTH} color={usageColor(overview.usageRatio)} />
+        </Text>
 
-          <Text> </Text>
-          <TokenMapHeader />
-          <Text color={micaUi.theme.colors.dim}>{'─'.repeat(TABLE_WIDTH)}</Text>
-          {overview.buckets.map((bucket) => (
-            <TokenMapRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} />
-          ))}
-        </micaUi.BottomScrollBox>
-      </micaUi.Dialog>
+        <Text> </Text>
+        <TokenMapHeader />
+        <Text color={micaUi.theme.colors.dim}>{'─'.repeat(TABLE_WIDTH)}</Text>
+        {overview.buckets.map((bucket) => (
+          <TokenMapRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} />
+        ))}
+      </ScrollableCommandDialog>
     );
   }
 
@@ -140,9 +147,11 @@ function showContextPanel(overview: ContextOverview) {
     component: ContextPanel,
     preserveInput: true,
     onInput: (_input, key) => {
-      if (!key.escape) return false;
-      hide();
-      return true;
+      if (key.escape) {
+        hide();
+        return true;
+      }
+      return handleScrollInput(scroll, key);
     },
     onTextChange: (value) => {
       if (value !== initialText) hide();
@@ -153,6 +162,7 @@ function showContextPanel(overview: ContextOverview) {
 
 function showContextDetailPanel(overview: ContextOverview) {
   const initialText = micaUi.terminalInput.text.get();
+  const scroll = createCommandScrollController();
 
   function hide() {
     micaUi.panels.removePluginUI(PANEL_ID);
@@ -160,44 +170,48 @@ function showContextDetailPanel(overview: ContextOverview) {
 
   function ContextDetailPanel() {
     return (
-      <micaUi.Dialog title="context detail" footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <micaUi.BottomScrollBox width={TABLE_WIDTH + 32} maxWidth="100%">
-          <Text color={micaUi.theme.colors.textSecondary}>{formatSummaryLine(overview)}</Text>
-          <Text> </Text>
-          <SectionTitle title="Buckets" />
-          {overview.buckets.map((bucket) => (
-            <DetailBucketRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} overview={overview} />
-          ))}
-          <Text> </Text>
-          <SectionTitle title="Largest tool outputs" />
-          {overview.largestToolOutputs.length === 0 ? (
-            <Text dimColor>no tool outputs</Text>
-          ) : (
-            overview.largestToolOutputs.map((entry, index) => (
-              <Box key={`${entry.toolName}-${index}`} flexDirection="column">
-                <Text>
-                  {`${index + 1}.`.padEnd(3)}
-                  {truncateText(entry.toolName, 14).padEnd(14)}{' '}
-                  <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(entry.tokens).padStart(6)}</Text>
-                  {'   '}
-                  {truncateText(entry.argSummary, 48)}
-                </Text>
-                <Text color={micaUi.theme.colors.dim}>{`   ${truncateText(entry.resultSummary, 72)}`}</Text>
-              </Box>
-            ))
-          )}
-          <Text> </Text>
-          <SectionTitle title="Tools" />
-          {overview.toolSchemaSources.map((tool) => (
-            <Text key={tool.name}>
-              {truncateText(tool.name, 52).padEnd(52)}{' '}
-              <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(tool.tokens).padStart(6)}</Text>
-              {'   '}
-              <Text color={micaUi.theme.colors.dim}>{tool.kind}</Text>
-            </Text>
-          ))}
-        </micaUi.BottomScrollBox>
-      </micaUi.Dialog>
+      <ScrollableCommandDialog
+        title="context detail"
+        controller={scroll}
+        hints={['esc exit', 'type to close']}
+        width={TABLE_WIDTH + 32}
+        maxWidth="100%"
+      >
+        <Text color={micaUi.theme.colors.textSecondary}>{formatSummaryLine(overview)}</Text>
+        <Text> </Text>
+        <SectionTitle title="Buckets" />
+        {overview.buckets.map((bucket) => (
+          <DetailBucketRow key={bucket.key} bucket={bucket} totalTokens={overview.usedTokens} overview={overview} />
+        ))}
+        <Text> </Text>
+        <SectionTitle title="Largest tool outputs" />
+        {overview.largestToolOutputs.length === 0 ? (
+          <Text dimColor>no tool outputs</Text>
+        ) : (
+          overview.largestToolOutputs.map((entry, index) => (
+            <Box key={`${entry.toolName}-${index}`} flexDirection="column">
+              <Text>
+                {`${index + 1}.`.padEnd(3)}
+                {truncateText(entry.toolName, 14).padEnd(14)}{' '}
+                <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(entry.tokens).padStart(6)}</Text>
+                {'   '}
+                {truncateText(entry.argSummary, 48)}
+              </Text>
+              <Text color={micaUi.theme.colors.dim}>{`   ${truncateText(entry.resultSummary, 72)}`}</Text>
+            </Box>
+          ))
+        )}
+        <Text> </Text>
+        <SectionTitle title="Tools" />
+        {overview.toolSchemaSources.map((tool) => (
+          <Text key={tool.name}>
+            {truncateText(tool.name, 52).padEnd(52)}{' '}
+            <Text color={micaUi.theme.colors.textSecondary}>{formatTokenCount(tool.tokens).padStart(6)}</Text>
+            {'   '}
+            <Text color={micaUi.theme.colors.dim}>{tool.kind}</Text>
+          </Text>
+        ))}
+      </ScrollableCommandDialog>
     );
   }
 
@@ -206,9 +220,11 @@ function showContextDetailPanel(overview: ContextOverview) {
     component: ContextDetailPanel,
     preserveInput: true,
     onInput: (_input, key) => {
-      if (!key.escape) return false;
-      hide();
-      return true;
+      if (key.escape) {
+        hide();
+        return true;
+      }
+      return handleScrollInput(scroll, key);
     },
     onTextChange: (value) => {
       if (value !== initialText) hide();

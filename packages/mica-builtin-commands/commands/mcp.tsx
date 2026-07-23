@@ -3,7 +3,8 @@ import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaMcp, type McpServerStatus } from '@packages/mica-mcp/index.js';
 import type { CommandRuntimeServices } from '../services.js';
-import { moveSelection } from '../shared/commandInput.js';
+import { handleScrollInput, moveSelection } from '../shared/commandInput.js';
+import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
 type McpState =
   | { view: 'list'; selectedIdx: number }
@@ -52,6 +53,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         return;
       }
       const panelState = atom<McpState>({ view: 'list', selectedIdx: 0 });
+      const detailScroll = createCommandScrollController();
 
       function hide() {
         micaUi.panels.clearPluginUIs();
@@ -196,63 +198,62 @@ export function createMcpCommand(services: CommandRuntimeServices) {
         );
 
         return (
-          <micaUi.Dialog
+          <ScrollableCommandDialog
             title={`${server?.name ?? 'mcp'} / ${tool?.name ?? ''}`}
-            footer={<micaUi.KeyHints hints={['esc back']} />}
+            controller={detailScroll}
+            hints={['esc back']}
           >
-            <micaUi.BottomScrollBox>
-              {tool?.description ? (
+            {tool?.description ? (
+              <Box paddingBottom={1}>
+                <Text dimColor>{tool.description}</Text>
+              </Box>
+            ) : null}
+            {Object.keys(properties).length === 0 ? (
+              <Text dimColor>no parameters</Text>
+            ) : (
+              <Box flexDirection="column">
                 <Box paddingBottom={1}>
-                  <Text dimColor>{tool.description}</Text>
+                  <Text bold>parameters</Text>
                 </Box>
-              ) : null}
-              {Object.keys(properties).length === 0 ? (
-                <Text dimColor>no parameters</Text>
-              ) : (
-                <Box flexDirection="column">
-                  <Box paddingBottom={1}>
-                    <Text bold>parameters</Text>
-                  </Box>
-                  {Object.entries(properties).map(([name, prop]) => (
-                    <micaUi.OneLineItem
-                      key={name}
-                      cells={[
-                        {
-                          key: 'required',
-                          content: required.includes(name) ? '*' : ' ',
-                          width: 2,
-                          color: required.includes(name) ? micaUi.theme.colors.error : micaUi.theme.colors.dim,
-                        },
-                        {
-                          key: 'name',
-                          content: name,
-                          width: parameterNameWidth,
-                        },
-                        {
-                          key: 'type',
-                          content: prop.type || 'any',
-                          width: parameterTypeWidth,
-                          color: typeColor(prop.type || 'any'),
-                        },
-                        {
-                          key: 'description',
-                          content: prop.description ?? '',
-                          flexGrow: 1,
-                          minWidth: 0,
-                          dimColor: true,
-                        },
-                      ]}
-                    />
-                  ))}
-                </Box>
-              )}
-              {schema.type && schema.type !== 'object' ? (
-                <Box paddingTop={1}>
-                  <Text>{`input type: ${schema.type}`}</Text>
-                </Box>
-              ) : null}
-            </micaUi.BottomScrollBox>
-          </micaUi.Dialog>
+                {Object.entries(properties).map(([name, prop]) => (
+                  <micaUi.OneLineItem
+                    key={name}
+                    cells={[
+                      {
+                        key: 'required',
+                        content: required.includes(name) ? '*' : ' ',
+                        width: 2,
+                        color: required.includes(name) ? micaUi.theme.colors.error : micaUi.theme.colors.dim,
+                      },
+                      {
+                        key: 'name',
+                        content: name,
+                        width: parameterNameWidth,
+                      },
+                      {
+                        key: 'type',
+                        content: prop.type || 'any',
+                        width: parameterTypeWidth,
+                        color: typeColor(prop.type || 'any'),
+                      },
+                      {
+                        key: 'description',
+                        content: prop.description ?? '',
+                        flexGrow: 1,
+                        minWidth: 0,
+                        dimColor: true,
+                      },
+                    ]}
+                  />
+                ))}
+              </Box>
+            )}
+            {schema.type && schema.type !== 'object' ? (
+              <Box paddingTop={1}>
+                <Text>{`input type: ${schema.type}`}</Text>
+              </Box>
+            ) : null}
+          </ScrollableCommandDialog>
         );
       }
 
@@ -335,6 +336,8 @@ export function createMcpCommand(services: CommandRuntimeServices) {
               return true;
             }
           }
+
+          if (state.view === 'detail') return handleScrollInput(detailScroll, key);
 
           return false;
         },

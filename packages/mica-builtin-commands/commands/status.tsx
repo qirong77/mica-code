@@ -10,6 +10,8 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { CommandAgent, CommandSessionController } from '../services.js';
 import { BUILD_TIME } from '../../../src/buildMeta.js';
+import { handleScrollInput } from '../shared/commandInput.js';
+import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
 type TotalSessionUsageSummary = AgentUsageSummary & {
   sessions: number;
@@ -55,6 +57,7 @@ export function createStatusCommand(agent: CommandAgent, sessionController?: Com
 function showStatusPanel(text: string, title = 'status') {
   const panelId = 'status-panel';
   const initialText = micaUi.terminalInput.text.get();
+  const scroll = createCommandScrollController();
 
   function hide() {
     micaUi.panels.removePluginUI(panelId);
@@ -62,15 +65,13 @@ function showStatusPanel(text: string, title = 'status') {
 
   function StatusPanel() {
     return (
-      <micaUi.Dialog title={title} footer={<micaUi.KeyHints hints={['esc exit', 'type to close']} />}>
-        <micaUi.BottomScrollBox>
-          {text.split('\n').map((line, index) => (
-            <Text key={`${index}:${line}`} color={micaUi.theme.colors.dim}>
-              {line}
-            </Text>
-          ))}
-        </micaUi.BottomScrollBox>
-      </micaUi.Dialog>
+      <ScrollableCommandDialog title={title} controller={scroll} hints={['esc exit', 'type to close']}>
+        {text.split('\n').map((line, index) => (
+          <Text key={`${index}:${line}`} color={micaUi.theme.colors.dim}>
+            {line}
+          </Text>
+        ))}
+      </ScrollableCommandDialog>
     );
   }
 
@@ -79,9 +80,11 @@ function showStatusPanel(text: string, title = 'status') {
     component: StatusPanel,
     preserveInput: true,
     onInput: (_input, key) => {
-      if (!key.escape) return false;
-      hide();
-      return true;
+      if (key.escape) {
+        hide();
+        return true;
+      }
+      return handleScrollInput(scroll, key);
     },
     onTextChange: (value) => {
       if (value !== initialText) hide();

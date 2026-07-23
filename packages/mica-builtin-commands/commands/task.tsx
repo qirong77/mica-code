@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import type { ScrollBoxHandle } from '@packages/@anthropic/ink/src/components/ScrollBox.js';
 import { atom } from 'nanostores';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
@@ -26,7 +25,12 @@ import type {
   SubagentTaskStatus,
   SubagentTaskSummary,
 } from '../services.js';
-import { moveSelection } from '../shared/commandInput.js';
+import { handleScrollInput, moveSelection } from '../shared/commandInput.js';
+import {
+  createCommandScrollController,
+  ScrollableCommandDialog,
+  type CommandScrollController,
+} from '../shared/ScrollableCommandDialog.js';
 
 type TaskDetailTarget = { kind: 'background' | 'subagent'; taskId: string };
 type TaskPanelState = { selectedIdx: number; detail: TaskDetailTarget | null; query: string };
@@ -79,10 +83,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
   const stateAtom = atom<TaskPanelState>({ selectedIdx: 0, detail: null, query: '' });
   const backgroundTasksAtom = atom<MicaUiBackgroundTaskItem[]>(loadBackgroundTasks());
   const subagentTasksAtom = atom<SubagentTaskSummary[]>(services.listSubagentTasks?.() ?? []);
-  let detailScroll: ScrollBoxHandle | null = null;
-  const setDetailScroll = (handle: ScrollBoxHandle | null) => {
-    detailScroll = handle;
-  };
+  const detailScroll = createCommandScrollController();
 
   function hide() {
     micaUi.terminalInput.clearText();
@@ -130,7 +131,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
     if (state.detail?.kind === 'background') {
       const detailTask = backgroundTasks.find((task) => task.id === state.detail?.taskId);
       return detailTask ? (
-        <BackgroundTaskDetail task={detailTask} nowMs={nowMs} scrollRef={setDetailScroll} />
+        <BackgroundTaskDetail task={detailTask} nowMs={nowMs} scroll={detailScroll} />
       ) : (
         <MissingTaskDetail taskId={state.detail.taskId} />
       );
@@ -138,12 +139,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
 
     if (state.detail?.kind === 'subagent') {
       return (
-        <SubagentTaskDetailView
-          services={services}
-          taskId={state.detail.taskId}
-          nowMs={nowMs}
-          scrollRef={setDetailScroll}
-        />
+        <SubagentTaskDetailView services={services} taskId={state.detail.taskId} nowMs={nowMs} scroll={detailScroll} />
       );
     }
 
@@ -209,12 +205,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
       }
 
       if (state.detail) {
-        const pageSize = Math.max(1, (detailScroll?.getViewportHeight() ?? 10) - 1);
-        if (key.upArrow) detailScroll?.scrollBy(-1);
-        if (key.downArrow) detailScroll?.scrollBy(1);
-        if (key.pageUp) detailScroll?.scrollBy(-pageSize);
-        if (key.pageDown) detailScroll?.scrollBy(pageSize);
-        return true;
+        return handleScrollInput(detailScroll, key);
       }
       if (items.length === 0) return true;
 
@@ -246,11 +237,11 @@ function showTaskPanel(services: CommandRuntimeServices) {
 function BackgroundTaskDetail({
   task,
   nowMs,
-  scrollRef,
+  scroll,
 }: {
   task: MicaUiBackgroundTaskItem;
   nowMs: number;
-  scrollRef: (handle: ScrollBoxHandle | null) => void;
+  scroll: CommandScrollController;
 }) {
   const meta = loadTaskMeta(task.id);
   const output = meta
@@ -259,24 +250,22 @@ function BackgroundTaskDetail({
   const lines = (output?.content || '(no output)').split('\n').slice(-12);
 
   return (
-    <micaUi.Dialog title={`task ${task.id}`} footer={<micaUi.KeyHints hints={['↑↓/pgup/pgdn scroll', 'esc back']} />}>
-      <micaUi.BottomScrollBox ref={scrollRef}>
-        <DetailLine label="status" value={formatTaskStatus(task.status)} color={statusColor(task.status)} />
-        <DetailLine label="age" value={formatTaskAge(task, nowMs)} />
-        <DetailLine label="pid" value={task.pid ? String(task.pid) : '-'} />
-        <DetailLine label="output" value={`${formatOutputSize(task.outputSize)}  ${task.outputPath}`} />
-        <DetailLine label="cwd" value={task.cwd} />
-        <DetailLine label="command" value={task.command} />
-        <Box paddingTop={1} paddingBottom={1}>
-          <Text dimColor>output tail</Text>
-        </Box>
-        {lines.map((line, index) => (
-          <Text key={`${index}-${line}`} dimColor wrap="truncate-end">
-            {line || ' '}
-          </Text>
-        ))}
-      </micaUi.BottomScrollBox>
-    </micaUi.Dialog>
+    <ScrollableCommandDialog title={`task ${task.id}`} controller={scroll} hints={['esc back']}>
+      <DetailLine label="status" value={formatTaskStatus(task.status)} color={statusColor(task.status)} />
+      <DetailLine label="age" value={formatTaskAge(task, nowMs)} />
+      <DetailLine label="pid" value={task.pid ? String(task.pid) : '-'} />
+      <DetailLine label="output" value={`${formatOutputSize(task.outputSize)}  ${task.outputPath}`} />
+      <DetailLine label="cwd" value={task.cwd} />
+      <DetailLine label="command" value={task.command} />
+      <Box paddingTop={1} paddingBottom={1}>
+        <Text dimColor>output tail</Text>
+      </Box>
+      {lines.map((line, index) => (
+        <Text key={`${index}-${line}`} dimColor wrap="truncate-end">
+          {line || ' '}
+        </Text>
+      ))}
+    </ScrollableCommandDialog>
   );
 }
 
@@ -284,12 +273,12 @@ function SubagentTaskDetailView({
   services,
   taskId,
   nowMs,
-  scrollRef,
+  scroll,
 }: {
   services: CommandRuntimeServices;
   taskId: string;
   nowMs: number;
-  scrollRef: (handle: ScrollBoxHandle | null) => void;
+  scroll: CommandScrollController;
 }) {
   const task = services.getSubagentTask(taskId);
   if (!task) return <MissingTaskDetail taskId={taskId} />;
@@ -299,30 +288,25 @@ function SubagentTaskDetailView({
   const resultPreview = truncatePreview(formatSubagentResult(task), RESULT_PREVIEW_CHARS);
 
   return (
-    <micaUi.Dialog
-      title={`subagent ${task.id}`}
-      footer={<micaUi.KeyHints hints={['↑↓/pgup/pgdn scroll', 'esc back']} />}
-    >
-      <micaUi.BottomScrollBox ref={scrollRef}>
-        <WrappedDetailLine label="status" value={task.status} color={subagentStatusAppearance(task.status).color} />
-        <WrappedDetailLine label="owner" value={formatSubagentOwner(task)} />
-        <WrappedDetailLine label="task id" value={task.id} />
-        <WrappedDetailLine label="elapsed" value={formatSubagentTaskAge(task, nowMs)} />
-        <WrappedDetailLine label="model" value={task.model || '-'} />
-        <WrappedDetailLine label="effort" value={task.effort || '-'} />
-        <WrappedDetailLine label="max turns" value={task.maxTurns === undefined ? '-' : String(task.maxTurns)} />
-        <WrappedDetailLine label="context" value={task.contextMode ?? '-'} />
-        <WrappedDetailLine label="write mode" value={task.writeMode ?? '-'} />
-        <WrappedDetailLine label="context files" value={formatStringList(task.contextFiles)} />
-        <WrappedDetailLine label="owned paths" value={formatStringList(task.ownedPaths)} />
-        <WrappedDetailLine label="usage" value={formatSubagentUsage(task)} />
-        <DetailTextSection label="task" value={promptPreview} />
-        {task.error ? (
-          <DetailTextSection label="error" value={task.error} color={micaUi.theme.colors.statusError} />
-        ) : null}
-        <DetailTextSection label="result" value={resultPreview} />
-      </micaUi.BottomScrollBox>
-    </micaUi.Dialog>
+    <ScrollableCommandDialog title={`subagent ${task.id}`} controller={scroll} hints={['esc back']}>
+      <WrappedDetailLine label="status" value={task.status} color={subagentStatusAppearance(task.status).color} />
+      <WrappedDetailLine label="owner" value={formatSubagentOwner(task)} />
+      <WrappedDetailLine label="task id" value={task.id} />
+      <WrappedDetailLine label="elapsed" value={formatSubagentTaskAge(task, nowMs)} />
+      <WrappedDetailLine label="model" value={task.model || '-'} />
+      <WrappedDetailLine label="effort" value={task.effort || '-'} />
+      <WrappedDetailLine label="max turns" value={task.maxTurns === undefined ? '-' : String(task.maxTurns)} />
+      <WrappedDetailLine label="context" value={task.contextMode ?? '-'} />
+      <WrappedDetailLine label="write mode" value={task.writeMode ?? '-'} />
+      <WrappedDetailLine label="context files" value={formatStringList(task.contextFiles)} />
+      <WrappedDetailLine label="owned paths" value={formatStringList(task.ownedPaths)} />
+      <WrappedDetailLine label="usage" value={formatSubagentUsage(task)} />
+      <DetailTextSection label="task" value={promptPreview} />
+      {task.error ? (
+        <DetailTextSection label="error" value={task.error} color={micaUi.theme.colors.statusError} />
+      ) : null}
+      <DetailTextSection label="result" value={resultPreview} />
+    </ScrollableCommandDialog>
   );
 }
 

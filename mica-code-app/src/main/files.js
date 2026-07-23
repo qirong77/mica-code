@@ -1,8 +1,11 @@
-import { ipcMain } from 'electron'
+import { clipboard, ipcMain, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import {
   chmod,
+  copyFile,
+  cp,
   lstat,
+  mkdir,
   open,
   opendir,
   readFile,
@@ -45,6 +48,38 @@ function versionOf(buffer) {
 function normalizeRoot(value) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('root is required')
   return path.resolve(value)
+}
+
+function normalizeName(value) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('名称不能为空')
+  const name = value.trim()
+  if (
+    name === '.' ||
+    name === '..' ||
+    name.includes('/') ||
+    name.includes('\\') ||
+    name.includes('\0')
+  ) {
+    throw new Error('名称不能包含路径分隔符')
+  }
+  return name
+}
+
+async function availableCopyPath(source) {
+  const extension = path.extname(source)
+  const stem = path.basename(source, extension)
+  const directory = path.dirname(source)
+  for (let index = 1; index < 10_000; index += 1) {
+    const suffix = index === 1 ? ' 副本' : ` 副本 ${index}`
+    const candidate = path.join(directory, `${stem}${suffix}${extension}`)
+    try {
+      await lstat(candidate)
+    } catch (error) {
+      if (error?.code === 'ENOENT') return candidate
+      throw error
+    }
+  }
+  throw new Error('无法生成副本名称')
 }
 
 function fuzzyMatch(value, query) {
@@ -252,6 +287,72 @@ export function registerFilesIpc() {
           return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
         })
     }
+  })
+
+  ipcMain.handle('files:create', async (_event, payload = {}) => {
+    const directory = normalizeDirectory(payload.directory)
+    const target = path.join(directory, normalizeName(payload.name))
+    if (payload.type === 'directory') await mkdir(target)
+    else if (payload.type === 'file') await writeFile(target, '', { flag: 'wx' })
+    else throw new Error('type must be file or directory')
+    return { path: target }
+  })
+
+  ipcMain.handle('files:rename', async (_event, payload = {}) => {
+    const source = normalizeDirectory(payload.path)
+    const target = path.join(path.dirname(source), normalizeName(payload.name))
+    if (source !== target) await rename(source, target)
+    return { path: target }
+  })
+
+  ipcMain.handle('files:move', async (_event, payload = {}) => {
+    const source = normalizeDirectory(payload.path)
+    const directory = normalizeDirectory(payload.directory)
+    const target = path.join(directory, path.basename(source))
+    if (source === target) return { path: source }
+    const relative = path.relative(source, target)
+    if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+      throw new Error('不能将文件夹移动到自身内部')
+    }
+    await rename(source, target)
+    return { path: target }
+  })
+
+  ipcMain.handle('files:duplicate', async (_event, payload = {}) => {
+    const source = normalizeDirectory(payload.path)
+    const info = await lstat(source)
+    const target = await availableCopyPath(source)
+    if (info.isDirectory()) await cp(source, target, { recursive: true, errorOnExist: true })
+    else if (info.isFile()) await copyFile(source, target)
+    else throw new Error('不支持复制此类型的项目')
+    return { path: target }
+  })
+
+  ipcMain.handle('files:delete', async (_event, payload = {}) => {
+    const target = normalizeDirectory(payload.path)
+    await shell.trashItem(target)
+    return { path: target }
+  })
+
+  ipcMain.handle('files:copy-path', (_event, payload = {}) => {
+    clipboard.writeText(normalizeDirectory(payload.path))
+    return true
+  })
+
+  ipcMain.handle('files:copy-relative-path', (_event, payload = {}) => {
+    const root = normalizeDirectory(payload.root)
+    const target = normalizeDirectory(payload.path)
+    const relative = path.relative(root, target)
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('项目不在当前根目录中')
+    }
+    clipboard.writeText(relative)
+    return relative
+  })
+
+  ipcMain.handle('files:reveal', (_event, payload = {}) => {
+    shell.showItemInFolder(normalizeDirectory(payload.path))
+    return true
   })
 
   ipcMain.handle('files:read', async (_event, payload = {}) => {
