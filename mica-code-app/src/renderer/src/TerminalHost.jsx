@@ -138,7 +138,7 @@ function TerminalPane({ id, active, onRegister, onRead }) {
 }
 
 export const TerminalHost = forwardRef(function TerminalHost(
-  { nodes, activeId, visible, sidebarCollapsed, resolveCwd, onRead },
+  { nodes, activeId, visible, docked = false, height, sidebarCollapsed, resolveCwd, onRead },
   ref
 ) {
   const hostRef = useRef(null)
@@ -359,7 +359,8 @@ export const TerminalHost = forwardRef(function TerminalHost(
   return (
     <section
       ref={hostRef}
-      className={`relative min-h-0 flex-1 overflow-hidden bg-[#0e0e0e] no-drag ${visible ? '' : 'hidden'}`}
+      className={`relative min-h-0 overflow-hidden bg-[#0e0e0e] no-drag ${docked ? 'shrink-0' : 'flex-1'} ${visible ? '' : 'hidden'}`}
+      style={docked ? { height } : undefined}
     >
       {mountedIds.map((id) => (
         <TerminalPane

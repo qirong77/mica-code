@@ -268,11 +268,22 @@ function useNotifications(activeId, onSessionId) {
 
 const tabClass =
   'no-drag relative flex min-w-19 items-center gap-1.5 px-2.5 text-xs hover:bg-white/[.04] hover:text-white/90'
+const DEFAULT_TERMINAL_PANEL_HEIGHT = 260
+const MIN_TERMINAL_PANEL_HEIGHT = 120
+const MIN_FILE_PANEL_HEIGHT = 140
+
+function savedTerminalPanelHeight() {
+  const value = Number(localStorage.getItem('mica.terminalPanelHeight'))
+  return Number.isFinite(value) && value >= MIN_TERMINAL_PANEL_HEIGHT
+    ? value
+    : DEFAULT_TERMINAL_PANEL_HEIGHT
+}
 
 export default function App() {
   const terminalRef = useRef(null)
   const filesRef = useRef(null)
   const branchButtonRef = useRef(null)
+  const contentRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [nodes, setNodes] = useState([])
@@ -282,6 +293,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [view, setView] = useState('terminal')
+  const [terminalPanelHeight, setTerminalPanelHeight] = useState(savedTerminalPanelHeight)
+  const terminalPanelHeightPreferenceRef = useRef(terminalPanelHeight)
+  const [terminalPanelOpen, setTerminalPanelOpen] = useState(true)
+  const [resizingTerminal, setResizingTerminal] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
   )
@@ -607,6 +622,77 @@ export default function App() {
       return !value
     })
   }
+  const clampTerminalPanelHeight = useCallback((height) => {
+    const available = contentRef.current?.clientHeight || window.innerHeight
+    return Math.round(
+      Math.min(
+        Math.max(MIN_TERMINAL_PANEL_HEIGHT, available - MIN_FILE_PANEL_HEIGHT),
+        Math.max(MIN_TERMINAL_PANEL_HEIGHT, height)
+      )
+    )
+  }, [])
+  const resizeTerminalPanel = useCallback(
+    (height) => {
+      const next = clampTerminalPanelHeight(height)
+      terminalPanelHeightPreferenceRef.current = next
+      setTerminalPanelHeight(next)
+      localStorage.setItem('mica.terminalPanelHeight', String(next))
+    },
+    [clampTerminalPanelHeight]
+  )
+  const startTerminalResize = useCallback(
+    (event) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      setResizingTerminal(true)
+      document.body.classList.add('is-resizing-terminal')
+
+      const onMove = (moveEvent) => {
+        const bottom = contentRef.current?.getBoundingClientRect().bottom
+        if (bottom != null) resizeTerminalPanel(bottom - moveEvent.clientY)
+      }
+      const finish = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', finish)
+        window.removeEventListener('pointercancel', finish)
+        document.body.classList.remove('is-resizing-terminal')
+        setResizingTerminal(false)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', finish)
+      window.addEventListener('pointercancel', finish)
+    },
+    [resizeTerminalPanel]
+  )
+  useEffect(() => {
+    if (view !== 'files') return undefined
+    const fitPanel = () => {
+      setTerminalPanelHeight(clampTerminalPanelHeight(terminalPanelHeightPreferenceRef.current))
+    }
+    fitPanel()
+    window.addEventListener('resize', fitPanel)
+    return () => window.removeEventListener('resize', fitPanel)
+  }, [clampTerminalPanelHeight, view])
+  useEffect(() => {
+    const toggleTerminalPanel = (event) => {
+      if (
+        view !== 'files' ||
+        resizingTerminal ||
+        event.repeat ||
+        !event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.code !== 'Backquote'
+      )
+        return
+      event.preventDefault()
+      event.stopPropagation()
+      setTerminalPanelOpen((open) => !open)
+    }
+    window.addEventListener('keydown', toggleTerminalPanel, true)
+    return () => window.removeEventListener('keydown', toggleTerminalPanel, true)
+  }, [resizingTerminal, view])
 
   if (!ready)
     return (
@@ -726,26 +812,52 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <TerminalHost
-            ref={terminalRef}
-            nodes={terminalNodes}
-            activeId={activeId}
-            visible={view === 'terminal'}
-            sidebarCollapsed={sidebarCollapsed}
-            resolveCwd={terminalCwd}
-            onRead={(id, reason) => notifications.markRead(id, reason)}
-          />
-          <FilesView
-            ref={filesRef}
-            root={gitIsCurrent ? git.cwd : null}
-            visible={view === 'files'}
-          />
-          <GitView
-            cwd={gitIsCurrent ? git.cwd : null}
-            repository={repository}
-            loading={gitIsCurrent ? git.loading : true}
-            visible={view === 'git-compare'}
-          />
+          <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <FilesView
+              ref={filesRef}
+              root={gitIsCurrent ? git.cwd : null}
+              visible={view === 'files'}
+            />
+            <GitView
+              cwd={gitIsCurrent ? git.cwd : null}
+              repository={repository}
+              loading={gitIsCurrent ? git.loading : true}
+              visible={view === 'git-compare'}
+            />
+            {view === 'files' && terminalPanelOpen && (
+              <div
+                className="terminal-panel-resizer z-20 h-1.5 shrink-0 cursor-row-resize no-drag"
+                role="separator"
+                aria-label="调整终端高度"
+                aria-orientation="horizontal"
+                aria-valuemin={MIN_TERMINAL_PANEL_HEIGHT}
+                aria-valuemax={Math.max(
+                  MIN_TERMINAL_PANEL_HEIGHT,
+                  (contentRef.current?.clientHeight || window.innerHeight) - MIN_FILE_PANEL_HEIGHT
+                )}
+                aria-valuenow={terminalPanelHeight}
+                data-resizing={resizingTerminal}
+                tabIndex={0}
+                onPointerDown={startTerminalResize}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                  event.preventDefault()
+                  resizeTerminalPanel(terminalPanelHeight + (event.key === 'ArrowUp' ? 20 : -20))
+                }}
+              />
+            )}
+            <TerminalHost
+              ref={terminalRef}
+              nodes={terminalNodes}
+              activeId={activeId}
+              visible={view === 'terminal' || (view === 'files' && terminalPanelOpen)}
+              docked={view === 'files'}
+              height={terminalPanelHeight}
+              sidebarCollapsed={sidebarCollapsed}
+              resolveCwd={terminalCwd}
+              onRead={(id, reason) => notifications.markRead(id, reason)}
+            />
+          </div>
           {!activeId && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">
               {error || '选择或新建一个终端会话'}

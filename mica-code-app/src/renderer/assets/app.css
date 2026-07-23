@@ -108,6 +108,27 @@ body.is-resizing {
   cursor: col-resize;
   user-select: none;
 }
+.terminal-panel-resizer {
+  position: relative;
+  touch-action: none;
+  background: #0e0e0e;
+}
+.terminal-panel-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 2px 0 auto;
+  height: 1px;
+  background: rgb(255 255 255 / 10%);
+}
+.terminal-panel-resizer:hover::after,
+.terminal-panel-resizer:focus-visible::after,
+.terminal-panel-resizer[data-resizing='true']::after {
+  background: #5aa7e8;
+}
+body.is-resizing-terminal {
+  cursor: row-resize;
+  user-select: none;
+}
 .monaco-editor .scroll-decoration {
   box-shadow: none !important;
 }
