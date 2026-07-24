@@ -5,6 +5,7 @@ export type TerminalInputQueueMode = 'after_iteration' | 'after_turn';
 export type TerminalInputSubmitOptions = {
   queueMode?: TerminalInputQueueMode;
   displayText?: string;
+  bashMode?: boolean;
 };
 
 export interface TerminalFileMentionItem {

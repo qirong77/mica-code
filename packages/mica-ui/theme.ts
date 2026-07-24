@@ -32,6 +32,7 @@ export const themeColors = {
   promptBorderCommand: '#26C6DA',
   promptBorderQueue: '#C9A227',
   promptBorderPlugin: '#8AB4F8',
+  promptBorderBash: '#B388FF',
   promptBorderDisabled: '#555555',
   statusRunning: '#9d9d9d',
   statusInfo: '#26C6DA',

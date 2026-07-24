@@ -817,6 +817,8 @@ export default function App() {
               ref={filesRef}
               root={gitIsCurrent ? git.cwd : null}
               visible={view === 'files'}
+              askText={askText}
+              onCornerResizeStart={terminalPanelOpen ? startTerminalResize : null}
             />
             <GitView
               cwd={gitIsCurrent ? git.cwd : null}

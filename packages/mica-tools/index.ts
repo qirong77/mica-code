@@ -43,6 +43,7 @@ export const micaTools = {
 };
 
 export { MicaTool } from './MicaTool.js';
+export { ToolRunShell } from './ToolRunShell.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
@@ -56,9 +57,11 @@ export type {
   ToolResultTextBlock,
 } from './types.js';
 export {
+  cleanBackgroundTaskOutput,
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
   readBackgroundTaskOutput,
+  killBackgroundTask,
   terminateCurrentBackgroundTasks,
 } from './ToolRunShellBackground.js';
 export type { BackgroundTaskMeta, BackgroundTaskStatus } from './ToolRunShellBackground.js';

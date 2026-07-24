@@ -15,6 +15,7 @@ import {
 import crypto from 'crypto';
 import { tmpdir } from 'os';
 import path from 'path';
+import stripAnsi from 'strip-ansi';
 import { formatSize } from './utils/outputLimits.js';
 
 export const MAX_BACKGROUND_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -314,6 +315,20 @@ export function readBackgroundTaskOutput(
   } finally {
     closeSync(fd);
   }
+}
+
+/** Remove mica's process bookkeeping while preserving the command's original ANSI output. */
+export function cleanBackgroundTaskOutput(content: string): string {
+  const spawnedMarker = '[mica background task spawned]';
+  const spawnedAt = content.indexOf(spawnedMarker);
+  let output = spawnedAt >= 0 ? content.slice(spawnedAt + spawnedMarker.length) : content;
+  output = output.replace(/^\r?\npid:.*\r?\n\r?\n/u, '');
+  output = output.replace(/\r?\n?\[mica background task exited\]\r?\n[\s\S]*$/u, '');
+  output = output.replace(
+    /\r?\n?\[mica background task kill requested\]\r?\nrequested_at:.*\r?\nsignal:.*\r?\n?/gu,
+    '\n',
+  );
+  return stripAnsi(output).trim();
 }
 
 export async function killBackgroundTask(

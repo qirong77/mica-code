@@ -30,6 +30,7 @@ interface YogaNodeLike {
 
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
 const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送';
+const BASH_MODE_TIP = 'bash · Enter 后台执行';
 
 export function hasRunningSubagent(tasks: readonly MicaUiSubagentTaskItem[]): boolean {
   return tasks.some((task) => task.status === 'running');
@@ -49,6 +50,7 @@ function mentionPath(path: string): string {
 function TerminalInput() {
   const [cursorOffset, setCursorOffset] = useState(0);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isBashMode, setIsBashMode] = useState(false);
   const terminalSize = useTerminalSize();
   const role = useScheduleState(input.role);
   const rolePrefixWidth = role === 'default' ? 0 : stringWidth(role) + 1;
@@ -113,7 +115,7 @@ function TerminalInput() {
       ? selectedQuickCommand.insertText
       : undefined;
   const fileMention =
-    !isCommandInput && !hasActiveInputPlugin && input.hasFileMentionProvider()
+    !isCommandInput && !isBashMode && !hasActiveInputPlugin && input.hasFileMentionProvider()
       ? activeFileMention(localText, cursorOffset)
       : null;
 
@@ -201,14 +203,16 @@ function TerminalInput() {
     !inputDisabled &&
     !hasActiveInputPlugin &&
     !isCommandInput &&
+    !isBashMode &&
     !dropdownVisible &&
     localText.trim().length > 0 &&
     cursorOffset === localText.length;
 
   const submitValue = useCallback((value: string, options?: TerminalInputSubmitOptions) => {
     const trimmed = value.trim();
-    micaConfig.inputHistory.append(trimmed);
+    micaConfig.inputHistory.append(options?.bashMode ? `!${trimmed}` : trimmed);
     setHistoryIndex(-1);
+    setIsBashMode(false);
     input.text.set('');
     setLocalText('');
     setCursorOffset(0);
@@ -357,6 +361,7 @@ function TerminalInput() {
 
     if (key.escape) {
       if (activePluginUIs.filter((x) => x.onInput).length === 0) {
+        setIsBashMode(false);
         setLocalText('');
         setCursorOffset(0);
         input.text.set('');
@@ -370,9 +375,9 @@ function TerminalInput() {
       if (!value.trim() || input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || hasActiveInputPlugin)
         return;
       if (isAgentRunning && currentPendingInputs.length > 0) return;
-      submitValue(value);
+      submitValue(value, isBashMode ? { bashMode: true } : undefined);
     },
-    [currentPendingInputs.length, hasActiveInputPlugin, isAgentRunning, submitValue],
+    [currentPendingInputs.length, hasActiveInputPlugin, isAgentRunning, isBashMode, submitValue],
   );
 
   const onExit = useCallback(() => {
@@ -381,15 +386,21 @@ function TerminalInput() {
 
   const handleChange = useCallback(
     (value: string) => {
-      setLocalText(value);
-      input.text.set(value);
-      for (const ui of activePluginUIs) {
-        if (ui.onTextChange?.(value)) return;
+      const entersBashMode = !isBashMode && value.startsWith('!');
+      const nextValue = entersBashMode ? value.slice(1) : value;
+      if (entersBashMode) {
+        setIsBashMode(true);
+        setCursorOffset(Math.max(0, cursorOffset - 1));
       }
-      if (value.startsWith('/') && value.length >= 1) DropDownUI.quickCommand.show(value.slice(1));
+      setLocalText(nextValue);
+      input.text.set(nextValue);
+      for (const ui of activePluginUIs) {
+        if (ui.onTextChange?.(nextValue)) return;
+      }
+      if (nextValue.startsWith('/') && nextValue.length >= 1) DropDownUI.quickCommand.show(nextValue.slice(1));
       else DropDownUI.quickCommand.hide();
     },
-    [activePluginUIs],
+    [activePluginUIs, cursorOffset, isBashMode],
   );
 
   const shouldIgnoreTextInput = useCallback(
@@ -408,9 +419,12 @@ function TerminalInput() {
     if (newIndex !== historyIndex) {
       setHistoryIndex(newIndex);
       const historyValue = history[history.length - 1 - newIndex]!;
-      setLocalText(historyValue);
-      setCursorOffset(historyValue.length);
-      input.text.set(historyValue);
+      const bashHistory = historyValue.startsWith('!');
+      const nextValue = bashHistory ? historyValue.slice(1) : historyValue;
+      setIsBashMode(bashHistory);
+      setLocalText(nextValue);
+      setCursorOffset(nextValue.length);
+      input.text.set(nextValue);
     }
   }, [historyIndex, preserveInputOnPluginHandle]);
 
@@ -422,11 +436,15 @@ function TerminalInput() {
       setHistoryIndex(newIndex);
       const historyValue = history[history.length - 1 - newIndex];
       if (!historyValue) return;
-      setLocalText(historyValue);
-      setCursorOffset(historyValue.length);
-      input.text.set(historyValue);
+      const bashHistory = historyValue.startsWith('!');
+      const nextValue = bashHistory ? historyValue.slice(1) : historyValue;
+      setIsBashMode(bashHistory);
+      setLocalText(nextValue);
+      setCursorOffset(nextValue.length);
+      input.text.set(nextValue);
     } else if (historyIndex === 0) {
       setHistoryIndex(-1);
+      setIsBashMode(false);
       setLocalText('');
       setCursorOffset(0);
       input.text.set('');
@@ -435,14 +453,16 @@ function TerminalInput() {
 
   const frameMode: PromptFrameMode = inputDisabled
     ? 'disabled'
-    : quickCommandVisible || isCommandInput
-      ? 'command'
-      : hasActiveInputPlugin
-        ? 'plugin'
-        : showQueueShortcutTip
-          ? 'queue'
-          : 'default';
-  const frameLabel = frameMode === 'queue' ? QUEUE_SHORTCUT_TIP : '';
+    : isBashMode
+      ? 'bash'
+      : quickCommandVisible || isCommandInput
+        ? 'command'
+        : hasActiveInputPlugin
+          ? 'plugin'
+          : showQueueShortcutTip
+            ? 'queue'
+            : 'default';
+  const frameLabel = frameMode === 'queue' ? QUEUE_SHORTCUT_TIP : frameMode === 'bash' ? BASH_MODE_TIP : '';
 
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>

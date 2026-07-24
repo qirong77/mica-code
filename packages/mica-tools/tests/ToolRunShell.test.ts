@@ -5,7 +5,12 @@ import { dirname } from 'node:path';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ToolRunShell } from '../ToolRunShell.js';
-import { getBackgroundTaskDir, listBackgroundTasks, waitForBackgroundSpawn } from '../ToolRunShellBackground.js';
+import {
+  cleanBackgroundTaskOutput,
+  getBackgroundTaskDir,
+  listBackgroundTasks,
+  waitForBackgroundSpawn,
+} from '../ToolRunShellBackground.js';
 import { ToolBackgroundTasks } from '../ToolBackgroundTasks.js';
 import { ToolReadTaskOutput } from '../ToolReadTaskOutput.js';
 import { ToolKillTask } from '../ToolKillTask.js';
@@ -47,6 +52,26 @@ async function waitForFileContains(filePath: string, text: string): Promise<stri
   }
   return content;
 }
+
+describe('cleanBackgroundTaskOutput', () => {
+  it('returns plain command output without lifecycle metadata', () => {
+    const content = [
+      '[mica background task]',
+      'id: abcdef123456',
+      '',
+      '[mica background task spawned]',
+      'pid: 42',
+      '',
+      '\u001b[32mcolored output\u001b[39m',
+      '',
+      '[mica background task exited]',
+      'exit_code: 0',
+      '',
+    ].join('\n');
+
+    expect(cleanBackgroundTaskOutput(content)).toBe('colored output');
+  });
+});
 
 describe('ToolRunShell', () => {
   it('returns structured metadata and separates stdout from stderr', async () => {

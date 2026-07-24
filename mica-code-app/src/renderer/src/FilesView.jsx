@@ -225,7 +225,10 @@ function FileTreeRows({
   })
 }
 
-export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
+export const FilesView = forwardRef(function FilesView(
+  { root, visible, askText, onCornerResizeStart },
+  ref
+) {
   const viewRef = useRef(null)
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
@@ -611,7 +614,7 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
         }
         if (action === 'new-file' || action === 'new-directory') {
           const kind = action === 'new-file' ? '文件' : '文件夹'
-          const name = window.prompt(`新建${kind}名称`)
+          const name = await askText(`新建${kind}`, '', `请输入${kind}名称`)
           if (!name?.trim()) return
           const result = await window.mica.files.create(
             node.path,
@@ -624,7 +627,7 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
           return
         }
         if (action === 'rename') {
-          const name = window.prompt('重命名', node.name)
+          const name = await askText('重命名', node.name, '请输入新名称')
           if (!name?.trim() || name.trim() === node.name) return
           if (!closeTabsUnder(node.path)) return
           await window.mica.files.rename(node.path, name)
@@ -649,7 +652,7 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
         showMessage(`操作失败：${error?.message || error}`, true, true)
       }
     },
-    [closeTabsUnder, openFile, refresh, showMessage, treeRef]
+    [askText, closeTabsUnder, openFile, refresh, showMessage, treeRef]
   )
 
   const openContextMenu = useCallback((event, node) => {
@@ -898,7 +901,7 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
   return (
     <section
       ref={viewRef}
-      className={`min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
+      className={`relative min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <aside
         className="flex min-h-0 shrink-0 flex-col bg-[#111]"
@@ -1010,6 +1013,22 @@ export const FilesView = forwardRef(function FilesView({ root, visible }, ref) {
         aria-valuenow={width}
         tabIndex={0}
       />
+      {onCornerResizeStart && (
+        <div
+          className="pane-corner-resizer absolute z-30"
+          style={{ left: width + 2.5, top: '100%' }}
+          title="同时调整文件目录宽度和终端高度"
+          aria-hidden="true"
+          data-resizing={separatorProps['data-resizing']}
+          onPointerDown={(event) => {
+            separatorProps.onPointerDown(event)
+            onCornerResizeStart(event)
+          }}
+          onPointerMove={separatorProps.onPointerMove}
+          onPointerUp={separatorProps.onPointerUp}
+          onPointerCancel={separatorProps.onPointerCancel}
+        />
+      )}
       <section
         id="file-editor-panel"
         role="tabpanel"

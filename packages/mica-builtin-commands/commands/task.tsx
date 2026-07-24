@@ -3,7 +3,9 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
+  cleanBackgroundTaskOutput,
   getBackgroundTaskOutputSize,
+  killBackgroundTask,
   listBackgroundTasks,
   readBackgroundTaskOutput,
   type BackgroundTaskMeta,
@@ -148,7 +150,9 @@ function showTaskPanel(services: CommandRuntimeServices) {
         title={`tasks (${items.length})`}
         paddingX={0}
         footer={
-          <micaUi.KeyHints hints={['type to search', '↑↓ navigate', '↵ switch session / open task', 'esc close']} />
+          <micaUi.KeyHints
+            hints={['type to search', '↑↓ navigate', '↵ switch session / open task', 'x stop shell', 'esc close']}
+          />
         }
       >
         <micaUi.SelectList
@@ -224,6 +228,14 @@ function showTaskPanel(services: CommandRuntimeServices) {
         return true;
       }
 
+      if (_input.toLowerCase() === 'x') {
+        const selected = items[clampIndex(state.selectedIdx, items.length)];
+        if (selected?.kind === 'background') {
+          void stopSelectedBackgroundTask(services, selected.taskId, backgroundTasksAtom, stateAtom);
+          return true;
+        }
+      }
+
       return false;
     },
     onTextChange: (value) => {
@@ -232,6 +244,30 @@ function showTaskPanel(services: CommandRuntimeServices) {
       return true;
     },
   });
+}
+
+async function stopSelectedBackgroundTask(
+  services: CommandRuntimeServices,
+  taskId: string,
+  backgroundTasksAtom: ReturnType<typeof atom<MicaUiBackgroundTaskItem[]>>,
+  stateAtom: ReturnType<typeof atom<TaskPanelState>>,
+): Promise<void> {
+  const before = loadTaskMeta(taskId);
+  if (!before) return;
+  const result = await killBackgroundTask(taskId, 'SIGTERM', 1500);
+  const task = result.meta ?? loadTaskMeta(taskId) ?? before;
+  const output = cleanBackgroundTaskOutput(
+    readBackgroundTaskOutput(task, {
+      maxBytes: DETAIL_OUTPUT_BYTES,
+      tailBytes: DETAIL_OUTPUT_BYTES,
+    }).content,
+  );
+  services.showNotice(`$ ${task.command}\n\n${output || result.message}`, services.getCurrentAgentSessionId(), {
+    command: `! ${task.command} · ${task.id}`,
+    status: result.ok ? 'warning' : 'error',
+  });
+  backgroundTasksAtom.set(loadBackgroundTasks());
+  stateAtom.set({ ...stateAtom.get(), selectedIdx: 0 });
 }
 
 function BackgroundTaskDetail({

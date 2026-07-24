@@ -2,8 +2,11 @@ import { calculateCachedTokenRate, type AgentUsageRecord } from '@packages/mica-
 import type { Disposable } from '@packages/mica-common/index.js';
 import { micaUi, type MicaUiBackgroundTaskItem, type MicaUiSubagentTaskItem } from '@packages/mica-ui/index.js';
 import {
+  cleanBackgroundTaskOutput,
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
+  readBackgroundTaskOutput,
+  ToolRunShell,
   type BackgroundTaskMeta,
 } from '@packages/mica-tools/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
@@ -19,6 +22,7 @@ import type { LocalRuntimeController } from './LocalRuntimeController.js';
 
 const MAX_AGENT_TURN_LOG_ITEMS = 120;
 const BACKGROUND_TASK_SYNC_INTERVAL_MS = 1000;
+const BASH_NOTICE_OUTPUT_BYTES = 40_000;
 
 export class MicaUiRuntimeBridge {
   private readonly toolLogs = new Map<AgentRuntime, ToolLogController>();
@@ -28,6 +32,8 @@ export class MicaUiRuntimeBridge {
   private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
   private readonly bridgeDisposers: Array<Disposable | (() => void) | undefined> = [];
   private backgroundTaskSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly bashTaskSessions = new Map<string, string>();
+  private readonly bashShell = new ToolRunShell();
 
   constructor(
     private agent: AgentRuntime,
@@ -131,6 +137,10 @@ export class MicaUiRuntimeBridge {
 
     this.bridgeDisposers.push(
       micaUi.terminalInput.onSubmit((text, options) => {
+        if (options?.bashMode) {
+          void this.runBashCommand(text.trim());
+          return;
+        }
         void this.runtime.submit(text, { queueMode: options?.queueMode, displayText: options?.displayText });
       }),
     );
@@ -183,11 +193,96 @@ export class MicaUiRuntimeBridge {
   }
 
   syncBackgroundTaskItems(): void {
+    const tasks = listBackgroundTasks({ status: 'all' });
     micaUi.panels.setBackgroundTaskItems(
-      listBackgroundTasks({ status: 'all' })
+      tasks
         .filter((task) => !task.agent_owner_id || task.agent_owner_id === this.agent.taskOwnerId)
         .map(toUiBackgroundTask),
     );
+    this.syncBashNotices(tasks);
+  }
+
+  private async runBashCommand(command: string): Promise<void> {
+    const session = this.agentSessions.current();
+    if (!command) {
+      this.upsertBashNotice(session.id, '命令不能为空。', '! bash', 'error');
+      return;
+    }
+    const result = await this.bashShell.execute(
+      { command, cwd: process.cwd(), run_in_background: true },
+      { context: { agent: session.agent } },
+    );
+    const taskId = result.match(/id: ([a-f0-9]{12})/)?.[1];
+    if (!taskId) {
+      this.upsertBashNotice(session.id, `$ ${command}\n\n${result}`, `! ${command}`, 'error');
+      return;
+    }
+    this.bashTaskSessions.set(taskId, session.id);
+    this.upsertBashNotice(
+      session.id,
+      `$ ${command}\n\n命令正在后台执行（task ${taskId}）。`,
+      bashNoticeCommand(command, taskId),
+      'running',
+    );
+    this.syncBackgroundTaskItems();
+  }
+
+  private syncBashNotices(tasks: BackgroundTaskMeta[]): void {
+    for (const task of tasks) {
+      const sessionId = this.bashTaskSessions.get(task.id);
+      if (!sessionId) continue;
+      const isRunning = task.status === 'starting' || task.status === 'running';
+      const session = this.agentSessions.findById(sessionId);
+      const command = bashNoticeCommand(task.command, task.id);
+      const alreadyFinalized = session?.uiState.conversationMessages.some(
+        (item) => item.role === 'notice' && item.command === command && item.status !== 'running',
+      );
+      if (alreadyFinalized) {
+        this.bashTaskSessions.delete(task.id);
+        continue;
+      }
+      const output = readBackgroundTaskOutput(task, {
+        maxBytes: BASH_NOTICE_OUTPUT_BYTES,
+        tailBytes: BASH_NOTICE_OUTPUT_BYTES,
+      }).content;
+      const visibleOutput = cleanBackgroundTaskOutput(output);
+      const status = isRunning
+        ? 'running'
+        : task.status === 'finished' && (task.exit_code ?? 0) === 0
+          ? 'success'
+          : task.status === 'killed'
+            ? 'warning'
+            : 'error';
+      this.upsertBashNotice(
+        sessionId,
+        `$ ${task.command}\n\n${visibleOutput || (isRunning ? '等待输出…' : '(no output)')}`,
+        command,
+        status,
+        !isRunning,
+      );
+      if (!isRunning) this.bashTaskSessions.delete(task.id);
+    }
+  }
+
+  private upsertBashNotice(
+    sessionId: string,
+    content: string,
+    command: string,
+    status: 'running' | 'success' | 'warning' | 'error',
+    save = true,
+  ): void {
+    const session = this.agentSessions.findById(sessionId);
+    if (!session) return;
+    const message = { role: 'notice' as const, content, command, status };
+    const messages = [...session.uiState.conversationMessages];
+    const runningIndex = messages.findLastIndex(
+      (item) => item.role === 'notice' && item.command === command && item.status === 'running',
+    );
+    if (runningIndex >= 0) messages[runningIndex] = message;
+    else messages.push(message);
+    session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: messages });
+    if (this.agentSessions.current().id === sessionId) micaUi.conversation.setMessages(messages);
+    if (save) session.sessionController.saveCurrent({ allowEmpty: true });
   }
 
   syncSubagentTaskItems(): void {
@@ -354,6 +449,10 @@ export class MicaUiRuntimeBridge {
     this.backgroundTaskSyncTimer = setInterval(() => this.syncBackgroundTaskItems(), BACKGROUND_TASK_SYNC_INTERVAL_MS);
     this.backgroundTaskSyncTimer.unref?.();
   }
+}
+
+function bashNoticeCommand(command: string, taskId: string): string {
+  return `! ${command} · ${taskId}`;
 }
 
 function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem {

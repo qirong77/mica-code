@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 
-export type PromptFrameMode = 'default' | 'command' | 'queue' | 'plugin' | 'disabled';
+export type PromptFrameMode = 'default' | 'command' | 'bash' | 'queue' | 'plugin' | 'disabled';
 
 type BorderTextOptions = {
   content: string;
@@ -28,6 +28,11 @@ const PROMPT_FRAME_VISUAL: Record<PromptFrameMode, { borderColor: string; marker
     borderColor: themeColors.promptBorder,
     markerColor: themeColors.text,
     marker: '❯',
+  },
+  bash: {
+    borderColor: themeColors.promptBorderBash,
+    markerColor: themeColors.promptBorderBash,
+    marker: '!',
   },
   queue: {
     borderColor: themeColors.promptBorderQueue,

@@ -165,7 +165,11 @@ export const Conversation = (): React.ReactNode => {
             >
               <Text color={notice.color}>{formatNoticeTitle(notice.title, item.status)}</Text>
               <Text> </Text>
-              <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
+              {item.command?.startsWith('! ') ? (
+                <Text>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Text>
+              ) : (
+                <Markdown>{truncateMiddleText(item.text, MAX_NOTICE_CHARS)}</Markdown>
+              )}
             </MessageGutter>
           );
         }
