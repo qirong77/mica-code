@@ -89,6 +89,7 @@
 
 .pane-resizer {
   position: relative;
+  cursor: ew-resize;
   touch-action: none;
 }
 .pane-resizer::after {
@@ -101,59 +102,39 @@
 .pane-resizer:hover::after,
 .pane-resizer:focus-visible::after,
 .pane-resizer[data-resizing='true']::after {
-  background: rgb(255 255 255 / 50%);
+  background: #007fd4;
 }
 
 body.is-resizing {
-  cursor: col-resize;
+  cursor: ew-resize;
   user-select: none;
 }
 .terminal-panel-resizer {
   position: relative;
+  cursor: ns-resize;
   touch-action: none;
-  background: #0e0e0e;
+  border-block: 1px solid rgb(255 255 255 / 8%);
+  background: #191919;
 }
-.terminal-panel-resizer::after {
-  content: '';
-  position: absolute;
-  top: 1px;
-  left: 50%;
-  width: 40px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 28%);
-  transform: translateX(-50%);
-}
-.terminal-panel-resizer:hover::after,
-.terminal-panel-resizer:focus-visible::after,
-.terminal-panel-resizer[data-resizing='true']::after {
-  background: #5aa7e8;
+.terminal-panel-resizer:hover,
+.terminal-panel-resizer:focus-visible,
+.terminal-panel-resizer[data-resizing='true'] {
+  border-color: #007fd4;
+  background: #202020;
 }
 body.is-resizing-terminal {
-  cursor: row-resize;
+  cursor: ns-resize;
   user-select: none;
 }
 .pane-corner-resizer {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  cursor: nwse-resize;
+  width: 20px;
+  height: 20px;
+  cursor: all-scroll;
   touch-action: none;
   transform: translate(-50%, -50%);
 }
-.pane-corner-resizer::after {
-  content: '';
-  position: absolute;
-  inset: 5px;
-  border-right: 2px solid rgb(255 255 255 / 28%);
-  border-bottom: 2px solid rgb(255 255 255 / 28%);
-}
-.pane-corner-resizer:hover::after,
-.pane-corner-resizer[data-resizing='true']::after {
-  border-color: #5aa7e8;
-}
 body.is-resizing.is-resizing-terminal {
-  cursor: nwse-resize;
+  cursor: all-scroll;
 }
 .monaco-editor .scroll-decoration {
   box-shadow: none !important;

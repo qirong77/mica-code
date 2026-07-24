@@ -1005,7 +1005,7 @@ export const FilesView = forwardRef(function FilesView(
       )}
       <div
         {...separatorProps}
-        className="pane-resizer z-10 w-1.25 shrink-0 cursor-col-resize"
+        className="pane-resizer z-10 w-1.25 shrink-0"
         role="separator"
         aria-label="调整文件目录宽度"
         aria-orientation="vertical"

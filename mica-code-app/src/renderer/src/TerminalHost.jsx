@@ -12,6 +12,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { createFileLinkProvider, openWebLink } from './terminal-links'
+import { createSubmittedCommandTracker } from './terminal-input'
 import { useLatest } from './hooks'
 
 const terminalTheme = {
@@ -62,9 +63,10 @@ function interceptTerminalKey(event, id) {
   window.mica.terminal.write(id, data)
 }
 
-function TerminalPane({ id, active, onRegister, onRead }) {
+function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
   const hostRef = useRef(null)
   const onReadRef = useLatest(onRead)
+  const onExitCommandRef = useLatest(onExitCommand)
 
   useEffect(() => {
     const host = hostRef.current
@@ -91,7 +93,11 @@ function TerminalPane({ id, active, onRegister, onRead }) {
     term.open(host)
     term.registerLinkProvider(createFileLinkProvider(term, id, window.mica.platform))
 
+    const trackCommand = createSubmittedCommandTracker((command) => {
+      if (command === 'exit') onExitCommandRef.current(id)
+    })
     const input = term.onData((data) => {
+      trackCommand(data)
       window.mica.terminal.write(id, data)
       onReadRef.current(id, 'input')
     })
@@ -126,7 +132,7 @@ function TerminalPane({ id, active, onRegister, onRead }) {
       host.removeEventListener('pointerdown', pointer)
       term.dispose()
     }
-  }, [id, onReadRef, onRegister])
+  }, [id, onExitCommandRef, onReadRef, onRegister])
 
   return (
     <div
@@ -138,7 +144,17 @@ function TerminalPane({ id, active, onRegister, onRead }) {
 }
 
 export const TerminalHost = forwardRef(function TerminalHost(
-  { nodes, activeId, visible, docked = false, height, sidebarCollapsed, resolveCwd, onRead },
+  {
+    nodes,
+    activeId,
+    visible,
+    docked = false,
+    height,
+    sidebarCollapsed,
+    resolveCwd,
+    onRead,
+    onExitCommand
+  },
   ref
 ) {
   const hostRef = useRef(null)
@@ -369,6 +385,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
           active={id === activeId}
           onRegister={register}
           onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
+          onExitCommand={onExitCommand}
         />
       ))}
     </section>

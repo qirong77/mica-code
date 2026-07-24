@@ -374,6 +374,15 @@ export default function App() {
       )
     )
   }, [])
+  const clearSessionId = useCallback((id) => {
+    setNodes((items) =>
+      items.map((node) =>
+        node.id === id && node.type === 'terminal' && node.sessionId
+          ? { ...node, sessionId: null }
+          : node
+      )
+    )
+  }, [])
   const notifications = useNotifications(activeId, setSessionId)
 
   const refreshGit = useCallback(
@@ -828,7 +837,7 @@ export default function App() {
             />
             {view === 'files' && terminalPanelOpen && (
               <div
-                className="terminal-panel-resizer z-20 h-1.5 shrink-0 cursor-row-resize no-drag"
+                className="terminal-panel-resizer z-20 h-2.5 shrink-0 no-drag"
                 role="separator"
                 aria-label="调整终端高度"
                 aria-orientation="horizontal"
@@ -858,6 +867,7 @@ export default function App() {
               sidebarCollapsed={sidebarCollapsed}
               resolveCwd={terminalCwd}
               onRead={(id, reason) => notifications.markRead(id, reason)}
+              onExitCommand={clearSessionId}
             />
           </div>
           {!activeId && (
