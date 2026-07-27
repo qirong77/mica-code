@@ -120,11 +120,13 @@ export class SessionController {
       title: this.currentTitleOverride ?? persistedTitle ?? derivedTitle,
       titleSource: this.currentTitleOverride ? this.currentTitleSource : (existing?.titleSource ?? 'derived'),
       createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
+      updatedAt: existing?.updatedAt ?? now,
       cwd: process.cwd(),
       turnState: this.currentTurnState,
       snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
+    if (existing && sessionsEqual(existing, session)) return true;
+    session.updatedAt = now;
     this.store.save(session);
     return true;
   }
@@ -211,6 +213,10 @@ export class SessionController {
     if (hasConversation(snapshot.messages, conversationMessages)) return false;
     return this.store.delete(this.currentSessionId);
   }
+}
+
+function sessionsEqual(left: PersistedSession, right: PersistedSession): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function hasConversation(providerMessages: unknown[], conversationMessages: MicaUiConversationMessage[]): boolean {

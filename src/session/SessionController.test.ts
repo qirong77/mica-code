@@ -124,7 +124,7 @@ describe('SessionController', () => {
     const store: SessionStoreLike = {
       list: vi.fn(() => []),
       listRecent: vi.fn(() => []),
-      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      load: vi.fn((id: string) => saves.findLast((session) => session.id === id) ?? null),
       save: vi.fn((session: PersistedSession) => {
         saves.push(session);
       }),
@@ -143,6 +143,56 @@ describe('SessionController', () => {
 
     controller.saveCurrent({ turnState: 'completed' });
     expect(saves.at(-1)?.turnState).toBe('completed');
+  });
+
+  it('does not rewrite a resumed session when nothing changed', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const persisted: PersistedSession = {
+      version: 1,
+      id: 'resumed-session',
+      title: 'Existing conversation',
+      titleSource: 'derived',
+      createdAt: '2026-07-20T01:00:00.000Z',
+      updatedAt: '2026-07-20T02:00:00.000Z',
+      cwd: process.cwd(),
+      turnState: 'completed',
+      snapshot: {
+        providerId: 'openai',
+        protocol: 'openai_chat_completions',
+        model: 'test-model',
+        effort: 'none',
+        role: 'default',
+        messages: [{ role: 'user', content: 'Existing conversation' }],
+        conversationMessages: [{ role: 'user', content: 'Existing conversation' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    };
+    const save = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({ ...persisted.snapshot })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'Existing conversation' }]),
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        load: () => persisted,
+        save,
+        delete: () => false,
+      },
+      config: { apply: vi.fn() },
+      ui: { restore: vi.fn() },
+    });
+
+    expect(controller.resume('resumed-session').ok).toBe(true);
+    expect(controller.saveCurrent()).toBe(true);
+
+    expect(save).not.toHaveBeenCalled();
+    expect(persisted.updatedAt).toBe('2026-07-20T02:00:00.000Z');
   });
 
   it('ignores compact metadata messages when deriving the session title', async () => {
