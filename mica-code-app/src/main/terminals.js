@@ -276,14 +276,6 @@ function resolveCwd(cwd) {
   return home
 }
 
-function normalizeResumeSessionId(value) {
-  if (typeof value !== 'string') return null
-  const sessionId = value.trim()
-  if (!sessionId || sessionId.length > 200) return null
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(sessionId)) return null
-  return sessionId
-}
-
 function createPty(id, sender, options = {}) {
   const shell = options.shell || getDefaultShell()
   const shellArgs = getShellArgs(shell)
@@ -292,7 +284,6 @@ function createPty(id, sender, options = {}) {
   const cols = options.cols || 80
   const rows = options.rows || 24
   const usedFallback = !!requestedCwd && cwd !== requestedCwd
-  const resumeSessionId = normalizeResumeSessionId(options.resumeSessionId)
 
   const term = pty.spawn(shell, shellArgs, {
     name: 'xterm-256color',
@@ -312,13 +303,6 @@ function createPty(id, sender, options = {}) {
   const session = { id, term, sender, cwd }
   sessions.set(id, session)
   startProcessActivityMonitor(session)
-
-  if (resumeSessionId) {
-    const resumeCommand = `mica --resume ${resumeSessionId}`
-    setTimeout(() => {
-      if (sessions.get(id)?.term === term) term.write(`${resumeCommand}\r`)
-    }, 50)
-  }
 
   term.onData((data) => {
     updateSessionCwdFromOutput(session, data)
@@ -341,8 +325,7 @@ function createPty(id, sender, options = {}) {
     shell,
     cwd,
     requestedCwd: requestedCwd || null,
-    usedFallback,
-    resumedSessionId: resumeSessionId
+    usedFallback
   }
 }
 

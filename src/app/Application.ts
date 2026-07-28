@@ -55,6 +55,7 @@ export class Application {
   async start(): Promise<void> {
     const sessionStore = micaSession.createStore();
     let startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
+    const missingStartupSessionId = this.options.sessionId && !startupSession ? this.options.sessionId : null;
     seedStartupModelDisplay(startupSession);
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
@@ -62,9 +63,6 @@ export class Application {
     micaUi.terminalInput.setOnExitRequested((exitCode) => this.requestExit(exitCode));
 
     try {
-      if (this.options.sessionId && !startupSession) {
-        throw new Error(`Session not found: ${this.options.sessionId}`);
-      }
       const pluginPaths = createPluginPaths();
       validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
       setupModelEffortContext();
@@ -193,6 +191,8 @@ export class Application {
 
       if (resumed?.ok) {
         showPluginMessage(`Resumed: ${resumed.session.title}`, 4000);
+      } else if (missingStartupSessionId) {
+        showPluginMessage(`Session not found: ${missingStartupSessionId}; started a new session`, 7000);
       }
 
       void micaConfig.loadMissingProviderModels().then(() => {

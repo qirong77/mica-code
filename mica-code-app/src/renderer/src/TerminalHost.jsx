@@ -162,7 +162,6 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const [mountedIds, setMountedIds] = useState(() => (activeId ? [activeId] : []))
   const activeRef = useLatest(activeId)
   const visibleRef = useLatest(visible)
-  const nodesRef = useLatest(nodes)
   const resolveCwdRef = useLatest(resolveCwd)
   const onReadRef = useLatest(onRead)
   const frameRef = useRef(null)
@@ -240,11 +239,9 @@ export const TerminalHost = forwardRef(function TerminalHost(
           entry.fit.fit()
           dimensions = { cols: entry.term.cols, rows: entry.term.rows }
         }
-        const node = nodesRef.current.find((item) => item.id === id)
         entry.creating = window.mica.terminal.create({
           id,
           ...(resolveCwdRef.current(id) ? { cwd: resolveCwdRef.current(id) } : {}),
-          ...(node?.sessionId ? { resumeSessionId: node.sessionId } : {}),
           ...(dimensions?.cols && dimensions?.rows ? dimensions : {})
         })
         try {
@@ -258,7 +255,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
       }
       if (activeRef.current === id) scheduleFit({ focus })
     },
-    [activeRef, measurable, nodesRef, resolveCwdRef, scheduleFit]
+    [activeRef, measurable, resolveCwdRef, scheduleFit]
   )
 
   const register = useCallback(
