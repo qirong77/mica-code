@@ -4,6 +4,7 @@ import {
   FolderPlus,
   GitBranch,
   GitCompare,
+  NotebookPen,
   PanelLeft,
   Plus,
   SquareTerminal
@@ -11,6 +12,7 @@ import {
 import { BranchPicker } from './BranchPicker'
 import { FilesView } from './FilesView'
 import { GitView } from './GitView'
+import { NotesView } from './NotesView'
 import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
 import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
@@ -797,7 +799,8 @@ export default function App() {
             {[
               ['terminal', '终端', SquareTerminal],
               ['files', '文件夹', Folder],
-              ['git-compare', 'Git', GitCompare]
+              ['git-compare', 'Git', GitCompare],
+              ['notes', 'Notes', NotebookPen]
             ].map(([id, label, Icon]) => (
               <button
                 key={id}
@@ -835,6 +838,7 @@ export default function App() {
               loading={gitIsCurrent ? git.loading : true}
               visible={view === 'git-compare'}
             />
+            <NotesView visible={view === 'notes'} />
             {view === 'files' && terminalPanelOpen && (
               <div
                 className="terminal-panel-resizer z-20 h-2.5 shrink-0 no-drag"

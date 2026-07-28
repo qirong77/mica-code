@@ -115,8 +115,11 @@ export function SessionTree({
             className={`${rowClass} ${selected ? 'bg-white/[.075] text-white' : 'text-white/70'} ${drag?.id === node.id ? 'opacity-45' : ''} ${target === 'inside' ? 'ring-1 ring-inset ring-white/30' : ''}`}
             style={{ paddingLeft: 7 + depth * 14 }}
             title={node.cwd ? `${node.text} — ${node.cwd}` : node.text}
-            onClick={() => onSelect(node)}
-            onDoubleClick={() => (folder ? onToggle(node.id) : onStartEdit(node.id))}
+            onClick={() => {
+              onSelect(node)
+              if (folder) onToggle(node.id)
+            }}
+            onDoubleClick={() => !folder && onStartEdit(node.id)}
             onContextMenu={(event) => {
               event.preventDefault()
               const x = Math.min(event.clientX, window.innerWidth - 160)
