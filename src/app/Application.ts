@@ -54,7 +54,7 @@ export class Application {
 
   async start(): Promise<void> {
     const sessionStore = micaSession.createStore();
-    const startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
+    let startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     seedStartupModelDisplay(startupSession);
     this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
       exitOnCtrlC: false,
@@ -69,8 +69,9 @@ export class Application {
       validateConfigPlugin({ paths: pluginPaths, logger: pluginLogger });
       setupModelEffortContext();
       if (startupSession) {
-        await micaConfig.ensureModelRule(startupSession.snapshot.model);
-        applySessionConfig(startupSession.snapshot);
+        const snapshot = applySessionConfig(startupSession.snapshot);
+        startupSession = { ...startupSession, snapshot };
+        await micaConfig.ensureModelRule(snapshot.model);
       } else {
         await ensureInitialModelSelection();
         await micaConfig.ensureModelRule(micaConfig.get().model);

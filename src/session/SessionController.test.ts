@@ -30,6 +30,85 @@ afterAll(() => {
 });
 
 describe('SessionController', () => {
+  it('falls back to the active provider and model when a resumed session references removed config', async () => {
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { applySessionConfig } = await import('./SessionController.js');
+    micaConfig.update(() => ({
+      provider: 'available',
+      model: 'current-model',
+      effort: 'high',
+      contextWindowSize: 1000000,
+      providers: [
+        {
+          id: 'available',
+          api_base: 'https://example.com',
+          api_key: 'test-key',
+          protocol: 'openai_responses',
+          models: ['current-model'],
+        },
+      ],
+    }));
+
+    const resolved = applySessionConfig({
+      providerId: 'removed',
+      protocol: 'openai_chat_completions',
+      model: 'removed-model',
+      effort: 'medium',
+      role: 'default',
+      messages: [],
+      conversationMessages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        providerId: 'available',
+        protocol: 'openai_responses',
+        model: 'current-model',
+        effort: 'medium',
+      }),
+    );
+    expect(micaConfig.get()).toEqual(
+      expect.objectContaining({ provider: 'available', model: 'current-model', effort: 'medium' }),
+    );
+  });
+
+  it('falls back to an available model when a resumed session model was removed', async () => {
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { applySessionConfig } = await import('./SessionController.js');
+    micaConfig.update(() => ({
+      provider: 'available',
+      model: 'current-model',
+      effort: 'medium',
+      contextWindowSize: 1000000,
+      providers: [
+        {
+          id: 'available',
+          api_base: 'https://example.com',
+          api_key: 'test-key',
+          protocol: 'openai_responses',
+          models: ['current-model'],
+        },
+      ],
+    }));
+
+    const resolved = applySessionConfig({
+      providerId: 'available',
+      protocol: 'openai_responses',
+      model: 'removed-model',
+      effort: 'high',
+      role: 'default',
+      messages: [],
+      conversationMessages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+
+    expect(resolved.model).toBe('current-model');
+    expect(resolved.providerId).toBe('available');
+  });
+
   it('does not retain an empty session, including one created by rename', async () => {
     const { SessionController } = await import('./SessionController.js');
     let persisted: PersistedSession | null = null;

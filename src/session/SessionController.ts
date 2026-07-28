@@ -7,7 +7,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { MicaUiCommandStatus, MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-import { micaConfig } from '@packages/mica-config/index.js';
+import { micaConfig, providerSupportsModel } from '@packages/mica-config/index.js';
 import {
   micaSession,
   type PersistedRuntimeSnapshot,
@@ -32,7 +32,7 @@ export type SessionAgentAdapter = {
 };
 
 export type SessionConfigAdapter = {
-  apply(snapshot: PersistedRuntimeSnapshot): void;
+  apply(snapshot: PersistedRuntimeSnapshot): PersistedRuntimeSnapshot | void;
 };
 
 export type SessionUiAdapter = {
@@ -188,9 +188,9 @@ export class SessionController {
     if (session.id !== this.currentSessionId) this.discardCurrentIfEmpty();
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
     const restoredRole = resolveSnapshotRole(requestedRole);
-    this.config.apply(session.snapshot);
+    const resolvedSnapshot = this.config.apply(session.snapshot) ?? session.snapshot;
     this.agent.reloadConfig(false);
-    this.agent.loadSnapshot(fromPersistedSnapshot(session.snapshot, restoredRole));
+    this.agent.loadSnapshot(fromPersistedSnapshot(resolvedSnapshot, restoredRole));
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
@@ -391,21 +391,38 @@ function sanitizeConversationContent(value: unknown): MicaUiConversationMessage[
   return '';
 }
 
-export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): void {
+export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): PersistedRuntimeSnapshot {
+  let resolvedSnapshot = snapshot;
   micaConfig.update((config) => {
-    const provider = config.providers.find((item) => item.id === snapshot.providerId);
-    if (!provider) {
-      throw new Error(`Provider not found: ${snapshot.providerId}`);
-    }
-    const model = snapshot.model;
+    const snapshotProvider = config.providers.find((item) => item.id === snapshot.providerId);
+    const provider = snapshotProvider ?? config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+    if (!provider) return config;
+
+    const snapshotModelAvailable = providerSupportsModel(provider, snapshot.model);
+    const model =
+      snapshotProvider && snapshotModelAvailable
+        ? snapshot.model
+        : provider.id === config.provider && providerSupportsModel(provider, config.model)
+          ? config.model
+          : (provider.models?.[0] ?? snapshot.model);
+    const effort =
+      provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort);
+    resolvedSnapshot = {
+      ...snapshot,
+      providerId: provider.id,
+      protocol: provider.protocol,
+      model,
+      effort,
+    };
     return {
       ...config,
       provider: provider.id,
       model,
-      effort: provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
+      effort,
       contextWindowSize: micaConfig.getModelRule(model).contextSize,
     };
   });
+  return resolvedSnapshot;
 }
 
 function deriveTitle(messages: MicaUiConversationMessage[]): string {
