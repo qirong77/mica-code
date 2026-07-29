@@ -4,10 +4,10 @@
 
 ## 主要能力
 
-- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/provider`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/diff`、`/commit`。
+- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/diff`、`/commit`。
 - 通过 `CommandHostService` 支持 `buildin-plugins` 中的 `/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/new`、`/rename`、`/resume`、`/rewind` 单文件插件。
 - 提供命令所需的服务类型与注入入口。
-- 支持带 UI 面板的命令，例如 `provider`、`resume`、`mcp`、`skills`、`task`。
+- 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
 - 导出 `cycleNextRole`，供输入框 `Shift+Tab` 快捷键循环切换 role。
 - 支持通过 `exclusive task` 执行耗时且会改上下文/文件的命令，避免用户并发切换配置导致状态抖动。

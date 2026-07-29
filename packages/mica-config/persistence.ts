@@ -1,22 +1,21 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import defaultConfig from './default.json';
 import type { PersistedMicaConfig } from './types.js';
+import { writeTextFileAtomic } from './atomicWrite.js';
 
 export function readPersistedConfig(configPath: string): PersistedMicaConfig {
   ensureConfigFile(configPath);
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8')) as PersistedMicaConfig;
-  } catch {
-    backupInvalidConfig(configPath);
-    writeDefaultConfig(configPath);
-    return defaultConfig as PersistedMicaConfig;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read config ${configPath}: ${detail}`);
   }
 }
 
 export function writePersistedConfig(configPath: string, config: PersistedMicaConfig) {
-  ensureConfigDir(configPath);
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  writeTextFileAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 function ensureConfigFile(configPath: string) {
@@ -31,13 +30,4 @@ function ensureConfigDir(configPath: string) {
 
 function writeDefaultConfig(configPath: string) {
   writePersistedConfig(configPath, defaultConfig as PersistedMicaConfig);
-}
-
-function backupInvalidConfig(configPath: string) {
-  try {
-    if (!existsSync(configPath)) return;
-    renameSync(configPath, `${configPath}.invalid-${Date.now()}`);
-  } catch {
-    // If the backup fails, still try to restore a usable default config.
-  }
 }

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { writeTextFileAtomic } from './atomicWrite.js';
 
 export const MICA_STORAGE_PATH = resolveMicaHomePath('storage.json');
 
@@ -30,13 +31,14 @@ export function readMicaStorage(): MicaStorageFile {
   if (!existsSync(MICA_STORAGE_PATH)) return { version: 1 };
   try {
     const parsed = JSON.parse(readFileSync(MICA_STORAGE_PATH, 'utf-8')) as unknown;
-    if (!isMicaStorageFile(parsed)) return { version: 1 };
+    if (!isMicaStorageFile(parsed)) throw new Error('invalid storage structure');
     return normalizeStorage({
       ...parsed,
       inputHistory: normalizeInputHistory(parsed.inputHistory ?? []),
     });
-  } catch {
-    return { version: 1 };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read storage ${MICA_STORAGE_PATH}: ${detail}`);
   }
 }
 
@@ -132,8 +134,7 @@ export function appendInputHistory(value: string): string[] {
 }
 
 function writeMicaStorage(storage: MicaStorageFile): void {
-  mkdirSync(dirname(MICA_STORAGE_PATH), { recursive: true });
-  writeFileSync(MICA_STORAGE_PATH, `${JSON.stringify(storage, null, 2)}\n`, 'utf-8');
+  writeTextFileAtomic(MICA_STORAGE_PATH, `${JSON.stringify(storage, null, 2)}\n`);
 }
 
 function normalizeStorage(storage: MicaStorageFile): MicaStorageFile {

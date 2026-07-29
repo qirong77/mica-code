@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -63,5 +63,13 @@ describe('mica storage runtime config', () => {
     expect(Object.keys(persisted.lastUsedByDirectory ?? {}).sort()).toEqual(
       [realpathSync(projectA), realpathSync(projectB)].sort(),
     );
+  });
+
+  it('does not replace invalid storage during a later update', () => {
+    const invalidStorage = '{"version": 1, "inputHistory": [';
+    writeFileSync(storageApi.MICA_STORAGE_PATH, invalidStorage, 'utf-8');
+
+    expect(() => storageApi.updateLastUsedConfig({ model: 'new-model' })).toThrow('Failed to read storage');
+    expect(readFileSync(storageApi.MICA_STORAGE_PATH, 'utf-8')).toBe(invalidStorage);
   });
 });

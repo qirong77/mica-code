@@ -231,6 +231,34 @@ describe('loadProviderModels', () => {
 
     expect(readFileSync(configApi.CONFIG_PATH, 'utf-8')).toBe(before);
   });
+
+  it('preserves a configured model that is absent from a dynamic catalog', async () => {
+    const provider = {
+      id: 'partial-catalog',
+      name: 'Partial Catalog',
+      api_base: 'https://example.com/v1',
+      api_key: 'test-key',
+      protocol: 'openai_chat_completions' as const,
+      get_model_url: 'https://example.com/v1/models',
+    };
+    configApi.updateConfig(() => ({
+      provider: provider.id,
+      model: 'configured-model',
+      effort: 'medium',
+      contextWindowSize: 256000,
+      providers: [provider],
+    }));
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ data: [{ id: 'catalog-model' }] }),
+      text: async () => '',
+    })) as unknown as typeof fetch;
+
+    await configApi.loadProviderModels(provider.id);
+
+    expect(configApi.getConfig().model).toBe('configured-model');
+    expect(configApi.getConfig().providers[0]?.models).toEqual(['configured-model', 'catalog-model']);
+  });
 });
 
 function baseConfig(): IMicaConfig {

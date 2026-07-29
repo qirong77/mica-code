@@ -31,20 +31,21 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
 
   const currentConfig = store.getConfig();
   if (currentConfig.provider === providerId) {
-    const model = models.includes(currentConfig.model) ? currentConfig.model : models[0]!;
+    const model = currentConfig.model || models[0]!;
     await ensureModelRule(model);
   }
 
   store.updateRuntimeConfig((config) => {
     const providers = config.providers.map((item) => {
       if (item.id !== providerId) return item;
+      const availableModels = config.provider === providerId && config.model ? [config.model, ...models] : models;
       return {
         ...item,
-        models,
+        models: [...new Set(availableModels)],
       };
     });
     const current = config.provider === providerId ? providers.find((item) => item.id === providerId) : null;
-    const model = current && !models.includes(config.model) ? models[0]! : config.model;
+    const model = current && !config.model ? models[0]! : config.model;
     return {
       ...config,
       providers,

@@ -30,7 +30,6 @@ function createBuiltInCommands(
     activeAgent,
     activeSessionController,
     commands: [
-      micaBuiltinCommands.createProviderCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createModelCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createEffortCommand(activeAgent, activeSessionController, services),
       micaBuiltinCommands.createRoleCommand(activeAgent, activeSessionController, services),

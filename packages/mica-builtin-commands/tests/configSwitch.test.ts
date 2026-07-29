@@ -33,7 +33,6 @@ afterAll(() => {
 
 describe('config switch commands', () => {
   it.each([
-    ['provider', 'Agent is busy; wait or abort before switching provider'],
     ['model', 'Agent is busy; wait or abort before switching model'],
     ['effort', 'Agent is busy; wait or abort before switching effort'],
   ] as const)('does not open the %s selector while the agent is busy', async (commandName, message) => {
@@ -94,7 +93,7 @@ describe('config switch commands', () => {
       expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
-      expect(services.showMessage).toHaveBeenLastCalledWith('Model: gpt-5.5', undefined);
+      expect(services.showMessage).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined);
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
       const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
         lastUsedByDirectory?: Record<string, Record<string, unknown>>;
@@ -115,7 +114,40 @@ describe('config switch commands', () => {
     }
   });
 
-  it('normalizes effort and context defaults when switching provider', async () => {
+  it('opens immediately when a dynamic provider catalog has not loaded yet', async () => {
+    const provider = {
+      id: 'dynamic',
+      name: 'Dynamic Provider',
+      api_base: 'https://example.com/v1',
+      api_key: 'test-key',
+      protocol: 'openai_chat_completions' as const,
+      get_model_url: 'https://example.com/v1/models',
+    };
+    micaConfig.update(() => ({
+      provider: provider.id,
+      model: 'current-model',
+      effort: 'low',
+      contextWindowSize: 256000,
+      providers: [provider],
+    }));
+    const services = makeServices();
+    const agent = makeAgent([], {
+      provider: { ...provider, contextWindowSize: 256000 },
+      model: 'current-model',
+      effort: 'low',
+    });
+
+    try {
+      const command = await makeConfigSwitchCommand('model', agent, makeSession(), services);
+      command.action();
+
+      expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-model');
+    } finally {
+      micaUi.panels.clearPluginUIs();
+    }
+  });
+
+  it('shows provider models together and switches provider and model in one selection', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const openai = {
       id: 'openai',
@@ -149,29 +181,23 @@ describe('config switch commands', () => {
     const session = makeSession();
 
     try {
-      const command = await makeConfigSwitchCommand('provider', agent, session, services);
+      const command = await makeConfigSwitchCommand('model', agent, session, services);
       await command.action();
       const panel = micaUi.panels.pluginUIs.get()[0];
-      expect(panel?.id).toBe('select-provider');
+      expect(panel?.id).toBe('select-model');
 
-      panel?.onInput?.('', { downArrow: true });
+      expect(panel?.onTextChange?.('DeepSeek')).toBe(true);
       panel?.onInput?.('', { return: true });
       await waitForSelectCommand();
 
-      let activePanel = micaUi.panels.pluginUIs.get()[0];
-      expect(activePanel?.id).toBe('select-model');
-      expect(micaConfig.get()).toMatchObject({
-        provider: 'deepseek',
-        model: 'deepseek-v4-pro',
-        effort: 'low',
-        contextWindowSize: 1000000,
-      });
-
-      activePanel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
-
-      activePanel = micaUi.panels.pluginUIs.get()[0];
+      const activePanel = micaUi.panels.pluginUIs.get()[0];
       expect(activePanel?.id).toBe('select-effort');
+      expect(micaConfig.get()).toMatchObject({
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro',
+        effort: 'low',
+        contextWindowSize: 1000000,
+      });
 
       activePanel?.onInput?.('', { return: true });
       await waitForSelectCommand();
@@ -182,7 +208,7 @@ describe('config switch commands', () => {
         effort: 'low',
         contextWindowSize: 1000000,
       });
-      expect(services.showMessage).toHaveBeenLastCalledWith('Provider: deepseek', 3000);
+      expect(services.showMessage).toHaveBeenLastCalledWith('Model: DeepSeek / deepseek-v4-pro', undefined);
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -231,13 +257,13 @@ describe('config switch commands', () => {
       const panel = micaUi.panels.pluginUIs.get()[0];
       expect(panel?.id).toBe('select-model');
 
-      panel?.onInput?.('', { upArrow: true });
+      panel?.onInput?.('', { downArrow: true });
       panel?.onInput?.('', { return: true });
       await waitForSelectCommand();
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
-      expect(services.showMessage).toHaveBeenLastCalledWith('Model: gpt-5.5', undefined);
+      expect(services.showMessage).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined);
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -247,15 +273,11 @@ describe('config switch commands', () => {
 });
 
 async function makeConfigSwitchCommand(
-  commandName: 'provider' | 'model' | 'effort',
+  commandName: 'model' | 'effort',
   agent: CommandAgent,
   session: CommandSessionController,
   services: CommandRuntimeServices,
 ) {
-  if (commandName === 'provider') {
-    const { createProviderCommand } = await import('../commands/provider.js');
-    return createProviderCommand(agent, session, services);
-  }
   if (commandName === 'model') {
     const { createModelCommand } = await import('../commands/model.js');
     return createModelCommand(agent, session, services);

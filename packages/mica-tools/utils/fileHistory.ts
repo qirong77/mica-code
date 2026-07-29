@@ -3,7 +3,7 @@ import { basename, resolve } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
 
-const FILE_HISTORY_DIR = resolve(homedir(), '.mica', 'file-history');
+const FILE_HISTORY_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'file-history');
 
 function historyEntryDir(filePath: string): string {
   const resolvedPath = resolve(filePath);

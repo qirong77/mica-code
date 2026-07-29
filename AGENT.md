@@ -42,12 +42,12 @@ bun run format          # 格式化 README、AGENT、src、packages、scripts、
 bunx tsc --noEmit
 bunx prettier --check AGENT.md
 bunx prettier --write AGENT.md
-bun test src/app/adapters/LocalRuntimeController.test.ts
-bun test packages/mica-builtin-commands/tests/configSwitch.test.ts
+bun run test -- src/app/adapters/LocalRuntimeController.test.ts
+bun run test -- packages/mica-builtin-commands/tests/configSwitch.test.ts
 git diff --check
 ```
 
-不要在根目录直接运行不带路径的裸 `bun test`。根目录 `temp/` 可能包含外部项目、临时代码或缺依赖代码；项目级测试入口是 `bun run test`，局部测试可以显式传入文件路径。
+不要使用 Bun 自带的 `bun test` 运行项目测试；它不兼容测试中使用的部分 Vitest API。项目级测试入口是 `bun run test`，局部测试通过 `bun run test -- <测试文件>` 显式传入路径。
 
 ## 当前源码版图
 
@@ -258,7 +258,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `src/plugins/commands/index.ts` 把内置命令注册到 `CommandRegistry`，并同步给 `mica-ui` quick commands。
 - 命令实现不要直接依赖应用层单例。需要 runtime、session、agent、UI、MCP、日志等能力时，通过 `CommandRuntimeServices` 或 active proxy 注入。
 - 耗时且会修改上下文、文件、配置或 git 状态的命令应通过 runtime exclusive task 执行，防止用户并发发送对话或切换配置。
-- `/provider`、`/model`、`/effort` 必须在打开 selector 前检查 target agent busy 状态，并在选择时保留二次 guard。
+- `/model`、`/effort` 必须在打开 selector 前检查 target agent busy 状态，并在选择时保留二次 guard。
 - `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`status`、`context`、`agents`、`new`、`fork`、`exit`、`rename`、`task`。
 - exclusive task 期间额外允许的命令在 `ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS`，当前是 `status`、`task`、`agents`、`new`。
 
@@ -266,8 +266,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 - `/clear`：终止并移除当前 owner 的 subagent、丢弃待注入的 system queue，然后新开一个空 session；不清除原 session 文件内容。
 - `/resume`：恢复历史会话。
-- `/provider`：切换 AI 服务提供商。
-- `/model`：切换当前 provider 的模型。
+- `/model`：从包含 provider 信息的模型列表中切换 provider 和模型。
 - `/effort`：切换推理强度。
 - `/role`：切换当前 agent 的系统提示词；自定义文件来自 `~/.mica/role` 或 `$MICA_HOME/role`。输入框中也可使用 `Shift+Tab` 按列表顺序循环切换 role（agent busy 时拒绝，与 `/role` 一致）；当 agent 运行中且输入已进入 queue 快捷提示时，`Shift+Tab` 仍表示 after_iteration 排队发送。
 - `/status`：显示当前 provider/model/effort/role 状态。

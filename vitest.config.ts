@@ -38,6 +38,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     fileParallelism: false,
+    setupFiles: ['./test/setup.ts'],
     include: [
       'buildin-plugins/**/*.test.ts',
       'src/**/*.test.ts',
