@@ -1,12 +1,14 @@
 import { memo, useEffect, useState } from 'react';
 import type { MachineInfo, SessionSummary } from './api';
 import { formatRelative, formatStatus } from './format';
+import { appIcons } from './icons';
 
 type SidebarProps = {
   machines: MachineInfo[];
   sessionsByMachine: Map<string, SessionSummary[]>;
   selectedMachineId: string | null;
   selectedSessionId: string | null;
+  open: boolean;
   onSelectSession: (machineId: string, sessionId: string | null) => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -17,12 +19,16 @@ export const Sidebar = memo(function Sidebar({
   sessionsByMachine,
   selectedMachineId,
   selectedSessionId,
+  open,
   onSelectSession,
   onRefresh,
   refreshing,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
+  const RefreshIcon = appIcons.refresh;
+  const ChevronDownIcon = appIcons.chevronDown;
+  const ChevronRightIcon = appIcons.chevronRight;
 
   // 新出现的机器默认折叠（选中的除外）；选中会话时自动展开对应机器。
   useEffect(() => {
@@ -50,13 +56,13 @@ export const Sidebar = memo(function Sidebar({
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${open ? 'open' : ''}`}>
       <div className="sidebar-header">
         <div className="logo">
           Mica<span className="logo-accent">Sync</span>
         </div>
         <button className="icon-button" onClick={onRefresh} disabled={refreshing} title="刷新">
-          {refreshing ? '…' : '⟳'}
+          <RefreshIcon size={14} className={refreshing ? 'spin' : ''} />
         </button>
       </div>
       <div className="search-box">
@@ -80,7 +86,9 @@ export const Sidebar = memo(function Sidebar({
                 <span className="machine-meta">
                   {sessions.length} 会话 · {formatRelative(machine.lastSeen)}
                 </span>
-                <span className="chevron">{isCollapsed ? '▸' : '▾'}</span>
+                <span className="chevron">
+                  {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+                </span>
               </button>
               {!isCollapsed && (
                 <div className="session-list">

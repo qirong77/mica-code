@@ -49,6 +49,7 @@ body {
   flex-direction: column;
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
+  transition: transform 0.22s ease;
 }
 
 .sidebar-header {
@@ -259,6 +260,25 @@ body {
   gap: 10px;
 }
 
+.menu-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.menu-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 .conversation-title {
   font-size: 15px;
   margin: 0;
@@ -337,8 +357,6 @@ body {
 .messages-scroll {
   flex: 1;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column-reverse;
 }
 
 .messages {
@@ -389,6 +407,10 @@ body {
   font-size: 13px;
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.msg-avatar svg {
+  display: block;
 }
 
 .msg-content {
@@ -578,6 +600,10 @@ body {
   }
 }
 
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
 /* input */
 
 .input-area {
@@ -623,6 +649,10 @@ body {
 
 .send-button,
 .abort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: none;
   border-radius: 7px;
   padding: 8px 20px;
@@ -723,4 +753,84 @@ body {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ── mobile ── */
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    width: min(85vw, 320px);
+    min-width: 0;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .menu-button {
+    display: inline-flex;
+  }
+
+  .conversation-header {
+    padding: 10px 12px 8px;
+  }
+
+  .conversation-meta {
+    gap: 4px 10px;
+  }
+
+  .meta-item {
+    max-width: 38vw;
+  }
+
+  .messages {
+    padding: 12px 12px 6px;
+    gap: 12px;
+  }
+
+  .msg-bubble.user {
+    max-width: 85%;
+  }
+
+  .tool-args-preview {
+    display: none;
+  }
+
+  .input-area {
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .welcome-stats {
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .stat-card {
+    padding: 12px 16px;
+    min-width: 70px;
+  }
 }

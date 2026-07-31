@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { MachineInfo, StoredSession } from './api';
 import { formatTime } from './format';
+import { appIcons } from './icons';
 import { Markdown } from './Markdown';
 import type { UiMessage } from './render';
 
@@ -13,11 +14,24 @@ type ConversationProps = {
   connecting: boolean;
   onSend: (text: string) => void;
   onAbort: () => void;
+  onOpenSidebar: () => void;
 };
 
 const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessage, { kind: 'tool' }> }) {
   const [expanded, setExpanded] = useState(false);
-  const stateIcon = message.state === 'running' ? '⏳' : message.state === 'done' ? '✓' : '✗';
+  const LoaderIcon = appIcons.loader;
+  const CheckIcon = appIcons.check;
+  const XIcon = appIcons.x;
+  const ChevronDownIcon = appIcons.chevronDown;
+  const ChevronRightIcon = appIcons.chevronRight;
+  const stateIcon =
+    message.state === 'running' ? (
+      <LoaderIcon size={13} className="spin" />
+    ) : message.state === 'done' ? (
+      <CheckIcon size={13} />
+    ) : (
+      <XIcon size={13} />
+    );
   const stateClass = `tool-state ${message.state}`;
   let argsPreview = '';
   try {
@@ -36,7 +50,9 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
         <span className={stateClass}>{stateIcon}</span>
         <span className="tool-name">{message.name}</span>
         {argsPreview && <span className="tool-args-preview">{argsPreview}</span>}
-        <span className="tool-expand">{expanded ? '▾' : '▸'}</span>
+        <span className="tool-expand">
+          {expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+        </span>
       </div>
       {expanded && (
         <div className="tool-body">
@@ -68,9 +84,12 @@ const MessageItem = memo(function MessageItem({ message }: { message: UiMessage 
     );
   }
   if (message.kind === 'assistant') {
+    const BotIcon = appIcons.bot;
     return (
       <div className="msg-row assistant">
-        <div className="msg-avatar">M</div>
+        <div className="msg-avatar">
+          <BotIcon size={16} />
+        </div>
         <div className="msg-content">
           <Markdown text={message.text} />
         </div>
@@ -79,9 +98,12 @@ const MessageItem = memo(function MessageItem({ message }: { message: UiMessage 
   }
   if (message.kind === 'tool') return <ToolCard message={message} />;
   if (message.kind === 'thinking') {
+    const SparklesIcon = appIcons.sparkles;
     return (
       <div className="thinking-block">
-        <span className="thinking-icon">💭</span>
+        <span className="thinking-icon">
+          <SparklesIcon size={13} />
+        </span>
         <span>{message.text}</span>
       </div>
     );
@@ -102,9 +124,12 @@ export const Conversation = memo(function Conversation({
   connecting,
   onSend,
   onAbort,
+  onOpenSidebar,
 }: ConversationProps) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
   // 终端在跑同一 session（快照 turnState === 'running'），与 daemon 远程运行区分开。
   const localRunning = session.turnState === 'running';
@@ -113,6 +138,16 @@ export const Conversation = memo(function Conversation({
   useEffect(() => {
     if (!running && !localRunning) inputRef.current?.focus();
   }, [running, localRunning]);
+
+  // 消息流从上往下排列；初始加载完成或用户接近底部时自动滚到最新消息。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const loadedFresh = messages.length > 0 && prevCountRef.current === 0;
+    prevCountRef.current = messages.length;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (loadedFresh || nearBottom) el.scrollTop = el.scrollHeight;
+  }, [messages, running]);
 
   const send = () => {
     const text = draft.trim();
@@ -124,11 +159,17 @@ export const Conversation = memo(function Conversation({
   const snapshot = session.snapshot ?? {};
   const modelLabel = [snapshot.providerId, snapshot.model].filter(Boolean).join(' / ');
   const effortLabel = snapshot.effort && snapshot.effort !== 'none' ? snapshot.effort : undefined;
+  const MenuIcon = appIcons.menu;
+  const SendIcon = appIcons.send;
+  const SquareIcon = appIcons.square;
 
   return (
     <main className="conversation">
       <header className="conversation-header">
         <div className="conversation-title-row">
+          <button className="menu-button" onClick={onOpenSidebar} title="机器与会话" aria-label="打开机器与会话列表">
+            <MenuIcon size={18} />
+          </button>
           <h1 className="conversation-title">{session.title}</h1>
           {running && (
             <span className="live-badge">
@@ -157,7 +198,7 @@ export const Conversation = memo(function Conversation({
         </div>
       </header>
 
-      <div className="messages-scroll">
+      <div className="messages-scroll" ref={scrollRef}>
         <div className="messages">
           {messages.length === 0 && <div className="empty-hint">这个会话还没有消息</div>}
           {messages.map((message) => (
@@ -194,10 +235,12 @@ export const Conversation = memo(function Conversation({
           <span className="input-hint">{draft.length > 0 ? `${draft.length} 字` : ' '}</span>
           {running ? (
             <button className="abort-button" onClick={onAbort}>
-              ■ 中止
+              <SquareIcon size={12} />
+              中止
             </button>
           ) : (
             <button className="send-button" onClick={send} disabled={!draft.trim() || busy}>
+              <SendIcon size={14} />
               发送
             </button>
           )}

@@ -72,6 +72,7 @@ export function App() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [running, setRunning] = useState(false);
   const [sessionError, setSessionError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const runningRef = useRef(running);
   const routeRef = useRef(route);
@@ -413,12 +414,15 @@ export function App() {
   // ── render ──
   return (
     <div className="app-shell">
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <Sidebar
         machines={machines}
         sessionsByMachine={sessionsByMachine}
         selectedMachineId={route.machineId}
         selectedSessionId={route.sessionId}
+        open={sidebarOpen}
         onSelectSession={(machineId, sessionId) => {
+          setSidebarOpen(false);
           const next = sessionId ? { machineId, sessionId } : EMPTY_ROUTE;
           selectRoute(next);
           window.location.hash = sessionId
@@ -438,6 +442,7 @@ export function App() {
           connecting={connecting}
           onSend={(text) => void send(text)}
           onAbort={() => void abort()}
+          onOpenSidebar={() => setSidebarOpen(true)}
         />
       ) : route.sessionId ? (
         <main className="welcome">
