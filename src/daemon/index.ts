@@ -102,9 +102,9 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
 
   const handleCommands = async (commands: DaemonCommand[]): Promise<void> => {
     for (const command of commands) {
-      if (command.type === 'run') {
+      if (command.type === 'run' || command.type === 'create') {
         log(
-          `run command for session ${command.sessionId}: ${command.prompt.slice(0, 80)}${command.prompt.length > 80 ? '…' : ''}`,
+          `${command.type} command for session ${command.sessionId}: ${command.prompt.slice(0, 80)}${command.prompt.length > 80 ? '…' : ''}`,
         );
         void executor.execute(command);
       } else if (command.type === 'abort') {

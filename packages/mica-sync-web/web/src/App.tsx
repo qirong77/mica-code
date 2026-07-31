@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   abortSession,
+  createSession,
   fetchMachines,
   fetchSession,
   fetchSessions,
@@ -12,6 +13,7 @@ import {
 } from './api';
 import { Conversation } from './Conversation';
 import { appIcons } from './icons';
+import { NewSessionModal } from './NewSessionModal';
 import { applyEvent, mergeSessionMessages, messagesFromSession, type UiMessage } from './render';
 import { Sidebar } from './Sidebar';
 import { useSse } from './useSse';
@@ -74,9 +76,13 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [sessionError, setSessionError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [newSessionFor, setNewSessionFor] = useState<string | null>(null);
+  const [newSessionError, setNewSessionError] = useState('');
+  const [newSessionSubmitting, setNewSessionSubmitting] = useState(false);
   const MenuIcon = appIcons.menu;
 
   const runningRef = useRef(running);
+  const machinesRef = useRef<MachineInfo[]>([]);
   const routeRef = useRef(route);
   const routeRevisionRef = useRef(0);
   const snapshotRevisionRef = useRef(0);
@@ -86,7 +92,12 @@ export function App() {
   const snapshotSeqBySessionRef = useRef(new Map<string, number>());
   const sessionDataRef = useRef<SessionData | null>(null);
   const latestSessionRef = useRef<StoredSession | null>(null);
+  // Sessions just created via the web UI: their detail fetch 404s until the
+  // daemon persists the first snapshot, so suppress the error and wait for the
+  // first SSE event instead.
+  const pendingSessionsRef = useRef(new Set<string>());
   runningRef.current = running;
+  machinesRef.current = machines;
 
   const setRemoteRunning = useCallback((value: boolean) => {
     runningRef.current = value;
@@ -252,6 +263,15 @@ export function App() {
           sameRoute(routeRef.current, requestedRoute) &&
           !sessionDataRef.current
         ) {
+          if (
+            requestedRoute.machineId &&
+            requestedRoute.sessionId &&
+            pendingSessionsRef.current.has(`${requestedRoute.machineId}/${requestedRoute.sessionId}`)
+          ) {
+            // The daemon has not persisted the freshly created session yet;
+            // the first SSE event will surface it.
+            return;
+          }
           setSessionError(error instanceof Error ? error.message : String(error));
         }
       }
@@ -273,6 +293,7 @@ export function App() {
         }
       }
 
+      pendingSessionsRef.current.delete(`${requestedRoute.machineId}/${requestedRoute.sessionId}`);
       latestSessionRef.current = snapshot;
       const current = sessionDataRef.current;
       if (current) {
@@ -283,8 +304,17 @@ export function App() {
         publishSession({ ...current, session: snapshot }, false);
         if (TERMINAL_TURN_STATES.has(snapshot.turnState)) void refetchSession(requestedRoute, 'terminal');
       } else {
-        snapshotRevisionRef.current += 1;
-        if (snapshot.turnState !== 'running') setRemoteRunning(false);
+        // Freshly created session: the light snapshot has no message payload,
+        // so render the header/input immediately and keep the message list
+        // built from streamed events.
+        const machine = machinesRef.current.find((item) => item.id === requestedRoute.machineId);
+        if (machine) {
+          publishSession({ machine, session: snapshot }, false);
+          if (TERMINAL_TURN_STATES.has(snapshot.turnState)) void refetchSession(requestedRoute, 'terminal');
+        } else {
+          snapshotRevisionRef.current += 1;
+          if (snapshot.turnState !== 'running') setRemoteRunning(false);
+        }
       }
     },
     [publishSession, refetchSession, setRemoteRunning],
@@ -376,6 +406,24 @@ export function App() {
   );
 
   // ── actions ──
+  const handleCreateSession = async (machineId: string, text: string, cwd?: string) => {
+    setNewSessionError('');
+    setNewSessionSubmitting(true);
+    try {
+      const { sessionId } = await createSession(machineId, text, cwd);
+      pendingSessionsRef.current.add(`${machineId}/${sessionId}`);
+      setNewSessionFor(null);
+      selectRoute({ machineId, sessionId });
+      window.location.hash = `#/m/${encodeURIComponent(machineId)}/s/${encodeURIComponent(sessionId)}`;
+      void refreshMachines();
+    } catch (error) {
+      if (!newSessionFor) return;
+      setNewSessionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setNewSessionSubmitting(false);
+    }
+  };
+
   const send = async (text: string) => {
     const requestedRoute = { ...routeRef.current };
     if (!requestedRoute.machineId || !requestedRoute.sessionId) return;
@@ -432,6 +480,11 @@ export function App() {
           window.location.hash = sessionId
             ? `#/m/${encodeURIComponent(machineId)}/s/${encodeURIComponent(sessionId)}`
             : '';
+        }}
+        onNewSession={(machineId) => {
+          setSidebarOpen(false);
+          setNewSessionError('');
+          setNewSessionFor(machineId);
         }}
         onRefresh={() => void refreshMachines()}
         refreshing={refreshing}
@@ -510,6 +563,20 @@ export function App() {
             </>
           )}
         </main>
+      )}
+      {newSessionFor && (
+        <NewSessionModal
+          machines={machines}
+          initialMachineId={newSessionFor}
+          error={newSessionError}
+          submitting={newSessionSubmitting}
+          onClose={() => {
+            if (newSessionSubmitting) return;
+            setNewSessionFor(null);
+            setNewSessionError('');
+          }}
+          onSubmit={(machineId, text, cwd) => void handleCreateSession(machineId, text, cwd)}
+        />
       )}
     </div>
   );

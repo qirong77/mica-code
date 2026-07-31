@@ -119,6 +119,16 @@ export async function runOnSession(machineId: string, sessionId: string, text: s
   });
 }
 
+/** Asks the daemon on `machineId` to start a brand-new session with `text`. */
+export async function createSession(machineId: string, text: string, cwd?: string): Promise<{ sessionId: string }> {
+  const data = await api<{ sessionId?: string }>(`/machines/${encodeURIComponent(machineId)}/sessions`, {
+    method: 'POST',
+    body: { text, ...(cwd ? { cwd } : {}) },
+  });
+  if (!data.sessionId) throw new Error('服务器未返回会话 ID');
+  return { sessionId: data.sessionId };
+}
+
 export async function abortSession(machineId: string, sessionId: string): Promise<void> {
   await api(`/machines/${encodeURIComponent(machineId)}/sessions/${encodeURIComponent(sessionId)}/abort`, {
     method: 'POST',

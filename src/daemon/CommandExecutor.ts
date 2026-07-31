@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { chdir } from 'node:process';
 import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -71,7 +72,7 @@ export class CommandExecutor {
       this.abort(command.sessionId);
       return;
     }
-    if (command.type !== 'run') return;
+    if (command.type !== 'run' && command.type !== 'create') return;
 
     if (this.busy) {
       this.emit(command.sessionId, [
@@ -84,7 +85,11 @@ export class CommandExecutor {
     this.currentSessionId = command.sessionId;
     this.currentCommandId = command.id;
     try {
-      await this.runTurn(command.sessionId, command.prompt);
+      if (command.type === 'create') {
+        await this.createTurn(command.sessionId, command.prompt, command.cwd);
+      } else {
+        await this.runTurn(command.sessionId, command.prompt);
+      }
     } finally {
       this.busy = false;
       this.currentSessionId = null;
@@ -93,9 +98,68 @@ export class CommandExecutor {
   }
 
   private async runTurn(sessionId: string, prompt: string): Promise<void> {
+    const store = micaSession.createStore();
+    const session = store.load(sessionId);
+    if (!session) {
+      this.emit(sessionId, [{ type: 'turn', state: 'error', error: `Session not found: ${sessionId}` }]);
+      return;
+    }
+    await this.executeTurn(session, prompt);
+  }
+
+  /** Creates a brand-new session from the local config and runs the first turn. */
+  private async createTurn(sessionId: string, prompt: string, requestedCwd?: string): Promise<void> {
+    try {
+      const store = micaSession.createStore();
+      if (store.load(sessionId)) {
+        this.emit(sessionId, [
+          { type: 'run_rejected', commandId: this.currentCommandId, message: `Session already exists: ${sessionId}` },
+        ]);
+        return;
+      }
+      // The sync server mints the id; the daemon seeds the session with the
+      // locally configured provider/model/effort and an empty history.
+      const agent = new AgentRuntime();
+      const snapshot = agent.getSnapshot();
+      const now = new Date().toISOString();
+      const session: PersistedSession = {
+        version: 1,
+        id: sessionId,
+        // Non-empty placeholder: parsePersistedSession rejects empty titles,
+        // and the first saveCurrent derives the real title from the prompt.
+        title: 'Untitled session',
+        createdAt: now,
+        updatedAt: now,
+        cwd: requestedCwd?.trim() || homedir(),
+        turnState: 'running',
+        snapshot: {
+          providerId: snapshot.providerId,
+          protocol: snapshot.protocol,
+          model: snapshot.model,
+          effort: snapshot.effort,
+          role: agent.role,
+          messages: [],
+          conversationMessages: [],
+          usageHistory: [],
+          lastUsage: undefined,
+        },
+      };
+      // Seed the session file before executeTurn: resumeLoaded records a
+      // persisted signature, and saveCurrent refuses to write a session whose
+      // file does not already exist on disk.
+      store.save(session);
+      await this.executeTurn(session, prompt, agent);
+    } catch (error) {
+      this.emit(sessionId, [
+        { type: 'turn', state: 'error', error: error instanceof Error ? error.message : String(error) },
+      ]);
+    }
+  }
+
+  private async executeTurn(session: PersistedSession, prompt: string, prebuiltAgent?: AgentRuntime): Promise<void> {
+    const sessionId = session.id;
     let controller: SessionController | null = null;
     let subagentTasks: SubagentTaskManager | null = null;
-    let session: PersistedSession | null = null;
     let lease: SessionTurnLease | null = null;
     const originalCwd = process.cwd();
 
@@ -112,19 +176,12 @@ export class CommandExecutor {
         return;
       }
 
-      const store = micaSession.createStore();
-      session = store.load(sessionId);
-      if (!session) {
-        this.emit(sessionId, [{ type: 'turn', state: 'error', error: `Session not found: ${sessionId}` }]);
-        return;
-      }
-
       if (!session.cwd || !statSync(session.cwd).isDirectory()) {
         throw new Error(`Session working directory is unavailable: ${session.cwd || '(empty)'}`);
       }
       chdir(session.cwd);
 
-      this.agent = new AgentRuntime();
+      this.agent = prebuiltAgent ?? new AgentRuntime();
       const agent = this.agent;
       subagentTasks = new SubagentTaskManager();
       this.subagentTasks = subagentTasks;
@@ -215,7 +272,9 @@ export class CommandExecutor {
       try {
         chdir(originalCwd);
       } catch (error) {
-        console.error(`[mica-sync] failed to restore daemon cwd: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(
+          `[mica-sync] failed to restore daemon cwd: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       lease?.release();
     }

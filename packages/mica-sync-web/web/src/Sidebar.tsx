@@ -10,6 +10,7 @@ type SidebarProps = {
   selectedSessionId: string | null;
   open: boolean;
   onSelectSession: (machineId: string, sessionId: string | null) => void;
+  onNewSession: (machineId: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
 };
@@ -21,12 +22,14 @@ export const Sidebar = memo(function Sidebar({
   selectedSessionId,
   open,
   onSelectSession,
+  onNewSession,
   onRefresh,
   refreshing,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
   const RefreshIcon = appIcons.refresh;
+  const PlusIcon = appIcons.plus;
   const ChevronDownIcon = appIcons.chevronDown;
   const ChevronRightIcon = appIcons.chevronRight;
 
@@ -77,19 +80,31 @@ export const Sidebar = memo(function Sidebar({
           const isCollapsed = collapsed.has(machine.id);
           return (
             <div key={machine.id} className="machine-group">
-              <button className="machine-row" onClick={() => toggle(machine.id)}>
-                <span className={`status-dot ${machine.online ? 'online' : 'offline'}`} />
-                <span className="machine-name" title={machine.hostname}>
-                  {machine.name}
-                  {machine.activeRunning && <span className="mini-badge running">RUN</span>}
-                </span>
-                <span className="machine-meta">
-                  {sessions.length} 会话 · {formatRelative(machine.lastSeen)}
-                </span>
-                <span className="chevron">
-                  {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
-                </span>
-              </button>
+              <div className="machine-head">
+                <button className="machine-row" onClick={() => toggle(machine.id)}>
+                  <span className={`status-dot ${machine.online ? 'online' : 'offline'}`} />
+                  <span className="machine-name" title={machine.hostname}>
+                    {machine.name}
+                    {machine.activeRunning && <span className="mini-badge running">RUN</span>}
+                  </span>
+                  <span className="machine-meta">
+                    {sessions.length} 会话 · {formatRelative(machine.lastSeen)}
+                  </span>
+                  <span className="chevron">
+                    {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+                  </span>
+                </button>
+                {machine.online && (
+                  <button
+                    className="new-session-btn"
+                    onClick={() => onNewSession(machine.id)}
+                    title={`在 ${machine.name} 上新建会话`}
+                    aria-label={`在 ${machine.name} 上新建会话`}
+                  >
+                    <PlusIcon size={14} />
+                  </button>
+                )}
+              </div>
               {!isCollapsed && (
                 <div className="session-list">
                   {sessions.length === 0 && <div className="empty-hint">无会话</div>}

@@ -459,19 +459,20 @@ rg --files src packages scripts docs blogs
 - 机器端 `mica daemon` 常驻进程主动**出站**连接中心服务器（NAT 友好，不需要机器开放入站端口）：`/daemon/register` 注册换取 `machineId`（按 hostname 复用已有记录，丢失 sync.json 不会换身份），`/daemon/beat` 心跳（20s，上报活跃会话），`/daemon/poll` 长轮询指令（server 最多 hold 25s），`/daemon/session` 推送会话快照，`/daemon/events` 推送 turn 事件。
 - 中心服务器 `mica-sync-server` 零第三方依赖（Node 内置模块），JSON 文件存储（`data/machines.json`、`data/sessions/<machineId>/<sessionId>.json`），每会话 500 条事件内存缓冲，SSE 订阅用 `since` 序号断线补拉。
 - **无认证**：daemon 请求用 `x-machine-id` header 标识机器，Web API 完全开放；服务公开在公网时需自行用 Nginx 基本认证或防火墙保护。
-- 续聊指令（`run` / `abort`）通过 poll 长轮询下发；daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected` 事件），不同 session 也不并发。
+- 指令（`create` / `run` / `abort`）通过 poll 长轮询下发；`create` 由服务器生成 `sessionId` 并携带 `prompt` 与可选 `cwd`，daemon 用本机配置创建全新会话并执行首条消息；daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected` 事件），不同 session 也不并发。
 - 事件类型：`user_input`、`thinking`、`text_delta`、`tool_call`、`tool_result`、`usage`、`status`、`turn`（state: completed/aborted/error）、`run_rejected`、`session`、`session_removed`。
 
 ### daemon 语义
 
 - 配置存 `~/.mica/sync.json`（跟随 `MICA_HOME`），含 `serverUrl`、`machineId`、`name`。`--server` 覆盖 serverUrl；未注册时启动即自动注册（无需 secret）。
 - **daemon 自启动**：交互模式启动 `mica` 时（`src/index.ts`）会 fire-and-forget 调 `ensureDaemonRunning()`（`src/daemon/ensureDaemonRunning.ts`）：配置了 sync.json 且 `daemon.pid`（`MICA_HOME/daemon.pid`）记录的进程不存活时，后台 detached 拉起 `mica daemon`（日志追加到 `MICA_HOME/daemon.log`），否则复用。daemon 自身启动时写 pid 文件、退出时清理，并对"已有存活 daemon"做竞态兜底（直接退出，避免双 daemon 抢同一 machineId）。`MICA_NO_DAEMON=1` 可禁用（CI/headless）。改动 pid 文件、spawn 参数或自启动时机时同步检查 `src/daemon/ensureDaemonRunning.ts` 及其测试、`src/daemon/index.ts`。
-- `CommandExecutor` 复用 `AgentRuntime` + `SessionController`（headless 式配置：`config.apply(){}` + `ui.restore(){}`），每 turn 新建 agent，MCP 保持 daemon 生命周期常开；turn 前 `chdir` 到会话记录的 `cwd`。
+- `CommandExecutor` 复用 `AgentRuntime` + `SessionController`（headless 式配置：`config.apply(){}` + `ui.restore(){}`），每 turn 新建 agent，MCP 保持 daemon 生命周期常开；turn 前 `chdir` 到会话记录的 `cwd`。`create` 指令在本地会话不存在时，用 `new AgentRuntime()` 的当前 snapshot（provider/protocol/model/effort/role）与空历史构造 `PersistedSession`，`cwd` 缺省回退到 daemon 机器家目录，再走与 `run` 相同的 turn 流程；构造时必须先用非空标题（如 `Untitled session`）落盘，否则 `resumeLoaded` 记录的 persisted signature 会让 `saveCurrent` 因磁盘无文件而拒绝写入，且 `parsePersistedSession` 会拒绝空标题。
 - abort 依赖 `AgentRuntime.abort()`（runId 失效 + signal）：正在等待 provider stream 时立即生效；**工具执行中或长 thinking 期间要等到当前迭代/工具结束的边界**才会抛出 `AgentAbortError`，属于 provider client 的既有语义，不要另造中断机制。
 - 会话文件变化由 `SessionWatcher` 监听并推送；`fs.watch` 在 macOS 上可能丢事件（rename 无 filename），因此还有 30s 周期 rescan 按 mtime/size 对比兜底。push 失败只记日志不重试队列。
 - 本地 runtime 与 daemon 对同一 session 使用 `packages/mica-session` 的跨进程 turn lease，冲突时返回 busy，避免整份 session 快照相互覆盖；远程完成后，本地下一次提交前会重载最新磁盘快照。会话快照带单调 `revision`，中心服务器拒绝迟到的旧快照。
 - Web 端切换会话时会真正中止旧 SSE，按事件 `seq` 去重；terminal turn 后主动重拉权威快照，并以低频轮询从丢失事件或代理断流中自愈。
 - 会话详情接口默认返回精简快照（剔除 `snapshot.messages`/`usageHistory`/`lastUsage`，`?full=1` 取全量）；SSE 的 `session` 事件只含元数据（id/title/updatedAt/cwd/turnState/revision + providerId/model/effort/role），完整快照仍全量落盘。detail 响应携带 `snapshotSeq`（最近一次 session 快照事件的 seq），Web 在详情加载完成后再建 SSE（`since=snapshotSeq`），避免重放已反映在快照中的旧事件造成重复渲染。改动这两处协议时同步检查 `packages/mica-sync-web/web/src/App.tsx` 的 `acceptEventSession`/`publishSession`/`sessionReady` 逻辑与 `useSse.ts` 的初始断点。
+- Web 新建会话：`POST /api/machines/:id/sessions`（body `{ text, cwd? }`）返回新 `sessionId`；创建成功后 Web 立即跳转该会话并加入 `pendingSessionsRef`（detail fetch 在 daemon 落盘前 404 时抑制报错，等第一条 SSE `session` 事件渲染）。SSE 首次收到的轻量 `session` 事件在 `sessionData` 为 null 时也会 `publishSession`（无消息 payload，仅渲染 header/输入框），消息列表由流式事件构建，turn 结束再拉权威快照合并。
 - Web 切换体验：`/api/machines/:id/sessions` 列表为每个 summary 附带 `snapshotSeq`，切换时立即开 SSE（`since=` 列表水位，detail 校正），不出现"连接断开"；切换瞬间显示"加载会话中…"而非 welcome 闪现。`useSse` 的 `lastSeqRef` 跨 effect 重启保留，绝不重放已见事件（`text_delta` 重复追加）。连接状态三态：实时连接 / 连接中… / 连接断开，自动重连中…。`serveStaticFile` 对 index.html 发 `no-cache`、对 `/assets/*` 发 `immutable` 一年缓存。
 
 ### 构建与部署

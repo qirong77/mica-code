@@ -19,23 +19,28 @@ Mica Sync 的中心聚合服务器：收集所有机器上 `mica daemon` 镜像�
 | ---- | ------------------ | --------------------------------------------------------- |
 | POST | `/daemon/register` | 注册机器，返回 `machineId`（hostname 相同则复用原记录）   |
 | POST | `/daemon/beat`     | 心跳 + 上报活跃会话状态                                   |
-| POST | `/daemon/poll`     | 长轮询指令（`run` / `abort`），最多 hold 25s              |
+| POST | `/daemon/poll`     | 长轮询指令（`create` / `run` / `abort`），最多 hold 25s   |
 | POST | `/daemon/session`  | 推送/删除会话快照（`session: null` + `sessionId` 为删除） |
 | POST | `/daemon/events`   | 推送 turn 事件批次，可附带最新会话快照                    |
 
 ### Web 端点（无需认证）
 
-| 方法 | 路径                                     | 说明                          |
-| ---- | ---------------------------------------- | ----------------------------- |
-| GET  | `/api/status`                            | 健康检查                      |
-| GET  | `/api/machines`                          | 机器列表（含在线状态）        |
-| GET  | `/api/machines/:id/sessions`             | 会话摘要列表                  |
-| GET  | `/api/machines/:id/sessions/:sid`        | 会话详情                      |
-| GET  | `/api/machines/:id/sessions/:sid/events` | SSE 事件流（`?since=N` 补拉） |
-| POST | `/api/machines/:id/sessions/:sid/run`    | 下发续聊指令 `{ text }`       |
-| POST | `/api/machines/:id/sessions/:sid/abort`  | 中止当前 turn                 |
+| 方法 | 路径                                     | 说明                                                       |
+| ---- | ---------------------------------------- | ---------------------------------------------------------- |
+| GET  | `/api/status`                            | 健康检查                                                   |
+| GET  | `/api/machines`                          | 机器列表（含在线状态）                                     |
+| GET  | `/api/machines/:id/sessions`             | 会话摘要列表                                               |
+| POST | `/api/machines/:id/sessions`             | 新建会话 `{ text, cwd? }`，返回 `{ sessionId, commandId }` |
+| GET  | `/api/machines/:id/sessions/:sid`        | 会话详情                                                   |
+| GET  | `/api/machines/:id/sessions/:sid/events` | SSE 事件流（`?since=N` 补拉）                              |
+| POST | `/api/machines/:id/sessions/:sid/run`    | 下发续聊指令 `{ text }`                                    |
+| POST | `/api/machines/:id/sessions/:sid/abort`  | 中止当前 turn                                              |
 
-机器在线判定：`lastSeen` 距今 < 90s。离线机器会拒绝 `run`（409）。
+机器在线判定：`lastSeen` 距今 < 90s。离线机器会拒绝 `run` / `create`（409）。
+
+新建会话：`POST /api/machines/:id/sessions` 由服务器生成 `sessionId` 并下发 `create`
+指令（`{ type: 'create', sessionId, prompt, cwd? }`）；daemon 用本机配置
+provider/model/effort 创建全新会话并执行首条消息，`cwd` 留空时使用 daemon 机器家目录。
 
 ## 部署
 

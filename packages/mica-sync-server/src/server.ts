@@ -19,6 +19,7 @@ export type RunningSyncServer = {
 
 type Command =
   | { type: 'run'; id: string; sessionId: string; prompt: string; requestedAt: string }
+  | { type: 'create'; id: string; sessionId: string; prompt: string; cwd?: string; requestedAt: string }
   | { type: 'abort'; id: string; sessionId: string; requestedAt: string };
 
 const MACHINE_ONLINE_MS = 90_000;
@@ -88,9 +89,11 @@ export async function startSyncServer(options: SyncServerOptions): Promise<Runni
   });
 
   await new Promise<void>((resolveListen) => server.listen(options.port, options.host ?? '0.0.0.0', resolveListen));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : options.port;
 
   return {
-    port: options.port,
+    port,
     stop: () =>
       new Promise<void>((resolveStop) => {
         server.close(() => resolveStop());
@@ -249,6 +252,33 @@ async function handleRequest(
     }
 
     if (!sessionId) {
+      if (method === 'POST') {
+        // Create a brand-new session: the server mints the id and dispatches a
+        // `create` command so the daemon starts it with a fresh snapshot.
+        if (!ctx.isOnline(machine)) {
+          writeJson(response, 409, { error: 'Machine is offline; start `mica daemon` on it and retry.' });
+          return true;
+        }
+        const body = await readJsonBody(request);
+        const text = String(body.text ?? '').trim();
+        if (!text) {
+          writeJson(response, 400, { error: 'Empty message' });
+          return true;
+        }
+        const cwd = body.cwd === undefined ? undefined : String(body.cwd);
+        const sessionId = randomUUID();
+        const command: Command = {
+          type: 'create',
+          id: randomUUID(),
+          sessionId,
+          prompt: text,
+          ...(cwd ? { cwd } : {}),
+          requestedAt: new Date().toISOString(),
+        };
+        ctx.enqueueCommand(machineId!, command);
+        writeJson(response, 200, { sessionId, commandId: command.id });
+        return true;
+      }
       const sessions = ctx.store.listSessionSummaries(machineId!).map((summary) => ({
         ...summary,
         // Let the web client open SSE immediately on switch without waiting
