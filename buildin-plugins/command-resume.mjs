@@ -42,13 +42,15 @@ function showResumeSelector(agent, sessionController, services) {
 
   function visibleSessions() {
     const normalizedQuery = query.get().trim().toLowerCase();
-    return sessions.filter((session) => {
-      if (filter.get() === 'cwd' && session.cwd !== process.cwd()) return false;
-      if (!normalizedQuery) return true;
-      return `${formatResumeSessionTitle(session)} ${basename(session.cwd)} ${session.cwd} ${session.model}`
-        .toLowerCase()
-        .includes(normalizedQuery);
-    });
+    return sessions
+      .filter((session) => {
+        if (filter.get() === 'cwd' && session.cwd !== process.cwd()) return false;
+        if (!normalizedQuery) return true;
+        return `${formatResumeSessionTitle(session)} ${basename(session.cwd)} ${session.cwd} ${session.model}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   function hide() {

@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { readSessionDetails, readSessionsDetails } from '../api.js';
+import { readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
 import { ConversationView } from '../components/ConversationView.js';
+import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
@@ -10,66 +11,138 @@ import type {
   ConfigWebSessionsDetails,
 } from '../../../src/shared/types.js';
 
-export function SessionsPage() {
+export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
   const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [session, setSession] = useState<ConfigWebSessionDetails | null>(null);
+  const [content, setContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const loadInFlight = useRef(false);
   const selectedIdRef = useRef('');
+  const dirty = content !== savedContent;
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
   const RefreshIcon = appIcons.refresh;
+  const SaveIcon = appIcons.save;
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  async function load(showLoading = true) {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
+    if (showLoading) setLoading(true);
     try {
       const next = await readSessionsDetails();
       const preferredId = selectedIdRef.current;
-      const nextId = next.sessions.some((item) => item.id === preferredId) ? preferredId : (next.sessions[0]?.id ?? '');
+      const preferredExists = next.sessions.some((item) => item.id === preferredId);
+      const nextId = preferredExists || (dirtyRef.current && preferredId) ? preferredId : (next.sessions[0]?.id ?? '');
       setIndex(next);
       selectedIdRef.current = nextId;
       setSelectedId(nextId);
-      await loadSession(nextId);
+      await loadSession(nextId, { background: !showLoading, forceContent: !preferredId });
+      if (!nextId) setError(null);
     } catch (loadError) {
       setError(formatError(loadError));
     } finally {
-      setLoading(false);
+      loadInFlight.current = false;
+      if (showLoading) setLoading(false);
     }
   }
 
-  async function loadSession(id: string) {
+  async function loadSession(id: string, options: { background?: boolean; forceContent?: boolean } = {}) {
     const sequence = ++requestSequence.current;
-    setSession(null);
-    if (!id) return;
-    setSessionLoading(true);
-    setError(null);
+    if (!id) {
+      setSession(null);
+      return;
+    }
+    if (!options.background) setSessionLoading(true);
     try {
       const next = await readSessionDetails(id);
-      if (requestSequence.current === sequence) setSession(next);
+      if (requestSequence.current === sequence) {
+        setSession(next);
+        if (options.forceContent || !dirtyRef.current) {
+          setContent(next.content);
+          setSavedContent(next.content);
+        }
+        setError(null);
+      }
     } catch (loadError) {
       if (requestSequence.current === sequence) setError(formatError(loadError));
     } finally {
-      if (requestSequence.current === sequence) setSessionLoading(false);
+      if (!options.background && requestSequence.current === sequence) setSessionLoading(false);
     }
   }
 
   function selectSession(id: string) {
+    if (id === selectedIdRef.current) return;
+    if (dirtyRef.current && !window.confirm('当前 Session 有未保存的修改，确定要切换吗？')) return;
     selectedIdRef.current = id;
     setSelectedId(id);
-    void loadSession(id);
+    setSession(null);
+    setContent('');
+    setSavedContent('');
+    dirtyRef.current = false;
+    void loadSession(id, { forceContent: true });
+  }
+
+  async function save() {
+    if (!session || session.turnState === 'running' || !dirty || saving) return;
+    setError(null);
+    try {
+      JSON.parse(content);
+    } catch (parseError) {
+      setError(`Session 内容不是有效 JSON：${formatError(parseError)}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await writeSession(session.id, content);
+      const next = await readSessionDetails(session.id);
+      setSession(next);
+      setContent(next.content);
+      setSavedContent(next.content);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1600);
+    } catch (saveError) {
+      setError(formatError(saveError));
+    } finally {
+      setSaving(false);
+    }
   }
 
   useEffect(() => {
     void load();
+    const timer = window.setInterval(() => void load(false), 1000);
+    return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+      onDirtyChange?.(false);
+    };
+  }, [dirty, onDirtyChange]);
 
   return (
     <PageFrame
       title="Sessions"
       path={index?.root}
-      actions={<Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />}
+      actions={
+        <div className="toolbar">
+          {saved ? <span className="save-status">已保存</span> : null}
+          <Button icon={<RefreshIcon size={15} />} title="立即刷新" onClick={() => void load()} loading={loading} />
+        </div>
+      }
     >
       {error ? <Alert message={error} /> : null}
       {!index || index.sessions.length === 0 ? (
@@ -82,6 +155,37 @@ export function SessionsPage() {
 
           {sessionLoading ? <div className="session-loading">正在加载 Session…</div> : null}
           {session ? <SessionHeader session={session} /> : null}
+          {session ? (
+            <section className="simple-card session-raw-card">
+              <div className="editor-pane-header session-raw-header">
+                <div>
+                  <h3>原始 JSON</h3>
+                  <p className="muted-text editor-pane-subtitle">{session.id}</p>
+                </div>
+                <div className="toolbar">
+                  {dirty ? <Tag tone="blue">未保存</Tag> : null}
+                  {session.turnState === 'running' ? <span className="muted-text">运行中不可保存</span> : null}
+                  <Button
+                    variant="primary"
+                    icon={<SaveIcon size={15} />}
+                    disabled={!dirty || session.turnState === 'running'}
+                    loading={saving}
+                    onClick={save}
+                  >
+                    保存
+                  </Button>
+                </div>
+              </div>
+              <div className="editor-host session-raw-editor">
+                <MonacoJsonEditor
+                  value={content}
+                  language="json"
+                  readOnly={saving || session.turnState === 'running'}
+                  onChange={setContent}
+                />
+              </div>
+            </section>
+          ) : null}
           {session ? <ConversationView details={session.conversation} /> : null}
         </div>
       )}
@@ -256,6 +360,7 @@ function SessionPicker({
 }
 
 function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
+  const status = presentStatus(session.turnState);
   return (
     <div className="session-summary simple-card">
       <div className="session-summary-title">
@@ -264,11 +369,9 @@ function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
           <span>{session.id}</span>
         </div>
         <div className="toolbar">
-          <Tag tone={session.turnState === 'completed' ? 'green' : session.turnState === 'error' ? 'red' : 'blue'}>
-            {session.turnState}
-          </Tag>
+          <Tag tone={status.tone}>{status.label}</Tag>
           <Tag>{session.role}</Tag>
-          <Tag>只读</Tag>
+          <Tag>{session.turnState === 'running' ? '编辑锁定' : 'JSON 可编辑'}</Tag>
         </div>
       </div>
       <div className="simple-list">
@@ -297,4 +400,14 @@ function formatDate(value: string): string {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function presentStatus(turnState: string): { tone: 'default' | 'green' | 'red' | 'blue'; label: string } {
+  switch (turnState) {
+    case 'running': return { tone: 'blue', label: '运行中' };
+    case 'completed': return { tone: 'green', label: '已完成' };
+    case 'aborted': return { tone: 'default', label: '已中止' };
+    case 'error': return { tone: 'red', label: '错误' };
+    default: return { tone: 'default', label: turnState };
+  }
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveConfigWebWorkerCommand, updateConfigWebConversation } from './startConfigWeb.js';
+import { resolveConfigWebWorkerCommand } from './startConfigWeb.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,46 +32,5 @@ describe('resolveConfigWebWorkerCommand', () => {
       executable: '/Users/me/bin/custom-runner',
       entryArgs: ['/repo/src/index.ts'],
     });
-  });
-
-  it('pushes conversation details to the local endpoint', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
-    const conversation = {
-      providerId: 'openai',
-      protocol: 'openai_chat_completions' as const,
-      model: 'gpt-5',
-      updatedAt: '2026-01-02T03:04:05.000Z',
-      items: [{ sequence: 1, type: 'system' as const, content: 'system prompt' }],
-    };
-
-    await updateConfigWebConversation(39127, conversation);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:39127/api/details/conversation',
-      expect.objectContaining({
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(conversation),
-      }),
-    );
-  });
-
-  it('reports a rejected conversation update', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Invalid conversation payload' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-
-    await expect(
-      updateConfigWebConversation(39127, {
-        providerId: 'openai',
-        protocol: 'openai_chat_completions',
-        model: 'gpt-5',
-        updatedAt: '2026-01-02T03:04:05.000Z',
-        items: [],
-      }),
-    ).rejects.toThrow('Invalid conversation payload');
   });
 });

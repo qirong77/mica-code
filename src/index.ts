@@ -82,6 +82,7 @@ if (invocation.mode === 'run') {
       cwd: invocation.cwd,
       model: invocation.model,
       variant: invocation.variant,
+      role: invocation.role,
       maxTurns: invocation.maxTurns,
       mcpConfigPath: invocation.mcpConfigPath,
       strictMcpConfig: invocation.strictMcpConfig,

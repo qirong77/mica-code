@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 export const DEFAULT_PROVIDER_PROTOCOL = 'openai_chat_completions';
 export const PROVIDER_PROTOCOLS = [DEFAULT_PROVIDER_PROTOCOL, 'openai_responses'];
+export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'];
 
 export class ConfigValidationError extends Error {
   constructor(issues, configPath) {
@@ -325,4 +326,12 @@ function isStringArray(value) {
 
 function isStringRecord(value) {
   return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
+}
+
+function isIntegerInRange(value, min, max = Number.MAX_SAFE_INTEGER) {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function toSnakeCase(value) {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }

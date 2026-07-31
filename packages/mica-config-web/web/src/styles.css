@@ -1009,8 +1009,6 @@ textarea {
   }
 }
 
-
-
 /* Conversation workspace */
 .chat-notice {
   margin-bottom: 10px;
@@ -1552,7 +1550,6 @@ textarea {
   }
 }
 
-
 /* Chat transcript (ChatGPT-like) */
 
 .chat-transcript {
@@ -1771,3 +1768,31 @@ textarea {
 .chat-messages .conversation-sequence {
   display: none;
 }
+
+.session-raw-card {
+  overflow: hidden;
+}
+
+.session-raw-header {
+  min-height: 58px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-raw-editor {
+  height: 480px;
+  border: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 720px) {
+  .session-raw-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-raw-editor {
+    height: 420px;
+  }
+}
+

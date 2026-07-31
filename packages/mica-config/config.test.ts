@@ -52,11 +52,12 @@ describe('startup config validation', () => {
 
     const result = applyConfigDefaultsToFile(configPath);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
-      providers: Array<{ protocol?: string }>;
+      providers: Array<{ id: string; protocol?: string }>;
     };
 
     expect(result.ok).toBe(true);
     expect(result.changed).toBe(true);
+    expect(persisted.providers[0]?.id).toBe('legacy');
     expect(persisted.providers[0]?.protocol).toBe(DEFAULT_PROVIDER_PROTOCOL);
   });
 

@@ -218,6 +218,11 @@ export function getSessionDetails(id: string): ConfigWebSessionDetails {
   };
 }
 
+export function writeSessionDetails(id: string, content: string): ConfigWebSessionDetails {
+  micaSession.createStore().replaceValidated(id, content);
+  return getSessionDetails(id);
+}
+
 function listRecentSessions(): ConfigWebSessionsDetails['sessions'] {
   if (!existsSync(micaSession.dir)) return [];
   return readdirSync(micaSession.dir, { withFileTypes: true })
@@ -400,7 +405,9 @@ function parseMcpServerConfig(content: string, name: string): McpServerConfig {
 function findEditableSkill(name: string): Skill {
   const normalizedName = normalizeSkillName(name);
   const root = getSkillsRootPath();
-  const skill = micaSkills.reload().find((item) => item.name === normalizedName || basename(item.baseDir) === normalizedName);
+  const skill = micaSkills
+    .reload()
+    .find((item) => item.name === normalizedName || basename(item.baseDir) === normalizedName);
   if (!skill) throw new Error(`Skill not found: ${normalizedName}`);
   if (!isPathInside(skill.baseDir, root)) throw new Error(`Skill is not editable: ${normalizedName}`);
   return skill;

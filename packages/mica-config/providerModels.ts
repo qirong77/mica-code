@@ -32,7 +32,7 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
   const currentConfig = store.getConfig();
   if (currentConfig.provider === providerId) {
     const model = currentConfig.model || models[0]!;
-    await ensureModelRule(model);
+    void ensureModelRule(model).catch(() => undefined);
   }
 
   store.updateRuntimeConfig((config) => {

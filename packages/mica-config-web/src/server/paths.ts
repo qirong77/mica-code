@@ -24,4 +24,3 @@ export function getPluginStatusPath(): string {
 export function getConversationWorkspacePath(): string {
   return resolve(getMicaHome(), 'conversation-workspace.json');
 }
-

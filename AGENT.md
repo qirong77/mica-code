@@ -116,7 +116,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
-1. `buildin-plugins/config-web-worker.mjs` 先判断当前进程是否为 Config Web worker；worker 模式只启动 Web server，不加载终端应用。
+1. `buildin-plugins/config-web-worker.mjs` 先判断当前进程是否为 Config Web worker；worker 模式只启动对应服务，不加载终端应用。
 2. `src/index.ts` 在加载 config/runtime 模块前分派 `--version`、`models`、headless `run --format json` 和交互模式；headless 的 `--dir` 也在动态加载运行模块前生效。
 3. 非 version/help 模式调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值；交互模式再加载应用和 UI 模块，由 `buildin-plugins/process-diagnostics.mjs` 设置进程标题、注册全局错误桥。
 4. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过 validate-config 单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。

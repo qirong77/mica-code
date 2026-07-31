@@ -55,6 +55,7 @@ export type SessionStoreLike = {
   listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
   save(session: PersistedSession): void;
+  replaceValidated?(id: string, content: string): PersistedSession;
   delete(id: string): boolean;
 };
 
@@ -63,17 +64,11 @@ export const SESSION_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '
 export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {
     ensureSessionDir();
-    const cwd = process.cwd();
     return readdirSync(SESSION_DIR)
       .filter((file) => file.endsWith('.json'))
       .map((file) => this.read(resolve(SESSION_DIR, file)))
       .filter((session): session is PersistedSession => Boolean(session))
-      .sort((a, b) => {
-        const aMatch = a.cwd === cwd ? 0 : 1;
-        const bMatch = b.cwd === cwd ? 0 : 1;
-        if (aMatch !== bMatch) return aMatch - bMatch;
-        return b.updatedAt.localeCompare(a.updatedAt);
-      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, limit)
       .map((session) => ({
         id: session.id,
@@ -118,10 +113,37 @@ export class SessionStore implements SessionStoreLike {
 
   save(session: PersistedSession): void {
     ensureSessionDir();
-    const path = sessionPath(session.id);
+    const safeId = sanitizeSessionId(session.id);
+    if (!safeId || safeId !== session.id) throw new Error(`Invalid session id: ${session.id}`);
+    const path = sessionPath(safeId);
     const tmpPath = `${path}.${process.pid}.tmp`;
     writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, 'utf-8');
     renameSync(tmpPath, path);
+  }
+
+  replaceValidated(id: string, content: string): PersistedSession {
+    const safeId = sanitizeSessionId(id);
+    if (!safeId || safeId !== id.trim()) throw new Error('Invalid session id');
+
+    const current = this.load(safeId);
+    if (!current) throw new Error(`Session not found: ${safeId}`);
+    if (current.turnState === 'running') throw new Error(`Cannot replace running session: ${safeId}`);
+
+    let data: unknown;
+    try {
+      data = JSON.parse(content) as unknown;
+    } catch (error) {
+      throw new Error(`Invalid session JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const session = parsePersistedSession(data);
+    if (!session) throw new Error('Invalid persisted session');
+    if (session.id !== safeId) {
+      throw new Error(`Session id mismatch: expected ${safeId}, received ${session.id}`);
+    }
+    if (session.turnState === 'running') throw new Error(`Cannot save running session: ${safeId}`);
+
+    this.save(session);
+    return session;
   }
 
   delete(id: string): boolean {
@@ -137,7 +159,7 @@ export class SessionStore implements SessionStoreLike {
     try {
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-      return parseSession(data);
+      return parsePersistedSession(data);
     } catch {
       return null;
     }
@@ -147,7 +169,7 @@ export class SessionStore implements SessionStoreLike {
     try {
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-      return parseSession(data) ?? (Array.isArray(data) ? parseLegacySessionForUsage(path, data) : null);
+      return parsePersistedSession(data) ?? (Array.isArray(data) ? parseLegacySessionForUsage(path, data) : null);
     } catch {
       return null;
     }
@@ -199,32 +221,49 @@ function sessionPath(id: string): string {
 }
 
 function sanitizeSessionId(id: string): string | null {
-  const safe = basename(id.trim());
-  return /^[a-zA-Z0-9_.-]+$/.test(safe) ? safe.replace(/\.json$/, '') : null;
+  const trimmed = id.trim();
+  if (!trimmed || basename(trimmed) !== trimmed) return null;
+  const safe = trimmed.replace(/\.json$/, '');
+  return safe && /^[a-zA-Z0-9_.-]+$/.test(safe) ? safe : null;
 }
 
-function parseSession(value: unknown): PersistedSession | null {
+export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!value || typeof value !== 'object') return null;
   const session = value as Partial<PersistedSession>;
   if (session.version !== 1) return null;
-  if (!session.id || !session.title || !session.createdAt || !session.updatedAt || !session.cwd) return null;
+  if (!isNonEmptyString(session.id) || sanitizeSessionId(session.id) !== session.id) return null;
+  if (!isNonEmptyString(session.title)) return null;
+  if (!isNonEmptyString(session.createdAt) || !isNonEmptyString(session.updatedAt) || !isNonEmptyString(session.cwd)) {
+    return null;
+  }
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
-  if (!session.snapshot.providerId || !session.snapshot.model) return null;
-  if (!isPersistedSessionTurnState(session.turnState)) session.turnState = 'completed';
-  if (!isProviderProtocol(session.snapshot.protocol)) {
-    const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
-      ?.map((record) => record?.provider)
-      .find(isProviderProtocol);
-    session.snapshot.protocol = provider ?? 'openai_chat_completions';
-  }
-  if (!isEffortOption(session.snapshot.effort)) return null;
-  if (typeof session.snapshot.role !== 'string' || !session.snapshot.role.trim()) {
-    session.snapshot.role = 'default';
-  }
+  if (!isNonEmptyString(session.snapshot.providerId) || !isNonEmptyString(session.snapshot.model)) return null;
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
-  return session as PersistedSession;
+  const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
+  let protocol = session.snapshot.protocol;
+  if (!isProviderProtocol(protocol)) {
+    const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
+      ?.map((record) => record?.provider)
+      .find(isProviderProtocol);
+    protocol = provider ?? 'openai_chat_completions';
+  }
+  if (!isEffortOption(session.snapshot.effort)) return null;
+  const role = isNonEmptyString(session.snapshot.role) ? session.snapshot.role : 'default';
+  return {
+    ...session,
+    turnState,
+    snapshot: {
+      ...session.snapshot,
+      protocol,
+      role,
+    },
+  } as PersistedSession;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function parseLegacySessionForUsage(path: string, messages: unknown[]): PersistedSession | null {

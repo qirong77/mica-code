@@ -10,7 +10,6 @@ import {
   Folder,
   FolderPlus,
   History,
-  MessageSquare,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -24,7 +23,6 @@ import {
 export const appIcons = {
   config: Braces,
   sessions: History,
-  conversation: MessageSquare,
   roles: ContactRound,
   mcp: Cable,
   skills: Sparkles,

@@ -6,6 +6,7 @@ export type RunCliInvocation = {
   cwd?: string;
   model?: string;
   variant?: string;
+  role?: string;
   maxTurns?: number;
   dangerouslySkipPermissions: boolean;
   mcpConfigPath?: string;
@@ -33,6 +34,7 @@ export const CLI_USAGE = [
   '  --dir <path>                      Set the task working directory',
   '  --model <provider/model>          Override provider and model',
   '  --variant <effort>                none|low|medium|high|xhigh',
+  '  --role <name>                     Override the agent role',
   '  --max-turns <count>               Limit model round trips',
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
@@ -68,6 +70,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   let cwd: string | undefined;
   let model: string | undefined;
   let variant: string | undefined;
+  let role: string | undefined;
   let maxTurns: number | undefined;
   let dangerouslySkipPermissions = false;
   let mcpConfigPath: string | undefined;
@@ -105,6 +108,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       '--dir',
       '--model',
       '--variant',
+      '--role',
       '--max-turns',
       '--mcp-config',
     ]);
@@ -123,6 +127,9 @@ export function parseCliArgs(argv: string[]): CliInvocation {
           break;
         case '--variant':
           variant = valueOption.value;
+          break;
+        case '--role':
+          role = valueOption.value;
           break;
         case '--mcp-config':
           mcpConfigPath = valueOption.value;
@@ -166,6 +173,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     cwd,
     model,
     variant,
+    role,
     maxTurns,
     dangerouslySkipPermissions,
     mcpConfigPath,

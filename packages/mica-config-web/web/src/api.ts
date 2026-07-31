@@ -1,7 +1,4 @@
 import type {
-  ConfigWebConversationDetails,
-  ConfigWebConversationStreamEvent,
-  ConfigWebConversationWorkspace,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginsDetails,
@@ -43,6 +40,15 @@ export async function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
 export async function readSessionsDetails(): Promise<ConfigWebSessionsDetails> {
   const response = await fetch('/api/details/sessions');
   return readJson(response);
+}
+
+export async function writeSession(id: string, content: string): Promise<void> {
+  const response = await fetch('/api/files/session', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, content }),
+  });
+  await assertOk(response);
 }
 
 export async function readSessionDetails(id: string): Promise<ConfigWebSessionDetails> {
@@ -136,154 +142,6 @@ export async function deleteSkill(name: string): Promise<ConfigWebSkillsDetails>
   return readJson(response);
 }
 
-export async function readConversationDetails(): Promise<ConfigWebConversationDetails | null> {
-  const response = await fetch('/api/details/conversation');
-  return readJson(response);
-}
-
-export async function readConversationWorkspace(): Promise<ConfigWebConversationWorkspace> {
-  const response = await fetch('/api/conversation/workspace');
-  return readJson(response);
-}
-
-export async function createConversation(input: {
-  title?: string;
-  folderId?: string | null;
-  providerId?: string;
-  model?: string;
-  effort?: string;
-  role?: string;
-} = {}): Promise<ConfigWebSessionDetails> {
-  const response = await fetch('/api/conversation', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return readJson(response);
-}
-
-export async function patchConversation(input: {
-  id: string;
-  title?: string;
-  folderId?: string | null;
-  pinned?: boolean;
-  providerId?: string;
-  model?: string;
-  effort?: string;
-  role?: string;
-}): Promise<ConfigWebSessionDetails> {
-  const response = await fetch('/api/conversation', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return readJson(response);
-}
-
-export async function deleteConversation(id: string): Promise<ConfigWebConversationWorkspace> {
-  const response = await fetch('/api/conversation', {
-    method: 'DELETE',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id }),
-  });
-  return readJson(response);
-}
-
-export async function clearConversation(id: string): Promise<ConfigWebSessionDetails> {
-  const response = await fetch('/api/conversation/clear', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id }),
-  });
-  return readJson(response);
-}
-
-export async function sendConversationMessage(id: string, content: string): Promise<ConfigWebSessionDetails> {
-  const response = await fetch('/api/conversation/send', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id, content }),
-  });
-  return readJson(response);
-}
-
-export async function streamConversationMessage(
-  id: string,
-  content: string,
-  onEvent: (event: ConfigWebConversationStreamEvent) => void,
-  signal?: AbortSignal,
-): Promise<ConfigWebSessionDetails> {
-  const response = await fetch('/api/conversation/send-stream', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id, content }),
-    signal,
-  });
-  if (!response.ok) throw new Error(await readResponseError(response));
-  if (!response.body) throw new Error('浏览器未提供流式响应体');
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let completed: ConfigWebSessionDetails | null = null;
-
-  const consumeLine = (line: string) => {
-    if (!line.trim()) return;
-    const event = JSON.parse(line) as ConfigWebConversationStreamEvent;
-    onEvent(event);
-    if (event.type === 'done') completed = event.session;
-    if (event.type === 'error') throw new Error(event.message);
-  };
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) consumeLine(line);
-      if (done) break;
-    }
-    consumeLine(buffer);
-    if (!completed) throw new Error('会话流在完成前已关闭');
-    return completed;
-  } finally {
-    if (!completed) await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
-
-export async function createConversationFolder(input: { name?: string } = {}): Promise<ConfigWebConversationWorkspace> {
-  const response = await fetch('/api/conversation/folder', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return readJson(response);
-}
-
-export async function patchConversationFolder(input: {
-  id: string;
-  name?: string;
-  collapsed?: boolean;
-}): Promise<ConfigWebConversationWorkspace> {
-  const response = await fetch('/api/conversation/folder', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return readJson(response);
-}
-
-export async function deleteConversationFolder(id: string): Promise<ConfigWebConversationWorkspace> {
-  const response = await fetch('/api/conversation/folder', {
-    method: 'DELETE',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id }),
-  });
-  return readJson(response);
-}
-
 export function connectHeartbeat(onEvent?: (event: { type?: string }) => void): WebSocket {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/events`);
@@ -304,6 +162,10 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new Error(await readResponseError(response));
   }
   return response.json();
+}
+
+async function assertOk(response: Response): Promise<void> {
+  if (!response.ok) throw new Error(await readResponseError(response));
 }
 
 async function readResponseError(response: Response): Promise<string> {

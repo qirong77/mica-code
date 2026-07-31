@@ -5,6 +5,8 @@ import { getConfigWebStatePath } from './paths.js';
 export type ConfigWebState = {
   pid: number;
   port: number;
+  host?: string;
+  persistent?: boolean;
 };
 
 export function readConfigWebState(): ConfigWebState | null {

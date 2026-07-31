@@ -69,10 +69,19 @@ export class Application {
       if (startupSession) {
         const snapshot = applySessionConfig(startupSession.snapshot);
         startupSession = { ...startupSession, snapshot };
-        await micaConfig.ensureModelRule(snapshot.model);
+        void micaConfig.ensureModelRule(snapshot.model).catch(() => undefined);
       } else {
-        await ensureInitialModelSelection();
-        await micaConfig.ensureModelRule(micaConfig.get().model);
+        try {
+          await ensureInitialModelSelection();
+        } catch (modelError) {
+          const msg = modelError instanceof Error ? modelError.message : String(modelError);
+          micaUi.messageBar.addMessage({
+            id: 'model-load-warning',
+            text: `模型加载失败：${msg}；请使用 /model 配置可用的 provider`,
+          });
+        }
+        const currentModel = micaConfig.get().model;
+        if (currentModel) void micaConfig.ensureModelRule(currentModel).catch(() => undefined);
       }
       const agent = new AgentRuntime();
       const sessionController = new SessionController({ agent, store: sessionStore });

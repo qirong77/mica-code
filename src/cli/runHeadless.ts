@@ -27,6 +27,7 @@ export type HeadlessRunOptions = {
   cwd?: string;
   model?: string;
   variant?: string;
+  role?: string;
   maxTurns?: number;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
@@ -65,7 +66,19 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     if (options.cwd) process.chdir(resolve(options.cwd));
 
     const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
-    const initialModel = runtimeOverride.model ?? micaConfig.get().model;
+    let initialModel = runtimeOverride.model ?? micaConfig.get().model;
+    if (!initialModel) {
+      const config = micaConfig.get();
+      const provider = config.providers.find((item) => item.id === config.provider);
+      if (provider?.get_model_url) {
+        try {
+          await micaConfig.loadProviderModels(provider.id);
+          initialModel = runtimeOverride.model ?? micaConfig.get().model;
+        } catch {
+          // Best-effort: dynamic model discovery may fail in restricted networks.
+        }
+      }
+    }
     await ensureHeadlessModelRule(initialModel, options.signal);
     throwIfAborted(options.signal);
 
@@ -107,6 +120,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
         );
       }
     }
+    if (options.role) agent.setRole(options.role);
     throwIfAborted(options.signal);
 
     sessionId = sessionController.getCurrentSessionId();
@@ -209,14 +223,12 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 async function ensureHeadlessModelRule(model: string, signal?: AbortSignal): Promise<void> {
-  try {
-    await micaConfig.ensureModelRule(model, signal);
-  } catch (error) {
+  void micaConfig.ensureModelRule(model, signal).catch((error) => {
     throwIfAborted(signal);
     console.error(
       `Model metadata unavailable for ${model}; using generic defaults: ${error instanceof Error ? error.message : String(error)}`,
     );
-  }
+  });
 }
 
 async function cleanup(label: string, action: () => unknown | Promise<unknown>, timeoutMs = 2000): Promise<void> {

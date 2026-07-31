@@ -1,6 +1,8 @@
 import type { ConfigWebSection } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 
+export type ConfigWebAppSection = ConfigWebSection;
+
 const items = [
   { key: 'config', label: 'Config' },
   { key: 'sessions', label: 'Sessions' },
@@ -8,11 +10,11 @@ const items = [
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
   { key: 'plugins', label: 'Plugins' },
-] satisfies Array<{ key: ConfigWebSection; label: string }>;
+] satisfies Array<{ key: ConfigWebAppSection; label: string }>;
 
 type SidebarProps = {
-  section: ConfigWebSection;
-  onChange(section: ConfigWebSection): void;
+  section: ConfigWebAppSection;
+  onChange(section: ConfigWebAppSection): void;
 };
 
 export function Sidebar({ section, onChange }: SidebarProps) {
@@ -52,10 +54,10 @@ function SidebarItem({
   label,
   onChange,
 }: {
-  currentSection: ConfigWebSection;
-  section: ConfigWebSection;
+  currentSection: ConfigWebAppSection;
+  section: ConfigWebAppSection;
   label: string;
-  onChange(section: ConfigWebSection): void;
+  onChange(section: ConfigWebAppSection): void;
 }) {
   const Icon = appIcons[section];
   const active = currentSection === section;

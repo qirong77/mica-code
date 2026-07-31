@@ -1,31 +1,41 @@
 import { spawn } from 'node:child_process';
 import { probeConfigWebState, readConfigWebState } from './singleton.js';
-import type { ConfigWebConversationDetails, ConfigWebServerInfo } from '../shared/types.js';
+import { resolveConfigWebAdvertisedUrl, resolveConfigWebBindHost } from './publicUrl.js';
+import type { ConfigWebServerInfo } from '../shared/types.js';
 
-export async function startConfigWeb(conversation?: ConfigWebConversationDetails): Promise<ConfigWebServerInfo> {
+export async function startConfigWeb(
+  options: { persistent?: boolean } = {},
+): Promise<ConfigWebServerInfo> {
   const current = readConfigWebState();
   if (current && (await probeConfigWebState(current))) {
-    const supportsConversation =
-      !conversation || (await tryUpdateConversation(current.port, conversation));
-    if (supportsConversation) {
+    const expectedHost = resolveWorkerBindHost(options.persistent === true);
+    const compatible =
+      current.host === expectedHost && (!options.persistent || current.persistent === true);
+    if (compatible) {
       return {
         url: toUrl(current.port),
         port: current.port,
         reused: true,
       };
     }
+    await stopIncompatibleConfigWeb(current.pid, current.port);
   }
 
   const workerCommand = resolveConfigWebWorkerCommand();
   const child = spawn(workerCommand.executable, [...workerCommand.entryArgs, '--config-web-worker'], {
     detached: true,
     stdio: 'ignore',
-    env: process.env,
+    env: {
+      ...process.env,
+      ...(options.persistent
+        ? { MICA_CONFIG_WEB_PERSIST: '1', MICA_CONFIG_WEB_HOST: '0.0.0.0' }
+        : {}),
+    },
   });
   child.unref();
 
-  const state = await waitForServer();
-  if (conversation) await updateConfigWebConversation(state.port, conversation);
+  const expectedHost = resolveWorkerBindHost(options.persistent === true);
+  const state = await waitForServer(current?.pid, options.persistent === true, expectedHost);
   return {
     url: toUrl(state.port),
     port: state.port,
@@ -33,45 +43,50 @@ export async function startConfigWeb(conversation?: ConfigWebConversationDetails
   };
 }
 
-async function tryUpdateConversation(
-  port: number,
-  conversation: ConfigWebConversationDetails,
-): Promise<boolean> {
-  try {
-    await updateConfigWebConversation(port, conversation);
-    return true;
-  } catch {
-    return false;
-  }
+function resolveWorkerBindHost(persistent: boolean): string {
+  if (persistent) return '0.0.0.0';
+  return resolveConfigWebBindHost();
 }
 
-export async function updateConfigWebConversation(
-  port: number,
-  conversation: ConfigWebConversationDetails,
-): Promise<void> {
-  const response = await fetch(`http://127.0.0.1:${port}/api/details/conversation`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(conversation),
-    signal: AbortSignal.timeout(2_000),
-  });
-  if (response.ok) return;
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-  throw new Error(payload?.error ?? `同步 Conversation 失败: ${response.status}`);
-}
-
-async function waitForServer() {
+async function waitForServer(previousPid?: number, persistent = false, expectedHost?: string) {
+  const host = expectedHost ?? resolveConfigWebBindHost();
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const state = readConfigWebState();
-    if (state && (await probeConfigWebState(state))) return state;
+    if (
+      state &&
+      state.pid !== previousPid &&
+      state.host === host &&
+      (!persistent || state.persistent === true) &&
+      (await probeConfigWebState(state))
+    ) {
+      return state;
+    }
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
   throw new Error('启动配置页面超时');
 }
 
+async function stopIncompatibleConfigWeb(pid: number, port: number): Promise<void> {
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (!(await probeConfigWebState({ pid, port }))) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // The worker exited between the final probe and the signal.
+  }
+}
+
 function toUrl(port: number): string {
-  return `http://127.0.0.1:${port}`;
+  return resolveConfigWebAdvertisedUrl(port);
 }
 
 export function resolveConfigWebWorkerCommand(
