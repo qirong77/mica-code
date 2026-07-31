@@ -64,6 +64,8 @@ function makeId(prefix: string, seed: number): string {
 
 const PERSISTED_KINDS: ReadonlySet<UiMessage['kind']> = new Set(['user', 'assistant', 'notice']);
 const LIVE_KINDS: ReadonlySet<UiMessage['kind']> = new Set(['thinking', 'tool']);
+const MAX_THINKING_CHARS = 40_000;
+const THINKING_TRUNCATION_MARKER = '[thinking display truncated]\n';
 
 /**
  * Merges live-only messages (thinking blocks / tool cards) into an
@@ -150,13 +152,20 @@ export function applyEvent(messages: UiMessage[], event: SyncEvent): UiMessage[]
       break;
     }
     case 'thinking': {
-      const text = String(event.text ?? '');
-      if (!text) return next;
+      const delta = String(event.text ?? '');
+      if (!delta) return next;
       const last = next.at(-1);
       if (last?.kind === 'thinking') {
-        next[next.length - 1] = { ...last, text };
+        // Provider streams reasoning as incremental deltas; append instead of
+        // replacing so the block shows the full segment, not the last chunk.
+        next[next.length - 1] = { ...last, text: appendBoundedText(last.text, delta) };
       } else {
-        next.push({ kind: 'thinking', id: makeId('thinking', next.length), text, ts: Number(event.ts ?? Date.now()) });
+        next.push({
+          kind: 'thinking',
+          id: makeId('thinking', next.length),
+          text: appendBoundedText('', delta),
+          ts: Number(event.ts ?? Date.now()),
+        });
       }
       break;
     }
@@ -227,4 +236,11 @@ export function applyEvent(messages: UiMessage[], event: SyncEvent): UiMessage[]
       break;
   }
   return next;
+}
+
+function appendBoundedText(previous: string, chunk: string): string {
+  const next = `${previous}${chunk}`;
+  if (next.length <= MAX_THINKING_CHARS) return next;
+  const body = next.startsWith(THINKING_TRUNCATION_MARKER) ? next.slice(THINKING_TRUNCATION_MARKER.length) : next;
+  return `${THINKING_TRUNCATION_MARKER}${body.slice(-(MAX_THINKING_CHARS - THINKING_TRUNCATION_MARKER.length))}`;
 }

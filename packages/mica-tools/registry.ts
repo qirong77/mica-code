@@ -16,6 +16,11 @@ import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
 import { ToolKillTask } from './ToolKillTask.js';
 import { ToolReadImage } from './ToolReadImage.js';
 import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
+import { ToolPtySpawn } from './pty/ToolPtySpawn.js';
+import { ToolPtySend } from './pty/ToolPtySend.js';
+import { ToolPtyRead } from './pty/ToolPtyRead.js';
+import { ToolPtyWait } from './pty/ToolPtyWait.js';
+import { ToolPtyKill } from './pty/ToolPtyKill.js';
 
 export type ToolFilter = (name: string) => boolean;
 
@@ -49,6 +54,11 @@ const builtinTools: MicaTool[] = [
   new ToolWebFetch(),
   new ToolWebSearch(),
   new ToolSkill(),
+  new ToolPtySpawn(),
+  new ToolPtySend(),
+  new ToolPtyRead(),
+  new ToolPtyWait(),
+  new ToolPtyKill(),
 ];
 
 let mcpTools: MicaTool[] = [];

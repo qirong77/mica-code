@@ -75,14 +75,27 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
 });
 
 const THINKING_PREVIEW_MAX = 80;
+const THINKING_PREVIEW_DEBOUNCE_MS = 300;
 
 const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extract<UiMessage, { kind: 'thinking' }> }) {
   const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState(() => message.text.slice(0, THINKING_PREVIEW_MAX));
   const SparklesIcon = appIcons.sparkles;
   const ChevronDownIcon = appIcons.chevronDown;
   const ChevronRightIcon = appIcons.chevronRight;
-  const preview = message.text.slice(0, THINKING_PREVIEW_MAX);
+
+  // 流式增量频繁到达时，摘要延迟更新，避免每块 delta 都跳变（闪烁）。
+  // 思考段停止推送约 300ms 后摘要才稳定到最终内容。
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setPreview(message.text.slice(0, THINKING_PREVIEW_MAX)),
+      THINKING_PREVIEW_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [message.text]);
+
   const truncated = message.text.length > THINKING_PREVIEW_MAX;
+  const summary = expanded ? `思考 · ${message.text.length} 字` : preview || '思考中…';
   return (
     <div className={`thinking-block ${expanded ? 'expanded' : ''}`}>
       <button
@@ -94,7 +107,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extrac
           <SparklesIcon size={13} />
         </span>
         <span className="thinking-summary">
-          {expanded ? `思考 · ${message.text.length} 字` : preview || '思考中…'}
+          {summary}
           {!expanded && truncated ? '…' : ''}
         </span>
         <span className="thinking-expand">

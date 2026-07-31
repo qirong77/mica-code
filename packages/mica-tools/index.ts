@@ -44,6 +44,11 @@ export const micaTools = {
 
 export { MicaTool } from './MicaTool.js';
 export { ToolRunShell } from './ToolRunShell.js';
+export { ToolPtySpawn } from './pty/ToolPtySpawn.js';
+export { ToolPtySend } from './pty/ToolPtySend.js';
+export { ToolPtyRead } from './pty/ToolPtyRead.js';
+export { ToolPtyWait } from './pty/ToolPtyWait.js';
+export { ToolPtyKill } from './pty/ToolPtyKill.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
