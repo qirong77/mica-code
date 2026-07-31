@@ -17,6 +17,7 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
@@ -24,6 +25,27 @@ body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+html {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 移动端：消除双击缩放延迟与 300ms 点击延迟（可点元素统一声明） */
+button,
+.machine-row,
+.session-row,
+.tool-card,
+.tool-body summary,
+.stat-card,
+.thinking-toggle,
+.send-button,
+.abort-button,
+.icon-button,
+.menu-button {
+  touch-action: manipulation;
 }
 
 body {
@@ -736,12 +758,37 @@ body {
   justify-content: center;
   gap: 6px;
   color: var(--text-dim);
+  position: relative;
+  padding: 24px 20px;
+  text-align: center;
 }
 
 .welcome h1 {
   color: var(--text);
   font-size: 22px;
   margin: 0;
+}
+
+.welcome-hint {
+  max-width: 480px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+  overflow-wrap: break-word;
+}
+
+.welcome-topbar {
+  display: none;
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.desktop-only {
+  display: inline;
+}
+
+.mobile-only {
+  display: none;
 }
 
 .welcome-loading {
@@ -866,14 +913,47 @@ body {
     padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   }
 
+  /* iOS 聚焦 <16px 输入框会自动缩放页面，移动端统一提为 16px */
+  .input-area textarea,
+  .search-box input {
+    font-size: 16px;
+  }
+
   .welcome-stats {
-    gap: 10px;
+    gap: 8px;
+    width: 100%;
     flex-wrap: wrap;
     justify-content: center;
   }
 
   .stat-card {
-    padding: 12px 16px;
-    min-width: 70px;
+    flex: 1 1 84px;
+    max-width: 110px;
+    min-width: 0;
+    padding: 12px 10px;
+  }
+
+  .welcome {
+    padding: 20px 16px;
+  }
+
+  .welcome h1 {
+    font-size: 18px;
+  }
+
+  .welcome-hint {
+    font-size: 13px;
+  }
+
+  .welcome-topbar {
+    display: flex;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+
+  .mobile-only {
+    display: inline;
   }
 }

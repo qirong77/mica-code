@@ -568,7 +568,8 @@ export class LocalRuntimeController implements RuntimeController {
     try {
       sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
       await this.hooks.emit('turn:before', { runtime: this, input, content });
-      await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
+      const promptBuildEvent = await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
+      const runContent = promptBuildEvent.content ?? content;
 
       let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
@@ -609,7 +610,7 @@ export class LocalRuntimeController implements RuntimeController {
         }
 
         try {
-          const result = await agent.run(content, {
+          const result = await agent.run(runContent, {
             reservedRunId: attempt === 0 ? reservedRunId : undefined,
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);

@@ -11,6 +11,7 @@ import {
   type SyncEvent,
 } from './api';
 import { Conversation } from './Conversation';
+import { appIcons } from './icons';
 import { applyEvent, mergeSessionMessages, messagesFromSession, type UiMessage } from './render';
 import { Sidebar } from './Sidebar';
 import { useSse } from './useSse';
@@ -73,6 +74,7 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [sessionError, setSessionError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const MenuIcon = appIcons.menu;
 
   const runningRef = useRef(running);
   const routeRef = useRef(route);
@@ -448,6 +450,16 @@ export function App() {
         />
       ) : route.sessionId ? (
         <main className="welcome">
+          <div className="welcome-topbar">
+            <button
+              className="menu-button"
+              onClick={() => setSidebarOpen(true)}
+              title="机器与会话"
+              aria-label="打开机器与会话列表"
+            >
+              <MenuIcon size={18} />
+            </button>
+          </div>
           {sessionError ? (
             <div className="notice-block error">{sessionError}</div>
           ) : (
@@ -459,12 +471,26 @@ export function App() {
         </main>
       ) : (
         <main className="welcome">
+          <div className="welcome-topbar">
+            <button
+              className="menu-button"
+              onClick={() => setSidebarOpen(true)}
+              title="机器与会话"
+              aria-label="打开机器与会话列表"
+            >
+              <MenuIcon size={18} />
+            </button>
+          </div>
           {sessionError ? (
             <div className="notice-block error">{sessionError}</div>
           ) : (
             <>
               <h1>选择一个会话</h1>
-              <p>左侧选择机器和会话，查看历史对话或继续对话。</p>
+              <p className="welcome-hint">
+                <span className="desktop-only">左侧选择机器和会话，</span>
+                <span className="mobile-only">点击左上角按钮选择机器和会话，</span>
+                查看历史对话或继续对话。
+              </p>
               <div className="welcome-stats">
                 <div className="stat-card">
                   <div className="stat-value">{machines.length}</div>

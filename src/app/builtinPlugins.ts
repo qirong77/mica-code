@@ -5,6 +5,7 @@ import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
 import setupFileMention from '../../buildin-plugins/file-mention.js';
 import setupMcp from '../../buildin-plugins/mcp.mjs';
 import setupMessageQueue from '../../buildin-plugins/message-queue.js';
+import setupCommandMemory from '../../buildin-plugins/command-memory.js';
 import { TodoPlugin } from '../../buildin-plugins/todo/TodoPlugin.js';
 import setupCommandCd from '../../buildin-plugins/command-cd.mjs';
 import setupCommandClear from '../../buildin-plugins/command-clear.mjs';
@@ -41,6 +42,7 @@ export function useBuiltinPlugins(
         setupSessionAutoTitle(ctx, agentSessions, onAgentTitleChanged);
       }),
     )
+    .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(new TodoPlugin())
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({
