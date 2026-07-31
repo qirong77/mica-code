@@ -23,9 +23,16 @@
 - `background_tasks`：列出后台任务。
 - `read_task_output`：读取后台任务输出。
 - `kill_task`：终止后台任务。
+- `pty_spawn`：在 PTY 中启动交互式终端程序。
+- `pty_send`：向 PTY 会话发送文本或命名按键。
+- `pty_read`：读取 PTY 会话输出。
+- `pty_wait`：等待 PTY 输出匹配、进程退出或静默。
+- `pty_kill`：终止 PTY 会话。
 - `web_fetch`：抓取 URL 内容。
 - `web_search`：搜索网络信息。
 - `Skill`：读取并调用本地 skill 指令。
+
+PTY 工具用于驱动交互式 TUI 程序做端到端验证。node-pty 的 native binding 在 Bun 进程内不工作，因此 PTY 会话由懒启动的 Node 子进程承载（`packages/mica-pty/src/server.mjs`），通过 JSONL over stdio 通信；工具实现位于 `packages/mica-tools/pty/`，首次调用时动态加载 `packages/mica-pty/src/manager.js`（不经过 `mica-pty/index.js`，避免 Bun 进程加载 node-pty）。node-pty 缺失或 Node 不可用时工具降级报错，不影响其他功能。
 
 ## 使用入口
 
@@ -61,6 +68,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `ToolRunShellBackground.ts`：后台 shell 输出与任务控制支持。
 - `ToolRunShellOutput.ts`：run_shell 统一输出处理。
 - `ToolSkill.ts`：基于 skills 的工具调用。
+- `pty/`：PTY 工具（spawn/send/read/wait/kill）与懒加载 manager 桥接。
 - `ToolWebFetch.ts`：抓取网址内容。
 - `ToolWebSearch.ts`：执行网络搜索。
 - `ToolWriteFile.ts`：写入与更新文件。

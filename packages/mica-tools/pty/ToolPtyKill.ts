@@ -5,19 +5,15 @@ import { getPtyManager } from './shared.js';
 
 export class ToolPtyKill extends MicaTool {
   constructor() {
-    super(
-      'pty_kill',
-      '终止 PTY 会话对应的子进程并清理会话。默认 SIGTERM，超时后升级 SIGKILL。',
-      {
-        type: 'object' as const,
-        properties: {
-          session_id: { type: 'string', description: 'pty_spawn 返回的会话 ID。' },
-          signal: { type: 'string', description: '终止信号，默认 SIGTERM。' },
-          force_after_ms: { type: 'number', description: '升级为 SIGKILL 的等待毫秒，默认 3000。' },
-        },
-        required: ['session_id'],
+    super('pty_kill', '终止 PTY 会话对应的子进程并清理会话。默认 SIGTERM，超时后升级 SIGKILL。', {
+      type: 'object' as const,
+      properties: {
+        session_id: { type: 'string', description: 'pty_spawn 返回的会话 ID。' },
+        signal: { type: 'string', description: '终止信号，默认 SIGTERM。' },
+        force_after_ms: { type: 'number', description: '升级为 SIGKILL 的等待毫秒，默认 3000。' },
       },
-    );
+      required: ['session_id'],
+    });
   }
 
   async execute(

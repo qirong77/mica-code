@@ -26,10 +26,4 @@ export type { KeyName } from './src/keys.js';
 export { ensureSpawnHelperExecutable } from './src/ensureExecutable.js';
 export { PtyManager, ptyManager } from './src/manager.js';
 export { ptyServerSource } from './src/ptyServerSource.js';
-export type {
-  PtySessionInfo,
-  PtyReadOptions,
-  PtyReadResult,
-  PtyWaitOptions,
-  PtyWaitResult,
-} from './src/manager.js';
+export type { PtySessionInfo, PtyReadOptions, PtyReadResult, PtyWaitOptions, PtyWaitResult } from './src/manager.js';

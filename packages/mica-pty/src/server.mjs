@@ -9,6 +9,11 @@
 // The resolved node-pty module entry is passed via the MICA_PTY_ENTRY
 // environment variable (file:// URL or absolute path) so this script does not
 // need a node_modules lookup of its own.
+//
+// This file is the source of truth for ptyServerSource.ts (which embeds it as
+// a string via scripts/generate-pty-server-source.mjs). Keep it free of
+// backticks and template-interpolation braces so it can be embedded in a
+// template literal.
 
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
@@ -23,11 +28,11 @@ const pty = ptyEntry ? require(ptyEntry) : null;
 const sessions = new Map();
 
 function emit(obj) {
-  process.stdout.write(`${JSON.stringify(obj)}\n`);
+  process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
 function reply(id, obj) {
-  emit({ id, ...obj });
+  emit(Object.assign({ id: id }, obj));
 }
 
 function createSessionId() {
@@ -39,19 +44,22 @@ function handleSpawn(id, msg) {
     if (!pty) throw new Error('node-pty 加载失败：缺少 MICA_PTY_ENTRY');
     const argv = Array.isArray(msg.argv) ? msg.argv : [];
     if (argv.length === 0) throw new Error('spawn 需要非空 argv');
-    const [file, ...args] = argv;
+    const file = argv[0];
+    const args = argv.slice(1);
     const options = msg.options ?? {};
     const proc = pty.spawn(file, args, {
       name: options.name ?? 'xterm-256color',
       cols: options.cols ?? 120,
       rows: options.rows ?? 40,
       cwd: options.cwd,
-      env: { ...process.env, ...(options.env ?? {}) },
+      env: Object.assign({}, process.env, options.env ?? {}),
     });
     const sessionId = createSessionId();
-    sessions.set(sessionId, { proc });
-    proc.onData((data) => emit({ type: 'data', session: sessionId, data }));
-    proc.onExit((info) => {
+    sessions.set(sessionId, { proc: proc });
+    proc.onData(function (data) {
+      emit({ type: 'data', session: sessionId, data: data });
+    });
+    proc.onExit(function (info) {
       emit({ type: 'exit', session: sessionId, exitCode: info.exitCode, signal: info.signal });
       sessions.delete(sessionId);
     });
@@ -63,7 +71,7 @@ function handleSpawn(id, msg) {
 
 function handleSend(id, msg) {
   const entry = sessions.get(msg.session);
-  if (!entry) return reply(id, { ok: false, error: `session 不存在: ${msg.session}` });
+  if (!entry) return reply(id, { ok: false, error: 'session 不存在: ' + msg.session });
   try {
     entry.proc.write(msg.data ?? '');
     reply(id, { ok: true });
@@ -74,7 +82,7 @@ function handleSend(id, msg) {
 
 function handleResize(id, msg) {
   const entry = sessions.get(msg.session);
-  if (!entry) return reply(id, { ok: false, error: `session 不存在: ${msg.session}` });
+  if (!entry) return reply(id, { ok: false, error: 'session 不存在: ' + msg.session });
   try {
     entry.proc.resize(msg.cols ?? 120, msg.rows ?? 40);
     reply(id, { ok: true });
@@ -92,19 +100,19 @@ function handleClose(id, msg) {
     // Already gone.
   }
   const forceAfterMs = msg.forceAfterMs ?? 3000;
-  const timer = setTimeout(() => {
+  const timer = setTimeout(function () {
     try {
       entry.proc.kill('SIGKILL');
     } catch {
       // Ignore.
     }
   }, forceAfterMs);
-  timer.unref?.();
+  if (timer.unref) timer.unref();
   reply(id, { ok: true });
 }
 
 function handleList(id) {
-  reply(id, { ok: true, sessions: [...sessions.keys()] });
+  reply(id, { ok: true, sessions: Array.from(sessions.keys()) });
 }
 
 function handleShutdown() {
@@ -120,7 +128,7 @@ function handleShutdown() {
 }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-rl.on('line', (line) => {
+rl.on('line', function (line) {
   let msg;
   try {
     msg = JSON.parse(line);
@@ -148,15 +156,17 @@ rl.on('line', (line) => {
         handleShutdown();
         break;
       default:
-        reply(msg.id, { ok: false, error: `unknown command: ${msg.type}` });
+        reply(msg.id, { ok: false, error: 'unknown command: ' + msg.type });
     }
   } catch (error) {
     reply(msg.id, { ok: false, error: error instanceof Error ? error.message : String(error) });
   }
 });
-rl.on('close', () => handleShutdown());
+rl.on('close', function () {
+  handleShutdown();
+});
 
 // If stdin never opens (e.g. spawn failed), do not leave the process hanging.
-setTimeout(() => {
+setTimeout(function () {
   if (!rl.closed && process.stdin.destroyed) handleShutdown();
 }, 5000).unref?.();

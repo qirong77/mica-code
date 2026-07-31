@@ -48,9 +48,7 @@ export class ToolPtyRead extends MicaTool {
         stripAnsi: input.strip_ansi !== false,
         clear: input.clear === true,
       });
-      const status = result.exited
-        ? `exited (code=${result.exitCode}, signal=${result.signal ?? 'none'})`
-        : 'running';
+      const status = result.exited ? `exited (code=${result.exitCode}, signal=${result.signal ?? 'none'})` : 'running';
       return [
         `session: ${input.session_id}`,
         `status: ${status}`,

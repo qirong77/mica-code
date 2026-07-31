@@ -12,7 +12,9 @@ export class ToolPtySend extends MicaTool {
     super(
       'pty_send',
       '向 PTY 会话发送输入。可发送原始文本（text，如需要换行用 \\r）或命名按键（key）。' +
-        'key 可选值：' + KEY_NAMES + '。',
+        'key 可选值：' +
+        KEY_NAMES +
+        '。',
       {
         type: 'object' as const,
         properties: {

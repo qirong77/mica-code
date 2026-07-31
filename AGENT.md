@@ -109,7 +109,7 @@ packages/
   mica-skills                      用户 skills 扫描、解析和缓存
   mica-plugin                      插件生命周期、hooks、service container
   mica-common                      跨包共享底层工具
-  mica-pty                         基于 node-pty 的 PTY 测试驱动（Node 运行时，不集成进 mica 运行时）
+  mica-pty                         PTY 测试驱动 + 内置 PTY 工具的 Node helper（node-pty 只在 Node 子进程加载）
   mica-sync-server                 中心聚合服务（零依赖 Node 单文件，REST/SSE/长轮询/JSON 存储）
   mica-sync-web                    Web 控制台（React + Vite，查看会话 + 远程续聊）
   @anthropic/ink                   本仓库维护的 Ink fork
@@ -315,12 +315,16 @@ AGENT.md
 - `read_image` 读取本地路径或 HTTP(S) URL，经过 `mica-common` 的格式识别后将原图作为图片内容块返回；它是只读工具，也应加入只读 subagent 的允许列表。
 - `run_shell` 的前后台执行、cwd 校验、输出截断、后台任务读取和终止逻辑应保留在 `packages/mica-tools` 内相邻模块，不分散到应用层。
 - 判断 retry 是否可重放依赖 `micaTools.isReadOnly(toolName)`；新增工具要认真设置 read-only 语义。
+- PTY 工具（`pty_spawn`/`pty_send`/`pty_read`/`pty_wait`/`pty_kill`）用于驱动交互式 TUI 程序做端到端验证，工具实现位于 `packages/mica-tools/pty/`。node-pty 的 native binding 在 Bun 进程内不工作，因此 PTY 会话由懒启动的 **Node 子进程**（`packages/mica-pty/src/server.mjs`，经 JSONL over stdio 通信）承载；Bun 主进程只做 IPC 和输出缓冲。node-pty 缺失或 Node 不可用时工具降级报错，不影响其他功能。
+- PTY 工具在首次调用时动态 import `@packages/mica-pty/src/manager.js`（独立模块，不经过 `mica-pty/index.js`），避免 Bun 进程顶层加载 node-pty；`node-pty` 入口通过 `import.meta.resolve`（排除 Bun 虚拟 `$bunfs` 路径）或向上遍历 `node_modules`（含 `.bun` 缓存布局）解析，由 Node helper 从真实磁盘加载。node-pty 必须保持 external，禁止从生产代码静态 import `node-pty` 或 `mica-pty/index.js`（编译二进制的 Bun 运行时无法解析 node-pty）。
+- `packages/mica-pty/src/ptyServerSource.ts` 是 `server.mjs` 的 JSON 转义内嵌（兼容 `bun build --compile`，打包器不支持 `?raw`）；改动 `server.mjs` 后必须运行 `bun run scripts/generate-pty-server-source.mjs`，`packages/mica-pty/tests/serverSource.test.ts` 会校验两者同步。
 
 当前内置工具包括：
 
 - `read_file`、`read_image`、`write_file`、`apply_patch`
 - `list_files`、`grep_search`
 - `run_shell`、`background_tasks`、`read_task_output`、`kill_task`
+- `pty_spawn`、`pty_send`、`pty_read`、`pty_wait`、`pty_kill`
 - `web_fetch`、`web_search`
 - `Skill`
 
@@ -401,7 +405,7 @@ AGENT.md
 - `mica-context` 提供上下文处理能力，不直接操纵 provider adapter。
 - `mica-skills` 只扫描、解析、缓存 skills，不执行 skill 内容。
 - `mica-plugin` 只提供插件机制，不内置具体产品插件。
-- `mica-pty` 只做 PTY 测试驱动，不依赖任何产品业务包，不集成进 mica 运行时；只能在 Node ≥22 / vitest 下运行。
+- `mica-pty` 提供 PTY 测试驱动（`PtyDriver`，Node ≥22 / vitest 下使用）和内置 PTY 工具运行时支持（`PtyManager` + Node helper server，Bun 主进程通过 IPC 使用）；`src/manager.ts` 不 import node-pty，`index.ts` 仍导出 `PtyDriver`（其顶层 import node-pty，因此生产代码不要静态 import `mica-pty/index.js`）。
 - `buildin-plugins` 放官方产品策略和流程；运行期插件通过 `PluginContext` 的 commands、hooks、services、runtime queue、tools 和 UI capability 接入，不反向 import `src/**`。
 
 如果新增代码会导致底层包依赖上层包，不要直接加 import。优先使用类型、回调、service、hook 或 adapter 注入能力。
@@ -411,7 +415,7 @@ AGENT.md
 - 根 tsconfig 配置了 `@packages/*` alias，映射到 `./packages/*`。
 - `src/` 中引用 package 统一使用 `@packages/<name>/index.js`，除非需要访问该 package 明确公开的相邻模块或测试目标。
 - 每个 package 的公共 API 通过 `index.ts` 聚合导出；新增公共能力时同步更新导出入口和 README。
-- 默认不使用动态 import。启动入口为确保 `validate-config` 在 `mica-config` 创建模块级快照前运行，可以在明确的进程模式分派边界延迟加载应用或 Config Web server。
+- 默认不使用动态 import。启动入口为确保 `validate-config` 在 `mica-config` 创建模块级快照前运行，可以在明确的进程模式分派边界延迟加载应用或 Config Web server；PTY 工具首次调用时动态加载 `mica-pty` 的 manager 模块属于同样的显式延迟边界（避免 Bun 进程加载 node-pty）。
 - import 路径风格保持与所在文件周边一致。
 - 不把应用装配逻辑塞进 package；package 需要上层能力时，通过抽象注入。
 - TypeScript 使用 strict、isolatedModules、verbatimModuleSyntax。类型导入应使用 `import type`。
@@ -421,7 +425,7 @@ AGENT.md
 ## 测试与验证
 
 - 单元/集成测试走 `bun run test`（vitest，Node 环境）；涉及交互式 TUI 的测试或验证优先使用 `packages/mica-pty`。
-- `packages/mica-pty` 是基于 node-pty 的 PTY 测试驱动，用于驱动 `dist/mica` 或任意交互式 TUI 程序做端到端验证。它只支持 Node ≥22 / vitest 运行时——node-pty 的 native binding 在 Bun 下不可用（master fd EBADF），因此**不要从 `bun run` 代码里 import 它**。
+- `packages/mica-pty` 提供两类能力：`PtyDriver`（直接 import 的 PTY 测试驱动，Node ≥22 / vitest 下使用——node-pty 的 native binding 在 Bun 下不可用，因此**不要从 `bun run` 代码里 import `PtyDriver`**）和内置 PTY 工具运行时（`PtyManager` + Node helper 桥接，Bun 主进程可安全使用，见 Tools 章节）。
 - 用 mica-pty 做冒烟验证（需要真实 provider API key，默认跳过）：
 
 ```bash
@@ -429,7 +433,7 @@ bun run build   # 生成 dist/mica
 MICA_PTY_SMOKE=1 npx vitest run packages/mica-pty/tests/mica.smoke.test.ts
 ```
 
-- mica-pty 常规测试：`bun run test -- packages/mica-pty/tests/driver.test.ts`。API 与用法见 `packages/mica-pty/README.md`；旧 python 驱动 `temp/mica_pty.py` 保留作为参考。
+- mica-pty 常规测试：`bun run test -- packages/mica-pty/tests/driver.test.ts packages/mica-pty/tests/manager.test.ts packages/mica-pty/tests/serverSource.test.ts`。API 与用法见 `packages/mica-pty/README.md`；旧 python 驱动 `temp/mica_pty.py` 保留作为参考。
 - 注意 node-pty 的 prebuild `spawn-helper` 通过 Bun 安装时可能缺执行位，`PtyDriver.spawn()` 会做幂等 chmod 兜底。
 
 ## 命令范围与临时目录

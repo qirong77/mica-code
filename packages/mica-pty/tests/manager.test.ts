@@ -118,7 +118,11 @@ describe('PtyManager', () => {
     const manager = makeManager();
     // ~1 MB of output with a small interval keeps the process from being killed
     // before the buffer cap kicks in.
-    const { sessionId } = await manager.spawn([SHELL, '-c', 'i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done']);
+    const { sessionId } = await manager.spawn([
+      SHELL,
+      '-c',
+      'i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done',
+    ]);
     await manager.wait(sessionId, { idleMs: 200, timeoutMs: LONG_TIMEOUT });
     const read = manager.read(sessionId, { mode: 'tail', windowSize: MAX_PTY_OUTPUT_BYTES });
     expect(read.totalBytes).toBeLessThanOrEqual(MAX_PTY_OUTPUT_BYTES + 4096);

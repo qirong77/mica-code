@@ -18,7 +18,13 @@ describe('PTY tools', () => {
   });
 
   it('declare spawn/send/read/wait/kill as non-read-only tools', () => {
-    for (const tool of [new ToolPtySpawn(), new ToolPtySend(), new ToolPtyRead(), new ToolPtyWait(), new ToolPtyKill()]) {
+    for (const tool of [
+      new ToolPtySpawn(),
+      new ToolPtySend(),
+      new ToolPtyRead(),
+      new ToolPtyWait(),
+      new ToolPtyKill(),
+    ]) {
       expect(tool.readOnly).toBe(false);
     }
   });

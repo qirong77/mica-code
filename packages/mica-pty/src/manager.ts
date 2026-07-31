@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -143,15 +143,46 @@ function assertSafeSessionId(id: string): void {
   }
 }
 
+/** True for a real file-system file:// URL (rejects Bun's virtual $bunfs paths). */
+function isRealFileUrl(url: string): boolean {
+  return url.startsWith('file://') && !url.includes('/$bunfs');
+}
+
+/** Walk up from `cwd` looking for node-pty in node_modules (incl. Bun's .bun cache layout). */
+function findNodePtyOnDisk(): string | null {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 64; depth++) {
+    const direct = path.join(dir, 'node_modules', 'node-pty', 'lib', 'index.js');
+    if (existsSync(direct)) return pathToFileURL(direct).href;
+    const bunCacheDir = path.join(dir, 'node_modules', '.bun');
+    try {
+      if (existsSync(bunCacheDir)) {
+        const match = readdirSync(bunCacheDir).find((entry) => entry.startsWith('node-pty@'));
+        if (match) {
+          const candidate = path.join(bunCacheDir, match, 'node_modules', 'node-pty', 'lib', 'index.js');
+          if (existsSync(candidate)) return pathToFileURL(candidate).href;
+        }
+      }
+    } catch {
+      // Ignore unreadable cache dirs.
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 /** Resolve the node-pty module entry the helper should load. */
 async function resolveNodePtyEntry(): Promise<string> {
   try {
-    return await import.meta.resolve('node-pty');
+    const resolved = await import.meta.resolve('node-pty');
+    if (isRealFileUrl(resolved)) return resolved;
   } catch {
-    // Fall back to a plain node_modules lookup from the current directory.
-    const fromCwd = path.join(process.cwd(), 'node_modules', 'node-pty', 'lib', 'index.js');
-    if (existsSync(fromCwd)) return pathToFileURL(fromCwd).href;
+    // Fall through to the on-disk lookup.
   }
+  const onDisk = findNodePtyOnDisk();
+  if (onDisk) return onDisk;
   throw new Error(
     '未找到 node-pty 依赖。PTY 工具需要本机可用的 node-pty（开发环境已在 node_modules 内置），' +
       '且 Node >= 22 可执行文件位于 PATH（可用 MICA_PTY_NODE 覆盖）。',

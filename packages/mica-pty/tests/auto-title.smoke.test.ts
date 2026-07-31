@@ -11,17 +11,24 @@ import { PtyDriver } from '../index.js';
  * status keywords that would confuse waitTurnCompleted. Completion is detected
  * by polling the persisted session file's turnState instead of UI text.
  *
- *   npx vitest run packages/mica-pty/tests/auto-title.smoke.test.ts
+ * Skipped by default because it needs a live provider API key (same as
+ * mica.smoke.test.ts):
+ *
+ *   MICA_PTY_TITLE_SMOKE=1 npx vitest run packages/mica-pty/tests/auto-title.smoke.test.ts
  */
 const MICA_BIN = '/Users/qironglin/Desktop/mica-code/dist/mica';
 const HOME = '/private/tmp/mica-pty-title-home';
 const CWD = '/private/tmp/mica-pty-title-wd';
 const SESSIONS_DIR = `${HOME}/sessions`;
+const LOG = `/private/tmp/mica-pty-title-${process.pid}.raw`;
+
+const enabled = process.env.MICA_PTY_TITLE_SMOKE === '1';
+const suite = enabled ? describe : describe.skip;
 
 const TURNS = [
-  '在 hello.txt 里写入一行：hello world',
-  '再往 hello.txt 追加一行：goodbye',
-  '把 hello.txt 的内容读出来并逐行回复',
+  'create a file hello.txt containing hello world',
+  'append goodbye to hello.txt',
+  'read hello.txt and reply with its content',
 ];
 
 function sleep(ms: number): Promise<void> {
@@ -67,28 +74,33 @@ async function waitForSession(
   return false;
 }
 
-describe('mica-pty: session auto-title end-to-end', () => {
+suite('mica-pty: session auto-title end-to-end', () => {
   it('auto-renames the persisted session after 3 real short turns', async () => {
     const driver = PtyDriver.spawn([MICA_BIN], {
       cols: 140,
       rows: 40,
       cwd: CWD,
-      env: { MICA_HOME: HOME },
-      logPath: '/private/tmp/mica-pty-title.raw',
+      env: { MICA_HOME: HOME, MICA_NO_DAEMON: '1' },
+      logPath: LOG,
     });
     try {
-      expect(await driver.waitFor(/Type a message|start a conversation/, { timeoutMs: 90_000 })).toBe(true);
-      await driver.waitIdle(1000, 15_000);
+      // Boot screen strips to "❯TypesomethingandpressEnter..." (spaces are
+      // consumed by the renderer), so match loosely; probe showed 8s is enough
+      // for input to work.
+      await sleep(8000);
+      expect(driver.text().length).toBeGreaterThan(0);
 
-      // Turn 1: any persisted session with turnState === 'completed' counts.
-      const turn1Ok = await waitForSession((s) => s.turnState === 'completed' && s.msgs >= 2, 240_000, 'turn1');
-      expect(turn1Ok).toBe(true);
-
-      const turn2Ok = await waitForSession((s) => s.turnState === 'completed' && s.msgs >= 4, 240_000, 'turn2');
-      expect(turn2Ok).toBe(true);
-
-      const turn3Ok = await waitForSession((s) => s.turnState === 'completed' && s.msgs >= 6, 240_000, 'turn3');
-      expect(turn3Ok).toBe(true);
+      const turnStages = [
+        { turnIndex: 0, minMsgs: 2, label: 'turn1' },
+        { turnIndex: 1, minMsgs: 4, label: 'turn2' },
+        { turnIndex: 2, minMsgs: 6, label: 'turn3' },
+      ];
+      for (const { turnIndex, minMsgs, label } of turnStages) {
+        await driver.typeText(TURNS[turnIndex], 8);
+        driver.enter();
+        const ok = await waitForSession((s) => s.turnState === 'completed' && s.msgs >= minMsgs, 240_000, label);
+        expect(ok).toBe(true);
+      }
 
       // Auto-title runs fire-and-forget after turn:after of the 3rd turn.
       const sawAuto = await waitForSession((s) => s.titleSource === 'auto', 120_000, 'auto-title');

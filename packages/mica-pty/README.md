@@ -1,8 +1,11 @@
 # mica-pty
 
-基于 [node-pty](https://github.com/microsoft/node-pty)（VS Code 终端同款底层库）的 PTY 测试驱动，用于驱动交互式 TUI 程序做测试和验证，例如 mica 本体。
+基于 [node-pty](https://github.com/microsoft/node-pty)（VS Code 终端同款底层库）的 PTY 能力包，包含两类能力：
 
-> **不集成进 mica 运行时**。mica 是 Bun 运行时，而 node-pty 的 native binding 在 Bun 下不可用（master fd 会 EBADF、读写无效）。本包必须运行在 Node ≥22 或 vitest（Node 环境）下。
+- **`PtyDriver`（测试驱动）**：Node ≥22 / vitest 环境下直接 import，用于驱动交互式 TUI 程序（如 mica 本体）做测试和验证。
+- **内置 `pty_*` 工具运行时**：mica 以 Bun 运行时内置 `pty_spawn`/`pty_send`/`pty_read`/`pty_wait`/`pty_kill` 工具。node-pty 的 native binding 在 Bun 进程内不工作（spawn 的进程不会输出、master fd 无效），因此 PTY 会话由懒启动的 **Node 子进程**（`src/server.mjs`）通过 JSONL over stdio 承载，Bun 主进程（`PtyManager`）只做 IPC 和输出缓冲。
+
+> node-pty 只能在 Node 进程中加载。**不要从 `bun run` 代码里 import `PtyDriver` 或 `mica-pty/index.js`**（后者会 chain 到 node-pty）；生产代码应只通过 `@packages/mica-pty/src/manager.js` 使用内置工具运行时。
 
 ## 设计动机
 
@@ -47,7 +50,35 @@ await driver.close('SIGTERM', 3_000);
 
 - 在 vitest 测试中直接 import（项目 `bun run test` 即 vitest，跑在 Node 上）。
 - 独立脚本用 `node` 运行，或用 `npx tsx`（本项目未内置 tsx）。
-- **不要**从 `bun run` 的代码里 import 本包。
+- **不要**从 `bun run` 的代码里 import `PtyDriver` 或 `index.ts`（会加载 node-pty）。
+
+## 内置 PTY 工具
+
+mica 内置 `pty_spawn` / `pty_send` / `pty_read` / `pty_wait` / `pty_kill` 工具，agent 可以直接驱动交互式 TUI 程序。运行时链路：
+
+```text
+pty_* 工具 (packages/mica-tools/pty/)
+  └─ 动态加载 PtyManager (packages/mica-pty/src/manager.ts，不 import node-pty)
+       └─ 懒启动 node 子进程运行 src/server.mjs（JSONL over stdin/stdout）
+            └─ node-pty 创建 PTY 会话，异步回传 data/exit 事件
+```
+
+- manager 先通过 `import.meta.resolve('node-pty')`（排除 Bun 虚拟 `$bunfs` 路径）或向上遍历 `node_modules`（含 `.bun` 缓存布局）解析 node-pty 入口，交给 Node helper 从真实磁盘加载。
+- `src/server.mjs` 是唯一真相源，`src/ptyServerSource.ts` 通过 `bun run scripts/generate-pty-server-source.mjs` 生成其 JSON 转义内嵌（`bun build --compile` 不支持 `?raw`），`tests/serverSource.test.ts` 校验同步。
+- node-pty 缺失或 `node` 不可用（可用 `MICA_PTY_NODE` 覆盖）时工具降级报错，不影响 mica 其他功能。
+
+`PtyManager` 也可直接编程使用：
+
+```ts
+import { PtyManager } from '@packages/mica-pty/src/manager.js';
+
+const manager = new PtyManager();
+const { sessionId } = await manager.spawn(['/bin/sh'], { cols: 120, rows: 40 });
+await manager.send(sessionId, 'echo hi\r');
+await manager.wait(sessionId, { pattern: 'hi' });
+console.log(manager.read(sessionId, { mode: 'tail' }).output);
+await manager.kill(sessionId);
+```
 
 ## API
 
@@ -111,8 +142,13 @@ packages/mica-pty/
     keys.ts           按键序列
     ensureExecutable.ts  spawn-helper chmod 兜底
     driver.ts         PtyDriver 核心
+    manager.ts        Bun 侧 PtyManager（JSONL IPC、session 状态、wait 逻辑）
+    server.mjs        Node 侧 PTY helper server（唯一真相源，JSONL 协议）
+    ptyServerSource.ts  由 server.mjs 生成的 JSON 转义内嵌（勿手改）
   tests/
     driver.test.ts    单元/集成测试（vitest，Node 环境）
+    manager.test.ts   PtyManager 集成测试（真实 PTY 进程）
+    serverSource.test.ts  校验 server.mjs 与 ptyServerSource.ts 同步
     mica.smoke.test.ts  真实 mica 端到端冒烟（默认跳过）
 ```
 
@@ -120,5 +156,5 @@ packages/mica-pty/
 
 ```bash
 bunx tsc --noEmit
-bun run test -- packages/mica-pty/tests/driver.test.ts
+bun run test -- packages/mica-pty/tests/driver.test.ts packages/mica-pty/tests/manager.test.ts packages/mica-pty/tests/serverSource.test.ts
 ```

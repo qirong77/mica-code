@@ -17,7 +17,7 @@
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks、service container 和 host capability context。
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
-- `mica-pty`：基于 node-pty 的 PTY 测试驱动，用于驱动交互式 TUI（如 mica 本体）做测试和验证；不集成进 mica 运行时。
+- `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-sync-server`：Mica Sync 中心聚合服务器（零依赖 Node 单文件，REST + SSE + 长轮询 + JSON 存储），独立部署。
 - `mica-sync-web`：Mica Sync Web 控制台（React + Vite），查看所有机器的会话并远程续聊。
 
@@ -27,7 +27,7 @@
 - 子包 README 需要说明包职责、主要能力、使用入口和目录结构。
 - 包内实现应保持职责单一，不把应用装配逻辑塞进 package。
 - 新增公共能力时同步更新对应包的 README 和导出入口。
-- 不使用动态导入。
+- 默认不使用动态导入；PTY 工具首次调用时延迟加载 `mica-pty` 的 manager 模块是显式例外（避免 Bun 进程加载 node-pty）。
 - import 路径风格保持与所在文件周边一致。
 
 ## 依赖边界
