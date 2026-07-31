@@ -6,6 +6,7 @@ import { PluginsPage } from './pages/PluginsPage.js';
 import { RolesPage } from './pages/RolesPage.js';
 import { SessionsPage } from './pages/SessionsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
+import { SyncPage } from './pages/SyncPage.js';
 import { connectHeartbeat } from './api.js';
 
 export function App() {
@@ -46,6 +47,7 @@ export function App() {
         {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
         {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
         {section === 'plugins' ? <PluginsPage /> : null}
+        {section === 'sync' ? <SyncPage /> : null}
       </div>
     </main>
   );
@@ -53,7 +55,7 @@ export function App() {
 
 function readInitialSection(): ConfigWebAppSection {
   const candidate = new URLSearchParams(window.location.search).get('section');
-  return candidate && ['config', 'sessions', 'roles', 'mcp', 'skills', 'plugins'].includes(candidate)
+  return candidate && ['config', 'sessions', 'roles', 'mcp', 'skills', 'plugins', 'sync'].includes(candidate)
     ? (candidate as ConfigWebAppSection)
     : 'config';
 }

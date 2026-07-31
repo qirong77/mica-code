@@ -16,6 +16,7 @@ import {
   Save,
   Search,
   Send,
+  Server,
   Sparkles,
   Trash2,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ export const appIcons = {
   mcp: Cable,
   skills: Sparkles,
   plugins: Blocks,
+  sync: Server,
   check: Check,
   chevronDown: ChevronDown,
   chevronRight: ChevronRight,

@@ -404,10 +404,15 @@ function formatError(error: unknown): string {
 
 function presentStatus(turnState: string): { tone: 'default' | 'green' | 'red' | 'blue'; label: string } {
   switch (turnState) {
-    case 'running': return { tone: 'blue', label: '运行中' };
-    case 'completed': return { tone: 'green', label: '已完成' };
-    case 'aborted': return { tone: 'default', label: '已中止' };
-    case 'error': return { tone: 'red', label: '错误' };
-    default: return { tone: 'default', label: turnState };
+    case 'running':
+      return { tone: 'blue', label: '运行中' };
+    case 'completed':
+      return { tone: 'green', label: '已完成' };
+    case 'aborted':
+      return { tone: 'default', label: '已中止' };
+    case 'error':
+      return { tone: 'red', label: '错误' };
+    default:
+      return { tone: 'default', label: turnState };
   }
 }

@@ -5,6 +5,7 @@ export const micaSession = {
   dir: micaSessionStore.dir,
   createStore: micaSessionStore.createStore,
   createId: micaSessionStore.createId,
+  acquireTurnLease: micaSessionStore.acquireTurnLease,
   SessionStore: micaSessionStore.SessionStore,
 };
 
@@ -14,4 +15,5 @@ export type {
   PersistedSessionTurnState,
   SessionStoreLike,
   SessionSummary,
+  SessionTurnLease,
 } from './sessionStore.js';

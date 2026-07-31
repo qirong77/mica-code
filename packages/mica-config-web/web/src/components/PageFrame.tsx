@@ -33,4 +33,3 @@ export function PageFrame({ title, path, actions, children, immersive = false }:
     </section>
   );
 }
-

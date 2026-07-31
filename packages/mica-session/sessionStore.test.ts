@@ -44,6 +44,32 @@ describe('SessionStore path', () => {
   });
 });
 
+describe('session turn lease', () => {
+  it('serializes turns for one session and releases idempotently', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-lease-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { acquireSessionTurnLease } = await import('./sessionStore.js');
+
+      const first = acquireSessionTurnLease('shared-session');
+      expect(first).not.toBeNull();
+      expect(acquireSessionTurnLease('shared-session')).toBeNull();
+      const other = acquireSessionTurnLease('other-session');
+      expect(other).not.toBeNull();
+
+      first?.release();
+      first?.release();
+      const next = acquireSessionTurnLease('shared-session');
+      expect(next).not.toBeNull();
+      next?.release();
+      other?.release();
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('SessionStore.replaceValidated', () => {
   it('validates and atomically replaces an existing completed session', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-replace-'));

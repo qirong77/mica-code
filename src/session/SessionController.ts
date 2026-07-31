@@ -55,6 +55,7 @@ export class SessionController {
   private currentTitleOverride: string | null = null;
   private currentTitleSource: 'derived' | 'auto' | 'manual' = 'derived';
   private currentTurnState: PersistedSessionTurnState = 'completed';
+  private currentPersistedSignature: string | null = null;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
   private readonly config: SessionConfigAdapter;
@@ -96,6 +97,7 @@ export class SessionController {
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
+    this.currentPersistedSignature = null;
   }
 
   saveCurrent(
@@ -111,11 +113,20 @@ export class SessionController {
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
+    if (this.currentPersistedSignature !== null) {
+      if (!existing) return false;
+      if (sessionSignature(existing) !== this.currentPersistedSignature) {
+        // Another process persisted a newer snapshot. Keep it authoritative;
+        // the next leased turn will refresh this controller before running.
+        return true;
+      }
+    }
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     const persistedTitle =
       options.preserveTitle && existing && !isInternalCompactText(existing.title) ? existing.title : undefined;
     const session: PersistedSession = {
       version: 1,
+      revision: existing?.revision,
       id: this.currentSessionId,
       title: this.currentTitleOverride ?? persistedTitle ?? derivedTitle,
       titleSource: this.currentTitleOverride ? this.currentTitleSource : (existing?.titleSource ?? 'derived'),
@@ -125,9 +136,14 @@ export class SessionController {
       turnState: this.currentTurnState,
       snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
-    if (existing && sessionsEqual(existing, session)) return true;
+    if (existing && sessionsEqual(existing, session)) {
+      this.currentPersistedSignature = sessionSignature(existing);
+      return true;
+    }
+    session.revision = (existing?.revision ?? 0) + 1;
     session.updatedAt = now;
     this.store.save(session);
+    this.currentPersistedSignature = sessionSignature(session);
     return true;
   }
 
@@ -140,8 +156,9 @@ export class SessionController {
     const existing = this.store.load(this.currentSessionId);
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
-    this.store.save({
+    const session: PersistedSession = {
       version: 1,
+      revision: (existing?.revision ?? 0) + 1,
       id: this.currentSessionId,
       title: nextTitle,
       titleSource: source,
@@ -150,7 +167,9 @@ export class SessionController {
       cwd: process.cwd(),
       turnState: existing?.turnState ?? this.currentTurnState,
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
-    });
+    };
+    this.store.save(session);
+    this.currentPersistedSignature = sessionSignature(session);
   }
 
   getCurrentTitle(): string | null {
@@ -193,6 +212,7 @@ export class SessionController {
     this.agent.loadSnapshot(fromPersistedSnapshot(resolvedSnapshot, restoredRole));
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
+    this.currentPersistedSignature = sessionSignature(session);
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     const restoredTitle = isInternalCompactText(session.title) ? derivedTitle : session.title;
@@ -207,6 +227,13 @@ export class SessionController {
     };
   }
 
+  /** Reloads the active session when another process has changed its file. */
+  refreshFromStore(): ResumeSessionResult | null {
+    const session = this.store.load(this.currentSessionId);
+    if (!session || sessionSignature(session) === this.currentPersistedSignature) return null;
+    return this.resumeLoaded(session);
+  }
+
   private discardCurrentIfEmpty(): boolean {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
@@ -217,6 +244,10 @@ export class SessionController {
 
 function sessionsEqual(left: PersistedSession, right: PersistedSession): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sessionSignature(session: PersistedSession): string {
+  return JSON.stringify(session);
 }
 
 function hasConversation(providerMessages: unknown[], conversationMessages: MicaUiConversationMessage[]): boolean {

@@ -17,6 +17,7 @@
     "packages/mica-session",
     "packages/mica-skills",
     "packages/mica-mcp",
+    "packages/mica-pty",
     "packages/@anthropic/ink/src"
   ],
   "exclude": ["**/dist", "**/node_modules"]

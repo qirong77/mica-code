@@ -1,6 +1,7 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
+import { micaSession, type SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -38,6 +39,7 @@ const MAX_TURN_RETRIES = 5;
 const TURN_RETRY_DELAY_MS = 10_000;
 const RETRY_TURN_NOTICE_COMMAND = '/error';
 const STOP_ABORT_WAIT_MS = 5000;
+const EXTERNAL_SESSION_REFRESH_MS = 1000;
 
 type RuntimeActiveContext = {
   agentSessions: {
@@ -73,6 +75,7 @@ export class LocalRuntimeController implements RuntimeController {
   private hookAgent: AgentRuntime | null = null;
   private nextExclusiveTaskId = 1;
   private stopping = false;
+  private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private agent: AgentRuntime,
@@ -87,6 +90,9 @@ export class LocalRuntimeController implements RuntimeController {
 
   async start(): Promise<void> {
     this.stopping = false;
+    if (!this.sessionRefreshTimer) {
+      this.sessionRefreshTimer = setInterval(() => this.refreshIdleCurrentSession(), EXTERNAL_SESSION_REFRESH_MS);
+    }
     await this.hooks.emit('runtime:start', { runtime: this });
   }
 
@@ -96,6 +102,10 @@ export class LocalRuntimeController implements RuntimeController {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    if (this.sessionRefreshTimer) {
+      clearInterval(this.sessionRefreshTimer);
+      this.sessionRefreshTimer = null;
+    }
     for (const agent of this.runningAgents) {
       agent.abort();
     }
@@ -399,8 +409,68 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: false, reason: 'busy' };
     }
 
-    await this.trackTurn(this.runTurn(inputHook.event.input, targetAgent, targetSessionController));
+    const lease = micaSession.acquireTurnLease(targetSessionController.getCurrentSessionId());
+    if (!lease) {
+      this.events.publish({
+        type: 'notification',
+        level: 'warn',
+        message: '该会话正在另一个终端或远程页面运行，请等待完成后再发送',
+        owner: targetAgent,
+      });
+      return { ok: false, reason: 'busy' };
+    }
+
+    await this.trackTurn(this.runTurnWithLease(inputHook.event.input, targetAgent, targetSessionController, lease));
     return { ok: true };
+  }
+
+  private async runTurnWithLease(
+    input: RuntimeInput,
+    agent: AgentRuntime,
+    sessionController: SessionController,
+    lease: SessionTurnLease,
+  ): Promise<void> {
+    try {
+      const refreshed = sessionController.refreshFromStore();
+      if (refreshed?.ok) {
+        this.applyRefreshedSession(agent, refreshed.session.turnState);
+      }
+      await this.runTurn(input, agent, sessionController);
+    } finally {
+      lease.release();
+    }
+  }
+
+  private refreshIdleCurrentSession(): void {
+    try {
+      const agent = this.agent;
+      const sessionController = this.sessionController;
+      if (this.stopping || this.isAgentBusy(agent)) return;
+      const latest = sessionController.load(sessionController.getCurrentSessionId());
+      if (!latest || latest.turnState === 'running') return;
+      const draft = micaUi.terminalInput.text.get();
+      const refreshed = sessionController.refreshFromStore();
+      if (!refreshed?.ok) return;
+      this.applyRefreshedSession(agent, refreshed.session.turnState);
+      micaUi.terminalInput.text.set(draft);
+    } catch {
+      // The next poll retries; external session refresh must never stop the UI.
+    }
+  }
+
+  private applyRefreshedSession(agent: AgentRuntime, turnState: string): void {
+    const terminalSession = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
+    if (terminalSession) {
+      terminalSession.uiState = normalizeUiState({
+        ...terminalSession.uiState,
+        conversationMessages: micaUi.conversation.messages.get(),
+        responseText: '',
+        thinkingText: '',
+        workingStatus: { type: 'idle' },
+        lastTurnOutcome: turnState === 'aborted' ? 'aborted' : turnState === 'error' ? 'error' : 'completed',
+      });
+    }
+    this.rewindCheckpoints.clear(agent);
   }
 
   private async trackTurn(turn: Promise<void>): Promise<void> {

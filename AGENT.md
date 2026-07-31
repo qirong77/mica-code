@@ -33,6 +33,8 @@ bun run test            # 运行 Vitest 测试：vitest run
 bun run test:watch      # 运行 Vitest watch
 bun run build           # 先 typecheck，再 compile 单二进制，postbuild 安装本地入口
 bun run dev:config-web  # Config Web Vite 调试：热更新 packages/mica-config-web/web
+bun run build:sync-web   # Mica Sync Web 前端构建（packages/mica-sync-web/web/dist）
+bun run build:sync-server # Mica Sync 中心服务 Node bundle（dist/mica-sync-server.js）
 bun run format          # 格式化 README、AGENT、src、packages、scripts、docs、blogs
 ```
 
@@ -84,6 +86,12 @@ src/
     uiBridge.ts                    provider/model/status 同步辅助
   session/
     SessionController.ts           session 保存、恢复、重命名和 UI restore 编排
+  daemon/
+    index.ts                       `mica daemon` 入口：注册/心跳/长轮询/命令分发
+    config.ts                      sync.json（serverUrl/machineId/name）读写
+    SessionWatcher.ts              sessions 目录监听 + 周期 rescan 兜底推送
+    SyncClient.ts                  与 mica-sync-server 的 HTTP 客户端
+    CommandExecutor.ts             远程续聊 turn 执行（复用 AgentRuntime + SessionController）
   tools/
     ToolAgent.ts                   启动/查询/停止 subagent，并解析角色、effort 与工具权限
 
@@ -101,6 +109,9 @@ packages/
   mica-skills                      用户 skills 扫描、解析和缓存
   mica-plugin                      插件生命周期、hooks、service container
   mica-common                      跨包共享底层工具
+  mica-pty                         基于 node-pty 的 PTY 测试驱动（Node 运行时，不集成进 mica 运行时）
+  mica-sync-server                 中心聚合服务（零依赖 Node 单文件，REST/SSE/长轮询/JSON 存储）
+  mica-sync-web                    Web 控制台（React + Vite，查看会话 + 远程续聊）
   @anthropic/ink                   本仓库维护的 Ink fork
 
 scripts/                           构建、安装、release installer 脚本
@@ -140,6 +151,7 @@ temp/                              临时代码和外部实验，默认不参与
 - 不要从 package 或底层工具反向 import `Application.ts` 获取状态。需要上层能力时，用 service、hook、adapter、回调或显式参数注入。
 - 多 agent 场景下，命令不能假定构造时传入的 `agent` 永远是当前 agent。命令插件使用 `createActiveAgentProxy` 和 `createActiveSessionControllerProxy` 解决这个问题。
 - provider/model/effort 切换前，要先同步当前 agent 的 config，再打开选择器；切换后要 `agent.reloadConfig(false)`、保存 session、同步 UI。role 切换同样需要 busy guard 和保存 session，但只重建 client 并保留当前历史。
+- 跨协议切换（`openai_chat_completions` ↔ `openai_responses`）在 `applyConfigSwitchUpdate` 中被阻止并提示：新协议 client 无法携带旧会话历史，行为与 `configureForRun` 的跨协议 resume 检查一致；空会话允许自由切换。不要绕过该检查去 `reloadConfig(false)` 静默丢历史。
 
 ## Runtime Turn Loop
 
@@ -389,6 +401,7 @@ AGENT.md
 - `mica-context` 提供上下文处理能力，不直接操纵 provider adapter。
 - `mica-skills` 只扫描、解析、缓存 skills，不执行 skill 内容。
 - `mica-plugin` 只提供插件机制，不内置具体产品插件。
+- `mica-pty` 只做 PTY 测试驱动，不依赖任何产品业务包，不集成进 mica 运行时；只能在 Node ≥22 / vitest 下运行。
 - `buildin-plugins` 放官方产品策略和流程；运行期插件通过 `PluginContext` 的 commands、hooks、services、runtime queue、tools 和 UI capability 接入，不反向 import `src/**`。
 
 如果新增代码会导致底层包依赖上层包，不要直接加 import。优先使用类型、回调、service、hook 或 adapter 注入能力。
@@ -407,7 +420,17 @@ AGENT.md
 
 ## 测试与验证
 
-不运行测试文件，也不需要补充测试文件，打包通过即可。
+- 单元/集成测试走 `bun run test`（vitest，Node 环境）；涉及交互式 TUI 的测试或验证优先使用 `packages/mica-pty`。
+- `packages/mica-pty` 是基于 node-pty 的 PTY 测试驱动，用于驱动 `dist/mica` 或任意交互式 TUI 程序做端到端验证。它只支持 Node ≥22 / vitest 运行时——node-pty 的 native binding 在 Bun 下不可用（master fd EBADF），因此**不要从 `bun run` 代码里 import 它**。
+- 用 mica-pty 做冒烟验证（需要真实 provider API key，默认跳过）：
+
+```bash
+bun run build   # 生成 dist/mica
+MICA_PTY_SMOKE=1 npx vitest run packages/mica-pty/tests/mica.smoke.test.ts
+```
+
+- mica-pty 常规测试：`bun run test -- packages/mica-pty/tests/driver.test.ts`。API 与用法见 `packages/mica-pty/README.md`；旧 python 驱动 `temp/mica_pty.py` 保留作为参考。
+- 注意 node-pty 的 prebuild `spawn-helper` 通过 Bun 安装时可能缺执行位，`PtyDriver.spawn()` 会做幂等 chmod 兜底。
 
 ## 命令范围与临时目录
 
@@ -422,6 +445,44 @@ rg --files src packages scripts docs blogs
 ```
 
 - 只有用户明确要求检查 `temp/` 或某个备份目录时，才进入这些目录。
+
+## Mica Sync 远程会话同步
+
+`mica daemon`（内置命令）+ `packages/mica-sync-server` + `packages/mica-sync-web` 组成 Mica Sync：所有机器上的活跃/历史会话镜像到一台中心服务器，浏览器实时查看并回源续聊。功能改动总结、协议细节、部署步骤与后续开发注意事项见 `docs/mica-sync-dev.md`，涉及 Sync 的变更要同步检查该文件。
+
+### 架构与协议
+
+- 机器端 `mica daemon` 常驻进程主动**出站**连接中心服务器（NAT 友好，不需要机器开放入站端口）：`/daemon/register` 注册换取 `machineId`（按 hostname 复用已有记录，丢失 sync.json 不会换身份），`/daemon/beat` 心跳（20s，上报活跃会话），`/daemon/poll` 长轮询指令（server 最多 hold 25s），`/daemon/session` 推送会话快照，`/daemon/events` 推送 turn 事件。
+- 中心服务器 `mica-sync-server` 零第三方依赖（Node 内置模块），JSON 文件存储（`data/machines.json`、`data/sessions/<machineId>/<sessionId>.json`），每会话 500 条事件内存缓冲，SSE 订阅用 `since` 序号断线补拉。
+- **无认证**：daemon 请求用 `x-machine-id` header 标识机器，Web API 完全开放；服务公开在公网时需自行用 Nginx 基本认证或防火墙保护。
+- 续聊指令（`run` / `abort`）通过 poll 长轮询下发；daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected` 事件），不同 session 也不并发。
+- 事件类型：`user_input`、`thinking`、`text_delta`、`tool_call`、`tool_result`、`usage`、`status`、`turn`（state: completed/aborted/error）、`run_rejected`、`session`、`session_removed`。
+
+### daemon 语义
+
+- 配置存 `~/.mica/sync.json`（跟随 `MICA_HOME`），含 `serverUrl`、`machineId`、`name`。`--server` 覆盖 serverUrl；未注册时启动即自动注册（无需 secret）。
+- **daemon 自启动**：交互模式启动 `mica` 时（`src/index.ts`）会 fire-and-forget 调 `ensureDaemonRunning()`（`src/daemon/ensureDaemonRunning.ts`）：配置了 sync.json 且 `daemon.pid`（`MICA_HOME/daemon.pid`）记录的进程不存活时，后台 detached 拉起 `mica daemon`（日志追加到 `MICA_HOME/daemon.log`），否则复用。daemon 自身启动时写 pid 文件、退出时清理，并对"已有存活 daemon"做竞态兜底（直接退出，避免双 daemon 抢同一 machineId）。`MICA_NO_DAEMON=1` 可禁用（CI/headless）。改动 pid 文件、spawn 参数或自启动时机时同步检查 `src/daemon/ensureDaemonRunning.ts` 及其测试、`src/daemon/index.ts`。
+- `CommandExecutor` 复用 `AgentRuntime` + `SessionController`（headless 式配置：`config.apply(){}` + `ui.restore(){}`），每 turn 新建 agent，MCP 保持 daemon 生命周期常开；turn 前 `chdir` 到会话记录的 `cwd`。
+- abort 依赖 `AgentRuntime.abort()`（runId 失效 + signal）：正在等待 provider stream 时立即生效；**工具执行中或长 thinking 期间要等到当前迭代/工具结束的边界**才会抛出 `AgentAbortError`，属于 provider client 的既有语义，不要另造中断机制。
+- 会话文件变化由 `SessionWatcher` 监听并推送；`fs.watch` 在 macOS 上可能丢事件（rename 无 filename），因此还有 30s 周期 rescan 按 mtime/size 对比兜底。push 失败只记日志不重试队列。
+- 本地 runtime 与 daemon 对同一 session 使用 `packages/mica-session` 的跨进程 turn lease，冲突时返回 busy，避免整份 session 快照相互覆盖；远程完成后，本地下一次提交前会重载最新磁盘快照。会话快照带单调 `revision`，中心服务器拒绝迟到的旧快照。
+- Web 端切换会话时会真正中止旧 SSE，按事件 `seq` 去重；terminal turn 后主动重拉权威快照，并以低频轮询从丢失事件或代理断流中自愈。
+- 会话详情接口默认返回精简快照（剔除 `snapshot.messages`/`usageHistory`/`lastUsage`，`?full=1` 取全量）；SSE 的 `session` 事件只含元数据（id/title/updatedAt/cwd/turnState/revision + providerId/model/effort/role），完整快照仍全量落盘。detail 响应携带 `snapshotSeq`（最近一次 session 快照事件的 seq），Web 在详情加载完成后再建 SSE（`since=snapshotSeq`），避免重放已反映在快照中的旧事件造成重复渲染。改动这两处协议时同步检查 `packages/mica-sync-web/web/src/App.tsx` 的 `acceptEventSession`/`publishSession`/`sessionReady` 逻辑与 `useSse.ts` 的初始断点。
+- Web 切换体验：`/api/machines/:id/sessions` 列表为每个 summary 附带 `snapshotSeq`，切换时立即开 SSE（`since=` 列表水位，detail 校正），不出现"连接断开"；切换瞬间显示"加载会话中…"而非 welcome 闪现。`useSse` 的 `lastSeqRef` 跨 effect 重启保留，绝不重放已见事件（`text_delta` 重复追加）。连接状态三态：实时连接 / 连接中… / 连接断开，自动重连中…。`serveStaticFile` 对 index.html 发 `no-cache`、对 `/assets/*` 发 `immutable` 一年缓存。
+
+### 构建与部署
+
+- `bun run build:sync-server` 产出 `dist/mica-sync-server.js`（Node 单文件 ESM bundle）；`bun run build:sync-web` 产出 `packages/mica-sync-web/web/dist`（vite `base: './'`，可部署到任意子路径）。
+- 生产部署在 `188.253.118.143`：`/opt/mica-sync/`（`mica-sync-server.mjs` + `web/` + `data/`），pm2 进程名 `mica-sync`，监听 5560；Nginx `location /mica/` 反代（必须 `proxy_buffering off` + 长 read timeout，否则 SSE 断开）。
+- **pm2 必须用 `pm2 start node --name mica-sync -- mica-sync-server.mjs ...` 显式指定解释器**；直接 `pm2 start mica-sync-server.mjs` 不会执行 ESM bundle 的入口。
+- **remote-shell 的 `upload&extract=1` 会清空 target**：重新部署前先 `mv /opt/mica-sync/data /tmp/mica-sync-data-backup`，上传解压后再移回并 `pm2 restart mica-sync`，否则机器注册和会话记录会丢失。
+- 服务器信息与 remote-shell 使用方式见 `qirong-application/Agent.md`；该文件记录了同一台服务器上的所有服务，变更服务器配置后要同步更新。
+
+### Config Web 的 Sync 页面
+
+- Config Web（`mica config-web` 或 worker 模式）侧边栏有 `Sync` 菜单：配置中心服务器地址（写 `~/.mica/sync.json`）、机器名，并展示服务器可达性、本机 daemon 是否在线、服务器上全部机器的在线状态。
+- 后端路由：`GET /api/details/sync`（`packages/mica-config-web/src/server/syncDetails.ts` 读取 sync.json 并探测服务器）、`PUT /api/files/sync`（保存 serverUrl/name）。探测逻辑调用中心服务器无认证 API `/api/machines`，按 machineId（缺失时按 hostname）判断本机在线。
+- 修改 sync 相关字段（serverUrl、name、machineId 语义、探测判定）时同步检查该文件与 shared/types.ts 的 `ConfigWebSyncDetails`。
 
 ## 构建、安装与发布
 

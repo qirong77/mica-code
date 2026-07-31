@@ -1,4 +1,15 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
@@ -25,6 +36,7 @@ export type PersistedSessionTurnState = 'running' | 'completed' | 'aborted' | 'e
 
 export type PersistedSession = {
   version: 1;
+  revision?: number;
   id: string;
   title: string;
   titleSource?: 'derived' | 'auto' | 'manual';
@@ -59,7 +71,13 @@ export type SessionStoreLike = {
   delete(id: string): boolean;
 };
 
+export type SessionTurnLease = {
+  sessionId: string;
+  release(): void;
+};
+
 export const SESSION_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'sessions');
+const MALFORMED_LEASE_STALE_MS = 60_000;
 
 export class SessionStore implements SessionStoreLike {
   list(limit = 20): SessionSummary[] {
@@ -180,8 +198,48 @@ export const micaSessionStore = {
   dir: SESSION_DIR,
   createStore: createSessionStore,
   createId: createSessionId,
+  acquireTurnLease: acquireSessionTurnLease,
   SessionStore,
 };
+
+/** Prevents local and remote turns from replacing the same session snapshot. */
+export function acquireSessionTurnLease(sessionId: string): SessionTurnLease | null {
+  const safeId = sanitizeSessionId(sessionId);
+  if (!safeId || safeId !== sessionId) return null;
+  ensureSessionDir();
+  const lockDir = resolve(SESSION_DIR, '.turn-locks');
+  mkdirSync(lockDir, { recursive: true });
+  const lockPath = resolve(lockDir, `${safeId}.lock`);
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try {
+        writeFileSync(fd, JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }), 'utf8');
+      } finally {
+        closeSync(fd);
+      }
+      let released = false;
+      return {
+        sessionId: safeId,
+        release() {
+          if (released) return;
+          released = true;
+          try {
+            const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { token?: unknown };
+            if (owner.token === token) rmSync(lockPath, { force: true });
+          } catch {
+            // Never remove a lock unless its token proves that we own it.
+          }
+        },
+      };
+    } catch (error) {
+      if (!isAlreadyExistsError(error) || attempt > 0 || !removeStaleTurnLease(lockPath)) return null;
+    }
+  }
+  return null;
+}
 
 export function createSessionId(date = new Date()): string {
   const stamp = date
@@ -225,6 +283,33 @@ function sanitizeSessionId(id: string): string | null {
   if (!trimmed || basename(trimmed) !== trimmed) return null;
   const safe = trimmed.replace(/\.json$/, '');
   return safe && /^[a-zA-Z0-9_.-]+$/.test(safe) ? safe : null;
+}
+
+function removeStaleTurnLease(lockPath: string): boolean {
+  try {
+    const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { pid?: unknown };
+    if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || owner.pid <= 0) return false;
+    try {
+      process.kill(owner.pid, 0);
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false;
+    }
+    rmSync(lockPath, { force: true });
+    return true;
+  } catch {
+    try {
+      if (Date.now() - statSync(lockPath).mtimeMs < MALFORMED_LEASE_STALE_MS) return false;
+      rmSync(lockPath, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === 'EEXIST';
 }
 
 export function parsePersistedSession(value: unknown): PersistedSession | null {

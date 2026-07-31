@@ -13,9 +13,16 @@ export type RunCliInvocation = {
   strictMcpConfig: boolean;
 };
 
+export type DaemonCliInvocation = {
+  mode: 'daemon';
+  server?: string;
+  name?: string;
+};
+
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | RunCliInvocation
+  | DaemonCliInvocation
   | { mode: 'models'; verbose: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
@@ -28,6 +35,7 @@ export const CLI_USAGE = [
   '  mica --version',
   '  mica models',
   '  mica run --format json [options] "<prompt>"',
+  '  mica daemon [--server <url>] [--name <name>]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -39,6 +47,10 @@ export const CLI_USAGE = [
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
+  '',
+  'Daemon options:',
+  '  --server <url>                    Sync server base URL',
+  '  --name <name>                     Machine display name (default: hostname)',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -62,6 +74,24 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     if (rest.length === 0) return { mode: 'models', verbose: false };
     if (rest.length === 1 && rest[0] === '--verbose') return { mode: 'models', verbose: true };
     return { mode: 'error', message: `Unknown models option: ${rest.join(' ')}` };
+  }
+  if (argv[0] === 'daemon') {
+    let server: string | undefined;
+    let name: string | undefined;
+    for (let index = 1; index < argv.length; index++) {
+      const arg = argv[index]!;
+      const valueOption = parseValueOption(arg, argv, index, ['--server', '--name']);
+      if (valueOption) {
+        if (!valueOption.ok) return valueOption.error;
+        index = valueOption.nextIndex;
+        if (valueOption.name === '--server') server = valueOption.value;
+        if (valueOption.name === '--name') name = valueOption.value;
+        continue;
+      }
+      if (arg === '--help' || arg === '-h') return { mode: 'help' };
+      return cliError(`Unknown daemon option: ${arg}`);
+    }
+    return { mode: 'daemon', server, name };
   }
   if (argv[0] !== 'run') return { mode: 'interactive' };
 

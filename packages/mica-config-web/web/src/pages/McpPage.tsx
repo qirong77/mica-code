@@ -172,7 +172,12 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
               {selectedServer ? <Tag tone={statusColor(selectedServer.status)}>{selectedServer.status}</Tag> : null}
             </div>
             <div className="editor-host role-editor-host">
-              <MonacoJsonEditor value={content} language="json" readOnly={saving || !selectedServer} onChange={setContent} />
+              <MonacoJsonEditor
+                value={content}
+                language="json"
+                readOnly={saving || !selectedServer}
+                onChange={setContent}
+              />
             </div>
           </div>
         </div>

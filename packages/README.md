@@ -17,6 +17,9 @@
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks、service container 和 host capability context。
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
+- `mica-pty`：基于 node-pty 的 PTY 测试驱动，用于驱动交互式 TUI（如 mica 本体）做测试和验证；不集成进 mica 运行时。
+- `mica-sync-server`：Mica Sync 中心聚合服务器（零依赖 Node 单文件，REST + SSE + 长轮询 + JSON 存储），独立部署。
+- `mica-sync-web`：Mica Sync Web 控制台（React + Vite），查看所有机器的会话并远程续聊。
 
 ## 包规范
 

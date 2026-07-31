@@ -1,4 +1,4 @@
-export type ConfigWebSection = 'config' | 'sessions' | 'roles' | 'mcp' | 'skills' | 'plugins';
+export type ConfigWebSection = 'config' | 'sessions' | 'roles' | 'mcp' | 'skills' | 'plugins' | 'sync';
 
 export type ConfigWebFilePayload = {
   path: string;
@@ -123,4 +123,23 @@ export type ConfigWebRole = {
 export type ConfigWebRolesDetails = {
   root: string;
   roles: ConfigWebRole[];
+};
+
+export type ConfigWebSyncMachine = {
+  id: string;
+  name: string;
+  online: boolean;
+  activeSessionId: string | null;
+};
+
+export type ConfigWebSyncDetails = {
+  configPath: string;
+  configured: boolean;
+  serverUrl: string;
+  machineId: string | null;
+  name: string;
+  serverReachable: boolean;
+  machineOnline: boolean;
+  machines: ConfigWebSyncMachine[];
+  error?: string;
 };

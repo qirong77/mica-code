@@ -40,6 +40,7 @@ export async function applyConfigSwitchUpdate({
   let adjustments: ConfigSwitchAdjustment[] = [];
   const candidate = update(configForAgent(micaConfig.get(), agent));
   await micaConfig.ensureModelRule(candidate.model);
+  assertProtocolCompatible(agent, candidate);
   const next = micaConfig.update((config) => {
     const normalized = normalizeConfigSwitchSelection(update(configForAgent(config, agent)));
     adjustments = normalized.adjustments;
@@ -50,6 +51,22 @@ export async function applyConfigSwitchUpdate({
   services.syncModelDisplay(agent);
   services.showMessage(formatConfigSwitchSuccess(successMessage(next), adjustments), successTtl);
   return next;
+}
+
+/**
+ * A provider protocol switch cannot carry the current conversation history into
+ * the new client (mirrors configureForRun's cross-protocol resume guard), so block
+ * the switch before any config is written. Empty sessions may switch freely.
+ */
+function assertProtocolCompatible(agent: CommandAgent, candidate: IMicaConfig): void {
+  const previousProtocol = agent.config.provider.protocol;
+  const nextProvider = micaConfig.get().providers.find((item) => item.id === candidate.provider);
+  const nextProtocol = nextProvider?.protocol ?? previousProtocol;
+  if (previousProtocol === nextProtocol) return;
+  if ((agent.getSnapshot().messages?.length ?? 0) === 0) return;
+  throw new Error(
+    `Cannot switch a ${previousProtocol} session to ${nextProtocol}; conversation history would be lost. Start a fresh session (/new) or clear this one (/clear) first.`,
+  );
 }
 
 export function syncConfigFromAgent(agent: CommandAgent): IMicaConfig {
