@@ -74,6 +74,38 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
   );
 });
 
+const THINKING_PREVIEW_MAX = 80;
+
+const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extract<UiMessage, { kind: 'thinking' }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const SparklesIcon = appIcons.sparkles;
+  const ChevronDownIcon = appIcons.chevronDown;
+  const ChevronRightIcon = appIcons.chevronRight;
+  const preview = message.text.slice(0, THINKING_PREVIEW_MAX);
+  const truncated = message.text.length > THINKING_PREVIEW_MAX;
+  return (
+    <div className={`thinking-block ${expanded ? 'expanded' : ''}`}>
+      <button
+        className="thinking-toggle"
+        onClick={() => setExpanded((value) => !value)}
+        title={expanded ? '收起思考内容' : '展开思考内容'}
+      >
+        <span className="thinking-icon">
+          <SparklesIcon size={13} />
+        </span>
+        <span className="thinking-summary">
+          {expanded ? `思考 · ${message.text.length} 字` : preview || '思考中…'}
+          {!expanded && truncated ? '…' : ''}
+        </span>
+        <span className="thinking-expand">
+          {expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+        </span>
+      </button>
+      {expanded && <div className="thinking-text">{message.text}</div>}
+    </div>
+  );
+});
+
 const MessageItem = memo(function MessageItem({ message }: { message: UiMessage }) {
   if (message.kind === 'user') {
     return (
@@ -97,17 +129,7 @@ const MessageItem = memo(function MessageItem({ message }: { message: UiMessage 
     );
   }
   if (message.kind === 'tool') return <ToolCard message={message} />;
-  if (message.kind === 'thinking') {
-    const SparklesIcon = appIcons.sparkles;
-    return (
-      <div className="thinking-block">
-        <span className="thinking-icon">
-          <SparklesIcon size={13} />
-        </span>
-        <span>{message.text}</span>
-      </div>
-    );
-  }
+  if (message.kind === 'thinking') return <ThinkingBlock message={message} />;
   return <div className={`notice-block ${message.variant === 'error' ? 'error' : ''}`}>{message.text}</div>;
 });
 

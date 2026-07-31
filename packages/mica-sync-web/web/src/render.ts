@@ -62,6 +62,65 @@ function makeId(prefix: string, seed: number): string {
   return `${prefix}-${seed}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+const PERSISTED_KINDS: ReadonlySet<UiMessage['kind']> = new Set(['user', 'assistant', 'notice']);
+const LIVE_KINDS: ReadonlySet<UiMessage['kind']> = new Set(['thinking', 'tool']);
+
+/**
+ * Merges live-only messages (thinking blocks / tool cards) into an
+ * authoritative snapshot list. The persisted snapshot only carries
+ * user/assistant/notice messages, so without this merge streamed thinking and
+ * tool messages would vanish on every snapshot refresh (turn end / polling),
+ * which reads as flickering during a remote run.
+ *
+ * Live messages are anchored to the persisted message they follow in the
+ * current stream by ordinal position; snapshot messages are authoritative and
+ * keep their order.
+ */
+export function mergeSessionMessages(current: UiMessage[], base: UiMessage[]): UiMessage[] {
+  if (base.length === 0) return current;
+  const kept = current.filter((message) => LIVE_KINDS.has(message.kind));
+  if (kept.length === 0) return base;
+
+  // The i-th persisted-kind message in `current` aligns with the i-th message
+  // in `base` (clamped so a fresher snapshot never overflows).
+  const baseSlots: number[] = [];
+  let persistedSeen = 0;
+  for (const message of current) {
+    if (PERSISTED_KINDS.has(message.kind)) {
+      baseSlots.push(Math.min(persistedSeen, base.length - 1));
+      persistedSeen += 1;
+    }
+  }
+  const lastSlot = baseSlots.length > 0 ? baseSlots[baseSlots.length - 1] : -1;
+
+  // Group live messages by the base index they should be inserted after.
+  const insertAfter = new Map<number, UiMessage[]>();
+  let currentPersistedIndex = -1;
+  for (const message of current) {
+    if (PERSISTED_KINDS.has(message.kind)) {
+      currentPersistedIndex += 1;
+    } else if (LIVE_KINDS.has(message.kind)) {
+      const at =
+        currentPersistedIndex >= 0
+          ? baseSlots[Math.min(currentPersistedIndex, baseSlots.length - 1)]
+          : -1;
+      const group = insertAfter.get(at) ?? [];
+      group.push(message);
+      insertAfter.set(at, group);
+    }
+  }
+
+  const result: UiMessage[] = [];
+  for (let index = 0; index < base.length; index += 1) {
+    const lead = insertAfter.get(index - 1);
+    if (lead) result.push(...lead);
+    result.push(base[index]);
+  }
+  const tail = insertAfter.get(lastSlot);
+  if (tail) result.push(...tail);
+  return result;
+}
+
 /** Applies a live sync event to the message list (idempotent where possible). */
 export function applyEvent(messages: UiMessage[], event: SyncEvent): UiMessage[] {
   const next = messages.slice();

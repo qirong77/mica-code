@@ -11,7 +11,7 @@ import {
   type SyncEvent,
 } from './api';
 import { Conversation } from './Conversation';
-import { applyEvent, messagesFromSession, type UiMessage } from './render';
+import { applyEvent, mergeSessionMessages, messagesFromSession, type UiMessage } from './render';
 import { Sidebar } from './Sidebar';
 import { useSse } from './useSse';
 
@@ -174,7 +174,9 @@ export function App() {
       // Live `session` events carry metadata only (no snapshot payload), so
       // they must not replace the message list built from streamed events.
       if (replaceMessages && (!wasRemoteRunning || finished)) {
-        setMessages(messagesFromSession(data.session.snapshot.conversationMessages));
+        setMessages((current) =>
+          mergeSessionMessages(current, messagesFromSession(data.session.snapshot.conversationMessages)),
+        );
       }
     },
     [setRemoteRunning],
