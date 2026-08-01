@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 describe('findFileMentions', () => {
-  it('ranks filename fuzzy matches ahead of path-only matches', async () => {
+  it('matches by prefix only and ranks basename prefix ahead of path prefix', async () => {
     const workspace = await createWorkspace([
       'nested/src',
       'nested/srcHelper.ts',
@@ -28,13 +28,36 @@ describe('findFileMentions', () => {
     expect(results.map((item) => item.path)).toEqual([
       'nested/src',
       'nested/srcHelper.ts',
-      'nested/my-src-file.ts',
-      'nested/searchHighlight.ts',
       'src/plain.ts',
     ]);
-    expect(results.find((item) => item.path === 'nested/searchHighlight.ts')).toMatchObject({
-      label: 'nested/searchHighlight.ts',
-      labelHighlights: [7, 10, 11],
+    expect(results.find((item) => item.path === 'nested/srcHelper.ts')).toMatchObject({
+      label: 'nested/srcHelper.ts',
+      labelHighlights: [7, 8, 9],
+    });
+    expect(results.find((item) => item.path === 'src/plain.ts')).toMatchObject({
+      label: 'src/plain.ts',
+      labelHighlights: [0, 1, 2],
+    });
+  });
+
+  it('matches any path segment prefix, not only the leading segment', async () => {
+    const workspace = await createWorkspace([
+      'node-api/server.ts',
+      'packages/node-sdk/index.ts',
+      'src/node/api.ts',
+      'src/mynode/helper.ts',
+      'src/other.ts',
+    ]);
+
+    const results = await findFileMentions(workspace, 'node');
+
+    expect(results.map((item) => item.path)).toEqual([
+      'src/node/api.ts',
+      'node-api/server.ts',
+      'packages/node-sdk/index.ts',
+    ]);
+    expect(results.find((item) => item.path === 'src/node/api.ts')).toMatchObject({
+      labelHighlights: [4, 5, 6, 7],
     });
   });
 
@@ -83,6 +106,20 @@ describe('findFileMentions', () => {
 
     expect(results.map((item) => item.path)).toContain('visible.ts');
     expect(results.map((item) => item.path)).toContain('generated/ignored.ts');
+  });
+
+  it('filters ignored build directories in a Git workspace', async () => {
+    const workspace = await createWorkspace([
+      'visible.ts',
+      'node_modules/pkg/index.js',
+      'dist/bundle.js',
+      'src/app.ts',
+    ]);
+    await execFileAsync('git', ['init', '--quiet'], { cwd: workspace });
+
+    const results = await findFileMentions(workspace, '');
+
+    expect(results.map((item) => item.path)).toEqual(['src/app.ts', 'visible.ts']);
   });
 });
 

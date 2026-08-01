@@ -94,7 +94,10 @@ export function SessionTree({
   selectedId,
   editingId,
   unread,
+  sessions,
+  titles,
   onSelect,
+  onSelectRecent,
   onToggle,
   onRename,
   onCancelEdit,
@@ -110,21 +113,23 @@ export function SessionTree({
   const [recentCollapsed, setRecentCollapsed] = useState(false)
   const closeMenu = () => setMenu(null)
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const recent = useMemo(
-    () =>
-      nodes
-        .filter((node) => node.type === 'terminal')
-        .filter(
-          (node) => !normalizedQuery || node.text.toLocaleLowerCase().includes(normalizedQuery)
-        )
-        .sort((left, right) => (right.lastActiveAt || 0) - (left.lastActiveAt || 0))
-        .slice(0, 6),
-    [nodes, normalizedQuery]
-  )
+  const displayText = (node) =>
+    node.type === 'terminal' && node.sessionId && titles?.[node.sessionId]?.title
+      ? titles[node.sessionId].title
+      : node.text
+  const recentSessions = useMemo(() => {
+    const source = sessions || []
+    if (!normalizedQuery) return source.slice(0, 8)
+    return source
+      .filter((session) =>
+        (session.title || session.id || '').toLocaleLowerCase().includes(normalizedQuery)
+      )
+      .slice(0, 8)
+  }, [sessions, normalizedQuery])
 
   const matchesQuery = (node) => {
     if (!normalizedQuery) return true
-    if (node.text.toLocaleLowerCase().includes(normalizedQuery)) return true
+    if (displayText(node).toLocaleLowerCase().includes(normalizedQuery)) return true
     return (children.get(node.id) || []).some(matchesQuery)
   }
 
@@ -154,7 +159,7 @@ export function SessionTree({
             draggable={editingId !== node.id}
             className={`${rowClass} ${selected ? 'bg-white/[.075] text-white' : 'text-white/70'} ${drag?.id === node.id ? 'opacity-45' : ''} ${target === 'inside' ? 'ring-1 ring-inset ring-white/30' : ''}`}
             style={{ paddingLeft: 7 + depth * 14 }}
-            title={node.cwd ? `${node.text} — ${node.cwd}` : node.text}
+            title={node.cwd ? `${displayText(node)} — ${node.cwd}` : displayText(node)}
             onClick={() => {
               onSelect(node)
               if (folder) onToggle(node.id)
@@ -221,7 +226,7 @@ export function SessionTree({
                 onCancel={onCancelEdit}
               />
             ) : (
-              <span className="min-w-0 flex-1 truncate">{node.text}</span>
+              <span className="min-w-0 flex-1 truncate">{displayText(node)}</span>
             )}
             {running && (
               <span className="size-1.75 shrink-0 animate-pulse rounded-full bg-[#46c57a] ring-2 ring-[#46c57a]/15" />
@@ -307,27 +312,31 @@ export function SessionTree({
             Recent
           </button>
           {!recentCollapsed &&
-            (recent.length ? (
+            (recentSessions.length ? (
               <ul className="flex flex-col gap-px" aria-label="最近会话">
-                {recent.map((node) => {
-                  const state = unread[node.id]
-                  const running = state?.running
-                  const hasUnread = !running && state?.unread
+                {recentSessions.map((session) => {
+                  const running = session.turnState === 'running'
+                  const isSelected = nodes.some(
+                    (node) => node.id === selectedId && node.sessionId === session.id
+                  )
                   return (
-                    <li key={node.id}>
+                    <li key={session.id}>
                       <button
                         type="button"
-                        title={node.text}
-                        className={`${rowClass} ml-5 w-[calc(100%-1.25rem)] px-2 text-left ${node.id === selectedId ? 'bg-white/[.075] text-white' : 'text-white/70'}`}
-                        onClick={() => onSelect(node)}
+                        title={
+                          session.cwd
+                            ? `${session.title || session.id} — ${session.cwd}`
+                            : session.title || session.id
+                        }
+                        className={`${rowClass} ml-5 w-[calc(100%-1.25rem)] px-2 text-left ${isSelected ? 'bg-white/[.075] text-white' : 'text-white/70'}`}
+                        onClick={() => onSelectRecent(session)}
                       >
                         <SquareTerminal size={14} className="shrink-0 text-white/50" />
-                        <span className="min-w-0 flex-1 truncate">{node.text}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          {session.title || session.id}
+                        </span>
                         {running && (
                           <span className="size-1.75 shrink-0 animate-pulse rounded-full bg-[#46c57a]" />
-                        )}
-                        {hasUnread && (
-                          <span className="size-1.75 shrink-0 rounded-full bg-[#5aa9ff]" />
                         )}
                       </button>
                     </li>

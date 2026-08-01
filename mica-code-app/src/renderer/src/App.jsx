@@ -31,6 +31,17 @@ import {
   uid
 } from './workspace'
 
+/** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
+function nodeIdFor(ptyId) {
+  if (typeof ptyId !== 'string') return ptyId
+  const index = ptyId.lastIndexOf(':')
+  return index > 0 ? ptyId.slice(0, index) : ptyId
+}
+
+function ptyIdForNode(nodeId) {
+  return `${nodeId}:mica`
+}
+
 function TextPrompt({ prompt, onClose }) {
   const [value, setValue] = useState(prompt.initial)
   const inputRef = useRef(null)
@@ -127,8 +138,9 @@ function useNotifications(activeId, onSessionId) {
     (list) => {
       const next = {}
       for (const item of list || []) {
-        if (item?.terminalId && (item.unread || item.running))
-          next[item.terminalId] = {
+        const id = item?.terminalId ? nodeIdFor(item.terminalId) : null
+        if (id && (item.unread || item.running))
+          next[id] = {
             unread: !!item.unread,
             running: !!item.running,
             lastType: item.lastType ?? null,
@@ -153,7 +165,7 @@ function useNotifications(activeId, onSessionId) {
       readTimer.current = window.setTimeout(() => {
         if (id !== activeRef.current || !readable() || !statesRef.current[id]?.unread) return
         window.mica.notify
-          .markRead(id)
+          .markRead(ptyIdForNode(id))
           .then((state) => {
             if (!state) return
             setStates((current) => {
@@ -212,11 +224,12 @@ function useNotifications(activeId, onSessionId) {
   useEffect(() => {
     const offNotify = window.mica.notify.onChanged((payload) => {
       if (payload?.type === 'cleared' && payload.terminalId) {
-        setTerminalState(payload.terminalId, { unread: false })
+        setTerminalState(nodeIdFor(payload.terminalId), { unread: false })
       } else if (payload?.state?.terminalId) {
         const state = payload.state
-        setTerminalState(state.terminalId, state)
-        if (state.sessionId) sessionRef.current(state.terminalId, state.sessionId)
+        const nodeId = nodeIdFor(state.terminalId)
+        setTerminalState(nodeId, state)
+        if (state.sessionId) sessionRef.current(nodeId, state.sessionId)
         if (payload.type === 'event' && state.lastType === 'turn.completed') {
           playCompleted().catch((error) => console.warn('play notification sound failed', error))
         }
@@ -317,6 +330,55 @@ export default function App() {
   })
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
+  const [sessions, setSessions] = useState([])
+  const [sessionMeta, setSessionMeta] = useState({})
+
+  const applySessions = useCallback((list) => {
+    const meta = {}
+    for (const row of list || []) {
+      if (!row?.id) continue
+      meta[row.id] = {
+        title: typeof row.title === 'string' && row.title.trim() ? row.title.trim() : '',
+        cwd: typeof row.cwd === 'string' && row.cwd.trim() ? row.cwd.trim() : null,
+        updatedAtMs: Number(row.updatedAtMs) || 0,
+        turnState: row.turnState || 'completed'
+      }
+    }
+    setSessionMeta((prev) => {
+      const prevKeys = Object.keys(prev)
+      const nextKeys = Object.keys(meta)
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every(
+          (key) =>
+            prev[key]?.title === meta[key].title && prev[key]?.updatedAtMs === meta[key].updatedAtMs
+        )
+      )
+        return prev
+      return meta
+    })
+    setSessions((prev) => (prev === list ? prev : list || []))
+    setNodes((items) => {
+      let changed = false
+      const next = items.map((node) => {
+        if (node.type !== 'terminal' || !node.sessionId) return node
+        const title = meta[node.sessionId]?.title
+        if (title && node.text !== title) {
+          changed = true
+          return { ...node, text: title }
+        }
+        return node
+      })
+      return changed ? next : items
+    })
+  }, [])
+
+  const refreshSessions = useCallback(() => {
+    window.mica.stats
+      .listSessions()
+      .then((result) => applySessions(result?.sessions))
+      .catch((error) => console.error('load sessions failed', error))
+  }, [applySessions])
 
   useEffect(() => {
     window.mica.workspace
@@ -352,8 +414,9 @@ export default function App() {
         parent: node.parent,
         text: node.text,
         type: node.type,
-        ...(node.type === 'folder' && node.cwd ? { cwd: node.cwd } : {}),
+        ...(node.cwd ? { cwd: node.cwd } : {}),
         ...(node.type === 'terminal' && node.sessionId ? { sessionId: node.sessionId } : {}),
+        ...(node.type === 'terminal' && node.command ? { command: node.command } : {}),
         ...(node.type === 'terminal' && node.lastActiveAt
           ? { lastActiveAt: node.lastActiveAt }
           : {}),
@@ -372,38 +435,28 @@ export default function App() {
   const terminalCwd = useCallback(
     (id) => {
       const node = nodesRef.current.find((item) => item.id === id)
-      return node ? resolveDefaultCwd(nodesRef.current, node.parent) : null
+      if (!node) return null
+      if (node.type === 'terminal' && node.cwd) return node.cwd
+      return resolveDefaultCwd(nodesRef.current, node.parent)
     },
     [nodesRef]
   )
 
-  const setSessionId = useCallback((id, sessionId) => {
-    const value = typeof sessionId === 'string' ? sessionId.trim() : ''
-    if (!value) return
-    setNodes((items) =>
-      items.map((node) =>
-        node.id === id && node.type === 'terminal' && node.sessionId !== value
-          ? { ...node, sessionId: value }
-          : node
-      )
-    )
-    window.mica.stats
-      .sessionTitle(value)
-      .then((title) => {
-        if (!title) return
-        setNodes((items) =>
-          items.map((node) =>
-            node.id === id &&
-            node.type === 'terminal' &&
-            node.sessionId === value &&
-            node.text !== title
-              ? { ...node, text: title }
-              : node
-          )
+  const setSessionId = useCallback(
+    (id, sessionId) => {
+      const value = typeof sessionId === 'string' ? sessionId.trim() : ''
+      if (!value) return
+      setNodes((items) =>
+        items.map((node) =>
+          node.id === id && node.type === 'terminal' && node.sessionId !== value
+            ? { ...node, sessionId: value }
+            : node
         )
-      })
-      .catch((error) => console.error('load session title failed', error))
-  }, [])
+      )
+      refreshSessions()
+    },
+    [refreshSessions]
+  )
   const clearSessionId = useCallback((id) => {
     setNodes((items) =>
       items.map((node) =>
@@ -414,6 +467,14 @@ export default function App() {
     )
   }, [])
   const notifications = useNotifications(activeId, setSessionId)
+
+  useEffect(() => {
+    refreshSessions()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [refreshSessions])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
@@ -538,7 +599,7 @@ export default function App() {
   }, [])
 
   const createTerminal = useCallback(
-    (parent = '#') => {
+    (parent = '#', options = {}) => {
       const current = nodesRef.current
       const selected = current.find((node) => node.id === parent)
       let target =
@@ -555,6 +616,13 @@ export default function App() {
       }
       const id = uid('term')
       const count = current.filter((node) => node.type === 'terminal').length + 1
+      const resumeSessionId =
+        typeof options.resumeSessionId === 'string' ? options.resumeSessionId.trim() : ''
+      const text =
+        typeof options.text === 'string' && options.text.trim()
+          ? options.text.trim()
+          : `新对话 ${count}`
+      const cwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
       setNodes((items) => {
         const opened = items.map((node) =>
           node.id === target ? { ...node, state: { ...node.state, opened: true } } : node
@@ -564,9 +632,11 @@ export default function App() {
           {
             id,
             parent: target,
-            text: `新对话 ${count}`,
+            text,
             type: 'terminal',
-            sessionId: null,
+            sessionId: resumeSessionId || null,
+            command: resumeSessionId ? `mica --resume ${resumeSessionId}` : null,
+            cwd,
             lastActiveAt: Date.now(),
             state: { opened: false, selected: false }
           }
@@ -594,6 +664,27 @@ export default function App() {
       }
     },
     [view]
+  )
+
+  const openRecent = useCallback(
+    (session) => {
+      if (!session?.id) return
+      setView('mica')
+      const existing = nodesRef.current.find(
+        (node) => node.type === 'terminal' && node.sessionId === session.id
+      )
+      if (existing) {
+        selectNode(existing)
+        return
+      }
+      const selected = nodesRef.current.find((node) => node.id === selectedId)
+      createTerminal(selected?.type === 'folder' ? selected.id : selected?.parent || '#', {
+        resumeSessionId: session.id,
+        text: session.title || session.id,
+        cwd: session.cwd || null
+      })
+    },
+    [createTerminal, nodesRef, selectNode, selectedId]
   )
 
   const disposeAndRemove = useCallback(
@@ -641,6 +732,10 @@ export default function App() {
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
+  const commandFor = useCallback(
+    (id) => nodesRef.current.find((node) => node.id === id)?.command || 'mica',
+    [nodesRef]
+  )
   const gitIsCurrent = git.terminalId === activeId
   const repository = gitIsCurrent ? git.repository : null
   const gitCount = repository?.files?.length ? repository : null
@@ -812,7 +907,10 @@ export default function App() {
             selectedId={selectedId}
             editingId={editingId}
             unread={notifications.states}
+            sessions={sessions}
+            titles={sessionMeta}
             onSelect={selectNode}
+            onSelectRecent={openRecent}
             onToggle={(id) =>
               setNodes((items) =>
                 items.map((node) =>
@@ -944,6 +1042,7 @@ export default function App() {
               height={terminalPanelHeight}
               sidebarCollapsed={sidebarCollapsed}
               resolveCwd={terminalCwd}
+              commandFor={commandFor}
               onRead={(id, reason) => notifications.markRead(id, reason)}
               onExitCommand={clearSessionId}
             />

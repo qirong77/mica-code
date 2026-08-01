@@ -74,6 +74,42 @@ function fingerprint(dir) {
   }
 }
 
+/** 解析单个 session 的轻量元数据（不展开 snapshot，供侧栏/最近列表轮询） */
+function parseSessionMeta(file) {
+  const raw = JSON.parse(readFileSync(file, 'utf8'))
+  const updatedAtMs = Date.parse(raw.updatedAt)
+  if (!Number.isFinite(updatedAtMs)) return null
+  return {
+    id: raw.id || null,
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null,
+    cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
+    updatedAtMs,
+    turnState: raw.turnState || 'completed'
+  }
+}
+
+/** 扫描全部 session 轻量元数据，按最近更新降序；指纹未变化时复用缓存 */
+function scanMeta() {
+  const dir = sessionsDir()
+  const fp = fingerprint(dir)
+  if (metaCache && metaCache.fingerprint === fp) return metaCache.sessions
+  const sessions = []
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json')) continue
+      try {
+        const row = parseSessionMeta(join(dir, name))
+        if (row) sessions.push(row)
+      } catch {
+        // 单个文件损坏不影响整体
+      }
+    }
+  }
+  sessions.sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+  metaCache = { fingerprint: fp, sessions }
+  return sessions
+}
+
 /** 解析单个 session 文件为统计行；损坏/示例文件返回 null */
 function parseSession(file) {
   const raw = JSON.parse(readFileSync(file, 'utf8'))
@@ -170,12 +206,14 @@ function scan() {
 }
 
 let cache = null
+let metaCache = null
 
 export function registerStatsIpc() {
   ipcMain.handle('stats:read', () => ({
     sessions: scan(),
     scannedAt: Date.now()
   }))
+  ipcMain.handle('stats:list-sessions', () => ({ sessions: scanMeta() }))
   ipcMain.handle('stats:session-title', (_event, { sessionId } = {}) => sessionTitle(sessionId))
   ipcMain.handle('stats:rename-session', (_event, { sessionId, title } = {}) =>
     renameSession(sessionId, title)

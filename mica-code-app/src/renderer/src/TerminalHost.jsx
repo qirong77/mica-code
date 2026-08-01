@@ -166,6 +166,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
     sidebarCollapsed,
     pane = PANE_MICA,
     resolveCwd,
+    commandFor,
     onRead,
     onExitCommand
   },
@@ -183,6 +184,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const visibleRef = useLatest(visible)
   const paneRef = useLatest(pane)
   const resolveCwdRef = useLatest(resolveCwd)
+  const commandForRef = useLatest(commandFor)
   const onReadRef = useLatest(onRead)
   const frameRef = useRef(null)
   const focusRef = useRef(false)
@@ -274,7 +276,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         }
         entry.creating = window.mica.terminal.create({
           id: ptyId,
-          ...(pane === PANE_MICA ? { command: 'mica' } : {}),
+          ...(pane === PANE_MICA ? { command: commandForRef.current(sessionId) || 'mica' } : {}),
           ...(resolveCwdRef.current(sessionId) ? { cwd: resolveCwdRef.current(sessionId) } : {}),
           ...(dimensions?.cols && dimensions?.rows ? dimensions : {})
         })
@@ -291,7 +293,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         scheduleFit({ focus })
       }
     },
-    [activePane, activeRef, measurable, resolveCwdRef, scheduleFit]
+    [activePane, activeRef, commandForRef, measurable, resolveCwdRef, scheduleFit]
   )
 
   const register = useCallback(

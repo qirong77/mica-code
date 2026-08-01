@@ -10,8 +10,9 @@ export function normalizeNodes(nodes = []) {
       parent: node.parent || '#',
       text: node.text || '',
       type,
-      cwd: type === 'folder' && node.cwd?.trim() ? node.cwd.trim() : null,
+      cwd: node.cwd?.trim() ? node.cwd.trim() : null,
       sessionId: type === 'terminal' && node.sessionId?.trim() ? node.sessionId.trim() : null,
+      command: type === 'terminal' && node.command?.trim() ? node.command.trim() : null,
       lastActiveAt:
         type === 'terminal' && Number.isFinite(node.lastActiveAt) ? node.lastActiveAt : 0,
       state: {

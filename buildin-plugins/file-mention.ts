@@ -67,13 +67,19 @@ function rankFiles(files: string[], query: string): RankedFile[] {
 
 function fileHighlightIndices(path: string, query: string): number[] {
   const lowerPath = path.toLocaleLowerCase();
-  const name = lowerPath.split('/').at(-1) ?? lowerPath;
-  const nameMatch = fuzzyMatch(name, query);
-  if (nameMatch) {
+  const segments = lowerPath.split('/');
+  const name = segments.at(-1) ?? lowerPath;
+  if (name.startsWith(query)) {
     const nameOffset = path.length - name.length;
-    return nameMatch.indices.map((index) => nameOffset + index);
+    return Array.from({ length: query.length }, (_, index) => nameOffset + index);
   }
-  return fuzzyMatch(lowerPath, query)?.indices ?? [];
+  const segmentIndex = segments.findIndex((segment) => segment.startsWith(query));
+  if (segmentIndex < 0) return [];
+  let offset = 0;
+  for (let index = 0; index < segmentIndex; index += 1) {
+    offset += segments[index]!.length + 1;
+  }
+  return Array.from({ length: query.length }, (_, index) => offset + index);
 }
 
 function normalizePathQuery(query: string): string {
@@ -123,10 +129,14 @@ async function listGitWorkspaceFiles(root: string): Promise<string[] | null> {
       ['-C', root, 'ls-files', '--cached', '--others', '-z', '--', '.'],
       { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 },
     );
-    return stdout.split('\0').filter(Boolean).slice(0, MAX_FILES);
+    return stdout.split('\0').filter(Boolean).filter(isWorkspaceFile).slice(0, MAX_FILES);
   } catch {
     return null;
   }
+}
+
+function isWorkspaceFile(path: string): boolean {
+  return !path.split('/').some((segment) => IGNORED_DIRECTORIES.has(segment));
 }
 
 async function walkWorkspaceFiles(root: string): Promise<string[]> {
@@ -158,56 +168,26 @@ async function walkWorkspaceFiles(root: string): Promise<string[]> {
   return files;
 }
 
-type FuzzyMatch = { score: number; indices: number[] };
-
-function fuzzyMatch(value: string, query: string): FuzzyMatch | null {
-  if (!query) return { score: 0, indices: [] };
-  const contiguousIndex = value.indexOf(query);
-  if (contiguousIndex >= 0) {
-    return {
-      score: value === query ? -300 : contiguousIndex === 0 ? -200 + value.length / 1_000 : -100 + contiguousIndex,
-      indices: Array.from({ length: query.length }, (_, index) => contiguousIndex + index),
-    };
-  }
-
-  let queryIndex = 0;
-  const indices: number[] = [];
-  for (let valueIndex = 0; valueIndex < value.length && queryIndex < query.length; valueIndex += 1) {
-    if (value[valueIndex] !== query[queryIndex]) continue;
-    indices.push(valueIndex);
-    queryIndex += 1;
-  }
-  if (queryIndex !== query.length) return null;
-
-  const first = indices[0] ?? 0;
-  const last = indices.at(-1) ?? first;
-  let gaps = 0;
-  let boundaryBonus = 0;
-  let consecutivePairs = 0;
-  for (let index = 0; index < indices.length; index += 1) {
-    if (index > 0) {
-      const gap = indices[index]! - indices[index - 1]! - 1;
-      gaps += gap;
-      if (gap === 0) consecutivePairs += 1;
-    }
-    const position = indices[index]!;
-    if (position === 0 || /[\s._/\\-]/.test(value[position - 1] ?? '')) boundaryBonus += 2;
-  }
-
-  return {
-    score: first * 3 + gaps * 2 + (last - first) - boundaryBonus - consecutivePairs * 2,
-    indices,
-  };
-}
-
 function scoreFileMatch(path: string, query: string): number | null {
   const lowerPath = path.toLocaleLowerCase();
-  const name = lowerPath.split('/').at(-1) ?? lowerPath;
-  const nameMatch = fuzzyMatch(name, query);
+  const segments = lowerPath.split('/');
+  const name = segments.at(-1) ?? lowerPath;
+
+  const nameMatch = prefixMatch(name, query);
   if (nameMatch) return nameMatch.score;
 
-  const pathMatch = fuzzyMatch(lowerPath, query);
-  return pathMatch ? 10_000 + pathMatch.score : null;
+  const segmentIndex = segments.findIndex((segment) => segment.startsWith(query));
+  if (segmentIndex < 0) return null;
+  const segmentMatch = prefixMatch(segments[segmentIndex]!, query);
+  return segmentMatch ? 10_000 + segmentIndex * 100 + segmentMatch.score : null;
+}
+
+function prefixMatch(value: string, query: string): { score: number; indices: number[] } | null {
+  if (!value.startsWith(query)) return null;
+  return {
+    score: value === query ? -300 : -200 + value.length / 1_000,
+    indices: Array.from({ length: query.length }, (_, index) => index),
+  };
 }
 
 function comparePaths(left: string, right: string): number {

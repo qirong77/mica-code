@@ -79,6 +79,7 @@ const gitApi = {
 
 const statsApi = {
   read: () => ipcRenderer.invoke('stats:read'),
+  listSessions: () => ipcRenderer.invoke('stats:list-sessions'),
   sessionTitle: (sessionId) => ipcRenderer.invoke('stats:session-title', { sessionId }),
   renameSession: (sessionId, title) =>
     ipcRenderer.invoke('stats:rename-session', { sessionId, title })
