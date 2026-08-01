@@ -20,6 +20,7 @@ export type RunningSyncServer = {
 type Command =
   | { type: 'run'; id: string; sessionId: string; prompt: string; requestedAt: string }
   | { type: 'create'; id: string; sessionId: string; prompt: string; cwd?: string; requestedAt: string }
+  | { type: 'update_cwd'; id: string; sessionId: string; cwd: string; requestedAt: string }
   | { type: 'abort'; id: string; sessionId: string; requestedAt: string };
 
 const MACHINE_ONLINE_MS = 90_000;
@@ -171,6 +172,14 @@ async function handleRequest(
         },
         timer,
       };
+      // Remove the waiter when the client disconnects (nginx timeout, a
+      // client that gave up, etc.). Without this a dead waiter stays in the
+      // queue and steals commands that were meant for the live daemon poll.
+      request.on('close', () => {
+        removeWaiter(ctx, machine.id, waiter);
+        clearTimeout(timer);
+        resolvePoll();
+      });
       const waiters = ctx.pollWaiters.get(machine.id) ?? [];
       waiters.push(waiter);
       ctx.pollWaiters.set(machine.id, waiters);
@@ -242,7 +251,7 @@ async function handleRequest(
     return true;
   }
 
-  const machineMatch = pathname.match(/^\/api\/machines\/([^/]+)\/sessions(?:\/([^/]+))?(\/(events|run|abort))?$/);
+  const machineMatch = pathname.match(/^\/api\/machines\/([^/]+)\/sessions(?:\/([^/]+))?(\/(events|run|abort|cwd))?$/);
   if (machineMatch && method !== 'OPTIONS') {
     const [, machineId, sessionId, , action] = machineMatch;
     const machine = ctx.store.getMachine(machineId!);
@@ -338,6 +347,29 @@ async function handleRequest(
         type: 'abort',
         id: randomUUID(),
         sessionId: sessionId!,
+        requestedAt: new Date().toISOString(),
+      };
+      ctx.enqueueCommand(machineId!, command);
+      writeJson(response, 200, { commandId: command.id });
+      return true;
+    }
+
+    if (action === 'cwd' && method === 'POST') {
+      if (!ctx.isOnline(machine)) {
+        writeJson(response, 409, { error: 'Machine is offline; start `mica daemon` on it and retry.' });
+        return true;
+      }
+      const body = await readJsonBody(request);
+      const cwd = String(body.cwd ?? '').trim();
+      if (!cwd) {
+        writeJson(response, 400, { error: 'Empty working directory' });
+        return true;
+      }
+      const command: Command = {
+        type: 'update_cwd',
+        id: randomUUID(),
+        sessionId: sessionId!,
+        cwd,
         requestedAt: new Date().toISOString(),
       };
       ctx.enqueueCommand(machineId!, command);

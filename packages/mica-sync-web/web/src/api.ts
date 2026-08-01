@@ -119,6 +119,14 @@ export async function runOnSession(machineId: string, sessionId: string, text: s
   });
 }
 
+/** Asks the daemon on `machineId` to switch the session's working directory. */
+export async function updateSessionCwd(machineId: string, sessionId: string, cwd: string): Promise<void> {
+  await api(`/machines/${encodeURIComponent(machineId)}/sessions/${encodeURIComponent(sessionId)}/cwd`, {
+    method: 'POST',
+    body: { cwd },
+  });
+}
+
 /** Asks the daemon on `machineId` to start a brand-new session with `text`. */
 export async function createSession(machineId: string, text: string, cwd?: string): Promise<{ sessionId: string }> {
   const data = await api<{ sessionId?: string }>(`/machines/${encodeURIComponent(machineId)}/sessions`, {

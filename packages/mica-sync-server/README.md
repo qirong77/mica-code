@@ -15,13 +15,13 @@ Mica Sync 的中心聚合服务器：收集所有机器上 `mica daemon` 镜像�
 
 ### Daemon 端点（`x-machine-id` header 标识机器，未注册返回 404）
 
-| 方法 | 路径               | 说明                                                      |
-| ---- | ------------------ | --------------------------------------------------------- |
-| POST | `/daemon/register` | 注册机器，返回 `machineId`（hostname 相同则复用原记录）   |
-| POST | `/daemon/beat`     | 心跳 + 上报活跃会话状态                                   |
-| POST | `/daemon/poll`     | 长轮询指令（`create` / `run` / `abort`），最多 hold 25s   |
-| POST | `/daemon/session`  | 推送/删除会话快照（`session: null` + `sessionId` 为删除） |
-| POST | `/daemon/events`   | 推送 turn 事件批次，可附带最新会话快照                    |
+| 方法 | 路径               | 说明                                                                   |
+| ---- | ------------------ | ---------------------------------------------------------------------- |
+| POST | `/daemon/register` | 注册机器，返回 `machineId`（hostname 相同则复用原记录）                |
+| POST | `/daemon/beat`     | 心跳 + 上报活跃会话状态                                                |
+| POST | `/daemon/poll`     | 长轮询指令（`create` / `run` / `update_cwd` / `abort`），最多 hold 25s |
+| POST | `/daemon/session`  | 推送/删除会话快照（`session: null` + `sessionId` 为删除）              |
+| POST | `/daemon/events`   | 推送 turn 事件批次，可附带最新会话快照                                 |
 
 ### Web 端点（无需认证）
 
@@ -34,6 +34,7 @@ Mica Sync 的中心聚合服务器：收集所有机器上 `mica daemon` 镜像�
 | GET  | `/api/machines/:id/sessions/:sid`        | 会话详情                                                   |
 | GET  | `/api/machines/:id/sessions/:sid/events` | SSE 事件流（`?since=N` 补拉）                              |
 | POST | `/api/machines/:id/sessions/:sid/run`    | 下发续聊指令 `{ text }`                                    |
+| POST | `/api/machines/:id/sessions/:sid/cwd`    | 切换会话工作目录 `{ cwd }`                                 |
 | POST | `/api/machines/:id/sessions/:sid/abort`  | 中止当前 turn                                              |
 
 机器在线判定：`lastSeen` 距今 < 90s。离线机器会拒绝 `run` / `create`（409）。
@@ -41,6 +42,14 @@ Mica Sync 的中心聚合服务器：收集所有机器上 `mica daemon` 镜像�
 新建会话：`POST /api/machines/:id/sessions` 由服务器生成 `sessionId` 并下发 `create`
 指令（`{ type: 'create', sessionId, prompt, cwd? }`）；daemon 用本机配置
 provider/model/effort 创建全新会话并执行首条消息，`cwd` 留空时使用 daemon 机器家目录。
+
+切换工作目录：`POST /api/machines/:id/sessions/:sid/cwd` 下发 `update_cwd` 指令
+（`{ type: 'update_cwd', sessionId, cwd }`）；daemon 更新本地会话文件（bump
+revision/updatedAt）后推送新快照，不执行 turn。会话正在本机/远程运行时被
+turn lease 拒绝（`cwd_update` 事件返回 `ok: false`）。
+
+poll 长轮询会监听请求的 `close` 事件：客户端断开（超时放弃、nginx 回收）时
+移除对应 waiter，避免死 waiter 抢占后续下发的指令。
 
 ## 部署
 

@@ -105,4 +105,68 @@ describe('create session endpoint', () => {
     });
     expect(created.status).toBe(409);
   });
+
+  it('dispatches an update_cwd command with a non-empty cwd', async () => {
+    const registered = await request('/daemon/register', {
+      method: 'POST',
+      body: { name: 'host', hostname: 'host.local', platform: 'darwin', version: '1' },
+    });
+    const machineId = String(registered.body.machineId);
+    const created = await request(`/api/machines/${machineId}/sessions`, {
+      method: 'POST',
+      body: { text: 'hello' },
+    });
+    const sessionId = String(created.body.sessionId);
+
+    const updated = await request(`/api/machines/${machineId}/sessions/${sessionId}/cwd`, {
+      method: 'POST',
+      body: { cwd: '/srv/app' },
+    });
+    expect(updated.status).toBe(200);
+
+    const polled = await request('/daemon/poll', { method: 'POST', body: {}, machineId });
+    const commands = polled.body.commands as Array<Record<string, unknown>>;
+    expect(commands).toHaveLength(2);
+    expect(commands[1]).toMatchObject({ type: 'update_cwd', sessionId, cwd: '/srv/app' });
+
+    const empty = await request(`/api/machines/${machineId}/sessions/${sessionId}/cwd`, {
+      method: 'POST',
+      body: { cwd: '   ' },
+    });
+    expect(empty.status).toBe(400);
+  });
+
+  it('does not let an abandoned poll steal queued commands', async () => {
+    const registered = await request('/daemon/register', {
+      method: 'POST',
+      body: { name: 'host', hostname: 'host.local', platform: 'darwin', version: '1' },
+    });
+    const machineId = String(registered.body.machineId);
+
+    // Open a long-poll and abandon it: the server must drop the waiter when
+    // the connection closes, otherwise a later command is routed to a dead
+    // socket and lost for the live daemon.
+    const controller = new AbortController();
+    const abandoned = fetch(`http://127.0.0.1:${server!.port}/daemon/poll`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-machine-id': machineId },
+      body: '{}',
+      signal: controller.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    await abandoned.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const created = await request(`/api/machines/${machineId}/sessions`, {
+      method: 'POST',
+      body: { text: 'hi' },
+    });
+    expect(created.status).toBe(200);
+
+    const polled = await request('/daemon/poll', { method: 'POST', body: {}, machineId });
+    const commands = polled.body.commands as Array<Record<string, unknown>>;
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ type: 'create', prompt: 'hi' });
+  });
 });

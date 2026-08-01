@@ -3,6 +3,7 @@ import type { PersistedSession } from '@packages/mica-session/index.js';
 export type DaemonCommand =
   | { type: 'run'; id: string; sessionId: string; prompt: string; requestedAt: string }
   | { type: 'create'; id: string; sessionId: string; prompt: string; cwd?: string; requestedAt: string }
+  | { type: 'update_cwd'; id: string; sessionId: string; cwd: string; requestedAt: string }
   | { type: 'abort'; id: string; sessionId: string; requestedAt: string };
 
 export type DaemonActive = { sessionId: string | null; running: boolean };

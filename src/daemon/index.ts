@@ -110,6 +110,9 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       } else if (command.type === 'abort') {
         log(`abort command for session ${command.sessionId}`);
         executor.abort(command.sessionId);
+      } else if (command.type === 'update_cwd') {
+        log(`update_cwd command for session ${command.sessionId}: ${command.cwd}`);
+        void executor.updateCwd(command.sessionId, command.cwd);
       }
     }
   };

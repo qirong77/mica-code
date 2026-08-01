@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { MachineInfo, StoredSession } from './api';
+import { CwdPicker } from './CwdPicker';
 import { formatTime } from './format';
 import { appIcons } from './icons';
 import { Markdown } from './Markdown';
@@ -12,8 +13,12 @@ type ConversationProps = {
   running: boolean;
   connected: boolean;
   connecting: boolean;
+  cwdCandidates: string[];
+  cwdSwitching: boolean;
+  cwdError: string;
   onSend: (text: string) => void;
   onAbort: () => void;
+  onSelectCwd: (cwd: string) => void;
   onOpenSidebar: () => void;
 };
 
@@ -50,9 +55,7 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
         <span className={stateClass}>{stateIcon}</span>
         <span className="tool-name">{message.name}</span>
         {argsPreview && <span className="tool-args-preview">{argsPreview}</span>}
-        <span className="tool-expand">
-          {expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
-        </span>
+        <span className="tool-expand">{expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}</span>
       </div>
       {expanded && (
         <div className="tool-body">
@@ -157,8 +160,12 @@ export const Conversation = memo(function Conversation({
   running,
   connected,
   connecting,
+  cwdCandidates,
+  cwdSwitching,
+  cwdError,
   onSend,
   onAbort,
+  onSelectCwd,
   onOpenSidebar,
 }: ConversationProps) {
   const [draft, setDraft] = useState('');
@@ -255,7 +262,9 @@ export const Conversation = memo(function Conversation({
         <textarea
           ref={inputRef}
           value={draft}
-          placeholder={running ? '远程任务运行中…' : localRunning ? '本机终端正在运行…' : '继续对话，Enter 发送，Shift+Enter 换行'}
+          placeholder={
+            running ? '远程任务运行中…' : localRunning ? '本机终端正在运行…' : '继续对话，Enter 发送，Shift+Enter 换行'
+          }
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -268,6 +277,13 @@ export const Conversation = memo(function Conversation({
         />
         <div className="input-actions">
           <span className="input-hint">{draft.length > 0 ? `${draft.length} 字` : ' '}</span>
+          <CwdPicker
+            cwd={session.cwd}
+            candidates={cwdCandidates}
+            switching={cwdSwitching}
+            error={cwdError}
+            onChange={onSelectCwd}
+          />
           {running ? (
             <button className="abort-button" onClick={onAbort}>
               <SquareIcon size={12} />

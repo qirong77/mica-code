@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   abortSession,
   createSession,
@@ -6,6 +6,7 @@ import {
   fetchSession,
   fetchSessions,
   runOnSession,
+  updateSessionCwd,
   type MachineInfo,
   type SessionSummary,
   type StoredSession,
@@ -79,6 +80,8 @@ export function App() {
   const [newSessionFor, setNewSessionFor] = useState<string | null>(null);
   const [newSessionError, setNewSessionError] = useState('');
   const [newSessionSubmitting, setNewSessionSubmitting] = useState(false);
+  const [cwdSwitching, setCwdSwitching] = useState(false);
+  const [cwdError, setCwdError] = useState('');
   const MenuIcon = appIcons.menu;
 
   const runningRef = useRef(running);
@@ -127,6 +130,7 @@ export function App() {
         // refines it when it arrives.
         initialSinceRef.current = snapshotSeqBySessionRef.current.get(`${next.machineId}/${next.sessionId}`) ?? 0;
       }
+      setCwdError('');
       clearSelectedSession();
       setRoute(next);
     },
@@ -367,6 +371,21 @@ export function App() {
         setMessages((current) => applyEvent(current, event));
         return;
       }
+      if (event.type === 'cwd_update') {
+        if (event.ok === false) {
+          setCwdError(String(event.error ?? '切换工作目录失败'));
+        } else if (typeof event.cwd === 'string') {
+          setCwdError('');
+          // The daemon persisted the new cwd; adopt it (also covers switching
+          // from another tab while this one is open).
+          setSessionData((current) =>
+            current && sameRoute(routeRef.current, requestedRoute)
+              ? { ...current, session: { ...current.session, cwd: event.cwd as string } }
+              : current,
+          );
+        }
+        return;
+      }
       if (event.type === 'session_removed') {
         setSessionsByMachine((current) => {
           const next = new Map(current);
@@ -463,6 +482,52 @@ export function App() {
     }
   };
 
+  // Recently used directories on this machine (from the sessions list), for
+  // the cwd switcher next to the send button. Most recent first.
+  const cwdCandidates = useMemo(() => {
+    if (!route.machineId) return [];
+    const sessions = sessionsByMachine.get(route.machineId) ?? [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const summary of [...sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))) {
+      if (!summary.cwd || seen.has(summary.cwd)) continue;
+      seen.add(summary.cwd);
+      result.push(summary.cwd);
+      if (result.length >= 10) break;
+    }
+    return result;
+  }, [sessionsByMachine, route.machineId]);
+
+  const handleSelectCwd = async (cwd: string) => {
+    const requestedRoute = { ...routeRef.current };
+    if (!requestedRoute.machineId || !requestedRoute.sessionId) return;
+    const { machineId, sessionId } = requestedRoute;
+    setCwdError('');
+    setCwdSwitching(true);
+    try {
+      await updateSessionCwd(machineId, sessionId, cwd);
+      // Optimistic update; the SSE session event will confirm the persisted cwd.
+      setSessionData((current) =>
+        current && sameRoute(routeRef.current, requestedRoute)
+          ? { ...current, session: { ...current.session, cwd } }
+          : current,
+      );
+      setSessionsByMachine((current) => {
+        const next = new Map(current);
+        next.set(
+          machineId,
+          (next.get(machineId) ?? []).map((summary) => (summary.id === sessionId ? { ...summary, cwd } : summary)),
+        );
+        return next;
+      });
+    } catch (error) {
+      if (!sameRoute(routeRef.current, requestedRoute)) return;
+      setCwdError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCwdSwitching(false);
+    }
+  };
+
   // ── render ──
   return (
     <div className="app-shell">
@@ -497,8 +562,12 @@ export function App() {
           running={running}
           connected={connected}
           connecting={connecting}
+          cwdCandidates={cwdCandidates}
+          cwdSwitching={cwdSwitching}
+          cwdError={cwdError}
           onSend={(text) => void send(text)}
           onAbort={() => void abort()}
+          onSelectCwd={(cwd) => void handleSelectCwd(cwd)}
           onOpenSidebar={() => setSidebarOpen(true)}
         />
       ) : route.sessionId ? (

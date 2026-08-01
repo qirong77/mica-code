@@ -459,7 +459,7 @@ rg --files src packages scripts docs blogs
 - 机器端 `mica daemon` 常驻进程主动**出站**连接中心服务器（NAT 友好，不需要机器开放入站端口）：`/daemon/register` 注册换取 `machineId`（按 hostname 复用已有记录，丢失 sync.json 不会换身份），`/daemon/beat` 心跳（20s，上报活跃会话），`/daemon/poll` 长轮询指令（server 最多 hold 25s），`/daemon/session` 推送会话快照，`/daemon/events` 推送 turn 事件。
 - 中心服务器 `mica-sync-server` 零第三方依赖（Node 内置模块），JSON 文件存储（`data/machines.json`、`data/sessions/<machineId>/<sessionId>.json`），每会话 500 条事件内存缓冲，SSE 订阅用 `since` 序号断线补拉。
 - **无认证**：daemon 请求用 `x-machine-id` header 标识机器，Web API 完全开放；服务公开在公网时需自行用 Nginx 基本认证或防火墙保护。
-- 指令（`create` / `run` / `abort`）通过 poll 长轮询下发；`create` 由服务器生成 `sessionId` 并携带 `prompt` 与可选 `cwd`，daemon 用本机配置创建全新会话并执行首条消息；daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected` 事件），不同 session 也不并发。
+- 指令（`create` / `run` / `update_cwd` / `abort`）通过 poll 长轮询下发；`create` 由服务器生成 `sessionId` 并携带 `prompt` 与可选 `cwd`，daemon 用本机配置创建全新会话并执行首条消息；`update_cwd` 由 Web 切换工作目录时下发，daemon 更新本地会话文件（bump revision/updatedAt）后推送新快照，不执行 turn，会话被 turn lease 占用时拒绝并回 `cwd_update ok:false` 事件；daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected` 事件），不同 session 也不并发。poll 长轮询监听请求 `close` 事件清理断开连接的 waiter，避免死 waiter 抢占指令。
 - 事件类型：`user_input`、`thinking`、`text_delta`、`tool_call`、`tool_result`、`usage`、`status`、`turn`（state: completed/aborted/error）、`run_rejected`、`session`、`session_removed`。
 
 ### daemon 语义
@@ -473,6 +473,7 @@ rg --files src packages scripts docs blogs
 - Web 端切换会话时会真正中止旧 SSE，按事件 `seq` 去重；terminal turn 后主动重拉权威快照，并以低频轮询从丢失事件或代理断流中自愈。
 - 会话详情接口默认返回精简快照（剔除 `snapshot.messages`/`usageHistory`/`lastUsage`，`?full=1` 取全量）；SSE 的 `session` 事件只含元数据（id/title/updatedAt/cwd/turnState/revision + providerId/model/effort/role），完整快照仍全量落盘。detail 响应携带 `snapshotSeq`（最近一次 session 快照事件的 seq），Web 在详情加载完成后再建 SSE（`since=snapshotSeq`），避免重放已反映在快照中的旧事件造成重复渲染。改动这两处协议时同步检查 `packages/mica-sync-web/web/src/App.tsx` 的 `acceptEventSession`/`publishSession`/`sessionReady` 逻辑与 `useSse.ts` 的初始断点。
 - Web 新建会话：`POST /api/machines/:id/sessions`（body `{ text, cwd? }`）返回新 `sessionId`；创建成功后 Web 立即跳转该会话并加入 `pendingSessionsRef`（detail fetch 在 daemon 落盘前 404 时抑制报错，等第一条 SSE `session` 事件渲染）。SSE 首次收到的轻量 `session` 事件在 `sessionData` 为 null 时也会 `publishSession`（无消息 payload，仅渲染 header/输入框），消息列表由流式事件构建，turn 结束再拉权威快照合并。
+- Web 切换工作目录：发送按钮左侧的 cwd 选择器（`CwdPicker.tsx`）展示当前 cwd，点击弹出最近使用目录（来自该机器会话列表去重）+ 自定义输入；提交后调 `POST .../cwd` 乐观更新本地 cwd，失败时显示 `cwd_update ok:false` 事件的错误信息。`update_cwd` 由 daemon 更新会话文件后经 SessionWatcher/onSessionSaved 推送，服务器按 revision 单调接受。
 - Web 切换体验：`/api/machines/:id/sessions` 列表为每个 summary 附带 `snapshotSeq`，切换时立即开 SSE（`since=` 列表水位，detail 校正），不出现"连接断开"；切换瞬间显示"加载会话中…"而非 welcome 闪现。`useSse` 的 `lastSeqRef` 跨 effect 重启保留，绝不重放已见事件（`text_delta` 重复追加）。连接状态三态：实时连接 / 连接中… / 连接断开，自动重连中…。`serveStaticFile` 对 index.html 发 `no-cache`、对 `/assets/*` 发 `immutable` 一年缓存。
 
 ### 构建与部署

@@ -67,6 +67,59 @@ export class CommandExecutor {
     if (this.agent) this.agent.abort();
   }
 
+  /** Switches a session's working directory without running a turn. */
+  async updateCwd(sessionId: string, cwd: string): Promise<void> {
+    const store = micaSession.createStore();
+    try {
+      if (!cwd.trim() || !statSync(cwd).isDirectory()) {
+        this.emit(sessionId, [
+          { type: 'cwd_update', sessionId, ok: false, error: `Working directory is unavailable: ${cwd}` },
+        ]);
+        return;
+      }
+      const lease = micaSession.acquireTurnLease(sessionId);
+      if (!lease) {
+        this.emit(sessionId, [
+          {
+            type: 'cwd_update',
+            sessionId,
+            ok: false,
+            error: '该会话正在本机终端或另一个进程运行，无法切换工作目录',
+          },
+        ]);
+        return;
+      }
+      try {
+        const session = store.load(sessionId);
+        if (!session) {
+          this.emit(sessionId, [
+            { type: 'cwd_update', sessionId, ok: false, error: `Session not found: ${sessionId}` },
+          ]);
+          return;
+        }
+        // Bump revision/updatedAt like saveCurrent does, otherwise the sync
+        // server's isNewerSession rejects the snapshot as stale.
+        session.cwd = cwd;
+        session.revision = (session.revision ?? 0) + 1;
+        session.updatedAt = new Date().toISOString();
+        store.save(session);
+        this.callbacks.onSessionSaved(session);
+        this.emit(sessionId, [{ type: 'cwd_update', sessionId, ok: true, cwd }]);
+      } finally {
+        lease.release();
+      }
+    } catch (error) {
+      this.emit(sessionId, [
+        {
+          type: 'cwd_update',
+          sessionId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      ]);
+    }
+  }
+
   async execute(command: DaemonCommand): Promise<void> {
     if (command.type === 'abort') {
       this.abort(command.sessionId);
