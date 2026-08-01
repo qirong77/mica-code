@@ -1,5 +1,5 @@
 import { app, ipcMain } from 'electron'
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 /**
@@ -12,6 +12,49 @@ import { join } from 'path'
 function sessionsDir() {
   const home = process.env.MICA_HOME || app.getPath('home')
   return join(home, '.mica', 'sessions')
+}
+
+function sessionTitle(sessionId) {
+  const file = sessionFile(sessionId)
+  if (!file) return null
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    return typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null
+  } catch {
+    return null
+  }
+}
+
+function renameSession(sessionId, title) {
+  const file = sessionFile(sessionId)
+  const nextTitle = typeof title === 'string' ? title.trim() : ''
+  if (!file || !nextTitle) throw new Error('Invalid session title')
+
+  let session
+  try {
+    session = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new Error('Session not found')
+  }
+  if (!session || typeof session !== 'object' || session.id !== sessionId)
+    throw new Error('Invalid session')
+
+  const updated = {
+    ...session,
+    title: nextTitle,
+    titleSource: 'manual',
+    revision: (Number.isInteger(session.revision) ? session.revision : 0) + 1,
+    updatedAt: new Date().toISOString()
+  }
+  const temporary = `${file}.${process.pid}.tmp`
+  writeFileSync(temporary, `${JSON.stringify(updated, null, 2)}\n`, 'utf8')
+  renameSync(temporary, file)
+  return updated.title
+}
+
+function sessionFile(sessionId) {
+  if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null
+  return join(sessionsDir(), `${sessionId}.json`)
 }
 
 /** 目录内容指纹：每个 session 文件的 name:mtimeMs:size，按名字排序拼起来 */
@@ -133,4 +176,8 @@ export function registerStatsIpc() {
     sessions: scan(),
     scannedAt: Date.now()
   }))
+  ipcMain.handle('stats:session-title', (_event, { sessionId } = {}) => sessionTitle(sessionId))
+  ipcMain.handle('stats:rename-session', (_event, { sessionId, title } = {}) =>
+    renameSession(sessionId, title)
+  )
 }

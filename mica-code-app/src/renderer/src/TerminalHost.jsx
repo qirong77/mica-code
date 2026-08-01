@@ -41,6 +41,19 @@ const terminalTheme = {
 export const SIDEBAR_TRANSITION_MS = 150
 const SIDEBAR_FIT_SETTLE_MS = SIDEBAR_TRANSITION_MS + 20
 
+export const PANE_MICA = 'mica'
+export const PANE_TERMINAL = 'terminal'
+
+function ptyIdFor(sessionId, pane) {
+  return `${sessionId}:${pane}`
+}
+
+function parsePtyId(ptyId) {
+  const index = ptyId.lastIndexOf(':')
+  if (index > 0) return { sessionId: ptyId.slice(0, index), pane: ptyId.slice(index + 1) }
+  return { sessionId: ptyId, pane: PANE_MICA }
+}
+
 function interceptTerminalKey(event, id) {
   const key = event.key.toLowerCase()
   const mod = event.metaKey || event.ctrlKey
@@ -63,7 +76,7 @@ function interceptTerminalKey(event, id) {
   window.mica.terminal.write(id, data)
 }
 
-function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
+function TerminalPane({ ptyId, sessionId, active, onRegister, onRead, onExitCommand }) {
   const hostRef = useRef(null)
   const onReadRef = useLatest(onRead)
   const onExitCommandRef = useLatest(onExitCommand)
@@ -91,19 +104,19 @@ function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
     term.loadAddon(new WebLinksAddon((event, url) => openWebLink(event, url, window.mica.platform)))
     term.unicode.activeVersion = '11'
     term.open(host)
-    term.registerLinkProvider(createFileLinkProvider(term, id, window.mica.platform))
+    term.registerLinkProvider(createFileLinkProvider(term, ptyId, window.mica.platform))
 
     const trackCommand = createSubmittedCommandTracker((command) => {
-      if (command === 'exit') onExitCommandRef.current(id)
+      if (command === 'exit') onExitCommandRef.current(sessionId)
     })
     const input = term.onData((data) => {
       trackCommand(data)
-      window.mica.terminal.write(id, data)
-      onReadRef.current(id, 'input')
+      window.mica.terminal.write(ptyId, data)
+      onReadRef.current(sessionId, 'input')
     })
-    const scroll = term.onScroll(() => onReadRef.current(id, 'scroll'))
-    const intercept = (event) => interceptTerminalKey(event, id)
-    const pointer = () => onReadRef.current(id, 'pointer')
+    const scroll = term.onScroll(() => onReadRef.current(sessionId, 'scroll'))
+    const intercept = (event) => interceptTerminalKey(event, ptyId)
+    const pointer = () => onReadRef.current(sessionId, 'pointer')
     host.addEventListener('keydown', intercept, true)
     host.addEventListener('keypress', intercept, true)
     host.addEventListener('pointerdown', pointer)
@@ -114,7 +127,7 @@ function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
       if (mod && !event.altKey && !event.shiftKey && (key === 'k' || key === 'l')) {
         term.clear()
         window.mica.terminal
-          .clear(id)
+          .clear(ptyId)
           .catch((error) => console.error('clear terminal failed', error))
         return false
       }
@@ -122,9 +135,9 @@ function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
     })
 
     const entry = { term, fit, el: host, ready: false, creating: null, lastPtySize: null }
-    onRegister(id, entry)
+    onRegister(ptyId, entry)
     return () => {
-      onRegister(id, null)
+      onRegister(ptyId, null)
       input.dispose()
       scroll.dispose()
       host.removeEventListener('keydown', intercept, true)
@@ -132,13 +145,13 @@ function TerminalPane({ id, active, onRegister, onRead, onExitCommand }) {
       host.removeEventListener('pointerdown', pointer)
       term.dispose()
     }
-  }, [id, onExitCommandRef, onReadRef, onRegister])
+  }, [ptyId, sessionId, onExitCommandRef, onReadRef, onRegister])
 
   return (
     <div
       ref={hostRef}
       className={`terminal-pane absolute inset-0 overflow-hidden bg-[#0e0e0e] ${active ? 'block' : 'hidden'}`}
-      data-id={id}
+      data-id={ptyId}
     />
   )
 }
@@ -151,6 +164,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
     docked = false,
     height,
     sidebarCollapsed,
+    pane = PANE_MICA,
     resolveCwd,
     onRead,
     onExitCommand
@@ -160,8 +174,14 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const hostRef = useRef(null)
   const entries = useRef(new Map())
   const [mountedIds, setMountedIds] = useState(() => (activeId ? [activeId] : []))
+  const [mountedPanes, setMountedPanes] = useState(() => {
+    const map = new Map()
+    if (activeId) map.set(activeId, new Set([PANE_MICA]))
+    return map
+  })
   const activeRef = useLatest(activeId)
   const visibleRef = useLatest(visible)
+  const paneRef = useLatest(pane)
   const resolveCwdRef = useLatest(resolveCwd)
   const onReadRef = useLatest(onRead)
   const frameRef = useRef(null)
@@ -169,15 +189,25 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const sidebarCollapsedRef = useRef(sidebarCollapsed)
   const suppressObservedFitRef = useRef(false)
 
+  const activePane = useCallback(
+    () => (paneRef.current === PANE_TERMINAL ? PANE_TERMINAL : PANE_MICA),
+    [paneRef]
+  )
+
   const measurable = useCallback(
-    (entry, id) =>
-      visibleRef.current &&
-      activeRef.current === id &&
-      hostRef.current?.clientWidth > 0 &&
-      hostRef.current?.clientHeight > 0 &&
-      entry.el.clientWidth > 0 &&
-      entry.el.clientHeight > 0,
-    [activeRef, visibleRef]
+    (entry, id) => {
+      const { sessionId, pane: entryPane } = parsePtyId(id)
+      return (
+        visibleRef.current &&
+        activeRef.current === sessionId &&
+        activePane() === entryPane &&
+        hostRef.current?.clientWidth > 0 &&
+        hostRef.current?.clientHeight > 0 &&
+        entry.el.clientWidth > 0 &&
+        entry.el.clientHeight > 0
+      )
+    },
+    [activePane, activeRef, visibleRef]
   )
 
   const syncPtySize = useCallback((id, entry) => {
@@ -198,21 +228,23 @@ export const TerminalHost = forwardRef(function TerminalHost(
 
   const fitActive = useCallback(
     (focus = false) => {
-      const id = activeRef.current
-      const entry = entries.current.get(id)
-      if (!id || !entry || !measurable(entry, id)) return
+      const sessionId = activeRef.current
+      if (!sessionId) return
+      const ptyId = ptyIdFor(sessionId, activePane())
+      const entry = entries.current.get(ptyId)
+      if (!entry || !measurable(entry, ptyId)) return
       try {
         entry.fit.fit()
-        syncPtySize(id, entry)
-        if (focus && activeRef.current === id) {
+        syncPtySize(ptyId, entry)
+        if (focus && activeRef.current === sessionId) {
           entry.term.focus()
-          onReadRef.current(id, 'activate')
+          onReadRef.current(sessionId, 'activate')
         }
       } catch (error) {
         console.error('fit terminal failed', error)
       }
     },
-    [activeRef, measurable, onReadRef, syncPtySize]
+    [activePane, activeRef, measurable, onReadRef, syncPtySize]
   )
 
   const scheduleFit = useCallback(
@@ -230,18 +262,20 @@ export const TerminalHost = forwardRef(function TerminalHost(
   )
 
   const activate = useCallback(
-    async (id, focus = true) => {
-      const entry = entries.current.get(id)
+    async (sessionId, pane = activePane(), focus = true) => {
+      const ptyId = ptyIdFor(sessionId, pane)
+      const entry = entries.current.get(ptyId)
       if (!entry) return
       if (!entry.ready && !entry.creating) {
         let dimensions = null
-        if (measurable(entry, id)) {
+        if (measurable(entry, ptyId)) {
           entry.fit.fit()
           dimensions = { cols: entry.term.cols, rows: entry.term.rows }
         }
         entry.creating = window.mica.terminal.create({
-          id,
-          ...(resolveCwdRef.current(id) ? { cwd: resolveCwdRef.current(id) } : {}),
+          id: ptyId,
+          ...(pane === PANE_MICA ? { command: 'mica' } : {}),
+          ...(resolveCwdRef.current(sessionId) ? { cwd: resolveCwdRef.current(sessionId) } : {}),
           ...(dimensions?.cols && dimensions?.rows ? dimensions : {})
         })
         try {
@@ -253,57 +287,102 @@ export const TerminalHost = forwardRef(function TerminalHost(
           entry.creating = null
         }
       }
-      if (activeRef.current === id) scheduleFit({ focus })
+      if (activeRef.current === sessionId && activePane() === pane) {
+        scheduleFit({ focus })
+      }
     },
-    [activeRef, measurable, resolveCwdRef, scheduleFit]
+    [activePane, activeRef, measurable, resolveCwdRef, scheduleFit]
   )
 
   const register = useCallback(
-    (id, entry) => {
+    (ptyId, entry) => {
       if (entry) {
-        entries.current.set(id, entry)
-        if (activeRef.current === id)
-          activate(id).catch((error) => console.error('create terminal failed', error))
+        entries.current.set(ptyId, entry)
+        const { sessionId, pane: entryPane } = parsePtyId(ptyId)
+        if (activeRef.current === sessionId && activePane() === entryPane) {
+          activate(sessionId, entryPane).catch((error) =>
+            console.error('create terminal failed', error)
+          )
+        }
       } else {
-        entries.current.delete(id)
+        entries.current.delete(ptyId)
       }
     },
-    [activate, activeRef]
+    [activate, activePane, activeRef]
   )
 
   useImperativeHandle(
     ref,
     () => ({
-      activate(id) {
-        return activate(id, true)
+      activate(sessionId) {
+        return activate(sessionId, activePane(), true)
       },
-      async getCwd(id = activeRef.current) {
-        if (!id) return null
-        return (await window.mica.terminal.getCwd(id)) || resolveCwdRef.current(id)
+      async getCwd(sessionId = activeRef.current) {
+        if (!sessionId) return null
+        return (
+          (await window.mica.terminal.getCwd(ptyIdFor(sessionId, activePane()))) ||
+          resolveCwdRef.current(sessionId)
+        )
       },
-      async dispose(id) {
-        const entry = entries.current.get(id)
-        if (entry) {
-          entry.ready = false
-          entry.lastPtySize = null
+      async dispose(sessionId) {
+        const ids = [ptyIdFor(sessionId, PANE_MICA), ptyIdFor(sessionId, PANE_TERMINAL), sessionId]
+        for (const ptyId of ids) {
+          const entry = entries.current.get(ptyId)
+          if (entry) {
+            entry.ready = false
+            entry.lastPtySize = null
+          }
+          try {
+            await window.mica.terminal.dispose(ptyId)
+          } catch (error) {
+            console.error('dispose terminal failed', error)
+          }
         }
-        return window.mica.terminal.dispose(id)
       },
       fit: scheduleFit
     }),
-    [activate, activeRef, resolveCwdRef, scheduleFit]
+    [activate, activePane, activeRef, resolveCwdRef, scheduleFit]
   )
 
   useEffect(() => {
     if (activeId) {
       setMountedIds((ids) => (ids.includes(activeId) ? ids : [...ids, activeId]))
-      activate(activeId).catch((error) => console.error('activate terminal failed', error))
+      setMountedPanes((prev) => {
+        if (prev.has(activeId)) return prev
+        const next = new Map(prev)
+        next.set(activeId, new Set([PANE_MICA]))
+        return next
+      })
+      activate(activeId, activePane()).catch((error) =>
+        console.error('activate terminal failed', error)
+      )
     }
-  }, [activate, activeId])
+  }, [activate, activeId, activePane])
+
+  useEffect(() => {
+    if (!activeId) return undefined
+    const current = pane === PANE_TERMINAL ? PANE_TERMINAL : PANE_MICA
+    setMountedPanes((prev) => {
+      const panes = prev.get(activeId)
+      if (panes && panes.has(current)) return prev
+      const next = new Map(prev)
+      next.set(activeId, panes ? new Set([...panes, current]) : new Set([current]))
+      return next
+    })
+    activate(activeId, current).catch((error) => console.error('activate pane failed', error))
+    return undefined
+  }, [activate, activeId, pane])
 
   useEffect(() => {
     const valid = new Set(nodes.map((node) => node.id))
     setMountedIds((ids) => ids.filter((id) => valid.has(id)))
+    setMountedPanes((prev) => {
+      const next = new Map(prev)
+      for (const id of next.keys()) {
+        if (!valid.has(id)) next.delete(id)
+      }
+      return next
+    })
   }, [nodes])
 
   useEffect(() => {
@@ -375,16 +454,37 @@ export const TerminalHost = forwardRef(function TerminalHost(
       className={`relative min-h-0 overflow-hidden bg-[#0e0e0e] no-drag ${docked ? 'shrink-0' : 'flex-1'} ${visible ? '' : 'hidden'}`}
       style={docked ? { height } : undefined}
     >
-      {mountedIds.map((id) => (
-        <TerminalPane
-          key={id}
-          id={id}
-          active={id === activeId}
-          onRegister={register}
-          onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
-          onExitCommand={onExitCommand}
-        />
-      ))}
+      {mountedIds.map((sessionId) => {
+        const isActiveSession = sessionId === activeId
+        const panes = mountedPanes.get(sessionId) || new Set([PANE_MICA])
+        return (
+          <div
+            key={sessionId}
+            className={`absolute inset-0 min-h-0 bg-[#0e0e0e] ${isActiveSession ? 'block' : 'hidden'}`}
+          >
+            {panes.has(PANE_MICA) && (
+              <TerminalPane
+                ptyId={ptyIdFor(sessionId, PANE_MICA)}
+                sessionId={sessionId}
+                active={isActiveSession && pane === PANE_MICA}
+                onRegister={register}
+                onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
+                onExitCommand={onExitCommand}
+              />
+            )}
+            {panes.has(PANE_TERMINAL) && (
+              <TerminalPane
+                ptyId={ptyIdFor(sessionId, PANE_TERMINAL)}
+                sessionId={sessionId}
+                active={isActiveSession && pane === PANE_TERMINAL}
+                onRegister={register}
+                onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
+                onExitCommand={onExitCommand}
+              />
+            )}
+          </div>
+        )
+      })}
     </section>
   )
 })

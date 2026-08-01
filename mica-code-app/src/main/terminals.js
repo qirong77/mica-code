@@ -170,6 +170,35 @@ function getShellArgs(shellPath) {
   return []
 }
 
+function isExecutable(file) {
+  try {
+    return statSync(file).isFile() && (statSync(file).mode & 0o111) !== 0
+  } catch {
+    return false
+  }
+}
+
+function resolveMicaExecutable() {
+  const explicit = (process.env.MICA_CLI_PATH || '').trim()
+  if (explicit && isExecutable(explicit)) return explicit
+  const defaultPath = path.join(os.homedir(), '.local', 'bin', 'mica')
+  return isExecutable(defaultPath) ? defaultPath : null
+}
+
+/** 归一化初始命令：`mica` 用绝对路径替换（Dock 启动的应用 PATH 精简） */
+function normalizeCommand(value) {
+  if (typeof value !== 'string') return null
+  const command = value.trim()
+  if (!command) return null
+  if (/^mica(?:\s|$)/.test(command)) {
+    const mica = resolveMicaExecutable()
+    if (mica) {
+      return command.length === 4 ? `'${mica}'` : `'${mica}' ${command.slice(4).trim()}`
+    }
+  }
+  return command
+}
+
 function execFileText(file, args) {
   return new Promise((resolve) => {
     execFile(file, args, { timeout: 1000 }, (error, stdout) => {
@@ -284,8 +313,14 @@ function createPty(id, sender, options = {}) {
   const cols = options.cols || 80
   const rows = options.rows || 24
   const usedFallback = !!requestedCwd && cwd !== requestedCwd
+  const command = normalizeCommand(options.command)
+  const args = command
+    ? process.platform === 'win32'
+      ? ['/d', '/c', command]
+      : [...shellArgs, '-c', command]
+    : shellArgs
 
-  const term = pty.spawn(shell, shellArgs, {
+  const term = pty.spawn(shell, args, {
     name: 'xterm-256color',
     cols,
     rows,
@@ -323,6 +358,7 @@ function createPty(id, sender, options = {}) {
   return {
     id,
     shell,
+    command: command || null,
     cwd,
     requestedCwd: requestedCwd || null,
     usedFallback

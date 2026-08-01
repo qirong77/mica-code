@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
+  Bot,
   Folder,
   GitBranch,
   GitCompare,
@@ -386,6 +387,22 @@ export default function App() {
           : node
       )
     )
+    window.mica.stats
+      .sessionTitle(value)
+      .then((title) => {
+        if (!title) return
+        setNodes((items) =>
+          items.map((node) =>
+            node.id === id &&
+            node.type === 'terminal' &&
+            node.sessionId === value &&
+            node.text !== title
+              ? { ...node, text: title }
+              : node
+          )
+        )
+      })
+      .catch((error) => console.error('load session title failed', error))
   }, [])
   const clearSessionId = useCallback((id) => {
     setNodes((items) =>
@@ -562,18 +579,22 @@ export default function App() {
     [nodesRef]
   )
 
-  const selectNode = useCallback((node, activate = true) => {
-    setSelectedId(node.id)
-    if (activate && node.type === 'terminal') {
-      setActiveId(node.id)
-      setNodes((items) =>
-        items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
-      )
-      terminalRef.current
-        ?.activate(node.id)
-        .catch((activateError) => console.error('activate terminal failed', activateError))
-    }
-  }, [])
+  const selectNode = useCallback(
+    (node, activate = true) => {
+      setSelectedId(node.id)
+      if (activate && node.type === 'terminal') {
+        if (view === 'stats' || view === 'settings') setView('mica')
+        setActiveId(node.id)
+        setNodes((items) =>
+          items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
+        )
+        terminalRef.current
+          ?.activate(node.id)
+          .catch((activateError) => console.error('activate terminal failed', activateError))
+      }
+    },
+    [view]
+  )
 
   const disposeAndRemove = useCallback(
     async (node) => {
@@ -731,6 +752,8 @@ export default function App() {
       </div>
     )
 
+  const isPageView = view === 'stats' || view === 'settings'
+
   return (
     <>
       <div
@@ -744,15 +767,16 @@ export default function App() {
           <nav className="no-drag shrink-0 px-2.5 pb-1.5 pt-1">
             <button
               type="button"
-              title="NEW SESSION"
-              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium text-white/70 transition-colors hover:bg-white/[.07] hover:text-white"
+              title="New Session"
+              className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
               onClick={() => {
+                setView('mica')
                 const selected = nodes.find((node) => node.id === selectedId)
                 createTerminal(selected?.type === 'folder' ? selected.id : selected?.parent || '#')
               }}
             >
-              <Rocket size={16} className="shrink-0 opacity-75" />
-              <span>NEW SESSION</span>
+              <Rocket size={14} className="shrink-0 opacity-80" />
+              <span>New Session</span>
             </button>
             <button
               type="button"
@@ -800,10 +824,17 @@ export default function App() {
             }
             onRename={(id, value) => {
               const text = value.trim()
-              if (text)
+              const node = nodes.find((item) => item.id === id)
+              if (text) {
                 setNodes((items) =>
                   items.map((node) => (node.id === id ? { ...node, text } : node))
                 )
+                if (node?.type === 'terminal' && node.sessionId) {
+                  window.mica.stats
+                    .renameSession(node.sessionId, text)
+                    .catch((error) => console.error('rename session failed', error))
+                }
+              }
               setEditingId(null)
             }}
             onCancelEdit={() => setEditingId(null)}
@@ -815,40 +846,53 @@ export default function App() {
           />
         </aside>
         <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e]">
-          <nav
-            role="tablist"
-            aria-label="工作区视图"
-            className={`drag-region mb-0.5 flex h-9 shrink-0 items-stretch border-b border-white/10 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
-          >
-            {[
-              ['terminal', '终端', SquareTerminal],
-              ['files', '文件夹', Folder],
-              ['git-compare', 'Git', GitCompare],
-              ['notes', 'Notes', NotebookPen],
-              ['stats', 'Stats', BarChart3]
-            ].map(([id, label, Icon]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={view === id}
-                className={`${tabClass} ${view === id ? 'text-white' : 'text-white/40'}`}
-                onClick={() => setView(id)}
-              >
-                <Icon size={14} />
-                <span>{label}</span>
-                {id === 'git-compare' && gitCount && (
-                  <span className="ml-0.5 flex gap-1 font-mono text-[10px]">
-                    <span className="text-[#55b982]">+{gitCount.additions}</span>
-                    <span className="text-[#e06c75]">−{gitCount.deletions}</span>
-                  </span>
-                )}
-                {view === id && (
-                  <span className="absolute inset-x-2.5 bottom-[-1px] h-px bg-white/90" />
-                )}
-              </button>
-            ))}
-          </nav>
+          {isPageView ? (
+            <header
+              className={`drag-region flex h-8.5 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
+            >
+              {view === 'stats' ? (
+                <BarChart3 size={13} className="shrink-0 opacity-80" />
+              ) : (
+                <Settings size={13} className="shrink-0 opacity-80" />
+              )}
+              <span>{view === 'stats' ? 'Stats' : 'Settings'}</span>
+            </header>
+          ) : (
+            <nav
+              role="tablist"
+              aria-label="工作区视图"
+              className={`drag-region mb-0.5 flex h-9 shrink-0 items-stretch border-b border-white/10 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
+            >
+              {[
+                ['mica', 'Mica', Bot],
+                ['terminal', '终端', SquareTerminal],
+                ['files', '文件夹', Folder],
+                ['git-compare', 'Git', GitCompare],
+                ['notes', 'Notes', NotebookPen]
+              ].map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === id}
+                  className={`${tabClass} ${view === id ? 'text-white' : 'text-white/40'}`}
+                  onClick={() => setView(id)}
+                >
+                  <Icon size={14} />
+                  <span>{label}</span>
+                  {id === 'git-compare' && gitCount && (
+                    <span className="ml-0.5 flex gap-1 font-mono text-[10px]">
+                      <span className="text-[#55b982]">+{gitCount.additions}</span>
+                      <span className="text-[#e06c75]">−{gitCount.deletions}</span>
+                    </span>
+                  )}
+                  {view === id && (
+                    <span className="absolute inset-x-2.5 bottom-[-1px] h-px bg-white/90" />
+                  )}
+                </button>
+              ))}
+            </nav>
+          )}
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <FilesView
               ref={filesRef}
@@ -892,7 +936,10 @@ export default function App() {
               ref={terminalRef}
               nodes={terminalNodes}
               activeId={activeId}
-              visible={view === 'terminal' || (view === 'files' && terminalPanelOpen)}
+              visible={
+                view === 'mica' || view === 'terminal' || (view === 'files' && terminalPanelOpen)
+              }
+              pane={view === 'terminal' ? 'terminal' : 'mica'}
               docked={view === 'files'}
               height={terminalPanelHeight}
               sidebarCollapsed={sidebarCollapsed}
@@ -903,7 +950,7 @@ export default function App() {
           </div>
           {!activeId && view !== 'stats' && view !== 'settings' && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">
-              {error || '选择或新建一个终端会话'}
+              {error || '选择或新建一个会话'}
             </div>
           )}
           <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
