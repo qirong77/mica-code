@@ -12,12 +12,12 @@ export function createRenameCommand(sessionController, services) {
     action(args) {
       const title = args?.trim();
       if (!title) {
-        services.showMessage('Usage: /rename <new title>');
+        services.showNotice('Usage: /rename <new title>', undefined, { command: '/rename', status: 'info' });
         return;
       }
       sessionController.renameCurrent(title);
       services.renameCurrentAgentSession(title);
-      services.showMessage(`Session renamed to: ${title}`);
+      services.showNotice(`Session renamed to: ${title}`, undefined, { command: '/rename', status: 'success' });
     },
   };
 }

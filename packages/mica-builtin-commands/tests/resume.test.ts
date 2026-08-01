@@ -27,6 +27,7 @@ describe('formatResumeSessionTitle', () => {
       syncModelDisplay: vi.fn(),
       refreshCurrentAgentSessionUi: vi.fn(),
       showMessage: vi.fn(),
+      showNotice: vi.fn(),
     } as unknown as CommandRuntimeServices;
 
     await createResumeCommand({} as CommandAgent, sessionController, services).action('session-2');

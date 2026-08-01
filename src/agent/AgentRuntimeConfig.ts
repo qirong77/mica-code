@@ -35,9 +35,7 @@ export function readAgentRuntimeConfig(override: AgentRuntimeConfigOverride = {}
     throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
   const model = override.model ?? (provider.id === config.provider ? config.model : (provider.models?.[0] ?? ''));
-  if (!model) {
-    throw new Error(`Model not configured for provider: ${provider.id}`);
-  }
+  // model 为空时允许启动（无 key/无模型列表的新用户），首次发送消息前才需要可用 model。
   const normalizedProvider = normalizeProviderForModel(provider, model);
   const requestedEffort = override.effort ?? config.effort;
   return {

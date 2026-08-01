@@ -13,7 +13,10 @@ describe('single-file session commands', () => {
 
     expect(services.newAgentSession).toHaveBeenCalledOnce();
     expect(services.switchAgentSession).toHaveBeenCalledWith('agent-2');
-    expect(services.showMessage).toHaveBeenCalledWith('Created agent #2', 4000);
+    expect(services.showNotice).toHaveBeenCalledWith('Created agent #2', undefined, {
+      command: '/new',
+      status: 'success',
+    });
   });
 
   it('/fork submits a prompt in the forked session without switching to it', async () => {
@@ -26,7 +29,10 @@ describe('single-file session commands', () => {
       expect(services.submitAgentSessionInput).toHaveBeenCalledWith('agent-3', 'continue in background');
     });
     expect(services.switchAgentSession).not.toHaveBeenCalled();
-    expect(services.showMessage).toHaveBeenCalledWith('Forked agent #3 in background', 4000);
+    expect(services.showNotice).toHaveBeenCalledWith('Forked agent #3 in background', undefined, {
+      command: '/fork',
+      status: 'success',
+    });
   });
 
   it('/rename updates persisted and retained session titles', () => {
@@ -37,7 +43,10 @@ describe('single-file session commands', () => {
 
     expect(sessionController.renameCurrent).toHaveBeenCalledWith('Better title');
     expect(services.renameCurrentAgentSession).toHaveBeenCalledWith('Better title');
-    expect(services.showMessage).toHaveBeenCalledWith('Session renamed to: Better title');
+    expect(services.showNotice).toHaveBeenCalledWith('Session renamed to: Better title', undefined, {
+      command: '/rename',
+      status: 'success',
+    });
   });
 });
 
@@ -51,6 +60,7 @@ function makeServices(options: {
     switchAgentSession: vi.fn(),
     submitAgentSessionInput: vi.fn(async () => ({ ok: true as const })),
     showMessage: vi.fn(),
+    showNotice: vi.fn(),
     renameCurrentAgentSession: vi.fn(),
   } as unknown as CommandRuntimeServices;
 }

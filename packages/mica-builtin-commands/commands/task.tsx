@@ -59,11 +59,12 @@ export function createTaskCommand(services: CommandRuntimeServices) {
     action: (arg?: string) => {
       if (arg?.trim().toLowerCase() === 'clear') {
         const result = services.clearIdleAgents();
-        services.showMessage(
+        services.showNotice(
           result.cleared.length > 0
             ? `Cleared ${result.cleared.length} idle task${result.cleared.length === 1 ? '' : 's'}`
             : 'No idle tasks to clear',
-          4000,
+          undefined,
+          { command: '/task', status: 'info' },
         );
         return;
       }
@@ -637,10 +638,13 @@ function openSelectedTask(
   hide();
   try {
     const switched = services.switchAgentSession(item.taskId);
-    services.showMessage(`Switched to #${switched.index}: ${switched.title}`, 4000);
+    services.showNotice(`Switched to #${switched.index}: ${switched.title}`, undefined, {
+      command: '/task',
+      status: 'success',
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    services.showMessage(`Switch failed: ${message}`, 5000);
+    services.showNotice(`Switch failed: ${message}`, undefined, { command: '/task', status: 'error' });
   }
 }
 

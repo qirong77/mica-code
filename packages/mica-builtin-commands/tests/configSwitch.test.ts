@@ -38,7 +38,7 @@ describe('config switch commands', () => {
   ] as const)('does not open the %s selector while the agent is busy', async (commandName, message) => {
     const services = makeServices();
     services.isAgentBusy = vi.fn(() => true);
-    services.showMessage = vi.fn();
+    services.showNotice = vi.fn();
     const setPluginUIs = vi.spyOn(micaUi.panels, 'setPluginUIs');
     const agent = makeAgent([]);
     const session = makeSession();
@@ -47,7 +47,10 @@ describe('config switch commands', () => {
       const command = await makeConfigSwitchCommand(commandName, agent, session, services);
       await command.action();
 
-      expect(services.showMessage).toHaveBeenCalledWith(message);
+      expect(services.showNotice).toHaveBeenCalledWith(message, undefined, {
+        command: `/${commandName}`,
+        status: 'warning',
+      });
       expect(setPluginUIs).not.toHaveBeenCalled();
     } finally {
       setPluginUIs.mockRestore();
@@ -93,7 +96,10 @@ describe('config switch commands', () => {
       expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
-      expect(services.showMessage).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined);
+      expect(services.showNotice).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined, {
+        command: '/model',
+        status: 'success',
+      });
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
       const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
         lastUsedByDirectory?: Record<string, Record<string, unknown>>;
@@ -208,7 +214,10 @@ describe('config switch commands', () => {
         effort: 'low',
         contextWindowSize: 1000000,
       });
-      expect(services.showMessage).toHaveBeenLastCalledWith('Model: DeepSeek / deepseek-v4-pro', undefined);
+      expect(services.showNotice).toHaveBeenLastCalledWith('Model: DeepSeek / deepseek-v4-pro', undefined, {
+        command: '/model',
+        status: 'success',
+      });
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -263,7 +272,10 @@ describe('config switch commands', () => {
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
-      expect(services.showMessage).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined);
+      expect(services.showNotice).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined, {
+        command: '/model',
+        status: 'success',
+      });
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {

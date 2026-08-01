@@ -18,7 +18,10 @@ export function createEffortCommand(
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       if (services.isAgentBusy(targetAgent)) {
-        services.showMessage('Agent is busy; wait or abort before switching effort');
+        services.showNotice('Agent is busy; wait or abort before switching effort', undefined, {
+          command: '/effort',
+          status: 'warning',
+        });
         return;
       }
       showEffortSelector(targetAgent, targetSessionController, services);
@@ -57,12 +60,17 @@ async function applyEffortSelection(
 ): Promise<boolean> {
   try {
     if (services.isAgentBusy(agent)) {
-      services.showMessage('Agent is busy; wait or abort before switching effort');
+      services.showNotice('Agent is busy; wait or abort before switching effort', undefined, {
+        command: '/effort',
+        status: 'warning',
+      });
       return false;
     }
     if (agent.config.provider.supportsEffort === false) {
-      services.showMessage(
+      services.showNotice(
         `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; status shows none`,
+        undefined,
+        { command: '/effort', status: 'info' },
       );
       return false;
     }
@@ -70,16 +78,16 @@ async function applyEffortSelection(
       return true;
     }
 
-    services.showMessage(
-      'Effort changed, prompt cache may be invalidated. Consider /compact',
-      6000,
-      services.getCurrentAgentSessionId(),
-    );
+    services.showNotice('Effort changed, prompt cache may be invalidated. Consider /compact', services.getCurrentAgentSessionId(), {
+      command: '/effort',
+      status: 'warning',
+    });
 
     await applyConfigSwitchUpdate({
       agent,
       sessionController,
       services,
+      command: '/effort',
       update: (config) => ({
         ...config,
         effort: effort as EffortOption,

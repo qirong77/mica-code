@@ -273,6 +273,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/model`、`/effort` 必须在打开 selector 前检查 target agent busy 状态，并在选择时保留二次 guard。
 - `ALLOW_DURING_TURN_COMMANDS` 当前允许运行中执行：`status`、`context`、`agents`、`new`、`fork`、`exit`、`rename`、`task`。
 - exclusive task 期间额外允许的命令在 `ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS`，当前是 `status`、`task`、`agents`、`new`。
+- 命令的交互反馈（busy 拒绝、切换成功、缓存失效警告、失败错误等）统一通过 `services.showNotice` 以对话区 notice 形式展示，不要用 `services.showMessage`；`showMessage` 只保留给运行日志性质的系统消息（启动提示、运行错误等）。`MicaUiRuntimeBridge` 会把 runtime `notification` 事件（运行中拒绝输入/命令、命令失败等）转成 conversation notice，不再写 MessageBar。
 
 当前内置命令：
 
@@ -433,6 +434,15 @@ bun run build   # 生成 dist/mica
 MICA_PTY_SMOKE=1 npx vitest run packages/mica-pty/tests/mica.smoke.test.ts
 ```
 
+- 真实用户流冒烟套件（`packages/mica-pty/tests/user-flows.smoke.test.ts`）：通过 PTY 驱动 `dist/mica` 模拟真实用户，覆盖全新配置启动、全部内置命令面板（`/status` `/context` `/skills` `/mcp` `/rename` 等）、真实模型多轮对话与文件工具（create/append/read）、多 agent（`/new` `/fork` `/task`）、`/clear` 会话隔离、`--resume` 跨重启恢复、Shift+Tab role 切换、随机命令序列 + resize + 快速输入的压测。需要真实 provider API key，默认跳过：
+
+```bash
+bun run build   # 生成 dist/mica
+MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" npx vitest run packages/mica-pty/tests/user-flows.smoke.test.ts
+```
+
+vitest 会把 `HOME` 重定向到临时目录，因此必须显式传 `MICA_PTY_SOURCE_HOME`（真实 `~/.mica`，测试只复制 `config.json` 到隔离的 `MICA_HOME`，不触碰用户数据）。
+
 - mica-pty 常规测试：`bun run test -- packages/mica-pty/tests/driver.test.ts packages/mica-pty/tests/manager.test.ts packages/mica-pty/tests/serverSource.test.ts`。API 与用法见 `packages/mica-pty/README.md`；旧 python 驱动 `temp/mica_pty.py` 保留作为参考。
 - 注意 node-pty 的 prebuild `spawn-helper` 通过 Bun 安装时可能缺执行位，`PtyDriver.spawn()` 会做幂等 chmod 兜底。
 
@@ -471,7 +481,9 @@ rg --files src packages scripts docs blogs
 - 会话文件变化由 `SessionWatcher` 监听并推送；`fs.watch` 在 macOS 上可能丢事件（rename 无 filename），因此还有 30s 周期 rescan 按 mtime/size 对比兜底。push 失败只记日志不重试队列。
 - 本地 runtime 与 daemon 对同一 session 使用 `packages/mica-session` 的跨进程 turn lease，冲突时返回 busy，避免整份 session 快照相互覆盖；远程完成后，本地下一次提交前会重载最新磁盘快照。会话快照带单调 `revision`，中心服务器拒绝迟到的旧快照。
 - Web 端切换会话时会真正中止旧 SSE，按事件 `seq` 去重；terminal turn 后主动重拉权威快照，并以低频轮询从丢失事件或代理断流中自愈。
-- 会话详情接口默认返回精简快照（剔除 `snapshot.messages`/`usageHistory`/`lastUsage`，`?full=1` 取全量）；SSE 的 `session` 事件只含元数据（id/title/updatedAt/cwd/turnState/revision + providerId/model/effort/role），完整快照仍全量落盘。detail 响应携带 `snapshotSeq`（最近一次 session 快照事件的 seq），Web 在详情加载完成后再建 SSE（`since=snapshotSeq`），避免重放已反映在快照中的旧事件造成重复渲染。改动这两处协议时同步检查 `packages/mica-sync-web/web/src/App.tsx` 的 `acceptEventSession`/`publishSession`/`sessionReady` 逻辑与 `useSse.ts` 的初始断点。
+- 会话详情接口默认返回精简快照（剔除 `snapshot.messages`/`usageHistory`，但保留 `lastUsage` 供 Web 渲染上下文占用，`?full=1` 取全量）；SSE 的 `session` 事件只含元数据（id/title/updatedAt/cwd/turnState/revision + providerId/model/effort/role），完整快照仍全量落盘。detail 响应携带 `snapshotSeq`（最近一次 session 快照事件的 seq），Web 在详情加载完成后再建 SSE（`since=snapshotSeq`），避免重放已反映在快照中的旧事件造成重复渲染。改动这两处协议时同步检查 `packages/mica-sync-web/web/src/App.tsx` 的 `acceptEventSession`/`publishSession`/`sessionReady` 逻辑与 `useSse.ts` 的初始断点。
+- `PersistedRuntimeSnapshot` 含可选 `contextWindowSize`（模型上下文窗口 token 数）：`SessionController.toPersistedSnapshot` 与 daemon `createTurn` 写入（`micaConfig.getModelRule(model).contextSize`），旧快照缺失时 Web 只显示 token 与 cached%，不显示 ctx%。Web 上下文摘要（`model_effort` + `N.NK (cached %, ctx %)`）由 `lastUsage` 计算，SSE `usage` 事件实时更新。
+- daemon 推送快照前用 `withContextWindowSize` 补齐旧快照缺失的 `contextWindowSize`（`micaConfig.getModelRule(model).contextSize`），服务器 `lightSession`（SSE `session` 事件）也携带该字段；Web 端 `publishSession` 浅合并新旧快照避免轻量事件覆盖掉 detail 已加载的字段，并内嵌 `KNOWN_CONTEXT_WINDOW` 兜底（缺字段时按模型名估算，fallback 1M）保证 ctx% 始终可渲染。
 - Web 新建会话：`POST /api/machines/:id/sessions`（body `{ text, cwd? }`）返回新 `sessionId`；创建成功后 Web 立即跳转该会话并加入 `pendingSessionsRef`（detail fetch 在 daemon 落盘前 404 时抑制报错，等第一条 SSE `session` 事件渲染）。SSE 首次收到的轻量 `session` 事件在 `sessionData` 为 null 时也会 `publishSession`（无消息 payload，仅渲染 header/输入框），消息列表由流式事件构建，turn 结束再拉权威快照合并。
 - Web 切换工作目录：发送按钮左侧的 cwd 选择器（`CwdPicker.tsx`）展示当前 cwd，点击弹出最近使用目录（来自该机器会话列表去重）+ 自定义输入；提交后调 `POST .../cwd` 乐观更新本地 cwd，失败时显示 `cwd_update ok:false` 事件的错误信息。`update_cwd` 由 daemon 更新会话文件后经 SessionWatcher/onSessionSaved 推送，服务器按 revision 单调接受。
 - Web 切换体验：`/api/machines/:id/sessions` 列表为每个 summary 附带 `snapshotSeq`，切换时立即开 SSE（`since=` 列表水位，detail 校正），不出现"连接断开"；切换瞬间显示"加载会话中…"而非 welcome 闪现。`useSse` 的 `lastSeqRef` 跨 effect 重启保留，绝不重放已见事件（`text_delta` 重复追加）。连接状态三态：实时连接 / 连接中… / 连接断开，自动重连中…。`serveStaticFile` 对 index.html 发 `no-cache`、对 `/assets/*` 发 `immutable` 一年缓存。

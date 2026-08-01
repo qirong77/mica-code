@@ -191,6 +191,7 @@ export class CommandExecutor {
           model: snapshot.model,
           effort: snapshot.effort,
           role: agent.role,
+          contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
           messages: [],
           conversationMessages: [],
           usageHistory: [],

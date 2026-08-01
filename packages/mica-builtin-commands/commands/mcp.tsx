@@ -46,7 +46,7 @@ export function createMcpCommand(services: CommandRuntimeServices) {
       if (trimmed?.startsWith('reconnect ')) {
         const serverName = trimmed.slice('reconnect '.length).trim();
         if (!serverName) {
-          services.showMessage('用法: /mcp reconnect <server>');
+          services.showNotice('用法: /mcp reconnect <server>', undefined, { command: '/mcp', status: 'info' });
           return;
         }
         void reconnectServer(serverName, services);
@@ -350,14 +350,14 @@ async function reconnectServer(name: string, services: CommandRuntimeServices) {
   const config = await micaMcp.loadConfig();
   const server = config[name];
   if (!server) {
-    services.showMessage(`未找到 MCP 配置: ${name}`, 4000);
+    services.showNotice(`未找到 MCP 配置: ${name}`, undefined, { command: '/mcp', status: 'warning' });
     return;
   }
   try {
     const message = await micaMcp.reconnectServer(name, server);
-    services.showMessage(message, 4000);
+    services.showNotice(message, undefined, { command: '/mcp', status: 'success' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    services.showMessage(`MCP reconnect failed: ${message}`, 4000);
+    services.showNotice(`MCP reconnect failed: ${message}`, undefined, { command: '/mcp', status: 'error' });
   }
 }

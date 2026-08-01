@@ -4,6 +4,8 @@ import { SyncClient, type DaemonCommand } from './SyncClient.js';
 import { CommandExecutor } from './CommandExecutor.js';
 import { SessionWatcher, sessionDir } from './SessionWatcher.js';
 import { isPidAlive, readDaemonPid, removeDaemonPid, writeDaemonPid } from './ensureDaemonRunning.js';
+import { micaConfig } from '@packages/mica-config/index.js';
+import type { PersistedSession } from '@packages/mica-session/index.js';
 import { VERSION } from '../buildMeta.js';
 
 export type DaemonOptions = {
@@ -26,6 +28,25 @@ function log(message: string): void {
 
 function logError(message: string): void {
   console.error(`[mica-sync ${new Date().toISOString()}] ${message}`);
+}
+
+/**
+ * Snapshots saved by older mica processes lack `contextWindowSize`. Fill it in
+ * from the model rule before pushing so the web console can render ctx% for
+ * every session, not just ones saved after the field was introduced.
+ */
+function withContextWindowSize(session: PersistedSession): PersistedSession {
+  const snapshot = (session.snapshot ?? {}) as Record<string, unknown>;
+  if (typeof snapshot.contextWindowSize === 'number' || !snapshot.model) return session;
+  try {
+    const size = micaConfig.getModelRule(String(snapshot.model)).contextSize;
+    return {
+      ...session,
+      snapshot: { ...(snapshot as object), contextWindowSize: size } as PersistedSession['snapshot'],
+    };
+  } catch {
+    return session;
+  }
 }
 
 /**
@@ -80,7 +101,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       pusher.push(sessionId, events);
     },
     onSessionSaved: (session) => {
-      void client.pushSession(session).catch((error) => {
+      void client.pushSession(withContextWindowSize(session)).catch((error) => {
         logError(`session push failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     },
@@ -88,7 +109,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
 
   const watcher = new SessionWatcher(sessionDir(), (session, sessionId) => {
     if (session) {
-      void client.pushSession(session).catch((error) => {
+      void client.pushSession(withContextWindowSize(session)).catch((error) => {
         logError(`session push failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     } else {

@@ -16,7 +16,7 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { buildConfigWebConversationDetails } from '../conversation.js';
+import { buildConfigWebConversationItems } from '../conversation.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
@@ -26,12 +26,31 @@ import type {
   ConfigWebMcpServer,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
+  ConfigWebContextAnalysis,
+  ConfigWebConversationItem,
+  ConfigWebConversationPage,
   ConfigWebSessionDetails,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
+import type { PersistedSession } from '@packages/mica-session/index.js';
+import { buildConfigWebContextAnalysis } from '../sessionAnalysis.js';
 
 let mcpInitialized = false;
+
+const SESSION_CACHE_BYTES_BUDGET = 64 * 1024 * 1024;
+const ITEMS_CACHE_BYTES_BUDGET = 48 * 1024 * 1024;
+const CONTENT_CACHE_ENTRIES = 2;
+
+type CachedEntry<T> = {
+  mtimeMs: number;
+  size: number;
+  value: T;
+};
+
+const sessionCache = new Map<string, CachedEntry<PersistedSession>>();
+const itemsCache = new Map<string, CachedEntry<ConfigWebConversationItem[]>>();
+const contentCache = new Map<string, CachedEntry<string>>();
 
 export async function getMcpDetails(): Promise<ConfigWebMcpDetails> {
   if (!mcpInitialized) {
@@ -191,9 +210,8 @@ export function getSessionsDetails(): ConfigWebSessionsDetails {
 }
 
 export function getSessionDetails(id: string): ConfigWebSessionDetails {
-  const session = micaSession.createStore().load(id);
-  if (!session) throw new Error(`Session not found: ${id}`);
-  const role = micaAgent.roles.get(session.snapshot.role);
+  const { value: session } = loadSessionCached(id);
+  const lastUsage = session.snapshot.lastUsage;
   return {
     id: session.id,
     title: session.title,
@@ -204,23 +222,79 @@ export function getSessionDetails(id: string): ConfigWebSessionDetails {
     providerId: session.snapshot.providerId,
     model: session.snapshot.model,
     role: session.snapshot.role,
-    content: JSON.stringify(session, null, 2),
-    conversation: buildConfigWebConversationDetails(
-      {
-        providerId: session.snapshot.providerId,
-        protocol: session.snapshot.protocol,
-        model: session.snapshot.model,
-        systemPrompt: role?.prompt ?? '',
-        messages: session.snapshot.messages,
-      },
-      new Date(session.updatedAt),
-    ),
+    fileSizeBytes: statSessionFile(session.id).size,
+    messageCount: session.snapshot.messages.length,
+    usageCount: session.snapshot.usageHistory.length,
+    contextWindowSize: session.snapshot.contextWindowSize,
+    lastUsage: lastUsage
+      ? {
+          inputTokens: lastUsage.inputTokens,
+          cachedInputTokens: lastUsage.cachedInputTokens,
+          outputTokens: lastUsage.outputTokens,
+          totalTokens: lastUsage.totalTokens,
+        }
+      : undefined,
   };
 }
 
 export function writeSessionDetails(id: string, content: string): ConfigWebSessionDetails {
-  micaSession.createStore().replaceValidated(id, content);
+  const session = micaSession.createStore().replaceValidated(id, content);
+  invalidateSessionCaches(session.id);
   return getSessionDetails(id);
+}
+
+export function getSessionConversationPage(
+  id: string,
+  offset: number,
+  limit: number,
+  tail = false,
+): ConfigWebConversationPage {
+  const { value: session } = loadSessionCached(id);
+  const items = loadConversationItemsCached(id, session);
+  const total = items.length;
+  const start = tail ? Math.max(0, total - limit) : clampInt(offset, 0, Math.max(0, total - 1));
+  const end = Math.min(total, start + clampInt(limit, 1, 500));
+  return {
+    id: session.id,
+    total,
+    offset: start,
+    limit: end - start,
+    items: items.slice(start, end),
+  };
+}
+
+export function getSessionItem(id: string, sequence: number): ConfigWebConversationItem {
+  const { value: session } = loadSessionCached(id);
+  const items = loadConversationItemsCached(id, session);
+  const item = items[clampInt(sequence, 1, items.length) - 1];
+  if (!item) throw new Error(`Conversation item not found: sequence ${sequence}`);
+  return item;
+}
+
+export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis {
+  const { value: session } = loadSessionCached(id);
+  const role = micaAgent.roles.get(session.snapshot.role);
+  return buildConfigWebContextAnalysis(
+    {
+      providerId: session.snapshot.providerId,
+      protocol: session.snapshot.protocol,
+      model: session.snapshot.model,
+      systemPrompt: role?.prompt ?? '',
+      messages: session.snapshot.messages,
+    },
+    session.snapshot.usageHistory,
+    session.snapshot.contextWindowSize,
+  );
+}
+
+export function getSessionContent(id: string): { content: string } {
+  const { value: session, mtimeMs, size } = loadSessionCached(id);
+  const cached = contentCache.get(session.id);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return { content: cached.value };
+  const content = JSON.stringify(session, null, 2);
+  contentCache.set(session.id, { mtimeMs, size, value: content });
+  evictByCount(contentCache, CONTENT_CACHE_ENTRIES);
+  return { content };
 }
 
 function listRecentSessions(): ConfigWebSessionsDetails['sessions'] {
@@ -249,6 +323,78 @@ function readSessionTitle(path: string): string | undefined {
   } finally {
     closeSync(handle);
   }
+}
+
+function loadSessionCached(id: string): CachedEntry<PersistedSession> {
+  const safeId = sanitizeSessionId(id);
+  if (!safeId) throw new Error(`Session not found: ${id}`);
+  const stat = statSessionFile(safeId);
+  const cached = sessionCache.get(safeId);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached;
+  const session = micaSession.createStore().load(safeId);
+  if (!session) throw new Error(`Session not found: ${id}`);
+  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, value: session };
+  sessionCache.set(safeId, entry);
+  evictByBytes(sessionCache, SESSION_CACHE_BYTES_BUDGET);
+  return entry;
+}
+
+function statSessionFile(id: string): { mtimeMs: number; size: number } {
+  const path = join(micaSession.dir, `${id}.json`);
+  if (!existsSync(path)) throw new Error(`Session not found: ${id}`);
+  const stat = statSync(path);
+  return { mtimeMs: stat.mtimeMs, size: stat.size };
+}
+
+function loadConversationItemsCached(id: string, session: PersistedSession): ConfigWebConversationItem[] {
+  const { mtimeMs, size } = statSessionFile(id);
+  const cached = itemsCache.get(id);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.value;
+  const role = micaAgent.roles.get(session.snapshot.role);
+  const items = buildConfigWebConversationItems({
+    providerId: session.snapshot.providerId,
+    protocol: session.snapshot.protocol,
+    model: session.snapshot.model,
+    systemPrompt: role?.prompt ?? '',
+    messages: session.snapshot.messages,
+  });
+  const entry = { mtimeMs, size, value: items };
+  itemsCache.set(id, entry);
+  evictByBytes(itemsCache, ITEMS_CACHE_BYTES_BUDGET);
+  return items;
+}
+
+function invalidateSessionCaches(id: string): void {
+  sessionCache.delete(id);
+  itemsCache.delete(id);
+  contentCache.delete(id);
+}
+
+function evictByBytes<T>(cache: Map<string, CachedEntry<T>>, budget: number): void {
+  let total = 0;
+  for (const entry of cache.values()) total += entry.size;
+  for (const key of cache.keys()) {
+    if (total <= budget) break;
+    total -= cache.get(key)?.size ?? 0;
+    cache.delete(key);
+  }
+}
+
+function evictByCount<T>(cache: Map<string, CachedEntry<T>>, maxEntries: number): void {
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function sanitizeSessionId(id: string): string | null {
+  const trimmed = id.trim().replace(/\.json$/, '');
+  return trimmed && /^[a-zA-Z0-9_.-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.trunc(value))) : min;
 }
 
 export function getRolesDetails(): ConfigWebRolesDetails {

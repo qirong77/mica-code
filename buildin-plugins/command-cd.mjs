@@ -43,11 +43,14 @@ export function collectRecentCwds(sessions) {
 function changeWorkingDirectory(cwd, services) {
   try {
     process.chdir(cwd);
-    services.showMessage(`Working directory: ${process.cwd()}`, 4000);
+    services.showNotice(`Working directory: ${process.cwd()}`, undefined, { command: '/cd', status: 'success' });
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    services.showMessage(`Unable to change working directory: ${message}`, 6000);
+    services.showNotice(`Unable to change working directory: ${message}`, undefined, {
+      command: '/cd',
+      status: 'error',
+    });
     return false;
   }
 }

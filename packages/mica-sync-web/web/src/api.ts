@@ -44,9 +44,17 @@ export type StoredSession = {
     model?: string;
     effort?: string;
     role?: string;
+    contextWindowSize?: number;
     conversationMessages?: unknown[];
     usageHistory?: unknown[];
-    lastUsage?: unknown;
+    lastUsage?: {
+      provider?: string;
+      model?: string;
+      inputTokens?: number;
+      cachedInputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
   };
 };
 

@@ -84,7 +84,7 @@ export class MicaUiRuntimeBridge {
         }
         if (event.type === 'notification') {
           const owner = eventOwnerAgent(event.owner, this.agent);
-          this.showMessageForAgent(owner, event.message, event.ttl);
+          this.showNoticeForAgent(owner, event.message, event.level);
         }
         if (event.type === 'turn:started') {
           const owner = eventOwnerAgent(event.owner, this.agent);
@@ -186,6 +186,16 @@ export class MicaUiRuntimeBridge {
     }, ttl);
     this.messageTimers.set(id, timer);
     this.messageTimerOwners.set(id, agent);
+  }
+
+  private showNoticeForAgent(agent: AgentRuntime, text: string, level: 'info' | 'warn' | 'error'): void {
+    const session = this.sessionFor(agent);
+    const status: 'success' | 'warning' | 'error' | 'info' =
+      level === 'error' ? 'error' : level === 'warn' ? 'warning' : 'info';
+    const message = { role: 'notice' as const, content: text, status };
+    const messages = [...session.uiState.conversationMessages, message];
+    session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: messages });
+    if (this.isActiveAgent(agent)) micaUi.conversation.setMessages(messages);
   }
 
   syncAgentStatusItems(): void {

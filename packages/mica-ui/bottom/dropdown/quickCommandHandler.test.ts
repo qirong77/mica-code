@@ -53,13 +53,15 @@ describe('quick command dropdown', () => {
     expect(state.get().visible).toBe(false);
   });
 
-  it('consumes navigation and submit keys while empty results are visible', () => {
+  it('does not consume navigation/submit keys while empty results are visible (enter must submit)', () => {
     showQuickCommands('missing');
 
-    expect(handleDropdownKey({ downArrow: true })).toBe(true);
-    expect(handleDropdownKey({ upArrow: true })).toBe(true);
-    expect(handleDropdownKey({ tab: true })).toBe(true);
-    expect(handleDropdownKey({ return: true })).toBe(true);
+    // 无匹配命令时下拉框不消费按键：enter 必须继续提交输入（unknown command
+    // 提示），tab/方向键回到输入框默认行为。
+    expect(handleDropdownKey({ downArrow: true })).toBe(false);
+    expect(handleDropdownKey({ upArrow: true })).toBe(false);
+    expect(handleDropdownKey({ tab: true })).toBe(false);
+    expect(handleDropdownKey({ return: true })).toBe(false);
     expect(state.get().visible).toBe(true);
   });
 

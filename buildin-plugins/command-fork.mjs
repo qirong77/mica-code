@@ -23,15 +23,21 @@ export function createForkCommand(services) {
       }
       services.switchAgentSession(forked.id);
       const mode = forked.sourceWasRunning ? 'before current turn' : 'full history';
-      services.showMessage(`Forked agent #${forked.index} (${mode})`, 5000);
+      services.showNotice(`Forked agent #${forked.index} (${mode})`, undefined, {
+        command: '/fork',
+        status: 'success',
+      });
     },
   };
 }
 
 function submitAgentPromptInBackground({ services, session, prompt, startedMessage }) {
-  services.showMessage(startedMessage, 4000);
+  services.showNotice(startedMessage, undefined, { command: '/fork', status: 'success' });
   const reportError = (reason) => {
-    services.showMessage(`Agent #${session.index} failed to start: ${reason}`, 6000);
+    services.showNotice(`Agent #${session.index} failed to start: ${reason}`, undefined, {
+      command: '/fork',
+      status: 'error',
+    });
   };
 
   void services

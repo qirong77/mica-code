@@ -20,7 +20,10 @@ export function createRoleCommand(
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       if (services.isAgentBusy(targetAgent)) {
-        services.showMessage('Agent is busy; wait or abort before switching role');
+        services.showNotice('Agent is busy; wait or abort before switching role', undefined, {
+          command: '/role',
+          status: 'warning',
+        });
         return;
       }
 
@@ -82,29 +85,40 @@ function applyRoleSelection(
 ): boolean {
   try {
     if (services.isAgentBusy(agent)) {
-      services.showMessage('Agent is busy; wait or abort before switching role');
+      services.showNotice('Agent is busy; wait or abort before switching role', undefined, {
+        command: '/role',
+        status: 'warning',
+      });
       return false;
     }
     const role = micaAgent.roles.get(roleName);
     if (!role) {
-      services.showMessage(`Role not found: ${roleName}`, 5000, services.getCurrentAgentSessionId());
+      services.showNotice(`Role not found: ${roleName}`, services.getCurrentAgentSessionId(), {
+        command: '/role',
+        status: 'warning',
+      });
       return false;
     }
     if (role.name === agent.role) return true;
 
-    services.showMessage(
-      'Role changed, prompt cache may be invalidated. Consider /compact',
-      6000,
-      services.getCurrentAgentSessionId(),
-    );
+    services.showNotice('Role changed, prompt cache may be invalidated. Consider /compact', services.getCurrentAgentSessionId(), {
+      command: '/role',
+      status: 'warning',
+    });
     agent.setRole(role.name);
     sessionController.saveCurrent();
     services.syncModelDisplay(agent);
-    services.showMessage(`Role: ${role.name}`, 3000, services.getCurrentAgentSessionId());
+    services.showNotice(`Role: ${role.name}`, services.getCurrentAgentSessionId(), {
+      command: '/role',
+      status: 'success',
+    });
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    services.showMessage(`Switch role failed: ${message}`, 6000, services.getCurrentAgentSessionId());
+    services.showNotice(`Switch role failed: ${message}`, services.getCurrentAgentSessionId(), {
+      command: '/role',
+      status: 'error',
+    });
     return false;
   }
 }

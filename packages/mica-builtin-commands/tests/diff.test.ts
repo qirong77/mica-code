@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   removePluginUI: vi.fn(),
   clearText: vi.fn(),
   showMessage: vi.fn(),
+  showNotice: vi.fn(),
   loadFileDiff: vi.fn(),
   loadDiffSummary: vi.fn(() => ({ additions: 0, deletions: 0, files: new Map() })),
   useScheduleState: vi.fn((store: { get(): unknown }) => store.get()),
@@ -45,6 +46,7 @@ describe('/diff command', () => {
     const services = {
       getCurrentAgent: () => agent,
       showMessage: mocks.showMessage,
+      showNotice: mocks.showNotice,
     };
     const command = createDiffCommand(agent as never, services as never, tracker as never);
 

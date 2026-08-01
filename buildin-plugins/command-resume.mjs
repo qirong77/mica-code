@@ -20,7 +20,10 @@ export function createResumeCommand(agent, sessionController, services) {
     description: '恢复之前的会话',
     async action(arg) {
       if (services.isAgentBusy(agent)) {
-        services.showMessage('Agent is busy; wait or abort before resuming');
+        services.showNotice('Agent is busy; wait or abort before resuming', undefined, {
+          command: '/resume',
+          status: 'warning',
+        });
         return;
       }
 
@@ -194,20 +197,23 @@ function renderResumeSessionItem(item, isSelected, index) {
 async function resumeSession(agent, sessionController, services, id) {
   const session = sessionController.load?.(id);
   if (sessionController.load && !session) {
-    services.showMessage(`Session not found: ${id}`, 5000);
+    services.showNotice(`Session not found: ${id}`, undefined, { command: '/resume', status: 'warning' });
     return;
   }
   if (session && services.ensureModelRule) {
     try {
       await services.ensureModelRule(session.snapshot.model);
     } catch (error) {
-      services.showMessage(error instanceof Error ? error.message : String(error), 5000);
+      services.showNotice(error instanceof Error ? error.message : String(error), undefined, {
+        command: '/resume',
+        status: 'error',
+      });
       return;
     }
   }
   const result = sessionController.resume(id);
   if (result.ok === false) {
-    services.showMessage(result.message, 5000);
+    services.showNotice(result.message, undefined, { command: '/resume', status: 'error' });
     return;
   }
   services.clearRewindCheckpoints?.();
@@ -216,5 +222,8 @@ async function resumeSession(agent, sessionController, services, id) {
   const roleMessage = result.roleFallback
     ? `; role ${result.roleFallback.missing} not found, using ${result.roleFallback.fallback}`
     : '';
-  services.showMessage(`Resumed: ${result.session.title}${roleMessage}`, roleMessage ? 7000 : 4000);
+  services.showNotice(`Resumed: ${result.session.title}${roleMessage}`, undefined, {
+    command: '/resume',
+    status: roleMessage ? 'warning' : 'success',
+  });
 }

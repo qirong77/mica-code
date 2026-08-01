@@ -337,6 +337,7 @@ body {
 .conversation-title {
   font-size: 15px;
   margin: 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -379,31 +380,110 @@ body {
   }
 }
 
-.conversation-meta {
+.conversation-meta,
+.composer-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin-top: 6px;
+  align-items: center;
+  min-width: 0;
   font-size: 11.5px;
   color: var(--text-dim);
 }
 
+.conversation-meta {
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.composer-meta {
+  gap: 7px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.composer-separator {
+  color: var(--border-strong);
+  flex-shrink: 0;
+}
+
 .meta-item {
   max-width: 260px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conn-badge.ok {
+.meta-model {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.meta-context {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.ctx-tokens {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ctx-sep {
+  color: var(--text-dim);
+}
+
+.ctx-cached {
+  color: var(--text-dim);
+}
+
+.ctx-pct {
+  font-weight: 600;
+}
+
+.ctx-pct.low {
   color: var(--green);
 }
 
-.conn-badge.lost {
+.ctx-pct.mid {
   color: var(--orange);
 }
 
-.conn-badge.connecting {
+.ctx-pct.high {
+  color: var(--red);
+}
+
+.meta-machine {
+  color: var(--text-dim);
+}
+
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.conn-dot.ok {
+  background: var(--green);
+}
+
+.conn-dot.connecting {
+  background: var(--orange);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.conn-dot.lost {
+  background: var(--red);
+}
+
+.conn-text.lost {
+  color: var(--red);
+}
+
+.conn-text.connecting {
   color: var(--text-dim);
 }
 
@@ -1208,8 +1288,28 @@ body {
     gap: 4px 10px;
   }
 
+  .composer-meta {
+    gap: 5px;
+    margin-bottom: 7px;
+    font-size: 11px;
+  }
+
   .meta-item {
-    max-width: 38vw;
+    max-width: none;
+  }
+
+  .composer-meta .meta-machine {
+    flex: 0 1 auto;
+  }
+
+  .composer-meta .meta-model {
+    flex: 0 1 auto;
+  }
+
+  .composer-meta .meta-context {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .messages {
@@ -1227,6 +1327,33 @@ body {
 
   .input-area {
     padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  /* Keep the cwd picker pinned left and the action pinned right on narrow
+     screens; its label is the only element permitted to shrink. */
+  .input-actions {
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .cwd-picker {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .cwd-button {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .cwd-label {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .input-hint {
+    display: none;
   }
 
   /* iOS 聚焦 <16px 输入框会自动缩放页面，移动端统一提为 16px */

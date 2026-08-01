@@ -50,7 +50,10 @@ export function handleDropdownKey(key: {
     return true;
   }
   if (s.items.length === 0) {
-    return Boolean(key.tab || key.return || key.upArrow || key.downArrow);
+    // 无匹配命令时不消费按键：enter 应继续提交输入（unknown command 提示），
+    // tab/方向键应回到输入框默认行为。否则 `/definitely-not-a-command` + enter
+    // 会被下拉框静默吞掉，用户无法发送。
+    return false;
   }
   if (key.tab) {
     applySelected();

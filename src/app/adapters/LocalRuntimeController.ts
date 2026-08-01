@@ -348,6 +348,18 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: true, handled: true };
     }
 
+    // 以 `/` 开头但不是已注册命令的输入是敲错的命令，不应当作普通消息
+    // 发给模型（会得到一段莫名其妙的长回复）。提示 Unknown command。
+    if (text.startsWith('/') && text.length > 1) {
+      this.events.publish({
+        type: 'notification',
+        level: 'warn',
+        message: `Unknown command: ${text}。输入 /help 查看可用命令`,
+        owner: this.agent,
+      });
+      return { ok: false, reason: 'unknown_command' };
+    }
+
     const targetAgent = this.submissionAgent(options);
     const targetSessionController = this.sessionControllers.get(targetAgent) ?? this.sessionController;
     return this.submitInputToAgent(text, targetAgent, targetSessionController, options);

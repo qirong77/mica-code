@@ -17,7 +17,10 @@ describe('createClearCommand', () => {
     expect(services.newAgentSession).not.toHaveBeenCalled();
     expect(services.switchAgentSession).not.toHaveBeenCalled();
     expect(onCleared).toHaveBeenCalledOnce();
-    expect(services.showMessage).toHaveBeenCalledWith('Started new session');
+    expect(services.showNotice).toHaveBeenCalledWith('Started new session', undefined, {
+      command: '/clear',
+      status: 'success',
+    });
   });
 
   it('does not create a new session while the current agent is busy', () => {
@@ -30,7 +33,10 @@ describe('createClearCommand', () => {
     expect(services.clearUI).not.toHaveBeenCalled();
     expect(services.clearSubagentTasks).not.toHaveBeenCalled();
     expect(onCleared).not.toHaveBeenCalled();
-    expect(services.showMessage).toHaveBeenCalledWith('Agent is busy; wait or abort before starting a new session');
+    expect(services.showNotice).toHaveBeenCalledWith('Agent is busy; wait or abort before starting a new session', undefined, {
+      command: '/clear',
+      status: 'warning',
+    });
   });
 });
 
@@ -73,6 +79,7 @@ function makeServices(options: { busy?: boolean } = {}): CommandRuntimeServices 
     clearUI: vi.fn(),
     clearSubagentTasks: vi.fn(() => 0),
     showMessage: vi.fn(),
+    showNotice: vi.fn(),
     setPluginStatus: vi.fn(),
     clearPluginStatus: vi.fn(),
     syncModelDisplay: vi.fn(),

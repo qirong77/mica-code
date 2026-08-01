@@ -331,7 +331,12 @@ function TerminalInput() {
       }
     }
 
-    for (const ui of activePluginUIs) {
+    // 输入分发必须用实时 pluginUIs 而不是 throttle 渲染快照：esc 关闭面板
+    // 后，useScheduleState 快照在节流窗口内仍含旧面板，其 onInput 会吞掉
+    // 用户紧接着输入的字符（例如 /skills esc 后立即输入 /mcp 被空列表
+    // 面板拦截）。
+    const livePluginUIs = pluginUIs.get();
+    for (const ui of livePluginUIs) {
       if (ui.onInput?.(_input, key)) {
         event?.preventDefault?.();
         event?.stopImmediatePropagation?.();
@@ -344,9 +349,9 @@ function TerminalInput() {
       }
     }
 
-    const interactivePlugins = activePluginUIs.filter((x) => x.onInput && !x.preserveInput);
+    const interactivePlugins = livePluginUIs.filter((x) => x.onInput && !x.preserveInput);
     if (interactivePlugins.length > 0 && !key.ctrl && !key.meta && _input) {
-      setPluginUIs(activePluginUIs.filter((x) => !x.onInput || x.preserveInput));
+      setPluginUIs(livePluginUIs.filter((x) => !x.onInput || x.preserveInput));
       if (_input === '/') {
         setLocalText('/');
         setCursorOffset(1);
@@ -360,7 +365,7 @@ function TerminalInput() {
     }
 
     if (key.escape) {
-      if (activePluginUIs.filter((x) => x.onInput).length === 0) {
+      if (pluginUIs.get().filter((x) => x.onInput).length === 0) {
         setIsBashMode(false);
         setLocalText('');
         setCursorOffset(0);
@@ -372,12 +377,23 @@ function TerminalInput() {
 
   const onSubmit = useCallback(
     (value: string) => {
-      if (!value.trim() || input.disabled.get() || DropDownUI.atomData.dropdown.get().visible || hasActiveInputPlugin)
+      // 实时读取 pluginUIs：esc 关闭面板后 useScheduleState 快照在节流窗口
+      // 内仍含旧面板，若用快照判断会把面板关闭后紧随的 enter 提交吞掉。
+      const liveHasInputPlugin = pluginUIs.get().some((ui) => ui.onInput);
+      // 下拉框有匹配项时 enter 由下拉框消费；无匹配项（如 unknown command）
+      // 时允许提交输入。
+      const dropdown = DropDownUI.atomData.dropdown.get();
+      if (
+        !value.trim() ||
+        input.disabled.get() ||
+        (dropdown.visible && dropdown.items.length > 0) ||
+        liveHasInputPlugin
+      )
         return;
       if (isAgentRunning && currentPendingInputs.length > 0) return;
       submitValue(value, isBashMode ? { bashMode: true } : undefined);
     },
-    [currentPendingInputs.length, hasActiveInputPlugin, isAgentRunning, isBashMode, submitValue],
+    [currentPendingInputs.length, isAgentRunning, isBashMode, submitValue],
   );
 
   const onExit = useCallback(() => {
@@ -405,10 +421,13 @@ function TerminalInput() {
 
   const shouldIgnoreTextInput = useCallback(
     (_input: string, key: any) => {
-      if (!DropDownUI.atomData.dropdown.get().visible && !hasActiveInputPlugin) return false;
+      // 同上：用实时 pluginUIs 判断，避免面板关闭后 enter 被旧快照忽略。
+      const liveHasInputPlugin = pluginUIs.get().some((ui) => ui.onInput);
+      const dropdown = DropDownUI.atomData.dropdown.get();
+      if (!(dropdown.visible && dropdown.items.length > 0) && !liveHasInputPlugin) return false;
       return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
     },
-    [hasActiveInputPlugin],
+    [],
   );
 
   const onHistoryUp = useCallback(() => {

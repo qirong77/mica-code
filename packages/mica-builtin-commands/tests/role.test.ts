@@ -39,34 +39,37 @@ describe('role command', () => {
     });
     const setRole = vi.fn();
     const saveCurrent = vi.fn();
-    const showMessage = vi.fn();
+    const showNotice = vi.fn();
     const syncModelDisplay = vi.fn();
     const agent = makeAgent({ setRole });
     const session = makeSession({ saveCurrent });
-    const services = makeServices({ agent, session, showMessage, syncModelDisplay });
+    const services = makeServices({ agent, session, showNotice, syncModelDisplay });
 
     createRoleCommand(agent, session, services).action('reviewer');
 
     expect(setRole).toHaveBeenCalledWith('reviewer');
     expect(saveCurrent).toHaveBeenCalledOnce();
     expect(syncModelDisplay).toHaveBeenCalledWith(agent);
-    expect(showMessage).toHaveBeenCalledWith('Role: reviewer', 3000, 'agent-1');
+    expect(showNotice).toHaveBeenCalledWith('Role: reviewer', 'agent-1', { command: '/role', status: 'success' });
   });
 
   it('does not switch to an unknown role', () => {
     mocks.getRole.mockReturnValue(undefined);
     const setRole = vi.fn();
     const saveCurrent = vi.fn();
-    const showMessage = vi.fn();
+    const showNotice = vi.fn();
     const agent = makeAgent({ setRole });
     const session = makeSession({ saveCurrent });
-    const services = makeServices({ agent, session, showMessage });
+    const services = makeServices({ agent, session, showNotice });
 
     createRoleCommand(agent, session, services).action('missing');
 
     expect(setRole).not.toHaveBeenCalled();
     expect(saveCurrent).not.toHaveBeenCalled();
-    expect(showMessage).toHaveBeenCalledWith('Role not found: missing', 5000, 'agent-1');
+    expect(showNotice).toHaveBeenCalledWith('Role not found: missing', 'agent-1', {
+      command: '/role',
+      status: 'warning',
+    });
   });
 
   it('cycles to the next available role', () => {
@@ -80,18 +83,18 @@ describe('role command', () => {
     );
     const setRole = vi.fn();
     const saveCurrent = vi.fn();
-    const showMessage = vi.fn();
+    const showNotice = vi.fn();
     const syncModelDisplay = vi.fn();
     const agent = makeAgent({ setRole, role: 'default' });
     const session = makeSession({ saveCurrent });
-    const services = makeServices({ agent, session, showMessage, syncModelDisplay });
+    const services = makeServices({ agent, session, showNotice, syncModelDisplay });
 
     expect(cycleNextRole(agent, session, services)).toBe(true);
 
     expect(setRole).toHaveBeenCalledWith('reviewer');
     expect(saveCurrent).toHaveBeenCalledOnce();
     expect(syncModelDisplay).toHaveBeenCalledWith(agent);
-    expect(showMessage).toHaveBeenCalledWith('Role: reviewer', 3000, 'agent-1');
+    expect(showNotice).toHaveBeenCalledWith('Role: reviewer', 'agent-1', { command: '/role', status: 'success' });
   });
 
   it('wraps role cycle from the last role back to default', () => {
@@ -105,7 +108,7 @@ describe('role command', () => {
     const setRole = vi.fn();
     const agent = makeAgent({ setRole, role: 'reviewer' });
     const session = makeSession({ saveCurrent: vi.fn() });
-    const services = makeServices({ agent, session, showMessage: vi.fn() });
+    const services = makeServices({ agent, session, showNotice: vi.fn() });
 
     expect(cycleNextRole(agent, session, services)).toBe(true);
     expect(setRole).toHaveBeenCalledWith('default');
@@ -156,7 +159,7 @@ function makeSession(options: { saveCurrent: () => void }): CommandSessionContro
 function makeServices(options: {
   agent: CommandAgent;
   session: CommandSessionController;
-  showMessage: CommandRuntimeServices['showMessage'];
+  showNotice: CommandRuntimeServices['showNotice'];
   syncModelDisplay?: CommandRuntimeServices['syncModelDisplay'];
 }): CommandRuntimeServices {
   return {
@@ -164,7 +167,8 @@ function makeServices(options: {
     getCurrentAgent: () => options.agent,
     getCurrentSessionController: () => options.session,
     getCurrentAgentSessionId: () => 'agent-1',
-    showMessage: options.showMessage,
+    showMessage: vi.fn(),
+    showNotice: options.showNotice,
     syncModelDisplay: options.syncModelDisplay ?? (() => undefined),
   } as unknown as CommandRuntimeServices;
 }

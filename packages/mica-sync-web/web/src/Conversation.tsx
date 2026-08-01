@@ -13,6 +13,7 @@ type ConversationProps = {
   running: boolean;
   connected: boolean;
   connecting: boolean;
+  usage?: StoredSession['snapshot']['lastUsage'];
   cwdCandidates: string[];
   cwdSwitching: boolean;
   cwdError: string;
@@ -79,6 +80,21 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
 
 const THINKING_PREVIEW_MAX = 80;
 const THINKING_PREVIEW_DEBOUNCE_MS = 300;
+
+/**
+ * Snapshots saved by older mica processes lack `contextWindowSize`. Estimate
+ * it from a small table of known models, falling back to the primary
+ * deployment model's window (deepseek-v4-flash, 1M) so ctx% still renders.
+ */
+const KNOWN_CONTEXT_WINDOW: Record<string, number> = {
+  'deepseek-v4-flash': 1_000_000,
+};
+const FALLBACK_CONTEXT_WINDOW = 1_000_000;
+
+function effectiveContextWindow(model: string, snapshotSize: number | undefined): number {
+  if (typeof snapshotSize === 'number' && snapshotSize > 0) return snapshotSize;
+  return KNOWN_CONTEXT_WINDOW[model] ?? FALLBACK_CONTEXT_WINDOW;
+}
 
 const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extract<UiMessage, { kind: 'thinking' }> }) {
   const [expanded, setExpanded] = useState(false);
@@ -160,6 +176,7 @@ export const Conversation = memo(function Conversation({
   running,
   connected,
   connecting,
+  usage,
   cwdCandidates,
   cwdSwitching,
   cwdError,
@@ -199,8 +216,20 @@ export const Conversation = memo(function Conversation({
   };
 
   const snapshot = session.snapshot ?? {};
-  const modelLabel = [snapshot.providerId, snapshot.model].filter(Boolean).join(' / ');
-  const effortLabel = snapshot.effort && snapshot.effort !== 'none' ? snapshot.effort : undefined;
+  const model = snapshot.model || '';
+  const effort = snapshot.effort && snapshot.effort !== 'none' ? snapshot.effort : undefined;
+  const modelLabel = effort && model ? `${model}_${effort}` : model;
+  const lastUsage = usage ?? snapshot.lastUsage;
+  const tokens = typeof lastUsage?.totalTokens === 'number' ? lastUsage.totalTokens : 0;
+  const contextWindow = effectiveContextWindow(model, snapshot.contextWindowSize);
+  const cachedInput = typeof lastUsage?.cachedInputTokens === 'number' ? lastUsage.cachedInputTokens : 0;
+  const inputTokens = typeof lastUsage?.inputTokens === 'number' ? lastUsage.inputTokens : 0;
+  const cachedPct = inputTokens > 0 ? Math.round((cachedInput / inputTokens) * 100) : 0;
+  const contextPct = contextWindow > 0 && tokens > 0 ? Math.min(100, Math.round((tokens / contextWindow) * 100)) : 0;
+  // Only the ctx% number is highlighted, with severity color by occupancy;
+  // token count and cached% stay subdued so the eye lands on the pressure
+  // indicator instead of a solid green block.
+  const ctxTone = contextPct > 80 ? 'high' : contextPct > 50 ? 'mid' : 'low';
   const MenuIcon = appIcons.menu;
   const SendIcon = appIcons.send;
   const SquareIcon = appIcons.square;
@@ -225,18 +254,11 @@ export const Conversation = memo(function Conversation({
               本机运行中
             </span>
           )}
-        </div>
-        <div className="conversation-meta">
-          <span className="meta-item">{machine.name}</span>
-          <span className="meta-item" title={session.cwd}>
-            {session.cwd}
-          </span>
-          {modelLabel && <span className="meta-item">{modelLabel}</span>}
-          {effortLabel && <span className="meta-item">effort {effortLabel}</span>}
-          {snapshot.role && <span className="meta-item">role {snapshot.role}</span>}
-          <span className={`conn-badge ${connected ? 'ok' : connecting ? 'connecting' : 'lost'}`}>
-            {connected ? '实时连接' : connecting ? '连接中…' : '连接断开，自动重连中…'}
-          </span>
+          <span
+            className={`conn-dot ${connected ? 'ok' : connecting ? 'connecting' : 'lost'}`}
+            title={connected ? '实时连接' : connecting ? '连接中…' : '连接断开，自动重连中…'}
+            aria-label="连接状态"
+          />
         </div>
       </header>
 
@@ -256,9 +278,37 @@ export const Conversation = memo(function Conversation({
       </div>
 
       <div className="input-area">
-        {localRunning && !running && (
-          <div className="notice-block">该会话正在本机终端运行，请等待完成后再继续，避免并发冲突</div>
-        )}
+        <div className="composer-meta">
+          <span className="meta-item meta-machine" title={machine.hostname}>
+            {machine.name}
+          </span>
+          {modelLabel && (
+            <>
+              <span className="composer-separator">·</span>
+              <span className="meta-item meta-model" title={modelLabel}>
+                {modelLabel}
+              </span>
+            </>
+          )}
+          {tokens > 0 && (
+            <>
+              <span className="composer-separator">·</span>
+              <span className="meta-item meta-context">
+                <span className="ctx-tokens">{formatTokens(tokens)}</span>
+                <span className="ctx-sep"> (cached </span>
+                <span className="ctx-cached">{cachedPct}%</span>
+                <span className="ctx-sep">, ctx </span>
+                <span className={`ctx-pct ${ctxTone}`}>{contextPct}%</span>
+                <span className="ctx-sep">)</span>
+              </span>
+            </>
+          )}
+          {!connected && (
+            <span className={`conn-text ${connecting ? 'connecting' : 'lost'}`}>
+              {connecting ? '连接中…' : '连接断开，自动重连中…'}
+            </span>
+          )}
+        </div>
         <textarea
           ref={inputRef}
           value={draft}
@@ -300,3 +350,9 @@ export const Conversation = memo(function Conversation({
     </main>
   );
 });
+
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(Math.round(value));
+}

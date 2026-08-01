@@ -163,9 +163,12 @@ function tokenize(
           result.state = 'escape';
           i++;
         } else {
-          // Invalid - treat ESC as text
+          // 孤立 ESC（\x1b 后跟非序列字节，如 esc 键后紧接普通输入）：
+          // 把 \x1b 作为独立 escape 键发出，后续字节继续按文本处理，
+          // 避免 esc 键与后续输入合并成文本导致按键丢失。
+          emitSequence(data.slice(seqStart, i));
           result.state = 'ground';
-          textStart = seqStart;
+          textStart = i;
         }
         break;
 

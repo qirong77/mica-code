@@ -340,7 +340,25 @@ export function parseMultipleKeypresses(
           if (mouse) {
             keys.push(mouse);
           } else {
-            keys.push(parseKeypress(token.value));
+            const key = parseKeypress(token.value);
+            if (
+              key.kind === 'key' &&
+              key.name === '' &&
+              token.value.length > 1 &&
+              token.value.startsWith('\x1b') &&
+              !token.value.startsWith('\x1b[') &&
+              !token.value.startsWith('\x1b]') &&
+              !token.value.startsWith('\x1bP') &&
+              !token.value.startsWith('\x1bO') &&
+              !token.value.startsWith('\x1b\x1b')
+            ) {
+              // 未知 ESC 序列（如 esc 键后紧跟的普通输入被 tokenizer 合并为
+              // ESC+intermediate+final 序列）：降级为独立 escape 键 + 剩余
+              // 文本，避免 esc 键丢失导致后续输入被仍挂载的面板吞掉。
+              keys.push(parseKeypress('\x1b'), parseKeypress(token.value.slice(1)));
+            } else {
+              keys.push(key);
+            }
           }
         }
       }

@@ -129,6 +129,16 @@ MICA_PTY_SOURCE_HOME="$HOME/.mica" MICA_PTY_SYNC_SMOKE=1 \
   npx vitest run packages/mica-pty/tests/mica-sync.smoke.test.ts
 ```
 
+`tests/user-flows.smoke.test.ts` 是真实用户流套件：通过 PTY 驱动 `dist/mica` 覆盖全新配置启动、全部内置命令面板、真实模型多轮对话与文件工具、多 agent（`/new` `/fork` `/task`）、`/clear` 会话隔离、`--resume` 跨重启恢复、Shift+Tab role 切换，以及随机命令序列 + resize + 快速输入的压测：
+
+```bash
+bun run build
+MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" \
+  npx vitest run packages/mica-pty/tests/user-flows.smoke.test.ts
+```
+
+vitest 会重定向 `HOME`，必须显式传 `MICA_PTY_SOURCE_HOME`；测试只把 `config.json` 复制到隔离 `MICA_HOME`，不触碰用户数据。可加 `-t "seeded HOME"` 等过滤只跑部分场景。
+
 按需修改文件顶部的 `MICA_BIN`/`HOME`/`CWD`，并预置隔离 `MICA_HOME`（config.json + storage.json，模板见 `temp/mica_pty.py`）。
 
 ## 目录结构
@@ -150,6 +160,7 @@ packages/mica-pty/
     manager.test.ts   PtyManager 集成测试（真实 PTY 进程）
     serverSource.test.ts  校验 server.mjs 与 ptyServerSource.ts 同步
     mica.smoke.test.ts  真实 mica 端到端冒烟（默认跳过）
+    user-flows.smoke.test.ts  真实用户流冒烟（命令/对话/多 agent/压测，默认跳过）
 ```
 
 ## 验证

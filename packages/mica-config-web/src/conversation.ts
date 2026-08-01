@@ -16,10 +16,9 @@ type UnknownNormalizer = {
   normalize(messages: unknown[]): ConversationItem[];
 };
 
-export function buildConfigWebConversationDetails(
-  source: ConfigWebConversationSource,
-  now: Date = new Date(),
-): ConfigWebConversationDetails {
+/** Normalizes provider messages into display items. Reasoning items are kept with a safe
+ *  summary as content and the encrypted payload length as `sizeHint` (never the payload itself). */
+export function buildConfigWebConversationItems(source: ConfigWebConversationSource): ConfigWebConversationItem[] {
   const normalized = normalizeMessages(source.protocol, source.messages);
   const toolNamesById = new Map<string, string>();
   const items: ConfigWebConversationItem[] = [
@@ -31,8 +30,6 @@ export function buildConfigWebConversationDetails(
   ];
 
   for (const item of normalized) {
-    if (isInternalReasoningItem(item)) continue;
-
     if (item.type === 'system' || item.type === 'user' || item.type === 'assistant') {
       items.push({
         sequence: items.length + 1,
@@ -65,6 +62,15 @@ export function buildConfigWebConversationDetails(
       continue;
     }
 
+    const reasoning = toReasoningItem(item);
+    if (reasoning) {
+      items.push({
+        sequence: items.length + 1,
+        ...reasoning,
+      });
+      continue;
+    }
+
     items.push({
       sequence: items.length + 1,
       type: 'unknown',
@@ -73,6 +79,16 @@ export function buildConfigWebConversationDetails(
     });
   }
 
+  return items;
+}
+
+export function buildConfigWebConversationDetails(
+  source: ConfigWebConversationSource,
+  now: Date = new Date(),
+): ConfigWebConversationDetails {
+  const items = buildConfigWebConversationItems(source)
+    .filter((item) => item.type !== 'reasoning')
+    .map((item, index) => ({ ...item, sequence: index + 1 }));
   return {
     providerId: source.providerId,
     protocol: source.protocol,
@@ -82,9 +98,38 @@ export function buildConfigWebConversationDetails(
   };
 }
 
-function isInternalReasoningItem(item: ConversationItem): boolean {
-  if (item.type !== 'unknown' || !item.content || typeof item.content !== 'object') return false;
-  return 'type' in item.content && item.content.type === 'reasoning';
+function toReasoningItem(
+  item: ConversationItem,
+): Pick<ConfigWebConversationItem, 'type' | 'content' | 'sizeHint'> | null {
+  if (item.type !== 'unknown' || !item.content || typeof item.content !== 'object') return null;
+  const raw = item.content as Record<string, unknown>;
+  if (raw.type !== 'reasoning') return null;
+  const sizeHint = typeof raw.encrypted_content === 'string' ? raw.encrypted_content.length : undefined;
+  const summary = extractReasoningSummary(raw);
+  return {
+    type: 'reasoning',
+    content: summary || '(推理内容未保存在会话中)',
+    sizeHint,
+  };
+}
+
+function extractReasoningSummary(raw: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (Array.isArray(raw.summary)) {
+    for (const entry of raw.summary) {
+      if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).text === 'string') {
+        parts.push((entry as Record<string, unknown>).text as string);
+      }
+    }
+  }
+  if (parts.length === 0 && Array.isArray(raw.content)) {
+    for (const entry of raw.content) {
+      if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).text === 'string') {
+        parts.push((entry as Record<string, unknown>).text as string);
+      }
+    }
+  }
+  return parts.join('\n');
 }
 
 function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): ConversationItem[] {

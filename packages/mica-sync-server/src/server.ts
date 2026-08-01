@@ -430,14 +430,16 @@ function removeWaiter(
 
 /**
  * Detail response used by the web console. The provider `messages` history
- * (and usage records) are only needed to resume a turn on the daemon machine;
- * the web renders `conversationMessages` exclusively. Stripping them cut the
- * largest session payload from ~1.3MB to ~15KB, which was the dominant cost of
- * switching sessions on slow links.
+ * and the full usage records are only needed to resume a turn on the daemon
+ * machine; the web renders `conversationMessages` exclusively. The last usage
+ * record is kept (a single small object) so the web can render the context
+ * usage summary. Stripping the bulk cut the largest session payload from
+ * ~1.3MB to ~15KB, which was the dominant cost of switching sessions on slow
+ * links.
  */
 function slimSession(session: StoredSession): StoredSession {
   const snapshot = (session.snapshot ?? {}) as Record<string, unknown>;
-  const { messages: _messages, usageHistory: _usage, lastUsage: _last, ...rest } = snapshot;
+  const { messages: _messages, usageHistory: _usage, ...rest } = snapshot;
   return { ...session, snapshot: rest as StoredSession['snapshot'] };
 }
 
@@ -457,6 +459,7 @@ function lightSession(session: StoredSession): StoredSession {
       model: snapshot.model,
       effort: snapshot.effort,
       role: snapshot.role,
+      contextWindowSize: snapshot.contextWindowSize,
     } as StoredSession['snapshot'],
   };
 }

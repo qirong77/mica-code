@@ -21,14 +21,17 @@ export function createRewindCommand(services) {
     description: '选择一轮对话，并回到该轮完成后的状态',
     action(rawArgs) {
       if ((rawArgs ?? '').trim()) {
-        services.showMessage('rewind: /rewind 不支持参数，请直接运行 /rewind', 5000);
+        services.showNotice('rewind: /rewind 不支持参数，请直接运行 /rewind', undefined, {
+          command: '/rewind',
+          status: 'warning',
+        });
         return;
       }
       if (showBusyMessage(services)) return;
 
       const checkpoints = services.listRewindCheckpoints();
       if (checkpoints.length === 0) {
-        services.showMessage('rewind: 没有可回退的对话', 4000);
+        services.showNotice('rewind: 没有可回退的对话', undefined, { command: '/rewind', status: 'info' });
         return;
       }
       showRewindPanel(checkpoints, services);
@@ -108,7 +111,10 @@ function showRewindPanel(checkpoints, services) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      services.showMessage(`rewind 已完成，但结果提示保存失败：${message}`, 7000, ownerSessionId);
+      services.showNotice(`rewind 已完成，但结果提示保存失败：${message}`, ownerSessionId, {
+        command: '/rewind',
+        status: 'error',
+      });
     }
     applying.set(false);
   }
@@ -321,12 +327,18 @@ function countFileActions(files) {
 
 function showBusyMessage(services) {
   if (services.hasBusyAgents?.()) {
-    services.showMessage('rewind: agent task still running; wait or abort before rewinding', 5000);
+    services.showNotice('rewind: agent task still running; wait or abort before rewinding', undefined, {
+      command: '/rewind',
+      status: 'warning',
+    });
     return true;
   }
   const running = services.listRunningAgents().filter((agent) => isRunningStatus(agent.status));
   if (running.length === 0) return false;
-  services.showMessage(`rewind: ${running.length} agent(s) still running; wait or abort before rewinding`, 5000);
+  services.showNotice(`rewind: ${running.length} agent(s) still running; wait or abort before rewinding`, undefined, {
+    command: '/rewind',
+    status: 'warning',
+  });
   return true;
 }
 

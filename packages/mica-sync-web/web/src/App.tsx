@@ -49,6 +49,15 @@ function compareUpdatedAt(left: StoredSession, right: StoredSession): number {
   return left.updatedAt.localeCompare(right.updatedAt);
 }
 
+/** Deep-merge helper: only non-undefined keys of `next` override `prev`. */
+function mergeSnapshots(prev: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...prev };
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
+
 function storedSessionFrom(value: unknown): StoredSession | null {
   if (!value || typeof value !== 'object') return null;
   const session = value as Partial<StoredSession>;
@@ -75,6 +84,7 @@ export function App() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [running, setRunning] = useState(false);
+  const [usage, setUsage] = useState<StoredSession['snapshot']['lastUsage']>(undefined);
   const [sessionError, setSessionError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newSessionFor, setNewSessionFor] = useState<string | null>(null);
@@ -114,6 +124,7 @@ export function App() {
       snapshotRevisionRef.current += 1;
       setSessionData(null);
       setMessages([]);
+      setUsage(undefined);
       setRemoteRunning(false);
       setSessionError(error);
     },
@@ -182,17 +193,31 @@ export function App() {
   const publishSession = useCallback(
     (data: SessionData, replaceMessages = true) => {
       const wasRemoteRunning = runningRef.current;
-      const finished = data.session.turnState !== 'running';
-      latestSessionRef.current = data.session;
-      sessionDataRef.current = data;
+      // Live `session` events carry metadata only; merge into the previous
+      // snapshot so fields like contextWindowSize/lastUsage survive.
+      const prev = sessionDataRef.current?.session.snapshot;
+      const merged =
+        prev && data.session.snapshot
+          ? {
+              ...data.session,
+              snapshot: mergeSnapshots(
+                prev,
+                data.session.snapshot as Record<string, unknown>,
+              ) as StoredSession['snapshot'],
+            }
+          : data.session;
+      const finished = merged.turnState !== 'running';
+      latestSessionRef.current = merged;
+      sessionDataRef.current = { ...data, session: merged };
       snapshotRevisionRef.current += 1;
-      setSessionData(data);
+      setSessionData({ ...data, session: merged });
+      setUsage((current) => merged.snapshot.lastUsage ?? current);
       if (finished) setRemoteRunning(false);
       // Live `session` events carry metadata only (no snapshot payload), so
       // they must not replace the message list built from streamed events.
       if (replaceMessages && (!wasRemoteRunning || finished)) {
         setMessages((current) =>
-          mergeSessionMessages(current, messagesFromSession(data.session.snapshot.conversationMessages)),
+          mergeSessionMessages(current, messagesFromSession(merged.snapshot.conversationMessages)),
         );
       }
     },
@@ -386,6 +411,11 @@ export function App() {
         }
         return;
       }
+      if (event.type === 'usage') {
+        const raw = event.usage as StoredSession['snapshot']['lastUsage'];
+        if (raw && typeof raw === 'object') setUsage(raw);
+        return;
+      }
       if (event.type === 'session_removed') {
         setSessionsByMachine((current) => {
           const next = new Map(current);
@@ -562,6 +592,7 @@ export function App() {
           running={running}
           connected={connected}
           connecting={connecting}
+          usage={usage}
           cwdCandidates={cwdCandidates}
           cwdSwitching={cwdSwitching}
           cwdError={cwdError}

@@ -317,6 +317,11 @@ export class AgentRuntime {
       this.emitStatus({ type: 'error', message });
       throw new Error(message);
     }
+    if (!this.currentConfig.model) {
+      const message = `未配置模型，运行 /model 命令选择模型后再尝试`;
+      this.emitStatus({ type: 'error', message });
+      throw new Error(message);
+    }
 
     const abortController = new AbortController();
     this.activeAbortController = abortController;

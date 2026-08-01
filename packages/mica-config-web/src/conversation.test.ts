@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildConfigWebConversationDetails } from './conversation.js';
+import { buildConfigWebConversationDetails, buildConfigWebConversationItems } from './conversation.js';
 
 describe('buildConfigWebConversationDetails', () => {
   it('orders the system prompt, chat messages, tool calls, and tool results', () => {
@@ -90,5 +90,31 @@ describe('buildConfigWebConversationDetails', () => {
     expect(details.items.map((item) => item.type)).toEqual(['system', 'user', 'assistant']);
     expect(details.items.map((item) => item.sequence)).toEqual([1, 2, 3]);
     expect(JSON.stringify(details.items)).not.toContain('private-provider-payload');
+  });
+
+  it('keeps reasoning items with a size hint and safe content in the raw item list', () => {
+    const items = buildConfigWebConversationItems({
+      providerId: 'responses',
+      protocol: 'openai_responses',
+      model: 'gpt-5',
+      systemPrompt: 'system instructions',
+      messages: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Think about this' }] },
+        {
+          type: 'reasoning',
+          id: 'rs_1',
+          summary: [{ type: 'summary_text', text: 'short summary' }],
+          encrypted_content: 'opaque-private-payload',
+        },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] },
+      ],
+    });
+
+    expect(items.map((item) => item.type)).toEqual(['system', 'user', 'reasoning', 'assistant']);
+    const reasoning = items[2];
+    expect(reasoning.type).toBe('reasoning');
+    expect(reasoning.content).toBe('short summary');
+    expect(reasoning.sizeHint).toBe('opaque-private-payload'.length);
+    expect(JSON.stringify(items)).not.toContain('opaque-private-payload');
   });
 });

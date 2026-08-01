@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
-import { ConversationView } from '../components/ConversationView.js';
+import { readSessionContent, readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
+import { ContextPane } from '../components/ContextPane.js';
+import { ConversationPane } from '../components/ConversationPane.js';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
@@ -11,27 +12,60 @@ import type {
   ConfigWebSessionsDetails,
 } from '../../../src/shared/types.js';
 
+type SessionTab = 'conversation' | 'context' | 'json';
+
 export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
   const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
   const [selectedId, setSelectedId] = useState('');
-  const [session, setSession] = useState<ConfigWebSessionDetails | null>(null);
-  const [content, setContent] = useState('');
-  const [savedContent, setSavedContent] = useState('');
+  const [header, setHeader] = useState<ConfigWebSessionDetails | null>(null);
+  const [tab, setTab] = useState<SessionTab>('conversation');
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+  const [dataVersion, setDataVersion] = useState(0);
+
+  // Raw JSON editor state is lifted here so tab switches do not lose edits.
+  const [rawContent, setRawContent] = useState('');
+  const [rawSavedContent, setRawSavedContent] = useState('');
+  const [rawLoaded, setRawLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
   const requestSequence = useRef(0);
   const loadInFlight = useRef(false);
   const selectedIdRef = useRef('');
-  const dirty = content !== savedContent;
+  const lastUpdatedAtRef = useRef<string | null>(null);
+  const dirty = rawContent !== rawSavedContent;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
   const RefreshIcon = appIcons.refresh;
   const SaveIcon = appIcons.save;
 
-  async function load(showLoading = true) {
+  async function loadHeader(id: string, showLoading = false) {
+    const sequence = ++requestSequence.current;
+    if (!id) {
+      setHeader(null);
+      return;
+    }
+    if (showLoading) setSessionLoading(true);
+    try {
+      const next = await readSessionDetails(id);
+      if (requestSequence.current !== sequence) return;
+      if (lastUpdatedAtRef.current !== null && lastUpdatedAtRef.current !== next.updatedAt) {
+        setDataVersion((value) => value + 1);
+      }
+      lastUpdatedAtRef.current = next.updatedAt;
+      setHeader(next);
+      setError(null);
+    } catch (loadError) {
+      if (requestSequence.current === sequence) setError(formatError(loadError));
+    } finally {
+      if (showLoading && requestSequence.current === sequence) setSessionLoading(false);
+    }
+  }
+
+  async function refreshIndex(showLoading: boolean) {
     if (loadInFlight.current) return;
     loadInFlight.current = true;
     if (showLoading) setLoading(true);
@@ -43,7 +77,7 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
       setIndex(next);
       selectedIdRef.current = nextId;
       setSelectedId(nextId);
-      await loadSession(nextId, { background: !showLoading, forceContent: !preferredId });
+      await loadHeader(nextId, showLoading);
       if (!nextId) setError(null);
     } catch (loadError) {
       setError(formatError(loadError));
@@ -53,59 +87,53 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
     }
   }
 
-  async function loadSession(id: string, options: { background?: boolean; forceContent?: boolean } = {}) {
-    const sequence = ++requestSequence.current;
-    if (!id) {
-      setSession(null);
-      return;
-    }
-    if (!options.background) setSessionLoading(true);
-    try {
-      const next = await readSessionDetails(id);
-      if (requestSequence.current === sequence) {
-        setSession(next);
-        if (options.forceContent || !dirtyRef.current) {
-          setContent(next.content);
-          setSavedContent(next.content);
-        }
-        setError(null);
-      }
-    } catch (loadError) {
-      if (requestSequence.current === sequence) setError(formatError(loadError));
-    } finally {
-      if (!options.background && requestSequence.current === sequence) setSessionLoading(false);
-    }
-  }
-
   function selectSession(id: string) {
     if (id === selectedIdRef.current) return;
     if (dirtyRef.current && !window.confirm('当前 Session 有未保存的修改，确定要切换吗？')) return;
     selectedIdRef.current = id;
     setSelectedId(id);
-    setSession(null);
-    setContent('');
-    setSavedContent('');
-    dirtyRef.current = false;
-    void loadSession(id, { forceContent: true });
+    setHeader(null);
+    lastUpdatedAtRef.current = null;
+    setRawContent('');
+    setRawSavedContent('');
+    setRawLoaded(false);
+    setError(null);
+    setVersion((value) => value + 1);
+    void loadHeader(id, true);
+  }
+
+  async function openRawTab() {
+    setTab('json');
+    if (rawLoaded || !header) return;
+    try {
+      const next = await readSessionContent(header.id);
+      setRawContent(next.content);
+      setRawSavedContent(next.content);
+      setRawLoaded(true);
+    } catch (loadError) {
+      setError(formatError(loadError));
+    }
   }
 
   async function save() {
-    if (!session || session.turnState === 'running' || !dirty || saving) return;
+    if (!header || header.turnState === 'running' || !dirty || saving) return;
     setError(null);
     try {
-      JSON.parse(content);
+      JSON.parse(rawContent);
     } catch (parseError) {
       setError(`Session 内容不是有效 JSON：${formatError(parseError)}`);
       return;
     }
     setSaving(true);
     try {
-      await writeSession(session.id, content);
-      const next = await readSessionDetails(session.id);
-      setSession(next);
-      setContent(next.content);
-      setSavedContent(next.content);
+      await writeSession(header.id, rawContent);
+      const next = await readSessionDetails(header.id);
+      lastUpdatedAtRef.current = next.updatedAt;
+      setHeader(next);
+      setRawSavedContent(rawContent);
+      setRawLoaded(true);
       setSaved(true);
+      setDataVersion((value) => value + 1);
       window.setTimeout(() => setSaved(false), 1600);
     } catch (saveError) {
       setError(formatError(saveError));
@@ -115,8 +143,8 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
   }
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(false), 1000);
+    void refreshIndex(true);
+    const timer = window.setInterval(() => void refreshIndex(false), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -133,6 +161,8 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
     };
   }, [dirty, onDirtyChange]);
 
+  const paneKey = `${selectedId}:${version}`;
+
   return (
     <PageFrame
       title="Sessions"
@@ -140,7 +170,12 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
       actions={
         <div className="toolbar">
           {saved ? <span className="save-status">已保存</span> : null}
-          <Button icon={<RefreshIcon size={15} />} title="立即刷新" onClick={() => void load()} loading={loading} />
+          <Button
+            icon={<RefreshIcon size={15} />}
+            title="立即刷新"
+            onClick={() => void refreshIndex(true)}
+            loading={loading}
+          />
         </div>
       }
     >
@@ -153,40 +188,81 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
             <SessionPicker sessions={index.sessions} value={selectedId} onChange={selectSession} />
           </div>
 
-          {sessionLoading ? <div className="session-loading">正在加载 Session…</div> : null}
-          {session ? <SessionHeader session={session} /> : null}
-          {session ? (
-            <section className="simple-card session-raw-card">
-              <div className="editor-pane-header session-raw-header">
-                <div>
-                  <h3>原始 JSON</h3>
-                  <p className="muted-text editor-pane-subtitle">{session.id}</p>
-                </div>
-                <div className="toolbar">
-                  {dirty ? <Tag tone="blue">未保存</Tag> : null}
-                  {session.turnState === 'running' ? <span className="muted-text">运行中不可保存</span> : null}
-                  <Button
-                    variant="primary"
-                    icon={<SaveIcon size={15} />}
-                    disabled={!dirty || session.turnState === 'running'}
-                    loading={saving}
-                    onClick={save}
-                  >
-                    保存
-                  </Button>
-                </div>
+          {sessionLoading && !header ? <div className="session-loading">正在加载 Session…</div> : null}
+          {header ? <SessionHeader session={header} /> : null}
+          {header ? (
+            <section className="simple-card session-tab-card">
+              <div className="session-tabs" role="tablist" aria-label="Session 视图">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'conversation'}
+                  className={`session-tab${tab === 'conversation' ? ' session-tab-active' : ''}`}
+                  onClick={() => setTab('conversation')}
+                >
+                  对话记录
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'context'}
+                  className={`session-tab${tab === 'context' ? ' session-tab-active' : ''}`}
+                  onClick={() => setTab('context')}
+                >
+                  Context 分析
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'json'}
+                  className={`session-tab${tab === 'json' ? ' session-tab-active' : ''}`}
+                  onClick={() => void openRawTab()}
+                >
+                  原始文件
+                  {dirty ? <span className="session-tab-dirty">●</span> : null}
+                </button>
               </div>
-              <div className="editor-host session-raw-editor">
-                <MonacoJsonEditor
-                  value={content}
-                  language="json"
-                  readOnly={saving || session.turnState === 'running'}
-                  onChange={setContent}
-                />
+              <div className="session-tab-body">
+                {tab === 'conversation' ? (
+                  <ConversationPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
+                ) : null}
+                {tab === 'context' ? (
+                  <ContextPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
+                ) : null}
+                {tab === 'json' ? (
+                  <div className="editor-pane-header session-raw-header">
+                    <div>
+                      <h3>原始 JSON</h3>
+                      <p className="muted-text editor-pane-subtitle">{header.id}</p>
+                    </div>
+                    <div className="toolbar">
+                      {dirty ? <Tag tone="blue">未保存</Tag> : null}
+                      {header.turnState === 'running' ? <span className="muted-text">运行中不可保存</span> : null}
+                      <Button
+                        variant="primary"
+                        icon={<SaveIcon size={15} />}
+                        disabled={!dirty || header.turnState === 'running'}
+                        loading={saving}
+                        onClick={() => void save()}
+                      >
+                        保存
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                {tab === 'json' ? (
+                  <div className="editor-host session-raw-editor">
+                    <MonacoJsonEditor
+                      value={rawContent}
+                      language="json"
+                      readOnly={saving || header.turnState === 'running'}
+                      onChange={setRawContent}
+                    />
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
-          {session ? <ConversationView details={session.conversation} /> : null}
         </div>
       )}
     </PageFrame>
@@ -389,6 +465,12 @@ function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
           <span>Updated</span>
           <strong>{formatDate(session.updatedAt)}</strong>
         </div>
+        <div className="simple-row">
+          <span>File</span>
+          <strong>
+            {formatBytes(session.fileSizeBytes)} · {session.messageCount} 条消息 · {session.usageCount} 条用量
+          </strong>
+        </div>
       </div>
     </div>
   );
@@ -396,6 +478,12 @@ function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
 }
 
 function formatError(error: unknown): string {

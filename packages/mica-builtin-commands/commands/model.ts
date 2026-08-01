@@ -23,7 +23,10 @@ export function createModelCommand(
       const targetAgent = services.getCurrentAgent() ?? agent;
       const targetSessionController = services.getCurrentSessionController() ?? sessionController;
       if (services.isAgentBusy(targetAgent)) {
-        services.showMessage('Agent is busy; wait or abort before switching model');
+        services.showNotice('Agent is busy; wait or abort before switching model', undefined, {
+          command: '/model',
+          status: 'warning',
+        });
         return;
       }
       showModelSelector(targetAgent, targetSessionController, services, { activateEffortAfterSelect: true });
@@ -75,22 +78,26 @@ async function applyModelSelection(
 ): Promise<boolean> {
   try {
     if (services.isAgentBusy(agent)) {
-      services.showMessage('Agent is busy; wait or abort before switching model');
+      services.showNotice('Agent is busy; wait or abort before switching model', undefined, {
+        command: '/model',
+        status: 'warning',
+      });
       return false;
     }
     if (selection.providerId === agent.config.provider.id && selection.model === agent.config.model) {
       return true;
     }
     const providerChanged = selection.providerId !== agent.config.provider.id;
-    services.showMessage(
+    services.showNotice(
       `${providerChanged ? 'Provider and model' : 'Model'} changed, prompt cache may be invalidated. Consider /compact`,
-      6000,
       services.getCurrentAgentSessionId(),
+      { command: '/model', status: 'warning' },
     );
     await applyConfigSwitchUpdate({
       agent,
       sessionController,
       services,
+      command: '/model',
       update: (config) => {
         const provider = config.providers.find((item) => item.id === selection.providerId);
         if (!provider) throw new Error(`Provider not found: ${selection.providerId}`);

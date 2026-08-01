@@ -28,7 +28,10 @@ export function createDiffCommand(agent: CommandAgent, services: CommandRuntimeS
       try {
         showDiffPanel(tracker.list(target.taskOwnerId), services);
       } catch (error) {
-        services.showMessage(`diff failed: ${error instanceof Error ? error.message : String(error)}`, 5000);
+        services.showNotice(`diff failed: ${error instanceof Error ? error.message : String(error)}`, undefined, {
+          command: '/diff',
+          status: 'error',
+        });
       }
     },
   } satisfies Parameters<typeof micaUi.dropdown.setQuickCommands>[0][number];
@@ -73,7 +76,10 @@ function showDiffPanel(files: TrackedGitFile[], services: CommandRuntimeServices
       micaUi.terminalInput.clearText();
       view.set('detail');
     } catch (error) {
-      services.showMessage(`diff failed: ${error instanceof Error ? error.message : String(error)}`, 5000);
+      services.showNotice(`diff failed: ${error instanceof Error ? error.message : String(error)}`, undefined, {
+        command: '/diff',
+        status: 'error',
+      });
     }
   };
 

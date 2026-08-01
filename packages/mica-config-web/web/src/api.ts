@@ -1,4 +1,7 @@
 import type {
+  ConfigWebContextAnalysis,
+  ConfigWebConversationItem,
+  ConfigWebConversationPage,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginsDetails,
@@ -52,8 +55,40 @@ export async function writeSession(id: string, content: string): Promise<void> {
   await assertOk(response);
 }
 
+/** Lightweight session header; heavy payloads are loaded lazily below. */
 export async function readSessionDetails(id: string): Promise<ConfigWebSessionDetails> {
   const response = await fetch(`/api/details/session?id=${encodeURIComponent(id)}`);
+  return readJson(response);
+}
+
+export async function readSessionContent(id: string): Promise<{ content: string }> {
+  const response = await fetch(`/api/details/session?id=${encodeURIComponent(id)}&view=json`);
+  return readJson(response);
+}
+
+export async function readSessionConversationPage(
+  id: string,
+  offset: number,
+  limit: number,
+  tail = false,
+): Promise<ConfigWebConversationPage> {
+  const response = await fetch(
+    `/api/details/session?id=${encodeURIComponent(id)}&view=conversation&offset=${offset}&limit=${limit}${
+      tail ? '&tail=1' : ''
+    }`,
+  );
+  return readJson(response);
+}
+
+export async function readSessionItem(id: string, sequence: number): Promise<ConfigWebConversationItem> {
+  const response = await fetch(
+    `/api/details/session?id=${encodeURIComponent(id)}&view=item&sequence=${encodeURIComponent(String(sequence))}`,
+  );
+  return readJson(response);
+}
+
+export async function readSessionContextAnalysis(id: string): Promise<ConfigWebContextAnalysis> {
+  const response = await fetch(`/api/details/session?id=${encodeURIComponent(id)}&view=context`);
   return readJson(response);
 }
 

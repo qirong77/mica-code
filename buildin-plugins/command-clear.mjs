@@ -16,13 +16,16 @@ export function createClearCommand(agent, sessionController, services, onCleared
     description: '新开一个空 session，不清除当前 session 内容',
     action() {
       if (services.isAgentBusy(agent)) {
-        services.showMessage('Agent is busy; wait or abort before starting a new session');
+        services.showNotice('Agent is busy; wait or abort before starting a new session', undefined, {
+          command: '/clear',
+          status: 'warning',
+        });
         return;
       }
       services.clearSubagentTasks?.(agent);
       services.clearUI(agent, sessionController);
       onCleared?.();
-      services.showMessage('Started new session');
+      services.showNotice('Started new session', undefined, { command: '/clear', status: 'success' });
     },
   };
 }

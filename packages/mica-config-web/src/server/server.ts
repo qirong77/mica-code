@@ -9,7 +9,11 @@ import {
   getMcpDetails,
   getPluginsDetails,
   getRolesDetails,
+  getSessionContent,
+  getSessionContextAnalysis,
+  getSessionConversationPage,
   getSessionDetails,
+  getSessionItem,
   getSessionsDetails,
   getSkillsDetails,
   writeMcpServer,
@@ -206,7 +210,20 @@ async function handleApiRequest(
   if (url.pathname === '/api/details/sessions') return json(getSessionsDetails());
   if (url.pathname === '/api/details/session') {
     try {
-      return json(getSessionDetails(url.searchParams.get('id') ?? ''));
+      const id = url.searchParams.get('id') ?? '';
+      const view = url.searchParams.get('view') ?? 'header';
+      if (view === 'json') return json(getSessionContent(id));
+      if (view === 'conversation') {
+        const offset = parsePositiveInt(url.searchParams.get('offset'), 0);
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 80);
+        const tail = url.searchParams.get('tail') === '1';
+        return json(getSessionConversationPage(id, offset, limit, tail));
+      }
+      if (view === 'item') {
+        return json(getSessionItem(id, parsePositiveInt(url.searchParams.get('sequence'), 1)));
+      }
+      if (view === 'context') return json(getSessionContextAnalysis(id));
+      return json(getSessionDetails(id));
     } catch (error) {
       return json({ error: formatError(error) }, 404);
     }
@@ -342,4 +359,10 @@ function json(value: unknown, status = 200): Response {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parsePositiveInt(value: string | null, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  return parsed;
 }

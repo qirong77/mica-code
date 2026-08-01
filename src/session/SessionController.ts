@@ -305,6 +305,7 @@ function toPersistedSnapshot(
     model: snapshot.model,
     effort: snapshot.effort,
     role: snapshot.role,
+    contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
     messages: snapshot.messages,
     conversationMessages,
     usageHistory: snapshot.usageHistory,
@@ -426,7 +427,8 @@ export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): Persiste
   let resolvedSnapshot = snapshot;
   micaConfig.update((config) => {
     const snapshotProvider = config.providers.find((item) => item.id === snapshot.providerId);
-    const provider = snapshotProvider ?? config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+    const provider =
+      snapshotProvider ?? config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
     if (!provider) return config;
 
     const snapshotModelAvailable = providerSupportsModel(provider, snapshot.model);
@@ -436,8 +438,7 @@ export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): Persiste
         : provider.id === config.provider && providerSupportsModel(provider, config.model)
           ? config.model
           : (provider.models?.[0] ?? snapshot.model);
-    const effort =
-      provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort);
+    const effort = provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort);
     resolvedSnapshot = {
       ...snapshot,
       providerId: provider.id,

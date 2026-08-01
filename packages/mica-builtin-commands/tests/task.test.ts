@@ -189,7 +189,10 @@ describe('task command', () => {
     command.action('clear');
 
     expect(services.clearIdleAgents).toHaveBeenCalledTimes(1);
-    expect(services.showMessage).toHaveBeenCalledWith('Cleared 1 idle task', 4000);
+    expect(services.showNotice).toHaveBeenCalledWith('Cleared 1 idle task', undefined, {
+      command: '/task',
+      status: 'info',
+    });
   });
 
   it('switches to the selected terminal task from the panel', () => {
@@ -201,7 +204,10 @@ describe('task command', () => {
     panel.onInput('', { return: true });
 
     expect(services.switchAgentSession).toHaveBeenCalledWith('agent-1');
-    expect(services.showMessage).toHaveBeenCalledWith('Switched to #1: Build UI', 4000);
+    expect(services.showNotice).toHaveBeenCalledWith('Switched to #1: Build UI', undefined, {
+      command: '/task',
+      status: 'success',
+    });
   });
 
   it('opens detail for the selected background task from the panel', () => {
@@ -229,5 +235,6 @@ function makeServices(options: { cleared?: RunningAgentRecord[] } = {}): Command
       return agent;
     }),
     showMessage: vi.fn(),
+    showNotice: vi.fn(),
   } as unknown as CommandRuntimeServices;
 }

@@ -26,6 +26,9 @@ export type PersistedRuntimeSnapshot = {
   model: string;
   effort: EffortOption;
   role: string;
+  /** Model context window in tokens; informational for the web console's
+   *  context usage display. Optional so older snapshots parse cleanly. */
+  contextWindowSize?: number;
   messages: unknown[];
   conversationMessages: unknown[];
   usageHistory: AgentUsageRecord[];

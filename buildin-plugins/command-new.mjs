@@ -22,15 +22,18 @@ export function createNewCommand(services) {
         return;
       }
       services.switchAgentSession(session.id);
-      services.showMessage(`Created agent #${session.index}`, 4000);
+      services.showNotice(`Created agent #${session.index}`, undefined, { command: '/new', status: 'success' });
     },
   };
 }
 
 function submitAgentPromptInBackground({ services, session, prompt, startedMessage }) {
-  services.showMessage(startedMessage, 4000);
+  services.showNotice(startedMessage, undefined, { command: '/new', status: 'success' });
   const reportError = (reason) => {
-    services.showMessage(`Agent #${session.index} failed to start: ${reason}`, 6000);
+    services.showNotice(`Agent #${session.index} failed to start: ${reason}`, undefined, {
+      command: '/new',
+      status: 'error',
+    });
   };
 
   void services

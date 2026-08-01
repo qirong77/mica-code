@@ -29,7 +29,7 @@ describe('cd command', () => {
     const target = makeTemporaryDirectory();
     const expectedCwd = realpathSync(target);
     const listRecent = vi.fn(() => [session(target), session(target)]);
-    const services = { showMessage: vi.fn() } as unknown as CommandRuntimeServices;
+    const services = { showMessage: vi.fn(), showNotice: vi.fn() } as unknown as CommandRuntimeServices;
     const controller = {
       list: vi.fn(() => []),
       listRecent,
@@ -43,24 +43,28 @@ describe('cd command', () => {
     await vi.waitFor(() => expect(process.cwd()).toBe(expectedCwd));
 
     expect(listRecent).toHaveBeenCalledWith(300);
-    expect(services.showMessage).toHaveBeenCalledWith(`Working directory: ${expectedCwd}`, 4000);
+    expect(services.showNotice).toHaveBeenCalledWith(`Working directory: ${expectedCwd}`, undefined, {
+      command: '/cd',
+      status: 'success',
+    });
   });
 
   it('keeps the current cwd when a saved directory no longer exists', async () => {
     const missing = join(tmpdir(), `mica-cd-missing-${Date.now()}`);
-    const services = { showMessage: vi.fn() } as unknown as CommandRuntimeServices;
+    const services = { showMessage: vi.fn(), showNotice: vi.fn() } as unknown as CommandRuntimeServices;
     const controller = {
       listRecent: vi.fn(() => [session(missing)]),
     } as unknown as CommandSessionController;
 
     createCdCommand(controller, services).action();
     micaUi.panels.pluginUIs.get()[0]?.onInput?.('', { return: true });
-    await vi.waitFor(() => expect(services.showMessage).toHaveBeenCalled());
+    await vi.waitFor(() => expect(services.showNotice).toHaveBeenCalled());
 
     expect(process.cwd()).toBe(originalCwd);
-    expect(services.showMessage).toHaveBeenCalledWith(
+    expect(services.showNotice).toHaveBeenCalledWith(
       expect.stringContaining('Unable to change working directory:'),
-      6000,
+      undefined,
+      { command: '/cd', status: 'error' },
     );
   });
 });

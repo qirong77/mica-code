@@ -11,7 +11,14 @@ export type ConfigWebServerInfo = {
   reused: boolean;
 };
 
-export type ConfigWebConversationItemType = 'system' | 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'unknown';
+export type ConfigWebConversationItemType =
+  | 'system'
+  | 'user'
+  | 'assistant'
+  | 'tool_call'
+  | 'tool_result'
+  | 'reasoning'
+  | 'unknown';
 
 export type ConfigWebConversationItem = {
   sequence: number;
@@ -20,6 +27,8 @@ export type ConfigWebConversationItem = {
   callId?: string;
   toolName?: string;
   role?: string;
+  /** Payload char size when the content itself is not persisted (e.g. encrypted reasoning). */
+  sizeHint?: number;
 };
 
 export type ConfigWebConversationDetails = {
@@ -29,6 +38,15 @@ export type ConfigWebConversationDetails = {
   updatedAt: string;
   items: ConfigWebConversationItem[];
 };
+
+export type ConfigWebConversationPage = {
+  id: string;
+  total: number;
+  offset: number;
+  limit: number;
+  items: ConfigWebConversationItem[];
+};
+
 export type ConfigWebMcpTool = {
   name: string;
   description?: string;
@@ -97,9 +115,60 @@ export type ConfigWebSession = {
   role: string;
 };
 
+export type ConfigWebSessionUsage = {
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+/** Lightweight session header; heavy payloads are loaded lazily via separate endpoints. */
 export type ConfigWebSessionDetails = ConfigWebSession & {
-  content: string;
-  conversation: ConfigWebConversationDetails;
+  fileSizeBytes: number;
+  messageCount: number;
+  usageCount: number;
+  contextWindowSize?: number;
+  lastUsage?: ConfigWebSessionUsage;
+};
+
+export type ConfigWebContextEntry = {
+  sequence: number;
+  type: ConfigWebConversationItemType;
+  label: string;
+  tokens: number;
+  preview: string;
+  images?: number;
+};
+
+export type ConfigWebContextTurn = {
+  /** 1-based turn number; 0 for a session without any user message. */
+  index: number;
+  userSequence: number;
+  userPreview: string;
+  conversationTokens: number;
+  toolTokens: number;
+  thinkingTokens: number;
+  totalTokens: number;
+  /** Real input tokens at the end of this turn, from usage history when aligned. */
+  contextTokens?: number;
+  cachedInputTokens?: number;
+  usageRequests: number;
+  entries: ConfigWebContextEntry[];
+};
+
+export type ConfigWebContextAnalysis = {
+  providerId: string;
+  model: string;
+  contextWindowSize?: number;
+  imageCount: number;
+  turnCount: number;
+  totals: {
+    conversationTokens: number;
+    toolTokens: number;
+    thinkingTokens: number;
+    totalTokens: number;
+  };
+  turns: ConfigWebContextTurn[];
 };
 
 export type ConfigWebSessionOption = {

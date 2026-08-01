@@ -19,7 +19,10 @@ export function reportConfigSwitchError(
   error: unknown,
 ): void {
   const message = error instanceof Error ? error.message : String(error);
-  services.showMessage(`Switch ${reason} failed: ${message}`, 6000, services.getCurrentAgentSessionId());
+  services.showNotice(`Switch ${reason} failed: ${message}`, services.getCurrentAgentSessionId(), {
+    command: `/${reason}`,
+    status: 'error',
+  });
 }
 
 export async function applyConfigSwitchUpdate({
@@ -28,14 +31,14 @@ export async function applyConfigSwitchUpdate({
   services,
   update,
   successMessage,
-  successTtl,
+  command = '/config',
 }: {
   agent: CommandAgent;
   sessionController: CommandSessionController;
   services: CommandRuntimeServices;
   update: (config: IMicaConfig) => IMicaConfig;
   successMessage: (config: IMicaConfig) => string;
-  successTtl?: number;
+  command?: string;
 }): Promise<IMicaConfig> {
   let adjustments: ConfigSwitchAdjustment[] = [];
   const candidate = update(configForAgent(micaConfig.get(), agent));
@@ -49,7 +52,10 @@ export async function applyConfigSwitchUpdate({
   agent.reloadConfig(false);
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
-  services.showMessage(formatConfigSwitchSuccess(successMessage(next), adjustments), successTtl);
+  services.showNotice(formatConfigSwitchSuccess(successMessage(next), adjustments), undefined, {
+    command,
+    status: 'success',
+  });
   return next;
 }
 

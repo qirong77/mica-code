@@ -168,6 +168,28 @@ describe('AgentRuntime tool status', () => {
   });
 });
 
+describe('AgentRuntime without a configured model', () => {
+  beforeEach(() => {
+    modelClient.resetState();
+    configState = {
+      ...testConfig,
+      providers: [...testConfig.providers],
+      model: '',
+    };
+  });
+
+  it('constructs without throwing when model is empty (first-run UX)', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    expect(() => new AgentRuntime()).not.toThrow();
+  });
+
+  it('reports a clear error on run() when model is empty', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    await expect(agent.run('hello')).rejects.toThrow(/未配置模型/);
+  });
+});
+
 function createModelClientStub(): IAgent<ModelClientOptions> & {
   queryImpl?: (question: AgentQueryContent, options?: AgentQueryOptions) => Promise<string>;
   resetState(): void;

@@ -6,6 +6,21 @@ function parse(input: Buffer | string): ParsedInput[] {
 }
 
 describe('terminal response parsing', () => {
+  it('emits escape key when ESC is followed by plain text in the same chunk', () => {
+    // 用户按 esc 后立即输入字符时，\x1b 与后续文本可能同批到达；
+    // 孤立 \x1b 必须作为 escape 键发出，不能被并入文本。
+    const keys = parse('\x1b/mcp');
+    expect(keys.map((k) => (k.kind === 'key' ? k.name : k.kind))).toEqual(['escape', '', '']);
+    expect('sequence' in keys[0] && keys[0].sequence).toBe('\x1b');
+    expect('sequence' in keys[1] && keys[1].sequence).toBe('/m');
+    expect('sequence' in keys[2] && keys[2].sequence).toBe('cp');
+  });
+
+  it('still parses real escape sequences as before', () => {
+    const keys = parse('\x1b[A');
+    expect(keys.map((k) => (k.kind === 'key' ? k.name : k.kind))).toEqual(['up']);
+  });
+
   it('parses xterm-compatible DECXCPR responses without a page', () => {
     expect(parse('\x1b[?7;5R')).toEqual([
       {
