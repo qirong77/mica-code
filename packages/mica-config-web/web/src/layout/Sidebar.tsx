@@ -44,7 +44,7 @@ function MicaMark() {
   return (
     <svg className="brand-mark" viewBox="0 0 32 32" role="img" aria-label="Mica">
       <rect width="32" height="32" rx="7" fill="currentColor" />
-      <path d="M8 22V10h3.2l4.8 6.5 4.8-6.5H24v12h-3.2v-6.7L16 21.5l-4.8-6.2V22H8z" fill="white" />
+      <path d="M8 22V10h3.2l4.8 6.5 4.8-6.5H24v12h-3.2v-6.7L16 21.5l-4.8-6.2V22H8z" fill="var(--bg)" />
     </svg>
   );
 }

@@ -3,7 +3,7 @@ export function uid(prefix) {
 }
 
 export function normalizeNodes(nodes = []) {
-  return nodes.map((node) => {
+  const normalized = nodes.map((node) => {
     const type = node.type || (node.parent === '#' ? 'folder' : 'terminal')
     return {
       id: node.id,
@@ -12,12 +12,17 @@ export function normalizeNodes(nodes = []) {
       type,
       cwd: type === 'folder' && node.cwd?.trim() ? node.cwd.trim() : null,
       sessionId: type === 'terminal' && node.sessionId?.trim() ? node.sessionId.trim() : null,
+      lastActiveAt:
+        type === 'terminal' && Number.isFinite(node.lastActiveAt) ? node.lastActiveAt : 0,
       state: {
         opened: type === 'folder' ? node.state?.opened !== false : false,
         selected: !!node.state?.selected
       }
     }
   })
+  return normalized.map((node) =>
+    node.parent === 'folder-recent' ? { ...node, parent: '#' } : node
+  )
 }
 
 export function childMap(nodes) {

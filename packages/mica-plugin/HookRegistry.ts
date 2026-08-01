@@ -60,6 +60,19 @@ export class HookRegistry {
     return current;
   }
 
+  pipelineSync<TEvent>(name: string, event: TEvent): TEvent {
+    let current = event;
+    for (const registration of this.hooks.get(name) ?? []) {
+      const result = this.runHandlerSync<TEvent, TEvent | { event?: TEvent }>(name, registration, current);
+      if (result && typeof result === 'object' && 'event' in result && result.event) {
+        current = result.event;
+      } else if (result !== undefined) {
+        current = result as TEvent;
+      }
+    }
+    return current;
+  }
+
   async guard<TEvent>(name: string, event: TEvent): Promise<{ event: TEvent; handled: boolean; blocked: boolean; reason?: string }> {
     let current = event;
     for (const registration of this.hooks.get(name) ?? []) {
@@ -96,5 +109,30 @@ export class HookRegistry {
       }
       return undefined;
     }
+  }
+
+  private runHandlerSync<TEvent, TResult>(
+    name: string,
+    registration: HookRegistration,
+    event: TEvent,
+  ): TResult | undefined {
+    let result: unknown;
+    try {
+      result = registration.handler(event, {
+        hook: name,
+        pluginId: registration.options.pluginId,
+      });
+    } catch (error) {
+      if (registration.options.failPolicy === 'stop') throw error;
+      if (registration.options.failPolicy === 'block') {
+        return { action: 'block', reason: error instanceof Error ? error.message : String(error) } as TResult;
+      }
+      return undefined;
+    }
+    if (result && typeof result === 'object' && 'then' in result) {
+      void Promise.resolve(result).catch(() => undefined);
+      throw new Error(`Hook ${name} must be synchronous`);
+    }
+    return result as TResult | undefined;
   }
 }

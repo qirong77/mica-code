@@ -3,7 +3,7 @@ import { HookRegistry } from '@packages/mica-plugin/HookRegistry.js';
 import setupSessionAutoTitle, { normalizeGeneratedTitle, sessionAutoTitleLimits } from './session-auto-title.mjs';
 
 describe('session auto title plugin', () => {
-  it('generates a title after the third meaningful user message', async () => {
+  it('generates a title after the first completed turn', async () => {
     const query = vi.fn(async (_input: string, _options?: unknown) => 'Fix mobile login flow');
     const sessionController = {
       getCurrentTitle: vi.fn(() => null as string | null),
@@ -22,9 +22,6 @@ describe('session auto title plugin', () => {
       toConversationMessages: () => [
         { role: 'user', content: 'The login button is broken on mobile.' },
         { role: 'assistant', content: 'I will inspect it.' },
-        { role: 'user', content: 'It happens only in Safari.' },
-        { role: 'assistant', content: 'I found the responsive layout.' },
-        { role: 'user', content: 'Please fix it and add a regression test.' },
       ],
       createSubAgent: vi.fn(() => ({ query })),
     };
@@ -45,14 +42,7 @@ describe('session auto title plugin', () => {
 
     await hooks.emit('turn:after', { owner: agent, hasError: false });
     await vi.waitFor(() => expect(sessionController.renameCurrent).toHaveBeenCalledWith('Fix mobile login flow'));
-    expect(query).toHaveBeenCalledWith(
-      [
-        'The login button is broken on mobile.',
-        'It happens only in Safari.',
-        'Please fix it and add a regression test.',
-      ].join('\n\n'),
-      expect.objectContaining({ maxTurns: 1 }),
-    );
+    expect(query).toHaveBeenCalledWith('The login button is broken on mobile.', expect.objectContaining({ maxTurns: 1 }));
     expect(query.mock.calls[0]?.[0]).not.toContain('I will inspect it.');
     expect(agent.createSubAgent).toHaveBeenCalledWith(expect.objectContaining({ effort: 'none', tools: false }));
     expect(session.titleOverride).toBe('Fix mobile login flow');
@@ -60,14 +50,11 @@ describe('session auto title plugin', () => {
     await Promise.all(disposers.map((dispose) => dispose()));
   });
 
-  it('does not run before the message and content thresholds', async () => {
+  it('does not run when there is no real user message', async () => {
     const agent = {
       toConversationMessages: () => [
-        { role: 'user', content: 'ok' },
         { role: 'assistant', content: 'Sure.' },
-        { role: 'user', content: 'go' },
-        { role: 'assistant', content: 'Done.' },
-        { role: 'user', content: 'yes' },
+        { role: 'notice', content: 'Nothing user-initiated.' },
       ],
       createSubAgent: vi.fn(),
     };
@@ -93,7 +80,7 @@ describe('session auto title plugin', () => {
 
     await hooks.emit('turn:after', { owner: agent, hasError: false });
     expect(agent.createSubAgent).not.toHaveBeenCalled();
-    expect(sessionAutoTitleLimits).toMatchObject({ minUserMessages: 3, minUserTextChars: 40 });
+    expect(sessionAutoTitleLimits).toMatchObject({ minUserMessages: 1, minUserTextChars: 1 });
   });
 
   it('does not overwrite a manual rename that happens while generation is running', async () => {

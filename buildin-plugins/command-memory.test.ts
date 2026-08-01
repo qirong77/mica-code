@@ -4,26 +4,24 @@ import { micaPlugin } from '@packages/mica-plugin/index.js';
 import setupCommandMemory from './command-memory.js';
 
 describe('command-memory', () => {
-  it('appends memory guidance to the end of string content', async () => {
+  it('appends memory guidance to the system prompt', () => {
     const harness = createHarness();
 
-    const result = await harness.hooks.pipeline('prompt:build', {
+    const result = harness.hooks.pipelineSync('system-prompt:build', {
       runtime: {},
-      input: { text: '继续上次的讨论' },
-      content: '继续上次的讨论',
+      prompt: 'base system prompt',
     });
 
-    const content = result.content as string;
-    expect(content.startsWith('继续上次的讨论')).toBe(true);
-    expect(content).toContain('# 会话记忆（Memory）');
-    expect(content).toContain('snapshot.conversationMessages');
-    expect(content).toContain('offset');
-    expect(content).toContain('## 怎么汇报');
-    expect(content).toContain('参考了会话');
-    expect(content.indexOf('继续上次的讨论')).toBeLessThan(content.indexOf('# 会话记忆'));
+    expect(result.prompt.startsWith('base system prompt')).toBe(true);
+    expect(result.prompt).toContain('# 会话记忆（Memory）');
+    expect(result.prompt).toContain('snapshot.conversationMessages');
+    expect(result.prompt).toContain('offset');
+    expect(result.prompt).toContain('## 怎么汇报');
+    expect(result.prompt).toContain('参考了会话');
+    expect(result.prompt.indexOf('base system prompt')).toBeLessThan(result.prompt.indexOf('# 会话记忆'));
   });
 
-  it('appends a text block for content block arrays', async () => {
+  it('does not modify user prompt content', async () => {
     const harness = createHarness();
 
     const result = await harness.hooks.pipeline('prompt:build', {
@@ -32,10 +30,10 @@ describe('command-memory', () => {
       content: [{ type: 'text', text: 'hi' }],
     });
 
-    expect(result.content).toEqual([{ type: 'text', text: 'hi' }, expect.objectContaining({ type: 'text' })]);
+    expect(result.content).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
-  it('points at the configured sessions directory when paths are provided', async () => {
+  it('points at the configured sessions directory when paths are provided', () => {
     const hooks = new micaPlugin.HookRegistry();
     setupCommandMemory({
       pluginId: 'test.commandMemory',
@@ -45,13 +43,12 @@ describe('command-memory', () => {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     } as unknown as PluginContext);
 
-    const result = await hooks.pipeline('prompt:build', {
+    const result = hooks.pipelineSync('system-prompt:build', {
       runtime: {},
-      input: { text: 'hi' },
-      content: 'hi',
+      prompt: 'base',
     });
 
-    expect(result.content as string).toContain('/custom/mica-home/sessions');
+    expect(result.prompt).toContain('/custom/mica-home/sessions');
   });
 });
 

@@ -83,13 +83,13 @@ export class Application {
         const currentModel = micaConfig.get().model;
         if (currentModel) void micaConfig.ensureModelRule(currentModel).catch(() => undefined);
       }
-      const agent = new AgentRuntime();
+      const hooks = new micaPlugin.HookRegistry();
+      const agent = new AgentRuntime({}, hooks);
       const sessionController = new SessionController({ agent, store: sessionStore });
       const commands = new micaCommands.CommandRegistry();
-      const hooks = new micaPlugin.HookRegistry();
       const services = new micaPlugin.ServiceContainer();
       const plugins = new micaPlugin.PluginManager();
-      const agentSessions = new TerminalAgentSessionManager();
+      const agentSessions = new TerminalAgentSessionManager(hooks);
       let runtime!: LocalRuntimeController;
       const subagentTasks = new SubagentTaskManager({
         onTaskFinished: (task, owner) => {

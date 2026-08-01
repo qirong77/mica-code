@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Folder,
-  FolderPlus,
   GitBranch,
   GitCompare,
   NotebookPen,
   PanelLeft,
-  Plus,
+  Rocket,
   Settings,
   SquareTerminal
 } from 'lucide-react'
@@ -22,7 +21,6 @@ import { StatsView } from './stats/StatsView'
 import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
 import { useLatest } from './hooks'
 import {
-  childMap,
   flattenNodes,
   moveNode,
   normalizeNodes,
@@ -327,7 +325,13 @@ export default function App() {
         const target =
           loaded.find((node) => node.id === workspace?.activeId && node.type === 'terminal') ||
           loaded.find((node) => node.type === 'terminal')
-        setNodes(loaded)
+        setNodes(
+          target?.lastActiveAt
+            ? loaded
+            : loaded.map((node) =>
+                node.id === target?.id ? { ...node, lastActiveAt: Date.now() } : node
+              )
+        )
         setActiveId(target?.id || null)
         setSelectedId(target?.id || null)
         setReady(true)
@@ -349,6 +353,9 @@ export default function App() {
         type: node.type,
         ...(node.type === 'folder' && node.cwd ? { cwd: node.cwd } : {}),
         ...(node.type === 'terminal' && node.sessionId ? { sessionId: node.sessionId } : {}),
+        ...(node.type === 'terminal' && node.lastActiveAt
+          ? { lastActiveAt: node.lastActiveAt }
+          : {}),
         state: {
           opened: node.type === 'folder' && !!node.state.opened,
           selected: node.id === selectedId
@@ -514,19 +521,20 @@ export default function App() {
   }, [])
 
   const createTerminal = useCallback(
-    (parent) => {
+    (parent = '#') => {
       const current = nodesRef.current
       const selected = current.find((node) => node.id === parent)
-      let target = selected?.type === 'folder' ? selected.id : selected?.parent || parent
+      let target =
+        parent === '#'
+          ? '#'
+          : selected?.type === 'folder'
+            ? selected.id
+            : selected?.parent || parent
       if (
-        !target ||
-        target === '#' ||
-        !current.some((node) => node.id === target && node.type === 'folder')
+        target !== '#' &&
+        (!target || !current.some((node) => node.id === target && node.type === 'folder'))
       ) {
-        target =
-          (childMap(current).get('#') || []).find((node) => node.type === 'folder')?.id ||
-          current.find((node) => node.type === 'folder')?.id ||
-          '#'
+        target = '#'
       }
       const id = uid('term')
       const count = current.filter((node) => node.type === 'terminal').length + 1
@@ -539,9 +547,10 @@ export default function App() {
           {
             id,
             parent: target,
-            text: `Terminal ${count}`,
+            text: `新对话 ${count}`,
             type: 'terminal',
             sessionId: null,
+            lastActiveAt: Date.now(),
             state: { opened: false, selected: false }
           }
         ])
@@ -557,6 +566,9 @@ export default function App() {
     setSelectedId(node.id)
     if (activate && node.type === 'terminal') {
       setActiveId(node.id)
+      setNodes((items) =>
+        items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
+      )
       terminalRef.current
         ?.activate(node.id)
         .catch((activateError) => console.error('activate terminal failed', activateError))
@@ -566,6 +578,9 @@ export default function App() {
   const disposeAndRemove = useCallback(
     async (node) => {
       const current = nodesRef.current
+      if (node.type === 'folder') {
+        if (!window.confirm(`删除文件夹“${node.text}”及其所有对话？此操作无法撤销。`)) return
+      } else if (!window.confirm(`删除对话“${node.text}”？此操作无法撤销。`)) return
       const ids = node.type === 'folder' ? terminalIdsUnder(current, node.id) : [node.id]
       const next = removeNode(current, node.id)
       setNodes((items) => removeNode(items, node.id))
@@ -726,44 +741,19 @@ export default function App() {
           className={`flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#1c1c1d] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
         >
           <div className="h-8.5 shrink-0 drag-region" aria-hidden="true" />
-          <header className="flex items-center justify-between gap-2.5 px-2.5 pb-2.5 pt-1 no-drag">
-            <div className="flex min-w-0 items-center gap-2 pl-1">
-              <span className="grid size-6 shrink-0 place-items-center rounded-[5px] bg-[#1677ff] text-sm font-bold text-white">
-                M
-              </span>
-              <span className="text-[13px] font-semibold text-white/95"></span>
-            </div>
-            <div className="flex gap-0.5">
-              <button
-                type="button"
-                title="新建文件夹"
-                aria-label="新建文件夹"
-                className="grid size-7 place-items-center rounded-sm text-white/35 hover:bg-white/[.06] hover:text-white"
-                onClick={() => {
-                  const selected = nodes.find((node) => node.id === selectedId)
-                  createFolder(
-                    selected?.type === 'folder'
-                      ? selected.id
-                      : selected?.parent !== '#'
-                        ? selected?.parent
-                        : '#'
-                  )
-                }}
-              >
-                <FolderPlus size={15} />
-              </button>
-              <button
-                type="button"
-                title="新建终端"
-                aria-label="新建终端"
-                className="grid size-7 place-items-center rounded-sm text-white/35 hover:bg-white/[.06] hover:text-white"
-                onClick={() => createTerminal(selectedId)}
-              >
-                <Plus size={15} />
-              </button>
-            </div>
-          </header>
-          <nav className="no-drag shrink-0 px-2.5 pb-1.5">
+          <nav className="no-drag shrink-0 px-2.5 pb-1.5 pt-1">
+            <button
+              type="button"
+              title="NEW SESSION"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium text-white/70 transition-colors hover:bg-white/[.07] hover:text-white"
+              onClick={() => {
+                const selected = nodes.find((node) => node.id === selectedId)
+                createTerminal(selected?.type === 'folder' ? selected.id : selected?.parent || '#')
+              }}
+            >
+              <Rocket size={16} className="shrink-0 opacity-75" />
+              <span>NEW SESSION</span>
+            </button>
             <button
               type="button"
               aria-pressed={view === 'stats'}

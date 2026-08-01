@@ -3,20 +3,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 const DEFAULT_WORKSPACE = {
-  version: 1,
+  version: 2,
   activeId: 'term-1',
   nodes: [
     {
-      id: 'folder-default',
-      parent: '#',
-      text: 'Sessions',
-      type: 'folder',
-      state: { opened: true }
-    },
-    {
       id: 'term-1',
-      parent: 'folder-default',
-      text: 'Terminal 1',
+      parent: '#',
+      text: '新对话',
       type: 'terminal'
     }
   ]

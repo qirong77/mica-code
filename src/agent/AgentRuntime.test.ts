@@ -166,6 +166,37 @@ describe('AgentRuntime tool status', () => {
     expect(configState?.model).toBe('test-model');
     expect(queryOptions?.maxTurns).toBe(4);
   });
+
+  it('builds the provider system prompt through synchronous plugin hooks', async () => {
+    const { micaPlugin } = await import('@packages/mica-plugin/index.js');
+    const hooks = new micaPlugin.HookRegistry();
+    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
+      event: { ...event, prompt: `${event.prompt}\n\nPlugin system guidance.` },
+    }));
+
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime({}, hooks);
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    const options = vi.mocked(micaAgent.createModelClient).mock.calls.at(-1)?.[0];
+
+    expect(agent.buildSystemPrompt()).toContain('Plugin system guidance.');
+    expect(typeof options?.systemPrompt).toBe('function');
+    expect((options?.systemPrompt as () => string)()).toContain('Plugin system guidance.');
+  });
+
+  it('shares system prompt hooks with agents created for new terminal sessions', async () => {
+    const { micaPlugin } = await import('@packages/mica-plugin/index.js');
+    const hooks = new micaPlugin.HookRegistry();
+    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
+      event: { ...event, prompt: `${event.prompt}\n\nShared session guidance.` },
+    }));
+
+    const { TerminalAgentSessionManager } = await import('../agents/terminalAgentSessions.js');
+    const sessions = new TerminalAgentSessionManager(hooks);
+    sessions.createSession();
+
+    expect(sessions.current().agent.buildSystemPrompt()).toContain('Shared session guidance.');
+  });
 });
 
 describe('AgentRuntime without a configured model', () => {

@@ -1,12 +1,10 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 
-type PromptBuildEvent = {
+type SystemPromptBuildEvent = {
   runtime: unknown;
-  input: unknown;
-  content: AgentQueryContent;
+  prompt: string;
 };
 
 export default function setupCommandMemory(ctx: PluginContext): void {
@@ -14,19 +12,18 @@ export default function setupCommandMemory(ctx: PluginContext): void {
   const sessionsDir = join(configDir, 'sessions');
   const guidance = buildMemoryGuidance(sessionsDir);
 
-  const disposable = ctx.hooks.on<PromptBuildEvent, { event: PromptBuildEvent }>(
-    'prompt:build',
-    async (event) => {
-      return { event: { ...event, content: appendText(event.content, guidance) } };
+  const disposable = ctx.hooks.on<SystemPromptBuildEvent, { event: SystemPromptBuildEvent }>(
+    'system-prompt:build',
+    (event) => {
+      return { event: { ...event, prompt: appendText(event.prompt, guidance) } };
     },
-    { pluginId: ctx.pluginId, priority: 0 },
+    { pluginId: ctx.pluginId, priority: 0, failPolicy: 'stop' },
   );
   ctx.onDispose(() => disposable.dispose());
 }
 
-function appendText(content: AgentQueryContent, text: string): AgentQueryContent {
-  if (typeof content === 'string') return `${content}\n\n${text}`;
-  return [...content, { type: 'text', text }];
+function appendText(content: string, text: string): string {
+  return `${content}\n\n${text}`;
 }
 
 function buildMemoryGuidance(sessionsDir: string): string {

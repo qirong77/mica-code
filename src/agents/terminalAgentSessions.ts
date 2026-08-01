@@ -1,5 +1,6 @@
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { sanitizeUiContent } from '@packages/mica-ui/utils/sanitizeContent.js';
+import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import { SessionController } from '../session/SessionController.js';
 import type {
@@ -73,6 +74,8 @@ export class TerminalAgentSessionManager {
   private nextIndex = 1;
   private currentSessionId: string | null = null;
 
+  constructor(private readonly hooks?: HookRegistry) {}
+
   registerCurrent(agent: AgentRuntime, sessionController: SessionController): void {
     if (this.sessions.some((session) => session.agent === agent)) return;
     const session = this.addSession(agent, sessionController);
@@ -80,7 +83,7 @@ export class TerminalAgentSessionManager {
   }
 
   createSession(): TerminalAgentSessionRecord {
-    const agent = new AgentRuntime();
+    const agent = new AgentRuntime({}, this.hooks);
     const sessionController = new SessionController(agent);
     const session = this.addSession(agent, sessionController);
     return this.toRecord(session);

@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, Folder, FolderOpen, SquareTerminal } from 'lucide-react'
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  ListTree,
+  MoreHorizontal,
+  Search,
+  SquareTerminal,
+  X
+} from 'lucide-react'
 import { childMap } from './workspace'
 
 const rowClass =
@@ -50,7 +59,7 @@ function ContextMenu({ menu, node, onClose, onAction }) {
     ...(node.type === 'folder'
       ? [
           ['createFolder', '新建文件夹'],
-          ['createTerminal', '新建终端'],
+          ['createTerminal', 'NEW SESSION'],
           ['setDefaultPath', '设置默认路径…']
         ]
       : []),
@@ -96,12 +105,43 @@ export function SessionTree({
   const children = useMemo(() => childMap(nodes), [nodes])
   const [menu, setMenu] = useState(null)
   const [drag, setDrag] = useState(null)
+  const [query, setQuery] = useState('')
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
+  const [recentCollapsed, setRecentCollapsed] = useState(false)
   const closeMenu = () => setMenu(null)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const recent = useMemo(
+    () =>
+      nodes
+        .filter((node) => node.type === 'terminal')
+        .filter(
+          (node) => !normalizedQuery || node.text.toLocaleLowerCase().includes(normalizedQuery)
+        )
+        .sort((left, right) => (right.lastActiveAt || 0) - (left.lastActiveAt || 0))
+        .slice(0, 6),
+    [nodes, normalizedQuery]
+  )
+
+  const matchesQuery = (node) => {
+    if (!normalizedQuery) return true
+    if (node.text.toLocaleLowerCase().includes(normalizedQuery)) return true
+    return (children.get(node.id) || []).some(matchesQuery)
+  }
+
+  const openMenu = (event, node) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setMenu({
+      id: node.id,
+      x: Math.max(4, Math.min(event.clientX, window.innerWidth - 160)),
+      y: Math.max(4, Math.min(event.clientY, window.innerHeight - 190))
+    })
+  }
 
   const renderChildren = (parent = '#', depth = 0) =>
-    (children.get(parent) || []).map((node) => {
+    (children.get(parent) || []).filter(matchesQuery).map((node) => {
       const folder = node.type === 'folder'
-      const opened = folder && node.state.opened
+      const opened = folder && (normalizedQuery || node.state.opened)
       const state = unread[node.id]
       const running = !folder && state?.running
       const hasUnread = !folder && !running && state?.unread
@@ -120,12 +160,7 @@ export function SessionTree({
               if (folder) onToggle(node.id)
             }}
             onDoubleClick={() => !folder && onStartEdit(node.id)}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              const x = Math.min(event.clientX, window.innerWidth - 160)
-              const y = Math.min(event.clientY, window.innerHeight - (folder ? 190 : 80))
-              setMenu({ id: node.id, x: Math.max(4, x), y: Math.max(4, y) })
-            }}
+            onContextMenu={(event) => openMenu(event, node)}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = 'move'
               event.dataTransfer.setData('text/plain', node.id)
@@ -192,16 +227,17 @@ export function SessionTree({
               <span className="size-1.75 shrink-0 animate-pulse rounded-full bg-[#46c57a] ring-2 ring-[#46c57a]/15" />
             )}
             {hasUnread && (
-              <span
-                className={`size-1.75 shrink-0 rounded-full ring-2 ${
-                  state.lastType === 'turn.completed'
-                    ? 'bg-[#5aa9ff] ring-[#5aa9ff]/20'
-                    : state.lastType === 'turn.aborted'
-                      ? 'bg-[#c08532] ring-[#c08532]/15'
-                      : 'bg-[#e75e78] ring-[#e75e78]/15'
-                }`}
-              />
+              <span className="size-1.75 shrink-0 rounded-full bg-[#5aa9ff] ring-2 ring-[#5aa9ff]/20" />
             )}
+            <button
+              type="button"
+              title="更多操作"
+              aria-label="更多操作"
+              className="grid size-5 shrink-0 place-items-center rounded text-white/40 opacity-0 hover:bg-white/[.1] hover:text-white group-hover:opacity-100 focus:opacity-100"
+              onClick={(event) => openMenu(event, node)}
+            >
+              <MoreHorizontal size={14} />
+            </button>
           </div>
           {opened && <ul role="group">{renderChildren(node.id, depth + 1)}</ul>}
         </li>
@@ -212,9 +248,96 @@ export function SessionTree({
   return (
     <>
       <div className="thin-scrollbar min-h-0 flex-1 overflow-auto px-2 pb-4 pt-1 no-drag">
-        <ul role="tree" className="flex flex-col gap-px">
-          {renderChildren()}
-        </ul>
+        <div className="mb-1 flex items-center gap-1.5 border-b border-transparent px-2 pt-1 focus-within:border-white/20">
+          <Search size={14} className="shrink-0 text-white/40" />
+          <input
+            type="search"
+            value={query}
+            placeholder="搜索会话..."
+            aria-label="搜索会话"
+            className="h-7 min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-white/35 focus:outline-none"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              title="清除搜索"
+              aria-label="清除搜索"
+              className="grid size-5 place-items-center rounded text-white/40 hover:bg-white/[.08] hover:text-white"
+              onClick={() => setQuery('')}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <section className="pb-3">
+          <button
+            type="button"
+            className="flex h-8 w-full items-center gap-2 px-2 pt-1 text-left text-[11px] font-semibold uppercase tracking-[.18em] text-white/75 hover:text-white"
+            aria-expanded={!sessionsCollapsed}
+            onClick={() => setSessionsCollapsed((value) => !value)}
+          >
+            <ChevronRight
+              size={14}
+              className={`text-white/55 transition-transform ${sessionsCollapsed ? '' : 'rotate-90'}`}
+            />
+            <span className="flex items-center gap-2">
+              <ListTree size={14} className="text-white/55" />
+              Sessions
+            </span>
+          </button>
+          {!sessionsCollapsed && (
+            <ul role="tree" className="flex flex-col gap-px">
+              {renderChildren()}
+            </ul>
+          )}
+        </section>
+        <section>
+          <button
+            type="button"
+            className="flex h-8 w-full items-center gap-2 px-2 pt-1 text-left text-[11px] font-semibold uppercase tracking-[.18em] text-white/75 hover:text-white"
+            aria-expanded={!recentCollapsed}
+            onClick={() => setRecentCollapsed((value) => !value)}
+          >
+            <ChevronRight
+              size={14}
+              className={`text-white/55 transition-transform ${recentCollapsed ? '' : 'rotate-90'}`}
+            />
+            <ListTree size={14} className="text-white/55" />
+            Recent
+          </button>
+          {!recentCollapsed &&
+            (recent.length ? (
+              <ul className="flex flex-col gap-px" aria-label="最近会话">
+                {recent.map((node) => {
+                  const state = unread[node.id]
+                  const running = state?.running
+                  const hasUnread = !running && state?.unread
+                  return (
+                    <li key={node.id}>
+                      <button
+                        type="button"
+                        title={node.text}
+                        className={`${rowClass} ml-5 w-[calc(100%-1.25rem)] px-2 text-left ${node.id === selectedId ? 'bg-white/[.075] text-white' : 'text-white/70'}`}
+                        onClick={() => onSelect(node)}
+                      >
+                        <SquareTerminal size={14} className="shrink-0 text-white/50" />
+                        <span className="min-w-0 flex-1 truncate">{node.text}</span>
+                        {running && (
+                          <span className="size-1.75 shrink-0 animate-pulse rounded-full bg-[#46c57a]" />
+                        )}
+                        {hasUnread && (
+                          <span className="size-1.75 shrink-0 rounded-full bg-[#5aa9ff]" />
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <p className="py-1 pl-7 pr-2 text-xs text-white/35">暂无最近会话。</p>
+            ))}
+        </section>
       </div>
       {menuNode && (
         <ContextMenu menu={menu} node={menuNode} onClose={closeMenu} onAction={onAction} />

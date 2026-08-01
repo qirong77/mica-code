@@ -11,6 +11,7 @@ import {
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaCommon } from '@packages/mica-common/index.js';
+import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
   createAgentClientOptions,
@@ -46,6 +47,11 @@ export type AgentRuntimeSnapshot = {
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
+};
+
+type SystemPromptBuildEvent = {
+  runtime: AgentRuntime;
+  prompt: string;
 };
 
 type AgentRunOptions = {
@@ -92,7 +98,10 @@ export class AgentRuntime {
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
 
-  constructor(configOverride: AgentRuntimeConfigOverride = {}) {
+  constructor(
+    configOverride: AgentRuntimeConfigOverride = {},
+    private readonly hooks?: HookRegistry,
+  ) {
     this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
   }
@@ -147,7 +156,9 @@ export class AgentRuntime {
   }
 
   buildSystemPrompt(): string {
-    return micaAgent.buildSystemPrompt({ baseSystemPrompt: this.resolveCurrentRole().prompt });
+    const prompt = micaAgent.buildSystemPrompt({ baseSystemPrompt: this.resolveCurrentRole().prompt });
+    const event = this.hooks?.pipelineSync<SystemPromptBuildEvent>('system-prompt:build', { runtime: this, prompt });
+    return event?.prompt ?? prompt;
   }
 
   setRole(roleName: string): void {
