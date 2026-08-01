@@ -19,7 +19,7 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
   const [selectedId, setSelectedId] = useState('');
   const [header, setHeader] = useState<ConfigWebSessionDetails | null>(null);
   const [tab, setTab] = useState<SessionTab>('conversation');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
@@ -180,7 +180,9 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
       }
     >
       {error ? <Alert message={error} /> : null}
-      {!index || index.sessions.length === 0 ? (
+      {loading && !index ? (
+        <div className="page-loading">正在加载 Sessions…</div>
+      ) : !index ? null : index.sessions.length === 0 ? (
         <Empty description="暂无 Session" />
       ) : (
         <div className="session-layout">

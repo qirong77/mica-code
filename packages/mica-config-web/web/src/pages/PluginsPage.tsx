@@ -7,7 +7,7 @@ import { appIcons } from '../icons.js';
 
 export function PluginsPage() {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const RefreshIcon = appIcons.refresh;
 
@@ -35,7 +35,9 @@ export function PluginsPage() {
     >
       {error ? <Alert message={error} /> : null}
       <div className="detail-body detail-body-stacked">
-        {!details || details.plugins.length === 0 ? (
+        {loading && !details ? (
+          <div className="page-loading">正在加载 Plugins…</div>
+        ) : !details ? null : details.plugins.length === 0 ? (
           <Empty description="暂无文件插件" />
         ) : (
           <div className="stacked-panels">
@@ -56,7 +58,7 @@ function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
       subtitle={plugin.id}
       meta={
         <>
-          <Tag tone="blue">{plugin.extension}</Tag>
+          <Tag>{plugin.extension}</Tag>
           <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>
             {plugin.status ?? 'unknown'}
           </Tag>
@@ -80,7 +82,6 @@ function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
           <span>Error</span>
           <strong>{plugin.error || '-'}</strong>
         </div>
-        <div style={{ marginTop: '4px' }}></div>
       </div>
       {plugin.content ? (
         <pre className="code-preview">

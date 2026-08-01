@@ -7,8 +7,9 @@ import { appIcons } from '../icons.js';
 
 export function ConfigPage() {
   const [content, setContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
   const [path, setPath] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -21,6 +22,7 @@ export function ConfigPage() {
     try {
       const payload = await readConfigFile();
       setContent(payload.content);
+      setSavedContent(payload.content);
       setPath(payload.path ?? '');
     } catch (loadError) {
       setError(formatError(loadError));
@@ -35,6 +37,7 @@ export function ConfigPage() {
     try {
       const payload = await writeConfigFile(content);
       setContent(payload.content);
+      setSavedContent(payload.content);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
     } catch (saveError) {
@@ -48,6 +51,8 @@ export function ConfigPage() {
     void load();
   }, []);
 
+  const dirty = content !== savedContent;
+
   return (
     <PageFrame
       title="Config"
@@ -56,16 +61,28 @@ export function ConfigPage() {
         <div className="toolbar">
           {saved ? <span className="save-status">已保存</span> : null}
           <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />
-          <Button variant="primary" icon={<SaveIcon size={15} />} onClick={save} loading={saving}>
+          <Button
+            variant="primary"
+            icon={<SaveIcon size={15} />}
+            onClick={save}
+            loading={saving}
+            disabled={loading || !path || !dirty}
+          >
             保存
           </Button>
         </div>
       }
     >
-      {error ? <Alert message={error} /> : null}
       <div className="editor-only">
+        {error ? <Alert message={error} /> : null}
+        {loading && !content ? <div className="editor-loading">正在加载配置…</div> : null}
         <div className="editor-host editor-host-large">
-          <MonacoJsonEditor value={content} language="json" onChange={setContent} />
+          <MonacoJsonEditor
+            value={content}
+            language="json"
+            readOnly={loading || saving || !path}
+            onChange={setContent}
+          />
         </div>
       </div>
     </PageFrame>

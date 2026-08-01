@@ -10,7 +10,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
   const [details, setDetails] = useState<ConfigWebMcpDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +127,13 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
             新建
           </Button>
           {selectedServer ? (
-            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeServer} loading={saving}>
+            <Button
+              variant="danger"
+              icon={<TrashIcon size={15} />}
+              title="删除"
+              onClick={removeServer}
+              loading={saving}
+            >
               删除
             </Button>
           ) : null}
@@ -139,49 +145,53 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
         </div>
       }
     >
-      {error ? <Alert message={error} /> : null}
-      {!details || details.servers.length === 0 ? (
-        <Empty description="暂无 MCP server" />
-      ) : (
-        <div className="role-layout">
-          <div className="role-list">
-            {details.servers.map((server) => (
-              <button
-                key={server.name}
-                type="button"
-                className={`role-list-item ${selectedName === server.name ? 'role-list-item-active' : ''}`}
-                disabled={saving}
-                onClick={() => selectServer(server.name)}
-              >
-                <span>{server.name}</span>
-                <Tag tone={statusColor(server.status)}>{server.status}</Tag>
-              </button>
-            ))}
-          </div>
-          <div className="role-editor-pane">
-            <div className="editor-pane-header">
-              <div>
-                <h3>{selectedServer?.name}</h3>
-                {selectedServer ? (
-                  <p className="muted-text editor-pane-subtitle">
-                    {selectedServer.type} · {selectedServer.toolCount} tools
-                    {selectedServer.error ? ` · ${selectedServer.error}` : ''}
-                  </p>
-                ) : null}
+      <div className="editor-workspace">
+        {error ? <Alert message={error} /> : null}
+        {loading && !details ? (
+          <div className="page-loading">正在加载 MCP 配置…</div>
+        ) : !details ? null : details.servers.length === 0 ? (
+          <Empty description="暂无 MCP server" />
+        ) : (
+          <div className="role-layout">
+            <div className="role-list">
+              {details.servers.map((server) => (
+                <button
+                  key={server.name}
+                  type="button"
+                  className={`role-list-item ${selectedName === server.name ? 'role-list-item-active' : ''}`}
+                  disabled={saving}
+                  onClick={() => selectServer(server.name)}
+                >
+                  <span>{server.name}</span>
+                  <Tag tone={statusColor(server.status)}>{server.status}</Tag>
+                </button>
+              ))}
+            </div>
+            <div className="role-editor-pane">
+              <div className="editor-pane-header">
+                <div>
+                  <h3>{selectedServer?.name}</h3>
+                  {selectedServer ? (
+                    <p className="muted-text editor-pane-subtitle">
+                      {selectedServer.type} · {selectedServer.toolCount} tools
+                      {selectedServer.error ? ` · ${selectedServer.error}` : ''}
+                    </p>
+                  ) : null}
+                </div>
+                {selectedServer ? <Tag tone={statusColor(selectedServer.status)}>{selectedServer.status}</Tag> : null}
               </div>
-              {selectedServer ? <Tag tone={statusColor(selectedServer.status)}>{selectedServer.status}</Tag> : null}
-            </div>
-            <div className="editor-host role-editor-host">
-              <MonacoJsonEditor
-                value={content}
-                language="json"
-                readOnly={saving || !selectedServer}
-                onChange={setContent}
-              />
+              <div className="editor-host role-editor-host">
+                <MonacoJsonEditor
+                  value={content}
+                  language="json"
+                  readOnly={saving || !selectedServer}
+                  onChange={setContent}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </PageFrame>
   );
 }

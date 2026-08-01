@@ -10,7 +10,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
   const [details, setDetails] = useState<ConfigWebSkillsDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,44 +139,50 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
         </div>
       }
     >
-      {error ? <Alert message={error} /> : null}
-      {!details || details.skills.length === 0 ? (
-        <Empty description="暂无 Skills" />
-      ) : (
-        <div className="role-layout">
-          <div className="role-list">
-            {details.skills.map((skill) => (
-              <button
-                key={skill.baseDir}
-                type="button"
-                className={`role-list-item ${selectedName === skill.name ? 'role-list-item-active' : ''}`}
-                disabled={saving}
-                onClick={() => selectSkill(skill.name)}
-              >
-                <span>{skill.name}</span>
-                <Tag tone={skill.editable ? 'blue' : 'default'}>{skill.editable ? 'editable' : 'read-only'}</Tag>
-              </button>
-            ))}
-          </div>
-          <div className="role-editor-pane">
-            <div className="editor-pane-header">
-              <div>
-                <h3>{selectedSkill?.name}</h3>
-                {selectedSkill ? <p className="muted-text editor-pane-subtitle">{selectedSkill.baseDir}</p> : null}
+      <div className="editor-workspace">
+        {error ? <Alert message={error} /> : null}
+        {loading && !details ? (
+          <div className="page-loading">正在加载 Skills…</div>
+        ) : !details ? null : details.skills.length === 0 ? (
+          <Empty description="暂无 Skills" />
+        ) : (
+          <div className="role-layout">
+            <div className="role-list">
+              {details.skills.map((skill) => (
+                <button
+                  key={skill.baseDir}
+                  type="button"
+                  className={`role-list-item ${selectedName === skill.name ? 'role-list-item-active' : ''}`}
+                  disabled={saving}
+                  onClick={() => selectSkill(skill.name)}
+                >
+                  <span>{skill.name}</span>
+                  <Tag>{skill.editable ? 'editable' : 'read-only'}</Tag>
+                </button>
+              ))}
+            </div>
+            <div className="role-editor-pane">
+              <div className="editor-pane-header">
+                <div>
+                  <h3>{selectedSkill?.name}</h3>
+                  {selectedSkill ? <p className="muted-text editor-pane-subtitle">{selectedSkill.baseDir}</p> : null}
+                </div>
+                {selectedSkill && !selectedSkill.editable ? (
+                  <span className="muted-text">项目外 Skill 只读</span>
+                ) : null}
               </div>
-              {selectedSkill && !selectedSkill.editable ? <span className="muted-text">项目外 Skill 只读</span> : null}
-            </div>
-            <div className="editor-host role-editor-host">
-              <MonacoJsonEditor
-                value={content}
-                language="markdown"
-                readOnly={!selectedSkill?.editable || saving}
-                onChange={setContent}
-              />
+              <div className="editor-host role-editor-host">
+                <MonacoJsonEditor
+                  value={content}
+                  language="markdown"
+                  readOnly={!selectedSkill?.editable || saving}
+                  onChange={setContent}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </PageFrame>
   );
 }

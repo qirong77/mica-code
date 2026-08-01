@@ -10,7 +10,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
   const [details, setDetails] = useState<ConfigWebRolesDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,41 +140,45 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
         </div>
       }
     >
-      {error ? <Alert message={error} /> : null}
-      {!details || details.roles.length === 0 ? (
-        <Empty description="暂无 Role" />
-      ) : (
-        <div className="role-layout">
-          <div className="role-list">
-            {details.roles.map((role) => (
-              <button
-                key={role.name}
-                type="button"
-                className={`role-list-item ${selectedName === role.name ? 'role-list-item-active' : ''}`}
-                disabled={saving}
-                onClick={() => selectRole(role.name)}
-              >
-                <span>{role.name}</span>
-                <Tag tone={role.builtIn ? 'default' : 'blue'}>{role.builtIn ? 'built-in' : 'editable'}</Tag>
-              </button>
-            ))}
-          </div>
-          <div className="role-editor-pane">
-            <div className="editor-pane-header">
-              <h3>{selectedRole?.name}</h3>
-              {selectedRole?.builtIn ? <span className="muted-text">内置 Role 只读</span> : null}
+      <div className="editor-workspace">
+        {error ? <Alert message={error} /> : null}
+        {loading && !details ? (
+          <div className="page-loading">正在加载 Roles…</div>
+        ) : !details ? null : details.roles.length === 0 ? (
+          <Empty description="暂无 Role" />
+        ) : (
+          <div className="role-layout">
+            <div className="role-list">
+              {details.roles.map((role) => (
+                <button
+                  key={role.name}
+                  type="button"
+                  className={`role-list-item ${selectedName === role.name ? 'role-list-item-active' : ''}`}
+                  disabled={saving}
+                  onClick={() => selectRole(role.name)}
+                >
+                  <span>{role.name}</span>
+                  <Tag>{role.builtIn ? 'built-in' : 'editable'}</Tag>
+                </button>
+              ))}
             </div>
-            <div className="editor-host role-editor-host">
-              <MonacoJsonEditor
-                value={content}
-                language="markdown"
-                readOnly={(selectedRole?.builtIn ?? true) || saving}
-                onChange={setContent}
-              />
+            <div className="role-editor-pane">
+              <div className="editor-pane-header">
+                <h3>{selectedRole?.name}</h3>
+                {selectedRole?.builtIn ? <span className="muted-text">内置 Role 只读</span> : null}
+              </div>
+              <div className="editor-host role-editor-host">
+                <MonacoJsonEditor
+                  value={content}
+                  language="markdown"
+                  readOnly={(selectedRole?.builtIn ?? true) || saving}
+                  onChange={setContent}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </PageFrame>
   );
 }

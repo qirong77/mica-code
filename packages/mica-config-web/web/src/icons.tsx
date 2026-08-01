@@ -19,6 +19,7 @@ import {
   Server,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 
 export const appIcons = {
@@ -41,4 +42,5 @@ export const appIcons = {
   search: Search,
   send: Send,
   trash: Trash2,
+  close: X,
 } satisfies Record<string, LucideIcon>;

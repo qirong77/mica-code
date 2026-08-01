@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { appIcons } from '../icons.js';
 
 export function Modal({
   title,
@@ -11,6 +12,8 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const CloseIcon = appIcons.close;
+
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -25,7 +28,7 @@ export function Modal({
         <header className="modal-header">
           <div className="modal-title">{title}</div>
           <button type="button" className="modal-close" aria-label="关闭" onClick={onClose}>
-            ×
+            <CloseIcon size={15} aria-hidden="true" />
           </button>
         </header>
         <div className="modal-body">{children}</div>
