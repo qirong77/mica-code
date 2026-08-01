@@ -128,7 +128,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
             新建
           </Button>
           {!selectedRole?.builtIn ? (
-            <Button icon={<TrashIcon size={15} />} title="删除" onClick={removeRole} loading={saving}>
+            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeRole} loading={saving}>
               删除
             </Button>
           ) : null}

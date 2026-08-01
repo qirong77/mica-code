@@ -445,7 +445,9 @@ function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
           <span>{session.id}</span>
         </div>
         <div className="toolbar">
-          <Tag tone={status.tone}>{status.label}</Tag>
+          <Tag tone={status.tone} dot>
+            {status.label}
+          </Tag>
           <Tag>{session.role}</Tag>
           <Tag>{session.turnState === 'running' ? '编辑锁定' : 'JSON 可编辑'}</Tag>
         </div>

@@ -127,7 +127,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
             新建
           </Button>
           {selectedServer ? (
-            <Button icon={<TrashIcon size={15} />} title="删除" onClick={removeServer} loading={saving}>
+            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeServer} loading={saving}>
               删除
             </Button>
           ) : null}

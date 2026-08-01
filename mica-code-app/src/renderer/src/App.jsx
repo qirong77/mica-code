@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarChart3,
   Folder,
   FolderPlus,
   GitBranch,
@@ -7,6 +8,7 @@ import {
   NotebookPen,
   PanelLeft,
   Plus,
+  Settings,
   SquareTerminal
 } from 'lucide-react'
 import { BranchPicker } from './BranchPicker'
@@ -15,6 +17,8 @@ import { GitView } from './GitView'
 import { NotesView } from './NotesView'
 import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
+import { SettingsView } from './SettingsView'
+import { StatsView } from './stats/StatsView'
 import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
 import { useLatest } from './hooks'
 import {
@@ -759,6 +763,36 @@ export default function App() {
               </button>
             </div>
           </header>
+          <nav className="no-drag shrink-0 px-2.5 pb-1.5">
+            <button
+              type="button"
+              aria-pressed={view === 'stats'}
+              title="查看使用统计"
+              className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium transition-colors ${
+                view === 'stats'
+                  ? 'bg-white/[.09] text-white'
+                  : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+              }`}
+              onClick={() => setView('stats')}
+            >
+              <BarChart3 size={14} className="shrink-0 opacity-80" />
+              <span>Stats</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === 'settings'}
+              title="打开 Mica 配置页面"
+              className={`mt-px flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium transition-colors ${
+                view === 'settings'
+                  ? 'bg-white/[.09] text-white'
+                  : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+              }`}
+              onClick={() => setView('settings')}
+            >
+              <Settings size={14} className="shrink-0 opacity-80" />
+              <span>Settings</span>
+            </button>
+          </nav>
           <SessionTree
             nodes={nodes}
             selectedId={selectedId}
@@ -800,7 +834,8 @@ export default function App() {
               ['terminal', '终端', SquareTerminal],
               ['files', '文件夹', Folder],
               ['git-compare', 'Git', GitCompare],
-              ['notes', 'Notes', NotebookPen]
+              ['notes', 'Notes', NotebookPen],
+              ['stats', 'Stats', BarChart3]
             ].map(([id, label, Icon]) => (
               <button
                 key={id}
@@ -839,6 +874,8 @@ export default function App() {
               visible={view === 'git-compare'}
             />
             <NotesView visible={view === 'notes'} />
+            <StatsView visible={view === 'stats'} />
+            <SettingsView visible={view === 'settings'} />
             {view === 'files' && terminalPanelOpen && (
               <div
                 className="terminal-panel-resizer z-20 h-2.5 shrink-0 no-drag"
@@ -874,7 +911,7 @@ export default function App() {
               onExitCommand={clearSessionId}
             />
           </div>
-          {!activeId && (
+          {!activeId && view !== 'stats' && view !== 'settings' && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">
               {error || '选择或新建一个终端会话'}
             </div>

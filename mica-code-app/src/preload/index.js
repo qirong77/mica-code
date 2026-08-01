@@ -77,6 +77,14 @@ const gitApi = {
     ipcRenderer.invoke('git:create-branch', { cwd, name, startRef })
 }
 
+const statsApi = {
+  read: () => ipcRenderer.invoke('stats:read')
+}
+
+const settingsApi = {
+  open: () => ipcRenderer.invoke('settings:open')
+}
+
 contextBridge.exposeInMainWorld('mica', {
   terminal: terminalApi,
   workspace: workspaceApi,
@@ -84,6 +92,8 @@ contextBridge.exposeInMainWorld('mica', {
   app: appApi,
   files: filesApi,
   git: gitApi,
+  stats: statsApi,
+  settings: settingsApi,
   platform: process.platform,
   windowsBuildNumber:
     process.platform === 'win32' ? Number.parseInt(os.release().split('.')[2], 10) || null : null

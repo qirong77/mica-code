@@ -7,6 +7,8 @@ import { registerWorkspaceIpc } from './workspace'
 import { createNotifyServer } from './notifyServer'
 import { registerFilesIpc } from './files'
 import { registerGitIpc } from './git'
+import { registerStatsIpc } from './stats'
+import { disposeSettings, registerSettingsIpc } from './settings'
 
 let mainWindow = null
 let notifyServer = null
@@ -119,6 +121,8 @@ app.whenReady().then(async () => {
   registerWorkspaceIpc()
   registerFilesIpc()
   registerGitIpc()
+  registerStatsIpc()
+  registerSettingsIpc()
 
   ipcMain.handle('app:get-window-state', () => {
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -156,6 +160,7 @@ app.on('window-all-closed', (event) => {
 app.on('before-quit', async () => {
   app.isQuitting = true
   disposeAllTerminals()
+  disposeSettings()
   if (typeof stopNotifyBridge === 'function') {
     stopNotifyBridge()
     stopNotifyBridge = null

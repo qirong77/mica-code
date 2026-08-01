@@ -128,20 +128,26 @@ export function SyncPage() {
         <div className="status-grid">
           <div className="status-item">
             <span className="status-label">配置</span>
-            <Tag tone={configured ? 'green' : 'red'}>{configured ? '已配置' : '未配置'}</Tag>
+            <Tag tone={configured ? 'green' : 'red'} dot>
+              {configured ? '已配置' : '未配置'}
+            </Tag>
           </div>
           <div className="status-item">
             <span className="status-label">服务器连接</span>
-            <Tag tone={serverReachable ? 'green' : 'red'}>{serverReachable ? '可达' : '不可达'}</Tag>
+            <Tag tone={serverReachable ? 'green' : 'red'} dot>
+              {serverReachable ? '可达' : '不可达'}
+            </Tag>
           </div>
           <div className="status-item">
             <span className="status-label">本机 daemon</span>
-            <Tag tone={machineOnline ? 'green' : 'red'}>{machineOnline ? '运行中' : '未运行'}</Tag>
+            <Tag tone={machineOnline ? 'green' : 'red'} dot>
+              {machineOnline ? '运行中' : '未运行'}
+            </Tag>
           </div>
           {details?.machineId ? (
             <div className="status-item">
               <span className="status-label">机器 ID</span>
-              <code className="status-code">{details.machineId.slice(0, 8)}…</code>
+              <code className="status-code">{details.machineId.slice(0, 8)}</code>
             </div>
           ) : null}
         </div>
@@ -159,6 +165,10 @@ export function SyncPage() {
             ) : (
               details.machines.map((machine) => (
                 <div className="machine-row" key={machine.id}>
+                  <span
+                    className={`status-lamp ${machine.online ? 'status-lamp-online' : 'status-lamp-offline'}`}
+                    aria-hidden="true"
+                  />
                   <span className="machine-name">{machine.name}</span>
                   <Tag tone={machine.online ? 'green' : 'default'}>{machine.online ? '在线' : '离线'}</Tag>
                   {machine.activeSessionId ? (

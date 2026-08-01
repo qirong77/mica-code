@@ -6,7 +6,7 @@ type ButtonProps = {
   loading?: boolean;
   disabled?: boolean;
   pressed?: boolean;
-  variant?: 'primary' | 'default';
+  variant?: 'primary' | 'danger' | 'default';
   title?: string;
   onClick(): void;
 };
@@ -21,9 +21,11 @@ export function Button({
   title,
   onClick,
 }: ButtonProps) {
+  const variantClass =
+    variant === 'primary' ? 'ui-button-primary' : variant === 'danger' ? 'ui-button-danger' : '';
   return (
     <button
-      className={`ui-button ${variant === 'primary' ? 'ui-button-primary' : ''}`}
+      className={`ui-button ${variantClass}`}
       type="button"
       title={title}
       disabled={loading || disabled}
@@ -53,11 +55,18 @@ export function Empty({ description }: { description: string }) {
 export function Tag({
   children,
   tone = 'default',
+  dot = false,
 }: {
   children: ReactNode;
   tone?: 'default' | 'green' | 'red' | 'blue';
+  dot?: boolean;
 }) {
-  return <span className={`ui-tag ui-tag-${tone}`}>{children}</span>;
+  return (
+    <span className={`ui-tag ui-tag-${tone}`}>
+      {dot ? <span className="ui-tag-dot" aria-hidden="true" /> : null}
+      {children}
+    </span>
+  );
 }
 
 type CollapsiblePanelProps = {

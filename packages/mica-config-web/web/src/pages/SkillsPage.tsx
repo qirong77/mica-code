@@ -127,7 +127,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
             新建
           </Button>
           {selectedSkill?.editable ? (
-            <Button icon={<TrashIcon size={15} />} title="删除" onClick={removeSkill} loading={saving}>
+            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeSkill} loading={saving}>
               删除
             </Button>
           ) : null}
