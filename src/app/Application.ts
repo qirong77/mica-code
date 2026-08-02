@@ -118,7 +118,7 @@ export class Application {
 
       setActiveContext(this.context);
 
-      useBuiltinPlugins(this, agent, sessionController, agentSessions, () => uiBridge.syncAgentStatusItems());
+      useBuiltinPlugins(this, agent, sessionController);
       const filePlugins = await setupFilePlugins({
         paths: pluginPaths,
         plugins,

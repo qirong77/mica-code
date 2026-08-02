@@ -153,11 +153,11 @@ export class SessionController {
     return true;
   }
 
-  renameCurrent(title: string, source: 'auto' | 'manual' = 'manual'): void {
+  renameCurrent(title: string): void {
     const now = new Date().toISOString();
     const nextTitle = normalizeSessionTitle(title);
     this.currentTitleOverride = nextTitle;
-    this.currentTitleSource = source;
+    this.currentTitleSource = 'manual';
 
     const existing = this.store.load(this.currentSessionId);
     const snapshot = this.agent.getSnapshot();
@@ -167,7 +167,7 @@ export class SessionController {
       revision: (existing?.revision ?? 0) + 1,
       id: this.currentSessionId,
       title: nextTitle,
-      titleSource: source,
+      titleSource: 'manual',
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
@@ -180,22 +180,6 @@ export class SessionController {
 
   getCurrentTitle(): string | null {
     return this.currentTitleOverride;
-  }
-
-  hasManualTitle(): boolean {
-    if (this.currentTitleSource === 'manual') return true;
-    const existing = this.store.load(this.currentSessionId);
-    if (!existing) return false;
-    if (existing.titleSource === 'manual') return true;
-    if (existing.titleSource) return false;
-    const messages = getPersistedConversationMessages(existing.snapshot);
-    return existing.title !== deriveTitle(getTitleConversationMessages(this.agent, messages));
-  }
-
-  tryAutoRename(expectedSessionId: string, title: string): boolean {
-    if (this.currentSessionId !== expectedSessionId || this.hasManualTitle()) return false;
-    this.renameCurrent(title, 'auto');
-    return true;
   }
 
   getCurrentSessionId(): string {

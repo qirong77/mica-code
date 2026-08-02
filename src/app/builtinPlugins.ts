@@ -17,8 +17,6 @@ import setupCommandRename from '../../buildin-plugins/command-rename.mjs';
 import setupCommandResume from '../../buildin-plugins/command-resume.mjs';
 import setupCommandRewind from '../../buildin-plugins/command-rewind.mjs';
 import setupMicaCodeAppNotify from '../../buildin-plugins/mica-code-app-notify.mjs';
-import setupSessionAutoTitle from '../../buildin-plugins/session-auto-title.mjs';
-import type { TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;
@@ -28,20 +26,12 @@ export function useBuiltinPlugins(
   app: PluginHost,
   agent: AgentRuntime,
   sessionController: SessionController,
-  agentSessions?: TerminalAgentSessionManager,
-  onAgentTitleChanged?: () => void,
 ): PluginHost {
   app.use(new BuiltInCommandsPlugin(agent, sessionController));
   for (const plugin of builtinCommandFilePlugins()) app.use(plugin);
   app
     .use(createBuiltinFilePlugin('runtime.messageQueue', 'Message Queue', setupMessageQueue))
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
-    .use(
-      createBuiltinFilePlugin('session-auto-title', 'Session Auto Title', (ctx) => {
-        if (!agentSessions) throw new Error('session-auto-title requires agent sessions');
-        setupSessionAutoTitle(ctx, agentSessions, onAgentTitleChanged);
-      }),
-    )
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(new TodoPlugin())
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
