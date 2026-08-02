@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
 import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
+import { TodoWriteTool } from '../../buildin-plugins/todo/TodoTool.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
+import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import {
   createRunJsonError,
   createRunJsonStepFinish,
@@ -29,6 +31,7 @@ export type HeadlessRunOptions = {
   variant?: string;
   role?: string;
   maxTurns?: number;
+  thinking?: boolean;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   writer?: RunJsonWriter;
@@ -49,6 +52,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
   let agent: AgentRuntime | null = null;
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
+  let todoTool: TodoWriteTool | null = null;
   let projector: RunJsonProjector | null = null;
   let sessionId = '';
   let mcpStarted = false;
@@ -97,6 +101,8 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     });
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
+    todoTool = new TodoWriteTool();
+    micaTools.registerRuntime(todoTool, { primaryAgentOnly: true });
 
     if (options.sessionId) {
       const resumed = sessionController.resume(options.sessionId);
@@ -124,7 +130,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     throwIfAborted(options.signal);
 
     sessionId = sessionController.getCurrentSessionId();
-    projector = attachRunJsonProjector(agent, writer, sessionId);
+    projector = attachRunJsonProjector(agent, writer, sessionId, { thinking: options.thinking === true });
     writer.write(createRunJsonStepStart(sessionId));
     sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
 
@@ -137,7 +143,11 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     throwIfAborted(options.signal);
 
     try {
-      const result = await agent.run(prompt, { maxTurns: options.maxTurns });
+      // Resolve [Image](...) refs into multimodal content blocks like the
+      // interactive input path does, so headless consumers (Web Chat) can
+      // attach pasted images to a turn.
+      const content = await parseImageRefs(prompt);
+      const result = await agent.run(content, { maxTurns: options.maxTurns });
       text = projector.completeText(result.text);
       status = 'completed';
       sessionController.saveCurrent({ turnState: 'completed' });
@@ -199,6 +209,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
       ),
       ...(mcpStarted ? [cleanup('shut down MCP', () => micaMcp.shutdown(), 5000)] : []),
     ]);
+    if (todoTool) micaTools.unregisterRuntime(todoTool);
     micaTools.unregisterRuntime('Agent');
     disposeModelEffortContext();
   }
@@ -223,12 +234,14 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 async function ensureHeadlessModelRule(model: string, signal?: AbortSignal): Promise<void> {
-  void micaConfig.ensureModelRule(model, signal).catch((error) => {
+  try {
+    await micaConfig.ensureModelRule(model, signal);
+  } catch (error) {
     throwIfAborted(signal);
     console.error(
       `Model metadata unavailable for ${model}; using generic defaults: ${error instanceof Error ? error.message : String(error)}`,
     );
-  });
+  }
 }
 
 async function cleanup(label: string, action: () => unknown | Promise<unknown>, timeoutMs = 2000): Promise<void> {

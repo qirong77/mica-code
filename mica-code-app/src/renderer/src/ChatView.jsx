@@ -1,0 +1,2473 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} from 'react'
+import {
+  ArrowDown,
+  Bot,
+  Brain,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleDot,
+  Command,
+  Copy,
+  ExternalLink,
+  ListTodo,
+  LoaderCircle,
+  Send,
+  Square,
+  Terminal,
+  X
+} from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import {
+  CHAT_COMMANDS,
+  commandInputValue,
+  commandSuggestions,
+  findChatCommand,
+  parseSlashCommand
+} from './chat-commands'
+import { useLatest } from './hooks'
+import { uid } from './workspace'
+
+const MAX_INPUT_ROWS = 10
+const MAX_TOOL_PREVIEW = 6000
+const SCROLL_BOTTOM_THRESHOLD = 72
+
+const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
+const RATIO_THRESHOLDS = [40, 50, 60, 70]
+const TOKEN_LEVEL_CLASS = [
+  '',
+  'chat-status-warn',
+  'chat-status-warn',
+  'chat-status-hot',
+  'chat-status-error'
+]
+const RATIO_LEVEL_CLASS = [
+  '',
+  'chat-status-warn',
+  'chat-status-hot',
+  'chat-status-error',
+  'chat-status-error'
+]
+
+function levelFor(value, thresholds) {
+  let level = 0
+  for (const threshold of thresholds) {
+    if (value >= threshold) level += 1
+  }
+  return level
+}
+
+function formatTokens(tokens) {
+  if (!Number.isFinite(tokens) || tokens <= 0) return '0'
+  if (tokens < 1000) return `${Math.round(tokens)}`
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`
+  return `${(tokens / 1_000_000).toFixed(2)}M`
+}
+
+const EFFORT_OPTIONS = [
+  { value: 'none', detail: '不发送推理参数' },
+  { value: 'low', detail: '轻量推理' },
+  { value: 'medium', detail: '默认推理' },
+  { value: 'high', detail: '深度推理' },
+  { value: 'xhigh', detail: '最强推理' }
+]
+
+const TOOL_ICONS = {
+  read_file: '📖',
+  read_image: '📷',
+  write_file: '✍',
+  apply_patch: '◫',
+  list_files: '📂',
+  grep_search: '⌕',
+  run_shell: '⚡',
+  web_fetch: '↗',
+  web_search: '◎',
+  Skill: '✦',
+  Agent: '◇',
+  TodoWrite: '☑',
+  background_tasks: '☷',
+  read_task_output: '☷',
+  kill_task: '■'
+}
+
+const TOOL_LABELS = {
+  read_file: 'Read file',
+  read_image: 'Read image',
+  write_file: 'Write file',
+  apply_patch: 'Apply patch',
+  list_files: 'List files',
+  grep_search: 'Search code',
+  run_shell: 'Shell',
+  web_fetch: 'Fetch web',
+  web_search: 'Search web',
+  Skill: 'Load skill',
+  Agent: 'Subagent',
+  TodoWrite: 'Plan',
+  background_tasks: 'Background tasks',
+  read_task_output: 'Task output',
+  kill_task: 'Stop task'
+}
+
+function copyText(text) {
+  if (!text) return Promise.resolve()
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).catch(() => {})
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
+  return Promise.resolve()
+}
+
+function useCopied(resetMs = 1400) {
+  const [copied, setCopied] = useState(false)
+  const copy = useCallback(
+    (text) => {
+      void copyText(text).then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), resetMs)
+      })
+    },
+    [resetMs]
+  )
+  return [copied, copy]
+}
+
+function nodeText(node) {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join('')
+  return nodeText(node.props?.children)
+}
+
+function CodeBlock({ children }) {
+  const [copied, copy] = useCopied()
+  const child = Array.isArray(children) ? children[0] : children
+  const code = nodeText(child?.props?.children ?? children).replace(/\n$/, '')
+  const language = /language-([^\s]+)/.exec(child?.props?.className || '')?.[1] || 'text'
+
+  return (
+    <div className="chat-code-block">
+      <div className="chat-code-header">
+        <span>{language}</span>
+        <button type="button" onClick={() => copy(code)} aria-label="复制代码">
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  )
+}
+
+function isExternalHref(href) {
+  return /^(https?:|mailto:)/i.test(href || '')
+}
+
+export function chatUrlTransform(url) {
+  if (!url) return ''
+  if (
+    isExternalHref(url) ||
+    url.startsWith('#') ||
+    url.startsWith('file://') ||
+    /^[a-zA-Z]:[\\/]/.test(url)
+  ) {
+    return url
+  }
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url)) return ''
+  return url
+}
+
+export function fileTarget(href) {
+  if (!href || href.startsWith('#') || isExternalHref(href)) return null
+  let decoded = href
+  if (href.startsWith('file://')) {
+    try {
+      const fileUrl = new URL(href)
+      let pathname = fileUrl.pathname
+      try {
+        pathname = decodeURIComponent(pathname)
+      } catch {
+        // Keep the encoded path when it contains malformed escapes.
+      }
+      decoded = `${fileUrl.host ? `//${fileUrl.host}` : ''}${pathname}${fileUrl.hash}`
+      if (/^\/[a-zA-Z]:\//.test(decoded)) decoded = decoded.slice(1)
+    } catch {
+      return null
+    }
+  } else {
+    try {
+      decoded = decodeURIComponent(href)
+    } catch {
+      // Keep the original href when it is not URI encoded.
+    }
+  }
+  const hashLine = /#L(\d+)(?:C(\d+))?$/.exec(decoded)
+  if (hashLine) {
+    return {
+      path: decoded.slice(0, hashLine.index),
+      line: Number(hashLine[1]),
+      column: Number(hashLine[2]) || 1
+    }
+  }
+  const suffix = /^(.*?):(\d+)(?::(\d+))?$/.exec(decoded)
+  if (suffix) {
+    return {
+      path: suffix[1],
+      line: Number(suffix[2]),
+      column: Number(suffix[3]) || 1
+    }
+  }
+  return { path: decoded, line: 1, column: 1 }
+}
+
+export function resolveChatPath(target, cwd) {
+  if (
+    !target ||
+    !cwd ||
+    target.startsWith('~') ||
+    target.startsWith('\\\\') ||
+    /^(?:\/|[a-zA-Z]:[\\/])/.test(target)
+  ) {
+    return target
+  }
+  const windows = /^[a-zA-Z]:[\\/]/.test(cwd)
+  const separator = windows ? '\\' : '/'
+  const base = cwd.replace(/[\\/]+$/, '')
+  const relative = target.replace(/^[\\/]+/, '').replace(windows ? /\//g : /\\/g, separator)
+  return `${base}${separator}${relative}`
+}
+
+function MarkdownLink({ href, children, onOpenFile }) {
+  const target = fileTarget(href)
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        event.preventDefault()
+        if (target && onOpenFile) {
+          onOpenFile(target.path, { line: target.line, column: target.column })
+          return
+        }
+        if (isExternalHref(href)) window.mica.terminal.openExternal(href).catch(() => {})
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+export function Markdown({ text, muted = false, onOpenFile }) {
+  const components = useMemo(
+    () => ({
+      a: ({ href, children }) => (
+        <MarkdownLink href={href} onOpenFile={onOpenFile}>
+          {children}
+        </MarkdownLink>
+      ),
+      pre: CodeBlock,
+      table: ({ children }) => (
+        <div className="chat-table-wrap thin-scrollbar">
+          <table>{children}</table>
+        </div>
+      ),
+      input: (props) => <input {...props} disabled />,
+      img: ({ alt, ...props }) => <img {...props} alt={alt || ''} loading="lazy" />
+    }),
+    [onOpenFile]
+  )
+
+  return (
+    <div className={`chat-markdown ${muted ? 'chat-markdown-muted' : ''}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={components}
+        urlTransform={chatUrlTransform}
+        skipHtml
+      >
+        {text || ''}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+function formatInput(input) {
+  if (input == null) return ''
+  if (typeof input === 'string') return input
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return String(input)
+  }
+}
+
+function compactLine(value, max = 110) {
+  const line = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
+function toolSummary(tool) {
+  const input = tool.input || {}
+  switch (tool.tool) {
+    case 'read_file':
+    case 'read_image':
+      return compactLine(input.file_path || input.source || input.path)
+    case 'write_file':
+      return compactLine(input.file_path)
+    case 'apply_patch':
+      return compactLine(
+        String(input.patch || '').match(/\*\*\* (?:Update|Add) File: ([^\n]+)/)?.[1] || ''
+      )
+    case 'list_files':
+      return compactLine([input.path, input.pattern].filter(Boolean).join(' · '))
+    case 'grep_search':
+      return compactLine([input.pattern, input.path].filter(Boolean).join(' · '))
+    case 'run_shell':
+      return compactLine(input.command)
+    case 'web_search':
+      return compactLine(input.query)
+    case 'web_fetch':
+      return compactLine(input.url)
+    case 'Skill':
+      return compactLine(input.skill)
+    case 'Agent':
+      return compactLine(
+        [input.subagent_type, input.description || input.operation].filter(Boolean).join(' · ')
+      )
+    case 'background_tasks':
+      return compactLine(input.status || 'all')
+    case 'read_task_output':
+    case 'kill_task':
+      return compactLine(input.task_id)
+    default:
+      return compactLine(Object.values(input).find((value) => typeof value === 'string') || '')
+  }
+}
+
+function toolDisplayName(tool) {
+  if (tool.tool === 'Agent') {
+    const operation = tool.input?.operation || 'run'
+    if (operation === 'run_many') return 'Subagents'
+    if (operation !== 'run') return `Subagent · ${operation}`
+  }
+  return TOOL_LABELS[tool.tool] || tool.tool
+}
+
+function backgroundTaskId(tool) {
+  if (tool.tool !== 'run_shell' || !tool.input?.run_in_background) return ''
+  return /id:\s*([\w-]{6,})/i.exec(String(tool.output || ''))?.[1] || ''
+}
+
+function ToolRow({ tool }) {
+  const [open, setOpen] = useState(false)
+  const [copied, copy] = useCopied()
+  const input = formatInput(tool.input)
+  const output = String(tool.output || '')
+  const detail = [input && `input\n${input}`, output && `output\n${output}`]
+    .filter(Boolean)
+    .join('\n\n')
+  const preview =
+    detail.length > MAX_TOOL_PREVIEW
+      ? `${detail.slice(0, MAX_TOOL_PREVIEW)}\n…[界面预览已截断，复制可获取完整内容]`
+      : detail
+  const summary = toolSummary(tool)
+  const running = tool.status === 'pending' || tool.status === 'running'
+  const failed = tool.status === 'error'
+  const aborted = tool.status === 'aborted'
+  const background = tool.tool === 'run_shell' && tool.input?.run_in_background
+  const duration = formatDuration(
+    Math.max(0, (tool.finishedAt || tool.updatedAt || Date.now()) - (tool.startedAt || Date.now()))
+  )
+  const taskId = backgroundTaskId(tool)
+
+  return (
+    <div
+      className={`chat-tool-row ${failed ? 'chat-tool-error' : ''} ${tool.tool === 'Agent' ? 'chat-tool-agent' : ''}`}
+    >
+      <button
+        type="button"
+        className="chat-tool-trigger"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="chat-tool-chevron">
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </span>
+        <span className="chat-tool-icon">
+          {running ? (
+            <LoaderCircle size={12} className="animate-spin" />
+          ) : tool.tool === 'Agent' ? (
+            <Bot size={12} />
+          ) : (
+            TOOL_ICONS[tool.tool] || '⚙'
+          )}
+        </span>
+        <span className="chat-tool-name">{toolDisplayName(tool)}</span>
+        {summary && <span className="chat-tool-summary">{summary}</span>}
+        {background && <span className="chat-tool-badge">background</span>}
+        <span className="chat-tool-state">
+          {failed
+            ? '失败'
+            : aborted
+              ? '已停止'
+              : running
+                ? '运行中'
+                : [taskId, duration].filter(Boolean).join(' · ') || '完成'}
+        </span>
+      </button>
+      {open && (
+        <div className="chat-tool-detail">
+          <button type="button" onClick={() => copy(detail)} aria-label="复制工具详情">
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? '已复制' : '复制'}
+          </button>
+          <pre className="thin-scrollbar">{preview || '无详情'}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function thinkingTitle(text) {
+  const source = String(text || '')
+    .replace(/```[\s\S]*?```/g, '')
+    .trim()
+  const heading = source.match(/^\s{0,3}#{1,6}\s+(.+)$/m)?.[1]
+  const bold = source.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)?.[1]
+  return compactLine(heading || bold || source.split('\n').find((line) => line.trim()) || '', 90)
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 1000) return ''
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+}
+
+function ReasoningRow({ message, onOpenFile }) {
+  const [open, setOpen] = useState(true)
+  const [expanded, setExpanded] = useState(false)
+  const bodyRef = useRef(null)
+  const followRef = useRef(true)
+  const title = thinkingTitle(message.text)
+  const duration = message.done
+    ? formatDuration(Math.max(0, (message.finishedAt || message.updatedAt) - message.startedAt))
+    : ''
+
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!body || expanded || message.done || !followRef.current) return
+    body.scrollTop = body.scrollHeight
+  }, [expanded, message.done, message.text])
+
+  return (
+    <div className={`chat-reasoning ${message.done ? '' : 'chat-reasoning-active'}`}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+        {message.done ? <Brain size={12} /> : <LoaderCircle size={12} className="animate-spin" />}
+        <span className="chat-reasoning-label">{message.done ? 'Thought' : 'Thinking'}</span>
+        {title && <span className="chat-reasoning-title">{title}</span>}
+        {duration && <span className="chat-reasoning-duration">{duration}</span>}
+      </button>
+      {open && message.text && (
+        <div
+          ref={bodyRef}
+          className={`chat-reasoning-body thin-scrollbar ${expanded ? 'chat-reasoning-expanded' : 'chat-reasoning-preview'}`}
+          onScroll={(event) => {
+            const element = event.currentTarget
+            followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24
+          }}
+        >
+          <div className="chat-reasoning-content">
+            <Markdown text={message.text} muted onOpenFile={onOpenFile} />
+          </div>
+          {(message.text.length > 900 || expanded) && (
+            <button
+              type="button"
+              className="chat-reasoning-expand"
+              onClick={() => {
+                followRef.current = true
+                setExpanded((value) => !value)
+              }}
+            >
+              {expanded ? '收起为实时预览' : '展开完整思考'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function usageValues(usage) {
+  if (!usage) return null
+  const total = usage.total_tokens ?? usage.totalTokens ?? usage.total ?? null
+  const input = usage.prompt_tokens ?? usage.inputTokens ?? usage.input ?? null
+  const output = usage.completion_tokens ?? usage.outputTokens ?? usage.output ?? null
+  const cached = usage.cachedInputTokens ?? usage.cacheRead ?? usage.cache?.read ?? null
+  if (total == null && input == null && output == null && cached == null) return null
+  return { total, input, output, cached }
+}
+
+function tokenCount(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return ''
+  if (number < 1000) return String(Math.round(number))
+  return `${(number / 1000).toFixed(number < 10_000 ? 1 : 0)}K`
+}
+
+function UsageLine({ usage }) {
+  const values = usageValues(usage)
+  if (!values) return null
+  const parts = []
+  if (values.total != null) parts.push(`${tokenCount(values.total)} tokens`)
+  if (values.input != null) parts.push(`in ${tokenCount(values.input)}`)
+  if (values.output != null) parts.push(`out ${tokenCount(values.output)}`)
+  if (values.cached) parts.push(`cached ${tokenCount(values.cached)}`)
+  return <div className="chat-usage">{parts.join(' · ')}</div>
+}
+
+function MessageActions({ text }) {
+  const [copied, copy] = useCopied()
+  return (
+    <button
+      type="button"
+      className="chat-message-copy"
+      aria-label="复制消息"
+      title={copied ? '已复制' : '复制'}
+      onClick={() => copy(text)}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  )
+}
+
+export function latestTodoItems(messages) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.kind !== 'tool' || message.tool?.tool !== 'TodoWrite') continue
+    if (message.tool.status !== 'completed') continue
+    const todos = message.tool.input?.todos
+    if (!Array.isArray(todos) || todos.length > 20) continue
+    const normalized = []
+    let inProgress = 0
+    let valid = true
+    for (const item of todos) {
+      const keys = item && typeof item === 'object' ? Object.keys(item) : []
+      const content = typeof item?.content === 'string' ? item.content.trim() : ''
+      const activeForm = typeof item?.activeForm === 'string' ? item.activeForm.trim() : ''
+      if (
+        keys.some((key) => !['content', 'activeForm', 'status'].includes(key)) ||
+        !content ||
+        !activeForm ||
+        content.length > 240 ||
+        activeForm.length > 240 ||
+        !['pending', 'in_progress', 'completed'].includes(item?.status)
+      ) {
+        valid = false
+        break
+      }
+      if (item.status === 'in_progress') inProgress += 1
+      normalized.push({ content, activeForm, status: item.status })
+    }
+    if (valid && inProgress <= 1) return normalized
+  }
+  return []
+}
+
+function TodoDock({ items, hidden, onToggleHidden }) {
+  const [open, setOpen] = useState(true)
+  const completed = items.filter((item) => item.status === 'completed').length
+  const current = items.find((item) => item.status === 'in_progress')
+  const allCompleted = items.length > 0 && completed === items.length
+
+  useEffect(() => {
+    if (allCompleted) setOpen(false)
+    else if (current) setOpen(true)
+  }, [allCompleted, current])
+
+  if (!items.length || hidden) return null
+
+  return (
+    <section className="chat-todo-dock" aria-label="当前运行计划">
+      <button type="button" className="chat-todo-header" onClick={() => setOpen((value) => !value)}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <ListTodo size={12} />
+        <span>Plan</span>
+        <span className="chat-todo-current">
+          {current?.activeForm || (completed === items.length ? '全部完成' : '等待继续')}
+        </span>
+        <span className="chat-todo-progress">
+          {completed}/{items.length}
+        </span>
+      </button>
+      {open && (
+        <div className="chat-todo-list">
+          {items.map((item, index) => (
+            <div
+              key={`${index}:${item.content}`}
+              className={`chat-todo-item chat-todo-${item.status}`}
+            >
+              {item.status === 'completed' ? (
+                <CheckCircle2 size={12} />
+              ) : item.status === 'in_progress' ? (
+                <CircleDot size={12} />
+              ) : (
+                <Circle size={12} />
+              )}
+              <span>{item.status === 'in_progress' ? item.activeForm : item.content}</span>
+            </div>
+          ))}
+          <button type="button" className="chat-todo-hide" onClick={() => onToggleHidden(true)}>
+            隐藏计划
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CommandRow({ message, onCommandAction }) {
+  return (
+    <div className={`chat-command-result chat-command-${message.variant || 'info'}`}>
+      <Command size={12} />
+      <div className="chat-command-result-body">
+        <div className="chat-command-result-title">{message.title}</div>
+        {message.detail && <pre>{message.detail}</pre>}
+      </div>
+      {message.action && (
+        <button type="button" onClick={() => onCommandAction?.(message)}>
+          {message.action === 'terminal' && <Terminal size={12} />}
+          {message.actionLabel || '打开'}
+          <ExternalLink size={10} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CommandPalette({ commands, activeIndex, onActiveIndex, onSelect }) {
+  if (!commands.length) return null
+  return (
+    <div className="chat-command-palette" role="listbox" aria-label="Mica 快捷命令">
+      <div className="chat-command-palette-title">
+        <Command size={12} /> Mica commands
+        <span>↑↓ 选择 · Tab 补全 · Esc 关闭</span>
+      </div>
+      {commands.map((command, index) => (
+        <button
+          key={command.name}
+          type="button"
+          role="option"
+          aria-selected={index === activeIndex}
+          className={index === activeIndex ? 'chat-command-active' : ''}
+          onMouseEnter={() => onActiveIndex(index)}
+          onClick={() => onSelect(command)}
+        >
+          <code>/{command.name}</code>
+          {command.argument && <span className="chat-command-argument">{command.argument}</span>}
+          <span className="chat-command-description">{command.description}</span>
+          <span className={`chat-command-availability chat-command-${command.availability}`}>
+            {command.availability === 'chat' ? 'Chat' : 'Terminal'}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SelectPalette({
+  title,
+  options,
+  activeIndex,
+  onActiveIndex,
+  onSelect,
+  selectedValue,
+  loading,
+  error
+}) {
+  return (
+    <div className="chat-command-palette chat-select-palette" role="listbox" aria-label={title}>
+      <div className="chat-command-palette-title">
+        <Command size={12} /> {title}
+        <span>↑↓ 选择 · Enter 确认 · Esc 关闭</span>
+      </div>
+      {loading && <div className="chat-select-empty">正在加载…</div>}
+      {!loading && error && <div className="chat-select-empty chat-select-error">{error}</div>}
+      {!loading &&
+        !error &&
+        options.map((option, index) => (
+          <button
+            key={option.value}
+            type="button"
+            role="option"
+            aria-selected={index === activeIndex}
+            className={index === activeIndex ? 'chat-command-active' : ''}
+            onMouseEnter={() => onActiveIndex(index)}
+            onClick={() => onSelect(option)}
+          >
+            <span className="chat-select-check">{option.value === selectedValue ? '✓' : ''}</span>
+            <span className="chat-select-label">{option.label ?? option.value}</span>
+            {option.detail && <span className="chat-select-detail">{option.detail}</span>}
+          </button>
+        ))}
+    </div>
+  )
+}
+
+function useEscape(onClose) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+}
+
+function ContextModal({ meta, onClose }) {
+  useEscape(onClose)
+  const usage = usageValues(meta?.lastUsage)
+  const contextWindow = Number(meta?.contextWindowSize) || 0
+  const percent =
+    usage?.total != null && contextWindow > 0
+      ? Math.min(100, Math.round((usage.total / contextWindow) * 100))
+      : null
+  const rows = [
+    ['tokens', usage?.total != null ? tokenCount(usage.total) : '—'],
+    ['input', usage?.input != null ? tokenCount(usage.input) : '—'],
+    ['output', usage?.output != null ? tokenCount(usage.output) : '—'],
+    ['cached', usage?.cached != null ? tokenCount(usage.cached) : '—'],
+    ['window', contextWindow > 0 ? tokenCount(contextWindow) : '—'],
+    ['used', percent != null ? `${percent}%` : '—']
+  ]
+  return (
+    <div className="chat-modal-overlay" onClick={onClose}>
+      <div
+        className="chat-modal"
+        role="dialog"
+        aria-label="上下文占用"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="chat-modal-header">
+          <span>Context usage</span>
+          <button type="button" title="关闭" aria-label="关闭" onClick={onClose}>
+            <X size={13} />
+          </button>
+        </div>
+        <div className="chat-modal-body">
+          {percent != null && (
+            <div className="chat-context-bar">
+              <div style={{ width: `${percent}%` }} />
+            </div>
+          )}
+          <dl className="chat-context-rows">
+            {rows.map(([label, value]) => (
+              <div key={label} className="chat-context-row">
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {meta && <p className="chat-context-model">{modelSummaryTitle(meta)}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function shortPath(path, max = 46) {
+  if (!path) return ''
+  const value = String(path)
+  if (value.length <= max) return value
+  const parts = value.split(/[\\/]/).filter(Boolean)
+  let head = ''
+  let tail = ''
+  if (value.startsWith('/')) head = '/'
+  else if (/^[a-zA-Z]:[\\/]/.test(value)) head = value.slice(0, 3)
+  const budget = max - head.length - 3
+  for (const part of parts) {
+    if (tail.length + part.length + 1 <= budget) tail = tail ? `${tail}/${part}` : part
+    else break
+  }
+  return `${head}…/${tail}`.slice(0, max)
+}
+
+function MessageRow({ message, onOpenFile, onCommandAction }) {
+  if (message.kind === 'command') {
+    return <CommandRow message={message} onCommandAction={onCommandAction} />
+  }
+  if (message.kind === 'notice') {
+    return (
+      <div className={`chat-notice ${message.variant === 'error' ? 'chat-notice-error' : ''}`}>
+        <span>▌</span>
+        <div>{message.text}</div>
+      </div>
+    )
+  }
+  if (message.kind === 'tool') {
+    if (message.tool?.tool === 'TodoWrite') return null
+    return <ToolRow tool={message.tool} />
+  }
+  if (message.kind === 'reasoning') {
+    return <ReasoningRow message={message} onOpenFile={onOpenFile} />
+  }
+  if (message.role === 'user') {
+    return (
+      <div className="chat-message chat-message-user">
+        <div className="chat-message-marker">▌</div>
+        <div className="chat-message-body whitespace-pre-wrap break-words">{message.text}</div>
+        <MessageActions text={message.text} />
+      </div>
+    )
+  }
+  return (
+    <div
+      className={`chat-message chat-message-assistant ${message.done ? '' : 'chat-message-active'}`}
+    >
+      <div className="chat-message-marker">●</div>
+      <div className="chat-message-body">
+        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+        <UsageLine usage={message.usage} />
+      </div>
+      {message.done && <MessageActions text={message.text} />}
+    </div>
+  )
+}
+
+function WelcomeHint({ cwd }) {
+  return (
+    <div className="chat-welcome">
+      <div className="chat-welcome-command">
+        <span>❯</span> mica
+      </div>
+      <p>输入任务开始对话。Mica 会直接在当前工作区读取代码、调用工具并持续汇报进度。</p>
+      {cwd && <code>{cwd}</code>}
+    </div>
+  )
+}
+
+function statusLabel(phase) {
+  switch (phase) {
+    case 'thinking':
+      return 'Thinking'
+    case 'streaming':
+      return 'Responding'
+    case 'working':
+      return 'Working'
+    case 'stopping':
+      return 'Stopping'
+    default:
+      return 'Connecting'
+  }
+}
+
+function modelSummary(meta) {
+  if (!meta) return ''
+  const model = meta.model || meta.providerId || ''
+  const effort = meta.effort && meta.effort !== 'none' ? `_${meta.effort}` : ''
+  return `${model}${effort}`
+}
+
+function modelSummaryTitle(meta) {
+  if (!meta) return ''
+  const usage = usageValues(meta.lastUsage)
+  const context = usage?.total != null ? tokenCount(usage.total) : ''
+  const cached = meta.cachedRate > 0 ? `cached ${Math.round(meta.cachedRate * 100)}%` : ''
+  const contextPercent =
+    usage?.total != null && meta.contextWindowSize
+      ? `ctx ${Math.round((usage.total / meta.contextWindowSize) * 100)}%`
+      : ''
+  return [
+    modelSummary(meta),
+    context,
+    cached || contextPercent ? `(${[cached, contextPercent].filter(Boolean).join(', ')})` : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function eventKey(event) {
+  try {
+    return JSON.stringify(event)
+  } catch {
+    return `${event?.type}:${event?.timestamp}`
+  }
+}
+
+export function mergeReplayEvents(buffered = [], pending = []) {
+  const events = []
+  const seen = new Set()
+  let lastSequence = 0
+  for (const record of buffered) {
+    const event = record?.event || record
+    const sequence = Number(record?.sequence) || 0
+    if (sequence) lastSequence = Math.max(lastSequence, sequence)
+    else seen.add(eventKey(event))
+    events.push(event)
+  }
+  for (const record of pending) {
+    const event = record?.event || record
+    const sequence = Number(record?.sequence) || 0
+    if (sequence ? sequence > lastSequence : !seen.has(eventKey(event))) events.push(event)
+  }
+  return events
+}
+
+function historyMessages(rows, key) {
+  return (Array.isArray(rows) ? rows : []).map((row, index) => ({
+    id: `history-${key}-${index}`,
+    kind: row.role === 'notice' ? 'notice' : 'message',
+    role: row.role,
+    text: row.text || '',
+    usage: row.usage ?? null,
+    done: true,
+    variant: row.role === 'notice' ? 'info' : undefined
+  }))
+}
+
+export function hasPersistedTurn(messages, prompt) {
+  if (!prompt) return false
+  const userIndex = messages.findLastIndex(
+    (message) => message.role === 'user' && message.text === prompt
+  )
+  return (
+    userIndex >= 0 &&
+    messages.slice(userIndex + 1).some((message) => message.role === 'assistant' && message.text)
+  )
+}
+
+export function historyBeforeRunReplay(messages, prompt) {
+  if (!prompt) return messages
+  const userIndex = messages.findLastIndex(
+    (message) => message.role === 'user' && message.text === prompt
+  )
+  return userIndex >= 0 ? messages.slice(0, userIndex + 1) : messages
+}
+
+export function isPersistedRunComplete(meta, startedAt) {
+  if (!meta?.turnState || meta.turnState === 'running' || !startedAt) return false
+  const updatedAt = Date.parse(meta.updatedAt || '')
+  return Number.isFinite(updatedAt) && updatedAt > startedAt
+}
+
+function persistedTranscript(messages) {
+  const result = []
+  for (const message of messages) {
+    if (message.kind !== 'message' && message.kind !== 'notice') continue
+    const role = message.role
+    const text = message.text || ''
+    const previous = result.at(-1)
+    if (previous?.role === role && role === 'assistant') previous.text += text
+    else result.push({ role, text })
+  }
+  return result
+}
+
+export function canReuseVisualTranscript(cached, persisted) {
+  return (
+    JSON.stringify(persistedTranscript(cached)) === JSON.stringify(persistedTranscript(persisted))
+  )
+}
+
+export function ChatView({
+  node,
+  cwd,
+  visible,
+  onSessionBound,
+  onOpenFile,
+  onNewSession,
+  onResumeSession,
+  onOpenTerminal,
+  onSessionRenamed
+}) {
+  const nodeId = node?.id || null
+  const nodeIdRef = useLatest(nodeId)
+  const cwdRef = useLatest(cwd)
+  const onSessionBoundRef = useLatest(onSessionBound)
+  const onOpenFileRef = useLatest(onOpenFile)
+  const onNewSessionRef = useLatest(onNewSession)
+  const onResumeSessionRef = useLatest(onResumeSession)
+  const onOpenTerminalRef = useLatest(onOpenTerminal)
+  const onSessionRenamedRef = useLatest(onSessionRenamed)
+  const sessionIdRef = useRef(node?.sessionId || null)
+  const streamRef = useRef({ id: null, kind: null, turnId: null })
+  const turnRef = useRef(null)
+  const finishedRef = useRef(true)
+  const restoringRef = useRef(false)
+  const restoreGenerationRef = useRef(0)
+  const pendingEventsRef = useRef([])
+  const pendingExitRef = useRef(null)
+  const loadedNodeRef = useRef(null)
+  const transcriptCacheRef = useRef(new Map())
+  const draftsRef = useRef(new Map())
+  const todoHiddenRef = useRef(new Map())
+  const inputHistoryRef = useRef(new Map())
+  const historyCursorRef = useRef(-1)
+  const stickToBottomRef = useRef(true)
+
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [running, setRunning] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [phase, setPhase] = useState('idle')
+  const [runStartedAt, setRunStartedAt] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [showJump, setShowJump] = useState(false)
+  const [meta, setMeta] = useState(null)
+  const [todoHidden, setTodoHidden] = useState(false)
+  const [commandIndex, setCommandIndex] = useState(0)
+  const [commandDismissed, setCommandDismissed] = useState(false)
+  const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
+  const forceRender = useReducer((version) => version + 1, 0)[1]
+  const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
+  const [pickerIndex, setPickerIndex] = useState(0)
+  const [contextOpen, setContextOpen] = useState(false)
+  const messagesRef = useRef([])
+  const modelProtocolsRef = useRef(null) // { map: { [modelId]: protocol }, currentProtocol }
+  const protocolBlockRef = useRef('')
+  const compactBusyRef = useRef(false)
+  const listRef = useRef(null)
+  const transcriptRef = useRef(null)
+  const composerDockRef = useRef(null)
+  const textareaRef = useRef(null)
+
+  const updateMessages = useCallback((update) => {
+    const next = typeof update === 'function' ? update(messagesRef.current) : update
+    messagesRef.current = next
+    setMessages(next)
+  }, [])
+
+  useEffect(() => {
+    sessionIdRef.current = node?.sessionId || null
+  }, [node?.sessionId])
+
+  const finishStream = useCallback(
+    (finishedAt = Date.now()) => {
+      const activeId = streamRef.current.id
+      if (!activeId) return
+      updateMessages((previous) =>
+        previous.map((message) =>
+          message.id === activeId ? { ...message, done: true, finishedAt } : message
+        )
+      )
+      streamRef.current = { id: null, kind: null, turnId: streamRef.current.turnId }
+    },
+    [updateMessages]
+  )
+
+  const finishPendingTools = useCallback(
+    (status, timestamp = Date.now()) => {
+      updateMessages((previous) =>
+        previous.map((message) => {
+          if (message.kind !== 'tool' || !['pending', 'running'].includes(message.tool.status)) {
+            return message
+          }
+          return {
+            ...message,
+            tool: {
+              ...message.tool,
+              status,
+              updatedAt: timestamp,
+              finishedAt: timestamp,
+              output:
+                message.tool.output ||
+                (status === 'aborted'
+                  ? '工具执行随当前 turn 一起停止。'
+                  : '工具调用结束前未收到结果。')
+            }
+          }
+        })
+      )
+    },
+    [updateMessages]
+  )
+
+  const appendPart = useCallback(
+    (kind, text, timestamp = Date.now()) => {
+      if (!text) return
+      updateMessages((previous) => {
+        const active = streamRef.current
+        if (active.id && active.kind === kind) {
+          return previous.map((message) =>
+            message.id === active.id
+              ? { ...message, text: `${message.text}${text}`, updatedAt: timestamp }
+              : message
+          )
+        }
+
+        const finalized = active.id
+          ? previous.map((message) =>
+              message.id === active.id ? { ...message, done: true, finishedAt: timestamp } : message
+            )
+          : previous
+        const id = uid(kind === 'reasoning' ? 'thought' : 'msg')
+        streamRef.current = { id, kind, turnId: turnRef.current }
+        return [
+          ...finalized,
+          {
+            id,
+            kind: kind === 'reasoning' ? 'reasoning' : 'message',
+            role: 'assistant',
+            text,
+            done: false,
+            turnId: turnRef.current,
+            startedAt: timestamp,
+            updatedAt: timestamp
+          }
+        ]
+      })
+    },
+    [updateMessages]
+  )
+
+  const appendNotice = useCallback(
+    (text, variant = 'info') => {
+      if (!text) return
+      updateMessages((previous) => [
+        ...previous,
+        { id: uid('notice'), kind: 'notice', role: 'notice', text, variant }
+      ])
+    },
+    [updateMessages]
+  )
+
+  const refreshMeta = useCallback(
+    (sessionId = sessionIdRef.current) => {
+      if (!sessionId) return
+      const targetNodeId = nodeIdRef.current
+      window.mica.chat
+        .meta(sessionId)
+        .then((value) => {
+          if (value && nodeIdRef.current === targetNodeId && sessionIdRef.current === sessionId) {
+            setMeta(value)
+          }
+        })
+        .catch(() => {})
+    },
+    [nodeIdRef]
+  )
+
+  const applyEvent = useCallback(
+    (event) => {
+      if (!event) return
+      const timestamp = Number(event.timestamp) || Date.now()
+      switch (event.type) {
+        case 'step_start': {
+          if (event.sessionID && !sessionIdRef.current) {
+            sessionIdRef.current = event.sessionID
+            onSessionBoundRef.current?.(nodeIdRef.current, event.sessionID)
+          }
+          turnRef.current = `${event.sessionID || nodeIdRef.current}:${timestamp}`
+          streamRef.current = { id: null, kind: null, turnId: turnRef.current }
+          finishedRef.current = false
+          setRunning(true)
+          setStopping(false)
+          setPhase('connecting')
+          setRunStartedAt((current) => current || timestamp)
+          break
+        }
+        case 'reasoning':
+          setPhase('thinking')
+          appendPart('reasoning', event.part?.text || '', timestamp)
+          break
+        case 'text':
+          setPhase('streaming')
+          appendPart('text', event.part?.text || '', timestamp)
+          break
+        case 'tool_use': {
+          finishStream(timestamp)
+          const part = event.part
+          if (!part?.tool) break
+          const callID = part.callID || uid('tool-call')
+          const tool = {
+            tool: part.tool,
+            callID,
+            status: part.state?.status || 'completed',
+            input: part.state?.input ?? {},
+            output: part.state?.output ?? part.state?.error ?? '',
+            startedAt: timestamp,
+            updatedAt: timestamp,
+            ...((part.state?.status || 'completed') === 'pending' ? {} : { finishedAt: timestamp })
+          }
+          updateMessages((previous) => {
+            const existing = previous.findIndex(
+              (message) => message.kind === 'tool' && message.tool.callID === callID
+            )
+            if (existing < 0) {
+              return [
+                ...previous,
+                { id: uid('tool'), kind: 'tool', role: 'tool', tool, turnId: turnRef.current }
+              ]
+            }
+            return previous.map((message, index) => {
+              if (index !== existing) return message
+              return {
+                ...message,
+                tool: {
+                  ...message.tool,
+                  ...tool,
+                  startedAt: message.tool.startedAt || timestamp,
+                  updatedAt: timestamp
+                }
+              }
+            })
+          })
+          setPhase('working')
+          break
+        }
+        case 'error':
+          finishStream(timestamp)
+          appendNotice(event.error?.data?.message || event.error?.name || '运行出错', 'error')
+          setPhase('error')
+          break
+        case 'step_finish': {
+          finishStream(timestamp)
+          finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
+          const usage = event.part?.tokens
+          if (usage) {
+            const turnId = turnRef.current
+            updateMessages((previous) => {
+              const index = previous.findLastIndex(
+                (message) =>
+                  message.kind === 'message' &&
+                  message.role === 'assistant' &&
+                  (!turnId || message.turnId === turnId)
+              )
+              if (index < 0) return previous
+              return previous.map((message, messageIndex) =>
+                messageIndex === index
+                  ? {
+                      ...message,
+                      usage: {
+                        total: usage.total,
+                        input: usage.input,
+                        output: usage.output,
+                        cacheRead: usage.cache?.read
+                      }
+                    }
+                  : message
+              )
+            })
+          }
+          finishedRef.current = true
+          setRunning(false)
+          setStopping(false)
+          setPhase(event.part?.reason === 'error' ? 'error' : 'idle')
+          if (event.sessionID) refreshMeta(event.sessionID)
+          break
+        }
+      }
+    },
+    [
+      appendNotice,
+      appendPart,
+      finishPendingTools,
+      finishStream,
+      nodeIdRef,
+      onSessionBoundRef,
+      refreshMeta,
+      updateMessages
+    ]
+  )
+  const applyEventRef = useLatest(applyEvent)
+
+  const processExit = useCallback(
+    (payload) => {
+      finishStream()
+      finishPendingTools(payload?.aborted ? 'aborted' : 'error')
+      if (!finishedRef.current && payload?.error) {
+        const message = compactLine(payload.error, 1000)
+        appendNotice(message || 'mica 进程异常退出', 'error')
+      }
+      if (!finishedRef.current && payload?.exitCode && !payload?.error) {
+        appendNotice(`mica 进程已退出（code ${payload.exitCode}）`, 'error')
+      }
+      finishedRef.current = true
+      setRunning(false)
+      setStopping(false)
+      setPhase('idle')
+      if (payload?.sessionId) refreshMeta(payload.sessionId)
+    },
+    [appendNotice, finishPendingTools, finishStream, refreshMeta]
+  )
+  const processExitRef = useLatest(processExit)
+
+  useEffect(() => {
+    if (!nodeId) return undefined
+    const offEvent = window.mica.chat.onEvent(({ id, sequence, event }) => {
+      if (id !== nodeIdRef.current) return
+      if (restoringRef.current) pendingEventsRef.current.push({ sequence, event })
+      else applyEventRef.current(event)
+    })
+    const offExit = window.mica.chat.onExit((payload) => {
+      if (payload.id !== nodeIdRef.current) return
+      if (restoringRef.current) pendingExitRef.current = payload
+      else processExitRef.current(payload)
+    })
+    return () => {
+      offEvent?.()
+      offExit?.()
+    }
+  }, [applyEventRef, nodeId, nodeIdRef, processExitRef])
+
+  useEffect(() => {
+    if (!nodeId) return undefined
+    const previousNodeId = loadedNodeRef.current
+    if (previousNodeId && previousNodeId !== nodeId && messagesRef.current.length > 0) {
+      transcriptCacheRef.current.set(previousNodeId, messagesRef.current)
+    }
+    loadedNodeRef.current = nodeId
+    const cachedTranscript = transcriptCacheRef.current.get(nodeId)
+    const generation = ++restoreGenerationRef.current
+    restoringRef.current = true
+    pendingEventsRef.current = []
+    pendingExitRef.current = null
+    stickToBottomRef.current = true
+    setShowJump(false)
+    updateMessages([])
+    setInput(draftsRef.current.get(nodeId) || '')
+    setTodoHidden(todoHiddenRef.current.get(nodeId) === true)
+    setCommandIndex(0)
+    setCommandDismissed(false)
+    setPicker(null)
+    setPickerIndex(0)
+    setRunning(false)
+    setStopping(false)
+    setPhase('idle')
+    setRunStartedAt(0)
+    setMeta(null)
+    setHistoryLoaded(false)
+    streamRef.current = { id: null, kind: null, turnId: null }
+    turnRef.current = null
+    finishedRef.current = true
+    historyCursorRef.current = -1
+    const sessionId = sessionIdRef.current
+
+    const restoreFinalSession = async (finalSessionId, fallbackRows) => {
+      if (!sessionIdRef.current) {
+        sessionIdRef.current = finalSessionId
+        onSessionBoundRef.current?.(nodeId, finalSessionId)
+      }
+      const [finalRows, finalMeta] = await Promise.all([
+        window.mica.chat.history(finalSessionId).catch(() => fallbackRows),
+        window.mica.chat.meta(finalSessionId).catch(() => null)
+      ])
+      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return false
+      const finalMessages = historyMessages(finalRows, finalSessionId)
+      const liveTranscript = messagesRef.current
+      updateMessages(
+        canReuseVisualTranscript(liveTranscript, finalMessages)
+          ? liveTranscript
+          : cachedTranscript && canReuseVisualTranscript(cachedTranscript, finalMessages)
+            ? cachedTranscript
+            : finalMessages
+      )
+      if (finalMeta) setMeta(finalMeta)
+      setHistoryLoaded(true)
+      setRunning(false)
+      setStopping(false)
+      setPhase('idle')
+      finishedRef.current = true
+      pendingEventsRef.current = []
+      restoringRef.current = false
+      if (pendingExitRef.current) {
+        processExitRef.current(pendingExitRef.current)
+        pendingExitRef.current = null
+      }
+      return true
+    }
+
+    const restore = async () => {
+      const [rows, sessionMeta] = await Promise.all([
+        sessionId ? window.mica.chat.history(sessionId).catch(() => []) : [],
+        sessionId ? window.mica.chat.meta(sessionId).catch(() => null) : null
+      ])
+      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      const restored = historyMessages(rows, sessionId || nodeId)
+      updateMessages(restored)
+      setMeta(sessionMeta)
+      setHistoryLoaded(true)
+
+      const state = await window.mica.chat.isRunning(nodeId).catch(() => null)
+      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      const stateSessionId = state?.sessionId || sessionIdRef.current
+      if (state?.running && stateSessionId && hasPersistedTurn(restored, state.prompt)) {
+        const latestMeta = await window.mica.chat.meta(stateSessionId).catch(() => null)
+        if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+        if (isPersistedRunComplete(latestMeta, state.startedAt)) {
+          updateMessages(historyBeforeRunReplay(restored, state.prompt))
+          for (const event of mergeReplayEvents(state.events, pendingEventsRef.current)) {
+            applyEventRef.current(event)
+          }
+          pendingEventsRef.current = []
+          await restoreFinalSession(stateSessionId, rows)
+          return
+        }
+      }
+      const pendingFinished = pendingEventsRef.current.some(
+        (record) => (record?.event || record)?.type === 'step_finish'
+      )
+      const pendingSessionId = pendingEventsRef.current.find(
+        (record) => (record?.event || record)?.sessionID
+      )?.event?.sessionID
+      if (state?.finished && Array.isArray(state.events) && state.events.length > 0) {
+        const replay = mergeReplayEvents(state.events, pendingEventsRef.current)
+        const replayFinished = replay.some((event) => event?.type === 'step_finish')
+        updateMessages(historyBeforeRunReplay(restored, state.prompt))
+        for (const event of replay) applyEventRef.current(event)
+        if (!replayFinished) {
+          finishPendingTools(state.exit?.aborted ? 'aborted' : 'error')
+        }
+        pendingEventsRef.current = []
+        const finalSessionId = state.sessionId || sessionIdRef.current || pendingSessionId
+        if (finalSessionId) await restoreFinalSession(finalSessionId, rows)
+        else {
+          restoringRef.current = false
+          setRunning(false)
+          finishedRef.current = true
+        }
+        if (!replayFinished && state.exit?.error) {
+          appendNotice(compactLine(state.exit.error, 1000), 'error')
+        }
+        return
+      }
+      if (
+        !state?.running &&
+        pendingFinished &&
+        (state?.sessionId || sessionIdRef.current || pendingSessionId)
+      ) {
+        const finalSessionId = state?.sessionId || sessionIdRef.current || pendingSessionId
+        for (const event of mergeReplayEvents(state?.events, pendingEventsRef.current)) {
+          applyEventRef.current(event)
+        }
+        pendingEventsRef.current = []
+        await restoreFinalSession(finalSessionId, rows)
+        return
+      }
+      if (state?.running) {
+        if (state.sessionId && !sessionIdRef.current) {
+          sessionIdRef.current = state.sessionId
+          onSessionBoundRef.current?.(nodeId, state.sessionId)
+        }
+        if (state.prompt && restored.at(-1)?.text !== state.prompt) {
+          updateMessages((previous) => [
+            ...previous,
+            { id: uid('msg'), kind: 'message', role: 'user', text: state.prompt, done: true }
+          ])
+        }
+        setRunStartedAt(state.startedAt || Date.now())
+        setRunning(true)
+        finishedRef.current = false
+      } else if (cachedTranscript && canReuseVisualTranscript(cachedTranscript, restored)) {
+        updateMessages(cachedTranscript)
+      }
+
+      for (const event of mergeReplayEvents(state?.events, pendingEventsRef.current)) {
+        applyEventRef.current(event)
+      }
+      pendingEventsRef.current = []
+      restoringRef.current = false
+      if (pendingExitRef.current) {
+        processExitRef.current(pendingExitRef.current)
+        pendingExitRef.current = null
+      }
+    }
+    void restore()
+    return undefined
+  }, [
+    appendNotice,
+    applyEventRef,
+    finishPendingTools,
+    nodeId,
+    nodeIdRef,
+    onSessionBoundRef,
+    processExitRef,
+    updateMessages
+  ])
+
+  useEffect(() => {
+    if (!running || !runStartedAt) {
+      setElapsed(0)
+      return undefined
+    }
+    const update = () => setElapsed(Math.max(0, Date.now() - runStartedAt))
+    update()
+    const timer = window.setInterval(update, 250)
+    return () => clearInterval(timer)
+  }, [runStartedAt, running])
+
+  useLayoutEffect(() => {
+    if (!stickToBottomRef.current) return undefined
+    const list = listRef.current
+    if (list) list.scrollTop = list.scrollHeight
+    return undefined
+  }, [messages, running, historyLoaded])
+
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    const composerDock = composerDockRef.current
+    if ((!transcript && !composerDock) || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottomRef.current) return
+      const list = listRef.current
+      if (list) list.scrollTop = list.scrollHeight
+    })
+    if (transcript) observer.observe(transcript)
+    if (composerDock) observer.observe(composerDock)
+    return () => observer.disconnect()
+  }, [nodeId])
+
+  useEffect(() => {
+    if (!visible || !nodeId || !historyLoaded) return
+    const timer = window.setTimeout(() => textareaRef.current?.focus(), 40)
+    return () => clearTimeout(timer)
+  }, [historyLoaded, nodeId, visible])
+
+  const resizeTextarea = useCallback(() => {
+    const element = textareaRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, MAX_INPUT_ROWS * 22)}px`
+  }, [])
+
+  useEffect(() => resizeTextarea(), [input, resizeTextarea])
+
+  const rememberInput = useCallback(
+    (text) => {
+      const history = inputHistoryRef.current.get(nodeId) || []
+      inputHistoryRef.current.set(
+        nodeId,
+        [...history.filter((item) => item !== text), text].slice(-100)
+      )
+      historyCursorRef.current = -1
+      draftsRef.current.set(nodeId, '')
+      setInput('')
+      setCommandDismissed(false)
+      setCommandIndex(0)
+    },
+    [nodeId]
+  )
+
+  const applyOverride = useCallback(
+    (kind, value) => {
+      const current = overridesRef.current.get(nodeId) || {}
+      const next = { ...current }
+      if (kind === 'model') next.model = value || undefined
+      else if (kind === 'variant') next.variant = value || undefined
+      else if (kind === 'role') next.role = value || undefined
+      overridesRef.current.set(nodeId, next)
+      forceRender()
+    },
+    [forceRender, nodeId]
+  )
+
+  const ensureModelProtocols = useCallback(async () => {
+    if (modelProtocolsRef.current) return
+    try {
+      const result = await window.mica.chat.models()
+      if (result?.ok) {
+        const map = {}
+        for (const item of result.models || []) map[item.id] = item.protocol
+        modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
+      }
+    } catch {
+      // 拉取失败不阻断切换；跨协议风险会在运行时以 run error 呈现
+    }
+  }, [])
+
+  const canSwitchModelProtocol = useCallback(
+    (modelId, hasHistory) => {
+      if (!hasHistory) return true
+      const info = modelProtocolsRef.current
+      const nextProtocol = info?.map?.[modelId]
+      const currentProtocol = meta?.protocol || info?.currentProtocol
+      if (!nextProtocol || !currentProtocol || nextProtocol === currentProtocol) return true
+      const reason = `当前会话使用 ${currentProtocol} 协议，目标模型使用 ${nextProtocol} 协议；跨协议切换会丢失会话历史，请先新建会话或清空当前会话`
+      protocolBlockRef.current = reason
+      appendNotice(reason, 'error')
+      return false
+    },
+    [appendNotice, meta?.protocol]
+  )
+
+  const openPicker = useCallback(
+    (kind) => {
+      if (running) {
+        appendNotice('当前 turn 仍在运行，请完成或停止后再切换')
+        return
+      }
+      setCommandDismissed(false)
+      setPickerIndex(0)
+      const titles = { model: '选择模型', variant: '选择推理强度', role: '选择角色' }
+      setPicker({ kind, title: titles[kind] || kind, options: [], loading: true, error: '' })
+      if (kind === 'variant') {
+        setPicker((current) =>
+          current?.kind === kind ? { ...current, loading: false, options: EFFORT_OPTIONS } : current
+        )
+        return
+      }
+      const request = kind === 'model' ? window.mica.chat.models() : window.mica.chat.roles()
+      request
+        .then((result) => {
+          if (kind === 'model' && result?.ok) {
+            const map = {}
+            for (const item of result.models || []) map[item.id] = item.protocol
+            modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
+          }
+          setPicker((current) => {
+            if (current?.kind !== kind) return current
+            if (!result?.ok)
+              return { ...current, loading: false, error: result?.error || '加载失败' }
+            const options =
+              kind === 'model'
+                ? (result.models || []).map((item) => ({
+                    value: item.id,
+                    label: item.id,
+                    protocol: item.protocol
+                  }))
+                : [
+                    { value: 'default', detail: '内置默认系统提示' },
+                    ...(result.roles || []).map((name) => ({ value: name }))
+                  ]
+            return { ...current, loading: false, options }
+          })
+        })
+        .catch((error) => {
+          setPicker((current) =>
+            current?.kind === kind
+              ? {
+                  ...current,
+                  loading: false,
+                  error: error instanceof Error ? error.message : String(error)
+                }
+              : current
+          )
+        })
+    },
+    [appendNotice, running]
+  )
+
+  const selectPickerOption = useCallback(
+    (option) => {
+      const kind = picker?.kind
+      if (!kind) return
+      const value = option.value
+      if (kind === 'model' && !canSwitchModelProtocol(value, messages.length)) return
+      applyOverride(kind, value)
+      setPicker(null)
+      const title =
+        kind === 'model'
+          ? `模型已设置为 ${value}`
+          : kind === 'variant'
+            ? `推理强度已切换为 ${value}`
+            : value === 'default'
+              ? '已恢复默认角色'
+              : `角色已切换为 ${value}`
+      appendNotice(`${title}（下次对话开始生效）。提示词缓存可能失效，如上下文较大可考虑 /compact`)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [appendNotice, applyOverride, canSwitchModelProtocol, messages.length, picker]
+  )
+
+  const appendCommandResult = useCallback(
+    (command, title, detail = '', options = {}) => {
+      stickToBottomRef.current = true
+      setShowJump(false)
+      updateMessages((previous) => [
+        ...previous,
+        {
+          id: uid('command'),
+          kind: 'command',
+          role: 'notice',
+          command,
+          title,
+          detail,
+          variant: options.variant || 'info',
+          action: options.action,
+          actionLabel: options.actionLabel
+        }
+      ])
+    },
+    [updateMessages]
+  )
+
+  const runSlashCommand = useCallback(
+    async (parsed) => {
+      const targetNodeId = nodeId
+      const isCurrentNode = () => nodeIdRef.current === targetNodeId
+      const command = findChatCommand(parsed.name)
+      rememberInput(parsed.raw)
+      if (!command) {
+        appendCommandResult(
+          parsed.raw,
+          `未知命令 /${parsed.name || ''}`,
+          '输入 /help 查看 Chat 支持的命令。未知 slash 命令不会发送给模型。',
+          { variant: 'error' }
+        )
+        return
+      }
+      if (command.availability === 'terminal') {
+        appendCommandResult(
+          parsed.raw,
+          `/${command.name} 需要交互式 Mica`,
+          `${command.description}\nWeb Chat 暂不模拟该命令的 Ink 面板；可复制命令并在 Terminal 中运行 mica 后粘贴。`,
+          { action: 'terminal', actionLabel: '复制并打开终端' }
+        )
+        return
+      }
+
+      if (parsed.name === 'help') {
+        const chat = CHAT_COMMANDS.filter((item) => item.availability === 'chat')
+          .map(
+            (item) =>
+              `/${item.name}${item.argument ? ` ${item.argument}` : ''}  ${item.description}`
+          )
+          .join('\n')
+        const terminal = CHAT_COMMANDS.filter((item) => item.availability === 'terminal')
+          .map((item) => `/${item.name}`)
+          .join('  ')
+        appendCommandResult(parsed.raw, 'Mica commands', `${chat}\n\nTerminal：${terminal}`)
+        return
+      }
+
+      if (parsed.name === 'status') {
+        appendCommandResult(
+          parsed.raw,
+          'Current session',
+          [
+            `session  ${sessionIdRef.current || '尚未创建'}`,
+            `provider ${meta?.providerId || '—'}`,
+            `model    ${meta?.model || '—'}`,
+            `effort   ${meta?.effort || 'none'}`,
+            `role     ${meta?.role || 'default'}`,
+            `state    ${running ? statusLabel(phase) : meta?.turnState || 'idle'}`,
+            `cwd      ${cwdRef.current || '—'}`
+          ].join('\n')
+        )
+        return
+      }
+
+      if (parsed.name === 'context') {
+        const usage = usageValues(meta?.lastUsage)
+        const percent =
+          usage?.total != null && meta?.contextWindowSize
+            ? `${Math.round((usage.total / meta.contextWindowSize) * 100)}%`
+            : '—'
+        appendCommandResult(
+          parsed.raw,
+          'Context usage',
+          [
+            `tokens   ${usage?.total != null ? tokenCount(usage.total) : '—'}`,
+            `input    ${usage?.input != null ? tokenCount(usage.input) : '—'}`,
+            `output   ${usage?.output != null ? tokenCount(usage.output) : '—'}`,
+            `cached   ${usage?.cached != null ? tokenCount(usage.cached) : '—'}`,
+            `window   ${meta?.contextWindowSize ? tokenCount(meta.contextWindowSize) : '—'}`,
+            `used     ${percent}`
+          ].join('\n')
+        )
+        return
+      }
+
+      if (parsed.name === 'todo') {
+        const action = parsed.args.toLowerCase()
+        if (action && action !== 'show' && action !== 'hide') {
+          appendCommandResult(parsed.raw, 'Usage: /todo [show|hide]', '', { variant: 'error' })
+          return
+        }
+        const hidden = action === 'hide' ? true : action === 'show' ? false : !todoHidden
+        todoHiddenRef.current.set(nodeId, hidden)
+        setTodoHidden(hidden)
+        appendCommandResult(parsed.raw, hidden ? '运行计划已隐藏' : '运行计划已显示')
+        return
+      }
+
+      if (parsed.name === 'model' || parsed.name === 'effort' || parsed.name === 'role') {
+        const kind = parsed.name === 'effort' ? 'variant' : parsed.name
+        if (running) {
+          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请完成或停止后再切换', '', {
+            variant: 'error'
+          })
+          return
+        }
+        const value = parsed.args
+        if (!value) {
+          openPicker(kind)
+          return
+        }
+        const normalized = kind === 'variant' ? value.toLowerCase() : value
+        if (kind === 'variant' && !EFFORT_OPTIONS.some((option) => option.value === normalized)) {
+          appendCommandResult(
+            parsed.raw,
+            '无效的 effort 值',
+            '可选值：none | low | medium | high | xhigh',
+            { variant: 'error' }
+          )
+          return
+        }
+        if (kind === 'model') {
+          await ensureModelProtocols()
+          if (!canSwitchModelProtocol(normalized, messages.length)) {
+            appendCommandResult(
+              parsed.raw,
+              '已阻止跨协议切换',
+              protocolBlockRef.current || '会话历史将丢失',
+              { variant: 'error' }
+            )
+            return
+          }
+        }
+        applyOverride(kind, normalized)
+        const title =
+          kind === 'model'
+            ? `模型已设置为 ${normalized}`
+            : kind === 'variant'
+              ? `推理强度已切换为 ${normalized}`
+              : normalized === 'default'
+                ? '已恢复默认角色'
+                : `角色已切换为 ${normalized}`
+        appendCommandResult(
+          parsed.raw,
+          title,
+          '下次对话开始生效。提示词缓存可能失效，如上下文较大可考虑 /compact'
+        )
+        return
+      }
+
+      if (parsed.name === 'config') {
+        await window.mica.settings.open()
+        if (isCurrentNode()) appendCommandResult(parsed.raw, '已打开 Mica 配置')
+        return
+      }
+
+      if (parsed.name === 'rename') {
+        if (running) {
+          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请完成或停止后再重命名', '', {
+            variant: 'error'
+          })
+          return
+        }
+        if (!parsed.args) {
+          appendCommandResult(parsed.raw, 'Usage: /rename <title>', '', { variant: 'error' })
+          return
+        }
+        if (!sessionIdRef.current) {
+          appendCommandResult(parsed.raw, '发送第一条消息后才能重命名会话', '', {
+            variant: 'error'
+          })
+          return
+        }
+        const targetSessionId = sessionIdRef.current
+        try {
+          const title = await window.mica.stats.renameSession(targetSessionId, parsed.args)
+          if (!isCurrentNode()) return
+          appendCommandResult(parsed.raw, `会话已重命名为 ${title}`)
+          onSessionRenamedRef.current?.()
+        } catch (error) {
+          if (!isCurrentNode()) return
+          appendCommandResult(
+            parsed.raw,
+            '重命名失败',
+            error instanceof Error ? error.message : String(error),
+            { variant: 'error' }
+          )
+        }
+        return
+      }
+
+      if (parsed.name === 'new' || parsed.name === 'clear') {
+        if (running) {
+          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请先停止再新建会话', '', {
+            variant: 'error'
+          })
+          return
+        }
+        onNewSessionRef.current?.(cwdRef.current)
+        return
+      }
+
+      if (parsed.name === 'compact') {
+        if (running) {
+          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请先停止再压缩', '', {
+            variant: 'error'
+          })
+          return
+        }
+        const targetSessionId = sessionIdRef.current
+        if (!targetSessionId) {
+          appendCommandResult(
+            parsed.raw,
+            '暂无会话可压缩',
+            '发送第一条消息后即可用 /compact 压缩当前会话上下文。',
+            { variant: 'error' }
+          )
+          return
+        }
+        if (compactBusyRef.current) {
+          appendCommandResult(parsed.raw, '正在压缩中', '请等待上一次压缩完成后再试。')
+          return
+        }
+        compactBusyRef.current = true
+        appendCommandResult(
+          parsed.raw,
+          '正在压缩上下文…',
+          '模型正在把历史会话整理为 checkpoint，通常需要几十秒。'
+        )
+        try {
+          const result = await window.mica.chat.compact(targetSessionId)
+          if (!isCurrentNode()) return
+          if (result?.ok) {
+            const before = formatTokens(Number(result.beforeTokenEstimate) || 0)
+            const after = formatTokens(Number(result.afterTokenEstimate) || 0)
+            const saved =
+              result.savedRatio != null
+                ? `（节省 ${Math.round(Number(result.savedRatio) * 100)}%）`
+                : ''
+            appendCommandResult(
+              parsed.raw,
+              '上下文压缩完成',
+              `${before} → ${after}${saved}。会话已刷新，后续对话将基于压缩后的 checkpoint。`
+            )
+            refreshMeta(targetSessionId)
+            const rows = await window.mica.chat.history(targetSessionId).catch(() => [])
+            if (isCurrentNode() && sessionIdRef.current === targetSessionId) {
+              updateMessages(historyMessages(rows, targetSessionId))
+            }
+          } else if (result?.code === 'not_needed') {
+            appendCommandResult(parsed.raw, '暂不需要压缩', result.error || '当前会话内容较少。')
+          } else {
+            appendCommandResult(parsed.raw, '压缩失败', result?.error || '未知错误', {
+              variant: 'error'
+            })
+          }
+        } catch (error) {
+          if (isCurrentNode()) {
+            appendCommandResult(
+              parsed.raw,
+              '压缩失败',
+              error instanceof Error ? error.message : String(error),
+              { variant: 'error' }
+            )
+          }
+        } finally {
+          compactBusyRef.current = false
+        }
+        return
+      }
+
+      if (parsed.name === 'resume') {
+        if (running) {
+          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请先停止再切换会话', '', {
+            variant: 'error'
+          })
+          return
+        }
+        if (!parsed.args) {
+          appendCommandResult(parsed.raw, 'Usage: /resume <session-id|title>', '', {
+            variant: 'error'
+          })
+          return
+        }
+        try {
+          const result = await window.mica.stats.listSessions()
+          if (!isCurrentNode()) return
+          const sessions = result?.sessions || []
+          const target = sessions.find(
+            (session) => session.id === parsed.args || session.title === parsed.args
+          )
+          if (!target) {
+            const nearby = sessions
+              .filter((session) =>
+                `${session.id} ${session.title}`.toLowerCase().includes(parsed.args.toLowerCase())
+              )
+              .slice(0, 5)
+              .map((session) => `${session.id}  ${session.title}`)
+              .join('\n')
+            appendCommandResult(
+              parsed.raw,
+              '未找到匹配会话',
+              nearby ? `可能匹配：\n${nearby}` : '可在左侧 History 中选择会话。',
+              { variant: 'error' }
+            )
+            return
+          }
+          onResumeSessionRef.current?.(target)
+        } catch (error) {
+          if (!isCurrentNode()) return
+          appendCommandResult(
+            parsed.raw,
+            '加载会话列表失败',
+            error instanceof Error ? error.message : String(error),
+            { variant: 'error' }
+          )
+        }
+      }
+    },
+    [
+      applyOverride,
+      canSwitchModelProtocol,
+      appendCommandResult,
+      cwdRef,
+      ensureModelProtocols,
+      meta,
+      messages.length,
+      nodeId,
+      nodeIdRef,
+      onNewSessionRef,
+      onResumeSessionRef,
+      onSessionRenamedRef,
+      openPicker,
+      phase,
+      refreshMeta,
+      rememberInput,
+      running,
+      todoHidden,
+      updateMessages
+    ]
+  )
+
+  const send = useCallback(() => {
+    const text = input.trim()
+    if (!text || !nodeId) return
+    const slash = parseSlashCommand(text)
+    if (slash) {
+      if (!slash.name) return // 单独的 / 保留给命令面板，不发送
+      void runSlashCommand(slash)
+      return
+    }
+    if (running) {
+      appendNotice('当前 turn 仍在运行，请等待完成或点击停止后继续')
+      return
+    }
+    const optimisticId = uid('msg')
+    stickToBottomRef.current = true
+    setShowJump(false)
+    updateMessages((previous) => [
+      ...previous,
+      { id: optimisticId, kind: 'message', role: 'user', text, done: true }
+    ])
+    rememberInput(text)
+    streamRef.current = { id: null, kind: null, turnId: null }
+    finishedRef.current = false
+    setRunning(true)
+    setStopping(false)
+    setPhase('connecting')
+    setRunStartedAt(Date.now())
+    const targetNodeId = nodeId
+
+    const rollback = (message, variant = 'error') => {
+      if (nodeIdRef.current !== targetNodeId) return
+      updateMessages((previous) => previous.filter((item) => item.id !== optimisticId))
+      appendNotice(message, variant)
+      draftsRef.current.set(nodeId, text)
+      setInput(text)
+      setRunning(false)
+      setPhase('idle')
+      finishedRef.current = true
+    }
+
+    const overrides = overridesRef.current.get(nodeId) || {}
+    window.mica.chat
+      .start({
+        id: nodeId,
+        sessionId: sessionIdRef.current || null,
+        cwd: cwdRef.current || null,
+        prompt: text,
+        maxTurns: 100,
+        model: overrides.model || null,
+        variant: overrides.variant || null,
+        role: overrides.role || null
+      })
+      .then((result) => {
+        if (!result) return
+        if (result.busy) rollback('该会话仍在运行，消息未发送', 'info')
+        else if (result.error) rollback(result.error)
+      })
+      .catch((error) => rollback(error instanceof Error ? error.message : String(error)))
+  }, [
+    appendNotice,
+    cwdRef,
+    input,
+    nodeId,
+    nodeIdRef,
+    rememberInput,
+    runSlashCommand,
+    running,
+    updateMessages
+  ])
+
+  const stop = useCallback(() => {
+    if (!nodeId || stopping) return
+    const targetNodeId = nodeId
+    setStopping(true)
+    setPhase('stopping')
+    window.mica.chat
+      .abort(nodeId)
+      .then((aborted) => {
+        if (nodeIdRef.current !== targetNodeId) return
+        if (!aborted) {
+          setStopping(false)
+          setRunning(false)
+          setPhase('idle')
+        }
+      })
+      .catch(() => {
+        if (nodeIdRef.current === targetNodeId) setStopping(false)
+      })
+  }, [nodeId, nodeIdRef, stopping])
+
+  const navigateInputHistory = useCallback(
+    (direction) => {
+      const history = inputHistoryRef.current.get(nodeId) || []
+      if (!history.length) return
+      let cursor = historyCursorRef.current
+      if (direction < 0) cursor = cursor < 0 ? history.length - 1 : Math.max(0, cursor - 1)
+      else cursor = cursor < 0 ? -1 : Math.min(history.length, cursor + 1)
+      historyCursorRef.current = cursor === history.length ? -1 : cursor
+      const value = historyCursorRef.current < 0 ? '' : history[historyCursorRef.current]
+      draftsRef.current.set(nodeId, value)
+      setInput(value)
+      requestAnimationFrame(() => {
+        const element = textareaRef.current
+        if (element) element.setSelectionRange(value.length, value.length)
+      })
+    },
+    [nodeId]
+  )
+
+  const showEmpty = historyLoaded && !running && messages.length === 0
+  const todoItems = useMemo(() => latestTodoItems(messages), [messages])
+  const commands = useMemo(() => {
+    if (picker || commandDismissed) return []
+    return commandSuggestions(input)
+  }, [commandDismissed, input, picker])
+  const activeOverrides = overridesRef.current.get(nodeId) || {}
+  const activeModel = activeOverrides.model || meta?.model || ''
+  const activeEffort = activeOverrides.variant || meta?.effort || 'none'
+  const activeRole = activeOverrides.role || meta?.role || 'default'
+  const modelText = activeModel ? `${activeModel}_${activeEffort}` : ''
+  const contextUsage = usageValues(meta?.lastUsage)
+  const contextTokens = contextUsage?.total ?? 0
+  const windowSize = meta?.contextWindowSize ?? 0
+  const inputTokens = contextUsage?.input ?? 0
+  const cachedTokens = contextUsage?.cached ?? 0
+  const hasContext = contextTokens > 0 && windowSize > 0
+  const tokenStr = hasContext ? formatTokens(contextTokens) : ''
+  const cachedPct =
+    inputTokens > 0 ? Math.max(0, Math.round((cachedTokens / inputTokens) * 100)) : 0
+  const contextPct = hasContext ? Math.round((contextTokens / windowSize) * 100) : 0
+  const tokenClass = hasContext ? TOKEN_LEVEL_CLASS[levelFor(contextTokens, TOKEN_THRESHOLDS)] : ''
+  const ctxClass = hasContext ? RATIO_LEVEL_CLASS[levelFor(contextPct, RATIO_THRESHOLDS)] : ''
+  const statusMetaTitle = modelSummaryTitle({
+    ...meta,
+    model: activeModel || null,
+    effort: activeEffort === 'none' ? null : activeEffort,
+    role: activeRole
+  })
+  const activeCommandIndex = Math.min(commandIndex, Math.max(0, commands.length - 1))
+  const selectCommand = useCallback(
+    (command) => {
+      const value = commandInputValue(command)
+      draftsRef.current.set(nodeId, value)
+      setInput(value)
+      setCommandDismissed(false)
+      setCommandIndex(0)
+      requestAnimationFrame(() => {
+        const element = textareaRef.current
+        element?.focus()
+        element?.setSelectionRange(value.length, value.length)
+      })
+    },
+    [nodeId]
+  )
+
+  return (
+    <div className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}>
+      <div
+        ref={listRef}
+        className="chat-scroll thin-scrollbar"
+        onScroll={(event) => {
+          const element = event.currentTarget
+          const atBottom =
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+            SCROLL_BOTTOM_THRESHOLD
+          stickToBottomRef.current = atBottom
+          setShowJump(!atBottom)
+        }}
+      >
+        <div ref={transcriptRef} className="chat-transcript">
+          {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
+          {showEmpty && <WelcomeHint cwd={cwd} />}
+          {messages.map((message) => (
+            <MessageRow
+              key={message.id}
+              message={message}
+              onOpenFile={(path, position) =>
+                onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position)
+              }
+              onCommandAction={(item) => {
+                if (item.action === 'terminal') {
+                  void copyText(item.command)
+                  onOpenTerminalRef.current?.()
+                }
+              }}
+            />
+          ))}
+          {running && phase === 'connecting' && streamRef.current.id == null && (
+            <div className="chat-inline-status">
+              <LoaderCircle size={12} className="animate-spin" /> Connecting
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showJump && (
+        <button
+          type="button"
+          className="chat-jump"
+          onClick={() => {
+            stickToBottomRef.current = true
+            setShowJump(false)
+            const list = listRef.current
+            if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+          }}
+        >
+          <ArrowDown size={13} /> 最新消息
+        </button>
+      )}
+
+      <div ref={composerDockRef} className="chat-composer-dock">
+        <CommandPalette
+          commands={commands}
+          activeIndex={activeCommandIndex}
+          onActiveIndex={setCommandIndex}
+          onSelect={selectCommand}
+        />
+        {picker && (
+          <SelectPalette
+            title={picker.title}
+            options={picker.options || []}
+            activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
+            onActiveIndex={setPickerIndex}
+            onSelect={selectPickerOption}
+            selectedValue={
+              (overridesRef.current.get(nodeId) || {})[picker.kind] ||
+              (picker.kind === 'variant'
+                ? meta?.effort || 'none'
+                : picker.kind === 'role'
+                  ? meta?.role || 'default'
+                  : meta?.model) ||
+              ''
+            }
+            loading={picker.loading}
+            error={picker.error}
+          />
+        )}
+        <TodoDock
+          items={todoItems}
+          hidden={todoHidden}
+          onToggleHidden={(hidden) => {
+            todoHiddenRef.current.set(nodeId, hidden)
+            setTodoHidden(hidden)
+          }}
+        />
+        <div className={`chat-composer ${running ? 'chat-composer-running' : ''}`}>
+          <span className="chat-prompt-mark" aria-hidden="true">
+            ›
+          </span>
+          <textarea
+            ref={textareaRef}
+            value={input}
+            rows={1}
+            spellCheck={false}
+            aria-label="对话输入"
+            placeholder="Type a message to start a conversation"
+            onChange={(event) => {
+              draftsRef.current.set(nodeId, event.target.value)
+              historyCursorRef.current = -1
+              setInput(event.target.value)
+              setCommandDismissed(false)
+              setCommandIndex(0)
+            }}
+            onPaste={(event) => {
+              const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
+                item.type.startsWith('image/')
+              )
+              if (!hasImage) return
+              event.preventDefault()
+              window.mica.chat
+                .savePastedImage()
+                .then((result) => {
+                  const element = textareaRef.current
+                  const start = element?.selectionStart ?? input.length
+                  const end = element?.selectionEnd ?? input.length
+                  const insertion = result?.ok
+                    ? `[Image](${result.ref})`
+                    : (event.clipboardData?.getData('text/plain') ?? '')
+                  const next = input.slice(0, start) + insertion + input.slice(end)
+                  draftsRef.current.set(nodeId, next)
+                  setInput(next)
+                  requestAnimationFrame(() => {
+                    const el = textareaRef.current
+                    if (el) el.setSelectionRange(start + insertion.length, start + insertion.length)
+                  })
+                })
+                .catch(() => {})
+            }}
+            onKeyDown={(event) => {
+              if (picker) {
+                const options = picker.options || []
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  if (options.length) setPickerIndex((value) => (value + 1) % options.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  if (options.length) {
+                    setPickerIndex((value) => (value - 1 + options.length) % options.length)
+                  }
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  if (options.length) {
+                    selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
+                  }
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setPicker(null)
+                  return
+                }
+                return
+              }
+              if (commands.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setCommandIndex((value) => (value + 1) % commands.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setCommandIndex((value) => (value - 1 + commands.length) % commands.length)
+                  return
+                }
+                if (event.key === 'Tab') {
+                  event.preventDefault()
+                  selectCommand(commands[activeCommandIndex])
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setCommandDismissed(true)
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  const selected = commands[activeCommandIndex]
+                  if (input.trim() !== `/${selected.name}` || selected.argument) {
+                    event.preventDefault()
+                    selectCommand(selected)
+                    return
+                  }
+                }
+              }
+              if (event.altKey && event.key === 'ArrowUp') {
+                event.preventDefault()
+                navigateInputHistory(-1)
+                return
+              }
+              if (event.altKey && event.key === 'ArrowDown') {
+                event.preventDefault()
+                navigateInputHistory(1)
+                return
+              }
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                send()
+              }
+            }}
+          />
+          <div className="chat-composer-actions">
+            <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
+            {running ? (
+              <button type="button" title="停止生成" aria-label="停止生成" onClick={stop}>
+                {stopping ? (
+                  <LoaderCircle size={13} className="animate-spin" />
+                ) : (
+                  <Square size={12} />
+                )}
+              </button>
+            ) : input.trim() ? (
+              <button
+                type="button"
+                title="发送"
+                aria-label="发送"
+                disabled={!input.trim()}
+                onClick={send}
+              >
+                <Send size={13} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="chat-status-line">
+          <div className="chat-status-primary">
+            {running && (
+              <>
+                <LoaderCircle size={11} className="animate-spin" />
+                <span>{statusLabel(phase)}</span>
+                {elapsed > 0 && <span>{formatDuration(elapsed)}</span>}
+              </>
+            )}
+          </div>
+          <div className="chat-status-meta" title={statusMetaTitle}>
+            <span
+              className="chat-status-model"
+              role="button"
+              tabIndex={0}
+              title="切换模型"
+              onClick={() => openPicker('model')}
+            >
+              {modelText}
+            </span>
+            {hasContext && (
+              <>
+                <span className={`chat-status-tokens ${tokenClass}`}>{tokenStr}</span>
+                <span className="chat-status-cached"> (cached {cachedPct}%, </span>
+                <span
+                  className={`chat-status-ctx ${ctxClass}`}
+                  role="button"
+                  tabIndex={0}
+                  title="查看上下文占用"
+                  onClick={() => setContextOpen(true)}
+                >
+                  ctx {contextPct}%
+                </span>
+                <span className="chat-status-cached">)</span>
+              </>
+            )}
+          </div>
+        </div>
+        {contextOpen && <ContextModal meta={meta} onClose={() => setContextOpen(false)} />}
+      </div>
+    </div>
+  )
+}

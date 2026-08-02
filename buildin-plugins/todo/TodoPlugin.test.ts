@@ -5,6 +5,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiAgentStatusItem } from '@packages/mica-ui/index.js';
 import { parseTodoInput, shouldShowTodoList, TodoPlugin } from './TodoPlugin.js';
+import { TodoWriteTool } from './TodoTool.js';
 
 describe('parseTodoInput', () => {
   it('normalizes a valid replacement list', () => {
@@ -38,6 +39,17 @@ describe('parseTodoInput', () => {
       ok: false,
       message: 'unknown input field: visible',
     });
+  });
+
+  it('executes as a standalone tool and reports the owner without UI state', async () => {
+    const replace = vi.fn();
+    const tool = new TodoWriteTool(replace);
+    const items = [{ content: 'Run tests', activeForm: 'Running tests', status: 'in_progress' as const }];
+
+    const result = await tool.execute({ todos: items }, { context: { agent: { taskOwnerId: 'owner-a' } } });
+
+    expect(result).toBe('Todo list updated: 1 total, 0 completed, 0 pending. Current: Running tests');
+    expect(replace).toHaveBeenCalledWith(items, 'owner-a');
   });
 });
 

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
-  Bot,
   Folder,
   GitBranch,
   GitCompare,
+  FolderOpen,
+  MessageSquare,
   NotebookPen,
   PanelLeft,
   Rocket,
@@ -12,6 +13,7 @@ import {
   SquareTerminal
 } from 'lucide-react'
 import { BranchPicker } from './BranchPicker'
+import { ChatView, shortPath } from './ChatView'
 import { FilesView } from './FilesView'
 import { GitView } from './GitView'
 import { NotesView } from './NotesView'
@@ -22,12 +24,10 @@ import { StatsView } from './stats/StatsView'
 import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
 import { useLatest } from './hooks'
 import {
-  flattenNodes,
-  moveNode,
+  createColdStartTerminal,
   normalizeNodes,
   removeNode,
   resolveDefaultCwd,
-  terminalIdsUnder,
   uid
 } from './workspace'
 
@@ -40,6 +40,105 @@ function nodeIdFor(ptyId) {
 
 function ptyIdForNode(nodeId) {
   return `${nodeId}:mica`
+}
+
+function recentChatCwd() {
+  return localStorage.getItem('mica.chatDefaultCwd') || ''
+}
+
+function CwdModal({ cwd, recent, onClose, onApply }) {
+  const [value, setValue] = useState(cwd || '')
+  const inputRef = useRef(null)
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+  const dirs = recent.length > 0 ? recent : [cwd].filter(Boolean)
+  const submit = () => {
+    const next = value.trim()
+    if (next) onApply(next)
+  }
+  return (
+    <div
+      className="fixed inset-0 z-[11000] grid place-items-center bg-black/45 no-drag"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-white/15 bg-[#181818]/98 p-3.5 shadow-2xl"
+      >
+        <h2 className="mb-2.5 text-sm font-semibold text-white/95">工作目录</h2>
+        <button
+          type="button"
+          className="mb-2.5 flex h-8 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-white/15 bg-white/[.02] text-xs text-white/60 hover:border-white/35 hover:text-white"
+          onClick={() => {
+            void window.mica.workspace
+              .selectDirectory({ title: '选择工作目录', defaultPath: cwd })
+              .then((result) => {
+                if (result && !result.canceled && result.path) onApply(result.path)
+              })
+          }}
+        >
+          <FolderOpen size={13} />
+          选择文件夹…
+        </button>
+        {dirs.length > 0 && (
+          <div className="mb-2.5 max-h-52 overflow-y-auto">
+            <div className="mb-1 text-[10px] text-white/35">最近目录</div>
+            {dirs.map((dir) => (
+              <button
+                key={dir}
+                type="button"
+                title={dir}
+                className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs ${
+                  dir === cwd
+                    ? 'text-white/85'
+                    : 'text-white/45 hover:bg-white/[.05] hover:text-white/80'
+                }`}
+                onClick={() => onApply(dir)}
+              >
+                <span className="w-3 text-center text-[10px] text-green-400/80">
+                  {dir === cwd ? '✓' : ''}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{shortPath(dir, 70)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            value={value}
+            spellCheck={false}
+            placeholder="输入完整路径，如 /Users/name/project"
+            className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                submit()
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={!value.trim()}
+            className="h-8 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:text-white/25"
+            onClick={submit}
+          >
+            应用
+          </button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function TextPrompt({ prompt, onClose }) {
@@ -105,11 +204,12 @@ function TextPrompt({ prompt, onClose }) {
   )
 }
 
-function useNotifications(activeId, onSessionId) {
+function useNotifications(activeId, onSessionId, canBindSessionId) {
   const [states, setStates] = useState({})
   const statesRef = useLatest(states)
   const activeRef = useLatest(activeId)
   const sessionRef = useLatest(onSessionId)
+  const canBindRef = useLatest(canBindSessionId)
   const windowState = useRef({ focused: true, visible: true })
   const readTimer = useRef(null)
   const audio = useRef(null)
@@ -229,7 +329,12 @@ function useNotifications(activeId, onSessionId) {
         const state = payload.state
         const nodeId = nodeIdFor(state.terminalId)
         setTerminalState(nodeId, state)
-        if (state.sessionId) sessionRef.current(nodeId, state.sessionId)
+        if (state.sessionId) {
+          // session.active 是 mica 启动时自动恢复会话，不主动给未关联的节点绑定，
+          // 避免没点过的会话也显示为已打开；turn.* 事件代表用户真实对话，正常跟随。
+          if (state.lastType !== 'session.active' || canBindRef.current?.(nodeId))
+            sessionRef.current(nodeId, state.sessionId)
+        }
         if (payload.type === 'event' && state.lastType === 'turn.completed') {
           playCompleted().catch((error) => console.warn('play notification sound failed', error))
         }
@@ -275,7 +380,7 @@ function useNotifications(activeId, onSessionId) {
       window.removeEventListener('pointerdown', unlock, true)
       window.removeEventListener('keydown', unlock, true)
     }
-  }, [activeRef, markRead, playCompleted, sessionRef, setTerminalState, sync])
+  }, [activeRef, canBindRef, markRead, playCompleted, sessionRef, setTerminalState, sync])
 
   const activeState = states[activeId]
   useEffect(() => {
@@ -289,6 +394,16 @@ const tabClass =
 const DEFAULT_TERMINAL_PANEL_HEIGHT = 260
 const MIN_TERMINAL_PANEL_HEIGHT = 120
 const MIN_FILE_PANEL_HEIGHT = 140
+const DEFAULT_SIDEBAR_WIDTH = 260
+const MIN_SIDEBAR_WIDTH = 180
+const MAX_SIDEBAR_WIDTH = 640
+
+function savedSidebarWidth() {
+  const value = Number(localStorage.getItem('mica.sidebarWidth'))
+  return Number.isFinite(value) && value >= MIN_SIDEBAR_WIDTH && value <= MAX_SIDEBAR_WIDTH
+    ? value
+    : DEFAULT_SIDEBAR_WIDTH
+}
 
 function savedTerminalPanelHeight() {
   const value = Number(localStorage.getItem('mica.terminalPanelHeight'))
@@ -309,7 +424,6 @@ export default function App() {
   const [activeId, setActiveId] = useState(null)
   const activeRef = useLatest(activeId)
   const [selectedId, setSelectedId] = useState(null)
-  const [editingId, setEditingId] = useState(null)
   const [view, setView] = useState('terminal')
   const [terminalPanelHeight, setTerminalPanelHeight] = useState(savedTerminalPanelHeight)
   const terminalPanelHeightPreferenceRef = useRef(terminalPanelHeight)
@@ -318,8 +432,13 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
   )
+  const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
+  const [resizingSidebar, setResizingSidebar] = useState(false)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  const dragStartRef = useRef(null)
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
+  const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -331,7 +450,8 @@ export default function App() {
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
   const [sessions, setSessions] = useState([])
-  const [sessionMeta, setSessionMeta] = useState({})
+  const [pins, setPins] = useState({})
+  const [sortOrder, setSortOrder] = useState({ pinned: [], sessions: [], recent: [] })
 
   const applySessions = useCallback((list) => {
     const meta = {}
@@ -344,19 +464,6 @@ export default function App() {
         turnState: row.turnState || 'completed'
       }
     }
-    setSessionMeta((prev) => {
-      const prevKeys = Object.keys(prev)
-      const nextKeys = Object.keys(meta)
-      if (
-        prevKeys.length === nextKeys.length &&
-        nextKeys.every(
-          (key) =>
-            prev[key]?.title === meta[key].title && prev[key]?.updatedAtMs === meta[key].updatedAtMs
-        )
-      )
-        return prev
-      return meta
-    })
     setSessions((prev) => (prev === list ? prev : list || []))
     setNodes((items) => {
       let changed = false
@@ -380,23 +487,54 @@ export default function App() {
       .catch((error) => console.error('load sessions failed', error))
   }, [applySessions])
 
+  const refreshPins = useCallback(() => {
+    window.mica.stats
+      .listPins()
+      .then((result) => setPins(result || {}))
+      .catch((error) => console.error('load pins failed', error))
+  }, [])
+
+  const togglePin = useCallback(
+    (sessionId) => {
+      const next = !pins[sessionId]
+      setPins((current) => {
+        const updated = { ...current }
+        if (next) updated[sessionId] = Date.now()
+        else delete updated[sessionId]
+        return updated
+      })
+      window.mica.stats
+        .setPin(sessionId, next)
+        .then(setPins)
+        .catch((error) => console.error('set pin failed', error))
+    },
+    [pins]
+  )
+
+  const refreshSort = useCallback(() => {
+    window.mica.stats
+      .listSort()
+      .then(setSortOrder)
+      .catch((error) => console.error('load sort failed', error))
+  }, [])
+
+  const reorderSessions = useCallback((section, ids) => {
+    setSortOrder((current) => ({ ...current, [section]: ids }))
+    window.mica.stats
+      .setSort(section, ids)
+      .then(setSortOrder)
+      .catch((error) => console.error('set sort failed', error))
+  }, [])
+
   useEffect(() => {
     window.mica.workspace
       .get()
       .then((workspace) => {
         const loaded = normalizeNodes(workspace?.nodes)
-        const target =
-          loaded.find((node) => node.id === workspace?.activeId && node.type === 'terminal') ||
-          loaded.find((node) => node.type === 'terminal')
-        setNodes(
-          target?.lastActiveAt
-            ? loaded
-            : loaded.map((node) =>
-                node.id === target?.id ? { ...node, lastActiveAt: Date.now() } : node
-              )
-        )
-        setActiveId(target?.id || null)
-        setSelectedId(target?.id || null)
+        const target = createColdStartTerminal(loaded, workspace?.activeId)
+        setNodes([target])
+        setActiveId(target.id)
+        setSelectedId(target.id)
         setReady(true)
       })
       .catch((loadError) => {
@@ -441,6 +579,19 @@ export default function App() {
     },
     [nodesRef]
   )
+  const recentSessionDirs = useMemo(() => {
+    const map = new Map()
+    for (const session of sessions) {
+      if (session?.cwd) {
+        const usedAt = Number(session.updatedAtMs) || 0
+        map.set(session.cwd, Math.max(map.get(session.cwd) || 0, usedAt))
+      }
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([dir]) => dir)
+      .slice(0, 10)
+  }, [sessions])
 
   const setSessionId = useCallback(
     (id, sessionId) => {
@@ -457,24 +608,24 @@ export default function App() {
     },
     [refreshSessions]
   )
-  const clearSessionId = useCallback((id) => {
-    setNodes((items) =>
-      items.map((node) =>
-        node.id === id && node.type === 'terminal' && node.sessionId
-          ? { ...node, sessionId: null }
-          : node
-      )
-    )
-  }, [])
-  const notifications = useNotifications(activeId, setSessionId)
+  const canBindSessionId = useCallback(
+    (nodeId) => {
+      const node = nodesRef.current.find((item) => item.id === nodeId)
+      return !!node?.sessionId
+    },
+    [nodesRef]
+  )
+  const notifications = useNotifications(activeId, setSessionId, canBindSessionId)
 
   useEffect(() => {
     refreshSessions()
+    refreshPins()
+    refreshSort()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
     }, 3000)
     return () => clearInterval(timer)
-  }, [refreshSessions])
+  }, [refreshPins, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
@@ -497,10 +648,16 @@ export default function App() {
           : { terminalId: id, cwd, repository: null, status: null, loading: true }
       )
       try {
-        let [summary, status] = await Promise.all([
-          window.mica.git.summary(cwd),
-          window.mica.git.status(cwd)
-        ])
+        const summaryPromise = window.mica.git.summary(cwd)
+        let status = await window.mica.git.status(cwd)
+        if (request === gitRequest.current && id === activeRef.current && status?.status) {
+          setGit((current) =>
+            current.terminalId === id && current.cwd === cwd
+              ? { ...current, status: status.status }
+              : current
+          )
+        }
+        let summary = await summaryPromise
         const fallbackRoot = gitRef.current.status?.root
         const cwdMissing = /\bENOENT\b|no such file or directory|cannot chdir/i.test(
           `${summary?.error || ''}\n${status?.error || ''}`
@@ -542,6 +699,9 @@ export default function App() {
 
   useEffect(() => setBranchPickerOpen(false), [activeId])
   useEffect(() => {
+    refreshGit({ cwd: terminalCwd(activeId) })
+  }, [activeId, refreshGit, terminalCwd])
+  useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) {
         refreshGit({ quiet: true })
@@ -576,44 +736,10 @@ export default function App() {
     [gitRef]
   )
 
-  const createFolder = useCallback((parent = '#') => {
-    const id = uid('folder')
-    setNodes((items) => {
-      const opened = items.map((node) =>
-        node.id === parent ? { ...node, state: { ...node.state, opened: true } } : node
-      )
-      return flattenNodes([
-        ...opened,
-        {
-          id,
-          parent,
-          text: '新建文件夹',
-          type: 'folder',
-          cwd: null,
-          state: { opened: true, selected: false }
-        }
-      ])
-    })
-    setSelectedId(id)
-    setEditingId(id)
-  }, [])
-
   const createTerminal = useCallback(
-    (parent = '#', options = {}) => {
+    (options = {}) => {
       const current = nodesRef.current
-      const selected = current.find((node) => node.id === parent)
-      let target =
-        parent === '#'
-          ? '#'
-          : selected?.type === 'folder'
-            ? selected.id
-            : selected?.parent || parent
-      if (
-        target !== '#' &&
-        (!target || !current.some((node) => node.id === target && node.type === 'folder'))
-      ) {
-        target = '#'
-      }
+      const target = '#'
       const id = uid('term')
       const count = current.filter((node) => node.type === 'terminal').length + 1
       const resumeSessionId =
@@ -624,52 +750,58 @@ export default function App() {
           : `新对话 ${count}`
       const cwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
       setNodes((items) => {
-        const opened = items.map((node) =>
-          node.id === target ? { ...node, state: { ...node.state, opened: true } } : node
-        )
-        return flattenNodes([
-          ...opened,
+        return [
+          ...items,
           {
             id,
             parent: target,
             text,
             type: 'terminal',
             sessionId: resumeSessionId || null,
-            command: resumeSessionId ? `mica --resume ${resumeSessionId}` : null,
+            command: null,
             cwd,
             lastActiveAt: Date.now(),
             state: { opened: false, selected: false }
           }
-        ])
+        ]
       })
       setSelectedId(id)
       setActiveId(id)
-      setEditingId(id)
     },
     [nodesRef]
+  )
+
+  const createSession = useCallback(
+    (cwd = null) => {
+      setView('chat')
+      createTerminal({ cwd: cwd || recentChatCwd() || null })
+    },
+    [createTerminal]
   )
 
   const selectNode = useCallback(
     (node, activate = true) => {
       setSelectedId(node.id)
       if (activate && node.type === 'terminal') {
-        if (view === 'stats' || view === 'settings') setView('mica')
+        if (view === 'stats' || view === 'settings') setView('chat')
         setActiveId(node.id)
         setNodes((items) =>
           items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
         )
-        terminalRef.current
-          ?.activate(node.id)
-          .catch((activateError) => console.error('activate terminal failed', activateError))
+        if (view === 'terminal' || view === 'files') {
+          terminalRef.current
+            ?.activate(node.id)
+            .catch((activateError) => console.error('activate terminal failed', activateError))
+        }
       }
     },
     [view]
   )
 
-  const openRecent = useCallback(
+  const openSession = useCallback(
     (session) => {
       if (!session?.id) return
-      setView('mica')
+      setView('chat')
       const existing = nodesRef.current.find(
         (node) => node.type === 'terminal' && node.sessionId === session.id
       )
@@ -677,61 +809,65 @@ export default function App() {
         selectNode(existing)
         return
       }
-      const selected = nodesRef.current.find((node) => node.id === selectedId)
-      createTerminal(selected?.type === 'folder' ? selected.id : selected?.parent || '#', {
+      createTerminal({
         resumeSessionId: session.id,
         text: session.title || session.id,
         cwd: session.cwd || null
       })
     },
-    [createTerminal, nodesRef, selectNode, selectedId]
+    [createTerminal, nodesRef, selectNode]
   )
 
-  const disposeAndRemove = useCallback(
-    async (node) => {
+  const closeTab = useCallback(
+    (node) => {
       const current = nodesRef.current
-      if (node.type === 'folder') {
-        if (!window.confirm(`删除文件夹“${node.text}”及其所有对话？此操作无法撤销。`)) return
-      } else if (!window.confirm(`删除对话“${node.text}”？此操作无法撤销。`)) return
-      const ids = node.type === 'folder' ? terminalIdsUnder(current, node.id) : [node.id]
       const next = removeNode(current, node.id)
       setNodes((items) => removeNode(items, node.id))
-      if (ids.includes(activeRef.current)) {
+      if (node.id === activeRef.current) {
         const terminal = next.find((item) => item.type === 'terminal')
         setActiveId(terminal?.id || null)
         setSelectedId(terminal?.id || null)
-      } else if (selectedId === node.id) {
-        setSelectedId(activeRef.current)
       }
-      const disposed = await Promise.allSettled(ids.map((id) => terminalRef.current?.dispose(id)))
-      for (const result of disposed) {
-        if (result.status === 'rejected') console.error('dispose terminal failed', result.reason)
-      }
+      terminalRef.current
+        ?.dispose(node.id)
+        .catch((error) => console.error('dispose terminal failed', error))
+      window.mica.chat
+        .dispose(node.id)
+        .catch((error) => console.error('dispose chat failed', error))
+      setView('chat')
     },
-    [activeRef, nodesRef, selectedId]
+    [activeRef, nodesRef]
   )
 
-  const handleAction = useCallback(
-    async (action, node) => {
-      if (action === 'rename') setEditingId(node.id)
-      else if (action === 'createFolder') createFolder(node.id)
-      else if (action === 'createTerminal') createTerminal(node.id)
-      else if (action === 'setDefaultPath') {
-        const value = await askText(
-          '设置默认路径',
-          node.cwd || '',
-          '该文件夹下新建的终端将使用此路径作为工作目录。留空可清除。'
-        )
-        if (value !== null)
-          setNodes((items) =>
-            items.map((item) => (item.id === node.id ? { ...item, cwd: value || null } : item))
-          )
-      } else if (action === 'remove') await disposeAndRemove(node)
+  const closeTerminal = useCallback(
+    (nodeId) => {
+      const node = nodesRef.current.find((item) => item.id === nodeId && item.type === 'terminal')
+      if (node) closeTab(node)
     },
-    [askText, createFolder, createTerminal, disposeAndRemove]
+    [closeTab, nodesRef]
+  )
+
+  const closeSession = useCallback(
+    (sessionId) => {
+      const node = nodesRef.current.find(
+        (item) => item.type === 'terminal' && item.sessionId === sessionId
+      )
+      if (node) closeTab(node)
+    },
+    [closeTab, nodesRef]
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
+  const openBySession = useMemo(() => {
+    const map = {}
+    for (const node of terminalNodes) if (node.sessionId) map[node.sessionId] = node.id
+    return map
+  }, [terminalNodes])
+  const draftTabs = useMemo(() => terminalNodes.filter((node) => !node.sessionId), [terminalNodes])
+  const activeSessionId = useMemo(() => {
+    const node = nodes.find((item) => item.id === activeId)
+    return node?.sessionId || null
+  }, [activeId, nodes])
   const commandFor = useCallback(
     (id) => nodesRef.current.find((node) => node.id === id)?.command || 'mica',
     [nodesRef]
@@ -747,6 +883,35 @@ export default function App() {
     setView('files')
     await filesRef.current?.openFile(path, position)
   }, [])
+  const openChatFile = useCallback(async (path, position) => {
+    setView('files')
+    await filesRef.current?.openFile(path, position)
+  }, [])
+  const openChatTerminal = useCallback(() => setView('terminal'), [])
+  const createChatSession = useCallback(
+    (cwd = null) => {
+      setView('chat')
+      createTerminal({ cwd: cwd || recentChatCwd() || null })
+    },
+    [createTerminal]
+  )
+  const changeChatCwd = useCallback(
+    (cwd) => {
+      const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
+      const id = activeRef.current
+      if (!dir || !id) return
+      localStorage.setItem('mica.chatDefaultCwd', dir)
+      setNodes((items) =>
+        items.map((node) =>
+          node.id === id && node.type === 'terminal' && node.cwd !== dir
+            ? { ...node, cwd: dir, sessionId: node.sessionId }
+            : node
+        )
+      )
+      refreshGit({ cwd: dir })
+    },
+    [activeRef, refreshGit]
+  )
   const closeSearchFile = useCallback(
     () => view === 'files' && !!filesRef.current?.closeActive(),
     [view]
@@ -810,6 +975,35 @@ export default function App() {
     },
     [resizeTerminalPanel]
   )
+  const startSidebarResize = useCallback((event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    dragStartRef.current = { x: event.clientX, width: sidebarWidthRef.current }
+    setResizingSidebar(true)
+    document.body.classList.add('is-resizing-sidebar')
+
+    const onMove = (moveEvent) => {
+      const width = dragStartRef.current
+        ? dragStartRef.current.width + moveEvent.clientX - dragStartRef.current.x
+        : sidebarWidthRef.current
+      setSidebarWidth(Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width))))
+    }
+    const finish = () => {
+      dragStartRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      document.body.classList.remove('is-resizing-sidebar')
+      setResizingSidebar(false)
+      localStorage.setItem('mica.sidebarWidth', String(sidebarWidthRef.current))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }, [])
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth
+  }, [sidebarWidth])
   useEffect(() => {
     if (view !== 'files') return undefined
     const fitPanel = () => {
@@ -852,23 +1046,34 @@ export default function App() {
   return (
     <>
       <div
-        className={`grid size-full transition-[grid-template-columns] ${sidebarCollapsed ? 'grid-cols-[0_1fr]' : 'grid-cols-[260px_1fr]'}`}
-        style={{ transitionDuration: `${SIDEBAR_TRANSITION_MS}ms` }}
+        className={`grid size-full transition-[grid-template-columns] ${sidebarCollapsed ? 'grid-cols-[0_1fr]' : ''}`}
+        style={
+          sidebarCollapsed
+            ? { transitionDuration: `${SIDEBAR_TRANSITION_MS}ms` }
+            : { gridTemplateColumns: `${sidebarWidth}px 1fr`, transition: 'none' }
+        }
       >
         <aside
-          className={`flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#1c1c1d] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
+          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#1c1c1d] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
+          style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
+          {!sidebarCollapsed && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整侧栏宽度"
+              title="拖动调整侧栏宽度"
+              className={`absolute inset-y-0 right-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingSidebar ? 'bg-white/30' : ''}`}
+              onPointerDown={startSidebarResize}
+            />
+          )}
           <div className="h-8.5 shrink-0 drag-region" aria-hidden="true" />
           <nav className="no-drag shrink-0 px-2.5 pb-1.5 pt-1">
             <button
               type="button"
               title="New Session"
               className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
-              onClick={() => {
-                setView('mica')
-                const selected = nodes.find((node) => node.id === selectedId)
-                createTerminal(selected?.type === 'folder' ? selected.id : selected?.parent || '#')
-              }}
+              onClick={() => createSession()}
             >
               <Rocket size={14} className="shrink-0 opacity-80" />
               <span>New Session</span>
@@ -903,44 +1108,36 @@ export default function App() {
             </button>
           </nav>
           <SessionTree
-            nodes={nodes}
-            selectedId={selectedId}
-            editingId={editingId}
-            unread={notifications.states}
             sessions={sessions}
-            titles={sessionMeta}
-            onSelect={selectNode}
-            onSelectRecent={openRecent}
-            onToggle={(id) =>
+            pins={pins}
+            sortOrder={sortOrder}
+            draftTabs={draftTabs}
+            openBySession={openBySession}
+            activeSessionId={activeSessionId}
+            selectedId={selectedId}
+            unread={notifications.states}
+            homeDir={window.mica.homeDir}
+            onOpenSession={openSession}
+            onSelectDraft={(node) => selectNode(node)}
+            onTogglePin={togglePin}
+            onReorderSessions={reorderSessions}
+            onRenameSession={(sessionId, title) => {
+              const text = (title || '').trim()
+              if (text) {
+                window.mica.stats
+                  .renameSession(sessionId, title)
+                  .then(() => refreshSessions())
+                  .catch((error) => console.error('rename session failed', error))
+              }
+            }}
+            onRenameDraft={(nodeId, text) =>
               setNodes((items) =>
-                items.map((node) =>
-                  node.id === id
-                    ? { ...node, state: { ...node.state, opened: !node.state.opened } }
-                    : node
-                )
+                items.map((node) => (node.id === nodeId ? { ...node, text } : node))
               )
             }
-            onRename={(id, value) => {
-              const text = value.trim()
-              const node = nodes.find((item) => item.id === id)
-              if (text) {
-                setNodes((items) =>
-                  items.map((node) => (node.id === id ? { ...node, text } : node))
-                )
-                if (node?.type === 'terminal' && node.sessionId) {
-                  window.mica.stats
-                    .renameSession(node.sessionId, text)
-                    .catch((error) => console.error('rename session failed', error))
-                }
-              }
-              setEditingId(null)
-            }}
-            onCancelEdit={() => setEditingId(null)}
-            onStartEdit={setEditingId}
-            onMove={(id, target, position) =>
-              setNodes((items) => moveNode(items, id, target, position))
-            }
-            onAction={(action, node) => handleAction(action, node).catch(console.error)}
+            onCloseSession={closeSession}
+            onCloseDraft={closeTerminal}
+            onCreateSession={createSession}
           />
         </aside>
         <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e]">
@@ -962,7 +1159,7 @@ export default function App() {
               className={`drag-region mb-0.5 flex h-9 shrink-0 items-stretch border-b border-white/10 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
             >
               {[
-                ['mica', 'Mica', Bot],
+                ['chat', 'Chat', MessageSquare],
                 ['terminal', '终端', SquareTerminal],
                 ['files', '文件夹', Folder],
                 ['git-compare', 'Git', GitCompare],
@@ -1008,6 +1205,17 @@ export default function App() {
             <NotesView visible={view === 'notes'} />
             <StatsView visible={view === 'stats'} />
             <SettingsView visible={view === 'settings'} />
+            <ChatView
+              node={terminalNodes.find((node) => node.id === activeId)}
+              cwd={terminalCwd(activeId)}
+              visible={view === 'chat'}
+              onSessionBound={setSessionId}
+              onOpenFile={openChatFile}
+              onNewSession={createChatSession}
+              onResumeSession={openSession}
+              onOpenTerminal={openChatTerminal}
+              onSessionRenamed={refreshSessions}
+            />
             {view === 'files' && terminalPanelOpen && (
               <div
                 className="terminal-panel-resizer z-20 h-2.5 shrink-0 no-drag"
@@ -1034,17 +1242,15 @@ export default function App() {
               ref={terminalRef}
               nodes={terminalNodes}
               activeId={activeId}
-              visible={
-                view === 'mica' || view === 'terminal' || (view === 'files' && terminalPanelOpen)
-              }
-              pane={view === 'terminal' ? 'terminal' : 'mica'}
+              visible={view === 'terminal' || (view === 'files' && terminalPanelOpen)}
+              pane="terminal"
               docked={view === 'files'}
               height={terminalPanelHeight}
               sidebarCollapsed={sidebarCollapsed}
               resolveCwd={terminalCwd}
               commandFor={commandFor}
               onRead={(id, reason) => notifications.markRead(id, reason)}
-              onExitCommand={clearSessionId}
+              onMicaExit={closeTerminal}
             />
           </div>
           {!activeId && view !== 'stats' && view !== 'settings' && (
@@ -1067,7 +1273,14 @@ export default function App() {
                   <GitBranch size={13} className="shrink-0" />
                   <span className="truncate">{git.status.branch || 'detached'}</span>
                 </button>
-                <span className="min-w-0 truncate text-right text-white/35">{git.status.root}</span>
+                <button
+                  type="button"
+                  title="切换工作目录"
+                  className="min-w-0 max-w-[45%] truncate rounded-sm px-1.5 py-0.5 text-right text-white/35 hover:bg-white/[.06] hover:text-white/75"
+                  onClick={() => setCwdModalOpen(true)}
+                >
+                  {git.status.root}
+                </button>
               </>
             ) : null}
           </footer>
@@ -1099,6 +1312,17 @@ export default function App() {
         />
       )}
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}
+      {cwdModalOpen && (
+        <CwdModal
+          cwd={terminalCwd(activeId) || git.cwd || ''}
+          recent={recentSessionDirs}
+          onClose={() => setCwdModalOpen(false)}
+          onApply={(dir) => {
+            setCwdModalOpen(false)
+            changeChatCwd(dir)
+          }}
+        />
+      )}
     </>
   )
 }

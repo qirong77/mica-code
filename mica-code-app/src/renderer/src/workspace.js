@@ -26,6 +26,32 @@ export function normalizeNodes(nodes = []) {
   )
 }
 
+/**
+ * A terminal node is only an in-process tab. PTYs do not survive an app quit,
+ * so restoring old terminal/session bindings makes historical sessions look
+ * open and may resume one before the user clicks anything.
+ *
+ * Start each app process with one fresh draft while preserving the last cwd.
+ */
+export function createColdStartTerminal(nodes, activeId, now = Date.now()) {
+  const previous =
+    nodes.find((node) => node.id === activeId && node.type === 'terminal') ||
+    nodes.find((node) => node.type === 'terminal')
+  const cwd = previous?.cwd || resolveDefaultCwd(nodes, previous?.parent)
+
+  return {
+    id: uid('term'),
+    parent: '#',
+    text: '新对话',
+    type: 'terminal',
+    cwd,
+    sessionId: null,
+    command: null,
+    lastActiveAt: now,
+    state: { opened: false, selected: true }
+  }
+}
+
 export function childMap(nodes) {
   const children = new Map([['#', []]])
   for (const node of nodes) {

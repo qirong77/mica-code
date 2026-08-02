@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortOption,
   isProviderProtocol,
@@ -33,6 +33,8 @@ export type PersistedRuntimeSnapshot = {
   conversationMessages: unknown[];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
+  /** Subagent task usage appended by the Agent tool; optional for older snapshots. */
+  subagentUsageHistory?: SubagentUsageRecord[];
 };
 
 export type PersistedSessionTurnState = 'running' | 'completed' | 'aborted' | 'error';
@@ -329,6 +331,12 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
+  if (
+    session.snapshot.subagentUsageHistory !== undefined &&
+    !Array.isArray(session.snapshot.subagentUsageHistory)
+  ) {
+    return null;
+  }
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {

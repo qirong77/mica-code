@@ -41,6 +41,7 @@ describe('parseCliArgs', () => {
       variant: 'high',
       role: 'reviewer',
       maxTurns: undefined,
+      thinking: false,
       dangerouslySkipPermissions: true,
       mcpConfigPath: undefined,
       strictMcpConfig: false,
@@ -56,6 +57,7 @@ describe('parseCliArgs', () => {
         '--max-turns=3',
         '--mcp-config=/tmp/mcp.json',
         '--strict-mcp-config',
+        '--thinking',
         'continue',
       ]),
     ).toMatchObject({
@@ -64,6 +66,7 @@ describe('parseCliArgs', () => {
       maxTurns: 3,
       mcpConfigPath: '/tmp/mcp.json',
       strictMcpConfig: true,
+      thinking: true,
       prompt: 'continue',
     });
   });
@@ -74,10 +77,33 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['models', '--verbose'])).toEqual({ mode: 'models', verbose: true });
   });
 
+  it('parses headless compact invocations', () => {
+    expect(
+      parseCliArgs(['compact', '--session', 'session-1', '--dir', '/work', '--force']),
+    ).toEqual({
+      mode: 'compact',
+      sessionId: 'session-1',
+      cwd: '/work',
+      force: true,
+      format: 'json',
+    });
+    expect(parseCliArgs(['compact', '--session=abc'])).toMatchObject({
+      mode: 'compact',
+      sessionId: 'abc',
+      force: false,
+    });
+    expect(parseCliArgs(['compact'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['compact', '--nope', 'x'])).toMatchObject({ mode: 'error' });
+  });
+
   it('accepts a Multica prompt whose first character is a dash', () => {
     expect(parseCliArgs(['run', '--format', 'json', '- fix the checklist'])).toMatchObject({
       mode: 'run',
       prompt: '- fix the checklist',
+    });
+    expect(parseCliArgs(['run', '--format', 'json', '--', '--help'])).toMatchObject({
+      mode: 'run',
+      prompt: '--help',
     });
   });
 

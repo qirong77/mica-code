@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from './terminals'
+import { disposeAllChatRuns, registerChatIpc, setChatNotifyServer } from './chat'
 import { registerWorkspaceIpc } from './workspace'
 import { createNotifyServer } from './notifyServer'
 import { registerFilesIpc } from './files'
@@ -112,12 +113,14 @@ app.whenReady().then(async () => {
 
   notifyServer = await createNotifyServer()
   setNotifyServer(notifyServer)
+  setChatNotifyServer(notifyServer)
   stopNotifyBridge = notifyServer.onChange((payload) => {
     broadcastNotifyChange(payload)
     updateBadge()
   })
 
   registerTerminalIpc()
+  registerChatIpc()
   registerWorkspaceIpc()
   registerFilesIpc()
   registerGitIpc()
@@ -160,6 +163,7 @@ app.on('window-all-closed', (event) => {
 app.on('before-quit', async () => {
   app.isQuitting = true
   disposeAllTerminals()
+  disposeAllChatRuns()
   disposeSettings()
   if (typeof stopNotifyBridge === 'function') {
     stopNotifyBridge()

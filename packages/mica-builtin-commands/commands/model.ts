@@ -88,11 +88,6 @@ async function applyModelSelection(
       return true;
     }
     const providerChanged = selection.providerId !== agent.config.provider.id;
-    services.showNotice(
-      `${providerChanged ? 'Provider and model' : 'Model'} changed, prompt cache may be invalidated. Consider /compact`,
-      services.getCurrentAgentSessionId(),
-      { command: '/model', status: 'warning' },
-    );
     await applyConfigSwitchUpdate({
       agent,
       sessionController,
@@ -119,6 +114,7 @@ async function applyModelSelection(
         const provider = config.providers.find((item) => item.id === config.provider);
         return `Model: ${provider?.name ?? config.provider} / ${config.model}`;
       },
+      successHint: 'Prompt cache may be invalidated. Consider /compact',
     });
     return true;
   } catch (error) {

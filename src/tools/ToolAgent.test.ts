@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentMaxTurnsError, type ModelClientOptions } from '@packages/mica-agent/index.js';
+import {
+  AgentMaxTurnsError,
+  type AgentUsageRecord,
+  type ModelClientOptions,
+} from '@packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { ToolAgent } from './ToolAgent.js';
@@ -64,6 +68,104 @@ describe('ToolAgent', () => {
 
     const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
     expect(options.effort).toBe('high');
+  });
+
+  it('records completed subagent usage into the parent runtime', async () => {
+    const { runtime, child, recordSubagentUsage } = createRuntimeStub();
+    const tool = new ToolAgent(runtime);
+    child.usageHistory.push({
+      provider: 'openai_responses',
+      turnId: 1,
+      requestIndex: 1,
+      messageCount: 3,
+      model: 'child-model',
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      paidTokenRate: 1,
+    });
+
+    await tool.execute({
+      description: 'inspect files',
+      subagent_type: 'Explore',
+      prompt: 'Find the config loader.',
+    });
+
+    expect(recordSubagentUsage).toHaveBeenCalledTimes(1);
+    const record = recordSubagentUsage.mock.calls[0]?.[0] as {
+      taskId: string;
+      subagentType: string;
+      description: string;
+      effort: string;
+      status: string;
+      startedAt: string;
+      finishedAt: string;
+      requests: AgentUsageRecord[];
+      summary: { records: number; inputTokens: number; outputTokens: number };
+    };
+    expect(record.taskId).toBeTruthy();
+    expect(record.subagentType).toBe('Explore');
+    expect(record.description).toBe('inspect files');
+    expect(record.effort).toBe('medium');
+    expect(record.status).toBe('completed');
+    expect(record.startedAt).toBeTruthy();
+    expect(record.finishedAt).toBeTruthy();
+    expect(record.requests).toHaveLength(1);
+    expect(record.requests[0]).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+    expect(record.summary).toMatchObject({ records: 1, inputTokens: 100, outputTokens: 20 });
+  });
+
+  it('records failed and partial subagent usage', async () => {
+    const failingQuery = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const { runtime: failedRuntime, recordSubagentUsage: recordFailed } = createRuntimeStub(failingQuery);
+    const failedTool = new ToolAgent(failedRuntime);
+    await expect(failedTool.execute({ description: 'x', prompt: 'Do it.' })).rejects.toThrow('boom');
+    expect(recordFailed).toHaveBeenCalledTimes(1);
+    expect(recordFailed.mock.calls[0]?.[0]?.status).toBe('failed');
+
+    const maxTurnsQuery = vi.fn(async () => {
+      throw new AgentMaxTurnsError(50, 'partial child result');
+    });
+    const { runtime: partialRuntime, recordSubagentUsage: recordPartial } = createRuntimeStub(maxTurnsQuery);
+    const partialTool = new ToolAgent(partialRuntime);
+    const partialResult = await partialTool.execute({ description: 'bounded', prompt: 'Keep going.' });
+    expect(partialResult).toContain('partial child result');
+    expect(recordPartial).toHaveBeenCalledTimes(1);
+    expect(recordPartial.mock.calls[0]?.[0]?.status).toBe('partial');
+  });
+
+  it('records background subagent usage on completion', async () => {
+    const deferred = createDeferred<string>();
+    const query = vi.fn(() => deferred.promise);
+    const { runtime, recordSubagentUsage } = createRuntimeStub(query);
+    const tool = new ToolAgent(runtime, new SubagentTaskManager());
+    const started = await tool.execute({
+      description: 'bg task',
+      prompt: 'Do it.',
+      run_in_background: true,
+    });
+    expect(started).toContain('已在后台启动');
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+
+    expect(recordSubagentUsage).toHaveBeenCalledTimes(1);
+    expect(recordSubagentUsage.mock.calls[0]?.[0]?.status).toBe('completed');
+  });
+
+  it('records the parent tool-call id and parent task id from tool context', async () => {
+    const { runtime, recordSubagentUsage } = createRuntimeStub();
+    const tool = new ToolAgent(runtime);
+    await tool.execute(
+      { description: 'nested', prompt: 'Do it.' },
+      { context: { agent: runtime, taskId: 'parent-task-9', toolCallId: 'call-abc' } },
+    );
+
+    const record = recordSubagentUsage.mock.calls[0]?.[0] as { parentTaskId?: string; initiatedByCallId?: string };
+    expect(record.parentTaskId).toBe('parent-task-9');
+    expect(record.initiatedByCallId).toBe('call-abc');
   });
 
   it('blocks nested Agent calls for the general-purpose subagent', async () => {
@@ -457,12 +559,12 @@ describe('ToolAgent', () => {
 function createRuntimeStub(query = vi.fn(async () => 'child result')) {
   const child: {
     query: typeof query;
-    usageHistory: [];
+    usageHistory: AgentUsageRecord[];
     onText?: (text: string) => void;
     onThinking?: (thinking: string) => void;
     onToolCall?: (name: string, args: string, id?: string) => void;
     onToolResult?: (name: string, result: string, id?: string) => void;
-  } = { query, usageHistory: [] };
+  } = { query, usageHistory: [] as AgentUsageRecord[] };
   const createSubAgent = vi.fn((_: ModelClientOptions) => child);
   const createClientOptions = vi.fn((overrides: Partial<ModelClientOptions> = {}) => ({
     model: 'parent-model',
@@ -474,13 +576,15 @@ function createRuntimeStub(query = vi.fn(async () => 'child result')) {
     },
     ...overrides,
   }));
+  const recordSubagentUsage = vi.fn();
   const runtime = {
     createSubAgent,
     createClientOptions,
     taskOwnerId: 'owner-1',
     getSnapshot: () => ({ messages: [{ role: 'user', content: 'parent history context' }] }),
+    recordSubagentUsage,
   } as unknown as AgentRuntime;
-  return { runtime, child, createSubAgent, createClientOptions, query };
+  return { runtime, child, createSubAgent, createClientOptions, query, recordSubagentUsage };
 }
 
 function createDeferred<T>() {

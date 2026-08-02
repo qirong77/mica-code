@@ -18,7 +18,10 @@ export async function createNotifyServer() {
     try {
       await handleRequest(req, res, { token, states, bus })
     } catch (error) {
-      writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      writeJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   })
 
@@ -147,15 +150,17 @@ async function handleRequest(req, res, ctx) {
 function setProcessRunning(states, bus, terminalId, running) {
   const previous = states.get(terminalId)
   if (!!previous?.processRunning === running) return previous ?? null
+  const completed = !!previous?.processRunning && !running
+  const now = Date.now()
 
   const state = {
     terminalId,
-    unread: !!previous?.unread,
+    unread: completed || !!previous?.unread,
     agentRunning: !!previous?.agentRunning,
     processRunning: running,
     running: !!previous?.agentRunning || running,
-    lastType: previous?.lastType ?? null,
-    lastEventAt: previous?.lastEventAt ?? null,
+    lastType: completed ? 'terminal.completed' : 'terminal.started',
+    lastEventAt: now,
     summary: previous?.summary,
     sessionId: previous?.sessionId,
     readAt: previous?.readAt ?? null

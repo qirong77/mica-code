@@ -8,6 +8,17 @@ export type RunJsonTokenUsage = {
   total: number;
 };
 
+type RunJsonToolState =
+  | {
+      status: 'pending';
+      input: Record<string, unknown>;
+    }
+  | {
+      status: 'completed';
+      input: Record<string, unknown>;
+      output: string;
+    };
+
 type RunJsonEventBase = {
   timestamp: number;
   sessionID?: string;
@@ -23,16 +34,16 @@ export type RunJsonEvent =
       part: { type: 'text'; text: string };
     })
   | (RunJsonEventBase & {
+      type: 'reasoning';
+      part: { type: 'reasoning'; text: string };
+    })
+  | (RunJsonEventBase & {
       type: 'tool_use';
       part: {
         type: 'tool';
         tool: string;
         callID: string;
-        state: {
-          status: 'completed';
-          input: Record<string, unknown>;
-          output: string;
-        };
+        state: RunJsonToolState;
       };
     })
   | (RunJsonEventBase & {
@@ -160,7 +171,7 @@ export function chunkRunJsonText(text: string, maxChars = 64 * 1024): string[] {
   if (maxChars <= 0) throw new RangeError('maxChars must be greater than zero');
   if (text.length <= maxChars) return text ? [text] : [];
   const chunks: string[] = [];
-  for (let start = 0; start < text.length; ) {
+  for (let start = 0; start < text.length;) {
     let end = Math.min(text.length, start + maxChars);
     if (end < text.length && isHighSurrogate(text.charCodeAt(end - 1))) end--;
     if (end === start) end = Math.min(text.length, start + 2);

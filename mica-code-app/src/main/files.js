@@ -1,4 +1,4 @@
-import { clipboard, ipcMain, shell } from 'electron'
+import { app, clipboard, ipcMain, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import {
   chmod,
@@ -15,6 +15,7 @@ import {
   unlink,
   writeFile
 } from 'fs/promises'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 
 const IGNORED_DIRECTORIES = new Set([
@@ -63,6 +64,32 @@ function normalizeName(value) {
     throw new Error('名称不能包含路径分隔符')
   }
   return name
+}
+
+/** 文件树手动拖拽排序：userData/file-order.json，{ [directoryPath]: [name, ...] } */
+function orderFile() {
+  return path.join(app.getPath('userData'), 'file-order.json')
+}
+
+function readFileOrder() {
+  try {
+    const raw = JSON.parse(readFileSync(orderFile(), 'utf8'))
+    const order = {}
+    for (const [directory, names] of Object.entries(raw || {})) {
+      order[directory] = Array.isArray(names)
+        ? names.filter((name) => typeof name === 'string' && name)
+        : []
+    }
+    return order
+  } catch {
+    return {}
+  }
+}
+
+function writeFileOrder(order) {
+  const file = orderFile()
+  mkdirSync(path.dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(order, null, 2)}\n`, 'utf8')
 }
 
 async function availableCopyPath(source) {
@@ -210,6 +237,19 @@ function previewOf(line, matchIndex, queryLength) {
 }
 
 export function registerFilesIpc() {
+  ipcMain.handle('files:order-get', () => readFileOrder())
+  ipcMain.handle('files:order-set', (_event, payload = {}) => {
+    const directory = normalizeDirectory(payload.directory)
+    const names = Array.isArray(payload.names)
+      ? payload.names.filter((name) => typeof name === 'string' && name)
+      : []
+    const order = readFileOrder()
+    if (names.length) order[directory] = names
+    else delete order[directory]
+    writeFileOrder(order)
+    return order
+  })
+
   ipcMain.handle('files:find', async (_event, payload = {}) => {
     const root = normalizeRoot(payload.root)
     if (payload.query != null && typeof payload.query !== 'string') {

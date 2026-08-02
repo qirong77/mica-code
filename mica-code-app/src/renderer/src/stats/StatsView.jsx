@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { BarSeries, CalendarHeatmap } from './charts'
+import { SessionDetailModal } from './SessionDetailModal'
 import {
-  DAY_MS,
   addDays,
   calendarGrid,
   currentStreak,
@@ -50,26 +50,64 @@ function isDayRange(range) {
 function rangeStart(range) {
   if (isDayRange(range)) return dayStartMs(range.day)
   if (range === 'all') return 0
-  const now = Date.now()
-  if (range === 'today') return dayStartMs(localDayKey(now))
-  return now - Number.parseInt(range, 10) * DAY_MS
+  const today = localDayKey(Date.now())
+  if (range === 'today') return dayStartMs(today)
+  return dayStartMs(addDays(today, -(Number.parseInt(range, 10) - 1)))
 }
 
-/** 范围总天数：today=1、Nd=N、all=最早活动日到今天、day=1 */
-function rangeWindowDays(range, minDay) {
-  if (isDayRange(range)) return 1
-  if (range === 'all') {
-    if (!minDay) return 0
-    return Math.max(1, daysBetween(minDay, localDayKey(Date.now())))
+function usageInRange(usage, range) {
+  if (isDayRange(range)) return localDayKey(usage.occurredAtMs) === range.day
+  return range === 'all' || usage.occurredAtMs >= rangeStart(range)
+}
+
+/** Rebuild one session from only the request-level usage events inside the selected range. */
+function scopeSession(session, range) {
+  const usageEvents = (session.usageEvents || []).filter((usage) => usageInRange(usage, range))
+  if (usageEvents.length === 0) return null
+  const modelMap = new Map()
+  const totals = {
+    requests: usageEvents.length,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 0,
+    totalTokens: 0
   }
-  if (range === 'today') return 1
-  return Number.parseInt(range, 10)
-}
-
-function sessionInRange(session, range) {
-  if (isDayRange(range)) return localDayKey(session.updatedAtMs) === range.day
-  if (range === 'all') return true
-  return session.updatedAtMs >= rangeStart(range)
+  for (const usage of usageEvents) {
+    const row = modelMap.get(usage.model) || {
+      model: usage.model,
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      uncachedInputTokens: 0,
+      totalTokens: 0
+    }
+    row.requests++
+    for (const key of [
+      'inputTokens',
+      'outputTokens',
+      'cachedInputTokens',
+      'uncachedInputTokens',
+      'totalTokens'
+    ]) {
+      row[key] += usage[key]
+      totals[key] += usage[key]
+    }
+    modelMap.set(usage.model, row)
+  }
+  const modelUsage = [...modelMap.values()].sort((a, b) => b.totalTokens - a.totalTokens)
+  const exactTurns = new Set(usageEvents.map((usage) => usage.turnId).filter(Number.isInteger)).size
+  return {
+    ...session,
+    ...totals,
+    usageEvents,
+    modelUsage,
+    model: modelUsage[0]?.model || session.model,
+    turns: exactTurns || session.turns,
+    updatedAtMs: Math.max(...usageEvents.map((usage) => usage.occurredAtMs)),
+    legacyUsageRecords: usageEvents.filter((usage) => usage.dateAccuracy !== 'exact').length
+  }
 }
 
 function basename(cwd) {
@@ -99,21 +137,32 @@ function dayShort(day) {
   return `${Number(d[1])}/${Number(d[2])}`
 }
 
-/** 有模型请求的会话按 updatedAt 聚合到天。旧 session 没有 usage 时间戳，只能按最后活动日归档。 */
+/** 按每次模型请求的时间聚合到本地日历日。 */
 function bucketByDay(sessions) {
   const map = new Map()
   for (const s of sessions) {
-    const requests = Number(s.requests) || 0
-    if (requests <= 0) continue
-    const day = localDayKey(s.updatedAtMs)
-    const row = map.get(day) || { day, sessions: 0, requests: 0, turns: 0, tokens: 0 }
-    row.sessions++
-    row.requests += requests
-    row.turns += s.turns
-    row.tokens += s.totalTokens
-    map.set(day, row)
+    for (const usage of s.usageEvents || []) {
+      const day = localDayKey(usage.occurredAtMs)
+      const row = map.get(day) || {
+        day,
+        sessionIds: new Set(),
+        requests: 0,
+        turns: new Set(),
+        tokens: 0
+      }
+      row.sessionIds.add(s.id)
+      row.requests++
+      if (Number.isInteger(usage.turnId)) row.turns.add(`${s.id}:${usage.turnId}`)
+      row.tokens += usage.totalTokens
+      map.set(day, row)
+    }
   }
-  return map
+  return new Map(
+    [...map].map(([day, row]) => [
+      day,
+      { ...row, sessions: row.sessionIds.size, turns: row.turns.size }
+    ])
+  )
 }
 
 function KpiTile({ label, value, title, className = '' }) {
@@ -131,14 +180,14 @@ function KpiTile({ label, value, title, className = '' }) {
 function OverviewCard({ snap, range, onSelectDay, calendar }) {
   const sessions = snap.sessions
   const scoped = useMemo(
-    () => sessions.filter((session) => sessionInRange(session, range)),
+    () => sessions.map((session) => scopeSession(session, range)).filter(Boolean),
     [sessions, range]
   )
 
   const allDays = useMemo(() => {
     const days = new Set()
     for (const s of sessions) {
-      if ((Number(s.requests) || 0) > 0) days.add(localDayKey(s.updatedAtMs))
+      for (const usage of s.usageEvents || []) days.add(localDayKey(usage.occurredAtMs))
     }
     return [...days].sort()
   }, [sessions])
@@ -149,6 +198,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
     let inputTokens = 0
     let outputTokens = 0
     let cachedInputTokens = 0
+    let uncachedInputTokens = 0
     let processedTokens = 0
     for (const s of scoped) {
       const sessionRequests = Number(s.requests) || 0
@@ -157,6 +207,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       inputTokens += Number(s.inputTokens) || 0
       outputTokens += Number(s.outputTokens) || 0
       cachedInputTokens += Number(s.cachedInputTokens) || 0
+      uncachedInputTokens += Number(s.uncachedInputTokens) || 0
       processedTokens += Number(s.totalTokens) || 0
     }
     return {
@@ -165,6 +216,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       inputTokens,
       outputTokens,
       cachedInputTokens,
+      uncachedInputTokens,
       processedTokens,
       cacheRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0
     }
@@ -186,17 +238,6 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
     }
     return best
   }, [scoped])
-
-  const scopedDays = useMemo(() => {
-    const days = new Set()
-    for (const s of scoped) {
-      if ((Number(s.requests) || 0) > 0) days.add(localDayKey(s.updatedAtMs))
-    }
-    return days
-  }, [scoped])
-
-  const windowDays = rangeWindowDays(range, allDays[0])
-  const activeDays = scopedDays.size
 
   const mostActive = useMemo(() => {
     const byDay = bucketByDay(scoped)
@@ -258,6 +299,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
         <KpiTile
           label="Model requests"
           className={cellBorder(1)}
+          title={`${totals.requests.toLocaleString()} requests (含 subagent 子任务请求)`}
           value={totals.requests.toLocaleString()}
         />
         <KpiTile
@@ -267,28 +309,28 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           value={tokensShort(totals.processedTokens)}
         />
         <KpiTile
-          label="Cache hit"
+          label="Cache hit rate"
           className={cellBorder(3)}
-          title={`${totals.cachedInputTokens.toLocaleString()} cached input tokens`}
-          value={totals.inputTokens > 0 ? `${(totals.cacheRate * 100).toFixed(1)}%` : '—'}
+          title={`${totals.cachedInputTokens.toLocaleString()} / ${totals.inputTokens.toLocaleString()} input tokens`}
+          value={`${(totals.cacheRate * 100).toFixed(1)}%`}
         />
         <KpiTile
-          label="Input tokens"
+          label="Cached input"
           className={cellBorder(4)}
-          title={totals.inputTokens.toLocaleString()}
-          value={tokensShort(totals.inputTokens)}
+          title={`${totals.cachedInputTokens.toLocaleString()} tokens`}
+          value={tokensShort(totals.cachedInputTokens)}
+        />
+        <KpiTile
+          label="Uncached input"
+          className={cellBorder(5)}
+          title={totals.uncachedInputTokens.toLocaleString()}
+          value={tokensShort(totals.uncachedInputTokens)}
         />
         <KpiTile
           label="Output tokens"
-          className={cellBorder(5)}
+          className={cellBorder(6)}
           title={totals.outputTokens.toLocaleString()}
           value={tokensShort(totals.outputTokens)}
-        />
-        <KpiTile
-          label="Active days"
-          className={cellBorder(6)}
-          title={`${activeDays} active days in a ${windowDays}-day window`}
-          value={`${activeDays}/${windowDays}`}
         />
         <KpiTile
           label="Top model"
@@ -368,7 +410,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   )
 }
 
-/** 每日 token 柱状图（按 updatedAt 聚合） */
+/** 每日 token 柱状图（按每次请求的 occurredAtMs 聚合） */
 function DailyCard({ sessions, range }) {
   const byDay = useMemo(() => bucketByDay(sessions), [sessions])
   const now = Date.now()
@@ -378,7 +420,9 @@ function DailyCard({ sessions, range }) {
   const startDay = isDayRange(range)
     ? range.day
     : range === 'all'
-      ? allDays[0] || today
+      ? allDays.length > 90
+        ? addDays(today, -89)
+        : allDays[0] || today
       : localDayKey(since)
   const endDay = isDayRange(range) ? range.day : today
   const totalDays = Math.max(1, daysBetween(startDay, endDay))
@@ -492,6 +536,96 @@ function ByModelCard({ scoped }) {
   )
 }
 
+/** 按 subagent 类型聚合（Explore / Implementer / Tester …），仅在范围内有 subagent 请求时展示 */
+function BySubagentCard({ scoped }) {
+  const rows = useMemo(() => {
+    const byType = new Map()
+    for (const s of scoped) {
+      for (const usage of s.usageEvents || []) {
+        if (!usage.isSubagent) continue
+        const type = usage.subagentType || 'unknown'
+        const row = byType.get(type) || {
+          type,
+          tasks: new Set(),
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0
+        }
+        if (usage.subagentTaskId) row.tasks.add(usage.subagentTaskId)
+        row.requests++
+        row.inputTokens += usage.inputTokens
+        row.outputTokens += usage.outputTokens
+        row.totalTokens += usage.totalTokens
+        byType.set(type, row)
+      }
+    }
+    return [...byType.values()]
+      .map((row) => ({ ...row, tasks: row.tasks.size }))
+      .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests)
+  }, [scoped])
+
+  if (rows.length === 0) return null
+
+  return (
+    <section className={`${CARD_CLASS} p-4`}>
+      <header className="mb-2 flex items-center justify-between">
+        <h2 className={OVERLINE_CLASS}>By subagent</h2>
+        <span className="text-[11px] text-[#707070]">{rows.length} types</span>
+      </header>
+      <div className="overflow-x-auto thin-scrollbar">
+        <table className="w-full min-w-[560px] table-fixed text-[13px]">
+          <colgroup>
+            <col className="w-[34%]" />
+            <col className="w-[16%]" />
+            <col className="w-[16%]" />
+            <col className="w-[17%]" />
+            <col className="w-[17%]" />
+          </colgroup>
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-[#707070]">
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
+                Type
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Tasks
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Requests
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Input
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Output
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.type} className="border-t border-[#1e1e1e]">
+                <td className="py-1 pr-3 text-xs text-[#eaeaea]">{row.type}</td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                  {row.tasks}
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                  {row.requests.toLocaleString()}
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                  {tokensShort(row.inputTokens)}
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                  {tokensShort(row.outputTokens)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 /** 按项目（cwd basename）聚合，分批展示 */
 function ByProjectCard({ scoped, visibleRows, onShowMore }) {
   const rows = useMemo(() => {
@@ -566,8 +700,8 @@ const SESSION_COLUMNS = [
   ...SORT_KEYS.map(([key, label]) => [key, label, true])
 ]
 
-/** 按会话明细表（可排序、分批） */
-function BySessionCard({ scoped }) {
+/** 按会话明细表（可排序、分批），每行可打开详情弹窗 */
+function BySessionCard({ scoped, onDetail }) {
   const [sortKey, setSortKey] = useState('lastActivity')
   const [desc, setDesc] = useState(true)
   const [visible, setVisible] = useState(SESSION_BATCH)
@@ -613,14 +747,15 @@ function BySessionCard({ scoped }) {
         <span className="text-[11px] text-[#707070]">{sorted.length} sessions</span>
       </header>
       <div className="overflow-x-auto thin-scrollbar">
-        <table className="w-full min-w-[860px] table-fixed text-[13px]">
+        <table className="w-full min-w-[940px] table-fixed text-[13px]">
           <colgroup>
-            <col className="w-[34%]" />
-            <col className="w-[16%]" />
-            <col className="w-[14%]" />
-            <col className="w-[10%]" />
+            <col className="w-[31%]" />
+            <col className="w-[15%]" />
             <col className="w-[13%]" />
-            <col className="w-[13%]" />
+            <col className="w-[9%]" />
+            <col className="w-[12%]" />
+            <col className="w-[12%]" />
+            <col className="w-[8%]" />
           </colgroup>
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-[#707070]">
@@ -650,6 +785,9 @@ function BySessionCard({ scoped }) {
                   )}
                 </th>
               ))}
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                详情
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -661,6 +799,9 @@ function BySessionCard({ scoped }) {
                   </span>
                   <span className="mt-0.5 block truncate text-[11px] text-[#707070]">
                     {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
+                    {Number(s.subagentTasks) > 0 && (
+                      <span className="text-[#8a7b52]"> · {s.subagentTasks} sub</span>
+                    )}
                   </span>
                 </td>
                 <td className="py-1 pr-3">
@@ -685,6 +826,15 @@ function BySessionCard({ scoped }) {
                     ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
                     : '—'}
                 </td>
+                <td className="py-1 pr-3 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onDetail(s.id)}
+                    className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[11px] text-[#9a9a9a] transition-colors hover:border-[#3a3a3a] hover:text-[#eaeaea]"
+                  >
+                    查看详情
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -708,6 +858,7 @@ export function StatsView({ visible }) {
   const [snap, setSnap] = useState(null)
   const [visibleRows, setVisibleRows] = useState(PROJECT_BATCH)
   const [calendarYear, setCalendarYear] = useState(null)
+  const [detailSessionId, setDetailSessionId] = useState(null)
 
   useEffect(() => {
     if (!visible) return undefined
@@ -733,7 +884,11 @@ export function StatsView({ visible }) {
   const calendar = useMemo(() => {
     const today = localDayKey(Date.now())
     const years = new Set()
-    for (const s of sessions) years.add(localDayKey(s.updatedAtMs).slice(0, 4))
+    for (const s of sessions) {
+      for (const usage of s.usageEvents || []) {
+        years.add(localDayKey(usage.occurredAtMs).slice(0, 4))
+      }
+    }
     const yearList = [...years].sort().reverse()
     const startDay = calendarYear != null ? `${calendarYear}-01-01` : addDays(today, -364)
     const endDay =
@@ -749,7 +904,7 @@ export function StatsView({ visible }) {
   }, [sessions, calendarYear])
 
   const scoped = useMemo(() => {
-    return sessions.filter((session) => sessionInRange(session, range))
+    return sessions.map((session) => scopeSession(session, range)).filter(Boolean)
   }, [sessions, range])
   const activeScoped = useMemo(
     () => scoped.filter((session) => (Number(session.requests) || 0) > 0),
@@ -757,6 +912,10 @@ export function StatsView({ visible }) {
   )
 
   const hasAny = sessions.some((session) => (Number(session.requests) || 0) > 0)
+  const legacyUsageRecords = scoped.reduce(
+    (total, session) => total + (Number(session.legacyUsageRecords) || 0),
+    0
+  )
 
   const setRangePreset = (value) => {
     setRange(value)
@@ -817,18 +976,29 @@ export function StatsView({ visible }) {
                 onSelectDay={onSelectDay}
                 calendar={calendar}
               />
+              {legacyUsageRecords > 0 && (
+                <div className="rounded-[5px] border border-[#332f24] bg-[#19170f] px-3 py-2 text-[11px] text-[#a89b78]">
+                  {legacyUsageRecords.toLocaleString()} 条旧 usage
+                  没有请求时间，已稳定归档到会话创建日（subagent
+                  记录归档到任务开始时间）；升级后产生的数据会按实际请求时间统计。
+                </div>
+              )}
               <DailyCard sessions={sessions} range={range} />
               <ByModelCard scoped={activeScoped} />
+              <BySubagentCard scoped={activeScoped} />
               <ByProjectCard
                 scoped={activeScoped}
                 visibleRows={visibleRows}
                 onShowMore={() => setVisibleRows((v) => v + PROJECT_BATCH)}
               />
-              <BySessionCard scoped={activeScoped} />
+              <BySessionCard scoped={activeScoped} onDetail={setDetailSessionId} />
             </>
           )}
         </div>
       </div>
+      {detailSessionId && (
+        <SessionDetailModal sessionId={detailSessionId} onClose={() => setDetailSessionId(null)} />
+      )}
     </section>
   )
 }

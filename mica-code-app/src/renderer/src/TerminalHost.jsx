@@ -12,7 +12,6 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { createFileLinkProvider, openWebLink } from './terminal-links'
-import { createSubmittedCommandTracker } from './terminal-input'
 import { useLatest } from './hooks'
 
 const terminalTheme = {
@@ -76,10 +75,9 @@ function interceptTerminalKey(event, id) {
   window.mica.terminal.write(id, data)
 }
 
-function TerminalPane({ ptyId, sessionId, active, onRegister, onRead, onExitCommand }) {
+function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
   const hostRef = useRef(null)
   const onReadRef = useLatest(onRead)
-  const onExitCommandRef = useLatest(onExitCommand)
 
   useEffect(() => {
     const host = hostRef.current
@@ -106,11 +104,7 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead, onExitComm
     term.open(host)
     term.registerLinkProvider(createFileLinkProvider(term, ptyId, window.mica.platform))
 
-    const trackCommand = createSubmittedCommandTracker((command) => {
-      if (command === 'exit') onExitCommandRef.current(sessionId)
-    })
     const input = term.onData((data) => {
-      trackCommand(data)
       window.mica.terminal.write(ptyId, data)
       onReadRef.current(sessionId, 'input')
     })
@@ -145,7 +139,7 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead, onExitComm
       host.removeEventListener('pointerdown', pointer)
       term.dispose()
     }
-  }, [ptyId, sessionId, onExitCommandRef, onReadRef, onRegister])
+  }, [ptyId, sessionId, onReadRef, onRegister])
 
   return (
     <div
@@ -168,7 +162,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
     resolveCwd,
     commandFor,
     onRead,
-    onExitCommand
+    onMicaExit
   },
   ref
 ) {
@@ -186,6 +180,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
   const resolveCwdRef = useLatest(resolveCwd)
   const commandForRef = useLatest(commandFor)
   const onReadRef = useLatest(onRead)
+  const onMicaExitRef = useLatest(onMicaExit)
   const frameRef = useRef(null)
   const focusRef = useRef(false)
   const sidebarCollapsedRef = useRef(sidebarCollapsed)
@@ -306,9 +301,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
             console.error('create terminal failed', error)
           )
         }
-      } else {
-        entries.current.delete(ptyId)
-      }
+      } else entries.current.delete(ptyId)
     },
     [activate, activePane, activeRef]
   )
@@ -333,6 +326,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
           if (entry) {
             entry.ready = false
             entry.lastPtySize = null
+            entry.disposing = true
           }
           try {
             await window.mica.terminal.dispose(ptyId)
@@ -419,13 +413,16 @@ export const TerminalHost = forwardRef(function TerminalHost(
       if (!entry) return
       entry.ready = false
       entry.lastPtySize = null
-      entry.term.writeln('\r\n[process exited]')
+      const { sessionId, pane } = parsePtyId(id)
+      if (pane === PANE_MICA) {
+        if (!entry.disposing) onMicaExitRef.current?.(sessionId)
+      } else entry.term.writeln('\r\n[process exited]')
     })
     return () => {
       offData?.()
       offExit?.()
     }
-  }, [])
+  }, [onMicaExitRef])
 
   useEffect(() => {
     const observer = new ResizeObserver(() => {
@@ -471,7 +468,6 @@ export const TerminalHost = forwardRef(function TerminalHost(
                 active={isActiveSession && pane === PANE_MICA}
                 onRegister={register}
                 onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
-                onExitCommand={onExitCommand}
               />
             )}
             {panes.has(PANE_TERMINAL) && (
@@ -481,7 +477,6 @@ export const TerminalHost = forwardRef(function TerminalHost(
                 active={isActiveSession && pane === PANE_TERMINAL}
                 onRegister={register}
                 onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
-                onExitCommand={onExitCommand}
               />
             )}
           </div>

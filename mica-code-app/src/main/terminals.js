@@ -178,7 +178,7 @@ function isExecutable(file) {
   }
 }
 
-function resolveMicaExecutable() {
+export function resolveMicaExecutable() {
   const explicit = (process.env.MICA_CLI_PATH || '').trim()
   if (explicit && isExecutable(explicit)) return explicit
   const defaultPath = path.join(os.homedir(), '.local', 'bin', 'mica')

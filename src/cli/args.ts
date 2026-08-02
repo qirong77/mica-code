@@ -8,6 +8,7 @@ export type RunCliInvocation = {
   variant?: string;
   role?: string;
   maxTurns?: number;
+  thinking: boolean;
   dangerouslySkipPermissions: boolean;
   mcpConfigPath?: string;
   strictMcpConfig: boolean;
@@ -19,10 +20,19 @@ export type DaemonCliInvocation = {
   name?: string;
 };
 
+export type CompactCliInvocation = {
+  mode: 'compact';
+  sessionId: string;
+  cwd?: string;
+  force: boolean;
+  format: 'json';
+};
+
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | RunCliInvocation
   | DaemonCliInvocation
+  | CompactCliInvocation
   | { mode: 'models'; verbose: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
@@ -36,6 +46,7 @@ export const CLI_USAGE = [
   '  mica models',
   '  mica run --format json [options] "<prompt>"',
   '  mica daemon [--server <url>] [--name <name>]',
+  '  mica compact --session <id> [--dir <path>] [--force]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -44,6 +55,7 @@ export const CLI_USAGE = [
   '  --variant <effort>                none|low|medium|high|xhigh',
   '  --role <name>                     Override the agent role',
   '  --max-turns <count>               Limit model round trips',
+  '  --thinking                        Include reasoning events in JSON output',
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
@@ -51,6 +63,11 @@ export const CLI_USAGE = [
   'Daemon options:',
   '  --server <url>                    Sync server base URL',
   '  --name <name>                     Machine display name (default: hostname)',
+  '',
+  'Compact options:',
+  '  --session <id>                    Compress the given session into a checkpoint',
+  '  --dir <path>                      Set the working directory',
+  '  --force                           Force a summary even when history is short',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -93,6 +110,30 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     }
     return { mode: 'daemon', server, name };
   }
+  if (argv[0] === 'compact') {
+    let sessionId: string | undefined;
+    let cwd: string | undefined;
+    let force = false;
+    for (let index = 1; index < argv.length; index++) {
+      const arg = argv[index]!;
+      const valueOption = parseValueOption(arg, argv, index, ['--session', '--dir']);
+      if (valueOption) {
+        if (!valueOption.ok) return valueOption.error;
+        index = valueOption.nextIndex;
+        if (valueOption.name === '--session') sessionId = valueOption.value;
+        if (valueOption.name === '--dir') cwd = valueOption.value;
+        continue;
+      }
+      if (arg === '--force') {
+        force = true;
+        continue;
+      }
+      if (arg === '--help' || arg === '-h') return { mode: 'help' };
+      return cliError(`Unknown compact option: ${arg}`);
+    }
+    if (!sessionId) return cliError('Missing value for --session.');
+    return { mode: 'compact', sessionId, cwd, force, format: 'json' };
+  }
   if (argv[0] !== 'run') return { mode: 'interactive' };
 
   let format: 'json' | undefined;
@@ -102,6 +143,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   let variant: string | undefined;
   let role: string | undefined;
   let maxTurns: number | undefined;
+  let thinking = false;
   let dangerouslySkipPermissions = false;
   let mcpConfigPath: string | undefined;
   let strictMcpConfig = false;
@@ -178,6 +220,10 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       dangerouslySkipPermissions = true;
       continue;
     }
+    if (arg === '--thinking') {
+      thinking = true;
+      continue;
+    }
     if (arg === '--strict-mcp-config') {
       strictMcpConfig = true;
       continue;
@@ -205,6 +251,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     variant,
     role,
     maxTurns,
+    thinking,
     dangerouslySkipPermissions,
     mcpConfigPath,
     strictMcpConfig,

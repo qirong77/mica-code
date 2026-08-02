@@ -76,6 +76,48 @@ const isSameOrChildPath = (candidate, parent) => {
   return caseLeft === caseRight || caseLeft.startsWith(`${caseRight}/`)
 }
 
+/** 目录部分：/a/b/c -> /a/b */
+function dirOf(path) {
+  const normalized = String(path || '')
+    .replaceAll('\\', '/')
+    .replace(/\/$/, '')
+  const index = normalized.lastIndexOf('/')
+  return index > 0 ? normalized.slice(0, index) : normalized || '/'
+}
+
+const isSibling = (a, b) => dirOf(a) === dirOf(b)
+
+function findDirChildren(nodes, dirPath) {
+  for (const node of nodes) {
+    if (node.path === dirPath) return node.children
+    if (node.children?.length) {
+      const found = findDirChildren(node.children, dirPath)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function updateDirChildren(nodes, dirPath, update) {
+  return nodes.map((node) =>
+    node.path === dirPath
+      ? { ...node, children: update(node.children) }
+      : node.children?.length
+        ? { ...node, children: updateDirChildren(node.children, dirPath, update) }
+        : node
+  )
+}
+
+function applyOrder(children, directory, orderMap) {
+  const order = orderMap?.[directory]
+  if (!order?.length) return children
+  const byName = new Map(children.map((node) => [node.name, node]))
+  const known = order.map((name) => byName.get(name)).filter(Boolean)
+  const seen = new Set(known.map((node) => node.name))
+  const rest = children.filter((node) => !seen.has(node.name))
+  return [...known, ...rest]
+}
+
 function FileContextMenu({ menu, onAction, onClose }) {
   useEffect(() => {
     const close = () => onClose()
@@ -140,15 +182,25 @@ function FileTreeRows({
   activePath,
   dragPath,
   dropPath,
+  siblingDrop,
+  orderMap,
   onToggle,
   onOpen,
   onContextMenu,
   onDragStart,
   onDragEnd,
-  onDrop
+  onDrop,
+  onSiblingHover,
+  onSiblingDrop
 }) {
   return nodes.map((node) => {
     const directory = node.type === 'directory'
+    const siblingOver =
+      siblingDrop?.path === node.path
+        ? siblingDrop.position === 'before'
+          ? 'before'
+          : 'after'
+        : null
     return (
       <div key={node.path}>
         <button
@@ -160,18 +212,44 @@ function FileTreeRows({
           className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] hover:text-white ${
             node.path === activePath ? 'bg-white/[.075] text-white' : 'text-white/70'
           } ${dragPath === node.path ? 'opacity-40' : ''} ${dropPath === node.path ? 'ring-1 ring-inset ring-[#5aa7e8]/70 bg-[#5aa7e8]/10' : ''}`}
-          style={{ paddingLeft: 5 + depth * 13 }}
+          style={{
+            paddingLeft: 5 + depth * 13,
+            boxShadow:
+              siblingOver === 'before'
+                ? 'inset 0 2px 0 rgba(90,167,232,.9)'
+                : siblingOver === 'after'
+                  ? 'inset 0 -2px 0 rgba(90,167,232,.9)'
+                  : undefined
+          }}
           onClick={() => (directory ? onToggle(node) : onOpen(node.path))}
           onContextMenu={(event) => onContextMenu(event, node)}
           onDragStart={(event) => onDragStart(event, node)}
           onDragEnd={onDragEnd}
           onDragOver={(event) => {
-            if (!directory || dragPath === node.path) return
+            if (!dragPath || dragPath === node.path) return
+            if (isSibling(dragPath, node.path)) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              const rect = event.currentTarget.getBoundingClientRect()
+              const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+              onSiblingHover(node.path, position)
+              return
+            }
+            if (!directory) return
             event.preventDefault()
             event.dataTransfer.dropEffect = 'move'
           }}
-          onDragEnter={(event) => directory && onDrop(event, node, false)}
-          onDrop={(event) => directory && onDrop(event, node, true)}
+          onDragEnter={(event) => {
+            if (!directory || (dragPath && isSibling(dragPath, node.path))) return
+            onDrop(event, node, false)
+          }}
+          onDrop={(event) => {
+            if (dragPath && isSibling(dragPath, node.path)) {
+              onSiblingDrop(node.path, siblingDrop?.position || 'after')
+              return
+            }
+            if (directory) onDrop(event, node, true)
+          }}
         >
           <span
             className={`grid size-3.5 shrink-0 place-items-center text-white/35 ${node.expanded ? 'rotate-90' : ''}`}
@@ -207,17 +285,21 @@ function FileTreeRows({
             </div>
           ) : (
             <FileTreeRows
-              nodes={node.children}
+              nodes={applyOrder(node.children, node.path, orderMap)}
               depth={depth + 1}
               activePath={activePath}
               dragPath={dragPath}
               dropPath={dropPath}
+              siblingDrop={siblingDrop}
+              orderMap={orderMap}
               onToggle={onToggle}
               onOpen={onOpen}
               onContextMenu={onContextMenu}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onDrop={onDrop}
+              onSiblingHover={onSiblingHover}
+              onSiblingDrop={onSiblingDrop}
             />
           ))}
       </div>
@@ -252,6 +334,9 @@ export const FilesView = forwardRef(function FilesView(
   const [contextMenu, setContextMenu] = useState(null)
   const [dragPath, setDragPath] = useState(null)
   const [dropPath, setDropPath] = useState(null)
+  const [siblingDrop, setSiblingDrop] = useState(null) // { path, position: 'before'|'after' }
+  const [orderMap, setOrderMap] = useState({})
+  const orderMapRef = useRef({})
   const [message, setMessage] = useState({
     text: '从左侧目录选择文件以开始编辑',
     transient: false,
@@ -535,6 +620,22 @@ export const FilesView = forwardRef(function FilesView(
     if (visible) loadRoot(root)
   }, [loadRoot, root, visible])
 
+  useEffect(() => {
+    if (!visible) return undefined
+    let cancelled = false
+    window.mica.files
+      .orderGet()
+      .then((order) => {
+        if (cancelled) return
+        orderMapRef.current = order || {}
+        setOrderMap(orderMapRef.current)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [visible])
+
   const restoreExpanded = useCallback(async (nodes, paths, request) => {
     const restored = []
     for (const node of nodes) {
@@ -668,6 +769,8 @@ export const FilesView = forwardRef(function FilesView(
   const startFileDrag = useCallback((event, node) => {
     setContextMenu(null)
     setDragPath(node.path)
+    setDropPath(null)
+    setSiblingDrop(null)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', node.path)
   }, [])
@@ -675,7 +778,58 @@ export const FilesView = forwardRef(function FilesView(
   const finishFileDrag = useCallback(() => {
     setDragPath(null)
     setDropPath(null)
+    setSiblingDrop(null)
   }, [])
+
+  const handleSiblingHover = useCallback((path, position) => {
+    setDropPath(null)
+    setSiblingDrop({ path, position })
+  }, [])
+
+  const handleSiblingDrop = useCallback(
+    async (targetPath, position) => {
+      if (!dragPath || dragPath === targetPath) return
+      const directory = dirOf(targetPath)
+      const current = treeRef.current
+      const children =
+        directory === current.root ? current.children : findDirChildren(current.children, directory)
+      if (!children?.length) return
+      const names = children.map((node) => node.name)
+      const dragName = children.find((node) => node.path === dragPath)?.name
+      const targetName = children.find((node) => node.path === targetPath)?.name
+      const from = names.indexOf(dragName)
+      const to = names.indexOf(targetName)
+      if (from < 0 || to < 0) {
+        setDragPath(null)
+        setSiblingDrop(null)
+        return
+      }
+      names.splice(from, 1)
+      const at = names.indexOf(targetName)
+      names.splice(position === 'before' ? at : at + 1, 0, dragName)
+      const reorder = (list) =>
+        names.map((name) => list.find((node) => node.name === name)).filter(Boolean)
+      setTree((value) => ({
+        ...value,
+        children:
+          directory === value.root
+            ? reorder(value.children)
+            : updateDirChildren(value.children, directory, reorder)
+      }))
+      setDragPath(null)
+      setDropPath(null)
+      setSiblingDrop(null)
+      try {
+        const next = { ...orderMapRef.current, [directory]: names }
+        orderMapRef.current = next
+        setOrderMap(next)
+        await window.mica.files.orderSet(directory, names)
+      } catch (error) {
+        showMessage(`排序保存失败：${error?.message || error}`, true, true)
+      }
+    },
+    [dragPath, showMessage, treeRef]
+  )
 
   const handleFileDrop = useCallback(
     async (event, directory, commit) => {
@@ -974,16 +1128,20 @@ export const FilesView = forwardRef(function FilesView(
             aria-label="文件目录"
           >
             <FileTreeRows
-              nodes={tree.children}
+              nodes={applyOrder(tree.children, tree.root, orderMap)}
               activePath={activePath}
               dragPath={dragPath}
               dropPath={dropPath}
+              siblingDrop={siblingDrop}
+              orderMap={orderMap}
               onToggle={toggleDirectory}
               onOpen={openFile}
               onContextMenu={openContextMenu}
               onDragStart={startFileDrag}
               onDragEnd={finishFileDrag}
               onDrop={handleFileDrop}
+              onSiblingHover={handleSiblingHover}
+              onSiblingDrop={handleSiblingDrop}
             />
           </div>
           {tree.status && (

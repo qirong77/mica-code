@@ -1,4 +1,5 @@
 import { OpenAI } from 'openai';
+import { randomUUID } from 'node:crypto';
 import { micaTools } from '@packages/mica-tools/index.js';
 import {
   resolveChatCompletionsEffortParams,
@@ -324,6 +325,8 @@ export class ChatCompletionsClient extends BaseAgent<
     const totalTokens = usage.total_tokens ?? promptTokens + outputTokens;
     const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
     const record: ChatCompletionsUsageRecord = {
+      usageId: randomUUID(),
+      occurredAt: new Date().toISOString(),
       provider: 'openai_chat_completions',
       turnId: metadata.turnId,
       requestIndex: metadata.requestIndex,

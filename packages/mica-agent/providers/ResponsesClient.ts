@@ -1,4 +1,5 @@
 import { OpenAI } from 'openai';
+import { randomUUID } from 'node:crypto';
 import type {
   FunctionTool,
   Response,
@@ -56,6 +57,12 @@ function getClient(options: ModelClientOptions) {
 
 function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
+}
+
+export function withResponsesReasoningSummary(patch: Record<string, unknown>): Record<string, unknown> {
+  const reasoning = patch.reasoning;
+  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning) || 'summary' in reasoning) return patch;
+  return { ...patch, reasoning: { ...reasoning, summary: 'auto' } };
 }
 
 export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInputItem, ResponsesUsageRecord> {
@@ -196,6 +203,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let completedResponse: Response | undefined;
       const outputItems: ResponseInputItem[] = [];
       const toolCalls = new Map<number, PendingToolCall>();
+      let hasReasoningText = false;
+      let reasoningPartDone = false;
 
       for await (const event of stream) {
         throwIfQueryStopped(options);
@@ -214,7 +223,15 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         }
 
         if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_text.delta') {
+          if (reasoningPartDone && hasReasoningText) this.onThinking?.('\n\n');
           this.onThinking?.(event.delta);
+          hasReasoningText = true;
+          reasoningPartDone = false;
+          continue;
+        }
+
+        if (event.type === 'response.reasoning_summary_text.done' || event.type === 'response.reasoning_text.done') {
+          reasoningPartDone = true;
           continue;
         }
 
@@ -318,10 +335,10 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
   private get reasoningParams(): Record<string, unknown> {
     if (!this.provider || !this.effort) return {};
-    return (
+    const patch =
       resolveModelRequestPatch(this.model, this.effort, 'openai_responses') ??
-      resolveResponsesReasoningParams(this.provider, this.effort)
-    );
+      resolveResponsesReasoningParams(this.provider, this.effort);
+    return withResponsesReasoningSummary(patch);
   }
 
   private recordUsage(
@@ -339,6 +356,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
     const paidTokenRate = totalTokens > 0 ? Math.max(0, totalTokens - cachedTokens) / totalTokens : 0;
     const record: ResponsesUsageRecord = {
+      usageId: randomUUID(),
+      occurredAt: new Date().toISOString(),
       provider: 'openai_responses',
       turnId: metadata.turnId,
       requestIndex: metadata.requestIndex,

@@ -31,6 +31,7 @@ export async function applyConfigSwitchUpdate({
   services,
   update,
   successMessage,
+  successHint,
   command = '/config',
 }: {
   agent: CommandAgent;
@@ -38,6 +39,7 @@ export async function applyConfigSwitchUpdate({
   services: CommandRuntimeServices;
   update: (config: IMicaConfig) => IMicaConfig;
   successMessage: (config: IMicaConfig) => string;
+  successHint?: string;
   command?: string;
 }): Promise<IMicaConfig> {
   let adjustments: ConfigSwitchAdjustment[] = [];
@@ -52,7 +54,7 @@ export async function applyConfigSwitchUpdate({
   agent.reloadConfig(false);
   sessionController.saveCurrent();
   services.syncModelDisplay(agent);
-  services.showNotice(formatConfigSwitchSuccess(successMessage(next), adjustments), undefined, {
+  services.showNotice(formatConfigSwitchSuccess(successMessage(next), adjustments, successHint), undefined, {
     command,
     status: 'success',
   });
@@ -146,9 +148,14 @@ function findCurrentProvider(config: IMicaConfig): ProviderDefinition | undefine
   return config.providers.find((item) => item.id === config.provider);
 }
 
-function formatConfigSwitchSuccess(message: string, adjustments: ConfigSwitchAdjustment[]): string {
-  if (adjustments.length === 0) return message;
-  return `${message}; ${formatConfigSwitchAdjustments(adjustments)}`;
+function formatConfigSwitchSuccess(
+  message: string,
+  adjustments: ConfigSwitchAdjustment[],
+  hint?: string,
+): string {
+  return [message, adjustments.length > 0 ? formatConfigSwitchAdjustments(adjustments) : undefined, hint]
+    .filter((part): part is string => Boolean(part))
+    .join('; ');
 }
 
 function formatConfigSwitchAdjustments(adjustments: ConfigSwitchAdjustment[]): string {

@@ -30,6 +30,17 @@ describe('runJson', () => {
     });
   });
 
+  it('encodes OpenCode-compatible reasoning parts', () => {
+    const event = {
+      type: 'reasoning',
+      timestamp: 234,
+      sessionID: 's1',
+      part: { type: 'reasoning', text: 'inspect the code' },
+    } satisfies RunJsonEvent;
+
+    expect(JSON.parse(encodeRunJsonLine(event))).toEqual(event);
+  });
+
   it('renders step-finish usage in the shape Multica parses', () => {
     const event = createRunJsonStepFinish(
       's1',

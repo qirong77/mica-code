@@ -48,10 +48,10 @@ export function MessageGutter({
 }: MessageGutterProps): React.ReactNode {
   return (
     <Box flexDirection="row" marginTop={marginTop} width="100%" minWidth={0} backgroundColor={backgroundColor}>
-      <Box width={2} flexShrink={0}>
+      <Box width={3} paddingLeft={1} flexShrink={0}>
         <Text color={markerColor ?? TONE_COLOR[tone]}>{marker}</Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={1}>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
         {children}
       </Box>
     </Box>

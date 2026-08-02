@@ -7,6 +7,7 @@
 - 提供 `BaseAgent`、`IAgent`、conversation message 等公共 agent 类型。
 - 提供 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 三类协议 client。
 - 提供子 agent 创建入口：`createSubAgent`。
+- 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
 - 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载 `.md` 用户 role，以文件名（不含扩展名）作为 role 名，并保留不可覆盖的内置 `default`。

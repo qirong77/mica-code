@@ -31,6 +31,7 @@ export function attachRunJsonProjector(
   agent: AgentRuntime,
   writer: RunJsonWriter,
   sessionID: string,
+  options: { thinking?: boolean } = {},
 ): RunJsonProjector {
   const pendingByID = new Map<string, PendingToolCall>();
   const pendingByName = new Map<string, PendingToolCall[]>();
@@ -49,9 +50,17 @@ export function attachRunJsonProjector(
         });
       }
     },
-    // The DevEco run-json dialect has no thinking event. Keeping reasoning off
-    // the text channel prevents it from polluting Multica's final task output.
-    thinking: () => undefined,
+    thinking: (text) => {
+      if (!options.thinking || !text) return;
+      for (const chunk of chunkRunJsonText(text)) {
+        writer.write({
+          type: 'reasoning',
+          timestamp: Date.now(),
+          sessionID,
+          part: { type: 'reasoning', text: chunk },
+        });
+      }
+    },
     toolCall: ({ name, args, id }) => {
       const call: PendingToolCall = {
         callID: id || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -65,6 +74,20 @@ export function attachRunJsonProjector(
         queue.push(call);
         pendingByName.set(name, queue);
       }
+      writer.write({
+        type: 'tool_use',
+        timestamp: Date.now(),
+        sessionID,
+        part: {
+          type: 'tool',
+          tool: call.name,
+          callID: call.callID,
+          state: {
+            status: 'pending',
+            input: call.input,
+          },
+        },
+      });
     },
     toolResult: ({ name, result, id }) => {
       const call = takePendingTool(pendingByID, pendingByName, name, id) ?? {
@@ -90,6 +113,9 @@ export function attachRunJsonProjector(
       writer.write(event);
     },
     usage: (record) => addUsage(usage, record),
+    // Subagent usage is persisted with the session snapshot; the run-JSON
+    // protocol has no subagent event shape, so headless projection ignores it.
+    subagentUsage: () => undefined,
     status: () => undefined,
   };
 

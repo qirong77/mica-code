@@ -78,11 +78,6 @@ async function applyEffortSelection(
       return true;
     }
 
-    services.showNotice('Effort changed, prompt cache may be invalidated. Consider /compact', services.getCurrentAgentSessionId(), {
-      command: '/effort',
-      status: 'warning',
-    });
-
     await applyConfigSwitchUpdate({
       agent,
       sessionController,
@@ -93,6 +88,7 @@ async function applyEffortSelection(
         effort: effort as EffortOption,
       }),
       successMessage: () => `Effort: ${effort}`,
+      successHint: 'Prompt cache may be invalidated. Consider /compact',
     });
     return true;
   } catch (error) {

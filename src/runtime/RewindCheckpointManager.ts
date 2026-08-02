@@ -727,6 +727,7 @@ function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
     messages: cloneJson(snapshot.messages),
     usageHistory: cloneJson(snapshot.usageHistory),
     lastUsage: cloneJson(snapshot.lastUsage),
+    subagentUsageHistory: cloneJson(snapshot.subagentUsageHistory),
   };
 }
 

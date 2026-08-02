@@ -33,7 +33,7 @@ export type {
 } from './core/Agent.js';
 export { AgentMaxTurnsError, throwIfAgentMaxTurnsReached } from './core/Agent.js';
 export type { AgentContentPartMapper } from './core/Content.js';
-export type { AgentUsageSummary } from './core/Usage.js';
+export type { AgentUsageSummary, SubagentUsageRecord } from './core/Usage.js';
 export { calculateCachedTokenRate, calculateUsageCachedTokenRate, summarizeUsageHistory } from './core/Usage.js';
 export type {
   ConversationContentBlock,

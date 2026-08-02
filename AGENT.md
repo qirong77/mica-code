@@ -61,6 +61,7 @@ src/
     args.ts                        `run` / `models` / `--version` argv 解析
     modelCatalog.ts                Multica runtime 模型 ID 列举与解析
     runHeadless.ts                 无 UI headless 执行与资源生命周期
+    runCompact.ts                  无 UI 会话压缩（mica compact，复用 CompactionService）
   agent/
     AgentRuntime.ts                provider client 生命周期、run/abort/snapshot/config reload
     AgentRuntimeConfig.ts          从 mica-config 读取并夹紧 provider/model/effort
@@ -244,6 +245,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `packages/mica-session/sessionStore.ts` 默认使用 `~/.mica/sessions`，设置 `MICA_HOME` 时跟随 `$MICA_HOME/sessions`。
 - session 文件是 version 1 JSON，保存 `id`、`title`、`createdAt`、`updatedAt`、`cwd` 和 `snapshot`。
 - `snapshot` 包含 providerId、model、effort、role、provider history messages、UI conversationMessages、usageHistory、lastUsage。旧 snapshot 缺少 role 时按 `default` 读取，自定义 role 文件缺失时恢复也回退到 `default`。
+- `snapshot.subagentUsageHistory`（可选）记录该 agent 发起的每个 subagent 任务完整 usage：`taskId`、`parentTaskId`（嵌套调用树）、`initiatedByCallId`（父 agent 的 provider tool-call id）、`subagentType`、`description`、`status`、`startedAt`/`finishedAt`、逐条 `requests`（`AgentUsageRecord[]`，含 `occurredAt`/`usageId`）和聚合 `summary`。由 `ToolAgent` 在任务结束时调用 `AgentRuntime.recordSubagentUsage` 写入，随会话快照落盘，rewind 的 checkpoint clone 会原样携带；subagent 的 `turnId`/`messageCount` 相对子 agent 自身消息数组，必须独立存放，不能混入主 `usageHistory`（否则破坏 rewind 的 `messageCount` 裁剪语义）。旧 snapshot 缺少该字段时按空数组处理。
 - `SessionController` 负责把 `AgentRuntime` snapshot 转为 persisted snapshot，恢复时先 apply config，再 reload agent，再 load snapshot，最后 restore UI。
 - 新增 session 字段必须有明确版本策略、默认值和 sanitize/parse 逻辑。
 
@@ -253,6 +255,9 @@ temp/                              临时代码和外部实验，默认不参与
 - 默认 effort map 是 `none -> null`、`low -> low`、`medium -> medium`、`high -> high`。未加载数据的模型默认提供 `none/low/medium/high`。
 - Provider 可通过 `get_model_url` 拉取模型列表；所有模型使用 `getModelRule` 返回的固定 context window 和 reasoning effort 映射。
 - 交互和 headless 模式都必须先注册 `buildin-plugins/model-effort-context` resolver，再调用 `ensureModelRule`；headless 获取不到 metadata 时只写 stderr 并使用通用 rule，不能污染协议 stdout。
+- Headless `run --format json` 默认不输出 provider reasoning；显式 `--thinking` 时按 OpenCode 形状输出 `reasoning` 事件（`part: { type: 'reasoning', text }`）。新增 run JSON 消费方若需要展示思考应传该开关，不要把 reasoning 混入 `text` 或最终任务输出。工具调用在 `toolCall` 时立即输出 `pending` `tool_use`，在 `toolResult` 时以相同 `callID` 输出 `completed`，消费端应原位更新而不是追加两张卡。
+- Headless run 的 prompt 会像交互输入一样先经 `micaUi.parseImageRefs` 解析 `[Image](路径)` 引用（从 `@packages/mica-ui/utils/imagePaste.js` 直接导入，避免把 React/Ink 拖进 headless 路径），生成多模态 content block 后再调用 `agent.run`，因此 Web Chat 等一次性消费方可以通过 `~/.mica/images/` 引用附加剪贴板图片。不依赖 React/Ink 的约束仍然成立。
+- Responses 请求只要包含 reasoning 参数，就应保留显式 summary 配置；未配置时补 `summary: 'auto'`，否则 provider 可能只有隐藏 reasoning tokens 而不会产生 `response.reasoning_summary_text.delta`，终端和 Chat 都没有可展示的思考内容。
 - 只有明确配置了 `get_model_url` 的动态 provider 才会触发 provider 模型列表查找；模型 context/effort metadata 则来自 Models.dev resolver。
 - context size 默认 256K，实际值由 Models.dev canonical 模型记录的 `limit.context` 决定。
 - 未在 Models.dev 中找到的模型使用默认值：256K context、`none/low/medium/high` effort。
@@ -284,7 +289,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/role`：切换当前 agent 的系统提示词；自定义文件来自 `~/.mica/role` 或 `$MICA_HOME/role`。输入框中也可使用 `Shift+Tab` 按列表顺序循环切换 role（agent busy 时拒绝，与 `/role` 一致）；当 agent 运行中且输入已进入 queue 快捷提示时，`Shift+Tab` 仍表示 after_iteration 排队发送。
 - `/status`：显示当前 provider/model/effort/role 状态。
 - `/context`：显示当前上下文占用总览。
-- `/compact`：压缩当前会话上下文为 checkpoint。
+- `/compact`：压缩当前会话上下文为 checkpoint。Web Chat 通过 `mica compact --session <id>` 调用同一套 `CompactionService`（见 `src/cli/runCompact.ts`）；该 headless 命令会写回压缩后的 checkpoint 并输出单行 JSON，会话内容过少时返回 `code: "not_needed"`。
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/task`：按 terminal session 展示当前终端中的 session、全部 retained subagent 和 active background shell。列表中 `Enter` 切换 session，或打开 subagent/shell 详情；`/task clear` 清除空闲 session。
@@ -328,6 +333,8 @@ AGENT.md
 - `pty_spawn`、`pty_send`、`pty_read`、`pty_wait`、`pty_kill`
 - `web_fetch`、`web_search`
 - `Skill`
+
+交互模式的 `TodoWrite` 由 Todo 插件注册；headless run 也会从不依赖 React/Ink 的 `buildin-plugins/todo/TodoTool.ts` 注册独立实例，使一次性 JSON 消费方能看到并展示结构化计划。Todo 状态仍只属于当前进程/turn，不写入 session；不要据此假设跨进程可恢复。
 
 ### MCP
 
@@ -375,6 +382,7 @@ AGENT.md
 - `/fork` 和后台 agent 相关命令要注意 provider/model/effort/role 与 UI snapshot 的一致性。
 - `Agent` 工具的后台 subagent 由 `SubagentTaskManager` 管理：按 parent agent 隔离 task，使用独立 abort signal，并通过 runtime system queue 把完成元数据回注 owner。原始结果需用 `Agent operation=read` 显式读取，也可用 `operation=await` 等待完成；system queue 不与单槽用户输入队列争用，也不会自行唤醒空闲 parent 执行工具。
 - foreground 和 background subagent 的任务记录都会留在 `SubagentTaskManager` 中供 `/task` 查看；每个 parent 最多保留 100 条，结果只在当前进程内存在。`/task` 的列表只保存轻量 summary，完整 prompt、context、usage、error 和 result 在打开详情时按 ID 获取。
+- subagent 的逐条模型请求由 `ToolAgent` 在任务结束时（completed/failed/killed/partial）深拷贝 `child.usageHistory` 写入 `AgentRuntime.recordSubagentUsage`，随 session snapshot 持久化到 `subagentUsageHistory`；`providerHelpers.executeProviderToolCall` 会把当前 tool call id 以 `toolCallId` 注入工具执行 context，`ToolAgent` 据此记录 `initiatedByCallId`。headless run JSON 投影不输出 subagent 事件，统计由 `mica-code-app` stats 侧按 `occurredAt` 展平归档。
 - Ctrl+C 中止 parent turn 时必须同步 abort 该 owner 的 running subagent，并保留 `killed` 记录供诊断；清理 session/owner 时则终止运行任务并移除其全部 retained subagent 记录。
 - 输入框上方 `TaskStatusBar` 展示 active subagent 时使用树形摘要：主行保留 kind/status/时长/type/description；子行用 `⎿` 展示并行 in-flight tool 摘要；嵌套 subagent 通过 `parent_task_id` 挂到父任务下。activity 只保留进行中的摘要，并对短工具调用保留最短可见时长（约 900ms）以减少闪烁；任务结束即清空。
 - subagent 默认允许父 agent 选择 effort；省略时继承 parent effort，definition 可用 `effort: false` 强制为 `none`。`maxTurns` 必须传到 provider query loop，未知 `subagent_type` 必须报错，不得静默降级。

@@ -96,10 +96,15 @@ describe('config switch commands', () => {
       expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(micaConfig.get().effort).toBe('low');
-      expect(services.showNotice).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined, {
-        command: '/model',
-        status: 'success',
-      });
+      expect(services.showNotice).toHaveBeenCalledTimes(1);
+      expect(services.showNotice).toHaveBeenLastCalledWith(
+        'Model: OpenAI / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
+        undefined,
+        {
+          command: '/model',
+          status: 'success',
+        },
+      );
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
       const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
         lastUsedByDirectory?: Record<string, Record<string, unknown>>;
@@ -115,6 +120,60 @@ describe('config switch commands', () => {
       });
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
+    } finally {
+      micaUi.panels.clearPluginUIs();
+    }
+  });
+
+  it('reports an effort switch and its cache warning in one notice', async () => {
+    const provider = {
+      id: 'openai',
+      name: 'OpenAI',
+      api_base: 'https://api.openai.com/v1',
+      api_key: 'test-key',
+      protocol: 'openai_chat_completions' as const,
+      models: ['gpt-5.4'],
+    };
+    await micaConfig.ensureModelRule('gpt-5.4');
+    const effortOptions = micaConfig.getModelEffortOptions('gpt-5.4');
+    const initialEffort = effortOptions[0];
+    const selectedEffort = effortOptions[1];
+    expect(initialEffort).toBeDefined();
+    expect(selectedEffort).toBeDefined();
+    if (!initialEffort || !selectedEffort) return;
+
+    const contextWindowSize = micaConfig.getModelRule('gpt-5.4').contextSize;
+    micaConfig.update(() => ({
+      provider: provider.id,
+      model: 'gpt-5.4',
+      effort: initialEffort,
+      contextWindowSize,
+      providers: [provider],
+    }));
+    const services = makeServices();
+    const agent = makeAgent([], {
+      provider: { ...provider, contextWindowSize },
+      model: 'gpt-5.4',
+      effort: initialEffort,
+    });
+
+    try {
+      const command = await makeConfigSwitchCommand('effort', agent, makeSession(), services);
+      await command.action();
+      const panel = micaUi.panels.pluginUIs.get()[0];
+      expect(panel?.id).toBe('select-effort');
+
+      panel?.onInput?.('', { downArrow: true });
+      panel?.onInput?.('', { return: true });
+      await waitForSelectCommand();
+
+      expect(micaConfig.get().effort).toBe(selectedEffort);
+      expect(services.showNotice).toHaveBeenCalledTimes(1);
+      expect(services.showNotice).toHaveBeenCalledWith(
+        `Effort: ${selectedEffort}; Prompt cache may be invalidated. Consider /compact`,
+        undefined,
+        { command: '/effort', status: 'success' },
+      );
     } finally {
       micaUi.panels.clearPluginUIs();
     }
@@ -214,10 +273,14 @@ describe('config switch commands', () => {
         effort: 'low',
         contextWindowSize: 1000000,
       });
-      expect(services.showNotice).toHaveBeenLastCalledWith('Model: DeepSeek / deepseek-v4-pro', undefined, {
-        command: '/model',
-        status: 'success',
-      });
+      expect(services.showNotice).toHaveBeenLastCalledWith(
+        'Model: DeepSeek / deepseek-v4-pro; Prompt cache may be invalidated. Consider /compact',
+        undefined,
+        {
+          command: '/model',
+          status: 'success',
+        },
+      );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {
@@ -272,10 +335,14 @@ describe('config switch commands', () => {
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
-      expect(services.showNotice).toHaveBeenLastCalledWith('Model: OpenAI / gpt-5.5', undefined, {
-        command: '/model',
-        status: 'success',
-      });
+      expect(services.showNotice).toHaveBeenLastCalledWith(
+        'Model: OpenAI / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
+        undefined,
+        {
+          command: '/model',
+          status: 'success',
+        },
+      );
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {

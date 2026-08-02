@@ -150,6 +150,56 @@ describe('AgentRuntime tool status', () => {
     expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
   });
 
+  it('carries recorded subagent usage through snapshots and emits an event', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const emitted: unknown[] = [];
+    agent.events.on('subagentUsage', (record) => emitted.push(record));
+
+    agent.recordSubagentUsage({
+      taskId: 'task-1',
+      subagentType: 'Explore',
+      description: 'search',
+      effort: 'medium',
+      status: 'completed',
+      startedAt: '2026-08-01T00:00:00.000Z',
+      finishedAt: '2026-08-01T00:01:00.000Z',
+      requests: [
+        {
+          provider: 'openai_chat_completions',
+          turnId: 1,
+          requestIndex: 1,
+          messageCount: 2,
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
+          paidTokenRate: 1,
+        },
+      ],
+      summary: { records: 1, inputTokens: 10, outputTokens: 2, cachedInputTokens: 0, totalTokens: 12 },
+    });
+
+    expect(agent.getSnapshot().subagentUsageHistory).toHaveLength(1);
+    expect(agent.getSubagentUsageHistory()).toHaveLength(1);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ taskId: 'task-1', status: 'completed' });
+
+    agent.loadSnapshot(agent.getSnapshot());
+    expect(agent.getSnapshot().subagentUsageHistory).toHaveLength(1);
+
+    agent.loadSnapshot({
+      providerId: 'test-provider',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+    expect(agent.getSnapshot().subagentUsageHistory).toEqual([]);
+  });
+
   it('applies a daemon-selected model without mutating global config and forwards maxTurns', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime({ model: 'daemon-model', effort: 'high' });

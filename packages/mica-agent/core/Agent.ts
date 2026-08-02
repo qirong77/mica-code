@@ -1,6 +1,10 @@
 import type { AgentConversationMessage, AgentQueryContent } from './Content.js';
 
 export type AgentUsageRecord = {
+  /** Stable identity for one model response. Preserved when snapshots are copied or forked. */
+  usageId?: string;
+  /** UTC wall-clock time when the provider reported this usage. */
+  occurredAt?: string;
   provider: string;
   turnId: number;
   requestIndex: number;

@@ -101,10 +101,16 @@ export class SessionController {
   }
 
   saveCurrent(
-    options: { allowEmpty?: boolean; turnState?: PersistedSessionTurnState; preserveTitle?: boolean } = {},
+    options: {
+      allowEmpty?: boolean;
+      turnState?: PersistedSessionTurnState;
+      preserveTitle?: boolean;
+      conversationMessages?: MicaUiConversationMessage[];
+    } = {},
   ): boolean {
     const snapshot = this.agent.getSnapshot();
-    const conversationMessages = getPersistableConversationMessages(this.agent);
+    const conversationMessages =
+      options.conversationMessages ?? getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
     if (!hasConversation(snapshot.messages, conversationMessages) && !options.allowEmpty) {
       this.store.delete(this.currentSessionId);
@@ -243,7 +249,18 @@ export class SessionController {
 }
 
 function sessionsEqual(left: PersistedSession, right: PersistedSession): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return JSON.stringify(stripDerivedContextWindow(left)) === JSON.stringify(stripDerivedContextWindow(right));
+}
+
+/**
+ * `snapshot.contextWindowSize` is derived from the model rule at save time,
+ * so older snapshots lack it and async model-rule loads can change it. It
+ * must not make an otherwise unchanged resumed session get rewritten (which
+ * bumps revision and refreshes updatedAt).
+ */
+function stripDerivedContextWindow(session: PersistedSession): PersistedSession {
+  if (session.snapshot.contextWindowSize === undefined) return session;
+  return { ...session, snapshot: { ...session.snapshot, contextWindowSize: undefined } };
 }
 
 function sessionSignature(session: PersistedSession): string {
@@ -310,6 +327,7 @@ function toPersistedSnapshot(
     conversationMessages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
+    subagentUsageHistory: snapshot.subagentUsageHistory,
   };
 }
 
@@ -326,6 +344,7 @@ function fromPersistedSnapshot(
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
+    subagentUsageHistory: snapshot.subagentUsageHistory,
   };
 }
 

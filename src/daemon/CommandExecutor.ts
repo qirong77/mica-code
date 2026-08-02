@@ -196,6 +196,7 @@ export class CommandExecutor {
           conversationMessages: [],
           usageHistory: [],
           lastUsage: undefined,
+          subagentUsageHistory: [],
         },
       };
       // Seed the session file before executeTurn: resumeLoaded records a

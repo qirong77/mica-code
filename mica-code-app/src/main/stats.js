@@ -1,6 +1,22 @@
 import { app, ipcMain } from 'electron'
-import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync
+} from 'fs'
+import { dirname, join } from 'path'
+import { isChatSessionRunning } from './chat'
+import {
+  dedupeStatsSessions,
+  parseStatsSession,
+  projectMessages,
+  projectSubagentRecords,
+  projectUsage
+} from './stats-core'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -10,8 +26,8 @@ import { join } from 'path'
 
 /** 会话目录：MICA_HOME 环境变量可覆盖，默认 ~/.mica/sessions */
 function sessionsDir() {
-  const home = process.env.MICA_HOME || app.getPath('home')
-  return join(home, '.mica', 'sessions')
+  const micaHome = process.env.MICA_HOME
+  return micaHome ? join(micaHome, 'sessions') : join(app.getPath('home'), '.mica', 'sessions')
 }
 
 function sessionTitle(sessionId) {
@@ -26,6 +42,9 @@ function sessionTitle(sessionId) {
 }
 
 function renameSession(sessionId, title) {
+  if (isChatSessionRunning(sessionId)) {
+    throw new Error('Cannot rename a session while its Chat turn is running')
+  }
   const file = sessionFile(sessionId)
   const nextTitle = typeof title === 'string' ? title.trim() : ''
   if (!file || !nextTitle) throw new Error('Invalid session title')
@@ -50,6 +69,63 @@ function renameSession(sessionId, title) {
   writeFileSync(temporary, `${JSON.stringify(updated, null, 2)}\n`, 'utf8')
   renameSync(temporary, file)
   return updated.title
+}
+
+/** 置顶会话存储：userData/session-pins.json，{ [sessionId]: pinnedAtMs } */
+function pinsFile() {
+  return join(app.getPath('userData'), 'session-pins.json')
+}
+
+function readPins() {
+  try {
+    const raw = JSON.parse(readFileSync(pinsFile(), 'utf8'))
+    const pins = {}
+    for (const [key, value] of Object.entries(raw || {}))
+      if (typeof value === 'number' && Number.isFinite(value)) pins[key] = value
+    return pins
+  } catch {
+    return {}
+  }
+}
+
+function setPin(sessionId, pinned) {
+  if (typeof sessionId !== 'string' || !sessionId) return readPins()
+  const next = readPins()
+  if (pinned) next[sessionId] = Date.now()
+  else delete next[sessionId]
+  const file = pinsFile()
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  return next
+}
+
+/** 侧栏手动拖拽排序：userData/session-sort.json，{ [section]: [sessionId, ...] } */
+function sortFile() {
+  return join(app.getPath('userData'), 'session-sort.json')
+}
+
+function readSort() {
+  try {
+    const raw = JSON.parse(readFileSync(sortFile(), 'utf8'))
+    const sort = {}
+    for (const section of ['pinned', 'sessions', 'recent']) {
+      const list = raw?.[section]
+      sort[section] = Array.isArray(list) ? list.filter((id) => typeof id === 'string' && id) : []
+    }
+    return sort
+  } catch {
+    return { pinned: [], sessions: [], recent: [] }
+  }
+}
+
+function setSectionSort(section, ids) {
+  if (!['pinned', 'sessions', 'recent'].includes(section)) return readSort()
+  const next = readSort()
+  next[section] = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string' && id) : []
+  const file = sortFile()
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  return next
 }
 
 function sessionFile(sessionId) {
@@ -79,11 +155,13 @@ function parseSessionMeta(file) {
   const raw = JSON.parse(readFileSync(file, 'utf8'))
   const updatedAtMs = Date.parse(raw.updatedAt)
   if (!Number.isFinite(updatedAtMs)) return null
+  const createdAtMs = Date.parse(raw.createdAt)
   return {
     id: raw.id || null,
     title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null,
     cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
     updatedAtMs,
+    createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
     turnState: raw.turnState || 'completed'
   }
 }
@@ -113,74 +191,7 @@ function scanMeta() {
 /** 解析单个 session 文件为统计行；损坏/示例文件返回 null */
 function parseSession(file) {
   const raw = JSON.parse(readFileSync(file, 'utf8'))
-  const createdAtMs = Date.parse(raw.createdAt)
-  const updatedAtMs = Date.parse(raw.updatedAt)
-  // 跳过示例/损坏文件（v1-session.json 的 createdAt 是 1970）
-  if (!Number.isFinite(createdAtMs) || !Number.isFinite(updatedAtMs) || createdAtMs <= 0)
-    return null
-
-  const snap = raw.snapshot || {}
-  const msgs = snap.messages || []
-  let turns = 0
-  for (const msg of msgs) {
-    if (msg?.role === 'assistant') turns++
-  }
-  const usageHistory = Array.isArray(snap.usageHistory)
-    ? snap.usageHistory.filter((usage) => usage && typeof usage === 'object')
-    : []
-  const modelMap = new Map()
-  let inputTokens = 0
-  let outputTokens = 0
-  let cachedInputTokens = 0
-  let totalTokens = 0
-  for (const usage of usageHistory) {
-    const model = usage.model || snap.model || 'Unknown'
-    const row = modelMap.get(model) || {
-      model,
-      requests: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-      totalTokens: 0
-    }
-    const input = Number(usage.inputTokens) || 0
-    const output = Number(usage.outputTokens) || 0
-    const cached = Number(usage.cachedInputTokens) || 0
-    const total = Number(usage.totalTokens) || input + output
-    row.requests++
-    row.inputTokens += input
-    row.outputTokens += output
-    row.cachedInputTokens += cached
-    row.totalTokens += total
-    inputTokens += input
-    outputTokens += output
-    cachedInputTokens += cached
-    totalTokens += total
-    modelMap.set(model, row)
-  }
-  const modelUsage = [...modelMap.values()].sort(
-    (a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests
-  )
-  const model = modelUsage[0]?.model || snap.model || null
-
-  return {
-    id: raw.id || null,
-    title: raw.title || null,
-    cwd: raw.cwd || null,
-    createdAtMs,
-    updatedAtMs,
-    turnState: raw.turnState || 'completed',
-    model,
-    providerId: snap.providerId || null,
-    turns,
-    requests: usageHistory.length,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    totalTokens,
-    modelUsage,
-    durationMs: Math.max(0, updatedAtMs - createdAtMs)
-  }
+  return parseStatsSession(raw)
 }
 
 /** 扫描并缓存；指纹未变化时直接返回缓存 */
@@ -200,9 +211,9 @@ function scan() {
       }
     }
   }
-  sessions.sort((a, b) => a.createdAtMs - b.createdAtMs)
-  cache = { fingerprint: fp, sessions }
-  return sessions
+  const deduped = dedupeStatsSessions(sessions)
+  cache = { fingerprint: fp, sessions: deduped }
+  return deduped
 }
 
 let cache = null
@@ -213,9 +224,40 @@ export function registerStatsIpc() {
     sessions: scan(),
     scannedAt: Date.now()
   }))
+  ipcMain.handle('stats:session-detail', (_event, { sessionId } = {}) => {
+    const file = sessionFile(sessionId)
+    if (!file || !existsSync(file)) throw new Error('Session not found')
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    const snap = raw.snapshot || {}
+    return {
+      id: raw.id || null,
+      title: raw.title || null,
+      cwd: raw.cwd || null,
+      createdAt: raw.createdAt || null,
+      updatedAt: raw.updatedAt || null,
+      turnState: raw.turnState || 'completed',
+      providerId: snap.providerId || null,
+      model: snap.model || null,
+      effort: snap.effort || null,
+      role: snap.role || null,
+      contextWindowSize: snap.contextWindowSize || null,
+      messages: projectMessages(Array.isArray(snap.messages) ? snap.messages : []),
+      usageHistory: (Array.isArray(snap.usageHistory) ? snap.usageHistory : []).map(projectUsage),
+      lastUsage: snap.lastUsage ? projectUsage(snap.lastUsage) : null,
+      subagentUsageHistory: projectSubagentRecords(
+        Array.isArray(snap.subagentUsageHistory) ? snap.subagentUsageHistory : []
+      )
+    }
+  })
   ipcMain.handle('stats:list-sessions', () => ({ sessions: scanMeta() }))
   ipcMain.handle('stats:session-title', (_event, { sessionId } = {}) => sessionTitle(sessionId))
   ipcMain.handle('stats:rename-session', (_event, { sessionId, title } = {}) =>
     renameSession(sessionId, title)
   )
+  ipcMain.handle('stats:list-pins', () => readPins())
+  ipcMain.handle('stats:set-pin', (_event, { sessionId, pinned } = {}) =>
+    setPin(sessionId, !!pinned)
+  )
+  ipcMain.handle('stats:list-sort', () => readSort())
+  ipcMain.handle('stats:set-sort', (_event, { section, ids } = {}) => setSectionSort(section, ids))
 }

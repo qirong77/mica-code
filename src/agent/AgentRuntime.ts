@@ -7,6 +7,7 @@ import {
   type IAgent,
   type AgentUsageRecord,
   type ModelClientOptions,
+  type SubagentUsageRecord,
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
@@ -35,6 +36,7 @@ export type AgentRuntimeEvents = {
   toolCall: { name: string; args: string; id?: string };
   toolResult: { name: string; result: string; id?: string };
   usage: AgentUsageRecord;
+  subagentUsage: SubagentUsageRecord;
   status: AgentRuntimeStatus;
 };
 
@@ -47,6 +49,8 @@ export type AgentRuntimeSnapshot = {
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
+  /** Usage of subagent tasks spawned by this agent, appended at task end. */
+  subagentUsageHistory?: SubagentUsageRecord[];
 };
 
 type SystemPromptBuildEvent = {
@@ -97,6 +101,7 @@ export class AgentRuntime {
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
+  private subagentUsageHistory: SubagentUsageRecord[] = [];
 
   constructor(
     configOverride: AgentRuntimeConfigOverride = {},
@@ -254,7 +259,22 @@ export class AgentRuntime {
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
+      subagentUsageHistory: this.subagentUsageHistory,
     };
+  }
+
+  getSubagentUsageHistory(): SubagentUsageRecord[] {
+    return this.subagentUsageHistory;
+  }
+
+  /**
+   * Appends one completed subagent task's usage. Called by the Agent tool when
+   * a subagent finishes; records survive process restarts once persisted with
+   * the session snapshot.
+   */
+  recordSubagentUsage(record: SubagentUsageRecord): void {
+    this.subagentUsageHistory.push(record);
+    this.events.emit('subagentUsage', record);
   }
 
   getForkSnapshot(options: { dropLastUserMessageAndAfter?: boolean } = {}): AgentRuntimeSnapshot {
@@ -270,6 +290,7 @@ export class AgentRuntime {
         : snapshot.messages,
       usageHistory,
       lastUsage: usageHistory.at(-1),
+      subagentUsageHistory: this.subagentUsageHistory,
     };
   }
 
@@ -311,6 +332,7 @@ export class AgentRuntime {
       lastUsage: snapshot.lastUsage,
       conversationMessages: [],
     });
+    this.subagentUsageHistory = snapshot.subagentUsageHistory ?? [];
   }
 
   toConversationMessages(): MicaUiConversationMessage[] {

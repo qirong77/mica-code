@@ -63,6 +63,24 @@ provider 配置了 `get_model_url`，模型列表会按 OpenAI `/models` 响应�
 
 没有动态模型接口时，可以直接配置静态 `models` 数组。
 
+## Headless JSON 协议
+
+Mica 可以通过 OpenCode/DevEco 兼容的 NDJSON 协议被桌面应用或自动化工具调用：
+
+```bash
+mica run --format json [--thinking] [--session <id>] [--dir <cwd>] "<prompt>"
+```
+
+默认输出 `step_start`、`text`、`tool_use`、`error` 和 `step_finish` 事件。每次工具调用先发送 `state.status: "pending"`，完成后以相同 `callID` 发送 `completed` 与结果，消费端可原位更新运行状态；headless 模式也注册 `TodoWrite`，便于结构化展示运行计划。显式传入 `--thinking` 时还会输出 `{ type: "reasoning", part: { type: "reasoning", text } }`，不传时保持精简输出并兼容现有消费者。Responses 协议在启用 reasoning effort 时会请求 `summary: "auto"`，让支持该能力的模型产生可流式展示的思考摘要。
+
+对已有会话做上下文压缩（Web Chat / 自动化脚本用）：
+
+```bash
+mica compact --session <id> [--dir <cwd>] [--force]
+```
+
+`mica compact` 复用交互式 `/compact` 的 `CompactionService`（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计与 `savedRatio`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
+
 ## 远程会话同步（Mica Sync）
 
 `mica daemon` 常驻进程可以把本机所有会话（活跃的 + 历史的）实时镜像到一台中心服务器，然后在浏览器里查看并远程续聊：

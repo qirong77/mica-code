@@ -25,6 +25,29 @@ const terminalApi = {
   }
 }
 
+const chatApi = {
+  start: (payload) => ipcRenderer.invoke('chat:start', payload),
+  abort: (id) => ipcRenderer.invoke('chat:abort', { id }),
+  history: (sessionId) => ipcRenderer.invoke('chat:history', { sessionId }),
+  meta: (sessionId) => ipcRenderer.invoke('chat:meta', { sessionId }),
+  models: () => ipcRenderer.invoke('chat:models'),
+  roles: () => ipcRenderer.invoke('chat:roles'),
+  compact: (sessionId) => ipcRenderer.invoke('chat:compact', { sessionId }),
+  savePastedImage: () => ipcRenderer.invoke('chat:save-pasted-image'),
+  dispose: (id) => ipcRenderer.invoke('chat:dispose', { id }),
+  isRunning: (id) => ipcRenderer.invoke('chat:is-running', { id }),
+  onEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:event', listener)
+    return () => ipcRenderer.removeListener('chat:event', listener)
+  },
+  onExit: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:exit', listener)
+    return () => ipcRenderer.removeListener('chat:exit', listener)
+  }
+}
+
 const workspaceApi = {
   get: () => ipcRenderer.invoke('workspace:get'),
   save: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
@@ -64,7 +87,9 @@ const filesApi = {
   delete: (path) => ipcRenderer.invoke('files:delete', { path }),
   copyPath: (path) => ipcRenderer.invoke('files:copy-path', { path }),
   copyRelativePath: (root, path) => ipcRenderer.invoke('files:copy-relative-path', { root, path }),
-  reveal: (path) => ipcRenderer.invoke('files:reveal', { path })
+  reveal: (path) => ipcRenderer.invoke('files:reveal', { path }),
+  orderGet: () => ipcRenderer.invoke('files:order-get'),
+  orderSet: (directory, names) => ipcRenderer.invoke('files:order-set', { directory, names })
 }
 
 const gitApi = {
@@ -79,10 +104,15 @@ const gitApi = {
 
 const statsApi = {
   read: () => ipcRenderer.invoke('stats:read'),
+  sessionDetail: (sessionId) => ipcRenderer.invoke('stats:session-detail', { sessionId }),
   listSessions: () => ipcRenderer.invoke('stats:list-sessions'),
   sessionTitle: (sessionId) => ipcRenderer.invoke('stats:session-title', { sessionId }),
   renameSession: (sessionId, title) =>
-    ipcRenderer.invoke('stats:rename-session', { sessionId, title })
+    ipcRenderer.invoke('stats:rename-session', { sessionId, title }),
+  listPins: () => ipcRenderer.invoke('stats:list-pins'),
+  setPin: (sessionId, pinned) => ipcRenderer.invoke('stats:set-pin', { sessionId, pinned }),
+  listSort: () => ipcRenderer.invoke('stats:list-sort'),
+  setSort: (section, ids) => ipcRenderer.invoke('stats:set-sort', { section, ids })
 }
 
 const settingsApi = {
@@ -91,6 +121,7 @@ const settingsApi = {
 
 contextBridge.exposeInMainWorld('mica', {
   terminal: terminalApi,
+  chat: chatApi,
   workspace: workspaceApi,
   notify: notifyApi,
   app: appApi,
@@ -99,6 +130,7 @@ contextBridge.exposeInMainWorld('mica', {
   stats: statsApi,
   settings: settingsApi,
   platform: process.platform,
+  homeDir: process.env.HOME || '',
   windowsBuildNumber:
     process.platform === 'win32' ? Number.parseInt(os.release().split('.')[2], 10) || null : null
 })

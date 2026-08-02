@@ -1,4 +1,9 @@
-import { AgentMaxTurnsError, type ModelClientOptions } from '@packages/mica-agent/index.js';
+import {
+  AgentMaxTurnsError,
+  type AgentUsageRecord,
+  type ModelClientOptions,
+  type SubagentUsageRecord,
+} from '@packages/mica-agent/index.js';
 import { isEffortOption, type EffortOption } from '@packages/mica-config/index.js';
 import { micaTools, MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import { basename } from 'node:path';
@@ -23,6 +28,8 @@ type AgentToolContext = {
   createClientOptions?: (overrides?: Partial<ModelClientOptions>) => ModelClientOptions;
   ownedPaths?: string[];
   cwd?: string;
+  /** Provider tool-call id of the parent Agent invocation, injected by providerHelpers. */
+  toolCallId?: string;
   taskId?: string;
   parentTaskId?: string;
   writeMode?: SubagentWriteMode;
@@ -262,6 +269,8 @@ export class ToolAgent extends MicaTool {
 
     const parentContext = isAgentToolContext(callbacks?.context) ? callbacks.context : undefined;
     const parentTaskId = parentContext?.taskId;
+    const initiatedByCallId = parentContext?.toolCallId;
+    const startedAt = new Date().toISOString();
     const toolContext: AgentToolContext = {
       agent: parentAgent,
       createClientOptions,
@@ -304,10 +313,11 @@ export class ToolAgent extends MicaTool {
         getUsage: () => summarizeSubagentUsage(child.usageHistory),
         run: async (signal) => {
           try {
-            toolContext.taskId = taskId || task.id;
+            const runTaskId = taskId || task.id;
+            toolContext.taskId = runTaskId;
             const activityTracking = attachSubagentActivityTracking({
               child,
-              taskId: taskId || task.id,
+              taskId: runTaskId,
               owner: parentAgent,
               taskManager: this.taskManager,
               signal,
@@ -318,7 +328,44 @@ export class ToolAgent extends MicaTool {
                 maxTurns: definition.maxTurns,
                 onIterationComplete: activityTracking.onIterationComplete,
               });
+              parentAgent.recordSubagentUsage(
+                buildSubagentUsageRecord({
+                  taskId: runTaskId,
+                  parentTaskId,
+                  initiatedByCallId,
+                  subagentType: definition.name,
+                  description,
+                  model: clientOptions.model,
+                  effort,
+                  status: 'completed',
+                  startedAt,
+                  finishedAt: new Date().toISOString(),
+                  requests: child.usageHistory,
+                }),
+              );
               return { result, usage: summarizeSubagentUsage(child.usageHistory) };
+            } catch (error) {
+              parentAgent.recordSubagentUsage(
+                buildSubagentUsageRecord({
+                  taskId: runTaskId,
+                  parentTaskId,
+                  initiatedByCallId,
+                  subagentType: definition.name,
+                  description,
+                  model: clientOptions.model,
+                  effort,
+                  status:
+                    error instanceof AgentMaxTurnsError
+                      ? 'partial'
+                      : signal.aborted
+                        ? 'killed'
+                        : 'failed',
+                  startedAt,
+                  finishedAt: new Date().toISOString(),
+                  requests: child.usageHistory,
+                }),
+              );
+              throw error;
             } finally {
               activityTracking.dispose();
             }
@@ -400,6 +447,21 @@ export class ToolAgent extends MicaTool {
           onIterationComplete: activityTracking.onIterationComplete,
         });
         tracked.complete(result, summarizeSubagentUsage(child.usageHistory));
+        parentAgent.recordSubagentUsage(
+          buildSubagentUsageRecord({
+            taskId: tracked.task.id,
+            parentTaskId,
+            initiatedByCallId,
+            subagentType: definition.name,
+            description,
+            model: clientOptions.model,
+            effort,
+            status: 'completed',
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            requests: child.usageHistory,
+          }),
+        );
         return formatStructuredSubagentResult({
           type: definition.name,
           description,
@@ -409,9 +471,39 @@ export class ToolAgent extends MicaTool {
       } catch (error) {
         if (!(error instanceof AgentMaxTurnsError)) {
           tracked.fail(error, undefined, summarizeSubagentUsage(child.usageHistory));
+          parentAgent.recordSubagentUsage(
+            buildSubagentUsageRecord({
+              taskId: tracked.task.id,
+              parentTaskId,
+              initiatedByCallId,
+              subagentType: definition.name,
+              description,
+              model: clientOptions.model,
+              effort,
+              status: signal.aborted ? 'killed' : 'failed',
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              requests: child.usageHistory,
+            }),
+          );
           throw error;
         }
         tracked.fail(error, error.partialResult, summarizeSubagentUsage(child.usageHistory));
+        parentAgent.recordSubagentUsage(
+          buildSubagentUsageRecord({
+            taskId: tracked.task.id,
+            parentTaskId,
+            initiatedByCallId,
+            subagentType: definition.name,
+            description,
+            model: clientOptions.model,
+            effort,
+            status: 'partial',
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            requests: child.usageHistory,
+          }),
+        );
         return formatStructuredSubagentResult({
           type: definition.name,
           description,
@@ -838,6 +930,41 @@ function humanizeToolName(name: string): string {
 
 function isAgentToolContext(value: unknown): value is AgentToolContext {
   return Boolean(value && typeof value === 'object');
+}
+
+function buildSubagentUsageRecord(options: {
+  taskId: string;
+  parentTaskId?: string;
+  initiatedByCallId?: string;
+  subagentType: string;
+  description: string;
+  model?: string;
+  effort: EffortOption;
+  status: SubagentUsageRecord['status'];
+  startedAt: string;
+  finishedAt: string;
+  requests: AgentUsageRecord[];
+}): SubagentUsageRecord {
+  return {
+    taskId: options.taskId,
+    ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
+    ...(options.initiatedByCallId ? { initiatedByCallId: options.initiatedByCallId } : {}),
+    subagentType: options.subagentType,
+    description: options.description,
+    ...(options.model ? { model: options.model } : {}),
+    effort: options.effort,
+    status: options.status,
+    startedAt: options.startedAt,
+    finishedAt: options.finishedAt,
+    // Deep copy: records outlive the subagent client, whose usageHistory is
+    // reused by subsequent subagents.
+    requests: cloneUsageRecords(options.requests),
+    summary: summarizeSubagentUsage(options.requests),
+  };
+}
+
+function cloneUsageRecords(records: AgentUsageRecord[]): AgentUsageRecord[] {
+  return JSON.parse(JSON.stringify(records)) as AgentUsageRecord[];
 }
 
 function normalizeOperation(value: unknown): AgentToolOperation {
