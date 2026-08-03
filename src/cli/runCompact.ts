@@ -11,6 +11,7 @@ export type CompactCliOptions = {
   sessionId: string;
   cwd?: string;
   force?: boolean;
+  pruneOnly?: boolean;
   signal?: AbortSignal;
 };
 
@@ -40,7 +41,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
   const disposeModelEffortContext = setupModelEffortContext();
   let agent: AgentRuntime | null = null;
   try {
-    await ensureCompactModelRule(micaConfig.get().model, options.signal);
+    if (!options.pruneOnly) await ensureCompactModelRule(micaConfig.get().model, options.signal);
     agent = new AgentRuntime({});
     const sessionController = new SessionController({
       agent,
@@ -57,15 +58,17 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     if (!resumed.ok) {
       return { ok: false, sessionId: options.sessionId, code: 'error', error: resumed.message };
     }
-    await ensureCompactModelRule(agent.config.model, options.signal);
-    agent.configureForRun(
-      {
-        providerId: agent.config.provider.id,
-        model: agent.config.model,
-        effort: agent.config.effort,
-      },
-      true,
-    );
+    if (!options.pruneOnly) {
+      await ensureCompactModelRule(agent.config.model, options.signal);
+      agent.configureForRun(
+        {
+          providerId: agent.config.provider.id,
+          model: agent.config.model,
+          effort: agent.config.effort,
+        },
+        true,
+      );
+    }
 
     const snapshot = agent.getSnapshot();
     if (snapshot.messages.length < 2) {
@@ -81,8 +84,14 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     const result = await service.compact({
       messages: snapshot.messages,
       options: {
-        force: options.force === true,
-        contextWindowSize: micaConfig.getModelRule(agent.config.model).contextSize,
+        force: options.pruneOnly === true || options.force === true,
+        pruneOnly: options.pruneOnly === true,
+        lightweightPrune: options.pruneOnly === true,
+        ...(options.pruneOnly
+          ? snapshot.contextWindowSize
+            ? { contextWindowSize: snapshot.contextWindowSize }
+            : {}
+          : { contextWindowSize: micaConfig.getModelRule(agent.config.model).contextSize }),
       },
       summarize: async (transcript, prompt) => {
         if (!agent) throw new Error('Agent is not available for summarization');
@@ -119,8 +128,9 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       agent.loadSnapshot({
         ...snapshot,
         messages: result.messages,
-        usageHistory: [],
-        lastUsage: undefined,
+        // Keep usage statistics across compact so Stats stays continuous.
+        usageHistory: snapshot.usageHistory,
+        lastUsage: snapshot.lastUsage,
       });
     } catch (error) {
       agent.loadSnapshot(snapshot);

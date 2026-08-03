@@ -24,8 +24,6 @@ describe('chat slash commands', () => {
 
   it('marks selector-heavy commands as available in chat with runtime overrides', () => {
     expect(findChatCommand('status').availability).toBe('chat')
-    expect(findChatCommand('model').availability).toBe('chat')
-    expect(findChatCommand('effort').availability).toBe('chat')
     expect(findChatCommand('role').availability).toBe('chat')
     expect(findChatCommand('compact').availability).toBe('chat')
     expect(findChatCommand('rewind').availability).toBe('terminal')
@@ -33,9 +31,9 @@ describe('chat slash commands', () => {
   })
 
   it('ranks exact prefix matches above fuzzy description matches', () => {
-    const names = commandSuggestions('/mo').map((command) => command.name)
-    expect(names[0]).toBe('model')
-    const effort = commandSuggestions('/eff').map((command) => command.name)
-    expect(effort).toContain('effort')
+    const names = commandSuggestions('/ren').map((command) => command.name)
+    expect(names[0]).toBe('rename')
+    const role = commandSuggestions('/rol').map((command) => command.name)
+    expect(role).toContain('role')
   })
 })

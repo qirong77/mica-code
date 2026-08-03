@@ -10,6 +10,9 @@ import { registerFilesIpc } from './files'
 import { registerGitIpc } from './git'
 import { registerStatsIpc } from './stats'
 import { disposeSettings, registerSettingsIpc } from './settings'
+import { initializeDesktopProcessPath } from './desktop-process-env'
+
+initializeDesktopProcessPath()
 
 let mainWindow = null
 let notifyServer = null

@@ -20,7 +20,7 @@ afterEach(async () => {
 })
 
 describe('terminal process activity notifications', () => {
-  it('uses running while work is active and unread after it completes', async () => {
+  it('uses running while terminal work is active without creating an unread reminder on completion', async () => {
     const server = await createNotifyServer()
     servers.push(server)
 
@@ -35,7 +35,7 @@ describe('terminal process activity notifications', () => {
     const completed = server.setProcessRunning('node:terminal', false)
     expect(completed).toMatchObject({
       running: false,
-      unread: true,
+      unread: false,
       processRunning: false,
       lastType: 'terminal.completed'
     })
@@ -52,7 +52,7 @@ describe('terminal process activity notifications', () => {
     await postEvent(server, terminalId, 'turn.started')
 
     const state = server.setProcessRunning(terminalId, false)
-    expect(state).toMatchObject({ running: true, unread: true, agentRunning: true })
+    expect(state).toMatchObject({ running: true, unread: false, agentRunning: true })
   })
 
   it('moves a Mica turn from green running to blue unread semantics', async () => {

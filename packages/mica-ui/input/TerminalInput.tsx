@@ -36,6 +36,22 @@ export function hasRunningSubagent(tasks: readonly MicaUiSubagentTaskItem[]): bo
   return tasks.some((task) => task.status === 'running');
 }
 
+export function shouldIgnoreTerminalTextInput(
+  key: any,
+  hasDropdownItems: boolean,
+  hasInputPlugin: boolean,
+): boolean {
+  // Input plugins own Enter while their interactive panels are open. A
+  // command/file dropdown only owns plain Enter; Shift+Enter still belongs
+  // to the multiline editor.
+  if (hasInputPlugin) {
+    return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
+  }
+  if (key.return && key.shift) return false;
+  if (!hasDropdownItems) return false;
+  return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
+}
+
 function activeFileMention(value: string, cursorOffset: number): { start: number; query: string } | null {
   const beforeCursor = value.slice(0, cursorOffset);
   const match = beforeCursor.match(/@([^\s@]*)$/u);
@@ -424,8 +440,11 @@ function TerminalInput() {
       // 同上：用实时 pluginUIs 判断，避免面板关闭后 enter 被旧快照忽略。
       const liveHasInputPlugin = pluginUIs.get().some((ui) => ui.onInput);
       const dropdown = DropDownUI.atomData.dropdown.get();
-      if (!(dropdown.visible && dropdown.items.length > 0) && !liveHasInputPlugin) return false;
-      return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
+      return shouldIgnoreTerminalTextInput(
+        key,
+        dropdown.visible && dropdown.items.length > 0,
+        liveHasInputPlugin,
+      );
     },
     [],
   );

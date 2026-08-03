@@ -9,38 +9,29 @@ import {
 } from 'react'
 import {
   ArrowDown,
-  Bot,
-  Brain,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Circle,
-  CircleDot,
   Command,
   Copy,
   ExternalLink,
-  ListTodo,
+  GitCommitHorizontal,
+  GitFork,
   LoaderCircle,
+  Minimize2,
   Send,
   Square,
   Terminal,
-  X
+  Trash2,
+  Undo2,
+  X,
+  Zap
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import {
-  CHAT_COMMANDS,
-  commandInputValue,
-  commandSuggestions,
-  findChatCommand,
-  parseSlashCommand
-} from './chat-commands'
+import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
 import { useLatest } from './hooks'
 import { uid } from './workspace'
 
 const MAX_INPUT_ROWS = 10
-const MAX_TOOL_PREVIEW = 6000
 const SCROLL_BOTTOM_THRESHOLD = 72
 
 const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
@@ -86,19 +77,19 @@ const EFFORT_OPTIONS = [
 const TOOL_ICONS = {
   read_file: '📖',
   read_image: '📷',
-  write_file: '✍',
-  apply_patch: '◫',
+  write_file: '✍️',
+  apply_patch: '🩹',
   list_files: '📂',
-  grep_search: '⌕',
-  run_shell: '⚡',
-  web_fetch: '↗',
-  web_search: '◎',
-  Skill: '✦',
-  Agent: '◇',
-  TodoWrite: '☑',
-  background_tasks: '☷',
-  read_task_output: '☷',
-  kill_task: '■'
+  grep_search: '📊',
+  run_shell: '⚡️',
+  web_fetch: '🔗',
+  web_search: '🌐',
+  Skill: '✨',
+  Agent: '🤖',
+  TodoWrite: '📝',
+  background_tasks: '📋',
+  read_task_output: '📋',
+  kill_task: '📋'
 }
 
 const TOOL_LABELS = {
@@ -176,6 +167,139 @@ function CodeBlock({ children }) {
 
 function isExternalHref(href) {
   return /^(https?:|mailto:)/i.test(href || '')
+}
+
+function resolveImageSource(source) {
+  const value = String(source || '').trim()
+  if (!value) return ''
+  if (/^(https?:|data:|blob:|file:)/i.test(value)) return value
+  const homeDir = typeof window !== 'undefined' ? window.mica?.homeDir || '' : ''
+  const expanded = value.startsWith('~/') && homeDir ? `${homeDir}${value.slice(1)}` : value
+  if (/^(?:\/|[a-zA-Z]:[\\/])/.test(expanded)) {
+    const normalized = expanded.replace(/\\/g, '/')
+    return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`
+  }
+  return expanded
+}
+
+function imageReferences(text) {
+  const result = []
+  const pattern = /!?(?:\[([^\]]*)\])\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match
+  while ((match = pattern.exec(text || ''))) {
+    const source = match[2]
+    if (!result.some((item) => item.source === source))
+      result.push({ alt: match[1] || '图片', source })
+  }
+  return result
+}
+
+function composerMarkdownNodes(text) {
+  const nodes = []
+  const pattern =
+    /(```[\s\S]*?```|`[^`\n]+`|!?\[[^\]]*\]\([^)\n]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|^ {0,3}(?:#{1,6}|[-*+]|\d+\.) +)/gm
+  let cursor = 0
+  let match
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
+    const token = match[0]
+    const kind = token.startsWith('```')
+      ? 'code'
+      : token.startsWith('!')
+        ? 'image'
+        : token.startsWith('[')
+          ? 'link'
+          : 'syntax'
+    nodes.push(
+      <span
+        key={`${match.index}:${token}`}
+        className={`chat-composer-token chat-composer-token-${kind}`}
+      >
+        {token}
+      </span>
+    )
+    cursor = match.index + token.length
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+function ComposerImageStrip({ text, onPreview }) {
+  const images = imageReferences(text)
+  if (!images.length) return null
+  return (
+    <div className="chat-composer-images" aria-label="输入中的图片">
+      {images.map((image) => (
+        <button
+          key={image.source}
+          type="button"
+          title="预览图片"
+          onClick={() => onPreview(image.source, image.alt)}
+        >
+          <img src={resolveImageSource(image.source)} alt={image.alt} loading="lazy" />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function QueueDock({ items, onRecall, recallingId }) {
+  if (!items.length) return null
+  return (
+    <section className="chat-queue-dock" aria-label="等待发送的消息">
+      <div className="chat-queue-dock-header">
+        <span aria-hidden="true">↳</span>
+        <span>waiting queue (after current turn)</span>
+        <span>{items.length}</span>
+      </div>
+      <div className="chat-queue-dock-items">
+        {items.map((item, index) => (
+          <div key={item.id || `${index}:${item.text}`} className="chat-queue-dock-item">
+            <span>▌</span>
+            <span>{item.text}</span>
+            <button
+              type="button"
+              title={item.pending ? '正在加入队列' : '撤回到输入框'}
+              aria-label={`撤回排队消息 ${index + 1}`}
+              disabled={item.pending || Boolean(recallingId)}
+              onClick={() => onRecall(item.id)}
+            >
+              {recallingId === item.id ? (
+                <LoaderCircle size={11} className="animate-spin" />
+              ) : (
+                <Undo2 size={11} />
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ImagePreviewModal({ source, alt, onClose }) {
+  useEffect(() => {
+    const onKeyDown = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="chat-image-preview-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="图片预览"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="chat-image-preview">
+        <img src={resolveImageSource(source)} alt={alt || '图片预览'} />
+        <button type="button" onClick={onClose} aria-label="关闭图片预览">
+          关闭
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function chatUrlTransform(url) {
@@ -271,7 +395,7 @@ function MarkdownLink({ href, children, onOpenFile }) {
   )
 }
 
-export function Markdown({ text, muted = false, onOpenFile }) {
+export function Markdown({ text, muted = false, onOpenFile, onPreviewImage }) {
   const components = useMemo(
     () => ({
       a: ({ href, children }) => (
@@ -286,9 +410,18 @@ export function Markdown({ text, muted = false, onOpenFile }) {
         </div>
       ),
       input: (props) => <input {...props} disabled />,
-      img: ({ alt, ...props }) => <img {...props} alt={alt || ''} loading="lazy" />
+      img: ({ alt, src, ...props }) => (
+        <button
+          type="button"
+          className="chat-markdown-image-button"
+          onClick={() => onPreviewImage?.(src, alt)}
+          title="预览图片"
+        >
+          <img {...props} src={resolveImageSource(src)} alt={alt || ''} loading="lazy" />
+        </button>
+      )
     }),
-    [onOpenFile]
+    [onOpenFile, onPreviewImage]
   )
 
   return (
@@ -303,16 +436,6 @@ export function Markdown({ text, muted = false, onOpenFile }) {
       </ReactMarkdown>
     </div>
   )
-}
-
-function formatInput(input) {
-  if (input == null) return ''
-  if (typeof input === 'string') return input
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return String(input)
-  }
 }
 
 function compactLine(value, max = 110) {
@@ -369,88 +492,50 @@ function toolDisplayName(tool) {
   return TOOL_LABELS[tool.tool] || tool.tool
 }
 
-function backgroundTaskId(tool) {
-  if (tool.tool !== 'run_shell' || !tool.input?.run_in_background) return ''
-  return /id:\s*([\w-]{6,})/i.exec(String(tool.output || ''))?.[1] || ''
+function subagentTasks(tool) {
+  if (tool.tool !== 'Agent') return []
+  const input = tool.input || {}
+  if (input.operation === 'run_many' && Array.isArray(input.tasks)) {
+    return input.tasks.map((task, index) => ({
+      id: task.id || String(index + 1),
+      type: task.subagent_type || 'general-purpose',
+      description: task.description || task.prompt || '执行子任务',
+      dependsOn: Array.isArray(task.depends_on) ? task.depends_on : []
+    }))
+  }
+  return [
+    {
+      id: input.task_id || '1',
+      type: input.subagent_type || 'general-purpose',
+      description: input.description || input.prompt || input.operation || '执行子任务',
+      dependsOn: []
+    }
+  ]
 }
 
-function ToolRow({ tool }) {
-  const [open, setOpen] = useState(false)
-  const [copied, copy] = useCopied()
-  const input = formatInput(tool.input)
-  const output = String(tool.output || '')
-  const detail = [input && `input\n${input}`, output && `output\n${output}`]
-    .filter(Boolean)
-    .join('\n\n')
-  const preview =
-    detail.length > MAX_TOOL_PREVIEW
-      ? `${detail.slice(0, MAX_TOOL_PREVIEW)}\n…[界面预览已截断，复制可获取完整内容]`
-      : detail
-  const summary = toolSummary(tool)
-  const running = tool.status === 'pending' || tool.status === 'running'
-  const failed = tool.status === 'error'
-  const aborted = tool.status === 'aborted'
-  const background = tool.tool === 'run_shell' && tool.input?.run_in_background
-  const duration = formatDuration(
-    Math.max(0, (tool.finishedAt || tool.updatedAt || Date.now()) - (tool.startedAt || Date.now()))
-  )
-  const taskId = backgroundTaskId(tool)
+function SubagentStatusDock({ messages, now = Date.now() }) {
+  if (!messages.length) return null
 
   return (
-    <div
-      className={`chat-tool-row ${failed ? 'chat-tool-error' : ''} ${tool.tool === 'Agent' ? 'chat-tool-agent' : ''}`}
-    >
-      <button
-        type="button"
-        className="chat-tool-trigger"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="chat-tool-chevron">
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </span>
-        <span className="chat-tool-icon">
-          {running ? (
-            <LoaderCircle size={12} className="animate-spin" />
-          ) : tool.tool === 'Agent' ? (
-            <Bot size={12} />
-          ) : (
-            TOOL_ICONS[tool.tool] || '⚙'
-          )}
-        </span>
-        <span className="chat-tool-name">{toolDisplayName(tool)}</span>
-        {summary && <span className="chat-tool-summary">{summary}</span>}
-        {background && <span className="chat-tool-badge">background</span>}
-        <span className="chat-tool-state">
-          {failed
-            ? '失败'
-            : aborted
-              ? '已停止'
-              : running
-                ? '运行中'
-                : [taskId, duration].filter(Boolean).join(' · ') || '完成'}
-        </span>
-      </button>
-      {open && (
-        <div className="chat-tool-detail">
-          <button type="button" onClick={() => copy(detail)} aria-label="复制工具详情">
-            {copied ? <Check size={11} /> : <Copy size={11} />}
-            {copied ? '已复制' : '复制'}
-          </button>
-          <pre className="thin-scrollbar">{preview || '无详情'}</pre>
-        </div>
-      )}
-    </div>
+    <section className="chat-task-dock chat-subagent-dock" aria-label="运行中的 Subagent">
+      {messages.flatMap((message) => {
+        const tool = message.tool
+        const age = formatLogElapsed(Math.max(0, now - (tool.startedAt || now)))
+        return subagentTasks(tool).map((task) => (
+          <div className="chat-task-summary-row" key={`${message.id}:${task.id}`}>
+            <span className="chat-task-kind">🤖(subagent)</span>
+            <span className="chat-task-status chat-task-status-running">running</span>
+            <span className="chat-task-runtime">{age}</span>
+            <span className="chat-task-type">{task.type}</span>
+            <span className="chat-task-description">
+              {compactLine(task.description, 180)}
+              {task.dependsOn.length > 0 ? ` · after ${task.dependsOn.join(', ')}` : ''}
+            </span>
+          </div>
+        ))
+      })}
+    </section>
   )
-}
-
-function thinkingTitle(text) {
-  const source = String(text || '')
-    .replace(/```[\s\S]*?```/g, '')
-    .trim()
-  const heading = source.match(/^\s{0,3}#{1,6}\s+(.+)$/m)?.[1]
-  const bold = source.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)?.[1]
-  return compactLine(heading || bold || source.split('\n').find((line) => line.trim()) || '', 90)
 }
 
 function formatDuration(ms) {
@@ -459,59 +544,10 @@ function formatDuration(ms) {
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
-function ReasoningRow({ message, onOpenFile }) {
-  const [open, setOpen] = useState(true)
-  const [expanded, setExpanded] = useState(false)
-  const bodyRef = useRef(null)
-  const followRef = useRef(true)
-  const title = thinkingTitle(message.text)
-  const duration = message.done
-    ? formatDuration(Math.max(0, (message.finishedAt || message.updatedAt) - message.startedAt))
-    : ''
-
-  useLayoutEffect(() => {
-    const body = bodyRef.current
-    if (!body || expanded || message.done || !followRef.current) return
-    body.scrollTop = body.scrollHeight
-  }, [expanded, message.done, message.text])
-
-  return (
-    <div className={`chat-reasoning ${message.done ? '' : 'chat-reasoning-active'}`}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-        {message.done ? <Brain size={12} /> : <LoaderCircle size={12} className="animate-spin" />}
-        <span className="chat-reasoning-label">{message.done ? 'Thought' : 'Thinking'}</span>
-        {title && <span className="chat-reasoning-title">{title}</span>}
-        {duration && <span className="chat-reasoning-duration">{duration}</span>}
-      </button>
-      {open && message.text && (
-        <div
-          ref={bodyRef}
-          className={`chat-reasoning-body thin-scrollbar ${expanded ? 'chat-reasoning-expanded' : 'chat-reasoning-preview'}`}
-          onScroll={(event) => {
-            const element = event.currentTarget
-            followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24
-          }}
-        >
-          <div className="chat-reasoning-content">
-            <Markdown text={message.text} muted onOpenFile={onOpenFile} />
-          </div>
-          {(message.text.length > 900 || expanded) && (
-            <button
-              type="button"
-              className="chat-reasoning-expand"
-              onClick={() => {
-                followRef.current = true
-                setExpanded((value) => !value)
-              }}
-            >
-              {expanded ? '收起为实时预览' : '展开完整思考'}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
+function formatLogElapsed(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '0ms'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return formatDuration(ms)
 }
 
 function usageValues(usage) {
@@ -557,7 +593,7 @@ function MessageActions({ text }) {
   )
 }
 
-export function latestTodoItems(messages) {
+function latestTodoState(messages) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
     if (message.kind !== 'tool' || message.tool?.tool !== 'TodoWrite') continue
@@ -585,59 +621,67 @@ export function latestTodoItems(messages) {
       if (item.status === 'in_progress') inProgress += 1
       normalized.push({ content, activeForm, status: item.status })
     }
-    if (valid && inProgress <= 1) return normalized
+    if (valid && inProgress <= 1) return { items: normalized, turnId: message.turnId || null }
   }
-  return []
+  return { items: [], turnId: null }
 }
 
-function TodoDock({ items, hidden, onToggleHidden }) {
-  const [open, setOpen] = useState(true)
+export function latestTodoItems(messages) {
+  return latestTodoState(messages).items
+}
+
+export function todoItemsForTurn(messages, turnId, running) {
+  const state = latestTodoState(messages)
+  const paused = !running || !state.turnId || state.turnId !== turnId
+  return paused
+    ? state.items.map((item) =>
+        item.status === 'in_progress' ? { ...item, status: 'pending' } : item
+      )
+    : state.items
+}
+
+function TodoDock({ items, hidden }) {
   const completed = items.filter((item) => item.status === 'completed').length
-  const current = items.find((item) => item.status === 'in_progress')
   const allCompleted = items.length > 0 && completed === items.length
+  const active = items.some((item) => item.status === 'in_progress')
+  const remaining = items.length - completed
 
-  useEffect(() => {
-    if (allCompleted) setOpen(false)
-    else if (current) setOpen(true)
-  }, [allCompleted, current])
-
-  if (!items.length || hidden) return null
+  if (!items.length || allCompleted || hidden) return null
 
   return (
-    <section className="chat-todo-dock" aria-label="当前运行计划">
-      <button type="button" className="chat-todo-header" onClick={() => setOpen((value) => !value)}>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <ListTodo size={12} />
-        <span>Plan</span>
-        <span className="chat-todo-current">
-          {current?.activeForm || (completed === items.length ? '全部完成' : '等待继续')}
+    <section className="chat-task-dock chat-todo-dock" aria-label="当前运行计划">
+      <div className="chat-task-summary-row">
+        <span className="chat-task-kind">📝(todo)</span>
+        <span className={`chat-task-status ${active ? 'chat-task-status-running' : ''}`}>
+          {active ? 'running' : 'pending'}
         </span>
-        <span className="chat-todo-progress">
+        <span className="chat-task-runtime">
           {completed}/{items.length}
         </span>
-      </button>
-      {open && (
-        <div className="chat-todo-list">
-          {items.map((item, index) => (
-            <div
-              key={`${index}:${item.content}`}
-              className={`chat-todo-item chat-todo-${item.status}`}
-            >
+        <span className="chat-task-description">{remaining} remaining</span>
+      </div>
+      <div className="chat-task-children thin-scrollbar">
+        {items.map((item, index) => (
+          <div
+            key={`${index}:${item.content}`}
+            className={`chat-task-child chat-todo-${item.status}`}
+          >
+            <span className="chat-task-child-prefix"> ⎿ </span>
+            <span className="chat-task-child-marker" aria-hidden="true">
               {item.status === 'completed' ? (
-                <CheckCircle2 size={12} />
+                '✓'
               ) : item.status === 'in_progress' ? (
-                <CircleDot size={12} />
+                <LoaderCircle size={10} className="animate-spin" />
               ) : (
-                <Circle size={12} />
+                '○'
               )}
-              <span>{item.status === 'in_progress' ? item.activeForm : item.content}</span>
-            </div>
-          ))}
-          <button type="button" className="chat-todo-hide" onClick={() => onToggleHidden(true)}>
-            隐藏计划
-          </button>
-        </div>
-      )}
+            </span>
+            <span className="chat-task-description">
+              {item.status === 'in_progress' ? item.activeForm : item.content}
+            </span>
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
@@ -645,7 +689,9 @@ function TodoDock({ items, hidden, onToggleHidden }) {
 function CommandRow({ message, onCommandAction }) {
   return (
     <div className={`chat-command-result chat-command-${message.variant || 'info'}`}>
-      <Command size={12} />
+      <span className="chat-command-marker" aria-hidden="true">
+        ▌
+      </span>
       <div className="chat-command-result-body">
         <div className="chat-command-result-title">{message.title}</div>
         {message.detail && <pre>{message.detail}</pre>}
@@ -661,37 +707,159 @@ function CommandRow({ message, onCommandAction }) {
   )
 }
 
-function CommandPalette({ commands, activeIndex, onActiveIndex, onSelect }) {
-  if (!commands.length) return null
+function isActivityMessage(message) {
+  return message?.kind === 'reasoning' || message?.kind === 'tool'
+}
+
+export function currentTurnActivityMessages(messages, turnId) {
+  if (!turnId) return []
+  return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
+}
+
+export function activeSubagentMessages(messages, turnId) {
+  return currentTurnActivityMessages(messages, turnId).filter(
+    (message) =>
+      message.kind === 'tool' &&
+      message.tool?.tool === 'Agent' &&
+      ['pending', 'running'].includes(message.tool.status)
+  )
+}
+
+function visibleShellOutput(tool, durationMs) {
+  if (tool.tool !== 'run_shell' || durationMs <= 10_000 || !tool.output) return []
+  return String(tool.output).replace(/\n$/, '').split('\n').slice(-10)
+}
+
+function TurnLogItem({ message, now }) {
+  if (message.kind === 'reasoning') {
+    return <div className="chat-turn-log-thinking">{message.text}</div>
+  }
+
+  const tool = message.tool
+  if (!tool) return null
+  const running = ['pending', 'running'].includes(tool.status)
+  const failed = tool.status === 'error'
+  const durationMs = Math.max(
+    0,
+    (running ? now : tool.finishedAt || tool.updatedAt || now) -
+      (tool.startedAt || tool.updatedAt || now)
+  )
+  const duration = formatLogElapsed(durationMs)
+  const outputLines = visibleShellOutput(tool, durationMs)
+
   return (
-    <div className="chat-command-palette" role="listbox" aria-label="Mica 快捷命令">
-      <div className="chat-command-palette-title">
-        <Command size={12} /> Mica commands
-        <span>↑↓ 选择 · Tab 补全 · Esc 关闭</span>
-      </div>
-      {commands.map((command, index) => (
-        <button
-          key={command.name}
-          type="button"
-          role="option"
-          aria-selected={index === activeIndex}
-          className={index === activeIndex ? 'chat-command-active' : ''}
-          onMouseEnter={() => onActiveIndex(index)}
-          onClick={() => onSelect(command)}
-        >
-          <code>/{command.name}</code>
-          {command.argument && <span className="chat-command-argument">{command.argument}</span>}
-          <span className="chat-command-description">{command.description}</span>
-          <span className={`chat-command-availability chat-command-${command.availability}`}>
-            {command.availability === 'chat' ? 'Chat' : 'Terminal'}
+    <div className={`chat-turn-log-tool ${failed ? 'chat-turn-log-error' : ''}`}>
+      <div className="chat-turn-log-tool-row">
+        {running && (
+          <span className="chat-turn-log-spinner" aria-hidden="true">
+            <LoaderCircle size={10} className="animate-spin" />
           </span>
-        </button>
+        )}
+        <span className="chat-turn-log-icon">{TOOL_ICONS[tool.tool] || '⚙'}</span>
+        <span className="chat-turn-log-display">
+          {toolDisplayName(tool)}
+          {toolSummary(tool) ? ` ${toolSummary(tool)}` : ''}
+        </span>
+        {duration && (
+          <span className="chat-turn-log-duration">{running ? duration : `(${duration})`}</span>
+        )}
+      </div>
+      {outputLines.map((line, index) => (
+        <div className="chat-turn-log-output" key={`${index}:${line}`}>
+          <span> │ </span>
+          {line}
+        </div>
       ))}
     </div>
   )
 }
 
+function TurnLogDock({ messages, now = Date.now() }) {
+  const scrollRef = useRef(null)
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    if (scroll) scroll.scrollTop = scroll.scrollHeight
+  }, [messages])
+
+  if (!messages.length) return null
+
+  return (
+    <section className="chat-turn-log" aria-label="当前回合的思考与工具日志">
+      <div ref={scrollRef} className="chat-turn-log-scroll thin-scrollbar">
+        {messages.map((message) => (
+          <TurnLogItem key={message.id} message={message} now={now} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ChatContextMenu({ menu, onAction, onClose }) {
+  useEffect(() => {
+    const close = () => onClose()
+    const keydown = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('blur', close)
+    window.addEventListener('keydown', keydown)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('keydown', keydown)
+    }
+  }, [onClose])
+  const items = [
+    {
+      id: 'compact-local',
+      label: '快速压缩（本地）',
+      title: '只清理工具结果、图片和文档，不调用模型',
+      icon: Zap,
+      disabled: !menu.hasSession || menu.running
+    },
+    {
+      id: 'compact-model',
+      label: '模型压缩',
+      title: '调用模型生成会话摘要',
+      icon: Minimize2,
+      disabled: !menu.hasSession || menu.running
+    },
+    { id: 'commit', label: 'Commit', icon: GitCommitHorizontal, disabled: menu.running },
+    { id: 'fork', label: 'Fork', icon: GitFork, disabled: !menu.hasSession || menu.running },
+    { separator: true },
+    { id: 'clear', label: 'Clear', icon: Trash2, disabled: menu.running, danger: true }
+  ]
+  return (
+    <div
+      className="fixed z-[10000] min-w-40 rounded-md border border-white/15 bg-[#181818]/98 p-1.5 text-xs shadow-2xl backdrop-blur"
+      style={{ left: menu.x, top: menu.y }}
+      role="menu"
+      data-no-chat-focus
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {items.map((item, index) =>
+        item.separator ? (
+          <div key={`separator-${index}`} className="my-1 border-t border-white/10" />
+        ) : (
+          <button
+            key={item.id}
+            type="button"
+            role="menuitem"
+            disabled={item.disabled}
+            title={item.title}
+            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-[#ef7288]' : 'text-white/75 enabled:hover:text-white'}`}
+            onClick={() => onAction(item.id)}
+          >
+            <item.icon size={14} className="shrink-0 opacity-75" />
+            {item.label}
+          </button>
+        )
+      )}
+    </div>
+  )
+}
+
 function SelectPalette({
+  paletteRef,
   title,
   options,
   activeIndex,
@@ -702,7 +870,12 @@ function SelectPalette({
   error
 }) {
   return (
-    <div className="chat-command-palette chat-select-palette" role="listbox" aria-label={title}>
+    <div
+      ref={paletteRef}
+      className="chat-command-palette chat-select-palette"
+      role="listbox"
+      aria-label={title}
+    >
       <div className="chat-command-palette-title">
         <Command size={12} /> {title}
         <span>↑↓ 选择 · Enter 确认 · Esc 关闭</span>
@@ -738,6 +911,18 @@ function useEscape(onClose) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+}
+
+function useClickOutside(ref, active, onClose) {
+  useEffect(() => {
+    if (!active) return undefined
+    const onPointerDown = (event) => {
+      if (event.target.closest?.('[data-chat-picker-trigger]')) return
+      if (!ref.current?.contains(event.target)) onClose()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [active, onClose, ref])
 }
 
 function ContextModal({ meta, onClose }) {
@@ -808,29 +993,48 @@ export function shortPath(path, max = 46) {
   return `${head}…/${tail}`.slice(0, max)
 }
 
-function MessageRow({ message, onOpenFile, onCommandAction }) {
+function MessageRow({ message, onOpenFile, onPreviewImage, onCommandAction }) {
   if (message.kind === 'command') {
     return <CommandRow message={message} onCommandAction={onCommandAction} />
   }
   if (message.kind === 'notice') {
+    const title =
+      message.variant === 'compact' ? '/compact' : message.variant === 'error' ? '/error' : ''
+    const noticeLines = String(message.text || '').split('\n')
     return (
-      <div className={`chat-notice ${message.variant === 'error' ? 'chat-notice-error' : ''}`}>
+      <div className={`chat-notice chat-notice-${message.variant || 'info'}`}>
         <span>▌</span>
-        <div>{message.text}</div>
+        <div className="chat-notice-body">
+          {title && (
+            <span className="chat-notice-title">
+              {title}
+              {message.status ? ` ${message.status}` : ''}{' '}
+            </span>
+          )}
+          {message.variant === 'compact' && noticeLines.length > 1 ? (
+            <>
+              <span className="chat-notice-summary">{noticeLines[0]}</span>
+              <span className="chat-notice-text">{noticeLines.slice(1).join('\n')}</span>
+            </>
+          ) : (
+            <span className="chat-notice-text">{message.text}</span>
+          )}
+        </div>
       </div>
     )
   }
   if (message.kind === 'tool') {
-    if (message.tool?.tool === 'TodoWrite') return null
-    return <ToolRow tool={message.tool} />
+    return null
   }
   if (message.kind === 'reasoning') {
-    return <ReasoningRow message={message} onOpenFile={onOpenFile} />
+    return null
   }
   if (message.role === 'user') {
     return (
-      <div className="chat-message chat-message-user">
-        <div className="chat-message-marker">▌</div>
+      <div
+        className={`chat-message chat-message-user ${message.queued ? 'chat-message-queued' : ''}`}
+      >
+        <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
         <div className="chat-message-body whitespace-pre-wrap break-words">{message.text}</div>
         <MessageActions text={message.text} />
       </div>
@@ -842,7 +1046,11 @@ function MessageRow({ message, onOpenFile, onCommandAction }) {
     >
       <div className="chat-message-marker">●</div>
       <div className="chat-message-body">
-        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+        <Markdown
+          text={message.text || ''}
+          onOpenFile={onOpenFile}
+          onPreviewImage={onPreviewImage}
+        />
         <UsageLine usage={message.usage} />
       </div>
       {message.done && <MessageActions text={message.text} />}
@@ -1018,12 +1226,17 @@ export function ChatView({
   const draftsRef = useRef(new Map())
   const todoHiddenRef = useRef(new Map())
   const inputHistoryRef = useRef(new Map())
+  const queuedMessageIdsRef = useRef([])
+  const recallingQueueRef = useRef(null)
   const historyCursorRef = useRef(-1)
   const stickToBottomRef = useRef(true)
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
+  const [queuedCount, setQueuedCount] = useState(0)
+  const [queuedItems, setQueuedItems] = useState([])
+  const [recallingQueueId, setRecallingQueueId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [runStartedAt, setRunStartedAt] = useState(0)
@@ -1032,13 +1245,14 @@ export function ChatView({
   const [showJump, setShowJump] = useState(false)
   const [meta, setMeta] = useState(null)
   const [todoHidden, setTodoHidden] = useState(false)
-  const [commandIndex, setCommandIndex] = useState(0)
-  const [commandDismissed, setCommandDismissed] = useState(false)
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
   const forceRender = useReducer((version) => version + 1, 0)[1]
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
   const [pickerIndex, setPickerIndex] = useState(0)
   const [contextOpen, setContextOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState(null)
+  const [imagePreview, setImagePreview] = useState(null)
+  const pickerRef = useRef(null)
   const messagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: protocol }, currentProtocol }
   const protocolBlockRef = useRef('')
@@ -1138,12 +1352,26 @@ export function ChatView({
   )
 
   const appendNotice = useCallback(
-    (text, variant = 'info') => {
-      if (!text) return
+    (text, variant = 'info', status = '') => {
+      if (!text) return null
+      const id = uid('notice')
       updateMessages((previous) => [
         ...previous,
-        { id: uid('notice'), kind: 'notice', role: 'notice', text, variant }
+        { id, kind: 'notice', role: 'notice', text, variant, status }
       ])
+      return id
+    },
+    [updateMessages]
+  )
+
+  const updateNotice = useCallback(
+    (id, text, variant = 'info', status = '') => {
+      if (!id || !text) return
+      updateMessages((previous) =>
+        previous.map((message) =>
+          message.id === id ? { ...message, text, variant, status } : message
+        )
+      )
     },
     [updateMessages]
   )
@@ -1170,6 +1398,14 @@ export function ChatView({
       const timestamp = Number(event.timestamp) || Date.now()
       switch (event.type) {
         case 'step_start': {
+          const queuedMessageId = queuedMessageIdsRef.current.shift()
+          if (queuedMessageId) {
+            updateMessages((previous) =>
+              previous.map((message) =>
+                message.id === queuedMessageId ? { ...message, queued: false } : message
+              )
+            )
+          }
           if (event.sessionID && !sessionIdRef.current) {
             sessionIdRef.current = event.sessionID
             onSessionBoundRef.current?.(nodeIdRef.current, event.sessionID)
@@ -1301,9 +1537,13 @@ export function ChatView({
       }
       finishedRef.current = true
       setRunning(false)
+      setQueuedCount(Number(payload?.queuedCount) || 0)
       setStopping(false)
       setPhase('idle')
-      if (payload?.sessionId) refreshMeta(payload.sessionId)
+      if (payload?.sessionId) {
+        refreshMeta(payload.sessionId)
+        window.setTimeout(() => refreshMeta(payload.sessionId), 250)
+      }
     },
     [appendNotice, finishPendingTools, finishStream, refreshMeta]
   )
@@ -1321,11 +1561,22 @@ export function ChatView({
       if (restoringRef.current) pendingExitRef.current = payload
       else processExitRef.current(payload)
     })
+    const offQueueState = window.mica.chat.onQueueState((payload) => {
+      if (payload.id !== nodeIdRef.current) return
+      setQueuedCount(Number(payload.queuedCount) || 0)
+      setQueuedItems(Array.isArray(payload.queuedItems) ? payload.queuedItems : [])
+    })
+    const offQueueError = window.mica.chat.onQueueError((payload) => {
+      if (payload.id !== nodeIdRef.current) return
+      appendNotice(`排队消息发送失败：${payload.error || '未知错误'}`, 'error')
+    })
     return () => {
       offEvent?.()
       offExit?.()
+      offQueueState?.()
+      offQueueError?.()
     }
-  }, [applyEventRef, nodeId, nodeIdRef, processExitRef])
+  }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef])
 
   useEffect(() => {
     if (!nodeId) return undefined
@@ -1344,11 +1595,14 @@ export function ChatView({
     updateMessages([])
     setInput(draftsRef.current.get(nodeId) || '')
     setTodoHidden(todoHiddenRef.current.get(nodeId) === true)
-    setCommandIndex(0)
-    setCommandDismissed(false)
     setPicker(null)
     setPickerIndex(0)
+    queuedMessageIdsRef.current = []
+    recallingQueueRef.current = null
     setRunning(false)
+    setQueuedCount(0)
+    setQueuedItems([])
+    setRecallingQueueId(null)
     setStopping(false)
     setPhase('idle')
     setRunStartedAt(0)
@@ -1382,6 +1636,8 @@ export function ChatView({
       if (finalMeta) setMeta(finalMeta)
       setHistoryLoaded(true)
       setRunning(false)
+      setQueuedCount(0)
+      setQueuedItems([])
       setStopping(false)
       setPhase('idle')
       finishedRef.current = true
@@ -1397,7 +1653,9 @@ export function ChatView({
     const restore = async () => {
       const [rows, sessionMeta] = await Promise.all([
         sessionId ? window.mica.chat.history(sessionId).catch(() => []) : [],
-        sessionId ? window.mica.chat.meta(sessionId).catch(() => null) : null
+        sessionId
+          ? window.mica.chat.meta(sessionId).catch(() => null)
+          : window.mica.chat.meta(null, cwd).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       const restored = historyMessages(rows, sessionId || nodeId)
@@ -1407,6 +1665,8 @@ export function ChatView({
 
       const state = await window.mica.chat.isRunning(nodeId).catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      setQueuedCount(Number(state?.queuedCount) || 0)
+      setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
       const stateSessionId = state?.sessionId || sessionIdRef.current
       if (state?.running && stateSessionId && hasPersistedTurn(restored, state.prompt)) {
         const latestMeta = await window.mica.chat.meta(stateSessionId).catch(() => null)
@@ -1497,6 +1757,7 @@ export function ChatView({
     finishPendingTools,
     nodeId,
     nodeIdRef,
+    cwd,
     onSessionBoundRef,
     processExitRef,
     updateMessages
@@ -1544,7 +1805,7 @@ export function ChatView({
     const element = textareaRef.current
     if (!element) return
     element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, MAX_INPUT_ROWS * 22)}px`
+    element.style.height = `${Math.max(30, Math.min(element.scrollHeight, MAX_INPUT_ROWS * 22))}px`
   }, [])
 
   useEffect(() => resizeTextarea(), [input, resizeTextarea])
@@ -1559,8 +1820,6 @@ export function ChatView({
       historyCursorRef.current = -1
       draftsRef.current.set(nodeId, '')
       setInput('')
-      setCommandDismissed(false)
-      setCommandIndex(0)
     },
     [nodeId]
   )
@@ -1577,20 +1836,6 @@ export function ChatView({
     },
     [forceRender, nodeId]
   )
-
-  const ensureModelProtocols = useCallback(async () => {
-    if (modelProtocolsRef.current) return
-    try {
-      const result = await window.mica.chat.models()
-      if (result?.ok) {
-        const map = {}
-        for (const item of result.models || []) map[item.id] = item.protocol
-        modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
-      }
-    } catch {
-      // 拉取失败不阻断切换；跨协议风险会在运行时以 run error 呈现
-    }
-  }, [])
 
   const canSwitchModelProtocol = useCallback(
     (modelId, hasHistory) => {
@@ -1613,7 +1858,6 @@ export function ChatView({
         appendNotice('当前 turn 仍在运行，请完成或停止后再切换')
         return
       }
-      setCommandDismissed(false)
       setPickerIndex(0)
       const titles = { model: '选择模型', variant: '选择推理强度', role: '选择角色' }
       setPicker({ kind, title: titles[kind] || kind, options: [], loading: true, error: '' })
@@ -1680,11 +1924,16 @@ export function ChatView({
             : value === 'default'
               ? '已恢复默认角色'
               : `角色已切换为 ${value}`
-      appendNotice(`${title}（下次对话开始生效）。提示词缓存可能失效，如上下文较大可考虑 /compact`)
+      appendNotice(
+        `${title}（下次对话开始生效）。提示词缓存可能失效，如上下文较大可在 Chat 区域右键选择 Compact`
+      )
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
     [appendNotice, applyOverride, canSwitchModelProtocol, messages.length, picker]
   )
+
+  const closePicker = useCallback(() => setPicker(null), [])
+  useClickOutside(pickerRef, Boolean(picker), closePicker)
 
   const appendCommandResult = useCallback(
     (command, title, detail = '', options = {}) => {
@@ -1713,7 +1962,7 @@ export function ChatView({
       const targetNodeId = nodeId
       const isCurrentNode = () => nodeIdRef.current === targetNodeId
       const command = findChatCommand(parsed.name)
-      rememberInput(parsed.raw)
+      if (!parsed.preserveDraft) rememberInput(parsed.raw)
       if (!command) {
         appendCommandResult(
           parsed.raw,
@@ -1798,8 +2047,8 @@ export function ChatView({
         return
       }
 
-      if (parsed.name === 'model' || parsed.name === 'effort' || parsed.name === 'role') {
-        const kind = parsed.name === 'effort' ? 'variant' : parsed.name
+      if (parsed.name === 'role') {
+        const kind = 'role'
         if (running) {
           appendCommandResult(parsed.raw, '当前 turn 仍在运行，请完成或停止后再切换', '', {
             variant: 'error'
@@ -1812,36 +2061,8 @@ export function ChatView({
           return
         }
         const normalized = kind === 'variant' ? value.toLowerCase() : value
-        if (kind === 'variant' && !EFFORT_OPTIONS.some((option) => option.value === normalized)) {
-          appendCommandResult(
-            parsed.raw,
-            '无效的 effort 值',
-            '可选值：none | low | medium | high | xhigh',
-            { variant: 'error' }
-          )
-          return
-        }
-        if (kind === 'model') {
-          await ensureModelProtocols()
-          if (!canSwitchModelProtocol(normalized, messages.length)) {
-            appendCommandResult(
-              parsed.raw,
-              '已阻止跨协议切换',
-              protocolBlockRef.current || '会话历史将丢失',
-              { variant: 'error' }
-            )
-            return
-          }
-        }
         applyOverride(kind, normalized)
-        const title =
-          kind === 'model'
-            ? `模型已设置为 ${normalized}`
-            : kind === 'variant'
-              ? `推理强度已切换为 ${normalized}`
-              : normalized === 'default'
-                ? '已恢复默认角色'
-                : `角色已切换为 ${normalized}`
+        const title = normalized === 'default' ? '已恢复默认角色' : `角色已切换为 ${normalized}`
         appendCommandResult(
           parsed.raw,
           title,
@@ -1904,65 +2125,89 @@ export function ChatView({
 
       if (parsed.name === 'compact') {
         if (running) {
-          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请先停止再压缩', '', {
-            variant: 'error'
-          })
+          appendNotice('当前 turn 仍在运行，请先停止再压缩', 'error')
           return
         }
         const targetSessionId = sessionIdRef.current
         if (!targetSessionId) {
-          appendCommandResult(
-            parsed.raw,
-            '暂无会话可压缩',
-            '发送第一条消息后即可用 /compact 压缩当前会话上下文。',
-            { variant: 'error' }
-          )
+          appendNotice('暂无会话可压缩。发送第一条消息后即可压缩当前会话上下文。', 'error')
           return
         }
         if (compactBusyRef.current) {
-          appendCommandResult(parsed.raw, '正在压缩中', '请等待上一次压缩完成后再试。')
+          appendNotice('正在压缩中，请等待上一次压缩完成后再试。', 'compact')
           return
         }
         compactBusyRef.current = true
-        appendCommandResult(
-          parsed.raw,
-          '正在压缩上下文…',
-          '模型正在把历史会话整理为 checkpoint，通常需要几十秒。'
+        const compactNoticeId = appendNotice(
+          parsed.compactMode === 'local' ? '正在快速压缩上下文…' : '正在进行模型压缩…',
+          'compact'
         )
         try {
-          const result = await window.mica.chat.compact(targetSessionId)
+          const compactMode = parsed.compactMode === 'local' ? 'local' : 'model'
+          const result = await window.mica.chat.compact(targetSessionId, compactMode)
           if (!isCurrentNode()) return
           if (result?.ok) {
-            const before = formatTokens(Number(result.beforeTokenEstimate) || 0)
-            const after = formatTokens(Number(result.afterTokenEstimate) || 0)
-            const saved =
-              result.savedRatio != null
-                ? `（节省 ${Math.round(Number(result.savedRatio) * 100)}%）`
-                : ''
-            appendCommandResult(
-              parsed.raw,
-              '上下文压缩完成',
-              `${before} → ${after}${saved}。会话已刷新，后续对话将基于压缩后的 checkpoint。`
+            const beforeTokens = Number(result.beforeTokenEstimate) || 0
+            const afterTokens = Number(result.afterTokenEstimate) || 0
+            const savedTokens = Math.max(
+              0,
+              Number(result.savedTokenEstimate) || beforeTokens - afterTokens
             )
+            const savedPercent = Math.round((Number(result.savedRatio) || 0) * 100)
+            const strategy = String(result.strategy || '').replaceAll('_', ' ')
+            const mode = `${result.mode || (compactMode === 'local' ? 'pruned' : 'summarized')}${strategy ? ` (${strategy})` : ''}`
+            const contextAfter =
+              result.contextUsageRatio != null
+                ? `${Math.round(Number(result.contextUsageRatio) * 100)}%`
+                : result.contextWindowSize > 0
+                  ? `${Math.round((afterTokens / Number(result.contextWindowSize)) * 100)}%`
+                  : '—'
+            const finalNotice = [
+              'compact complete',
+              '',
+              `- Mode: ${mode}`,
+              `- Messages: ${Number(result.beforeCount) || 0} → ${Number(result.afterCount) || 0}`,
+              `- Saved: ~${formatTokens(savedTokens).toLowerCase()} tokens (${savedPercent}%)`,
+              `- Recent kept: ${Number(result.keptCount) || 0} messages`,
+              `- Context after compact: ${contextAfter}`
+            ].join('\n')
             refreshMeta(targetSessionId)
             const rows = await window.mica.chat.history(targetSessionId).catch(() => [])
             if (isCurrentNode() && sessionIdRef.current === targetSessionId) {
-              updateMessages(historyMessages(rows, targetSessionId))
+              updateMessages([
+                ...historyMessages(rows, targetSessionId),
+                {
+                  id: compactNoticeId,
+                  kind: 'notice',
+                  role: 'notice',
+                  text: finalNotice,
+                  variant: 'compact',
+                  status: 'success'
+                }
+              ])
             }
           } else if (result?.code === 'not_needed') {
-            appendCommandResult(parsed.raw, '暂不需要压缩', result.error || '当前会话内容较少。')
+            updateNotice(
+              compactNoticeId,
+              `${compactMode === 'local' ? '暂无可快速清理内容' : '暂不需要模型压缩'}：${result.error || '当前会话内容较少。'}`,
+              'compact',
+              'skipped'
+            )
           } else {
-            appendCommandResult(parsed.raw, '压缩失败', result?.error || '未知错误', {
-              variant: 'error'
-            })
+            updateNotice(
+              compactNoticeId,
+              `压缩失败：${result?.error || '未知错误'}`,
+              'error',
+              'error'
+            )
           }
         } catch (error) {
           if (isCurrentNode()) {
-            appendCommandResult(
-              parsed.raw,
-              '压缩失败',
-              error instanceof Error ? error.message : String(error),
-              { variant: 'error' }
+            updateNotice(
+              compactNoticeId,
+              `压缩失败：${error instanceof Error ? error.message : String(error)}`,
+              'error',
+              'error'
             )
           }
         } finally {
@@ -2021,12 +2266,10 @@ export function ChatView({
     },
     [
       applyOverride,
-      canSwitchModelProtocol,
       appendCommandResult,
+      appendNotice,
       cwdRef,
-      ensureModelProtocols,
       meta,
-      messages.length,
       nodeId,
       nodeIdRef,
       onNewSessionRef,
@@ -2038,79 +2281,104 @@ export function ChatView({
       rememberInput,
       running,
       todoHidden,
+      updateNotice,
       updateMessages
     ]
   )
 
-  const send = useCallback(() => {
-    const text = input.trim()
-    if (!text || !nodeId) return
-    const slash = parseSlashCommand(text)
-    if (slash) {
-      if (!slash.name) return // 单独的 / 保留给命令面板，不发送
-      void runSlashCommand(slash)
-      return
-    }
-    if (running) {
-      appendNotice('当前 turn 仍在运行，请等待完成或点击停止后继续')
-      return
-    }
-    const optimisticId = uid('msg')
-    stickToBottomRef.current = true
-    setShowJump(false)
-    updateMessages((previous) => [
-      ...previous,
-      { id: optimisticId, kind: 'message', role: 'user', text, done: true }
-    ])
-    rememberInput(text)
-    streamRef.current = { id: null, kind: null, turnId: null }
-    finishedRef.current = false
-    setRunning(true)
-    setStopping(false)
-    setPhase('connecting')
-    setRunStartedAt(Date.now())
-    const targetNodeId = nodeId
+  const send = useCallback(
+    (requestedInput, options = {}) => {
+      const text = (typeof requestedInput === 'string' ? requestedInput : input).trim()
+      if (!text || !nodeId) return
+      const optimisticId = uid('msg')
+      const queueing = running || !finishedRef.current
+      const previousTurnId = turnRef.current
+      let acceptedIntoQueue = false
+      stickToBottomRef.current = true
+      setShowJump(false)
+      updateMessages((previous) => [
+        ...previous,
+        { id: optimisticId, kind: 'message', role: 'user', text, done: true, queued: queueing }
+      ])
+      if (queueing) queuedMessageIdsRef.current.push(optimisticId)
+      if (!options.preserveDraft) rememberInput(text)
+      if (!queueing) {
+        turnRef.current = `pending:${optimisticId}`
+        streamRef.current = { id: null, kind: null, turnId: turnRef.current }
+        finishedRef.current = false
+        setRunning(true)
+        setStopping(false)
+        setPhase('connecting')
+        setRunStartedAt(Date.now())
+      }
+      const targetNodeId = nodeId
 
-    const rollback = (message, variant = 'error') => {
-      if (nodeIdRef.current !== targetNodeId) return
-      updateMessages((previous) => previous.filter((item) => item.id !== optimisticId))
-      appendNotice(message, variant)
-      draftsRef.current.set(nodeId, text)
-      setInput(text)
-      setRunning(false)
-      setPhase('idle')
-      finishedRef.current = true
-    }
+      const rollback = (message, variant = 'error') => {
+        if (nodeIdRef.current !== targetNodeId) return
+        updateMessages((previous) => previous.filter((item) => item.id !== optimisticId))
+        appendNotice(message, variant)
+        if (!options.preserveDraft) {
+          draftsRef.current.set(nodeId, text)
+          setInput(text)
+        }
+        if (queueing) {
+          if (acceptedIntoQueue) {
+            setQueuedCount((count) => Math.max(0, count - 1))
+            setQueuedItems((items) => items.filter((item) => item.id !== optimisticId))
+          }
+        } else {
+          turnRef.current = previousTurnId
+          setRunning(false)
+          setPhase('idle')
+          finishedRef.current = true
+        }
+      }
 
-    const overrides = overridesRef.current.get(nodeId) || {}
-    window.mica.chat
-      .start({
-        id: nodeId,
-        sessionId: sessionIdRef.current || null,
-        cwd: cwdRef.current || null,
-        prompt: text,
-        maxTurns: 100,
-        model: overrides.model || null,
-        variant: overrides.variant || null,
-        role: overrides.role || null
-      })
-      .then((result) => {
-        if (!result) return
-        if (result.busy) rollback('该会话仍在运行，消息未发送', 'info')
-        else if (result.error) rollback(result.error)
-      })
-      .catch((error) => rollback(error instanceof Error ? error.message : String(error)))
-  }, [
-    appendNotice,
-    cwdRef,
-    input,
-    nodeId,
-    nodeIdRef,
-    rememberInput,
-    runSlashCommand,
-    running,
-    updateMessages
-  ])
+      const overrides = overridesRef.current.get(nodeId) || {}
+      window.mica.chat
+        .start({
+          id: nodeId,
+          sessionId: sessionIdRef.current || null,
+          cwd: cwdRef.current || null,
+          prompt: text,
+          clientMessageId: optimisticId,
+          maxTurns: 100,
+          model: overrides.model || null,
+          variant: overrides.variant || null,
+          role: overrides.role || null
+        })
+        .then((result) => {
+          if (!result) return
+          if (result.queued) {
+            acceptedIntoQueue = true
+            if (!queuedMessageIdsRef.current.includes(optimisticId)) {
+              queuedMessageIdsRef.current.push(optimisticId)
+            }
+            updateMessages((previous) =>
+              previous.map((message) =>
+                message.id === optimisticId ? { ...message, queued: true } : message
+              )
+            )
+            setQueuedCount(Number(result.position) || 1)
+            setQueuedItems(Array.isArray(result.queuedItems) ? result.queuedItems : [])
+          } else {
+            queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter(
+              (id) => id !== optimisticId
+            )
+            updateMessages((previous) =>
+              previous.map((message) =>
+                message.id === optimisticId ? { ...message, queued: false } : message
+              )
+            )
+            setQueuedItems((items) => items.filter((item) => item.id !== optimisticId))
+            if (result.busy) rollback('该会话暂时无法排队，请稍后重试', 'error')
+            else if (result.error) rollback(result.error)
+          }
+        })
+        .catch((error) => rollback(error instanceof Error ? error.message : String(error)))
+    },
+    [appendNotice, cwdRef, input, nodeId, nodeIdRef, rememberInput, running, updateMessages]
+  )
 
   const stop = useCallback(() => {
     if (!nodeId || stopping) return
@@ -2137,10 +2405,15 @@ export function ChatView({
       const history = inputHistoryRef.current.get(nodeId) || []
       if (!history.length) return
       let cursor = historyCursorRef.current
-      if (direction < 0) cursor = cursor < 0 ? history.length - 1 : Math.max(0, cursor - 1)
-      else cursor = cursor < 0 ? -1 : Math.min(history.length, cursor + 1)
+      if (direction < 0) {
+        if (cursor < 0) draftsRef.current.set(nodeId, input)
+        cursor = cursor < 0 ? history.length - 1 : Math.max(0, cursor - 1)
+      } else cursor = cursor < 0 ? -1 : Math.min(history.length, cursor + 1)
       historyCursorRef.current = cursor === history.length ? -1 : cursor
-      const value = historyCursorRef.current < 0 ? '' : history[historyCursorRef.current]
+      const value =
+        historyCursorRef.current < 0
+          ? draftsRef.current.get(nodeId) || ''
+          : history[historyCursorRef.current]
       draftsRef.current.set(nodeId, value)
       setInput(value)
       requestAnimationFrame(() => {
@@ -2148,57 +2421,200 @@ export function ChatView({
         if (element) element.setSelectionRange(value.length, value.length)
       })
     },
-    [nodeId]
+    [input, nodeId]
   )
 
   const showEmpty = historyLoaded && !running && messages.length === 0
-  const todoItems = useMemo(() => latestTodoItems(messages), [messages])
-  const commands = useMemo(() => {
-    if (picker || commandDismissed) return []
-    return commandSuggestions(input)
-  }, [commandDismissed, input, picker])
+  const queueReady = running && input.trim().length > 0
+  const transcriptMessages = useMemo(
+    () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
+    [messages]
+  )
+  const queuedDisplayItems = useMemo(() => {
+    const items = [...queuedItems]
+    for (const message of messages) {
+      if (!message.queued || items.some((item) => item.id === message.id)) continue
+      items.push({ id: message.id, text: message.text, pending: true })
+    }
+    return items
+  }, [messages, queuedItems])
+  const recallQueued = useCallback(
+    async (requestedId) => {
+      if (!nodeId || recallingQueueRef.current) return
+      const item = requestedId
+        ? queuedDisplayItems.find((candidate) => candidate.id === requestedId)
+        : queuedDisplayItems[queuedDisplayItems.length - 1]
+      if (!item || item.pending) return
+      const targetNodeId = nodeId
+      recallingQueueRef.current = item.id
+      setRecallingQueueId(item.id)
+      try {
+        const result = await window.mica.chat.recallQueued(nodeId, item.id)
+        if (nodeIdRef.current !== targetNodeId) return
+        setQueuedCount(Number(result?.queuedCount) || 0)
+        setQueuedItems(Array.isArray(result?.queuedItems) ? result.queuedItems : [])
+        if (!result?.ok) {
+          appendNotice(result?.error || '排队消息撤回失败', 'error')
+          return
+        }
+        queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((id) => id !== item.id)
+        updateMessages((previous) => previous.filter((message) => message.id !== item.id))
+        const recalledText = result.text || item.text || ''
+        setInput((current) => {
+          const next = current.trim() ? `${current}\n\n${recalledText}` : recalledText
+          draftsRef.current.set(nodeId, next)
+          return next
+        })
+        historyCursorRef.current = -1
+        requestAnimationFrame(() => {
+          const element = textareaRef.current
+          if (!element) return
+          element.focus()
+          element.setSelectionRange(element.value.length, element.value.length)
+        })
+      } catch (error) {
+        if (nodeIdRef.current === targetNodeId) {
+          appendNotice(
+            `排队消息撤回失败：${error instanceof Error ? error.message : String(error)}`,
+            'error'
+          )
+        }
+      } finally {
+        if (recallingQueueRef.current === item.id) recallingQueueRef.current = null
+        if (nodeIdRef.current === targetNodeId) setRecallingQueueId(null)
+      }
+    },
+    [appendNotice, nodeId, nodeIdRef, queuedDisplayItems, updateMessages]
+  )
+  const activityTurnId =
+    turnRef.current ||
+    messages.findLast((message) => isActivityMessage(message) && message.turnId)?.turnId ||
+    null
+  const turnActivityMessages = useMemo(
+    () => currentTurnActivityMessages(messages, activityTurnId),
+    [activityTurnId, messages]
+  )
+  const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
+  const activeSubagents = useMemo(
+    () => (running ? activeSubagentMessages(messages, activityTurnId) : []),
+    [activityTurnId, messages, running]
+  )
+  const todoItems = useMemo(() => {
+    return todoItemsForTurn(messages, activityTurnId, running)
+  }, [activityTurnId, messages, running])
   const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeModel = activeOverrides.model || meta?.model || ''
   const activeEffort = activeOverrides.variant || meta?.effort || 'none'
   const activeRole = activeOverrides.role || meta?.role || 'default'
-  const modelText = activeModel ? `${activeModel}_${activeEffort}` : ''
   const contextUsage = usageValues(meta?.lastUsage)
   const contextTokens = contextUsage?.total ?? 0
   const windowSize = meta?.contextWindowSize ?? 0
   const inputTokens = contextUsage?.input ?? 0
   const cachedTokens = contextUsage?.cached ?? 0
-  const hasContext = contextTokens > 0 && windowSize > 0
+  const hasContext = contextTokens > 0
   const tokenStr = hasContext ? formatTokens(contextTokens) : ''
-  const cachedPct =
-    inputTokens > 0 ? Math.max(0, Math.round((cachedTokens / inputTokens) * 100)) : 0
-  const contextPct = hasContext ? Math.round((contextTokens / windowSize) * 100) : 0
+  const metaCachedRate = Number(meta?.cachedRate)
+  const cachedPct = Math.min(
+    100,
+    Math.max(
+      0,
+      Number.isFinite(metaCachedRate)
+        ? Math.round(metaCachedRate * 100)
+        : inputTokens > 0
+          ? Math.round((cachedTokens / inputTokens) * 100)
+          : 0
+    )
+  )
+  const hasContextWindow = hasContext && windowSize > 0
+  const contextPct = hasContextWindow
+    ? Math.min(100, Math.max(0, Math.round((contextTokens / windowSize) * 100)))
+    : 0
   const tokenClass = hasContext ? TOKEN_LEVEL_CLASS[levelFor(contextTokens, TOKEN_THRESHOLDS)] : ''
-  const ctxClass = hasContext ? RATIO_LEVEL_CLASS[levelFor(contextPct, RATIO_THRESHOLDS)] : ''
+  const ctxClass = hasContextWindow ? RATIO_LEVEL_CLASS[levelFor(contextPct, RATIO_THRESHOLDS)] : ''
   const statusMetaTitle = modelSummaryTitle({
     ...meta,
     model: activeModel || null,
     effort: activeEffort === 'none' ? null : activeEffort,
     role: activeRole
   })
-  const activeCommandIndex = Math.min(commandIndex, Math.max(0, commands.length - 1))
-  const selectCommand = useCallback(
-    (command) => {
-      const value = commandInputValue(command)
-      draftsRef.current.set(nodeId, value)
-      setInput(value)
-      setCommandDismissed(false)
-      setCommandIndex(0)
-      requestAnimationFrame(() => {
-        const element = textareaRef.current
-        element?.focus()
-        element?.setSelectionRange(value.length, value.length)
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  const openChatContextMenu = useCallback(
+    (event) => {
+      event.preventDefault()
+      setPicker(null)
+      setContextOpen(false)
+      setContextMenu({
+        x: Math.max(4, Math.min(event.clientX, window.innerWidth - 172)),
+        y: Math.max(4, Math.min(event.clientY, window.innerHeight - 196)),
+        hasSession: Boolean(sessionIdRef.current),
+        running
       })
     },
-    [nodeId]
+    [running]
+  )
+  const runContextMenuAction = useCallback(
+    async (action) => {
+      setContextMenu(null)
+      if (action === 'compact-local' || action === 'compact-model' || action === 'clear') {
+        await runSlashCommand({
+          name: action === 'clear' ? 'clear' : 'compact',
+          args: '',
+          raw:
+            action === 'compact-local'
+              ? '快速压缩（本地）'
+              : action === 'compact-model'
+                ? '模型压缩'
+                : 'Clear',
+          compactMode: action === 'compact-local' ? 'local' : 'model',
+          preserveDraft: true
+        })
+        return
+      }
+      if (action === 'commit') {
+        send('请分析当前 Git 变化，创建合适的提交并推送当前分支。提交前请检查改动和测试结果。', {
+          preserveDraft: true
+        })
+        return
+      }
+      if (action !== 'fork') return
+      const sessionId = sessionIdRef.current
+      if (!sessionId) {
+        appendNotice('发送第一条消息后才能分叉会话', 'error')
+        return
+      }
+      try {
+        const forked = await window.mica.chat.fork(sessionId)
+        onSessionRenamedRef.current?.()
+        onResumeSessionRef.current?.(forked)
+      } catch (error) {
+        appendNotice(
+          `分叉会话失败：${error instanceof Error ? error.message : String(error)}`,
+          'error'
+        )
+      }
+    },
+    [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, send]
   )
 
+  const focusComposerOnMouseDown = useCallback((event) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    if (
+      target.closest(
+        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
+      )
+    ) {
+      return
+    }
+    textareaRef.current?.focus()
+  }, [])
+
   return (
-    <div className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}>
+    <div
+      className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
+      onMouseDown={focusComposerOnMouseDown}
+      onContextMenu={openChatContextMenu}
+    >
       <div
         ref={listRef}
         className="chat-scroll thin-scrollbar"
@@ -2214,53 +2630,46 @@ export function ChatView({
         <div ref={transcriptRef} className="chat-transcript">
           {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
           {showEmpty && <WelcomeHint cwd={cwd} />}
-          {messages.map((message) => (
-            <MessageRow
-              key={message.id}
-              message={message}
-              onOpenFile={(path, position) =>
-                onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position)
-              }
-              onCommandAction={(item) => {
-                if (item.action === 'terminal') {
-                  void copyText(item.command)
-                  onOpenTerminalRef.current?.()
-                }
-              }}
-            />
-          ))}
-          {running && phase === 'connecting' && streamRef.current.id == null && (
-            <div className="chat-inline-status">
-              <LoaderCircle size={12} className="animate-spin" /> Connecting
-            </div>
-          )}
+          {transcriptMessages.map((message) => {
+            const onOpenFile = (path, position) =>
+              onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position)
+            const onPreviewImage = (source, alt) => setImagePreview({ source, alt })
+            return (
+              <MessageRow
+                key={message.id}
+                message={message}
+                onOpenFile={onOpenFile}
+                onPreviewImage={onPreviewImage}
+                onCommandAction={(item) => {
+                  if (item.action === 'terminal') {
+                    void copyText(item.command)
+                    onOpenTerminalRef.current?.()
+                  }
+                }}
+              />
+            )
+          })}
         </div>
       </div>
 
-      {showJump && (
-        <button
-          type="button"
-          className="chat-jump"
-          onClick={() => {
-            stickToBottomRef.current = true
-            setShowJump(false)
-            const list = listRef.current
-            if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
-          }}
-        >
-          <ArrowDown size={13} /> 最新消息
-        </button>
-      )}
-
       <div ref={composerDockRef} className="chat-composer-dock">
-        <CommandPalette
-          commands={commands}
-          activeIndex={activeCommandIndex}
-          onActiveIndex={setCommandIndex}
-          onSelect={selectCommand}
-        />
+        {showJump && (
+          <button
+            type="button"
+            className="chat-jump"
+            onClick={() => {
+              stickToBottomRef.current = true
+              setShowJump(false)
+              const list = listRef.current
+              if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+            }}
+          >
+            <ArrowDown size={13} /> 最新消息
+          </button>
+        )}
         {picker && (
           <SelectPalette
+            paletteRef={pickerRef}
             title={picker.title}
             options={picker.options || []}
             activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
@@ -2279,142 +2688,199 @@ export function ChatView({
             error={picker.error}
           />
         )}
-        <TodoDock
-          items={todoItems}
-          hidden={todoHidden}
-          onToggleHidden={(hidden) => {
-            todoHiddenRef.current.set(nodeId, hidden)
-            setTodoHidden(hidden)
-          }}
+        <TodoDock items={todoItems} hidden={todoHidden} />
+        <SubagentStatusDock messages={activeSubagents} now={Date.now()} />
+        <QueueDock
+          items={queuedDisplayItems}
+          onRecall={recallQueued}
+          recallingId={recallingQueueId}
         />
-        <div className={`chat-composer ${running ? 'chat-composer-running' : ''}`}>
+        <ComposerImageStrip
+          text={input}
+          onPreview={(source, alt) => setImagePreview({ source, alt })}
+        />
+        <div
+          className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
+        >
           <span className="chat-prompt-mark" aria-hidden="true">
-            ›
+            {queueReady ? '↳' : '›'}
           </span>
-          <textarea
-            ref={textareaRef}
-            value={input}
-            rows={1}
-            spellCheck={false}
-            aria-label="对话输入"
-            placeholder="Type a message to start a conversation"
-            onChange={(event) => {
-              draftsRef.current.set(nodeId, event.target.value)
-              historyCursorRef.current = -1
-              setInput(event.target.value)
-              setCommandDismissed(false)
-              setCommandIndex(0)
-            }}
-            onPaste={(event) => {
-              const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
-                item.type.startsWith('image/')
-              )
-              if (!hasImage) return
-              event.preventDefault()
-              window.mica.chat
-                .savePastedImage()
-                .then((result) => {
-                  const element = textareaRef.current
-                  const start = element?.selectionStart ?? input.length
-                  const end = element?.selectionEnd ?? input.length
-                  const insertion = result?.ok
-                    ? `[Image](${result.ref})`
-                    : (event.clipboardData?.getData('text/plain') ?? '')
-                  const next = input.slice(0, start) + insertion + input.slice(end)
-                  draftsRef.current.set(nodeId, next)
-                  setInput(next)
-                  requestAnimationFrame(() => {
-                    const el = textareaRef.current
-                    if (el) el.setSelectionRange(start + insertion.length, start + insertion.length)
+          <div className="chat-composer-input">
+            <div className="chat-composer-markdown-layer" aria-hidden="true">
+              {input ? (
+                composerMarkdownNodes(input)
+              ) : (
+                <span className="chat-composer-placeholder">
+                  {running
+                    ? '消息会在当前 turn 完成后自动发送'
+                    : 'Type a message to start a conversation'}
+                </span>
+              )}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              rows={1}
+              spellCheck={false}
+              aria-label="对话输入"
+              placeholder=""
+              onChange={(event) => {
+                draftsRef.current.set(nodeId, event.target.value)
+                historyCursorRef.current = -1
+                setInput(event.target.value)
+              }}
+              onPaste={(event) => {
+                const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
+                  item.type.startsWith('image/')
+                )
+                if (!hasImage) return
+                event.preventDefault()
+                window.mica.chat
+                  .savePastedImage()
+                  .then((result) => {
+                    const element = textareaRef.current
+                    const start = element?.selectionStart ?? input.length
+                    const end = element?.selectionEnd ?? input.length
+                    const insertion = result?.ok
+                      ? `[Image](${result.ref})`
+                      : (event.clipboardData?.getData('text/plain') ?? '')
+                    const next = input.slice(0, start) + insertion + input.slice(end)
+                    draftsRef.current.set(nodeId, next)
+                    setInput(next)
+                    requestAnimationFrame(() => {
+                      const el = textareaRef.current
+                      if (el)
+                        el.setSelectionRange(start + insertion.length, start + insertion.length)
+                    })
                   })
-                })
-                .catch(() => {})
-            }}
-            onKeyDown={(event) => {
-              if (picker) {
-                const options = picker.options || []
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault()
-                  if (options.length) setPickerIndex((value) => (value + 1) % options.length)
-                  return
-                }
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  if (options.length) {
-                    setPickerIndex((value) => (value - 1 + options.length) % options.length)
-                  }
-                  return
-                }
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  if (options.length) {
-                    selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
-                  }
-                  return
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  setPicker(null)
-                  return
-                }
-                return
-              }
-              if (commands.length > 0) {
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault()
-                  setCommandIndex((value) => (value + 1) % commands.length)
-                  return
-                }
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  setCommandIndex((value) => (value - 1 + commands.length) % commands.length)
-                  return
-                }
-                if (event.key === 'Tab') {
-                  event.preventDefault()
-                  selectCommand(commands[activeCommandIndex])
-                  return
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  setCommandDismissed(true)
-                  return
-                }
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  const selected = commands[activeCommandIndex]
-                  if (input.trim() !== `/${selected.name}` || selected.argument) {
+                  .catch(() => {})
+              }}
+              onKeyDown={(event) => {
+                if (picker) {
+                  const options = picker.options || []
+                  if (event.key === 'ArrowDown') {
                     event.preventDefault()
-                    selectCommand(selected)
+                    if (options.length) setPickerIndex((value) => (value + 1) % options.length)
                     return
                   }
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    if (options.length) {
+                      setPickerIndex((value) => (value - 1 + options.length) % options.length)
+                    }
+                    return
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    if (options.length) {
+                      selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
+                    }
+                    return
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setPicker(null)
+                    return
+                  }
+                  return
                 }
-              }
-              if (event.altKey && event.key === 'ArrowUp') {
-                event.preventDefault()
-                navigateInputHistory(-1)
-                return
-              }
-              if (event.altKey && event.key === 'ArrowDown') {
-                event.preventDefault()
-                navigateInputHistory(1)
-                return
-              }
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                send()
-              }
-            }}
-          />
+                if (
+                  event.key === 'ArrowLeft' &&
+                  event.shiftKey &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  queuedDisplayItems.length > 0 &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  void recallQueued()
+                  return
+                }
+                if (event.altKey && event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  navigateInputHistory(-1)
+                  return
+                }
+                if (event.altKey && event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  navigateInputHistory(1)
+                  return
+                }
+                if (
+                  event.key === 'ArrowUp' &&
+                  !event.shiftKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  event.currentTarget.selectionStart === 0 &&
+                  event.currentTarget.selectionEnd === 0
+                ) {
+                  event.preventDefault()
+                  navigateInputHistory(-1)
+                  return
+                }
+                if (
+                  event.key === 'ArrowDown' &&
+                  !event.shiftKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  event.currentTarget.selectionStart === event.currentTarget.value.length &&
+                  event.currentTarget.selectionEnd === event.currentTarget.value.length
+                ) {
+                  event.preventDefault()
+                  navigateInputHistory(1)
+                  return
+                }
+                if (event.key === 'Tab' && queueReady) {
+                  event.preventDefault()
+                  send()
+                  return
+                }
+                if (
+                  event.key === 'Enter' &&
+                  event.shiftKey &&
+                  queueReady &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  send()
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  send()
+                }
+              }}
+              onScroll={(event) => {
+                const layer = event.currentTarget.parentElement?.querySelector(
+                  '.chat-composer-markdown-layer'
+                )
+                if (layer) layer.scrollTop = event.currentTarget.scrollTop
+              }}
+            />
+          </div>
           <div className="chat-composer-actions">
             <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
             {running ? (
-              <button type="button" title="停止生成" aria-label="停止生成" onClick={stop}>
-                {stopping ? (
-                  <LoaderCircle size={13} className="animate-spin" />
-                ) : (
-                  <Square size={12} />
+              <>
+                {input.trim() && (
+                  <button
+                    type="button"
+                    title="加入发送队列"
+                    aria-label="加入发送队列"
+                    onClick={send}
+                  >
+                    <Send size={13} />
+                  </button>
                 )}
-              </button>
+                <button type="button" title="停止生成" aria-label="停止生成" onClick={stop}>
+                  {stopping ? (
+                    <LoaderCircle size={13} className="animate-spin" />
+                  ) : (
+                    <Square size={12} />
+                  )}
+                </button>
+              </>
             ) : input.trim() ? (
               <button
                 type="button"
@@ -2428,6 +2894,13 @@ export function ChatView({
             ) : null}
           </div>
         </div>
+        {imagePreview && (
+          <ImagePreviewModal
+            source={imagePreview.source}
+            alt={imagePreview.alt}
+            onClose={() => setImagePreview(null)}
+          />
+        )}
         <div className="chat-status-line">
           <div className="chat-status-primary">
             {running && (
@@ -2437,37 +2910,78 @@ export function ChatView({
                 {elapsed > 0 && <span>{formatDuration(elapsed)}</span>}
               </>
             )}
+            {queueReady && <span className="chat-status-queue">Shift+Enter / Tab 排队</span>}
+            {queuedCount > 0 && (
+              <span className="chat-status-queue">队列 {queuedCount} · Shift+← 撤回</span>
+            )}
+            {!running && !queueReady && <span className="chat-status-idle">就绪</span>}
           </div>
           <div className="chat-status-meta" title={statusMetaTitle}>
             <span
-              className="chat-status-model"
-              role="button"
-              tabIndex={0}
-              title="切换模型"
-              onClick={() => openPicker('model')}
+              className="chat-status-history"
+              title="输入历史：在首行按 ↑，末行按 ↓；也可使用 Alt + ↑/↓"
             >
-              {modelText}
+              ↑↓ 历史
             </span>
+            {activeModel && (
+              <span className="chat-status-model-group">
+                <span
+                  className="chat-status-model"
+                  role="button"
+                  tabIndex={0}
+                  title="切换模型"
+                  data-chat-picker-trigger
+                  onClick={() => openPicker('model')}
+                >
+                  {activeModel}
+                </span>
+                <span className="chat-status-sep">_</span>
+                <span
+                  className="chat-status-model"
+                  role="button"
+                  tabIndex={0}
+                  title="切换推理强度"
+                  data-chat-picker-trigger
+                  onClick={() => openPicker('variant')}
+                >
+                  {activeEffort}
+                </span>
+              </span>
+            )}
             {hasContext && (
               <>
                 <span className={`chat-status-tokens ${tokenClass}`}>{tokenStr}</span>
                 <span className="chat-status-cached"> (cached {cachedPct}%, </span>
-                <span
-                  className={`chat-status-ctx ${ctxClass}`}
-                  role="button"
-                  tabIndex={0}
-                  title="查看上下文占用"
-                  onClick={() => setContextOpen(true)}
-                >
-                  ctx {contextPct}%
-                </span>
+                {hasContextWindow ? (
+                  <span
+                    className={`chat-status-ctx ${ctxClass}`}
+                    role="button"
+                    tabIndex={0}
+                    title="查看上下文占用"
+                    onClick={() => setContextOpen(true)}
+                  >
+                    ctx {contextPct}%
+                  </span>
+                ) : (
+                  <span className="chat-status-cached" title="当前会话尚未提供上下文窗口大小">
+                    ctx —
+                  </span>
+                )}
                 <span className="chat-status-cached">)</span>
               </>
             )}
           </div>
         </div>
+        <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
         {contextOpen && <ContextModal meta={meta} onClose={() => setContextOpen(false)} />}
       </div>
+      {contextMenu && (
+        <ChatContextMenu
+          menu={contextMenu}
+          onAction={runContextMenuAction}
+          onClose={closeContextMenu}
+        />
+      )}
     </div>
   )
 }

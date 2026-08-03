@@ -12,6 +12,7 @@ export type RunCliInvocation = {
   dangerouslySkipPermissions: boolean;
   mcpConfigPath?: string;
   strictMcpConfig: boolean;
+  mcpInitTimeoutMs?: number;
 };
 
 export type DaemonCliInvocation = {
@@ -25,6 +26,7 @@ export type CompactCliInvocation = {
   sessionId: string;
   cwd?: string;
   force: boolean;
+  pruneOnly: boolean;
   format: 'json';
 };
 
@@ -46,7 +48,7 @@ export const CLI_USAGE = [
   '  mica models',
   '  mica run --format json [options] "<prompt>"',
   '  mica daemon [--server <url>] [--name <name>]',
-  '  mica compact --session <id> [--dir <path>] [--force]',
+  '  mica compact --session <id> [--dir <path>] [--force] [--prune-only]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -59,6 +61,7 @@ export const CLI_USAGE = [
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
+  '  --mcp-init-timeout-ms <ms>        Limit connect + tools/list time per MCP server',
   '',
   'Daemon options:',
   '  --server <url>                    Sync server base URL',
@@ -68,6 +71,7 @@ export const CLI_USAGE = [
   '  --session <id>                    Compress the given session into a checkpoint',
   '  --dir <path>                      Set the working directory',
   '  --force                           Force a summary even when history is short',
+  '  --prune-only                      Only perform local cleanup; never call a model',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -114,6 +118,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     let sessionId: string | undefined;
     let cwd: string | undefined;
     let force = false;
+    let pruneOnly = false;
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index]!;
       const valueOption = parseValueOption(arg, argv, index, ['--session', '--dir']);
@@ -128,11 +133,15 @@ export function parseCliArgs(argv: string[]): CliInvocation {
         force = true;
         continue;
       }
+      if (arg === '--prune-only') {
+        pruneOnly = true;
+        continue;
+      }
       if (arg === '--help' || arg === '-h') return { mode: 'help' };
       return cliError(`Unknown compact option: ${arg}`);
     }
     if (!sessionId) return cliError('Missing value for --session.');
-    return { mode: 'compact', sessionId, cwd, force, format: 'json' };
+    return { mode: 'compact', sessionId, cwd, force, pruneOnly, format: 'json' };
   }
   if (argv[0] !== 'run') return { mode: 'interactive' };
 
@@ -147,6 +156,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   let dangerouslySkipPermissions = false;
   let mcpConfigPath: string | undefined;
   let strictMcpConfig = false;
+  let mcpInitTimeoutMs: number | undefined;
   const positionals: string[] = [];
   let positionalOnly = false;
 
@@ -183,6 +193,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       '--role',
       '--max-turns',
       '--mcp-config',
+      '--mcp-init-timeout-ms',
     ]);
     if (valueOption) {
       if (!valueOption.ok) return valueOption.error;
@@ -210,6 +221,14 @@ export function parseCliArgs(argv: string[]): CliInvocation {
           const parsed = Number(valueOption.value);
           if (!Number.isInteger(parsed) || parsed <= 0) return cliError('--max-turns must be a positive integer.');
           maxTurns = parsed;
+          break;
+        }
+        case '--mcp-init-timeout-ms': {
+          const parsed = Number(valueOption.value);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            return cliError('--mcp-init-timeout-ms must be a positive integer.');
+          }
+          mcpInitTimeoutMs = parsed;
           break;
         }
       }
@@ -255,6 +274,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     dangerouslySkipPermissions,
     mcpConfigPath,
     strictMcpConfig,
+    mcpInitTimeoutMs,
   };
 }
 

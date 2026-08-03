@@ -56,7 +56,10 @@ describe('CLI runtime probes', () => {
   it('keeps run-mode startup failures as a single valid NDJSON error line', () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-run-probe-'));
     try {
-      const result = runCli(['run', '--format', 'json', '--dir', join(micaHome, 'missing'), 'test'], micaHome);
+      const result = runCli(
+        ['run', '--format', 'json', '--mcp-init-timeout-ms', '3000', '--dir', join(micaHome, 'missing'), 'test'],
+        micaHome,
+      );
       expect(result.status).toBe(2);
       const lines = result.stdout.trim().split('\n');
       expect(lines).toHaveLength(1);

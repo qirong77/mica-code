@@ -3,15 +3,18 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   Markdown,
+  activeSubagentMessages,
   canReuseVisualTranscript,
   chatUrlTransform,
+  currentTurnActivityMessages,
   fileTarget,
   hasPersistedTurn,
   historyBeforeRunReplay,
   isPersistedRunComplete,
   latestTodoItems,
   mergeReplayEvents,
-  resolveChatPath
+  resolveChatPath,
+  todoItemsForTurn
 } from './ChatView'
 
 describe('chat Markdown', () => {
@@ -229,5 +232,60 @@ describe('structured activity state', () => {
     ]
 
     expect(historyBeforeRunReplay(messages, 'active prompt')).toEqual(messages.slice(0, 3))
+  })
+
+  it('keeps current-turn logs separate from active subagent status', () => {
+    const messages = [
+      { id: 'old', kind: 'reasoning', turnId: 'turn-1', text: 'old thought' },
+      { id: 'thought', kind: 'reasoning', turnId: 'turn-2', text: 'current thought' },
+      {
+        id: 'read',
+        kind: 'tool',
+        turnId: 'turn-2',
+        tool: { tool: 'read_file', status: 'completed' }
+      },
+      {
+        id: 'agent-running',
+        kind: 'tool',
+        turnId: 'turn-2',
+        tool: { tool: 'Agent', status: 'running' }
+      },
+      {
+        id: 'agent-done',
+        kind: 'tool',
+        turnId: 'turn-2',
+        tool: { tool: 'Agent', status: 'completed' }
+      }
+    ]
+
+    expect(currentTurnActivityMessages(messages, 'turn-2').map((message) => message.id)).toEqual([
+      'thought',
+      'read',
+      'agent-running',
+      'agent-done'
+    ])
+    expect(activeSubagentMessages(messages, 'turn-2').map((message) => message.id)).toEqual([
+      'agent-running'
+    ])
+  })
+
+  it('pauses an in-progress todo outside its owning active turn', () => {
+    const messages = [
+      {
+        kind: 'tool',
+        turnId: 'turn-1',
+        tool: {
+          tool: 'TodoWrite',
+          status: 'completed',
+          input: {
+            todos: [{ content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }]
+          }
+        }
+      }
+    ]
+
+    expect(todoItemsForTurn(messages, 'turn-1', true)[0].status).toBe('in_progress')
+    expect(todoItemsForTurn(messages, 'turn-1', false)[0].status).toBe('pending')
+    expect(todoItemsForTurn(messages, 'turn-2', true)[0].status).toBe('pending')
   })
 })

@@ -28,11 +28,14 @@ const terminalApi = {
 const chatApi = {
   start: (payload) => ipcRenderer.invoke('chat:start', payload),
   abort: (id) => ipcRenderer.invoke('chat:abort', { id }),
+  recallQueued: (id, clientMessageId) =>
+    ipcRenderer.invoke('chat:recall-queued', { id, clientMessageId }),
   history: (sessionId) => ipcRenderer.invoke('chat:history', { sessionId }),
-  meta: (sessionId) => ipcRenderer.invoke('chat:meta', { sessionId }),
+  meta: (sessionId, cwd) => ipcRenderer.invoke('chat:meta', { sessionId, cwd }),
   models: () => ipcRenderer.invoke('chat:models'),
   roles: () => ipcRenderer.invoke('chat:roles'),
-  compact: (sessionId) => ipcRenderer.invoke('chat:compact', { sessionId }),
+  compact: (sessionId, mode = 'model') => ipcRenderer.invoke('chat:compact', { sessionId, mode }),
+  fork: (sessionId) => ipcRenderer.invoke('chat:fork', { sessionId }),
   savePastedImage: () => ipcRenderer.invoke('chat:save-pasted-image'),
   dispose: (id) => ipcRenderer.invoke('chat:dispose', { id }),
   isRunning: (id) => ipcRenderer.invoke('chat:is-running', { id }),
@@ -45,6 +48,16 @@ const chatApi = {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('chat:exit', listener)
     return () => ipcRenderer.removeListener('chat:exit', listener)
+  },
+  onQueueState: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:queue-state', listener)
+    return () => ipcRenderer.removeListener('chat:queue-state', listener)
+  },
+  onQueueError: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:queue-error', listener)
+    return () => ipcRenderer.removeListener('chat:queue-error', listener)
   }
 }
 

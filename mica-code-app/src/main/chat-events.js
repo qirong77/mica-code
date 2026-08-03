@@ -106,6 +106,18 @@ export function createChatEventPacer(
   }
 }
 
+// Chat starts a fresh headless CLI for every turn, so a broken MCP would add
+// this delay repeatedly. Two seconds leaves enough room for normal npx-based
+// servers while keeping an unavailable server from dominating model TTFT.
+export const CHAT_MCP_INIT_TIMEOUT_MS = 2000
+
+export function buildChatEnv(env = process.env) {
+  return {
+    ...env,
+    MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS)
+  }
+}
+
 export function buildChatArgs({ prompt, sessionId, cwd, maxTurns, model, variant, role }) {
   const args = ['run', '--format', 'json', '--thinking']
   if (sessionId) args.push('--session', sessionId)

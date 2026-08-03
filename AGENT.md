@@ -340,7 +340,7 @@ AGENT.md
 
 - `packages/mica-mcp` 管理 MCP server 生命周期：读取配置、连接 server、注册远端 tools、重连、关闭和清理工具。
 - MCP 配置来自 `~/.mica/config.json` 或 `$MICA_HOME/config.json` 的 `mcpServers`。
-- Headless run 会显式初始化/关闭 MCP；`--mcp-config <path>` 可加载额外配置，`--strict-mcp-config` 禁止混入本地配置。
+- Headless run 会显式初始化/关闭 MCP，并发连接各个独立 server 后按配置顺序合并工具；`--mcp-config <path>` 可加载额外配置，`--strict-mcp-config` 禁止混入本地配置，`--mcp-init-timeout-ms <ms>` 可限制单个 server 完成 connect + tools/list 的总时间。`mica-code-app` 的一次性 turn 会通过 `MICA_MCP_INIT_TIMEOUT_MS=2000` 传入上限，避免失效 MCP 在每轮冷启动时反复阻塞默认的 15 秒阶段超时，同时不让新版 App 对旧版外部 CLI 传入未知参数；交互模式和未显式传参/环境变量的 CLI 保持原默认值。
 - 远端工具必须通过 `micaTools.registerMcp()` 接入；server 断开、重连失败或关闭时要同步清理对应工具。
 - `/mcp reconnect <server>` 失败后也要刷新注册工具列表，避免 registry 中残留 stale tools。
 
@@ -373,6 +373,8 @@ AGENT.md
 - 普通终端主界面使用 `rows - 1` 作为最小高度而不是固定高度：短内容保留终端最后一行，长 conversation 必须按自然高度扩展到原生 scrollback，避免 Yoga 收缩后文本越界覆盖后续消息和输入区。
 - Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 `Buffer`；该层负责增量 UTF-8 解码，并把 DEC 8-bit C1 控制字节规范化为 7-bit ESC 序列。不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`，否则 S8C1T 模式下的终端查询响应会损坏并泄漏为输入。
 - 长会话性能问题优先检查 retained buffers、rewind snapshots、Markdown 渲染输入、图片 payload、MCP 输出和 agent turn log，不要直接做大重构。
+- `mica-code-app` 的 session 侧栏/Stats 扫描使用 `src/main/stats-scanner.js` 按 dev/ino/size/mtime/ctime 做文件级增量缓存；metadata 与完整 stats 投影分别懒加载，单文件变化只能重读对应文件，稳定结果需缓存排序/去重输出。不要退回“目录任一指纹变化就同步解析全部 session”的模式。
+- 打包桌面进程不会执行登录 shell/profile；`src/main/desktop-process-env.js` 在主进程启动时保留现有 PATH 顺序，并追加存在且可执行的用户工具目录、当前/最高可用 NVM/FNM Node bin 和常见系统目录，使 `npx` MCP、`rg`、Bun/Node 工具可被子进程找到。新增路径发现不能输出环境内容或把候选目录插到用户现有 PATH 前面。
 
 ## 多 Agent、Session、Rewind、Compact 与 Recap
 
@@ -395,6 +397,7 @@ AGENT.md
 - `packages/mica-context` 提供 `CompactionService`。compact 结果通过 runtime/session 层接入对话，不应让 provider adapter 直接感知 compact 策略。
 - `/compact` 是上下文压缩 checkpoint，适合减少后续上下文压力。
 - compact 可以裁剪 tool result、媒体和 base64，但绝不能把 tool-call `arguments` 截成自由文本；过长或损坏参数必须改写成合法 JSON 占位，否则后续 provider 请求会 400。
+- compact 应用 checkpoint 时必须保留原 `usageHistory`/`lastUsage`，禁止清零：清零会丢掉 compact 之前的 token 统计，导致 mica-code-app Stats 与上游平台（krill 等）对账出现整段缺口。两处应用点（`src/plugins/commands/commandRuntimeServices.ts` 的 `/compact`、`src/cli/runCompact.ts`）已按此约定实现。
 - compact、review、commit 等命令如果需要模型调用，应通过 subagent 或 exclusive task 隔离，不要污染当前正在运行的 turn。
 
 ## Package 依赖边界

@@ -155,7 +155,9 @@ function setProcessRunning(states, bus, terminalId, running) {
 
   const state = {
     terminalId,
-    unread: completed || !!previous?.unread,
+    // Foreground shell commands only drive the green activity indicator. Their
+    // completion is not a Mica session completion and must not leave unread UI.
+    unread: !!previous?.unread,
     agentRunning: !!previous?.agentRunning,
     processRunning: running,
     running: !!previous?.agentRunning || running,

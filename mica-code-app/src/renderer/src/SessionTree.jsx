@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  Bell,
   ChevronRight,
   Folder,
   FolderOpen,
@@ -167,6 +168,7 @@ export function SessionTree({
     sessions: false,
     recent: false
   })
+  const [inboxOpen, setInboxOpen] = useState(true)
   const [sessionsCollapsed, setSessionsCollapsed] = useState(new Set())
   const [drag, setDrag] = useState(null) // { section, kind: 'row'|'group', id, key }
   const [over, setOver] = useState(null) // { section, kind, id, key, position: 'before'|'after' }
@@ -200,6 +202,21 @@ export function SessionTree({
     const sorted = [...searchable].sort(byUpdatedDesc)
     return normalizedQuery ? sorted : sorted.slice(0, 20)
   }, [normalizedQuery, searchable])
+  const inboxItems = useMemo(() => {
+    const items = []
+    for (const session of sessions) {
+      const nodeId = openBySession[session.id]
+      const state = nodeId ? unread[nodeId] : null
+      if (state?.unread || state?.running) items.push({ key: nodeId, nodeId, session, state })
+    }
+    for (const draft of draftTabs) {
+      const state = unread[draft.id]
+      if (state?.unread || state?.running) {
+        items.push({ key: draft.id, nodeId: draft.id, draft, state })
+      }
+    }
+    return items.sort((a, b) => (b.state.lastEventAt || 0) - (a.state.lastEventAt || 0))
+  }, [draftTabs, openBySession, sessions, unread])
   const expandedSessions = (key) => normalizedQuery || !sessionsCollapsed.has(key)
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
@@ -589,7 +606,7 @@ export function SessionTree({
 
   return (
     <>
-      <div className="thin-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-1 no-drag">
+      <div className="hidden-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-1 no-drag">
         <div className="mb-1 flex items-center gap-1.5 border-b border-transparent px-2 pt-1 focus-within:border-white/20">
           <Search size={14} className="shrink-0 text-white/40" />
           <input
@@ -612,6 +629,60 @@ export function SessionTree({
             </button>
           )}
         </div>
+
+        <section className="mb-1">
+          <button
+            type="button"
+            className="flex h-8 w-full items-center gap-1.5 px-2 pt-1 text-left text-[11px] font-semibold uppercase tracking-[.18em] text-white/75 hover:text-white"
+            aria-expanded={inboxOpen}
+            onClick={() => setInboxOpen((value) => !value)}
+          >
+            <ChevronRight
+              size={14}
+              className={`text-white/55 transition-transform ${inboxOpen ? 'rotate-90' : ''}`}
+            />
+            <Bell size={14} className="text-white/55" />
+            <span className="min-w-0 flex-1">Inbox</span>
+            {inboxItems.length > 0 && (
+              <span className="rounded-full bg-white/[.08] px-1.5 text-[10px] font-normal tracking-normal text-white/55">
+                {inboxItems.length}
+              </span>
+            )}
+          </button>
+          {inboxOpen && (
+            <div className="flex flex-col gap-px">
+              {inboxItems.length ? (
+                inboxItems.map((item) => {
+                  const active = item.session
+                    ? activeSessionId === item.session.id
+                    : item.nodeId === selectedId
+                  const title = item.session?.title || item.draft?.text || item.nodeId
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`${rowClass} ${active ? 'bg-white/[.075] text-white' : 'text-white/70'}`}
+                      title={title}
+                      onClick={() =>
+                        item.session ? onOpenSession(item.session) : onSelectDraft(item.draft)
+                      }
+                    >
+                      <span className="size-3.5 shrink-0" />
+                      <Bell size={13} className="shrink-0 text-white/45" />
+                      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+                      <span
+                        className={`size-1.75 shrink-0 rounded-full ${item.state.running ? 'bg-[#46c57a] ring-2 ring-[#46c57a]/15 chat-dot-running' : 'bg-[#5aa7e8] ring-2 ring-[#5aa7e8]/20 chat-dot-unread'}`}
+                        title={item.state.running ? '正在运行' : '有未读结果'}
+                      />
+                    </button>
+                  )
+                })
+              ) : (
+                <div className="px-7 py-1 text-xs text-white/30">暂无消息</div>
+              )}
+            </div>
+          )}
+        </section>
 
         <div className="flex flex-col gap-px">
           <section>

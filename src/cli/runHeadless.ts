@@ -34,6 +34,7 @@ export type HeadlessRunOptions = {
   thinking?: boolean;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
+  mcpInitTimeoutMs?: number;
   writer?: RunJsonWriter;
   signal?: AbortSignal;
 };
@@ -138,6 +139,8 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     await micaMcp.init({
       ...(options.mcpConfigPath ? { configPath: resolve(options.mcpConfigPath) } : {}),
       strict: options.strictMcpConfig === true,
+      initTimeoutMs: options.mcpInitTimeoutMs,
+      parallel: true,
       signal: options.signal,
     });
     throwIfAborted(options.signal);

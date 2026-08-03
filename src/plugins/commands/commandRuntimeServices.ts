@@ -640,8 +640,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         concreteAgent.loadSnapshot({
           ...snapshot,
           messages: result.messages,
-          usageHistory: [],
-          lastUsage: undefined,
+          // Keep usage statistics across compact: clearing them would drop
+          // pre-compact token usage from Stats and the platform reconciliation.
+          usageHistory: snapshot.usageHistory,
+          lastUsage: snapshot.lastUsage,
         });
       } catch (error) {
         concreteAgent.loadSnapshot(snapshot);

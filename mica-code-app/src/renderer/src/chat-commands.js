@@ -48,18 +48,6 @@ export const CHAT_COMMANDS = [
     availability: 'chat'
   },
   {
-    name: 'model',
-    description: '切换 provider 与模型',
-    availability: 'chat',
-    argument: '[provider/model]'
-  },
-  {
-    name: 'effort',
-    description: '切换推理强度',
-    availability: 'chat',
-    argument: '[none|low|medium|high|xhigh]'
-  },
-  {
     name: 'role',
     description: '切换系统角色',
     availability: 'chat',

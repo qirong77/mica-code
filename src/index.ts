@@ -88,6 +88,7 @@ if (invocation.mode === 'run') {
       thinking: invocation.thinking,
       mcpConfigPath: invocation.mcpConfigPath,
       strictMcpConfig: invocation.strictMcpConfig,
+      mcpInitTimeoutMs: invocation.mcpInitTimeoutMs ?? positiveIntegerEnv('MICA_MCP_INIT_TIMEOUT_MS'),
       writer,
       signal: abortController.signal,
     });
@@ -121,6 +122,7 @@ if (invocation.mode === 'compact') {
       sessionId: invocation.sessionId,
       cwd: invocation.cwd,
       force: invocation.force,
+      pruneOnly: invocation.pruneOnly,
       signal: abortController.signal,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -193,6 +195,11 @@ try {
   await app.stop();
 } finally {
   processDiagnostics.dispose();
+}
+
+function positiveIntegerEnv(name: string): number | undefined {
+  const parsed = Number(process.env[name]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 async function exitAfterStdoutFlush(exitCode: number): Promise<never> {

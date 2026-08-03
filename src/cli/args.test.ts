@@ -45,6 +45,7 @@ describe('parseCliArgs', () => {
       dangerouslySkipPermissions: true,
       mcpConfigPath: undefined,
       strictMcpConfig: false,
+      mcpInitTimeoutMs: undefined,
     });
   });
 
@@ -57,6 +58,7 @@ describe('parseCliArgs', () => {
         '--max-turns=3',
         '--mcp-config=/tmp/mcp.json',
         '--strict-mcp-config',
+        '--mcp-init-timeout-ms=3000',
         '--thinking',
         'continue',
       ]),
@@ -66,6 +68,7 @@ describe('parseCliArgs', () => {
       maxTurns: 3,
       mcpConfigPath: '/tmp/mcp.json',
       strictMcpConfig: true,
+      mcpInitTimeoutMs: 3000,
       thinking: true,
       prompt: 'continue',
     });
@@ -78,19 +81,24 @@ describe('parseCliArgs', () => {
   });
 
   it('parses headless compact invocations', () => {
-    expect(
-      parseCliArgs(['compact', '--session', 'session-1', '--dir', '/work', '--force']),
-    ).toEqual({
+    expect(parseCliArgs(['compact', '--session', 'session-1', '--dir', '/work', '--force'])).toEqual({
       mode: 'compact',
       sessionId: 'session-1',
       cwd: '/work',
       force: true,
+      pruneOnly: false,
       format: 'json',
     });
     expect(parseCliArgs(['compact', '--session=abc'])).toMatchObject({
       mode: 'compact',
       sessionId: 'abc',
       force: false,
+      pruneOnly: false,
+    });
+    expect(parseCliArgs(['compact', '--session=abc', '--prune-only'])).toMatchObject({
+      mode: 'compact',
+      sessionId: 'abc',
+      pruneOnly: true,
     });
     expect(parseCliArgs(['compact'])).toMatchObject({ mode: 'error' });
     expect(parseCliArgs(['compact', '--nope', 'x'])).toMatchObject({ mode: 'error' });
@@ -111,5 +119,11 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['run', '--format', 'json'])).toMatchObject({ mode: 'error' });
     expect(parseCliArgs(['run', '--format', 'text', 'hi'])).toMatchObject({ mode: 'error' });
     expect(parseCliArgs(['run', '--format=json', '--max-turns=0', 'hi'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['run', '--format=json', '--mcp-init-timeout-ms=0', 'hi'])).toMatchObject({
+      mode: 'error',
+    });
+    expect(parseCliArgs(['run', '--format=json', '--mcp-init-timeout-ms=1.5', 'hi'])).toMatchObject({
+      mode: 'error',
+    });
   });
 });

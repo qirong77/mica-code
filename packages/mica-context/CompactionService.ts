@@ -32,6 +32,7 @@ export type CompactOptions = {
   aggressive?: boolean;
   force?: boolean;
   preview?: boolean;
+  pruneOnly?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -141,12 +142,13 @@ export class CompactionService {
       lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
       const lightweightUsageRatio = usageRatio(lightweightTokenEstimate, budget.contextWindowSize);
       if (
-        !options.forceSummary &&
         prunedMessageCount > 0 &&
         lightweightTokenEstimate < beforeTokenEstimate &&
-        budget.contextWindowSize &&
-        lightweightUsageRatio !== undefined &&
-        lightweightUsageRatio <= pruneOnlyThresholdRatio
+        (options.pruneOnly ||
+          (!options.forceSummary &&
+            budget.contextWindowSize &&
+            lightweightUsageRatio !== undefined &&
+            lightweightUsageRatio <= pruneOnlyThresholdRatio))
       ) {
         const savedTokenEstimate = Math.max(0, beforeTokenEstimate - lightweightTokenEstimate);
         const savedRatio = beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0;
@@ -177,6 +179,10 @@ export class CompactionService {
           reducedRecentRounds: 0,
         };
       }
+    }
+
+    if (options.pruneOnly) {
+      throw new CompactionNotNeededError('当前会话没有可本地清理的内容，暂不需要快速压缩');
     }
 
     if (groupMessagesByRound(activeMessages).length < 2) {

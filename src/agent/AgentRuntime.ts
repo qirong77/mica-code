@@ -46,6 +46,8 @@ export type AgentRuntimeSnapshot = {
   model: string;
   effort: EffortOption;
   role: string;
+  /** Derived model context window in tokens, used by headless/session tooling. */
+  contextWindowSize?: number;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
@@ -256,6 +258,7 @@ export class AgentRuntime {
       model: this.currentConfig.model,
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       role: this.role,
+      contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,

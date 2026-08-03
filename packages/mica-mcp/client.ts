@@ -31,6 +31,7 @@ export interface ConnectedMcpServer {
 
 export const mcpServersAtom = atom<McpServerStatus[]>([]);
 export const connections = new Map<string, ConnectedMcpServer>();
+const pendingConnections = new Map<string, Promise<ConnectedMcpServer>>();
 
 function updateServerStatus(update: McpServerStatus) {
   const current = mcpServersAtom.get();
@@ -55,7 +56,23 @@ export async function connectToServer(
 ): Promise<ConnectedMcpServer> {
   const existing = connections.get(name);
   if (existing) return existing;
+  const pending = pendingConnections.get(name);
+  if (pending) return pending;
 
+  const connection = createConnection(name, config, signal);
+  pendingConnections.set(name, connection);
+  try {
+    return await connection;
+  } finally {
+    if (pendingConnections.get(name) === connection) pendingConnections.delete(name);
+  }
+}
+
+async function createConnection(
+  name: string,
+  config: McpServerConfig,
+  signal?: AbortSignal,
+): Promise<ConnectedMcpServer> {
   updateServerStatus({
     name,
     url: getConfigLabel(config),
@@ -75,7 +92,7 @@ export async function connectToServer(
     client,
     config,
     cleanup: async () => {
-      connections.delete(name);
+      if (connections.get(name) === server) connections.delete(name);
       await client.close();
     },
   };

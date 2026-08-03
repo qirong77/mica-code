@@ -242,6 +242,27 @@ describe('CompactionService', () => {
     assertValidJsonArguments(result.messages);
   });
 
+  it('prune-only compact never calls the summarizer even when the context remains large', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const result = await service.compact({
+      messages: makeToolMessages(5),
+      options: {
+        force: true,
+        aggressive: true,
+        lightweightPrune: true,
+        pruneOnly: true,
+        contextWindowSize: 10,
+      },
+      summarize,
+    });
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('prune_only');
+    expect(JSON.stringify(result.messages)).not.toContain('RAW_TOOL_RESULT_1');
+  });
+
   it('forces an LLM summary after lightweight pruning when requested', async () => {
     const service = new CompactionService();
     const summarize = vi.fn(async () => FULL_SUMMARY);

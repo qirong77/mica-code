@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { appendBufferedEvent, buildChatArgs, createChatEventPacer } from './chat-events'
+import {
+  appendBufferedEvent,
+  buildChatArgs,
+  buildChatEnv,
+  CHAT_MCP_INIT_TIMEOUT_MS,
+  createChatEventPacer
+} from './chat-events'
 
 function timerHarness() {
   let scheduled = null
@@ -119,6 +125,16 @@ describe('chat live event pacing', () => {
 })
 
 describe('chat CLI arguments', () => {
+  it('bounds managed MCP startup through an environment variable compatible with older CLIs', () => {
+    const source = { PATH: '/usr/bin' }
+    expect(buildChatEnv(source)).toEqual({
+      PATH: '/usr/bin',
+      MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS)
+    })
+    expect(source).toEqual({ PATH: '/usr/bin' })
+    expect(buildChatArgs({ prompt: 'hi' })).not.toContain('--mcp-init-timeout-ms')
+  })
+
   it('separates prompts from mica options even when the prompt starts with a dash', () => {
     expect(buildChatArgs({ prompt: '--help', sessionId: 's1' })).toEqual([
       'run',

@@ -1,11 +1,20 @@
 import { clipboard, ipcMain } from 'electron'
 import { spawn } from 'child_process'
-import { existsSync, readFileSync, readdirSync } from 'fs'
+import { randomUUID } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { basename, join } from 'path'
 import { resolveMicaExecutable } from './terminals'
-import { appendBufferedEvent, buildChatArgs, createChatEventPacer } from './chat-events'
+import {
+  appendBufferedEvent,
+  buildChatArgs,
+  buildChatEnv,
+  createChatEventPacer
+} from './chat-events'
 import { savePastedImage } from './chat-images'
+import { resolveDefaultChatMeta } from './chat-meta'
+import { forkSessionSnapshot } from './chat-session-actions'
+import { createChatQueue } from './chat-queue'
 
 /**
  * Mica chat service: runs one `mica run --format json` child process per turn
@@ -21,10 +30,46 @@ const NOTIFY_TIMEOUT_MS = 1500
 const ABORT_FORCE_KILL_MS = 5000
 const MAX_STDERR_CHARS = 32 * 1024
 const MAX_COMPLETED_RUNS = 40
+const MAX_QUEUED_RUNS = 50
 
 const runs = new Map() // nodeId -> { child, buffer, sessionId }
+const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
 const completedRuns = new Map() // nodeId -> recently finished replay state
 let notifyServer = null
+
+function queuedItems(id) {
+  return queuedRuns.values(id).map((item, index) => ({
+    id: item.payload?.clientMessageId || `queued:${id}:${index}`,
+    text: item.payload?.prompt || '',
+    position: index + 1
+  }))
+}
+
+function recallQueuedRun(sender, id, clientMessageId) {
+  if (!clientMessageId || typeof clientMessageId !== 'string') {
+    return { ok: false, error: '排队消息 id 缺失', queuedItems: queuedItems(id) }
+  }
+  const removed = queuedRuns.remove(
+    id,
+    (item) => item.sender === sender && item.payload?.clientMessageId === clientMessageId
+  )
+  const items = queuedItems(id)
+  if (!removed) {
+    return {
+      ok: false,
+      error: '该消息已开始发送或已不在队列中',
+      queuedCount: items.length,
+      queuedItems: items
+    }
+  }
+  return {
+    ok: true,
+    id: clientMessageId,
+    text: removed.payload?.prompt || '',
+    queuedCount: items.length,
+    queuedItems: items
+  }
+}
 
 export function setChatNotifyServer(server) {
   notifyServer = server
@@ -60,6 +105,20 @@ function readMicaConfig() {
   } catch {
     return { providers: [], provider: null }
   }
+}
+
+function readMicaStorage() {
+  try {
+    const file = join(micaHomeDir(), 'storage.json')
+    if (!existsSync(file)) return null
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function readDefaultMeta(cwd) {
+  return resolveDefaultChatMeta(readMicaConfig(), readMicaStorage(), cwd)
 }
 
 function protocolForProviderId(providerId) {
@@ -149,6 +208,30 @@ function readSessionMeta(sessionId) {
   }
 }
 
+function forkSession(sessionId) {
+  if (isChatSessionRunning(sessionId))
+    throw new Error('Cannot fork a session while its turn is running')
+  const sourceFile = sessionFile(sessionId)
+  if (!sourceFile) throw new Error('Invalid session id')
+  let source
+  try {
+    source = JSON.parse(readFileSync(sourceFile, 'utf8'))
+  } catch {
+    throw new Error('Session not found')
+  }
+  if (source?.id !== sessionId) throw new Error('Invalid session')
+
+  const id = randomUUID()
+  const fork = forkSessionSnapshot(source, id)
+  const directory = sessionsDir()
+  const file = join(directory, `${id}.json`)
+  const temporary = `${file}.${process.pid}.tmp`
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(temporary, `${JSON.stringify(fork, null, 2)}\n`, 'utf8')
+  renameSync(temporary, file)
+  return { id: fork.id, title: fork.title, cwd: fork.cwd }
+}
+
 function postNotify(terminalId, type, extra = {}) {
   if (!notifyServer) return
   const controller = new AbortController()
@@ -169,12 +252,18 @@ function postNotify(terminalId, type, extra = {}) {
 }
 
 function startRun(sender, id, payload) {
-  const existing = runs.get(id)
-  if (existing) return { ok: false, busy: true }
-  completedRuns.delete(id)
-
   const prompt = String(payload.prompt || '').trim()
   if (!prompt) return { ok: false, error: '消息内容为空' }
+
+  const existing = runs.get(id)
+  if (existing) {
+    const queued = queuedRuns.enqueue(id, { sender, payload: { ...payload, prompt } })
+    if (!queued.ok) {
+      return { ok: false, error: `发送队列已满（最多 ${MAX_QUEUED_RUNS} 条）` }
+    }
+    return { ok: true, queued: true, position: queued.position, queuedItems: queuedItems(id) }
+  }
+  completedRuns.delete(id)
 
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
@@ -204,7 +293,7 @@ function startRun(sender, id, payload) {
   try {
     child = spawn(mica, args, {
       cwd: cwd || process.cwd(),
-      env: { ...process.env },
+      env: buildChatEnv(process.env),
       stdio: ['ignore', 'pipe', 'pipe']
     })
   } catch (error) {
@@ -303,6 +392,14 @@ function startRun(sender, id, payload) {
         aborted: run.aborting
       })
     }
+    startNextQueuedRun(id, run.sessionId || sessionId)
+    if (!sender.isDestroyed()) {
+      sender.send('chat:queue-state', {
+        id,
+        queuedCount: queuedRuns.size(id),
+        queuedItems: queuedItems(id)
+      })
+    }
   }
 
   child.on('error', (error) => {
@@ -340,6 +437,25 @@ function startRun(sender, id, payload) {
 
   postNotify(`${id}:mica`, 'turn.started', sessionId ? { sessionId } : {})
   return { ok: true }
+}
+
+function startNextQueuedRun(id, sessionId) {
+  while (queuedRuns.size(id)) {
+    const next = queuedRuns.take(id)
+    if (!next?.sender || next.sender.isDestroyed()) continue
+    const result = startRun(next.sender, id, {
+      ...next.payload,
+      sessionId: next.payload.sessionId || sessionId || null
+    })
+    if (result?.ok) return result
+    next.sender.send('chat:queue-error', {
+      id,
+      prompt: next.payload?.prompt || '',
+      error: result?.error || '排队消息启动失败'
+    })
+  }
+
+  return null
 }
 
 function abortRun(id) {
@@ -433,7 +549,7 @@ function listRoles() {
   }
 }
 
-function runCompactSession(sessionId) {
+function runCompactSession(sessionId, mode = 'model') {
   const mica = resolveMicaExecutable()
   if (!mica) {
     return Promise.resolve({
@@ -446,10 +562,14 @@ function runCompactSession(sessionId) {
     let stderr = ''
     let child
     try {
-      child = spawn(mica, ['compact', '--session', sessionId], {
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
+      child = spawn(
+        mica,
+        ['compact', '--session', sessionId, ...(mode === 'local' ? ['--prune-only'] : [])],
+        {
+          env: { ...process.env },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
     } catch (error) {
       resolvePromise({ ok: false, error: error instanceof Error ? error.message : String(error) })
       return
@@ -495,9 +615,14 @@ function runCompactSession(sessionId) {
             strategy: result.strategy,
             beforeCount: result.beforeCount,
             afterCount: result.afterCount,
+            summarizedCount: result.summarizedCount,
+            keptCount: result.keptCount,
             beforeTokenEstimate: result.beforeTokenEstimate,
             afterTokenEstimate: result.afterTokenEstimate,
-            savedRatio: result.savedRatio
+            savedTokenEstimate: result.savedTokenEstimate,
+            savedRatio: result.savedRatio,
+            contextWindowSize: result.contextWindowSize,
+            contextUsageRatio: result.contextUsageRatio
           })
           return
         }
@@ -524,19 +649,25 @@ export function registerChatIpc() {
     return abortRun(id)
   })
 
+  ipcMain.handle('chat:recall-queued', (event, { id, clientMessageId } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失', queuedCount: 0, queuedItems: [] }
+    return recallQueuedRun(event.sender, id, clientMessageId)
+  })
+
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {
     if (!sessionId) return []
     return readHistory(sessionId)
   })
 
-  ipcMain.handle('chat:meta', (_event, { sessionId } = {}) => {
-    if (!sessionId) return null
+  ipcMain.handle('chat:meta', (_event, { sessionId, cwd } = {}) => {
+    if (!sessionId) return readDefaultMeta(cwd)
     return readSessionMeta(sessionId)
   })
 
   ipcMain.handle('chat:dispose', (_event, { id } = {}) => {
     if (!id) return false
     abortRun(id)
+    queuedRuns.clear(id)
     completedRuns.delete(id)
     return true
   })
@@ -546,13 +677,21 @@ export function registerChatIpc() {
     if (!run) {
       const completed = completedRuns.get(id)
       return completed
-        ? { running: false, finished: true, ...completed }
-        : { running: false, sessionId: null, events: [] }
+        ? { running: false, finished: true, queuedCount: 0, queuedItems: [], ...completed }
+        : {
+            running: false,
+            sessionId: null,
+            events: [],
+            queuedCount: queuedRuns.size(id),
+            queuedItems: queuedItems(id)
+          }
     }
     if (run.finished) {
       return {
         running: false,
         finished: true,
+        queuedCount: queuedRuns.size(id),
+        queuedItems: queuedItems(id),
         sessionId: run.sessionId,
         events: run.events.slice(),
         prompt: run.prompt,
@@ -561,6 +700,8 @@ export function registerChatIpc() {
     }
     return {
       running: true,
+      queuedCount: queuedRuns.size(id),
+      queuedItems: queuedItems(id),
       sessionId: run.sessionId,
       events: run.events.slice(),
       prompt: run.prompt,
@@ -572,9 +713,14 @@ export function registerChatIpc() {
 
   ipcMain.handle('chat:roles', () => listRoles())
 
-  ipcMain.handle('chat:compact', (_event, { sessionId } = {}) => {
+  ipcMain.handle('chat:compact', (_event, { sessionId, mode } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return { ok: false, error: 'sessionId 缺失' }
-    return runCompactSession(sessionId)
+    return runCompactSession(sessionId, mode === 'local' ? 'local' : 'model')
+  })
+
+  ipcMain.handle('chat:fork', (_event, { sessionId } = {}) => {
+    if (!sessionId || typeof sessionId !== 'string') throw new Error('session id is required')
+    return forkSession(sessionId)
   })
 
   ipcMain.handle('chat:save-pasted-image', () => savePastedImage(clipboard))
@@ -585,5 +731,6 @@ export function disposeAllChatRuns() {
     abortRun(id)
   }
   runs.clear()
+  queuedRuns.clearAll()
   completedRuns.clear()
 }
