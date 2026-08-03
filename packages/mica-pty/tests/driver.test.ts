@@ -112,6 +112,13 @@ describe('PtyDriver spawn & I/O', () => {
     await driver.waitFor(/idle-check/, { timeoutMs: 10_000 });
     expect(await driver.waitIdle(300, 10_000)).toBe(true);
   }, 20_000);
+
+  it('does not return malformed Unicode when a screen tail cuts an emoji', async () => {
+    const driver = spawn([process.execPath, '-e', "process.stdout.write('🤖')"]);
+    await driver.waitFor(/🤖/, { timeoutMs: 10_000 });
+    const screen = driver.latestScreen(1);
+    expect(JSON.stringify(screen)).not.toContain('\\ud');
+  }, 20_000);
 });
 
 describe('PtyDriver lifecycle', () => {

@@ -3,6 +3,7 @@ import * as pty from 'node-pty';
 import { stripAnsi } from './ansi.js';
 import { ensureSpawnHelperExecutable } from './ensureExecutable.js';
 import { KEYS, ctrl, type KeyName } from './keys.js';
+import { toWellFormedText } from './wellFormedText.js';
 
 export type PtySpawnOptions = {
   /** Terminal columns; default 120. */
@@ -336,7 +337,7 @@ class BufferStore {
 
   stripped(): string {
     if (this.dirty) {
-      this.strippedCache = stripAnsi(this.chunks.join(''));
+      this.strippedCache = toWellFormedText(stripAnsi(this.chunks.join('')));
       this.dirty = false;
     }
     return this.strippedCache;
@@ -345,7 +346,7 @@ class BufferStore {
   strippedWindow(windowSize: number): string {
     const all = this.chunks.join('');
     const slice = all.length > windowSize ? all.slice(-windowSize) : all;
-    return stripAnsi(slice);
+    return toWellFormedText(stripAnsi(slice));
   }
 
   subscribe(cb: (data: string) => void): () => void {

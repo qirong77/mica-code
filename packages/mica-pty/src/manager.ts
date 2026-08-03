@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { stripAnsi } from './ansi.js';
 import { KEYS, type KeyName } from './keys.js';
 import { ptyServerSource } from './ptyServerSource.js';
+import { toWellFormedText } from './wellFormedText.js';
 
 /**
  * Bun-side PTY session manager.
@@ -114,7 +115,7 @@ class PtySession {
   allText(strip: boolean, windowSize?: number): string {
     const joined = this.chunks.join('');
     const sliced = windowSize && joined.length > windowSize ? joined.slice(-windowSize) : joined;
-    return strip ? stripAnsi(sliced) : sliced;
+    return toWellFormedText(strip ? stripAnsi(sliced) : sliced);
   }
 }
 

@@ -85,6 +85,15 @@ describe('PtyManager', () => {
     await manager.kill(sessionId);
   });
 
+  it('does not return malformed Unicode when a tail window cuts an emoji', async () => {
+    const manager = makeManager();
+    const { sessionId } = await manager.spawn([process.execPath, '-e', "process.stdout.write('🤖')"]);
+    await manager.wait(sessionId, { idleMs: 150, timeoutMs: LONG_TIMEOUT });
+    const read = manager.read(sessionId, { mode: 'tail', windowSize: 1 });
+    expect(JSON.stringify(read.output)).not.toContain('\\ud');
+    await manager.kill(sessionId);
+  });
+
   it('read clear empties the buffer', async () => {
     const manager = makeManager();
     const { sessionId } = await manager.spawn([SHELL, '-c', 'echo to-clear']);

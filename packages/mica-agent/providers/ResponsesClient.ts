@@ -383,10 +383,10 @@ function resolveSystemPrompt(source: ModelClientOptions['systemPrompt']): string
 }
 
 function micaContentToResponsesContent(content: AgentQueryContent): ResponseInputMessageContentList {
-  if (typeof content === 'string') return [{ type: 'input_text', text: content }];
+  if (typeof content === 'string') return [{ type: 'input_text', text: toWellFormedText(content) }];
 
   return content.map((part) => {
-    if (part.type === 'text') return { type: 'input_text', text: part.text };
+    if (part.type === 'text') return { type: 'input_text', text: toWellFormedText(part.text) };
     return {
       type: 'input_image',
       detail: 'auto',
@@ -399,9 +399,10 @@ function responsesToolOutput(
   text: string,
   images: Array<Extract<AgentContentBlockParam, { type: 'image' }>>,
 ): string | ResponseFunctionCallOutputItemList {
-  if (images.length === 0) return text;
+  const safeText = toWellFormedText(text);
+  if (images.length === 0) return safeText;
   return [
-    { type: 'input_text', text },
+    { type: 'input_text', text: safeText },
     ...images.map((image) => ({
       type: 'input_image' as const,
       detail: 'auto' as const,
@@ -471,11 +472,44 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
 
 function prepareHistoricalResponsesInput(messages: ResponseInputItem[]): ResponseInputItem[] {
   return stripUnusableResponseInputItems(messages).map((rawItem) => {
-    const item = sanitizeHistoricalResponsesMedia(rawItem);
+    const item = sanitizeHistoricalResponsesText(sanitizeHistoricalResponsesMedia(rawItem));
     if (item.type !== 'function_call_output' || typeof item.output !== 'string') return item;
     const compacted = compactHistoricalToolResultText(item.output);
     return compacted === item.output ? item : { ...item, output: compacted };
   });
+}
+
+function sanitizeHistoricalResponsesText(item: ResponseInputItem): ResponseInputItem {
+  if (item.type === 'message' && typeof item.content === 'string') {
+    const content = toWellFormedText(item.content);
+    return content === item.content ? item : { ...item, content };
+  }
+  if (item.type === 'message' && Array.isArray(item.content)) {
+    const content = item.content.map((part) => sanitizeResponsesTextPart(part));
+    return { ...item, content } as ResponseInputItem;
+  }
+  if (item.type === 'function_call' && typeof item.arguments === 'string') {
+    const args = toWellFormedText(item.arguments);
+    return args === item.arguments ? item : { ...item, arguments: args };
+  }
+  if (item.type === 'function_call_output' && typeof item.output === 'string') {
+    const output = toWellFormedText(item.output);
+    return output === item.output ? item : { ...item, output };
+  }
+  if (item.type === 'function_call_output' && Array.isArray(item.output)) {
+    const output = item.output.map((part) => sanitizeResponsesTextPart(part));
+    return { ...item, output } as ResponseInputItem;
+  }
+  return item;
+}
+
+function sanitizeResponsesTextPart<T>(part: T): T {
+  if (!part || typeof part !== 'object') return part;
+  const record = part as Record<string, unknown>;
+  const textKey = typeof record.text === 'string' ? 'text' : typeof record.refusal === 'string' ? 'refusal' : null;
+  if (!textKey) return part;
+  const text = toWellFormedText(record[textKey] as string);
+  return text === record[textKey] ? part : ({ ...record, [textKey]: text } as T);
 }
 
 function sanitizeHistoricalResponsesMedia(item: ResponseInputItem): ResponseInputItem {
@@ -519,6 +553,37 @@ function isValidHistoricalImageUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function toWellFormedText(text: string): string {
+  let result = '';
+  let changed = false;
+
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        result += text[index] + text[index + 1];
+        index++;
+      } else {
+        result += '\ufffd';
+        changed = true;
+      }
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      result += '\ufffd';
+      changed = true;
+      continue;
+    }
+
+    result += text[index];
+  }
+
+  return changed ? result : text;
 }
 
 function stripUnusableResponseInputItems(messages: ResponseInputItem[]): ResponseInputItem[] {

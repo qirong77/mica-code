@@ -33,6 +33,7 @@ import { uid } from './workspace'
 
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
+const TERMINAL_CURSOR_WIDTH = 8
 
 const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
 const RATIO_THRESHOLDS = [40, 50, 60, 70]
@@ -64,6 +65,68 @@ function formatTokens(tokens) {
   if (tokens < 1000) return `${Math.round(tokens)}`
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`
   return `${(tokens / 1_000_000).toFixed(2)}M`
+}
+
+function measureTextareaCursor(element, text, selectionStart, selectionEnd) {
+  if (!element || selectionStart !== selectionEnd) return null
+  const styles = window.getComputedStyle(element)
+  const mirror = document.createElement('div')
+  const marker = document.createElement('span')
+  const copiedStyles = [
+    'boxSizing',
+    'width',
+    'fontFamily',
+    'fontSize',
+    'fontWeight',
+    'fontStyle',
+    'letterSpacing',
+    'lineHeight',
+    'textTransform',
+    'paddingTop',
+    'paddingRight',
+    'paddingBottom',
+    'paddingLeft',
+    'borderTopWidth',
+    'borderRightWidth',
+    'borderBottomWidth',
+    'borderLeftWidth',
+    'whiteSpace',
+    'overflowWrap',
+    'wordBreak',
+    'tabSize'
+  ]
+
+  for (const property of copiedStyles) mirror.style[property] = styles[property]
+  mirror.style.position = 'fixed'
+  mirror.style.left = '-10000px'
+  mirror.style.top = '0'
+  mirror.style.height = 'auto'
+  mirror.style.minHeight = '0'
+  mirror.style.overflow = 'hidden'
+  mirror.style.visibility = 'hidden'
+  mirror.style.pointerEvents = 'none'
+  mirror.style.whiteSpace = 'pre-wrap'
+  mirror.style.width = `${element.clientWidth}px`
+
+  const before = text.slice(0, selectionStart).replace(/\n$/u, '\n\u200b')
+  mirror.append(document.createTextNode(before))
+  marker.textContent = '\u200b'
+  marker.style.display = 'inline-block'
+  marker.style.width = '0'
+  marker.style.height = styles.lineHeight
+  mirror.append(marker)
+  document.body.append(mirror)
+
+  const mirrorRect = mirror.getBoundingClientRect()
+  const markerRect = marker.getBoundingClientRect()
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 20
+  const position = {
+    left: Math.max(0, markerRect.left - mirrorRect.left - element.scrollLeft),
+    top: Math.max(0, markerRect.top - mirrorRect.top - element.scrollTop),
+    height: lineHeight
+  }
+  mirror.remove()
+  return position
 }
 
 const EFFORT_OPTIONS = [
@@ -1233,6 +1296,8 @@ export function ChatView({
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
+  const [inputFocused, setInputFocused] = useState(false)
+  const [terminalCursor, setTerminalCursor] = useState(null)
   const [running, setRunning] = useState(false)
   const [queuedCount, setQueuedCount] = useState(0)
   const [queuedItems, setQueuedItems] = useState([])
@@ -1809,6 +1874,33 @@ export function ChatView({
   }, [])
 
   useEffect(() => resizeTextarea(), [input, resizeTextarea])
+
+  const updateTerminalCursor = useCallback(() => {
+    const element = textareaRef.current
+    if (!element || document.activeElement !== element) {
+      setTerminalCursor(null)
+      return
+    }
+    const next = measureTextareaCursor(
+      element,
+      element.value,
+      element.selectionStart ?? element.value.length,
+      element.selectionEnd ?? element.value.length
+    )
+    setTerminalCursor(next)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!inputFocused) return
+    resizeTextarea()
+    updateTerminalCursor()
+  }, [input, inputFocused, resizeTextarea, updateTerminalCursor])
+
+  useEffect(() => {
+    if (!inputFocused) return undefined
+    window.addEventListener('resize', updateTerminalCursor)
+    return () => window.removeEventListener('resize', updateTerminalCursor)
+  }, [inputFocused, updateTerminalCursor])
 
   const rememberInput = useCallback(
     (text) => {
@@ -2717,6 +2809,18 @@ export function ChatView({
                 </span>
               )}
             </div>
+            {inputFocused && terminalCursor && (
+              <span
+                className="chat-composer-terminal-cursor"
+                aria-hidden="true"
+                style={{
+                  left: `${terminalCursor.left}px`,
+                  top: `${terminalCursor.top}px`,
+                  width: `${TERMINAL_CURSOR_WIDTH}px`,
+                  height: `${terminalCursor.height}px`
+                }}
+              />
+            )}
             <textarea
               ref={textareaRef}
               value={input}
@@ -2728,7 +2832,19 @@ export function ChatView({
                 draftsRef.current.set(nodeId, event.target.value)
                 historyCursorRef.current = -1
                 setInput(event.target.value)
+                requestAnimationFrame(updateTerminalCursor)
               }}
+              onFocus={() => {
+                setInputFocused(true)
+                requestAnimationFrame(updateTerminalCursor)
+              }}
+              onBlur={() => {
+                setInputFocused(false)
+                setTerminalCursor(null)
+              }}
+              onSelect={updateTerminalCursor}
+              onKeyUp={updateTerminalCursor}
+              onClick={updateTerminalCursor}
               onPaste={(event) => {
                 const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
                   item.type.startsWith('image/')
@@ -2749,8 +2865,10 @@ export function ChatView({
                     setInput(next)
                     requestAnimationFrame(() => {
                       const el = textareaRef.current
-                      if (el)
+                      if (el) {
                         el.setSelectionRange(start + insertion.length, start + insertion.length)
+                        updateTerminalCursor()
+                      }
                     })
                   })
                   .catch(() => {})
@@ -2856,6 +2974,7 @@ export function ChatView({
                   '.chat-composer-markdown-layer'
                 )
                 if (layer) layer.scrollTop = event.currentTarget.scrollTop
+                updateTerminalCursor()
               }}
             />
           </div>

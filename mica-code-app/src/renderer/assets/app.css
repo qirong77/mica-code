@@ -1884,6 +1884,28 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 48%);
 }
 
+.chat-composer-terminal-cursor {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  border-radius: 1px;
+  background: rgb(211 211 211 / 72%);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  animation: chat-terminal-cursor-blink 1.05s steps(1, end) infinite;
+}
+
+@keyframes chat-terminal-cursor-blink {
+  0%,
+  52% {
+    opacity: 1;
+  }
+  53%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .chat-composer-token-syntax {
   color: #d19a66;
 }
@@ -1943,7 +1965,7 @@ body.is-resizing.is-resizing-terminal {
   background: transparent;
   padding: 5px 5px 5px 0;
   color: transparent;
-  caret-color: #d3d3d3;
+  caret-color: transparent;
   -webkit-text-fill-color: transparent;
 }
 

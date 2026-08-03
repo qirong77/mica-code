@@ -4,6 +4,7 @@ import { KEYS, ctrl, key } from './src/keys.js';
 import { ensureSpawnHelperExecutable } from './src/ensureExecutable.js';
 import { PtyManager, ptyManager } from './src/manager.js';
 import { ptyServerSource } from './src/ptyServerSource.js';
+import { toWellFormedText } from './src/wellFormedText.js';
 
 export const micaPty = {
   PtyDriver,
@@ -16,6 +17,7 @@ export const micaPty = {
   PtyManager,
   ptyManager,
   ptyServerSource,
+  toWellFormedText,
 };
 
 export { PtyDriver } from './src/driver.js';
@@ -26,4 +28,5 @@ export type { KeyName } from './src/keys.js';
 export { ensureSpawnHelperExecutable } from './src/ensureExecutable.js';
 export { PtyManager, ptyManager } from './src/manager.js';
 export { ptyServerSource } from './src/ptyServerSource.js';
+export { toWellFormedText } from './src/wellFormedText.js';
 export type { PtySessionInfo, PtyReadOptions, PtyReadResult, PtyWaitOptions, PtyWaitResult } from './src/manager.js';
