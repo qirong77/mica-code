@@ -19,6 +19,10 @@ import { liveSessionRowState } from './session-state'
 const rowClass =
   'group relative flex min-h-6.5 cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-[13px] hover:bg-white/[.045] hover:text-white active:bg-white/[.07]'
 
+const RECENT_PREVIEW_LIMIT = 6
+const SESSION_FOLDER_PREVIEW_LIMIT = 8
+const SESSION_GROUP_PREVIEW_LIMIT = 10
+
 /** 取路径最后一段作为文件夹名 */
 function baseName(cwd) {
   const trimmed = String(cwd || '').replace(/\/+$/, '')
@@ -169,10 +173,15 @@ export function SessionTree({
     recent: false
   })
   const [inboxOpen, setInboxOpen] = useState(true)
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(new Set())
+  const [expandedSessionGroups, setExpandedSessionGroups] = useState(new Set())
+  const [collapsedSessionGroups, setCollapsedSessionGroups] = useState(new Set())
+  const [expandedSessionFolders, setExpandedSessionFolders] = useState(false)
+  const [expandedRecent, setExpandedRecent] = useState(false)
+  const [expandedFullGroups, setExpandedFullGroups] = useState(new Set())
   const [drag, setDrag] = useState(null) // { section, kind: 'row'|'group', id, key }
   const [over, setOver] = useState(null) // { section, kind, id, key, position: 'before'|'after' }
   const normalizedQuery = query.trim().toLocaleLowerCase()
+  const groupKeyOf = (session) => session.cwd || '~'
 
   const searchable = useMemo(
     () =>
@@ -198,10 +207,21 @@ export function SessionTree({
     [searchable, sortOrder.sessions]
   )
   const sessionGroups = useMemo(() => groupByCwd(sessionList, homeDir), [sessionList, homeDir])
-  const recentList = useMemo(() => {
-    const sorted = [...searchable].sort(byUpdatedDesc)
-    return normalizedQuery ? sorted : sorted.slice(0, 20)
-  }, [normalizedQuery, searchable])
+  const recentCandidates = useMemo(
+    () => [...searchable].filter((session) => !pins[session.id]).sort(byUpdatedDesc),
+    [pins, searchable]
+  )
+  const recentList = useMemo(
+    () =>
+      normalizedQuery || expandedRecent
+        ? recentCandidates
+        : recentCandidates.slice(0, RECENT_PREVIEW_LIMIT),
+    [expandedRecent, normalizedQuery, recentCandidates]
+  )
+  const recentOverflow = Math.max(0, recentCandidates.length - recentList.length)
+  useEffect(() => {
+    if (normalizedQuery) setExpandedRecent(false)
+  }, [normalizedQuery])
   const inboxItems = useMemo(() => {
     const items = []
     for (const session of sessions) {
@@ -217,14 +237,52 @@ export function SessionTree({
     }
     return items.sort((a, b) => (b.state.lastEventAt || 0) - (a.state.lastEventAt || 0))
   }, [draftTabs, openBySession, sessions, unread])
-  const expandedSessions = (key) => normalizedQuery || !sessionsCollapsed.has(key)
+  const autoExpandedSessionGroups = useMemo(() => {
+    const keys = new Set()
+    for (const session of sessions) {
+      const nodeId = openBySession[session.id]
+      const state = nodeId ? unread[nodeId] : null
+      if (session.id === activeSessionId || state?.running || state?.unread) {
+        keys.add(groupKeyOf(session))
+      }
+    }
+    return keys
+  }, [activeSessionId, openBySession, sessions, unread])
+  const visibleSessionGroups = useMemo(() => {
+    if (normalizedQuery || expandedSessionFolders) return sessionGroups
+    const visibleKeys = new Set()
+    for (const group of sessionGroups.slice(0, SESSION_FOLDER_PREVIEW_LIMIT)) {
+      visibleKeys.add(group.key)
+    }
+    for (const key of autoExpandedSessionGroups) visibleKeys.add(key)
+    return sessionGroups.filter((group) => visibleKeys.has(group.key))
+  }, [autoExpandedSessionGroups, expandedSessionFolders, normalizedQuery, sessionGroups])
+  const hiddenSessionGroupCount = Math.max(0, sessionGroups.length - visibleSessionGroups.length)
+  const expandedSessions = (key) =>
+    normalizedQuery ||
+    expandedSessionGroups.has(key) ||
+    (autoExpandedSessionGroups.has(key) && !collapsedSessionGroups.has(key))
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
-  const toggleSessionGroup = (key) =>
-    setSessionsCollapsed((prev) => {
+  const toggleSessionGroup = (key) => {
+    const currentlyExpanded = expandedSessions(key)
+    setExpandedSessionGroups((prev) => {
       const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
+      if (currentlyExpanded) next.delete(key)
       else next.add(key)
+      return next
+    })
+    setCollapsedSessionGroups((prev) => {
+      const next = new Set(prev)
+      if (currentlyExpanded) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
+  const showAllSessionGroup = (key) =>
+    setExpandedFullGroups((prev) => {
+      const next = new Set(prev)
+      next.add(key)
       return next
     })
   const openMenu = (event, payload) => {
@@ -256,7 +314,6 @@ export function SessionTree({
     return items
   }
 
-  const groupKeyOf = (session) => session.cwd || '~'
   const sectionItems = { pinned, sessions: sessionList }
   const orderedIds = (section, items) =>
     orderSessions(items, sortOrder[section] || [], byUpdatedDesc).map((session) => session.id)
@@ -513,6 +570,9 @@ export function SessionTree({
     const isOver = over?.section === section && over?.kind === 'group' && over?.key === group.key
     const draggingThis =
       drag?.section === section && drag?.kind === 'group' && drag.key === group.key
+    const showAll = normalizedQuery || expandedFullGroups.has(group.key)
+    const visibleRows = showAll ? group.rows : group.rows.slice(0, SESSION_GROUP_PREVIEW_LIMIT)
+    const hiddenCount = Math.max(0, group.rows.length - visibleRows.length)
     return (
       <li key={group.key}>
         <div
@@ -578,7 +638,23 @@ export function SessionTree({
         </div>
         {expanded && (
           <ul className="flex flex-col gap-px">
-            {group.rows.map((row) => renderSessionRow(row.session, indent + 1, section))}
+            {visibleRows.map((row) => renderSessionRow(row.session, indent + 1, section))}
+            {hiddenCount > 0 && (
+              <li>
+                <button
+                  type="button"
+                  className={`${rowClass} text-white/45 hover:text-white/75`}
+                  style={{ paddingLeft: 7 + (indent + 1) * 14 }}
+                  onClick={() => showAllSessionGroup(group.key)}
+                >
+                  <span className="size-3.5 shrink-0" />
+                  <span className="grid size-3.5 shrink-0 place-items-center text-white/35">
+                    <MoreHorizontal size={14} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-left">Show {hiddenCount} more</span>
+                </button>
+              </li>
+            )}
           </ul>
         )}
       </li>
@@ -701,9 +777,27 @@ export function SessionTree({
             {renderSectionHeader('recent', 'Recent', ListTree)}
             {sectionOpen('recent') &&
               (recentList.length ? (
-                <ul role="tree" className="flex flex-col gap-px">
-                  {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
-                </ul>
+                <>
+                  <ul role="tree" className="flex flex-col gap-px">
+                    {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
+                  </ul>
+                  {recentOverflow > 0 && !normalizedQuery && (
+                    <button
+                      type="button"
+                      className={`${rowClass} w-full text-white/45 hover:text-white/75`}
+                      style={{ paddingLeft: 7 }}
+                      onClick={() => setExpandedRecent(true)}
+                    >
+                      <span className="size-3.5 shrink-0" />
+                      <span className="grid size-3.5 shrink-0 place-items-center text-white/35">
+                        <MoreHorizontal size={14} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        Show {recentOverflow} more
+                      </span>
+                    </button>
+                  )}
+                </>
               ) : (
                 <p className="py-1 pl-7 pr-2 text-xs text-white/35">暂无最近会话。</p>
               ))}
@@ -715,7 +809,7 @@ export function SessionTree({
               <>
                 <ul role="tree" className="flex flex-col gap-px">
                   {draftTabs.map((node) => renderDraftRow(node))}
-                  {sessionGroups.map((group) =>
+                  {visibleSessionGroups.map((group) =>
                     renderGroup(
                       group,
                       expandedSessions(group.key),
@@ -723,6 +817,24 @@ export function SessionTree({
                       0,
                       'sessions'
                     )
+                  )}
+                  {hiddenSessionGroupCount > 0 && !normalizedQuery && (
+                    <li>
+                      <button
+                        type="button"
+                        className={`${rowClass} w-full text-white/45 hover:text-white/75`}
+                        style={{ paddingLeft: 7 }}
+                        onClick={() => setExpandedSessionFolders(true)}
+                      >
+                        <span className="size-3.5 shrink-0" />
+                        <span className="grid size-3.5 shrink-0 place-items-center text-white/35">
+                          <MoreHorizontal size={14} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left">
+                          Show {hiddenSessionGroupCount} more folders
+                        </span>
+                      </button>
+                    </li>
                   )}
                 </ul>
                 {!sessionGroups.length && !draftTabs.length && (

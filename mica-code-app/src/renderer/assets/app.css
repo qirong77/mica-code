@@ -196,8 +196,9 @@ body.is-resizing.is-resizing-terminal {
   --chat-user: #373737;
   --chat-accent: #d77757;
   --chat-thinking: #c9a227;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  --chat-font:
+    'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', monospace;
 }
 
 .chat-scroll {
@@ -208,6 +209,7 @@ body.is-resizing.is-resizing-terminal {
   overscroll-behavior: contain;
   overflow-anchor: none;
   scroll-behavior: auto;
+  font-family: var(--chat-font);
 }
 
 .chat-transcript {
@@ -215,8 +217,7 @@ body.is-resizing.is-resizing-terminal {
   min-height: 100%;
   margin: 0;
   padding: 5px 4px 16px;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 13px;
   line-height: 1.28;
 }
@@ -400,8 +401,7 @@ body.is-resizing.is-resizing-terminal {
   min-width: 0;
   overflow-wrap: anywhere;
   color: #c9c9c9;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 13px;
   line-height: 1.28;
 }
@@ -544,8 +544,7 @@ body.is-resizing.is-resizing-terminal {
   background: transparent;
   padding: 0;
   color: #a7addd;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 1em;
 }
 
@@ -566,8 +565,7 @@ body.is-resizing.is-resizing-terminal {
   border-bottom: 1px solid rgb(255 255 255 / 7%);
   background: #222;
   color: rgb(255 255 255 / 35%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 10px;
 }
 
@@ -660,8 +658,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-markdown-muted {
   color: rgb(255 255 255 / 47%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 11.5px;
   line-height: 1.55;
 }
@@ -678,8 +675,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-tool-row {
   margin: 5px 0 0 22px;
   color: var(--chat-muted);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 11.5px;
 }
 
@@ -876,8 +872,7 @@ body.is-resizing.is-resizing-terminal {
   background: transparent;
   padding: 0 6px 0 22px;
   color: rgb(255 255 255 / 42%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 11.5px;
   text-align: left;
 }
@@ -1044,8 +1039,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-usage {
   margin-top: 6px;
   color: rgb(255 255 255 / 20%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 9.5px;
 }
 
@@ -1084,8 +1078,7 @@ body.is-resizing.is-resizing-terminal {
     24px 0 0 #211f17,
     -24px 0 0 #211f17;
   color: #c9a227;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 11.5px;
 }
 
@@ -1151,10 +1144,11 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-turn-log {
   min-width: 0;
-  background: #0e0e0e;
-  color: #7b7b7b;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
+  background: linear-gradient(90deg, rgb(118 169 216 / 5%), transparent 26px), #090909;
+  color: #828282;
+  font-family: var(--chat-font);
   font-size: 11.5px;
   line-height: 1.45;
 }
@@ -1163,23 +1157,38 @@ body.is-resizing.is-resizing-terminal {
   max-height: calc(1.45em * 10 + 14px);
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 7px 12px 8px;
+  padding: 8px 14px 9px 13px;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
 .chat-turn-log-thinking {
   min-width: 0;
-  color: #7b7b7b;
+  margin: 1px 0 7px;
+  border-left: 2px solid rgb(118 169 216 / 24%);
+  padding-left: 9px;
+  color: #8a8a8a;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.chat-turn-log-tool {
+  position: relative;
+  min-width: 0;
+  padding-left: 0;
+}
+
+.chat-turn-log-tool + .chat-turn-log-tool,
+.chat-turn-log-thinking + .chat-turn-log-tool {
+  margin-top: 3px;
 }
 
 .chat-turn-log-tool-row {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  min-height: 20px;
 }
 
 .chat-turn-log-spinner,
@@ -1195,33 +1204,41 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-turn-log-icon {
   width: 16px;
+  opacity: 0.82;
 }
 
 .chat-turn-log-display {
   min-width: 0;
   overflow: hidden;
+  color: #8e8e8e;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.chat-turn-log-running .chat-turn-log-display,
+.chat-turn-log-running .chat-turn-log-duration {
+  color: #9acbd2;
+}
+
 .chat-turn-log-duration {
   flex: 0 0 auto;
-  color: #666;
+  color: #6c6c6c;
   font-variant-numeric: tabular-nums;
 }
 
 .chat-turn-log-output {
   display: flex;
   min-width: 0;
-  padding-left: 0;
-  color: #7b7b7b;
+  border-left: 1px solid rgb(255 255 255 / 9%);
+  margin-left: 7px;
+  padding-left: 8px;
+  color: #787878;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .chat-turn-log-output > span {
-  flex: 0 0 auto;
-  color: #666;
+  display: none;
 }
 
 .chat-turn-log-error .chat-turn-log-display,
@@ -1235,9 +1252,9 @@ body.is-resizing.is-resizing-terminal {
   border-top: 1px solid rgb(201 162 39 / 18%);
   border-bottom: 1px solid rgb(201 162 39 / 12%);
   background: #211f17;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--chat-font);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .chat-queue-dock-header {
@@ -1345,8 +1362,7 @@ body.is-resizing.is-resizing-terminal {
   box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
   padding: 4px;
   color: rgb(255 255 255 / 48%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 10.5px;
 }
 
@@ -1465,10 +1481,9 @@ body.is-resizing.is-resizing-terminal {
   padding: 6px 12px 2px;
   background: #0e0e0e;
   color: #9d9d9d;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.55;
+  font-family: var(--chat-font);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .chat-task-dock + .chat-task-dock {
@@ -1479,7 +1494,7 @@ body.is-resizing.is-resizing-terminal {
   display: grid;
   width: 100%;
   min-width: 0;
-  min-height: 19px;
+  min-height: 22px;
   grid-template-columns: 12ch 8ch auto auto minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
@@ -1487,6 +1502,10 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-todo-dock .chat-task-summary-row {
   grid-template-columns: 12ch 8ch auto minmax(0, 1fr);
+}
+
+.chat-todo-dock {
+  font-family: var(--chat-font);
 }
 
 .chat-task-kind,
@@ -1533,7 +1552,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-task-child {
   display: flex;
   min-width: 0;
-  min-height: 19px;
+  min-height: 22px;
   align-items: center;
   color: #7b7b7b;
 }
@@ -1572,14 +1591,13 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-status-line {
   display: grid;
-  min-height: 35px;
+  min-height: 24px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  padding: 0 24px 0 12px;
+  padding: 0 24px 2px 12px;
   color: rgb(255 255 255 / 34%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 12px;
 }
 
@@ -1594,15 +1612,9 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 58%);
 }
 
-.chat-status-idle,
-.chat-status-history {
+.chat-status-idle {
   color: rgb(255 255 255 / 24%);
   font-size: 10px;
-}
-
-.chat-status-history {
-  border-right: 1px solid rgb(255 255 255 / 9%);
-  padding-right: 8px;
 }
 
 .chat-status-meta {
@@ -1618,15 +1630,18 @@ body.is-resizing.is-resizing-terminal {
   align-items: center;
 }
 
-.chat-status-model,
-.chat-status-ctx {
+.chat-status-model {
   cursor: pointer;
   color: inherit;
 }
 
-.chat-status-model:hover,
-.chat-status-ctx:hover {
+.chat-status-model:hover {
   color: rgb(255 255 255 / 72%);
+}
+
+.chat-status-ctx,
+.chat-status-token-delta {
+  color: inherit;
 }
 
 .chat-status-tokens {
@@ -1709,8 +1724,7 @@ body.is-resizing.is-resizing-terminal {
   background: #171717;
   box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
   color: rgb(255 255 255 / 60%);
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 11px;
 }
 
@@ -1839,6 +1853,7 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-composer {
+  position: relative;
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: end;
@@ -1861,8 +1876,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer-markdown-layer,
 .chat-composer-input textarea {
   width: 100%;
-  font-family:
-    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--chat-font);
   font-size: 13px;
   line-height: 20px;
   white-space: pre-wrap;
@@ -1935,6 +1949,23 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer-queue:focus-within {
   border-color: #c9a227;
   box-shadow: 0 0 0 2px rgb(201 162 39 / 12%);
+}
+
+.chat-composer-frame-label {
+  position: absolute;
+  right: 10px;
+  top: -8px;
+  max-width: min(420px, calc(100% - 24px));
+  overflow: hidden;
+  background: #0e0e0e;
+  padding: 0 6px;
+  color: rgb(201 162 39 / 82%);
+  font-family: var(--chat-font);
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .chat-prompt-mark {

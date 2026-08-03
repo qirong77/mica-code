@@ -22,7 +22,6 @@ import {
   Terminal,
   Trash2,
   Undo2,
-  X,
   Zap
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -34,6 +33,32 @@ import { uid } from './workspace'
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
 const TERMINAL_CURSOR_WIDTH = 8
+
+const TEXTAREA_CURSOR_STYLE_PROPS = [
+  'boxSizing',
+  'width',
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'fontStyle',
+  'letterSpacing',
+  'lineHeight',
+  'textTransform',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'borderTopWidth',
+  'borderRightWidth',
+  'borderBottomWidth',
+  'borderLeftWidth',
+  'whiteSpace',
+  'overflowWrap',
+  'wordBreak',
+  'tabSize'
+]
+
+let textareaCursorMirror = null
 
 const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
 const RATIO_THRESHOLDS = [40, 50, 60, 70]
@@ -70,62 +95,66 @@ function formatTokens(tokens) {
 function measureTextareaCursor(element, text, selectionStart, selectionEnd) {
   if (!element || selectionStart !== selectionEnd) return null
   const styles = window.getComputedStyle(element)
-  const mirror = document.createElement('div')
-  const marker = document.createElement('span')
-  const copiedStyles = [
-    'boxSizing',
-    'width',
-    'fontFamily',
-    'fontSize',
-    'fontWeight',
-    'fontStyle',
-    'letterSpacing',
-    'lineHeight',
-    'textTransform',
-    'paddingTop',
-    'paddingRight',
-    'paddingBottom',
-    'paddingLeft',
-    'borderTopWidth',
-    'borderRightWidth',
-    'borderBottomWidth',
-    'borderLeftWidth',
-    'whiteSpace',
-    'overflowWrap',
-    'wordBreak',
-    'tabSize'
-  ]
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 20
+  const fontSize = Number.parseFloat(styles.fontSize) || 13
+  const cursorHeight = Math.max(12, Math.min(lineHeight, Math.ceil(fontSize * 1.18)))
+  const cursorOffset = Math.max(0, (lineHeight - cursorHeight) / 2)
 
-  for (const property of copiedStyles) mirror.style[property] = styles[property]
-  mirror.style.position = 'fixed'
-  mirror.style.left = '-10000px'
-  mirror.style.top = '0'
-  mirror.style.height = 'auto'
-  mirror.style.minHeight = '0'
-  mirror.style.overflow = 'hidden'
-  mirror.style.visibility = 'hidden'
-  mirror.style.pointerEvents = 'none'
-  mirror.style.whiteSpace = 'pre-wrap'
+  if (!text) {
+    return {
+      left: Math.max(0, (Number.parseFloat(styles.paddingLeft) || 0) - element.scrollLeft),
+      top: Math.max(
+        0,
+        (Number.parseFloat(styles.paddingTop) || 0) - element.scrollTop + cursorOffset
+      ),
+      width: TERMINAL_CURSOR_WIDTH,
+      height: cursorHeight
+    }
+  }
+
+  if (!textareaCursorMirror) {
+    textareaCursorMirror = {
+      mirror: document.createElement('div'),
+      marker: document.createElement('span'),
+      measure: document.createElement('span')
+    }
+    const { mirror, marker, measure } = textareaCursorMirror
+    mirror.style.position = 'fixed'
+    mirror.style.left = '-10000px'
+    mirror.style.top = '0'
+    mirror.style.height = 'auto'
+    mirror.style.minHeight = '0'
+    mirror.style.overflow = 'hidden'
+    mirror.style.visibility = 'hidden'
+    mirror.style.pointerEvents = 'none'
+    mirror.style.whiteSpace = 'pre-wrap'
+    marker.textContent = '\u200b'
+    marker.style.display = 'inline-block'
+    marker.style.width = '0'
+    measure.style.display = 'inline-block'
+    measure.style.whiteSpace = 'pre'
+  }
+
+  const { mirror, marker, measure } = textareaCursorMirror
+
+  for (const property of TEXTAREA_CURSOR_STYLE_PROPS) mirror.style[property] = styles[property]
   mirror.style.width = `${element.clientWidth}px`
 
   const before = text.slice(0, selectionStart).replace(/\n$/u, '\n\u200b')
-  mirror.append(document.createTextNode(before))
-  marker.textContent = '\u200b'
-  marker.style.display = 'inline-block'
-  marker.style.width = '0'
   marker.style.height = styles.lineHeight
-  mirror.append(marker)
-  document.body.append(mirror)
+  const nextChar = Array.from(text.slice(selectionStart))[0]
+  measure.textContent = nextChar && nextChar !== '\n' ? nextChar : ' '
+  mirror.replaceChildren(document.createTextNode(before), marker, measure)
+  if (!mirror.isConnected) document.body.append(mirror)
 
   const mirrorRect = mirror.getBoundingClientRect()
   const markerRect = marker.getBoundingClientRect()
-  const lineHeight = Number.parseFloat(styles.lineHeight) || 20
   const position = {
     left: Math.max(0, markerRect.left - mirrorRect.left - element.scrollLeft),
-    top: Math.max(0, markerRect.top - mirrorRect.top - element.scrollTop),
-    height: lineHeight
+    top: Math.max(0, markerRect.top - mirrorRect.top - element.scrollTop + cursorOffset),
+    width: Math.max(TERMINAL_CURSOR_WIDTH, measure.getBoundingClientRect().width),
+    height: cursorHeight
   }
-  mirror.remove()
   return position
 }
 
@@ -613,6 +642,27 @@ function formatLogElapsed(ms) {
   return formatDuration(ms)
 }
 
+function estimateTokens(text) {
+  let ascii = 0
+  let cjk = 0
+  for (const char of String(text || '')) {
+    const code = char.codePointAt(0)
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x20000 && code <= 0x2ceaf) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      cjk += 1
+    } else {
+      ascii += 1
+    }
+  }
+  return Math.max(1, Math.ceil(ascii / 4 + cjk / 1.5))
+}
+
 function usageValues(usage) {
   if (!usage) return null
   const total = usage.total_tokens ?? usage.totalTokens ?? usage.total ?? null
@@ -802,6 +852,11 @@ function TurnLogItem({ message, now }) {
   if (!tool) return null
   const running = ['pending', 'running'].includes(tool.status)
   const failed = tool.status === 'error'
+  const statusClass = running
+    ? 'chat-turn-log-running'
+    : failed
+      ? 'chat-turn-log-error'
+      : 'chat-turn-log-complete'
   const durationMs = Math.max(
     0,
     (running ? now : tool.finishedAt || tool.updatedAt || now) -
@@ -811,7 +866,7 @@ function TurnLogItem({ message, now }) {
   const outputLines = visibleShellOutput(tool, durationMs)
 
   return (
-    <div className={`chat-turn-log-tool ${failed ? 'chat-turn-log-error' : ''}`}>
+    <div className={`chat-turn-log-tool ${statusClass}`}>
       <div className="chat-turn-log-tool-row">
         {running && (
           <span className="chat-turn-log-spinner" aria-hidden="true">
@@ -966,16 +1021,6 @@ function SelectPalette({
   )
 }
 
-function useEscape(onClose) {
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-}
-
 function useClickOutside(ref, active, onClose) {
   useEffect(() => {
     if (!active) return undefined
@@ -986,57 +1031,6 @@ function useClickOutside(ref, active, onClose) {
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [active, onClose, ref])
-}
-
-function ContextModal({ meta, onClose }) {
-  useEscape(onClose)
-  const usage = usageValues(meta?.lastUsage)
-  const contextWindow = Number(meta?.contextWindowSize) || 0
-  const percent =
-    usage?.total != null && contextWindow > 0
-      ? Math.min(100, Math.round((usage.total / contextWindow) * 100))
-      : null
-  const rows = [
-    ['tokens', usage?.total != null ? tokenCount(usage.total) : '—'],
-    ['input', usage?.input != null ? tokenCount(usage.input) : '—'],
-    ['output', usage?.output != null ? tokenCount(usage.output) : '—'],
-    ['cached', usage?.cached != null ? tokenCount(usage.cached) : '—'],
-    ['window', contextWindow > 0 ? tokenCount(contextWindow) : '—'],
-    ['used', percent != null ? `${percent}%` : '—']
-  ]
-  return (
-    <div className="chat-modal-overlay" onClick={onClose}>
-      <div
-        className="chat-modal"
-        role="dialog"
-        aria-label="上下文占用"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="chat-modal-header">
-          <span>Context usage</span>
-          <button type="button" title="关闭" aria-label="关闭" onClick={onClose}>
-            <X size={13} />
-          </button>
-        </div>
-        <div className="chat-modal-body">
-          {percent != null && (
-            <div className="chat-context-bar">
-              <div style={{ width: `${percent}%` }} />
-            </div>
-          )}
-          <dl className="chat-context-rows">
-            {rows.map(([label, value]) => (
-              <div key={label} className="chat-context-row">
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-          {meta && <p className="chat-context-model">{modelSummaryTitle(meta)}</p>}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 export function shortPath(path, max = 46) {
@@ -1133,18 +1127,20 @@ function WelcomeHint({ cwd }) {
   )
 }
 
-function statusLabel(phase) {
+function statusLabel(phase, toolNames = []) {
   switch (phase) {
+    case 'connecting':
+      return 'waiting_model'
     case 'thinking':
-      return 'Thinking'
+      return 'thinking'
     case 'streaming':
-      return 'Responding'
+      return 'streaming'
     case 'working':
-      return 'Working'
+      return toolNames.length ? toolNames.join(', ') : 'calling_tool'
     case 'stopping':
-      return 'Stopping'
+      return 'stopping'
     default:
-      return 'Connecting'
+      return 'waiting_model'
   }
 }
 
@@ -1314,7 +1310,6 @@ export function ChatView({
   const forceRender = useReducer((version) => version + 1, 0)[1]
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
   const [pickerIndex, setPickerIndex] = useState(0)
-  const [contextOpen, setContextOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const pickerRef = useRef(null)
@@ -1326,6 +1321,8 @@ export function ChatView({
   const transcriptRef = useRef(null)
   const composerDockRef = useRef(null)
   const textareaRef = useRef(null)
+  const cursorFrameRef = useRef(0)
+  const cursorMeasureRef = useRef({ signature: null, position: null })
 
   const updateMessages = useCallback((update) => {
     const next = typeof update === 'function' ? update(messagesRef.current) : update
@@ -1876,19 +1873,52 @@ export function ChatView({
   useEffect(() => resizeTextarea(), [input, resizeTextarea])
 
   const updateTerminalCursor = useCallback(() => {
+    cursorFrameRef.current = 0
     const element = textareaRef.current
     if (!element || document.activeElement !== element) {
+      cursorMeasureRef.current = { signature: null, position: null }
       setTerminalCursor(null)
       return
     }
-    const next = measureTextareaCursor(
-      element,
+    const selectionStart = element.selectionStart ?? element.value.length
+    const selectionEnd = element.selectionEnd ?? element.value.length
+    const signature = [
       element.value,
-      element.selectionStart ?? element.value.length,
-      element.selectionEnd ?? element.value.length
-    )
+      selectionStart,
+      selectionEnd,
+      element.scrollLeft,
+      element.scrollTop,
+      element.clientWidth
+    ]
+    const previous = cursorMeasureRef.current
+    if (
+      previous.signature &&
+      previous.signature.length === signature.length &&
+      previous.signature.every((value, index) => value === signature[index])
+    ) {
+      return
+    }
+    const next = measureTextareaCursor(element, element.value, selectionStart, selectionEnd)
+    cursorMeasureRef.current = { signature, position: next }
+    const last = previous.position
+    if (
+      last &&
+      next &&
+      last.left === next.left &&
+      last.top === next.top &&
+      last.width === next.width &&
+      last.height === next.height
+    ) {
+      return
+    }
+    if (!last && !next) return
     setTerminalCursor(next)
   }, [])
+
+  const scheduleTerminalCursorUpdate = useCallback(() => {
+    if (cursorFrameRef.current) return
+    cursorFrameRef.current = requestAnimationFrame(updateTerminalCursor)
+  }, [updateTerminalCursor])
 
   useLayoutEffect(() => {
     if (!inputFocused) return
@@ -1898,9 +1928,20 @@ export function ChatView({
 
   useEffect(() => {
     if (!inputFocused) return undefined
-    window.addEventListener('resize', updateTerminalCursor)
-    return () => window.removeEventListener('resize', updateTerminalCursor)
-  }, [inputFocused, updateTerminalCursor])
+    window.addEventListener('resize', scheduleTerminalCursorUpdate)
+    document.addEventListener('selectionchange', scheduleTerminalCursorUpdate)
+    return () => {
+      window.removeEventListener('resize', scheduleTerminalCursorUpdate)
+      document.removeEventListener('selectionchange', scheduleTerminalCursorUpdate)
+    }
+  }, [inputFocused, scheduleTerminalCursorUpdate])
+
+  useEffect(
+    () => () => {
+      if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current)
+    },
+    []
+  )
 
   const rememberInput = useCallback(
     (text) => {
@@ -2587,6 +2628,22 @@ export function ChatView({
     [activityTurnId, messages]
   )
   const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
+  const runningToolNames = useMemo(
+    () =>
+      turnActivityMessages
+        .filter(
+          (message) =>
+            message.kind === 'tool' && ['pending', 'running'].includes(message.tool?.status)
+        )
+        .map((message) => message.tool?.tool)
+        .filter(Boolean),
+    [turnActivityMessages]
+  )
+  const activeStreamText =
+    streamRef.current.id && ['thinking', 'streaming'].includes(phase)
+      ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
+      : ''
+  const activeStreamTokenEstimate = activeStreamText ? estimateTokens(activeStreamText) : 0
   const activeSubagents = useMemo(
     () => (running ? activeSubagentMessages(messages, activityTurnId) : []),
     [activityTurnId, messages, running]
@@ -2634,7 +2691,6 @@ export function ChatView({
     (event) => {
       event.preventDefault()
       setPicker(null)
-      setContextOpen(false)
       setContextMenu({
         x: Math.max(4, Math.min(event.clientX, window.innerWidth - 172)),
         y: Math.max(4, Math.min(event.clientY, window.innerHeight - 196)),
@@ -2688,23 +2744,94 @@ export function ChatView({
     [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, send]
   )
 
-  const focusComposerOnMouseDown = useCallback((event) => {
-    const target = event.target
-    if (!(target instanceof Element)) return
-    if (
-      target.closest(
-        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
-      )
-    ) {
-      return
-    }
-    textareaRef.current?.focus()
-  }, [])
+  const focusComposerFromShell = useCallback(
+    (event) => {
+      if (event.button != null && event.button !== 0) return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (
+        target.closest(
+          'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
+        )
+      ) {
+        return
+      }
+      if (event.type === 'pointerdown' && target.closest('.chat-scroll, .chat-transcript')) return
+      const selection = window.getSelection?.()
+      if (selection && !selection.isCollapsed) return
+      textareaRef.current?.focus()
+      scheduleTerminalCursorUpdate()
+    },
+    [scheduleTerminalCursorUpdate]
+  )
+
+  const statusLine = (
+    <div className="chat-status-line">
+      <div className="chat-status-primary">
+        {queuedCount > 0 ? (
+          <span className="chat-status-queue">
+            消息已排队，将在当前任务完成后发送{queuedCount > 1 ? ` · ${queuedCount}` : ''}
+          </span>
+        ) : running ? (
+          <>
+            <LoaderCircle size={11} className="animate-spin" />
+            <span>{statusLabel(phase, runningToolNames)}</span>
+            {elapsed > 0 && <span>{formatDuration(elapsed)}</span>}
+            {activeStreamTokenEstimate > 0 && (
+              <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
+            )}
+          </>
+        ) : null}
+      </div>
+      <div className="chat-status-meta" title={statusMetaTitle}>
+        {activeModel && (
+          <span className="chat-status-model-group">
+            <span
+              className="chat-status-model"
+              role="button"
+              tabIndex={0}
+              title="切换模型"
+              data-chat-picker-trigger
+              onClick={() => openPicker('model')}
+            >
+              {activeModel}
+            </span>
+            <span className="chat-status-sep">_</span>
+            <span
+              className="chat-status-model"
+              role="button"
+              tabIndex={0}
+              title="切换推理强度"
+              data-chat-picker-trigger
+              onClick={() => openPicker('variant')}
+            >
+              {activeEffort}
+            </span>
+          </span>
+        )}
+        {hasContext && (
+          <>
+            <span className={`chat-status-tokens ${tokenClass}`}>{tokenStr}</span>
+            <span className="chat-status-cached"> (cached {cachedPct}%, </span>
+            {hasContextWindow ? (
+              <span className={`chat-status-ctx ${ctxClass}`}>ctx {contextPct}%</span>
+            ) : (
+              <span className="chat-status-cached" title="当前会话尚未提供上下文窗口大小">
+                ctx —
+              </span>
+            )}
+            <span className="chat-status-cached">)</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div
       className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
-      onMouseDown={focusComposerOnMouseDown}
+      onPointerDownCapture={focusComposerFromShell}
+      onMouseUp={focusComposerFromShell}
       onContextMenu={openChatContextMenu}
     >
       <div
@@ -2741,6 +2868,7 @@ export function ChatView({
               />
             )
           })}
+          <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
         </div>
       </div>
 
@@ -2794,6 +2922,11 @@ export function ChatView({
         <div
           className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
         >
+          {queueReady && (
+            <span className="chat-composer-frame-label">
+              Enter/Tab/Shift+Tab 等 agent 执行完成后发送
+            </span>
+          )}
           <span className="chat-prompt-mark" aria-hidden="true">
             {queueReady ? '↳' : '›'}
           </span>
@@ -2816,7 +2949,7 @@ export function ChatView({
                 style={{
                   left: `${terminalCursor.left}px`,
                   top: `${terminalCursor.top}px`,
-                  width: `${TERMINAL_CURSOR_WIDTH}px`,
+                  width: `${terminalCursor.width || TERMINAL_CURSOR_WIDTH}px`,
                   height: `${terminalCursor.height}px`
                 }}
               />
@@ -2832,19 +2965,19 @@ export function ChatView({
                 draftsRef.current.set(nodeId, event.target.value)
                 historyCursorRef.current = -1
                 setInput(event.target.value)
-                requestAnimationFrame(updateTerminalCursor)
+                scheduleTerminalCursorUpdate()
               }}
               onFocus={() => {
                 setInputFocused(true)
-                requestAnimationFrame(updateTerminalCursor)
+                scheduleTerminalCursorUpdate()
               }}
               onBlur={() => {
                 setInputFocused(false)
                 setTerminalCursor(null)
               }}
-              onSelect={updateTerminalCursor}
-              onKeyUp={updateTerminalCursor}
-              onClick={updateTerminalCursor}
+              onSelect={scheduleTerminalCursorUpdate}
+              onKeyUp={scheduleTerminalCursorUpdate}
+              onClick={scheduleTerminalCursorUpdate}
               onPaste={(event) => {
                 const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
                   item.type.startsWith('image/')
@@ -2874,6 +3007,7 @@ export function ChatView({
                   .catch(() => {})
               }}
               onKeyDown={(event) => {
+                scheduleTerminalCursorUpdate()
                 if (picker) {
                   const options = picker.options || []
                   if (event.key === 'ArrowDown') {
@@ -2954,16 +3088,6 @@ export function ChatView({
                   send()
                   return
                 }
-                if (
-                  event.key === 'Enter' &&
-                  event.shiftKey &&
-                  queueReady &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault()
-                  send()
-                  return
-                }
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   send()
@@ -2974,7 +3098,7 @@ export function ChatView({
                   '.chat-composer-markdown-layer'
                 )
                 if (layer) layer.scrollTop = event.currentTarget.scrollTop
-                updateTerminalCursor()
+                scheduleTerminalCursorUpdate()
               }}
             />
           </div>
@@ -3020,79 +3144,7 @@ export function ChatView({
             onClose={() => setImagePreview(null)}
           />
         )}
-        <div className="chat-status-line">
-          <div className="chat-status-primary">
-            {running && (
-              <>
-                <LoaderCircle size={11} className="animate-spin" />
-                <span>{statusLabel(phase)}</span>
-                {elapsed > 0 && <span>{formatDuration(elapsed)}</span>}
-              </>
-            )}
-            {queueReady && <span className="chat-status-queue">Shift+Enter / Tab 排队</span>}
-            {queuedCount > 0 && (
-              <span className="chat-status-queue">队列 {queuedCount} · Shift+← 撤回</span>
-            )}
-            {!running && !queueReady && <span className="chat-status-idle">就绪</span>}
-          </div>
-          <div className="chat-status-meta" title={statusMetaTitle}>
-            <span
-              className="chat-status-history"
-              title="输入历史：在首行按 ↑，末行按 ↓；也可使用 Alt + ↑/↓"
-            >
-              ↑↓ 历史
-            </span>
-            {activeModel && (
-              <span className="chat-status-model-group">
-                <span
-                  className="chat-status-model"
-                  role="button"
-                  tabIndex={0}
-                  title="切换模型"
-                  data-chat-picker-trigger
-                  onClick={() => openPicker('model')}
-                >
-                  {activeModel}
-                </span>
-                <span className="chat-status-sep">_</span>
-                <span
-                  className="chat-status-model"
-                  role="button"
-                  tabIndex={0}
-                  title="切换推理强度"
-                  data-chat-picker-trigger
-                  onClick={() => openPicker('variant')}
-                >
-                  {activeEffort}
-                </span>
-              </span>
-            )}
-            {hasContext && (
-              <>
-                <span className={`chat-status-tokens ${tokenClass}`}>{tokenStr}</span>
-                <span className="chat-status-cached"> (cached {cachedPct}%, </span>
-                {hasContextWindow ? (
-                  <span
-                    className={`chat-status-ctx ${ctxClass}`}
-                    role="button"
-                    tabIndex={0}
-                    title="查看上下文占用"
-                    onClick={() => setContextOpen(true)}
-                  >
-                    ctx {contextPct}%
-                  </span>
-                ) : (
-                  <span className="chat-status-cached" title="当前会话尚未提供上下文窗口大小">
-                    ctx —
-                  </span>
-                )}
-                <span className="chat-status-cached">)</span>
-              </>
-            )}
-          </div>
-        </div>
-        <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
-        {contextOpen && <ContextModal meta={meta} onClose={() => setContextOpen(false)} />}
+        {statusLine}
       </div>
       {contextMenu && (
         <ChatContextMenu
