@@ -1858,8 +1858,8 @@ body.is-resizing.is-resizing-terminal {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: end;
   border: 0;
-  border-top: 1px solid #595959;
-  border-bottom: 1px solid #595959;
+  border-top: 1px solid #777;
+  border-bottom: 1px solid #777;
   border-radius: 0;
   background: #090909;
   box-shadow: none;
@@ -1931,10 +1931,6 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer-token-link,
 .chat-composer-token-image {
   color: #61afef;
-}
-
-.chat-composer:focus-within {
-  border-color: #777;
 }
 
 .chat-composer-running {

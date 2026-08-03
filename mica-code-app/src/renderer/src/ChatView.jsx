@@ -1294,6 +1294,7 @@ export function ChatView({
   const [input, setInput] = useState('')
   const [inputFocused, setInputFocused] = useState(false)
   const [terminalCursor, setTerminalCursor] = useState(null)
+  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus())
   const [running, setRunning] = useState(false)
   const [queuedCount, setQueuedCount] = useState(0)
   const [queuedItems, setQueuedItems] = useState([])
@@ -1875,7 +1876,7 @@ export function ChatView({
   const updateTerminalCursor = useCallback(() => {
     cursorFrameRef.current = 0
     const element = textareaRef.current
-    if (!element || document.activeElement !== element) {
+    if (!element) {
       cursorMeasureRef.current = { signature: null, position: null }
       setTerminalCursor(null)
       return
@@ -1921,20 +1922,31 @@ export function ChatView({
   }, [updateTerminalCursor])
 
   useLayoutEffect(() => {
-    if (!inputFocused) return
     resizeTextarea()
     updateTerminalCursor()
-  }, [input, inputFocused, resizeTextarea, updateTerminalCursor])
+  }, [input, resizeTextarea, updateTerminalCursor])
+
+  useEffect(() => {
+    window.addEventListener('resize', scheduleTerminalCursorUpdate)
+    return () => window.removeEventListener('resize', scheduleTerminalCursorUpdate)
+  }, [scheduleTerminalCursorUpdate])
 
   useEffect(() => {
     if (!inputFocused) return undefined
-    window.addEventListener('resize', scheduleTerminalCursorUpdate)
     document.addEventListener('selectionchange', scheduleTerminalCursorUpdate)
-    return () => {
-      window.removeEventListener('resize', scheduleTerminalCursorUpdate)
-      document.removeEventListener('selectionchange', scheduleTerminalCursorUpdate)
-    }
+    return () => document.removeEventListener('selectionchange', scheduleTerminalCursorUpdate)
   }, [inputFocused, scheduleTerminalCursorUpdate])
+
+  useEffect(() => {
+    const onWindowFocus = () => setWindowFocused(true)
+    const onWindowBlur = () => setWindowFocused(false)
+    window.addEventListener('focus', onWindowFocus)
+    window.addEventListener('blur', onWindowBlur)
+    return () => {
+      window.removeEventListener('focus', onWindowFocus)
+      window.removeEventListener('blur', onWindowBlur)
+    }
+  }, [])
 
   useEffect(
     () => () => {
@@ -2942,7 +2954,7 @@ export function ChatView({
                 </span>
               )}
             </div>
-            {inputFocused && terminalCursor && (
+            {windowFocused && terminalCursor && (
               <span
                 className="chat-composer-terminal-cursor"
                 aria-hidden="true"
@@ -2973,7 +2985,6 @@ export function ChatView({
               }}
               onBlur={() => {
                 setInputFocused(false)
-                setTerminalCursor(null)
               }}
               onSelect={scheduleTerminalCursorUpdate}
               onKeyUp={scheduleTerminalCursorUpdate}
