@@ -33,6 +33,14 @@ import { uid } from './workspace'
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
 const TERMINAL_CURSOR_WIDTH = 8
+const MIN_TURN_LOG_HEIGHT = 60
+const MAX_TURN_LOG_HEIGHT_RATIO = 0.6
+const TURN_LOG_HEIGHT_KEY = 'mica.turnLogHeight'
+const CURSOR_ACTIVE_DURATION_MS = 1200
+const SUPPORTS_FIELD_SIZING =
+  typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
+    ? CSS.supports('field-sizing', 'content')
+    : false
 
 const TEXTAREA_CURSOR_STYLE_PROPS = [
   'boxSizing',
@@ -892,28 +900,86 @@ function TurnLogItem({ message, now }) {
   )
 }
 
+function savedTurnLogHeight() {
+  const value = Number(localStorage.getItem(TURN_LOG_HEIGHT_KEY))
+  return Number.isFinite(value) && value >= MIN_TURN_LOG_HEIGHT
+    ? Math.min(value, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
+    : null
+}
+
 function TurnLogDock({ messages, now = Date.now() }) {
   const scrollRef = useRef(null)
+  const [height, setHeight] = useState(savedTurnLogHeight)
+  const stickToBottomRef = useRef(true)
 
+  // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。
   useLayoutEffect(() => {
     const scroll = scrollRef.current
-    if (scroll) scroll.scrollTop = scroll.scrollHeight
-  }, [messages])
+    if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
+  }, [messages, height])
+
+  const startResize = useCallback((event, direction) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    document.body.classList.add('is-resizing-terminal')
+    const startY = event.clientY
+    const startHeight = scrollRef.current?.getBoundingClientRect().height || 0
+    const onMove = (moveEvent) => {
+      const delta = direction === 'top' ? startY - moveEvent.clientY : moveEvent.clientY - startY
+      const next = Math.round(
+        Math.min(
+          window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO,
+          Math.max(MIN_TURN_LOG_HEIGHT, startHeight + delta)
+        )
+      )
+      setHeight(next)
+      localStorage.setItem(TURN_LOG_HEIGHT_KEY, String(next))
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      document.body.classList.remove('is-resizing-terminal')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }, [])
 
   if (!messages.length) return null
 
   return (
     <section className="chat-turn-log" aria-label="当前回合的思考与工具日志">
-      <div ref={scrollRef} className="chat-turn-log-scroll thin-scrollbar">
+      <div
+        className="chat-turn-log-resizer chat-turn-log-resizer-top"
+        onPointerDown={(event) => startResize(event, 'top')}
+        title="拖动调整日志高度"
+      />
+      <div
+        ref={scrollRef}
+        className="chat-turn-log-scroll thin-scrollbar"
+        style={height != null ? { height, maxHeight: 'none' } : undefined}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          stickToBottomRef.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+            SCROLL_BOTTOM_THRESHOLD
+        }}
+      >
         {messages.map((message) => (
           <TurnLogItem key={message.id} message={message} now={now} />
         ))}
       </div>
+      <div
+        className="chat-turn-log-resizer"
+        onPointerDown={(event) => startResize(event, 'bottom')}
+        title="拖动调整日志高度"
+      />
     </section>
   )
 }
 
-function ChatContextMenu({ menu, onAction, onClose }) {
+function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
   useEffect(() => {
     const close = () => onClose()
     const keydown = (event) => event.key === 'Escape' && onClose()
@@ -941,7 +1007,13 @@ function ChatContextMenu({ menu, onAction, onClose }) {
       icon: Minimize2,
       disabled: !menu.hasSession || menu.running
     },
-    { id: 'commit', label: 'Commit', icon: GitCommitHorizontal, disabled: menu.running },
+    {
+      id: 'commit',
+      label: 'Commit',
+      icon: GitCommitHorizontal,
+      disabled: menu.running || commitRunning,
+      title: commitRunning ? 'commit 任务正在执行' : undefined
+    },
     { id: 'fork', label: 'Fork', icon: GitFork, disabled: !menu.hasSession || menu.running },
     { separator: true },
     { id: 'clear', label: 'Clear', icon: Trash2, disabled: menu.running, danger: true }
@@ -1313,9 +1385,12 @@ export function ChatView({
   const [pickerIndex, setPickerIndex] = useState(0)
   const [contextMenu, setContextMenu] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
+  const [commitRunning, setCommitRunning] = useState(false)
+  const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
+  const commitNoticeTextRef = useRef('')
   const pickerRef = useRef(null)
   const messagesRef = useRef([])
-  const modelProtocolsRef = useRef(null) // { map: { [modelId]: protocol }, currentProtocol }
+  const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
   const protocolBlockRef = useRef('')
   const compactBusyRef = useRef(false)
   const listRef = useRef(null)
@@ -1324,6 +1399,8 @@ export function ChatView({
   const textareaRef = useRef(null)
   const cursorFrameRef = useRef(0)
   const cursorMeasureRef = useRef({ signature: null, position: null })
+  const cursorActiveTimerRef = useRef(null)
+  const [cursorActive, setCursorActive] = useState(false)
 
   const updateMessages = useCallback((update) => {
     const next = typeof update === 'function' ? update(messagesRef.current) : update
@@ -1866,7 +1943,10 @@ export function ChatView({
 
   const resizeTextarea = useCallback(() => {
     const element = textareaRef.current
-    if (!element) return
+    if (!element || SUPPORTS_FIELD_SIZING) return
+    // Chromium 117+ 的 field-sizing: content 让 textarea 高度自动跟随内容，
+    // 无需 JS 逐键测量（style.height='auto' + scrollHeight 读取会强制整页
+    // 布局，模型流式渲染时表现为输入抖动）。旧内核才走这里。
     element.style.height = 'auto'
     element.style.height = `${Math.max(30, Math.min(element.scrollHeight, MAX_INPUT_ROWS * 22))}px`
   }, [])
@@ -1916,15 +1996,27 @@ export function ChatView({
     setTerminalCursor(next)
   }, [])
 
+  const markCursorActive = useCallback(() => {
+    setCursorActive(true)
+    if (cursorActiveTimerRef.current) clearTimeout(cursorActiveTimerRef.current)
+    cursorActiveTimerRef.current = setTimeout(
+      () => setCursorActive(false),
+      CURSOR_ACTIVE_DURATION_MS
+    )
+  }, [])
+
   const scheduleTerminalCursorUpdate = useCallback(() => {
+    markCursorActive()
     if (cursorFrameRef.current) return
     cursorFrameRef.current = requestAnimationFrame(updateTerminalCursor)
-  }, [updateTerminalCursor])
+  }, [markCursorActive, updateTerminalCursor])
 
   useLayoutEffect(() => {
     resizeTextarea()
-    updateTerminalCursor()
-  }, [input, resizeTextarea, updateTerminalCursor])
+    // 光标测量涉及 DOM 写+读（layout thrash），移到 rAF 异步执行，
+    // 避免每次按键在 layout 阶段同步强制整页重排（模型流式渲染时表现为抖动）。
+    scheduleTerminalCursorUpdate()
+  }, [input, resizeTextarea, scheduleTerminalCursorUpdate])
 
   useEffect(() => {
     window.addEventListener('resize', scheduleTerminalCursorUpdate)
@@ -1951,6 +2043,7 @@ export function ChatView({
   useEffect(
     () => () => {
       if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current)
+      if (cursorActiveTimerRef.current) clearTimeout(cursorActiveTimerRef.current)
     },
     []
   )
@@ -2006,24 +2099,40 @@ export function ChatView({
       setPickerIndex(0)
       const titles = { model: '选择模型', variant: '选择推理强度', role: '选择角色' }
       setPicker({ kind, title: titles[kind] || kind, options: [], loading: true, error: '' })
-      if (kind === 'variant') {
-        setPicker((current) =>
-          current?.kind === kind ? { ...current, loading: false, options: EFFORT_OPTIONS } : current
-        )
-        return
-      }
-      const request = kind === 'model' ? window.mica.chat.models() : window.mica.chat.roles()
+      const needsModels = kind === 'model' || kind === 'variant'
+      const request =
+        kind === 'model' || kind === 'variant'
+          ? window.mica.chat.models()
+          : window.mica.chat.roles()
       request
         .then((result) => {
-          if (kind === 'model' && result?.ok) {
+          if (needsModels && result?.ok) {
             const map = {}
-            for (const item of result.models || []) map[item.id] = item.protocol
+            for (const item of result.models || [])
+              map[item.id] = { protocol: item.protocol, efforts: item.efforts || [] }
             modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
           }
           setPicker((current) => {
             if (current?.kind !== kind) return current
             if (!result?.ok)
               return { ...current, loading: false, error: result?.error || '加载失败' }
+            if (kind === 'variant') {
+              const activeModel = overridesRef.current.get(nodeId)?.model || meta?.model || ''
+              const entry = (result.models || []).find((item) => {
+                if (!activeModel) return false
+                return item.id === activeModel || item.id.endsWith(`/${activeModel}`)
+              })
+              const efforts = entry?.efforts?.length
+                ? entry.efforts
+                : EFFORT_OPTIONS.map((option) => option.value)
+              const effortSet = new Set(efforts)
+              const options = EFFORT_OPTIONS.filter((option) => effortSet.has(option.value))
+              return {
+                ...current,
+                loading: false,
+                options: options.length ? options : EFFORT_OPTIONS
+              }
+            }
             const options =
               kind === 'model'
                 ? (result.models || []).map((item) => ({
@@ -2050,7 +2159,7 @@ export function ChatView({
           )
         })
     },
-    [appendNotice, running]
+    [appendNotice, meta, nodeId, running]
   )
 
   const selectPickerOption = useCallback(
@@ -2712,6 +2821,67 @@ export function ChatView({
     },
     [running]
   )
+  const startCommitTask = useCallback(() => {
+    if (commitTaskRef.current) return
+    const commitId = uid('commit')
+    const cwd = cwdRef.current
+    const noticeId = appendNotice('commit: 正在分析 Git 变化...', 'info')
+    commitTaskRef.current = { id: commitId, noticeId, cwd, nodeId: nodeIdRef.current }
+    commitNoticeTextRef.current = ''
+    setCommitRunning(true)
+    window.mica.chat
+      .commit({ commitId, cwd })
+      .then((result) => {
+        if (!result?.ok) {
+          const error = result?.error || 'commit 任务启动失败'
+          updateNotice(noticeId, `commit 启动失败：${compactLine(error, 400)}`, 'error')
+          commitTaskRef.current = null
+          setCommitRunning(false)
+        }
+      })
+      .catch((error) => {
+        updateNotice(noticeId, `commit 启动失败：${compactLine(String(error), 400)}`, 'error')
+        commitTaskRef.current = null
+        setCommitRunning(false)
+      })
+  }, [appendNotice, cwdRef, nodeIdRef, updateNotice])
+
+  useEffect(() => {
+    const offEvent = window.mica.chat.onCommitEvent(({ commitId, event }) => {
+      const task = commitTaskRef.current
+      if (!task || task.id !== commitId) return
+      if (event?.type === 'tool_use' && event.part?.tool) {
+        updateNotice(task.noticeId, `commit: 正在执行 ${event.part.tool} ...`, 'info')
+      } else if (event?.type === 'text' && event.part?.text) {
+        commitNoticeTextRef.current = `${commitNoticeTextRef.current}${event.part.text}`.slice(-400)
+      } else if (event?.type === 'reasoning') {
+        updateNotice(task.noticeId, 'commit: 正在分析提交信息...', 'info')
+      }
+    })
+    const offExit = window.mica.chat.onCommitExit(({ commitId, exitCode, error }) => {
+      const task = commitTaskRef.current
+      if (!task || task.id !== commitId) return
+      commitTaskRef.current = null
+      setCommitRunning(false)
+      if (error) {
+        updateNotice(task.noticeId, `commit 失败：${compactLine(error, 400)}`, 'error')
+      } else if (exitCode !== 0) {
+        updateNotice(task.noticeId, `commit 异常退出（code ${exitCode}）`, 'error')
+      } else {
+        const summary = commitNoticeTextRef.current.trim()
+        updateNotice(
+          task.noticeId,
+          summary ? `commit: 已完成 ${compactLine(summary, 300)}` : 'commit: 已完成',
+          'info'
+        )
+      }
+    })
+    return () => {
+      offEvent?.()
+      offExit?.()
+    }
+  }, [updateNotice])
+
   const runContextMenuAction = useCallback(
     async (action) => {
       setContextMenu(null)
@@ -2731,9 +2901,7 @@ export function ChatView({
         return
       }
       if (action === 'commit') {
-        send('请分析当前 Git 变化，创建合适的提交并推送当前分支。提交前请检查改动和测试结果。', {
-          preserveDraft: true
-        })
+        startCommitTask()
         return
       }
       if (action !== 'fork') return
@@ -2753,7 +2921,7 @@ export function ChatView({
         )
       }
     },
-    [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, send]
+    [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, startCommitTask]
   )
 
   const focusComposerFromShell = useCallback(
@@ -2956,7 +3124,7 @@ export function ChatView({
             </div>
             {windowFocused && terminalCursor && (
               <span
-                className="chat-composer-terminal-cursor"
+                className={`chat-composer-terminal-cursor${cursorActive ? ' cursor-active' : ''}`}
                 aria-hidden="true"
                 style={{
                   left: `${terminalCursor.left}px`,
@@ -3162,6 +3330,7 @@ export function ChatView({
           menu={contextMenu}
           onAction={runContextMenuAction}
           onClose={closeContextMenu}
+          commitRunning={commitRunning}
         />
       )}
     </div>

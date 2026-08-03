@@ -43,6 +43,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
   try {
     if (!options.pruneOnly) await ensureCompactModelRule(micaConfig.get().model, options.signal);
     agent = new AgentRuntime({});
+    let sessionCwd: string | null = null;
     const sessionController = new SessionController({
       agent,
       // Do not write daemon/headless-selected config into user-level last-used
@@ -57,6 +58,16 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     const resumed = sessionController.resume(options.sessionId);
     if (!resumed.ok) {
       return { ok: false, sessionId: options.sessionId, code: 'error', error: resumed.message };
+    }
+    sessionCwd = resumed.session?.cwd ?? null;
+    // 调用方未显式指定 --dir 时，把进程切回会话自己的工作目录，避免
+    // saveCurrent 把无关的 process.cwd() 覆盖进会话文件。
+    if (!options.cwd && sessionCwd) {
+      try {
+        process.chdir(resolve(sessionCwd));
+      } catch {
+        // Best-effort: an unreachable session cwd must not fail compact.
+      }
     }
     if (!options.pruneOnly) {
       await ensureCompactModelRule(agent.config.model, options.signal);
@@ -150,6 +161,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
 
     sessionController.saveCurrent({
       preserveTitle: true,
+      turnState: 'completed',
       conversationMessages: conversationMessages as MicaUiConversationMessage[],
     });
     return {

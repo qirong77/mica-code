@@ -33,6 +33,7 @@ const MAX_COMPLETED_RUNS = 40
 const MAX_QUEUED_RUNS = 50
 
 const runs = new Map() // nodeId -> { child, buffer, sessionId }
+const commitRuns = new Map() // commitId -> { child, buffer, stderr }
 const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
 const completedRuns = new Map() // nodeId -> recently finished replay state
 let notifyServer = null
@@ -196,6 +197,7 @@ function readSessionMeta(sessionId) {
       model: snapshot.model || null,
       effort: snapshot.effort || null,
       role: snapshot.role || 'default',
+      cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
       protocol: protocolForProviderId(snapshot.providerId),
       contextWindowSize: Number(snapshot.contextWindowSize) || null,
       lastUsage: snapshot.lastUsage || null,
@@ -249,6 +251,80 @@ function postNotify(terminalId, type, extra = {}) {
       // Fire-and-forget; chat keeps working even if the notify side is busy.
     })
     .finally(() => clearTimeout(timer))
+}
+
+const COMMIT_PROMPT =
+  '请分析当前 Git 变化，创建合适的提交并推送当前分支。提交前请检查改动和测试结果。'
+
+function startCommitRun(sender, commitId, payload) {
+  const cwd = typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : ''
+  if (!cwd) return { ok: false, error: '缺少工作目录' }
+  if (commitRuns.has(commitId)) return { ok: false, error: 'commit 任务已存在' }
+
+  const mica = resolveMicaExecutable()
+  if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
+
+  let child
+  try {
+    child = spawn(
+      mica,
+      ['run', '--format', 'json', '--thinking', '--no-save', '--dir', cwd, '--', COMMIT_PROMPT],
+      {
+        cwd,
+        env: buildChatEnv(process.env),
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+
+  const run = { child, buffer: '', stderr: '' }
+  commitRuns.set(commitId, run)
+  const send = (channel, extra) => {
+    if (!sender.isDestroyed()) sender.send(channel, { commitId, ...extra })
+  }
+
+  child.stderr.on('data', (chunk) => {
+    run.stderr = `${run.stderr}${chunk.toString()}`.slice(-MAX_STDERR_CHARS)
+  })
+
+  child.stdout.on('data', (chunk) => {
+    run.buffer += chunk.toString()
+    let newline
+    while ((newline = run.buffer.indexOf('\n')) >= 0) {
+      const line = run.buffer.slice(0, newline).trim()
+      run.buffer = run.buffer.slice(newline + 1)
+      if (!line) continue
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        continue
+      }
+      send('chat:commit-event', { event })
+    }
+  })
+
+  const finish = (exitCode, signal, error) => {
+    if (!commitRuns.has(commitId)) return
+    commitRuns.delete(commitId)
+    send('chat:commit-exit', {
+      exitCode,
+      signal,
+      ...(error
+        ? { error: String(error).slice(0, 1000) }
+        : exitCode && run.stderr.trim()
+          ? { error: run.stderr.trim().slice(0, 1000) }
+          : {})
+    })
+  }
+
+  child.on('error', (error) =>
+    finish(null, null, error instanceof Error ? error.message : String(error))
+  )
+  child.on('close', (exitCode, signal) => finish(exitCode, signal))
+  return { ok: true }
 }
 
 function startRun(sender, id, payload) {
@@ -478,15 +554,13 @@ function abortRun(id) {
   return true
 }
 
-function listModels() {
-  const mica = resolveMicaExecutable()
-  if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
+function runModelsCommand(mica, args) {
   return new Promise((resolvePromise) => {
     let stdout = ''
     let stderr = ''
     let child
     try {
-      child = spawn(mica, ['models'], {
+      child = spawn(mica, args, {
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe']
       })
@@ -521,18 +595,49 @@ function listModels() {
         })
         return
       }
-      const ids = stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#'))
-      const { provider } = readMicaConfig()
-      resolvePromise({
-        ok: true,
-        models: ids.map((id) => ({ id, protocol: protocolForModelId(id) })),
-        currentProtocol: protocolForProviderId(provider)
-      })
+      resolvePromise({ ok: true, stdout })
     })
   })
+}
+
+async function listModels() {
+  const mica = resolveMicaExecutable()
+  if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
+  const { provider } = readMicaConfig()
+  const parsePlain = (stdout) =>
+    stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .map((id) => ({ id, efforts: [] }))
+  const buildResult = (entries) => ({
+    ok: true,
+    models: entries.map((entry) => ({
+      id: entry.id,
+      protocol: protocolForModelId(entry.id),
+      efforts: Array.isArray(entry.efforts) ? entry.efforts : []
+    })),
+    currentProtocol: protocolForProviderId(provider)
+  })
+
+  // 新版 CLI 支持 --json（附带每个模型的 effort 选项）；旧版回退到纯文本行。
+  const jsonResult = await runModelsCommand(mica, ['models', '--json'])
+  if (jsonResult.ok) {
+    try {
+      const parsed = JSON.parse(jsonResult.stdout.trim())
+      if (Array.isArray(parsed)) return buildResult(parsed)
+    } catch {
+      // fall through to plain-text fallback
+    }
+  }
+  const plainResult = await runModelsCommand(mica, ['models'])
+  if (!plainResult.ok) {
+    return {
+      ok: false,
+      error: jsonResult.ok ? jsonResult.error : plainResult.error || 'mica models 加载失败'
+    }
+  }
+  return buildResult(parsePlain(plainResult.stdout))
 }
 
 function listRoles() {
@@ -557,6 +662,11 @@ function runCompactSession(sessionId, mode = 'model') {
       error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用'
     })
   }
+  // compact 进程必须落在会话自己的工作目录，否则 saveCurrent 会把
+  // process.cwd()（Electron 主进程的 cwd，Finder 启动时通常是 /）写进会话文件，
+  // 覆盖真实 cwd，导致后续恢复会话时工作目录错乱。
+  const sessionMeta = readSessionMeta(sessionId)
+  const compactCwd = sessionMeta?.cwd || process.cwd()
   return new Promise((resolvePromise) => {
     let stdout = ''
     let stderr = ''
@@ -564,8 +674,16 @@ function runCompactSession(sessionId, mode = 'model') {
     try {
       child = spawn(
         mica,
-        ['compact', '--session', sessionId, ...(mode === 'local' ? ['--prune-only'] : [])],
+        [
+          'compact',
+          '--session',
+          sessionId,
+          '--dir',
+          compactCwd,
+          ...(mode === 'local' ? ['--prune-only'] : [])
+        ],
         {
+          cwd: compactCwd,
           env: { ...process.env },
           stdio: ['ignore', 'pipe', 'pipe']
         }
@@ -642,6 +760,12 @@ export function registerChatIpc() {
     const id = payload.id
     if (!id) throw new Error('chat id is required')
     return startRun(event.sender, id, payload)
+  })
+
+  ipcMain.handle('chat:commit', (event, payload = {}) => {
+    const commitId = payload.commitId
+    if (!commitId) throw new Error('commit id is required')
+    return startCommitRun(event.sender, commitId, payload)
   })
 
   ipcMain.handle('chat:abort', (_event, { id } = {}) => {
@@ -729,6 +853,14 @@ export function registerChatIpc() {
 export function disposeAllChatRuns() {
   for (const id of [...runs.keys()]) {
     abortRun(id)
+  }
+  for (const [commitId, run] of [...commitRuns.entries()]) {
+    try {
+      run.child.kill('SIGTERM')
+    } catch {
+      // ignore
+    }
+    commitRuns.delete(commitId)
   }
   runs.clear()
   queuedRuns.clearAll()

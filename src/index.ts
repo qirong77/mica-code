@@ -53,6 +53,31 @@ applyConfigDefaultsToFile(resolve(micaHome, 'config.json'));
 if (invocation.mode === 'models') {
   const { listRuntimeModelIds } = await import('./cli/modelCatalog.js');
   const models = await listRuntimeModelIds();
+  if (invocation.json) {
+    const { ensureModelRule, getModelEffortOptions } = await import('@packages/mica-config/index.js');
+    const { default: setupModelEffortContext } = await import(
+      '../buildin-plugins/model-effort-context/index.mjs'
+    );
+    const disposeModelEffortContext = setupModelEffortContext();
+    try {
+      const entries = await Promise.all(
+        models.map(async (id) => {
+          let efforts: string[] = [];
+          try {
+            await ensureModelRule(id.split('/').at(-1) ?? id);
+            efforts = getModelEffortOptions(id.split('/').at(-1) ?? id);
+          } catch {
+            // Best-effort: models.dev lookup may be unavailable offline.
+          }
+          return { id, efforts };
+        }),
+      );
+      process.stdout.write(`${JSON.stringify(entries)}\n`);
+    } finally {
+      disposeModelEffortContext();
+    }
+    await exitAfterStdoutFlush(0);
+  }
   if (models.length > 0) process.stdout.write(`${models.join('\n')}\n`);
   await exitAfterStdoutFlush(0);
 }
@@ -86,6 +111,7 @@ if (invocation.mode === 'run') {
       role: invocation.role,
       maxTurns: invocation.maxTurns,
       thinking: invocation.thinking,
+      noSave: invocation.noSave,
       mcpConfigPath: invocation.mcpConfigPath,
       strictMcpConfig: invocation.strictMcpConfig,
       mcpInitTimeoutMs: invocation.mcpInitTimeoutMs ?? positiveIntegerEnv('MICA_MCP_INIT_TIMEOUT_MS'),

@@ -1162,6 +1162,40 @@ body.is-resizing.is-resizing-terminal {
   scrollbar-gutter: stable;
 }
 
+.chat-turn-log-resizer {
+  position: relative;
+  height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  border-top: 1px solid rgb(255 255 255 / 6%);
+}
+
+.chat-turn-log-resizer-top {
+  border-top: none;
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
+}
+
+.chat-turn-log-resizer::after {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: #3a3a3a;
+}
+
+.chat-turn-log-resizer:hover::after,
+.chat-turn-log-resizer:active::after {
+  background: #8a8a8a;
+}
+
+.chat-turn-log-resizer:hover,
+.chat-turn-log-resizer:active {
+  background: rgb(255 255 255 / 4%);
+}
+
 .chat-turn-log-thinking {
   min-width: 0;
   margin: 1px 0 7px;
@@ -1909,6 +1943,11 @@ body.is-resizing.is-resizing-terminal {
   animation: chat-terminal-cursor-blink 1.05s steps(1, end) infinite;
 }
 
+.chat-composer-terminal-cursor.cursor-active {
+  animation: none;
+  opacity: 1;
+}
+
 @keyframes chat-terminal-cursor-blink {
   0%,
   52% {
@@ -1984,6 +2023,7 @@ body.is-resizing.is-resizing-terminal {
   width: 100%;
   min-height: 30px;
   max-height: 180px;
+  field-sizing: content;
   resize: none;
   display: block;
   overflow-y: auto;

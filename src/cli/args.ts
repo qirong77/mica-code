@@ -9,6 +9,7 @@ export type RunCliInvocation = {
   role?: string;
   maxTurns?: number;
   thinking: boolean;
+  noSave: boolean;
   dangerouslySkipPermissions: boolean;
   mcpConfigPath?: string;
   strictMcpConfig: boolean;
@@ -35,7 +36,7 @@ export type CliInvocation =
   | RunCliInvocation
   | DaemonCliInvocation
   | CompactCliInvocation
-  | { mode: 'models'; verbose: boolean }
+  | { mode: 'models'; verbose: boolean; json: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
   | { mode: 'error'; message: string };
@@ -46,6 +47,7 @@ export const CLI_USAGE = [
   '  mica --resume <session-id>',
   '  mica --version',
   '  mica models',
+  '  mica models --json',
   '  mica run --format json [options] "<prompt>"',
   '  mica daemon [--server <url>] [--name <name>]',
   '  mica compact --session <id> [--dir <path>] [--force] [--prune-only]',
@@ -58,6 +60,7 @@ export const CLI_USAGE = [
   '  --role <name>                     Override the agent role',
   '  --max-turns <count>               Limit model round trips',
   '  --thinking                        Include reasoning events in JSON output',
+  '  --no-save                         Run without persisting a session file',
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
@@ -92,8 +95,10 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   if (argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') return { mode: 'help' };
   if (argv[0] === 'models') {
     const rest = argv.slice(1);
-    if (rest.length === 0) return { mode: 'models', verbose: false };
-    if (rest.length === 1 && rest[0] === '--verbose') return { mode: 'models', verbose: true };
+    const options = new Set(rest);
+    if (rest.every((option) => option === '--verbose' || option === '--json')) {
+      return { mode: 'models', verbose: options.has('--verbose'), json: options.has('--json') };
+    }
     return { mode: 'error', message: `Unknown models option: ${rest.join(' ')}` };
   }
   if (argv[0] === 'daemon') {
@@ -153,6 +158,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   let role: string | undefined;
   let maxTurns: number | undefined;
   let thinking = false;
+  let noSave = false;
   let dangerouslySkipPermissions = false;
   let mcpConfigPath: string | undefined;
   let strictMcpConfig = false;
@@ -243,6 +249,10 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       thinking = true;
       continue;
     }
+    if (arg === '--no-save') {
+      noSave = true;
+      continue;
+    }
     if (arg === '--strict-mcp-config') {
       strictMcpConfig = true;
       continue;
@@ -271,6 +281,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     role,
     maxTurns,
     thinking,
+    noSave,
     dangerouslySkipPermissions,
     mcpConfigPath,
     strictMcpConfig,

@@ -257,6 +257,7 @@ temp/                              临时代码和外部实验，默认不参与
 - 交互和 headless 模式都必须先注册 `buildin-plugins/model-effort-context` resolver，再调用 `ensureModelRule`；headless 获取不到 metadata 时只写 stderr 并使用通用 rule，不能污染协议 stdout。
 - Headless `run --format json` 默认不输出 provider reasoning；显式 `--thinking` 时按 OpenCode 形状输出 `reasoning` 事件（`part: { type: 'reasoning', text }`）。新增 run JSON 消费方若需要展示思考应传该开关，不要把 reasoning 混入 `text` 或最终任务输出。工具调用在 `toolCall` 时立即输出 `pending` `tool_use`，在 `toolResult` 时以相同 `callID` 输出 `completed`，消费端应原位更新而不是追加两张卡。
 - Headless run 的 prompt 会像交互输入一样先经 `micaUi.parseImageRefs` 解析 `[Image](路径)` 引用（从 `@packages/mica-ui/utils/imagePaste.js` 直接导入，避免把 React/Ink 拖进 headless 路径），生成多模态 content block 后再调用 `agent.run`，因此 Web Chat 等一次性消费方可以通过 `~/.mica/images/` 引用附加剪贴板图片。不依赖 React/Ink 的约束仍然成立。
+- Headless `run --no-save` 会在整个 turn 期间跳过 session 落盘（包括 running/completed/aborted/error 各阶段），用于 mica-code-app 右键 Commit 等一次性后台任务：与主对话完全隔离、不创建垃圾 session 文件。它不改变 prompt、工具、MCP 或事件输出行为。
 - Responses 请求只要包含 reasoning 参数，就应保留显式 summary 配置；未配置时补 `summary: 'auto'`，否则 provider 可能只有隐藏 reasoning tokens 而不会产生 `response.reasoning_summary_text.delta`，终端和 Chat 都没有可展示的思考内容。
 - 只有明确配置了 `get_model_url` 的动态 provider 才会触发 provider 模型列表查找；模型 context/effort metadata 则来自 Models.dev resolver。
 - context size 默认 256K，实际值由 Models.dev canonical 模型记录的 `limit.context` 决定。

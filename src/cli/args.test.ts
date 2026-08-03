@@ -42,6 +42,7 @@ describe('parseCliArgs', () => {
       role: 'reviewer',
       maxTurns: undefined,
       thinking: false,
+      noSave: false,
       dangerouslySkipPermissions: true,
       mcpConfigPath: undefined,
       strictMcpConfig: false,
@@ -76,8 +77,34 @@ describe('parseCliArgs', () => {
 
   it('supports version and model-discovery probes without entering the UI', () => {
     expect(parseCliArgs(['--version'])).toEqual({ mode: 'version' });
-    expect(parseCliArgs(['models'])).toEqual({ mode: 'models', verbose: false });
-    expect(parseCliArgs(['models', '--verbose'])).toEqual({ mode: 'models', verbose: true });
+    expect(parseCliArgs(['models'])).toEqual({ mode: 'models', verbose: false, json: false });
+    expect(parseCliArgs(['models', '--verbose'])).toEqual({
+      mode: 'models',
+      verbose: true,
+      json: false,
+    });
+    expect(parseCliArgs(['models', '--json'])).toEqual({
+      mode: 'models',
+      verbose: false,
+      json: true,
+    });
+    expect(parseCliArgs(['models', '--verbose', '--json'])).toEqual({
+      mode: 'models',
+      verbose: true,
+      json: true,
+    });
+  });
+
+  it('parses the --no-save flag for one-shot background tasks', () => {
+    expect(parseCliArgs(['run', '--format=json', '--no-save', 'commit changes'])).toMatchObject({
+      mode: 'run',
+      noSave: true,
+      prompt: 'commit changes',
+    });
+    expect(parseCliArgs(['run', '--format=json', 'commit changes'])).toMatchObject({
+      mode: 'run',
+      noSave: false,
+    });
   });
 
   it('parses headless compact invocations', () => {

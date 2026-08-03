@@ -32,6 +32,7 @@ export type HeadlessRunOptions = {
   role?: string;
   maxTurns?: number;
   thinking?: boolean;
+  noSave?: boolean;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   mcpInitTimeoutMs?: number;
@@ -133,7 +134,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     sessionId = sessionController.getCurrentSessionId();
     projector = attachRunJsonProjector(agent, writer, sessionId, { thinking: options.thinking === true });
     writer.write(createRunJsonStepStart(sessionId));
-    sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
+    if (!options.noSave) sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
 
     mcpStarted = true;
     await micaMcp.init({
@@ -153,17 +154,17 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
       const result = await agent.run(content, { maxTurns: options.maxTurns });
       text = projector.completeText(result.text);
       status = 'completed';
-      sessionController.saveCurrent({ turnState: 'completed' });
+      if (!options.noSave) sessionController.saveCurrent({ turnState: 'completed' });
     } catch (error) {
       text = projector.getText();
       if (error instanceof AgentAbortError || options.signal?.aborted) {
         status = 'aborted';
         agent.preserveAbortedTurn(prompt, text || undefined);
-        sessionController.saveCurrent({ turnState: 'aborted' });
+        if (!options.noSave) sessionController.saveCurrent({ turnState: 'aborted' });
       } else {
         status = 'error';
         errorMessage = error instanceof Error ? error.message : String(error);
-        sessionController.saveCurrent({ turnState: 'error' });
+        if (!options.noSave) sessionController.saveCurrent({ turnState: 'error' });
         console.error(errorMessage);
         writer.write(
           createRunJsonError(errorMessage, {
@@ -179,7 +180,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
   } catch (error) {
     status = options.signal?.aborted ? 'aborted' : 'error';
     errorMessage = error instanceof Error ? error.message : String(error);
-    if (sessionController && sessionId) {
+    if (!options.noSave && sessionController && sessionId) {
       try {
         sessionController.saveCurrent({
           allowEmpty: true,

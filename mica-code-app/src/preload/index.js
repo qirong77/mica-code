@@ -58,6 +58,17 @@ const chatApi = {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('chat:queue-error', listener)
     return () => ipcRenderer.removeListener('chat:queue-error', listener)
+  },
+  commit: (payload) => ipcRenderer.invoke('chat:commit', payload),
+  onCommitEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:commit-event', listener)
+    return () => ipcRenderer.removeListener('chat:commit-event', listener)
+  },
+  onCommitExit: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:commit-exit', listener)
+    return () => ipcRenderer.removeListener('chat:commit-exit', listener)
   }
 }
 

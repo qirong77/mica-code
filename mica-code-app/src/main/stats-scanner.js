@@ -30,6 +30,17 @@ function fileSignature(fileSystem, file) {
 
 /** Keep this projection aligned with the session-list behavior in stats.js. */
 function parseSessionMeta(raw) {
+  // 与 CLI 的 parsePersistedSession 保持一致的轻量校验：结构不完整的会话
+  // 无法被 mica run/compact 恢复，不进入侧栏列表，避免点击后报
+  // "Session not found: <id>"。
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.version !== 1) return null
+  if (typeof raw.id !== 'string' || !raw.id.trim()) return null
+  const snapshot = raw.snapshot
+  if (!snapshot || typeof snapshot !== 'object') return null
+  if (!Array.isArray(snapshot.messages) || !Array.isArray(snapshot.conversationMessages))
+    return null
+  if (!['none', 'low', 'medium', 'high', 'xhigh'].includes(snapshot.effort)) return null
   const updatedAtMs = Date.parse(raw.updatedAt)
   if (!Number.isFinite(updatedAtMs)) return null
   const createdAtMs = Date.parse(raw.createdAt)
@@ -135,7 +146,10 @@ export function createStatsScanner({
       // failures. Mark it unstable so callers do not replace their cache.
       const loadedKey = kind === 'meta' ? 'metaLoaded' : 'statsLoaded'
       return {
-        rows: [...entries.values()].filter((entry) => entry[loadedKey]).map((entry) => entry[kind]).filter(Boolean),
+        rows: [...entries.values()]
+          .filter((entry) => entry[loadedKey])
+          .map((entry) => entry[kind])
+          .filter(Boolean),
         stable: false
       }
     }

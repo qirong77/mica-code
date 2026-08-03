@@ -20,12 +20,21 @@ afterEach(() => {
 
 function fixture(id, overrides = {}) {
   return {
+    version: 1,
     id,
     title: `Session ${id}`,
     cwd: `/work/${id}`,
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
     turnState: 'completed',
+    snapshot: {
+      providerId: 'test',
+      model: 'm1',
+      effort: 'medium',
+      messages: [{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      conversationMessages: [{ id: 'c1', role: 'user', text: 'hi' }],
+      usageHistory: []
+    },
     value: 1,
     ...overrides
   }
