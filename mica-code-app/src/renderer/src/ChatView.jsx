@@ -1376,6 +1376,7 @@ export function ChatView({
   const recallingQueueRef = useRef(null)
   const historyCursorRef = useRef(-1)
   const stickToBottomRef = useRef(true)
+  const shellPointerRef = useRef(null)
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -2942,7 +2943,7 @@ export function ChatView({
         updateNotice(task.noticeId, 'commit: 正在分析提交信息...', 'info')
       }
     })
-    const offExit = window.mica.chat.onCommitExit(({ commitId, exitCode, error }) => {
+    const offExit = window.mica.chat.onCommitExit(({ commitId, exitCode, error, summary }) => {
       const task = commitTaskRef.current
       if (!task || task.id !== commitId) return
       commitTaskRef.current = null
@@ -2952,10 +2953,10 @@ export function ChatView({
       } else if (exitCode !== 0) {
         updateNotice(task.noticeId, `commit 异常退出（code ${exitCode}）`, 'error')
       } else {
-        const summary = commitNoticeTextRef.current.trim()
+        const text = (summary || commitNoticeTextRef.current).trim()
         updateNotice(
           task.noticeId,
-          summary ? `commit: 已完成 ${compactLine(summary, 300)}` : 'commit: 已完成',
+          text ? `commit: 已完成 ${compactLine(text, 300)}` : 'commit: 已完成',
           'info'
         )
       }
@@ -3018,9 +3019,35 @@ export function ChatView({
           'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
         )
       ) {
+        shellPointerRef.current = null
         return
       }
-      if (event.type === 'pointerdown' && target.closest('.chat-scroll, .chat-transcript')) return
+
+      if (event.type === 'pointerdown') {
+        shellPointerRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript'))
+        }
+        if (shellPointerRef.current.inTranscript) return
+        textareaRef.current?.focus()
+        scheduleTerminalCursorUpdate()
+        return
+      }
+
+      const pointer = shellPointerRef.current
+      shellPointerRef.current = null
+      if (pointer?.inTranscript) {
+        requestAnimationFrame(() => {
+          const selection = window.getSelection?.()
+          if (pointer.moved || (selection && !selection.isCollapsed)) return
+          textareaRef.current?.focus()
+          scheduleTerminalCursorUpdate()
+        })
+        return
+      }
+
       const selection = window.getSelection?.()
       if (selection && !selection.isCollapsed) return
       textareaRef.current?.focus()
@@ -3028,6 +3055,14 @@ export function ChatView({
     },
     [scheduleTerminalCursorUpdate]
   )
+
+  const trackShellPointerMove = useCallback((event) => {
+    const pointer = shellPointerRef.current
+    if (!pointer) return
+    if (Math.abs(event.clientX - pointer.x) > 3 || Math.abs(event.clientY - pointer.y) > 3) {
+      pointer.moved = true
+    }
+  }, [])
 
   const statusLine = (
     <div className="chat-status-line">
@@ -3095,6 +3130,7 @@ export function ChatView({
     <div
       className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
       onPointerDownCapture={focusComposerFromShell}
+      onPointerMoveCapture={trackShellPointerMove}
       onMouseUp={focusComposerFromShell}
       onContextMenu={openChatContextMenu}
     >

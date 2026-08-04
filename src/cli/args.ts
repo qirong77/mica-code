@@ -31,11 +31,18 @@ export type CompactCliInvocation = {
   format: 'json';
 };
 
+export type CommitCliInvocation = {
+  mode: 'commit';
+  cwd?: string;
+  format: 'json';
+};
+
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | RunCliInvocation
   | DaemonCliInvocation
   | CompactCliInvocation
+  | CommitCliInvocation
   | { mode: 'models'; verbose: boolean; json: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
@@ -51,6 +58,7 @@ export const CLI_USAGE = [
   '  mica run --format json [options] "<prompt>"',
   '  mica daemon [--server <url>] [--name <name>]',
   '  mica compact --session <id> [--dir <path>] [--force] [--prune-only]',
+  '  mica commit [--dir <path>]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -75,6 +83,9 @@ export const CLI_USAGE = [
   '  --dir <path>                      Set the working directory',
   '  --force                           Force a summary even when history is short',
   '  --prune-only                      Only perform local cleanup; never call a model',
+  '',
+  'Commit options:',
+  '  --dir <path>                      Set the working directory',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -147,6 +158,27 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     }
     if (!sessionId) return cliError('Missing value for --session.');
     return { mode: 'compact', sessionId, cwd, force, pruneOnly, format: 'json' };
+  }
+  if (argv[0] === 'commit') {
+    let cwd: string | undefined;
+    let format: 'json' = 'json';
+    for (let index = 1; index < argv.length; index++) {
+      const arg = argv[index]!;
+      const valueOption = parseValueOption(arg, argv, index, ['--dir', '--format']);
+      if (valueOption) {
+        if (!valueOption.ok) return valueOption.error;
+        index = valueOption.nextIndex;
+        if (valueOption.name === '--dir') cwd = valueOption.value;
+        if (valueOption.name === '--format') {
+          if (valueOption.value !== 'json') return cliError(`Unsupported --format: ${valueOption.value}`);
+          format = 'json';
+        }
+        continue;
+      }
+      if (arg === '--help' || arg === '-h') return { mode: 'help' };
+      return cliError(`Unknown commit option: ${arg}`);
+    }
+    return { mode: 'commit', cwd, format };
   }
   if (argv[0] !== 'run') return { mode: 'interactive' };
 

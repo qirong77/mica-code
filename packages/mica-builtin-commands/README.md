@@ -38,7 +38,7 @@ const commands = [
 
 ```text
 packages/mica-builtin-commands/
-  index.ts                 公共 API：命令工厂、AgentChangeTracker、services 类型
+  index.ts                 公共 API：命令工厂、AgentChangeTracker、commit 分析辅助、services 类型
   commandHost.ts           单文件命令插件使用的宿主服务契约
   services.ts              命令依赖的服务接口定义
   README.md
@@ -56,6 +56,7 @@ packages/mica-builtin-commands/
 - `git/`：
   - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
   - `gitDiff.ts`：unified/side-by-side diff 解析与加载。
+  - `commitRunner.ts`：commit 命令与 headless `mica commit` 共享的确定性 git 分析/提交逻辑（变更摘要、commit message 生成、add/commit/push），公共入口由 `index.ts` 聚合导出。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。

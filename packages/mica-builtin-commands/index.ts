@@ -48,5 +48,13 @@ export type {
 } from './services.js';
 export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
 export { AgentChangeTracker } from './git/agentChangeTracker.js';
+export {
+  buildChangeSummary,
+  commitWithMessage,
+  generateCommitMessage,
+  hasUnmergedFiles,
+  pushCurrentBranch,
+} from './git/commitRunner.js';
+export type { CommitMessageAgent } from './git/commitRunner.js';
 export { commandHostToken } from './commandHost.js';
 export type { BuiltInCommandItem, CommandHostService } from './commandHost.js';

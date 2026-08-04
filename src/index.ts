@@ -163,6 +163,31 @@ if (invocation.mode === 'compact') {
   await exitAfterStdoutFlush(exitCode);
 }
 
+if (invocation.mode === 'commit') {
+  const { runCommit } = await import('./cli/runCommit.js');
+  const abortController = new AbortController();
+  const requestAbort = () => abortController.abort();
+  process.once('SIGINT', requestAbort);
+  process.once('SIGTERM', requestAbort);
+  process.once('SIGHUP', requestAbort);
+  let exitCode = 0;
+  try {
+    const result = await runCommit({
+      cwd: invocation.cwd,
+      signal: abortController.signal,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (!result.ok) exitCode = 1;
+    if (!result.ok && result.error) console.error(result.error);
+  } catch (error) {
+    exitCode = 1;
+    const message = error instanceof Error ? error.message : String(error);
+    process.stdout.write(`${JSON.stringify({ ok: false, code: 'error', error: message })}\n`);
+    console.error(message);
+  }
+  await exitAfterStdoutFlush(exitCode);
+}
+
 if (invocation.mode === 'daemon') {
   const { runDaemon } = await import('./daemon/index.js');
   await runDaemon({

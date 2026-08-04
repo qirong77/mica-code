@@ -254,9 +254,6 @@ function postNotify(terminalId, type, extra = {}) {
     .finally(() => clearTimeout(timer))
 }
 
-const COMMIT_PROMPT =
-  '请分析当前 Git 变化，创建合适的提交并推送当前分支。提交前请检查改动和测试结果。'
-
 function startCommitRun(sender, commitId, payload) {
   const cwd = typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : ''
   if (!cwd) return { ok: false, error: '缺少工作目录' }
@@ -269,7 +266,9 @@ function startCommitRun(sender, commitId, payload) {
   try {
     child = spawn(
       mica,
-      ['run', '--format', 'json', '--thinking', '--no-save', '--dir', cwd, '--', COMMIT_PROMPT],
+      // One-shot commit: mica collects the git changes, asks the model exactly
+      // once for the message, then runs add/commit/push. No multi-turn loop.
+      ['commit', '--format', 'json', '--dir', cwd],
       {
         cwd,
         env: buildChatEnv(process.env),
@@ -292,32 +291,40 @@ function startCommitRun(sender, commitId, payload) {
 
   child.stdout.on('data', (chunk) => {
     run.buffer += chunk.toString()
-    let newline
-    while ((newline = run.buffer.indexOf('\n')) >= 0) {
-      const line = run.buffer.slice(0, newline).trim()
-      run.buffer = run.buffer.slice(newline + 1)
-      if (!line) continue
-      let event
-      try {
-        event = JSON.parse(line)
-      } catch {
-        continue
-      }
-      send('chat:commit-event', { event })
-    }
+    run.buffer = run.buffer.slice(-MAX_STDERR_CHARS)
   })
 
   const finish = (exitCode, signal, error) => {
     if (!commitRuns.has(commitId)) return
     commitRuns.delete(commitId)
+    const result = parseCommitResult(run.buffer)
+    if (result?.ok) {
+      const summary = [
+        result.pushed
+          ? `已提交并推送 \`${result.commitHash}\`  ${result.subject || ''}`
+          : `已提交 \`${result.commitHash}\`，未找到远程分支  ${result.subject || ''}`
+      ]
+      if (result.commitMessage && result.commitMessage.split('\n').length > 1) {
+        summary.push(result.commitMessage.split('\n').slice(1).join('\n').trim())
+      }
+      send('chat:commit-exit', {
+        exitCode,
+        signal,
+        summary: summary.filter(Boolean).join('\n'),
+        result
+      })
+      return
+    }
     send('chat:commit-exit', {
       exitCode,
       signal,
       ...(error
         ? { error: String(error).slice(0, 1000) }
-        : exitCode && run.stderr.trim()
-          ? { error: run.stderr.trim().slice(0, 1000) }
-          : {})
+        : result?.error || (exitCode && run.stderr.trim())
+          ? { error: String(result?.error || run.stderr.trim()).slice(0, 1000) }
+          : exitCode
+            ? { error: `commit 未成功完成（code ${exitCode}）` }
+            : { error: 'commit 输出格式异常，请更新 mica CLI' })
     })
   }
 
@@ -326,6 +333,21 @@ function startCommitRun(sender, commitId, payload) {
   )
   child.on('close', (exitCode, signal) => finish(exitCode, signal))
   return { ok: true }
+}
+
+function parseCommitResult(buffer) {
+  const line = buffer
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .at(-1)
+  if (!line) return null
+  try {
+    const parsed = JSON.parse(line)
+    return parsed && typeof parsed === 'object' && 'ok' in parsed ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function startRun(sender, id, payload) {

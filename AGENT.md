@@ -62,6 +62,7 @@ src/
     modelCatalog.ts                Multica runtime 模型 ID 列举与解析
     runHeadless.ts                 无 UI headless 执行与资源生命周期
     runCompact.ts                  无 UI 会话压缩（mica compact，复用 CompactionService）
+    runCommit.ts                   无 UI 一次性 git 提交（mica commit，复用 commitRunner）
   agent/
     AgentRuntime.ts                provider client 生命周期、run/abort/snapshot/config reload
     AgentRuntimeConfig.ts          从 mica-config 读取并夹紧 provider/model/effort
@@ -129,7 +130,7 @@ temp/                              临时代码和外部实验，默认不参与
 `Application` 是唯一应用入口，当前启动顺序大致为：
 
 1. `buildin-plugins/config-web-worker.mjs` 先判断当前进程是否为 Config Web worker；worker 模式只启动对应服务，不加载终端应用。
-2. `src/index.ts` 在加载 config/runtime 模块前分派 `--version`、`models`、headless `run --format json` 和交互模式；headless 的 `--dir` 也在动态加载运行模块前生效。
+2. `src/index.ts` 在加载 config/runtime 模块前分派 `--version`、`models`、headless `run --format json` / `commit` / `compact` 和交互模式；headless 的 `--dir` 也在动态加载运行模块前生效。
 3. 非 version/help 模式调用 `buildin-plugins/validate-config.mjs` 补齐向后兼容的配置默认值；交互模式再加载应用和 UI 模块，由 `buildin-plugins/process-diagnostics.mjs` 设置进程标题、注册全局错误桥。
 4. `Application.start()` 使用 `wrappedRender(React.createElement(micaUi.App), { exitOnCtrlC: false })` 启动 Ink UI，然后通过 validate-config 单文件插件执行完整配置校验，确保错误能进入现有启动失败提示。
 5. `ensureInitialModelSelection()` 在当前 provider 配置了 `get_model_url` 且顶层 model 为空时，先尝试拉取模型列表。
@@ -291,6 +292,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/status`：显示当前 provider/model/effort/role 状态。
 - `/context`：显示当前上下文占用总览。
 - `/compact`：压缩当前会话上下文为 checkpoint。Web Chat 通过 `mica compact --session <id>` 调用同一套 `CompactionService`（见 `src/cli/runCompact.ts`）；该 headless 命令会写回压缩后的 checkpoint 并输出单行 JSON，会话内容过少时返回 `code: "not_needed"`。
+- `mica commit`（headless，`src/cli/runCommit.ts`）：与 `/commit` 复用 `packages/mica-builtin-commands/git/commitRunner.ts` 的确定性分析/提交函数，程序收集 git 变化摘要后**只发一次模型请求**生成 commit message（不启用工具、无多轮循环），再程序化 add/commit/push，输出单行 JSON（`ok`/`commitHash`/`subject`/`commitMessage`/`pushed`）。`mica-code-app` 右键 commit 通过 `mica commit --dir <cwd>` 调用它，代替原先的 `mica run` 多轮工具循环。
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
 - `/task`：按 terminal session 展示当前终端中的 session、全部 retained subagent 和 active background shell。列表中 `Enter` 切换 session，或打开 subagent/shell 详情；`/task clear` 清除空闲 session。

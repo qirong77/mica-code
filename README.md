@@ -81,6 +81,14 @@ mica compact --session <id> [--dir <cwd>] [--force]
 
 `mica compact` 复用交互式 `/compact` 的 `CompactionService`（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
 
+一次性的 Git 提交（右键 commit 等一次性消费方用）：
+
+```bash
+mica commit [--dir <cwd>]
+```
+
+`mica commit` 与交互式 `/commit` 复用同一套确定性分析/提交逻辑（`packages/mica-builtin-commands/git/commitRunner.ts`）：程序先收集 git 变化摘要，再向模型**只发一次请求**生成 commit message（不启用工具、无多轮循环），随后程序自己执行 `git add`/`commit`/`push`，最后输出单行 JSON（`ok`、`commitHash`、`subject`、`commitMessage`、`pushed`，失败时含 `code`/`error`）。
+
 ## 远程会话同步（Mica Sync）
 
 `mica daemon` 常驻进程可以把本机所有会话（活跃的 + 历史的）实时镜像到一台中心服务器，然后在浏览器里查看并远程续聊：
