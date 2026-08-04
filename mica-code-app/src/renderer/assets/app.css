@@ -196,6 +196,7 @@ body.is-resizing.is-resizing-terminal {
   --chat-user: #373737;
   --chat-accent: #d77757;
   --chat-thinking: #c9a227;
+  --chat-text-size: 13px;
   --chat-font:
     'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', monospace;
@@ -218,7 +219,7 @@ body.is-resizing.is-resizing-terminal {
   margin: 0;
   padding: 5px 4px 16px;
   font-family: var(--chat-font);
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 1.28;
 }
 
@@ -289,7 +290,7 @@ body.is-resizing.is-resizing-terminal {
     4px 0 0 var(--chat-user),
     -4px 0 0 var(--chat-user);
   color: #d7d7d7;
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 1.28;
 }
 
@@ -402,7 +403,7 @@ body.is-resizing.is-resizing-terminal {
   overflow-wrap: anywhere;
   color: #c9c9c9;
   font-family: var(--chat-font);
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 1.28;
 }
 
@@ -598,7 +599,7 @@ body.is-resizing.is-resizing-terminal {
   background: transparent;
   padding: 0;
   color: #c9c9c9;
-  font-size: 12px;
+  font-size: 1em;
 }
 
 .chat-table-wrap {
@@ -613,7 +614,7 @@ body.is-resizing.is-resizing-terminal {
   width: 100%;
   min-width: max-content;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 1em;
 }
 
 .chat-markdown th,
@@ -1287,7 +1288,7 @@ body.is-resizing.is-resizing-terminal {
   border-bottom: 1px solid rgb(201 162 39 / 12%);
   background: #211f17;
   font-family: var(--chat-font);
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 1.35;
 }
 
@@ -1516,7 +1517,7 @@ body.is-resizing.is-resizing-terminal {
   background: #0e0e0e;
   color: #9d9d9d;
   font-family: var(--chat-font);
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 1.35;
 }
 
@@ -1911,7 +1912,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer-input textarea {
   width: 100%;
   font-family: var(--chat-font);
-  font-size: 13px;
+  font-size: var(--chat-text-size);
   line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: break-word;

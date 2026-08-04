@@ -84,7 +84,7 @@ mica-code 是一个轻量 CLI code agent，基于 Bun + TypeScript + React（Ink
 
 ---
 
-## 文章列表（当前共 6 篇）
+## 文章列表（当前共 7 篇）
 
 - [工具设计的防御性编程：限制输入、执行与输出](./defensive-tool-design.md)
 - [后台命令执行：让长任务不阻塞 Agent](./background-shell-tasks.md)
@@ -92,6 +92,7 @@ mica-code 是一个轻量 CLI code agent，基于 Bun + TypeScript + React（Ink
 - [Agent Skills：不是更长的 Prompt](./agent-skills.md)
 - [上下文压缩：不只是总结聊天记录](./context-compaction.md)
 - [Agent Runtime 协议：Mica 为什么选择 DevEco](./multica-runtime-protocol.md)
+- [把两个 MCP 变成 Skill：卸载 37 个常驻工具](./mcp-to-skill.md)
 
 ---
 

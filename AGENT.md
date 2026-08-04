@@ -376,6 +376,7 @@ AGENT.md
 - 普通终端主界面使用 `rows - 1` 作为最小高度而不是固定高度：短内容保留终端最后一行，长 conversation 必须按自然高度扩展到原生 scrollback，避免 Yoga 收缩后文本越界覆盖后续消息和输入区。
 - Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 `Buffer`；该层负责增量 UTF-8 解码，并把 DEC 8-bit C1 控制字节规范化为 7-bit ESC 序列。不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`，否则 S8C1T 模式下的终端查询响应会损坏并泄漏为输入。
 - 长会话性能问题优先检查 retained buffers、rewind snapshots、Markdown 渲染输入、图片 payload、MCP 输出和 agent turn log，不要直接做大重构。
+- `mica-code-app` 是终端风格的 Web 渲染，而不是常规网页聊天 UI。Chat 区要保持等宽字体、紧凑行高和一致字号；用户输入、用户消息、助手 Markdown、代码块、表格、队列和任务 dock 等主文本应共享同一个字号来源（当前为 `--chat-text-size`），不要在局部硬编码更小/更大的主文字字号导致视觉跳变。
 - `mica-code-app` 的 session 侧栏/Stats 扫描使用 `src/main/stats-scanner.js` 按 dev/ino/size/mtime/ctime 做文件级增量缓存；metadata 与完整 stats 投影分别懒加载，单文件变化只能重读对应文件，稳定结果需缓存排序/去重输出。不要退回“目录任一指纹变化就同步解析全部 session”的模式。
 - 打包桌面进程不会执行登录 shell/profile；`src/main/desktop-process-env.js` 在主进程启动时保留现有 PATH 顺序，并追加存在且可执行的用户工具目录、当前/最高可用 NVM/FNM Node bin 和常见系统目录，使 `npx` MCP、`rg`、Bun/Node 工具可被子进程找到。新增路径发现不能输出环境内容或把候选目录插到用户现有 PATH 前面。
 
