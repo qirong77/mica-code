@@ -228,6 +228,12 @@ export class ChatCompletionsClient extends BaseAgent<
         }
       }
 
+      // The OpenAI SDK swallows AbortError raised while waiting for the next
+      // chunk and ends the stream normally. Without this check the aborted
+      // request would be committed as an empty assistant message, which the
+      // provider rejects on the next request with a 400.
+      throwIfQueryStopped(options);
+
       const toolCalls =
         toolCallsMap.size > 0
           ? Array.from(toolCallsMap.values())
@@ -295,9 +301,9 @@ export class ChatCompletionsClient extends BaseAgent<
         await commitCompleteIteration(true);
       }
       if (!message.tool_calls || message.tool_calls.length === 0) {
-        messages.push(message);
+        if (content) messages.push(message);
         await commitCompleteIteration(false);
-        return totalContent || message.content || '';
+        return totalContent || content || '';
       }
     }
   }

@@ -176,4 +176,35 @@ describe('terminal response parsing', () => {
       }),
     ]);
   });
+
+  it.each([
+    { sequence: '\x1b\r', label: 'ESC CR (Alt+Enter)' },
+    { sequence: '\x1b\n', label: 'ESC LF (Alt+Enter)' },
+  ])('parses $label as a single meta+return key', ({ sequence }) => {
+    const keys = parse(sequence);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toEqual(
+      expect.objectContaining({
+        kind: 'key',
+        name: 'return',
+        meta: true,
+      }),
+    );
+  });
+
+  it('does not split Alt+Enter into Escape and Return keys', () => {
+    // 拆分会导致输入框被 escape 清空并误提交（回归防护）。
+    const keys = parse('\x1b\r');
+    expect(keys.map((k) => (k.kind === 'key' ? k.name : k.kind))).toEqual(['return']);
+  });
+
+  it('keeps a plain Enter as return without meta', () => {
+    expect(parse('\r')).toEqual([
+      expect.objectContaining({
+        kind: 'key',
+        name: 'return',
+        meta: false,
+      }),
+    ]);
+  });
 });

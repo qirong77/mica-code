@@ -782,9 +782,14 @@ function parseKeypress(s: string = ''): ParsedKey {
     return createNavKey(s, 'mouse', false);
   }
 
-  if (s === '\r') {
+  if (s === '\r' || s === '\x1b\r' || s === '\x1b\n') {
+    // Alt/Option+Enter arrives as ESC CR (ESC LF on some terminals). It must
+    // stay a single meta+return key: the generic "unknown ESC sequence"
+    // fallback in parseMultipleKeypresses would split it into Escape + Return
+    // (clearing the input and submitting whatever was typed).
     key.raw = undefined;
     key.name = 'return';
+    key.meta = s.length > 1;
   } else if (s === '\n') {
     key.name = 'enter';
   } else if (s === '\t') {

@@ -156,6 +156,13 @@ function tokenize(
           // Two-character escape sequence
           i++;
           emitSequence(data.slice(seqStart, i));
+        } else if (code === 0x0d || code === 0x0a) {
+          // Alt+Enter arrives as ESC CR (ESC LF on some terminals). Keep it
+          // as one sequence so parseKeypress can produce a single meta+return;
+          // splitting it here would emit Escape + Return (clearing the input
+          // and submitting whatever was typed).
+          i++;
+          emitSequence(data.slice(seqStart, i));
         } else if (code === C0.ESC) {
           // Double escape - emit first, start new
           emitSequence(data.slice(seqStart, i));

@@ -199,6 +199,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `AgentRuntime.run()` 在 abort 或 runId 过期时抛 `AgentAbortError`，并记录可裁剪 usage 的起止位置。
 - `LocalRuntimeController` abort 后使用 `committedResponseBuffers` 区分已经写入历史的文本和 live suffix，避免 retry/continue 后重复或丢失助手输出。
 - 如果不是 `/clear` 导致的中止，`agent.preserveAbortedTurn(content, partialAnswer)` 会决定是否把部分回复写回 provider history。
+- provider client 的流迭代结束后必须再检查一次 abort：OpenAI SDK 在等待下一个 chunk/event 时收到 AbortError 会静默结束流而不抛错，若不检查，被中止的请求会被提交成空 assistant 消息（`content: null` 且无 tool_calls），下一次请求直接 400 `Invalid assistant message: content or tool_calls must be set`。`ChatCompletionsClient` 和 `ResponsesClient` 都在 `for await` 结束后调用 `throwIfQueryStopped(options)`，并在 content 为空时跳过提交空 assistant 消息；修改这两个 client 的流循环时不要把该检查点删掉。
 - UI 展示的真相优先来自 `TerminalAgentSession.uiState.conversationMessages`，而不是重新从 provider history 推断。这个边界很重要，避免 abort/continue 后消息重复、错序或丢失。
 
 ## Provider、Prompt 与模型协议

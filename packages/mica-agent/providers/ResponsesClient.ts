@@ -285,6 +285,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         }
       }
 
+      // Same guard as ChatCompletionsClient: the SDK ends the stream normally
+      // when the request is aborted while waiting for the next event, so an
+      // aborted turn must not be committed as a partial/empty response.
+      throwIfQueryStopped(options);
+
       if (completedResponse?.usage) {
         this.recordUsage(completedResponse.usage, {
           model: completedResponse.model,
@@ -294,7 +299,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         });
       }
 
-      messages.push(...outputItems);
+      messages.push(...outputItems.filter((item) => !isEmptyResponseMessage(item)));
       const completedToolCalls = Array.from(toolCalls.values()).filter((toolCall) => toolCall.callId && toolCall.name);
 
       if (completedToolCalls.length === 0) {
@@ -444,6 +449,14 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
     default:
       return null;
   }
+}
+
+function isEmptyResponseMessage(item: ResponseInputItem): boolean {
+  return (
+    item.type === 'message' &&
+    item.role === 'assistant' &&
+    item.content.length === 0
+  );
 }
 
 function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInputItem[] {
