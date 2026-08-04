@@ -192,6 +192,7 @@ function readSessionMeta(sessionId) {
       (sum, usage) => sum + Math.max(0, Number(usage?.cachedInputTokens) || 0),
       0
     )
+    const lastUsage = snapshot.lastUsage || usageHistory.at(-1) || null
     return {
       providerId: snapshot.providerId || null,
       model: snapshot.model || null,
@@ -200,7 +201,7 @@ function readSessionMeta(sessionId) {
       cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
       protocol: protocolForProviderId(snapshot.providerId),
       contextWindowSize: Number(snapshot.contextWindowSize) || null,
-      lastUsage: snapshot.lastUsage || null,
+      lastUsage,
       cachedRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0,
       turnState: raw.turnState || 'completed',
       updatedAt: raw.updatedAt || null

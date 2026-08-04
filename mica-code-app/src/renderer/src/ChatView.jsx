@@ -681,6 +681,21 @@ function usageValues(usage) {
   return { total, input, output, cached }
 }
 
+function metaUsageFromStepTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object') return null
+  const total = tokens.total_tokens ?? tokens.totalTokens ?? tokens.total ?? null
+  const input = tokens.prompt_tokens ?? tokens.inputTokens ?? tokens.input ?? null
+  const output = tokens.completion_tokens ?? tokens.outputTokens ?? tokens.output ?? null
+  const cached = tokens.cachedInputTokens ?? tokens.cacheRead ?? tokens.cache?.read ?? null
+  if (total == null && input == null && output == null && cached == null) return null
+  return {
+    totalTokens: Number(total) || 0,
+    inputTokens: Number(input) || 0,
+    outputTokens: Number(output) || 0,
+    cachedInputTokens: Number(cached) || 0
+  }
+}
+
 function tokenCount(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return ''
@@ -1524,13 +1539,71 @@ export function ChatView({
         .meta(sessionId)
         .then((value) => {
           if (value && nodeIdRef.current === targetNodeId && sessionIdRef.current === sessionId) {
-            setMeta(value)
+            setMeta((previous) => {
+              const hasFreshUsage = Boolean(value.lastUsage)
+              return {
+                ...value,
+                contextWindowSize: value.contextWindowSize || previous?.contextWindowSize || null,
+                lastUsage: value.lastUsage || previous?.lastUsage || null,
+                cachedRate: hasFreshUsage ? value.cachedRate || 0 : previous?.cachedRate || 0
+              }
+            })
           }
         })
         .catch(() => {})
     },
     [nodeIdRef]
   )
+
+  const refreshMetaSoon = useCallback(
+    (sessionId = sessionIdRef.current) => {
+      if (!sessionId) return
+      refreshMeta(sessionId)
+      for (const delay of [250, 1000, 2500]) {
+        window.setTimeout(() => refreshMeta(sessionId), delay)
+      }
+    },
+    [refreshMeta]
+  )
+
+  const applyLiveUsageMeta = useCallback((tokens) => {
+    const usage = metaUsageFromStepTokens(tokens)
+    if (!usage) return
+    setMeta((previous) => {
+      const cachedRate =
+        usage.inputTokens > 0
+          ? usage.cachedInputTokens / usage.inputTokens
+          : previous?.cachedRate || 0
+      return {
+        ...(previous || {}),
+        lastUsage: usage,
+        cachedRate,
+        turnState: 'completed',
+        updatedAt: new Date().toISOString()
+      }
+    })
+  }, [])
+
+  const applyCompactMeta = useCallback((result) => {
+    const totalTokens = Number(result?.afterTokenEstimate) || 0
+    if (totalTokens <= 0 && !result?.contextWindowSize) return
+    setMeta((previous) => ({
+      ...(previous || {}),
+      contextWindowSize: Number(result?.contextWindowSize) || previous?.contextWindowSize || null,
+      lastUsage:
+        totalTokens > 0
+          ? {
+              totalTokens,
+              inputTokens: totalTokens,
+              outputTokens: 0,
+              cachedInputTokens: 0
+            }
+          : previous?.lastUsage || null,
+      cachedRate: previous?.cachedRate || 0,
+      turnState: 'completed',
+      updatedAt: new Date().toISOString()
+    }))
+  }, [])
 
   const applyEvent = useCallback(
     (event) => {
@@ -1618,6 +1691,7 @@ export function ChatView({
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
           const usage = event.part?.tokens
           if (usage) {
+            applyLiveUsageMeta(usage)
             const turnId = turnRef.current
             updateMessages((previous) => {
               const index = previous.findLastIndex(
@@ -1646,7 +1720,7 @@ export function ChatView({
           setRunning(false)
           setStopping(false)
           setPhase(event.part?.reason === 'error' ? 'error' : 'idle')
-          if (event.sessionID) refreshMeta(event.sessionID)
+          if (event.sessionID) refreshMetaSoon(event.sessionID)
           break
         }
       }
@@ -1658,7 +1732,8 @@ export function ChatView({
       finishStream,
       nodeIdRef,
       onSessionBoundRef,
-      refreshMeta,
+      applyLiveUsageMeta,
+      refreshMetaSoon,
       updateMessages
     ]
   )
@@ -1681,11 +1756,10 @@ export function ChatView({
       setStopping(false)
       setPhase('idle')
       if (payload?.sessionId) {
-        refreshMeta(payload.sessionId)
-        window.setTimeout(() => refreshMeta(payload.sessionId), 250)
+        refreshMetaSoon(payload.sessionId)
       }
     },
-    [appendNotice, finishPendingTools, finishStream, refreshMeta]
+    [appendNotice, finishPendingTools, finishStream, refreshMetaSoon]
   )
   const processExitRef = useLatest(processExit)
 
@@ -2425,7 +2499,8 @@ export function ChatView({
               `- Recent kept: ${Number(result.keptCount) || 0} messages`,
               `- Context after compact: ${contextAfter}`
             ].join('\n')
-            refreshMeta(targetSessionId)
+            applyCompactMeta(result)
+            refreshMetaSoon(targetSessionId)
             const rows = await window.mica.chat.history(targetSessionId).catch(() => [])
             if (isCurrentNode() && sessionIdRef.current === targetSessionId) {
               updateMessages([
@@ -2520,6 +2595,7 @@ export function ChatView({
     },
     [
       applyOverride,
+      applyCompactMeta,
       appendCommandResult,
       appendNotice,
       cwdRef,
@@ -2531,7 +2607,7 @@ export function ChatView({
       onSessionRenamedRef,
       openPicker,
       phase,
-      refreshMeta,
+      refreshMetaSoon,
       rememberInput,
       running,
       todoHidden,
