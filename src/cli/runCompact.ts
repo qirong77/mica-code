@@ -24,9 +24,14 @@ export type CompactCliResult = {
   strategy?: string;
   beforeCount?: number;
   afterCount?: number;
+  summarizedCount?: number;
+  keptCount?: number;
   beforeTokenEstimate?: number;
   afterTokenEstimate?: number;
+  savedTokenEstimate?: number;
   savedRatio?: number;
+  contextWindowSize?: number;
+  contextUsageRatio?: number;
   summary?: string;
 };
 
@@ -98,11 +103,8 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         force: options.pruneOnly === true || options.force === true,
         pruneOnly: options.pruneOnly === true,
         lightweightPrune: options.pruneOnly === true,
-        ...(options.pruneOnly
-          ? snapshot.contextWindowSize
-            ? { contextWindowSize: snapshot.contextWindowSize }
-            : {}
-          : { contextWindowSize: micaConfig.getModelRule(agent.config.model).contextSize }),
+        contextWindowSize:
+          snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
       },
       summarize: async (transcript, prompt) => {
         if (!agent) throw new Error('Agent is not available for summarization');
@@ -119,9 +121,14 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         strategy: result.strategy,
         beforeCount: result.beforeCount,
         afterCount: result.afterCount,
+        summarizedCount: result.summarizedCount,
+        keptCount: result.keptCount,
         beforeTokenEstimate: result.beforeTokenEstimate,
         afterTokenEstimate: result.afterTokenEstimate,
+        savedTokenEstimate: result.savedTokenEstimate,
         savedRatio: result.savedRatio,
+        contextWindowSize: result.contextWindowSize,
+        contextUsageRatio: result.contextUsageRatio,
         summary: result.summary,
       };
     }
@@ -171,9 +178,14 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       strategy: result.strategy,
       beforeCount: result.beforeCount,
       afterCount: result.afterCount,
+      summarizedCount: result.summarizedCount,
+      keptCount: result.keptCount,
       beforeTokenEstimate: result.beforeTokenEstimate,
       afterTokenEstimate: result.afterTokenEstimate,
+      savedTokenEstimate: result.savedTokenEstimate,
       savedRatio: result.savedRatio,
+      contextWindowSize: result.contextWindowSize,
+      contextUsageRatio: result.contextUsageRatio,
       summary: result.summary,
     };
   } catch (error) {

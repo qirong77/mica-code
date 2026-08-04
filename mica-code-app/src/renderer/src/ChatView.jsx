@@ -1532,7 +1532,7 @@ export function ChatView({
   )
 
   const refreshMeta = useCallback(
-    (sessionId = sessionIdRef.current) => {
+    (sessionId = sessionIdRef.current, options = {}) => {
       if (!sessionId) return
       const targetNodeId = nodeIdRef.current
       window.mica.chat
@@ -1541,10 +1541,18 @@ export function ChatView({
           if (value && nodeIdRef.current === targetNodeId && sessionIdRef.current === sessionId) {
             setMeta((previous) => {
               const hasFreshUsage = Boolean(value.lastUsage)
+              // 快速压缩会保留会话快照里的 lastUsage（供 Stats 对账），磁盘上的
+              // 值仍是压缩前的上下文占用。keepLiveUsage 让压缩结果继续显示在
+              // 输入框右下角，直到下一次真实 turn 的用量事件刷新它。
+              const keepLiveUsage = options.keepLiveUsage === true
               return {
                 ...value,
-                contextWindowSize: value.contextWindowSize || previous?.contextWindowSize || null,
-                lastUsage: value.lastUsage || previous?.lastUsage || null,
+                contextWindowSize: keepLiveUsage
+                  ? previous?.contextWindowSize || value.contextWindowSize || null
+                  : value.contextWindowSize || previous?.contextWindowSize || null,
+                lastUsage: keepLiveUsage
+                  ? previous?.lastUsage || value.lastUsage || null
+                  : value.lastUsage || previous?.lastUsage || null,
                 cachedRate: hasFreshUsage ? value.cachedRate || 0 : previous?.cachedRate || 0
               }
             })
@@ -1556,11 +1564,11 @@ export function ChatView({
   )
 
   const refreshMetaSoon = useCallback(
-    (sessionId = sessionIdRef.current) => {
+    (sessionId = sessionIdRef.current, options) => {
       if (!sessionId) return
-      refreshMeta(sessionId)
+      refreshMeta(sessionId, options)
       for (const delay of [250, 1000, 2500]) {
-        window.setTimeout(() => refreshMeta(sessionId), delay)
+        window.setTimeout(() => refreshMeta(sessionId, options), delay)
       }
     },
     [refreshMeta]
@@ -2500,7 +2508,7 @@ export function ChatView({
               `- Context after compact: ${contextAfter}`
             ].join('\n')
             applyCompactMeta(result)
-            refreshMetaSoon(targetSessionId)
+            refreshMetaSoon(targetSessionId, { keepLiveUsage: true })
             const rows = await window.mica.chat.history(targetSessionId).catch(() => [])
             if (isCurrentNode() && sessionIdRef.current === targetSessionId) {
               updateMessages([

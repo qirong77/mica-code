@@ -79,7 +79,7 @@ mica run --format json [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [
 mica compact --session <id> [--dir <cwd>] [--force]
 ```
 
-`mica compact` 复用交互式 `/compact` 的 `CompactionService`（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计与 `savedRatio`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
+`mica compact` 复用交互式 `/compact` 的 `CompactionService`（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
 
 ## 远程会话同步（Mica Sync）
 
