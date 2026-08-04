@@ -196,6 +196,7 @@ body.is-resizing.is-resizing-terminal {
   --chat-user: #373737;
   --chat-accent: #d77757;
   --chat-thinking: #c9a227;
+  --chat-row-marker-width: 18px;
   --chat-text-size: 13px;
   --chat-font:
     'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'PingFang SC',
@@ -261,7 +262,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-message {
   position: relative;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 22px;
+  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) 22px;
   width: 100%;
   min-width: 0;
   margin-top: 15px;
@@ -295,7 +296,8 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-message-user .chat-message-marker {
-  margin-left: -4px;
+  /* Keep the user marker on the same inset as Notice and assistant rows. */
+  margin-left: 4px;
   color: #9d9d9d;
 }
 
@@ -347,7 +349,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-notice {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr);
   margin-top: 10px;
   padding-block: 5px;
   background: #211f17;
@@ -1069,7 +1071,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-command-result {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) auto;
   gap: 0;
   margin: 10px 0 0;
   padding: 5px 0;
@@ -1675,8 +1677,13 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-status-ctx,
-.chat-status-token-delta {
+.chat-status-token-delta,
+.chat-status-elapsed {
   color: inherit;
+}
+
+.chat-status-elapsed {
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-status-tokens {

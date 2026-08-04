@@ -1339,6 +1339,43 @@ export function canReuseVisualTranscript(cached, persisted) {
   )
 }
 
+export function activateQueuedMessage(messages, queuedMessageId) {
+  if (!queuedMessageId) return messages
+  const index = messages.findIndex((message) => message.id === queuedMessageId)
+  if (index < 0) return messages
+  const queuedMessage = messages[index]
+  return [
+    ...messages.slice(0, index),
+    ...messages.slice(index + 1),
+    { ...queuedMessage, queued: false }
+  ]
+}
+
+export function switchChatDraft(drafts, previousNodeId, nextNodeId, currentInput) {
+  if (previousNodeId === nextNodeId) return currentInput
+  if (previousNodeId) drafts.set(previousNodeId, currentInput)
+  return drafts.get(nextNodeId) || ''
+}
+
+// 输入框历史浏览：direction < 0 为 ArrowUp（往旧），> 0 为 ArrowDown（往新）。
+// cursor 为 -1 表示处于 draft 模式（未发送输入），>= 0 时直接索引 history（最新在末尾）。
+// draft 只在首次 ArrowUp 进入历史时保存一次，浏览过程中不允许覆盖；
+// 回到 draft 模式（cursor 回到 -1）时恢复原始输入。返回 null 表示无变化。
+export function navigateChatHistory(drafts, history, cursorRef, direction, currentInput, nodeId) {
+  if (!history.length) return null
+  let cursor = cursorRef.current
+  if (direction < 0) {
+    if (cursor < 0) drafts.set(nodeId, currentInput)
+    cursor = cursor < 0 ? history.length - 1 : Math.max(0, cursor - 1)
+  } else {
+    if (cursor < 0) return null
+    cursor = Math.min(history.length, cursor + 1)
+  }
+  const nextCursor = cursor === history.length ? -1 : cursor
+  cursorRef.current = nextCursor
+  return nextCursor < 0 ? drafts.get(nodeId) || '' : history[nextCursor]
+}
+
 export function ChatView({
   node,
   cwd,
@@ -1380,6 +1417,7 @@ export function ChatView({
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
+  const inputRef = useLatest(input)
   const [inputFocused, setInputFocused] = useState(false)
   const [terminalCursor, setTerminalCursor] = useState(null)
   const [windowFocused, setWindowFocused] = useState(() => document.hasFocus())
@@ -1622,11 +1660,7 @@ export function ChatView({
         case 'step_start': {
           const queuedMessageId = queuedMessageIdsRef.current.shift()
           if (queuedMessageId) {
-            updateMessages((previous) =>
-              previous.map((message) =>
-                message.id === queuedMessageId ? { ...message, queued: false } : message
-              )
-            )
+            updateMessages((previous) => activateQueuedMessage(previous, queuedMessageId))
           }
           if (event.sessionID && !sessionIdRef.current) {
             sessionIdRef.current = event.sessionID
@@ -1807,6 +1841,7 @@ export function ChatView({
     if (previousNodeId && previousNodeId !== nodeId && messagesRef.current.length > 0) {
       transcriptCacheRef.current.set(previousNodeId, messagesRef.current)
     }
+    const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     loadedNodeRef.current = nodeId
     const cachedTranscript = transcriptCacheRef.current.get(nodeId)
     const generation = ++restoreGenerationRef.current
@@ -1816,7 +1851,7 @@ export function ChatView({
     stickToBottomRef.current = true
     setShowJump(false)
     updateMessages([])
-    setInput(draftsRef.current.get(nodeId) || '')
+    setInput(nextInput)
     setTodoHidden(todoHiddenRef.current.get(nodeId) === true)
     setPicker(null)
     setPickerIndex(0)
@@ -1978,6 +2013,7 @@ export function ChatView({
     appendNotice,
     applyEventRef,
     finishPendingTools,
+    inputRef,
     nodeId,
     nodeIdRef,
     cwd,
@@ -2742,25 +2778,22 @@ export function ChatView({
   const navigateInputHistory = useCallback(
     (direction) => {
       const history = inputHistoryRef.current.get(nodeId) || []
-      if (!history.length) return
-      let cursor = historyCursorRef.current
-      if (direction < 0) {
-        if (cursor < 0) draftsRef.current.set(nodeId, input)
-        cursor = cursor < 0 ? history.length - 1 : Math.max(0, cursor - 1)
-      } else cursor = cursor < 0 ? -1 : Math.min(history.length, cursor + 1)
-      historyCursorRef.current = cursor === history.length ? -1 : cursor
-      const value =
-        historyCursorRef.current < 0
-          ? draftsRef.current.get(nodeId) || ''
-          : history[historyCursorRef.current]
-      draftsRef.current.set(nodeId, value)
+      const value = navigateChatHistory(
+        draftsRef.current,
+        history,
+        historyCursorRef,
+        direction,
+        inputRef.current,
+        nodeId
+      )
+      if (value === null) return
       setInput(value)
       requestAnimationFrame(() => {
         const element = textareaRef.current
         if (element) element.setSelectionRange(value.length, value.length)
       })
     },
-    [input, nodeId]
+    [nodeId]
   )
 
   const showEmpty = historyLoaded && !running && messages.length === 0
@@ -3075,7 +3108,6 @@ export function ChatView({
           <>
             <LoaderCircle size={11} className="animate-spin" />
             <span>{statusLabel(phase, runningToolNames)}</span>
-            {elapsed > 0 && <span>{formatDuration(elapsed)}</span>}
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
@@ -3121,6 +3153,11 @@ export function ChatView({
             )}
             <span className="chat-status-cached">)</span>
           </>
+        )}
+        {running && (
+          <span className="chat-status-elapsed" title="本次任务总运行时间">
+            {formatLogElapsed(elapsed)}
+          </span>
         )}
       </div>
     </div>
@@ -3348,12 +3385,12 @@ export function ChatView({
                   void recallQueued()
                   return
                 }
-                if (event.altKey && event.key === 'ArrowUp') {
+                if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   navigateInputHistory(-1)
                   return
                 }
-                if (event.altKey && event.key === 'ArrowDown') {
+                if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   navigateInputHistory(1)
                   return
@@ -3363,6 +3400,7 @@ export function ChatView({
                   !event.shiftKey &&
                   !event.ctrlKey &&
                   !event.metaKey &&
+                  !event.nativeEvent.isComposing &&
                   event.currentTarget.selectionStart === 0 &&
                   event.currentTarget.selectionEnd === 0
                 ) {
@@ -3375,6 +3413,7 @@ export function ChatView({
                   !event.shiftKey &&
                   !event.ctrlKey &&
                   !event.metaKey &&
+                  !event.nativeEvent.isComposing &&
                   event.currentTarget.selectionStart === event.currentTarget.value.length &&
                   event.currentTarget.selectionEnd === event.currentTarget.value.length
                 ) {
