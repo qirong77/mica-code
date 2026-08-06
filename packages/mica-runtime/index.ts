@@ -23,6 +23,7 @@ export type {
   RuntimeOwner,
   RuntimePluginQueue,
   RuntimeTurnAfterHookEvent,
+  TurnOutcome,
 } from './PluginRuntime.js';
 export type {
   RewindApplyRequest,

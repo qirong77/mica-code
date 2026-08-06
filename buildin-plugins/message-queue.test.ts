@@ -96,6 +96,7 @@ describe('message-queue', () => {
       input: micaRuntime.createRuntimeInput('current turn'),
       elapsedMs: 10,
       hasError: false,
+      outcome: 'completed',
     });
 
     expect(harness.queue.dequeue).toHaveBeenCalledWith(owner);

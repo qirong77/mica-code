@@ -19,6 +19,7 @@ import {
   type RewindPreviewResult,
   type SubmitOptions,
   type SubmitResult,
+  type TurnOutcome,
 } from '@packages/mica-runtime/index.js';
 import type { RewindApplyRequest, RewindCheckpointSummary } from '@packages/mica-runtime/Rewind.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
@@ -786,7 +787,14 @@ export class LocalRuntimeController implements RuntimeController {
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       this.hookAgent = agent;
       try {
-        await this.hooks.emit<RuntimeTurnAfterHookEvent>('turn:after', { input, elapsedMs, hasError, owner: agent });
+        const outcome: TurnOutcome = wasAborted ? 'aborted' : hasError ? 'error' : 'completed';
+        await this.hooks.emit<RuntimeTurnAfterHookEvent>('turn:after', {
+          input,
+          elapsedMs,
+          hasError,
+          outcome,
+          owner: agent,
+        });
       } finally {
         this.hookAgent = null;
       }

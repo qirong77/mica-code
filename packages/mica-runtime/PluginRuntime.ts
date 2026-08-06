@@ -20,5 +20,8 @@ export type RuntimeTurnAfterHookEvent = {
   input: RuntimeInput;
   elapsedMs: number;
   hasError: boolean;
+  outcome: TurnOutcome;
   owner: RuntimeOwner;
 };
+
+export type TurnOutcome = 'completed' | 'aborted' | 'error';

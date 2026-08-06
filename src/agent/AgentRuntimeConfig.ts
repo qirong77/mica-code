@@ -52,8 +52,7 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
   if (!provider) {
     // 会话引用的 provider 已从配置移除（旧配置/重命名/迁移）。降级到当前
     // 默认 provider 恢复会话，而不是让整个会话变成 "Session not found"。
-    const fallback =
-      config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+    const fallback = config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
     if (fallback) {
       const model = fallback.models?.includes(snapshot.model)
         ? snapshot.model
@@ -61,29 +60,27 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
       return {
         provider: normalizeProviderForModel(fallback, model),
         model,
-        effort:
-          fallback.supportsEffort === false
-            ? 'none'
-            : micaConfig.normalizeModelEffort(model, snapshot.effort),
+        effort: fallback.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
       };
     }
     throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
   }
   if (provider.protocol !== snapshot.protocol) {
-    // provider 存在但协议已迁移，同样降级到默认 provider 而不是拒绝恢复。
-    const fallback =
-      config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
-    if (fallback && fallback.id !== provider.id) {
+    // provider 存在但协议已迁移（例如 krill 从 chat_completions 升级到
+    // responses）：同 provider 的协议变化也降级恢复（保持 model/effort），
+    // 而不是 throw——否则迁移前的旧会话每次 resume 都会崩溃，app-server
+    // 直接 exit(1) 显示 "mica 进程已退出（code 1）"。
+    const fallback = config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+    if (fallback) {
       const model = fallback.models?.includes(snapshot.model)
         ? snapshot.model
-        : (fallback.models?.[0] ?? config.model ?? '');
+        : fallback.id === provider.id
+          ? snapshot.model
+          : (fallback.models?.[0] ?? config.model ?? '');
       return {
         provider: normalizeProviderForModel(fallback, model),
         model,
-        effort:
-          fallback.supportsEffort === false
-            ? 'none'
-            : micaConfig.normalizeModelEffort(model, snapshot.effort),
+        effort: fallback.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
       };
     }
     throw new Error(`Session protocol mismatch: ${snapshot.protocol} -> ${provider.protocol}`);

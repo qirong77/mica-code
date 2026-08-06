@@ -402,6 +402,273 @@ function ImagePreviewModal({ source, alt, onClose }) {
   )
 }
 
+const CTX_ROLE_STYLE = {
+  user: 'bg-[#232a3a] text-[#9fb4e8]',
+  assistant: 'bg-[#2a2a2a] text-[#eaeaea]',
+  tool: 'bg-[#1e2e26] text-[#7fc79a]',
+  system: 'bg-[#2a2333] text-[#c4a0e8]'
+}
+const CTX_ROLE_LABEL = {
+  user: 'User',
+  assistant: 'Assistant',
+  tool: 'Tool',
+  system: 'System'
+}
+
+function ctxMessageTokens(message) {
+  let text = ''
+  if (typeof message.content === 'string') text = message.content
+  if (Array.isArray(message.toolCalls)) {
+    for (const tc of message.toolCalls) {
+      text += (tc.name || '') + (tc.arguments || '')
+    }
+  }
+  return estimateTokens(text)
+}
+
+function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
+  const [detail, setDetail] = useState(null)
+  const [error, setError] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+
+  useEffect(() => {
+    const onKeyDown = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!sessionId) {
+      setError('No active session')
+      return
+    }
+    window.mica.stats
+      .sessionDetail(sessionId)
+      .then((data) => {
+        if (cancelled) return
+        setDetail(data)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(String(err?.message || err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  const win = contextWindowSize || 0
+  const allMessages = detail?.messages || []
+  const lastUsage = detail?.lastUsage || null
+  const totalInputTokens = lastUsage?.inputTokens || 0
+
+  const items = useMemo(() => {
+    const result = []
+    let msgTokenSum = 0
+    for (const msg of allMessages) {
+      const tokens = ctxMessageTokens(msg)
+      msgTokenSum += tokens
+      const role = msg.role || 'assistant'
+      let label = CTX_ROLE_LABEL[role] || role
+      let detail_label = ''
+      if (role === 'tool' && msg.toolCallId) {
+        detail_label = msg.toolCallId
+      } else if (role === 'assistant' && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0) {
+        detail_label = msg.toolCalls.map((tc) => tc.name).filter(Boolean).join(', ')
+      }
+      result.push({
+        id: `msg-${result.length}`,
+        type: 'message',
+        role,
+        label,
+        detail_label,
+        tokens,
+        message: msg
+      })
+    }
+    const overhead = Math.max(0, totalInputTokens - msgTokenSum)
+    return { result, msgTokenSum, overhead }
+  }, [allMessages, totalInputTokens])
+
+  const breakdown = useMemo(() => {
+    const list = []
+    if (items.overhead > 0) {
+      list.push({
+        id: 'system-prompt',
+        type: 'overhead',
+        label: '系统提示词 + 工具定义',
+        detail_label: `role: ${detail?.role || 'default'}`,
+        tokens: items.overhead,
+        note: '运行时构建，未持久化；包含 system prompt、AGENT.md、skills 索引、工具 schema 等'
+      })
+    }
+    for (const it of items.result) {
+      list.push(it)
+    }
+    return list
+  }, [items, detail])
+
+  const grandTotal = breakdown.reduce((s, it) => s + it.tokens, 0)
+  const maxTokens = Math.max(grandTotal, totalInputTokens, 1)
+
+  return (
+    <div
+      className="chat-ctx-modal-overlay no-drag"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div className="chat-ctx-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="chat-ctx-modal-header">
+          <span>Context Breakdown</span>
+          <button type="button" onClick={onClose} aria-label="关闭">
+            Esc ✕
+          </button>
+        </div>
+        <div className="chat-ctx-modal-body thin-scrollbar">
+          {error ? (
+            <div className="chat-ctx-modal-empty">{error}</div>
+          ) : !detail ? (
+            <div className="chat-ctx-modal-empty">加载中…</div>
+          ) : (
+            <>
+              <div className="chat-ctx-modal-summary">
+                <span>{breakdown.length} items</span>
+                <span className="chat-ctx-modal-sep">·</span>
+                <span className="tabular-nums">
+                  est. {formatTokens(grandTotal)} tokens
+                </span>
+                {totalInputTokens > 0 && (
+                  <>
+                    <span className="chat-ctx-modal-sep">·</span>
+                    <span className="tabular-nums">
+                      last req {formatTokens(totalInputTokens)} in
+                    </span>
+                  </>
+                )}
+                {win > 0 && (
+                  <>
+                    <span className="chat-ctx-modal-sep">·</span>
+                    <span className="tabular-nums">
+                      ctx win {formatTokens(win)}
+                    </span>
+                  </>
+                )}
+              </div>
+              {breakdown.length === 0 ? (
+                <div className="chat-ctx-modal-empty">无上下文数据</div>
+              ) : (
+                breakdown.map((it, i) => {
+                  const pct = Math.min(
+                    100,
+                    Math.round((it.tokens / maxTokens) * 100)
+                  )
+                  const isExpanded = expandedId === it.id
+                  const isOverhead = it.type === 'overhead'
+                  return (
+                    <div key={it.id} className="chat-ctx-modal-row-wrap">
+                      <button
+                        type="button"
+                        className={`chat-ctx-modal-row ${isExpanded ? 'expanded' : ''}`}
+                        onClick={() => setExpandedId(isExpanded ? null : it.id)}
+                      >
+                        {pct > 0 && (
+                          <span
+                            className="chat-ctx-modal-bar"
+                            style={{
+                              width: `${pct}%`,
+                              background: `rgba(255,255,255,${0.03 + Math.min(0.07, (pct / 100) * 0.07)})`
+                            }}
+                          />
+                        )}
+                        <span
+                          className={`chat-ctx-modal-badge ${CTX_ROLE_STYLE[it.role || (isOverhead ? 'system' : 'assistant')] || ''}`}
+                        >
+                          {it.label}
+                        </span>
+                        {it.detail_label && (
+                          <span className="chat-ctx-modal-row-detail" title={it.detail_label}>
+                            {it.detail_label}
+                          </span>
+                        )}
+                        <span className="chat-ctx-modal-tokens tabular-nums">
+                          ~{formatTokens(it.tokens)}
+                        </span>
+                        <span className="chat-ctx-modal-pct tabular-nums">
+                          {pct}%
+                        </span>
+                        <span className="chat-ctx-modal-chevron">
+                          {isExpanded ? '▾' : '▸'}
+                        </span>
+                      </button>
+                      {isExpanded && (
+                        <div className="chat-ctx-modal-detail">
+                          {isOverhead ? (
+                            <div className="chat-ctx-modal-detail-note">
+                              {it.note}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="chat-ctx-modal-detail-meta">
+                                <span>Role</span>
+                                <span>{it.role}</span>
+                                <span>Est. tokens</span>
+                                <span className="tabular-nums">
+                                  {it.tokens.toLocaleString()}
+                                </span>
+                                <span>Share</span>
+                                <span className="tabular-nums">{pct}%</span>
+                              </div>
+                              {it.message.content && (
+                                <div className="chat-ctx-modal-detail-content">
+                                  <div className="chat-ctx-modal-detail-content-label">
+                                    Content
+                                  </div>
+                                  <pre className="chat-ctx-modal-detail-pre">
+                                    {it.message.content}
+                                  </pre>
+                                </div>
+                              )}
+                              {Array.isArray(it.message.toolCalls) &&
+                                it.message.toolCalls.length > 0 && (
+                                  <div className="chat-ctx-modal-detail-content">
+                                    <div className="chat-ctx-modal-detail-content-label">
+                                      Tool Calls ({it.message.toolCalls.length})
+                                    </div>
+                                    {it.message.toolCalls.map((tc, j) => (
+                                      <div
+                                        key={tc.id || j}
+                                        className="chat-ctx-modal-detail-tc"
+                                      >
+                                        <div className="chat-ctx-modal-detail-tc-name">
+                                          {tc.name || 'tool_call'}
+                                        </div>
+                                        {tc.arguments && (
+                                          <pre className="chat-ctx-modal-detail-pre">
+                                            {tc.arguments}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function chatUrlTransform(url) {
   if (!url) return ''
   if (
@@ -1449,6 +1716,7 @@ export function ChatView({
   const [pickerIndex, setPickerIndex] = useState(0)
   const [contextMenu, setContextMenu] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
+  const [contextDetail, setContextDetail] = useState(false)
   const [commitRunning, setCommitRunning] = useState(false)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
   const commitNoticeTextRef = useRef('')
@@ -3156,7 +3424,13 @@ export function ChatView({
           </span>
         )}
         {hasContext && (
-          <>
+          <span
+            className="chat-status-context-trigger"
+            role="button"
+            tabIndex={0}
+            title="点击查看上下文使用详情"
+            onClick={() => setContextDetail(true)}
+          >
             <span className={`chat-status-tokens ${tokenClass}`}>{tokenStr}</span>
             <span className="chat-status-cached"> (cached {cachedPct}%, </span>
             {hasContextWindow ? (
@@ -3167,7 +3441,7 @@ export function ChatView({
               </span>
             )}
             <span className="chat-status-cached">)</span>
-          </>
+          </span>
         )}
         {running && (
           <span className="chat-status-elapsed" title="本次任务总运行时间">
@@ -3510,6 +3784,13 @@ export function ChatView({
         )}
         {statusLine}
       </div>
+      {contextDetail && (
+        <ContextDetailPopover
+          sessionId={sessionIdRef.current}
+          contextWindowSize={windowSize}
+          onClose={() => setContextDetail(false)}
+        />
+      )}
       {contextMenu && (
         <ChatContextMenu
           menu={contextMenu}

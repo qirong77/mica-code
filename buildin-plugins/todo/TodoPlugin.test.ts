@@ -143,7 +143,7 @@ describe('TodoPlugin', () => {
     }
   });
 
-  it('returns a stale in-progress item to pending when the turn ends', async () => {
+  it('marks a stale in-progress item completed when the turn finishes successfully', async () => {
     const harness = createTodoHarness(disposeCallbacks);
     const owner = setCurrentTodoOwner('owner-a');
 
@@ -152,11 +152,12 @@ describe('TodoPlugin', () => {
       input: micaRuntime.createRuntimeInput('test', 'ui'),
       elapsedMs: 10,
       hasError: false,
+      outcome: 'completed',
       owner,
     });
     await harness.commands.execute('/todo show');
 
-    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 1 completed, 0 pending.');
   });
 
   it('settles errored and aborted turns without claiming completion', async () => {
@@ -168,13 +169,20 @@ describe('TodoPlugin', () => {
       input: micaRuntime.createRuntimeInput('error', 'ui'),
       elapsedMs: 10,
       hasError: true,
+      outcome: 'error',
       owner,
     });
     await harness.commands.execute('/todo show');
     expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
 
     await writeTodoForOwner(owner, 'Retry work', 'Retrying work');
-    harness.events.publish({ type: 'turn:aborted', input: micaRuntime.createRuntimeInput('abort', 'ui'), owner });
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('abort', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'aborted',
+      owner,
+    });
     await harness.commands.execute('/todo show');
     expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
   });
@@ -195,6 +203,7 @@ describe('TodoPlugin', () => {
       input: micaRuntime.createRuntimeInput('background', 'ui'),
       elapsedMs: 10,
       hasError: false,
+      outcome: 'completed',
       owner: ownerB,
     });
     await harness.commands.execute('/todo show');
@@ -204,7 +213,7 @@ describe('TodoPlugin', () => {
 
     setCurrentTodoOwner('owner-b');
     await harness.commands.execute('/todo show');
-    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 0 completed, 1 pending.');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 1 completed, 0 pending.');
   });
 
   it('drops todo state when a top-level agent session is disposed', async () => {

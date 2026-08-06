@@ -157,6 +157,7 @@ temp/                              临时代码和外部实验，默认不参与
 - 多 agent 场景下，命令不能假定构造时传入的 `agent` 永远是当前 agent。命令插件使用 `createActiveAgentProxy` 和 `createActiveSessionControllerProxy` 解决这个问题。
 - provider/model/effort 切换前，要先同步当前 agent 的 config，再打开选择器；切换后要 `agent.reloadConfig(false)`、保存 session、同步 UI。role 切换同样需要 busy guard 和保存 session，但只重建 client 并保留当前历史。
 - 跨协议切换（`openai_chat_completions` ↔ `openai_responses`）在 `applyConfigSwitchUpdate` 中被阻止并提示：新协议 client 无法携带旧会话历史，行为与 `configureForRun` 的跨协议 resume 检查一致；空会话允许自由切换。不要绕过该检查去 `reloadConfig(false)` 静默丢历史。
+- **恢复旧会话的协议降级**：`agentRuntimeConfigFromSnapshot` 遇到 `provider.protocol !== snapshot.protocol`（例如 krill 从 chat_completions 升级到 responses 后恢复旧协议会话）时，同 provider 或默认 provider 都**降级恢复**（保持 model/effort、用当前 provider 协议），而不是 throw——否则迁移前的旧会话每次 resume 都会崩溃，app-server 直接 exit(1) 显示"mica 进程已退出（code 1）"无原因。
 
 ## Runtime Turn Loop
 
@@ -176,7 +177,7 @@ temp/                              临时代码和外部实验，默认不参与
 10. turn 开始先以 `running` 状态保存；每次工具 iteration 完成后继续保存可恢复 checkpoint；整个 turn 成功后再把 response buffer 或 final text 写入 assistant message，触发 `turn:beforePersist`，并以 `completed` 保存最终快照。abort 和最终错误分别保存为 `aborted`、`error`，非 `completed` 会话在 `/resume` 中标记为 `（uncompleted）`。
 11. 失败时按 retry 策略处理；不可重试或重试耗尽后写入 error UI 状态。
 12. abort 时保留已经展示的部分回复，裁剪 aborted run 的 usage，并保存可用的中止后会话状态。
-13. finally 中释放 running 状态，触发 `turn:after`，然后 message queue 插件可以提交 `after_turn` 排队输入。
+13. finally 中释放 running 状态，触发携带 `outcome`（`completed`/`aborted`/`error`，由 `wasAborted`/`hasError` 推导）的 `turn:after`，然后 message queue 插件可以提交 `after_turn` 排队输入。内置 Todo 插件据此收尾：`completed` 把仍 `in_progress` 的项标为 `completed`（全部完成后列表自动收起），`aborted`/`error` 才降级为 `pending`（保守，不声称完成）。
 
 ### Queue 语义
 
@@ -280,6 +281,7 @@ temp/                              临时代码和外部实验，默认不参与
 - 协议实现位于 `packages/mica-runtime/codexProtocol.ts`（framing/编解码）与 `src/runtime/CodexProjector.ts`（AgentRuntime 事件 → `turn/started`/`turn/completed`/`item/agentMessage/delta`/`item/reasoning/textDelta`/`item/commandExecution/outputDelta`/`item/started`/`item/completed`/`thread/tokenUsage/updated` 通知）。`turn/start` 立即返回 `{turn:{id,status:"inProgress"}}` 后异步执行；`turn/steer`（带 `expectedTurnId`）把输入注入活跃 turn 的 after_iteration 队列；`turn/interrupt` 中止。这是 Codex App Server 协议子集，未来任何理解该协议的客户端（IDE 插件等）可直接驱动 mica。
 - `mica exec`（`src/cli/runExec.ts`）是一次性 headless 执行，对齐 `codex exec`：默认人类可读文本，`--json` 输出 ThreadEvent JSONL（`packages/mica-runtime/codexExecEvents.ts` 定义类型，`src/runtime/CodexExecProjector.ts` 投影）。生命周期与 `mica app-server` 一致（MCP init、session 落盘、subagent 清理）。
 - `mica-code-app` 的 chat 主进程（`mica-code-app/src/main/chat.js`）每 chat 节点维护一个常驻 `app-server` 子进程：`chat:start` 在空闲时发 `turn/start`、忙时 Shift+Tab 发 `turn/steer`（after_iteration 注入）、忙时 Tab 在本地 `queuedRuns` 排队等 `turn/completed` 后重放；`chat-events.js` 的 `codexNotificationToEvent` 把 v2 通知映射回 app 内部事件形状。abort 改为 `turn/interrupt` 请求而非杀进程。host 意外退出时 app 清理该节点、下条消息重建。页面刷新后 `chat:start`/`chat:is-running` 会刷新 `run.sender`，避免事件发给已销毁的 webContents。
+- 容错约定：`--session` resume 失败（含 `resumeLoaded` 抛错，不只是 `{ok:false}`）或 `--dir` chdir 失败时**降级继续**（发 Codex `error` 通知携带真实原因，resume 失败回退为空会话，chdir 失败保持当前目录），不退出进程——避免 mica-code-app 显示"mica 进程已退出（code 1）"却没有原因。`src/index.ts` 的 app-server 启动失败兜底同样输出 Codex `error` 通知（不要改回旧 run-JSON error 格式）。进程注册 `unhandledRejection`（记录 + 通知，不退出）和 `uncaughtException`（通知后退出）兜底；`exit(code)` 退出前先 flush stdout/stderr，避免 process.exit 丢弃缓冲的真实原因。
 
 ## 命令系统
 
@@ -349,7 +351,7 @@ AGENT.md
 - `web_fetch`、`web_search`
 - `Skill`
 
-交互模式的 `TodoWrite` 由 Todo 插件注册；headless run 也会从不依赖 React/Ink 的 `buildin-plugins/todo/TodoTool.ts` 注册独立实例，使一次性 JSON 消费方能看到并展示结构化计划。Todo 状态仍只属于当前进程/turn，不写入 session；不要据此假设跨进程可恢复。
+交互模式的 `TodoWrite` 由 Todo 插件注册；headless run 也会从不依赖 React/Ink 的 `buildin-plugins/todo/TodoTool.ts` 注册独立实例，使一次性 JSON 消费方能看到并展示结构化计划。Todo 状态仍只属于当前进程/turn，不写入 session；不要据此假设跨进程可恢复。turn 正常结束时插件会把遗留的 `in_progress` 项标为 `completed`（运行完不残留 pending 项、列表不再一直展示），只有 abort/error 才转 `pending`。
 
 ### MCP
 

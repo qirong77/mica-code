@@ -172,6 +172,7 @@ if (invocation.mode === 'commit') {
 
 if (invocation.mode === 'app-server') {
   const { runAppServer } = await import('./cli/runAppServer.js');
+  const { encodeCodexNotification, CODEX_NOTIFICATIONS } = await import('@packages/mica-runtime/index.js');
   const mcpInitTimeoutMs = invocation.mcpInitTimeoutMs ?? positiveIntegerEnv('MICA_MCP_INIT_TIMEOUT_MS');
   try {
     await runAppServer({
@@ -187,13 +188,16 @@ if (invocation.mode === 'app-server') {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Surface startup failures as a Codex v2 `error` notification so
+    // app-server clients (mica-code-app) can show the real reason instead of
+    // a bare exit code.
     process.stdout.write(
-      `${JSON.stringify({
-        type: 'error',
-        timestamp: Date.now(),
-        part: { type: 'error' },
-        error: { name: 'MicaRuntimeError', data: { message } },
-      })}\n`,
+      encodeCodexNotification(CODEX_NOTIFICATIONS.error, {
+        error: { message },
+        willRetry: false,
+        threadId: '',
+        turnId: '',
+      }),
     );
     console.error(message);
     process.exitCode = 1;

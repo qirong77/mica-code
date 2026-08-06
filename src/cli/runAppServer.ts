@@ -66,7 +66,22 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     process.stdout.write(encodeCodexNotification(method, params));
   };
   const disposeModelEffortContext = setupModelEffortContext();
-  if (options.cwd) process.chdir(resolve(options.cwd));
+  if (options.cwd) {
+    try {
+      process.chdir(resolve(options.cwd));
+    } catch (error) {
+      // A stale/deleted --dir must not kill the whole host: notify the client
+      // with the real reason and keep serving from the current directory.
+      process.stdout.write(
+        encodeCodexNotification(CODEX_NOTIFICATIONS.error, {
+          error: { message: error instanceof Error ? error.message : String(error) },
+          willRetry: false,
+          threadId: '',
+          turnId: '',
+        }),
+      );
+    }
+  }
 
   let agent: AgentRuntime | null = null;
   let sessionController: SessionController | null = null;
@@ -96,6 +111,13 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 
   const exit = async (code: number): Promise<never> => {
     await cleanup();
+    // Flush stdout/stderr before exiting: a bare process.exit(1) right after
+    // console.error can drop the buffered reason, leaving the app with only
+    // "mica 进程已退出（code 1）" and no explanation.
+    await Promise.all([
+      new Promise<void>((resolveFlush) => process.stdout.write('', () => resolveFlush())),
+      new Promise<void>((resolveFlush) => process.stderr.write('', () => resolveFlush())),
+    ]);
     process.exit(code);
   };
 
@@ -132,26 +154,47 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     micaTools.registerRuntime(todoTool, { primaryAgentOnly: true });
 
     if (options.sessionId) {
-      const resumed = sessionController.resume(options.sessionId);
-      if (!resumed.ok) {
+      let resumed: { ok: true } | { ok: false; message?: string };
+      try {
+        resumed = sessionController.resume(options.sessionId);
+      } catch (error) {
+        // resumeLoaded can throw (e.g. snapshot/provider config issues) instead
+        // of returning { ok: false }. Degrade to a fresh session with the real
+        // reason surfaced, never exit(1) with a bare code.
+        const message = error instanceof Error ? error.message : String(error);
         writeNotification(CODEX_NOTIFICATIONS.error, {
-          error: { message: `No conversation found with session ID: ${options.sessionId}` },
+          error: { message },
           willRetry: false,
           threadId: options.sessionId,
           turnId: '',
         });
-        console.error(`No conversation found with session ID: ${options.sessionId}`);
-        await exit(1);
+        console.error(message);
+        options.sessionId = undefined;
+        resumed = { ok: false, message };
       }
-      await ensureChatHostModelRule(runtimeOverride.model ?? agent.config.model);
-      agent.configureForRun(
-        {
-          providerId: agent.config.provider.id,
-          model: agent.config.model,
-          effort: agent.config.effort,
-        },
-        true,
-      );
+      if (!resumed.ok) {
+        writeNotification(CODEX_NOTIFICATIONS.error, {
+          error: { message: resumed.message ?? `No conversation found with session ID: ${options.sessionId}` },
+          willRetry: false,
+          threadId: options.sessionId,
+          turnId: '',
+        });
+        console.error(resumed.message ?? `No conversation found with session ID: ${options.sessionId}`);
+        // Degrade to a fresh session instead of killing the host: the client
+        // sees the error notification above and can keep chatting.
+        options.sessionId = undefined;
+      }
+      if (resumed.ok) {
+        await ensureChatHostModelRule(runtimeOverride.model ?? agent.config.model);
+        agent.configureForRun(
+          {
+            providerId: agent.config.provider.id,
+            model: agent.config.model,
+            effort: agent.config.effort,
+          },
+          true,
+        );
+      }
     }
     if (options.role) agent.setRole(options.role);
 
@@ -191,6 +234,41 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   process.once('SIGINT', () => void exit(0));
   process.once('SIGTERM', () => void exit(0));
   process.once('SIGHUP', () => void exit(0));
+
+  // Guard the long-lived host against silent crashes: an unhandled rejection
+  // (e.g. a stray provider/tool promise) must surface as an error notification
+  // instead of exiting with a bare code 1 that the app reports as
+  // "mica 进程已退出（code 1）" with no reason. Uncaught exceptions still
+  // terminate after the notification so corrupted state cannot keep serving.
+  process.on('unhandledRejection', (reason) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error(`Unhandled rejection: ${message}`);
+    try {
+      writeNotification(CODEX_NOTIFICATIONS.error, {
+        error: { message: `Unhandled rejection: ${message}` },
+        willRetry: false,
+        threadId: sessionId,
+        turnId: currentTurnId ?? '',
+      });
+    } catch {
+      // stdout may be gone at shutdown; stderr above is the fallback.
+    }
+  });
+  process.on('uncaughtException', (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Uncaught exception: ${message}`, error instanceof Error ? (error.stack ?? '') : '');
+    try {
+      writeNotification(CODEX_NOTIFICATIONS.error, {
+        error: { message: `Uncaught exception: ${message}` },
+        willRetry: false,
+        threadId: sessionId,
+        turnId: currentTurnId ?? '',
+      });
+    } catch {
+      // ignore
+    }
+    void exit(1);
+  });
 
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of rl) {
