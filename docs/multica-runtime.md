@@ -1,19 +1,25 @@
 # Multica runtime compatibility
 
-Mica can run as a Multica custom runtime through Multica's existing `deveco`
-protocol family. That family uses the OpenCode/DevEco process contract:
+Mica exposes its execution surface with the OpenAI Codex protocol family, so any
+client that already drives `codex exec` or `codex app-server` can drive Mica:
 
 ```text
 <agent> --version
 <agent> models
-<agent> run --format json --dangerously-skip-permissions \
+<agent> exec [--json] --dangerously-skip-permissions \
   --dir <workdir> [--model <provider/model>] [--variant <effort>] \
   [--session <id>] <prompt>
+<agent> app-server [--session <id>] [--dir <workdir>]
 ```
 
-The run command emits one JSON object per stdout line. Mica keeps diagnostics on
-stderr and uses exit code `0` for success, `1` for failure, and `130` for an
-interrupted run.
+`mica exec` mirrors `codex exec`: default human-readable text on stdout, and with
+`--json` it emits Codex ThreadEvent JSONL (`thread.started`, `turn.started`,
+`item.started`/`item.updated`/`item.completed`, `turn.completed`, `error`; item
+types `agent_message`/`reasoning`/`command_execution`). `mica app-server` mirrors
+`codex app-server --stdio`: JSON-RPC-style requests over stdin
+(`initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt`) and v2
+notifications over stdout. Mica keeps diagnostics on stderr and uses exit code
+`0` for success, `1` for failure, and `130` for an interrupted run.
 
 ## Register in Multica
 
@@ -21,7 +27,6 @@ If the release binary is available as `mica` on the daemon host:
 
 ```bash
 multica runtime profile create \
-  --protocol-family deveco \
   --command-name mica \
   --display-name "Mica Code"
 ```
@@ -45,9 +50,9 @@ as interchangeable merely because more than one uses newline-delimited JSON.
 | Layer                        | Owner                                                                                       | Mica responsibility                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Multica daemon control plane | Multica HTTP/WebSocket registration, heartbeat, claim, and reporting                        | None; the daemon owns it                        |
-| DevEco/OpenCode run JSON     | `run --format json`, positional prompt, stdout NDJSON                                       | Supported; this is the integration transport    |
+| Codex exec ThreadEvent       | `exec --json`, positional prompt, stdout JSONL                                              | Supported; this is the one-shot transport       |
+| Codex app-server             | `app-server`, JSON-RPC thread/turn protocol over stdio                                      | Supported; this is the resident transport       |
 | Claude SDK stream-json       | Bidirectional stdin/stdout with `system`, `assistant`, `user`, `result`, and control frames | Not supported; do not register Mica as `claude` |
-| Codex app-server             | JSON-RPC thread/turn protocol                                                               | Not supported                                   |
 | ACP                          | JSON-RPC `initialize` and `session/*` methods                                               | Not currently supported                         |
 | MCP                          | Mica tool-server connections over stdio or Streamable HTTP                                  | Supported inside Mica                           |
 
@@ -55,26 +60,23 @@ The Claude Code source is useful as a design reference for strict stdout,
 session-first startup, cancellation, usage aggregation, and long-running tool
 handling. Its `stream-json` schema is nevertheless a different wire protocol.
 
-## Run JSON events
+## ThreadEvent events
 
-Mica emits the event shapes consumed by Multica's DevEco backend:
+`mica exec --json` emits the event shapes consumed by Codex-compatible backends:
 
-- `step_start` announces a running session.
-- `text` streams assistant output from `part.text`.
-- `tool_use` contains a completed call and result under `part.state`.
-- `error` carries `error.name` and `error.data.message`.
-- `step_finish` carries aggregate input, output, and cache token usage.
+- `thread.started` announces the thread id.
+- `turn.started` opens a turn.
+- `item.started` announces a running item (`command_execution` with
+  `status: "in_progress"`).
+- `item.updated` streams `agent_message` text and (with `--thinking`) `reasoning`.
+- `item.completed` closes an item; a tool call carries `exit_code` and aggregated
+  output, the final assistant message carries the full text.
+- `turn.completed` carries aggregate input, output, cache, and reasoning tokens.
+- `error` carries a message; a missing resume target fails before
+  `thread.started` with a single `error` line.
 
-Every event after session creation includes the camel-case `sessionID` field
-expected by that backend. A missing resume target fails before `step_start` and
-does not echo the stale session ID, allowing Multica to retry with a fresh
-session.
-
-The DevEco parser has no distinct tool-start/tool-progress frame: emitting a
-running and then a completed `tool_use` would duplicate the call in Multica and
-leave its in-flight counter unbalanced. Mica therefore emits one terminal tool
-event and intentionally does not send synthetic heartbeats that could hide a
-genuinely stuck tool from Multica's inactivity watchdog.
+A missing resume target fails before any turn event and does not echo the stale
+session ID, allowing callers to retry with a fresh session.
 
 ## Models, working directory, instructions, and skills
 
@@ -84,7 +86,7 @@ themselves contain `/` remain intact. A daemon-selected model and effort are
 session-local overrides and do not change Mica's persisted last-used choice.
 
 The `--dir` value is applied before model/runtime modules load. This matters
-because Multica writes task context into that directory. Mica loads both
+because task runners write task context into that directory. Mica loads both
 `AGENT.md` and `AGENTS.md` and scans these project skill roots:
 
 - `.mica/skills`
@@ -93,16 +95,16 @@ because Multica writes task context into that directory. Mica loads both
 - `.agent_context/skills`
 
 It continues to load user skills from `$MICA_HOME/skills` (or
-`~/.mica/skills`). When `MICA_HOME` is not set, it also recognizes the DevEco
-family's user-level `~/.config/deveco/skills` directory.
+`~/.mica/skills`). When `MICA_HOME` is not set, it also recognizes the
+`~/.config/deveco/skills` directory.
 
 ## MCP and current limits
 
-Headless runs now initialize and shut down Mica's MCP connections. By default
-they read `mcpServers` from Mica's own config. They can also accept:
+Headless runs initialize and shut down Mica's MCP connections. By default they
+read `mcpServers` from Mica's own config. They can also accept:
 
 ```bash
-mica run --format json \
+mica exec --json \
   --mcp-config /path/to/mcp.json \
   --strict-mcp-config \
   "task"
@@ -111,25 +113,10 @@ mica run --format json \
 Without strict mode, explicit servers override same-named local servers. Strict
 mode uses only the explicit file.
 
-Multica's current `deveco` backend does not forward an agent's managed
-`mcp_config` to the child process. That is a Multica-side limitation: Mica's
-explicit-file support is ready, but managed MCP will not arrive automatically
-through this protocol family until Multica adds the corresponding argument or a
-native Mica/ACP backend.
-
 Other current limits:
 
-- Multica's current DevEco `step_start` handler drops the event's `sessionID`
-  when constructing its status message. Normal completion and later resume work,
-  but a daemon/process crash before the final result can lose the early resume
-  pointer. Fixing early session pinning requires Multica to copy `sessionID`
-  onto that status message.
-- DevEco run JSON has no thinking event consumed by Multica, so Mica does not
-  mix private reasoning into final text.
-- The same parser has no non-duplicating tool-start frame. Until Multica adds
-  one, a running Mica tool is governed by the ordinary idle watchdog rather
-  than Multica's longer in-flight-tool watchdog; unusually long tools may need
-  a larger daemon idle window.
+- `mica exec --json` has no thinking event by default; pass `--thinking` to
+  project `reasoning` items. Private reasoning is never mixed into final text.
 - Mica currently runs tools autonomously; the
   `--dangerously-skip-permissions` flag acknowledges the daemon policy but does
   not switch a separate permission engine.

@@ -4,26 +4,17 @@ import { TodoWriteTool } from '../../buildin-plugins/todo/TodoTool.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
-import {
-  createRunJsonError,
-  createRunJsonStepFinish,
-  createRunJsonStepStart,
-  createStdoutRunJsonWriter,
-  emptyRunJsonTokenUsage,
-  exitCodeForRunJsonStatus,
-  type RunJsonStatus,
-  type RunJsonWriter,
-} from '@packages/mica-runtime/index.js';
+import { createStdoutCodexExecWriter, type CodexExecEventWriter } from '@packages/mica-runtime/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
-import { attachRunJsonProjector, type RunJsonProjector } from '../runtime/RunJsonProjector.js';
+import { attachCodexExecProjector, type CodexExecProjector } from '../runtime/CodexExecProjector.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
 
-export type HeadlessRunOptions = {
+export type HeadlessExecOptions = {
   prompt: string;
   sessionId?: string;
   cwd?: string;
@@ -32,33 +23,35 @@ export type HeadlessRunOptions = {
   role?: string;
   maxTurns?: number;
   thinking?: boolean;
+  json?: boolean;
   noSave?: boolean;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   mcpInitTimeoutMs?: number;
-  writer?: RunJsonWriter;
+  writer?: CodexExecEventWriter;
   signal?: AbortSignal;
 };
 
-export type HeadlessRunResult = {
-  status: RunJsonStatus;
+export type HeadlessExecResult = {
+  status: 'completed' | 'aborted' | 'error';
   sessionId: string;
   text: string;
   error?: string;
   exitCode: number;
 };
 
-export async function runHeadless(options: HeadlessRunOptions): Promise<HeadlessRunResult> {
-  const writer = options.writer ?? createStdoutRunJsonWriter();
+export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExecResult> {
+  const json = options.json === true;
+  const writer = options.writer ?? (json ? createStdoutCodexExecWriter() : { write() {} });
   const prompt = options.prompt.trim();
   let agent: AgentRuntime | null = null;
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
   let todoTool: TodoWriteTool | null = null;
-  let projector: RunJsonProjector | null = null;
+  let projector: CodexExecProjector | null = null;
   let sessionId = '';
   let mcpStarted = false;
-  let status: RunJsonStatus = 'completed';
+  let status: 'completed' | 'aborted' | 'error' = 'completed';
   let text = '';
   let errorMessage: string | undefined;
   const disposeModelEffortContext = setupModelEffortContext();
@@ -68,7 +61,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
 
   try {
     throwIfAborted(options.signal);
-    if (!prompt) throw new Error('Headless run requires a non-empty prompt');
+    if (!prompt) throw new Error('Headless exec requires a non-empty prompt');
     if (options.cwd) process.chdir(resolve(options.cwd));
 
     const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
@@ -111,7 +104,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
       if (!resumed.ok) {
         errorMessage = resumed.message;
         console.error(`No conversation found with session ID: ${options.sessionId}`);
-        writer.write(createRunJsonError(resumed.message));
+        writer.write({ type: 'error', message: resumed.message });
         return resultFor('error', options.sessionId, '', resumed.message);
       }
       await ensureHeadlessModelRule(runtimeOverride.model ?? agent.config.model, options.signal);
@@ -132,8 +125,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     throwIfAborted(options.signal);
 
     sessionId = sessionController.getCurrentSessionId();
-    projector = attachRunJsonProjector(agent, writer, sessionId, { thinking: options.thinking === true });
-    writer.write(createRunJsonStepStart(sessionId));
+    projector = attachCodexExecProjector(agent, writer, sessionId, { thinking: options.thinking === true });
     if (!options.noSave) sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
 
     mcpStarted = true;
@@ -154,28 +146,24 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
       const result = await agent.run(content, { maxTurns: options.maxTurns });
       text = projector.completeText(result.text);
       status = 'completed';
+      writer.write({ type: 'turn.completed', usage: projector.getUsage() });
       if (!options.noSave) sessionController.saveCurrent({ turnState: 'completed' });
     } catch (error) {
       text = projector.getText();
       if (error instanceof AgentAbortError || options.signal?.aborted) {
         status = 'aborted';
         agent.preserveAbortedTurn(prompt, text || undefined);
+        writer.write({ type: 'error', message: 'Turn interrupted by user' });
         if (!options.noSave) sessionController.saveCurrent({ turnState: 'aborted' });
       } else {
         status = 'error';
         errorMessage = error instanceof Error ? error.message : String(error);
         if (!options.noSave) sessionController.saveCurrent({ turnState: 'error' });
         console.error(errorMessage);
-        writer.write(
-          createRunJsonError(errorMessage, {
-            sessionID: sessionId,
-            name: error instanceof Error ? error.name : undefined,
-          }),
-        );
+        writer.write({ type: 'error', message: errorMessage });
       }
     }
 
-    writer.write(createRunJsonStepFinish(sessionId, status, projector.getUsage()));
     return resultFor(status, sessionId, text, errorMessage);
   } catch (error) {
     status = options.signal?.aborted ? 'aborted' : 'error';
@@ -192,15 +180,7 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
     }
     if (status === 'error') {
       console.error(errorMessage);
-      writer.write(
-        createRunJsonError(errorMessage, {
-          ...(sessionId ? { sessionID: sessionId } : {}),
-          name: error instanceof Error ? error.name : undefined,
-        }),
-      );
-    }
-    if (sessionId) {
-      writer.write(createRunJsonStepFinish(sessionId, status, projector?.getUsage() ?? emptyRunJsonTokenUsage()));
+      writer.write({ type: 'error', message: errorMessage });
     }
     return resultFor(status, sessionId || options.sessionId || '', text, errorMessage);
   } finally {
@@ -219,14 +199,30 @@ export async function runHeadless(options: HeadlessRunOptions): Promise<Headless
   }
 }
 
-function resultFor(status: RunJsonStatus, sessionId: string, text: string, error?: string): HeadlessRunResult {
+function resultFor(
+  status: 'completed' | 'aborted' | 'error',
+  sessionId: string,
+  text: string,
+  error?: string,
+): HeadlessExecResult {
   return {
     status,
     sessionId,
     text,
     ...(error ? { error } : {}),
-    exitCode: exitCodeForRunJsonStatus(status),
+    exitCode: exitCodeForStatus(status),
   };
+}
+
+function exitCodeForStatus(status: 'completed' | 'aborted' | 'error'): number {
+  switch (status) {
+    case 'completed':
+      return 0;
+    case 'aborted':
+      return 130;
+    case 'error':
+      return 1;
+  }
 }
 
 function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {

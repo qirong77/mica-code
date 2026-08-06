@@ -1351,6 +1351,16 @@ export function activateQueuedMessage(messages, queuedMessageId) {
   ]
 }
 
+// 输入框内 Tab / Shift+Tab 的行为：
+// - agent 运行中（queueReady）：Tab 与 Shift+Tab 都把当前输入排队发送（Shift+Tab 对应 CLI 的 after_iteration 快速排队）；
+// - 空闲时 Shift+Tab：打开角色选择器，与 CLI 的 Shift+Tab 角色循环对齐；
+// - 空闲 Tab：不拦截，交给浏览器默认行为。
+export function resolveComposerTabAction({ shiftKey, queueReady }) {
+  if (queueReady) return 'queue'
+  if (shiftKey) return 'cycle-role'
+  return null
+}
+
 export function switchChatDraft(drafts, previousNodeId, nextNodeId, currentInput) {
   if (previousNodeId === nextNodeId) return currentInput
   if (previousNodeId) drafts.set(previousNodeId, currentInput)
@@ -2570,7 +2580,11 @@ export function ChatView({
           } else {
             updateNotice(
               compactNoticeId,
-              `压缩失败：${result?.error || '未知错误'}`,
+              `压缩失败：${result?.error || '未知错误'}${
+                result?.cwdMissing
+                  ? '\n提示：会话工作目录不存在，请点击右下角路径切换到正确目录后重试。'
+                  : ''
+              }`,
               'error',
               'error'
             )
@@ -2717,7 +2731,8 @@ export function ChatView({
           cwd: cwdRef.current || null,
           prompt: text,
           clientMessageId: optimisticId,
-          maxTurns: 100,
+          queueMode: options.queueMode || null,
+          maxTurns: 999,
           model: overrides.model || null,
           variant: overrides.variant || null,
           role: overrides.role || null
@@ -3421,10 +3436,21 @@ export function ChatView({
                   navigateInputHistory(1)
                   return
                 }
-                if (event.key === 'Tab' && queueReady) {
-                  event.preventDefault()
-                  send()
-                  return
+                if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
+                  const tabAction = resolveComposerTabAction({
+                    shiftKey: event.shiftKey,
+                    queueReady
+                  })
+                  if (tabAction === 'queue') {
+                    event.preventDefault()
+                    send(null, { queueMode: event.shiftKey ? 'after_iteration' : 'after_turn' })
+                    return
+                  }
+                  if (tabAction === 'cycle-role') {
+                    event.preventDefault()
+                    openPicker('role')
+                    return
+                  }
                 }
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()

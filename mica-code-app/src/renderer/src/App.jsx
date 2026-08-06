@@ -46,7 +46,7 @@ function recentChatCwd() {
   return localStorage.getItem('mica.chatDefaultCwd') || ''
 }
 
-function CwdModal({ cwd, recent, onClose, onApply }) {
+function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   const [value, setValue] = useState(cwd || '')
   const inputRef = useRef(null)
   useEffect(() => {
@@ -75,6 +75,11 @@ function CwdModal({ cwd, recent, onClose, onApply }) {
         className="w-[min(440px,calc(100vw-32px))] rounded-md border border-white/15 bg-[#181818]/98 p-3.5 shadow-2xl"
       >
         <h2 className="mb-2.5 text-sm font-semibold text-white/95">工作目录</h2>
+        {invalid && (
+          <div className="mb-2.5 rounded-sm border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs leading-relaxed text-red-300">
+            当前目录不存在或已被移动，请选择正确的项目目录后再压缩。
+          </div>
+        )}
         <button
           type="button"
           className="mb-2.5 flex h-8 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-white/15 bg-white/[.02] text-xs text-white/60 hover:border-white/35 hover:text-white"
@@ -439,6 +444,7 @@ export default function App() {
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
+  const [cwdValid, setCwdValid] = useState(true)
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -874,6 +880,24 @@ export default function App() {
   )
   const gitIsCurrent = git.terminalId === activeId
   const activeCwd = terminalCwd(activeId) || (gitIsCurrent ? git.cwd : null)
+  useEffect(() => {
+    let cancelled = false
+    if (!activeCwd) {
+      setCwdValid(true)
+      return
+    }
+    window.mica.chat
+      .checkCwd(activeCwd)
+      .then((result) => {
+        if (!cancelled) setCwdValid(result?.exists !== false)
+      })
+      .catch(() => {
+        if (!cancelled) setCwdValid(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeCwd])
   const repository = gitIsCurrent ? git.repository : null
   const gitCount = repository?.files?.length ? repository : null
   const getSearchRoot = useCallback(
@@ -902,6 +926,7 @@ export default function App() {
       const id = activeRef.current
       if (!dir || !id) return
       localStorage.setItem('mica.chatDefaultCwd', dir)
+      const node = nodesRef.current.find((item) => item.id === id)
       setNodes((items) =>
         items.map((node) =>
           node.id === id && node.type === 'terminal' && node.cwd !== dir
@@ -909,6 +934,11 @@ export default function App() {
             : node
         )
       )
+      setCwdValid(true)
+      // 把新 cwd 持久化到会话文件，压缩/续聊等后续流程才能读到正确目录
+      if (node?.sessionId) {
+        window.mica.chat.updateCwd(node.sessionId, dir).catch(() => {})
+      }
       refreshGit({ cwd: dir })
     },
     [activeRef, refreshGit]
@@ -1277,8 +1307,16 @@ export default function App() {
             {activeCwd && (
               <button
                 type="button"
-                title={activeCwd}
-                className="ml-auto min-w-0 max-w-[45%] truncate rounded-sm px-1.5 py-0.5 text-right text-white/35 hover:bg-white/[.06] hover:text-white/75"
+                title={
+                  cwdValid
+                    ? activeCwd
+                    : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
+                }
+                className={`ml-auto min-w-0 max-w-[45%] truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
+                  cwdValid
+                    ? 'text-white/35 hover:text-white/75'
+                    : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
+                }`}
                 onClick={() => setCwdModalOpen(true)}
               >
                 {activeCwd}
@@ -1316,6 +1354,7 @@ export default function App() {
       {cwdModalOpen && (
         <CwdModal
           cwd={terminalCwd(activeId) || git.cwd || ''}
+          invalid={!cwdValid}
           recent={recentSessionDirs}
           onClose={() => setCwdModalOpen(false)}
           onApply={(dir) => {

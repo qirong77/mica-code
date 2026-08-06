@@ -63,15 +63,17 @@ provider 配置了 `get_model_url`，模型列表会按 OpenAI `/models` 响应�
 
 没有动态模型接口时，可以直接配置静态 `models` 数组。
 
-## Headless JSON 协议
+## Headless 执行（Codex 风格）
 
-Mica 可以通过 OpenCode/DevEco 兼容的 NDJSON 协议被桌面应用或自动化工具调用：
+Mica 的执行协议与 OpenAI Codex 对齐：一次性执行用 `mica exec`（对齐 `codex exec`），常驻会话用 `mica app-server`（对齐 `codex app-server`）。
+
+一次性 headless 执行，默认输出人类可读文本；`--json` 输出与 `codex exec --json` 对齐的 ThreadEvent JSONL（`thread.started`、`turn.started`、`item.started`/`item.updated`/`item.completed`、`turn.completed`、`error`，item 类型 `agent_message`/`reasoning`/`command_execution`）：
 
 ```bash
-mica run --format json [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [--mcp-init-timeout-ms <ms>] "<prompt>"
+mica exec [--json] [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [--mcp-init-timeout-ms <ms>] "<prompt>"
 ```
 
-默认输出 `step_start`、`text`、`tool_use`、`error` 和 `step_finish` 事件。每次工具调用先发送 `state.status: "pending"`，完成后以相同 `callID` 发送 `completed` 与结果，消费端可原位更新运行状态；headless 模式也注册 `TodoWrite`，便于结构化展示运行计划。显式传入 `--thinking` 时还会输出 `{ type: "reasoning", part: { type: "reasoning", text } }`，不传时保持精简输出并兼容现有消费者。`--mcp-init-timeout-ms` 可为每个 MCP server 的 connect + tools/list 设置总截止时间，健康 server 仍会并行完成并注册工具。Responses 协议在启用 reasoning effort 时会请求 `summary: "auto"`，让支持该能力的模型产生可流式展示的思考摘要。
+工具调用以 `command_execution` item 投影：调用时 `item.started`（`in_progress`），完成后 `item.completed`（`exit_code` + 聚合输出）。`--thinking` 控制是否投影 `reasoning` item。headless 模式也注册 `TodoWrite`。`--mcp-init-timeout-ms` 可为每个 MCP server 的 connect + tools/list 设置总截止时间，健康 server 仍会并行完成并注册工具。Responses 协议在启用 reasoning effort 时会请求 `summary: "auto"`，让支持该能力的模型产生可流式展示的思考摘要。
 
 对已有会话做上下文压缩（Web Chat / 自动化脚本用）：
 
@@ -88,6 +90,12 @@ mica commit [--dir <cwd>]
 ```
 
 `mica commit` 与交互式 `/commit` 复用同一套确定性分析/提交逻辑（`packages/mica-builtin-commands/git/commitRunner.ts`）：程序先收集 git 变化摘要，再向模型**只发一次请求**生成 commit message（不启用工具、无多轮循环），随后程序自己执行 `git add`/`commit`/`push`，最后输出单行 JSON（`ok`、`commitHash`、`subject`、`commitMessage`、`pushed`，失败时含 `code`/`error`）。
+
+常驻会话进程（桌面 App 用；每会话一个进程，暴露 Codex v2 App Server 协议子集——JSON-RPC 风格 stdio，连续对话跳过进程启动、session 重载和 MCP 重复 init，`turn/steer` 支持 after_iteration 迭代注入）：
+
+```bash
+mica app-server [--session <id>] [--dir <cwd>] [--model <id>] [--variant <effort>] [--role <name>]
+```
 
 ## 远程会话同步（Mica Sync）
 

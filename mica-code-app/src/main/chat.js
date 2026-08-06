@@ -5,25 +5,33 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { homedir } from 'os'
 import { basename, join } from 'path'
 import { resolveMicaExecutable } from './terminals'
+import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
-  buildChatArgs,
-  buildChatEnv,
-  createChatEventPacer
+  buildAppServerArgs,
+  CHAT_MCP_INIT_TIMEOUT_MS,
+  codexNotificationToEvent,
+  createChatEventPacer,
+  tokensFromCodexUsage
 } from './chat-events'
 import { savePastedImage } from './chat-images'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue } from './chat-queue'
+import { getShellEnvSnapshot } from './shell-env'
 
 /**
- * Mica chat service: runs one `mica run --format json` child process per turn
- * and streams NDJSON events to the renderer. Session history is read directly
- * from ~/.mica/sessions so the chat view can restore past conversations.
+ * Mica chat service: one resident `mica app-server` process per chat node
+ * streams NDJSON run-JSON events to the renderer across many turns, so
+ * repeated messages skip process startup, session reload and MCP re-init, and
+ * queued inputs get real after_iteration injection (Shift+Tab in the app).
+ * The host owns the queue; chat:start forwards requests over its stdin and the
+ * host acknowledges queue state via `queued`/`queue_state` events.
  *
- * Turn lifecycle notifications reuse the local notify server (same HTTP
- * protocol the mica plugin uses), so sidebar dots and unread badges work
- * exactly like PTY-hosted mica sessions.
+ * Session history is read directly from ~/.mica/sessions so the chat view can
+ * restore past conversations. Turn lifecycle notifications reuse the local
+ * notify server (same HTTP protocol the mica plugin uses), so sidebar dots and
+ * unread badges work exactly like PTY-hosted mica sessions.
  */
 
 const NOTIFY_TIMEOUT_MS = 1500
@@ -32,8 +40,26 @@ const MAX_STDERR_CHARS = 32 * 1024
 const MAX_COMPLETED_RUNS = 40
 const MAX_QUEUED_RUNS = 50
 
-const runs = new Map() // nodeId -> { child, buffer, sessionId }
+// Merge the login-shell environment captured at startup (e.g. exports from
+// ~/.zshrc) into a spawned mica process. Falls back to the inherited env
+// while the capture is still pending or unavailable.
+function mergeShellEnv(env) {
+  const shellEnv = getShellEnvSnapshot()
+  return shellEnv ? { ...env, ...shellEnv } : { ...env }
+}
+
+function buildSpawnEnv(env = process.env) {
+  return {
+    ...mergeShellEnv(env),
+    MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS)
+  }
+}
+
+const runs = new Map() // nodeId -> resident chat host: { child, buffer, running, sessionId }
 const commitRuns = new Map() // commitId -> { child, buffer, stderr }
+// after_turn inputs (plain Tab while busy) are queued here and replayed as
+// turn/start once the current turn completes. Shift+Tab (after_iteration) is
+// forwarded to the host as turn/steer instead.
 const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
 const completedRuns = new Map() // nodeId -> recently finished replay state
 let notifyServer = null
@@ -50,6 +76,8 @@ function recallQueuedRun(sender, id, clientMessageId) {
   if (!clientMessageId || typeof clientMessageId !== 'string') {
     return { ok: false, error: '排队消息 id 缺失', queuedItems: queuedItems(id) }
   }
+  const run = runs.get(id)
+  if (run?.child) run.sender = sender
   const removed = queuedRuns.remove(
     id,
     (item) => item.sender === sender && item.payload?.clientMessageId === clientMessageId
@@ -79,7 +107,7 @@ export function setChatNotifyServer(server) {
 export function isChatSessionRunning(sessionId) {
   if (!sessionId) return false
   return [...runs.values()].some(
-    (run) => !run.finished && (run.sessionId === sessionId || run.requestedSessionId === sessionId)
+    (run) => run.running && (run.sessionId === sessionId || run.requestedSessionId === sessionId)
   )
 }
 
@@ -271,7 +299,7 @@ function startCommitRun(sender, commitId, payload) {
       ['commit', '--format', 'json', '--dir', cwd],
       {
         cwd,
-        env: buildChatEnv(process.env),
+        env: buildSpawnEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe']
       }
     )
@@ -355,15 +383,106 @@ function startRun(sender, id, payload) {
   if (!prompt) return { ok: false, error: '消息内容为空' }
 
   const existing = runs.get(id)
-  if (existing) {
-    const queued = queuedRuns.enqueue(id, { sender, payload: { ...payload, prompt } })
-    if (!queued.ok) {
-      return { ok: false, error: `发送队列已满（最多 ${MAX_QUEUED_RUNS} 条）` }
+  if (existing?.child) {
+    // Resident host already running. Refresh the sender (a renderer reload
+    // creates a new webContents whose listeners must receive streamed events)
+    // and dispatch by bus state:
+    //   idle               -> turn/start (fresh turn)
+    //   busy + Shift+Tab   -> turn/steer (after_iteration injection into the
+    //                         active turn; host-side single-slot queue)
+    //   busy + plain Tab   -> queue locally; replayed as turn/start when the
+    //                         current turn completes (after_turn)
+    existing.sender = sender
+    if (existing.running) {
+      if (payload.queueMode === 'after_iteration') {
+        if (!sendSteer(existing, payload)) {
+          disposeHost(id)
+          return { ok: false, error: 'chat host 不可用，请重试' }
+        }
+        return { ok: true }
+      }
+      const enqueued = queuedRuns.enqueue(id, { sender, payload: { ...payload, prompt } })
+      if (!enqueued.ok) {
+        return {
+          ok: false,
+          error: '排队消息已达上限，请先发送或取消排队',
+          queuedCount: queuedRuns.size(id),
+          queuedItems: queuedItems(id)
+        }
+      }
+      if (existing.sender && !existing.sender.isDestroyed()) {
+        existing.sender.send('chat:queue-state', {
+          id,
+          queuedCount: queuedRuns.size(id),
+          queuedItems: queuedItems(id)
+        })
+      }
+      return { ok: true, queued: true, position: enqueued.position, queuedItems: queuedItems(id) }
     }
-    return { ok: true, queued: true, position: queued.position, queuedItems: queuedItems(id) }
+    const accepted = sendTurnStart(existing, payload)
+    if (!accepted) {
+      disposeHost(id)
+      return { ok: false, error: 'chat host 不可用，请重试' }
+    }
+    return { ok: true }
   }
-  completedRuns.delete(id)
 
+  const spawned = spawnChatHost(id, sender, payload)
+  if (!spawned.ok) return spawned
+  const run = runs.get(id)
+  run.prompt = prompt
+  // Optimistically mark the host busy so a rapid second message queues instead
+  // of racing ahead of turn/started; the turn/completed event clears it.
+  run.running = true
+  const accepted = sendTurnStart(run, payload)
+  if (!accepted) {
+    disposeHost(id)
+    return { ok: false, error: 'chat host 启动后写入失败，请重试' }
+  }
+  return { ok: true }
+}
+
+function writeHostRequest(run, request) {
+  if (!run?.child?.stdin?.writable) return false
+  run.child.stdin.write(`${JSON.stringify(request)}\n`)
+  return true
+}
+
+function sendCodexRequest(run, method, params) {
+  if (!run?.child?.stdin?.writable) return false
+  run.requestSeq = (run.requestSeq || 0) + 1
+  const id = run.requestSeq
+  run.pendingRequests = run.pendingRequests || new Map()
+  run.pendingRequests.set(id, { method, params })
+  run.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  return true
+}
+
+function sendTurnStart(run, payload) {
+  const params = { threadId: run.sessionId || run.requestedSessionId || '' }
+  params.input = [{ type: 'text', text: String(payload.prompt || '') }]
+  if (payload.cwd) params.cwd = payload.cwd
+  if (payload.model) params.model = payload.model
+  if (payload.variant) params.effort = payload.variant
+  return sendCodexRequest(run, 'turn/start', params)
+}
+
+function sendSteer(run, payload) {
+  return sendCodexRequest(run, 'turn/steer', {
+    threadId: run.sessionId || run.requestedSessionId || '',
+    expectedTurnId: run.currentTurnId || '',
+    input: [{ type: 'text', text: String(payload.prompt || '') }]
+  })
+}
+
+function sendInterrupt(run) {
+  return sendCodexRequest(run, 'turn/interrupt', {
+    threadId: run.sessionId || run.requestedSessionId || '',
+    turnId: run.currentTurnId || ''
+  })
+}
+
+function spawnChatHost(id, sender, payload) {
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
 
@@ -378,22 +497,21 @@ function startRun(sender, id, payload) {
     typeof payload.variant === 'string' && payload.variant.trim() ? payload.variant.trim() : ''
   const role = typeof payload.role === 'string' && payload.role.trim() ? payload.role.trim() : ''
 
-  const args = buildChatArgs({
-    prompt,
+  const args = buildAppServerArgs({
     sessionId,
     cwd,
-    maxTurns: payload.maxTurns,
     model,
     variant,
-    role
+    role,
+    maxTurns: payload.maxTurns
   })
 
   let child
   try {
     child = spawn(mica, args, {
       cwd: cwd || process.cwd(),
-      env: buildChatEnv(process.env),
-      stdio: ['ignore', 'pipe', 'pipe']
+      env: buildSpawnEnv(process.env),
+      stdio: ['pipe', 'pipe', 'pipe']
     })
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -401,21 +519,28 @@ function startRun(sender, id, payload) {
 
   const run = {
     child,
+    sender: null,
     buffer: '',
     stderr: '',
     sessionId: null,
     requestedSessionId: sessionId || null,
     events: [],
-    prompt,
+    prompt: '',
     startedAt: Date.now(),
-    finished: false,
+    running: false,
     aborting: false,
     exitSent: false,
-    sequence: 0
+    sequence: 0,
+    currentTurnId: null,
+    requestSeq: 0,
+    pendingRequests: new Map(),
+    toolOutputs: new Map(),
+    lastTokenUsage: null
   }
-  const eventPacer = createChatEventPacer(({ sequence, event }) => {
-    if (!sender.isDestroyed()) {
-      sender.send('chat:event', { id, sequence, event })
+  run.sender = sender
+  run.eventPacer = createChatEventPacer(({ sequence, event }) => {
+    if (runs.get(id) === run && run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:event', { id, sequence, event })
     }
   })
   runs.set(id, run)
@@ -424,153 +549,264 @@ function startRun(sender, id, payload) {
     run.stderr = `${run.stderr}${chunk.toString()}`.slice(-MAX_STDERR_CHARS)
   })
 
-  child.stdout.on('data', (chunk) => {
-    run.buffer += chunk.toString()
-    let newline
-    while ((newline = run.buffer.indexOf('\n')) >= 0) {
-      const line = run.buffer.slice(0, newline).trim()
-      run.buffer = run.buffer.slice(newline + 1)
-      if (!line) continue
-      let event
-      try {
-        event = JSON.parse(line)
-      } catch {
-        continue
-      }
-      const sequence = ++run.sequence
-      const record = { sequence, event }
-      appendBufferedEvent(run.events, record)
-      // 新会话由 mica 生成 sessionId；补发一次 notify 让侧栏自动绑定节点
-      if (event.type === 'step_start' && event.sessionID) {
-        if (!run.sessionId && !sessionId) {
-          postNotify(`${id}:mica`, 'turn.started', { sessionId: event.sessionID })
-        }
-        run.sessionId = event.sessionID
-      } else if (event.type === 'step_finish') {
-        run.finished = true
-        const reason = event.part?.reason
-        const currentSessionId = run.sessionId || sessionId
-        const extra = currentSessionId ? { sessionId: currentSessionId } : {}
-        if (reason === 'completed') {
-          postNotify(`${id}:mica`, 'turn.completed', extra)
-        } else if (reason === 'aborted') {
-          postNotify(`${id}:mica`, 'turn.aborted', extra)
-        } else if (reason === 'error') {
-          const message = event.part?.error?.message || ''
-          postNotify(`${id}:mica`, 'turn.error', {
-            ...(message ? { summary: message.slice(0, 200) } : {}),
-            ...extra
-          })
-        }
-      }
-      eventPacer.push(record)
-    }
-  })
-
-  const sendExit = (payload) => {
-    if (run.exitSent) return
-    eventPacer.flush()
-    run.exitSent = true
-    runs.delete(id)
-    completedRuns.delete(id)
-    completedRuns.set(id, {
-      sessionId: run.sessionId || sessionId || null,
-      events: run.events.slice(),
-      prompt: run.prompt,
-      startedAt: run.startedAt,
-      exit: { ...payload, aborted: run.aborting }
-    })
-    while (completedRuns.size > MAX_COMPLETED_RUNS) {
-      completedRuns.delete(completedRuns.keys().next().value)
-    }
-    if (!sender.isDestroyed()) {
-      sender.send('chat:exit', {
-        id,
-        sessionId: run.sessionId || sessionId,
-        ...payload,
-        aborted: run.aborting
-      })
-    }
-    startNextQueuedRun(id, run.sessionId || sessionId)
-    if (!sender.isDestroyed()) {
-      sender.send('chat:queue-state', {
-        id,
-        queuedCount: queuedRuns.size(id),
-        queuedItems: queuedItems(id)
-      })
-    }
-  }
+  child.stdout.on('data', (chunk) => handleHostOutput(id, run, chunk))
 
   child.on('error', (error) => {
     const message = error instanceof Error ? error.message : String(error)
-    if (!run.finished) {
+    if (!run.exitSent) {
       postNotify(`${id}:mica`, 'turn.error', {
-        ...(run.sessionId || sessionId ? { sessionId: run.sessionId || sessionId } : {}),
+        ...(run.sessionId || run.requestedSessionId
+          ? { sessionId: run.sessionId || run.requestedSessionId }
+          : {}),
         summary: message.slice(0, 200)
       })
+      sendChatExit(id, run, { exitCode: null, signal: null, error: message })
     }
-    sendExit({ exitCode: null, signal: null, error: message })
   })
 
   child.on('close', (exitCode, signal) => {
-    if (!run.finished) {
-      const currentSessionId = run.sessionId || sessionId
-      const extra = currentSessionId ? { sessionId: currentSessionId } : {}
+    if (runs.get(id) !== run) return
+    runs.delete(id)
+    queuedRuns.clear(id)
+    if (!run.exitSent) {
+      const extra =
+        run.sessionId || run.requestedSessionId
+          ? { sessionId: run.sessionId || run.requestedSessionId }
+          : {}
       if (run.aborting || signal === 'SIGTERM' || signal === 'SIGINT') {
         postNotify(`${id}:mica`, 'turn.aborted', extra)
-      } else if (exitCode === 0) {
-        postNotify(`${id}:mica`, 'turn.completed', extra)
       } else {
         postNotify(`${id}:mica`, 'turn.error', {
           ...extra,
           ...(run.stderr.trim() ? { summary: run.stderr.trim().slice(0, 200) } : {})
         })
       }
+      sendChatExit(id, run, {
+        exitCode,
+        signal,
+        ...(exitCode && run.stderr.trim() ? { error: run.stderr.trim() } : {})
+      })
     }
-    sendExit({
-      exitCode,
-      signal,
-      ...(exitCode && run.stderr.trim() ? { error: run.stderr.trim() } : {})
-    })
   })
 
-  postNotify(`${id}:mica`, 'turn.started', sessionId ? { sessionId } : {})
   return { ok: true }
 }
 
-function startNextQueuedRun(id, sessionId) {
-  while (queuedRuns.size(id)) {
-    const next = queuedRuns.take(id)
-    if (!next?.sender || next.sender.isDestroyed()) continue
-    const result = startRun(next.sender, id, {
-      ...next.payload,
-      sessionId: next.payload.sessionId || sessionId || null
-    })
-    if (result?.ok) return result
-    next.sender.send('chat:queue-error', {
-      id,
-      prompt: next.payload?.prompt || '',
-      error: result?.error || '排队消息启动失败'
-    })
+function handleHostOutput(id, run, chunk) {
+  run.buffer += chunk.toString()
+  let newline
+  while ((newline = run.buffer.indexOf('\n')) >= 0) {
+    const line = run.buffer.slice(0, newline).trim()
+    run.buffer = run.buffer.slice(newline + 1)
+    if (!line) continue
+    let message
+    try {
+      message = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if ('method' in message) {
+      handleHostNotification(id, run, message)
+      continue
+    }
+    if ('id' in message) {
+      handleHostResponse(id, run, message)
+      continue
+    }
   }
-
-  return null
 }
 
-function abortRun(id) {
+function handleHostResponse(id, run, message) {
+  const pending = run.pendingRequests?.get(message.id)
+  run.pendingRequests?.delete(message.id)
+  if (!pending) return
+  if (message.error) {
+    // Request-level errors (busy turn/start, steer mismatch, ...). Surface as
+    // an error event so the renderer sees why a message did not start.
+    const errorMessage = message.error.message || 'chat host 请求失败'
+    const record = {
+      sequence: ++run.sequence,
+      event: {
+        type: 'error',
+        timestamp: Date.now(),
+        sessionID: run.sessionId,
+        error: { name: 'MicaRuntimeError', data: { message: errorMessage } }
+      }
+    }
+    appendBufferedEvent(run.events, record)
+    run.eventPacer.push(record)
+  }
+}
+
+function handleHostNotification(id, run, notification) {
+  const method = notification.method
+  const params = notification.params || {}
+  const event = codexNotificationToEvent(notification)
+
+  if (method === 'turn/started') {
+    // 新会话由 mica 生成 sessionId；补发一次 notify 让侧栏自动绑定节点
+    const sessionID = params.threadId
+    if (sessionID && !run.sessionId && !run.requestedSessionId) {
+      postNotify(`${id}:mica`, 'turn.started', { sessionId: sessionID })
+    }
+    if (sessionID) run.sessionId = sessionID
+    run.currentTurnId = params.turn?.id || null
+    run.running = true
+    run.aborting = false
+    run.startedAt = notification.emittedAtMs || Date.now()
+    run.exitSent = false
+    run.toolOutputs.clear()
+  } else if (method === 'turn/completed') {
+    run.running = false
+    run.currentTurnId = null
+    const reason = event?.part?.reason || 'completed'
+    const currentSessionId = run.sessionId || run.requestedSessionId
+    const extra = currentSessionId ? { sessionId: currentSessionId } : {}
+    if (reason === 'completed') {
+      postNotify(`${id}:mica`, 'turn.completed', extra)
+    } else if (reason === 'aborted') {
+      postNotify(`${id}:mica`, 'turn.aborted', extra)
+    } else {
+      postNotify(`${id}:mica`, 'turn.error', extra)
+    }
+    if (event && run.lastTokenUsage) {
+      event.part.tokens = tokensFromCodexUsage(run.lastTokenUsage)
+    }
+    sendChatExit(id, run, { exitCode: reason === 'error' ? 1 : 0 })
+    replayQueuedTurn(id, run)
+    return
+  } else if (method === 'item/commandExecution/outputDelta') {
+    const itemId = params.itemId
+    if (itemId) {
+      const previous = run.toolOutputs.get(itemId) || ''
+      run.toolOutputs.set(itemId, `${previous}${params.delta || ''}`)
+    }
+    return
+  } else if (method === 'item/completed') {
+    if (params.item?.type === 'commandExecution' && event) {
+      const itemId = params.item.id
+      const buffered = run.toolOutputs.get(itemId)
+      if (buffered) {
+        event.part.state.output = buffered
+        run.toolOutputs.delete(itemId)
+      }
+    }
+  } else if (method === 'thread/tokenUsage/updated') {
+    if (params.tokenUsage) run.lastTokenUsage = params.tokenUsage
+    return
+  } else if (method === 'error') {
+    run.running = false
+    const errorMessage = params.error?.message || 'chat host 出错'
+    postNotify(`${id}:mica`, 'turn.error', {
+      ...(run.sessionId ? { sessionId: run.sessionId } : {}),
+      ...(errorMessage ? { summary: errorMessage.slice(0, 200) } : {})
+    })
+    sendChatExit(id, run, { exitCode: 1, error: errorMessage })
+    return
+  }
+
+  if (!event) return
+  const sequence = ++run.sequence
+  const record = { sequence, event }
+  appendBufferedEvent(run.events, record)
+  run.eventPacer.push(record)
+}
+
+function replayQueuedTurn(id, run) {
+  const next = queuedRuns.take(id)
+  if (!next) {
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:queue-state', {
+        id,
+        queuedCount: queuedRuns.size(id),
+        queuedItems: queuedItems(id)
+      })
+    }
+    return
+  }
+  if (run.sender && !run.sender.isDestroyed()) {
+    run.sender.send('chat:queue-state', {
+      id,
+      queuedCount: queuedRuns.size(id),
+      queuedItems: queuedItems(id)
+    })
+  }
+  run.running = true
+  if (sendTurnStart(run, next.payload)) {
+    run.prompt = next.payload.prompt || run.prompt
+  } else {
+    run.running = false
+  }
+}
+
+function sendChatExit(id, run, payload) {
+  if (run.exitSent) return
+  run.eventPacer.flush()
+  run.exitSent = true
+  completedRuns.delete(id)
+  completedRuns.set(id, {
+    sessionId: run.sessionId || run.requestedSessionId || null,
+    events: run.events.slice(),
+    prompt: run.prompt,
+    startedAt: run.startedAt,
+    exit: { ...payload, aborted: run.aborting }
+  })
+  while (completedRuns.size > MAX_COMPLETED_RUNS) {
+    completedRuns.delete(completedRuns.keys().next().value)
+  }
+  if (run.sender && !run.sender.isDestroyed()) {
+    run.sender.send('chat:exit', {
+      id,
+      sessionId: run.sessionId || run.requestedSessionId,
+      ...payload,
+      aborted: run.aborting,
+      queuedCount: queuedRuns.size(id),
+      queuedItems: queuedItems(id)
+    })
+  }
+}
+
+function disposeHost(id) {
   const run = runs.get(id)
-  if (!run) return false
-  run.aborting = true
+  if (!run) return
+  runs.delete(id)
+  queuedRuns.clear(id)
   try {
-    run.child.kill('SIGTERM')
+    writeHostRequest(run, { method: 'shutdown' })
   } catch {
     // ignore
   }
   const timer = setTimeout(() => {
+    if (run.child) {
+      try {
+        run.child.kill('SIGKILL')
+      } catch {
+        // ignore
+      }
+    }
+  }, 500)
+  timer.unref?.()
+}
+
+function abortRun(id) {
+  const run = runs.get(id)
+  if (!run?.child || !run.running) return false
+  run.aborting = true
+  if (!sendInterrupt(run)) {
     try {
-      run.child.kill('SIGKILL')
+      run.child.kill('SIGTERM')
     } catch {
       // ignore
+    }
+    return true
+  }
+  const timer = setTimeout(() => {
+    if (runs.get(id) === run && run.running) {
+      try {
+        run.child.kill('SIGTERM')
+      } catch {
+        // ignore
+      }
     }
   }, ABORT_FORCE_KILL_MS)
   timer.unref?.()
@@ -584,7 +820,7 @@ function runModelsCommand(mica, args) {
     let child
     try {
       child = spawn(mica, args, {
-        env: { ...process.env },
+        env: mergeShellEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe']
       })
     } catch (error) {
@@ -689,7 +925,10 @@ function runCompactSession(sessionId, mode = 'model') {
   // process.cwd()（Electron 主进程的 cwd，Finder 启动时通常是 /）写进会话文件，
   // 覆盖真实 cwd，导致后续恢复会话时工作目录错乱。
   const sessionMeta = readSessionMeta(sessionId)
-  const compactCwd = sessionMeta?.cwd || process.cwd()
+  // 会话记录的 cwd 可能因目录被移动/删除而失效，此时 spawn 会 ENOENT。
+  // 先归一化为可用目录，避免压缩直接失败；回退信息随结果返回供 UI 提示。
+  const resolved = resolveUsableCwd(sessionMeta?.cwd || process.cwd())
+  const compactCwd = resolved.cwd
   return new Promise((resolvePromise) => {
     let stdout = ''
     let stderr = ''
@@ -707,7 +946,7 @@ function runCompactSession(sessionId, mode = 'model') {
         ],
         {
           cwd: compactCwd,
-          env: { ...process.env },
+          env: mergeShellEnv(process.env),
           stdio: ['ignore', 'pipe', 'pipe']
         }
       )
@@ -752,6 +991,9 @@ function runCompactSession(sessionId, mode = 'model') {
             ok: result.ok === true,
             code: result.code,
             error: result.error,
+            cwdMissing: resolved.changed,
+            originalCwd: resolved.original,
+            resolvedCwd: resolved.cwd,
             mode: result.mode,
             strategy: result.strategy,
             beforeCount: result.beforeCount,
@@ -813,14 +1055,14 @@ export function registerChatIpc() {
 
   ipcMain.handle('chat:dispose', (_event, { id } = {}) => {
     if (!id) return false
-    abortRun(id)
-    queuedRuns.clear(id)
+    disposeHost(id)
     completedRuns.delete(id)
     return true
   })
 
-  ipcMain.handle('chat:is-running', (_event, { id } = {}) => {
+  ipcMain.handle('chat:is-running', (event, { id } = {}) => {
     const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
     if (!run) {
       const completed = completedRuns.get(id)
       return completed
@@ -833,10 +1075,10 @@ export function registerChatIpc() {
             queuedItems: queuedItems(id)
           }
     }
-    if (run.finished) {
+    if (!run.running) {
       return {
         running: false,
-        finished: true,
+        finished: !run.exitSent,
         queuedCount: queuedRuns.size(id),
         queuedItems: queuedItems(id),
         sessionId: run.sessionId,
@@ -865,6 +1107,31 @@ export function registerChatIpc() {
     return runCompactSession(sessionId, mode === 'local' ? 'local' : 'model')
   })
 
+  ipcMain.handle('chat:check-cwd', (_event, { cwd } = {}) => {
+    return { ok: true, exists: isDirectory(cwd) }
+  })
+
+  ipcMain.handle('chat:update-cwd', (_event, { sessionId, cwd } = {}) => {
+    const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
+    if (!sessionId || typeof sessionId !== 'string' || !dir) {
+      return { ok: false, error: 'sessionId 或 cwd 缺失' }
+    }
+    if (!isDirectory(dir)) return { ok: false, error: '目录不存在，请选择有效目录' }
+    const file = sessionFile(sessionId)
+    if (!file || !existsSync(file)) return { ok: false, error: '会话不存在' }
+    try {
+      const raw = JSON.parse(readFileSync(file, 'utf8'))
+      if (!raw || typeof raw !== 'object') return { ok: false, error: '会话文件已损坏' }
+      if (raw.cwd === dir) return { ok: true, unchanged: true }
+      raw.cwd = dir
+      raw.updatedAt = new Date().toISOString()
+      writeFileSync(file, JSON.stringify(raw, null, 2))
+      return { ok: true, unchanged: false }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('chat:fork', (_event, { sessionId } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') throw new Error('session id is required')
     return forkSession(sessionId)
@@ -874,8 +1141,18 @@ export function registerChatIpc() {
 }
 
 export function disposeAllChatRuns() {
-  for (const id of [...runs.keys()]) {
-    abortRun(id)
+  for (const [id, run] of [...runs.entries()]) {
+    try {
+      writeHostRequest(run, { method: 'shutdown' })
+    } catch {
+      // ignore
+    }
+    try {
+      run.child?.kill('SIGTERM')
+    } catch {
+      // ignore
+    }
+    runs.delete(id)
   }
   for (const [commitId, run] of [...commitRuns.entries()]) {
     try {
@@ -885,7 +1162,6 @@ export function disposeAllChatRuns() {
     }
     commitRuns.delete(commitId)
   }
-  runs.clear()
   queuedRuns.clearAll()
   completedRuns.clear()
 }

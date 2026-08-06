@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { RunJsonEvent } from '@packages/mica-runtime/index.js';
-import { runHeadless } from './runHeadless.js';
+import type { CodexExecEvent } from '@packages/mica-runtime/index.js';
+import { runExec } from './runExec.js';
 
-describe('runHeadless lifecycle', () => {
+describe('runExec lifecycle', () => {
   it('does not start a session or model request when the external signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
-    const events: RunJsonEvent[] = [];
+    const events: CodexExecEvent[] = [];
 
-    const result = await runHeadless({
+    const result = await runExec({
       prompt: 'should not run',
       signal: controller.signal,
       writer: { write: (event) => events.push(event) },

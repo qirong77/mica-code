@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import {
   appendBufferedEvent,
-  buildChatArgs,
+  buildAppServerArgs,
   buildChatEnv,
   CHAT_MCP_INIT_TIMEOUT_MS,
-  createChatEventPacer
+  codexNotificationToEvent,
+  createChatEventPacer,
+  tokensFromCodexUsage
 } from './chat-events'
 
 function timerHarness() {
@@ -132,45 +134,176 @@ describe('chat CLI arguments', () => {
       MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS)
     })
     expect(source).toEqual({ PATH: '/usr/bin' })
-    expect(buildChatArgs({ prompt: 'hi' })).not.toContain('--mcp-init-timeout-ms')
   })
 
-  it('separates prompts from mica options even when the prompt starts with a dash', () => {
-    expect(buildChatArgs({ prompt: '--help', sessionId: 's1' })).toEqual([
-      'run',
-      '--format',
-      'json',
-      '--thinking',
-      '--session',
-      's1',
-      '--',
-      '--help'
-    ])
-    expect(buildChatArgs({ prompt: '--' }).slice(-2)).toEqual(['--', '--'])
-  })
-
-  it('passes model, effort and role overrides through to the mica CLI', () => {
+  it('builds resident app-server arguments with overrides', () => {
     expect(
-      buildChatArgs({
-        prompt: 'hello',
+      buildAppServerArgs({
+        sessionId: 's1',
+        cwd: '/tmp/work',
         model: 'krill/gpt-5.6-terra',
         variant: 'high',
-        role: 'coder'
+        role: 'coder',
+        maxTurns: 50
       })
     ).toEqual([
-      'run',
-      '--format',
-      'json',
-      '--thinking',
+      'app-server',
+      '--session',
+      's1',
+      '--dir',
+      '/tmp/work',
       '--model',
       'krill/gpt-5.6-terra',
       '--variant',
       'high',
       '--role',
       'coder',
-      '--',
-      'hello'
+      '--max-turns',
+      '50'
     ])
-    expect(buildChatArgs({ prompt: 'hi' })).not.toContain('--model')
+  })
+
+  it('omits optional app-server flags when absent', () => {
+    const args = buildAppServerArgs({})
+    expect(args[0]).toBe('app-server')
+    for (const flag of ['--session', '--dir', '--model', '--variant', '--role', '--max-turns']) {
+      expect(args).not.toContain(flag)
+    }
+  })
+
+  it('maps codex turn/started to a step_start app event', () => {
+    const event = codexNotificationToEvent({
+      method: 'turn/started',
+      emittedAtMs: 1234,
+      params: { threadId: 's1', turn: { id: 'turn-1', status: 'inProgress' } }
+    })
+    expect(event).toMatchObject({
+      type: 'step_start',
+      timestamp: 1234,
+      sessionID: 's1',
+      turnId: 'turn-1'
+    })
+  })
+
+  it('maps codex agentMessage/reasoning deltas to text/reasoning events', () => {
+    expect(
+      codexNotificationToEvent({
+        method: 'item/agentMessage/delta',
+        params: { threadId: 's1', turnId: 't1', itemId: 'i1', delta: 'hi' }
+      })
+    ).toMatchObject({ type: 'text', part: { type: 'text', text: 'hi' } })
+    expect(
+      codexNotificationToEvent({
+        method: 'item/reasoning/textDelta',
+        params: { threadId: 's1', turnId: 't1', itemId: 'i1', delta: 'think', contentIndex: 0 }
+      })
+    ).toMatchObject({ type: 'reasoning', part: { type: 'reasoning', text: 'think' } })
+  })
+
+  it('maps codex commandExecution items to pending/completed tool events', () => {
+    const started = codexNotificationToEvent({
+      method: 'item/started',
+      params: {
+        threadId: 's1',
+        turnId: 't1',
+        item: {
+          type: 'commandExecution',
+          id: 'c1',
+          command: 'run_shell {"cmd":"ls"}',
+          status: 'inProgress'
+        }
+      }
+    })
+    expect(started).toMatchObject({
+      type: 'tool_use',
+      part: {
+        type: 'tool',
+        tool: 'run_shell',
+        callID: 'c1',
+        state: { status: 'pending', input: { cmd: 'ls' } }
+      }
+    })
+    const completed = codexNotificationToEvent({
+      method: 'item/completed',
+      params: {
+        threadId: 's1',
+        turnId: 't1',
+        item: {
+          type: 'commandExecution',
+          id: 'c1',
+          command: 'run_shell',
+          status: 'completed',
+          aggregatedOutput: 'out'
+        }
+      }
+    })
+    expect(completed).toMatchObject({
+      type: 'tool_use',
+      part: {
+        type: 'tool',
+        callID: 'c1',
+        state: { status: 'completed', output: 'out' }
+      }
+    })
+  })
+
+  it('maps codex turn/completed and token usage for step_finish', () => {
+    const event = codexNotificationToEvent({
+      method: 'turn/completed',
+      params: {
+        threadId: 's1',
+        turn: { id: 't1', status: 'completed' }
+      }
+    })
+    expect(event).toMatchObject({ type: 'step_finish', part: { reason: 'completed' } })
+    expect(
+      codexNotificationToEvent({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 's1',
+          turnId: 't1',
+          tokenUsage: {
+            total: { total_tokens: 100 },
+            last: {
+              total_tokens: 10,
+              input_tokens: 4,
+              cached_input_tokens: 2,
+              output_tokens: 6,
+              reasoning_output_tokens: 1,
+              cache_write_input_tokens: 0
+            }
+          }
+        }
+      })
+    ).toMatchObject({ type: 'usage', tokenUsage: expect.any(Object) })
+  })
+
+  it('builds step_finish tokens from the last codex usage', () => {
+    expect(
+      tokensFromCodexUsage({
+        total: { total_tokens: 100 },
+        last: {
+          total_tokens: 10,
+          input_tokens: 4,
+          cached_input_tokens: 2,
+          output_tokens: 6,
+          reasoning_output_tokens: 1,
+          cache_write_input_tokens: 3
+        }
+      })
+    ).toEqual({
+      total: 10,
+      input: 4,
+      output: 6,
+      reasoning: 1,
+      cache: { read: 2, write: 3 }
+    })
+    expect(tokensFromCodexUsage(null)).toEqual({
+      total: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 }
+    })
   })
 })

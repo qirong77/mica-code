@@ -2,7 +2,7 @@
 
 Mica Code is a compact Electron workspace with session management, file editing, workspace search, Git diff views, and a web-style chat view for driving Mica conversations.
 
-The Chat tab replaces the old terminal-hosted Mica view: every message spawns a `mica run --format json --thinking` child process (NDJSON event stream over stdout) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
+The Chat tab replaces the old terminal-hosted Mica view: every chat node keeps one resident `mica app-server` child process (Codex v2 App Server protocol over stdio) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
 
 ## Tech stack
 
@@ -16,13 +16,7 @@ The Chat tab replaces the old terminal-hosted Mica view: every message spawns a 
 
 ## Chat protocol
 
-The Chat tab talks to the Mica CLI via its existing headless protocol:
-
-```bash
-mica run --format json --thinking [--session <id>] [--dir <cwd>] [--max-turns <n>] "<prompt>"
-```
-
-Stdout is NDJSON with `step_start` (carries the session ID), `reasoning`, `text`, `tool_use`, `error` and `step_finish` events. Tool calls arrive first as `pending` and later as `completed` records with the same call ID. `--thinking` is opt-in at the CLI protocol level so existing Multica consumers keep their compact output; the app enables it for a bounded live Thought preview that remains available after the turn. The main process (`src/main/chat.js`) spawns one child per turn, paces adjacent text/reasoning deltas before forwarding them, supports abort via SIGTERM (with a SIGKILL fallback), and reads conversation history plus model/context metadata from `~/.mica/sessions/*.json` when a session is reopened. Turn lifecycle notifications are posted to the local notify server so sidebar dots and unread badges behave exactly like PTY-hosted Mica sessions.
+The Chat tab talks to the Mica CLI via `mica app-server`, a per-chat-node resident process speaking the Codex v2 App Server protocol subset over stdio (JSON-RPC style, one JSON object per line): the app sends `initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt` and consumes v2 notifications (`turn/started`, `turn/completed`, `item/agentMessage/delta` for text, `item/reasoning/textDelta` for thinking, `item/commandExecution/outputDelta` plus `item/started`/`item/completed` for tool calls — pending then completed with the same item id, `thread/tokenUsage/updated` for usage). The main process (`src/main/chat.js`) maps these notifications back to the renderer's internal event shape, paces adjacent text/reasoning deltas, and keeps the host alive across turns (skipping process startup, session reload and MCP re-init; Shift+Tab steers into the active turn for after_iteration injection, plain Tab queues locally for after_turn). Aborts send `turn/interrupt` instead of killing the process (SIGTERM fallback). Conversation history plus model/context metadata is read from `~/.mica/sessions/*.json` when a session is reopened, and turn lifecycle notifications are posted to the local notify server so sidebar dots and unread badges behave exactly like PTY-hosted Mica sessions.
 
 The sidebar intentionally has only two activity indicators: a breathing green dot while a Mica turn or terminal process is running, and a blue dot once the result is unread. Merely opening an idle session never creates a status dot; running takes precedence if both flags are present.
 

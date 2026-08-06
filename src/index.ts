@@ -27,21 +27,14 @@ if (invocation.mode === 'version') {
   await exitAfterStdoutFlush(0);
 }
 
-if (invocation.mode === 'run' && invocation.cwd) {
+if (invocation.mode === 'exec' && invocation.cwd) {
   const cwd = resolve(invocation.cwd);
   try {
     process.chdir(cwd);
     invocation.cwd = cwd;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stdout.write(
-      `${JSON.stringify({
-        type: 'error',
-        timestamp: Date.now(),
-        part: { type: 'error' },
-        error: { name: 'WorkingDirectoryError', data: { message } },
-      })}\n`,
-    );
+    process.stdout.write(`${JSON.stringify({ type: 'error', message })}\n`);
     console.error(message);
     await exitAfterStdoutFlush(2);
   }
@@ -55,9 +48,7 @@ if (invocation.mode === 'models') {
   const models = await listRuntimeModelIds();
   if (invocation.json) {
     const { ensureModelRule, getModelEffortOptions } = await import('@packages/mica-config/index.js');
-    const { default: setupModelEffortContext } = await import(
-      '../buildin-plugins/model-effort-context/index.mjs'
-    );
+    const { default: setupModelEffortContext } = await import('../buildin-plugins/model-effort-context/index.mjs');
     const disposeModelEffortContext = setupModelEffortContext();
     try {
       const entries = await Promise.all(
@@ -82,12 +73,8 @@ if (invocation.mode === 'models') {
   await exitAfterStdoutFlush(0);
 }
 
-if (invocation.mode === 'run') {
-  const [{ runHeadless }, { createStdoutRunJsonWriter }] = await Promise.all([
-    import('./cli/runHeadless.js'),
-    import('@packages/mica-runtime/index.js'),
-  ]);
-  const writer = createStdoutRunJsonWriter();
+if (invocation.mode === 'exec') {
+  const { runExec } = await import('./cli/runExec.js');
   const processDiagnostics = setupProcessDiagnostics({
     reportError: (error: unknown, prefix?: string) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -102,7 +89,7 @@ if (invocation.mode === 'run') {
   process.once('SIGHUP', requestAbort);
 
   try {
-    const result = await runHeadless({
+    const result = await runExec({
       prompt: invocation.prompt,
       sessionId: invocation.sessionId,
       cwd: invocation.cwd,
@@ -111,22 +98,17 @@ if (invocation.mode === 'run') {
       role: invocation.role,
       maxTurns: invocation.maxTurns,
       thinking: invocation.thinking,
+      json: invocation.json,
       noSave: invocation.noSave,
       mcpConfigPath: invocation.mcpConfigPath,
       strictMcpConfig: invocation.strictMcpConfig,
       mcpInitTimeoutMs: invocation.mcpInitTimeoutMs ?? positiveIntegerEnv('MICA_MCP_INIT_TIMEOUT_MS'),
-      writer,
       signal: abortController.signal,
     });
+    if (!invocation.json && result.text) process.stdout.write(`${result.text}\n`);
     process.exitCode = result.exitCode;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writer.write({
-      type: 'error',
-      timestamp: Date.now(),
-      part: { type: 'error' },
-      error: { name: error instanceof Error ? error.name : 'MicaRuntimeError', data: { message } },
-    });
     console.error(message);
     process.exitCode = 1;
   } finally {
@@ -186,6 +168,37 @@ if (invocation.mode === 'commit') {
     console.error(message);
   }
   await exitAfterStdoutFlush(exitCode);
+}
+
+if (invocation.mode === 'app-server') {
+  const { runAppServer } = await import('./cli/runAppServer.js');
+  const mcpInitTimeoutMs = invocation.mcpInitTimeoutMs ?? positiveIntegerEnv('MICA_MCP_INIT_TIMEOUT_MS');
+  try {
+    await runAppServer({
+      sessionId: invocation.sessionId,
+      cwd: invocation.cwd,
+      model: invocation.model,
+      variant: invocation.variant,
+      role: invocation.role,
+      maxTurns: invocation.maxTurns,
+      mcpConfigPath: invocation.mcpConfigPath,
+      strictMcpConfig: invocation.strictMcpConfig,
+      mcpInitTimeoutMs,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        timestamp: Date.now(),
+        part: { type: 'error' },
+        error: { name: 'MicaRuntimeError', data: { message } },
+      })}\n`,
+    );
+    console.error(message);
+    process.exitCode = 1;
+  }
+  await exitAfterStdoutFlush(Number(process.exitCode ?? 0));
 }
 
 if (invocation.mode === 'daemon') {

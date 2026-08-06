@@ -1,6 +1,6 @@
-export type RunCliInvocation = {
-  mode: 'run';
-  format: 'json';
+export type ExecCliInvocation = {
+  mode: 'exec';
+  json: boolean;
   prompt: string;
   sessionId?: string;
   cwd?: string;
@@ -37,12 +37,26 @@ export type CommitCliInvocation = {
   format: 'json';
 };
 
+export type AppServerCliInvocation = {
+  mode: 'app-server';
+  sessionId?: string;
+  cwd?: string;
+  model?: string;
+  variant?: string;
+  role?: string;
+  maxTurns?: number;
+  mcpConfigPath?: string;
+  strictMcpConfig: boolean;
+  mcpInitTimeoutMs?: number;
+};
+
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
-  | RunCliInvocation
+  | ExecCliInvocation
   | DaemonCliInvocation
   | CompactCliInvocation
   | CommitCliInvocation
+  | AppServerCliInvocation
   | { mode: 'models'; verbose: boolean; json: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
@@ -55,10 +69,11 @@ export const CLI_USAGE = [
   '  mica --version',
   '  mica models',
   '  mica models --json',
-  '  mica run --format json [options] "<prompt>"',
+  '  mica exec [--json] [options] "<prompt>"',
   '  mica daemon [--server <url>] [--name <name>]',
   '  mica compact --session <id> [--dir <path>] [--force] [--prune-only]',
   '  mica commit [--dir <path>]',
+  '  mica app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -68,6 +83,7 @@ export const CLI_USAGE = [
   '  --role <name>                     Override the agent role',
   '  --max-turns <count>               Limit model round trips',
   '  --thinking                        Include reasoning events in JSON output',
+  '  --json                            Emit Codex exec-style ThreadEvent JSONL',
   '  --no-save                         Run without persisting a session file',
   '  --dangerously-skip-permissions    Autonomous runtime mode',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
@@ -180,9 +196,64 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     }
     return { mode: 'commit', cwd, format };
   }
-  if (argv[0] !== 'run') return { mode: 'interactive' };
+  if (argv[0] === 'app-server') {
+    let sessionId: string | undefined;
+    let cwd: string | undefined;
+    let model: string | undefined;
+    let variant: string | undefined;
+    let role: string | undefined;
+    let maxTurns: number | undefined;
+    let mcpConfigPath: string | undefined;
+    let strictMcpConfig = false;
+    let mcpInitTimeoutMs: number | undefined;
+    for (let index = 1; index < argv.length; index++) {
+      const arg = argv[index]!;
+      const valueOption = parseValueOption(arg, argv, index, [
+        '--session',
+        '--dir',
+        '--model',
+        '--variant',
+        '--role',
+        '--max-turns',
+        '--mcp-config',
+        '--mcp-init-timeout-ms',
+      ]);
+      if (valueOption) {
+        if (!valueOption.ok) return valueOption.error;
+        index = valueOption.nextIndex;
+        if (valueOption.name === '--session') sessionId = valueOption.value;
+        if (valueOption.name === '--dir') cwd = valueOption.value;
+        if (valueOption.name === '--model') model = valueOption.value;
+        if (valueOption.name === '--variant') variant = valueOption.value;
+        if (valueOption.name === '--role') role = valueOption.value;
+        if (valueOption.name === '--max-turns') maxTurns = Number(valueOption.value);
+        if (valueOption.name === '--mcp-config') mcpConfigPath = valueOption.value;
+        if (valueOption.name === '--mcp-init-timeout-ms') mcpInitTimeoutMs = Number(valueOption.value);
+        continue;
+      }
+      if (arg === '--strict-mcp-config') {
+        strictMcpConfig = true;
+        continue;
+      }
+      if (arg === '--help' || arg === '-h') return { mode: 'help' };
+      return cliError(`Unknown app-server option: ${arg}`);
+    }
+    return {
+      mode: 'app-server',
+      sessionId,
+      cwd,
+      model,
+      variant,
+      role,
+      maxTurns,
+      mcpConfigPath,
+      strictMcpConfig,
+      mcpInitTimeoutMs,
+    };
+  }
+  if (argv[0] !== 'exec') return { mode: 'interactive' };
 
-  let format: 'json' | undefined;
+  let json = false;
   let sessionId: string | undefined;
   let cwd: string | undefined;
   let model: string | undefined;
@@ -208,21 +279,6 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       positionalOnly = true;
       continue;
     }
-    if (arg === '--format') {
-      const value = takeValue(argv, ++index, '--format');
-      if (!value.ok) return value.error;
-      if (value.value !== 'json') return cliError('Unsupported --format value. Use --format json.');
-      format = 'json';
-      continue;
-    }
-    if (arg.startsWith('--format=')) {
-      if (arg.slice('--format='.length) !== 'json') {
-        return cliError('Unsupported --format value. Use --format json.');
-      }
-      format = 'json';
-      continue;
-    }
-
     const valueOption = parseValueOption(arg, argv, index, [
       '--session',
       '--dir',
@@ -281,6 +337,10 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       thinking = true;
       continue;
     }
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
     if (arg === '--no-save') {
       noSave = true;
       continue;
@@ -298,13 +358,12 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     positionals.push(arg);
   }
 
-  if (format !== 'json') return cliError('mica run currently requires --format json.');
   const prompt = positionals.join(' ').trim();
   if (!prompt) return cliError(CLI_USAGE);
 
   return {
-    mode: 'run',
-    format,
+    mode: 'exec',
+    json,
     prompt,
     sessionId,
     cwd,

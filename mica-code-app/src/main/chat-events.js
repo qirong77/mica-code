@@ -118,14 +118,154 @@ export function buildChatEnv(env = process.env) {
   }
 }
 
-export function buildChatArgs({ prompt, sessionId, cwd, maxTurns, model, variant, role }) {
-  const args = ['run', '--format', 'json', '--thinking']
+// Per-session resident `mica app-server` process: one host per chat node, kept
+// alive across turns so repeated messages skip process startup, session reload
+// and MCP re-init, and queued inputs get real after_iteration injection.
+export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTurns }) {
+  const args = ['app-server']
   if (sessionId) args.push('--session', sessionId)
   if (cwd) args.push('--dir', cwd)
   if (model) args.push('--model', model)
   if (variant) args.push('--variant', variant)
   if (role) args.push('--role', role)
   if (Number.isInteger(maxTurns) && maxTurns > 0) args.push('--max-turns', String(maxTurns))
-  args.push('--', prompt)
   return args
+}
+
+// Map a Codex v2 app-server notification (mica chat-host protocol) to the app's
+// internal event shape consumed by the renderer. Returns null for notifications
+// that need state accumulation (commandExecution outputDelta, token usage) or
+// that have no UI projection.
+export function codexNotificationToEvent(notification) {
+  const { method, params = {}, emittedAtMs } = notification
+  const timestamp = emittedAtMs || Date.now()
+  const sessionID = params.threadId || null
+  switch (method) {
+    case 'turn/started':
+      return {
+        type: 'step_start',
+        timestamp,
+        sessionID,
+        turnId: params.turn?.id
+      }
+    case 'turn/completed':
+      return {
+        type: 'step_finish',
+        timestamp,
+        sessionID,
+        part: {
+          type: 'step-finish',
+          reason: codexTurnStatusToReason(params.turn?.status),
+          tokens: {
+            total: 0,
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 }
+          }
+        }
+      }
+    case 'item/agentMessage/delta':
+      return {
+        type: 'text',
+        timestamp,
+        sessionID,
+        part: { type: 'text', text: params.delta || '' }
+      }
+    case 'item/reasoning/textDelta':
+      return {
+        type: 'reasoning',
+        timestamp,
+        sessionID,
+        part: { type: 'reasoning', text: params.delta || '' }
+      }
+    case 'item/started':
+      if (params.item?.type !== 'commandExecution') return null
+      return {
+        type: 'tool_use',
+        timestamp,
+        sessionID,
+        part: {
+          type: 'tool',
+          tool: commandToolName(params.item.command),
+          callID: params.item.id,
+          state: { status: 'pending', input: commandInput(params.item.command) }
+        }
+      }
+    case 'item/completed':
+      if (params.item?.type !== 'commandExecution') return null
+      return {
+        type: 'tool_use',
+        timestamp,
+        sessionID,
+        part: {
+          type: 'tool',
+          tool: commandToolName(params.item.command),
+          callID: params.item.id,
+          state: {
+            status: 'completed',
+            input: commandInput(params.item.command),
+            output: params.item.aggregatedOutput || ''
+          }
+        }
+      }
+    case 'item/commandExecution/outputDelta':
+      // Accumulated into the item/completed output by chat.js.
+      return null
+    case 'thread/tokenUsage/updated':
+      // Accumulated into step_finish tokens by chat.js.
+      return { type: 'usage', timestamp, sessionID, tokenUsage: params.tokenUsage }
+    case 'error':
+      return {
+        type: 'error',
+        timestamp,
+        sessionID,
+        error: {
+          name: 'MicaRuntimeError',
+          data: { message: params.error?.message || 'chat host 出错' }
+        }
+      }
+    default:
+      return null
+  }
+}
+
+export function codexTurnStatusToReason(status) {
+  if (status === 'completed') return 'completed'
+  if (status === 'interrupted') return 'aborted'
+  return 'error'
+}
+
+export function tokensFromCodexUsage(tokenUsage) {
+  const last = tokenUsage?.last
+  if (!last) return { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  return {
+    total: last.total_tokens || 0,
+    input: last.input_tokens || 0,
+    output: last.output_tokens || 0,
+    reasoning: last.reasoning_output_tokens || 0,
+    cache: {
+      read: last.cached_input_tokens || 0,
+      write: last.cache_write_input_tokens || 0
+    }
+  }
+}
+
+function commandToolName(command) {
+  return String(command || '').split(/\s+/)[0] || 'tool'
+}
+
+function commandInput(command) {
+  const rest = String(command || '')
+    .split(/\s+/)
+    .slice(1)
+    .join(' ')
+    .trim()
+  if (!rest) return {}
+  try {
+    const value = JSON.parse(rest)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : { value: rest }
+  } catch {
+    return { value: rest }
+  }
 }

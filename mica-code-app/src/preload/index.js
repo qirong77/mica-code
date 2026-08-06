@@ -35,6 +35,8 @@ const chatApi = {
   models: () => ipcRenderer.invoke('chat:models'),
   roles: () => ipcRenderer.invoke('chat:roles'),
   compact: (sessionId, mode = 'model') => ipcRenderer.invoke('chat:compact', { sessionId, mode }),
+  checkCwd: (cwd) => ipcRenderer.invoke('chat:check-cwd', { cwd }),
+  updateCwd: (sessionId, cwd) => ipcRenderer.invoke('chat:update-cwd', { sessionId, cwd }),
   fork: (sessionId) => ipcRenderer.invoke('chat:fork', { sessionId }),
   savePastedImage: () => ipcRenderer.invoke('chat:save-pasted-image'),
   dispose: (id) => ipcRenderer.invoke('chat:dispose', { id }),

@@ -12,6 +12,7 @@ export type { RuntimeEventBus } from './RuntimeEventBus.js';
 export type { MessageQueueService } from './MessageQueueService.js';
 export type { RuntimeController } from './RuntimeController.js';
 export type { RuntimeInput, RuntimeInputSource, RuntimeQueueMode } from './RuntimeInput.js';
+export * from './codexProtocol.js';
 export type { RuntimeEvent, RuntimeEventMap } from './RuntimeEvent.js';
 export type { RuntimeStatus } from './RuntimeStatus.js';
 export type { RuntimeViewSnapshot } from './RuntimeViewSnapshot.js';
@@ -32,16 +33,5 @@ export type {
   RewindMode,
   RewindPreviewResult,
 } from './Rewind.js';
-export type { RunJsonEvent, RunJsonStatus, RunJsonTokenUsage, RunJsonWriter } from './runJson.js';
-export {
-  chunkRunJsonText,
-  createRunJsonError,
-  createRunJsonStepFinish,
-  createRunJsonStepStart,
-  createStdoutRunJsonWriter,
-  emptyRunJsonTokenUsage,
-  encodeRunJsonLine,
-  exitCodeForRunJsonStatus,
-  parseToolCallInput,
-  truncateRunJsonToolOutput,
-} from './runJson.js';
+export type { CodexExecEvent, CodexExecEventWriter, CodexExecItem, CodexExecUsage } from './codexExecEvents.js';
+export { createStdoutCodexExecWriter, emptyCodexExecUsage, encodeCodexExecLine } from './codexExecEvents.js';

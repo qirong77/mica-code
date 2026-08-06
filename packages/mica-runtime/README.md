@@ -40,5 +40,6 @@ queue.enqueue({ text: '继续' });
 - `AbortResult.ts`：中止结果。
 - `MessageQueueService.ts`：运行中输入排队服务。
 - `PluginRuntime.ts`：插件 runtime queue capability、opaque owner 和 hook event 类型。
-- `runJson.ts`：`run --format json` NDJSON 事件类型、编码、文本分块、输出上限和结果退出码。
+- `codexExecEvents.ts`：`mica exec --json` 的 Codex exec ThreadEvent JSONL 类型（`thread.started`/`turn.started`/`item.*`/`turn.completed`/`error`，item 类型 `agent_message`/`reasoning`/`command_execution`）、编码与输出。
+- `codexProtocol.ts`：Codex v2 App Server 协议子集（`mica app-server` 用）——JSON-RPC 风格 framing（每行一个 JSON、无 `jsonrpc` 字段）、请求/响应/错误/通知编解码、方法名与通知名常量。
 - `index.ts`：公共 API 聚合导出。

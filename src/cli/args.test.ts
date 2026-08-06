@@ -12,12 +12,11 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--resume'])).toMatchObject({ mode: 'error' });
   });
 
-  it('parses the exact argv shape used by Multica deveco runtimes', () => {
+  it('parses codex-style exec invocations', () => {
     expect(
       parseCliArgs([
-        'run',
-        '--format',
-        'json',
+        'exec',
+        '--json',
         '--dangerously-skip-permissions',
         '--dir',
         '/work/task',
@@ -32,8 +31,8 @@ describe('parseCliArgs', () => {
         'fix tests',
       ]),
     ).toEqual({
-      mode: 'run',
-      format: 'json',
+      mode: 'exec',
+      json: true,
       prompt: 'fix tests',
       sessionId: 'session-1',
       cwd: '/work/task',
@@ -53,8 +52,7 @@ describe('parseCliArgs', () => {
   it('parses equals-form flags and managed MCP options', () => {
     expect(
       parseCliArgs([
-        'run',
-        '--format=json',
+        'exec',
         '--session=abc',
         '--max-turns=3',
         '--mcp-config=/tmp/mcp.json',
@@ -64,7 +62,8 @@ describe('parseCliArgs', () => {
         'continue',
       ]),
     ).toMatchObject({
-      mode: 'run',
+      mode: 'exec',
+      json: false,
       sessionId: 'abc',
       maxTurns: 3,
       mcpConfigPath: '/tmp/mcp.json',
@@ -96,13 +95,15 @@ describe('parseCliArgs', () => {
   });
 
   it('parses the --no-save flag for one-shot background tasks', () => {
-    expect(parseCliArgs(['run', '--format=json', '--no-save', 'commit changes'])).toMatchObject({
-      mode: 'run',
+    expect(parseCliArgs(['exec', '--no-save', 'commit changes'])).toMatchObject({
+      mode: 'exec',
+      json: false,
       noSave: true,
       prompt: 'commit changes',
     });
-    expect(parseCliArgs(['run', '--format=json', 'commit changes'])).toMatchObject({
-      mode: 'run',
+    expect(parseCliArgs(['exec', 'commit changes'])).toMatchObject({
+      mode: 'exec',
+      json: false,
       noSave: false,
     });
   });
@@ -132,25 +133,25 @@ describe('parseCliArgs', () => {
   });
 
   it('accepts a Multica prompt whose first character is a dash', () => {
-    expect(parseCliArgs(['run', '--format', 'json', '- fix the checklist'])).toMatchObject({
-      mode: 'run',
+    expect(parseCliArgs(['exec', '- fix the checklist'])).toMatchObject({
+      mode: 'exec',
       prompt: '- fix the checklist',
     });
-    expect(parseCliArgs(['run', '--format', 'json', '--', '--help'])).toMatchObject({
-      mode: 'run',
+    expect(parseCliArgs(['exec', '--', '--help'])).toMatchObject({
+      mode: 'exec',
       prompt: '--help',
     });
   });
 
-  it('rejects missing prompts, invalid counts, and unsupported formats', () => {
-    expect(parseCliArgs(['run', '--format', 'json'])).toMatchObject({ mode: 'error' });
-    expect(parseCliArgs(['run', '--format', 'text', 'hi'])).toMatchObject({ mode: 'error' });
-    expect(parseCliArgs(['run', '--format=json', '--max-turns=0', 'hi'])).toMatchObject({ mode: 'error' });
-    expect(parseCliArgs(['run', '--format=json', '--mcp-init-timeout-ms=0', 'hi'])).toMatchObject({
+  it('rejects missing prompts and invalid counts', () => {
+    expect(parseCliArgs(['exec'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['exec', '--max-turns=0', 'hi'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['exec', '--mcp-init-timeout-ms=0', 'hi'])).toMatchObject({
       mode: 'error',
     });
-    expect(parseCliArgs(['run', '--format=json', '--mcp-init-timeout-ms=1.5', 'hi'])).toMatchObject({
+    expect(parseCliArgs(['exec', '--mcp-init-timeout-ms=1.5', 'hi'])).toMatchObject({
       mode: 'error',
     });
+    expect(parseCliArgs(['run', '--format=json', 'hi'])).toMatchObject({ mode: 'interactive' });
   });
 });

@@ -53,11 +53,11 @@ describe('CLI runtime probes', () => {
     }
   });
 
-  it('keeps run-mode startup failures as a single valid NDJSON error line', () => {
+  it('keeps exec-mode startup failures as a single valid JSON error line', () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-run-probe-'));
     try {
       const result = runCli(
-        ['run', '--format', 'json', '--mcp-init-timeout-ms', '3000', '--dir', join(micaHome, 'missing'), 'test'],
+        ['exec', '--json', '--mcp-init-timeout-ms', '3000', '--dir', join(micaHome, 'missing'), 'test'],
         micaHome,
       );
       expect(result.status).toBe(2);
@@ -65,7 +65,6 @@ describe('CLI runtime probes', () => {
       expect(lines).toHaveLength(1);
       expect(JSON.parse(lines[0]!)).toMatchObject({
         type: 'error',
-        error: { name: 'WorkingDirectoryError' },
       });
     } finally {
       rmSync(micaHome, { recursive: true, force: true });

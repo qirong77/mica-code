@@ -28,7 +28,7 @@ export type CommitCliResult = {
 
 // One-shot git commit: collect the change summary deterministically, ask the
 // model a single time for the message, then run add/commit/push ourselves.
-// Unlike `mica run`, no tools are enabled and no multi-turn loop happens.
+// Unlike `mica exec`, no tools are enabled and no multi-turn loop happens.
 export async function runCommit(options: CommitCliOptions): Promise<CommitCliResult> {
   if (options.cwd) process.chdir(resolve(options.cwd));
   const disposeModelEffortContext = setupModelEffortContext();
