@@ -344,9 +344,13 @@ class BufferStore {
   }
 
   strippedWindow(windowSize: number): string {
-    const all = this.chunks.join('');
-    const slice = all.length > windowSize ? all.slice(-windowSize) : all;
-    return toWellFormedText(stripAnsi(slice));
+    // 从原始字节尾部硬切会从 ANSI 序列中间开始，stripAnsi 会把未闭合的
+    // ESC 序列连同后续一大段文本一起吞掉（Ink 重绘输出量很容易超过窗口）。
+    // 先全量 strip（带缓存）再取尾部，保证窗口永远是良构文本。
+    const stripped = this.stripped();
+    const window = stripped.length > windowSize ? stripped.slice(-windowSize) : stripped;
+    // slice 可能从多字节字符中间切出孤立 surrogate，窗口需再规范化一次。
+    return toWellFormedText(window);
   }
 
   subscribe(cb: (data: string) => void): () => void {

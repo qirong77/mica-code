@@ -1,0 +1,60 @@
+---
+// 基础布局：导航 + 页脚 + 全局样式
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'Mica Code — Minimal, Intelligent, Cache-first Agent' } = Astro.props;
+const pageTitle = title === 'Mica Code' ? title : `${title} · Mica Code`;
+// BASE_URL 本地为 /，GitHub Pages 子路径部署时为 /mica-code/
+const base = import.meta.env.BASE_URL;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="description" content={description} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href={`${base}mica.svg`} />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="nav-brand" href={base}>
+          <img src={`${base}mica.svg`} alt="Mica Code" />
+          Mica Code
+        </a>
+        <div class="nav-links">
+          <a href={`${base}#features`}>功能</a>
+          <a href={`${base}#headless`}>协议</a>
+          <a href={`${base}docs/getting-started`} class="label-docs">文档</a>
+          <a href="https://github.com/qirong77/mica-code" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>© {new Date().getFullYear()} Mica Code · Minimal, Intelligent, Cache-first Agent</span>
+        <span>
+          <a href="https://github.com/qirong77/mica-code" target="_blank" rel="noopener">GitHub</a>
+          &nbsp;·&nbsp;
+          <a href={`${base}docs/getting-started`}>使用文档</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

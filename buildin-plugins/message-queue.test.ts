@@ -26,6 +26,8 @@ describe('message-queue', () => {
     expect(harness.queue.enqueue).not.toHaveBeenCalledWith(activeOwner, input);
     expect(harness.queues.get(owner)).toEqual([expect.objectContaining({ ...input, queueMode: 'after_turn' })]);
     expect(harness.queues.get(activeOwner)).toBeUndefined();
+    // 排队成功后只发布 queue:changed 驱动 waiting queue 行，
+    // 不再重复发 info notice（waiting 行已包含 queueMode 与重新编辑提示）。
     expect(harness.published).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -33,8 +35,13 @@ describe('message-queue', () => {
           pendingInputs: [expect.objectContaining({ ...input, queueMode: 'after_turn' })],
           owner,
         }),
+      ]),
+    );
+    expect(harness.published).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           type: 'notification',
+          level: 'info',
           owner,
         }),
       ]),

@@ -12,6 +12,7 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
+  MICA_QUEUE_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -21,6 +22,7 @@ import {
   type CodexThread,
   type CodexTurn,
   type CodexUserInput,
+  type MicaQueueItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
@@ -42,6 +44,7 @@ export type AppServerOptions = {
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   mcpInitTimeoutMs?: number;
+  thinking?: boolean;
 };
 
 /**
@@ -315,6 +318,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
             threadId: sessionId,
             turnId,
             cwd: process.cwd(),
+            thinking: options.thinking === true,
           });
         },
         initialized,
@@ -487,8 +491,15 @@ async function handleCodexRequest(
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'input must contain at least one text item');
         return;
       }
+      // Mica extension: carry the client message id through so queue events can
+      // correlate with the optimistic message the app already rendered. Codex
+      // clients simply never send this field.
+      const clientMessageId = typeof params.clientMessageId === 'string' ? params.clientMessageId : undefined;
       const result = await ctx.executor.start(
-        micaRuntime.createRuntimeInput(input, 'ui', { queueMode: 'after_iteration' }),
+        micaRuntime.createRuntimeInput(input, 'ui', {
+          queueMode: 'after_iteration',
+          ...(clientMessageId ? { id: clientMessageId } : {}),
+        }),
       );
       if (result === 'rejected') {
         ctx.writeError(CODEX_ERROR_INTERNAL, '已有一条排队消息，等待发送或重新编辑');
@@ -536,11 +547,54 @@ function handleTurnEvent(
     }
     case 'queued':
     case 'dequeue':
-    case 'queue:changed':
-      // Steer queue bookkeeping is confirmed by the turn/steer response; the
-      // protocol has no queue notification.
+    case 'queue:changed': {
+      // Mica extension: the Codex protocol has no queue event, so clients would
+      // never see an after_iteration input waiting at the host. Emit incremental
+      // `mica/queue/*` notifications; Codex clients ignore the unknown method.
+      const notification = turnEventToQueueNotification(event, sessionId);
+      if (notification) writeNotification(notification.method, notification.params);
       break;
+    }
   }
+}
+
+export function turnEventToQueueNotification(
+  event: HeadlessTurnEvent,
+  sessionId: string,
+): { method: string; params: unknown } | null {
+  if (event.type !== 'queued' && event.type !== 'dequeue' && event.type !== 'queue:changed') return null;
+  const pending = (event.type === 'dequeue' ? [] : (event.pending ?? [])).map(inputToQueueItem);
+  const base = { threadId: sessionId };
+  if (event.type === 'queued') {
+    return {
+      method: MICA_QUEUE_NOTIFICATIONS.queued,
+      params: {
+        ...base,
+        input: inputToQueueItem(event.input),
+        position: event.position,
+        pending,
+      },
+    };
+  }
+  if (event.type === 'dequeue') {
+    return {
+      method: MICA_QUEUE_NOTIFICATIONS.dequeue,
+      params: { ...base, input: inputToQueueItem(event.input), pending: [] },
+    };
+  }
+  return { method: MICA_QUEUE_NOTIFICATIONS.changed, params: { ...base, pending } };
+}
+
+function inputToQueueItem(input: {
+  id: string;
+  text: string;
+  queueMode?: 'after_iteration' | 'after_turn';
+}): MicaQueueItem {
+  return {
+    id: input.id,
+    text: input.text,
+    queueMode: input.queueMode ?? null,
+  };
 }
 
 async function ensureChatHostModelRule(model: string): Promise<void> {

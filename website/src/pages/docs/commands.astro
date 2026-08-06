@@ -1,0 +1,64 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+
+const commands = [
+  { cmd: '/clear', desc: '终止并移除当前 agent 的 subagent，丢弃排队输入，然后新开一个空会话（不清除原会话文件内容）。' },
+  { cmd: '/resume', desc: '恢复历史会话；未正常完成（aborted / error）的会话会标记为（uncompleted）。' },
+  { cmd: '/model', desc: '从包含 provider 信息的模型列表中切换 provider 和模型（打开前会检查 busy 状态）。' },
+  { cmd: '/effort', desc: '切换推理强度 none / low / medium / high / xhigh。' },
+  { cmd: '/role', desc: '切换当前 agent 的系统提示词；自定义 role 放在 ~/.mica/role/ 下。' },
+  { cmd: '/status', desc: '显示当前 provider / model / effort / role 状态。' },
+  { cmd: '/context', desc: '显示当前上下文占用总览（token、缓存命中率、上下文窗口）。' },
+  { cmd: '/compact', desc: '把当前会话压缩为 checkpoint，减少后续上下文压力；保留原有 token 统计。' },
+  { cmd: '/new', desc: '新开一个 agent；/new &lt;text&gt; 后台运行新 agent。' },
+  { cmd: '/fork', desc: '从当前 agent 历史分叉一个新 agent；/fork &lt;text&gt; 后台运行。' },
+  { cmd: '/task', desc: '按终端 session 展示全部 agent、retained subagent 和 active background shell；/task clear 清除空闲 session。' },
+  { cmd: '/rewind', desc: '选择一轮对话，保留该用户输入及该轮回复并删除之后的内容；有文件 checkpoint 时可选恢复文件。' },
+  { cmd: '/mcp', desc: '列出 MCP 服务器和工具；/mcp reconnect &lt;server&gt; 重连指定服务。' },
+  { cmd: '/skills', desc: '列出已安装的 skills（来自 ~/.mica/skills 与项目级 .mica/skills 等目录）。' },
+  { cmd: '/rename', desc: '重命名当前会话。' },
+  { cmd: '/commit', desc: '分析当前 git 变化，只发一次模型请求生成 commit message，然后 add / commit / push。' },
+  { cmd: '/exit', desc: '退出程序。' },
+];
+---
+
+<DocLayout title="内置命令" active="commands" description="Mica Code 的全部内置斜杠命令参考">
+  <h1>内置命令</h1>
+  <p>所有命令通过斜杠触发，运行中或执行独占任务时，部分命令会被拒绝并给出提示；耗时且会修改上下文、文件、配置或 git 状态的命令通过 exclusive task 执行，防止并发切换导致状态抖动。</p>
+
+  <table>
+    <thead>
+      <tr><th>命令</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      {commands.map((c) => (
+        <tr>
+          <td><code>{c.cmd}</code></td>
+          <td>{c.desc}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  <h2>常用快捷键</h2>
+  <table>
+    <thead>
+      <tr><th>按键</th><th>行为</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>@</code></td><td>在输入框中触发当前工作区文件搜索，方向键选择，Enter 或 Tab 插入</td></tr>
+      <tr><td><code>Shift+Tab</code></td><td>按列表顺序循环切换 role（agent 运行中拒绝；输入已排队时表示 after_iteration 发送）</td></tr>
+      <tr><td><code>Ctrl+C</code></td><td>中止当前 turn（同步 abort 该 agent 的 running subagent，并保留已展示的部分回复）</td></tr>
+    </tbody>
+  </table>
+
+  <h2>MCP 与 Skills</h2>
+  <ul>
+    <li>MCP 服务器配置在 <code>config.json</code> 的 <code>mcpServers</code>，mica 在启动时并发连接，并把远端工具注册进工具列表。</li>
+    <li>Skills 是带 <code>SKILL.md</code> 的目录，扫描 <code>~/.mica/skills</code>（跟随 <code>MICA_HOME</code>）以及项目级 <code>.mica/skills</code>、<code>.agents/skills</code> 等目录；system prompt 里只有索引，完整内容通过 <code>Skill</code> 工具按需读取。</li>
+    <li>工具按语义区分只读与可写：只读工具调用失败后 turn 可安全重放，非只读工具调用之后不会盲目重放请求（避免重复修改文件、执行命令或触发外部副作用）。</li>
+  </ul>
+
+  <h2>后台 subagent</h2>
+  <p>mica 内置 <code>Agent</code> 工具，可派发后台 subagent 执行并行任务，支持 <code>run_many</code>（任务图 + depends_on + max_parallel）、<code>join</code> 汇总、路径租约（<code>owned_paths</code>）与只读/可写类型（Explore / Implementer / Reviewer / Tester / Planner / Proposal）。任务记录保留在当前进程内，通过 <code>/task</code> 查看详情。</p>
+</DocLayout>

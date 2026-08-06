@@ -1645,10 +1645,6 @@ body.is-resizing.is-resizing-terminal {
   gap: 6px;
 }
 
-.chat-status-queue {
-  color: rgb(255 255 255 / 58%);
-}
-
 .chat-status-idle {
   color: rgb(255 255 255 / 24%);
   font-size: 10px;
@@ -1678,8 +1674,13 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-status-ctx,
 .chat-status-token-delta,
-.chat-status-elapsed {
+.chat-status-elapsed,
+.chat-status-phase-elapsed {
   color: inherit;
+}
+
+.chat-status-phase-elapsed {
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-status-elapsed {
@@ -2177,6 +2178,23 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 48%);
 }
 
+.chat-composer-cursor-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.chat-composer-selection {
+  background: #585b70;
+  border-radius: 2px;
+}
+
 .chat-composer-terminal-cursor {
   position: absolute;
   z-index: 2;
@@ -2185,36 +2203,6 @@ body.is-resizing.is-resizing-terminal {
   background: rgb(211 211 211 / 72%);
   pointer-events: none;
   mix-blend-mode: screen;
-  animation: chat-terminal-cursor-blink 1.05s steps(1, end) infinite;
-}
-
-.chat-composer-terminal-cursor.cursor-active {
-  animation: none;
-  opacity: 1;
-}
-
-@keyframes chat-terminal-cursor-blink {
-  0%,
-  52% {
-    opacity: 1;
-  }
-  53%,
-  100% {
-    opacity: 0;
-  }
-}
-
-.chat-composer-token-syntax {
-  color: #d19a66;
-}
-
-.chat-composer-token-code {
-  color: #98c379;
-}
-
-.chat-composer-token-link,
-.chat-composer-token-image {
-  color: #61afef;
 }
 
 .chat-composer-running {
@@ -2318,8 +2306,7 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-composer-queue .chat-prompt-mark,
-.chat-composer-queue .chat-composer-actions button:first-child,
-.chat-status-queue {
+.chat-composer-queue .chat-composer-actions button:first-child {
   color: #c9a227;
 }
 

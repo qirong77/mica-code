@@ -1,0 +1,164 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { features, protocolItems } from '../content/home';
+
+const base = import.meta.env.BASE_URL;
+
+const installCmd = `curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
+mica`;
+
+const heroTerm = `$ mica
+▸ Mica Code · model: kimi-k2.7 · effort: medium · role: default
+
+  ▸ 你好，帮我看看这个仓库里 README 的安装步骤是不是完整。
+
+  ● 我先读一下 README，再检查 install.sh 是否一致……
+  ✔ 发现 install.sh 缺少 macOS arm64 的 sha256 校验，已修复
+  ✔ 补上 README 中缺失的 MICA_HOME 说明
+
+  ▸ 提交这些改动，message 用英文。
+
+  ● 收集 git 变更 → 生成 commit message → push
+  ✔ committed 2 files: "add checksum verification to install script"
+  ✔ pushed to origin/main
+
+  上下文占用 12.4K / 200K (6%) · 缓存命中率 97% · 耗时 18s`;
+---
+
+<BaseLayout title="Mica Code">
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <img class="hero-logo" src={`${base}mica.svg`} alt="Mica Code logo" />
+      <h1>Mica Code</h1>
+      <div class="tagline">Minimal, Intelligent, Cache-first Agent.</div>
+      <p class="sub">
+        一个轻量、终端原生的 AI coding agent。不离开 shell，用最省 token 的方式
+        帮你读代码、改代码、跑测试、提交和远程续聊。
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href={`${base}docs/getting-started`}>快速开始 →</a>
+        <a class="btn btn-ghost" href="https://github.com/qirong77/mica-code" target="_blank" rel="noopener">GitHub 源码</a>
+      </div>
+
+      <div class="hero-term" aria-hidden="true">
+        <div class="term-bar">
+          <span class="term-dot" style="background:#f87171"></span>
+          <span class="term-dot" style="background:#facc15"></span>
+          <span class="term-dot" style="background:#4ade80"></span>
+          <span class="term-title">mica — terminal</span>
+        </div>
+        <div class="term-body">{heroTerm}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 核心优势 -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-title">
+        <div class="kicker">Why Mica</div>
+        <h2>核心优势</h2>
+        <p>围绕「省 token、不离开终端、可回退」三条主线设计</p>
+      </div>
+      <div class="grid">
+        {features.map((f) => (
+          <div class="card">
+            <div class="icon">{f.icon}</div>
+            <h3>{f.title}</h3>
+            <p>{f.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- 截图 -->
+  <section class="section">
+    <div class="container">
+      <div class="section-title">
+        <div class="kicker">In action</div>
+        <h2>终端里的样子</h2>
+        <p>信息密度高、键盘优先，多 agent 与后台任务一眼可见</p>
+      </div>
+      <figure class="screenshot">
+        <img src={`${base}screenshots/terminal.png`} alt="Mica Code 使用过程截图" loading="lazy" />
+      </figure>
+    </div>
+  </section>
+
+  <!-- 工具与能力 -->
+  <section class="section" style="padding-top:20px">
+    <div class="container">
+      <div class="section-title">
+        <div class="kicker">Capabilities</div>
+        <h2>开箱即用的能力</h2>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="icon">🧰</div>
+          <h3>工具可拼装</h3>
+          <p>文件读写、搜索、shell、网页检索、技能（skills）开箱即用；MCP 接入个人脚本与团队服务。</p>
+        </div>
+        <div class="card">
+          <div class="icon">🤖</div>
+          <h3>多 Agent 协作</h3>
+          <p>/new 与 /fork 分叉出独立 agent，/task 统一管理；后台 subagent 可并行探索、实现、测试。</p>
+        </div>
+        <div class="card">
+          <div class="icon">⏪</div>
+          <h3>可回退、可压缩</h3>
+          <p>/rewind 回到所选历史节点（有文件检查点时连文件一起恢复）；/compact 在上下文吃紧时收束历史。</p>
+        </div>
+        <div class="card">
+          <div class="icon">🎭</div>
+          <h3>Role 即工作流</h3>
+          <p>/role 整段替换 system prompt，写码、审查、规划各用一套人格；Shift+Tab 快速循环切换。</p>
+        </div>
+        <div class="card">
+          <div class="icon">📎</div>
+          <h3>文件引用更快</h3>
+          <p>输入 @ 即可搜索当前工作区文件，方向键选择，Enter 或 Tab 插入，还可附加剪贴板图片。</p>
+        </div>
+        <div class="card">
+          <div class="icon">🔌</div>
+          <h3>可被嵌入调用</h3>
+          <p>提供 Headless NDJSON 协议与常驻 app-server，桌面 App、IDE 插件和自动化脚本都能驱动 mica。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Headless 协议 -->
+  <section class="section" id="headless" style="background:var(--bg-soft);border-block:1px solid var(--border)">
+    <div class="container">
+      <div class="section-title">
+        <div class="kicker">Headless</div>
+        <h2>不只是终端</h2>
+        <p>mica 可以被桌面应用和自动化工具以 JSON 协议驱动</p>
+      </div>
+      <div class="grid">
+        {protocolItems.map((p) => (
+          <div class="card">
+            <code>{p.cmd}</code>
+            <h3 style="margin-top:12px">{p.title}</h3>
+            <p>{p.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section" style="padding-block:80px;text-align:center">
+    <div class="container">
+      <h2 style="font-size:1.8rem;margin-bottom:10px">现在就试试</h2>
+      <p style="color:var(--text-dim);margin-bottom:26px">一行命令安装，首次运行自动创建本地配置</p>
+      <pre style="max-width:680px;margin:0 auto 26px;text-align:left"><code>{installCmd}</code></pre>
+      <div class="hero-actions" style="margin-bottom:0">
+        <a class="btn btn-primary" href={`${base}docs/getting-started`}>查看使用文档 →</a>
+        <a class="btn btn-ghost" href={`${base}docs/architecture`}>了解架构</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { PtyDriver } from '../index.js';
 
 /**
@@ -15,7 +16,10 @@ import { PtyDriver } from '../index.js';
  * The user's real ~/.mica/config.json (with API keys) is copied into an
  * isolated per-test MICA_HOME; user data is never touched.
  */
-const MICA_BIN = '/Users/qironglin/Desktop/mica-code/dist/mica';
+// dist/mica lives at the repo root; resolve relative to this test file so the
+// suite works from any checkout location. MICA_PTY_BIN overrides for custom builds.
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const MICA_BIN = process.env.MICA_PTY_BIN ?? join(TEST_DIR, '..', '..', '..', 'dist', 'mica');
 // vitest redirects HOME to a temp dir; pass the real source config explicitly:
 //   MICA_PTY_SOURCE_HOME="$HOME/.mica" MICA_PTY_FLOW_SMOKE=1 npx vitest run ...
 const SOURCE_CONFIG = `${process.env.MICA_PTY_SOURCE_HOME ?? `${process.env.HOME}/.mica`}/config.json`;

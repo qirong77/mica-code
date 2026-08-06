@@ -34,15 +34,6 @@ export default function setupMessageQueue(ctx: PluginContext): void {
         pendingInputs: queue.list(event.owner),
         owner: event.owner,
       });
-      ctx.events.publish({
-        type: 'notification',
-        level: 'info',
-        message:
-          queueMode === 'after_turn'
-            ? '消息已排队，将在当前任务完成后发送'
-            : '消息已排队，将在完整一轮工具调用迭代后发送',
-        owner: event.owner,
-      });
 
       return { action: 'handled' as const, reason: 'queued' };
     },

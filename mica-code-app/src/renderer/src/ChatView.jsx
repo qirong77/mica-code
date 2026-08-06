@@ -29,44 +29,17 @@ import remarkGfm from 'remark-gfm'
 import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
 import { useLatest } from './hooks'
 import { uid } from './workspace'
+import TerminalComposer from './TerminalComposer'
 
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
-const TERMINAL_CURSOR_WIDTH = 8
 const MIN_TURN_LOG_HEIGHT = 60
 const MAX_TURN_LOG_HEIGHT_RATIO = 0.6
 const TURN_LOG_HEIGHT_KEY = 'mica.turnLogHeight'
-const CURSOR_ACTIVE_DURATION_MS = 1200
 const SUPPORTS_FIELD_SIZING =
   typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
     ? CSS.supports('field-sizing', 'content')
     : false
-
-const TEXTAREA_CURSOR_STYLE_PROPS = [
-  'boxSizing',
-  'width',
-  'fontFamily',
-  'fontSize',
-  'fontWeight',
-  'fontStyle',
-  'letterSpacing',
-  'lineHeight',
-  'textTransform',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-  'borderTopWidth',
-  'borderRightWidth',
-  'borderBottomWidth',
-  'borderLeftWidth',
-  'whiteSpace',
-  'overflowWrap',
-  'wordBreak',
-  'tabSize'
-]
-
-let textareaCursorMirror = null
 
 const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
 const RATIO_THRESHOLDS = [40, 50, 60, 70]
@@ -100,72 +73,6 @@ function formatTokens(tokens) {
   return `${(tokens / 1_000_000).toFixed(2)}M`
 }
 
-function measureTextareaCursor(element, text, selectionStart, selectionEnd) {
-  if (!element || selectionStart !== selectionEnd) return null
-  const styles = window.getComputedStyle(element)
-  const lineHeight = Number.parseFloat(styles.lineHeight) || 20
-  const fontSize = Number.parseFloat(styles.fontSize) || 13
-  const cursorHeight = Math.max(12, Math.min(lineHeight, Math.ceil(fontSize * 1.18)))
-  const cursorOffset = Math.max(0, (lineHeight - cursorHeight) / 2)
-
-  if (!text) {
-    return {
-      left: Math.max(0, (Number.parseFloat(styles.paddingLeft) || 0) - element.scrollLeft),
-      top: Math.max(
-        0,
-        (Number.parseFloat(styles.paddingTop) || 0) - element.scrollTop + cursorOffset
-      ),
-      width: TERMINAL_CURSOR_WIDTH,
-      height: cursorHeight
-    }
-  }
-
-  if (!textareaCursorMirror) {
-    textareaCursorMirror = {
-      mirror: document.createElement('div'),
-      marker: document.createElement('span'),
-      measure: document.createElement('span')
-    }
-    const { mirror, marker, measure } = textareaCursorMirror
-    mirror.style.position = 'fixed'
-    mirror.style.left = '-10000px'
-    mirror.style.top = '0'
-    mirror.style.height = 'auto'
-    mirror.style.minHeight = '0'
-    mirror.style.overflow = 'hidden'
-    mirror.style.visibility = 'hidden'
-    mirror.style.pointerEvents = 'none'
-    mirror.style.whiteSpace = 'pre-wrap'
-    marker.textContent = '\u200b'
-    marker.style.display = 'inline-block'
-    marker.style.width = '0'
-    measure.style.display = 'inline-block'
-    measure.style.whiteSpace = 'pre'
-  }
-
-  const { mirror, marker, measure } = textareaCursorMirror
-
-  for (const property of TEXTAREA_CURSOR_STYLE_PROPS) mirror.style[property] = styles[property]
-  mirror.style.width = `${element.clientWidth}px`
-
-  const before = text.slice(0, selectionStart).replace(/\n$/u, '\n\u200b')
-  marker.style.height = styles.lineHeight
-  const nextChar = Array.from(text.slice(selectionStart))[0]
-  measure.textContent = nextChar && nextChar !== '\n' ? nextChar : ' '
-  mirror.replaceChildren(document.createTextNode(before), marker, measure)
-  if (!mirror.isConnected) document.body.append(mirror)
-
-  const mirrorRect = mirror.getBoundingClientRect()
-  const markerRect = marker.getBoundingClientRect()
-  const position = {
-    left: Math.max(0, markerRect.left - mirrorRect.left - element.scrollLeft),
-    top: Math.max(0, markerRect.top - mirrorRect.top - element.scrollTop + cursorOffset),
-    width: Math.max(TERMINAL_CURSOR_WIDTH, measure.getBoundingClientRect().width),
-    height: cursorHeight
-  }
-  return position
-}
-
 const EFFORT_OPTIONS = [
   { value: 'none', detail: '不发送推理参数' },
   { value: 'low', detail: '轻量推理' },
@@ -190,6 +97,11 @@ const TOOL_ICONS = {
   background_tasks: '📋',
   read_task_output: '📋',
   kill_task: '📋'
+}
+
+function getToolIcon(toolName) {
+  if (String(toolName || '').startsWith('mcp__')) return '🔌'
+  return TOOL_ICONS[toolName] || '⚙'
 }
 
 const TOOL_LABELS = {
@@ -294,36 +206,6 @@ function imageReferences(text) {
   return result
 }
 
-function composerMarkdownNodes(text) {
-  const nodes = []
-  const pattern =
-    /(```[\s\S]*?```|`[^`\n]+`|!?\[[^\]]*\]\([^)\n]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|^ {0,3}(?:#{1,6}|[-*+]|\d+\.) +)/gm
-  let cursor = 0
-  let match
-  while ((match = pattern.exec(text))) {
-    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
-    const token = match[0]
-    const kind = token.startsWith('```')
-      ? 'code'
-      : token.startsWith('!')
-        ? 'image'
-        : token.startsWith('[')
-          ? 'link'
-          : 'syntax'
-    nodes.push(
-      <span
-        key={`${match.index}:${token}`}
-        className={`chat-composer-token chat-composer-token-${kind}`}
-      >
-        {token}
-      </span>
-    )
-    cursor = match.index + token.length
-  }
-  if (cursor < text.length) nodes.push(text.slice(cursor))
-  return nodes
-}
-
 function ComposerImageStrip({ text, onPreview }) {
   const images = imageReferences(text)
   if (!images.length) return null
@@ -345,11 +227,19 @@ function ComposerImageStrip({ text, onPreview }) {
 
 function QueueDock({ items, onRecall, recallingId }) {
   if (!items.length) return null
+  // 文案与 CLI 的 waiting queue 提示保持一致（app 用按钮撤回，不展示
+  // shift + ← 快捷键）。after_iteration 排队来自 host 的 mica/queue/queued
+  // 扩展通知（Shift+Tab 注入活跃 turn），标题区分两种发送时机。
+  const queueMode = items[0]?.queueMode
+  const headerText =
+    queueMode === 'after_iteration'
+      ? 'waiting queue ( waiting to send after a complete tool-call iteration )'
+      : 'waiting queue ( waiting to send after current turn )'
   return (
     <section className="chat-queue-dock" aria-label="等待发送的消息">
       <div className="chat-queue-dock-header">
         <span aria-hidden="true">↳</span>
-        <span>waiting queue (after current turn)</span>
+        <span>{headerText}</span>
         <span>{items.length}</span>
       </div>
       <div className="chat-queue-dock-items">
@@ -475,7 +365,10 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
       if (role === 'tool' && msg.toolCallId) {
         detail_label = msg.toolCallId
       } else if (role === 'assistant' && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0) {
-        detail_label = msg.toolCalls.map((tc) => tc.name).filter(Boolean).join(', ')
+        detail_label = msg.toolCalls
+          .map((tc) => tc.name)
+          .filter(Boolean)
+          .join(', ')
       }
       result.push({
         id: `msg-${result.length}`,
@@ -536,9 +429,7 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
               <div className="chat-ctx-modal-summary">
                 <span>{breakdown.length} items</span>
                 <span className="chat-ctx-modal-sep">·</span>
-                <span className="tabular-nums">
-                  est. {formatTokens(grandTotal)} tokens
-                </span>
+                <span className="tabular-nums">est. {formatTokens(grandTotal)} tokens</span>
                 {totalInputTokens > 0 && (
                   <>
                     <span className="chat-ctx-modal-sep">·</span>
@@ -550,9 +441,7 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
                 {win > 0 && (
                   <>
                     <span className="chat-ctx-modal-sep">·</span>
-                    <span className="tabular-nums">
-                      ctx win {formatTokens(win)}
-                    </span>
+                    <span className="tabular-nums">ctx win {formatTokens(win)}</span>
                   </>
                 )}
               </div>
@@ -560,10 +449,7 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
                 <div className="chat-ctx-modal-empty">无上下文数据</div>
               ) : (
                 breakdown.map((it, i) => {
-                  const pct = Math.min(
-                    100,
-                    Math.round((it.tokens / maxTokens) * 100)
-                  )
+                  const pct = Math.min(100, Math.round((it.tokens / maxTokens) * 100))
                   const isExpanded = expandedId === it.id
                   const isOverhead = it.type === 'overhead'
                   return (
@@ -595,36 +481,26 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
                         <span className="chat-ctx-modal-tokens tabular-nums">
                           ~{formatTokens(it.tokens)}
                         </span>
-                        <span className="chat-ctx-modal-pct tabular-nums">
-                          {pct}%
-                        </span>
-                        <span className="chat-ctx-modal-chevron">
-                          {isExpanded ? '▾' : '▸'}
-                        </span>
+                        <span className="chat-ctx-modal-pct tabular-nums">{pct}%</span>
+                        <span className="chat-ctx-modal-chevron">{isExpanded ? '▾' : '▸'}</span>
                       </button>
                       {isExpanded && (
                         <div className="chat-ctx-modal-detail">
                           {isOverhead ? (
-                            <div className="chat-ctx-modal-detail-note">
-                              {it.note}
-                            </div>
+                            <div className="chat-ctx-modal-detail-note">{it.note}</div>
                           ) : (
                             <>
                               <div className="chat-ctx-modal-detail-meta">
                                 <span>Role</span>
                                 <span>{it.role}</span>
                                 <span>Est. tokens</span>
-                                <span className="tabular-nums">
-                                  {it.tokens.toLocaleString()}
-                                </span>
+                                <span className="tabular-nums">{it.tokens.toLocaleString()}</span>
                                 <span>Share</span>
                                 <span className="tabular-nums">{pct}%</span>
                               </div>
                               {it.message.content && (
                                 <div className="chat-ctx-modal-detail-content">
-                                  <div className="chat-ctx-modal-detail-content-label">
-                                    Content
-                                  </div>
+                                  <div className="chat-ctx-modal-detail-content-label">Content</div>
                                   <pre className="chat-ctx-modal-detail-pre">
                                     {it.message.content}
                                   </pre>
@@ -637,10 +513,7 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
                                       Tool Calls ({it.message.toolCalls.length})
                                     </div>
                                     {it.message.toolCalls.map((tc, j) => (
-                                      <div
-                                        key={tc.id || j}
-                                        className="chat-ctx-modal-detail-tc"
-                                      >
+                                      <div key={tc.id || j} className="chat-ctx-modal-detail-tc">
                                         <div className="chat-ctx-modal-detail-tc-name">
                                           {tc.name || 'tool_call'}
                                         </div>
@@ -851,6 +724,15 @@ function toolSummary(tool) {
 }
 
 function toolDisplayName(tool) {
+  if (String(tool.tool || '').startsWith('mcp__')) {
+    // mcp__<server>__<tool>_<hash> -> [MCP:server] tool（去掉 hash 后缀，与 CLI 一致）
+    const match = /^mcp__([^_]+)__(.+)$/.exec(tool.tool)
+    if (match) {
+      const server = match[1]
+      const toolPart = String(match[2]).replace(/_[0-9a-f]{8}$/, '')
+      return `[MCP:${server}] ${toolPart}`
+    }
+  }
   if (tool.tool === 'Agent') {
     const operation = tool.input?.operation || 'run'
     if (operation === 'run_many') return 'Subagents'
@@ -1129,8 +1011,12 @@ export function activeSubagentMessages(messages, turnId) {
 }
 
 function visibleShellOutput(tool, durationMs) {
-  if (tool.tool !== 'run_shell' || durationMs <= 10_000 || !tool.output) return []
-  return String(tool.output).replace(/\n$/, '').split('\n').slice(-10)
+  // 阈值与 CLI 的 MICA_RUN_SHELL_* 同源（preload 注入），默认值一致。
+  const config = typeof window !== 'undefined' ? window.mica?.runShellLogConfig : undefined
+  const threshold = config?.verboseThresholdMs ?? 10_000
+  const maxLines = config?.maxLines ?? 10
+  if (tool.tool !== 'run_shell' || durationMs <= threshold || !tool.output) return []
+  return String(tool.output).replace(/\n$/, '').split('\n').slice(-maxLines)
 }
 
 function TurnLogItem({ message, now }) {
@@ -1163,10 +1049,10 @@ function TurnLogItem({ message, now }) {
             <LoaderCircle size={10} className="animate-spin" />
           </span>
         )}
-        <span className="chat-turn-log-icon">{TOOL_ICONS[tool.tool] || '⚙'}</span>
+        <span className="chat-turn-log-icon">{getToolIcon(tool.tool)}</span>
         <span className="chat-turn-log-display">
-          {toolDisplayName(tool)}
-          {toolSummary(tool) ? ` ${toolSummary(tool)}` : ''}
+          {tool.displayText ||
+            `${toolDisplayName(tool)}${toolSummary(tool) ? ` ${toolSummary(tool)}` : ''}`}
         </span>
         {duration && (
           <span className="chat-turn-log-duration">{running ? duration : `(${duration})`}</span>
@@ -1278,7 +1164,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
-      title: '只清理工具结果、图片和文档，不调用模型',
+      title: '本地压缩：工具调用参数与结果全部占位，清理图片/文档，必要时丢弃最早轮次；不调用模型',
       icon: Zap,
       disabled: !menu.hasSession || menu.running
     },
@@ -1628,6 +1514,21 @@ export function resolveComposerTabAction({ shiftKey, queueReady }) {
   return null
 }
 
+// 模型切换的协议校验：有历史会话时同协议放行、跨协议拒绝；新会话或
+// 无法判定协议（协议信息缺失）时保守放行。返回 { allowed: true } 或
+// { allowed: false, reason }。reason 文案与 CLI 的跨协议提示保持一致。
+export function resolveModelSwitchProtocol({ modelId, hasHistory, protocolMap, currentProtocol }) {
+  if (!hasHistory) return { allowed: true }
+  const nextProtocol = protocolMap?.[modelId]?.protocol
+  if (!nextProtocol || !currentProtocol || nextProtocol === currentProtocol) {
+    return { allowed: true }
+  }
+  return {
+    allowed: false,
+    reason: `当前会话使用 ${currentProtocol} 协议，目标模型使用 ${nextProtocol} 协议；跨协议切换会丢失会话历史，请先新建会话或清空当前会话`
+  }
+}
+
 export function switchChatDraft(drafts, previousNodeId, nextNodeId, currentInput) {
   if (previousNodeId === nextNodeId) return currentInput
   if (previousNodeId) drafts.set(previousNodeId, currentInput)
@@ -1695,17 +1596,23 @@ export function ChatView({
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
-  const [inputFocused, setInputFocused] = useState(false)
-  const [terminalCursor, setTerminalCursor] = useState(null)
-  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus())
   const [running, setRunning] = useState(false)
-  const [queuedCount, setQueuedCount] = useState(0)
   const [queuedItems, setQueuedItems] = useState([])
   const [recallingQueueId, setRecallingQueueId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [runStartedAt, setRunStartedAt] = useState(0)
   const [elapsed, setElapsed] = useState(0)
+  // 当前阶段/工具的实时耗时（对齐 CLI WorkingStatus：状态文本带 elapsed，
+  // working 阶段从最早 running 工具 startedAt 起算，其余阶段从 phase 切换起算）。
+  const phaseStartedAtRef = useRef(0)
+  const [phaseElapsed, setPhaseElapsed] = useState(0)
+
+  useEffect(() => {
+    if (phase === 'idle' || !running) return undefined
+    phaseStartedAtRef.current = Date.now()
+    return undefined
+  }, [phase, running])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [showJump, setShowJump] = useState(false)
   const [meta, setMeta] = useState(null)
@@ -1729,10 +1636,6 @@ export function ChatView({
   const transcriptRef = useRef(null)
   const composerDockRef = useRef(null)
   const textareaRef = useRef(null)
-  const cursorFrameRef = useRef(0)
-  const cursorMeasureRef = useRef({ signature: null, position: null })
-  const cursorActiveTimerRef = useRef(null)
-  const [cursorActive, setCursorActive] = useState(false)
 
   const updateMessages = useCallback((update) => {
     const next = typeof update === 'function' ? update(messagesRef.current) : update
@@ -1972,6 +1875,7 @@ export function ChatView({
             status: part.state?.status || 'completed',
             input: part.state?.input ?? {},
             output: part.state?.output ?? part.state?.error ?? '',
+            displayText: part.displayText || null,
             startedAt: timestamp,
             updatedAt: timestamp,
             ...((part.state?.status || 'completed') === 'pending' ? {} : { finishedAt: timestamp })
@@ -2064,18 +1968,20 @@ export function ChatView({
     (payload) => {
       finishStream()
       finishPendingTools(payload?.aborted ? 'aborted' : 'error')
-      if (!finishedRef.current && payload?.error) {
+      const finished = finishedRef.current
+      if (!finished && payload?.error) {
         const message = compactLine(payload.error, 1000)
         appendNotice(message || 'mica 进程异常退出', 'error')
       }
-      if (!finishedRef.current && payload?.exitCode && !payload?.error) {
+      if (!finished && payload?.exitCode && !payload?.error) {
         appendNotice(`mica 进程已退出（code ${payload.exitCode}）`, 'error')
       }
       finishedRef.current = true
       setRunning(false)
-      setQueuedCount(Number(payload?.queuedCount) || 0)
       setStopping(false)
-      setPhase('idle')
+      // step_finish 已到达时保留其 phase（error 保持 error 以展示 turn log），
+      // 否则（进程异常退出）回落到 idle。
+      setPhase((current) => (finished ? current : 'idle'))
       if (payload?.sessionId) {
         refreshMetaSoon(payload.sessionId)
       }
@@ -2098,8 +2004,22 @@ export function ChatView({
     })
     const offQueueState = window.mica.chat.onQueueState((payload) => {
       if (payload.id !== nodeIdRef.current) return
-      setQueuedCount(Number(payload.queuedCount) || 0)
-      setQueuedItems(Array.isArray(payload.queuedItems) ? payload.queuedItems : [])
+      const items = Array.isArray(payload.queuedItems) ? payload.queuedItems : []
+      setQueuedItems(items)
+      // 同步消息的排队标记：host 的 after_iteration 排队（mica/queue/queued
+      // 扩展通知）也会把对应乐观消息标记为排队，dequeue 后恢复，与本地
+      // after_turn 排队展示一致。
+      const queuedIds = new Set(items.map((item) => item?.id))
+      updateMessages((previous) => {
+        let changed = false
+        const next = previous.map((message) => {
+          const isQueued = queuedIds.has(message.id)
+          if (message.queued === isQueued) return message
+          changed = true
+          return { ...message, queued: isQueued }
+        })
+        return changed ? next : previous
+      })
     })
     const offQueueError = window.mica.chat.onQueueError((payload) => {
       if (payload.id !== nodeIdRef.current) return
@@ -2111,7 +2031,7 @@ export function ChatView({
       offQueueState?.()
       offQueueError?.()
     }
-  }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef])
+  }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
   useEffect(() => {
     if (!nodeId) return undefined
@@ -2136,7 +2056,6 @@ export function ChatView({
     queuedMessageIdsRef.current = []
     recallingQueueRef.current = null
     setRunning(false)
-    setQueuedCount(0)
     setQueuedItems([])
     setRecallingQueueId(null)
     setStopping(false)
@@ -2172,7 +2091,6 @@ export function ChatView({
       if (finalMeta) setMeta(finalMeta)
       setHistoryLoaded(true)
       setRunning(false)
-      setQueuedCount(0)
       setQueuedItems([])
       setStopping(false)
       setPhase('idle')
@@ -2201,7 +2119,6 @@ export function ChatView({
 
       const state = await window.mica.chat.isRunning(nodeId).catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
-      setQueuedCount(Number(state?.queuedCount) || 0)
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
       const stateSessionId = state?.sessionId || sessionIdRef.current
       if (state?.running && stateSessionId && hasPersistedTurn(restored, state.prompt)) {
@@ -2350,101 +2267,6 @@ export function ChatView({
 
   useEffect(() => resizeTextarea(), [input, resizeTextarea])
 
-  const updateTerminalCursor = useCallback(() => {
-    cursorFrameRef.current = 0
-    const element = textareaRef.current
-    if (!element) {
-      cursorMeasureRef.current = { signature: null, position: null }
-      setTerminalCursor(null)
-      return
-    }
-    const selectionStart = element.selectionStart ?? element.value.length
-    const selectionEnd = element.selectionEnd ?? element.value.length
-    const signature = [
-      element.value,
-      selectionStart,
-      selectionEnd,
-      element.scrollLeft,
-      element.scrollTop,
-      element.clientWidth
-    ]
-    const previous = cursorMeasureRef.current
-    if (
-      previous.signature &&
-      previous.signature.length === signature.length &&
-      previous.signature.every((value, index) => value === signature[index])
-    ) {
-      return
-    }
-    const next = measureTextareaCursor(element, element.value, selectionStart, selectionEnd)
-    cursorMeasureRef.current = { signature, position: next }
-    const last = previous.position
-    if (
-      last &&
-      next &&
-      last.left === next.left &&
-      last.top === next.top &&
-      last.width === next.width &&
-      last.height === next.height
-    ) {
-      return
-    }
-    if (!last && !next) return
-    setTerminalCursor(next)
-  }, [])
-
-  const markCursorActive = useCallback(() => {
-    setCursorActive(true)
-    if (cursorActiveTimerRef.current) clearTimeout(cursorActiveTimerRef.current)
-    cursorActiveTimerRef.current = setTimeout(
-      () => setCursorActive(false),
-      CURSOR_ACTIVE_DURATION_MS
-    )
-  }, [])
-
-  const scheduleTerminalCursorUpdate = useCallback(() => {
-    markCursorActive()
-    if (cursorFrameRef.current) return
-    cursorFrameRef.current = requestAnimationFrame(updateTerminalCursor)
-  }, [markCursorActive, updateTerminalCursor])
-
-  useLayoutEffect(() => {
-    resizeTextarea()
-    // 光标测量涉及 DOM 写+读（layout thrash），移到 rAF 异步执行，
-    // 避免每次按键在 layout 阶段同步强制整页重排（模型流式渲染时表现为抖动）。
-    scheduleTerminalCursorUpdate()
-  }, [input, resizeTextarea, scheduleTerminalCursorUpdate])
-
-  useEffect(() => {
-    window.addEventListener('resize', scheduleTerminalCursorUpdate)
-    return () => window.removeEventListener('resize', scheduleTerminalCursorUpdate)
-  }, [scheduleTerminalCursorUpdate])
-
-  useEffect(() => {
-    if (!inputFocused) return undefined
-    document.addEventListener('selectionchange', scheduleTerminalCursorUpdate)
-    return () => document.removeEventListener('selectionchange', scheduleTerminalCursorUpdate)
-  }, [inputFocused, scheduleTerminalCursorUpdate])
-
-  useEffect(() => {
-    const onWindowFocus = () => setWindowFocused(true)
-    const onWindowBlur = () => setWindowFocused(false)
-    window.addEventListener('focus', onWindowFocus)
-    window.addEventListener('blur', onWindowBlur)
-    return () => {
-      window.removeEventListener('focus', onWindowFocus)
-      window.removeEventListener('blur', onWindowBlur)
-    }
-  }, [])
-
-  useEffect(
-    () => () => {
-      if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current)
-      if (cursorActiveTimerRef.current) clearTimeout(cursorActiveTimerRef.current)
-    },
-    []
-  )
-
   const rememberInput = useCallback(
     (text) => {
       const history = inputHistoryRef.current.get(nodeId) || []
@@ -2474,14 +2296,16 @@ export function ChatView({
 
   const canSwitchModelProtocol = useCallback(
     (modelId, hasHistory) => {
-      if (!hasHistory) return true
       const info = modelProtocolsRef.current
-      const nextProtocol = info?.map?.[modelId]
-      const currentProtocol = meta?.protocol || info?.currentProtocol
-      if (!nextProtocol || !currentProtocol || nextProtocol === currentProtocol) return true
-      const reason = `当前会话使用 ${currentProtocol} 协议，目标模型使用 ${nextProtocol} 协议；跨协议切换会丢失会话历史，请先新建会话或清空当前会话`
-      protocolBlockRef.current = reason
-      appendNotice(reason, 'error')
+      const result = resolveModelSwitchProtocol({
+        modelId,
+        hasHistory,
+        protocolMap: info?.map,
+        currentProtocol: meta?.protocol || info?.currentProtocol
+      })
+      if (result.allowed) return true
+      protocolBlockRef.current = result.reason
+      appendNotice(result.reason, 'error')
       return false
     },
     [appendNotice, meta?.protocol]
@@ -2839,9 +2663,12 @@ export function ChatView({
               ])
             }
           } else if (result?.code === 'not_needed') {
+            const localHint = String(result?.error || '').includes('没有可本地清理')
+              ? '\n提示：上下文大主要是由大量小消息构成，本地压缩无法缩减；如需摘要压缩请使用「模型压缩」。'
+              : ''
             updateNotice(
               compactNoticeId,
-              `${compactMode === 'local' ? '暂无可快速清理内容' : '暂不需要模型压缩'}：${result.error || '当前会话内容较少。'}`,
+              `${compactMode === 'local' ? '暂无可快速清理内容' : '暂不需要模型压缩'}：${result.error || '当前会话内容较少。'}${localHint}`,
               'compact',
               'skipped'
             )
@@ -2949,6 +2776,11 @@ export function ChatView({
       if (!text || !nodeId) return
       const optimisticId = uid('msg')
       const queueing = running || !finishedRef.current
+      // 单槽排队（对齐 CLI）：已有排队消息时拒绝新的排队输入，避免乐观消息闪现后回滚。
+      if (queueing && queuedMessageIdsRef.current.length > 0) {
+        appendNotice('已有一条排队消息，等待发送或重新编辑', 'warn')
+        return
+      }
       const previousTurnId = turnRef.current
       let acceptedIntoQueue = false
       stickToBottomRef.current = true
@@ -2980,7 +2812,6 @@ export function ChatView({
         }
         if (queueing) {
           if (acceptedIntoQueue) {
-            setQueuedCount((count) => Math.max(0, count - 1))
             setQueuedItems((items) => items.filter((item) => item.id !== optimisticId))
           }
         } else {
@@ -3017,7 +2848,6 @@ export function ChatView({
                 message.id === optimisticId ? { ...message, queued: true } : message
               )
             )
-            setQueuedCount(Number(result.position) || 1)
             setQueuedItems(Array.isArray(result.queuedItems) ? result.queuedItems : [])
           } else {
             queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter(
@@ -3089,7 +2919,7 @@ export function ChatView({
     const items = [...queuedItems]
     for (const message of messages) {
       if (!message.queued || items.some((item) => item.id === message.id)) continue
-      items.push({ id: message.id, text: message.text, pending: true })
+      items.push({ id: message.id, text: message.text, pending: true, queueMode: 'after_turn' })
     }
     return items
   }, [messages, queuedItems])
@@ -3106,7 +2936,6 @@ export function ChatView({
       try {
         const result = await window.mica.chat.recallQueued(nodeId, item.id)
         if (nodeIdRef.current !== targetNodeId) return
-        setQueuedCount(Number(result?.queuedCount) || 0)
         setQueuedItems(Array.isArray(result?.queuedItems) ? result.queuedItems : [])
         if (!result?.ok) {
           appendNotice(result?.error || '排队消息撤回失败', 'error')
@@ -3161,6 +2990,34 @@ export function ChatView({
         .filter(Boolean),
     [turnActivityMessages]
   )
+  // 当前工具（working）阶段的实时耗时：取最早 running 工具的 startedAt。
+  const activeToolStartedAt = useMemo(() => {
+    if (phase !== 'working') return null
+    const starts = turnActivityMessages
+      .filter(
+        (message) =>
+          message.kind === 'tool' && ['pending', 'running'].includes(message.tool?.status)
+      )
+      .map((message) => message.tool?.startedAt)
+      .filter(Boolean)
+    return starts.length ? Math.min(...starts) : null
+  }, [phase, turnActivityMessages])
+
+  useEffect(() => {
+    if (!running) {
+      setPhaseElapsed(0)
+      return undefined
+    }
+    const startedAt = phase === 'working' ? activeToolStartedAt : phaseStartedAtRef.current
+    if (!startedAt) {
+      setPhaseElapsed(0)
+      return undefined
+    }
+    const update = () => setPhaseElapsed(Math.max(0, Date.now() - startedAt))
+    update()
+    const timer = window.setInterval(update, 250)
+    return () => clearInterval(timer)
+  }, [running, phase, activeToolStartedAt])
   const activeStreamText =
     streamRef.current.id && ['thinking', 'streaming'].includes(phase)
       ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
@@ -3325,52 +3182,46 @@ export function ChatView({
     [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, startCommitTask]
   )
 
-  const focusComposerFromShell = useCallback(
-    (event) => {
-      if (event.button != null && event.button !== 0) return
-      const target = event.target
-      if (!(target instanceof Element)) return
-      if (
-        target.closest(
-          'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
-        )
-      ) {
-        shellPointerRef.current = null
-        return
-      }
-
-      if (event.type === 'pointerdown') {
-        shellPointerRef.current = {
-          x: event.clientX,
-          y: event.clientY,
-          moved: false,
-          inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript'))
-        }
-        if (shellPointerRef.current.inTranscript) return
-        textareaRef.current?.focus()
-        scheduleTerminalCursorUpdate()
-        return
-      }
-
-      const pointer = shellPointerRef.current
+  const focusComposerFromShell = useCallback((event) => {
+    if (event.button != null && event.button !== 0) return
+    const target = event.target
+    if (!(target instanceof Element)) return
+    if (
+      target.closest(
+        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
+      )
+    ) {
       shellPointerRef.current = null
-      if (pointer?.inTranscript) {
-        requestAnimationFrame(() => {
-          const selection = window.getSelection?.()
-          if (pointer.moved || (selection && !selection.isCollapsed)) return
-          textareaRef.current?.focus()
-          scheduleTerminalCursorUpdate()
-        })
-        return
-      }
+      return
+    }
 
-      const selection = window.getSelection?.()
-      if (selection && !selection.isCollapsed) return
+    if (event.type === 'pointerdown') {
+      shellPointerRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        moved: false,
+        inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript'))
+      }
+      if (shellPointerRef.current.inTranscript) return
       textareaRef.current?.focus()
-      scheduleTerminalCursorUpdate()
-    },
-    [scheduleTerminalCursorUpdate]
-  )
+      return
+    }
+
+    const pointer = shellPointerRef.current
+    shellPointerRef.current = null
+    if (pointer?.inTranscript) {
+      requestAnimationFrame(() => {
+        const selection = window.getSelection?.()
+        if (pointer.moved || (selection && !selection.isCollapsed)) return
+        textareaRef.current?.focus()
+      })
+      return
+    }
+
+    const selection = window.getSelection?.()
+    if (selection && !selection.isCollapsed) return
+    textareaRef.current?.focus()
+  }, [])
 
   const trackShellPointerMove = useCallback((event) => {
     const pointer = shellPointerRef.current
@@ -3383,14 +3234,13 @@ export function ChatView({
   const statusLine = (
     <div className="chat-status-line">
       <div className="chat-status-primary">
-        {queuedCount > 0 ? (
-          <span className="chat-status-queue">
-            消息已排队，将在当前任务完成后发送{queuedCount > 1 ? ` · ${queuedCount}` : ''}
-          </span>
-        ) : running ? (
+        {running ? (
           <>
             <LoaderCircle size={11} className="animate-spin" />
             <span>{statusLabel(phase, runningToolNames)}</span>
+            {phaseElapsed > 0 && (
+              <span className="chat-status-phase-elapsed">{formatLogElapsed(phaseElapsed)}</span>
+            )}
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
@@ -3550,196 +3400,148 @@ export function ChatView({
         >
           {queueReady && (
             <span className="chat-composer-frame-label">
-              Enter/Tab/Shift+Tab 等 agent 执行完成后发送
+              Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送
             </span>
           )}
           <span className="chat-prompt-mark" aria-hidden="true">
             {queueReady ? '↳' : '›'}
           </span>
-          <div className="chat-composer-input">
-            <div className="chat-composer-markdown-layer" aria-hidden="true">
-              {input ? (
-                composerMarkdownNodes(input)
-              ) : (
-                <span className="chat-composer-placeholder">
-                  {running
-                    ? '消息会在当前 turn 完成后自动发送'
-                    : 'Type a message to start a conversation'}
-                </span>
-              )}
-            </div>
-            {windowFocused && terminalCursor && (
-              <span
-                className={`chat-composer-terminal-cursor${cursorActive ? ' cursor-active' : ''}`}
-                aria-hidden="true"
-                style={{
-                  left: `${terminalCursor.left}px`,
-                  top: `${terminalCursor.top}px`,
-                  width: `${terminalCursor.width || TERMINAL_CURSOR_WIDTH}px`,
-                  height: `${terminalCursor.height}px`
-                }}
-              />
-            )}
-            <textarea
-              ref={textareaRef}
-              value={input}
-              rows={1}
-              spellCheck={false}
-              aria-label="对话输入"
-              placeholder=""
-              onChange={(event) => {
-                draftsRef.current.set(nodeId, event.target.value)
-                historyCursorRef.current = -1
-                setInput(event.target.value)
-                scheduleTerminalCursorUpdate()
-              }}
-              onFocus={() => {
-                setInputFocused(true)
-                scheduleTerminalCursorUpdate()
-              }}
-              onBlur={() => {
-                setInputFocused(false)
-              }}
-              onSelect={scheduleTerminalCursorUpdate}
-              onKeyUp={scheduleTerminalCursorUpdate}
-              onClick={scheduleTerminalCursorUpdate}
-              onPaste={(event) => {
-                const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
-                  item.type.startsWith('image/')
-                )
-                if (!hasImage) return
-                event.preventDefault()
-                window.mica.chat
-                  .savePastedImage()
-                  .then((result) => {
-                    const element = textareaRef.current
-                    const start = element?.selectionStart ?? input.length
-                    const end = element?.selectionEnd ?? input.length
-                    const insertion = result?.ok
-                      ? `[Image](${result.ref})`
-                      : (event.clipboardData?.getData('text/plain') ?? '')
-                    const next = input.slice(0, start) + insertion + input.slice(end)
-                    draftsRef.current.set(nodeId, next)
-                    setInput(next)
-                    requestAnimationFrame(() => {
-                      const el = textareaRef.current
-                      if (el) {
-                        el.setSelectionRange(start + insertion.length, start + insertion.length)
-                        updateTerminalCursor()
-                      }
-                    })
+          <TerminalComposer
+            value={input}
+            placeholder={
+              running ? '消息会在当前 turn 完成后自动发送' : 'Type something and press Enter...'
+            }
+            textareaRef={textareaRef}
+            onChange={(nextValue) => {
+              draftsRef.current.set(nodeId, nextValue)
+              historyCursorRef.current = -1
+              setInput(nextValue)
+            }}
+            onPaste={(event) => {
+              const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
+                item.type.startsWith('image/')
+              )
+              if (!hasImage) return
+              event.preventDefault()
+              window.mica.chat
+                .savePastedImage()
+                .then((result) => {
+                  const element = textareaRef.current
+                  const start = element?.selectionStart ?? input.length
+                  const end = element?.selectionEnd ?? input.length
+                  const insertion = result?.ok
+                    ? `[Image](${result.ref})`
+                    : (event.clipboardData?.getData('text/plain') ?? '')
+                  const next = input.slice(0, start) + insertion + input.slice(end)
+                  draftsRef.current.set(nodeId, next)
+                  setInput(next)
+                  requestAnimationFrame(() => {
+                    const el = textareaRef.current
+                    if (el) el.setSelectionRange(start + insertion.length, start + insertion.length)
                   })
-                  .catch(() => {})
-              }}
-              onKeyDown={(event) => {
-                scheduleTerminalCursorUpdate()
-                if (picker) {
-                  const options = picker.options || []
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault()
-                    if (options.length) setPickerIndex((value) => (value + 1) % options.length)
-                    return
-                  }
-                  if (event.key === 'ArrowUp') {
-                    event.preventDefault()
-                    if (options.length) {
-                      setPickerIndex((value) => (value - 1 + options.length) % options.length)
-                    }
-                    return
-                  }
-                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault()
-                    if (options.length) {
-                      selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
-                    }
-                    return
-                  }
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    setPicker(null)
-                    return
-                  }
-                  return
-                }
-                if (
-                  event.key === 'ArrowLeft' &&
-                  event.shiftKey &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  queuedDisplayItems.length > 0 &&
-                  !event.nativeEvent.isComposing
-                ) {
+                })
+                .catch(() => {})
+            }}
+            onKeyDown={(event) => {
+              if (picker) {
+                const options = picker.options || []
+                if (event.key === 'ArrowDown') {
                   event.preventDefault()
-                  void recallQueued()
+                  if (options.length) setPickerIndex((value) => (value + 1) % options.length)
                   return
                 }
-                if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
+                if (event.key === 'ArrowUp') {
                   event.preventDefault()
-                  navigateInputHistory(-1)
-                  return
-                }
-                if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  navigateInputHistory(1)
-                  return
-                }
-                if (
-                  event.key === 'ArrowUp' &&
-                  !event.shiftKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.nativeEvent.isComposing &&
-                  event.currentTarget.selectionStart === 0 &&
-                  event.currentTarget.selectionEnd === 0
-                ) {
-                  event.preventDefault()
-                  navigateInputHistory(-1)
-                  return
-                }
-                if (
-                  event.key === 'ArrowDown' &&
-                  !event.shiftKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.nativeEvent.isComposing &&
-                  event.currentTarget.selectionStart === event.currentTarget.value.length &&
-                  event.currentTarget.selectionEnd === event.currentTarget.value.length
-                ) {
-                  event.preventDefault()
-                  navigateInputHistory(1)
-                  return
-                }
-                if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
-                  const tabAction = resolveComposerTabAction({
-                    shiftKey: event.shiftKey,
-                    queueReady
-                  })
-                  if (tabAction === 'queue') {
-                    event.preventDefault()
-                    send(null, { queueMode: event.shiftKey ? 'after_iteration' : 'after_turn' })
-                    return
+                  if (options.length) {
+                    setPickerIndex((value) => (value - 1 + options.length) % options.length)
                   }
-                  if (tabAction === 'cycle-role') {
-                    event.preventDefault()
-                    openPicker('role')
-                    return
-                  }
+                  return
                 }
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
-                  send()
+                  if (options.length) {
+                    selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
+                  }
+                  return
                 }
-              }}
-              onScroll={(event) => {
-                const layer = event.currentTarget.parentElement?.querySelector(
-                  '.chat-composer-markdown-layer'
-                )
-                if (layer) layer.scrollTop = event.currentTarget.scrollTop
-                scheduleTerminalCursorUpdate()
-              }}
-            />
-          </div>
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setPicker(null)
+                  return
+                }
+                return
+              }
+              if (
+                event.key === 'ArrowLeft' &&
+                event.shiftKey &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                queuedDisplayItems.length > 0 &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault()
+                void recallQueued()
+                return
+              }
+              if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                navigateInputHistory(-1)
+                return
+              }
+              if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                navigateInputHistory(1)
+                return
+              }
+              if (
+                event.key === 'ArrowUp' &&
+                !event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.nativeEvent.isComposing &&
+                event.currentTarget.selectionStart === 0 &&
+                event.currentTarget.selectionEnd === 0
+              ) {
+                event.preventDefault()
+                navigateInputHistory(-1)
+                return
+              }
+              if (
+                event.key === 'ArrowDown' &&
+                !event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.nativeEvent.isComposing &&
+                event.currentTarget.selectionStart === event.currentTarget.value.length &&
+                event.currentTarget.selectionEnd === event.currentTarget.value.length
+              ) {
+                event.preventDefault()
+                navigateInputHistory(1)
+                return
+              }
+              if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
+                const tabAction = resolveComposerTabAction({
+                  shiftKey: event.shiftKey,
+                  queueReady
+                })
+                if (tabAction === 'queue') {
+                  event.preventDefault()
+                  send(null, { queueMode: event.shiftKey ? 'after_iteration' : 'after_turn' })
+                  return
+                }
+                if (tabAction === 'cycle-role') {
+                  event.preventDefault()
+                  openPicker('role')
+                  return
+                }
+              }
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                send()
+              }
+            }}
+          />
           <div className="chat-composer-actions">
             <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
             {running ? (

@@ -97,6 +97,24 @@ export const CODEX_NOTIFICATIONS = {
   warning: 'warning',
 } as const;
 
+/**
+ * Mica extension notifications (incremental: Codex clients ignore unknown
+ * notification method names). The Codex protocol has no queue event, so the
+ * desktop app would otherwise never learn that a turn/steer input is waiting
+ * at the host for its after_iteration boundary.
+ */
+export const MICA_QUEUE_NOTIFICATIONS = {
+  queued: 'mica/queue/queued',
+  dequeue: 'mica/queue/dequeue',
+  changed: 'mica/queue/changed',
+} as const;
+
+export type MicaQueueItem = {
+  id: string;
+  text: string;
+  queueMode?: 'after_iteration' | 'after_turn' | null;
+};
+
 export type CodexTurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';
 export type CodexThreadStatus = 'notLoaded' | 'idle' | 'systemError' | { active: { activeFlags: string[] } };
 
@@ -125,6 +143,9 @@ export type CodexThreadItem =
       type: 'commandExecution';
       id: string;
       command: string;
+      /** Mica tool display text (onToolUseDisplayText), so clients render the
+       * same tool-call summary as the CLI instead of re-deriving it. */
+      displayText?: string | null;
       cwd: string;
       status: 'pending' | 'inProgress' | 'completed' | 'error' | 'cancelled' | 'interrupted';
       aggregatedOutput?: string | null;

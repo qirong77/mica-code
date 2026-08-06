@@ -1,0 +1,85 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+
+const stack = [
+  { name: 'Bun + TypeScript + React + Ink', desc: '终端 TUI 与运行时底座：CLI 启动、turn loop、模型 provider、UI 状态分层管理。' },
+  { name: 'packages/ 可复用包', desc: 'agent 抽象、工具 registry、MCP、UI、runtime 协议、session、config、commands、skills、plugin 等按职责拆分为独立包。' },
+  { name: 'src/ 应用装配层', desc: '负责应用级 wiring、生命周期和跨包编排：Application、LocalRuntimeController、多 agent session 管理。' },
+  { name: 'buildin-plugins/ 官方插件', desc: '产品策略与流程插件：Todo、MCP、message queue、文件 mention、命令插件。' },
+  { name: 'mica-code-app', desc: '终端风格的桌面 Web 渲染，通过 app-server 协议驱动 mica 子进程。' },
+];
+---
+
+<DocLayout title="架构概览" active="architecture" description="Mica Code 的源码结构与设计理念">
+  <h1>架构概览</h1>
+
+  <h2>设计理念</h2>
+  <ul>
+    <li><strong>append-only 会话历史</strong>：默认追加消息、工具调用与输出，只有上下文压力明显时在明确的阶段边界 compact——这是 96%+ 缓存命中率的基础。</li>
+    <li><strong>稳定 prompt 前缀</strong>：system prompt 的构建路径按 live cwd 解析，skills 在 system prompt 里只放索引，完整内容按需读取。</li>
+    <li><strong>分层边界</strong>：底层包不依赖上层。agent 抽象不碰 UI，UI 不直接调 provider，session 只做持久化，MCP 只管生命周期、远端工具注册统一走工具 registry。</li>
+  </ul>
+
+  <h2>技术栈</h2>
+  <table>
+    <thead>
+      <tr><th>模块</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      {stack.map((s) => (
+        <tr>
+          <td><strong>{s.name}</strong></td>
+          <td>{s.desc}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  <h2>源码版图</h2>
+  <pre><code>src/
+  index.ts                  CLI 入口：模式分派、全局错误钩子、Application 启停
+  cli/                      run / models / exec / compact / commit / app-server 入口
+  app/                      Application 生命周期、LocalRuntimeController turn loop、UI bridge
+  agents/                   终端内多 agent session 与后台 subagent 管理
+  runtime/                  Rewind checkpoint、ToolLog、Headless turn 执行器、Codex 投影
+  session/                  session 保存、恢复、重命名与 UI restore
+  daemon/                   mica daemon：注册/心跳/长轮询/远程续聊
+  tools/                    Agent 工具的 subagent 生命周期
+
+packages/
+  mica-agent                provider adapter 与 prompt 构建（provider-neutral）
+  mica-tools                唯一工具 registry：内置工具 + MCP 工具接入
+  mica-mcp                  MCP 配置读取、连接管理、远端工具适配
+  mica-ui                   Ink 终端 UI 组件和状态 store
+  mica-runtime              runtime 协议、事件、状态原语（Codex 协议 / ThreadEvent JSONL）
+  mica-session              会话快照本地保存、读取和列表
+  mica-config               本地配置、storage、模型列表、on-demand Models.dev 查找
+  mica-commands             通用斜杠命令注册与分发
+  mica-builtin-commands     Mica Code 内置产品命令
+  mica-context              上下文管理（compact）
+  mica-skills               skills 扫描、解析和缓存
+  mica-plugin               插件生命周期、hooks、service container
+  mica-common               跨包共享底层工具
+  mica-pty                  PTY 测试驱动 + 内置 PTY 工具
+  mica-sync-server          中心聚合服务（零依赖 Node 单文件）
+  mica-sync-web             Web 控制台（查看会话 + 远程续聊）</code></pre>
+
+  <h2>Turn loop 与缓存</h2>
+  <p>普通输入的关键路径：trim 输入 → 命令分发 → busy 检查与排队（单槽队列，支持 after_iteration / after_turn）→ turn 开始捕获 rewind checkpoint → <code>agent.run</code> 迭代执行工具 → 每轮迭代保存可恢复 checkpoint → 成功后写入 assistant message 并保存 completed 快照。turn 级错误最多重试 5 次，每次间隔 10 秒；只有可安全重放（只读工具阶段）的错误才自动重试。</p>
+  <p>Abort 语义：<code>AgentRuntime.abort()</code> 递增 runId、abort controller；provider 流迭代结束后必须再检查一次 abort，避免把被中止的请求提交成空的 assistant 消息。UI 展示的真相来自 <code>TerminalAgentSession.uiState.conversationMessages</code>，而不是从 provider history 重新推断。</p>
+
+  <h2>多 Agent 与 Rewind</h2>
+  <ul>
+    <li><code>TerminalAgentSessionManager</code> 管理同一终端内多个 agent session；<code>/new</code> 创建独立 agent，<code>/fork</code> 基于当前历史分叉。每个 agent 有独立的 UI snapshot（conversationMessages、pendingInputs、workingStatus 等），切换时从对应 session 恢复。</li>
+    <li><code>RewindCheckpointManager</code> 在 turn 前创建对话和文件 checkpoint，始终保留「用户输入之前」的状态；内存 checkpoint 缺失时从可对齐的 provider/UI history 动态生成仅对话节点。</li>
+    <li>subagent 的逐条模型请求深拷贝进 <code>subagentUsageHistory</code>，随会话快照落盘，供 Stats 对账。</li>
+  </ul>
+
+  <h2>验证</h2>
+  <ul>
+    <li>单元 / 集成测试：<code>bun run test</code>（Vitest）。</li>
+    <li>类型检查：<code>bunx tsc --noEmit</code>。</li>
+    <li>构建：<code>bun run build</code> 产出无外部运行时依赖的单二进制 <code>dist/mica</code>。</li>
+    <li>真实用户流冒烟：通过 <code>packages/mica-pty</code> 驱动 <code>dist/mica</code> 覆盖安装、命令面板、多 agent、resume 等端到端场景。</li>
+  </ul>
+</DocLayout>

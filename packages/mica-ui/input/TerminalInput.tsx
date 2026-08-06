@@ -232,6 +232,10 @@ function TerminalInput() {
     input.text.set('');
     setLocalText('');
     setCursorOffset(0);
+    // 提交会绕过 handleChange 直接清空输入框，必须在这里关闭补全下拉，
+    // 否则 `no matching commands` 下拉残留导致输入框持续重绘。
+    DropDownUI.quickCommand.hide();
+    DropDownUI.fileMention.hide();
     input.submit(trimmed, options);
   }, []);
 
@@ -360,6 +364,8 @@ function TerminalInput() {
           input.text.set('');
           setLocalText('');
           setCursorOffset(0);
+          DropDownUI.quickCommand.hide();
+          DropDownUI.fileMention.hide();
         }
         return;
       }
@@ -376,6 +382,8 @@ function TerminalInput() {
         setLocalText('');
         setCursorOffset(0);
         input.text.set('');
+        DropDownUI.quickCommand.hide();
+        DropDownUI.fileMention.hide();
       }
       return;
     }
@@ -386,6 +394,8 @@ function TerminalInput() {
         setLocalText('');
         setCursorOffset(0);
         input.text.set('');
+        DropDownUI.quickCommand.hide();
+        DropDownUI.fileMention.hide();
       }
       return;
     }

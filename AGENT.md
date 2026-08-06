@@ -36,6 +36,8 @@ bun run dev:config-web  # Config Web Vite 调试：热更新 packages/mica-confi
 bun run build:sync-web   # Mica Sync Web 前端构建（packages/mica-sync-web/web/dist）
 bun run build:sync-server # Mica Sync 中心服务 Node bundle（dist/mica-sync-server.js）
 bun run format          # 格式化 README、AGENT、src、packages、scripts、docs、blogs
+cd website && bun run dev     # 官网（Astro）开发服务器
+cd website && bun run build   # 官网静态构建（website/dist）
 ```
 
 常用局部验证：
@@ -124,6 +126,7 @@ docs/                              设计草案和长期能力规划
 blogs/                             开发过程记录
 skills/                            仓库内 skill 资料
 buildin-plugins/                   官方内置产品插件与启动扩展；包含 Todo、MCP、message queue、文件 mention 和命令
+website/                           官网源码（Astro 静态站：首页 + 文档站，内容从 README/命令文档取材）
 temp/                              临时代码和外部实验，默认不参与搜索/测试/格式化
 .backups/                          临时备份痕迹，默认不作为实现或验证输入
 ```
@@ -184,6 +187,7 @@ temp/                              临时代码和外部实验，默认不参与
 - 当前 `packages/mica-runtime/MessageQueueService.ts` 是单槽队列：每个 agent 同时最多保留一条 pending input。
 - `RuntimeQueueMode` 只有 `after_turn` 和 `after_iteration`。
 - 内置 message queue 插件在 `input:received` 阶段处理 busy agent 的输入。如果已有排队消息，会提示“已有一条排队消息，等待发送或重新编辑”。
+- 排队成功时插件只发布 `queue:changed`（驱动 conversation 底部的 waiting queue 行），不再重复发 info notification——waiting queue 行已包含发送时机（after turn / after a complete tool-call iteration）与重新编辑提示（`shift + ← to re-edit`）。
 - queue 操作必须带 owner/agent 语义。后台 agent 或非当前 agent 的输入不能落到当前 active agent 上。
 - UI 展示使用 `RuntimeInput.displayText` 或 `displayContent` 时，只影响展示摘要；`text` 或 `content` 仍保留完整上下文给 agent。
 - pending input 在 conversation 底部使用临时 notice 样式展示，标题包含发送时机和重新编辑快捷键；它仍属于 `pendingInputs` UI 状态，不追加到 `conversationMessages` 或 agent history。
@@ -278,9 +282,17 @@ temp/                              临时代码和外部实验，默认不参与
 
 - `src/runtime/HeadlessTurnExecutor.ts` 是无 UI turn 执行核心：持有单槽 `MessageQueueService`（`after_iteration` 输入在完整工具迭代边界注入、`after_turn` 输入在当前 turn 结束后自动排空），并对外发布 `turn:start`/`turn:finish`/`queued`/`dequeue`/`queue:changed` 生命周期事件。它不拥有输出协议（文本/工具/usage 流仍由消费方经 `CodexProjector`、`CodexExecProjector` 或 sync 事件映射转发），不触碰 Ink/UI。它是交互 runtime（`LocalRuntimeController`）队列语义的 headless 版，与 CLI Shift+Tab 的 after_iteration 行为一致。
 - `mica app-server`（`src/cli/runAppServer.ts`）是**每会话常驻进程**：从 stdin 读 Codex v2 app-server 协议请求（`initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt`，JSON-RPC 风格、每行一个 JSON、无 `jsonrpc` 字段），向 stdout 写 v2 通知；持有 `AgentRuntime` + `SessionController` + MCP 连接 + `HeadlessTurnExecutor` 直到会话关闭/进程退出，因此连续对话跳过进程启动、session 重载和 MCP 重复 init。**不要把它改成全局单 daemon**：每会话进程隔离干净、退出即回收，多会话不互相阻塞。
-- 协议实现位于 `packages/mica-runtime/codexProtocol.ts`（framing/编解码）与 `src/runtime/CodexProjector.ts`（AgentRuntime 事件 → `turn/started`/`turn/completed`/`item/agentMessage/delta`/`item/reasoning/textDelta`/`item/commandExecution/outputDelta`/`item/started`/`item/completed`/`thread/tokenUsage/updated` 通知）。`turn/start` 立即返回 `{turn:{id,status:"inProgress"}}` 后异步执行；`turn/steer`（带 `expectedTurnId`）把输入注入活跃 turn 的 after_iteration 队列；`turn/interrupt` 中止。这是 Codex App Server 协议子集，未来任何理解该协议的客户端（IDE 插件等）可直接驱动 mica。
+- 协议实现位于 `packages/mica-runtime/codexProtocol.ts`（framing/编解码）与 `src/runtime/CodexProjector.ts`（AgentRuntime 事件 → `turn/started`/`turn/completed`/`item/agentMessage/delta`/`item/reasoning/textDelta`/`item/commandExecution/outputDelta`/`item/started`/`item/completed`/`thread/tokenUsage/updated` 通知）。`turn/start` 立即返回 `{turn:{id,status:"inProgress"}}` 后异步执行；`turn/steer`（带 `expectedTurnId`）把输入注入活跃 turn 的 after_iteration 队列；`turn/interrupt` 中止。这是 Codex App Server 协议子集，未来任何理解该协议的客户端（IDE 插件等）可直接驱动 mica。`commandExecution` item 携带 `displayText`（工具 `onToolUseDisplayText` 的文案），让客户端与 CLI 展示同一工具摘要，而不是自己重拼；`item/started` 与 `item/completed` 都带。思考流默认关闭，`app-server --thinking`（或 projector context 的 `thinking: true`）才发 `item/reasoning/textDelta`。
+- **Mica 增量扩展**：Codex 协议没有队列事件，`app-server` 会额外发 `mica/queue/queued`/`mica/queue/dequeue`/`mica/queue/changed` 通知（`MICA_QUEUE_NOTIFICATIONS`），让客户端能展示 host 侧 after_iteration（Shift+Tab）排队态；未知通知方法对 Codex 客户端无害，属纯增量。`turn/steer` 的 params 可带可选 `clientMessageId`（Mica 扩展），host 把它作为 `RuntimeInput.id`，使 queue 通知能关联 app 的乐观消息；`createRuntimeInput` 支持 `id` option。mica-code-app 用 `allQueuedItems` 合并本地 after_turn 队列与 host after_iteration 队列（单槽互斥），queue 通知同步消息排队标记。
 - `mica exec`（`src/cli/runExec.ts`）是一次性 headless 执行，对齐 `codex exec`：默认人类可读文本，`--json` 输出 ThreadEvent JSONL（`packages/mica-runtime/codexExecEvents.ts` 定义类型，`src/runtime/CodexExecProjector.ts` 投影）。生命周期与 `mica app-server` 一致（MCP init、session 落盘、subagent 清理）。
 - `mica-code-app` 的 chat 主进程（`mica-code-app/src/main/chat.js`）每 chat 节点维护一个常驻 `app-server` 子进程：`chat:start` 在空闲时发 `turn/start`、忙时 Shift+Tab 发 `turn/steer`（after_iteration 注入）、忙时 Tab 在本地 `queuedRuns` 排队等 `turn/completed` 后重放；`chat-events.js` 的 `codexNotificationToEvent` 把 v2 通知映射回 app 内部事件形状。abort 改为 `turn/interrupt` 请求而非杀进程。host 意外退出时 app 清理该节点、下条消息重建。页面刷新后 `chat:start`/`chat:is-running` 会刷新 `run.sender`，避免事件发给已销毁的 webContents。
+- **app 与 CLI 交互/展示对齐约定**（改任何一侧都要同步检查另一侧）：
+  - 排队语义单槽：`mica-code-app/src/main/chat-queue.js` 的 `resolveBusyDispatch({running, queueMode, queuedCount})` 是 busy 分派唯一判定——空闲→start、busy 无排队→Tab/Enter enqueue（after_turn）或 Shift+Tab steer（after_iteration）、**busy 已有任意排队→一律 reject**（文案与 CLI 一致「已有一条排队消息，等待发送或重新编辑」）。本地队列与 host after_iteration 队列互斥，禁止恢复多槽堆叠。
+  - 输入框文案对齐 CLI：composer queue 提示精确复用 `TerminalInput.tsx` 的 `QUEUE_SHORTCUT_TIP`（「Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送」）；空闲 placeholder 用 `mica-ui/input/state.ts` 的「Type something and press Enter...」；`QueueDock` 标题按 queueMode 用 CLI `formatPendingStatus` 文案（after_iteration → "waiting to send after a complete tool-call iteration"）。
+  - 状态栏耗时对齐 CLI `WorkingStatus`：主区状态文本后跟当前阶段/工具的实时 elapsed（working 阶段取最早 running 工具 `startedAt` 起算，其余阶段从 phase 切换起算，250ms 刷新）；meta 区保留总任务 elapsed（`runStartedAt` 起算）与模型/ctx 占用。
+  - token 统计用累计值：`chat-events.js` 的 `tokensFromCodexUsage` 读 `tokenUsage.total`（CodexProjector 维护的累计），不要改回 `last`（单条记录），否则上下文/cached 数字偏小。
+  - run_shell 日志阈值 env 化：preload 注入 `window.mica.runShellLogConfig`（来自 `MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS`/`MICA_RUN_SHELL_LOG_MAX_LINES`，默认 10000/10 与 CLI 一致），`visibleShellOutput` 不要再硬编码。
+  - 思考流：app 的 `buildAppServerArgs` 必须带 `--thinking`，否则 `CodexProjector` 默认不发 `item/reasoning/textDelta`，思考日志与 thinking 状态消失。
 - 容错约定：`--session` resume 失败（含 `resumeLoaded` 抛错，不只是 `{ok:false}`）或 `--dir` chdir 失败时**降级继续**（发 Codex `error` 通知携带真实原因，resume 失败回退为空会话，chdir 失败保持当前目录），不退出进程——避免 mica-code-app 显示"mica 进程已退出（code 1）"却没有原因。`src/index.ts` 的 app-server 启动失败兜底同样输出 Codex `error` 通知（不要改回旧 run-JSON error 格式）。进程注册 `unhandledRejection`（记录 + 通知，不退出）和 `uncaughtException`（通知后退出）兜底；`exit(code)` 退出前先 flush stdout/stderr，避免 process.exit 丢弃缓冲的真实原因。
 
 ## 命令系统
@@ -306,6 +318,7 @@ temp/                              临时代码和外部实验，默认不参与
 - `/status`：显示当前 provider/model/effort/role 状态。
 - `/context`：显示当前上下文占用总览。
 - `/compact`：压缩当前会话上下文为 checkpoint。Web Chat 通过 `mica compact --session <id>` 调用同一套 `CompactionService`（见 `src/cli/runCompact.ts`）；该 headless 命令会写回压缩后的 checkpoint 并输出单行 JSON，会话内容过少时返回 `code: "not_needed"`。
+- `mica compact --prune-only`（mica-code-app 右键「快速压缩（本地）」）只做本地清理、不调用模型：先修剪单条消息内的大块内容——**所有**工具调用结果（tool result / `function_call_output` / `toolUseResult`）与**所有**工具调用参数（`arguments`）都无条件替换为占位符（arguments 必须替换为合法 JSON `TOOL_ARGUMENTS_PLACEHOLDER`，否则 provider 400），图片/base64/超长字符串按尺寸修剪；若没有可修剪内容且会话存在可丢弃的旧轮次（本地丢弃的节省量达到 `MIN_LOCAL_ROUND_DROP_SAVED_TOKENS`/`MIN_LOCAL_ROUND_DROP_SAVED_RATIO` 下限），则沿轮次边界丢弃最早轮次、保留最近轮次（复用最近 token 预算，且不拆散 tool call/result 配对）；两种情况都不满足时才返回 `not_needed`「暂无可快速清理内容」。不要改变"prune-only 永不调用模型"的约定；`mode: 'kept'`（模型压缩保留的最近轮次）仍只截断超长参数，保持工具调用可读。
 - `mica commit`（headless，`src/cli/runCommit.ts`）：与 `/commit` 复用 `packages/mica-builtin-commands/git/commitRunner.ts` 的确定性分析/提交函数，程序收集 git 变化摘要后**只发一次模型请求**生成 commit message（不启用工具、无多轮循环），再程序化 add/commit/push，输出单行 JSON（`ok`/`commitHash`/`subject`/`commitMessage`/`pushed`）。`mica-code-app` 右键 commit 通过 `mica commit --dir <cwd>` 调用它，代替原先的 `mica exec` 多轮工具循环。
 - `/new`：新开一个 agent；`/new <text>` 后台运行新 agent。
 - `/fork`：从当前 agent 历史分叉一个新 agent；`/fork <text>` 后台运行。
@@ -472,6 +485,7 @@ MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" npx vitest run packages
 ```
 
 vitest 会把 `HOME` 重定向到临时目录，因此必须显式传 `MICA_PTY_SOURCE_HOME`（真实 `~/.mica`，测试只复制 `config.json` 到隔离的 `MICA_HOME`，不触碰用户数据）。
+套件的 `dist/mica` 路径按仓库根解析，可用 `MICA_PTY_BIN` 覆盖（自定义构建/其他路径）。
 
 - mica-pty 常规测试：`bun run test -- packages/mica-pty/tests/driver.test.ts packages/mica-pty/tests/manager.test.ts packages/mica-pty/tests/serverSource.test.ts`。API 与用法见 `packages/mica-pty/README.md`；旧 python 驱动 `temp/mica_pty.py` 保留作为参考。
 - 注意 node-pty 的 prebuild `spawn-helper` 通过 Bun 安装时可能缺执行位，`PtyDriver.spawn()` 会做幂等 chmod 兜底。
@@ -544,6 +558,7 @@ rg --files src packages scripts docs blogs
 - release 安装采用按平台下载：`install.sh` 自身很小，探测 os/arch 后只下载对应 `mica-code-<platform>-<cpu>.tar.gz`，并用 `sha256sums.txt` 校验；不再把全部平台二进制 base64 嵌入安装脚本。
 - GitHub Actions 页面上的 `mica-code-release` artifact 是 4 个平台压缩包的 CI 汇总包，不是用户安装路径；用户只下载 `install.sh` + 当前平台 `.tar.gz`。可变 `latest` release 每次重建，避免残留旧 bare binary。
 - `.github/workflows/build-binaries.yml` 在 push、PR 和手动触发时运行 typecheck/test；在 `main` 或 `v*` tag 上构建 Linux/macOS x64/arm64 release 二进制，打包单平台 `tar.gz`（`GZIP=-9`）、薄 `install.sh` 与 `sha256sums.txt` 后上传 release asset。
+- `.github/workflows/deploy-pages.yml` 在 `main` 分支变更 `website/**`（或手动触发）时构建 `website/` 并发布到 GitHub Pages（`https://qirong77.github.io/mica-code/`）：`actions/configure-pages` 注入 `PAGES_BASE_PATH`，`website/astro.config.mjs` 用它作 `base`（本地 dev/preview 不设置该变量，base 为 `/`）。Astro 不会自动给模板中硬编码的绝对路径加 base 前缀，因此布局/页面里所有内部链接（`mica.svg`、`screenshots/`、`docs/`、锚点）都必须用 `import.meta.env.BASE_URL` 拼接，CSS 用 frontmatter `import` 而不是 `<link href="/src/...">`；新增页面或资源时保持这个约定。
 - 如果用户报告启动、startup UI、build/install 行为与源码不一致，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`dist/mica` 可能不一致。
 
 ## Git 与工作区安全

@@ -16,6 +16,10 @@ const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
 const MIN_SUMMARY_INPUT_TOKENS = 8_000;
 const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
 const TOOL_ARGUMENTS_PLACEHOLDER = '{"_truncated":true,"note":"tool arguments cleared during compact"}';
+// 快速压缩（prune-only）找不到单条消息内可清理内容时，允许本地丢弃最早轮次。
+// 只有节省量达到这两个下限之一才丢弃，避免把内容本来就不多的小会话也删掉。
+const MIN_LOCAL_ROUND_DROP_SAVED_TOKENS = 8_000;
+const MIN_LOCAL_ROUND_DROP_SAVED_RATIO = 0.05;
 
 export type CompactInput = {
   messages: unknown[];
@@ -182,6 +186,20 @@ export class CompactionService {
     }
 
     if (options.pruneOnly) {
+      const roundDrop = buildLocalRoundDrop({
+        messages: activeMessages,
+        compactedMessages: compactedActiveMessages,
+        previewMessages: originalMessages,
+        options,
+        beforeCount,
+        beforeTokenEstimate,
+        boundaryIndex: activeStartIndex - 1,
+        budget,
+        userMessageTemplate,
+        pruneOnlyThresholdRatio,
+        targetContextRatio,
+      });
+      if (roundDrop) return roundDrop;
       throw new CompactionNotNeededError('当前会话没有可本地清理的内容，暂不需要快速压缩');
     }
 
@@ -470,6 +488,87 @@ function dropOldestRecentRound(messages: unknown[]): unknown[] {
   return messages.slice(rounds[1]?.start ?? messages.length);
 }
 
+// prune-only 快速压缩的兜底：单条消息内没有可清理的大块内容（上下文大主要是
+// 由大量小消息堆出来的，例如工具调用对 + 短输出），此时本地丢弃最早轮次、
+// 保留最近轮次（复用最近 token 预算），不调用模型。必须落在轮次边界且不能
+// 拆散 tool call/result 配对，节省量低于阈值时返回 null 交给上层报
+// "暂无可快速清理内容"。
+function buildLocalRoundDrop(params: {
+  messages: unknown[];
+  compactedMessages: unknown[];
+  previewMessages: unknown[];
+  options: CompactOptions;
+  beforeCount: number;
+  beforeTokenEstimate: number;
+  boundaryIndex: number;
+  budget: CompactBudget;
+  userMessageTemplate: unknown;
+  pruneOnlyThresholdRatio: number;
+  targetContextRatio: number;
+}): CompactResult | null {
+  if (groupMessagesByRound(params.messages).length < 2) return null;
+
+  let splitIndex = chooseRecentStartIndex(params.messages, params.compactedMessages, params.options);
+  splitIndex = adjustStartForToolPairs(params.messages, splitIndex);
+  if (splitIndex <= 0) return null;
+
+  const keptMessages = params.compactedMessages.slice(splitIndex);
+  const droppedCount = splitIndex;
+  const boundaryMessage = createCompactBoundaryMessage(
+    {
+      mode: 'pruned',
+      strategy: 'prune_only',
+      beforeCount: params.beforeCount,
+      beforeTokenEstimate: params.beforeTokenEstimate,
+      prunedCount: droppedCount,
+      keptCount: keptMessages.length,
+      droppedRounds: Math.max(0, groupMessagesByRound(params.messages).length - groupMessagesByRound(keptMessages).length),
+      trigger: 'manual',
+      contextWindowSize: params.budget.contextWindowSize,
+      pruneOnlyThresholdRatio: params.pruneOnlyThresholdRatio,
+      targetContextRatio: params.targetContextRatio,
+    },
+    params.userMessageTemplate,
+  );
+  const compactMessages = [boundaryMessage, ...keptMessages];
+  const afterTokenEstimate = estimateMessagesTokens(compactMessages);
+  const savedTokenEstimate = Math.max(0, params.beforeTokenEstimate - afterTokenEstimate);
+  const savedRatio = params.beforeTokenEstimate > 0 ? savedTokenEstimate / params.beforeTokenEstimate : 0;
+  if (
+    savedTokenEstimate < MIN_LOCAL_ROUND_DROP_SAVED_TOKENS &&
+    savedTokenEstimate < params.beforeTokenEstimate * MIN_LOCAL_ROUND_DROP_SAVED_RATIO
+  ) {
+    return null;
+  }
+
+  return {
+    messages: params.options.preview ? cloneJson(params.previewMessages) : compactMessages,
+    summary: 'Quick compact dropped the oldest rounds locally; recent rounds retained.',
+    mode: 'pruned',
+    strategy: 'prune_only',
+    beforeCount: params.beforeCount,
+    afterCount: compactMessages.length,
+    summarizedCount: 0,
+    keptCount: keptMessages.length,
+    beforeTokenEstimate: params.beforeTokenEstimate,
+    afterTokenEstimate,
+    savedTokenEstimate,
+    savedRatio,
+    boundaryIndex: params.boundaryIndex,
+    promptTooLongRetries: 0,
+    forced: Boolean(params.options.force),
+    preview: Boolean(params.options.preview),
+    contextWindowSize: params.budget.contextWindowSize,
+    contextUsageRatio: usageRatio(afterTokenEstimate, params.budget.contextWindowSize),
+    lightweightTokenEstimate: afterTokenEstimate,
+    targetContextRatio: params.targetContextRatio,
+    pruneOnlyThresholdRatio: params.pruneOnlyThresholdRatio,
+    recentTokenEstimate: estimateMessagesTokens(keptMessages),
+    summaryInputTokenEstimate: 0,
+    reducedRecentRounds: 0,
+  };
+}
+
 function buildSummarizedMessages(
   summary: string,
   keptMessages: unknown[],
@@ -713,7 +812,7 @@ function isProtocolSensitiveKey(key: string): boolean {
 
 function preserveProtocolSensitiveValue(value: unknown, options: PruneOptions, key?: string): unknown {
   if (typeof value === 'string') {
-    if (key === 'arguments') return preserveToolArguments(value, options.maxStringChars);
+    if (key === 'arguments') return preserveToolArguments(value, options);
     // IDs/names/types must stay exact; free-text truncation would break tool pairing.
     return value;
   }
@@ -739,11 +838,14 @@ function preserveProtocolSensitiveValue(value: unknown, options: PruneOptions, k
   return next;
 }
 
-function preserveToolArguments(value: string, maxStringChars: number): string {
+function preserveToolArguments(value: string, options: PruneOptions): string {
   // Chat Completions / Responses tool-call arguments must remain valid JSON strings.
   // Free-form head/tail truncation makes the next provider request 400.
+  // 快速压缩（mode: old）时工具参数也全部替换为合法 JSON 占位符，只保留占位；
+  // 其他模式（保留的最近轮次）只截断超长参数，保持工具调用的可读性。
+  if (options.mode === 'old') return TOOL_ARGUMENTS_PLACEHOLDER;
   if (isValidJsonText(value)) {
-    return value.length <= maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
+    return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
   }
   return TOOL_ARGUMENTS_PLACEHOLDER;
 }

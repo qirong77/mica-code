@@ -611,6 +611,27 @@ describe('CompactionService', () => {
     });
   });
 
+  it('prune-only compact replaces every tool-call argument with a valid JSON placeholder', async () => {
+    const service = new CompactionService();
+    const result = await service.compact({
+      messages: makeToolMessages(3),
+      options: { force: true, pruneOnly: true, lightweightPrune: true, contextWindowSize: 100_000 },
+      summarize: vi.fn(async () => FULL_SUMMARY),
+    });
+
+    assertValidJsonArguments(result.messages);
+    expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('prune_only');
+    // 无论参数大小，快速压缩后所有工具参数都替换为合法 JSON 占位符
+    expect(JSON.stringify(result.messages)).not.toContain('packages/example1.ts');
+    expect(JSON.stringify(result.messages)).not.toContain('RAW_TOOL_RESULT');
+    const parsedArgs = collectToolArguments(result.messages).map((args) => JSON.parse(args));
+    expect(parsedArgs.length).toBeGreaterThan(0);
+    for (const args of parsedArgs) {
+      expect(args).toEqual({ _truncated: true, note: 'tool arguments cleared during compact' });
+    }
+  });
+
   it('keeps tool-call arguments valid when recent kept messages are aggressively compacted', async () => {
     const service = new CompactionService();
     const hugeArgs = JSON.stringify({ command: 'echo ' + 'x'.repeat(20_000) });
@@ -658,12 +679,89 @@ describe('CompactionService', () => {
     expect(JSON.stringify(result.messages)).not.toContain('[truncated:');
   });
 
+  it('prune-only compact drops oldest rounds locally when only small messages remain', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const messages = makeSmallCleanMessages(100);
+    const result = await service.compact({
+      messages,
+      options: { force: true, pruneOnly: true, lightweightPrune: true, contextWindowSize: 1_000_000 },
+      summarize,
+    });
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('prune_only');
+    expect(result.savedTokenEstimate).toBeGreaterThan(0);
+    expect(result.savedRatio).toBeGreaterThan(0.5);
+    expect(result.keptCount).toBeGreaterThan(0);
+    expect(result.messages[0]).toMatchObject({ role: 'user' });
+    expect(contentOf(result.messages[0])).toContain(COMPACT_BOUNDARY_PREFIX);
+    expect(JSON.stringify(result.messages)).toContain('droppedRounds');
+    // 旧轮次被本地丢弃，最近轮次保留，且 tool call/result 配对完整
+    expect(JSON.stringify(result.messages)).toContain('user request 100');
+    expect(JSON.stringify(result.messages)).not.toContain('user request 1 keep this round');
+    const serialized = JSON.stringify(result.messages);
+    for (const message of result.messages) {
+      if (!message || typeof message !== 'object') continue;
+      const toolCalls = (message as Record<string, unknown>).tool_calls;
+      if (Array.isArray(toolCalls)) {
+        for (const call of toolCalls) {
+          if (call && typeof call === 'object' && typeof (call as Record<string, string>).id === 'string') {
+            expect(serialized).toContain((call as Record<string, string>).id);
+          }
+        }
+      }
+    }
+  });
+
+  it('prune-only compact still refuses tiny clean sessions with nothing meaningful to drop', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+
+    await expect(
+      service.compact({
+        messages: makeSmallCleanMessages(2),
+        options: { force: true, pruneOnly: true, lightweightPrune: true, contextWindowSize: 1_000_000 },
+        summarize,
+      }),
+    ).rejects.toBeInstanceOf(CompactionNotNeededError);
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {
   return Array.from({ length: rounds }, (_, index) => index + 1 + offset).flatMap((turn) => [
     { role: 'user', content: `user request ${turn}` },
     { role: 'assistant', content: `assistant answer ${turn}\nfile packages/example${turn}.ts` },
+  ]);
+}
+
+// 大量小消息、无单条内可清理内容（工具结果已是占位符），模拟长会话的
+// "消息数量大但每条都小" 场景——旧实现会误报"暂无可快速清理内容"。
+function makeSmallCleanMessages(rounds: number): unknown[] {
+  return Array.from({ length: rounds }, (_, index) => index + 1).flatMap((turn) => [
+    { role: 'user', content: `user request ${turn} keep this round` },
+    {
+      role: 'assistant',
+      content: `assistant answer ${turn} with a moderately long recap of findings and the next step`,
+      tool_calls: [
+        {
+          id: `call-${turn}`,
+          type: 'function',
+          function: { name: 'grep_search', arguments: `{"pattern":"needle_${turn}","path":"src"}` },
+        },
+      ],
+    },
+    { role: 'tool', tool_call_id: `call-${turn}`, content: '[Old tool result content cleared during compact]' },
+    {
+      type: 'function_call',
+      call_id: `rc-${turn}`,
+      name: 'run_shell',
+      arguments: `{"cmd":"rg needle_${turn}"}`,
+    },
+    { type: 'function_call_output', call_id: `rc-${turn}`, output: '[Old tool result content cleared during compact]' },
   ]);
 }
 

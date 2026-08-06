@@ -48,6 +48,7 @@ export type AppServerCliInvocation = {
   mcpConfigPath?: string;
   strictMcpConfig: boolean;
   mcpInitTimeoutMs?: number;
+  thinking: boolean;
 };
 
 export type CliInvocation =
@@ -206,6 +207,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     let mcpConfigPath: string | undefined;
     let strictMcpConfig = false;
     let mcpInitTimeoutMs: number | undefined;
+    let thinking = false;
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index]!;
       const valueOption = parseValueOption(arg, argv, index, [
@@ -235,6 +237,10 @@ export function parseCliArgs(argv: string[]): CliInvocation {
         strictMcpConfig = true;
         continue;
       }
+      if (arg === '--thinking') {
+        thinking = true;
+        continue;
+      }
       if (arg === '--help' || arg === '-h') return { mode: 'help' };
       return cliError(`Unknown app-server option: ${arg}`);
     }
@@ -249,6 +255,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       mcpConfigPath,
       strictMcpConfig,
       mcpInitTimeoutMs,
+      thinking,
     };
   }
   if (argv[0] !== 'exec') return { mode: 'interactive' };

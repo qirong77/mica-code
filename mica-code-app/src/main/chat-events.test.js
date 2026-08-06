@@ -148,6 +148,7 @@ describe('chat CLI arguments', () => {
       })
     ).toEqual([
       'app-server',
+      '--thinking',
       '--session',
       's1',
       '--dir',
@@ -166,6 +167,7 @@ describe('chat CLI arguments', () => {
   it('omits optional app-server flags when absent', () => {
     const args = buildAppServerArgs({})
     expect(args[0]).toBe('app-server')
+    expect(args).toContain('--thinking')
     for (const flag of ['--session', '--dir', '--model', '--variant', '--role', '--max-turns']) {
       expect(args).not.toContain(flag)
     }
@@ -210,6 +212,7 @@ describe('chat CLI arguments', () => {
           type: 'commandExecution',
           id: 'c1',
           command: 'run_shell {"cmd":"ls"}',
+          displayText: '$ ls',
           status: 'inProgress'
         }
       }
@@ -220,6 +223,7 @@ describe('chat CLI arguments', () => {
         type: 'tool',
         tool: 'run_shell',
         callID: 'c1',
+        displayText: '$ ls',
         state: { status: 'pending', input: { cmd: 'ls' } }
       }
     })
@@ -232,6 +236,7 @@ describe('chat CLI arguments', () => {
           type: 'commandExecution',
           id: 'c1',
           command: 'run_shell',
+          displayText: '$ ls',
           status: 'completed',
           aggregatedOutput: 'out'
         }
@@ -242,6 +247,7 @@ describe('chat CLI arguments', () => {
       part: {
         type: 'tool',
         callID: 'c1',
+        displayText: '$ ls',
         state: { status: 'completed', output: 'out' }
       }
     })
@@ -278,10 +284,17 @@ describe('chat CLI arguments', () => {
     ).toMatchObject({ type: 'usage', tokenUsage: expect.any(Object) })
   })
 
-  it('builds step_finish tokens from the last codex usage', () => {
+  it('builds step_finish tokens from the cumulative codex usage', () => {
     expect(
       tokensFromCodexUsage({
-        total: { total_tokens: 100 },
+        total: {
+          total_tokens: 100,
+          input_tokens: 40,
+          cached_input_tokens: 20,
+          output_tokens: 60,
+          reasoning_output_tokens: 10,
+          cache_write_input_tokens: 5
+        },
         last: {
           total_tokens: 10,
           input_tokens: 4,
@@ -292,11 +305,11 @@ describe('chat CLI arguments', () => {
         }
       })
     ).toEqual({
-      total: 10,
-      input: 4,
-      output: 6,
-      reasoning: 1,
-      cache: { read: 2, write: 3 }
+      total: 100,
+      input: 40,
+      output: 60,
+      reasoning: 10,
+      cache: { read: 20, write: 5 }
     })
     expect(tokensFromCodexUsage(null)).toEqual({
       total: 0,

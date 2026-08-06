@@ -15,10 +15,10 @@ export type RuntimeInput = {
 export function createRuntimeInput(
   text: string,
   source: RuntimeInputSource = 'ui',
-  options: { queueMode?: RuntimeQueueMode; displayText?: string } = {},
+  options: { queueMode?: RuntimeQueueMode; displayText?: string; id?: string } = {},
 ): RuntimeInput {
   return {
-    id: micaCommon.createId('input'),
+    id: options.id ?? micaCommon.createId('input'),
     text,
     ...(options.displayText ? { displayText: options.displayText } : {}),
     source,

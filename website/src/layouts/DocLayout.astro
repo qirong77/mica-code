@@ -1,0 +1,57 @@
+---
+// 文档布局：左侧目录 + 右侧内容
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  active: string;
+}
+
+const { title, description, active } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const nav = [
+  { group: '开始', items: [
+    { href: `${base}docs/getting-started`, label: '快速开始', key: 'getting-started' },
+    { href: `${base}docs/commands`, label: '内置命令', key: 'commands' },
+  ]},
+  { group: '协议', items: [
+    { href: `${base}docs/headless`, label: 'Headless 协议', key: 'headless' },
+    { href: `${base}docs/sync`, label: 'Mica Sync', key: 'sync' },
+  ]},
+  { group: '进阶', items: [
+    { href: `${base}docs/architecture`, label: '架构概览', key: 'architecture' },
+  ]},
+];
+---
+
+<BaseLayout title={title} description={description}>
+  <div class="container">
+    <div class="doc">
+      <aside class="doc-side">
+        {nav.map((group) => (
+          <div>
+            <h4>{group.group}</h4>
+            <ul>
+              {group.items.map((item) => (
+                <li>
+                  <a
+                    href={item.href}
+                    class:list={{ active: item.key === active }}
+                    aria-current={item.key === active ? 'page' : undefined}
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </aside>
+      <article class="doc-main">
+        <slot />
+      </article>
+    </div>
+  </div>
+</BaseLayout>

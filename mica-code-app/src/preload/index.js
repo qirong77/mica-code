@@ -157,6 +157,12 @@ contextBridge.exposeInMainWorld('mica', {
   settings: settingsApi,
   platform: process.platform,
   homeDir: process.env.HOME || '',
+  // run_shell 工具日志展示阈值：与 CLI 的 MICA_RUN_SHELL_* 环境变量同源，默认值一致。
+  runShellLogConfig: {
+    verboseThresholdMs:
+      Number.parseInt(process.env.MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, 10) || 10000,
+    maxLines: Number.parseInt(process.env.MICA_RUN_SHELL_LOG_MAX_LINES, 10) || 10
+  },
   windowsBuildNumber:
     process.platform === 'win32' ? Number.parseInt(os.release().split('.')[2], 10) || null : null
 })

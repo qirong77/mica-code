@@ -1,5 +1,6 @@
 import type { AgentRuntime, AgentRuntimeEvents } from '../agent/AgentRuntime.js';
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import {
   CODEX_NOTIFICATIONS,
   type CodexThreadItem,
@@ -12,12 +13,15 @@ export type CodexNotificationWriter = (method: string, params: unknown) => void;
 type PendingCommandItem = {
   itemId: string;
   name: string;
+  displayText: string;
 };
 
 type ProjectorContext = {
   threadId: string;
   turnId: string;
   cwd: string;
+  /** Emit reasoning deltas. Off by default to keep noise down on protocol-only clients. */
+  thinking?: boolean;
 };
 
 export type CodexProjector = {
@@ -25,6 +29,15 @@ export type CodexProjector = {
   completeAgentMessage(): void;
   dispose(): void;
 };
+
+/** Mica tool display text (onToolUseDisplayText), same source the CLI turn log uses. */
+function toolDisplayText(name: string, args: string): string {
+  try {
+    return micaTools.getDisplayText(name, JSON.parse(args));
+  } catch {
+    return name;
+  }
+}
 
 type CodexHandlers = {
   [K in keyof AgentRuntimeEvents]: (payload: AgentRuntimeEvents[K]) => void;
@@ -89,6 +102,7 @@ export function attachCodexProjector(
   options: { thinking?: boolean } = {},
 ): CodexProjector {
   const { threadId, turnId, cwd } = context;
+  const thinking = context.thinking ?? options.thinking ?? false;
   const agentMessageItemId = `${turnId}-agent`;
   const reasoningItemId = `${turnId}-reasoning`;
   const pendingCommands = new Map<string, PendingCommandItem>();
@@ -135,7 +149,7 @@ export function attachCodexProjector(
       });
     },
     thinking: (text) => {
-      if (!options.thinking || !text) return;
+      if (!thinking || !text) return;
       if (!reasoningStarted) {
         reasoningStarted = true;
         emitItemStarted({
@@ -155,11 +169,13 @@ export function attachCodexProjector(
     },
     toolCall: ({ name, args, id }) => {
       const itemId = id || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      pendingCommands.set(itemId, { itemId, name });
+      const displayText = toolDisplayText(name, args || '');
+      pendingCommands.set(itemId, { itemId, name, displayText });
       emitItemStarted({
         type: 'commandExecution',
         id: itemId,
         command: formatCommand(name, args || ''),
+        displayText,
         cwd,
         status: 'inProgress',
       });
@@ -184,6 +200,7 @@ export function attachCodexProjector(
         type: 'commandExecution',
         id: itemId,
         command: pending?.name || name,
+        displayText: pending?.displayText ?? toolDisplayText(name, result || ''),
         cwd,
         status: 'completed',
         aggregatedOutput: truncated,

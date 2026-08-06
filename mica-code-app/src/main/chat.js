@@ -16,8 +16,9 @@ import {
 } from './chat-events'
 import { savePastedImage } from './chat-images'
 import { resolveDefaultChatMeta } from './chat-meta'
+import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
-import { createChatQueue } from './chat-queue'
+import { createChatQueue, resolveBusyDispatch } from './chat-queue'
 import { getShellEnvSnapshot } from './shell-env'
 
 /**
@@ -68,8 +69,33 @@ function queuedItems(id) {
   return queuedRuns.values(id).map((item, index) => ({
     id: item.payload?.clientMessageId || `queued:${id}:${index}`,
     text: item.payload?.prompt || '',
-    position: index + 1
+    position: index + 1,
+    queueMode: 'after_turn'
   }))
+}
+
+// Merge the local after_turn queue with the host-side after_iteration queue.
+// The single-slot rule means at most one of the two is ever non-empty.
+function allQueuedItems(id, run) {
+  const host = (run?.hostPending || []).map((item, index) => ({
+    id: item.id || `host:${id}:${index}`,
+    text: item.text || '',
+    position: index + 1,
+    queueMode: item.queueMode || 'after_iteration',
+    pending: true
+  }))
+  return [...host, ...queuedItems(id)]
+}
+
+function pushQueueState(id, run) {
+  if (run?.sender && !run.sender.isDestroyed()) {
+    const items = allQueuedItems(id, run)
+    run.sender.send('chat:queue-state', {
+      id,
+      queuedCount: items.length,
+      queuedItems: items
+    })
+  }
 }
 
 function recallQueuedRun(sender, id, clientMessageId) {
@@ -120,8 +146,6 @@ function micaHomeDir() {
   return process.env.MICA_HOME || join(homedir(), '.mica')
 }
 
-const DEFAULT_PROTOCOL = 'openai_chat_completions'
-
 function readMicaConfig() {
   try {
     const file = join(micaHomeDir(), 'config.json')
@@ -151,19 +175,13 @@ function readDefaultMeta(cwd) {
 }
 
 function protocolForProviderId(providerId) {
-  if (!providerId) return DEFAULT_PROTOCOL
   const { providers } = readMicaConfig()
-  const provider = providers.find((item) => item?.id === providerId)
-  return provider?.protocol || DEFAULT_PROTOCOL
+  return resolveProviderProtocol(providers, providerId)
 }
 
 function protocolForModelId(modelId) {
-  if (!modelId) return DEFAULT_PROTOCOL
   const { providers } = readMicaConfig()
-  const matched = [...providers]
-    .sort((a, b) => (b?.id?.length || 0) - (a?.id?.length || 0))
-    .find((provider) => modelId.startsWith(`${provider?.id}/`))
-  return matched?.protocol || DEFAULT_PROTOCOL
+  return resolveModelProtocol(providers, modelId)
 }
 
 function sessionFile(sessionId) {
@@ -394,7 +412,22 @@ function startRun(sender, id, payload) {
     //                         current turn completes (after_turn)
     existing.sender = sender
     if (existing.running) {
-      if (payload.queueMode === 'after_iteration') {
+      // 单槽排队（对齐 CLI）：已有任意排队（本地 after_turn 或 host
+      // after_iteration）时，Enter/Tab/Shift+Tab 都拒绝新的排队输入。
+      const dispatch = resolveBusyDispatch({
+        running: true,
+        queueMode: payload.queueMode,
+        queuedCount: queuedRuns.size(id)
+      })
+      if (dispatch.action === 'reject') {
+        return {
+          ok: false,
+          error: dispatch.message,
+          queuedCount: queuedRuns.size(id),
+          queuedItems: queuedItems(id)
+        }
+      }
+      if (dispatch.action === 'steer') {
         if (!sendSteer(existing, payload)) {
           disposeHost(id)
           return { ok: false, error: 'chat host 不可用，请重试' }
@@ -471,7 +504,9 @@ function sendSteer(run, payload) {
   return sendCodexRequest(run, 'turn/steer', {
     threadId: run.sessionId || run.requestedSessionId || '',
     expectedTurnId: run.currentTurnId || '',
-    input: [{ type: 'text', text: String(payload.prompt || '') }]
+    input: [{ type: 'text', text: String(payload.prompt || '') }],
+    // Mica extension: correlate queue events with the optimistic message id.
+    clientMessageId: payload.clientMessageId || undefined
   })
 }
 
@@ -535,7 +570,10 @@ function spawnChatHost(id, sender, payload) {
     requestSeq: 0,
     pendingRequests: new Map(),
     toolOutputs: new Map(),
-    lastTokenUsage: null
+    lastTokenUsage: null,
+    // Host-side after_iteration queue (single slot, mirror of the local one):
+    // driven by `mica/queue/*` extension notifications from app-server.
+    hostPending: []
   }
   run.sender = sender
   run.eventPacer = createChatEventPacer(({ sequence, event }) => {
@@ -644,11 +682,11 @@ function handleHostNotification(id, run, notification) {
   const event = codexNotificationToEvent(notification)
 
   if (method === 'turn/started') {
-    // 新会话由 mica 生成 sessionId；补发一次 notify 让侧栏自动绑定节点
+    // 常驻 host 跨 turn 复用同一 run，恢复会话也带 requestedSessionId：
+    // 必须每轮都发 turn.started，notifyServer 据此点亮侧栏运行灯
+    // （agentRunning=true）；节点绑定幂等，重复发送无害。
     const sessionID = params.threadId
-    if (sessionID && !run.sessionId && !run.requestedSessionId) {
-      postNotify(`${id}:mica`, 'turn.started', { sessionId: sessionID })
-    }
+    if (sessionID) postNotify(`${id}:mica`, 'turn.started', { sessionId: sessionID })
     if (sessionID) run.sessionId = sessionID
     run.currentTurnId = params.turn?.id || null
     run.running = true
@@ -659,6 +697,7 @@ function handleHostNotification(id, run, notification) {
   } else if (method === 'turn/completed') {
     run.running = false
     run.currentTurnId = null
+    run.hostPending = []
     const reason = event?.part?.reason || 'completed'
     const currentSessionId = run.sessionId || run.requestedSessionId
     const extra = currentSessionId ? { sessionId: currentSessionId } : {}
@@ -672,6 +711,10 @@ function handleHostNotification(id, run, notification) {
     if (event && run.lastTokenUsage) {
       event.part.tokens = tokensFromCodexUsage(run.lastTokenUsage)
     }
+    // step_finish 必须在事件流里送达渲染层：reason/usage 驱动 turn log 收尾、
+    // assistant 消息 usage 行与状态栏刷新。丢失会导致 phase 被 processExit 覆盖成 idle，
+    // error/aborted 的日志被隐藏，并误报 "mica 进程已退出（code 1）"。
+    if (event) pushChatEvent(run, event)
     sendChatExit(id, run, { exitCode: reason === 'error' ? 1 : 0 })
     replayQueuedTurn(id, run)
     return
@@ -694,18 +737,42 @@ function handleHostNotification(id, run, notification) {
   } else if (method === 'thread/tokenUsage/updated') {
     if (params.tokenUsage) run.lastTokenUsage = params.tokenUsage
     return
+  } else if (method === 'mica/queue/queued') {
+    // Host accepted an after_iteration steer input; show it as a waiting
+    // queue row until the iteration boundary fires (mica/queue/dequeue).
+    run.hostPending = Array.isArray(params.pending)
+      ? params.pending
+      : params.input
+        ? [params.input]
+        : []
+    pushQueueState(id, run)
+    return
+  } else if (method === 'mica/queue/dequeue') {
+    run.hostPending = []
+    pushQueueState(id, run)
+    return
+  } else if (method === 'mica/queue/changed') {
+    run.hostPending = Array.isArray(params.pending) ? params.pending : []
+    pushQueueState(id, run)
+    return
   } else if (method === 'error') {
     run.running = false
+    run.hostPending = []
     const errorMessage = params.error?.message || 'chat host 出错'
     postNotify(`${id}:mica`, 'turn.error', {
       ...(run.sessionId ? { sessionId: run.sessionId } : {}),
       ...(errorMessage ? { summary: errorMessage.slice(0, 200) } : {})
     })
+    if (event) pushChatEvent(run, event)
     sendChatExit(id, run, { exitCode: 1, error: errorMessage })
     return
   }
 
   if (!event) return
+  pushChatEvent(run, event)
+}
+
+function pushChatEvent(run, event) {
   const sequence = ++run.sequence
   const record = { sequence, event }
   appendBufferedEvent(run.events, record)

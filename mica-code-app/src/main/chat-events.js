@@ -122,7 +122,9 @@ export function buildChatEnv(env = process.env) {
 // alive across turns so repeated messages skip process startup, session reload
 // and MCP re-init, and queued inputs get real after_iteration injection.
 export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTurns }) {
-  const args = ['app-server']
+  // Keep `--thinking` so reasoning deltas reach the renderer turn log and
+  // status line, matching the pre-codex `mica run --format json --thinking`.
+  const args = ['app-server', '--thinking']
   if (sessionId) args.push('--session', sessionId)
   if (cwd) args.push('--dir', cwd)
   if (model) args.push('--model', model)
@@ -189,6 +191,7 @@ export function codexNotificationToEvent(notification) {
           type: 'tool',
           tool: commandToolName(params.item.command),
           callID: params.item.id,
+          displayText: params.item.displayText || null,
           state: { status: 'pending', input: commandInput(params.item.command) }
         }
       }
@@ -202,6 +205,7 @@ export function codexNotificationToEvent(notification) {
           type: 'tool',
           tool: commandToolName(params.item.command),
           callID: params.item.id,
+          displayText: params.item.displayText || null,
           state: {
             status: 'completed',
             input: commandInput(params.item.command),
@@ -237,16 +241,19 @@ export function codexTurnStatusToReason(status) {
 }
 
 export function tokensFromCodexUsage(tokenUsage) {
-  const last = tokenUsage?.last
-  if (!last) return { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  // CodexProjector emits cumulative `total` plus the per-record `last`.
+  // The old run-JSON protocol reported accumulated usage, so surface `total`
+  // to keep context/cached figures matching the pre-codex UI.
+  const total = tokenUsage?.total || tokenUsage?.last
+  if (!total) return { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
   return {
-    total: last.total_tokens || 0,
-    input: last.input_tokens || 0,
-    output: last.output_tokens || 0,
-    reasoning: last.reasoning_output_tokens || 0,
+    total: total.total_tokens || 0,
+    input: total.input_tokens || 0,
+    output: total.output_tokens || 0,
+    reasoning: total.reasoning_output_tokens || 0,
     cache: {
-      read: last.cached_input_tokens || 0,
-      write: last.cache_write_input_tokens || 0
+      read: total.cached_input_tokens || 0,
+      write: total.cache_write_input_tokens || 0
     }
   }
 }

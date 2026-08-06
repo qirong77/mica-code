@@ -48,3 +48,20 @@ export function createChatQueue(maxSize = Infinity) {
     }
   }
 }
+
+/**
+ * Busy dispatch for a second message while a resident host is running.
+ * Mirrors the CLI's single-slot queue semantics (MessageQueueService +
+ * TerminalInput): once one message is queued — locally (plain Tab / Enter,
+ * after_turn) or injected at the host (Shift+Tab, after_iteration) — any
+ * further queue request is rejected with the CLI's exact notice text instead
+ * of stacking a second slot.
+ */
+export function resolveBusyDispatch({ running, queueMode, queuedCount }) {
+  if (!running) return { action: 'start' }
+  if (queuedCount > 0) {
+    return { action: 'reject', message: '已有一条排队消息，等待发送或重新编辑' }
+  }
+  if (queueMode === 'after_iteration') return { action: 'steer' }
+  return { action: 'enqueue' }
+}
