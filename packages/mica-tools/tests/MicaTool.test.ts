@@ -3,6 +3,8 @@ import { MicaTool } from '../MicaTool.js';
 import {
   executeTool,
   getToolDefinitions,
+  isToolPrimaryAgentOnly,
+  isToolReadOnly,
   registerMcpTools,
   registerRuntimeTool,
   unregisterMcpTools,
@@ -85,5 +87,47 @@ describe('getToolDefinitions', () => {
     await expect(
       executeTool('runtime_blocked', { file_path: 'README.md' }, undefined, (name) => name === 'runtime_allowed'),
     ).resolves.toContain('不在当前 agent 的允许工具范围内');
+  });
+
+  // read-only 语义直接决定 runtime turn 级 retry 是否可重放（非只读工具调用
+  // 之后不能盲目重放请求），漏标会导致重放副作用。这里锁死内置工具全集。
+  describe('builtin read-only semantics', () => {
+    it('marks pure inspection tools as read-only', () => {
+      for (const name of [
+        'read_file',
+        'read_image',
+        'list_files',
+        'grep_search',
+        'web_fetch',
+        'web_search',
+        'Skill',
+        'background_tasks',
+        'read_task_output',
+      ]) {
+        expect(isToolReadOnly(name), `${name} should be read-only`).toBe(true);
+      }
+    });
+
+    it('marks mutating/executing tools as non-read-only', () => {
+      for (const name of [
+        'write_file',
+        'apply_patch',
+        'run_shell',
+        'kill_task',
+        'pty_spawn',
+        'pty_send',
+        'pty_read',
+        'pty_wait',
+        'pty_kill',
+      ]) {
+        expect(isToolReadOnly(name), `${name} must NOT be read-only`).toBe(false);
+      }
+    });
+
+    it('exposes primaryAgentOnly metadata for the todo tool', () => {
+      // TodoWrite 由插件注册为 runtime tool（primaryAgentOnly），内置 registry
+      // 中不存在；这里验证未知工具不误报 primaryAgentOnly。
+      expect(isToolPrimaryAgentOnly('TodoWrite')).toBe(false);
+    });
   });
 });

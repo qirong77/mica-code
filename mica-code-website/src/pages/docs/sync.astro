@@ -1,5 +1,20 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+
+const sseExample = `# 新建会话（服务器生成 sessionId，下发给 daemon 执行）
+$ curl -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
+  -H 'Content-Type: application/json' -d '{"text":"总结 README"}'
+{"sessionId":"8f3a2c1e"}
+
+# 订阅事件流
+$ curl -N 'http://<server>:5560/api/machines/<machineId>/sessions/8f3a2c1e/events?since=0'
+data: {"type":"user_input","text":"总结 README",...}
+data: {"type":"thinking","text":"让我先读一下 README…",...}
+data: {"type":"tool_call","name":"read_file","args":"README.md",...}
+data: {"type":"tool_result","name":"read_file","content":"# Mica Code\\n…",...}
+data: {"type":"text_delta","text":"README 介绍了安装方式…",...}
+data: {"type":"usage","inputTokens":1832,"cachedInputTokens":1690,"outputTokens":412,...}
+data: {"type":"turn","state":"completed",...}`;
 ---
 
 <DocLayout title="Mica Sync" active="sync" description="跨机器远程会话同步与网页续聊">
@@ -28,6 +43,28 @@ mica daemon --server http://&lt;server&gt;:5560   # --name 可选，默认用机
     <li>daemon 同一时刻只执行一个 turn（busy 时发 <code>run_rejected</code> 事件），不同 session 也不并发；同一 session 忙时的输入会排队并支持 after_iteration 注入。</li>
     <li>同一会话的本地 runtime 与 daemon 使用跨进程 turn lease，避免整份快照相互覆盖；会话快照带单调 <code>revision</code>，服务器拒绝迟到的旧快照。</li>
   </ul>
+
+  <h2>HTTP API</h2>
+  <p>中心服务器同时提供 REST 接口（Web 控制台与第三方脚本使用）和 daemon 出站接口。以下端点基于 <code>&lt;server&gt;</code> 根路径：</p>
+  <table>
+    <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/machines</code></td><td>机器列表（含在线状态）</td></tr>
+      <tr><td>GET</td><td><code>/api/machines/:id/sessions</code></td><td>会话摘要列表（每项附带 <code>snapshotSeq</code> 水位）</td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions</code></td><td>新建会话，body <code>&#123; text, cwd? &#125;</code>，返回 <code>&#123; sessionId &#125;</code></td></tr>
+      <tr><td>GET</td><td><code>/api/machines/:id/sessions/:sid</code></td><td>会话详情（默认精简快照，<code>?full=1</code> 取全量）</td></tr>
+      <tr><td>GET</td><td><code>/api/machines/:id/sessions/:sid/events?since=N</code></td><td>SSE 事件流，<code>since</code> 序号断线补拉</td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/run</code></td><td>下发续聊指令 <code>&#123; text &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/cwd</code></td><td>切换会话工作目录 <code>&#123; cwd &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/abort</code></td><td>中止当前 turn</td></tr>
+      <tr><td>POST</td><td><code>/daemon/register</code> <code>/daemon/beat</code> <code>/daemon/poll</code> <code>/daemon/session</code> <code>/daemon/events</code></td><td>daemon 出站接口（注册 / 心跳 / 长轮询指令 / 推送快照 / 推送事件）</td></tr>
+    </tbody>
+  </table>
+  <p>详细请求/响应字段见 <code>packages/mica-sync-server/README.md</code>。</p>
+
+  <h3>示例：SSE 实时续聊</h3>
+  <p>浏览器或脚本通过 SSE 订阅某个会话的事件流，<code>since</code> 从最近一次快照的 <code>snapshotSeq</code> 开始，避免重放旧事件：</p>
+  <pre><code>{sseExample}</code></pre>
 
   <h2>事件类型</h2>
   <p><code>user_input</code>、<code>thinking</code>、<code>text_delta</code>、<code>tool_call</code>、<code>tool_result</code>、<code>usage</code>、<code>status</code>、<code>turn</code>（completed / aborted / error）、<code>run_rejected</code>、<code>session</code>、<code>session_removed</code>，以及队列相关 <code>queued</code>、<code>dequeue</code>、<code>queue_state</code>。</p>

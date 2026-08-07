@@ -284,6 +284,20 @@ describe('chat CLI arguments', () => {
     ).toMatchObject({ type: 'usage', tokenUsage: expect.any(Object) })
   })
 
+  it('carries the failed turn error message through step_finish', () => {
+    const event = codexNotificationToEvent({
+      method: 'turn/completed',
+      params: {
+        threadId: 's1',
+        turn: { id: 't1', status: 'failed', error: { message: '400 unknown model' } }
+      }
+    })
+    expect(event).toMatchObject({
+      type: 'step_finish',
+      part: { reason: 'error', error: '400 unknown model' }
+    })
+  })
+
   it('builds step_finish tokens from the cumulative codex usage', () => {
     expect(
       tokensFromCodexUsage({
@@ -318,5 +332,72 @@ describe('chat CLI arguments', () => {
       reasoning: 0,
       cache: { read: 0, write: 0 }
     })
+  })
+
+  it('maps mica background task snapshots to background_tasks events', () => {
+    const event = codexNotificationToEvent({
+      method: 'mica/backgroundTasks/updated',
+      emittedAtMs: 5678,
+      params: {
+        threadId: 's1',
+        tasks: [
+          {
+            id: 'abc123',
+            command: 'npm run dev',
+            cwd: '/tmp/proj',
+            shell: '/bin/bash',
+            status: 'running',
+            startedAt: '2026-08-06T00:00:00.000Z'
+          }
+        ]
+      }
+    })
+    expect(event).toMatchObject({
+      type: 'background_tasks',
+      timestamp: 5678,
+      sessionID: 's1',
+      tasks: [{ id: 'abc123', command: 'npm run dev', status: 'running' }]
+    })
+  })
+
+  it('maps mica subagent snapshots to subagent_tasks events', () => {
+    const event = codexNotificationToEvent({
+      method: 'mica/subagentTasks/updated',
+      params: {
+        threadId: 's1',
+        tasks: [
+          {
+            taskId: 'task-1',
+            parentTaskId: 'task-0',
+            subagentType: 'Explore',
+            description: 'find usages',
+            status: 'running',
+            startedAt: '2026-08-06T00:00:00.000Z',
+            activities: [
+              {
+                id: 'a1',
+                summary: 'searching files',
+                toolName: 'grep_search',
+                startedAt: '2026-08-06T00:00:01.000Z'
+              }
+            ]
+          }
+        ]
+      }
+    })
+    expect(event).toMatchObject({
+      type: 'subagent_tasks',
+      sessionID: 's1',
+      tasks: [{ taskId: 'task-1', subagentType: 'Explore', status: 'running' }]
+    })
+  })
+
+  it('defaults missing task arrays to empty lists', () => {
+    expect(
+      codexNotificationToEvent({ method: 'mica/backgroundTasks/updated', params: { threadId: 's1' } })
+    ).toMatchObject({ type: 'background_tasks', tasks: [] })
+    expect(
+      codexNotificationToEvent({ method: 'mica/subagentTasks/updated', params: { threadId: 's1' } })
+    ).toMatchObject({ type: 'subagent_tasks', tasks: [] })
   })
 })

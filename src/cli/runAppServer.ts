@@ -13,6 +13,7 @@ import {
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
   MICA_QUEUE_NOTIFICATIONS,
+  MICA_TASK_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -22,12 +23,19 @@ import {
   type CodexThread,
   type CodexTurn,
   type CodexUserInput,
+  type MicaBackgroundTaskItem,
   type MicaQueueItem,
+  type MicaSubagentTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
+import {
+  listBackgroundTasks,
+  micaTools,
+  terminateCurrentBackgroundTasks,
+  type BackgroundTaskMeta,
+} from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
-import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
+import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { SessionController } from '../session/SessionController.js';
@@ -46,6 +54,48 @@ export type AppServerOptions = {
   mcpInitTimeoutMs?: number;
   thinking?: boolean;
 };
+
+/** Project active background shell tasks for the `mica/backgroundTasks/updated`
+ * snapshot. Only tasks still starting/running are surfaced (matches the CLI
+ * TaskStatusBar, which hides finished rows). */
+export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgroundTaskItem[] {
+  return tasks
+    .filter((task) => task.status === 'starting' || task.status === 'running')
+    .map((task) => ({
+      id: task.id,
+      command: task.command,
+      cwd: task.cwd,
+      shell: task.shell,
+      status: task.status,
+      startedAt: task.started_at,
+      ...(task.finished_at ? { finishedAt: task.finished_at } : {}),
+      ...(task.exit_code !== undefined && task.exit_code !== null ? { exitCode: task.exit_code } : {}),
+      ...(task.signal ? { signal: task.signal } : {}),
+    }));
+}
+
+/** Project running subagents (foreground + background) for the
+ * `mica/subagentTasks/updated` snapshot. Activities are included so the client
+ * can render the same in-flight tool rows as the CLI. */
+export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentTaskItem[] {
+  return tasks
+    .filter((task) => task.status === 'running')
+    .map((task) => ({
+      taskId: task.id,
+      ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),
+      subagentType: task.subagent_type,
+      description: task.description,
+      status: task.status,
+      startedAt: task.started_at,
+      ...(task.finished_at ? { finishedAt: task.finished_at } : {}),
+      activities: (task.activities ?? []).map((activity) => ({
+        id: activity.id,
+        summary: activity.summary,
+        ...(activity.toolName ? { toolName: activity.toolName } : {}),
+        startedAt: activity.startedAt,
+      })),
+    }));
+}
 
 /**
  * `mica app-server`: a per-session resident process exposing a Codex v2
@@ -96,8 +146,13 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let sessionId = '';
   let currentTurnId: string | null = null;
   let initialized = false;
+  let taskSnapshotTimer: NodeJS.Timeout | null = null;
 
   const cleanup = async (): Promise<void> => {
+    if (taskSnapshotTimer) {
+      clearInterval(taskSnapshotTimer);
+      taskSnapshotTimer = null;
+    }
     executor?.abort();
     projector?.dispose();
     await Promise.all([
@@ -222,6 +277,38 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
           return turnId;
         }),
     });
+
+    // Long-lived host state that outlives a single turn: background shell tasks
+    // and running subagents (including `run_in_background` ones still active
+    // after the parent turn finished). The Codex protocol has no event for
+    // either, so push change-driven snapshots so the desktop app can render the
+    // same task rows above the composer as the CLI shows above its input.
+    let lastBackgroundTasksKey = '';
+    let lastSubagentTasksKey = '';
+    const pushTaskSnapshots = () => {
+      if (!agent || !subagentTasks) return;
+      const backgroundTasks = projectBackgroundTasks(listBackgroundTasks({ status: 'all' }));
+      const backgroundKey = JSON.stringify(backgroundTasks);
+      if (backgroundKey !== lastBackgroundTasksKey) {
+        lastBackgroundTasksKey = backgroundKey;
+        writeNotification(MICA_TASK_NOTIFICATIONS.backgroundTasksUpdated, {
+          threadId: sessionId,
+          tasks: backgroundTasks,
+        });
+      }
+      const subagentItems = projectSubagentTasks(subagentTasks.list(agent));
+      const subagentKey = JSON.stringify(subagentItems);
+      if (subagentKey !== lastSubagentTasksKey) {
+        lastSubagentTasksKey = subagentKey;
+        writeNotification(MICA_TASK_NOTIFICATIONS.subagentTasksUpdated, {
+          threadId: sessionId,
+          tasks: subagentItems,
+        });
+      }
+    };
+    pushTaskSnapshots();
+    taskSnapshotTimer = setInterval(pushTaskSnapshots, 1000);
+    taskSnapshotTimer.unref?.();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     writeNotification(CODEX_NOTIFICATIONS.error, {
@@ -437,11 +524,16 @@ async function handleCodexRequest(
       const effort = paramString(params, 'effort');
       if (model || effort) {
         try {
+          // params.model carries the app's full id (`krill/gpt-5.6-luna`), not
+          // a bare model name. Resolve provider + model like the CLI does,
+          // otherwise the current provider receives an unknown model name and
+          // the turn fails immediately with a 400.
+          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
           ctx.agent.configureForRun(
             {
-              providerId: ctx.agent.config.provider.id,
-              model: model ?? ctx.agent.config.model,
-              effort: (effort as never) ?? ctx.agent.config.effort,
+              providerId: override.providerId,
+              model: override.model,
+              effort: override.effort,
             },
             true,
           );

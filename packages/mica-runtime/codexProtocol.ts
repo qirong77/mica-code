@@ -115,6 +115,43 @@ export type MicaQueueItem = {
   queueMode?: 'after_iteration' | 'after_turn' | null;
 };
 
+/**
+ * Mica extension notifications for long-lived host state that outlives a single
+ * turn: background shell tasks (`run_shell` background/`background_tasks`) and
+ * subagents (including `run_in_background: true` tasks still running after the
+ * parent turn finished). The Codex protocol has no event for either, so the
+ * desktop app would otherwise lose the input-above-composer status rows the
+ * CLI shows. Both are snapshot pushes: the client replaces its whole list on
+ * each update, and the host only emits when the serialized snapshot changed.
+ */
+export const MICA_TASK_NOTIFICATIONS = {
+  backgroundTasksUpdated: 'mica/backgroundTasks/updated',
+  subagentTasksUpdated: 'mica/subagentTasks/updated',
+} as const;
+
+export type MicaBackgroundTaskItem = {
+  id: string;
+  command: string;
+  cwd: string;
+  shell: string;
+  status: 'starting' | 'running' | 'finished' | 'killed' | 'failed' | 'unknown_exited';
+  startedAt: string;
+  finishedAt?: string | null;
+  exitCode?: number | null;
+  signal?: string | null;
+};
+
+export type MicaSubagentTaskItem = {
+  taskId: string;
+  parentTaskId?: string | null;
+  subagentType: string;
+  description: string;
+  status: 'running' | 'completed' | 'failed' | 'killed';
+  startedAt: string;
+  finishedAt?: string | null;
+  activities?: { id: string; summary: string; toolName?: string; startedAt: string }[];
+};
+
 export type CodexTurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';
 export type CodexThreadStatus = 'notLoaded' | 'idle' | 'systemError' | { active: { activeFlags: string[] } };
 

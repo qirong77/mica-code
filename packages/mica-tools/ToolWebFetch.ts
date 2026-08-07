@@ -119,29 +119,33 @@ function getTurndown(): TurndownService {
 
 export class ToolWebFetch extends MicaTool {
   constructor() {
-    super('web_fetch', '抓取 URL 内容，HTML 自动转 Markdown 返回。', {
-      type: 'object' as const,
-      properties: {
-        url: { type: 'string', description: '要抓取的 URL' },
-        prompt: {
-          type: 'string',
-          description: '对内容的处理要求，会附加在内容后面交给模型（可选）',
-        },
-        query: {
-          type: 'string',
-          description: '只返回与该查询相关的页面片段，用于减少 token 消耗（可选）',
-        },
-        max_chars: {
-          type: 'number',
-          description: '最多返回字符数，默认 0 表示不限制；传 0 表示不截断',
-        },
-        max_bytes: {
-          type: 'number',
-          description: `最多下载字节数，默认 ${DEFAULT_MAX_BYTES}；传 0 表示不限制`,
+    super(
+      'web_fetch',
+      '抓取 URL 内容，HTML 自动转 Markdown 返回。',
+      {
+        type: 'object' as const,
+        properties: {
+          url: { type: 'string', description: '要抓取的 URL' },
+          prompt: {
+            type: 'string',
+            description: '对内容的处理要求，会附加在内容后面交给模型（可选）',
+          },
+          query: {
+            type: 'string',
+            description: '只返回与该查询相关的页面片段，用于减少 token 消耗（可选）',
+          },
+          max_chars: {
+            type: 'number',
+            description: '最多返回字符数，默认 0 表示不限制；传 0 表示不截断',
+          },
+          max_bytes: {
+            type: 'number',
+            description: `最多下载字节数，默认 ${DEFAULT_MAX_BYTES}；传 0 表示不限制`,
+          },
         },
       },
-      required: ['url'],
-    });
+      { readOnly: true },
+    );
   }
 
   async execute(

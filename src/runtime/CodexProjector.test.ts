@@ -103,4 +103,100 @@ describe('attachCodexProjector thinking', () => {
     expect(startedItem.displayText).toBe('read /tmp/a.txt :10');
     expect(completedItem.displayText).toBe('read /tmp/a.txt :10');
   });
+
+  it('emits tool result as outputDelta then item/completed with aggregatedOutput', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't',
+      turnId: 'turn-1',
+      cwd: '/tmp',
+    });
+    agent.emit('toolCall', { name: 'run_shell', args: JSON.stringify({ command: 'echo hi' }), id: 'c1' });
+    agent.emit('toolResult', { name: 'run_shell', result: 'line1\nline2', id: 'c1' });
+    projector.dispose();
+
+    const delta = notifications.find((n) => n.method === 'item/commandExecution/outputDelta');
+    const completed = notifications.find((n) => n.method === 'item/completed');
+    expect(delta?.params.delta).toBe('line1\nline2');
+    expect(delta?.params.itemId).toBe('c1');
+    const completedItem = completed!.params.item as {
+      aggregatedOutput?: string;
+      status?: string;
+      command?: string;
+    };
+    expect(completedItem.aggregatedOutput).toBe('line1\nline2');
+    expect(completedItem.status).toBe('completed');
+    // item/completed 的 command 只有工具名；完整命令（含参数）在 item/started 上。
+    expect(completedItem.command).toBe('run_shell');
+  });
+
+  it('truncates tool results over 256 KiB on the wire', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't',
+      turnId: 'turn-1',
+      cwd: '/tmp',
+    });
+    const big = 'x'.repeat(300 * 1024);
+    agent.emit('toolCall', { name: 'run_shell', args: '{}', id: 'c1' });
+    agent.emit('toolResult', { name: 'run_shell', result: big, id: 'c1' });
+    projector.dispose();
+
+    const delta = notifications.find((n) => n.method === 'item/commandExecution/outputDelta');
+    const completed = notifications.find((n) => n.method === 'item/completed');
+    const completedItem = completed!.params.item as { aggregatedOutput?: string };
+    expect(delta?.params.delta as string).toContain('...[truncated by Mica]');
+    expect((delta?.params.delta as string).length).toBeLessThan(256 * 1024 + 64);
+    expect(completedItem.aggregatedOutput).toBe(delta?.params.delta);
+  });
+
+  it('completes the turn with status/error mapping for completed, interrupted and failed', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't',
+      turnId: 'turn-1',
+      cwd: '/tmp',
+    });
+    projector.completeTurn('completed');
+    projector.dispose();
+
+    const completed = notifications.filter((n) => n.method === 'turn/completed');
+    expect(completed).toHaveLength(1);
+    const turn = completed[0]!.params.turn as { status?: string; error?: { message?: string } | null };
+    expect(turn.status).toBe('completed');
+    expect(turn.error).toBeNull();
+
+    const interruptedAgent = fakeAgent();
+    const interrupted: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const interruptedProjector = attachCodexProjector(
+      interruptedAgent as unknown as AgentRuntime,
+      (method, params) => interrupted.push({ method, params: params as Record<string, unknown> }),
+      { threadId: 't', turnId: 'turn-2', cwd: '/tmp' },
+    );
+    interruptedProjector.completeTurn('interrupted');
+    interruptedProjector.dispose();
+    const interruptedTurn = interrupted
+      .find((n) => n.method === 'turn/completed')!
+      .params.turn as { status?: string };
+    expect(interruptedTurn.status).toBe('interrupted');
+
+    const failedAgent = fakeAgent();
+    const failed: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const failedProjector = attachCodexProjector(
+      failedAgent as unknown as AgentRuntime,
+      (method, params) => failed.push({ method, params: params as Record<string, unknown> }),
+      { threadId: 't', turnId: 'turn-3', cwd: '/tmp' },
+    );
+    failedProjector.completeTurn('failed', '400 bad model');
+    failedProjector.dispose();
+    const failedTurn = failed.find((n) => n.method === 'turn/completed')!.params.turn as {
+      status?: string;
+      error?: { message?: string } | null;
+    };
+    expect(failedTurn.status).toBe('failed');
+    expect(failedTurn.error?.message).toBe('400 bad model');
+  });
 });

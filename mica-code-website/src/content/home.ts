@@ -35,9 +35,9 @@ export const features = [
 
 export const protocolItems = [
   {
-    cmd: 'mica run --format json',
+    cmd: 'mica exec --json',
     title: '一次性执行',
-    desc: '输出 Codex 兼容的 NDJSON 事件流（step_start / text / tool_use / error / step_finish），自带 TodoWrite 计划展示。',
+    desc: '输出 Codex 兼容的 ThreadEvent JSONL 事件流（thread.started / item.started / item.updated / item.completed / turn.completed），自带 TodoWrite 计划展示。',
   },
   {
     cmd: 'mica app-server',

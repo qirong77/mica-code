@@ -158,6 +158,7 @@ export function codexNotificationToEvent(notification) {
         part: {
           type: 'step-finish',
           reason: codexTurnStatusToReason(params.turn?.status),
+          error: params.turn?.error?.message || undefined,
           tokens: {
             total: 0,
             input: 0,
@@ -219,6 +220,24 @@ export function codexNotificationToEvent(notification) {
     case 'thread/tokenUsage/updated':
       // Accumulated into step_finish tokens by chat.js.
       return { type: 'usage', timestamp, sessionID, tokenUsage: params.tokenUsage }
+    case 'mica/backgroundTasks/updated':
+      // Host-side snapshot of active background shell tasks, pushed whenever
+      // the list changes (change-driven, ~1s poll). Replaces the whole list.
+      return {
+        type: 'background_tasks',
+        timestamp,
+        sessionID,
+        tasks: Array.isArray(params.tasks) ? params.tasks : []
+      }
+    case 'mica/subagentTasks/updated':
+      // Host-side snapshot of running subagents (foreground + background),
+      // pushed whenever the list changes. Replaces the whole list.
+      return {
+        type: 'subagent_tasks',
+        timestamp,
+        sessionID,
+        tasks: Array.isArray(params.tasks) ? params.tasks : []
+      }
     case 'error':
       return {
         type: 'error',

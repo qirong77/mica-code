@@ -120,8 +120,6 @@ export class HeadlessTurnExecutor {
       await this.failTurn(input, startedAt, error);
       return;
     }
-    if (!agent.isCurrent(reservedRunId)) return;
-
     try {
       sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
       const result = await agent.run(content, {
@@ -132,6 +130,10 @@ export class HeadlessTurnExecutor {
           return this.takeQueuedIterationInput();
         },
       });
+      // An abort that lands between reserveRunId() and the agent.run() check is
+      // surfaced by agent.run() as an AgentAbortError below; never return here
+      // silently or the client never receives a turn/completed notification and
+      // the app stays "running" forever.
       if (!agent.isCurrent(result.runId)) return;
       sessionController.saveCurrent({ turnState: 'completed' });
       onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });

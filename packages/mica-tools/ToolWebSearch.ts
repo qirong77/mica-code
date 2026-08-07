@@ -63,6 +63,7 @@ export class ToolWebSearch extends MicaTool {
         },
         required: ['query'],
       },
+      { readOnly: true },
     );
   }
 

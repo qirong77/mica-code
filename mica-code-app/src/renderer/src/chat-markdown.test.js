@@ -3,7 +3,6 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   Markdown,
-  activeSubagentMessages,
   canReuseVisualTranscript,
   chatUrlTransform,
   currentTurnActivityMessages,
@@ -263,9 +262,6 @@ describe('structured activity state', () => {
       'read',
       'agent-running',
       'agent-done'
-    ])
-    expect(activeSubagentMessages(messages, 'turn-2').map((message) => message.id)).toEqual([
-      'agent-running'
     ])
   })
 

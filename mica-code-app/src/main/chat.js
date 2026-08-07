@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { basename, join } from 'path'
-import { resolveMicaExecutable } from './terminals'
+import { resolveMicaExecutable } from './mica-cli'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
@@ -754,6 +754,18 @@ function handleHostNotification(id, run, notification) {
   } else if (method === 'mica/queue/changed') {
     run.hostPending = Array.isArray(params.pending) ? params.pending : []
     pushQueueState(id, run)
+    return
+  } else if (method === 'mica/backgroundTasks/updated' || method === 'mica/subagentTasks/updated') {
+    // Long-lived host state snapshots: background shell tasks / running
+    // subagents survive the parent turn and arrive on their own cadence, so
+    // they must NOT go through the turn event buffer (appendBufferedEvent would
+    // let frequent snapshots evict text/step_finish events and replay stale
+    // lists on restore). Deliver directly; the renderer replaces the whole
+    // list each time, so the latest snapshot always wins.
+    const snapshotEvent = codexNotificationToEvent(notification)
+    if (snapshotEvent && run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:event', { id, sequence: ++run.sequence, event: snapshotEvent })
+    }
     return
   } else if (method === 'error') {
     run.running = false

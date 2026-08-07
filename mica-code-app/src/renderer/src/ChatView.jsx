@@ -741,47 +741,114 @@ function toolDisplayName(tool) {
   return TOOL_LABELS[tool.tool] || tool.tool
 }
 
-function subagentTasks(tool) {
-  if (tool.tool !== 'Agent') return []
-  const input = tool.input || {}
-  if (input.operation === 'run_many' && Array.isArray(input.tasks)) {
-    return input.tasks.map((task, index) => ({
-      id: task.id || String(index + 1),
-      type: task.subagent_type || 'general-purpose',
-      description: task.description || task.prompt || '执行子任务',
-      dependsOn: Array.isArray(task.depends_on) ? task.depends_on : []
-    }))
-  }
-  return [
-    {
-      id: input.task_id || '1',
-      type: input.subagent_type || 'general-purpose',
-      description: input.description || input.prompt || input.operation || '执行子任务',
-      dependsOn: []
+// 后台 subagent / 后台任务与 CLI TaskStatusBar 对齐：状态来自 app-server 的
+// mica/*Tasks/updated 快照通知（跨 turn 常驻，不依赖当前 running 状态）。
+function buildTaskForest(tasks) {
+  const byId = new Map(tasks.map((task) => [task.taskId, task]))
+  const childrenByParent = new Map()
+  const roots = []
+  for (const task of tasks) {
+    const parentId = task.parentTaskId
+    if (parentId && byId.has(parentId) && parentId !== task.taskId) {
+      const list = childrenByParent.get(parentId) || []
+      list.push(task)
+      childrenByParent.set(parentId, list)
+      continue
     }
-  ]
+    roots.push(task)
+  }
+  const byStarted = (a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)
+  roots.sort(byStarted)
+  for (const children of childrenByParent.values()) children.sort(byStarted)
+  return { roots, childrenByParent }
 }
 
-function SubagentStatusDock({ messages, now = Date.now() }) {
-  if (!messages.length) return null
+function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs }) {
+  const activities = (task.activities || []).filter((activity) => activity.toolName !== 'Agent')
+  const childTasks = childrenByParent.get(task.taskId) || []
+  const age = formatLogElapsed(Math.max(0, nowMs - (Date.parse(task.startedAt) || nowMs)))
+  const indent = Math.min(depth * 14, 42)
+  // 与 CLI SubagentTaskRow 对齐：嵌套行（depth > 0）和活动行共用同一个
+  // ` ⎿ ` 前缀（⎿ 列对齐），并随深度缩进；5 列 grid 放不下第 6 个前缀格，
+  // 嵌套行改用 flex 布局。
+  const summaryRow = (
+    <>
+      {depth > 0 && <span className="chat-task-child-prefix"> ⎿ </span>}
+      <span className="chat-task-kind">🤖(subagent)</span>
+      <span className="chat-task-status chat-task-status-running">{task.status}</span>
+      <span className="chat-task-runtime">{age}</span>
+      <span className="chat-task-type">{task.subagentType}</span>
+      <span className="chat-task-description">{compactLine(task.description, 180)}</span>
+    </>
+  )
+  return (
+    <div>
+      {depth > 0 ? (
+        <div
+          className="chat-task-summary-row chat-task-summary-row-nested"
+          style={{ paddingLeft: indent }}
+        >
+          {summaryRow}
+        </div>
+      ) : (
+        <div className="chat-task-summary-row">{summaryRow}</div>
+      )}
+      {activities.map((activity) => (
+        <div className="chat-task-child" key={activity.id} style={{ paddingLeft: indent }}>
+          <span className="chat-task-child-prefix"> ⎿ </span>
+          <span className="chat-task-description">{compactLine(activity.summary, 180)}</span>
+        </div>
+      ))}
+      {childTasks.map((child) => (
+        <SubagentTaskRowView
+          key={child.taskId}
+          task={child}
+          childrenByParent={childrenByParent}
+          depth={depth + 1}
+          nowMs={nowMs}
+        />
+      ))}
+    </div>
+  )
+}
 
+function SubagentStatusDock({ tasks, now = Date.now() }) {
+  const { roots, childrenByParent } = useMemo(() => buildTaskForest(tasks), [tasks])
+  if (!roots.length) return null
   return (
     <section className="chat-task-dock chat-subagent-dock" aria-label="运行中的 Subagent">
-      {messages.flatMap((message) => {
-        const tool = message.tool
-        const age = formatLogElapsed(Math.max(0, now - (tool.startedAt || now)))
-        return subagentTasks(tool).map((task) => (
-          <div className="chat-task-summary-row" key={`${message.id}:${task.id}`}>
-            <span className="chat-task-kind">🤖(subagent)</span>
-            <span className="chat-task-status chat-task-status-running">running</span>
+      {roots.map((task) => (
+        <SubagentTaskRowView
+          key={task.taskId}
+          task={task}
+          childrenByParent={childrenByParent}
+          nowMs={now}
+        />
+      ))}
+    </section>
+  )
+}
+
+function BackgroundTasksDock({ tasks, now = Date.now() }) {
+  if (!tasks.length) return null
+  return (
+    <section className="chat-task-dock chat-background-dock" aria-label="运行中的后台任务">
+      {tasks.map((task) => {
+        const age = formatLogElapsed(Math.max(0, now - (Date.parse(task.startedAt) || now)))
+        const shell =
+          String(task.shell || '')
+            .split('/')
+            .filter(Boolean)
+            .pop() || 'shell'
+        return (
+          <div className="chat-task-summary-row" key={task.id}>
+            <span className="chat-task-kind">$ ({shell})</span>
+            <span className="chat-task-status chat-task-status-running">{task.status}</span>
             <span className="chat-task-runtime">{age}</span>
-            <span className="chat-task-type">{task.type}</span>
-            <span className="chat-task-description">
-              {compactLine(task.description, 180)}
-              {task.dependsOn.length > 0 ? ` · after ${task.dependsOn.join(', ')}` : ''}
-            </span>
+            <span className="chat-task-type">{task.id}</span>
+            <span className="chat-task-description">{compactLine(task.command, 180)}</span>
           </div>
-        ))
+        )
       })}
     </section>
   )
@@ -999,15 +1066,6 @@ function isActivityMessage(message) {
 export function currentTurnActivityMessages(messages, turnId) {
   if (!turnId) return []
   return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
-}
-
-export function activeSubagentMessages(messages, turnId) {
-  return currentTurnActivityMessages(messages, turnId).filter(
-    (message) =>
-      message.kind === 'tool' &&
-      message.tool?.tool === 'Agent' &&
-      ['pending', 'running'].includes(message.tool.status)
-  )
 }
 
 function visibleShellOutput(tool, durationMs) {
@@ -1578,6 +1636,9 @@ export function ChatView({
   const streamRef = useRef({ id: null, kind: null, turnId: null })
   const turnRef = useRef(null)
   const finishedRef = useRef(true)
+  // 当前 turn 的开始时间戳（ref 形式，applyEvent 闭包里可读），
+  // 用于 step_finish 时计算整轮耗时并在状态行展示（对齐 CLI completed <elapsed>）。
+  const turnStartedAtRef = useRef(0)
   const restoringRef = useRef(false)
   const restoreGenerationRef = useRef(0)
   const pendingEventsRef = useRef([])
@@ -1599,14 +1660,30 @@ export function ChatView({
   const [running, setRunning] = useState(false)
   const [queuedItems, setQueuedItems] = useState([])
   const [recallingQueueId, setRecallingQueueId] = useState(null)
+  // 跨 turn 常驻的后台任务 / subagent 状态（来自 app-server 快照通知，
+  // 与 CLI TaskStatusBar 一致地展示在输入框上方）。
+  const [backgroundTasks, setBackgroundTasks] = useState([])
+  const [subagentTasks, setSubagentTasks] = useState([])
+  const [taskNow, setTaskNow] = useState(() => Date.now())
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [runStartedAt, setRunStartedAt] = useState(0)
   const [elapsed, setElapsed] = useState(0)
+  // 最近一次 turn 的结束结果：{ state: 'completed' | 'error', durationMs }。
+  // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
+  const [lastRun, setLastRun] = useState(null)
   // 当前阶段/工具的实时耗时（对齐 CLI WorkingStatus：状态文本带 elapsed，
   // working 阶段从最早 running 工具 startedAt 起算，其余阶段从 phase 切换起算）。
   const phaseStartedAtRef = useRef(0)
   const [phaseElapsed, setPhaseElapsed] = useState(0)
+
+  // 有活跃后台任务 / subagent 时每秒刷新耗时，空闲时停表。
+  const hasLiveTasks = backgroundTasks.length > 0 || subagentTasks.length > 0
+  useEffect(() => {
+    if (!hasLiveTasks) return undefined
+    const timer = window.setInterval(() => setTaskNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [hasLiveTasks])
 
   useEffect(() => {
     if (phase === 'idle' || !running) return undefined
@@ -1850,6 +1927,8 @@ export function ChatView({
           turnRef.current = `${event.sessionID || nodeIdRef.current}:${timestamp}`
           streamRef.current = { id: null, kind: null, turnId: turnRef.current }
           finishedRef.current = false
+          turnStartedAtRef.current = timestamp
+          setLastRun(null)
           setRunning(true)
           setStopping(false)
           setPhase('connecting')
@@ -1914,6 +1993,12 @@ export function ChatView({
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
+          // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
+          // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
+          // 用户看到“运行了又马上停止”却没有任何提示。
+          if (event.part?.reason === 'error' && event.part?.error) {
+            appendNotice(compactLine(String(event.part.error), 1000), 'error')
+          }
           const usage = event.part?.tokens
           if (usage) {
             applyLiveUsageMeta(usage)
@@ -1945,9 +2030,24 @@ export function ChatView({
           setRunning(false)
           setStopping(false)
           setPhase(event.part?.reason === 'error' ? 'error' : 'idle')
+          // 运行结束后状态行左侧展示结果（对齐 CLI WorkingStatus 的 completed/error）。
+          const turnStartedAt = turnStartedAtRef.current
+          const durationMs = turnStartedAt ? Math.max(0, timestamp - turnStartedAt) : 0
+          const reason = event.part?.reason
+          if (reason === 'completed') setLastRun({ state: 'completed', durationMs })
+          else if (reason === 'error') setLastRun({ state: 'error', durationMs })
+          else setLastRun(null) // aborted：对齐 CLI abort 后 idle 空白
           if (event.sessionID) refreshMetaSoon(event.sessionID)
           break
         }
+        case 'background_tasks':
+          // Host 快照：整体替换后台任务列表（跨 turn 常驻展示）。
+          setBackgroundTasks(Array.isArray(event.tasks) ? event.tasks : [])
+          break
+        case 'subagent_tasks':
+          // Host 快照：整体替换运行中 subagent 列表（含后台 subagent）。
+          setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
+          break
       }
     },
     [
@@ -1959,7 +2059,9 @@ export function ChatView({
       onSessionBoundRef,
       applyLiveUsageMeta,
       refreshMetaSoon,
-      updateMessages
+      updateMessages,
+      setBackgroundTasks,
+      setSubagentTasks
     ]
   )
   const applyEventRef = useLatest(applyEvent)
@@ -2058,6 +2160,8 @@ export function ChatView({
     setRunning(false)
     setQueuedItems([])
     setRecallingQueueId(null)
+    setBackgroundTasks([])
+    setSubagentTasks([])
     setStopping(false)
     setPhase('idle')
     setRunStartedAt(0)
@@ -2795,6 +2899,7 @@ export function ChatView({
         turnRef.current = `pending:${optimisticId}`
         streamRef.current = { id: null, kind: null, turnId: turnRef.current }
         finishedRef.current = false
+        turnStartedAtRef.current = Date.now()
         setRunning(true)
         setStopping(false)
         setPhase('connecting')
@@ -3023,10 +3128,6 @@ export function ChatView({
       ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
       : ''
   const activeStreamTokenEstimate = activeStreamText ? estimateTokens(activeStreamText) : 0
-  const activeSubagents = useMemo(
-    () => (running ? activeSubagentMessages(messages, activityTurnId) : []),
-    [activityTurnId, messages, running]
-  )
   const todoItems = useMemo(() => {
     return todoItemsForTurn(messages, activityTurnId, running)
   }, [activityTurnId, messages, running])
@@ -3245,6 +3346,13 @@ export function ChatView({
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
           </>
+        ) : lastRun ? (
+          <span className={`chat-status-last-run chat-status-${lastRun.state}`}>
+            {lastRun.state === 'completed' ? 'completed' : 'error'}
+            {lastRun.durationMs > 0 && (
+              <span className="chat-status-elapsed"> {formatLogElapsed(lastRun.durationMs)}</span>
+            )}
+          </span>
         ) : null}
       </div>
       <div className="chat-status-meta" title={statusMetaTitle}>
@@ -3385,7 +3493,8 @@ export function ChatView({
           />
         )}
         <TodoDock items={todoItems} hidden={todoHidden} />
-        <SubagentStatusDock messages={activeSubagents} now={Date.now()} />
+        <SubagentStatusDock tasks={subagentTasks} now={taskNow} />
+        <BackgroundTasksDock tasks={backgroundTasks} now={taskNow} />
         <QueueDock
           items={queuedDisplayItems}
           onRecall={recallQueued}

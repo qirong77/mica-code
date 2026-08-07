@@ -286,6 +286,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-message-user {
   align-items: center;
+  margin-top: 10px;
   background: var(--chat-user);
   box-shadow:
     4px 0 0 var(--chat-user),
@@ -293,6 +294,10 @@ body.is-resizing.is-resizing-terminal {
   color: #d7d7d7;
   font-size: var(--chat-text-size);
   line-height: 1.28;
+}
+
+.chat-message-user:first-child {
+  margin-top: 10px;
 }
 
 .chat-message-user .chat-message-marker {
@@ -1537,6 +1542,34 @@ body.is-resizing.is-resizing-terminal {
   column-gap: 8px;
 }
 
+/* 嵌套 subagent 行：6 个格（⎿ + 5 列），5 列 grid 放不下，改用 flex；
+ * ⎿ 前缀与活动行 ` ⎿ ` 同宽（3 列），kind/status 保持与主行 grid 列宽一致。 */
+.chat-task-summary-row-nested {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.chat-task-summary-row-nested .chat-task-child-prefix {
+  width: 3ch;
+  flex: 0 0 3ch;
+}
+
+.chat-task-summary-row-nested .chat-task-kind {
+  width: 12ch;
+  flex: 0 0 12ch;
+}
+
+.chat-task-summary-row-nested .chat-task-status {
+  width: 8ch;
+  flex: 0 0 8ch;
+}
+
+.chat-task-summary-row-nested .chat-task-description {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .chat-todo-dock .chat-task-summary-row {
   grid-template-columns: 12ch 8ch auto minmax(0, 1fr);
 }
@@ -1701,6 +1734,14 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-status-hot {
   color: #ff9800;
+}
+
+.chat-status-completed {
+  color: #4caf50;
+}
+
+.chat-status-last-run {
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-status-error {
