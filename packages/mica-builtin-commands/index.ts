@@ -2,7 +2,6 @@ import { createCommitCommand } from './commands/commit.js';
 import { createConfigCommand } from './commands/config.js';
 import { createContextCommand } from './commands/context.js';
 import { createEffortCommand } from './commands/effort.js';
-import { createDiffCommand } from './commands/diff.js';
 import { createMcpCommand } from './commands/mcp.js';
 import { createModelCommand } from './commands/model.js';
 import { createRoleCommand, cycleNextRole } from './commands/role.js';
@@ -18,7 +17,6 @@ export const micaBuiltinCommands = {
   createConfigCommand,
   createContextCommand,
   createEffortCommand,
-  createDiffCommand,
   createMcpCommand,
   createModelCommand,
   createRoleCommand,

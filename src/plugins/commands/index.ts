@@ -9,7 +9,7 @@ import { createActiveAgentProxy, createActiveSessionControllerProxy } from './ac
 import { createCommandRuntimeServices } from './commandRuntimeServices.js';
 import { registerCommand } from './registerCommand.js';
 
-const ALLOW_DURING_TURN_COMMANDS = new Set(['status', 'context', 'config', 'task', 'commit', 'diff']);
+const ALLOW_DURING_TURN_COMMANDS = new Set(['status', 'context', 'config', 'task', 'commit']);
 
 function createBuiltInCommands(
   agent: AgentRuntime,
@@ -38,7 +38,6 @@ function createBuiltInCommands(
       micaBuiltinCommands.createConfigCommand(activeAgent, services),
       micaBuiltinCommands.createMcpCommand(services),
       micaBuiltinCommands.createSkillsCommand(),
-      micaBuiltinCommands.createDiffCommand(activeAgent, services, tracker),
       micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
       micaBuiltinCommands.createTaskCommand(services),
     ],

@@ -1,6 +1,8 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
 
+const base = import.meta.env.BASE_URL;
+
 const configExample = `{
   "providers": [
     {
@@ -67,8 +69,8 @@ mica</code></pre>
 
   <h2>下一步</h2>
   <ul>
-    <li>想了解全部内置命令：见 <a href="/docs/commands">内置命令</a></li>
-    <li>接入桌面应用 / 自动化脚本：见 <a href="/docs/headless">Headless 协议</a></li>
-    <li>多机器远程续聊：见 <a href="/docs/sync">Mica Sync</a></li>
+    <li>想了解全部内置命令：见 <a href={`${base}docs/commands`}>内置命令</a></li>
+    <li>接入桌面应用 / 自动化脚本：见 <a href={`${base}docs/headless`}>Headless 协议</a></li>
+    <li>多机器远程续聊：见 <a href={`${base}docs/sync`}>Mica Sync</a></li>
   </ul>
 </DocLayout>

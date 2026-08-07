@@ -300,7 +300,7 @@ temp/                              临时代码和外部实验，默认不参与
 
 - 通用命令机制放在 `packages/mica-commands`。
 - Mica Code 产品命令放在 `packages/mica-builtin-commands`。
-- `packages/mica-builtin-commands` 目录按职责拆分：`commands/` 放命令实现，`shared/` 放命令间共享辅助，`git/` 放变更追踪与 diff 辅助，`tests/` 放全部测试，公共入口仍是 `index.ts` 与 `services.ts`。
+- `packages/mica-builtin-commands` 目录按职责拆分：`commands/` 放命令实现，`shared/` 放命令间共享辅助，`git/` 放变更追踪与提交辅助，`tests/` 放全部测试，公共入口仍是 `index.ts` 与 `services.ts`。
 - `src/plugins/commands/index.ts` 把内置命令注册到 `CommandRegistry`，并同步给 `mica-ui` quick commands。
 - 命令实现不要直接依赖应用层单例。需要 runtime、session、agent、UI、MCP、日志等能力时，通过 `CommandRuntimeServices` 或 active proxy 注入。
 - 耗时且会修改上下文、文件、配置或 git 状态的命令应通过 runtime exclusive task 执行，防止用户并发发送对话或切换配置。

@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/diff`、`/commit`。
+- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`。
 - 通过 `CommandHostService` 支持 `buildin-plugins` 中的 `/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/new`、`/rename`、`/resume`、`/rewind` 单文件插件。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。
@@ -44,18 +44,17 @@ packages/mica-builtin-commands/
   README.md
   commands/                各内置斜杠命令实现
   shared/                  命令间共享辅助逻辑
-  git/                     Git 变更追踪与 diff 展示辅助
+  git/                     Git 变更追踪与提交辅助
   tests/                   包内全部测试
 ```
 
-- `commands/`：`commit`、`config`、`context`、`diff`、`effort`、`mcp`、`model`、`provider`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
+- `commands/`：`commit`、`config`、`context`、`effort`、`mcp`、`model`、`provider`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。
   - `configSwitch.ts`：provider/model/effort 切换辅助。
 - `git/`：
   - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
-  - `gitDiff.ts`：unified/side-by-side diff 解析与加载。
   - `commitRunner.ts`：commit 命令与 headless `mica commit` 共享的确定性 git 分析/提交逻辑（变更摘要、commit message 生成、add/commit/push），公共入口由 `index.ts` 聚合导出。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
