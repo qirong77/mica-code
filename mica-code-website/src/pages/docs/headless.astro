@@ -1,56 +1,91 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
 
-const execExample = `$ mica exec --json --thinking "总结这个仓库的安装方式"
-{"type":"thread.started","thread_id":"s_8f3a2c1e"}
+const base = import.meta.env.BASE_URL;
+
+// 示例均为真实命令输出（或按真实字段省略中间片段），ID 等每次运行都会变化，仅示意格式。
+
+const modelsExample = `$ mica models
+krill/gpt-5.6-luna
+krill/gpt-5.6-terra
+deepseek/deepseek-v4-flash
+Llm-proxy/kimi-k2.7-code
+...
+
+$ mica models --json
+[{"id":"krill/gpt-5.6-luna","efforts":["none","low","medium","high","xhigh"]},
+ {"id":"deepseek/deepseek-v4-pro","efforts":["none","high","xhigh"]},
+ ...]`;
+
+const execExample = `$ mica exec --json "总结这个仓库的安装方式"
+{"type":"thread.started","thread_id":"20260807T053327Z-jlq994"}
 {"type":"turn.started"}
 {"type":"item.started","item":{"id":"cmd-1725...","type":"command_execution","command":"grep_search install","aggregated_output":"","exit_code":null,"status":"in_progress"}}
 {"type":"item.completed","item":{"id":"cmd-1725...","type":"command_execution","command":"grep_search install","aggregated_output":"AGENT.md:21  bun install\\nREADME.md:17  curl -fsSL ... | sh\\n","exit_code":0,"status":"completed"}}
-{"type":"item.updated","item":{"id":"reasoning","type":"reasoning","text":"仓库提供 Bun 安装与 release 安装两种方式…"}}
-{"type":"item.updated","item":{"id":"agent-message","type":"agent_message","text":"支持两种安装方式：1) Bun：\`bun install\`…"}}
+{"type":"item.updated","item":{"id":"agent-message","type":"agent_message","text":"支持两种安装方式：1) Bun：\`bun install\`；2) release：一行 curl 脚本。"}}
 {"type":"item.completed","item":{"id":"agent-message","type":"agent_message","text":"支持两种安装方式：1) Bun：\`bun install\`；2) release：一行 curl 脚本。"}}
 {"type":"turn.completed","usage":{"input_tokens":1832,"cached_input_tokens":1690,"cache_write_input_tokens":0,"output_tokens":412,"reasoning_output_tokens":96}}`;
 
 const compactExample = `$ mica compact --session 1f2e3d4a
-{"ok":true,"sessionId":"1f2e3d4a","mode":"kept","strategy":"recent-rounds","beforeCount":42,"afterCount":18,"summarizedCount":0,"keptCount":18,"beforeTokenEstimate":82000,"afterTokenEstimate":31000,"savedTokenEstimate":51000,"savedRatio":0.62,"contextWindowSize":200000,"contextUsageRatio":0.16,"summary":""}`;
+{"ok":true,"sessionId":"1f2e3d4a","mode":"kept","strategy":"recent-rounds","beforeCount":42,"afterCount":18,"summarizedCount":0,"keptCount":18,"beforeTokenEstimate":82000,"afterTokenEstimate":31000,"savedTokenEstimate":51000,"savedRatio":0.62,"contextWindowSize":200000,"contextUsageRatio":0.16,"summary":""}
+
+$ mica compact --session 1f2e3d4a
+{"ok":false,"sessionId":"1f2e3d4a","code":"not_needed","error":"当前会话内容较少，暂不需要 compact"}
+
+$ mica compact --session missing-id
+{"ok":false,"sessionId":"missing-id","code":"error","error":"Session not found: missing-id"}`;
 
 const commitExample = `$ mica commit
-{"ok":true,"commitHash":"a1b2c3d","subject":"fix: add checksum verification to install script","commitMessage":"fix: add checksum verification to install script\\n\\n- verify sha256 before extracting the release archive\\n- add missing macOS arm64 checksum entry","pushed":true}
+{"ok":true,"commitHash":"cb130c9","subject":"docs: 添加项目 README 说明","commitMessage":"docs: 添加项目 README 说明","pushed":false}
 
 $ mica commit
-{"ok":false,"code":"nothing_to_commit","error":"没有可提交的变化"}`;
+{"ok":false,"code":"nothing_to_commit","error":"没有可提交的变化"}
 
-const appServerConversation = `$ mica app-server --session 1f2e3d4a
+$ mica commit   # 不在 git 仓库里时
+{"ok":false,"code":"error","error":"fatal: not a git repository (or any of the parent directories): .git"}`;
 
+const appServerConversation = `$ mica app-server
+
+# 客户端 → 进程 stdin（每行一个 JSON），进程在 stdout 逐行返回响应/通知
 {"id":1,"method":"initialize"}
 {"id":1,"result":{"capabilities":{"protocolVersion":2},"userAgent":"mica-code/app-server","codexHome":"","platformFamily":"unix","platformOs":"darwin"}}
 {"method":"initialized"}
 
 {"id":2,"method":"thread/start","params":{"cwd":"/work/mica-code"}}
-{"id":2,"result":{"thread":{"id":"1f2e3d4a","status":"idle","cwd":"/work/mica-code","createdAt":...,"updatedAt":...,"cliVersion":"...","source":"app-server","modelProvider":"...","model":"..."},"model":"...","modelProvider":"...","cwd":"/work/mica-code","approvalPolicy":{"strategy":"unapproved"}}}
+{"id":2,"result":{"thread":{"id":"20260807T053545Z-44r46d","status":"idle","cwd":"/work/mica-code","createdAt":...,"updatedAt":...,"recencyAt":null,"cliVersion":"mica","source":"cli","modelProvider":"deepseek","model":"deepseek-v4-flash"},"model":"deepseek-v4-flash","modelProvider":"deepseek","cwd":"/work/mica-code","approvalPolicy":{"strategy":"unapproved"}}}
 
 {"id":3,"method":"turn/start","params":{"input":[{"type":"text","text":"看看 README 的安装步骤"}]}}
-{"method":"turn/started","params":{"threadId":"1f2e3d4a","turn":{"id":"t_9c21","items":[],"itemsView":"notLoaded","status":"inProgress","startedAt":...,"completedAt":null,"durationMs":null}},"emittedAtMs":...}
-{"id":3,"result":{"turn":{"id":"t_9c21","items":[],"itemsView":"notLoaded","status":"inProgress","startedAt":...,"completedAt":null,"durationMs":null}}}
+{"method":"turn/started","params":{"threadId":"20260807T053545Z-44r46d","turn":{"id":"3f373392-fd3b-4ecb-90f1-27487dcccd29","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":null,"completedAt":null,"durationMs":null}},"emittedAtMs":...}
+{"id":3,"result":{"turn":{"id":"3f373392-fd3b-4ecb-90f1-27487dcccd29","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":null,"completedAt":null,"durationMs":null}}}
 
-{"method":"item/started","params":{"threadId":"1f2e3d4a","turnId":"t_9c21","item":{"id":"cmd-...","type":"commandExecution","command":"read_file","displayText":"读取 README.md","cwd":"/work/mica-code","status":"inProgress","aggregatedOutput":"","exitCode":null}},"emittedAtMs":...}
-{"method":"item/commandExecution/outputDelta","params":{"threadId":"1f2e3d4a","turnId":"t_9c21","itemId":"cmd-...","outputDelta":"# Mica Code\\n..."},"emittedAtMs":...}
-{"method":"item/completed","params":{"threadId":"1f2e3d4a","turnId":"t_9c21","item":{"id":"cmd-...","type":"commandExecution","command":"read_file","displayText":"读取 README.md","cwd":"/work/mica-code","status":"completed","aggregatedOutput":"# Mica Code\\n...","exitCode":0}},"emittedAtMs":...}
-{"method":"item/agentMessage/delta","params":{"threadId":"1f2e3d4a","turnId":"t_9c21","itemId":"agent-message","textDelta":"安装分两步：…"},"emittedAtMs":...}
-{"method":"thread/tokenUsage/updated","params":{"threadId":"1f2e3d4a","tokenUsage":{"total":{"total_tokens":2200,"input_tokens":1900,"cached_input_tokens":1700,"cache_write_input_tokens":0,"output_tokens":300,"reasoning_output_tokens":0},"last":{...},"model_context_window":200000}},"emittedAtMs":...}
-{"method":"turn/completed","params":{"threadId":"1f2e3d4a","turn":{"id":"t_9c21","items":[...],"itemsView":"summary","status":"completed","startedAt":...,"completedAt":...,"durationMs":8200}},"emittedAtMs":...}`;
+{"method":"item/started","params":{"threadId":"20260807T053545Z-44r46d","turnId":"3f373392-...","item":{"id":"cmd-01","type":"commandExecution","command":"read_file","displayText":"读取 README.md","cwd":"/work/mica-code","status":"inProgress","aggregatedOutput":"","exitCode":null}},"emittedAtMs":...}
+{"method":"item/commandExecution/outputDelta","params":{"threadId":"...","turnId":"3f373392-...","itemId":"cmd-01","outputDelta":"# Mica Code\\n..."},"emittedAtMs":...}
+{"method":"item/completed","params":{"threadId":"...","turnId":"3f373392-...","item":{"id":"cmd-01","type":"commandExecution","command":"read_file","displayText":"读取 README.md","cwd":"/work/mica-code","status":"completed","aggregatedOutput":"# Mica Code\\n...","exitCode":0}},"emittedAtMs":...}
+{"method":"item/agentMessage/delta","params":{"threadId":"...","turnId":"3f373392-...","itemId":"agent-message","textDelta":"安装分两步：…"},"emittedAtMs":...}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"...","tokenUsage":{"total":{"total_tokens":2200,"input_tokens":1900,"cached_input_tokens":1700,"cache_write_input_tokens":0,"output_tokens":300,"reasoning_output_tokens":0},"last":{...},"model_context_window":200000}},"emittedAtMs":...}
+{"method":"turn/completed","params":{"threadId":"20260807T053545Z-44r46d","turn":{"id":"3f373392-fd3b-4ecb-90f1-27487dcccd29","items":[...],"itemsView":"summary","status":"completed","error":null,"startedAt":...,"completedAt":...,"durationMs":8200}},"emittedAtMs":...}`;
 
-const appServerSteer = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"t_9c21","input":[{"type":"text","text":"顺便看一下 install.sh"}],"clientMessageId":"msg-42"}}
-{"method":"mica/queue/queued","params":{"threadId":"1f2e3d4a","turnId":"t_9c21","item":{"id":"msg-42","text":"顺便看一下 install.sh","queueMode":"after_iteration"}},"emittedAtMs":...}
-{"id":4,"result":{"turnId":"t_9c21"}}`;
+const appServerSteer = `# 上一轮 turn 未完成时注入新输入（expectedTurnId 必须对应当前活跃 turn）
+{"id":4,"method":"turn/steer","params":{"expectedTurnId":"3f373392-...","input":[{"type":"text","text":"顺便看一下 install.sh"}],"clientMessageId":"msg-42"}}
+{"method":"mica/queue/queued","params":{"threadId":"20260807T053545Z-44r46d","turnId":"3f373392-...","item":{"id":"msg-42","text":"顺便看一下 install.sh","queueMode":"after_iteration"}},"emittedAtMs":...}
+{"id":4,"result":{"turnId":"3f373392-..."}}
 
-const sseExample = `# 新建会话（服务器生成 sessionId，下发给 daemon 执行）
-$ curl -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
-  -H 'Content-Type: application/json' -d '{"text":"总结 README"}'
-{"sessionId":"8f3a2c1e"}
+# expectedTurnId 不匹配时返回 -32602 错误（模型已在 3s 内跑完，turn 已结束）
+{"id":4,"error":{"code":-32602,"message":"expected active turn id \`3ee9fb5c\` but found \`3f373392-...\`"}}
 
-# 订阅事件流
+# 中断当前 turn：返回空 result，随后 turn 以 status "interrupted" 结束
+{"id":5,"method":"turn/interrupt","params":{}}
+{"id":5,"result":{}}
+{"method":"turn/completed","params":{"turn":{"id":"3f373392-...","status":"interrupted",...}},"emittedAtMs":...}`;
+
+const sseExample = `# 新建会话（服务器生成 sessionId 与 commandId，下发给 daemon 执行）
+$ curl -s -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
+  -H 'Content-Type: application/json' -d '{"text":"总结 README","cwd":"/work/mica-code"}'
+{"sessionId":"8f3a2c1e-...","commandId":"0f8df6f3-..."}
+
+# 订阅事件流（SSE 首行是 ": connected" 注释）
 $ curl -N 'http://<server>:5560/api/machines/<machineId>/sessions/8f3a2c1e/events?since=0'
+: connected
 data: {"type":"user_input","text":"总结 README",...}
 data: {"type":"thinking","text":"让我先读一下 README…",...}
 data: {"type":"tool_call","name":"read_file","args":"README.md",...}
@@ -60,9 +95,29 @@ data: {"type":"usage","inputTokens":1832,"cachedInputTokens":1690,"outputTokens"
 data: {"type":"turn","state":"completed",...}`;
 ---
 
-<DocLayout title="Headless 协议" active="headless" description="mica exec / mica compact / mica commit / mica app-server 等无 UI 调用方式">
+<DocLayout title="Headless 协议" active="headless" description="mica models / mica exec / mica compact / mica commit / mica app-server 等无 UI 调用方式">
   <h1>Headless 协议</h1>
-  <p>Mica 可以通过 JSON 协议被桌面应用或自动化工具调用，无需终端 UI。所有 headless 模式都会注册 MCP、支持 session 落盘与 subagent 清理，生命周期与交互模式一致。</p>
+  <p>Mica 的全部无 UI 入口都可以被桌面应用或自动化脚本用 JSON 协议调用，无需终端界面。所有 headless 模式都会注册 MCP、支持 session 落盘与 subagent 清理，生命周期与交互模式一致；输出的都是单行 JSON，方便程序解析。</p>
+
+  <h2>CLI 入口总览</h2>
+  <table>
+    <thead><tr><th>命令</th><th>作用</th><th>输出</th></tr></thead>
+    <tbody>
+      <tr><td><code>mica</code></td><td>交互式终端界面</td><td>TUI</td></tr>
+      <tr><td><code>mica --resume &lt;id&gt;</code></td><td>恢复历史会话进入交互模式</td><td>TUI</td></tr>
+      <tr><td><code>mica models [--json] [--verbose]</code></td><td>列出所有可用模型（provider/model 格式）</td><td>文本或 JSON</td></tr>
+      <tr><td><code>mica exec ... "&lt;prompt&gt;"</code></td><td>一次性执行一轮任务</td><td>文本 / ThreadEvent JSONL</td></tr>
+      <tr><td><code>mica compact --session &lt;id&gt;</code></td><td>把会话压缩为 checkpoint</td><td>JSON</td></tr>
+      <tr><td><code>mica commit</code></td><td>分析 git 变化并提交推送</td><td>JSON</td></tr>
+      <tr><td><code>mica daemon --server &lt;url&gt;</code></td><td>Mica Sync 常驻进程（见 <a href={`${base}docs/sync`}>Mica Sync</a>）</td><td>日志</td></tr>
+      <tr><td><code>mica app-server</code></td><td>每会话常驻进程，暴露 Codex v2 App Server 协议</td><td>JSONL（stdin 请求 / stdout 通知）</td></tr>
+      <tr><td><code>mica --version</code> / <code>mica --help</code></td><td>版本号 / 完整用法</td><td>文本</td></tr>
+    </tbody>
+  </table>
+
+  <h2>查看模型：mica models</h2>
+  <p>列出所有 provider 的可用模型，格式为 <code>provider/model</code>，与 <code>--model</code>、<code>/model</code> 使用的 ID 一致。默认逐行输出模型 ID；<code>--json</code> 附带每个模型支持的 effort 列表，<code>--verbose</code> 输出更详细的信息。</p>
+  <pre><code>{modelsExample}</code></pre>
 
   <h2>一次性执行：mica exec</h2>
   <pre><code>mica exec [--json] [--thinking] [--no-save] [--max-turns &lt;count&gt;]
@@ -71,16 +126,17 @@ data: {"type":"turn","state":"completed",...}`;
   [--mcp-init-timeout-ms &lt;ms&gt;] [--dangerously-skip-permissions] "&lt;prompt&gt;"</code></pre>
   <p>默认输出人类可读文本；显式传 <code>--json</code> 时输出 <strong>Codex exec 兼容的 ThreadEvent JSONL</strong>（每行一个 JSON 对象，与 <code>codex exec --json</code> 形状对齐，已有 codex 消费端可直接替换）。</p>
   <ul>
-    <li>事件类型：<code>thread.started</code>（带 <code>thread_id</code>）、<code>turn.started</code>、<code>item.started</code>、<code>item.updated</code>、<code>item.completed</code>、<code>turn.completed</code>（带 usage）、<code>error</code>。</li>
-    <li>item 类型：<code>agent_message</code>（最终回复）、<code>reasoning</code>（思考）、<code>command_execution</code>（工具调用）。</li>
-    <li>工具调用先发 <code>item.started</code>（<code>status: "in_progress"</code>、<code>exit_code: null</code>），完成后以相同 <code>id</code> 发 <code>item.completed</code>（<code>exit_code: 0</code>、<code>status: "completed"</code> 与 <code>aggregated_output</code>），消费端可原位更新运行状态。</li>
-    <li>文本按流式以 <code>item.updated</code>（<code>item.type: "agent_message"</code>）增量输出，结束时补发 <code>item.completed</code>。</li>
+    <li><code>--json</code>：事件类型 <code>thread.started</code>（带 <code>thread_id</code>）、<code>turn.started</code>、<code>item.started</code>、<code>item.updated</code>、<code>item.completed</code>、<code>turn.completed</code>（带 usage）、<code>error</code>；item 类型为 <code>agent_message</code>（最终回复）、<code>reasoning</code>（思考）、<code>command_execution</code>（工具调用，下划线命名）。</li>
+    <li>工具调用先发 <code>item.started</code>（<code>status: "in_progress"</code>、<code>exit_code: null</code>），完成后以相同 <code>id</code> 发 <code>item.completed</code>（<code>exit_code</code>、<code>status: "completed"</code>、<code>aggregated_output</code>），消费端可原位更新运行状态。</li>
+    <li>文本回复按流式以 <code>item.updated</code> 增量输出（每个片段一条），结束时补发同 id 的 <code>item.completed</code>。</li>
     <li>显式传 <code>--thinking</code> 时才输出 <code>reasoning</code> item；不传时保持精简输出以兼容现有消费者。</li>
-    <li>headless 模式也会注册 <code>TodoWrite</code>，便于结构化展示运行计划。</li>
-    <li><code>--mcp-init-timeout-ms</code> 为每个 MCP server 的 connect + tools/list 设置总截止时间，健康 server 仍会并行完成。</li>
-    <li><code>--no-save</code> 在整轮 turn 期间跳过 session 落盘，适合一次性后台任务（如右键 Commit），不产生垃圾会话文件。</li>
+    <li><code>--no-save</code>：整轮 turn 期间跳过 session 落盘，适合一次性后台任务（如右键 Commit），不产生垃圾会话文件。</li>
+    <li><code>--max-turns &lt;count&gt;</code>：限制模型最多几轮工具循环；<code>--model</code> / <code>--variant</code> / <code>--role</code> 覆盖运行时的 provider/model/effort/role。</li>
+    <li><code>--session &lt;id&gt;</code>：续跑已有会话；<code>--dir &lt;cwd&gt;</code>：指定任务工作目录。</li>
+    <li><code>--dangerously-skip-permissions</code>：自动批准模式，跳过文件/shell 等需要授权的操作确认（只在受信环境使用）。</li>
+    <li>MCP：<code>--mcp-config &lt;path&gt;</code> 加载额外配置，<code>--strict-mcp-config</code> 禁止混入本地配置，<code>--mcp-init-timeout-ms &lt;ms&gt;</code> 限制单个 server 的 connect + tools/list 总截止时间（健康 server 仍会并行完成）。</li>
+    <li>headless 模式也会注册 <code>TodoWrite</code>，便于结构化展示运行计划；prompt 中支持 <code>[Image](路径)</code> 引用本地图片（解析为多模态 content block 后再发给模型）。</li>
     <li>Responses 协议启用 reasoning effort 时会请求 <code>summary: "auto"</code>，让支持该能力的模型产生可流式展示的思考摘要。</li>
-    <li>prompt 中支持 <code>[Image](路径)</code> 引用本地图片（解析为多模态 content block 后再发给模型）。</li>
   </ul>
 
   <h3>示例：mica exec --json</h3>
@@ -90,9 +146,9 @@ data: {"type":"turn","state":"completed",...}`;
   <pre><code>mica compact --session &lt;id&gt; [--dir &lt;cwd&gt;] [--force] [--prune-only]</code></pre>
   <p>复用交互式 <code>/compact</code> 的 <code>CompactionService</code>，把压缩后的 checkpoint 写回会话文件并输出一行 JSON。不指定 <code>--prune-only</code> 时是模型摘要 + 最近轮次保留；会话内容较少时返回 <code>code: "not_needed"</code>。</p>
   <ul>
-    <li>输出字段：<code>ok</code>、<code>mode</code>（<code>summarized</code> / <code>kept</code>）、<code>strategy</code>、<code>beforeCount</code> / <code>afterCount</code> / <code>summarizedCount</code> / <code>keptCount</code>、<code>beforeTokenEstimate</code> / <code>afterTokenEstimate</code> / <code>savedTokenEstimate</code> / <code>savedRatio</code>。</li>
-    <li>附带 <code>contextWindowSize</code> / <code>contextUsageRatio</code> 供消费方直接展示压缩后的上下文占用。</li>
-    <li><code>--prune-only</code> 只做本地清理、<strong>不调用模型</strong>：把工具结果与参数替换为占位符、按尺寸修剪图片/超长文本，无内容可清理时沿轮次边界丢弃最早轮次；返回 <code>code: "not_needed"</code> 表示无可快速清理内容。</li>
+    <li>输出字段：<code>ok</code>、<code>mode</code>（<code>summarized</code> / <code>kept</code>）、<code>strategy</code>、<code>beforeCount</code> / <code>afterCount</code> / <code>summarizedCount</code> / <code>keptCount</code>、<code>beforeTokenEstimate</code> / <code>afterTokenEstimate</code> / <code>savedTokenEstimate</code> / <code>savedRatio</code>，附带 <code>contextWindowSize</code> / <code>contextUsageRatio</code> 供消费方直接展示压缩后的上下文占用。</li>
+    <li><code>--force</code>：会话内容较少时也强制摘要；<code>--prune-only</code> 只做本地清理、<strong>不调用模型</strong>：把工具结果与参数替换为占位符、按尺寸修剪图片/超长文本，无内容可清理时沿轮次边界丢弃最早轮次；两者都返回 <code>code: "not_needed"</code> 表示无可快速清理内容。</li>
+    <li>压缩会保留原 <code>usageHistory</code> / <code>lastUsage</code>，不会清零 token 统计。</li>
   </ul>
 
   <h3>示例：mica compact</h3>
@@ -102,8 +158,8 @@ data: {"type":"turn","state":"completed",...}`;
   <pre><code>mica commit [--dir &lt;cwd&gt;]</code></pre>
   <p>与交互式 <code>/commit</code> 复用同一套确定性分析/提交逻辑：程序先收集 git 变化摘要，再向模型<strong>只发一次请求</strong>生成 commit message（不启用工具、无多轮循环），随后程序自己执行 <code>git add</code> / <code>commit</code> / <code>push</code>，最后输出单行 JSON。</p>
   <ul>
-    <li>成功时：<code>ok: true</code>、<code>commitHash</code>、<code>subject</code>、<code>commitMessage</code>、<code>pushed</code>。</li>
-    <li>失败时：<code>ok: false</code>、<code>code</code>（<code>nothing_to_commit</code> / <code>unmerged</code> / <code>nothing_staged</code> / <code>error</code>）、<code>error</code>。</li>
+    <li>成功时：<code>ok: true</code>、<code>commitHash</code>（7 位短哈希）、<code>subject</code>、<code>commitMessage</code>、<code>pushed</code>。</li>
+    <li>失败时：<code>ok: false</code>、<code>code</code>（<code>nothing_to_commit</code> / <code>unmerged</code> / <code>nothing_staged</code> / <code>error</code>）、<code>error</code>（人类可读原因）。</li>
   </ul>
 
   <h3>示例：mica commit</h3>
@@ -113,35 +169,36 @@ data: {"type":"turn","state":"completed",...}`;
   <pre><code>mica app-server [--session &lt;id&gt;] [--dir &lt;cwd&gt;] [--model &lt;id&gt;] [--variant &lt;effort&gt;]
   [--role &lt;name&gt;] [--max-turns &lt;count&gt;] [--thinking]
   [--mcp-config &lt;path&gt;] [--strict-mcp-config] [--mcp-init-timeout-ms &lt;ms&gt;]</code></pre>
-  <p>每会话一个常驻进程，从 stdin 读 <strong>Codex v2 App Server 协议</strong>请求，向 stdout 写 v2 通知（JSON-RPC 风格，每行一个 JSON，无 <code>jsonrpc</code> 字段）。连续对话跳过进程启动、session 重载和 MCP 重复初始化，适合桌面应用/IDE 插件长期持有。</p>
+  <p>每会话一个常驻进程，从 stdin 读 <strong>Codex v2 App Server 协议</strong>请求，向 stdout 写 v2 通知（JSON-RPC 风格，每行一个 JSON，无 <code>jsonrpc</code> 字段）。连续对话跳过进程启动、session 重载和 MCP 重复初始化，适合桌面应用 / IDE 插件长期持有。请求带 <code>id</code> 时进程返回同 id 的 <code>result</code>（或 <code>error</code>）；不带 <code>id</code> 的是客户端通知（<code>initialized</code> / <code>shutdown</code>），无响应。</p>
 
   <h3>请求方法</h3>
   <ul>
-    <li><code>initialize</code>：返回协议能力、平台信息。</li>
-    <li><code>thread/start</code>：加载/创建会话线程，返回 thread 与当前 model / cwd / approvalPolicy。</li>
-    <li><code>turn/start</code>（params：<code>input</code>、可选 <code>model</code> / <code>effort</code> / <code>cwd</code>）：立即返回 <code>&#123; turn: &#123; id, status: "inProgress" &#125; &#125;</code> 后异步执行；busy 时返回错误，需用 <code>turn/steer</code> 排队。</li>
-    <li><code>turn/steer</code>（params：<code>expectedTurnId</code>、<code>input</code>、可选 <code>clientMessageId</code>）：把输入注入活跃 turn 的 after_iteration 队列，实现忙时 Shift+Tab 续聊。</li>
-    <li><code>turn/interrupt</code>：中止当前 turn；tool 执行中会在当前迭代/工具结束的边界生效。</li>
+    <li><code>initialize</code>：返回协议能力（<code>capabilities.protocolVersion: 2</code>）、平台信息。</li>
+    <li><code>thread/start</code>（params：<code>cwd</code>）：加载/创建会话线程，返回 thread（含 <code>id</code> / <code>status</code> / <code>cwd</code> / <code>modelProvider</code> / <code>model</code>）、当前 model 与 approvalPolicy。</li>
+    <li><code>turn/start</code>（params：<code>input</code>、可选 <code>model</code> / <code>effort</code> / <code>cwd</code>）：<strong>立即返回</strong> <code>&#123; turn: &#123; id, status: "inProgress" &#125; &#125;</code> 后异步执行；已有活跃 turn 时返回错误，需要排队请用 <code>turn/steer</code>。输入内容与 CLI 一致：<code>&#123; "type": "text", "text": "..." &#125;</code> 文本，或 <code>&#123; "type": "image", "url": "..." &#125;</code> / <code>localImage</code> 图片。</li>
+    <li><code>turn/steer</code>（params：<code>expectedTurnId</code>、<code>input</code>、可选 <code>clientMessageId</code>）：把新输入注入活跃 turn 的 after_iteration 队列，实现忙时 Shift+Tab 续聊；<code>expectedTurnId</code> 必须对应当前活跃 turn（不匹配返回 -32602）。<code>clientMessageId</code> 用于让客户端关联排队状态（Mica 扩展）。</li>
+    <li><code>turn/interrupt</code>：中止当前 turn，返回空 result；tool 执行中会在当前迭代/工具结束的边界生效，随后发 <code>turn/completed</code>（<code>status: "interrupted"</code>）。</li>
     <li>客户端通知：<code>&#123;"method":"initialized"&#125;</code>、<code>&#123;"method":"shutdown"&#125;</code>。</li>
   </ul>
 
   <h3>通知事件</h3>
   <ul>
-    <li>生命周期：<code>thread/started</code>、<code>thread/status/changed</code>、<code>turn/started</code>、<code>turn/completed</code>、<code>error</code>、<code>warning</code>。</li>
-    <li>内容：<code>item/started</code>、<code>item/completed</code>、<code>item/agentMessage/delta</code>、<code>item/reasoning/textDelta</code>（默认关闭，<code>--thinking</code> 开启）、<code>item/commandExecution/outputDelta</code>、<code>thread/tokenUsage/updated</code>。</li>
-    <li>Mica 增量扩展：<code>mica/queue/queued</code>、<code>mica/queue/dequeue</code>、<code>mica/queue/changed</code> 同步 host 侧排队状态（Codex 协议本身没有队列事件，未知方法名对 Codex 客户端无害）。</li>
+    <li>生命周期：<code>thread/started</code>、<code>thread/status/changed</code>、<code>turn/started</code>、<code>turn/completed</code>（status：<code>completed</code> / <code>interrupted</code> / <code>failed</code>）、<code>error</code>、<code>warning</code>。</li>
+    <li>内容：<code>item/started</code>、<code>item/completed</code>（item 类型为 <code>commandExecution</code> 等，驼峰命名）、<code>item/agentMessage/delta</code>、<code>item/reasoning/textDelta</code>（默认关闭，<code>--thinking</code> 开启）、<code>item/commandExecution/outputDelta</code>、<code>thread/tokenUsage/updated</code>（<code>total</code> 为累计值，<code>model_context_window</code> 为上下文窗口）。</li>
+    <li>Mica 增量扩展（Codex 协议没有对应事件，未知方法名对 Codex 客户端无害）：<code>mica/queue/queued</code> / <code>mica/queue/dequeue</code> / <code>mica/queue/changed</code> 同步排队状态；<code>mica/backgroundTasks/updated</code> / <code>mica/subagentTasks/updated</code> 以整体快照方式同步跨 turn 存活的 shell 后台任务与 subagent（启动时立即推一次初始快照，之后有变化才推）。</li>
     <li>所有通知带 <code>emittedAtMs</code> 时间戳；<code>commandExecution</code> item 携带 <code>displayText</code>（工具展示文案），让客户端与 CLI 展示同一工具摘要。</li>
   </ul>
 
   <h3>示例：一次完整对话</h3>
   <p>启动进程后逐行写入请求（客户端 → 进程 stdin），进程在 stdout 逐行返回响应/通知：</p>
   <pre><code>{appServerConversation}</code></pre>
-  <p>忙时续聊：在上一轮 turn 未完成时用 <code>turn/steer</code> 注入新输入，host 会在完整工具迭代边界把它追加进当前 provider loop，并发出 <code>mica/queue/queued</code> 通知：</p>
+  <p>忙时续聊：在上一轮 turn 未完成时用 <code>turn/steer</code> 注入新输入，host 会在完整工具迭代边界把它追加进当前 provider loop，并发出 <code>mica/queue/queued</code> 通知；<code>turn/interrupt</code> 可随时中止当前 turn：</p>
   <pre><code>{appServerSteer}</code></pre>
 
   <h2>容错约定</h2>
   <ul>
     <li><code>--session</code> resume 失败或 <code>--dir</code> chdir 失败时降级继续并发出携带真实原因的 <code>error</code> 通知，不退出进程。</li>
     <li>进程捕获 <code>unhandledRejection</code>（记录 + 通知，不退出）与 <code>uncaughtException</code>（通知后退出）；退出前先 flush stdout/stderr，避免丢弃缓冲中的真实原因。</li>
+    <li>stdin 关闭（EOF）时进程会在收尾时中止当前 turn（<code>status: "interrupted"</code>），因此长会话客户端应保持 stdin 打开。</li>
   </ul>
 </DocLayout>

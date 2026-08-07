@@ -2165,6 +2165,7 @@ export function ChatView({
     setStopping(false)
     setPhase('idle')
     setRunStartedAt(0)
+    setLastRun(null)
     setMeta(null)
     setHistoryLoaded(false)
     streamRef.current = { id: null, kind: null, turnId: null }

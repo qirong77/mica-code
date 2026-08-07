@@ -2,6 +2,8 @@
 import DocLayout from '../../layouts/DocLayout.astro';
 
 const commands = [
+  { cmd: '/config', desc: '打开 Mica 配置页面（Config Web），可视化编辑 provider / 模型 / MCP 等配置。' },
+  { cmd: '/cd', desc: '切换到最近 session 使用过的工作目录（从历史会话中收集并去重）。' },
   { cmd: '/clear', desc: '终止并移除当前 agent 的 subagent，丢弃排队输入，然后新开一个空会话（不清除原会话文件内容）。' },
   { cmd: '/resume', desc: '恢复历史会话；未正常完成（aborted / error）的会话会标记为（uncompleted）。' },
   { cmd: '/model', desc: '从包含 provider 信息的模型列表中切换 provider 和模型（打开前会检查 busy 状态）。' },
@@ -10,6 +12,7 @@ const commands = [
   { cmd: '/status', desc: '显示当前 provider / model / effort / role 状态。' },
   { cmd: '/context', desc: '显示当前上下文占用总览（token、缓存命中率、上下文窗口）。' },
   { cmd: '/compact', desc: '把当前会话压缩为 checkpoint，减少后续上下文压力；保留原有 token 统计。' },
+  { cmd: '/diff', desc: '交互查看当前 Git 变更及其来源（Agent 改动 / 用户改动），支持并排 diff 与撤销定位。' },
   { cmd: '/new', desc: '新开一个 agent；/new &lt;text&gt; 后台运行新 agent。' },
   { cmd: '/fork', desc: '从当前 agent 历史分叉一个新 agent；/fork &lt;text&gt; 后台运行。' },
   { cmd: '/task', desc: '按终端 session 展示全部 agent、retained subagent 和 active background shell；/task clear 清除空闲 session。' },

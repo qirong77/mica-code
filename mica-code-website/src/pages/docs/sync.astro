@@ -1,13 +1,14 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
 
-const sseExample = `# 新建会话（服务器生成 sessionId，下发给 daemon 执行）
-$ curl -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
-  -H 'Content-Type: application/json' -d '{"text":"总结 README"}'
-{"sessionId":"8f3a2c1e"}
+const sseExample = `# 新建会话（服务器生成 sessionId 与 commandId，下发给 daemon 执行）
+$ curl -s -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
+  -H 'Content-Type: application/json' -d '{"text":"总结 README","cwd":"/work/mica-code"}'
+{"sessionId":"8f3a2c1e-7d4b-4f3e-9a2c-1b2c3d4e5f6a","commandId":"0f8df6f3-2cca-481b-9c26-6aa13919e548"}
 
-# 订阅事件流
+# 订阅事件流（SSE 首行是 ": connected" 注释；since 用最近一次快照的 snapshotSeq 避免重放）
 $ curl -N 'http://<server>:5560/api/machines/<machineId>/sessions/8f3a2c1e/events?since=0'
+: connected
 data: {"type":"user_input","text":"总结 README",...}
 data: {"type":"thinking","text":"让我先读一下 README…",...}
 data: {"type":"tool_call","name":"read_file","args":"README.md",...}
@@ -45,29 +46,40 @@ mica daemon --server http://&lt;server&gt;:5560   # --name 可选，默认用机
   </ul>
 
   <h2>HTTP API</h2>
-  <p>中心服务器同时提供 REST 接口（Web 控制台与第三方脚本使用）和 daemon 出站接口。以下端点基于 <code>&lt;server&gt;</code> 根路径：</p>
+  <p>中心服务器同时提供 REST 接口（Web 控制台与第三方脚本使用）和 daemon 出站接口。机器在线判定：<code>lastSeen</code> 距今 &lt; 90s；离线机器上的 <code>create</code> / <code>run</code> / <code>cwd</code> 会返回 409。以下端点基于 <code>&lt;server&gt;</code> 根路径：</p>
   <table>
     <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
     <tbody>
+      <tr><td>GET</td><td><code>/api/status</code></td><td>健康检查，返回 <code>&#123; ok, serverTime &#125;</code></td></tr>
       <tr><td>GET</td><td><code>/api/machines</code></td><td>机器列表（含在线状态）</td></tr>
       <tr><td>GET</td><td><code>/api/machines/:id/sessions</code></td><td>会话摘要列表（每项附带 <code>snapshotSeq</code> 水位）</td></tr>
-      <tr><td>POST</td><td><code>/api/machines/:id/sessions</code></td><td>新建会话，body <code>&#123; text, cwd? &#125;</code>，返回 <code>&#123; sessionId &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions</code></td><td>新建会话，body <code>&#123; text, cwd? &#125;</code>，返回 <code>&#123; sessionId, commandId &#125;</code></td></tr>
       <tr><td>GET</td><td><code>/api/machines/:id/sessions/:sid</code></td><td>会话详情（默认精简快照，<code>?full=1</code> 取全量）</td></tr>
       <tr><td>GET</td><td><code>/api/machines/:id/sessions/:sid/events?since=N</code></td><td>SSE 事件流，<code>since</code> 序号断线补拉</td></tr>
-      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/run</code></td><td>下发续聊指令 <code>&#123; text &#125;</code></td></tr>
-      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/cwd</code></td><td>切换会话工作目录 <code>&#123; cwd &#125;</code></td></tr>
-      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/abort</code></td><td>中止当前 turn</td></tr>
-      <tr><td>POST</td><td><code>/daemon/register</code> <code>/daemon/beat</code> <code>/daemon/poll</code> <code>/daemon/session</code> <code>/daemon/events</code></td><td>daemon 出站接口（注册 / 心跳 / 长轮询指令 / 推送快照 / 推送事件）</td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/run</code></td><td>下发续聊指令，body <code>&#123; text &#125;</code>，返回 <code>&#123; commandId &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/cwd</code></td><td>切换会话工作目录，body <code>&#123; cwd &#125;</code>，返回 <code>&#123; commandId &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/api/machines/:id/sessions/:sid/abort</code></td><td>中止当前 turn，返回 <code>&#123; commandId &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/daemon/register</code></td><td>daemon 注册机器，返回 <code>&#123; machineId, name &#125;</code>（同 hostname 复用原记录）</td></tr>
+      <tr><td>POST</td><td><code>/daemon/beat</code></td><td>daemon 心跳 + 上报活跃会话状态，返回 <code>&#123; ok, serverTime &#125;</code></td></tr>
+      <tr><td>POST</td><td><code>/daemon/poll</code></td><td>daemon 长轮询指令（<code>create</code> / <code>run</code> / <code>update_cwd</code> / <code>abort</code>），最多 hold 25s</td></tr>
+      <tr><td>POST</td><td><code>/daemon/session</code></td><td>daemon 推送/删除会话快照（带 <code>sessionId</code> 且无 <code>session</code> 时为删除）</td></tr>
+      <tr><td>POST</td><td><code>/daemon/events</code></td><td>daemon 推送 turn 事件批次，可附带最新会话快照</td></tr>
     </tbody>
   </table>
-  <p>详细请求/响应字段见 <code>packages/mica-sync-server/README.md</code>。</p>
+  <p>daemon 出站接口统一用 <code>x-machine-id</code> header 标识机器，未注册返回 404；Web 接口无需认证。详细请求/响应字段见 <code>packages/mica-sync-server/README.md</code>。</p>
 
   <h3>示例：SSE 实时续聊</h3>
   <p>浏览器或脚本通过 SSE 订阅某个会话的事件流，<code>since</code> 从最近一次快照的 <code>snapshotSeq</code> 开始，避免重放旧事件：</p>
   <pre><code>{sseExample}</code></pre>
 
   <h2>事件类型</h2>
-  <p><code>user_input</code>、<code>thinking</code>、<code>text_delta</code>、<code>tool_call</code>、<code>tool_result</code>、<code>usage</code>、<code>status</code>、<code>turn</code>（completed / aborted / error）、<code>run_rejected</code>、<code>session</code>、<code>session_removed</code>，以及队列相关 <code>queued</code>、<code>dequeue</code>、<code>queue_state</code>。</p>
+  <p>daemon 推送到服务器、再经 SSE 广播给 Web 的事件：</p>
+  <ul>
+    <li>会话内容：<code>user_input</code>、<code>thinking</code>、<code>text_delta</code>（流式回复）、<code>tool_call</code>、<code>tool_result</code>、<code>status</code>、<code>usage</code>。</li>
+    <li>生命周期：<code>turn</code>（state：<code>completed</code> / <code>aborted</code> / <code>error</code>，带 <code>commandId</code>）、<code>session</code>（轻量元数据）、<code>session_removed</code>。</li>
+    <li>队列 / 拒绝：<code>queued</code>（携带 prompt/position/queueMode）、<code>dequeue</code>、<code>queue_state</code>（携带 queuedCount/queuedItems）、<code>run_rejected</code>。</li>
+    <li>工作目录：<code>cwd_update</code>（<code>&#123; ok: true, cwd &#125;</code>，turn lease 占用时 <code>ok: false</code> + error）。</li>
+  </ul>
 
   <h2>注意事项</h2>
   <blockquote>
