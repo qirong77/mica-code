@@ -27,12 +27,14 @@
 
 ```bash
 bun install             # 安装依赖
+cd apps/desktop && npm install   # 桌面应用（Electron）依赖是独立 npm 项目，根 bun install 不覆盖；npm run build:app 的 prebuild:app 会自动检测并补装
 bun run dev             # 开发运行：bun run apps/cli/src/index.ts
 bun run typecheck       # 类型检查：bunx tsc --noEmit
 bun run test            # 运行 Vitest 测试：vitest run
 bun run test:watch      # 运行 Vitest watch
 bun run build           # 先 typecheck，再 compile 单二进制，postbuild 安装本地入口
 bun run dev:config-web  # Config Web Vite 调试：热更新 apps/config-web/web
+npm run build:app       # 构建桌面应用（cd apps/desktop && bun run build:mac；依赖缺失时 prebuild:app 自动 npm install）
 bun run build:sync-web   # Mica Sync Web 前端构建（apps/sync/web/dist）
 bun run build:sync-server # Mica Sync 中心服务 Node bundle（dist/mica-sync-server.js）
 bun run format          # 格式化 README、AGENT、apps、plugins、packages、scripts、docs、blogs

@@ -14,6 +14,7 @@
     "postbuild": "bun scripts/install.mjs",
     "typecheck": "bunx tsc --noEmit",
     "dev:app": "cd apps/desktop && bun run dev",
+    "prebuild:app": "cd apps/desktop && [ -x node_modules/.bin/electron-vite ] || npm install",
     "build:app": "cd apps/desktop && bun run build:mac",
     "test": "vitest run",
     "test:watch": "vitest",
