@@ -1,5 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { formatTokens } from '@packages/mica-web-shared/index.js';
+import {
+  contextUsage,
+  formatElapsedMs,
+  formatTokens,
+  modelLabel,
+  toolIcon,
+  toolLabel,
+} from '@packages/mica-web-shared/index.js';
 import type { MachineInfo, StoredSession } from './api';
 import { CwdPicker } from './CwdPicker';
 import { formatTime } from './format';
@@ -27,19 +34,12 @@ type ConversationProps = {
 const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessage, { kind: 'tool' }> }) {
   const [expanded, setExpanded] = useState(false);
   const LoaderIcon = appIcons.loader;
-  const CheckIcon = appIcons.check;
-  const XIcon = appIcons.x;
   const ChevronDownIcon = appIcons.chevronDown;
   const ChevronRightIcon = appIcons.chevronRight;
-  const stateIcon =
-    message.state === 'running' ? (
-      <LoaderIcon size={13} className="spin" />
-    ) : message.state === 'done' ? (
-      <CheckIcon size={13} />
-    ) : (
-      <XIcon size={13} />
-    );
-  const stateClass = `tool-state ${message.state}`;
+  const running = message.state === 'running';
+  const failed = message.state === 'error';
+  const statusClass = running ? 'running' : failed ? 'error' : 'complete';
+
   let argsPreview = '';
   try {
     const parsed = JSON.parse(message.args) as Record<string, unknown>;
@@ -52,25 +52,39 @@ const ToolCard = memo(function ToolCard({ message }: { message: Extract<UiMessag
   }
 
   return (
-    <div className="tool-card" onClick={() => setExpanded((value) => !value)} title={expanded ? '收起' : '展开'}>
-      <div className="tool-head">
-        <span className={stateClass}>{stateIcon}</span>
-        <span className="tool-name">{message.name}</span>
-        {argsPreview && <span className="tool-args-preview">{argsPreview}</span>}
-        <span className="tool-expand">{expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}</span>
+    <div className={`chat-tool-card ${statusClass}`} onClick={() => setExpanded((value) => !value)}>
+      <div className="chat-tool-card-row">
+        {running && (
+          <span className="chat-tool-spinner">
+            <LoaderIcon size={10} className="spin" />
+          </span>
+        )}
+        <span className="chat-tool-icon">{toolIcon(message.name)}</span>
+        <span className="chat-tool-display">
+          {toolLabel(message.name)}
+          {argsPreview && <span className="chat-tool-args"> {argsPreview}</span>}
+        </span>
+        {typeof message.durationMs === 'number' && (
+          <span className="chat-tool-duration">
+            {running ? formatElapsedMs(message.durationMs) : `(${formatElapsedMs(message.durationMs)})`}
+          </span>
+        )}
+        <span className="chat-tool-expand">
+          {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        </span>
       </div>
       {expanded && (
-        <div className="tool-body">
+        <div className="chat-tool-body">
           {message.args && (
             <details open>
               <summary>参数</summary>
-              <pre className="tool-json">{message.args}</pre>
+              <pre className="chat-tool-json">{message.args}</pre>
             </details>
           )}
           {message.result !== undefined && (
-            <details open={message.state === 'error'}>
-              <summary>结果{message.state === 'error' ? '（失败）' : ''}</summary>
-              <pre className={`tool-result ${message.state === 'error' ? 'error' : ''}`}>{message.result}</pre>
+            <details open={failed}>
+              <summary>结果{failed ? '（失败）' : ''}</summary>
+              <pre className={`chat-tool-result ${failed ? 'error' : ''}`}>{message.result}</pre>
             </details>
           )}
         </div>
@@ -117,24 +131,20 @@ const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extrac
   const truncated = message.text.length > THINKING_PREVIEW_MAX;
   const summary = expanded ? `思考 · ${message.text.length} 字` : preview || '思考中…';
   return (
-    <div className={`thinking-block ${expanded ? 'expanded' : ''}`}>
-      <button
-        className="thinking-toggle"
-        onClick={() => setExpanded((value) => !value)}
-        title={expanded ? '收起思考内容' : '展开思考内容'}
-      >
-        <span className="thinking-icon">
-          <SparklesIcon size={13} />
+    <div className={`chat-thinking ${expanded ? 'expanded' : ''}`}>
+      <button className="chat-thinking-toggle" onClick={() => setExpanded((value) => !value)}>
+        <span className="chat-thinking-icon">
+          <SparklesIcon size={12} />
         </span>
-        <span className="thinking-summary">
+        <span className="chat-thinking-summary">
           {summary}
           {!expanded && truncated ? '…' : ''}
         </span>
-        <span className="thinking-expand">
-          {expanded ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+        <span className="chat-thinking-expand">
+          {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
       </button>
-      {expanded && <div className="thinking-text">{message.text}</div>}
+      {expanded && <div className="chat-thinking-text">{message.text}</div>}
     </div>
   );
 });
@@ -142,39 +152,36 @@ const ThinkingBlock = memo(function ThinkingBlock({ message }: { message: Extrac
 const MessageItem = memo(function MessageItem({ message }: { message: UiMessage }) {
   if (message.kind === 'user') {
     return (
-      <div className="msg-row user">
-        <div className="msg-bubble user">{message.text}</div>
-        <span className="msg-time">{formatTime(new Date(message.ts).toISOString())}</span>
+      <div className="chat-message chat-message-user">
+        <span className="chat-message-marker">▌</span>
+        <div className="chat-message-body whitespace-pre-wrap break-words">{message.text}</div>
+        <span className="chat-message-time">{formatTime(new Date(message.ts).toISOString())}</span>
       </div>
     );
   }
   if (message.kind === 'assistant') {
-    const BotIcon = appIcons.bot;
     return (
-      <div className="msg-row assistant">
-        <div className="msg-avatar">
-          <BotIcon size={16} />
-        </div>
-        <div className="msg-content">
+      <div className="chat-message chat-message-assistant">
+        <span className="chat-message-marker">●</span>
+        <div className="chat-message-body">
           <Markdown text={message.text} />
         </div>
+        <span className="chat-message-time">{formatTime(new Date(message.ts).toISOString())}</span>
       </div>
     );
   }
   if (message.kind === 'tool') return <ToolCard message={message} />;
   if (message.kind === 'thinking') return <ThinkingBlock message={message} />;
-  return <div className={`notice-block ${message.variant === 'error' ? 'error' : ''}`}>{message.text}</div>;
+  return (
+    <div className={`chat-notice ${message.variant === 'error' ? 'chat-notice-error' : ''}`}>
+      <span>▌</span>
+      <div className="chat-notice-body">{message.text}</div>
+    </div>
+  );
 });
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
 export const Conversation = memo(function Conversation({
@@ -243,18 +250,12 @@ export const Conversation = memo(function Conversation({
   const snapshot = session.snapshot ?? {};
   const model = snapshot.model || '';
   const effort = snapshot.effort && snapshot.effort !== 'none' ? snapshot.effort : undefined;
-  const modelLabel = effort && model ? `${model}_${effort}` : model;
-  const lastUsage = usage ?? snapshot.lastUsage;
-  const tokens = typeof lastUsage?.totalTokens === 'number' ? lastUsage.totalTokens : 0;
-  const contextWindow = effectiveContextWindow(model, snapshot.contextWindowSize);
-  const cachedInput = typeof lastUsage?.cachedInputTokens === 'number' ? lastUsage.cachedInputTokens : 0;
-  const inputTokens = typeof lastUsage?.inputTokens === 'number' ? lastUsage.inputTokens : 0;
-  const cachedPct = inputTokens > 0 ? Math.round((cachedInput / inputTokens) * 100) : 0;
-  const contextPct = contextWindow > 0 && tokens > 0 ? Math.min(100, Math.round((tokens / contextWindow) * 100)) : 0;
-  // Only the ctx% number is highlighted, with severity color by occupancy;
-  // token count and cached% stay subdued so the eye lands on the pressure
-  // indicator instead of a solid green block.
-  const ctxTone = contextPct > 80 ? 'high' : contextPct > 50 ? 'mid' : 'low';
+  const modelName = modelLabel(model, effort);
+  const context = contextUsage({
+    usage: usage ?? snapshot.lastUsage,
+    model,
+    contextWindowSize: effectiveContextWindow(model, snapshot.contextWindowSize),
+  });
   const MenuIcon = appIcons.menu;
   const SendIcon = appIcons.send;
   const SquareIcon = appIcons.square;
@@ -271,7 +272,7 @@ export const Conversation = memo(function Conversation({
             <span className="live-badge">
               <span className="live-dot" />
               远程运行中
-              {elapsed > 0 && <span className="elapsed">· {formatElapsed(elapsed)}</span>}
+              {elapsed > 0 && <span className="elapsed">· {formatElapsedMs(elapsed * 1000)}</span>}
             </span>
           )}
           {!running && localRunning && (
@@ -304,36 +305,40 @@ export const Conversation = memo(function Conversation({
       </div>
 
       <div className="input-area">
-        <div className="composer-meta">
-          <span className="meta-item meta-machine" title={machine.hostname}>
-            {machine.name}
-          </span>
-          {modelLabel && (
-            <>
-              <span className="composer-separator">·</span>
-              <span className="meta-item meta-model" title={modelLabel}>
-                {modelLabel}
-              </span>
-            </>
-          )}
-          {tokens > 0 && (
-            <>
-              <span className="composer-separator">·</span>
-              <span className="meta-item meta-context">
-                <span className="ctx-tokens">{formatTokens(tokens)}</span>
-                <span className="ctx-sep"> (cached </span>
-                <span className="ctx-cached">{cachedPct}%</span>
-                <span className="ctx-sep">, ctx </span>
-                <span className={`ctx-pct ${ctxTone}`}>{contextPct}%</span>
-                <span className="ctx-sep">)</span>
-              </span>
-            </>
-          )}
-          {!connected && (
-            <span className={`conn-text ${connecting ? 'connecting' : 'lost'}`}>
-              {connecting ? '连接中…' : '连接断开，自动重连中…'}
+        <div className="chat-status-line">
+          <span className="chat-status-primary">
+            <span className="meta-machine" title={machine.hostname}>
+              {machine.name}
             </span>
-          )}
+            {modelName && (
+              <>
+                <span className="composer-separator">·</span>
+                <span className="meta-model" title={modelName}>
+                  {modelName}
+                </span>
+              </>
+            )}
+            {context && (
+              <>
+                <span className="composer-separator">·</span>
+                <span className="meta-context">
+                  <span className="ctx-tokens">{formatTokens(context.tokens)}</span>
+                  <span className="ctx-sep"> (cached </span>
+                  <span className="ctx-cached">{context.cachedPct}%</span>
+                  <span className="ctx-sep">, ctx </span>
+                  <span className={`ctx-pct ${context.tone}`}>{context.contextPct}%</span>
+                  <span className="ctx-sep">)</span>
+                </span>
+              </>
+            )}
+          </span>
+          <span className="chat-status-meta">
+            {!connected && (
+              <span className={`conn-text ${connecting ? 'connecting' : 'lost'}`}>
+                {connecting ? '连接中…' : '连接断开，自动重连中…'}
+              </span>
+            )}
+          </span>
         </div>
         <textarea
           ref={inputRef}

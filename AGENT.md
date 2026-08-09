@@ -125,7 +125,7 @@ packages/
   mica-common                      跨包共享底层工具
   mica-pty                         PTY 测试驱动 + 内置 PTY 工具的 Node helper（node-pty 只在 Node 子进程加载）
   mica-sync-protocol               mica-sync 三端（daemon/server/web）共享的 wire 协议类型，无运行时代码
-  mica-web-shared                 sync web 与 desktop renderer 共用的展示纯函数（时间/状态/token 格式化）
+  mica-web-shared                 sync web 与 desktop renderer 共用的展示纯函数（时间/状态/token 格式化、工具图标/标签、usage/context 摘要计算）
   @anthropic/ink                   本仓库维护的 Ink fork
 
 plugins/builtin/                   官方内置产品插件与启动扩展（原 buildin-plugins/）；Todo、MCP、message queue、文件 mention 和命令
@@ -479,6 +479,7 @@ AGENT.md
 ## 测试与验证
 
 - 单元/集成测试走 `bun run test`（vitest，Node 环境）；涉及交互式 TUI 的测试或验证优先使用 `packages/mica-pty`。
+- vitest include 覆盖 `apps/**/*.test.{ts,tsx}`（sync web 的组件冒烟测试是 `.tsx`，用 react-dom/server 渲染验证终端风格结构）；`apps/desktop` 是独立 npm 项目，其测试用项目内 `bun test` 且依赖 `apps/desktop/node_modules`（未安装时测试不可运行，属环境问题而非代码问题）。
 - `packages/mica-pty` 提供两类能力：`PtyDriver`（直接 import 的 PTY 测试驱动，Node ≥22 / vitest 下使用——node-pty 的 native binding 在 Bun 下不可用，因此**不要从 `bun run` 代码里 import `PtyDriver`**）和内置 PTY 工具运行时（`PtyManager` + Node helper 桥接，Bun 主进程可安全使用，见 Tools 章节）。
 - 用 mica-pty 做冒烟验证（需要真实 provider API key，默认跳过）：
 
@@ -546,10 +547,11 @@ rg --files src packages scripts docs blogs
 
 ### 构建与部署
 
-- `bun run build:sync-server` 产出 `dist/mica-sync-server.js`（Node 单文件 ESM bundle）；`bun run build:sync-web` 产出 `apps/sync/web/web/dist`（vite `base: './'`，可部署到任意子路径）。
+- `bun run build:sync-server` 产出 `dist/mica-sync-server.js`（Node 单文件 ESM bundle）；`bun run build:sync-web` 产出 `apps/sync/web/dist`（vite `base: './'`，可部署到任意子路径）。
 - 生产部署在 `188.253.118.143`：`/opt/mica-sync/`（`mica-sync-server.mjs` + `web/` + `data/`），pm2 进程名 `mica-sync`，监听 5560；Nginx `location /mica/` 反代（必须 `proxy_buffering off` + 长 read timeout，否则 SSE 断开）。
 - **pm2 必须用 `pm2 start node --name mica-sync -- mica-sync-server.mjs ...` 显式指定解释器**；直接 `pm2 start mica-sync-server.mjs` 不会执行 ESM bundle 的入口。
-- **remote-shell 的 `upload&extract=1` 会清空 target**：重新部署前先 `mv /opt/mica-sync/data /tmp/mica-sync-data-backup`，上传解压后再移回并 `pm2 restart mica-sync`，否则机器注册和会话记录会丢失。
+- **deploy-server 的 `/upload` 用法**：body 必须是原始 tar 二进制（`curl -X POST --data-binary @dist.tar.gz`，不支持 multipart）；`path` 是服务器端**临时存储路径**（extract 后或未 extract 时都会被删除，不能用作正式落盘路径，写普通文件用 `POST /file { path, content }`）；`extract=1` 会 **`rm -rf` 清空 `target`** 再解压。重新部署 web 前先 `mv /opt/mica-sync/data /tmp/mica-sync-data-backup`，上传解压（tar 只含 `dist/` 内容、不带顶层目录）后再把 data 移回并 `pm2 restart mica-sync`，否则机器注册和会话记录会丢失；只更新静态文件时解压到临时目录再 `mv` 覆盖 `/opt/mica-sync/web`，不要碰 server 和 data。
+- sync web UI（`apps/sync/web`）与 mica-code-app（`apps/desktop` renderer）共用同一套展示词汇：等宽终端字体、`#0e0e0e` 暗色、`--chat-*` 变量、消息 `marker|body|time` 网格、`chat-markdown`（react-markdown + remark-gfm，根依赖与 desktop 同版本）、工具行 `icon + label + args + state + duration`、状态行 `model_effort · tokens (cached %, ctx %)`。展示数据计算（工具图标/标签、usage 归一化、context 摘要、耗时格式化）在 `packages/mica-web-shared`，改任何一侧的展示形态时同步检查另一侧。移动端（≤768px）隐藏消息时间列、侧栏抽屉全宽、触控目标 ≥36px、输入框 16px 防 iOS 缩放、safe-area-inset-bottom。
 - 服务器信息与 remote-shell 使用方式见 `qirong-application/Agent.md`；该文件记录了同一台服务器上的所有服务，变更服务器配置后要同步更新。
 
 ### Config Web 的 Sync 页面

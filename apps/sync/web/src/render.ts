@@ -12,6 +12,8 @@ export type UiMessage =
       state: 'running' | 'done' | 'error';
       result?: string;
       ts: number;
+      /** Wall-clock duration of the tool call, set when the result arrives. */
+      durationMs?: number;
     }
   | { kind: 'thinking'; id: string; text: string; ts: number }
   | { kind: 'notice'; id: string; text: string; ts: number; variant?: 'error' };
@@ -102,10 +104,7 @@ export function mergeSessionMessages(current: UiMessage[], base: UiMessage[]): U
     if (PERSISTED_KINDS.has(message.kind)) {
       currentPersistedIndex += 1;
     } else if (LIVE_KINDS.has(message.kind)) {
-      const at =
-        currentPersistedIndex >= 0
-          ? baseSlots[Math.min(currentPersistedIndex, baseSlots.length - 1)]
-          : -1;
+      const at = currentPersistedIndex >= 0 ? baseSlots[Math.min(currentPersistedIndex, baseSlots.length - 1)] : -1;
       const group = insertAfter.get(at) ?? [];
       group.push(message);
       insertAfter.set(at, group);
@@ -190,10 +189,12 @@ export function applyEvent(messages: UiMessage[], event: SyncEvent): UiMessage[]
       if (index >= 0) {
         const message = next[index];
         if (message.kind === 'tool') {
+          const resultTs = Number(event.ts ?? Date.now());
           next[index] = {
             ...message,
             state: record.ok ? 'done' : 'error',
             result: record.result,
+            durationMs: resultTs > 0 && message.ts > 0 ? Math.max(0, resultTs - message.ts) : undefined,
           };
         }
       } else {

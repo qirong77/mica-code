@@ -27,6 +27,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
+import { toolIcon as sharedToolIcon, toolLabel as sharedToolLabel } from '@packages/mica-web-shared'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -79,45 +80,8 @@ const EFFORT_OPTIONS = [
   { value: 'xhigh', detail: '最强推理' }
 ]
 
-const TOOL_ICONS = {
-  read_file: '📖',
-  read_image: '📷',
-  write_file: '✍️',
-  apply_patch: '🩹',
-  list_files: '📂',
-  grep_search: '📊',
-  run_shell: '⚡️',
-  web_fetch: '🔗',
-  web_search: '🌐',
-  Skill: '✨',
-  Agent: '🤖',
-  TodoWrite: '📝',
-  background_tasks: '📋',
-  read_task_output: '📋',
-  kill_task: '📋'
-}
-
 function getToolIcon(toolName) {
-  if (String(toolName || '').startsWith('mcp__')) return '🔌'
-  return TOOL_ICONS[toolName] || '⚙'
-}
-
-const TOOL_LABELS = {
-  read_file: 'Read file',
-  read_image: 'Read image',
-  write_file: 'Write file',
-  apply_patch: 'Apply patch',
-  list_files: 'List files',
-  grep_search: 'Search code',
-  run_shell: 'Shell',
-  web_fetch: 'Fetch web',
-  web_search: 'Search web',
-  Skill: 'Load skill',
-  Agent: 'Subagent',
-  TodoWrite: 'Plan',
-  background_tasks: 'Background tasks',
-  read_task_output: 'Task output',
-  kill_task: 'Stop task'
+  return sharedToolIcon(toolName)
 }
 
 function copyText(text) {
@@ -722,21 +686,12 @@ function toolSummary(tool) {
 }
 
 function toolDisplayName(tool) {
-  if (String(tool.tool || '').startsWith('mcp__')) {
-    // mcp__<server>__<tool>_<hash> -> [MCP:server] tool（去掉 hash 后缀，与 CLI 一致）
-    const match = /^mcp__([^_]+)__(.+)$/.exec(tool.tool)
-    if (match) {
-      const server = match[1]
-      const toolPart = String(match[2]).replace(/_[0-9a-f]{8}$/, '')
-      return `[MCP:${server}] ${toolPart}`
-    }
-  }
   if (tool.tool === 'Agent') {
     const operation = tool.input?.operation || 'run'
     if (operation === 'run_many') return 'Subagents'
     if (operation !== 'run') return `Subagent · ${operation}`
   }
-  return TOOL_LABELS[tool.tool] || tool.tool
+  return sharedToolLabel(tool.tool)
 }
 
 // 后台 subagent / 后台任务与 CLI TaskStatusBar 对齐：状态来自 app-server 的

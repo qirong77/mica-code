@@ -3,4 +3,7 @@
 // both build pipelines (Vite + TS and electron-vite renderer) can consume it.
 
 export { formatTime, formatRelative, relativeTimeShort } from './time.js';
-export { formatStatus, formatTokens } from './format.js';
+export { formatStatus, formatTokens, tokenCount, formatElapsedMs } from './format.js';
+export { toolIcon, toolLabel } from './tools.js';
+export { usageValues, modelLabel, contextUsage } from './context.js';
+export type { UsageValues, ContextUsage, ContextTone } from './context.js';
