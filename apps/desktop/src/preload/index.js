@@ -31,6 +31,10 @@ const chatApi = {
   recallQueued: (id, clientMessageId) =>
     ipcRenderer.invoke('chat:recall-queued', { id, clientMessageId }),
   history: (sessionId) => ipcRenderer.invoke('chat:history', { sessionId }),
+  inputHistory: {
+    read: () => ipcRenderer.invoke('chat:input-history:read'),
+    append: (text) => ipcRenderer.invoke('chat:input-history:append', { text })
+  },
   meta: (sessionId, cwd) => ipcRenderer.invoke('chat:meta', { sessionId, cwd }),
   models: () => ipcRenderer.invoke('chat:models'),
   roles: () => ipcRenderer.invoke('chat:roles'),

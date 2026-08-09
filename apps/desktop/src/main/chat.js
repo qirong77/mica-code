@@ -20,6 +20,7 @@ import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, resolveBusyDispatch } from './chat-queue'
 import { getShellEnvSnapshot } from './shell-env'
+import { appendInputHistory, readInputHistory } from './input-history'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -1126,6 +1127,10 @@ export function registerChatIpc() {
     if (!sessionId) return []
     return readHistory(sessionId)
   })
+
+  ipcMain.handle('chat:input-history:read', () => readInputHistory())
+
+  ipcMain.handle('chat:input-history:append', (_event, { text } = {}) => appendInputHistory(text))
 
   ipcMain.handle('chat:meta', (_event, { sessionId, cwd } = {}) => {
     if (!sessionId) return readDefaultMeta(cwd)

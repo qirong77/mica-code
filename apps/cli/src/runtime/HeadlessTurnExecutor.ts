@@ -112,7 +112,6 @@ export class HeadlessTurnExecutor {
     const { agent, sessionController, onEvent } = this.options;
     const startedAt = Date.now();
     this.responseBuffer = '';
-    const reservedRunId = agent.reserveRunId();
     let content: AgentQueryContent;
     try {
       content = input.source === 'system' ? input.text : await this.parseImageRefs(input.text);
@@ -121,6 +120,15 @@ export class HeadlessTurnExecutor {
       return;
     }
     try {
+      // Refresh the persisted signature before this turn's saves: another host
+      // (a second app-server for the same session, the sync daemon or a CLI
+      // resume) may have written the session file since our last save. Without
+      // this, saveCurrent's "another process wrote" guard would skip every
+      // save of this turn and the conversation would be lost on restart.
+      // Must run before reserveRunId(): loadSnapshot inside the refresh bumps
+      // the run id, and reserving first would make this turn look aborted.
+      sessionController.refreshFromStore();
+      const reservedRunId = agent.reserveRunId();
       sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
       const result = await agent.run(content, {
         reservedRunId,

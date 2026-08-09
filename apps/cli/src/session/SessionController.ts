@@ -109,8 +109,7 @@ export class SessionController {
     } = {},
   ): boolean {
     const snapshot = this.agent.getSnapshot();
-    const conversationMessages =
-      options.conversationMessages ?? getPersistableConversationMessages(this.agent);
+    const conversationMessages = options.conversationMessages ?? getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
     if (!hasConversation(snapshot.messages, conversationMessages) && !options.allowEmpty) {
       this.store.delete(this.currentSessionId);
@@ -122,9 +121,14 @@ export class SessionController {
     if (this.currentPersistedSignature !== null) {
       if (!existing) return false;
       if (sessionSignature(existing) !== this.currentPersistedSignature) {
-        // Another process persisted a newer snapshot. Keep it authoritative;
-        // the next leased turn will refresh this controller before running.
-        return true;
+        // Another process persisted the session file since our last save
+        // (a second app-server host, the sync daemon or a CLI resume).
+        // Prefer keeping the other writer's snapshot authoritative, but never
+        // skip the save forever: headless hosts (app-server / exec) do not
+        // call refreshFromStore between turns, so a permanent skip would
+        // silently drop every later turn of this host. Falling back to writing
+        // the current in-memory snapshot (revision bump below) guarantees the
+        // host's own turns survive; the next refresh converges the signature.
       }
     }
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));

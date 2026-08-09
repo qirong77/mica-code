@@ -274,6 +274,62 @@ describe('SessionController', () => {
     expect(persisted.updatedAt).toBe('2026-07-20T02:00:00.000Z');
   });
 
+  it('keeps saving when another process rewrote the session file (no permanent skip)', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let disk: PersistedSession | null = null;
+    const saves: PersistedSession[] = [];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [{ role: 'user', content: 'my prompt' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'my prompt' }]),
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        load: () => disk,
+        save: (session) => {
+          saves.push(session);
+          disk = session;
+        },
+        delete: () => false,
+      },
+    });
+
+    expect(controller.saveCurrent()).toBe(true);
+    expect(saves).toHaveLength(1);
+
+    // Another host rewrote the file while we were idle (stale signature).
+    disk = {
+      ...saves[0]!,
+      turnState: 'running',
+      snapshot: {
+        ...saves[0]!.snapshot,
+        messages: [{ role: 'user', content: 'written by another host' }],
+      },
+    };
+
+    // Our next save must write the in-memory snapshot instead of skipping
+    // forever (regression: the headless host would silently lose every later
+    // turn of its session otherwise).
+    expect(controller.saveCurrent({ turnState: 'completed' })).toBe(true);
+    expect(saves).toHaveLength(2);
+    expect(saves[1]!.snapshot.messages).toEqual([{ role: 'user', content: 'my prompt' }]);
+    expect(saves[1]!.turnState).toBe('completed');
+    expect(saves[1]!.revision).toBe((saves[0]!.revision ?? 0) + 1);
+  });
+
   it('ignores compact metadata messages when deriving the session title', async () => {
     const { SessionController } = await import('./SessionController.js');
     const saves: PersistedSession[] = [];

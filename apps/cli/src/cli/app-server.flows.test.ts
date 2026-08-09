@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -917,5 +917,80 @@ suite('mica app-server real-user flows (mock provider)', () => {
     }
     // The queued text reached the provider as the second request after abort.
     expect(JSON.stringify(mock!.state.requests[1]?.input ?? [])).toContain('排队的话（abort 后继续）');
+  });
+
+  itE2E('two hosts racing on one session keep persisting both turns (no silent skip)', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.longText = '';
+
+    const home = makeHome('race');
+    const hostA = spawnHost('race-a', [], home);
+    hosts.push(hostA);
+    await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
+    const latestStartedId = (host: Host) => {
+      const startedAll = host.lines.filter((m) => m.method === 'turn/started');
+      return (startedAll[startedAll.length - 1]?.params?.turn as { id?: string } | undefined)?.id ?? '';
+    };
+    const waitForNewStarted = async (host: Host, label: string) => {
+      const before = host.lines.filter((m) => m.method === 'turn/started').length;
+      await waitFor(host, () => host.lines.filter((x) => x.method === 'turn/started').length > before, label, 30_000);
+    };
+
+    await send(hostA, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: 'A-1 第一条' }] });
+    await waitForNewStarted(hostA, 'A turn 1 started');
+    await waitFor(hostA, turnCompleted(latestStartedId(hostA)), 'A turn 1 completed', 30_000);
+
+    const sessionFile = readdirSync(join(home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFile).toBeTruthy();
+    const sessionId = sessionFile!.replace(/\.json$/, '');
+    const sessionPath = join(home, 'sessions', sessionFile!);
+
+    const hostB = spawnHost('race-b', ['--session', sessionId], home);
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'host B ready or error', 30_000);
+    await sleep(200);
+
+    await send(hostA, 2, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: 'A-2 第二条' }],
+    });
+    await waitForNewStarted(hostA, 'A turn 2 started');
+    await waitFor(hostA, turnCompleted(latestStartedId(hostA)), 'A turn 2 completed', 30_000);
+
+    // Host B runs a turn with a stale persisted signature: it must still save.
+    await send(hostB, 3, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: 'B-1 第三条（B 的 turn）' }],
+    });
+    await waitForNewStarted(hostB, 'B turn started');
+    await waitFor(hostB, turnCompleted(latestStartedId(hostB)), 'B turn completed', 30_000);
+    await sleep(150);
+
+    const disk = JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
+      turnState?: string;
+      snapshot?: { messages?: unknown[] };
+    };
+    expect(JSON.stringify(disk)).toContain('B-1 第三条（B 的 turn）');
+    expect(disk.turnState).toBe('completed');
+    const userTexts = (disk.snapshot?.messages ?? [])
+      .filter((m) => (m as { type?: string }).type === 'message' && (m as { role?: string }).role === 'user')
+      .map((m) => JSON.stringify(m));
+    expect(JSON.stringify(userTexts)).toContain('A-1 第一条');
+    expect(JSON.stringify(userTexts)).toContain('A-2 第二条');
+    expect(JSON.stringify(userTexts)).toContain('B-1 第三条（B 的 turn）');
+
+    // Host A keeps persisting afterwards too.
+    await send(hostA, 4, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: 'A-3 第五条' }],
+    });
+    await waitForNewStarted(hostA, 'A turn 3 started');
+    await waitFor(hostA, turnCompleted(latestStartedId(hostA)), 'A turn 3 completed', 30_000);
+    await sleep(150);
+    const disk2 = JSON.parse(readFileSync(sessionPath, 'utf-8')) as { snapshot?: { messages?: unknown[] } };
+    expect(JSON.stringify(disk2)).toContain('A-3 第五条');
   });
 });

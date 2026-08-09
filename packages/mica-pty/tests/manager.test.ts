@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { PtyManager, MAX_PTY_OUTPUT_BYTES } from '../src/manager.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { PtyManager, MAX_PTY_OUTPUT_BYTES, findNodePtyUpward, resolveNodePtyEntry } from '../src/manager.js';
 
 const SHELL = process.env.MICA_PTY_TEST_SHELL ?? '/bin/sh';
 const LONG_TIMEOUT = 20_000;
@@ -136,5 +140,60 @@ describe('PtyManager', () => {
     const read = manager.read(sessionId, { mode: 'tail', windowSize: MAX_PTY_OUTPUT_BYTES });
     expect(read.totalBytes).toBeLessThanOrEqual(MAX_PTY_OUTPUT_BYTES + 4096);
     await manager.kill(sessionId);
+  });
+});
+
+describe('resolveNodePtyEntry', () => {
+  it('优先使用 MICA_PTY_ENTRY 环境变量指定的入口', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-pty-test-'));
+    const fakeEntry = join(dir, 'index.js');
+    writeFileSync(fakeEntry, '');
+    process.env.MICA_PTY_ENTRY = fakeEntry;
+    try {
+      const entry = await resolveNodePtyEntry();
+      expect(entry).toBe(pathToFileURL(fakeEntry).href);
+    } finally {
+      delete process.env.MICA_PTY_ENTRY;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('MICA_PTY_ENTRY 指向不存在的文件时继续后续查找而不是报错', async () => {
+    process.env.MICA_PTY_ENTRY = join(tmpdir(), 'mica-pty-does-not-exist', 'index.js');
+    try {
+      const entry = await resolveNodePtyEntry();
+      // 本仓库 node_modules 里应能找到真实 node-pty。
+      expect(entry.endsWith('/node-pty/lib/index.js')).toBe(true);
+    } finally {
+      delete process.env.MICA_PTY_ENTRY;
+    }
+  });
+
+  it('findNodePtyUpward 能从 node_modules 布局中定位 node-pty 入口', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-pty-test-'));
+    const ptyDir = join(dir, 'node_modules', 'node-pty', 'lib');
+    mkdirSync(ptyDir, { recursive: true });
+    writeFileSync(join(ptyDir, 'index.js'), '');
+    try {
+      const entry = findNodePtyUpward(dir);
+      expect(entry).toBe(pathToFileURL(join(ptyDir, 'index.js')).href);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('发布版布局（二进制旁 node_modules/node-pty）可被解析', () => {
+    // 模拟 ~/.local/lib/mica/ 的发布目录结构：mica 二进制 + node_modules/node-pty。
+    const dir = mkdtempSync(join(tmpdir(), 'mica-pty-test-'));
+    const binaryDir = join(dir, 'lib', 'mica');
+    const ptyDir = join(binaryDir, 'node_modules', 'node-pty', 'lib');
+    mkdirSync(ptyDir, { recursive: true });
+    writeFileSync(join(ptyDir, 'index.js'), '');
+    try {
+      const entry = findNodePtyUpward(binaryDir);
+      expect(entry).toBe(pathToFileURL(join(ptyDir, 'index.js')).href);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

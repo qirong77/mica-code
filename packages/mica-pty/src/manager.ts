@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripAnsi } from './ansi.js';
 import { KEYS, type KeyName } from './keys.js';
 import { ptyServerSource } from './ptyServerSource.js';
@@ -149,24 +149,31 @@ function isRealFileUrl(url: string): boolean {
   return url.startsWith('file://') && !url.includes('/$bunfs');
 }
 
-/** Walk up from `cwd` looking for node-pty in node_modules (incl. Bun's .bun cache layout). */
-function findNodePtyOnDisk(): string | null {
-  let dir = process.cwd();
-  for (let depth = 0; depth < 64; depth++) {
-    const direct = path.join(dir, 'node_modules', 'node-pty', 'lib', 'index.js');
-    if (existsSync(direct)) return pathToFileURL(direct).href;
-    const bunCacheDir = path.join(dir, 'node_modules', '.bun');
-    try {
-      if (existsSync(bunCacheDir)) {
-        const match = readdirSync(bunCacheDir).find((entry) => entry.startsWith('node-pty@'));
-        if (match) {
-          const candidate = path.join(bunCacheDir, match, 'node_modules', 'node-pty', 'lib', 'index.js');
-          if (existsSync(candidate)) return pathToFileURL(candidate).href;
-        }
+/** node-pty 包入口：node_modules/node-pty/lib/index.js（兼容 Bun 的 .bun 缓存布局）。 */
+function findNodePtyInNodeModules(rootDir: string): string | null {
+  const direct = path.join(rootDir, 'node_modules', 'node-pty', 'lib', 'index.js');
+  if (existsSync(direct)) return pathToFileURL(direct).href;
+  const bunCacheDir = path.join(rootDir, 'node_modules', '.bun');
+  try {
+    if (existsSync(bunCacheDir)) {
+      const match = readdirSync(bunCacheDir).find((entry) => entry.startsWith('node-pty@'));
+      if (match) {
+        const candidate = path.join(bunCacheDir, match, 'node_modules', 'node-pty', 'lib', 'index.js');
+        if (existsSync(candidate)) return pathToFileURL(candidate).href;
       }
-    } catch {
-      // Ignore unreadable cache dirs.
     }
+  } catch {
+    // Ignore unreadable cache dirs.
+  }
+  return null;
+}
+
+/** 从 startDir 逐级向上，在各级 node_modules 中查找 node-pty。 */
+export function findNodePtyUpward(startDir: string): string | null {
+  let dir = startDir;
+  for (let depth = 0; depth < 64; depth++) {
+    const found = findNodePtyInNodeModules(dir);
+    if (found) return found;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -174,19 +181,94 @@ function findNodePtyOnDisk(): string | null {
   return null;
 }
 
-/** Resolve the node-pty module entry the helper should load. */
-async function resolveNodePtyEntry(): Promise<string> {
+/** 常见全局 node_modules 位置（npm -g / homebrew / nvm 多版本）。 */
+function findNodePtyGlobally(): string | null {
+  const candidates = ['/usr/local/lib/node_modules', '/opt/homebrew/lib/node_modules', '/usr/lib/node_modules'];
+  for (const candidate of candidates) {
+    const found = findNodePtyInNodeModules(candidate);
+    if (found) return found;
+  }
+  try {
+    const nvmDir = path.join(homedir(), '.nvm', 'versions', 'node');
+    for (const version of readdirSync(nvmDir)) {
+      const found = findNodePtyInNodeModules(path.join(nvmDir, version, 'lib'));
+      if (found) return found;
+    }
+  } catch {
+    // Ignore missing nvm dirs.
+  }
+  try {
+    const npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 10_000 }).trim();
+    if (npmRoot) {
+      const found = findNodePtyInNodeModules(npmRoot);
+      if (found) return found;
+    }
+  } catch {
+    // npm 不可用时忽略，前面已有多个候选。
+  }
+  return null;
+}
+
+/**
+ * 解析 node-pty 模块入口（node-pty/lib/index.js 的 file:// URL）。
+ *
+ * 查找顺序：
+ * 1. MICA_PTY_ENTRY 环境变量（显式指定，最优先）
+ * 2. import.meta.resolve（开发模式，从源码 node_modules 解析）
+ * 3. mica 二进制所在目录向上（发布版自带 node_modules/node-pty，如 ~/.local/lib/mica/）
+ * 4. 本模块所在目录向上（开发模式，不依赖 cwd）
+ * 5. 当前工作目录向上（用户项目里安装）
+ * 6. 全局 npm / homebrew / nvm 目录
+ *
+ * 全部失败时抛出带诊断信息的错误，列出已尝试的查找位置和修复方式。
+ */
+export async function resolveNodePtyEntry(): Promise<string> {
+  const attempted: string[] = [];
+
+  const envEntry = process.env.MICA_PTY_ENTRY;
+  if (envEntry) {
+    if (envEntry.startsWith('file://')) return envEntry;
+    const absolute = path.resolve(envEntry);
+    if (existsSync(absolute)) return pathToFileURL(absolute).href;
+    attempted.push(`MICA_PTY_ENTRY=${envEntry}（文件不存在）`);
+  }
+
   try {
     const resolved = await import.meta.resolve('node-pty');
     if (isRealFileUrl(resolved)) return resolved;
-  } catch {
-    // Fall through to the on-disk lookup.
+    attempted.push(`import.meta.resolve('node-pty') → ${resolved}`);
+  } catch (error) {
+    attempted.push(`import.meta.resolve('node-pty') 失败: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const onDisk = findNodePtyOnDisk();
-  if (onDisk) return onDisk;
+
+  const bases: Array<{ label: string; dir: string }> = [];
+  const execName = process.execPath ? path.basename(process.execPath) : '';
+  if (execName && execName !== 'bun' && execName !== 'bunx') {
+    bases.push({ label: `mica 二进制目录 ${path.dirname(process.execPath)}`, dir: path.dirname(process.execPath) });
+  }
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  bases.push({ label: `mica-pty 模块目录 ${moduleDir}`, dir: moduleDir });
+  bases.push({ label: `工作目录 ${process.cwd()}`, dir: process.cwd() });
+
+  for (const { label, dir } of bases) {
+    const found = findNodePtyUpward(dir);
+    if (found) return found;
+    attempted.push(`${label}: 向上查找未命中`);
+  }
+
+  const globalFound = findNodePtyGlobally();
+  if (globalFound) return globalFound;
+  attempted.push('全局 npm / homebrew / nvm 目录: 未找到');
+
   throw new Error(
-    '未找到 node-pty 依赖。PTY 工具需要本机可用的 node-pty（开发环境已在 node_modules 内置），' +
-      '且 Node >= 22 可执行文件位于 PATH（可用 MICA_PTY_NODE 覆盖）。',
+    'PTY 工具不可用：未找到 node-pty 依赖。\n' +
+      '已尝试:\n' +
+      attempted.map((line) => `  - ${line}`).join('\n') +
+      '\n修复方式（任选其一）:\n' +
+      '  1. 重新安装 mica（新版发布包自带 node-pty）: ' +
+      'curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh\n' +
+      '  2. 安装全局 node-pty: npm install -g node-pty\n' +
+      '  3. 用 MICA_PTY_ENTRY 指定 node-pty 入口（node-pty/lib/index.js 的绝对路径）',
   );
 }
 

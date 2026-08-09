@@ -2,11 +2,16 @@
 # Mica Code release installer.
 # Product: mica-code. CLI command: mica.
 # Downloads only the current platform archive from GitHub Releases.
+#
+# 新版发布包内含 node-pty 运行时（mica + node_modules/node-pty），解压到
+# ~/.local/lib/mica/，~/.local/bin/mica 只是 launcher。PTY 工具开箱即用，
+# 不依赖用户机器上的 node_modules。
 set -eu
 
 REPO="${MICA_GITHUB_REPO:-qirong77/mica-code}"
 VERSION="${MICA_VERSION:-${1:-latest}}"
 INSTALL_DIR="${MICA_INSTALL_DIR:-$HOME/.local/bin}"
+PACKAGE_DIR="${MICA_PACKAGE_DIR:-$HOME/.local/lib/mica}"
 BIN_NAME="${MICA_BIN_NAME:-mica}"
 
 need_cmd() {
@@ -117,17 +122,26 @@ if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
   exit 1
 fi
 
-mkdir -p "${TMP_DIR}/payload"
-tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "${TMP_DIR}/payload"
+# 完整解压（mica 二进制 + node_modules/node-pty）到 package dir，先清空旧版本残留。
+rm -rf "$PACKAGE_DIR"
+mkdir -p "$PACKAGE_DIR"
+tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "$PACKAGE_DIR"
 
-if [ ! -f "${TMP_DIR}/payload/${ASSET}" ]; then
-  echo "Archive does not include ${ASSET}." >&2
+if [ ! -f "${PACKAGE_DIR}/mica" ]; then
+  echo "Archive does not include mica binary." >&2
   exit 1
 fi
+chmod 755 "${PACKAGE_DIR}/mica"
 
+# node-pty 的 spawn-helper 需要可执行位（tar 可能丢失或本来就缺）。
+find "$PACKAGE_DIR/node_modules" -name spawn-helper -exec chmod 755 {} + 2>/dev/null || true
+
+# launcher 指向 package dir 内的二进制；旧版本这里直接是二进制，会被覆盖。
 mkdir -p "$INSTALL_DIR"
-chmod 755 "${TMP_DIR}/payload/${ASSET}"
-cp "${TMP_DIR}/payload/${ASSET}" "${INSTALL_DIR}/${BIN_NAME}"
+cat > "${INSTALL_DIR}/${BIN_NAME}" <<EOF
+#!/bin/sh
+exec "${PACKAGE_DIR}/mica" "\$@"
+EOF
 chmod 755 "${INSTALL_DIR}/${BIN_NAME}"
 
 echo "Installed ${BIN_NAME} to ${INSTALL_DIR}/${BIN_NAME}"

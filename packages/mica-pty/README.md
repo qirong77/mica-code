@@ -63,9 +63,25 @@ pty_* 工具 (packages/mica-tools/pty/)
             └─ node-pty 创建 PTY 会话，异步回传 data/exit 事件
 ```
 
-- manager 先通过 `import.meta.resolve('node-pty')`（排除 Bun 虚拟 `$bunfs` 路径）或向上遍历 `node_modules`（含 `.bun` 缓存布局）解析 node-pty 入口，交给 Node helper 从真实磁盘加载。
+- manager 按以下顺序解析 node-pty 入口，交给 Node helper 从真实磁盘加载：
+  1. `MICA_PTY_ENTRY` 环境变量（显式指定，最优先）；
+  2. `import.meta.resolve('node-pty')`（开发模式，排除 Bun 虚拟 `$bunfs` 路径）；
+  3. mica 二进制所在目录向上（发布版自带 `node_modules/node-pty`，如 `~/.local/lib/mica/`）；
+  4. mica-pty 模块目录向上（开发模式，不依赖 cwd）；
+  5. 当前工作目录向上（含 `.bun` 缓存布局）；
+  6. 全局 npm / homebrew / nvm 目录。
+  全部失败时报错会列出已尝试位置和修复方式。
 - `src/server.mjs` 是唯一真相源，`src/ptyServerSource.ts` 通过 `bun run scripts/generate-pty-server-source.mjs` 生成其 JSON 转义内嵌（`bun build --compile` 不支持 `?raw`），`tests/serverSource.test.ts` 校验同步。
 - node-pty 缺失或 `node` 不可用（可用 `MICA_PTY_NODE` 覆盖）时工具降级报错，不影响 mica 其他功能。
+
+### 发布版自带 node-pty
+
+node-pty 是 C++ 原生模块，无法打进 `bun build --compile` 的单文件二进制，因此发布包（GitHub Release 的 `mica-code-{platform}-{cpu}.tar.gz`）除 `mica` 二进制外还携带精简后的 `node_modules/node-pty`：
+
+- darwin / win32：npm 包自带的 `prebuilds/{platform}-{arch}`（`pty.node` + `spawn-helper`）；
+- linux：构建机（对应架构 runner）上 `bun install` 时编译的 `build/Release/{pty.node,spawn-helper}`。
+
+安装脚本（`scripts/install.sh` 与 `scripts/install.mjs`）把两者解压到 `~/.local/lib/mica/`，`~/.local/bin/mica` 只是 launcher。运行时 manager 从二进制目录向上即可找到 node-pty，**不再依赖用户机器上的 node_modules**。打包逻辑见 `scripts/package-release.mjs` 与 `scripts/stage-node-pty.mjs`。
 
 `PtyManager` 也可直接编程使用：
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { navigateChatHistory } from './ChatView'
+import { isCaretOnFirstLine, isCaretOnLastLine, navigateChatHistory } from './ChatView'
 
 function makeCursor() {
   return { current: -1 }
@@ -59,5 +59,36 @@ describe('chat input history navigation', () => {
     const cursor = makeCursor()
     expect(navigateChatHistory(drafts, ['only'], cursor, -1, 'draft', 'node')).toBe('only')
     expect(navigateChatHistory(drafts, ['only'], cursor, 1, 'only', 'node')).toBe('draft')
+  })
+})
+
+describe('caret line detection for history navigation', () => {
+  const element = (value, selectionStart, selectionEnd) => ({ value, selectionStart, selectionEnd })
+
+  it('first line: any caret position on the first line triggers ArrowUp history', () => {
+    expect(isCaretOnFirstLine(element('single line', 0, 0))).toBe(true)
+    expect(isCaretOnFirstLine(element('single line', 5, 5))).toBe(true)
+    expect(isCaretOnFirstLine(element('multi\nline', 3, 3))).toBe(true)
+  })
+
+  it('first line: caret after a newline is not on the first line', () => {
+    expect(isCaretOnFirstLine(element('multi\nline', 6, 6))).toBe(false)
+    expect(isCaretOnFirstLine(element('multi\nline', 11, 11))).toBe(false)
+  })
+
+  it('last line: caret on the last line triggers ArrowDown history', () => {
+    expect(isCaretOnLastLine(element('multi\nline', 11, 11))).toBe(true)
+    expect(isCaretOnLastLine(element('multi\nline', 6, 6))).toBe(true)
+    expect(isCaretOnLastLine(element('single line', 5, 5))).toBe(true)
+  })
+
+  it('last line: caret before a newline is not on the last line', () => {
+    expect(isCaretOnLastLine(element('multi\nline', 3, 3))).toBe(false)
+    expect(isCaretOnLastLine(element('multi\nline', 0, 0))).toBe(false)
+  })
+
+  it('tolerates missing element fields', () => {
+    expect(isCaretOnFirstLine(null)).toBe(true)
+    expect(isCaretOnLastLine({ value: '' })).toBe(true)
   })
 })

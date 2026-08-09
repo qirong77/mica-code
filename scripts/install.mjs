@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { chmodSpawnHelpers, stageNodePty } from './stage-node-pty.mjs';
 
 const outFile = process.env.MICA_BUILD_OUTFILE ?? join('dist', process.env.MICA_BUILD_NAME ?? 'mica');
 if (!existsSync(outFile)) {
@@ -22,9 +23,19 @@ try {
   copyFileSync(outFile, packagedBinary);
   chmodSync(packagedBinary, 0o755);
 
-  // Remove native image runtime files left by versions that depended on sharp.
-  for (const legacyPath of [join(packageDir, 'node_modules'), join(packageDir, 'package.json')]) {
-    if (existsSync(legacyPath)) rmSync(legacyPath, { recursive: true, force: true });
+  // 复制 node-pty 运行时，让 PTY 工具不依赖用户机器上的 node_modules。
+  // 旧版残留（如 sharp 时代的整个 node_modules）只清理 sharp，不再删 node-pty。
+  const legacySharp = join(packageDir, 'node_modules', 'sharp');
+  if (existsSync(legacySharp)) rmSync(legacySharp, { recursive: true, force: true });
+  try {
+    const platform = process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win32' : 'linux';
+    const ptyRoot = join(packageDir, 'node_modules', 'node-pty');
+    stageNodePty({ dest: ptyRoot, platform, arch: process.arch });
+    chmodSpawnHelpers(ptyRoot, platform, process.arch);
+  } catch (error) {
+    console.log(
+      `Warning: node-pty staging skipped (${error instanceof Error ? error.message : String(error)}). PTY 工具将不可用。`,
+    );
   }
 
   const launcher = join(binDir, binName);
@@ -36,22 +47,25 @@ try {
   chmodSync(launcher, 0o755);
   console.log(`Installed launcher to: ${launcher}`);
   console.log(`Packaged binary: ${packagedBinary}`);
+  console.log(`node-pty runtime: ${join(packageDir, 'node_modules', 'node-pty')}`);
 
-  const rcFiles = [join(home, '.zshrc'), join(home, '.bashrc'), join(home, '.bash_profile'), join(home, '.profile')];
-  const rcFile = rcFiles.find((file) => existsSync(file));
-  if (!rcFile) {
-    console.log(`Warning: could not find shell rc file to add ${binDir} to PATH.`);
-    process.exit(0);
-  }
+  if (process.env.MICA_NO_RC !== '1') {
+    const rcFiles = [join(home, '.zshrc'), join(home, '.bashrc'), join(home, '.bash_profile'), join(home, '.profile')];
+    const rcFile = rcFiles.find((file) => existsSync(file));
+    if (!rcFile) {
+      console.log(`Warning: could not find shell rc file to add ${binDir} to PATH.`);
+      process.exit(0);
+    }
 
-  const pathLine = `export PATH="${binDir}:$PATH"`;
-  const content = readFileSync(rcFile, 'utf-8');
-  if (content.includes(binDir)) {
-    console.log(`${binDir} is already in PATH (${rcFile}).`);
-  } else {
-    appendFileSync(rcFile, `\n${pathLine}\n`);
-    console.log(`Added ${binDir} to PATH in ${rcFile}.`);
-    console.log(`Run \`source ${rcFile}\` or open a new terminal to apply.`);
+    const pathLine = `export PATH="${binDir}:$PATH"`;
+    const content = readFileSync(rcFile, 'utf-8');
+    if (content.includes(binDir)) {
+      console.log(`${binDir} is already in PATH (${rcFile}).`);
+    } else {
+      appendFileSync(rcFile, `\n${pathLine}\n`);
+      console.log(`Added ${binDir} to PATH in ${rcFile}.`);
+      console.log(`Run \`source ${rcFile}\` or open a new terminal to apply.`);
+    }
   }
 } catch (error) {
   console.log(`Warning: install skipped (${error instanceof Error ? error.message : String(error)}).`);

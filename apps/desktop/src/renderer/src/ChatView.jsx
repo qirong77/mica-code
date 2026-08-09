@@ -1565,6 +1565,21 @@ export function navigateChatHistory(drafts, history, cursorRef, direction, curre
   return nextCursor < 0 ? drafts.get(nodeId) || '' : history[nextCursor]
 }
 
+// 光标位于第一行（按 ArrowUp 触发输入历史）时返回 true；多行输入下
+// 保持"非第一行时上箭头先移动光标"的编辑习惯（对齐 ChatGPT 等终端式输入框）。
+export function isCaretOnFirstLine(element) {
+  const value = typeof element?.value === 'string' ? element.value : ''
+  const start = element?.selectionStart ?? 0
+  return value.slice(0, start).indexOf('\n') < 0
+}
+
+// 光标位于最后一行（按 ArrowDown 触发输入历史）时返回 true。
+export function isCaretOnLastLine(element) {
+  const value = typeof element?.value === 'string' ? element.value : ''
+  const end = element?.selectionEnd ?? value.length
+  return value.slice(end).indexOf('\n') < 0
+}
+
 export function ChatView({
   node,
   cwd,
@@ -1600,7 +1615,9 @@ export function ChatView({
   const transcriptCacheRef = useRef(new Map())
   const draftsRef = useRef(new Map())
   const todoHiddenRef = useRef(new Map())
-  const inputHistoryRef = useRef(new Map())
+  // 输入历史与 CLI 共享（~/.mica/storage.json 的 inputHistory），跨节点共用
+  // 一份数组；挂载时从磁盘加载，发送时异步回写。
+  const inputHistoryRef = useRef([])
   const queuedMessageIdsRef = useRef([])
   const recallingQueueRef = useRef(null)
   const historyCursorRef = useRef(-1)
@@ -2313,6 +2330,17 @@ export function ChatView({
     return () => clearTimeout(timer)
   }, [historyLoaded, nodeId, visible])
 
+  // 挂载时加载与 CLI 共享的输入历史（~/.mica/storage.json）；失败静默，
+  // 历史为空时上下键导航保持原样（无操作）。
+  useEffect(() => {
+    window.mica.chat.inputHistory
+      .read()
+      .then((history) => {
+        if (Array.isArray(history) && history.length) inputHistoryRef.current = history
+      })
+      .catch(() => {})
+  }, [])
+
   const resizeTextarea = useCallback(() => {
     const element = textareaRef.current
     if (!element || SUPPORTS_FIELD_SIZING) return
@@ -2327,11 +2355,10 @@ export function ChatView({
 
   const rememberInput = useCallback(
     (text) => {
-      const history = inputHistoryRef.current.get(nodeId) || []
-      inputHistoryRef.current.set(
-        nodeId,
-        [...history.filter((item) => item !== text), text].slice(-100)
-      )
+      const history = inputHistoryRef.current
+      inputHistoryRef.current = [...history.filter((item) => item !== text), text].slice(-200)
+      // 与 CLI 的 storage.json inputHistory 共享；失败静默，不影响发送路径。
+      window.mica.chat.inputHistory.append(text).catch(() => {})
       historyCursorRef.current = -1
       draftsRef.current.set(nodeId, '')
       setInput('')
@@ -2949,10 +2976,9 @@ export function ChatView({
 
   const navigateInputHistory = useCallback(
     (direction) => {
-      const history = inputHistoryRef.current.get(nodeId) || []
       const value = navigateChatHistory(
         draftsRef.current,
-        history,
+        inputHistoryRef.current,
         historyCursorRef,
         direction,
         inputRef.current,
@@ -2965,7 +2991,7 @@ export function ChatView({
         if (element) element.setSelectionRange(value.length, value.length)
       })
     },
-    [nodeId]
+    [inputRef, nodeId]
   )
 
   const showEmpty = historyLoaded && !running && messages.length === 0
@@ -3563,8 +3589,7 @@ export function ChatView({
                 !event.ctrlKey &&
                 !event.metaKey &&
                 !event.nativeEvent.isComposing &&
-                event.currentTarget.selectionStart === 0 &&
-                event.currentTarget.selectionEnd === 0
+                isCaretOnFirstLine(event.currentTarget)
               ) {
                 event.preventDefault()
                 navigateInputHistory(-1)
@@ -3576,8 +3601,7 @@ export function ChatView({
                 !event.ctrlKey &&
                 !event.metaKey &&
                 !event.nativeEvent.isComposing &&
-                event.currentTarget.selectionStart === event.currentTarget.value.length &&
-                event.currentTarget.selectionEnd === event.currentTarget.value.length
+                isCaretOnLastLine(event.currentTarget)
               ) {
                 event.preventDefault()
                 navigateInputHistory(1)

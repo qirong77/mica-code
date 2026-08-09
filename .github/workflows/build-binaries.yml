@@ -36,17 +36,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
-  build:
-    name: Build release assets
-    needs: desktop-checks
+  checks:
+    name: Typecheck & tests
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -59,27 +55,84 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Build binaries
+  # 每个目标平台一个独立 job：在对应架构 runner 上 bun install，
+  # 保证 node-pty 的原生产物（linux 编译 / darwin prebuilds）与目标平台一致。
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: [desktop-checks, checks]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            asset: mica-code-linux-x64
+            runner: ubuntu-latest
+            pty-os: linux
+            pty-arch: x64
+          - target: bun-linux-arm64
+            asset: mica-code-linux-arm64
+            runner: ubuntu-24.04-arm
+            pty-os: linux
+            pty-arch: arm64
+          - target: bun-darwin-x64
+            asset: mica-code-darwin-x64
+            runner: ubuntu-latest
+            pty-os: darwin
+            pty-arch: x64
+          - target: bun-darwin-arm64
+            asset: mica-code-darwin-arm64
+            runner: ubuntu-latest
+            pty-os: darwin
+            pty-arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies (compiles node-pty native binding)
+        run: bun install --frozen-lockfile
+
+      - name: Build binary
         run: |
-          mkdir -p dist/release
+          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=${{ matrix.target }} \
+          MICA_BUILD_OUTFILE=dist/release/${{ matrix.asset }} bun scripts/build.mjs
+          chmod 755 dist/release/${{ matrix.asset }}
 
-          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-linux-x64 MICA_BUILD_OUTFILE=dist/release/mica-code-linux-x64 bun scripts/build.mjs
-          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-linux-arm64 MICA_BUILD_OUTFILE=dist/release/mica-code-linux-arm64 bun scripts/build.mjs
-          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-darwin-x64 MICA_BUILD_OUTFILE=dist/release/mica-code-darwin-x64 bun scripts/build.mjs
-          MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-darwin-arm64 MICA_BUILD_OUTFILE=dist/release/mica-code-darwin-arm64 bun scripts/build.mjs
-
-          chmod 755 dist/release/mica-code-*
-
-      - name: Package release archives
+      - name: Package release archive (binary + node-pty runtime)
         run: |
-          mkdir -p dist/packages
+          MICA_ASSET_NAME=${{ matrix.asset }} \
+          MICA_PTY_TARGET_OS=${{ matrix.pty-os }} \
+          MICA_PTY_TARGET_ARCH=${{ matrix.pty-arch }} \
+          bun scripts/package-release.mjs
 
-          for binary in dist/release/mica-code-*; do
-            name="$(basename "$binary")"
-            # Maximum portable gzip compression for release downloads.
-            GZIP=-9 tar -czf "dist/packages/${name}.tar.gz" -C dist/release "$name"
-          done
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/packages/${{ matrix.asset }}.tar.gz
 
+  publish:
+    name: Publish release assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download platform archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/packages
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
           # Ship the thin installer as-is. It downloads only the current platform archive.
           cp scripts/install.sh install.sh
           chmod 755 install.sh
