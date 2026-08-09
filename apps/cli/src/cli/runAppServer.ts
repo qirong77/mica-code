@@ -143,6 +143,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
   let mcpStarted = false;
+  let mcpInitPromise: Promise<unknown> | null = null;
   let sessionId = '';
   let currentTurnId: string | null = null;
   let initialized = false;
@@ -258,13 +259,35 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 
     sessionId = sessionController.getCurrentSessionId();
 
+    // MCP 初始化与 host ready 解耦：交互模式是 UI 先渲染、MCP 插件在
+    // runtime:start 后台连接，app-server 之前却把 `await micaMcp.init()` 放在
+    // ready 路径上，慢 MCP 会把整个 host 就绪卡住。改成后台初始化后 host 立即
+    // 发出首帧快照（可服务），turn/start 开始前才等待 mcpReady——用户打字到
+    // 发送之间的间隔通常已覆盖 MCP 初始化，首轮感知延迟接近零。
+    // init 失败降级：记录 stderr + 发 error 通知，host 继续服务（无 MCP 工具），
+    // 与交互模式 mcp.mjs 的"初始化失败只报错不崩溃"语义一致，不 exit(1)。
     mcpStarted = true;
-    await micaMcp.init({
-      ...(options.mcpConfigPath ? { configPath: resolve(options.mcpConfigPath) } : {}),
-      strict: options.strictMcpConfig === true,
-      initTimeoutMs: options.mcpInitTimeoutMs,
-      parallel: true,
-    });
+    mcpInitPromise = micaMcp
+      .init({
+        ...(options.mcpConfigPath ? { configPath: resolve(options.mcpConfigPath) } : {}),
+        strict: options.strictMcpConfig === true,
+        initTimeoutMs: options.mcpInitTimeoutMs,
+        parallel: true,
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`MCP init failed: ${message}`);
+        try {
+          writeNotification(CODEX_NOTIFICATIONS.error, {
+            error: { message: `MCP init failed: ${message}` },
+            willRetry: false,
+            threadId: sessionId,
+            turnId: '',
+          });
+        } catch {
+          // stdout may be gone at shutdown
+        }
+      });
 
     executor = new HeadlessTurnExecutor({
       agent,
@@ -391,6 +414,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         agent: agent!,
         sessionController: sessionController!,
         executor: executor!,
+        mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
         getCurrentTurnId: () => currentTurnId,
         setCurrentTurnId: (turnId) => {
@@ -423,6 +447,8 @@ type HostContext = {
   agent: AgentRuntime;
   sessionController: SessionController;
   executor: HeadlessTurnExecutor;
+  /** Resolves once the background MCP init finished (never rejects). */
+  mcpReady: Promise<unknown>;
   sessionId: string;
   getCurrentTurnId: () => string | null;
   setCurrentTurnId: (turnId: string | null) => void;
@@ -544,6 +570,9 @@ async function handleCodexRequest(
       }
       const cwdParam = paramString(params, 'cwd');
       if (cwdParam) process.chdir(resolve(cwdParam));
+      // MCP init 与 host ready 解耦：首个 turn 在这里等后台 MCP 连接完成，
+      // 用户打字间隔通常已覆盖初始化，首轮感知延迟接近零。
+      await ctx.mcpReady;
       const turnId = randomUUID();
       ctx.setCurrentTurnId(turnId);
       ctx.attachProjector(turnId);

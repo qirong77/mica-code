@@ -237,6 +237,7 @@ type HostMessage = {
   method?: string;
   id?: number;
   params?: Record<string, unknown>;
+  emittedAtMs?: number;
   result?: unknown;
   error?: unknown;
 };
@@ -277,6 +278,56 @@ function makeHome(tag: string): string {
     ),
   );
   mkdirSync(join(home, 'sessions'), { recursive: true });
+  return home;
+}
+
+/** makeHome variant with a slow stdio MCP server (3s initialize delay), used to
+ * verify the host becomes ready before MCP init finishes and the first turn
+ * waits for it. */
+function makeHomeWithSlowMcp(tag: string): string {
+  const home = makeHome(tag);
+  writeFileSync(
+    join(home, 'config.json'),
+    JSON.stringify(
+      {
+        providers: [
+          {
+            id: 'mock',
+            name: 'Mock',
+            protocol: 'openai_responses',
+            api_base: baseUrl,
+            api_key: 'test-key',
+            models: ['mock-chat'],
+          },
+        ],
+        mcpServers: {
+          slow: { command: process.execPath, args: [join(home, 'slow-mcp-server.mjs')] },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(home, 'slow-mcp-server.mjs'),
+    [
+      "import { createInterface } from 'node:readline';",
+      'const rl = createInterface({ input: process.stdin });',
+      'const sleep = (ms) => new Promise((r) => setTimeout(r, ms));',
+      "const respond = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');",
+      "rl.on('line', async (line) => {",
+      '  let msg;',
+      '  try { msg = JSON.parse(line); } catch { return; }',
+      "  if (msg.method === 'initialize') {",
+      '    await sleep(3000);',
+      "    respond(msg.id, { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'slow-mock', version: '1.0.0' } });",
+      "  } else if (msg.method === 'tools/list') {",
+      '    respond(msg.id, { tools: [] });',
+      '  }',
+      '});',
+      '',
+    ].join('\n'),
+  );
   return home;
 }
 
@@ -476,6 +527,36 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // Session was persisted as a completed turn.
     await waitFor(host, (m) => m.method === 'mica/queue/changed', 'queue settle', 10_000).catch(() => undefined);
     expect(true).toBe(true);
+  });
+
+  itE2E('slow MCP init does not block host ready; the first turn waits for it', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const home = makeHomeWithSlowMcp('slow-mcp');
+    const host = spawnHost('slow-mcp', [], home);
+    hosts.push(host);
+
+    const ready = await waitFor(host, hostReady, 'host ready or error', 30_000);
+    const readyAt = ready.emittedAtMs ?? 0;
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '你好' }],
+      model: 'mock/mock-chat',
+    });
+    // The MCP server sleeps 3s before answering initialize. The host must have
+    // become ready before that (background MCP init), and the turn/started
+    // notification only fires after MCP is up -> started trails ready by ~3s.
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const startedAt = started.emittedAtMs ?? 0;
+    expect(startedAt - readyAt).toBeGreaterThan(1500);
+
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
+    expect((completed.params?.turn as { status?: string }).status).toBe('completed');
   });
 
   itE2E('ran and immediately stopped -> turn/interrupt -> interrupted without error', async () => {
