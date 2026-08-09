@@ -15,7 +15,8 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@packages/*": ["./packages/*"]
+      "@packages/*": ["./packages/*"],
+      "@apps/*": ["./apps/*"]
     },
     "types": ["node", "bun"]
   }

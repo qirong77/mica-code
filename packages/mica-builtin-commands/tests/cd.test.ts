@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaUi } from '@packages/mica-ui/index.js';
-import { collectRecentCwds, createCdCommand } from '../../../buildin-plugins/command-cd.mjs';
+import { collectRecentCwds, createCdCommand } from '../../../plugins/builtin/command-cd.mjs';
 import type { CommandRuntimeServices, CommandSessionController, SessionSummary } from '../services.js';
 
 const originalCwd = process.cwd();

@@ -36,7 +36,7 @@ vi.mock('@packages/mica-ui/utils/format.js', () => ({
   formatSessionListTime: (value: string) => value,
 }));
 
-const { createRewindCommand, rewindCheckpointCells } = await import('../../../buildin-plugins/command-rewind.mjs');
+const { createRewindCommand, rewindCheckpointCells } = await import('../../../plugins/builtin/command-rewind.mjs');
 
 describe('rewind command', () => {
   beforeEach(() => {

@@ -9,7 +9,6 @@ import {
   type AgentUsageSummary,
 } from '@packages/mica-agent/index.js';
 import type { CommandAgent, CommandSessionController } from '../services.js';
-import { BUILD_TIME } from '../../../src/buildMeta.js';
 import { handleScrollInput } from '../shared/commandInput.js';
 import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
@@ -20,7 +19,11 @@ type TotalSessionUsageSummary = AgentUsageSummary & {
   currentSessionIncluded: boolean;
 };
 
-export function createStatusCommand(agent: CommandAgent, sessionController?: CommandSessionController) {
+export function createStatusCommand(
+  agent: CommandAgent,
+  sessionController?: CommandSessionController,
+  buildTime = 'dev',
+) {
   return {
     name: 'status',
     description: '显示当前 provider/model/effort 状态，支持 `total` 参数查看本地全部 session 累计 token',
@@ -48,6 +51,7 @@ export function createStatusCommand(agent: CommandAgent, sessionController?: Com
           contextWindowSize,
           usageTotals,
           latestUsage,
+          buildTime,
         ),
       );
     },
@@ -102,6 +106,7 @@ function formatCurrentStatusList(
   contextWindowSize: number,
   usageTotals: AgentUsageSummary,
   latestUsage: AgentUsageRecord | undefined,
+  buildTime: string,
 ): string {
   return formatStatusList([
     ['Model', model],
@@ -114,7 +119,7 @@ function formatCurrentStatusList(
     ['Total output tokens', formatTokenValue(usageTotals.outputTokens, usageTotals.records)],
     ['Latest input cached', formatUsageCachedTokenValue(latestUsage)],
     ['Total input cached', formatTotalsCachedTokenValue(usageTotals)],
-    ['Build', formatBuildTime(BUILD_TIME)],
+    ['Build', formatBuildTime(buildTime)],
   ]);
 }
 

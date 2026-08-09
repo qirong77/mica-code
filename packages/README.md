@@ -1,6 +1,6 @@
 # packages
 
-`packages/` 存放 Mica Code 的内部可复用包。主应用装配逻辑在 `src/`，这里的包主要负责沉淀稳定的领域能力和公共 API。
+`packages/` 存放 Mica Code 的内部可复用包。可运行的应用放在 `apps/`（CLI、桌面、配置 Web、Sync server/web、官网），这里的包主要负责沉淀稳定的领域能力和公共 API。
 
 ## 包说明
 
@@ -18,8 +18,19 @@
 - `mica-plugin`：插件生命周期、hooks、service container 和 host capability context。
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
-- `mica-sync-server`：Mica Sync 中心聚合服务器（零依赖 Node 单文件，REST + SSE + 长轮询 + JSON 存储），独立部署。
-- `mica-sync-web`：Mica Sync Web 控制台（React + Vite），查看所有机器的会话并远程续聊。
+- `mica-sync-protocol`：mica-sync 三端（daemon / server / web）共享的 wire 协议类型（指令、事件、机器/会话 DTO），纯类型包，无运行时代码。
+- `mica-web-shared`：`apps/sync/web` 与 `apps/desktop` renderer 共用的 Web 展示纯函数（时间/状态/token 格式化），无 React、无运行时依赖。
+
+## 应用目录
+
+可运行产品统一放在 `apps/`：
+
+- `apps/cli`：Mica CLI 主应用（`apps/cli/src`，原根目录 `src/`）。
+- `apps/desktop`：Electron 桌面应用（原 `mica-code-app/`）。
+- `apps/config-web`：本地配置 Web，server + 内嵌静态资源（原 `packages/mica-config-web/`）。
+- `apps/sync/server`：Mica Sync 中心聚合服务器（零依赖 Node 单文件，REST + SSE + 长轮询 + JSON 存储），独立部署（原 `packages/mica-sync-server/`）。
+- `apps/sync/web`：Mica Sync Web 控制台（React + Vite），查看所有机器的会话并远程续聊（原 `packages/mica-sync-web/`）。
+- `apps/website`：官网与文档站（Astro，原 `mica-code-website/`）。
 
 ## 包规范
 

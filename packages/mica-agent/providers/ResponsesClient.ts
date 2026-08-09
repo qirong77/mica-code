@@ -28,7 +28,7 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
-import { withRetry } from '../core/retry.js';
+import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -175,9 +175,37 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       throwIfQueryStopped(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       requestIndex++;
-      const stream = await withRetry(
-        () =>
-          getClient(this).responses.create(
+
+      const contentSeparator: string =
+        requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
+      let emittedContentSeparator = false;
+      let content = '';
+      let completedResponse: Response | undefined;
+      let outputItems: ResponseInputItem[] = [];
+      let toolCalls = new Map<number, PendingToolCall>();
+      let hasReasoningText = false;
+      let reasoningPartDone = false;
+
+      // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
+      // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
+      // 在流迭代首帧抛出（type=service_unavailable_error / code=server_is_overloaded）。
+      // 因此重试必须包住"建流 + 流消费"。只有"还没有文本/工具输出"时重发整个
+      // 请求才是安全的：一旦收到文本或 tool-call 增量，重放会重复 onText 输出、
+      // 污染 usageHistory，或重放已产生的 tool call 增量。thinking/reasoning 事件
+      // 不计入"有输出"——它是 turn 内暂存的过程数据，重试丢弃无害，而且工具迭代后
+      // 模型往往先输出 thinking 再被过载中断，计入会导致本可安全重试的请求被跳过。
+      let attemptHadOutput = false;
+      await withRetry(
+        async () => {
+          attemptHadOutput = false;
+          emittedContentSeparator = false;
+          content = '';
+          completedResponse = undefined;
+          outputItems = [];
+          toolCalls = new Map<number, PendingToolCall>();
+          hasReasoningText = false;
+          reasoningPartDone = false;
+          const stream = await getClient(this).responses.create(
             {
               model: this.model,
               instructions: systemPrompt,
@@ -192,98 +220,114 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               stream: true,
             },
             { signal: options?.signal },
-          ),
-        { signal: options?.signal },
-      );
+          );
 
-      const contentSeparator: string =
-        requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
-      let emittedContentSeparator = false;
-      let content = '';
-      let completedResponse: Response | undefined;
-      const outputItems: ResponseInputItem[] = [];
-      const toolCalls = new Map<number, PendingToolCall>();
-      let hasReasoningText = false;
-      let reasoningPartDone = false;
+          for await (const event of stream) {
+            throwIfQueryStopped(options);
+            if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
 
-      for await (const event of stream) {
-        throwIfQueryStopped(options);
-        if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
-
-        if (event.type === 'response.output_text.delta') {
-          const textDelta: string =
-            contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
-          emittedContentSeparator = true;
-          content += textDelta;
-          totalContent += textDelta;
-          hasStreamedText = true;
-          streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
-          this.onText?.(textDelta);
-          continue;
-        }
-
-        if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_text.delta') {
-          if (reasoningPartDone && hasReasoningText) this.onThinking?.('\n\n');
-          this.onThinking?.(event.delta);
-          hasReasoningText = true;
-          reasoningPartDone = false;
-          continue;
-        }
-
-        if (event.type === 'response.reasoning_summary_text.done' || event.type === 'response.reasoning_text.done') {
-          reasoningPartDone = true;
-          continue;
-        }
-
-        if (event.type === 'response.output_item.added' && event.item.type === 'function_call') {
-          toolCalls.set(event.output_index, {
-            id: event.item.id,
-            callId: event.item.call_id,
-            name: event.item.name,
-            arguments: event.item.arguments || '',
-          });
-          continue;
-        }
-
-        if (event.type === 'response.function_call_arguments.delta') {
-          const pending = toolCalls.get(event.output_index);
-          if (pending) pending.arguments += event.delta;
-          continue;
-        }
-
-        if (event.type === 'response.function_call_arguments.done') {
-          const pending = toolCalls.get(event.output_index);
-          if (pending) pending.arguments = event.arguments;
-          continue;
-        }
-
-        if (event.type === 'response.output_item.done') {
-          const inputItem = responseOutputItemToInputItem(event.item);
-          if (inputItem) outputItems.push(inputItem);
-          if (event.item.type === 'message' && !content) {
-            const finalText = responseOutputMessageText(event.item);
-            if (finalText) {
-              content = finalText;
-              totalContent += finalText;
+            if (event.type === 'response.output_text.delta') {
+              attemptHadOutput = true;
+              const textDelta: string =
+                contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
+              emittedContentSeparator = true;
+              content += textDelta;
+              totalContent += textDelta;
               hasStreamedText = true;
-              streamTextEndsWithBlankLine = finalText.endsWith('\n\n');
-              this.onText?.(finalText);
+              streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
+              this.onText?.(textDelta);
+              continue;
             }
-          } else if (event.item.type === 'function_call') {
-            toolCalls.set(event.output_index, {
-              id: event.item.id,
-              callId: event.item.call_id,
-              name: event.item.name,
-              arguments: event.item.arguments,
-            });
-          }
-          continue;
-        }
 
-        if (event.type === 'response.completed') {
-          completedResponse = event.response;
-        }
-      }
+            if (
+              event.type === 'response.reasoning_summary_text.delta' ||
+              event.type === 'response.reasoning_text.delta'
+            ) {
+              if (reasoningPartDone && hasReasoningText) this.onThinking?.('\n\n');
+              this.onThinking?.(event.delta);
+              hasReasoningText = true;
+              reasoningPartDone = false;
+              continue;
+            }
+
+            if (
+              event.type === 'response.reasoning_summary_text.done' ||
+              event.type === 'response.reasoning_text.done'
+            ) {
+              reasoningPartDone = true;
+              continue;
+            }
+
+            if (event.type === 'response.output_item.added' && event.item.type === 'function_call') {
+              attemptHadOutput = true;
+              toolCalls.set(event.output_index, {
+                id: event.item.id,
+                callId: event.item.call_id,
+                name: event.item.name,
+                arguments: event.item.arguments || '',
+              });
+              continue;
+            }
+
+            if (event.type === 'response.function_call_arguments.delta') {
+              attemptHadOutput = true;
+              const pending = toolCalls.get(event.output_index);
+              if (pending) pending.arguments += event.delta;
+              continue;
+            }
+
+            if (event.type === 'response.function_call_arguments.done') {
+              attemptHadOutput = true;
+              const pending = toolCalls.get(event.output_index);
+              if (pending) pending.arguments = event.arguments;
+              continue;
+            }
+
+            if (event.type === 'response.output_item.done') {
+              const inputItem = responseOutputItemToInputItem(event.item);
+              if (inputItem) outputItems.push(inputItem);
+              if (event.item.type === 'message' && !content) {
+                const finalText = responseOutputMessageText(event.item);
+                if (finalText) {
+                  attemptHadOutput = true;
+                  content = finalText;
+                  totalContent += finalText;
+                  hasStreamedText = true;
+                  streamTextEndsWithBlankLine = finalText.endsWith('\n\n');
+                  this.onText?.(finalText);
+                }
+              } else if (event.item.type === 'function_call') {
+                attemptHadOutput = true;
+                toolCalls.set(event.output_index, {
+                  id: event.item.id,
+                  callId: event.item.call_id,
+                  name: event.item.name,
+                  arguments: event.item.arguments,
+                });
+              }
+              continue;
+            }
+
+            if (event.type === 'response.completed') {
+              attemptHadOutput = true;
+              completedResponse = event.response;
+            }
+          }
+        },
+        {
+          signal: options?.signal,
+          maxRetries: 4,
+          delayMs: 2000,
+          backoffFactor: 2,
+          maxDelayMs: 16000,
+          shouldRetry: (error) => !attemptHadOutput && isRetryableError(error),
+          onRetry: ({ attempt, error }) => {
+            console.error(
+              `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        },
+      );
 
       // Same guard as ChatCompletionsClient: the SDK ends the stream normally
       // when the request is aborted while waiting for the next event, so an
@@ -452,11 +496,7 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
 }
 
 function isEmptyResponseMessage(item: ResponseInputItem): boolean {
-  return (
-    item.type === 'message' &&
-    item.role === 'assistant' &&
-    item.content.length === 0
-  );
+  return item.type === 'message' && item.role === 'assistant' && item.content.length === 0;
 }
 
 function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInputItem[] {

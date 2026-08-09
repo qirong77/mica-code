@@ -43,7 +43,7 @@ if (existsSync(statePath)) {
   }
 }
 
-const child = spawn(process.execPath, ['src/index.ts', '--config-web-worker'], {
+const child = spawn(process.execPath, ['apps/cli/src/index.ts', '--config-web-worker'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
@@ -75,7 +75,7 @@ try {
   console.log('');
   console.log('Config Web dev server ready (Vite HMR)');
   console.log(`  ${url}`);
-  console.log('  Source: packages/mica-config-web/web');
+  console.log('  Source: apps/config-web/web');
   console.log('  Edit UI files for live reload. Ctrl+C to stop.');
   console.log('');
 } catch (error) {

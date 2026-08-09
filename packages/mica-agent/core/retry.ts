@@ -16,7 +16,14 @@ export function isRetryableError(error: unknown): boolean {
 
   const type = typeof err.type === 'string' ? err.type : undefined;
   if (type === 'connection_error' || type === 'timeout_error') return true;
-  if (type === 'api_error' || type === 'server_error' || type === 'rate_limit_error') return true;
+  if (
+    type === 'api_error' ||
+    type === 'server_error' ||
+    type === 'rate_limit_error' ||
+    type === 'service_unavailable_error'
+  ) {
+    return true;
+  }
 
   const code = typeof err.code === 'string' ? err.code.toLowerCase() : undefined;
   if (code) {
@@ -26,6 +33,8 @@ export function isRetryableError(error: unknown): boolean {
       code === 'rate_limit_error' ||
       code === 'server_error' ||
       code === 'service_unavailable' ||
+      code === 'server_is_overloaded' ||
+      code === 'slow_down' ||
       code === 'temporarily_unavailable' ||
       code === 'overloaded'
     ) {
@@ -98,11 +107,27 @@ export async function withRetry<T>(
   options?: {
     maxRetries?: number;
     delayMs?: number;
+    /** 指数退避倍数（每次重试 delayMs * factor^attempt），默认 1（固定间隔） */
+    backoffFactor?: number;
+    /** 单次重试等待上限，默认与 delayMs 相同 */
+    maxDelayMs?: number;
     signal?: AbortSignal;
+    /**
+     * 覆盖默认的可重试判定。默认用 isRetryableError(error)。
+     * 典型用法：调用方想在"重放安全"的前提下才重试（例如 provider 流消费
+     * 只有 0 输出时才可整体重发），用闭包状态决定是否允许本次重试。
+     */
+    shouldRetry?: (error: unknown) => boolean;
+    /** 每次实际重试前回调（用于诊断日志） */
+    onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   },
 ): Promise<T> {
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const delayMs = options?.delayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const baseDelayMs = options?.delayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const backoffFactor = options?.backoffFactor ?? 1;
+  const maxDelayMs = options?.maxDelayMs ?? baseDelayMs;
+  const shouldRetry = options?.shouldRetry ?? isRetryableError;
+  const onRetry = options?.onRetry;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -111,7 +136,9 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error;
-      if (attempt < maxRetries && isRetryableError(error)) {
+      if (attempt < maxRetries && shouldRetry(error)) {
+        const delayMs = Math.min(baseDelayMs * Math.pow(backoffFactor, attempt), maxDelayMs);
+        onRetry?.({ attempt: attempt + 1, error, delayMs });
         await sleep(delayMs, options?.signal);
         continue;
       }

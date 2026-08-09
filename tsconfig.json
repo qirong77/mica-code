@@ -1,8 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "include": [
-    "buildin-plugins",
-    "src",
+    "plugins/builtin",
+    "apps/cli/src",
     "packages/mica-common",
     "packages/mica-plugin",
     "packages/mica-runtime",
@@ -13,7 +13,9 @@
     "packages/mica-tools",
     "packages/mica-ui",
     "packages/mica-config",
-    "packages/mica-config-web",
+    "apps/config-web",
+    "apps/sync/server",
+    "apps/sync/web/src",
     "packages/mica-session",
     "packages/mica-skills",
     "packages/mica-mcp",

@@ -48,7 +48,7 @@ execFileSync(
     `__MICA_BUILD_TIME__=${JSON.stringify(buildTime)}`,
     '--define',
     `__MICA_VERSION__=${JSON.stringify(buildVersion)}`,
-    './src/index.ts',
+    './apps/cli/src/index.ts',
     '--outfile',
     outFile,
   ],

@@ -2,11 +2,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import setupModelEffortContext from '../../buildin-plugins/model-effort-context/index.mjs';
+import setupModelEffortContext from '../../plugins/builtin/model-effort-context/index.mjs';
 import {
   __resetModelsCacheForTests,
   getModelRule as getModelsDevRule,
-} from '../../buildin-plugins/model-effort-context/getModelRule.js';
+} from '../../plugins/builtin/model-effort-context/getModelRule.js';
 import { ensureModelRule, getModelEffortOptions, getModelRule, resolveModelRequestPatch } from './getModelRule.js';
 
 let dispose: (() => void) | undefined;

@@ -34,7 +34,10 @@ export async function ensureModelRule(modelName: string, signal?: AbortSignal): 
       registeredRules.set(modelName, rule);
       return getModelRule(modelName);
     })
-    .catch(() => getModelRule(modelName))
+    .catch((error: unknown) => {
+      if (signal?.aborted) throw error;
+      return getModelRule(modelName);
+    })
     .finally(() => pendingRules.delete(modelName));
   pendingRules.set(modelName, pending);
   return pending;

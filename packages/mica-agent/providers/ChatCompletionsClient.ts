@@ -18,7 +18,7 @@ import {
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { providerContentToAgentContent } from '../core/Content.js';
-import { withRetry } from '../core/retry.js';
+import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -150,9 +150,24 @@ export class ChatCompletionsClient extends BaseAgent<
       throwIfQueryStopped(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       requestIndex++;
-      const stream = await withRetry(
-        () =>
-          getClient(this).chat.completions.create(
+
+      let content = '';
+      const contentSeparator: string =
+        requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
+      let emittedContentSeparator = false;
+      const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
+
+      // 与 ResponsesClient 同理：上游（如 krill）过载时返回 HTTP 200 + error JSON，
+      // openai-node SDK 把它反序列化成 APIError 在流迭代首帧抛出。重试必须包住
+      // "建流 + 流消费"，但只有"还没有文本/工具输出"时重发整个请求才安全：
+      // 一旦收到文本或 tool-call 增量，重放会重复 onText 输出并污染 usageHistory。
+      // thinking/reasoning chunk 不计入"有输出"——它是 turn 内暂存的过程数据，
+      // 重试丢弃无害，而且工具迭代后模型往往先输出 thinking 再被过载中断。
+      let attemptHadOutput = false;
+      await withRetry(
+        async () => {
+          attemptHadOutput = false;
+          const stream = await getClient(this).chat.completions.create(
             {
               model: this.model,
               messages,
@@ -169,64 +184,74 @@ export class ChatCompletionsClient extends BaseAgent<
               },
             },
             { signal: options?.signal },
-          ),
-        { signal: options?.signal },
-      );
+          );
 
-      let content = '';
-      const contentSeparator: string =
-        requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
-      let emittedContentSeparator = false;
-      const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
-
-      for await (const chunk of stream) {
-        throwIfQueryStopped(options);
-        if (chunk.usage) {
-          this.recordUsage(chunk.usage, {
-            model: chunk.model,
-            turnId,
-            requestIndex,
-            messageCount: messages.length,
-          });
-        }
-        const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
-        for (const choice of choices) {
-          const delta = choice?.delta;
-          if (!delta) continue;
-          if (typeof delta.content === 'string' && delta.content) {
-            const textDelta: string =
-              contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
-            emittedContentSeparator = true;
-            content += textDelta;
-            totalContent += textDelta;
-            hasStreamedText = true;
-            streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
+          for await (const chunk of stream) {
             throwIfQueryStopped(options);
-            this.onText?.(textDelta);
-          }
-          const reasoning = readReasoningContent(delta);
-          if (typeof reasoning === 'string' && reasoning) {
-            throwIfQueryStopped(options);
-            this.onThinking?.(reasoning);
-          }
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const toolCallIndex = typeof tc.index === 'number' ? tc.index : 0;
-              let existing = toolCallsMap.get(toolCallIndex);
-              if (!existing) {
-                existing = {
-                  id: tc.id || '',
-                  function: { name: '', arguments: '' },
-                };
-                toolCallsMap.set(toolCallIndex, existing);
+            if (chunk.usage) {
+              attemptHadOutput = true;
+              this.recordUsage(chunk.usage, {
+                model: chunk.model,
+                turnId,
+                requestIndex,
+                messageCount: messages.length,
+              });
+            }
+            const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+            for (const choice of choices) {
+              const delta = choice?.delta;
+              if (!delta) continue;
+              if (typeof delta.content === 'string' && delta.content) {
+                attemptHadOutput = true;
+                const textDelta: string =
+                  contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
+                emittedContentSeparator = true;
+                content += textDelta;
+                totalContent += textDelta;
+                hasStreamedText = true;
+                streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
+                throwIfQueryStopped(options);
+                this.onText?.(textDelta);
               }
-              if (tc.id) existing.id = tc.id;
-              if (tc.function?.name) existing.function.name += tc.function.name;
-              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+              const reasoning = readReasoningContent(delta);
+              if (typeof reasoning === 'string' && reasoning) {
+                throwIfQueryStopped(options);
+                this.onThinking?.(reasoning);
+              }
+              if (delta.tool_calls) {
+                attemptHadOutput = true;
+                for (const tc of delta.tool_calls) {
+                  const toolCallIndex = typeof tc.index === 'number' ? tc.index : 0;
+                  let existing = toolCallsMap.get(toolCallIndex);
+                  if (!existing) {
+                    existing = {
+                      id: tc.id || '',
+                      function: { name: '', arguments: '' },
+                    };
+                    toolCallsMap.set(toolCallIndex, existing);
+                  }
+                  if (tc.id) existing.id = tc.id;
+                  if (tc.function?.name) existing.function.name += tc.function.name;
+                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+                }
+              }
             }
           }
-        }
-      }
+        },
+        {
+          signal: options?.signal,
+          maxRetries: 4,
+          delayMs: 2000,
+          backoffFactor: 2,
+          maxDelayMs: 16000,
+          shouldRetry: (error) => !attemptHadOutput && isRetryableError(error),
+          onRetry: ({ attempt, error }) => {
+            console.error(
+              `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        },
+      );
 
       // The OpenAI SDK swallows AbortError raised while waiting for the next
       // chunk and ends the stream normally. Without this check the aborted
@@ -466,9 +491,7 @@ function sanitizeHistoricalChatMedia(
     const content = message.content.map((part) => {
       if (part.type !== 'image_url') return part;
       const imageUrl =
-        part.image_url && typeof part.image_url === 'object'
-          ? (part.image_url as { url?: unknown }).url
-          : undefined;
+        part.image_url && typeof part.image_url === 'object' ? (part.image_url as { url?: unknown }).url : undefined;
       if (isValidHistoricalImageUrl(imageUrl)) return part;
       return { type: 'text' as const, text: '[image omitted from invalid historical content]' };
     });

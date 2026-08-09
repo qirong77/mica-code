@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'website/**'
+      - 'apps/website/**'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
@@ -37,18 +37,18 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        working-directory: website
+        working-directory: apps/website
         run: bun install --frozen-lockfile
 
       - name: Build
-        working-directory: website
+        working-directory: apps/website
         # configure-pages 注入的 PAGES_BASE_PATH 决定 base（如 /mica-code/）
         run: bun run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: website/dist
+          path: apps/website/dist
 
   deploy:
     name: Deploy to GitHub Pages

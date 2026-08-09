@@ -102,11 +102,11 @@ mica app-server [--session <id>] [--dir <cwd>] [--model <id>] [--variant <effort
 `mica daemon` 常驻进程可以把本机所有会话（活跃的 + 历史的）实时镜像到一台中心服务器，然后在浏览器里查看并远程续聊：
 
 ```bash
-# 1. 在中心服务器部署 mica-sync-server（见 packages/mica-sync-server/README.md）
+# 1. 在中心服务器部署 mica-sync-server（见 apps/sync/server/README.md）
 # 2. 在每台需要接入的机器上启动 daemon（首次运行自动注册）
 mica daemon --server http://<server>:5560   # --name 可选，默认用机器 hostname
 ```
 
 之后打开 `http://<server>:5560/`（或 Nginx 反代路径）即可看到所有机器的会话；点击会话可以实时查看运行进度，也可以直接继续对话（任务回源到对应机器执行，`Agent` 的本地文件、shell、MCP 能力都保留在本机）。注意 Mica Sync 默认无认证，公网部署时建议自行加一层访问保护。
 
-常用命令：`pm2 start node --name mica-sync -- mica-sync-server.mjs --port 5560 --data-dir ... --web-dir ...`（详见 `packages/mica-sync-server/README.md`）。
+常用命令：`pm2 start node --name mica-sync -- mica-sync-server.mjs --port 5560 --data-dir ... --web-dir ...`（详见 `apps/sync/server/README.md`）。

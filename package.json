@@ -3,21 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/index.ts",
+    "dev": "bun run apps/cli/src/index.ts",
     "example:task": "bun run packages/mica-ui/examples/example-task.tsx",
-    "build:config-web": "vite build --config packages/mica-config-web/web/vite.config.ts && bun scripts/generate-config-web-assets.mjs",
+    "build:config-web": "vite build --config apps/config-web/web/vite.config.ts && bun scripts/generate-config-web-assets.mjs",
     "dev:config-web": "MICA_CONFIG_WEB_DEV=1 bun scripts/dev-config-web.mjs",
-    "build:sync-web": "vite build --config packages/mica-sync-web/web/vite.config.ts",
-    "build:sync-server": "bun build packages/mica-sync-server/src/main.ts --target=node --outfile=dist/mica-sync-server.js",
+    "build:sync-web": "vite build --config apps/sync/web/vite.config.ts",
+    "build:sync-server": "bun build apps/sync/server/src/main.ts --target=node --outfile=dist/mica-sync-server.js",
     "build": "MICA_PREBUILD_DONE=1 bun scripts/build.mjs",
     "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",
     "typecheck": "bunx tsc --noEmit",
-    "dev:app": "cd mica-code-app && bun run dev",
-    "build:app": "cd mica-code-app && bun run build:mac",
+    "dev:app": "cd apps/desktop && bun run dev",
+    "build:app": "cd apps/desktop && bun run build:mac",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"buildin-plugins/**/*.{ts,tsx,js,mjs,md}\" \"src/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
+    "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"plugins/builtin/**/*.{ts,tsx,js,mjs,md}\" \"apps/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
   },
   "workspaces": [
     "packages/*",

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createForkCommand } from '../../../buildin-plugins/command-fork.mjs';
-import { createNewCommand } from '../../../buildin-plugins/command-new.mjs';
-import { createRenameCommand } from '../../../buildin-plugins/command-rename.mjs';
+import { createForkCommand } from '../../../plugins/builtin/command-fork.mjs';
+import { createNewCommand } from '../../../plugins/builtin/command-new.mjs';
+import { createRenameCommand } from '../../../plugins/builtin/command-rename.mjs';
 import type { CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('single-file session commands', () => {

@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
-const distDir = resolve('packages/mica-config-web/web/dist');
-const outFile = resolve('packages/mica-config-web/src/server/generatedStaticAssets.ts');
+const distDir = resolve('apps/config-web/web/dist');
+const outFile = resolve('apps/config-web/src/server/generatedStaticAssets.ts');
 const ignored = new Set(['.DS_Store']);
 
 const files = listFiles(distDir).filter((file) => !file.endsWith('.map') && !ignored.has(file.split(sep).at(-1) ?? ''));

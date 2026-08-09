@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createResumeCommand, formatResumeSessionTitle } from '../../../buildin-plugins/command-resume.mjs';
+import { createResumeCommand, formatResumeSessionTitle } from '../../../plugins/builtin/command-resume.mjs';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('formatResumeSessionTitle', () => {

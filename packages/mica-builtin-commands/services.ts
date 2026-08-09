@@ -163,6 +163,7 @@ export type CommandRuntimeServices = {
   clearPluginStatus(agent: CommandAgent, ownerSessionId?: string): void;
   syncModelDisplay(agent: CommandAgent): void;
   ensureModelRule?(model: string): Promise<void>;
+  startConfigWeb?(): Promise<{ url: string }>;
   isAgentRunning(): boolean;
   isAgentBusy(agent?: CommandAgent): boolean;
   hasBusyAgents?(): boolean;

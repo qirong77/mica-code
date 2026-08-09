@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -64,6 +64,32 @@ describe('session turn lease', () => {
       expect(next).not.toBeNull();
       next?.release();
       other?.release();
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('reclaims a stale lock left by a dead daemon process', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-stale-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { acquireSessionTurnLease, SESSION_DIR } = await import('./sessionStore.js');
+
+      // Simulate a daemon that crashed mid-turn: its pid is no longer alive and
+      // the lock file was never released. A fresh acquire must reclaim it.
+      const lockDir = resolve(SESSION_DIR, '.turn-locks');
+      mkdirSync(lockDir, { recursive: true });
+      const lockPath = resolve(lockDir, 'crashed-session.lock');
+      writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: 999_999_999, token: 'stale', createdAt: new Date().toISOString() }),
+        'utf-8',
+      );
+
+      const lease = acquireSessionTurnLease('crashed-session');
+      expect(lease).not.toBeNull();
+      lease?.release();
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }
