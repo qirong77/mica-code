@@ -18,7 +18,7 @@ const CONTEXT_USAGE_COLORS = [
   themeColors.inactive,
   themeColors.statusInfo,
   themeColors.statusWarning,
-  '#FF9800',
+  themeColors.toolWrite,
   themeColors.statusError,
 ] as const;
 

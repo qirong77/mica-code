@@ -131,6 +131,26 @@ describe('attachCodexProjector thinking', () => {
     expect(completedItem.command).toBe('run_shell');
   });
 
+  it('aggregates agent message deltas into item/completed', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't',
+      turnId: 'turn-message',
+      cwd: '/tmp',
+    });
+    agent.emit('text', '第一段');
+    agent.emit('text', '第二段');
+    projector.completeTurn('completed');
+
+    const completed = notifications.find(
+      (notification) =>
+        notification.method === 'item/completed' &&
+        (notification.params.item as { type?: string } | undefined)?.type === 'agentMessage',
+    );
+    expect(completed?.params.item).toMatchObject({ type: 'agentMessage', text: '第一段第二段' });
+  });
+
   it('truncates tool results over 256 KiB on the wire', () => {
     const agent = fakeAgent();
     const { notifications, writer } = collect();

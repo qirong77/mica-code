@@ -1,10 +1,14 @@
 import { createInterface } from 'node:readline';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '../../../../plugins/builtin/model-effort-context/index.mjs';
 import { TodoWriteTool } from '../../../../plugins/builtin/todo/TodoTool.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
+import { prepareImageForApi } from '@packages/mica-common/index.js';
+import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
   CODEX_ERROR_INTERNAL,
   CODEX_ERROR_INVALID_REQUEST,
@@ -293,12 +297,14 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       agent,
       sessionController,
       maxTurns: options.maxTurns,
-      onEvent: (event) =>
+      onEvent: (event) => {
+        if (event.type === 'turn:finish') projector?.completeAgentMessage();
         handleTurnEvent(writeNotification, event, sessionId, () => {
           const turnId = currentTurnId;
           currentTurnId = null;
           return turnId;
-        }),
+        });
+      },
     });
 
     // Long-lived host state that outlives a single turn: background shell tasks
@@ -416,6 +422,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         executor: executor!,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
+        setSessionId: (nextSessionId) => {
+          sessionId = nextSessionId;
+        },
         getCurrentTurnId: () => currentTurnId,
         setCurrentTurnId: (turnId) => {
           currentTurnId = turnId;
@@ -450,6 +459,7 @@ type HostContext = {
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
   sessionId: string;
+  setSessionId: (sessionId: string) => void;
   getCurrentTurnId: () => string | null;
   setCurrentTurnId: (turnId: string | null) => void;
   writeNotification: (method: string, params: unknown) => void;
@@ -458,15 +468,6 @@ type HostContext = {
   attachProjector: (turnId: string) => void;
   initialized: boolean;
 };
-
-function textOf(input: CodexUserInput[] | undefined): string {
-  if (!Array.isArray(input)) return '';
-  return input
-    .filter((item): item is { type: 'text'; text: string } => item?.type === 'text' && typeof item.text === 'string')
-    .map((item) => item.text)
-    .join('\n')
-    .trim();
-}
 
 function threadSnapshot(ctx: HostContext, model: string): CodexThread {
   const cwd = process.cwd();
@@ -503,6 +504,106 @@ function paramString(params: Record<string, unknown>, key: string): string | und
   return typeof value === 'string' && value ? value : undefined;
 }
 
+const CODEX_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+type CodexRuntimeInputPayload = {
+  text: string;
+  content?: AgentQueryContent;
+};
+
+/** Convert Codex multimodal items to the content blocks understood by Mica. */
+export async function codexInputToRuntimePayload(
+  input: CodexUserInput[] | undefined,
+): Promise<CodexRuntimeInputPayload> {
+  if (!Array.isArray(input) || input.length === 0) throw new Error('input must contain at least one item');
+
+  const displayParts: string[] = [];
+  const content: AgentContentBlockParam[] = [];
+  let hasImage = false;
+  for (const item of input) {
+    if (!item || typeof item !== 'object') throw new Error('input contains an invalid item');
+    if (item.type === 'text') {
+      if (typeof item.text !== 'string') throw new Error('text input must contain a string text field');
+      displayParts.push(item.text);
+      content.push({ type: 'text', text: item.text });
+      continue;
+    }
+    if (item.type !== 'image' && item.type !== 'localImage') throw new Error('unsupported input type');
+
+    hasImage = true;
+    const imagePath = item.type === 'localImage' ? item.path : undefined;
+    const source = item.type === 'image' ? item.url : undefined;
+    const image = await loadCodexImage(source, imagePath);
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: image.mediaType, data: image.buffer.toString('base64') },
+    });
+    displayParts.push(imagePath ? `[Image](${imagePath})` : '[Image]');
+  }
+
+  const text = displayParts.join('\n').trim();
+  if (!text && !hasImage) throw new Error('input must contain at least one text or image item');
+  return { text: text || '[Image]', ...(hasImage ? { content } : {}) };
+}
+
+async function loadCodexImage(
+  source: string | undefined,
+  localPath: string | undefined,
+): Promise<{ buffer: Buffer; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' }> {
+  let bytes: Buffer;
+  if (localPath) {
+    const path = localPath.startsWith('~/') ? resolve(homedir(), localPath.slice(2)) : resolve(localPath);
+    bytes = await readFile(path);
+  } else if (source?.startsWith('data:')) {
+    const match = /^data:[^;,]+;base64,(.*)$/s.exec(source);
+    if (!match) throw new Error('image url must be a base64 data URL or an http(s) URL');
+    bytes = Buffer.from(match[1]!, 'base64');
+  } else if (source?.startsWith('http://') || source?.startsWith('https://')) {
+    const response = await fetch(source, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`image download failed with HTTP ${response.status}`);
+    const length = Number(response.headers.get('content-length') ?? 0);
+    if (length > CODEX_IMAGE_MAX_BYTES) throw new Error('image is larger than 20 MiB');
+    bytes = Buffer.from(await response.arrayBuffer());
+  } else {
+    throw new Error('image input requires a local path or image URL');
+  }
+  if (bytes.length > CODEX_IMAGE_MAX_BYTES) throw new Error('image is larger than 20 MiB');
+  return prepareImageForApi(bytes);
+}
+
+const MICA_APPROVAL_POLICY = 'never';
+const MICA_SANDBOX_POLICY = { type: 'dangerFullAccess' };
+
+function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
+  const approval = params.approvalPolicy;
+  const sandbox = params.sandboxPolicy ?? params.sandbox;
+  const approvalIsCompatible = approval === undefined || approval === 'never' || approval === 'unapproved';
+  const sandboxText = typeof sandbox === 'string' ? sandbox : JSON.stringify(sandbox);
+  const sandboxIsCompatible =
+    sandbox === undefined || sandboxText === 'dangerFullAccess' || sandboxText === 'danger-full-access';
+  if (approvalIsCompatible && sandboxIsCompatible) return;
+  ctx.writeNotification(CODEX_NOTIFICATIONS.warning, {
+    threadId: ctx.sessionId,
+    turnId: '',
+    warning: {
+      message:
+        'Mica accepts Codex approval/sandbox parameters for protocol compatibility, but does not enforce a sandbox or interactive approval boundary; effective policy is approvalPolicy=never, sandboxPolicy=dangerFullAccess.',
+    },
+  });
+}
+
+function threadResponse(ctx: HostContext): Record<string, unknown> {
+  const model = ctx.agent.config.model;
+  return {
+    thread: threadSnapshot(ctx, model),
+    model,
+    modelProvider: ctx.agent.config.provider.id,
+    cwd: process.cwd(),
+    approvalPolicy: MICA_APPROVAL_POLICY,
+    sandboxPolicy: MICA_SANDBOX_POLICY,
+  };
+}
+
 async function handleCodexRequest(
   _id: CodexRequestId,
   method: string,
@@ -521,16 +622,46 @@ async function handleCodexRequest(
       return;
     }
     case CODEX_METHODS.threadStart: {
-      const model = ctx.agent.config.model;
       const cwdParam = paramString(params, 'cwd');
       if (cwdParam) process.chdir(resolve(cwdParam));
-      ctx.writeResponse({
-        thread: threadSnapshot(ctx, model),
-        model,
-        modelProvider: ctx.agent.config.provider.id,
-        cwd: process.cwd(),
-        approvalPolicy: { strategy: 'unapproved' },
-      });
+      warnIfCodexPolicyCannotBeEnforced(ctx, params);
+      const thread = threadSnapshot(ctx, ctx.agent.config.model);
+      ctx.writeNotification(CODEX_NOTIFICATIONS.threadStarted, { thread });
+      ctx.writeResponse(threadResponse(ctx));
+      return;
+    }
+    case CODEX_METHODS.threadResume: {
+      if (ctx.executor.isBusy) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'cannot resume a thread while a turn is active');
+        return;
+      }
+      const threadId = paramString(params, 'threadId');
+      if (!threadId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'threadId must not be empty');
+        return;
+      }
+      const resumed = ctx.sessionController.resume(threadId);
+      if (!resumed.ok) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, resumed.message);
+        return;
+      }
+      ctx.sessionId = threadId;
+      ctx.setSessionId(threadId);
+      await ensureChatHostModelRule(ctx.agent.config.model);
+      ctx.agent.configureForRun(
+        {
+          providerId: ctx.agent.config.provider.id,
+          model: ctx.agent.config.model,
+          effort: ctx.agent.config.effort,
+        },
+        true,
+      );
+      const cwdParam = paramString(params, 'cwd');
+      if (cwdParam) process.chdir(resolve(cwdParam));
+      warnIfCodexPolicyCannotBeEnforced(ctx, params);
+      const thread = threadSnapshot(ctx, ctx.agent.config.model);
+      ctx.writeNotification(CODEX_NOTIFICATIONS.threadStarted, { thread });
+      ctx.writeResponse(threadResponse(ctx));
       return;
     }
     case CODEX_METHODS.turnStart: {
@@ -541,11 +672,14 @@ async function handleCodexRequest(
         );
         return;
       }
-      const input = textOf(params.input as CodexUserInput[] | undefined);
-      if (!input) {
-        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'input must contain at least one text item');
+      let input: CodexRuntimeInputPayload;
+      try {
+        input = await codexInputToRuntimePayload(params.input as CodexUserInput[] | undefined);
+      } catch (error) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
         return;
       }
+      warnIfCodexPolicyCannotBeEnforced(ctx, params);
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
       if (model || effort) {
@@ -577,7 +711,10 @@ async function handleCodexRequest(
       ctx.setCurrentTurnId(turnId);
       ctx.attachProjector(turnId);
       const result = await ctx.executor.start(
-        micaRuntime.createRuntimeInput(input, 'ui', { queueMode: 'after_iteration' }),
+        micaRuntime.createRuntimeInput(input.text, 'ui', {
+          queueMode: 'after_iteration',
+          ...(input.content ? { content: input.content } : {}),
+        }),
       );
       if (result === 'rejected') {
         ctx.setCurrentTurnId(null);
@@ -607,9 +744,11 @@ async function handleCodexRequest(
         );
         return;
       }
-      const input = textOf(params.input as CodexUserInput[] | undefined);
-      if (!input) {
-        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'input must contain at least one text item');
+      let input: CodexRuntimeInputPayload;
+      try {
+        input = await codexInputToRuntimePayload(params.input as CodexUserInput[] | undefined);
+      } catch (error) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
         return;
       }
       // Mica extension: carry the client message id through so queue events can
@@ -617,8 +756,9 @@ async function handleCodexRequest(
       // clients simply never send this field.
       const clientMessageId = typeof params.clientMessageId === 'string' ? params.clientMessageId : undefined;
       const result = await ctx.executor.start(
-        micaRuntime.createRuntimeInput(input, 'ui', {
+        micaRuntime.createRuntimeInput(input.text, 'ui', {
           queueMode: 'after_iteration',
+          ...(input.content ? { content: input.content } : {}),
           ...(clientMessageId ? { id: clientMessageId } : {}),
         }),
       );

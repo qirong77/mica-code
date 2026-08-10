@@ -107,6 +107,7 @@ export function attachCodexProjector(
   const reasoningItemId = `${turnId}-reasoning`;
   const pendingCommands = new Map<string, PendingCommandItem>();
   let agentMessageStarted = false;
+  let agentMessageText = '';
   let reasoningStarted = false;
   const totalUsage = emptyTokenUsage();
 
@@ -141,6 +142,7 @@ export function attachCodexProjector(
           text: '',
         });
       }
+      agentMessageText += text;
       emit(CODEX_NOTIFICATIONS.agentMessageDelta, {
         threadId,
         turnId,
@@ -236,9 +238,10 @@ export function attachCodexProjector(
       emitItemCompleted({
         type: 'agentMessage',
         id: agentMessageItemId,
-        text: '',
+        text: agentMessageText,
       });
       agentMessageStarted = false;
+      agentMessageText = '';
     }
     if (reasoningStarted) {
       emitItemCompleted({

@@ -524,6 +524,11 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(mock!.state.requests[0].model).toBe('mock-chat');
     // Text deltas reached the event stream (the renderer turns them into the message).
     expect(host.lines.some((m) => m.method === 'item/agentMessage/delta')).toBe(true);
+    expect(
+      host.lines.find(
+        (m) => m.method === 'item/completed' && (m.params?.item as { type?: string } | undefined)?.type === 'agentMessage',
+      )?.params?.item,
+    ).toMatchObject({ type: 'agentMessage', text: '你好，我是 mock 模型的回复' });
     // Session was persisted as a completed turn.
     await waitFor(host, (m) => m.method === 'mica/queue/changed', 'queue settle', 10_000).catch(() => undefined);
     expect(true).toBe(true);
@@ -833,13 +838,17 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const conversationText = JSON.stringify(after.snapshot?.conversationMessages ?? []);
     expect(conversationText).toContain('Primary Request and Intent');
 
-    // A fresh host resumes the compacted snapshot (same MICA_HOME!) and keeps
-    // chatting; the new provider request must contain the compact summary.
-    const resumed = spawnHost('compact-resume-2', ['--session', sessionId], host.home);
+    // A fresh host resumes the compacted snapshot through the standard Codex
+    // thread/resume request (same MICA_HOME!) and keeps chatting; the new
+    // provider request must contain the compact summary.
+    const resumed = spawnHost('compact-resume-2', [], host.home);
     hosts.push(resumed);
     await waitFor(resumed, hostReady, 'resumed host ready or error', 30_000);
+    await send(resumed, 1, 'thread/resume', { threadId: sessionId });
+    const resumedThread = await waitFor(resumed, (m) => m.id === 1 && m.result !== undefined, 'thread/resume response');
+    expect((resumedThread.result as { thread?: { id?: string } }).thread?.id).toBe(sessionId);
     mock!.state.requests = [];
-    await send(resumed, 1, 'turn/start', {
+    await send(resumed, 2, 'turn/start', {
       threadId: sessionId,
       input: [{ type: 'text', text: '压缩后继续：下一步做什么' }],
     });

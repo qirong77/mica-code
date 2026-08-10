@@ -3,6 +3,7 @@ import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Box, Text } from '@anthropic/ink';
+import { ThemeProvider } from '../../../../packages/@anthropic/ink/src/theme/ThemeProvider.js';
 import { wrappedRender } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -57,9 +58,10 @@ export class Application {
     let startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     const missingStartupSessionId = this.options.sessionId && !startupSession ? this.options.sessionId : null;
     seedStartupModelDisplay(startupSession);
-    this.renderInstance = await wrappedRender(React.createElement(micaUi.App), {
-      exitOnCtrlC: false,
-    });
+    this.renderInstance = await wrappedRender(
+      React.createElement(ThemeProvider, { initialState: 'auto', children: React.createElement(micaUi.App) }),
+      { exitOnCtrlC: false },
+    );
     micaUi.terminalInput.setOnExitRequested((exitCode) => this.requestExit(exitCode));
 
     try {

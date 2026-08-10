@@ -1,9 +1,57 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MICA_QUEUE_NOTIFICATIONS } from '@packages/mica-runtime/index.js';
-import { projectBackgroundTasks, projectSubagentTasks, turnEventToQueueNotification } from './runAppServer.js';
+import {
+  codexInputToRuntimePayload,
+  projectBackgroundTasks,
+  projectSubagentTasks,
+  turnEventToQueueNotification,
+} from './runAppServer.js';
 import type { HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
 import type { BackgroundTaskMeta } from '@packages/mica-tools/index.js';
 import type { SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
+
+const ONE_PIXEL_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+describe('Codex multimodal input compatibility', () => {
+  it('keeps text and converts data-url images into provider content blocks', async () => {
+    const result = await codexInputToRuntimePayload([
+      { type: 'text', text: '请描述这张图' },
+      { type: 'image', url: `data:image/png;base64,${ONE_PIXEL_PNG}` },
+    ]);
+
+    expect(result.text).toContain('请描述这张图');
+    expect(result.content).toEqual([
+      { type: 'text', text: '请描述这张图' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: ONE_PIXEL_PNG } },
+    ]);
+  });
+
+  it('rejects malformed image inputs instead of silently dropping them', async () => {
+    await expect(codexInputToRuntimePayload([{ type: 'image', url: 'not-an-image' }])).rejects.toThrow(
+      'local path or image URL',
+    );
+  });
+});
+
+describe('Codex local image input compatibility', () => {
+  it('loads localImage paths into the same normalized content shape', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mica-codex-image-'));
+    const imagePath = join(directory, 'input.png');
+    writeFileSync(imagePath, Buffer.from(ONE_PIXEL_PNG, 'base64'));
+    try {
+      const result = await codexInputToRuntimePayload([{ type: 'localImage', path: imagePath }]);
+      expect(result.content).toEqual([
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: ONE_PIXEL_PNG } },
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 const input = {
   id: 'msg-abc-123',

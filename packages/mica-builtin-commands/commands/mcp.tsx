@@ -24,11 +24,11 @@ function statusColor(status: McpServerStatus['status']) {
 }
 
 function typeColor(type: string) {
-  if (type === 'string') return '#FFC107';
-  if (type === 'number' || type === 'integer') return '#4FC3F7';
-  if (type === 'boolean') return '#CE93D8';
-  if (type === 'object') return '#81C784';
-  if (type === 'array') return '#FF8A65';
+  if (type === 'string') return micaUi.theme.colors.warning;
+  if (type === 'number' || type === 'integer') return micaUi.theme.colors.info;
+  if (type === 'boolean') return micaUi.theme.colors.accent;
+  if (type === 'object') return micaUi.theme.colors.success;
+  if (type === 'array') return micaUi.theme.colors.toolWrite;
   return undefined;
 }
 

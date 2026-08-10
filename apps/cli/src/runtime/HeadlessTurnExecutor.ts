@@ -114,7 +114,12 @@ export class HeadlessTurnExecutor {
     this.responseBuffer = '';
     let content: AgentQueryContent;
     try {
-      content = input.source === 'system' ? input.text : await this.parseImageRefs(input.text);
+      content =
+        input.content !== undefined
+          ? (input.content as AgentQueryContent)
+          : input.source === 'system'
+            ? input.text
+            : await this.parseImageRefs(input.text);
     } catch (error) {
       await this.failTurn(input, startedAt, error);
       return;
@@ -147,7 +152,10 @@ export class HeadlessTurnExecutor {
       onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
     } catch (error) {
       if (error instanceof AgentAbortError) {
-        agent.preserveAbortedTurn(input.text, this.responseBuffer || undefined);
+        agent.preserveAbortedTurn(
+          (input.content as AgentQueryContent | undefined) ?? input.text,
+          this.responseBuffer || undefined,
+        );
         sessionController.saveCurrent({ turnState: 'aborted' });
         onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
         return;
