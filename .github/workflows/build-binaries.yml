@@ -101,6 +101,7 @@ jobs:
       - name: Build binary
         run: |
           MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=${{ matrix.target }} \
+          MICA_BUILD_ALIASES= \
           MICA_BUILD_OUTFILE=dist/release/${{ matrix.asset }} bun scripts/build.mjs
           chmod 755 dist/release/${{ matrix.asset }}
 

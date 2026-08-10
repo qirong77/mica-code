@@ -351,8 +351,8 @@ MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" npx vitest run packages
 ## 构建、安装与发布
 
 - `bun run build` 实际运行 `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`；`prebuild` 是 `bunx tsc --noEmit`；`postbuild` 是 `bun scripts/install.mjs`。
-- `scripts/build.mjs` 用 `bun build --compile --compile-autoload-package-json` 构建无外部运行时依赖的本地二进制，默认输出 `dist/mica`。
-- `scripts/install.mjs` 默认安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。
+- `scripts/build.mjs` 用 `bun build --compile --compile-autoload-package-json` 构建无外部运行时依赖的本地二进制，默认输出 `dist/mica`。构建时注入 `__MICA_APP_NAME__`（默认 `mica`，编译期常量在 `packages/mica-common/appName.ts`，驱动命令名/终端标题/版本输出）；`MICA_BUILD_ALIASES`（默认 `studio`，逗号分隔，置空关闭）额外编译同名别名二进制到主输出同目录，与主命令共用一份源码、仅注入不同 app name。GitHub Actions release 构建显式传 `MICA_BUILD_ALIASES=` 不产出别名。
+- `scripts/install.mjs` 默认安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。同一次安装会把 `MICA_BUILD_ALIASES` 指定的别名二进制（`dist/<alias>` 存在时）一并安装到 `~/.local/bin/<alias>`；release 包不含别名，别名文件缺失时跳过。studio 别名命令的使用文档见 `studio/doc.md`。
 - 产品名是 Mica Code / `mica-code`；release 采用按平台下载：`scripts/install.sh` 探测 os/arch 后只下载对应 `mica-code-<platform>-<cpu>.tar.gz` 并用 `sha256sums.txt` 校验，不内嵌全部平台二进制。GitHub Actions 的 `mica-code-release` artifact 是 CI 汇总包，不是用户安装路径。
 - `.github/workflows/build-binaries.yml` 在 push/PR/手动触发时跑根 typecheck/test + Desktop test/lint，在 `main` 或 `v*` tag 构建 Linux/macOS x64/arm64 release 二进制并上传 asset。
 - `.github/workflows/deploy-pages.yml` 发布 `website/` 到 GitHub Pages：`actions/configure-pages` **只暴露 outputs，不会注入 `PAGES_BASE_PATH` 环境变量**，Build 步骤用 `env.PAGES_BASE_PATH` 显式传入；`website/astro.config.mjs` 归一化（补尾斜杠，缺省 `/`）后作 Astro `base`。`base_path` output 不带尾斜杠，必须补，否则模板 `${base}mica.svg` 拼接出错位路径。Astro 不会自动给硬编码绝对路径加 base 前缀，因此布局/页面里所有内部链接（`mica.svg`、`screenshots/`、`docs/`、锚点）都必须用 `import.meta.env.BASE_URL` 拼接，CSS 用 frontmatter `import`；新增页面或资源时保持这个约定。

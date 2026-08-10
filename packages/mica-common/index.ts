@@ -35,3 +35,4 @@ export { formatExecError, gitBuffer, gitBufferAsync, gitText, gitTextAsync, safe
 export type { GitCommandOptions } from './git.js';
 export { prepareImageForApi } from './image.js';
 export type { ProcessedImage, SupportedImageMediaType } from './image.js';
+export { APP_DISPLAY_NAME, APP_NAME, APP_TITLE_NAME } from './appName.js';

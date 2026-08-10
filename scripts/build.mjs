@@ -37,23 +37,40 @@ if (existsSync(legacySharpRuntimeDir)) rmSync(legacySharpRuntimeDir, { recursive
 console.log('Building config web assets...\n');
 execSync('bun run build:config-web', { stdio: 'inherit' });
 
-execFileSync(
-  'bun',
-  [
-    'build',
-    '--compile',
-    '--compile-autoload-package-json',
-    ...(target ? ['--target', target] : []),
-    '--define',
-    `__MICA_BUILD_TIME__=${JSON.stringify(buildTime)}`,
-    '--define',
-    `__MICA_VERSION__=${JSON.stringify(buildVersion)}`,
-    './apps/cli/src/index.ts',
-    '--outfile',
-    outFile,
-  ],
-  {
-    stdio: 'inherit',
-  },
-);
-console.log(`Built native binary: ${outFile}`);
+function buildBinary(file, appName) {
+  execFileSync(
+    'bun',
+    [
+      'build',
+      '--compile',
+      '--compile-autoload-package-json',
+      ...(target ? ['--target', target] : []),
+      '--define',
+      `__MICA_BUILD_TIME__=${JSON.stringify(buildTime)}`,
+      '--define',
+      `__MICA_VERSION__=${JSON.stringify(buildVersion)}`,
+      '--define',
+      `__MICA_APP_NAME__=${JSON.stringify(appName)}`,
+      './apps/cli/src/index.ts',
+      '--outfile',
+      file,
+    ],
+    {
+      stdio: 'inherit',
+    },
+  );
+  console.log(`Built native binary: ${file} (app name: ${appName})`);
+}
+
+buildBinary(outFile, outName);
+
+// 额外别名二进制（如 studio）：与主二进制共用同一份源码，仅注入不同的
+// __MICA_APP_NAME__，让命令名 / 终端标题 / 版本输出保持独立，不修改原命令。
+// 用 MICA_BUILD_ALIASES= 清空可关闭；别名输出到主输出同目录。
+const aliases = (process.env.MICA_BUILD_ALIASES ?? 'studio')
+  .split(',')
+  .map((name) => name.trim())
+  .filter(Boolean);
+for (const alias of aliases) {
+  buildBinary(join(targetDir, alias), alias);
+}

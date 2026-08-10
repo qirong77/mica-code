@@ -4,19 +4,20 @@ import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { useScheduleState } from '../hooks/useScheduleState.js';
 import { workingStatus } from '../panels/state.js';
 import type { MicaUiWorkingStatus } from '../types.js';
+import { APP_TITLE_NAME } from '@packages/mica-common/index.js';
 
 const VSCODE_AGENT_CLI_PROBE_TITLE = 'Claude Code';
 const RUNNING_TITLE_FRAMES = [
-  '⠋ Mica',
-  '⠙ Mica',
-  '⠹ Mica',
-  '⠸ Mica',
-  '⠼ Mica',
-  '⠴ Mica',
-  '⠦ Mica',
-  '⠧ Mica',
-  '⠇ Mica',
-  '⠏ Mica',
+  `⠋ ${APP_TITLE_NAME}`,
+  `⠙ ${APP_TITLE_NAME}`,
+  `⠹ ${APP_TITLE_NAME}`,
+  `⠸ ${APP_TITLE_NAME}`,
+  `⠼ ${APP_TITLE_NAME}`,
+  `⠴ ${APP_TITLE_NAME}`,
+  `⠦ ${APP_TITLE_NAME}`,
+  `⠧ ${APP_TITLE_NAME}`,
+  `⠇ ${APP_TITLE_NAME}`,
+  `⠏ ${APP_TITLE_NAME}`,
 ] as const;
 
 const RUNNING_STATUS_TYPES = new Set<MicaUiWorkingStatus['type']>([
@@ -33,9 +34,9 @@ function isRunningStatus(status: MicaUiWorkingStatus): boolean {
 
 export function getTerminalTitle(status: MicaUiWorkingStatus, animationFrame = 0): string {
   if (isRunningStatus(status)) return RUNNING_TITLE_FRAMES[animationFrame % RUNNING_TITLE_FRAMES.length];
-  if (status.type === 'completed') return '✓ Mica';
-  if (status.type === 'error') return '✕ Mica';
-  return 'Mica';
+  if (status.type === 'completed') return `✓ ${APP_TITLE_NAME}`;
+  if (status.type === 'error') return `✕ ${APP_TITLE_NAME}`;
+  return APP_TITLE_NAME;
 }
 
 export function TerminalTitle(): null {

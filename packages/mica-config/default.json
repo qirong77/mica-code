@@ -22,8 +22,8 @@
       "name": "Llm-proxy",
       "protocol": "openai_chat_completions",
       "api_base": "https://llm-proxy.intra.xiaojukeji.com",
-      "get_model_url": "https://llm-proxy.intra.xiaojukeji.com/v1/models",
-      "api_key": "sk-YHP6U1yb5ci73_77-d81Dg"
+      "api_key": "sk-YHP6U1yb5ci73_77-d81Dg",
+      "models": ["kimi-k2.7-code", "glm-5.2"]
     }
   ],
   "mcpServers": {

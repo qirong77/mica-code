@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import startConfigWebWorker from '../../../plugins/builtin/config-web-worker.mjs';
 import setupProcessDiagnostics from '../../../plugins/builtin/process-diagnostics.mjs';
 import { applyConfigDefaultsToFile } from '../../../plugins/builtin/validate-config.mjs';
+import { APP_NAME } from '@packages/mica-common/index.js';
 import { CLI_USAGE, parseCliArgs } from './cli/args.js';
 import { VERSION } from './buildMeta.js';
 import { ensureDaemonRunning } from './features/sync-daemon/ensureDaemonRunning.js';
@@ -23,7 +24,7 @@ if (invocation.mode === 'help') {
   await exitAfterStdoutFlush(0);
 }
 if (invocation.mode === 'version') {
-  console.log(`mica-code ${VERSION}`);
+  console.log(`${APP_NAME === 'mica' ? 'mica-code' : APP_NAME} ${VERSION}`);
   await exitAfterStdoutFlush(0);
 }
 
@@ -219,7 +220,7 @@ const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
   import('./app/index.js'),
   import('./runtime/uiBridge.js'),
 ]);
-const processDiagnostics = setupProcessDiagnostics({ reportError: reportRuntimeError });
+const processDiagnostics = setupProcessDiagnostics({ reportError: reportRuntimeError, title: APP_NAME });
 
 const app = createApplication({ sessionId: invocation.mode === 'interactive' ? invocation.sessionId : undefined });
 
