@@ -132,6 +132,19 @@ Studio 使用 `~/.mica` 作为配置与本地数据目录（设置 `MICA_HOME` �
 - 会话：`~/.mica/sessions/`
 - 本地状态：`~/.mica/storage.json`（provider/model/effort、输入历史等）
 
+## 自定义配置（Web 页面）
+
+Studio 提供 Web 配置页面，可图形化配置 provider、模型、MCP、角色、skills、插件和 sync 等：
+
+```bash
+studio                     # 1. 启动交互式 TUI
+```
+
+2. 在输入框输入 `/config` 并回车；
+3. 对话区会出现 `Config UI: http://<地址>` 链接，点击（或复制到浏览器打开）即可进入配置页面。
+
+配置保存后即时生效，可继续在 Studio 中使用；`/config` 启动的配置服务独立于 Studio 进程运行，无需每次重复启动。
+
 ## 常见问题
 
 **Q: `studio: command not found`？**
