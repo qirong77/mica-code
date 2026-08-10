@@ -543,7 +543,7 @@ function backgroundStatusAppearance(status: MicaUiBackgroundTaskItem['status']):
 
 function TaskListRowSurface({ selected, children }: { selected: boolean; children: ReactNode }) {
   return (
-    <Box width="100%" backgroundColor={selected ? '#3A3A3A' : undefined}>
+    <Box width="100%" backgroundColor={selected ? micaUi.theme.colors.listRowSelected : undefined}>
       {children}
     </Box>
   );

@@ -5,7 +5,6 @@ import { Box, Ansi, stringWidth, useTerminalSize, wrapAnsi } from '@anthropic/in
 import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
-import type { ChalkInstance } from 'chalk';
 import stripAnsi from 'strip-ansi';
 
 import type { Token, Tokens } from 'marked';
@@ -14,21 +13,6 @@ import type { Token, Tokens } from 'marked';
 
 const BLOCKQUOTE_BAR = '\u258e'; // ▎
 const EOL = '\n';
-
-// ─── Markdown theme ──────────────────────────────────────────────────────────
-
-const theme = {
-  permission: 'rgb(177,185,249)',
-  text: 'rgb(255,255,255)',
-  inactive: 'rgb(153,153,153)',
-} as const;
-
-function themeChalk(key: keyof typeof theme): ChalkInstance {
-  const rgbValue = theme[key];
-  const rgbMatch = rgbValue.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-  if (rgbMatch) return chalk.rgb(+rgbMatch[1]!, +rgbMatch[2]!, +rgbMatch[3]!);
-  return chalk.white;
-}
 
 // ─── marked config ───────────────────────────────────────────────────────────
 
@@ -177,7 +161,9 @@ function formatToken(
       return highlight.highlight(token.text, { language }) + EOL;
     }
     case 'codespan': {
-      return themeChalk('permission')(token.text);
+      // ANSI blue follows the terminal palette and remains usable in both
+      // light and dark profiles; the previous fixed lavender was light-only.
+      return chalk.blue(token.text);
     }
     case 'em':
       return chalk.italic((token.tokens ?? []).map((t) => formatToken(t, 0, null, parent, highlight)).join(''));

@@ -75,6 +75,7 @@ export const CODEX_ERROR_INTERNAL = -32603;
 export const CODEX_METHODS = {
   initialize: 'initialize',
   threadStart: 'thread/start',
+  threadResume: 'thread/resume',
   turnStart: 'turn/start',
   turnSteer: 'turn/steer',
   turnInterrupt: 'turn/interrupt',

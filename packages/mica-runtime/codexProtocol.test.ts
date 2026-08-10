@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CODEX_METHODS,
   CODEX_ERROR_METHOD_NOT_FOUND,
   encodeCodexError,
   encodeCodexNotification,
@@ -8,6 +9,10 @@ import {
 } from './codexProtocol.js';
 
 describe('codex protocol framing', () => {
+  it('advertises the standard thread resume method', () => {
+    expect(CODEX_METHODS.threadResume).toBe('thread/resume');
+  });
+
   it('parses a JSON-RPC request with id/method/params', () => {
     expect(parseCodexLine('{"id":1,"method":"turn/start","params":{"threadId":"t"}}')).toEqual({
       id: 1,

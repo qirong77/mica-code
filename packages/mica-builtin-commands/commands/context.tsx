@@ -728,7 +728,7 @@ function barParts(ratio: number, width: number): { filled: string; empty: string
 
 function usageColor(ratio: number): string {
   if (ratio >= 0.8) return micaUi.theme.colors.error;
-  if (ratio >= 0.6) return '#FF9800';
+  if (ratio >= 0.6) return micaUi.theme.colors.toolWrite;
   if (ratio >= 0.45) return micaUi.theme.colors.warning;
   if (ratio >= 0.3) return micaUi.theme.colors.info;
   return micaUi.theme.colors.dim;

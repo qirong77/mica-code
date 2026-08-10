@@ -1,7 +1,7 @@
-import { feature } from 'bun:bundle';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import useStdin from '../hooks/use-stdin.js';
 import { getSystemThemeName, type SystemTheme } from './systemTheme.js';
+import { watchSystemTheme } from '../../utils/systemThemeWatcher.js';
 import type { ThemeName, ThemeSetting } from './theme-types.js';
 
 // -- Config persistence injection --
@@ -72,23 +72,11 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
 
   const { internal_querier } = useStdin();
 
-  // Watch for live terminal theme changes while 'auto' is active.
-  // Positive feature() pattern so the watcher import is dead-code-eliminated
-  // in external builds.
+  // Watch for live terminal theme changes while 'auto' is active. The query is
+  // best-effort: terminals that do not answer OSC 11 keep the env-based seed.
   useEffect(() => {
-    if (feature('AUTO_THEME')) {
-      if (activeSetting !== 'auto' || !internal_querier) return;
-      let cleanup: (() => void) | undefined;
-      let cancelled = false;
-      void import('../../utils/systemThemeWatcher.js').then(({ watchSystemTheme }) => {
-        if (cancelled) return;
-        cleanup = watchSystemTheme(internal_querier, setSystemTheme);
-      });
-      return () => {
-        cancelled = true;
-        cleanup?.();
-      };
-    }
+    if (activeSetting !== 'auto' || !internal_querier) return;
+    return watchSystemTheme(internal_querier, setSystemTheme);
   }, [activeSetting, internal_querier]);
 
   const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : activeSetting;

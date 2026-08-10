@@ -174,10 +174,12 @@ data: {"type":"turn","state":"completed",...}`;
   <h3>请求方法</h3>
   <ul>
     <li><code>initialize</code>：返回协议能力（<code>capabilities.protocolVersion: 2</code>）、平台信息。</li>
-    <li><code>thread/start</code>（params：<code>cwd</code>）：加载/创建会话线程，返回 thread（含 <code>id</code> / <code>status</code> / <code>cwd</code> / <code>modelProvider</code> / <code>model</code>）、当前 model 与 approvalPolicy。</li>
+    <li><code>thread/start</code>（params：<code>cwd</code>）：加载/创建会话线程，返回 thread（含 <code>id</code> / <code>status</code> / <code>cwd</code> / <code>modelProvider</code> / <code>model</code>）、当前 model、approvalPolicy 与 sandboxPolicy；同时发出 <code>thread/started</code>。</li>
+    <li><code>thread/resume</code>（params：<code>threadId</code>）：通过协议重新打开已持久化的会话，响应形状与 <code>thread/start</code> 相同，并发出 <code>thread/started</code>。</li>
     <li><code>turn/start</code>（params：<code>input</code>、可选 <code>model</code> / <code>effort</code> / <code>cwd</code>）：<strong>立即返回</strong> <code>&#123; turn: &#123; id, status: "inProgress" &#125; &#125;</code> 后异步执行；已有活跃 turn 时返回错误，需要排队请用 <code>turn/steer</code>。输入内容与 CLI 一致：<code>&#123; "type": "text", "text": "..." &#125;</code> 文本，或 <code>&#123; "type": "image", "url": "..." &#125;</code> / <code>localImage</code> 图片。</li>
     <li><code>turn/steer</code>（params：<code>expectedTurnId</code>、<code>input</code>、可选 <code>clientMessageId</code>）：把新输入注入活跃 turn 的 after_iteration 队列，实现忙时 Shift+Tab 续聊；<code>expectedTurnId</code> 必须对应当前活跃 turn（不匹配返回 -32602）。<code>clientMessageId</code> 用于让客户端关联排队状态（Mica 扩展）。</li>
     <li><code>turn/interrupt</code>：中止当前 turn，返回空 result；tool 执行中会在当前迭代/工具结束的边界生效，随后发 <code>turn/completed</code>（<code>status: "interrupted"</code>）。</li>
+    <li>Codex 的 approval/sandbox 参数会被接受以保持请求兼容；Mica 当前没有真正的沙箱或交互审批执行器，实际有效策略为 <code>approvalPolicy: "never"</code>、<code>sandboxPolicy: dangerFullAccess</code>。请求更严格策略时会发出 <code>warning</code>，不能将其当作 Codex 的安全边界。</li>
     <li>客户端通知：<code>&#123;"method":"initialized"&#125;</code>、<code>&#123;"method":"shutdown"&#125;</code>。</li>
   </ul>
 
