@@ -1,19 +1,38 @@
 {
   "providers": [
     {
+      "id": "GPT",
+      "name": "GPT",
+      "api_base": "https://api.cdn-krill-ai.com/codex/v1",
+      "api_key": "nb_P2m6mBffWFthELno1-4xw4asrtkb8aOfZYIYOPJJV7c",
+      "protocol": "openai_responses",
+      "models": ["gpt-5.6-terra", "grok-4.5"]
+    },
+    {
       "id": "deepseek",
       "name": "DeepSeek",
       "api_base": "https://api.deepseek.com",
-      "protocol": "openai_chat_completions",
       "get_model_url": "https://api.deepseek.com/models",
-      "api_key": ""
+      "api_key": "sk-bb6450aaf27348f18c37b98608bf696a",
+      "protocol": "openai_responses",
+      "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+    },
+    {
+      "id": "Llm-proxy",
+      "name": "Llm-proxy",
+      "protocol": "openai_chat_completions",
+      "api_base": "https://llm-proxy.intra.xiaojukeji.com",
+      "get_model_url": "https://llm-proxy.intra.xiaojukeji.com/v1/models",
+      "api_key": "sk-YHP6U1yb5ci73_77-d81Dg"
     }
   ],
-  "serperApiKey": "",
   "mcpServers": {
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    "Cooper": {
+      "url": "http://127.0.0.1:28582/v1/hub/cooper_mcp",
+      "headers": {
+        "Authorization": "Bearer dXI4RkRwYkIvMFpZa0FBQUFZYlZmaElkVFlST01VMkljY0FTalZlNVV5dGFQaHNxVmhYOWlIQUhIYjVURUljM08wTmlBaVJibzZQeFoyY0piZz09"
+      }
     }
-  }
+  },
+  "serperApiKey": "902dde8b49e3adbbb76456eeba118920f474848f"
 }
