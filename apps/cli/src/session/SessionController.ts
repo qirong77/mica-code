@@ -27,6 +27,7 @@ export type ResumeSessionResult =
 export type SessionAgentAdapter = {
   getSnapshot(): AgentRuntimeSnapshot;
   loadSnapshot(snapshot: AgentRuntimeSnapshot): void;
+  setSessionId?(sessionId: string): void;
   reloadConfig(resetSession?: boolean): void;
   toConversationMessages(): MicaUiConversationMessage[];
 };
@@ -67,6 +68,7 @@ export class SessionController {
     this.store = options.store ?? micaSession.createStore();
     this.config = options.config ?? defaultSessionConfigAdapter;
     this.ui = options.ui ?? defaultSessionUiAdapter;
+    this.agent.setSessionId?.(this.currentSessionId);
   }
 
   list(limit = 20): SessionSummary[] {
@@ -94,6 +96,7 @@ export class SessionController {
   startNewSession(): void {
     this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
+    this.agent.setSessionId?.(this.currentSessionId);
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
@@ -205,6 +208,7 @@ export class SessionController {
     this.agent.reloadConfig(false);
     this.agent.loadSnapshot(fromPersistedSnapshot(resolvedSnapshot, restoredRole));
     this.currentSessionId = session.id;
+    this.agent.setSessionId?.(this.currentSessionId);
     this.currentTurnState = session.turnState ?? 'completed';
     this.currentPersistedSignature = sessionSignature(session);
     const conversationMessages = getPersistedConversationMessages(session.snapshot);

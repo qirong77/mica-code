@@ -18,6 +18,7 @@
     "build:app": "cd apps/desktop && bun run build:mac",
     "test": "vitest run",
     "test:watch": "vitest",
+    "release:studio": "bun scripts/publish-studio.mjs",
     "format": "prettier --write AGENT.md README.md package.json tsconfig.json tsconfig.base.json .prettierrc \"plugins/builtin/**/*.{ts,tsx,js,mjs,md}\" \"apps/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,json,md}\" \"docs/**/*.md\" \"blogs/**/*.md\""
   },
   "workspaces": [

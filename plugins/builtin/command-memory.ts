@@ -8,6 +8,7 @@ type SystemPromptBuildEvent = {
 };
 
 export default function setupCommandMemory(ctx: PluginContext): void {
+  return; // 暂时禁用，避免误导用户
   const configDir = ctx.paths?.config ?? process.env.MICA_HOME ?? join(homedir(), '.mica');
   const sessionsDir = join(configDir, 'sessions');
   const guidance = buildMemoryGuidance(sessionsDir);

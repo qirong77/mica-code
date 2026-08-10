@@ -104,6 +104,7 @@ export class AgentRuntime {
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
   private subagentUsageHistory: SubagentUsageRecord[] = [];
+  private sessionId = '';
 
   constructor(
     configOverride: AgentRuntimeConfigOverride = {},
@@ -152,6 +153,7 @@ export class AgentRuntime {
     return mergeDefined(
       {
         ...createAgentClientOptions(this.currentConfig),
+        ...(this.sessionId ? { clientMetadata: { session_id: this.sessionId } } : {}),
         systemPrompt: () => this.buildSystemPrompt(),
         toolContext: {
           agent: this,
@@ -160,6 +162,15 @@ export class AgentRuntime {
       },
       overrides,
     );
+  }
+
+  setSessionId(sessionId: string): void {
+    if (this.sessionId === sessionId) return;
+    if (this.isRunning) throw new Error('Cannot switch session while agent is running');
+    const previousSnapshot = this.client?.getSnapshot();
+    this.sessionId = sessionId;
+    this.recreateClient();
+    if (previousSnapshot && this.client) this.client.loadSnapshot(previousSnapshot);
   }
 
   buildSystemPrompt(): string {

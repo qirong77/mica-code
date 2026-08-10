@@ -7,6 +7,7 @@ export type ModelClientOptions = {
   baseURL?: string;
   effort?: EffortOption;
   provider: ProviderDefinition;
+  clientMetadata?: Record<string, string>;
   tools?: boolean;
   toolFilter?: ToolFilter;
   toolContext?: unknown;

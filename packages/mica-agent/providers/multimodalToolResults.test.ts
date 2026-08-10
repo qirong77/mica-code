@@ -125,6 +125,17 @@ describe('multimodal tool results', () => {
     expect(displayedResults[0]).not.toContain('data:image');
   });
 
+  it('sends client metadata with the session id for Responses', async () => {
+    openaiMocks.responsesCreate.mockResolvedValueOnce(streamOf({ type: 'response.output_text.delta', delta: 'done' }));
+    const client = new ResponsesClient({ ...options('openai_responses'), clientMetadata: { session_id: 'session-1' } });
+
+    await expect(client.query('hello')).resolves.toBe('done');
+
+    expect(openaiMocks.responsesCreate.mock.calls[0]?.[0]).toMatchObject({
+      client_metadata: { session_id: 'session-1' },
+    });
+  });
+
   it('keeps all Chat tool results before a synthetic image message for parallel calls', async () => {
     let secondRequestSnapshot: unknown;
     const toolCalls = ['call-image-1', 'call-image-2'].map((id, index) => ({

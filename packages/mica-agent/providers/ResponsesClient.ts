@@ -75,6 +75,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   baseURL: string | undefined;
   effort: EffortOption | undefined;
   provider!: ProviderDefinition;
+  clientMetadata: ModelClientOptions['clientMetadata'];
   tools: boolean;
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
@@ -92,6 +93,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     this.baseURL = options.baseURL;
     this.effort = options.effort;
     this.provider = options.provider;
+    this.clientMetadata = options.clientMetadata;
     this.tools = options.tools ?? true;
     this.toolFilter = options.toolFilter;
     this.toolContext = options.toolContext;
@@ -217,6 +219,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
                   }
                 : {}),
               ...this.reasoningParams,
+              ...(this.clientMetadata ? { client_metadata: this.clientMetadata } : {}),
               stream: true,
             },
             { signal: options?.signal },
