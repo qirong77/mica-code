@@ -32,6 +32,11 @@ export async function getModelRule(modelName = '', signal) {
 
   let providers = await loadModels(signal);
   let matches = findMatches(providers, requestedName);
+  if (matches.length === 0 && providers !== seedEntry.payload) {
+    // A disk cache may be stale or miss models that the bundled seed knows
+    // about; always fall back to the seed before waiting on the network.
+    matches = findMatches(seedEntry.payload, requestedName);
+  }
   if (matches.length === 0 && refreshPromise) {
     try {
       providers = await refreshPromise;

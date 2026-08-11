@@ -151,6 +151,19 @@ describe('model-effort-context', () => {
     expect(rule.efforts).toBeDefined();
   });
 
+  it('falls back to the bundled seed when a disk cache misses a model the seed knows', async () => {
+    await writeModelsCache(Date.now(), {
+      other: { models: { 'other-model': model(999000, []) } },
+    });
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
+    vi.stubGlobal('fetch', fetchMock);
+    dispose = setupModelEffortContext();
+
+    const rule = await getModelsDevRule('deepseek-v4-flash');
+    expect(rule.contextSize).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('falls back to the generic rule with a warning when the model is missing from the seed and refresh fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
