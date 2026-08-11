@@ -177,10 +177,11 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 ## 模型、Effort 与 Context 规则
 
 - 全局 effort 枚举是 `none/low/medium/high/xhigh`，直接映射到 OpenAI 请求参数。未加载数据的模型默认提供 `none/low/medium/high`。
-- context size 默认 256K，实际值由 Models.dev resolver 决定；未找到的模型使用 256K + `none/low/medium/high`。provider 可设 `supportsEffort: false`（状态显示 `none`，不发送 reasoning effort）。Anthropic Messages 协议 effort 固定 `none/low/medium/high`。
+- context size 默认 256K，实际值由 Models.dev resolver 决定；缓存/内置种子都未命中且在线刷新失败的模型使用通用规则（context 1M、默认 effort `medium`、全部 effort 枚举），fallback 在 `packages/mica-config/getModelRule.ts`，与 `plugins/builtin/model-effort-context/getModelRule.js` 的 resolver 同名但职责不同。provider 可设 `supportsEffort: false`（状态显示 `none`，不发送 reasoning effort）。Anthropic Messages 协议 effort 固定 `none/low/medium/high`。
 - provider/model/effort 切换时必须 clamp effort 并同步 context window size，不要把无效 effort 持久化进 storage 或 session。
 - 只有配置了 `get_model_url` 的动态 provider 才触发模型列表查找（解析 OpenAI 风格 `{ data: [{ id }] }`，空列表或非预期结构报错）；动态模型只缓存到内存配置和 storage 运行态，不回填静态 `config.json`。
 - 交互和 headless 模式都必须先注册 `plugins/builtin/model-effort-context` resolver 再调用 `ensureModelRule`；headless 获取不到 metadata 时只写 stderr 并使用通用 rule，不能污染协议 stdout。
+- `plugins/builtin/model-effort-context/getModelRule.js` 的模型数据来源优先级：磁盘缓存（`$MICA_HOME/cache/models-dev.json`）→ 内置种子（`plugins/builtin/model-effort-context/seed/models-dev.seed.ts` 的 `modelsDevSeedBase64`，gzip→base64 内嵌、模块加载时 `gunzipSync` 解压一次，随二进制打包）→ 在线下载 `https://models.dev/api.json`。缓存 TTL 24h，过期后后台异步刷新（fire-and-forget，不阻塞调用）；只有请求的模型不在任何缓存/种子中时才同步等待在线刷新（最多 15s）。磁盘缓存缺失或损坏时用种子兜底，不触发同步下载；下载/刷新失败或模型缺失而降级时写 stderr 告警（进程内去重），不静默。后台刷新也必须透传调用方的 `signal`（`refreshModels(signal)`），否则 await 同一 `refreshPromise` 时 abort 不生效、只能干等超时。
 - Headless `exec` 默认输出人类可读文本；`--json` 时输出 Codex exec ThreadEvent JSONL（形状与 `codex exec --json` 对齐，`--thinking` 控制 reasoning item，不要把 reasoning 混入 `text` 或最终输出）。
 - Headless run 的 prompt 会先经 `micaUi.parseImageRefs` 解析 `[Image](路径)` 引用生成多模态 content block（直接导入 `@packages/mica-ui/utils/imagePaste.js`，避免把 React/Ink 拖进 headless 路径）。
 - Headless `run --no-save` 在整个 turn 期间跳过 session 落盘，用于 mica-code-app 右键 Commit 等一次性后台任务；不改变 prompt、工具、MCP 或事件输出行为。
@@ -310,6 +311,7 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 
 ## 测试与验证
 
+- **全量 `bun run test` 很慢（实测约 7~8 分钟）**：大头是真实 spawn 进程的端到端套件，包括 `apps/cli/src/cli/app-server.flows.test.ts`（~60s）、`apps/cli/src/cli/commit.flows.test.ts`（~63s）、`packages/mica-pty/tests/driver.test.ts`（~17s）以及 `models.flows.test.ts`。日常开发**默认只跑局部测试**：`bun run test -- <测试文件>`（可传多个路径），按改动范围选对应套件；**全量只在必要时跑**（发布前、改动影响面跨多个慢套件、或 CI 要求时），不要每次改动都全量。
 - 单元/集成测试走 `bun run test`（vitest，Node 环境）；涉及交互式 TUI 的测试优先用 `packages/mica-pty`。
 - vitest include 覆盖 `apps/**/*.test.{ts,tsx}`（sync web 组件冒烟测试是 `.tsx`，用 react-dom/server 渲染验证终端风格结构）；`apps/desktop` 是独立 npm 项目，用项目内 `bun test` 且依赖 `apps/desktop/node_modules`。
 - `packages/mica-pty` 两类能力：`PtyDriver`（直接 import，Node ≥22 / vitest 下使用——node-pty 在 Bun 下不可用，**不要从 `bun run` 代码里 import `PtyDriver`**）和内置 PTY 工具运行时（`PtyManager` + Node helper 桥接，Bun 主进程可安全使用）。
@@ -352,6 +354,7 @@ MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" npx vitest run packages
 
 - `bun run build` 实际运行 `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`；`prebuild` 是 `bunx tsc --noEmit`；`postbuild` 是 `bun scripts/install.mjs`。
 - `scripts/build.mjs` 用 `bun build --compile --compile-autoload-package-json` 构建无外部运行时依赖的本地二进制，默认输出 `dist/mica`。构建时注入 `__MICA_APP_NAME__`（默认 `mica`，编译期常量在 `packages/mica-common/appName.ts`，驱动命令名/终端标题/版本输出）；`MICA_BUILD_ALIASES`（默认 `studio`，逗号分隔，置空关闭）额外编译同名别名二进制到主输出同目录，与主命令共用一份源码、仅注入不同 app name。GitHub Actions release 构建显式传 `MICA_BUILD_ALIASES=` 不产出别名。
+- 内置 models.dev 种子由 `scripts/update-models-dev-seed.mjs` 刷新（下载 `api.json` → 校验结构 → `gzipSync` 压缩 → base64 → 原子写入 `plugins/builtin/model-effort-context/seed/models-dev.seed.ts`，失败退出码 1）；手动运行 `bun scripts/update-models-dev-seed.mjs`。种子以 gzip 内嵌（约 350KB，未压缩 3.5MB）避免 `?raw` 不支持问题并控制仓库体积。CI 在 release 构建前 best-effort 刷新（失败仅打 warning、用仓库固定副本，绝不阻断构建）。
 - `scripts/install.mjs` 默认安装到 `$HOME/.local/lib/mica`，并在 `$HOME/.local/bin/mica` 写薄 launcher；可用 `MICA_INSTALL_DIR`、`MICA_INSTALL_PACKAGE_DIR`、`MICA_BIN_NAME` 覆盖。同一次安装会把 `MICA_BUILD_ALIASES` 指定的别名二进制（`dist/<alias>` 存在时）一并安装到 `~/.local/bin/<alias>`；release 包不含别名，别名文件缺失时跳过。studio 别名命令的使用文档见 `studio/doc.md`。
 - 产品名是 Mica Code / `mica-code`；release 采用按平台下载：`scripts/install.sh` 探测 os/arch 后只下载对应 `mica-code-<platform>-<cpu>.tar.gz` 并用 `sha256sums.txt` 校验，不内嵌全部平台二进制。GitHub Actions 的 `mica-code-release` artifact 是 CI 汇总包，不是用户安装路径。
 - `.github/workflows/build-binaries.yml` 在 push/PR/手动触发时跑根 typecheck/test + Desktop test/lint，在 `main` 或 `v*` tag 构建 Linux/macOS x64/arm64 release 二进制并上传 asset。

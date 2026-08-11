@@ -52,7 +52,7 @@ describe('model-effort-context', () => {
   });
 
   it('loads context sizes and dynamic effort options on demand', async () => {
-    mockModelsDev();
+    await mockModelsDev();
     dispose = setupModelEffortContext();
     await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5', 'grok-4.5'].map((model) => ensureModelRule(model)));
 
@@ -65,7 +65,7 @@ describe('model-effort-context', () => {
   });
 
   it('resolves protocol-specific request patches without provider matching', async () => {
-    mockModelsDev();
+    await mockModelsDev();
     dispose = setupModelEffortContext();
     await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5'].map((model) => ensureModelRule(model)));
 
@@ -80,7 +80,7 @@ describe('model-effort-context', () => {
       reasoning: { effort: 'medium' },
     });
   });
-  it('uses a models.dev disk cache younger than 12 hours without requesting the API', async () => {
+  it('uses a models.dev disk cache younger than 24 hours without requesting the API', async () => {
     await writeModelsCache(Date.now() - 60 * 60 * 1000, {
       cached: { models: { 'cached-model': model(321000, []) } },
     });
@@ -92,7 +92,7 @@ describe('model-effort-context', () => {
   });
 
   it('returns a stale cache immediately and refreshes it in the background', async () => {
-    await writeModelsCache(Date.now() - 13 * 60 * 60 * 1000, {
+    await writeModelsCache(Date.now() - 25 * 60 * 60 * 1000, {
       cached: { models: { 'stale-model': model(111000, []) } },
     });
     let resolveFetch!: (response: Response) => void;
@@ -115,7 +115,7 @@ describe('model-effort-context', () => {
   });
 
   it('keeps a stale cache when the background refresh fails', async () => {
-    await writeModelsCache(Date.now() - 13 * 60 * 60 * 1000, {
+    await writeModelsCache(Date.now() - 25 * 60 * 60 * 1000, {
       cached: { models: { 'fallback-model': model(333000, []) } },
     });
     const before = await readFile(modelsCachePath(), 'utf8');
@@ -141,6 +141,27 @@ describe('model-effort-context', () => {
     expect(cache.payload.fetched?.models['cold-model']?.limit.context).toBe(456000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('resolves models from the bundled seed when no disk cache exists and models.dev is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    dispose = setupModelEffortContext();
+
+    const rule = await getModelsDevRule('deepseek-v4-flash');
+    expect(rule.contextSize).toBeGreaterThan(0);
+    expect(rule.efforts).toBeDefined();
+  });
+
+  it('falls back to the generic rule with a warning when the model is missing from the seed and refresh fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    dispose = setupModelEffortContext();
+
+    const rule = await ensureModelRule('brand-new-model-2099');
+    expect(rule.contextSize).toBe(1000000);
+    expect(rule.defaultEffort).toBe('medium');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('brand-new-model-2099'));
+    errorSpy.mockRestore();
+  });
 });
 
 type ModelsCache = {
@@ -158,36 +179,32 @@ async function writeModelsCache(fetchedAt: number, payload: ModelsCache['payload
   await writeFile(modelsCachePath(), JSON.stringify({ version: 1, fetchedAt, payload }), 'utf8');
 }
 
-function mockModelsDev() {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          moonshotai: {
-            models: {
-              'kimi-k2.6': model(262144, [{ type: 'toggle' }]),
-            },
-          },
-          deepseek: {
-            models: {
-              'deepseek-v4-pro': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }]),
-            },
-          },
-          openai: {
-            models: {
-              'gpt-5.5': model(1050000, [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'max'] }]),
-            },
-          },
-          xai: {
-            models: {
-              'grok-4.5': model(500000, [{ type: 'effort', values: ['low', 'medium', 'high'] }]),
-            },
-          },
-        }),
-      ),
-    ),
-  );
+async function mockModelsDev() {
+  const payload = {
+    moonshotai: {
+      models: {
+        'kimi-k2.6': model(262144, [{ type: 'toggle' }]),
+      },
+    },
+    deepseek: {
+      models: {
+        'deepseek-v4-pro': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }]),
+      },
+    },
+    openai: {
+      models: {
+        'gpt-5.5': model(1050000, [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'max'] }]),
+      },
+    },
+    xai: {
+      models: {
+        'grok-4.5': model(500000, [{ type: 'effort', values: ['low', 'medium', 'high'] }]),
+      },
+    },
+  };
+  // A disk cache pins the tests to the mock payload regardless of the bundled seed.
+  await writeModelsCache(Date.now(), payload);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload))));
 }
 
 function model(context: number, reasoning_options: unknown[]) {

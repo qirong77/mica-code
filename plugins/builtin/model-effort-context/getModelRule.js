@@ -2,15 +2,22 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
+import { modelsDevSeedBase64 } from './seed/models-dev.seed.js';
 
 const MODELS_URL = 'https://models.dev/api.json';
 const CACHE_VERSION = 1;
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh'];
 
 let memoryCache;
 let cacheReadPromise;
 let refreshPromise;
+let warnedRefreshFailure = false;
+let warnedSyncFallback = false;
+
+/** The bundled models.dev snapshot, decoded once at module load. */
+const seedEntry = parseSeedEntry(modelsDevSeedBase64);
 
 /**
  * Look up a model on models.dev and turn its metadata into a mica model rule.
@@ -26,10 +33,18 @@ export async function getModelRule(modelName = '', signal) {
   let providers = await loadModels(signal);
   let matches = findMatches(providers, requestedName);
   if (matches.length === 0 && refreshPromise) {
-    providers = await refreshPromise;
+    try {
+      providers = await refreshPromise;
+    } catch (error) {
+      warnSyncFallback(requestedName, error);
+      throw error;
+    }
     matches = findMatches(providers, requestedName);
   }
-  if (matches.length === 0) throw new Error(`Model not found on models.dev: ${requestedName}`);
+  if (matches.length === 0) {
+    warnSyncFallback(requestedName);
+    throw new Error(`Model not found on models.dev: ${requestedName}`);
+  }
 
   const match = selectMatch(matches, requestedName);
   const contextSize = match.model?.limit?.context;
@@ -56,11 +71,11 @@ export async function getModelRule(modelName = '', signal) {
 }
 
 async function loadModels(signal) {
-  const cached = memoryCache ?? (await readCacheOnce());
+  const cached = memoryCache ?? (await readCacheOnce()) ?? seedEntry;
   if (cached) {
     memoryCache = cached;
     if (!isFresh(cached)) {
-      void refreshModels().catch(() => undefined);
+      void refreshModels(signal).catch(() => warnRefreshFailure(cached));
     }
     return cached.payload;
   }
@@ -139,6 +154,12 @@ function isCacheEntry(value) {
   );
 }
 
+function parseSeedEntry(encoded) {
+  const entry = JSON.parse(gunzipSync(Buffer.from(encoded, 'base64')).toString('utf8'));
+  if (!isCacheEntry(entry)) throw new Error('invalid bundled models.dev seed');
+  return entry;
+}
+
 function isModelsPayload(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return Object.values(value).some(
@@ -151,6 +172,38 @@ export function __resetModelsCacheForTests() {
   memoryCache = undefined;
   cacheReadPromise = undefined;
   refreshPromise = undefined;
+  warnedRefreshFailure = false;
+  warnedSyncFallback = false;
+}
+
+/**
+ * Background refresh failed while a stale disk cache or the bundled seed was in
+ * use. The request keeps running on stale data; warn once per process so the
+ * degraded state is visible instead of silent.
+ */
+function warnRefreshFailure(cached) {
+  if (warnedRefreshFailure) return;
+  warnedRefreshFailure = true;
+  const source = cached === seedEntry ? 'bundled seed' : 'cached';
+  console.error(
+    `mica: could not refresh model metadata from ${MODELS_URL}; using ${source} data. ` +
+      'Model metadata may be stale until models.dev is reachable again.',
+  );
+}
+
+/**
+ * The requested model is in neither the cache nor the seed and the online
+ * refresh failed. The caller falls back to a generic rule; warn so the missing
+ * metadata (context size, effort options) is not silently assumed.
+ */
+function warnSyncFallback(modelName, error) {
+  if (warnedSyncFallback) return;
+  warnedSyncFallback = true;
+  console.error(
+    `mica: model "${modelName}" was not found in the bundled seed or cached models.dev data, ` +
+      `and it could not be resolved online (${error instanceof Error ? error.message : String(error)}). ` +
+      'Using a generic rule (context 1M, default effort).',
+  );
 }
 
 function findMatches(providers, requestedName) {
