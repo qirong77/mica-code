@@ -37,7 +37,7 @@ function createMockProvider() {
     mode: 'ok' as 'ok' | 'error' | 'tool',
     errorMessage: '',
     delayBeforeTextMs: 0,
-    requests: [] as Array<{ model: string; input: unknown[] }>,
+    requests: [] as Array<{ model: string; input: unknown[]; reasoning?: { effort?: string } }>,
     responsesFinished: 0,
     /** `tool` mode: requests #1/#2 return write_file function calls (two tool
      * iterations), later requests return plain text. Two iterations are needed
@@ -51,19 +51,21 @@ function createMockProvider() {
     /** Override reply text; compact tests use a long reply so the checkpoint
      * exceeds the recent-token budget and actually summarizes. */
     longText: '',
+    includeReasoning: false,
   };
   const server: Server = createServer((req, res) => {
     if (req.method === 'POST' && req.url?.startsWith('/v1/responses')) {
       let body = '';
       req.on('data', (chunk) => (body += chunk.toString()));
       req.on('end', () => {
-        let parsed: { model?: string; input?: unknown[] } = {};
+        let parsed: { model?: string; input?: unknown[]; reasoning?: { effort?: string } } = {};
         try {
           parsed = JSON.parse(body);
         } catch {
           // keep defaults
         }
-        state.requests.push({ model: parsed?.model ?? '', input: parsed?.input ?? [] });
+        const { model = '', input = [], reasoning } = parsed;
+        state.requests.push({ model, input, reasoning });
         if (state.mode === 'error') {
           res.writeHead(400, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: { message: state.errorMessage || 'mock provider error' } }));
@@ -75,6 +77,22 @@ function createMockProvider() {
         const emitTextEvents = () => {
           emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
           emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
+          if (state.includeReasoning) {
+            emit({
+              type: 'response.reasoning_summary_text.delta',
+              item_id: 'reasoning_1',
+              output_index: 0,
+              content_index: 0,
+              delta: 'thinking...',
+            });
+            emit({
+              type: 'response.reasoning_summary_text.done',
+              item_id: 'reasoning_1',
+              output_index: 0,
+              content_index: 0,
+              text: 'thinking...',
+            });
+          }
           emit({
             type: 'response.output_item.added',
             output_index: 0,
@@ -337,14 +355,7 @@ function spawnHost(tag: string, extraArgs: string[] = [], homeOverride?: string)
   mkdirSync(cwd, { recursive: true });
   const child = spawn(
     process.env.MICA_BIN ?? 'bun',
-    [
-      ...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']),
-      'app-server',
-      '--thinking',
-      '--dir',
-      cwd,
-      ...extraArgs,
-    ],
+    [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), 'app-server', '--dir', cwd, ...extraArgs],
     {
       cwd: ROOT,
       env: { ...process.env, MICA_HOME: home, MICA_NO_DAEMON: '1' },
@@ -431,6 +442,14 @@ async function send(host: Host, id: number, method: string, params: Record<strin
   });
 }
 
+/** Write one unencoded protocol line so parse failures can be exercised through
+ * the same real child-process stdin transport as normal requests. */
+async function sendRaw(host: Host, line: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    host.child.stdin!.write(`${line}\n`, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
 function killHost(host: Host): void {
   try {
     host.child.kill('SIGTERM');
@@ -489,8 +508,23 @@ const hostReady = (m: HostMessage) => m.method === 'mica/backgroundTasks/updated
 
 suite('mica app-server real-user flows (mock provider)', () => {
   const hosts: Host[] = [];
-  afterEach(() => {
-    for (const host of hosts.splice(0)) killHost(host);
+  afterEach(async () => {
+    const activeHosts = hosts.splice(0);
+    for (const host of activeHosts) killHost(host);
+    await Promise.all(
+      activeHosts.map(async (host) => {
+        await Promise.race([host.closePromise, sleep(5_000)]);
+        rmSync(host.home, { recursive: true, force: true });
+      }),
+    );
+    mock!.state.mode = 'ok';
+    mock!.state.errorMessage = '';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.toolFilePath = '';
+    mock!.state.longText = '';
+    mock!.state.includeReasoning = false;
   });
 
   itE2E('new session + switched model (full provider/model id) + effort completes the turn', async () => {
@@ -526,12 +560,262 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(host.lines.some((m) => m.method === 'item/agentMessage/delta')).toBe(true);
     expect(
       host.lines.find(
-        (m) => m.method === 'item/completed' && (m.params?.item as { type?: string } | undefined)?.type === 'agentMessage',
+        (m) =>
+          m.method === 'item/completed' && (m.params?.item as { type?: string } | undefined)?.type === 'agentMessage',
       )?.params?.item,
     ).toMatchObject({ type: 'agentMessage', text: '你好，我是 mock 模型的回复' });
     // Session was persisted as a completed turn.
-    await waitFor(host, (m) => m.method === 'mica/queue/changed', 'queue settle', 10_000).catch(() => undefined);
-    expect(true).toBe(true);
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      turnState?: string;
+    };
+    expect(session.turnState).toBe('completed');
+  });
+
+  itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.includeReasoning = true;
+
+    const host = spawnHost('thinking', ['--thinking']);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '请先思考再回答' }],
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'thinking turn started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'thinking turn completed', 30_000);
+
+    expect(
+      host.lines.some(
+        (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'thinking...',
+      ),
+    ).toBe(true);
+  });
+
+  itE2E('unknown protocol methods return -32601 and keep the resident host usable', async () => {
+    const host = spawnHost('unknown-method');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'mica/doesNotExist', {});
+    const unknown = await waitFor(host, (message) => message.id === 1 && message.error !== undefined, 'unknown method');
+    expect(unknown.error).toMatchObject({ code: -32601, message: 'Method not found: mica/doesNotExist' });
+
+    await send(host, 2, 'thread/start', { threadId: '' });
+    const thread = await waitFor(
+      host,
+      (message) => message.id === 2 && message.result !== undefined,
+      'thread after error',
+    );
+    expect(thread.result).toMatchObject({ thread: { id: expect.any(String) } });
+  });
+
+  itE2E('malformed JSON returns a parse error and keeps the resident host usable', async () => {
+    const host = spawnHost('malformed-json');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await sendRaw(host, '{"id":1,"method":"thread/start"');
+    const parseError = await waitFor(
+      host,
+      (message) => message.id === -32700 && message.error !== undefined,
+      'malformed JSON parse error',
+    );
+    expect(parseError.error).toMatchObject({ code: -32600, message: 'Parse error' });
+
+    await send(host, 2, 'thread/start', { threadId: '' });
+    const thread = await waitFor(
+      host,
+      (message) => message.id === 2 && message.result !== undefined,
+      'thread after parse error',
+    );
+    expect(thread.result).toMatchObject({ thread: { id: expect.any(String) } });
+  });
+
+  itE2E(
+    'thread/resume rejects missing, non-string, and unknown session ids without contacting the provider',
+    async () => {
+      mock!.state.requests = [];
+      const host = spawnHost('resume-errors');
+      hosts.push(host);
+      await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+      await send(host, 1, 'thread/resume', {});
+      const missingId = await waitFor(
+        host,
+        (message) => message.id === 1 && message.error !== undefined,
+        'missing thread id',
+      );
+      expect(missingId.error).toMatchObject({ code: -32602, message: 'threadId must not be empty' });
+
+      await send(host, 2, 'thread/resume', { threadId: 42 });
+      const nonStringId = await waitFor(
+        host,
+        (message) => message.id === 2 && message.error !== undefined,
+        'non-string thread id',
+      );
+      expect(nonStringId.error).toMatchObject({ code: -32602, message: 'threadId must not be empty' });
+
+      await send(host, 3, 'thread/resume', { threadId: 'missing-session-id' });
+      const missingSession = await waitFor(
+        host,
+        (message) => message.id === 3 && message.error !== undefined,
+        'missing session',
+      );
+      expect(missingSession.error).toMatchObject({ code: -32602, message: 'Session not found: missing-session-id' });
+      expect(mock!.state.requests).toHaveLength(0);
+    },
+  );
+
+  itE2E('invalid turn input and idle steer return -32602 without starting a provider request', async () => {
+    mock!.state.requests = [];
+    const host = spawnHost('turn-errors');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [] });
+    const invalidInput = await waitFor(
+      host,
+      (message) => message.id === 1 && message.error !== undefined,
+      'invalid input',
+    );
+    expect(invalidInput.error).toMatchObject({ code: -32602, message: 'input must contain at least one item' });
+
+    await send(host, 2, 'turn/start', { threadId: '', input: [null] });
+    const invalidItem = await waitFor(
+      host,
+      (message) => message.id === 2 && message.error !== undefined,
+      'invalid input item',
+    );
+    expect(invalidItem.error).toMatchObject({ code: -32602, message: 'input contains an invalid item' });
+
+    await send(host, 3, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: 'not-active',
+      input: [{ type: 'text', text: '不能注入' }],
+    });
+    const idleSteer = await waitFor(host, (message) => message.id === 3 && message.error !== undefined, 'idle steer');
+    expect(idleSteer.error).toMatchObject({ code: -32602, message: 'no active turn to steer' });
+    expect(mock!.state.requests).toHaveLength(0);
+    expect(host.lines.some((message) => message.method === 'turn/started')).toBe(false);
+  });
+
+  itE2E('active steer validates turn id and input without disturbing the running turn', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.delayBeforeTextMs = 5000;
+
+    const host = spawnHost('steer-validation');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '保持运行，等待参数校验' }],
+    });
+    const started = await waitFor(host, (message) => message.method === 'turn/started', 'validation turn started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    await send(host, 2, 'turn/steer', {
+      threadId: '',
+      input: [{ type: 'text', text: '缺少 turn id' }],
+    });
+    const missingTurnId = await waitFor(
+      host,
+      (message) => message.id === 2 && message.error !== undefined,
+      'missing expected turn id',
+    );
+    expect(missingTurnId.error).toMatchObject({ code: -32602, message: 'expectedTurnId must not be empty' });
+
+    await send(host, 3, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: 'stale-turn-id',
+      input: [{ type: 'text', text: '过期 turn id' }],
+    });
+    const staleTurnId = await waitFor(
+      host,
+      (message) => message.id === 3 && message.error !== undefined,
+      'stale expected turn id',
+    );
+    expect(staleTurnId.error).toMatchObject({
+      code: -32602,
+      message: `expected active turn id \`stale-turn-id\` but found \`${turnId}\``,
+    });
+
+    await send(host, 4, 'turn/steer', { threadId: '', expectedTurnId: turnId, input: [] });
+    const invalidSteerInput = await waitFor(
+      host,
+      (message) => message.id === 4 && message.error !== undefined,
+      'invalid steer input',
+    );
+    expect(invalidSteerInput.error).toMatchObject({ code: -32602, message: 'input must contain at least one item' });
+    expect(host.lines.some((message) => message.method === 'mica/queue/queued')).toBe(false);
+
+    await send(host, 5, 'turn/interrupt', { threadId: '', turnId });
+    const completed = await waitFor(host, turnCompleted(turnId), 'validation turn interrupted', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('interrupted');
+  });
+
+  itE2E('idle and stale interrupts are idempotent and do not poison the next turn', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('stale-interrupt');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // A stop request can race ahead of turn/started and carry ids from an old
+    // host. It must remain a harmless, acknowledged no-op while this host is idle.
+    await send(host, 1, 'turn/interrupt', { threadId: 'wrong-thread-id', turnId: 'wrong-turn-id' });
+    const idleInterrupt = await waitFor(host, (message) => message.id === 1, 'idle interrupt response');
+    expect(idleInterrupt.error).toBeUndefined();
+    expect(idleInterrupt.result).toEqual({});
+    expect(mock!.state.requests).toHaveLength(0);
+
+    await send(host, 2, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '第一轮正常执行' }],
+    });
+    const started1 = await waitFor(host, (message) => message.method === 'turn/started', 'first turn started');
+    const turn1 = (started1.params?.turn as { id?: string }).id!;
+    const completed1 = await waitFor(host, turnCompleted(turn1), 'first turn completed', 30_000);
+    expect((completed1.params?.turn as { status?: string }).status).toBe('completed');
+
+    // Replaying stop for an already-completed turn is also acknowledged and
+    // must not leave an abort signal armed for the following turn.
+    await send(host, 3, 'turn/interrupt', { threadId: started1.params?.threadId ?? '', turnId: turn1 });
+    const staleInterrupt = await waitFor(host, (message) => message.id === 3, 'stale interrupt response');
+    expect(staleInterrupt.error).toBeUndefined();
+    expect(staleInterrupt.result).toEqual({});
+
+    mock!.state.delayBeforeTextMs = 5_000;
+    await send(host, 4, 'turn/start', {
+      threadId: (started1.params?.threadId as string) || '',
+      input: [{ type: 'text', text: '第二轮仍应正常执行' }],
+    });
+    const started2 = await waitFor(
+      host,
+      (message) => message.method === 'turn/started' && (message.params?.turn as { id?: string })?.id !== turn1,
+      'second turn started',
+    );
+    const turn2 = (started2.params?.turn as { id?: string }).id!;
+    await send(host, 5, 'turn/interrupt', {
+      threadId: started2.params?.threadId ?? '',
+      turnId: turn1,
+    });
+    const activeStaleInterrupt = await waitFor(host, (message) => message.id === 5, 'active stale interrupt');
+    expect(JSON.stringify(activeStaleInterrupt.error)).toContain('expected active turn id');
+    const completed2 = await waitFor(host, turnCompleted(turn2), 'second turn completed', 30_000);
+    expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
+    expect(mock!.state.requests).toHaveLength(2);
   });
 
   itE2E('slow MCP init does not block host ready; the first turn waits for it', async () => {
@@ -615,6 +899,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // The app renders this message as an error notice (chat-events maps
     // turn.error.message into step_finish.error). A silent stop regressed here.
     expect(turn.error?.message).toContain('mock-chat');
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as unknown;
+    expect(JSON.stringify(session)).toContain('你好');
   });
 
   itE2E('busy-host steer input queues then runs as the next turn on the same resident host', async () => {
@@ -663,7 +951,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(JSON.stringify(mock!.state.requests[1]?.input ?? [])).toContain('第二句话（排队注入）');
 
     // The queued turn runs silently; wait for its provider response to finish.
-    while (mock!.state.responsesFinished < 2) await sleep(100);
+    const secondResponseDeadline = Date.now() + 30_000;
+    while (mock!.state.responsesFinished < 2 && Date.now() < secondResponseDeadline) await sleep(100);
+    expect(mock!.state.responsesFinished).toBeGreaterThanOrEqual(2);
 
     // A new explicit turn reuses the same resident host and session id (no
     // re-spawn). Retry turn/start while the host is still draining the queued
@@ -1082,5 +1372,206 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await sleep(150);
     const disk2 = JSON.parse(readFileSync(sessionPath, 'utf-8')) as { snapshot?: { messages?: unknown[] } };
     expect(JSON.stringify(disk2)).toContain('A-3 第五条');
+  });
+
+  itE2E('--role override without a session is returned by thread/start and used for the turn', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const home = makeHome('role-override');
+    mkdirSync(join(home, 'role'), { recursive: true });
+    writeFileSync(join(home, 'role', 'reviewer.md'), 'Always review the change before answering.');
+    const host = spawnHost('role-override', ['--role', 'reviewer'], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'thread/start', { threadId: '' });
+    const started = await waitFor(host, (m) => m.id === 1 && m.result !== undefined, 'thread/start response');
+    expect((started.result as { role?: string }).role).toBe('reviewer');
+
+    await send(host, 2, 'turn/start', {
+      threadId: (started.result as { thread?: { id?: string } }).thread?.id ?? '',
+      input: [{ type: 'text', text: '请检查这个改动' }],
+    });
+    const turnStarted = await waitFor(host, (m) => m.method === 'turn/started', 'role turn started');
+    const turnId = (turnStarted.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'role turn completed', 30_000);
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(JSON.stringify(mock!.state.requests[0]?.input ?? [])).toContain('请检查这个改动');
+  });
+
+  itE2E('--max-turns stops tool iteration after the configured limit', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('max-turns', ['--max-turns', '1']);
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'should-not-finish.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '请调用工具完成任务' }],
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'max-turns started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    const completed = await waitFor(host, turnCompleted(turnId), 'max-turns completed', 30_000);
+    const turn = completed.params?.turn as { status?: string; error?: { message?: string } | null };
+
+    expect(mock!.state.requests).toHaveLength(1);
+    expect(turn.status).toBe('failed');
+    expect(turn.error?.message).toContain('maximum of 1 turns');
+  });
+
+  itE2E('--model + --variant overrides survive --session resume', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    // Phase 1: create a session with the default model (mock/mock-chat).
+    const home = makeHome('model-resume');
+    const hostA = spawnHost('model-resume-a', [], home);
+    hosts.push(hostA);
+    await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
+
+    await send(hostA, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '初始化会话' }],
+    });
+    const startedA = await waitFor(hostA, (m) => m.method === 'turn/started', 'A turn started');
+    const turnIdA = (startedA.params?.turn as { id?: string }).id!;
+    await waitFor(hostA, turnCompleted(turnIdA), 'A turn completed', 30_000);
+
+    const sessionFile = readdirSync(join(home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFile).toBeTruthy();
+    const sessionId = sessionFile!.replace(/\.json$/, '');
+
+    // Phase 2: resume the session with --model override to a different model.
+    // The mock provider records the model name from each request, so we can
+    // verify the override reached the provider (not the session's old model).
+    mock!.state.requests = [];
+    const hostB = spawnHost(
+      'model-resume-b',
+      ['--session', sessionId, '--model', 'mock/mock-chat-override', '--variant', 'high'],
+      home,
+    );
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'host B ready or error', 30_000);
+
+    // turn/start WITHOUT a model param: the --model override should survive.
+    await send(hostB, 1, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '续聊' }],
+    });
+    const startedB = await waitFor(hostB, (m) => m.method === 'turn/started', 'B turn started');
+    const turnIdB = (startedB.params?.turn as { id?: string }).id!;
+    await waitFor(hostB, turnCompleted(turnIdB), 'B turn completed', 30_000);
+
+    // Both overrides must win over the session snapshot's original model and
+    // effort.
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(mock!.state.requests[0].model).toBe('mock-chat-override');
+    expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
+  });
+
+  itE2E('--variant (effort) override survives --session resume', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    // Phase 1: create a session with low effort.
+    const home = makeHome('variant-resume');
+    const hostA = spawnHost('variant-resume-a', [], home);
+    hosts.push(hostA);
+    await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
+
+    await send(hostA, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '初始化会话' }],
+      effort: 'low',
+    });
+    const startedA = await waitFor(hostA, (m) => m.method === 'turn/started', 'A turn started');
+    const turnIdA = (startedA.params?.turn as { id?: string }).id!;
+    await waitFor(hostA, turnCompleted(turnIdA), 'A turn completed', 30_000);
+
+    const sessionFile = readdirSync(join(home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFile).toBeTruthy();
+    const sessionId = sessionFile!.replace(/\.json$/, '');
+
+    // Phase 2: resume with --variant high. The session snapshot has effort=low,
+    // but the CLI override must win.
+    mock!.state.requests = [];
+    const hostB = spawnHost('variant-resume-b', ['--session', sessionId, '--variant', 'high'], home);
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'host B ready or error', 30_000);
+
+    await send(hostB, 1, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '续聊' }],
+    });
+    const startedB = await waitFor(hostB, (m) => m.method === 'turn/started', 'B turn started');
+    const turnIdB = (startedB.params?.turn as { id?: string }).id!;
+    await waitFor(hostB, turnCompleted(turnIdB), 'B turn completed', 30_000);
+
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
+  });
+
+  itE2E('--model + --variant overrides survive thread/resume (Codex protocol path)', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    // Phase 1: create a session with the default model.
+    const home = makeHome('model-thread-resume');
+    const hostA = spawnHost('model-thread-resume-a', ['--model', 'mock/mock-chat-override'], home);
+    hosts.push(hostA);
+    await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
+
+    // First turn uses the --model override (no model param in turn/start).
+    await send(hostA, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '初始化会话' }],
+    });
+    const startedA = await waitFor(hostA, (m) => m.method === 'turn/started', 'A turn started');
+    const turnIdA = (startedA.params?.turn as { id?: string }).id!;
+    await waitFor(hostA, turnCompleted(turnIdA), 'A turn completed', 30_000);
+
+    // Verify the override reached the provider on the first turn.
+    expect(mock!.state.requests[0].model).toBe('mock-chat-override');
+
+    const sessionFile = readdirSync(join(home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFile).toBeTruthy();
+    const sessionId = sessionFile!.replace(/\.json$/, '');
+
+    // Phase 2: a NEW host with the same --model override sends thread/resume
+    // (Codex protocol path), then turn/start without a model param.
+    mock!.state.requests = [];
+    const hostB = spawnHost('model-thread-resume-b', ['--model', 'mock/mock-chat-override', '--variant', 'high'], home);
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'host B ready or error', 30_000);
+
+    await send(hostB, 1, 'thread/resume', { threadId: sessionId });
+    await waitFor(hostB, (m) => m.id === 1 && m.result !== undefined, 'thread/resume response');
+
+    await send(hostB, 2, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '续聊' }],
+    });
+    const startedB = await waitFor(hostB, (m) => m.method === 'turn/started', 'B turn started');
+    const turnIdB = (startedB.params?.turn as { id?: string }).id!;
+    await waitFor(hostB, turnCompleted(turnIdB), 'B turn completed', 30_000);
+
+    // Both CLI overrides must survive thread/resume.
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(mock!.state.requests[0].model).toBe('mock-chat-override');
+    expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
   });
 });

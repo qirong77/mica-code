@@ -166,6 +166,10 @@ export class HeadlessTurnExecutor {
 
   private async failTurn(input: RuntimeInput, startedAt: number, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
+    this.options.agent.preserveAbortedTurn(
+      (input.content as AgentQueryContent | undefined) ?? input.text,
+      this.responseBuffer || undefined,
+    );
     this.options.sessionController.saveCurrent({ turnState: 'error' });
     this.options.onEvent({
       type: 'turn:finish',

@@ -100,9 +100,8 @@ export class ChatCompletionsClient extends BaseAgent<
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
     this.messages = prepareHistoricalChatMessages(this.messages);
-    const hasCurrentTurn = this.messages.some(
-      (message) => message.role === 'user' && isSameOpenAIUserContent(message.content, question),
-    );
+    const lastMessage = this.messages.at(-1);
+    const hasCurrentTurn = lastMessage?.role === 'user' && isSameOpenAIUserContent(lastMessage.content, question);
     const answer = partialAnswer?.trim();
     if (hasCurrentTurn) {
       if (answer) this.messages.push({ role: 'assistant', content: answer });
