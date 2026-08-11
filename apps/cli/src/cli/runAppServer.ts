@@ -39,6 +39,7 @@ import {
   type BackgroundTaskMeta,
 } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
+import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
@@ -184,8 +185,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     process.exit(code);
   };
 
+  const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
+
   try {
-    const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
     let initialModel = runtimeOverride.model ?? micaConfig.get().model;
     if (!initialModel) {
       const config = micaConfig.get();
@@ -249,12 +251,19 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       }
       if (resumed.ok) {
         await ensureChatHostModelRule(runtimeOverride.model ?? agent.config.model);
+        // A --model/--variant override must take priority over the session
+        // snapshot's provider/model/effort. Without this, resume discards the
+        // CLI override (the agent reloaded config from the snapshot inside
+        // resume), so `--model deepseek/deepseek-v4-flash` is silently ignored
+        // when resuming a session. Mirrors runExec's hasRuntimeOverride check.
         agent.configureForRun(
-          {
-            providerId: agent.config.provider.id,
-            model: agent.config.model,
-            effort: agent.config.effort,
-          },
+          hasRuntimeOverride(runtimeOverride)
+            ? runtimeOverride
+            : {
+                providerId: agent.config.provider.id,
+                model: agent.config.model,
+                effort: agent.config.effort,
+              },
           true,
         );
       }
@@ -419,6 +428,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       await handleCodexRequest(id, method, params, {
         agent: agent!,
         sessionController: sessionController!,
+        runtimeOverride,
         executor: executor!,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
@@ -455,6 +465,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 type HostContext = {
   agent: AgentRuntime;
   sessionController: SessionController;
+  runtimeOverride: AgentRuntimeConfigOverride;
   executor: HeadlessTurnExecutor;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
@@ -598,6 +609,7 @@ function threadResponse(ctx: HostContext): Record<string, unknown> {
     thread: threadSnapshot(ctx, model),
     model,
     modelProvider: ctx.agent.config.provider.id,
+    role: ctx.agent.role,
     cwd: process.cwd(),
     approvalPolicy: MICA_APPROVAL_POLICY,
     sandboxPolicy: MICA_SANDBOX_POLICY,
@@ -647,13 +659,19 @@ async function handleCodexRequest(
       }
       ctx.sessionId = threadId;
       ctx.setSessionId(threadId);
-      await ensureChatHostModelRule(ctx.agent.config.model);
+      // Same override-priority logic as the --session resume path above: a
+      // --model/--variant CLI override must survive thread/resume, otherwise
+      // the session snapshot silently replaces it.
+      const overrideModel = ctx.runtimeOverride.model ?? ctx.agent.config.model;
+      await ensureChatHostModelRule(overrideModel);
       ctx.agent.configureForRun(
-        {
-          providerId: ctx.agent.config.provider.id,
-          model: ctx.agent.config.model,
-          effort: ctx.agent.config.effort,
-        },
+        hasRuntimeOverride(ctx.runtimeOverride)
+          ? ctx.runtimeOverride
+          : {
+              providerId: ctx.agent.config.provider.id,
+              model: ctx.agent.config.model,
+              effort: ctx.agent.config.effort,
+            },
         true,
       );
       const cwdParam = paramString(params, 'cwd');
@@ -770,6 +788,29 @@ async function handleCodexRequest(
       return;
     }
     case CODEX_METHODS.turnInterrupt: {
+      if (ctx.executor.isBusy) {
+        const threadId = paramString(params, 'threadId');
+        const turnId = paramString(params, 'turnId');
+        const activeTurnId = ctx.getCurrentTurnId();
+        if (threadId && threadId !== ctx.sessionId) {
+          ctx.writeError(
+            CODEX_ERROR_INVALID_PARAMS,
+            `expected active thread id \`${threadId}\` but found \`${ctx.sessionId}\``,
+          );
+          return;
+        }
+        if (!turnId) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'turnId must not be empty');
+          return;
+        }
+        if (turnId !== activeTurnId) {
+          ctx.writeError(
+            CODEX_ERROR_INVALID_PARAMS,
+            `expected active turn id \`${turnId}\` but found \`${activeTurnId}\``,
+          );
+          return;
+        }
+      }
       ctx.executor.abort();
       ctx.writeResponse({});
       return;
@@ -882,4 +923,8 @@ async function cleanupTask(label: string, action: () => unknown | Promise<unknow
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {
+  return override.providerId !== undefined || override.model !== undefined || override.effort !== undefined;
 }

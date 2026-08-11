@@ -124,10 +124,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
     this.messages = prepareHistoricalResponsesInput(this.messages);
     const content = micaContentToResponsesContent(question);
-    const hasCurrentTurn = this.messages.some(
-      (item) =>
-        item.type === 'message' && item.role === 'user' && JSON.stringify(item.content) === JSON.stringify(content),
-    );
+    const lastMessage = this.messages.at(-1);
+    const hasCurrentTurn =
+      lastMessage?.type === 'message' &&
+      lastMessage.role === 'user' &&
+      JSON.stringify(lastMessage.content) === JSON.stringify(content);
     const answer = partialAnswer?.trim();
     if (hasCurrentTurn) {
       if (answer) this.messages.push({ type: 'message', role: 'assistant', content: answer });

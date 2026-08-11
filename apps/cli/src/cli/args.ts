@@ -86,7 +86,7 @@ export const CLI_USAGE = [
   '  --thinking                        Include reasoning events in JSON output',
   '  --json                            Emit Codex exec-style ThreadEvent JSONL',
   '  --no-save                         Run without persisting a session file',
-  '  --dangerously-skip-permissions    Autonomous runtime mode',
+  '  --dangerously-skip-permissions    Compatibility flag; headless mode already runs without prompts',
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
   '  --mcp-init-timeout-ms <ms>        Limit connect + tools/list time per MCP server',

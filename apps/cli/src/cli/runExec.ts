@@ -158,6 +158,11 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       } else {
         status = 'error';
         errorMessage = error instanceof Error ? error.message : String(error);
+        // Provider failures can happen before the client commits the in-flight
+        // user message to its snapshot. Preserve the attempted turn so the
+        // error session remains resumable instead of saveCurrent deleting the
+        // now-empty placeholder created at turn start.
+        agent.preserveAbortedTurn(prompt, text || undefined);
         if (!options.noSave) sessionController.saveCurrent({ turnState: 'error' });
         console.error(errorMessage);
         writer.write({ type: 'error', message: errorMessage });

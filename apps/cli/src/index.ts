@@ -186,6 +186,7 @@ if (invocation.mode === 'app-server') {
       mcpConfigPath: invocation.mcpConfigPath,
       strictMcpConfig: invocation.strictMcpConfig,
       mcpInitTimeoutMs,
+      thinking: invocation.thinking,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
