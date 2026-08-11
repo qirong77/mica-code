@@ -98,6 +98,13 @@ jobs:
       - name: Install dependencies (compiles node-pty native binding)
         run: bun install --frozen-lockfile
 
+      # Refresh the bundled models.dev seed so release binaries ship recent model
+      # metadata. Never blocks the build: the committed seed stays as a fallback.
+      - name: Refresh bundled models.dev seed
+        run: |
+          bun scripts/update-models-dev-seed.mjs || \
+            echo "::warning::models.dev seed refresh failed; shipping the committed seed"
+
       - name: Build binary
         run: |
           MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=${{ matrix.target }} \
