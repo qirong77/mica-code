@@ -42,7 +42,7 @@ function formatPendingStatus(queueMode: 'after_iteration' | 'after_turn' | null)
 }
 
 export function formatPendingNoticeTitle(queueMode: 'after_iteration' | 'after_turn' | null): string {
-  return `waiting queue ( ${formatPendingStatus(queueMode)} · shift + ← to re-edit )`;
+  return `${formatPendingStatus(queueMode)} · shift + ← to re-edit`;
 }
 
 interface LogItem {
@@ -193,6 +193,7 @@ export const Conversation = (): React.ReactNode => {
           backgroundColor={themeColors.surfaceNotice}
         >
           <Text color={themeColors.messageNotice}>{formatPendingNoticeTitle(currentQueueMode)}</Text>
+          <Text> </Text>
           <Markdown>{truncateLines(text, MAX_USER_LINES)}</Markdown>
         </MessageGutter>
       ))}
