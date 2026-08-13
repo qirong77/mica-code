@@ -175,7 +175,9 @@ const MessageItem = memo(function MessageItem({ message }: { message: UiMessage 
   return (
     <div className={`chat-notice ${message.variant === 'error' ? 'chat-notice-error' : ''}`}>
       <span>▌</span>
-      <div className="chat-notice-body">{message.text}</div>
+      <div className="chat-notice-body">
+        <Markdown text={message.text} />
+      </div>
     </div>
   );
 });

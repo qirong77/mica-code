@@ -887,6 +887,10 @@ button,
   white-space: pre-wrap;
 }
 
+.chat-notice .chat-markdown {
+  color: inherit;
+}
+
 .chat-notice-error {
   background: var(--notice-error-bg);
   box-shadow:

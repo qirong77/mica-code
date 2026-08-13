@@ -195,8 +195,8 @@ function QueueDock({ items, onRecall, recallingId }) {
   const queueMode = items[0]?.queueMode
   const headerText =
     queueMode === 'after_iteration'
-      ? 'waiting queue ( waiting to send after a complete tool-call iteration )'
-      : 'waiting queue ( waiting to send after current turn )'
+      ? 'waiting to send after a complete tool-call iteration'
+      : 'waiting to send after current turn'
   return (
     <section className="chat-queue-dock" aria-label="等待发送的消息">
       <div className="chat-queue-dock-header">
@@ -1307,7 +1307,8 @@ function MessageRow({ message, onOpenFile, onPreviewImage, onCommandAction }) {
   }
   if (message.kind === 'notice') {
     const title =
-      message.variant === 'compact' ? '/compact' : message.variant === 'error' ? '/error' : ''
+      message.command ||
+      (message.variant === 'compact' ? '/compact' : message.variant === 'error' ? '/error' : '')
     const noticeLines = String(message.text || '').split('\n')
     return (
       <div className={`chat-notice chat-notice-${message.variant || 'info'}`}>
@@ -1453,9 +1454,11 @@ function historyMessages(rows, key) {
     kind: row.role === 'notice' ? 'notice' : 'message',
     role: row.role,
     text: row.text || '',
+    variant: row.variant ?? (row.role === 'notice' ? 'info' : undefined),
+    command: row.command ?? undefined,
+    status: row.status ?? undefined,
     usage: row.usage ?? null,
-    done: true,
-    variant: row.role === 'notice' ? 'info' : undefined
+    done: true
   }))
 }
 
