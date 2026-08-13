@@ -44,10 +44,10 @@ export function showSelectCommand(config: SelectCommandConfig) {
     return option.name;
   }
 
-  function getFilteredOptions(): SelectOption[] {
-    const text = searchText.get().toLowerCase();
-    if (!text || !config.filterable) return config.options;
-    return config.options.filter((option) => resolveSearchField(option).toLowerCase().includes(text));
+  function getFilteredOptions(text: string): SelectOption[] {
+    const normalized = text.toLowerCase();
+    if (!normalized || !config.filterable) return config.options;
+    return config.options.filter((option) => resolveSearchField(option).toLowerCase().includes(normalized));
   }
 
   function hide() {
@@ -57,7 +57,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
 
   function selectCurrent() {
     if (applying.get()) return;
-    const filtered = getFilteredOptions();
+    const filtered = getFilteredOptions(searchText.get());
     const selected = filtered[selectedIdx.get()];
     if (selected) {
       applying.set(true);
@@ -85,7 +85,8 @@ export function showSelectCommand(config: SelectCommandConfig) {
   function SelectorPanel() {
     const currentIdx = micaUi.useScheduleState(selectedIdx);
     const isApplying = micaUi.useScheduleState(applying);
-    const filtered = getFilteredOptions();
+    const search = micaUi.useScheduleState(searchText);
+    const filtered = getFilteredOptions(search);
     const items: SelectItem[] = filtered.map((option) => ({
       key: option.name,
       label: option.label,
@@ -151,7 +152,7 @@ export function showSelectCommand(config: SelectCommandConfig) {
       }
       const direction = selectionDirection(key);
       if (direction) {
-        const filtered = getFilteredOptions();
+        const filtered = getFilteredOptions(searchText.get());
         if (filtered.length > 0) selectedIdx.set(moveSelection(selectedIdx.get(), filtered.length, direction));
         return true;
       }

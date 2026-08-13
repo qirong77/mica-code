@@ -448,7 +448,7 @@ export class LocalRuntimeController implements RuntimeController {
       if (refreshed?.ok) {
         this.applyRefreshedSession(agent, refreshed.session.turnState);
       }
-      await this.runTurn(input, agent, sessionController);
+      await this.runTurn(input, agent, sessionController, lease);
     } finally {
       lease.release();
     }
@@ -507,7 +507,12 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
-  private async runTurn(input: RuntimeInput, agent: AgentRuntime, sessionController: SessionController): Promise<void> {
+  private async runTurn(
+    input: RuntimeInput,
+    agent: AgentRuntime,
+    sessionController: SessionController,
+    lease?: SessionTurnLease,
+  ): Promise<void> {
     this.runningAgents.add(agent);
     const reservedRunId = agent.reserveRunId();
     const startedAt = Date.now();
@@ -785,6 +790,11 @@ export class LocalRuntimeController implements RuntimeController {
       }
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
+      // Release the turn lease before turn:after hooks run. The message-queue
+      // plugin dequeues after-turn inputs there and starts the next turn, which
+      // needs a free lease; releasing after the hook made that submit fail with
+      // a false "running in another terminal" warning and dropped the input.
+      lease?.release();
       this.hookAgent = agent;
       try {
         const outcome: TurnOutcome = wasAborted ? 'aborted' : hasError ? 'error' : 'completed';

@@ -128,7 +128,7 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 - turn 开始时捕获 rewind checkpoint、解析图片引用、写入 UI message、清空 response buffer；触发 `turn:before`/`prompt:build` hooks 后 `agent.run(...)`。
 - `after_iteration` 排队输入在完整工具迭代边界注入同一次 provider loop；`after_turn` 在当前 turn 结束后发送。
 - turn 先以 `running` 保存，工具迭代后保存可恢复 checkpoint，成功后写 assistant message（触发 `turn:beforePersist`）并以 `completed` 保存；abort/error 分别保存为 `aborted`/`error`，非 `completed` 会话在 `/resume` 标记 `（uncompleted）`。
-- finally 触发携带 `outcome`（`completed`/`aborted`/`error`）的 `turn:after`。内置 Todo 插件据此收尾：`completed` 把 `in_progress` 项标为 `completed`，`aborted`/`error` 降级为 `pending`。
+- finally 触发携带 `outcome`（`completed`/`aborted`/`error`）的 `turn:after`。内置 Todo 插件据此收尾：`completed` 把 `in_progress` 项标为 `completed`，`aborted`/`error` 降级为 `pending`。**turn lease 必须在 `turn:after` 之前释放**（`runTurn` finally 内 `lease.release()`），否则 message-queue 插件在 `turn:after` 里 `runtime.submit()` 排队输入时会被自己的旧 lease 卡住，误报「该会话正在另一个终端或远程页面运行」并丢弃消息；`runTurnWithLease` 的 finally 保留幂等兜底释放。
 
 ### Queue 语义
 
