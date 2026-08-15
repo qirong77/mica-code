@@ -35,13 +35,14 @@ const suite = bunAvailable ? describe : describe.skip;
  * calls, or optionally include reasoning events before the text events. */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'stream-error' | 'tool',
+    mode: 'ok' as 'ok' | 'error' | 'stream-error' | 'tool' | 'session-tool',
     errorMessage: '',
     requests: [] as Array<{
       model: string;
       input: unknown[];
       instructions?: string;
       reasoning?: { effort?: string };
+      tools?: unknown[];
     }>,
     responsesFinished: 0,
     /** When true, emit reasoning SSE events before the text events. */
@@ -61,14 +62,15 @@ function createMockProvider() {
           input?: unknown[];
           instructions?: string;
           reasoning?: { effort?: string };
+          tools?: unknown[];
         } = {};
         try {
           parsed = JSON.parse(body);
         } catch {
           // keep defaults
         }
-        const { model = '', input = [], instructions, reasoning } = parsed;
-        state.requests.push({ model, input, instructions, reasoning });
+        const { model = '', input = [], instructions, reasoning, tools } = parsed;
+        state.requests.push({ model, input, instructions, reasoning, tools });
         if (state.mode === 'error') {
           res.writeHead(400, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: { message: state.errorMessage || 'mock provider error' } }));
@@ -209,6 +211,48 @@ function createMockProvider() {
               status: 'completed',
               call_id: callId,
               name: 'write_file',
+              arguments: argumentsText,
+            },
+          });
+          emitCompleted();
+          res.end();
+          state.responsesFinished += 1;
+          return;
+        }
+        if (state.mode === 'session-tool' && state.requests.length === 1) {
+          // Ask the model to call session_info: proves the headless plugin host
+          // registered the session-autonomy tools for exec/app-server runs.
+          const callId = 'call_session_1';
+          const argumentsText = '{}';
+          emit({ type: 'response.created', response: { id: 'resp_session', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_session', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+              id: 'fc_session_1',
+              type: 'function_call',
+              status: 'in_progress',
+              call_id: callId,
+              name: 'session_info',
+              arguments: '',
+            },
+          });
+          emit({
+            type: 'response.function_call_arguments.done',
+            output_index: 0,
+            item_id: 'fc_session_1',
+            arguments: argumentsText,
+          });
+          emit({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'fc_session_1',
+              type: 'function_call',
+              status: 'completed',
+              call_id: callId,
+              name: 'session_info',
               arguments: argumentsText,
             },
           });
@@ -604,6 +648,27 @@ suite('mica exec real-user flows (mock provider)', () => {
     // The first tool call is executed; the limit prevents the follow-up model request.
     expect(existsSync(join(cwd, mock!.state.toolFilePath))).toBe(true);
     expect(parseJsonl(result.stdout).some((event) => String(event.message).includes('maximum of 1 turns'))).toBe(true);
+  });
+
+  itE2E('headless exec exposes the session-autonomy tools (session_info round trip)', async () => {
+    mock!.state.mode = 'session-tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    const home = makeHome('exec-session-tool');
+
+    const result = await runCli(['exec', '--json', '查看会话信息'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+
+    expect(result.code).toBe(0);
+    // The first request carries the session_info tool definition (the headless
+    // plugin host registered session-autonomy for exec, not just the TUI).
+    expect(JSON.stringify(mock!.state.requests[0]?.tools ?? [])).toContain('session_info');
+    // The model called session_info and the host executed it: the second
+    // request carries the tool result with real session metadata.
+    expect(mock!.state.requests).toHaveLength(2);
+    const secondRequest = JSON.stringify(mock!.state.requests[1]?.input ?? []);
+    expect(secondRequest).toContain('function_call_output');
+    expect(secondRequest).toContain('会话 id');
+    expect(parseJsonl(result.stdout).some((event) => event.type === 'turn.completed')).toBe(true);
   });
 
   itE2E('--role loads a custom role into the headless exec system prompt', async () => {

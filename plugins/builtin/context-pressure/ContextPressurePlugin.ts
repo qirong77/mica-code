@@ -1,7 +1,6 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type { CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
-import { micaUi } from '@packages/mica-ui/index.js';
 import {
   CONTEXT_RESET_RATIO_THRESHOLD,
   isContextInRedZone,
@@ -15,6 +14,13 @@ import {
  */
 const WARN_REMINDER_INTERVAL_MS = 60_000;
 
+/**
+ * Watches `context:changed` events (published by the runtime bridge in TUI
+ * mode and by the headless plugin host in app-server/exec mode) and, once the
+ * context is in the red zone, submits a user message asking the model to
+ * compact the conversation. Event-driven so TUI and headless share the exact
+ * same behavior.
+ */
 export default function setupContextPressure(ctx: PluginContext): void {
   const host = ctx.services.get(commandHostToken);
   if (!host) throw new Error('context-pressure requires the builtin command host');
@@ -23,10 +29,9 @@ export default function setupContextPressure(ctx: PluginContext): void {
   let warned = false;
   let lastWarnAt = 0;
 
-  const evaluate = (contextTokens: number): void => {
+  const evaluate = (contextTokens: number, windowSize: number): void => {
     const sessionId = services.getCurrentAgentSessionId();
     if (!sessionId || contextTokens <= 0) return;
-    const windowSize = micaUi.panels.modelDisplay.contextWindowSize.get();
     // The token-count dimension can be red even before the model rule loads
     // (e.g. 300k tokens with an unknown window). Coloring is harmless but
     // injecting a reminder starts a whole turn, so stay conservative until
@@ -52,12 +57,12 @@ export default function setupContextPressure(ctx: PluginContext): void {
     });
   };
 
-  // contextSize is updated whenever a turn finishes (usage event / session
-  // restore), which is exactly when the agent is idle and a reminder can be
-  // submitted. Subscribe fires once immediately with the current value; 0
-  // never triggers the red zone.
-  const unsubscribeSize = micaUi.panels.contextSize.subscribe((value) => {
-    if (typeof value === 'number') evaluate(value);
+  // context:changed is published whenever a turn finishes (usage event /
+  // session restore), which is exactly when the agent is idle and a reminder
+  // can be submitted. tokens 0 never triggers the red zone.
+  const eventDisposable = ctx.events.on('event', (event) => {
+    if (event.type !== 'context:changed') return;
+    evaluate(event.tokens, event.windowSize);
   });
-  ctx.onDispose(() => unsubscribeSize());
+  ctx.onDispose(() => eventDisposable.dispose());
 }

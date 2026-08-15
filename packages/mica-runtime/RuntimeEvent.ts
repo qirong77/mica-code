@@ -10,7 +10,9 @@ export type RuntimeEvent =
   | { type: 'turn:started'; input: RuntimeInput; owner?: unknown; preservePreviousTurnUi?: boolean }
   | { type: 'turn:finished'; input: RuntimeInput; elapsedMs: number; owner?: unknown }
   | { type: 'turn:error'; input: RuntimeInput; error: unknown; owner?: unknown }
-  | { type: 'turn:aborted'; input: RuntimeInput; owner?: unknown };
+  | { type: 'turn:aborted'; input: RuntimeInput; owner?: unknown }
+  /** Context usage snapshot published whenever a turn reports usage (TUI + headless). */
+  | { type: 'context:changed'; tokens: number; windowSize: number; owner?: unknown };
 
 export type RuntimeEventMap = {
   event: RuntimeEvent;

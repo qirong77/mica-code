@@ -60,6 +60,7 @@ apps/
     app/                        Application/ApplicationContext/createApplication、activeContext、builtinPlugins、LocalRuntimeController、MicaUiRuntimeBridge
     plugins/commands/           内置命令 host adapter 和 active proxy
     runtime/                    RewindCheckpointManager、ToolLogController、CodexProjector/CodexExecProjector、HeadlessTurnExecutor、uiBridge
+    headless/                   HeadlessPluginHost（headless 插件装配层）+ headlessRuntimeServices（headless CommandRuntimeServices）
     session/                    SessionController：session 保存、恢复、重命名和 UI restore
     features/sync-daemon/       mica-sync 机器端 daemon（注册/心跳/长轮询/命令分发、SessionWatcher、SyncClient、CommandExecutor）
     tools/                      ToolAgent：启动/查询/停止 subagent
@@ -187,9 +188,14 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 - Headless `run --no-save` 在整个 turn 期间跳过 session 落盘，用于 mica-code-app 右键 Commit 等一次性后台任务；不改变 prompt、工具、MCP 或事件输出行为。
 - Responses 请求只要包含 reasoning 参数就应保留显式 summary 配置，未配置时补 `summary: 'auto'`，否则终端和 Chat 没有可展示的思考内容。
 
-## Headless turn 执行核心与 app-server
+## Headless turn 执行核心、插件装配与 app-server
 
 - `apps/cli/src/runtime/HeadlessTurnExecutor.ts` 是无 UI turn 执行核心：单槽队列（after_iteration 在完整工具迭代边界注入、after_turn 在 turn 结束后排空），发布 `turn:start`/`turn:finish`/`queued`/`dequeue`/`queue:changed` 事件，不拥有输出协议、不触碰 Ink/UI。**每个 turn 必须发出 `turn:finish`（completed/aborted/error 三态之一）**，不要在 `runTurn` 里静默 return，否则客户端永远收不到 `turn/completed`。**每个 turn 开始前先 `sessionController.refreshFromStore()` 再 `reserveRunId()`**，顺序颠倒会把本轮误判为 abort。
+- **headless 也跑内置插件**：`apps/cli/src/headless/HeadlessPluginHost.ts` 是 headless 版插件装配层，`runExec`/`runAppServer`/sync `CommandExecutor` 三个入口统一用它，保证 headless 与 TUI 的 agent 能力一致。装配流程：创建 `HookRegistry`（**必须传入 `AgentRuntime` 构造**，`system-prompt:build` 依赖它）→ 注册 headless command host（`commandHostToken` + `headlessRuntimeServices`）→ 注册内置插件（message-queue、command-memory、session-autonomy、context-pressure、Todo、mica-code-app-notify）→ `plugins.setupAll` → `attachPluginLayer` 把 hooks/host/queue/conversationMessages 绑定到 executor → `emitRuntimeStart()`。
+- **HeadlessPluginHost 与 TUI 的刻意差异**（只在确实无等价物的功能上）：MCP 不注册插件（headless 手工参数化 `micaMcp.init`，支持 `--mcp-config`/`--strict-mcp-config`/`--mcp-init-timeout-ms`）；file-mention、命令插件（`/model` 等）、用户文件插件（`$MICA_HOME/plugins`）不注册（无输入框/UI）。**新增插件时若 headless 也应具备，必须同步注册到 HeadlessPluginHost，否则 headless 与 TUI 能力再次分叉**。
+- `HeadlessTurnExecutor.attachPluginLayer()` 必须同时替换内部 `queue`（插件 enqueue 到 host.queue，loop 从 executor.queue dequeue，两个实例会卡死排队输入）；无插件层时 executor 行为与旧版完全一致（hooks 为 undefined 时不产生额外微任务）。
+- headless 的会话 UI 消息 = provider 历史 + 插件 notice（`headlessRuntimeServices.showNotice` 写入 `conversationMessages` 并随 `saveCurrent` 落盘），`getConversationMessages` 空列表返回 undefined（空消息会让 `saveCurrent` 删除会话文件）。
+- `context-pressure` 插件是**事件驱动**的：订阅 `ctx.events` 的 `context:changed`（TUI 由 `MicaUiRuntimeBridge.onUsage` 发布、headless 由 HeadlessPluginHost 的 usage 监听发布），不再直接读 `micaUi.panels.contextSize`。改动 context 占用来源时同步检查这两处发布点与 `ContextPressurePlugin.ts`。
 - `mica app-server` 是**每会话常驻进程**：从 stdin 读 Codex v2 app-server 协议请求（`initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt`，每行一个 JSON），向 stdout 写 v2 通知；持有 `AgentRuntime` + `SessionController` + MCP + `HeadlessTurnExecutor` 直到会话关闭。**不要改成全局单 daemon**。MCP 初始化在后台发起（`.catch` 消化错误），host 先发首帧快照即可服务，首个 `turn/start` 前 `await ctx.mcpReady`；MCP init 失败降级：stderr 记录 + Codex `error` 通知，host 继续服务，不 `exit(1)`。
 - 协议实现位于 `packages/mica-runtime/codexProtocol.ts`（framing/编解码）与 `apps/cli/src/runtime/CodexProjector.ts`（AgentRuntime 事件 → v2 通知投影）。`commandExecution` item 携带 `displayText`（工具 `onToolUseDisplayText` 文案）；思考流默认关闭，`app-server --thinking` 才发 `item/reasoning/textDelta`。
 - **Mica 增量扩展**（Codex 协议没有的，属纯增量、对 Codex 客户端无害）：`mica/queue/queued`/`dequeue`/`changed` 队列通知（`MICA_QUEUE_NOTIFICATIONS`，`turn/steer` 可带 `clientMessageId` 作 `RuntimeInput.id`）；`mica/backgroundTasks/updated`/`mica/subagentTasks/updated` 跨 turn 常驻状态快照（`MICA_TASK_NOTIFICATIONS`，整体替换语义，1s 轮询对比 JSON 序列化结果，有变化才推送，只投影活跃项；投影逻辑是导出纯函数 `projectBackgroundTasks`/`projectSubagentTasks` 便于单测）。mica-code-app 对这两个 method 直接送渲染层、不进 turn 事件缓冲。
@@ -239,9 +245,9 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 
 交互模式的 `TodoWrite` 由 Todo 插件注册；headless run 也注册独立实例（`plugins/builtin/todo/TodoTool.ts`，不依赖 React/Ink）。Todo 状态只属于当前进程/turn，不写入 session；turn 正常结束时把遗留 `in_progress` 项标为 `completed`，只有 abort/error 才转 `pending`。
 
-`session_*` 会话自治工具族由 `plugins/builtin/session-autonomy/` 插件注册（仅交互主 agent，`primaryAgentOnly: true`，subagent 的 tool context 还会被显式拒绝）：`session_info`/`session_history` 只读（必须保持 `readOnly: true`），`session_compact`/`session_set_prompt`/`session_rewrite` 是延迟写操作——工具执行时只登记，`turn:before`（agent 空闲、请求未构建）统一经 `services.applySessionHistory` 应用并 `saveCurrent`，**不能在 `turn:after` 应用**（会与下一轮并发竞态），也不能在工具执行时改 snapshot（agent 正 busy，会破坏在途请求）。`session_rewrite` 只做"整段历史替换为单条总结"（含跨协议格式归一），不提供任意增删改。`session-autonomy` 插件通过 `system-prompt:build` hook 注入**固定**的会话自治引导文字（不能带动态数字，会打散 prompt cache）。新增或修改这些工具时同步检查 `SessionAutonomyTools.ts` 的 readOnly 标记与 `services.ts` 的 `applySessionHistory` 签名。
+`session_*` 会话自治工具族由 `plugins/builtin/session-autonomy/` 插件注册（`primaryAgentOnly: true`，subagent 的 tool context 还会被显式拒绝；**交互与 headless 都注册**，HeadlessPluginHost 与 useBuiltinPlugins 各注册一次）：`session_info`/`session_history` 只读（必须保持 `readOnly: true`），`session_compact`/`session_set_prompt`/`session_rewrite` 是延迟写操作——工具执行时只登记，`turn:before`（agent 空闲、请求未构建）统一经 `services.applySessionHistory` 应用并 `saveCurrent`，**不能在 `turn:after` 应用**（会与下一轮并发竞态），也不能在工具执行时改 snapshot（agent 正 busy，会破坏在途请求）。`session_rewrite` 只做"整段历史替换为单条总结"（含跨协议格式归一），不提供任意增删改。`session-autonomy` 插件通过 `system-prompt:build` hook 注入**固定**的会话自治引导文字（不能带动态数字，会打散 prompt cache）。headless 的写操作在 `HeadlessTurnExecutor` 的 turn:before 触发应用；`mica exec` 单轮场景在 turn 结束后由 `runExec` 手动再触发一次 turn:before 排空 pending ops。新增或修改这些工具时同步检查 `SessionAutonomyTools.ts` 的 readOnly 标记与 `services.ts` 的 `applySessionHistory` 签名。
 
-`plugins/builtin/context-pressure/` 是上下文压力提醒插件：订阅 `micaUi.panels.contextSize` 与 `modelDisplay.contextWindowSize`，在占用进入红色区（判定复用 `packages/mica-ui/panels/contextThresholds.ts`，与 WorkingStatus 状态栏着色同源：ratio ≥ 0.7 或 tokens ≥ 300k）且窗口已知时，经 `services.submitAgentSessionInput` 注入一条固定模板的用户消息（`queueMode: 'after_turn'`，busy 时由 message-queue 排队），提醒模型调用 `session_compact`。防重复：提醒后进入 `warned` 闩锁，占用回落到 ratio < 0.5 才解除（另有 60s 冷却兜底）；`contextSize` 在每轮 turn 结束更新，正是 agent 空闲可注入的时机。改动阈值时必须同步 `contextThresholds.ts` 与 WorkingStatus 的着色，并保持 `submitAgentSessionInput` 的 options 透传（queueMode/displayText）。
+`plugins/builtin/context-pressure/` 是上下文压力提醒插件：订阅 `ctx.events` 的 `context:changed` 事件（TUI 与 headless 同源，发布点见 HeadlessPluginHost 与 `MicaUiRuntimeBridge.onUsage`），在占用进入红色区（判定复用 `packages/mica-ui/panels/contextThresholds.ts`，与 WorkingStatus 状态栏着色同源：ratio ≥ 0.7 或 tokens ≥ 300k）且窗口已知时，经 `services.submitAgentSessionInput` 注入一条固定模板的用户消息（`queueMode: 'after_turn'`，busy 时由 message-queue 排队），提醒模型调用 `session_compact`。防重复：提醒后进入 `warned` 闩锁，占用回落到 ratio < 0.5 才解除（另有 60s 冷却兜底）。改动阈值时必须同步 `contextThresholds.ts` 与 WorkingStatus 的着色，并保持 `submitAgentSessionInput` 的 options 透传（queueMode/displayText）。
 
 ### MCP
 
@@ -346,7 +352,7 @@ MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" npx vitest run packages
 - 指令：`create`/`run`/`update_cwd`/`abort`。daemon 同一时刻只执行一个 turn（busy 时发 `run_rejected`）；poll 监听请求 `close` 清理断开连接的 waiter。
 - 事件类型：`user_input`、`thinking`、`text_delta`、`tool_call`、`tool_result`、`usage`、`status`、`turn`、`run_rejected`、`session`、`session_removed`；队列相关 `queued`/`dequeue`/`queue_state`。
 - daemon 配置存 `~/.mica/sync.json`（跟随 `MICA_HOME`）；交互模式启动时 fire-and-forget `ensureDaemonRunning()`（`apps/cli/src/features/sync-daemon/ensureDaemonRunning.ts`）后台 detached 拉起 daemon（pid 文件 `$MICA_HOME/daemon.pid`，日志 `daemon.log`），`MICA_NO_DAEMON=1` 禁用；改动 pid/spawn/自启动时机时同步检查该文件及测试和 `index.ts`。
-- `CommandExecutor` 复用 `HeadlessTurnExecutor` + **每会话常驻 host**（MCP 保持 daemon 生命周期常开），turn 前 `chdir` 到会话 cwd；`create` 指令构造 `PersistedSession` 时必须先用非空标题落盘，否则 `saveCurrent` 会因磁盘无文件拒绝写入。
+- `CommandExecutor` 复用 `HeadlessTurnExecutor` + **每会话常驻 host**（MCP 保持 daemon 生命周期常开），turn 前 `chdir` 到会话 cwd；每个 host 也经 `HeadlessPluginHost` 跑内置插件（host 移除时 `emitRuntimeStop` + `dispose`）；`create` 指令构造 `PersistedSession` 时必须先用非空标题落盘，否则 `saveCurrent` 会因磁盘无文件拒绝写入。
 - abort 依赖 `AgentRuntime.abort()`（runId 失效 + signal）：等待 provider stream 时立即生效；工具执行中或长 thinking 期间要等当前迭代/工具结束的边界才抛 `AgentAbortError`，不要另造中断机制。
 - 会话文件由 `SessionWatcher` 监听推送（`fs.watch` 在 macOS 可能丢事件，有 30s 周期 rescan 兜底）；本地 runtime 与 daemon 用 `packages/mica-session` 的跨进程 turn lease 避免快照相互覆盖，快照带单调 `revision`，服务器拒绝迟到旧快照。
 - Web：会话详情默认精简快照（剔除 messages/usageHistory、保留 `lastUsage`，`?full=1` 取全量），detail 响应带 `snapshotSeq`，Web 在详情加载完成后再建 SSE（`since=snapshotSeq`）避免重放旧事件；`useSse` 的 `lastSeqRef` 跨 effect 重启保留，绝不重放已见事件。改动协议时同步检查 `apps/sync/web/web/src/App.tsx` 与 `useSse.ts`。

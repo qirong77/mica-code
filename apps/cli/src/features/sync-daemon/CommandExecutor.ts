@@ -4,6 +4,7 @@ import { chdir } from 'node:process';
 import setupModelEffortContext from '../../../../../plugins/builtin/model-effort-context/index.mjs';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
+import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { micaSession, type PersistedSession, type SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
@@ -13,6 +14,7 @@ import { SubagentTaskManager } from '../../agents/SubagentTaskManager.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from '../../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../../session/SessionController.js';
 import { ToolAgent } from '../../tools/ToolAgent.js';
+import { createHeadlessPluginHost, startAsSubmit } from '../../headless/HeadlessPluginHost.js';
 
 export type ExecutorCallbacks = {
   onEvents: (sessionId: string, events: Array<Record<string, unknown>>) => void;
@@ -27,6 +29,7 @@ type SessionHost = {
   sessionController: SessionController;
   subagentTasks: SubagentTaskManager;
   executor: HeadlessTurnExecutor;
+  pluginHost: ReturnType<typeof createHeadlessPluginHost>;
 };
 
 /**
@@ -68,6 +71,8 @@ export class CommandExecutor {
   async stop(): Promise<void> {
     for (const host of this.hosts.values()) {
       host.executor.abort();
+      await host.pluginHost.emitRuntimeStop();
+      await host.pluginHost.dispose();
     }
     await Promise.all([
       cleanup('stop subagents', () => {
@@ -409,7 +414,8 @@ export class CommandExecutor {
     const existing = this.hosts.get(session.id);
     if (existing) return existing;
     try {
-      const agent = new AgentRuntime();
+      const hooks = new micaPlugin.HookRegistry();
+      const agent = new AgentRuntime({}, hooks);
       const sessionController = new SessionController({
         agent,
         // The session snapshot already restores provider/model/effort.
@@ -441,10 +447,27 @@ export class CommandExecutor {
         onEvent: (event) => this.emitHostEvent(session.id, event),
         onIdle: () => this.releaseBusy(session.id),
       });
+      const pluginHost = createHeadlessPluginHost({
+        hooks,
+        agent,
+        sessionController,
+        subagentTasks,
+        isBusy: () => executor.isBusy,
+        submit: (inputText, submitOptions) => startAsSubmit((input) => executor.start(input), inputText, submitOptions),
+      });
+      executor.attachPluginLayer({
+        hooks: pluginHost.hooks,
+        host: pluginHost,
+        queue: pluginHost.queue,
+        getConversationMessages: pluginHost.getConversationMessages,
+      });
 
       this.attachAgentEvents(agent, session.id);
-      const host: SessionHost = { sessionId: session.id, agent, sessionController, subagentTasks, executor };
+      const host: SessionHost = { sessionId: session.id, agent, sessionController, subagentTasks, executor, pluginHost };
       this.hosts.set(session.id, host);
+      void pluginHost.emitRuntimeStart().catch((error) => {
+        console.error(`[mica-sync] plugin start failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
       return host;
     } catch (error) {
       this.emit(session.id, [

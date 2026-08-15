@@ -367,6 +367,12 @@ export class MicaUiRuntimeBridge {
     session.uiState.contextSize = usage.totalTokens;
     session.uiState.cachedTokenRate = cachedTokenRate;
     session.uiState = normalizeUiState(session.uiState);
+    this.runtime.events.publish({
+      type: 'context:changed',
+      tokens: usage.totalTokens,
+      windowSize: micaUi.panels.modelDisplay.contextWindowSize.get(),
+      owner: agent,
+    });
     if (this.isActiveAgent(agent)) {
       micaUi.panels.contextSize.set(usage.totalTokens);
       micaUi.panels.cachedTokenRate.set(cachedTokenRate);

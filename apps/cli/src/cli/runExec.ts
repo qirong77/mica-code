@@ -1,17 +1,19 @@
 import { resolve } from 'node:path';
 import setupModelEffortContext from '../../../../plugins/builtin/model-effort-context/index.mjs';
-import { TodoWriteTool } from '../../../../plugins/builtin/todo/TodoTool.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
-import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
+import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { createStdoutCodexExecWriter, type CodexExecEventWriter } from '@packages/mica-runtime/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { attachCodexExecProjector, type CodexExecProjector } from '../runtime/CodexExecProjector.js';
+import { HeadlessTurnExecutor } from '../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
+import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
 
 export type HeadlessExecOptions = {
@@ -47,8 +49,9 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
   let agent: AgentRuntime | null = null;
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
-  let todoTool: TodoWriteTool | null = null;
   let projector: CodexExecProjector | null = null;
+  let host: ReturnType<typeof createHeadlessPluginHost> | null = null;
+  let executor: HeadlessTurnExecutor | null = null;
   let sessionId = '';
   let mcpStarted = false;
   let status: 'completed' | 'aborted' | 'error' = 'completed';
@@ -56,7 +59,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
   let errorMessage: string | undefined;
   const disposeModelEffortContext = setupModelEffortContext();
 
-  const onAbort = () => agent?.abort();
+  const onAbort = () => executor?.abort();
   options.signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
@@ -81,7 +84,8 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     await ensureHeadlessModelRule(initialModel, options.signal);
     throwIfAborted(options.signal);
 
-    agent = new AgentRuntime(runtimeOverride);
+    const hooks = new micaPlugin.HookRegistry();
+    agent = new AgentRuntime(runtimeOverride, hooks);
     sessionController = new SessionController({
       agent,
       // AgentRuntime.loadSnapshot restores the provider/model from the session
@@ -96,8 +100,6 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     });
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
-    todoTool = new TodoWriteTool();
-    micaTools.registerRuntime(todoTool, { primaryAgentOnly: true });
 
     if (options.sessionId) {
       const resumed = sessionController.resume(options.sessionId);
@@ -126,7 +128,35 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
 
     sessionId = sessionController.getCurrentSessionId();
     projector = attachCodexExecProjector(agent, writer, sessionId, { thinking: options.thinking === true });
-    if (!options.noSave) sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
+
+    executor = new HeadlessTurnExecutor({
+      agent,
+      sessionController,
+      maxTurns: options.maxTurns,
+      save: options.noSave !== true,
+      onEvent: (event) => {
+        if (event.type === 'turn:finish') {
+          status = event.status;
+          if (event.error) errorMessage = event.error;
+        }
+      },
+    });
+    host = createHeadlessPluginHost({
+      hooks,
+      agent,
+      sessionController,
+      subagentTasks,
+      isBusy: () => executor!.isBusy,
+      submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
+    });
+    executor.attachPluginLayer({
+      hooks: host.hooks,
+      host,
+      queue: host.queue,
+      getConversationMessages: host.getConversationMessages,
+    });
+    await host.emitRuntimeStart();
+    throwIfAborted(options.signal);
 
     mcpStarted = true;
     await micaMcp.init({
@@ -139,31 +169,35 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     throwIfAborted(options.signal);
 
     try {
-      // Resolve [Image](...) refs into multimodal content blocks like the
-      // interactive input path does, so headless consumers (Web Chat) can
-      // attach pasted images to a turn.
-      const content = await parseImageRefs(prompt);
-      const result = await agent.run(content, { maxTurns: options.maxTurns });
-      text = projector.completeText(result.text);
-      status = 'completed';
-      writer.write({ type: 'turn.completed', usage: projector.getUsage() });
-      if (!options.noSave) sessionController.saveCurrent({ turnState: 'completed' });
+      const started = await executor.start(micaRuntime.createRuntimeInput(prompt, 'ui'));
+      if (started === 'rejected') throw new Error('The turn was rejected (queue full or blocked)');
+      await waitForIdle(executor);
+      // Drain pending plugin ops (session_compact / session_rewrite queued by
+      // the final turn): a one-shot run has no "next turn" for the applier.
+      if (host.hooks) {
+        await host.hooks.emit('turn:before', {
+          runtime: host,
+          input: micaRuntime.createRuntimeInput(prompt, 'ui'),
+          content: undefined,
+        });
+      }
+      text = projector.completeText(projector.getText());
+      if (status === 'completed') {
+        writer.write({ type: 'turn.completed', usage: projector.getUsage() });
+      } else if (status === 'aborted') {
+        writer.write({ type: 'error', message: 'Turn interrupted by user' });
+      } else if (status === 'error' && errorMessage) {
+        console.error(errorMessage);
+        writer.write({ type: 'error', message: errorMessage });
+      }
     } catch (error) {
       text = projector.getText();
       if (error instanceof AgentAbortError || options.signal?.aborted) {
         status = 'aborted';
-        agent.preserveAbortedTurn(prompt, text || undefined);
         writer.write({ type: 'error', message: 'Turn interrupted by user' });
-        if (!options.noSave) sessionController.saveCurrent({ turnState: 'aborted' });
       } else {
         status = 'error';
         errorMessage = error instanceof Error ? error.message : String(error);
-        // Provider failures can happen before the client commits the in-flight
-        // user message to its snapshot. Preserve the attempted turn so the
-        // error session remains resumable instead of saveCurrent deleting the
-        // now-empty placeholder created at turn start.
-        agent.preserveAbortedTurn(prompt, text || undefined);
-        if (!options.noSave) sessionController.saveCurrent({ turnState: 'error' });
         console.error(errorMessage);
         writer.write({ type: 'error', message: errorMessage });
       }
@@ -173,16 +207,6 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
   } catch (error) {
     status = options.signal?.aborted ? 'aborted' : 'error';
     errorMessage = error instanceof Error ? error.message : String(error);
-    if (!options.noSave && sessionController && sessionId) {
-      try {
-        sessionController.saveCurrent({
-          allowEmpty: true,
-          turnState: status === 'aborted' ? 'aborted' : 'error',
-        });
-      } catch {
-        // Keep the original runtime failure as the canonical error.
-      }
-    }
     if (status === 'error') {
       console.error(errorMessage);
       writer.write({ type: 'error', message: errorMessage });
@@ -198,23 +222,42 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       ),
       ...(mcpStarted ? [cleanup('shut down MCP', () => micaMcp.shutdown(), 5000)] : []),
     ]);
-    if (todoTool) micaTools.unregisterRuntime(todoTool);
+    if (host) {
+      await host.emitRuntimeStop();
+      await host.dispose();
+    }
     micaTools.unregisterRuntime('Agent');
     disposeModelEffortContext();
   }
 }
 
+function waitForIdle(executor: HeadlessTurnExecutor): Promise<void> {
+  if (!executor.isBusy) return Promise.resolve();
+  return new Promise<void>((resolveIdle) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (!executor.isBusy) {
+        clearInterval(timer);
+        resolveIdle();
+      } else if (Date.now() - startedAt > 30 * 60 * 1000) {
+        clearInterval(timer);
+        resolveIdle();
+      }
+    }, 100);
+  });
+}
+
 function resultFor(
-  status: 'completed' | 'aborted' | 'error',
+  status: HeadlessExecResult['status'],
   sessionId: string,
   text: string,
-  error?: string,
+  errorMessage?: string,
 ): HeadlessExecResult {
   return {
     status,
     sessionId,
     text,
-    ...(error ? { error } : {}),
+    ...(errorMessage ? { error: errorMessage } : {}),
     exitCode: exitCodeForStatus(status),
   };
 }
@@ -230,8 +273,12 @@ function exitCodeForStatus(status: 'completed' | 'aborted' | 'error'): number {
   }
 }
 
-function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {
-  return override.providerId !== undefined || override.model !== undefined || override.effort !== undefined;
+async function cleanup(label: string, task: () => Promise<unknown> | void, timeoutMs = 3000): Promise<void> {
+  try {
+    await Promise.race([Promise.resolve(task()), new Promise((resolveTimeout) => setTimeout(resolveTimeout, timeoutMs))]);
+  } catch (error) {
+    console.error(`[headless exec] ${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -242,25 +289,12 @@ async function ensureHeadlessModelRule(model: string, signal?: AbortSignal): Pro
   try {
     await micaConfig.ensureModelRule(model, signal);
   } catch (error) {
-    throwIfAborted(signal);
-    console.error(
-      `Model metadata unavailable for ${model}; using generic defaults: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    // Headless mode must not pollute protocol stdout: log to stderr and fall
+    // back to the generic model rule.
+    console.error(`Model metadata unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function cleanup(label: string, action: () => unknown | Promise<unknown>, timeoutMs = 2000): Promise<void> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    await Promise.race([
-      Promise.resolve().then(action),
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error(`cleanup timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    console.error(`Failed to ${label}: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
+function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {
+  return override.providerId !== undefined || override.model !== undefined || override.effort !== undefined;
 }

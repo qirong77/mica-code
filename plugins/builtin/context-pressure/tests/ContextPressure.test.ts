@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
-import { micaUi } from '@packages/mica-ui/index.js';
 import {
   CONTEXT_RESET_RATIO_THRESHOLD,
   getContextRatioColorIndex,
@@ -12,9 +11,16 @@ import setupContextPressure from '../ContextPressurePlugin.js';
 
 const WINDOW = 1_000_000;
 
-function mount() {
+type Mounted = {
+  submit: ReturnType<typeof vi.fn>;
+  emit: (tokens: number, windowSize: number) => void;
+  dispose: () => void;
+};
+
+function mount(): Mounted {
   const submit = vi.fn(async (_id: string, _text: string, _options?: unknown) => ({ ok: true }));
   const disposers: Array<() => void> = [];
+  const handlers: Array<(event: { type: string; tokens: number; windowSize: number }) => void> = [];
   const services = {
     getCurrentAgentSessionId: () => 'sess-1',
     submitAgentSessionInput: submit,
@@ -25,11 +31,20 @@ function mount() {
       get: (token: unknown) => (token === commandHostToken ? { services } : undefined),
     },
     hooks: { on: () => ({ dispose: () => undefined }) },
-    events: { publish: () => undefined },
+    events: {
+      on: (_name: string, handler: (event: { type: string; tokens: number; windowSize: number }) => void) => {
+        handlers.push(handler);
+        return { dispose: () => undefined };
+      },
+    },
     onDispose: (fn: () => void) => disposers.push(fn),
   } as unknown as PluginContext;
   setupContextPressure(ctx);
-  return { submit, dispose: () => disposers.forEach((fn) => fn()) };
+  return {
+    submit,
+    emit: (tokens, windowSize) => handlers.forEach((handler) => handler({ type: 'context:changed', tokens, windowSize })),
+    dispose: () => disposers.forEach((fn) => fn()),
+  };
 }
 
 describe('context thresholds (shared with WorkingStatus UI)', () => {
@@ -61,14 +76,12 @@ describe('context thresholds (shared with WorkingStatus UI)', () => {
 
 describe('context-pressure plugin', () => {
   afterEach(() => {
-    micaUi.panels.contextSize.set(0);
-    micaUi.panels.modelDisplay.contextWindowSize.set(0);
+    vi.useRealTimers();
   });
 
   it('injects a reminder user message once in the red zone', async () => {
-    micaUi.panels.modelDisplay.contextWindowSize.set(WINDOW);
-    const { submit, dispose } = mount();
-    micaUi.panels.contextSize.set(800_000);
+    const { submit, emit, dispose } = mount();
+    emit(800_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(1);
     const [sessionId, text, options] = submit.mock.calls[0]!;
     expect(sessionId).toBe('sess-1');
@@ -79,40 +92,35 @@ describe('context-pressure plugin', () => {
   });
 
   it('does not re-inject while still in the red zone', async () => {
-    micaUi.panels.modelDisplay.contextWindowSize.set(WINDOW);
-    const { submit, dispose } = mount();
-    micaUi.panels.contextSize.set(800_000);
-    micaUi.panels.contextSize.set(850_000);
+    const { submit, emit, dispose } = mount();
+    emit(800_000, WINDOW);
+    emit(850_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(1);
     dispose();
   });
 
   it('re-arms only after usage drops below the reset ratio', async () => {
     vi.useFakeTimers();
-    micaUi.panels.modelDisplay.contextWindowSize.set(WINDOW);
-    const { submit, dispose } = mount();
-    micaUi.panels.contextSize.set(800_000);
+    const { submit, emit, dispose } = mount();
+    emit(800_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(61_000); // past the reminder cooldown
     // still red (650k tokens > 300k line) -> no re-arm
-    micaUi.panels.contextSize.set(650_000);
-    micaUi.panels.contextSize.set(800_000);
+    emit(650_000, WINDOW);
+    emit(800_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(1);
     // drops below both red lines and the 0.5 ratio latch -> re-armed
-    micaUi.panels.contextSize.set(250_000);
-    micaUi.panels.contextSize.set(800_000);
+    emit(250_000, WINDOW);
+    emit(800_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
     dispose();
   });
 
   it('stays silent while the window size is unknown', async () => {
-    const { submit, dispose } = mount();
-    micaUi.panels.contextSize.set(800_000); // windowSize 0: no ratio available
+    const { submit, emit, dispose } = mount();
+    emit(800_000, 0); // windowSize 0: no ratio available
     expect(submit).not.toHaveBeenCalled();
-    micaUi.panels.modelDisplay.contextWindowSize.set(WINDOW);
-    micaUi.panels.contextSize.set(1); // force a change event
-    micaUi.panels.contextSize.set(800_000);
+    emit(800_000, WINDOW);
     expect(submit).toHaveBeenCalledTimes(1);
     dispose();
   });

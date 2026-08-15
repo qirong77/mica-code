@@ -4,9 +4,9 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '../../../../plugins/builtin/model-effort-context/index.mjs';
-import { TodoWriteTool } from '../../../../plugins/builtin/todo/TodoTool.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
+import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { prepareImageForApi } from '@packages/mica-common/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -45,6 +45,7 @@ import { HeadlessTurnExecutor, type HeadlessTurnEvent } from '../runtime/Headles
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
+import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
 
 export type AppServerOptions = {
@@ -144,9 +145,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let agent: AgentRuntime | null = null;
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
-  let todoTool: TodoWriteTool | null = null;
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
+  let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
   let mcpInitPromise: Promise<unknown> | null = null;
   let sessionId = '';
@@ -168,7 +169,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       ),
       ...(mcpStarted ? [cleanupTask('shut down MCP', () => micaMcp.shutdown(), 5000)] : []),
     ]);
-    if (todoTool) micaTools.unregisterRuntime(todoTool);
+    if (pluginHost) {
+      await cleanupTask('stop headless plugins', () => pluginHost!.emitRuntimeStop());
+      await cleanupTask('dispose headless plugins', () => pluginHost!.dispose());
+    }
     micaTools.unregisterRuntime('Agent');
     disposeModelEffortContext();
   };
@@ -203,7 +207,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     }
     await ensureChatHostModelRule(initialModel);
 
-    agent = new AgentRuntime(runtimeOverride);
+    const hooks = new micaPlugin.HookRegistry();
+    agent = new AgentRuntime(runtimeOverride, hooks);
     sessionController = new SessionController({
       agent,
       config: { apply() {} },
@@ -215,8 +220,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     });
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
-    todoTool = new TodoWriteTool();
-    micaTools.registerRuntime(todoTool, { primaryAgentOnly: true });
 
     if (options.sessionId) {
       let resumed: { ok: true } | { ok: false; message?: string };
@@ -315,6 +318,21 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         });
       },
     });
+    pluginHost = createHeadlessPluginHost({
+      hooks,
+      agent,
+      sessionController,
+      subagentTasks,
+      isBusy: () => executor!.isBusy,
+      submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
+    });
+    executor.attachPluginLayer({
+      hooks: pluginHost.hooks,
+      host: pluginHost,
+      queue: pluginHost.queue,
+      getConversationMessages: pluginHost.getConversationMessages,
+    });
+    await pluginHost.emitRuntimeStart();
 
     // Long-lived host state that outlives a single turn: background shell tasks
     // and running subagents (including `run_in_background` ones still active

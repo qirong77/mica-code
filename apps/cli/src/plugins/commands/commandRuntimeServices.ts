@@ -215,7 +215,7 @@ function upsertNoticeForSession(
   if (save) session.sessionController.saveCurrent({ allowEmpty: true });
 }
 
-function upsertCommandNotice(
+export function upsertCommandNotice(
   messages: MicaUiConversationMessage[],
   message: Extract<MicaUiConversationMessage, { role: 'notice' }>,
 ): MicaUiConversationMessage[] {

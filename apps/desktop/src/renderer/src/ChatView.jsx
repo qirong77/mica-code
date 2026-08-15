@@ -2920,7 +2920,7 @@ export function ChatView({
           prompt: text,
           clientMessageId: optimisticId,
           queueMode: options.queueMode || null,
-          maxTurns: 999,
+          maxTurns: 9999,
           model: overrides.model || null,
           variant: overrides.variant || null,
           role: overrides.role || null
