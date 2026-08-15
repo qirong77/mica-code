@@ -442,13 +442,17 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       context.uiBridge.syncAgentStatusItems();
       return record;
     },
-    submitAgentSessionInput(id, text) {
+    submitAgentSessionInput(id, text, options) {
       const context = currentContext();
       if (!context) throw new Error('Application is not ready');
       const session = context.agentSessions.findById(id);
       if (!session) throw new Error(`Agent session not found: ${id}`);
       context.uiBridge.watchAgent(session.agent);
-      return context.runtime.submitToAgent(session.agent, session.sessionController, text, { source: 'command' });
+      return context.runtime.submitToAgent(session.agent, session.sessionController, text, {
+        source: 'command',
+        queueMode: options?.queueMode,
+        displayText: options?.displayText,
+      });
     },
     forkCurrentAgent() {
       const context = currentContext();
@@ -613,6 +617,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
           });
           const subAgent = concreteAgent.createSubAgent({
             systemPrompt: prompt,
+            // The summary subagent must not run any tools: it shares the
+            // parent's tool registry and session tools would mutate the very
+            // session being compacted. Disable tools entirely.
+            tools: false,
           });
           return subAgent.query(
             [
@@ -680,6 +688,61 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       }
       concreteSessionController.saveCurrent({ preserveTitle: true });
       return result;
+    },
+    async applySessionHistory(agent, sessionController, ownerSessionId, options) {
+      const context = currentContext();
+      const ownerSession = ownerSessionId
+        ? context?.agentSessions.findById(ownerSessionId)
+        : context?.agentSessions.current();
+      const concreteAgent = ownerSession?.agent ?? (agent as AgentRuntime);
+      const concreteSessionController = ownerSession?.sessionController ?? (sessionController as SessionController);
+      const clientSnapshot = concreteAgent.captureClientSnapshot();
+      if (!clientSnapshot || clientSnapshot.messages.length === 0) {
+        throw new Error('没有可替换的历史');
+      }
+
+      try {
+        concreteAgent.restoreClientSnapshot({
+          ...clientSnapshot,
+          messages: options.messages,
+          // Keep usage statistics across rewrite: clearing them would drop
+          // pre-rewrite token usage from Stats and the platform reconciliation.
+          usageHistory: clientSnapshot.usageHistory,
+          lastUsage: clientSnapshot.lastUsage,
+        });
+      } catch (error) {
+        concreteAgent.restoreClientSnapshot(clientSnapshot);
+        throw error;
+      }
+
+      const appliedMessages = concreteAgent.getSnapshot().messages;
+      const compactedConversationMessages = toCompactedConversationDisplay(concreteAgent.toConversationMessages());
+      if (appliedMessages.length === 0 || compactedConversationMessages.length === 0) {
+        concreteAgent.restoreClientSnapshot(clientSnapshot);
+        throw new Error('History replacement removed all usable conversation content; the original session was restored');
+      }
+
+      const previousUiState = ownerSession?.uiState ?? captureSessionUi();
+      const nextUiState = normalizeUiState({
+        ...previousUiState,
+        conversationMessages: compactedConversationMessages,
+        responseText: '',
+        pendingInputs: [],
+        pendingQueueMode: null,
+        contextSize: 0,
+        cachedTokenRate: 0,
+      });
+      if (ownerSession) ownerSession.uiState = nextUiState;
+      if (!ownerSession || context?.agentSessions.current().id === ownerSession.id) {
+        micaUi.conversation.setMessages(compactedConversationMessages);
+        micaUi.conversation.clearResponseText();
+        micaUi.conversation.clearPendingInput();
+        micaUi.panels.contextSize.set(0);
+        micaUi.panels.cachedTokenRate.set(0);
+        if (ownerSession) ownerSession.uiState = normalizeUiState(captureSessionUi());
+      }
+      concreteSessionController.saveCurrent({ preserveTitle: true });
+      return { beforeCount: options.beforeCount, afterCount: appliedMessages.length };
     },
   };
 }

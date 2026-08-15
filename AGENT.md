@@ -88,7 +88,7 @@ packages/
   mica-web-shared    sync web 与 desktop renderer 共用的展示纯函数
   @anthropic/ink     本仓库维护的 Ink fork
 
-plugins/builtin/    官方内置产品插件与启动扩展（Todo、MCP、message queue、文件 mention、命令、validate-config）
+plugins/builtin/    官方内置产品插件与启动扩展（Todo、MCP、message queue、文件 mention、命令、validate-config、session-autonomy、context-pressure）
 scripts/            构建、安装、release installer 脚本
 tests/              跨应用集成测试与测试辅助
 temp/               临时代码和外部实验，默认不参与搜索/测试/格式化
@@ -238,6 +238,10 @@ temp/               临时代码和外部实验，默认不参与搜索/测试/�
 当前内置工具：`read_file`、`read_image`、`write_file`、`apply_patch`、`list_files`、`grep_search`、`run_shell`、`background_tasks`、`read_task_output`、`kill_task`、`pty_spawn`/`pty_send`/`pty_read`/`pty_wait`/`pty_kill`、`web_fetch`、`web_search`、`Skill`。
 
 交互模式的 `TodoWrite` 由 Todo 插件注册；headless run 也注册独立实例（`plugins/builtin/todo/TodoTool.ts`，不依赖 React/Ink）。Todo 状态只属于当前进程/turn，不写入 session；turn 正常结束时把遗留 `in_progress` 项标为 `completed`，只有 abort/error 才转 `pending`。
+
+`session_*` 会话自治工具族由 `plugins/builtin/session-autonomy/` 插件注册（仅交互主 agent，`primaryAgentOnly: true`，subagent 的 tool context 还会被显式拒绝）：`session_info`/`session_history` 只读（必须保持 `readOnly: true`），`session_compact`/`session_set_prompt`/`session_rewrite` 是延迟写操作——工具执行时只登记，`turn:before`（agent 空闲、请求未构建）统一经 `services.applySessionHistory` 应用并 `saveCurrent`，**不能在 `turn:after` 应用**（会与下一轮并发竞态），也不能在工具执行时改 snapshot（agent 正 busy，会破坏在途请求）。`session_rewrite` 只做"整段历史替换为单条总结"（含跨协议格式归一），不提供任意增删改。`session-autonomy` 插件通过 `system-prompt:build` hook 注入**固定**的会话自治引导文字（不能带动态数字，会打散 prompt cache）。新增或修改这些工具时同步检查 `SessionAutonomyTools.ts` 的 readOnly 标记与 `services.ts` 的 `applySessionHistory` 签名。
+
+`plugins/builtin/context-pressure/` 是上下文压力提醒插件：订阅 `micaUi.panels.contextSize` 与 `modelDisplay.contextWindowSize`，在占用进入红色区（判定复用 `packages/mica-ui/panels/contextThresholds.ts`，与 WorkingStatus 状态栏着色同源：ratio ≥ 0.7 或 tokens ≥ 300k）且窗口已知时，经 `services.submitAgentSessionInput` 注入一条固定模板的用户消息（`queueMode: 'after_turn'`，busy 时由 message-queue 排队），提醒模型调用 `session_compact`。防重复：提醒后进入 `warned` 闩锁，占用回落到 ratio < 0.5 才解除（另有 60s 冷却兜底）；`contextSize` 在每轮 turn 结束更新，正是 agent 空闲可注入的时机。改动阈值时必须同步 `contextThresholds.ts` 与 WorkingStatus 的着色，并保持 `submitAgentSessionInput` 的 options 透传（queueMode/displayText）。
 
 ### MCP
 

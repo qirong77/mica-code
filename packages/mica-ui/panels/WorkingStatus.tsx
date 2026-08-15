@@ -10,10 +10,9 @@ import { themeColors } from '../theme.js';
 import { Spin } from '../primitives/Spin.js';
 import { formatElapsed } from '../utils/format.js';
 import { getWorkingStatusDisplay, getWorkingStatusTotalElapsed } from '../utils/workingStatusDisplay.js';
+import { CTX_RATIO_THRESHOLDS, CTX_TOKEN_THRESHOLDS, getThresholdLevel } from './contextThresholds.js';
 import type { MicaUiWorkingStatus } from '../types.js';
 
-const CTX_RATIO_THRESHOLDS = [0.4, 0.5, 0.6, 0.7] as const;
-const CTX_TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000] as const;
 const CONTEXT_USAGE_COLORS = [
   themeColors.inactive,
   themeColors.statusInfo,
@@ -21,13 +20,6 @@ const CONTEXT_USAGE_COLORS = [
   themeColors.toolWrite,
   themeColors.statusError,
 ] as const;
-
-function getThresholdLevel(value: number, thresholds: readonly number[]): number {
-  for (let i = thresholds.length - 1; i >= 0; i--) {
-    if (value >= thresholds[i]) return i + 1;
-  }
-  return 0;
-}
 
 export function getContextTokenColorIndex(contextTokens: number): number {
   return getThresholdLevel(contextTokens, CTX_TOKEN_THRESHOLDS);

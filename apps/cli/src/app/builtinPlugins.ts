@@ -17,6 +17,8 @@ import setupCommandRename from '../../../../plugins/builtin/command-rename.mjs';
 import setupCommandResume from '../../../../plugins/builtin/command-resume.mjs';
 import setupCommandRewind from '../../../../plugins/builtin/command-rewind.mjs';
 import setupMicaCodeAppNotify from '../../../../plugins/builtin/mica-code-app-notify.mjs';
+import setupSessionAutonomy from '../../../../plugins/builtin/session-autonomy/SessionAutonomyPlugin.js';
+import setupContextPressure from '../../../../plugins/builtin/context-pressure/ContextPressurePlugin.js';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;
@@ -33,6 +35,8 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('runtime.messageQueue', 'Message Queue', setupMessageQueue))
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
+    .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
+    .use(createBuiltinFilePlugin('context-pressure', 'Context Pressure', setupContextPressure))
     .use(new TodoPlugin())
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({

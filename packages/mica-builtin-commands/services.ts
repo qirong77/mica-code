@@ -177,7 +177,11 @@ export type CommandRuntimeServices = {
   clearIdleAgents(): ClearIdleAgentsResult;
   requestExit(exitCode?: number): Promise<void>;
   newAgentSession(): RunningAgentRecord;
-  submitAgentSessionInput(id: string, text: string): Promise<SubmitResult>;
+  submitAgentSessionInput(
+    id: string,
+    text: string,
+    options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
+  ): Promise<SubmitResult>;
   forkCurrentAgent(): ForkAgentResult;
   switchAgentSession(id: string): RunningAgentRecord;
   refreshCurrentAgentSessionUi(): void;
@@ -192,4 +196,10 @@ export type CommandRuntimeServices = {
     ownerSessionId?: string,
     options?: CompactOptions,
   ): Promise<CompactResult>;
+  applySessionHistory?(
+    agent: CommandAgent,
+    sessionController: CommandSessionController,
+    ownerSessionId: string | undefined,
+    options: { messages: unknown[]; beforeCount: number },
+  ): Promise<{ beforeCount: number; afterCount: number }>;
 };
