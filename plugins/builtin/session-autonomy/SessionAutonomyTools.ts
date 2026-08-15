@@ -299,7 +299,7 @@ export class ToolSessionSetPrompt extends MicaTool {
       'session_set_prompt',
       [
         '替换/追加/清除当前会话的系统提示词覆盖（session 级，不写盘，不影响其他会话）。',
-        '修改将在下一轮对话生效（当前轮的系统提示词已固定）。',
+        '修改将在本轮对话结束后生效（下一轮请求使用新的提示词）。',
         '适合在系统提示词缺少关键约束、任务上下文漂移时使用。',
       ].join(' '),
       {
@@ -329,7 +329,9 @@ export class ToolSessionSetPrompt extends MicaTool {
     if (!this.deps.queueOp(ownerKey, { type: 'setPrompt', input: { mode, text } })) {
       return '当前已有待应用的会话操作排队，请等待本轮结束后再发起';
     }
-    return mode === 'clear' ? '已登记清除系统提示词覆盖，将在下一轮对话生效。' : '已登记系统提示词修改，将在下一轮对话生效。';
+    return mode === 'clear'
+      ? '已登记清除系统提示词覆盖，将在本轮对话结束后生效。'
+      : '已登记系统提示词修改，将在本轮对话结束后生效。';
   }
 
   onToolUseDisplayText(input: ToolInput): string {

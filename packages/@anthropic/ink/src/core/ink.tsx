@@ -88,6 +88,7 @@ import {
 import {
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,
+  CLEAR_TERMINAL_TITLE,
   setClipboard,
   supportsTabStatus,
   wrapForMultiplexer,
@@ -1645,6 +1646,9 @@ export default class Ink {
       writeSync(1, SHOW_CURSOR);
       // Clear iTerm2 progress bar
       writeSync(1, CLEAR_ITERM2_PROGRESS);
+      // Clear the OSC 0 title set via useTerminalTitle so the tab/window
+      // title is restored when the app exits (Terminal.app keeps it otherwise).
+      writeSync(1, CLEAR_TERMINAL_TITLE);
       // Clear tab status (OSC 21337) so a stale dot doesn't linger
       if (supportsTabStatus()) writeSync(1, wrapForMultiplexer(CLEAR_TAB_STATUS));
     }

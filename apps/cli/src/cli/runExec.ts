@@ -173,7 +173,9 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       if (started === 'rejected') throw new Error('The turn was rejected (queue full or blocked)');
       await waitForIdle(executor);
       // Drain pending plugin ops (session_compact / session_rewrite queued by
-      // the final turn): a one-shot run has no "next turn" for the applier.
+      // the final turn) as a fallback: the session-autonomy plugin applies
+      // them in its turn:after already, but a host that never emitted one
+      // (e.g. an aborted turn) still gets drained here.
       if (host.hooks) {
         await host.hooks.emit('turn:before', {
           runtime: host,

@@ -2021,6 +2021,23 @@ export function ChatView({
           // Host 快照：整体替换运行中 subagent 列表（含后台 subagent）。
           setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
+        case 'session_history_replaced': {
+          // session_* 工具（session_compact / session_rewrite）在 host 侧替换了
+          // 持久化历史（主进程已重新读取会话文件）：立即用新历史替换消息列表，
+          // 而不是保留旧记录直到会话重开。流式行随替换一并丢弃（turn 已完成，
+          // 紧随其后的 step_finish 只做收尾）。
+          finishStream(timestamp)
+          const rows = historyMessages(
+            Array.isArray(event.history) ? event.history : [],
+            event.sessionID || nodeIdRef.current
+          )
+          updateMessages((previous) => {
+            const queued = previous.filter((message) => message.queued)
+            return queued.length > 0 ? [...rows, ...queued] : rows
+          })
+          setHistoryLoaded(true)
+          break
+        }
       }
     },
     [
@@ -2028,6 +2045,7 @@ export function ChatView({
       appendPart,
       finishPendingTools,
       finishStream,
+      setHistoryLoaded,
       nodeIdRef,
       onSessionBoundRef,
       applyLiveUsageMeta,

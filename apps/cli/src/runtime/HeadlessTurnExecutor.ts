@@ -59,9 +59,9 @@ export type HeadlessTurnExecutorOptions = {
  * runtime's ordering: input:received guard on submit, turn:before +
  * prompt:build before agent.run, turn:beforePersist before the completed
  * save, turn:abort / turn:error on failures, turn:after once the turn
- * finished. Pending plugin ops (e.g. session_compact) are drained by one
- * final turn:before when the queue empties, since a one-shot headless run has
- * no "next turn".
+ * finished. Pending plugin ops (e.g. session_compact) are applied by the
+ * session-autonomy plugin in turn:after; one-shot headless runs additionally
+ * re-emit a final turn:before after the queue empties as a fallback.
  */
 export class HeadlessTurnExecutor {
   private options: HeadlessTurnExecutorOptions;

@@ -252,7 +252,7 @@ class MeasuredText {
   }
 }
 
-class Cursor {
+export class Cursor {
   constructor(
     readonly measuredText: MeasuredText,
     readonly offset: number = 0,
@@ -389,6 +389,25 @@ class Cursor {
 
   deleteWordAfter(): Cursor {
     return this.isAtEnd() ? this : this.modifyText(new Cursor(this.measuredText, this.nextWord().offset));
+  }
+
+  /** Delete the logical line containing the cursor (including its trailing
+   *  newline, if any). Cursor lands at the line start (or previous line end
+   *  when the deleted line was last). */
+  deleteLine(): Cursor {
+    const text = this.text;
+    let start = text.lastIndexOf('\n', this.offset - 1) + 1;
+    let end = text.indexOf('\n', this.offset);
+    if (end === -1) {
+      end = text.length;
+      // Last line: also consume the preceding newline so the whole line
+      // disappears instead of leaving a dangling blank line.
+      if (start > 0) start -= 1;
+    } else {
+      end += 1; // include trailing newline
+    }
+    const newText = text.slice(0, start) + text.slice(end);
+    return Cursor.fromText(newText, this.columns, Math.min(start, newText.length));
   }
 
   render(cursorChar: string, invert: (text: string) => string, maxVisibleLines?: number): string {
@@ -533,6 +552,12 @@ function buildTextHandler({
       }
       if (key.rightArrow && (key.ctrl || key.meta)) {
         nextCursor = cursor.nextWord();
+        break;
+      }
+      if (key.super && key.backspace) {
+        // Cmd+Backspace (macOS) — only reachable via kitty keyboard protocol
+        // (CSI u) terminals. Deletes the current line.
+        nextCursor = cursor.deleteLine();
         break;
       }
       if (key.backspace) {

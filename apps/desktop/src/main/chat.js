@@ -771,6 +771,23 @@ function handleHostNotification(id, run, notification) {
       run.sender.send('chat:event', { id, sequence: ++run.sequence, event: snapshotEvent })
     }
     return
+  } else if (method === 'mica/sessionHistory/replaced') {
+    // A session_* tool replaced the persisted history mid-host (emitted after
+    // the host applied the change and saved the session file). Reload the
+    // session rows so the renderer swaps its transcript immediately instead of
+    // keeping the stale messages until the session is reopened. Delivered
+    // directly like the task snapshots: it is a snapshot, not a turn delta.
+    const sessionID = run.sessionId || params.threadId || null
+    const history = sessionID ? readHistory(sessionID) : []
+    const replacedEvent = codexNotificationToEvent(notification)
+    if (replacedEvent && run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:event', {
+        id,
+        sequence: ++run.sequence,
+        event: { ...replacedEvent, history }
+      })
+    }
+    return
   } else if (method === 'error') {
     run.running = false
     run.hostPending = []

@@ -202,4 +202,6 @@ export type CommandRuntimeServices = {
     ownerSessionId: string | undefined,
     options: { messages: unknown[]; beforeCount: number },
   ): Promise<{ beforeCount: number; afterCount: number }>;
+  /** Fired after a session_* tool replaced the persisted history (app-server pushes a UI refresh). */
+  onSessionHistoryApplied?(): void;
 };

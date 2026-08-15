@@ -166,7 +166,7 @@ describe('session tools', () => {
     const tooLong = await tool.execute({ mode: 'replace', text: 'x'.repeat(8_001) }, withAgent(deps));
     expect(tooLong).toContain('上限 8000');
     const ok = await tool.execute({ mode: 'append', text: '新增约束' }, withAgent(deps));
-    expect(ok).toContain('下一轮对话生效');
+    expect(ok).toContain('本轮对话结束后生效');
     expect(deps.queued[0]!.op).toEqual({ type: 'setPrompt', input: { mode: 'append', text: '新增约束' } });
     deps.queued.length = 0;
     const clear = await new ToolSessionSetPrompt(deps).execute({ mode: 'clear' }, withAgent(deps));

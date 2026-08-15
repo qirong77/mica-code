@@ -45,6 +45,11 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
 
   const pendingByOwner = new Map<string, PendingQueue>();
   const promptOverrideByOwner = new Map<string, string>();
+  // In-flight applies per owner: the interactive runtime lets the next turn
+  // start while a turn:after applier is still running (the status line shows
+  // "completed" before turn:after finishes), so the next turn's turn:before
+  // must wait for the applier to finish before the request is built.
+  const applyingByOwner = new Map<string, Promise<void>>();
 
   const queueOp = (ownerKey: string, op: PendingSessionOp): boolean => {
     const current = pendingByOwner.get(ownerKey);
@@ -68,6 +73,43 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
     return registration;
   });
 
+  const applyPendingOps = async (sessionId: string | undefined): Promise<void> => {
+    const agent = services.getCurrentAgent?.();
+    const sessionController = services.getCurrentSessionController?.();
+    if (!agent || !sessionController) return;
+    const ownerKey = ownerKeyOf(agent);
+    if (!ownerKey) return;
+    await applyingByOwner.get(ownerKey);
+    const pending = pendingByOwner.get(ownerKey);
+    if (!pending) return;
+    pendingByOwner.delete(ownerKey);
+    const run = (async () => {
+      for (const op of pending.ops) {
+        try {
+          await applyOp(services, agent, sessionController, sessionId, ownerKey, op, promptOverrideByOwner);
+        } catch (error) {
+          services.showNotice(`会话自治操作失败: ${error instanceof Error ? error.message : String(error)}`, sessionId, {
+            variant: 'error',
+            command: 'session-autonomy',
+            status: 'error',
+          });
+        }
+      }
+    })().finally(() => {
+      applyingByOwner.delete(ownerKey);
+    });
+    applyingByOwner.set(ownerKey, run);
+    await run;
+  };
+
+  // Pending ops are applied at the end of the turn that queued them: the agent
+  // is idle and the save for that turn is done, so replacing the client
+  // history (and saving the session) is safe and the UI reflects the new
+  // history immediately instead of waiting for the next user message.
+  // Priority 50 keeps this ahead of message-queue's turn:after (100), which
+  // starts the next turn; emitting would otherwise race the applier against
+  // the next turn's request build. turn:before below stays as a fallback for
+  // one-shot headless runs that never emit turn:after.
   const turnAfterDisposable = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
     'turn:after',
     async (event) => {
@@ -82,40 +124,21 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
           command: 'session-autonomy',
           status: 'warning',
         });
+        return;
       }
+      await applyPendingOps(services.getCurrentAgentSessionId?.());
     },
-    { pluginId: PLUGIN_ID, priority: 100, failPolicy: 'continue' },
+    { pluginId: PLUGIN_ID, priority: 50, failPolicy: 'continue' },
   );
   ctx.onDispose(() => turnAfterDisposable.dispose());
 
-  // Pending ops are applied at the next turn start: the agent is idle then and
-  // the provider request has not been built yet, so replacing the client
-  // history is safe. Applying inside turn:after would race with the next turn
-  // (its request can be issued while the applier is still saving the session).
+  // Fallback applier for hosts without a turn:after (one-shot `mica exec`
+  // drains pending ops by re-emitting turn:before after the queue empties).
   const turnBeforeDisposable = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
     'turn:before',
     async () => {
-      const agent = services.getCurrentAgent?.();
-      const sessionController = services.getCurrentSessionController?.();
       const sessionId = services.getCurrentAgentSessionId?.();
-      if (!agent || !sessionController) return;
-      const ownerKey = ownerKeyOf(agent);
-      if (!ownerKey) return;
-      const pending = pendingByOwner.get(ownerKey);
-      if (!pending) return;
-      pendingByOwner.delete(ownerKey);
-
-      for (const op of pending.ops) {
-        try {
-          await applyOp(services, agent, sessionController, sessionId, ownerKey, op, promptOverrideByOwner);
-        } catch (error) {
-          services.showNotice(`会话自治操作失败: ${error instanceof Error ? error.message : String(error)}`, sessionId, {
-            variant: 'error',
-            command: 'session-autonomy',
-            status: 'error',
-          });
-        }
-      }
+      await applyPendingOps(sessionId);
     },
     { pluginId: PLUGIN_ID, priority: 10, failPolicy: 'continue' },
   );
@@ -193,6 +216,8 @@ async function applyOp(
       sessionId,
       { variant: 'compact', command: 'session_compact', status: 'success' },
     );
+    // Notify after showNotice so a reloading client sees the completion notice too.
+    services.onSessionHistoryApplied?.();
     return;
   }
 
@@ -233,6 +258,8 @@ async function applyOp(
       sessionId,
       { variant: 'compact', command: 'session_rewrite', status: 'success' },
     );
+    // Notify after showNotice so a reloading client sees the completion notice too.
+    services.onSessionHistoryApplied?.();
     return;
   }
 }

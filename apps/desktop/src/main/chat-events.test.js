@@ -400,4 +400,21 @@ describe('chat CLI arguments', () => {
       codexNotificationToEvent({ method: 'mica/subagentTasks/updated', params: { threadId: 's1' } })
     ).toMatchObject({ type: 'subagent_tasks', tasks: [] })
   })
+
+  it('maps replaced session history to a session_history_replaced event', () => {
+    expect(
+      codexNotificationToEvent({
+        method: 'mica/sessionHistory/replaced',
+        emittedAtMs: 1234,
+        params: { threadId: 's1' }
+      })
+    ).toMatchObject({
+      type: 'session_history_replaced',
+      timestamp: 1234,
+      sessionID: 's1'
+    })
+    expect(
+      codexNotificationToEvent({ method: 'mica/sessionHistory/replaced', params: {} })
+    ).toMatchObject({ type: 'session_history_replaced', sessionID: null })
+  })
 })

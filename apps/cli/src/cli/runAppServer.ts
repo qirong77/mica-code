@@ -17,6 +17,7 @@ import {
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
   MICA_QUEUE_NOTIFICATIONS,
+  MICA_SESSION_NOTIFICATIONS,
   MICA_TASK_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
@@ -324,6 +325,17 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       sessionController,
       subagentTasks,
       isBusy: () => executor!.isBusy,
+      onHistoryApplied: () => {
+        // A session_* tool replaced the persisted history mid-host; tell the
+        // client so it reloads the session instead of keeping stale messages.
+        try {
+          writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, {
+            threadId: sessionId,
+          });
+        } catch {
+          // stdout may be gone at shutdown
+        }
+      },
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
     executor.attachPluginLayer({

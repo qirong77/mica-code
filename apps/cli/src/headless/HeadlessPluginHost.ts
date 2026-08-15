@@ -39,6 +39,8 @@ export type HeadlessPluginHostOptions = {
   sessionController: SessionController;
   subagentTasks: SubagentTaskManager;
   isBusy: () => boolean;
+  /** Called after a session_* tool replaced the persisted history (e.g. app-server notifies its client). */
+  onHistoryApplied?: () => void;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -105,6 +107,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     subagentTasks,
     uiState,
     isBusy: options.isBusy,
+    onHistoryApplied: options.onHistoryApplied,
     submit: options.submit,
   });
 

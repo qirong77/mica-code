@@ -238,6 +238,14 @@ export function codexNotificationToEvent(notification) {
         sessionID,
         tasks: Array.isArray(params.tasks) ? params.tasks : []
       }
+    case 'mica/sessionHistory/replaced':
+      // A session_* tool replaced the persisted history mid-host. chat.js
+      // attaches the reloaded session rows; the renderer swaps its transcript.
+      return {
+        type: 'session_history_replaced',
+        timestamp,
+        sessionID
+      }
     case 'error':
       return {
         type: 'error',

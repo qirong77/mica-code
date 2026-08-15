@@ -27,6 +27,8 @@ export type HeadlessRuntimeServicesOptions = {
   subagentTasks: SubagentTaskManager;
   uiState: HeadlessUiState;
   isBusy: () => boolean;
+  /** Called after a session_* tool replaced the persisted history (e.g. app-server notifies its client). */
+  onHistoryApplied?: () => void;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -207,6 +209,9 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         conversationMessages: compacted,
       });
       return { beforeCount: historyOptions.beforeCount, afterCount: appliedMessages.length };
+    },
+    onSessionHistoryApplied() {
+      options.onHistoryApplied?.();
     },
   };
 }

@@ -189,6 +189,10 @@ async function sendTurn(driver: PtyDriver, text: string): Promise<number> {
     if (Date.now() > deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  // 等 PTY 输出完全静止再输入：turn 收尾（状态行 completed 帧、notice、
+  // session_* 工具应用后的 UI 替换）是异步渲染的，直接输入会在输入框重建
+  // 期间丢字符，且迟到的 completed 帧会让 waitTurnCompleted 误判上一轮完成。
+  await driver.waitIdle(250, 10_000);
   const pos = driver.text().length;
   await driver.typeText(text, 15);
   driver.enter();
@@ -218,7 +222,7 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
       // turn 3: compact registration
       { kind: 'tool', name: 'session_compact', args: { preview: false } },
       { kind: 'text', text: '已登记压缩。' },
-      // turn 4: plain turn; compact is applied at its start
+      // turn 4: plain turn; compact was applied at turn 3's end (turn:after)
       { kind: 'text', text: '继续。' },
       // turn 5: rewrite registration
       { kind: 'tool', name: 'session_rewrite', args: { summary: '这是重写后的精简总结。', keep_recent_rounds: 0 } },
@@ -314,7 +318,7 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
         'turn3 的 compact 登记结果应进入 provider 历史',
       );
 
-      // ---- turn 4: compact is applied at this turn's start ----
+      // ---- turn 4: compact applied at turn 3's end; history now compacted ----
       const sendPos4 = await sendTurn(driver, '继续');
       const t4 = await driver.waitTurnCompleted(sendPos4, { timeoutMs: 90_000 });
       assertScreen(t4 === 'completed', `turn4 未完成: ${String(t4)}`);
@@ -338,7 +342,7 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
         'turn5 的 rewrite 登记结果应进入 provider 历史',
       );
 
-      // ---- turn 6: rewrite is applied at this turn's start ----
+      // ---- turn 6: rewrite applied at turn 5's end; history now rewritten ----
       const sendPos6 = await sendTurn(driver, '记住我的偏好');
       const t6 = await driver.waitTurnCompleted(sendPos6, { timeoutMs: 90_000 });
       assertScreen(t6 === 'completed', `turn6 未完成: ${String(t6)}`);
@@ -365,6 +369,10 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
 
       // ---- turn 7: verify guidance stays in the prompt ----
       const sendPos7 = await sendTurn(driver, '继续');
+      assertScreen(
+        await waitForFile(() => mock.state.requests.length >= 10, 30_000),
+        'turn7 应发出请求（先等新 turn 真正启动，避免 completed 帧误判）',
+      );
       const t7 = await driver.waitTurnCompleted(sendPos7, { timeoutMs: 90_000 });
       assertScreen(t7 === 'completed', `turn7 未完成: ${String(t7)}`);
 

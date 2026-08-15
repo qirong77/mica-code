@@ -214,6 +214,16 @@ export class Application {
       });
 
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');
+      // Apple Terminal sends the same byte (\r) for Shift+Enter and Enter and
+      // has no kitty keyboard protocol support, so Shift+Enter/Cmd+Backspace
+      // shortcuts can never reach the app there. Surface the working
+      // alternatives once so users don't hunt for the broken bindings.
+      if (process.env.TERM_PROGRAM === 'Apple_Terminal') {
+        showPluginMessage(
+          'Apple Terminal 不支持 Shift+Enter 换行：请用 Option+Enter（终端设置需开启“将 Option 用作 Meta 键”）或 Ctrl+J；Cmd+Backspace 删除行不可用，可用 Ctrl+U 删除到行首',
+          9000,
+        );
+      }
     } catch (error) {
       micaUi.terminalInput.setPlaceholder('启动失败：修复配置后重新运行 mica，按 Ctrl+C 退出');
       reportRuntimeError(error, '启动失败');
