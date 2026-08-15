@@ -810,7 +810,7 @@ function BackgroundTasksDock({ tasks, now = Date.now() }) {
 function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms < 1000) return ''
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
 }
 
 function formatLogElapsed(ms) {
