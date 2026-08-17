@@ -32,6 +32,7 @@ import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
@@ -79,6 +80,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: ModelClientOptions['systemPrompt'];
+  supportsVision!: boolean;
 
   constructor(options: ModelClientOptions) {
     super();
@@ -96,6 +98,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     this.toolFilter = options.toolFilter;
     this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
+    this.supportsVision = options.supportsVision ?? true;
   }
 
   reset() {
@@ -186,6 +189,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let toolCalls = new Map<number, PendingToolCall>();
       let hasReasoningText = false;
       let reasoningPartDone = false;
+      const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
 
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
@@ -210,7 +214,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             {
               model: this.model,
               instructions: systemPrompt,
-              input: messages,
+              input: wireMessages,
               ...(this.tools
                 ? {
                     tools: this.responseTools,
@@ -642,6 +646,36 @@ function toWellFormedText(text: string): string {
 
 function stripUnusableResponseInputItems(messages: ResponseInputItem[]): ResponseInputItem[] {
   return messages.filter((item) => item.type !== 'reasoning' || Boolean(item.encrypted_content));
+}
+
+/**
+ * Replaces every image part with a text placeholder before a request goes to a
+ * model that cannot accept images. Works on a copy: the persisted conversation
+ * keeps the original image blocks so switching back to a vision model does not
+ * lose them.
+ */
+function stripImagesForVision(
+  messages: ResponseInputItem[],
+  supportsVision: boolean,
+  model: string,
+): ResponseInputItem[] {
+  if (supportsVision) return messages;
+  const placeholder = imageOmittedPlaceholder(model);
+  return messages.map((item) => {
+    if (item.type === 'message' && Array.isArray(item.content)) {
+      const content = item.content.map((part) =>
+        part.type === 'input_image' ? { type: 'input_text' as const, text: placeholder } : part,
+      );
+      return { ...item, content } as ResponseInputItem;
+    }
+    if (item.type === 'function_call_output' && Array.isArray(item.output)) {
+      const output = item.output.map((part) =>
+        part.type === 'input_image' ? { type: 'input_text' as const, text: placeholder } : part,
+      );
+      return { ...item, output } as ResponseInputItem;
+    }
+    return item;
+  });
 }
 
 function interruptedResponsesToolResult(callId: string): ResponseInputItem {

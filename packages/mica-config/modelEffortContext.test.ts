@@ -60,6 +60,8 @@ describe('model-effort-context', () => {
     expect(getModelRule('deepseek-v4-pro').contextSize).toBe(1000000);
     expect(getModelRule('gpt-5.5').contextSize).toBe(1050000);
     expect(getModelRule('grok-4.5').contextSize).toBe(500000);
+    expect(getModelRule('deepseek-v4-pro').supportsVision).toBe(false);
+    expect(getModelRule('gpt-5.5').supportsVision).toBe(true);
     expect(getModelEffortOptions('deepseek-v4-pro')).toEqual(['none', 'high', 'xhigh']);
     expect(getModelEffortOptions('grok-4.5')).toEqual(['low', 'medium', 'high']);
   });
@@ -172,6 +174,7 @@ describe('model-effort-context', () => {
     const rule = await ensureModelRule('brand-new-model-2099');
     expect(rule.contextSize).toBe(1000000);
     expect(rule.defaultEffort).toBe('medium');
+    expect(rule.supportsVision).toBe(true);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('brand-new-model-2099'));
     errorSpy.mockRestore();
   });
@@ -201,7 +204,11 @@ async function mockModelsDev() {
     },
     deepseek: {
       models: {
-        'deepseek-v4-pro': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }]),
+        'deepseek-v4-pro': model(
+          1000000,
+          [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }],
+          { input: ['text'], output: ['text'] },
+        ),
       },
     },
     openai: {
@@ -220,6 +227,6 @@ async function mockModelsDev() {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload))));
 }
 
-function model(context: number, reasoning_options: unknown[]) {
-  return { reasoning: true, reasoning_options, limit: { context } };
+function model(context: number, reasoning_options: unknown[], modalities?: unknown) {
+  return { reasoning: true, reasoning_options, limit: { context }, ...(modalities ? { modalities } : undefined) };
 }

@@ -41,6 +41,8 @@ export type ModelRule = {
   name: string;
   modelKeysIncludes: string[];
   contextSize: number;
+  /** Whether the model accepts image input. Missing/true means vision-capable. */
+  supportsVision?: boolean;
   defaultEffort: EffortOption;
   efforts: Partial<Record<EffortOption, ModelEffortRule>>;
 };

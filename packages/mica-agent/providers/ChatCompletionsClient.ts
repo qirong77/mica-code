@@ -22,6 +22,7 @@ import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
@@ -59,6 +60,7 @@ export class ChatCompletionsClient extends BaseAgent<
   toolFilter: ModelClientOptions['toolFilter'];
   toolContext: unknown;
   systemPrompt: ModelClientOptions['systemPrompt'];
+  supportsVision!: boolean;
   constructor(options: ModelClientOptions) {
     super();
     this.tools = true;
@@ -74,6 +76,7 @@ export class ChatCompletionsClient extends BaseAgent<
     this.toolFilter = options.toolFilter;
     this.toolContext = options.toolContext;
     this.systemPrompt = options.systemPrompt;
+    this.supportsVision = options.supportsVision ?? true;
   }
   reset() {
     this.messages = [];
@@ -155,6 +158,7 @@ export class ChatCompletionsClient extends BaseAgent<
         requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
       let emittedContentSeparator = false;
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
+      const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
 
       // 与 ResponsesClient 同理：上游（如 krill）过载时返回 HTTP 200 + error JSON，
       // openai-node SDK 把它反序列化成 APIError 在流迭代首帧抛出。重试必须包住
@@ -169,7 +173,7 @@ export class ChatCompletionsClient extends BaseAgent<
           const stream = await getClient(this).chat.completions.create(
             {
               model: this.model,
-              messages,
+              messages: wireMessages,
               ...(this.tools
                 ? {
                     tools: this.openaiTools,
@@ -494,6 +498,28 @@ function sanitizeHistoricalChatMedia(
       if (isValidHistoricalImageUrl(imageUrl)) return part;
       return { type: 'text' as const, text: '[image omitted from invalid historical content]' };
     });
+    return { ...message, content };
+  });
+}
+
+/**
+ * Replaces every image_url part with a text placeholder before a request goes
+ * to a model that cannot accept images. Works on a copy: the persisted
+ * conversation keeps the original image blocks so switching back to a vision
+ * model does not lose them.
+ */
+function stripImagesForVision(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  supportsVision: boolean,
+  model: string,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  if (supportsVision) return messages;
+  const placeholder = imageOmittedPlaceholder(model);
+  return messages.map((message) => {
+    if (message.role !== 'user' || !Array.isArray(message.content)) return message;
+    const content = message.content.map((part) =>
+      part.type === 'image_url' ? { type: 'text' as const, text: placeholder } : part,
+    );
     return { ...message, content };
   });
 }

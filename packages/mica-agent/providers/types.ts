@@ -6,6 +6,8 @@ export type ModelClientOptions = {
   apiKey?: string;
   baseURL?: string;
   effort?: EffortOption;
+  /** Whether the model accepts image input. Missing defaults to true (vision-capable). */
+  supportsVision?: boolean;
   provider: ProviderDefinition;
   tools?: boolean;
   toolFilter?: ToolFilter;

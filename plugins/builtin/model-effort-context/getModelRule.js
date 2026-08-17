@@ -66,6 +66,7 @@ export async function getModelRule(modelName = '', signal) {
   return {
     contextSize,
     defaultEffort: chooseDefaultEffort(efforts, protocol),
+    supportsVision: modelSupportsVision(match.model),
     efforts: Object.fromEntries(
       efforts.map((effort) => [
         effort,
@@ -73,6 +74,17 @@ export async function getModelRule(modelName = '', signal) {
       ]),
     ),
   };
+}
+
+/**
+ * models.dev annotates every model with a modalities.input list. A model that
+ * lists "image" can receive image blocks; anything else is text-only. When the
+ * field is missing we stay conservative and assume vision is supported so a
+ * text-only model never gets silently mislabeled as capable.
+ */
+function modelSupportsVision(model) {
+  const input = model?.modalities?.input;
+  return !Array.isArray(input) || input.includes('image');
 }
 
 async function loadModels(signal) {

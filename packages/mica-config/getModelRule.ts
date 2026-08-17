@@ -51,6 +51,7 @@ export function getModelRule(modelName: string): ModelRule {
     modelKeysIncludes: [modelName],
     contextSize: 1000000,
     defaultEffort: 'medium',
+    supportsVision: true,
     efforts: Object.fromEntries(EFFORT_OPTIONS.map((effort) => [effort, {}])),
   };
 }

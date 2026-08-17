@@ -101,6 +101,7 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
     baseURL: config.provider.api_base,
     model: config.model,
     effort: config.effort,
+    supportsVision: micaConfig.getModelRule(config.model).supportsVision ?? true,
     provider: config.provider,
   };
 }
