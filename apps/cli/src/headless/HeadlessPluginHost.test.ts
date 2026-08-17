@@ -85,7 +85,7 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
   it('registers the session-autonomy tools and TodoWrite', async () => {
     const { host } = await mount();
     const names = toolNames();
-    for (const expected of ['session_info', 'session_history', 'session_compact', 'session_rewrite', 'session_set_prompt', 'TodoWrite']) {
+    for (const expected of ['session_info', 'session_compact', 'TodoWrite']) {
       expect(names).toContain(expected);
     }
     await host.dispose();

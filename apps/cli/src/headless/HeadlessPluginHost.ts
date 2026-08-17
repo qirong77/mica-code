@@ -159,8 +159,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   plugins.register(new TodoPlugin());
 
   // Persisted conversation = provider history + notices appended by plugins
-  // (session_compact / session_rewrite results), matching the interactive
-  // session's uiState without rendering anything.
+  // (session_compact results), matching the interactive session's uiState
+  // without rendering anything.
   // An empty list must stay "unset": SessionController.saveCurrent treats an
   // empty conversation as "delete this session" unless allowEmpty is passed.
   const getConversationMessages = (): MicaUiConversationMessage[] | undefined =>

@@ -22,8 +22,8 @@ const suite = enabled ? describe : describe.skip;
 
 type ScriptStep = { kind: 'tool'; name: string; args: Record<string, unknown> } | { kind: 'text'; text: string };
 
-// 长回复：让 session_history 的工具输出足够大，轻量裁剪的收益能覆盖
-// compact boundary 消息的开销（否则 CompactionService 会判定“无需压缩”）。
+// 长回复：配合 turn2 的大 grep_search 工具输出（UI 只渲染工具行，不渲染
+// tool result），让 lightweight prune 有可裁剪的大块内容。
 const LONG_REPLY = Array.from({ length: 40 }, (_, i) => {
   const items = [
     '这是第 ' + (i + 1) + ' 条长回复内容，用于累积历史文本。',
@@ -31,7 +31,7 @@ const LONG_REPLY = Array.from({ length: 40 }, (_, i) => {
     '关键约束：append-only 会话历史、稳定 prompt 前缀、上下文压力明显时才 compact。',
     '架构边界：mica-agent 只做 provider 适配与 prompt 构建，mica-ui 不直接调用 provider。',
     '工具注册：运行期产品工具由内置插件通过 ctx.tools.register() 注册，可声明 primaryAgentOnly。',
-    '会话自治：模型可以观察会话状态、压缩历史、重写总结、写入长期记忆。',
+    '会话自治：模型可以观察会话状态、在上下文压力明显时压缩历史。',
     '验证习惯：日常只跑局部测试，全量测试约 7-8 分钟，发布前才跑。',
   ];
   return `# 段落 ${i + 1}\n` + items.join('\n');
@@ -212,31 +212,33 @@ async function sendTurn(driver: PtyDriver, text: string): Promise<number> {
 }
 
 suite('session-autonomy PTY end-to-end (mock provider)', () => {
-  it('observes, compacts, rewrites, remembers and injects memory', async () => {
+  it('observes and compacts via the session tools', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mica-sa-pty-home-'));
+    const wd = mkdtempSync(join(tmpdir(), 'mica-sa-pty-wd-'));
+    const BIG_FILE = join(wd, 'big.txt');
+    writeFileSync(
+      BIG_FILE,
+      Array.from({ length: 300 }, (_, i) => `line ${i + 1} ` + '内容填充'.repeat(25)).join('\n'),
+    );
     const mock = createMockProvider([
       // turn 1: long assistant reply seeds the history
       { kind: 'text', text: LONG_REPLY },
-      // turn 2: session_history returns a big tool output (prunable)
-      { kind: 'tool', name: 'session_history', args: { limit: 10 } },
-      { kind: 'text', text: '已读取历史。' },
+      // turn 2: grep_search returns a big tool output (prunable)
+      { kind: 'tool', name: 'grep_search', args: { pattern: 'line', path: BIG_FILE, head_limit: 200 } },
+      { kind: 'text', text: '已搜索。' },
       // turn 3: compact registration
       { kind: 'tool', name: 'session_compact', args: { preview: false } },
       { kind: 'text', text: '已登记压缩。' },
       // turn 4: plain turn; compact was applied at turn 3's end (turn:after)
       { kind: 'text', text: '继续。' },
-      // turn 5: rewrite registration
-      { kind: 'tool', name: 'session_rewrite', args: { summary: '这是重写后的精简总结。', keep_recent_rounds: 0 } },
-      { kind: 'text', text: '历史已重写。' },
-      // turn 6: plain reply, verifies the rewrite applied at its start
-      { kind: 'text', text: '第七轮回复。' },
+      // turn 5: verify the guidance and tool definitions persist
+      { kind: 'text', text: '继续。' },
     ]);
     await new Promise<void>((resolve) => mock.server.listen(0, '127.0.0.1', resolve));
     const { port } = mock.server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${port}/v1`;
 
-    const home = mkdtempSync(join(tmpdir(), 'mica-sa-pty-home-'));
     mock.state.logPath = join(home, 'requests.log');
-    const wd = mkdtempSync(join(tmpdir(), 'mica-sa-pty-wd-'));
     mkdirSync(join(home, 'sessions'), { recursive: true });
     // macOS /var is a symlink to /private/var; the compiled binary may resolve
     // cwd to the real path, so seed both spellings of the directory key.
@@ -290,23 +292,26 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
       assertScreen(screen1.includes('这是第40条长回复内容'), 'turn1 应显示长回复');
 
       const toolRequests = allRequestText(mock.state);
-      for (const name of ['session_info', 'session_history', 'session_compact', 'session_rewrite']) {
+      for (const name of ['session_info', 'session_compact']) {
         assertScreen(toolRequests.includes(name), `provider 请求应包含 ${name} 工具定义`);
       }
       assertScreen(
         (mock.state.requests[0]?.instructions ?? '').includes('会话自治'),
         'provider 请求应包含会话自治引导',
       );
+      assertScreen(!toolRequests.includes('session_history'), '不应再注册 session_history 工具');
+      assertScreen(!toolRequests.includes('session_rewrite'), '不应再注册 session_rewrite 工具');
+      assertScreen(!toolRequests.includes('session_set_prompt'), '不应再注册 session_set_prompt 工具');
 
-      // ---- turn 2: session_history (big prunable tool output) ----
-      const sendPos2 = await sendTurn(driver, '查看历史');
+      // ---- turn 2: grep_search (big prunable tool output) ----
+      const sendPos2 = await sendTurn(driver, '搜索文件内容');
       const t2 = await driver.waitTurnCompleted(sendPos2, { timeoutMs: 90_000 });
       assertScreen(t2 === 'completed', `turn2 未完成: ${String(t2)}`);
       // 工具行渲染依赖 Ink 帧时序（太快会合并掉中间帧），不断言 UI 行；
-      // 改为验证工具结果确实进入了下一请求的 provider 历史。
+      // 改为验证 grep_search 工具结果确实进入了下一请求的 provider 历史。
       assertScreen(
-        JSON.stringify(mock.state.requests[2]?.input ?? []).includes('session_history'),
-        'turn2 的 history 工具结果应进入 provider 历史',
+        JSON.stringify(mock.state.requests[2]?.input ?? []).includes('内容填充'),
+        'turn2 的 grep 工具结果应进入 provider 历史',
       );
 
       // ---- turn 3: compact registration ----
@@ -333,48 +338,14 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
       const screen4 = driver.latestScreen(60_000);
       assertScreen(screen4.includes('session_compact: 完成'), 'turn4 UI 应显示 compact 完成通知');
 
-      // ---- turn 5: rewrite registration ----
-      const sendPos5 = await sendTurn(driver, '把历史重写为总结');
+      // ---- turn 5: verify guidance stays in the prompt ----
+      const sendPos5 = await sendTurn(driver, '继续');
+      assertScreen(
+        await waitForFile(() => mock.state.requests.length >= 7, 30_000),
+        'turn5 应发出请求（先等新 turn 真正启动，避免 completed 帧误判）',
+      );
       const t5 = await driver.waitTurnCompleted(sendPos5, { timeoutMs: 90_000 });
       assertScreen(t5 === 'completed', `turn5 未完成: ${String(t5)}`);
-      assertScreen(
-        JSON.stringify(mock.state.requests[7]?.input ?? []).includes('session_rewrite'),
-        'turn5 的 rewrite 登记结果应进入 provider 历史',
-      );
-
-      // ---- turn 6: rewrite applied at turn 5's end; history now rewritten ----
-      const sendPos6 = await sendTurn(driver, '记住我的偏好');
-      const t6 = await driver.waitTurnCompleted(sendPos6, { timeoutMs: 90_000 });
-      assertScreen(t6 === 'completed', `turn6 未完成: ${String(t6)}`);
-      assertScreen(
-        await waitForFile(() => {
-          const messages = readLatestSession(home).messages;
-          const serialized = JSON.stringify(messages);
-          // rewrite 应用后：1 条总结 + turn6（user + tool + output + text）= 5 条
-          return (
-            messages.length >= 2 &&
-            messages.length <= 5 &&
-            serialized.includes('这是重写后的精简总结') &&
-            !serialized.includes('第40条长回复内容') &&
-            !serialized.includes('Mica compact boundary')
-          );
-        }, 15_000),
-        'rewrite 后历史应只剩总结（旧历史与 boundary 消失）',
-      );
-
-      const screen6 = driver.latestScreen(60_000);
-      assertScreen(screen6.includes('session_rewrite: 历史重写完成'), 'turn6 UI 应显示 rewrite 完成通知');
-      const session2 = readLatestSession(home);
-      assertScreen(JSON.stringify(session2.messages).includes('这是重写后的精简总结'), 'rewrite 后应包含总结内容');
-
-      // ---- turn 7: verify guidance stays in the prompt ----
-      const sendPos7 = await sendTurn(driver, '继续');
-      assertScreen(
-        await waitForFile(() => mock.state.requests.length >= 10, 30_000),
-        'turn7 应发出请求（先等新 turn 真正启动，避免 completed 帧误判）',
-      );
-      const t7 = await driver.waitTurnCompleted(sendPos7, { timeoutMs: 90_000 });
-      assertScreen(t7 === 'completed', `turn7 未完成: ${String(t7)}`);
 
       const lastRequests = allRequestText(mock.state);
       assertScreen(
@@ -382,13 +353,8 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
         '后续请求应仍含会话自治引导',
       );
       assertScreen(lastRequests.includes('session_info'), '后续请求应仍含 session 工具定义');
-      // 10 main-agent steps, nothing extra
-      assertScreen(mock.state.requests.length === 10, `请求总数应为 10，实际 ${mock.state.requests.length}`);
-
-      // rewrite 后历史保持精简（turn6/turn7 各一轮，不应膨胀回旧历史）
-      const session4 = readLatestSession(home);
-      // 1 条总结 + turn6（工具轮 4 条）+ turn7（2 条）= 7 条；旧历史不应回流
-      assertScreen(session4.messages.length <= 7, `rewrite 后历史应保持精简，实际 ${session4.messages.length} 条`);
+      // 7 main-agent steps, nothing extra
+      assertScreen(mock.state.requests.length === 7, `请求总数应为 7，实际 ${mock.state.requests.length}`);
     } finally {
       await driver.close('SIGKILL', 1_000).catch(() => undefined);
       await new Promise<void>((resolve) => mock.server.close(() => resolve()));

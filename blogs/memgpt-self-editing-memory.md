@@ -10,6 +10,8 @@
 
 这篇记录我们从 MemGPT 论文（arXiv 2310.08560）里拿到的答案，以及它在 mica-code 里的两次落地：`session_*` 会话自治工具族，和 context-pressure 自动提醒插件。
 
+> **更新（后续迭代）**：本文描述的 `session_history` / `session_rewrite` / `session_set_prompt` 三个工具已在后续版本中移除。当前会话自治工具族只保留 `session_info`（只读观察）和 `session_compact`（压缩历史），其余内容（延迟应用到 turn 结束、`primaryAgentOnly` 隔离、context-pressure 自动提醒）仍然有效。
+
 ---
 
 ## 一、MemGPT 在讲什么：把 LLM 当操作系统

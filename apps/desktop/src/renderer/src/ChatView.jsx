@@ -2022,10 +2022,10 @@ export function ChatView({
           setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'session_history_replaced': {
-          // session_* 工具（session_compact / session_rewrite）在 host 侧替换了
-          // 持久化历史（主进程已重新读取会话文件）：立即用新历史替换消息列表，
-          // 而不是保留旧记录直到会话重开。流式行随替换一并丢弃（turn 已完成，
-          // 紧随其后的 step_finish 只做收尾）。
+          // session_compact 工具在 host 侧替换了持久化历史（主进程已重新
+          // 读取会话文件）：立即用新历史替换消息列表，而不是保留旧记录直到
+          // 会话重开。流式行随替换一并丢弃（turn 已完成，紧随其后的
+          // step_finish 只做收尾）。
           finishStream(timestamp)
           const rows = historyMessages(
             Array.isArray(event.history) ? event.history : [],

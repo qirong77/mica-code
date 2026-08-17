@@ -172,10 +172,10 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       const started = await executor.start(micaRuntime.createRuntimeInput(prompt, 'ui'));
       if (started === 'rejected') throw new Error('The turn was rejected (queue full or blocked)');
       await waitForIdle(executor);
-      // Drain pending plugin ops (session_compact / session_rewrite queued by
-      // the final turn) as a fallback: the session-autonomy plugin applies
-      // them in its turn:after already, but a host that never emitted one
-      // (e.g. an aborted turn) still gets drained here.
+      // Drain pending plugin ops (session_compact queued by the final turn) as
+      // a fallback: the session-autonomy plugin applies it in its turn:after
+      // already, but a host that never emitted one (e.g. an aborted turn)
+      // still gets drained here.
       if (host.hooks) {
         await host.hooks.emit('turn:before', {
           runtime: host,

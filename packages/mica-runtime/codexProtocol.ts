@@ -131,11 +131,11 @@ export const MICA_TASK_NOTIFICATIONS = {
 } as const;
 
 /**
- * Mica extension notification: a session_* tool (session_compact /
- * session_rewrite) replaced the persisted conversation history mid-host. The
- * Codex protocol has no event for it, so the desktop app would otherwise keep
- * showing the stale transcript until the session is reopened. Emitted once per
- * applied history replacement; the client reloads the session file.
+ * Mica extension notification: the session_compact tool replaced the persisted
+ * conversation history mid-host. The Codex protocol has no event for it, so
+ * the desktop app would otherwise keep showing the stale transcript until the
+ * session is reopened. Emitted once per applied history replacement; the
+ * client reloads the session file.
  */
 export const MICA_SESSION_NOTIFICATIONS = {
   historyReplaced: 'mica/sessionHistory/replaced',
