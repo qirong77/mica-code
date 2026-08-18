@@ -160,6 +160,32 @@ describe('TodoPlugin', () => {
     expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 1 total, 1 completed, 0 pending.');
   });
 
+  it('completes stale pending items as well when the turn finishes successfully', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const owner = setCurrentTodoOwner('owner-a');
+
+    await micaTools.execute(
+      'TodoWrite',
+      {
+        todos: [
+          { content: 'Update docs', activeForm: 'Updating docs', status: 'completed' },
+          { content: 'Verify', activeForm: 'Verifying', status: 'pending' },
+        ],
+      },
+      { context: { agent: owner } },
+    );
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('test', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+      owner,
+    });
+    await harness.commands.execute('/todo show');
+
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list updated: 2 total, 2 completed, 0 pending.');
+  });
+
   it('settles errored and aborted turns without claiming completion', async () => {
     const harness = createTodoHarness(disposeCallbacks);
     const owner = setCurrentTodoOwner('owner-a');

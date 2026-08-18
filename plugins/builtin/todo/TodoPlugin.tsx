@@ -128,7 +128,7 @@ export class TodoPlugin implements MicaPlugin {
       'turn:after',
       (event) => {
         const ownerId = todoOwnerId(event.owner) ?? activeOwnerId();
-        updateOwnerState(ownerId, event.outcome === 'completed' ? completeInProgressTodo : pauseInProgressTodo);
+        updateOwnerState(ownerId, event.outcome === 'completed' ? completeRemainingTodo : pauseInProgressTodo);
       },
       { pluginId: ctx.pluginId },
     );
@@ -191,13 +191,13 @@ function pauseInProgressTodo(current: TodoViewState): TodoViewState {
   };
 }
 
-function completeInProgressTodo(current: TodoViewState): TodoViewState {
-  if (!current.items.some((item) => item.status === 'in_progress')) return current;
-  // A successfully finished turn drove the in-progress item to completion; marking it completed
-  // lets shouldShowTodoList hide the list once every item is done.
+function completeRemainingTodo(current: TodoViewState): TodoViewState {
+  if (!current.items.some((item) => item.status !== 'completed')) return current;
+  // A successfully finished turn means the agent yielded with the work done; leftover in-progress
+  // or pending items are stale, so complete them all and let shouldShowTodoList hide the list.
   return {
     ...current,
-    items: current.items.map((item) => (item.status === 'in_progress' ? { ...item, status: 'completed' } : item)),
+    items: current.items.map((item) => (item.status === 'completed' ? item : { ...item, status: 'completed' })),
   };
 }
 
