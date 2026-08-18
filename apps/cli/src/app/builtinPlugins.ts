@@ -16,6 +16,7 @@ import setupCommandNew from '../../../../plugins/builtin/command-new.mjs';
 import setupCommandRename from '../../../../plugins/builtin/command-rename.mjs';
 import setupCommandResume from '../../../../plugins/builtin/command-resume.mjs';
 import setupCommandRewind from '../../../../plugins/builtin/command-rewind.mjs';
+import setupLoop from '../../../../plugins/builtin/loop.js';
 import setupMicaCodeAppNotify from '../../../../plugins/builtin/mica-code-app-notify.mjs';
 import setupSessionAutonomy from '../../../../plugins/builtin/session-autonomy/SessionAutonomyPlugin.js';
 import setupContextPressure from '../../../../plugins/builtin/context-pressure/ContextPressurePlugin.js';
@@ -59,6 +60,7 @@ function builtinCommandFilePlugins(): MicaPlugin[] {
     createBuiltinCommandFilePlugin('rename', setupCommandRename),
     createBuiltinCommandFilePlugin('resume', setupCommandResume),
     createBuiltinCommandFilePlugin('rewind', setupCommandRewind),
+    createBuiltinCommandFilePlugin('loop', setupLoop),
   ];
 }
 

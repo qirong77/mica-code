@@ -40,7 +40,7 @@ bun run format
   - `mica-skills`：skills 扫描解析缓存；`mica-plugin`：插件机制；`mica-common`：跨包底层工具（图片识别）
   - `mica-pty`：PTY 测试驱动 + 内置 PTY 工具 Node helper（node-pty 只在 Node 子进程加载）
   - `mica-sync-protocol`：sync 三端 wire 类型；`mica-web-shared`：sync web 与 desktop 共用展示纯函数
-- `plugins/builtin/`：官方内置插件（Todo、MCP、message queue、文件 mention、命令、validate-config、session-autonomy、context-pressure）。
+- `plugins/builtin/`：官方内置插件（Todo、MCP、message queue、文件 mention、命令、validate-config、session-autonomy、context-pressure、loop）。
 - `temp/`（git 忽略）与 `.backups/` 不属默认源码、测试、格式化、构建或搜索范围。
 
 ## 依赖边界与 Import 约定
@@ -110,7 +110,7 @@ bun run format
 
 - 通用机制在 `packages/mica-commands`，产品命令在 `packages/mica-builtin-commands`；`apps/cli/src/plugins/commands/index.ts` 注册到 CommandRegistry 并同步 mica-ui quick commands。命令经 `CommandRuntimeServices`/active proxy 注入，不依赖应用层单例；耗时且改状态/文件/配置/git 的命令走 runtime exclusive task。
 - `ALLOW_DURING_TURN_COMMANDS`：`status`、`context`、`agents`、`new`、`fork`、`exit`、`rename`、`task`（exclusive task 期间额外 `status`/`task`/`agents`/`new`）。`/model`、`/effort` 打开 selector 前检查 busy 并二次 guard。交互反馈统一用 `services.showNotice`，不用 `showMessage`。
-- 当前内置命令：`/clear`、`/resume`、`/model`、`/effort`、`/role`、`/status`、`/context`、`/compact`、`/commit`、`/new`、`/fork`、`/task`、`/rewind`、`/mcp`、`/skills`、`/rename`、`/exit`。要点：`/compact` 与 headless `mica compact --session` 走同一 `CompactionService`；`--prune-only` 只做本地清理、不调用模型，工具结果与工具参数无条件替换为合法 JSON 占位符（`TOOL_ARGUMENTS_PLACEHOLDER`，否则 provider 400）；headless `mica commit` 复用 `commitRunner.ts`，只发一次模型请求。
+- 当前内置命令：`/clear`、`/resume`、`/model`、`/effort`、`/role`、`/status`、`/context`、`/compact`、`/commit`、`/new`、`/fork`、`/task`、`/rewind`、`/mcp`、`/skills`、`/rename`、`/exit`、`/loop`。要点：`/compact` 与 headless `mica compact --session` 走同一 `CompactionService`；`--prune-only` 只做本地清理、不调用模型，工具结果与工具参数无条件替换为合法 JSON 占位符（`TOOL_ARGUMENTS_PLACEHOLDER`，否则 provider 400）；headless `mica commit` 复用 `commitRunner.ts`，只发一次模型请求。`/loop <间隔> <任务描述>` 由 `plugins/builtin/loop.ts` 注册（`LoopController` 进程内调度、定时器 unref），循环运行时经 `system-prompt:build`（priority 20）在 system prompt 末尾追加 loop 指引，每轮经 `submitAgentSessionInput` 以 after_turn 提交任务、忙时由 message-queue 兜底排队；`/loop stop` 停止并移除指引。
 - 新增/删除命令时检查：`apps/cli/src/plugins/commands/index.ts`、`packages/mica-builtin-commands/index.ts` + README、根 `README.md`、`AGENT.md`。
 
 ## Tools、MCP 与 Skills

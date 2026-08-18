@@ -2,6 +2,7 @@ import { createCommitCommand } from './commands/commit.js';
 import { createConfigCommand } from './commands/config.js';
 import { createContextCommand } from './commands/context.js';
 import { createEffortCommand } from './commands/effort.js';
+import { createLoopCommand } from './commands/loop.js';
 import { createMcpCommand } from './commands/mcp.js';
 import { createModelCommand } from './commands/model.js';
 import { createRoleCommand, cycleNextRole } from './commands/role.js';
@@ -17,6 +18,7 @@ export const micaBuiltinCommands = {
   createConfigCommand,
   createContextCommand,
   createEffortCommand,
+  createLoopCommand,
   createMcpCommand,
   createModelCommand,
   createRoleCommand,
@@ -26,6 +28,9 @@ export const micaBuiltinCommands = {
   AgentChangeTracker,
   syncConfigFromAgent,
 };
+
+export { createLoopCommand, formatDuration, LoopController, parseDuration, parseLoopArgs } from './commands/loop.js';
+export type { LoopParseResult, LoopStartParams, LoopState } from './commands/loop.js';
 
 export type {
   ClearIdleAgentsResult,
