@@ -511,6 +511,10 @@ export class CommandExecutor {
           { type: 'user_input', text: event.input.text, commandId: this.currentCommandId },
         ]);
         break;
+      case 'turn:retrying':
+        // Sync protocol has no retry event; the turn outcome is reported by
+        // turn:finish once retries are exhausted (or it succeeds).
+        break;
       case 'turn:finish':
         if (event.status === 'completed') {
           this.emit(sessionId, [{ type: 'turn', state: 'completed' }]);

@@ -9,9 +9,18 @@ class MockAgent {
   aborted = false;
   runCalls: Array<{ content: unknown; options: unknown }> = [];
   iterationBoundaryResults: Array<unknown> = [];
+  /** Errors to throw from run(), in order; when exhausted the run succeeds. */
+  nextErrors: Array<Error> = [];
+  restoreCalls = 0;
+  /** 0-indexed run index after which a non-readonly toolCall is emitted. */
+  emitToolCallAfterRunIndex = -1;
 
   reserveRunId(): number {
     return ++this.runId;
+  }
+
+  get activeRunId(): number {
+    return this.runId;
   }
 
   isCurrent(runId: number): boolean {
@@ -24,7 +33,11 @@ class MockAgent {
   }
 
   captureClientSnapshot() {
-    return null;
+    return { marker: 'pre-turn' };
+  }
+
+  restoreClientSnapshot() {
+    this.restoreCalls++;
   }
 
   preserveAbortedTurn(): boolean {
@@ -43,6 +56,11 @@ class MockAgent {
     const second = options.onIterationComplete ? await options.onIterationComplete() : null;
     this.iterationBoundaryResults = [first, second];
     if (this.aborted) throw new AgentAbortError(this.runId);
+    if (this.runCalls.length - 1 === this.emitToolCallAfterRunIndex) {
+      this.events.emit('toolCall', { name: 'run_shell', args: 'echo hi' });
+    }
+    const nextError = this.nextErrors.shift();
+    if (nextError) throw nextError;
     return { runId: this.runId, text: 'done' };
   }
 }
@@ -64,6 +82,8 @@ function createHarness() {
     agent: agent as unknown as never,
     sessionController: sessionController as never,
     onEvent: (event) => events.push(event),
+    maxTurnRetries: 2,
+    retryDelayMs: 5,
     onIdle: () => {
       idleCount++;
     },
@@ -167,6 +187,63 @@ describe('HeadlessTurnExecutor', () => {
     expect(finish).toMatchObject({ status: 'completed' });
     expect(savedStates).toContain('running');
     expect(savedStates).toContain('completed');
+  });
+
+  it('retries transient provider errors and reports turn:retrying', async () => {
+    const { agent, executor, events } = createHarness();
+    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 500 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(agent.runCalls).toHaveLength(2);
+    expect(agent.restoreCalls).toBe(1);
+    const retrying = events.find((event) => event.type === 'turn:retrying');
+    expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1 });
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+  });
+
+  it('does not retry non-transient errors', async () => {
+    const { agent, executor, events } = createHarness();
+    agent.nextErrors = [Object.assign(new Error('bad request'), { status: 400 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(agent.runCalls).toHaveLength(1);
+    expect(events.find((event) => event.type === 'turn:retrying')).toBeUndefined();
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
+  });
+
+  it('does not retry after a non-readonly tool call ran', async () => {
+    const { agent, executor, events } = createHarness();
+    agent.emitToolCallAfterRunIndex = 0;
+    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 500 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(agent.runCalls).toHaveLength(1);
+    expect(events.find((event) => event.type === 'turn:retrying')).toBeUndefined();
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
+  });
+
+  it('gives up after exhausting retries and reports the final error', async () => {
+    const { agent, executor, events } = createHarness();
+    agent.nextErrors = [
+      Object.assign(new Error('busy 1'), { status: 503 }),
+      Object.assign(new Error('busy 2'), { status: 503 }),
+      Object.assign(new Error('busy 3'), { status: 503 }),
+    ];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(agent.runCalls).toHaveLength(3); // 1 + maxTurnRetries(2)
+    expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(2);
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
+  });
+
+  it('stops retrying when the turn is aborted during the retry delay', async () => {
+    const { agent, executor, events } = createHarness();
+    agent.nextErrors = [Object.assign(new Error('busy'), { status: 503 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    executor.abort();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'aborted' });
   });
 
   it('queues with after_turn mode and reports the queue position', async () => {

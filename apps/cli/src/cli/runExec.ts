@@ -10,7 +10,7 @@ import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { attachCodexExecProjector, type CodexExecProjector } from '../runtime/CodexExecProjector.js';
-import { HeadlessTurnExecutor } from '../runtime/HeadlessTurnExecutor.js';
+import { HeadlessTurnExecutor, MAX_TURN_RETRIES } from '../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
@@ -135,6 +135,13 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       maxTurns: options.maxTurns,
       save: options.noSave !== true,
       onEvent: (event) => {
+        if (event.type === 'turn:retrying') {
+          console.error(
+            `[mica] turn will retry (${event.attempt}/${MAX_TURN_RETRIES}) in ${Math.ceil(event.delayMs / 1000)}s: ${
+              event.error ?? 'unknown error'
+            }`,
+          );
+        }
         if (event.type === 'turn:finish') {
           status = event.status;
           if (event.error) errorMessage = event.error;

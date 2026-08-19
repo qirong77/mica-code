@@ -1,7 +1,9 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import { micaAgent } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
@@ -11,9 +13,17 @@ export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 export type HeadlessTurnEvent =
   | { type: 'turn:start'; input: RuntimeInput }
   | { type: 'turn:finish'; input: RuntimeInput; status: HeadlessTurnStatus; elapsedMs: number; error?: string }
+  | { type: 'turn:retrying'; input: RuntimeInput; attempt: number; delayMs: number; error?: string }
   | { type: 'queued'; input: RuntimeInput; position: number; pending: RuntimeInput[] }
   | { type: 'dequeue'; input: RuntimeInput }
   | { type: 'queue:changed'; pending: RuntimeInput[] };
+
+// Mirrors the interactive runtime's turn-level retry policy
+// (LocalRuntimeController): at most 5 attempts with a fixed 10s delay, only
+// for transient provider errors, and never after a non-readonly tool call ran.
+const MAX_TURN_RETRIES = 5;
+const TURN_RETRY_DELAY_MS = 10_000;
+export { MAX_TURN_RETRIES, TURN_RETRY_DELAY_MS };
 
 export type HeadlessTurnExecutorOptions = {
   agent: AgentRuntime;
@@ -38,6 +48,9 @@ export type HeadlessTurnExecutorOptions = {
   getConversationMessages?: () => MicaUiConversationMessage[] | undefined;
   /** Set to false to skip session persistence entirely (e.g. one-shot UI tasks). */
   save?: boolean;
+  /** Turn-level retry policy override (defaults match the interactive CLI). */
+  maxTurnRetries?: number;
+  retryDelayMs?: number;
 };
 
 /**
@@ -214,30 +227,84 @@ export class HeadlessTurnExecutor {
         });
         if (promptBuildEvent?.content !== undefined) runContent = promptBuildEvent.content;
       }
-      const result = await agent.run(runContent, {
-        reservedRunId,
-        maxTurns: this.options.maxTurns,
-        onIterationComplete: () => {
-          this.saveCurrent({ allowEmpty: true, turnState: 'running' });
-          return this.takeQueuedIterationInput();
-        },
-      });
-      // An abort that lands between reserveRunId() and the agent.run() check is
-      // surfaced by agent.run() as an AgentAbortError below; never return here
-      // silently or the client never receives a turn/completed notification and
-      // the app stays "running" forever.
-      if (!agent.isCurrent(result.runId)) return;
-      if (this.options.hooks) {
-        await this.options.hooks.emit('turn:beforePersist', {
-          runtime: this.options.host,
-          input,
-          content: runContent,
-          result,
-        });
+      const preTurnSnapshot = agent.captureClientSnapshot();
+      let hadNonRetryableToolCall = false;
+      const markToolCall = (toolCall: { name: string }) => {
+        if (!micaTools.isReadOnly(toolCall.name)) hadNonRetryableToolCall = true;
+      };
+      agent.events.on('toolCall', markToolCall);
+      try {
+        let runResult: { runId: number; text: string } | null = null;
+        // after_iteration inputs consumed by a failed attempt are re-injected
+        // at the next attempt's first iteration boundary so a retry never
+        // swallows a queued user input.
+        const replayInputs: AgentQueryContent[] = [];
+        const maxRetries = this.options.maxTurnRetries ?? MAX_TURN_RETRIES;
+        const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          const attemptInputs: AgentQueryContent[] = [];
+          if (attempt > 0) {
+            // Restore client state to before the turn, clearing partial output.
+            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
+            this.responseBuffer = '';
+            this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+            await waitForRetryDelay(agent, retryDelayMs);
+          }
+          try {
+            runResult = await agent.run(runContent, {
+              reservedRunId: attempt === 0 ? reservedRunId : undefined,
+              maxTurns: this.options.maxTurns,
+              onIterationComplete: () => {
+                this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+                const replayed = replayInputs.shift();
+                if (replayed !== undefined) {
+                  attemptInputs.push(replayed);
+                  return replayed;
+                }
+                return this.takeQueuedIterationInput(attemptInputs);
+              },
+            });
+            break;
+          } catch (error) {
+            replayInputs.length = 0;
+            replayInputs.push(...attemptInputs);
+            // An abort that lands between reserveRunId() and the agent.run()
+            // check is surfaced as an AgentAbortError here; never retry it.
+            if (error instanceof AgentAbortError) throw error;
+            if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= maxRetries) {
+              throw error;
+            }
+            if (this.options.hooks) {
+              await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
+            }
+            onEvent({
+              type: 'turn:retrying',
+              input,
+              attempt: attempt + 1,
+              delayMs: retryDelayMs,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        // An abort that lands between reserveRunId() and the first agent.run()
+        // check is surfaced by agent.run() as an AgentAbortError; never return
+        // here silently or the client never receives a turn/completed
+        // notification and the app stays "running" forever.
+        if (!agent.isCurrent(runResult!.runId)) return;
+        if (this.options.hooks) {
+          await this.options.hooks.emit('turn:beforePersist', {
+            runtime: this.options.host,
+            input,
+            content: runContent,
+            result: runResult,
+          });
+        }
+        this.saveCurrent({ turnState: 'completed' });
+        if (this.options.hooks) await this.emitTurnAfter(input, 'completed', Date.now() - startedAt, false);
+        onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
+      } finally {
+        agent.events.off('toolCall', markToolCall);
       }
-      this.saveCurrent({ turnState: 'completed' });
-      if (this.options.hooks) await this.emitTurnAfter(input, 'completed', Date.now() - startedAt, false);
-      onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
     } catch (error) {
       if (error instanceof AgentAbortError) {
         if (this.options.hooks) {
@@ -291,15 +358,43 @@ export class HeadlessTurnExecutor {
     this.options.sessionController.saveCurrent(conversationMessages ? { ...options, conversationMessages } : options);
   }
 
-  private takeQueuedIterationInput(): Promise<AgentQueryContent | null> {
+  private takeQueuedIterationInput(consumedInputs: AgentQueryContent[]): Promise<AgentQueryContent | null> {
     const next = this.queue.dequeueAfterCompletedIteration(true);
     if (!next) return Promise.resolve(null);
     this.options.onEvent({ type: 'dequeue', input: next });
     this.options.onEvent({ type: 'queue:changed', pending: this.queue.list() });
-    return next.source === 'system' ? Promise.resolve(next.text) : this.parseImageRefs(next.text);
+    const content = next.source === 'system' ? Promise.resolve(next.text) : this.parseImageRefs(next.text);
+    return content.then((c) => {
+      consumedInputs.push(c);
+      return c;
+    });
   }
 }
 
 function runContentOr(input: RuntimeInput): AgentQueryContent {
   return (input.content as AgentQueryContent | undefined) ?? input.text;
+}
+
+/** Fixed-delay wait that aborts early (throws AgentAbortError) when the agent
+ * run id changes, so an interrupt during a retry delay stops the turn instead
+ * of silently waiting out the full 10s. */
+function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {
+  const delayRunId = agent.activeRunId;
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      fn();
+    };
+    const timer = setTimeout(() => finish(resolve), delayMs);
+    const poll = setInterval(() => {
+      if (agent.activeRunId !== delayRunId) {
+        finish(() => reject(new AgentAbortError(agent.activeRunId)));
+        return;
+      }
+    }, 250);
+  });
 }

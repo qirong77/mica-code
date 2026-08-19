@@ -42,7 +42,11 @@ import {
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
-import { HeadlessTurnExecutor, type HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
+import {
+  HeadlessTurnExecutor,
+  MAX_TURN_RETRIES,
+  type HeadlessTurnEvent,
+} from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
@@ -860,6 +864,16 @@ function handleTurnEvent(
   switch (event.type) {
     case 'turn:start':
       break; // turn/started is emitted by the request handler with the turn id
+    case 'turn:retrying':
+      // The host retries transient provider errors (same policy as the CLI).
+      // Log to stderr only: a Codex `error` notification would make the desktop
+      // app mark the run as failed and exit instead of waiting for the retry.
+      console.error(
+        `[mica] turn will retry (${event.attempt}/${MAX_TURN_RETRIES}) in ${Math.ceil(event.delayMs / 1000)}s: ${
+          event.error ?? 'unknown error'
+        }`,
+      );
+      break;
     case 'turn:finish': {
       const turnId = takeTurnId();
       if (!turnId) break;
