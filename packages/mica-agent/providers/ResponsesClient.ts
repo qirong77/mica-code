@@ -189,7 +189,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let toolCalls = new Map<number, PendingToolCall>();
       let hasReasoningText = false;
       let reasoningPartDone = false;
-      const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
+      const wireMessages = stripImagesForVision(toWireResponsesInput(messages), this.supportsVision, this.model);
 
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
@@ -500,6 +500,45 @@ function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputI
   }
 }
 
+/**
+ * Output items echoed back from a previous response carry server-side-only
+ * metadata (`status`, `id`, `phase`) that strict Responses-compatible gateways
+ * reject inside the `input` array (krill: 400 [ObjectParam] [input[2].status]
+ * [unknown_parameter]). Normalize everything that goes back on the wire to the
+ * canonical input shapes; OpenAI tolerates the extra fields, strict gateways do
+ * not.
+ */
+function toWireResponsesInput(messages: ResponseInputItem[]): ResponseInputItem[] {
+  return messages.map(normalizeResponsesInputItem);
+}
+
+function normalizeResponsesInputItem(item: ResponseInputItem): ResponseInputItem {
+  if (item.type === 'message') {
+    return { type: 'message', role: item.role, content: item.content } as ResponseInputItem;
+  }
+  if (item.type === 'function_call') {
+    return {
+      type: 'function_call',
+      call_id: item.call_id,
+      name: item.name,
+      arguments: item.arguments,
+    } as ResponseInputItem;
+  }
+  if (item.type === 'function_call_output') {
+    return { type: 'function_call_output', call_id: item.call_id, output: item.output } as ResponseInputItem;
+  }
+  if (item.type === 'reasoning') {
+    return {
+      type: 'reasoning',
+      id: item.id,
+      summary: item.summary,
+      ...(item.content ? { content: item.content } : {}),
+      ...(item.encrypted_content ? { encrypted_content: item.encrypted_content } : {}),
+    } as ResponseInputItem;
+  }
+  return item;
+}
+
 function isEmptyResponseMessage(item: ResponseInputItem): boolean {
   return item.type === 'message' && item.role === 'assistant' && item.content.length === 0;
 }
@@ -530,7 +569,9 @@ function repairResponsesToolResults(messages: ResponseInputItem[]): ResponseInpu
 
 function prepareHistoricalResponsesInput(messages: ResponseInputItem[]): ResponseInputItem[] {
   return stripUnusableResponseInputItems(messages).map((rawItem) => {
-    const item = sanitizeHistoricalResponsesText(sanitizeHistoricalResponsesMedia(rawItem));
+    const item = sanitizeHistoricalResponsesText(
+      sanitizeHistoricalResponsesMedia(normalizeResponsesInputItem(rawItem)),
+    );
     if (item.type !== 'function_call_output' || typeof item.output !== 'string') return item;
     const compacted = compactHistoricalToolResultText(item.output);
     return compacted === item.output ? item : { ...item, output: compacted };
