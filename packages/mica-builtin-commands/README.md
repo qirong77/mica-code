@@ -8,7 +8,7 @@
 - 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。
-- 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉、定时循环任务（`/loop`）；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
+- 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉、定时循环任务（`/loop`，每轮执行前自动做一次本地压缩）；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
 - 导出 `cycleNextRole`，供输入框 `Shift+Tab` 快捷键循环切换 role。
 - 支持通过 `exclusive task` 执行耗时且会改上下文/文件的命令，避免用户并发切换配置导致状态抖动。
 

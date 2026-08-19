@@ -1,6 +1,7 @@
 import type { BuiltInCommandItem } from '../commandHost.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
 
 export const MIN_LOOP_INTERVAL_MS = 10_000;
 
@@ -152,6 +153,7 @@ export class LoopController {
       '',
       `- 触发间隔：每 ${intervalLabel}`,
       `- 每次任务内容：${task}`,
+      '- 每轮任务开始前会自动压缩一次会话历史（本地裁剪，不调用模型）；较早轮次的细节可能已被清理',
       '',
       '收到任务消息即开始一次执行，按任务内容完成并简要汇报结果，然后等待下一次触发。',
       '不要询问是否继续，也不要主动结束循环；循环由系统调度，你只需完成每次任务。',
@@ -219,8 +221,8 @@ export class LoopController {
 }
 
 export function createLoopCommand(
-  _agent: CommandAgent,
-  _sessionController: CommandSessionController,
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
   services: CommandRuntimeServices,
   controller: LoopController,
 ): BuiltInCommandItem {
@@ -280,6 +282,8 @@ export function createLoopCommand(
             canFire: () => !services.isAgentBusy(),
             submit: async (text, displayText) => {
               try {
+                // 每次运行前先做一次本地裁剪压缩（不调用模型），让每轮在紧凑的历史上开始
+                await compactBeforeLoopRun(services, agent, sessionController, ownerSessionId);
                 await services.submitAgentSessionInput(ownerSessionId, text, { queueMode: 'after_turn', displayText });
               } catch (error) {
                 // 会话已关闭等场景：停止循环并提示，避免反复失败
@@ -303,6 +307,38 @@ export function createLoopCommand(
       }
     },
   };
+}
+
+/**
+ * 每轮任务开始前压缩一次会话历史。prune-only 本地裁剪不调用模型、不发摘要请求；
+ * 会话内容较少无需压缩时静默跳过，压缩失败只提示、不中断循环。
+ */
+async function compactBeforeLoopRun(
+  services: CommandRuntimeServices,
+  agent: CommandAgent,
+  sessionController: CommandSessionController,
+  ownerSessionId: string,
+): Promise<void> {
+  try {
+    await services.compact(agent, sessionController, ownerSessionId, {
+      aggressive: true,
+      force: true,
+      lightweightPrune: true,
+      pruneOnly: true,
+      pruneOnlyThresholdRatio: 0.3,
+      targetContextRatio: 0.35,
+      minRecentRounds: 1,
+      maxRecentRounds: 3,
+      contextWindowSize: agent.config.provider.contextWindowSize,
+    });
+  } catch (error) {
+    if (isCompactionNotNeededError(error)) return;
+    services.showNotice(
+      `loop 任务前压缩失败（已继续执行）：${error instanceof Error ? error.message : String(error)}`,
+      ownerSessionId,
+      { command: 'loop', status: 'warning' },
+    );
+  }
 }
 
 export type LoopToolDeps = {

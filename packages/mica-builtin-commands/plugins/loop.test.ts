@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
+import { CompactionNotNeededError } from '@packages/mica-context/index.js';
 import {
   LoopController,
   parseDuration,
@@ -167,6 +168,7 @@ describe('loop plugin', () => {
     expect(command).toBeDefined();
 
     await command.action('60m 推送一个 BBC 的新闻');
+    await flush();
 
     expect(notices.some((n) => n.includes('loop 已启动'))).toBe(true);
     expect(submitted).toHaveLength(1); // 启动即执行第一次
@@ -228,10 +230,44 @@ describe('loop plugin', () => {
     await command.action('stop');
     expect(micaUi.panels.loopStatus.get()).toBeNull();
   });
+
+  it('compacts the session before every loop run', async () => {
+    const { registered, services } = createHarness();
+    const command = registered.get('loop')!;
+
+    await command.action('60m 推送新闻');
+    await command.action('60m 推送新闻'); // 重启后立即执行第一次
+    await flush();
+
+    expect(services.compact).toHaveBeenCalledTimes(2);
+    expect(services.submitAgentSessionInput).toHaveBeenCalledTimes(2);
+    expect(services.compact).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      's1',
+      expect.objectContaining({ pruneOnly: true }),
+    );
+  });
+
+  it('still submits the task when compaction is not needed', async () => {
+    const { registered, services, notices } = createHarness();
+    (services.compact as ReturnType<typeof vi.fn>).mockRejectedValue(new CompactionNotNeededError());
+    const command = registered.get('loop')!;
+
+    await command.action('60m 推送新闻');
+    await flush();
+
+    expect(services.submitAgentSessionInput).toHaveBeenCalledTimes(1);
+    expect(notices.some((n) => n.includes('压缩失败'))).toBe(false);
+  });
 });
 
 type RegisteredCommand = { name: string; action(args?: string): Promise<unknown> };
 type RegisteredTool = { name: string };
+
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function createHarness() {
   const hooks = new micaPlugin.HookRegistry();
@@ -242,11 +278,12 @@ function createHarness() {
   const services = {
     getCurrentAgentSessionId: () => 's1',
     isAgentBusy: () => false,
+    compact: vi.fn(async () => ({})),
     submitAgentSessionInput: vi.fn(async (_id: string, text: string, options?: unknown) => {
       submitted.push({ text, options });
       return { ok: true };
     }),
-    showNotice: (text: string) => notices.push(text),
+    showNotice: vi.fn((text: string) => notices.push(text)),
   };
   const registered = new Map<string, RegisteredCommand>();
   const ctx = {
@@ -256,7 +293,7 @@ function createHarness() {
       get: (token: unknown) =>
         token === commandHostToken
           ? {
-              agent: {},
+              agent: { config: { provider: { contextWindowSize: 128_000 } } },
               sessionController: {},
               services,
               registerCommand: (_ctx: PluginContext, command: RegisteredCommand) => registered.set(command.name, command),
