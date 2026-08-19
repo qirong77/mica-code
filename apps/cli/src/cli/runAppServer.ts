@@ -929,7 +929,16 @@ function inputToQueueItem(input: {
   };
 }
 
+/** Models whose metadata was already ensured for this host process. The resume
+ * path would otherwise resolve the same model twice in a row (once before the
+ * session load, once after), and when models.dev is unreachable each attempt
+ * blocks up to 15s — resuming a session then looks hung (and the app-server
+ * flow tests' 30s host-ready wait fails). A host only needs the rule once per
+ * model; a later snapshot model that differs re-enters through a fresh key. */
+const ensuredHostModelRules = new Set<string>();
 async function ensureChatHostModelRule(model: string): Promise<void> {
+  if (!model || ensuredHostModelRules.has(model)) return;
+  ensuredHostModelRules.add(model);
   try {
     await micaConfig.ensureModelRule(model);
   } catch (error) {
