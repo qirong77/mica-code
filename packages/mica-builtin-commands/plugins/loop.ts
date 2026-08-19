@@ -1,8 +1,10 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
+import { micaUi, type MicaUiLoopStatus } from '@packages/mica-ui/index.js';
 import {
   createLoopCommand,
   LoopController,
+  type LoopState,
   ToolLoopSetInterval,
   ToolLoopSetTask,
   ToolLoopStatus,
@@ -27,6 +29,19 @@ export default function setupLoop(ctx: PluginContext): void {
   const services = host.services;
 
   const controller = new LoopController();
+
+  const toUiStatus = (state: LoopState | null): MicaUiLoopStatus =>
+    state
+      ? {
+          intervalLabel: state.intervalLabel,
+          task: state.task,
+          fireCount: state.fireCount,
+          nextFireAt: state.nextFireAt,
+          ownerSessionId: state.ownerSessionId,
+        }
+      : null;
+  // 输入框徽标常驻显示 loop 状态（间隔/下次触发倒计时/已执行次数）
+  controller.onStateChange((state) => micaUi.panels.setLoopStatus(toUiStatus(state)));
 
   const tools = [
     new ToolLoopStatus({ controller, services }),

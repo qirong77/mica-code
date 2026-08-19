@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { themeColors } from '../theme.js';
 
-export type PromptFrameMode = 'default' | 'command' | 'bash' | 'queue' | 'plugin' | 'disabled';
+export type PromptFrameMode = 'default' | 'command' | 'bash' | 'queue' | 'plugin' | 'loop' | 'disabled';
 
 type BorderTextOptions = {
   content: string;
@@ -14,6 +14,8 @@ type BorderTextOptions = {
 export interface PromptFrameProps {
   mode: PromptFrameMode;
   label?: string;
+  /** 常驻徽标（如定时循环状态），优先于 label 显示在边框右上角。 */
+  badge?: string;
   role?: string;
   children: React.ReactNode;
 }
@@ -44,6 +46,11 @@ const PROMPT_FRAME_VISUAL: Record<PromptFrameMode, { borderColor: string; marker
     markerColor: themeColors.promptBorderPlugin,
     marker: '◆',
   },
+  loop: {
+    borderColor: themeColors.promptBorderLoop,
+    markerColor: themeColors.promptBorderLoop,
+    marker: '⏰',
+  },
   disabled: {
     borderColor: themeColors.promptBorderDisabled,
     markerColor: themeColors.inactive,
@@ -51,12 +58,12 @@ const PROMPT_FRAME_VISUAL: Record<PromptFrameMode, { borderColor: string; marker
   },
 };
 
-export function PromptFrame({ mode, label, role, children }: PromptFrameProps): React.ReactNode {
+export function PromptFrame({ mode, label, badge, role, children }: PromptFrameProps): React.ReactNode {
   const visual = PROMPT_FRAME_VISUAL[mode];
   const roleLabel = role && role !== 'default' ? role : undefined;
-  const borderText: BorderTextOptions | undefined = label
+  const borderText: BorderTextOptions | undefined = badge ?? label
     ? {
-        content: ` ${label} `,
+        content: ` ${badge ?? label} `,
         position: 'top',
         align: 'end',
         offset: 1,

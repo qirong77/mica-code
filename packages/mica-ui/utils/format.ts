@@ -7,6 +7,26 @@ export function formatElapsed(ms: number): string {
   return `${m}m ${sec}s`;
 }
 
+/** 将剩余毫秒格式化为中文倒计时，如「42 秒」「3 分 12 秒」「1 小时 5 分」。 */
+export function formatCountdown(ms: number): string {
+  if (ms < 1000) return '即将触发';
+  const totalSeconds = Math.ceil(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes > 0 ? `${hours} 小时 ${restMinutes} 分` : `${hours} 小时`;
+  const days = Math.floor(hours / 24);
+  return `${days} 天`;
+}
+
+/** 输入框定时循环徽标：⏰ 每 60 分钟 · 下次 3 分 12 秒 · 第 3 次 */
+export function buildLoopBadge(intervalLabel: string, fireCount: number, nextFireAt: number, now: number): string {
+  return `⏰ 每 ${intervalLabel} · 下次 ${formatCountdown(nextFireAt - now)} · 第 ${fireCount} 次`;
+}
+
 export function formatSessionListTime(updatedAt: string, now = new Date()): string {
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return updatedAt;

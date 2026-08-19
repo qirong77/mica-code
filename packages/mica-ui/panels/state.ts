@@ -9,6 +9,7 @@ import type {
   MicaUiStartupBannerState,
   MicaUiCommandPanelItem,
   MicaUiPluginStatusItem,
+  MicaUiLoopStatus,
 } from '../types.js';
 
 const MAX_COMMAND_PANEL_ITEMS = 4;
@@ -25,6 +26,7 @@ export const cachedTokenRate = atom(0);
 export const agentStatusItems = atom<MicaUiAgentStatusItem[]>([]);
 export const backgroundTaskItems = atom<MicaUiBackgroundTaskItem[]>([]);
 export const subagentTaskItems = atom<MicaUiSubagentTaskItem[]>([]);
+export const loopStatus = atom<MicaUiLoopStatus>(null);
 export const startupBanner = atom<MicaUiStartupBannerState>({
   provider: '-',
   model: '-',
@@ -165,6 +167,10 @@ export function setBackgroundTaskItems(items: MicaUiBackgroundTaskItem[]): void 
 
 export function setSubagentTaskItems(items: MicaUiSubagentTaskItem[]): void {
   subagentTaskItems.set([...items]);
+}
+
+export function setLoopStatus(status: MicaUiLoopStatus): void {
+  loopStatus.set(status);
 }
 
 export function setStartupBanner(state: Partial<MicaUiStartupBannerState>): void {

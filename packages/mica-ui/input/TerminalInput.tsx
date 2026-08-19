@@ -13,10 +13,12 @@ import {
   setPluginUIs,
   editPendingInput,
   commandPanelItems,
+  loopStatus,
 } from '../panels/state.js';
 import { pendingInputs } from '../conversation/state.js';
 import { DropDownUI } from '../bottom/dropdown/index.js';
 import { saveClipboardImage } from '../utils/imagePaste.js';
+import { buildLoopBadge } from '../utils/format.js';
 import { PromptFrame } from './PromptFrame.js';
 import type { DOMElement } from '@anthropic/ink';
 import type { TerminalInputQueueMode, TerminalInputSubmitOptions } from './state.js';
@@ -31,6 +33,18 @@ interface YogaNodeLike {
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
 const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送';
 const BASH_MODE_TIP = 'bash · Enter 后台执行';
+
+/** 定时循环运行期间每秒刷新一次，驱动输入框徽标的倒计时。 */
+function useLoopCountdown(active: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  React.useEffect(() => {
+    setNow(Date.now());
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
 
 export function hasRunningSubagent(tasks: readonly MicaUiSubagentTaskItem[]): boolean {
   return tasks.some((task) => task.status === 'running');
@@ -79,6 +93,8 @@ function TerminalInput() {
   const placeholder = useScheduleState(input.placeholder);
   const inputDisabled = useScheduleState(input.disabled);
   const currentPendingInputs = useScheduleState(pendingInputs);
+  const loop = useScheduleState(loopStatus);
+  const loopNow = useLoopCountdown(loop !== null);
   const inputBoxRef = useRef<DOMElement | null>(null);
   const setInputBoxRef = useCallback((el: DOMElement | null) => {
     inputBoxRef.current = el;
@@ -499,7 +515,8 @@ function TerminalInput() {
     }
   }, [historyIndex, preserveInputOnPluginHandle]);
 
-  const frameMode: PromptFrameMode = inputDisabled
+  const loopBadge = loop ? buildLoopBadge(loop.intervalLabel, loop.fireCount, loop.nextFireAt, loopNow) : undefined;
+  const baseFrameMode: PromptFrameMode = inputDisabled
     ? 'disabled'
     : isBashMode
       ? 'bash'
@@ -510,11 +527,13 @@ function TerminalInput() {
           : showQueueShortcutTip
             ? 'queue'
             : 'default';
-  const frameLabel = frameMode === 'queue' ? QUEUE_SHORTCUT_TIP : frameMode === 'bash' ? BASH_MODE_TIP : '';
+  const frameMode: PromptFrameMode = loopBadge ? 'loop' : baseFrameMode;
+  const frameLabel =
+    loopBadge ?? (baseFrameMode === 'queue' ? QUEUE_SHORTCUT_TIP : baseFrameMode === 'bash' ? BASH_MODE_TIP : '');
 
   return (
     <Box flexDirection="column" marginTop={1} ref={setInputBoxRef}>
-      <PromptFrame mode={frameMode} label={frameLabel} role={role}>
+      <PromptFrame mode={frameMode} label={frameLabel} badge={loopBadge} role={role}>
         <SimpleTextInput
           value={localText}
           onChange={handleChange}

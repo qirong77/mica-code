@@ -27,6 +27,8 @@ export type LoopState = {
   nextFireAt: number;
 };
 
+export type LoopStateListener = (state: LoopState | null) => void;
+
 export type LoopStartParams = {
   intervalMs: number;
   intervalLabel: string;
@@ -98,9 +100,16 @@ export class LoopController {
   private state: LoopState | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private deps: { canFire: () => boolean; submit: (text: string, displayText: string) => Promise<unknown> } | null = null;
+  private listeners = new Set<LoopStateListener>();
 
   get active(): LoopState | null {
     return this.state;
+  }
+
+  /** 订阅循环状态变化（start/stop/interval/task/fire 等），返回取消订阅函数。 */
+  onStateChange(listener: LoopStateListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   start(params: LoopStartParams): LoopState {
@@ -116,6 +125,7 @@ export class LoopController {
       nextFireAt: now,
     };
     this.deps = { canFire: params.canFire, submit: params.submit };
+    this.emit();
     return this.state;
   }
 
@@ -123,6 +133,7 @@ export class LoopController {
     this.clearTimer();
     this.state = null;
     this.deps = null;
+    this.emit();
   }
 
   /** 立即执行第一次任务（不等待间隔）。 */
@@ -160,6 +171,7 @@ export class LoopController {
     this.state.intervalMs = intervalMs;
     this.state.intervalLabel = formatDuration(intervalMs);
     this.scheduleNext();
+    this.emit();
     return this.state;
   }
 
@@ -168,6 +180,7 @@ export class LoopController {
     const trimmed = task.trim();
     if (!this.state || !trimmed) return null;
     this.state.task = trimmed;
+    this.emit();
     return this.state;
   }
 
@@ -181,6 +194,7 @@ export class LoopController {
       void this.deps.submit(this.state.task, displayText);
     }
     this.scheduleNext();
+    this.emit();
   }
 
   private scheduleNext(): void {
@@ -196,6 +210,11 @@ export class LoopController {
       clearTimeout(this.timer);
       this.timer = null;
     }
+  }
+
+  private emit(): void {
+    const state = this.state;
+    this.listeners.forEach((listener) => listener(state));
   }
 }
 

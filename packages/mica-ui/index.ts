@@ -167,4 +167,5 @@ export type {
   MicaUiCommandPanelVariant,
   MicaUiAgentStatusItem,
   MicaUiStartupBannerState,
+  MicaUiLoopStatus,
 } from './types.js';

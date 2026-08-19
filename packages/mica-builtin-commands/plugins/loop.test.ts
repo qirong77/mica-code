@@ -13,6 +13,7 @@ import {
   type CommandRuntimeServices,
 } from '@packages/mica-builtin-commands/index.js';
 import type { MicaTool } from '@packages/mica-tools/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import setupLoop from './loop.js';
 
 describe('parseDuration', () => {
@@ -207,6 +208,25 @@ describe('loop plugin', () => {
       'loop_status',
       'loop_stop',
     ]);
+  });
+
+  it('pushes loop status to the UI store and clears it on stop', async () => {
+    micaUi.panels.setLoopStatus(null);
+    const { registered } = createHarness();
+    const command = registered.get('loop')!;
+
+    expect(micaUi.panels.loopStatus.get()).toBeNull();
+    await command.action('60m 推送一个 BBC 的新闻');
+
+    const status = micaUi.panels.loopStatus.get();
+    expect(status).not.toBeNull();
+    expect(status?.intervalLabel).toBe('1 小时');
+    expect(status?.task).toBe('推送一个 BBC 的新闻');
+    expect(status?.fireCount).toBe(1);
+    expect(status?.nextFireAt).toBeGreaterThan(Date.now());
+
+    await command.action('stop');
+    expect(micaUi.panels.loopStatus.get()).toBeNull();
   });
 });
 

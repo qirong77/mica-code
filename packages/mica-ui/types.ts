@@ -191,3 +191,12 @@ export interface MicaUiStartupBannerState {
   workdir: string;
   tips: string;
 }
+
+/** 定时循环（/loop）的 UI 展示状态；未运行时为 null。 */
+export type MicaUiLoopStatus = {
+  intervalLabel: string;
+  task: string;
+  fireCount: number;
+  nextFireAt: number;
+  ownerSessionId: string | undefined;
+} | null;

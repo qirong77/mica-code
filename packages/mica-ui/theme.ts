@@ -39,6 +39,7 @@ export const themeColors = {
   promptBorderPlugin: 'permission',
   promptBorderBash: 'bashBorder',
   promptBorderDisabled: 'inactive',
+  promptBorderLoop: 'warning',
   statusRunning: 'inactive',
   statusInfo: 'claudeBlue_FOR_SYSTEM_SPINNER',
   statusSuccess: 'success',
