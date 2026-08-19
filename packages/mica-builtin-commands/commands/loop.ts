@@ -1,7 +1,7 @@
 import type { BuiltInCommandItem } from '../commandHost.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
-const MIN_LOOP_INTERVAL_MS = 10_000;
+export const MIN_LOOP_INTERVAL_MS = 10_000;
 
 const DURATION_UNITS: Record<'s' | 'm' | 'h' | 'd', number> = {
   s: 1_000,
@@ -144,7 +144,30 @@ export class LoopController {
       '收到任务消息即开始一次执行，按任务内容完成并简要汇报结果，然后等待下一次触发。',
       '不要询问是否继续，也不要主动结束循环；循环由系统调度，你只需完成每次任务。',
       '如果你是单次执行的子任务，忽略本段指引，专注完成自己的任务即可。',
+      '',
+      '你可以通过以下工具随时调整循环（例如用户要求改变间隔、内容或停止时）：',
+      '- loop_status：查看当前循环状态',
+      '- loop_set_interval：修改触发间隔（例如 "30m"、"2h"），修改后从新时刻重新计时',
+      '- loop_set_task：修改每次任务内容',
+      '- loop_stop：停止循环',
     ].join('\n');
+  }
+
+  /** 修改触发间隔并重新计时；未运行时返回 null。 */
+  updateInterval(intervalMs: number): LoopState | null {
+    if (!this.state) return null;
+    this.state.intervalMs = intervalMs;
+    this.state.intervalLabel = formatDuration(intervalMs);
+    this.scheduleNext();
+    return this.state;
+  }
+
+  /** 修改每次任务内容；未运行或内容为空时返回 null。 */
+  updateTask(task: string): LoopState | null {
+    const trimmed = task.trim();
+    if (!this.state || !trimmed) return null;
+    this.state.task = trimmed;
+    return this.state;
   }
 
   private fire(force = false): void {
@@ -156,6 +179,11 @@ export class LoopController {
       const displayText = `⏰ 定时任务第 ${count} 次：${this.state.task}`;
       void this.deps.submit(this.state.task, displayText);
     }
+    this.scheduleNext();
+  }
+
+  private scheduleNext(): void {
+    if (!this.state) return;
     this.state.nextFireAt = Date.now() + this.state.intervalMs;
     this.clearTimer();
     this.timer = setTimeout(() => this.fire(), this.state.intervalMs);

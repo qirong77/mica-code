@@ -29,8 +29,17 @@ export const micaBuiltinCommands = {
   syncConfigFromAgent,
 };
 
-export { createLoopCommand, formatDuration, LoopController, parseDuration, parseLoopArgs } from './commands/loop.js';
+export {
+  createLoopCommand,
+  formatDuration,
+  LoopController,
+  MIN_LOOP_INTERVAL_MS,
+  parseDuration,
+  parseLoopArgs,
+} from './commands/loop.js';
 export type { LoopParseResult, LoopStartParams, LoopState } from './commands/loop.js';
+export { ToolLoopSetInterval, ToolLoopSetTask, ToolLoopStatus, ToolLoopStop } from './commands/loop-tools.js';
+export type { LoopToolDeps } from './commands/loop-tools.js';
 
 export type {
   ClearIdleAgentsResult,

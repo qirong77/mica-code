@@ -3,6 +3,7 @@ import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
 import { LoopController, parseDuration, parseLoopArgs } from '@packages/mica-builtin-commands/index.js';
+import type { MicaTool } from '@packages/mica-tools/index.js';
 import setupLoop from './loop.js';
 
 describe('parseDuration', () => {
@@ -188,15 +189,27 @@ describe('loop plugin', () => {
     await command.action('abc 任务');
     expect(notices.some((n) => n.includes('无法解析循环间隔'))).toBe(true);
   });
+
+  it('registers the loop adjustment tools for the primary agent', () => {
+    const { registeredTools } = createHarness();
+    expect(registeredTools.map((t) => t.name).sort()).toEqual([
+      'loop_set_interval',
+      'loop_set_task',
+      'loop_status',
+      'loop_stop',
+    ]);
+  });
 });
 
 type RegisteredCommand = { name: string; action(args?: string): Promise<unknown> };
+type RegisteredTool = { name: string };
 
 function createHarness() {
   const hooks = new micaPlugin.HookRegistry();
   const published: unknown[] = [];
   const notices: string[] = [];
   const submitted: Array<{ text: string; options?: unknown }> = [];
+  const registeredTools: RegisteredTool[] = [];
   const services = {
     getCurrentAgentSessionId: () => 's1',
     isAgentBusy: () => false,
@@ -221,10 +234,16 @@ function createHarness() {
             }
           : undefined,
     },
+    tools: {
+      register: (tool: MicaTool) => {
+        registeredTools.push({ name: tool.name });
+        return { dispose: () => undefined };
+      },
+    },
     events: { publish: vi.fn((event: unknown) => published.push(event)) },
     onDispose: vi.fn(),
   } as unknown as PluginContext;
 
   setupLoop(ctx);
-  return { hooks, registered, services, notices, submitted, published };
+  return { hooks, registered, services, notices, submitted, published, registeredTools };
 }
