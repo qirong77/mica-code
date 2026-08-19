@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
   "include": [
-    "plugins/builtin",
     "apps/cli/src",
     "packages/mica-common",
     "packages/mica-plugin",
@@ -22,5 +21,8 @@
     "packages/mica-pty",
     "packages/@anthropic/ink/src"
   ],
-  "exclude": ["**/dist", "**/node_modules"]
+  "exclude": [
+    "**/dist",
+    "**/node_modules"
+  ]
 }

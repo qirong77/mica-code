@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import setupModelEffortContext from '../../../../plugins/builtin/model-effort-context/index.mjs';
+import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';

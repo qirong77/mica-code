@@ -25,12 +25,14 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
-import setupSessionAutonomy from '../../../../plugins/builtin/session-autonomy/SessionAutonomyPlugin.js';
-import setupContextPressure from '../../../../plugins/builtin/context-pressure/ContextPressurePlugin.js';
-import setupMessageQueue from '../../../../plugins/builtin/message-queue.js';
-import setupCommandMemory from '../../../../plugins/builtin/command-memory.js';
-import setupMicaCodeAppNotify from '../../../../plugins/builtin/mica-code-app-notify.mjs';
-import { TodoPlugin } from '../../../../plugins/builtin/todo/TodoPlugin.js';
+import {
+  setupCommandMemory,
+  setupContextPressure,
+  setupMessageQueue,
+  setupMicaCodeAppNotify,
+  setupSessionAutonomy,
+  TodoPlugin,
+} from '@packages/mica-builtin-commands/index.js';
 import { createHeadlessRuntimeServices, type HeadlessUiState } from './headlessRuntimeServices.js';
 
 export type HeadlessPluginHostOptions = {

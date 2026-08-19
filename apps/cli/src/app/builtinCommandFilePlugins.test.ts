@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { MicaPlugin } from '@packages/mica-plugin/index.js';
+import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
-import setupCommandCd from '../../../../plugins/builtin/command-cd.mjs';
-import setupCommandClear from '../../../../plugins/builtin/command-clear.mjs';
-import setupCommandCompact from '../../../../plugins/builtin/command-compact.mjs';
-import setupCommandExit from '../../../../plugins/builtin/command-exit.mjs';
-import setupCommandFork from '../../../../plugins/builtin/command-fork.mjs';
-import setupCommandNew from '../../../../plugins/builtin/command-new.mjs';
-import setupCommandRename from '../../../../plugins/builtin/command-rename.mjs';
-import setupCommandResume from '../../../../plugins/builtin/command-resume.mjs';
-import setupCommandRewind from '../../../../plugins/builtin/command-rewind.mjs';
+import {
+  setupCommandCd,
+  setupCommandClear,
+  setupCommandCompact,
+  setupCommandExit,
+  setupCommandFork,
+  setupCommandNew,
+  setupCommandRename,
+  setupCommandResume,
+  setupCommandRewind,
+} from '@packages/mica-builtin-commands/index.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 
 const FILE_COMMANDS = [
@@ -42,7 +44,7 @@ describe('built-in command file plugins', () => {
       },
     };
 
-    setup(ctx);
+    setup(ctx as unknown as PluginContext);
 
     expect(registerCommand).toHaveBeenCalledOnce();
     expect(registerCommand).toHaveBeenCalledWith(

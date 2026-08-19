@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
 import type { ConfigWebFilePayload } from '../shared/types.js';
-import { assertValidConfig, validateConfigText } from '../../../../plugins/builtin/validate-config.mjs';
+import { assertValidConfig, validateConfigText } from '@packages/mica-builtin-commands/startup/validate-config.js';
 
 export function readConfigWebFile(): ConfigWebFilePayload {
   if (!existsSync(micaConfig.path)) micaConfig.read();

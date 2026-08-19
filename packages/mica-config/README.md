@@ -35,7 +35,7 @@ micaConfig.update((current) => ({
 - userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
 - `config.json` 不保存最后一次使用的 provider/model/effort；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
 - provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
-- 启动配置迁移与语义校验集中在根目录 `plugins/builtin/validate-config.mjs`；缺失的 provider `protocol` 会自动补为 `openai_chat_completions`。
+- 启动配置迁移与语义校验集中在 `packages/mica-builtin-commands/startup/validate-config.js`；缺失的 provider `protocol` 会自动补为 `openai_chat_completions`。
 - 默认配置模板放在 `default.json`，新增字段需要提供明确默认值。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 

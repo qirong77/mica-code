@@ -2,24 +2,26 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
-import setupFileMention from '../../../../plugins/builtin/file-mention.js';
-import setupMcp from '../../../../plugins/builtin/mcp.mjs';
-import setupMessageQueue from '../../../../plugins/builtin/message-queue.js';
-import setupCommandMemory from '../../../../plugins/builtin/command-memory.js';
-import { TodoPlugin } from '../../../../plugins/builtin/todo/TodoPlugin.js';
-import setupCommandCd from '../../../../plugins/builtin/command-cd.mjs';
-import setupCommandClear from '../../../../plugins/builtin/command-clear.mjs';
-import setupCommandCompact from '../../../../plugins/builtin/command-compact.mjs';
-import setupCommandExit from '../../../../plugins/builtin/command-exit.mjs';
-import setupCommandFork from '../../../../plugins/builtin/command-fork.mjs';
-import setupCommandNew from '../../../../plugins/builtin/command-new.mjs';
-import setupCommandRename from '../../../../plugins/builtin/command-rename.mjs';
-import setupCommandResume from '../../../../plugins/builtin/command-resume.mjs';
-import setupCommandRewind from '../../../../plugins/builtin/command-rewind.mjs';
-import setupLoop from '../../../../plugins/builtin/loop.js';
-import setupMicaCodeAppNotify from '../../../../plugins/builtin/mica-code-app-notify.mjs';
-import setupSessionAutonomy from '../../../../plugins/builtin/session-autonomy/SessionAutonomyPlugin.js';
-import setupContextPressure from '../../../../plugins/builtin/context-pressure/ContextPressurePlugin.js';
+import {
+  setupCommandCd,
+  setupCommandClear,
+  setupCommandCompact,
+  setupCommandExit,
+  setupCommandFork,
+  setupCommandMemory,
+  setupCommandNew,
+  setupCommandRename,
+  setupCommandResume,
+  setupCommandRewind,
+  setupContextPressure,
+  setupFileMention,
+  setupLoop,
+  setupMcp,
+  setupMessageQueue,
+  setupMicaCodeAppNotify,
+  setupSessionAutonomy,
+  TodoPlugin,
+} from '@packages/mica-builtin-commands/index.js';
 
 type PluginHost = {
   use(plugin: MicaPlugin): PluginHost;

@@ -2,9 +2,9 @@
 
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import startConfigWebWorker from '../../../plugins/builtin/config-web-worker.mjs';
-import setupProcessDiagnostics from '../../../plugins/builtin/process-diagnostics.mjs';
-import { applyConfigDefaultsToFile } from '../../../plugins/builtin/validate-config.mjs';
+import startConfigWebWorker from './app/configWebWorker.js';
+import setupProcessDiagnostics from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
+import { applyConfigDefaultsToFile } from '@packages/mica-builtin-commands/startup/validate-config.js';
 import { CLI_USAGE, parseCliArgs } from './cli/args.js';
 import { VERSION } from './buildMeta.js';
 import { ensureDaemonRunning } from './features/sync-daemon/ensureDaemonRunning.js';
@@ -49,7 +49,7 @@ if (invocation.mode === 'models') {
   if (invocation.json) {
     const { ensureModelRule, getModelEffortOptions } = await import('@packages/mica-config/index.js');
     const { default: setupModelEffortContext } =
-      await import('../../../plugins/builtin/model-effort-context/index.mjs');
+      await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
     const disposeModelEffortContext = setupModelEffortContext();
     try {
       const entries = await Promise.all(

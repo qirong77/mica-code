@@ -1,11 +1,11 @@
 # mica-builtin-commands
 
-`mica-builtin-commands` 是 Mica Code 的内置斜杠命令基础包。它定义共享命令实现、command host 契约与运行时服务类型；已经插件化的命令实现位于仓库根目录的 `plugins/builtin/*.mjs`。
+`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、Todo、MCP、message queue、文件 mention、session-autonomy、context-pressure、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
 
 ## 主要能力
 
-- 提供尚未迁移的产品内置命令实现，例如：`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`、`/loop`。
-- 通过 `CommandHostService` 支持 `plugins/builtin` 中的 `/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/new`、`/rename`、`/resume`、`/rewind` 单文件插件。
+- 提供全部产品内置命令实现：`/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。
+- 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉、定时循环任务（`/loop`）；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
@@ -48,7 +48,7 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：`commit`、`config`、`context`、`effort`、`loop`、`mcp`、`model`、`provider`、`role`、`skills`、`status`、`task` 等尚未迁移的命令工厂。
+- `commands/`：全部命令工厂，`cd`、`clear`、`compact`、`commit`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。

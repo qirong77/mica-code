@@ -9,7 +9,7 @@ import {
   applyConfigDefaultsToFile,
   assertValidConfig,
   validateConfig,
-} from '../../plugins/builtin/validate-config.mjs';
+} from '@packages/mica-builtin-commands/startup/validate-config.js';
 
 const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;

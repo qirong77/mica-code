@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import startConfigWebWorker from '../../../../plugins/builtin/config-web-worker.mjs';
-import setupFilePlugins, { writeFilePluginStatus } from '../../../../plugins/builtin/file-plugins.mjs';
-import setupProcessDiagnostics from '../../../../plugins/builtin/process-diagnostics.mjs';
+import startConfigWebWorker from './configWebWorker.js';
+import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-commands/startup/file-plugins.js';
+import setupProcessDiagnostics from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
 
 const tempDirectories: string[] = [];
 

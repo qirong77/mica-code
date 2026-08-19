@@ -28,7 +28,7 @@ describe('LocalRuntimeController queue drain', () => {
     const { SessionController } = await import('../../session/SessionController.js');
     const { micaCommands } = await import('@packages/mica-commands/index.js');
     const { micaPlugin } = await import('@packages/mica-plugin/index.js');
-    const { default: setupMessageQueue } = await import('../../../../../plugins/builtin/message-queue.js');
+    const { default: setupMessageQueue } = await import('@packages/mica-builtin-commands/plugins/message-queue.js');
 
     const snapshot: AgentRuntimeSnapshot = {
       providerId: 'openai',

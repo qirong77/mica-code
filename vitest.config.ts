@@ -41,7 +41,7 @@ export default defineConfig({
     fileParallelism: false,
     setupFiles: ['./test/setup.ts'],
     include: [
-      'plugins/builtin/**/*.test.ts',
+      'packages/mica-builtin-commands/**/*.test.ts',
       'apps/**/*.test.{ts,tsx}',
       'packages/mica-*/**/*.test.ts',
       'packages/@anthropic/ink/**/*.test.ts',

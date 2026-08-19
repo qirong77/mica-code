@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { chdir } from 'node:process';
-import setupModelEffortContext from '../../../../../plugins/builtin/model-effort-context/index.mjs';
+import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';

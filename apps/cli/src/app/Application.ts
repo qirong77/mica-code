@@ -28,9 +28,9 @@ import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
-import setupFilePlugins, { writeFilePluginStatus } from '../../../../plugins/builtin/file-plugins.mjs';
-import validateConfigPlugin from '../../../../plugins/builtin/validate-config.mjs';
-import setupModelEffortContext from '../../../../plugins/builtin/model-effort-context/index.mjs';
+import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-commands/startup/file-plugins.js';
+import validateConfigPlugin from '@packages/mica-builtin-commands/startup/validate-config.js';
+import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;

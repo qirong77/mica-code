@@ -11,7 +11,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const MODELS_URL = 'https://models.dev/api.json';
-const SEED_OUT_PATH = new URL('../plugins/builtin/model-effort-context/seed/models-dev.seed.ts', import.meta.url);
+const SEED_OUT_PATH = new URL('../packages/mica-builtin-commands/startup/model-effort-context/seed/models-dev.seed.ts', import.meta.url);
 const FETCH_TIMEOUT_MS = 30_000;
 const CACHE_VERSION = 1;
 

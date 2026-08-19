@@ -40,21 +40,21 @@ bun run format
   - `mica-skills`：skills 扫描解析缓存；`mica-plugin`：插件机制；`mica-common`：跨包底层工具（图片识别）
   - `mica-pty`：PTY 测试驱动 + 内置 PTY 工具 Node helper（node-pty 只在 Node 子进程加载）
   - `mica-sync-protocol`：sync 三端 wire 类型；`mica-web-shared`：sync web 与 desktop 共用展示纯函数
-- `plugins/builtin/`：官方内置插件（Todo、MCP、message queue、文件 mention、命令、validate-config、session-autonomy、context-pressure、loop）。
+- `packages/mica-builtin-commands/`：产品命令与全部内置插件——`commands/` 命令实现、`plugins/` 运行期插件装配（Todo、MCP、message queue、文件 mention、`command-*.ts`、session-autonomy、context-pressure、loop）、`startup/` 启动扩展（validate-config、process-diagnostics、file-plugins、model-effort-context）；运行期插件与启动扩展统一从 `index.ts` 导出。`config-web-worker` 因依赖 `apps/config-web` 保留在 `apps/cli/src/app/configWebWorker.ts`。
 - `temp/`（git 忽略）与 `.backups/` 不属默认源码、测试、格式化、构建或搜索范围。
 
 ## 依赖边界与 Import 约定
 
 - 所有 package 通过 `index.ts` 暴露公共 API，应用层优先 `@packages/<name>/index.js`；根 tsconfig 配 `@packages/*`、`@apps/*` alias，package 不得经 `@apps/*` 反向依赖应用。
 - 底层包不得依赖上层包；需要上层能力时用类型、回调、service、hook 或 adapter 注入，不要直接加 import。
-- 职责边界：`mica-agent` 不依赖 UI/session/commands/应用入口；`mica-ui` 不调用 provider；`mica-runtime` 只定义原语不做 turn loop 编排；`mica-commands` 只放通用机制；`mica-session` 只持久化；`mica-context` 不直接操纵 provider adapter；`mica-skills` 只扫描解析缓存；`mica-plugin` 只提供插件机制；`plugins/builtin` 经 PluginContext 接入，不反向 import `src/**`。
+- 职责边界：`mica-agent` 不依赖 UI/session/commands/应用入口；`mica-ui` 不调用 provider；`mica-runtime` 只定义原语不做 turn loop 编排；`mica-commands` 只放通用机制；`mica-session` 只持久化；`mica-context` 不直接操纵 provider adapter；`mica-skills` 只扫描解析缓存；`mica-plugin` 只提供插件机制；`packages/mica-builtin-commands/plugins` 经 PluginContext 接入，不反向 import `src/**`。
 - `mica-pty`：`src/manager.ts` 不 import node-pty；`index.ts` 顶层 import node-pty。**生产代码禁止静态 import `node-pty` 或 `mica-pty/index.js`**（Bun 编译二进制无法解析 native binding）。
 - TypeScript：strict、isolatedModules、verbatimModuleSyntax，类型导入用 `import type`。默认不用动态 import（例外：进程模式分派边界延迟加载、PTY 工具首次调用加载 manager）。不写无关注释，不做无关格式化、重命名或顺手重构。
 
 ## 应用启动链路
 
-1. `plugins/builtin/config-web-worker.mjs` 先判断是否为 Config Web worker，worker 模式只启动对应服务。
-2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 `--version`/`models`/headless `exec`/`commit`/`compact` 与交互模式；`plugins/builtin/validate-config.mjs` 补齐向后兼容的配置默认值。
+1. `apps/cli/src/app/configWebWorker.ts` 先判断是否为 Config Web worker，worker 模式只启动对应服务。
+2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 `--version`/`models`/headless `exec`/`commit`/`compact` 与交互模式；`packages/mica-builtin-commands/startup/validate-config.js` 补齐向后兼容的配置默认值。
 3. `Application.start()` 启动 Ink UI → 完整配置校验 → `ensureInitialModelSelection()`（仅 `get_model_url` 动态 provider 且顶层 model 为空时）。
 4. 创建 AgentRuntime、SessionController、CommandRegistry、HookRegistry、ServiceContainer、PluginManager、TerminalAgentSessionManager、LocalRuntimeController、MicaUiRuntimeBridge、SubagentTaskManager；当前 agent 经 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
 5. `setActiveContext` 暴露 ApplicationContext；`useBuiltinPlugins()` 注册 command host 与内置插件（MCP 随 runtime start/stop 建连）；`$MICA_HOME/plugins` 用户插件 `setupAll` 并写 `plugin-status.json`；最后 `uiBridge.start()`、`runtime.start()`。
@@ -81,21 +81,21 @@ bun run format
 
 - `createModelClient` 按 `provider.protocol` 显式分流：chat_completions → ChatCompletionsClient、responses → ResponsesClient；不要按 `api_base` 猜协议。adapter 负责消息结构、history normalizer、usage 归一化、tool-call 格式与请求参数转换；runtime 不直接拼 provider 请求参数。
 - 工具结果可为纯文本或文本/图片内容块。Chat Completions 先追加全部 `tool` 文本结果再用一条 `user` 多模态消息承载图片；Responses 用原生多模态 `function_call_output`。UI、日志和 run JSON 只接收文本投影，不得输出 Base64。
-- 模型视觉能力由 `ModelRule.supportsVision` 表示：`plugins/builtin/model-effort-context/getModelRule.js` 从 models.dev `modalities.input` 解析（缺失或未命中默认 `true`，保守不误伤），经 `ModelClientOptions.supportsVision` 注入两个 client。**无视觉模型时**，发送层 `stripImagesForVision` 把 wire 数据里的 `input_image`/`image_url`（含用户输入、`read_image` 工具结果、恢复的历史）统一换成 `imageOmittedPlaceholder` 文本（`packages/mica-agent/providers/imagePlaceholder.ts`，要求模型如实告知用户图片被省略）。替换只作用于发送副本，`this.messages`/session 持久化保留原始图片，切回视觉模型不丢图；不要把替换做成对持久化历史的原地修改。
+- 模型视觉能力由 `ModelRule.supportsVision` 表示：`packages/mica-builtin-commands/startup/model-effort-context/getModelRule.js` 从 models.dev `modalities.input` 解析（缺失或未命中默认 `true`，保守不误伤），经 `ModelClientOptions.supportsVision` 注入两个 client。**无视觉模型时**，发送层 `stripImagesForVision` 把 wire 数据里的 `input_image`/`image_url`（含用户输入、`read_image` 工具结果、恢复的历史）统一换成 `imageOmittedPlaceholder` 文本（`packages/mica-agent/providers/imagePlaceholder.ts`，要求模型如实告知用户图片被省略）。替换只作用于发送副本，`this.messages`/session 持久化保留原始图片，切回视觉模型不丢图；不要把替换做成对持久化历史的原地修改。
 - Headless/交互模式的用户输入都会先经 `micaUi.parseImageRefs` 把 `[Image](路径)` 转为多模态 content block（headless 直接导入 `@packages/mica-ui/utils/imagePaste.js`，避免拖 React/Ink 进 headless 路径）。
 - `buildSystemPrompt()` 默认读 `packages/mica-agent/prompt/system.md`，自定义 role 只替换 `<system>` 段；cwd 下 `AGENT.md`/`AGENTS.md` 合并注入，读取路径按 live cwd 解析（不能模块加载时冻结）。system prompt 中的 skills 只是索引。role 从 `~/.mica/role`（跟随 `MICA_HOME`）扫描 `.md` 文件，文件名去扩展名作 role 名；内置 `default` 只展示、不可被同名文件覆盖。
 
 ## 配置、本地数据与 MICA_HOME
 
 - `packages/mica-config` 是配置与本地状态的唯一入口，UI/commands/runtime/adapter 不自己读写路径。默认 `~/.mica/{config.json,storage.json,sessions}`，`MICA_HOME` 时全部跟随；测试和临时 repro 用临时 `MICA_HOME`，不污染真实 `~/.mica`。
-- `PersistedMicaConfig` 只存静态字段（providers 等）；顶层 `provider`/`model`/`effort`/`contextWindowSize` 是运行时合成字段，经 `stripRuntimeFields` 去掉不写回 config.json。协议只支持 chat_completions/responses；启动迁移与语义校验统一在 `plugins/builtin/validate-config.mjs`（配置 Web 保存也复用），不要在别处另建校验规则。
+- `PersistedMicaConfig` 只存静态字段（providers 等）；顶层 `provider`/`model`/`effort`/`contextWindowSize` 是运行时合成字段，经 `stripRuntimeFields` 去掉不写回 config.json。协议只支持 chat_completions/responses；启动迁移与语义校验统一在 `packages/mica-builtin-commands/startup/validate-config.js`（配置 Web 保存也复用），不要在别处另建校验规则。
 - session 文件是 version 1 JSON（id/title/createdAt/updatedAt/cwd/snapshot）；snapshot 含 providerId/model/effort/role/history/conversationMessages/usage。`subagentUsageHistory` 必须独立存放（相对子 agent 自身消息数组，不能混入主 usageHistory，否则破坏 rewind 裁剪语义）。新增字段必须有版本策略、默认值和 sanitize/parse。
 - `SessionController.saveCurrent` 用持久化签名检测"另一进程写盘"，签名不匹配时**降级写盘**（revision+1、以内存快照为准）而不是永久跳过，否则 headless host 后续 turn 不落盘；`refreshFromStore` 会在下次刷新收敛。
 
 ## 模型、Effort 与 Context
 
-- effort 枚举 `none/low/medium/high/xhigh`，直接映射请求参数；未加载数据的模型默认提供 `none/low/medium/high`。provider 可设 `supportsEffort: false`（状态显示 none、不发送 reasoning effort）。缓存/种子/在线都未命中的模型用通用规则（context 1M、effort medium、全枚举、`supportsVision: true`），fallback 在 `packages/mica-config/getModelRule.ts`（与 `plugins/builtin/model-effort-context/getModelRule.js` 的 resolver 同名但职责不同）。切换 provider/model/effort 时必须 clamp effort 并同步 context window size，不要把无效 effort 持久化。
-- 模型数据源优先级：磁盘缓存（`$MICA_HOME/cache/models-dev.json`，TTL 24h）→ 内置种子（`plugins/builtin/model-effort-context/seed/models-dev.seed.ts`，gzip→base64 内嵌，刷新用 `bun scripts/update-models-dev-seed.mjs`）→ 在线 `https://models.dev/api.json`。请求的模型不在缓存时**先查种子兜底**，缓存+种子都未命中才同步等在线刷新（≤15s）；降级写 stderr 告警（进程内去重）不静默；后台刷新必须透传调用方 signal。
+- effort 枚举 `none/low/medium/high/xhigh`，直接映射请求参数；未加载数据的模型默认提供 `none/low/medium/high`。provider 可设 `supportsEffort: false`（状态显示 none、不发送 reasoning effort）。缓存/种子/在线都未命中的模型用通用规则（context 1M、effort medium、全枚举、`supportsVision: true`），fallback 在 `packages/mica-config/getModelRule.ts`（与 `packages/mica-builtin-commands/startup/model-effort-context/getModelRule.js` 的 resolver 同名但职责不同）。切换 provider/model/effort 时必须 clamp effort 并同步 context window size，不要把无效 effort 持久化。
+- 模型数据源优先级：磁盘缓存（`$MICA_HOME/cache/models-dev.json`，TTL 24h）→ 内置种子（`packages/mica-builtin-commands/startup/model-effort-context/seed/models-dev.seed.ts`，gzip→base64 内嵌，刷新用 `bun scripts/update-models-dev-seed.mjs`）→ 在线 `https://models.dev/api.json`。请求的模型不在缓存时**先查种子兜底**，缓存+种子都未命中才同步等在线刷新（≤15s）；降级写 stderr 告警（进程内去重）不静默；后台刷新必须透传调用方 signal。
 - 只有配置了 `get_model_url` 的动态 provider 才触发模型列表查找；动态模型只缓存到内存配置和 storage 运行态，不回填 config.json。交互和 headless 都必须先注册 model-effort-context resolver 再调 `ensureModelRule`；headless 获取不到 metadata 只写 stderr 并用通用 rule，不能污染协议 stdout。
 - Headless `exec` 默认输出人读文本，`--json` 输出 Codex exec ThreadEvent JSONL（`--thinking` 控制 reasoning item，不混入 text）；`--no-save` 跳过 session 落盘（一次性后台任务）。Responses 请求只要带 reasoning 参数就保留显式 `summary: 'auto'`，否则终端和 Chat 没有可展示的思考内容。
 
@@ -109,17 +109,18 @@ bun run format
 ## 命令系统
 
 - 通用机制在 `packages/mica-commands`，产品命令在 `packages/mica-builtin-commands`；`apps/cli/src/plugins/commands/index.ts` 注册到 CommandRegistry 并同步 mica-ui quick commands。命令经 `CommandRuntimeServices`/active proxy 注入，不依赖应用层单例；耗时且改状态/文件/配置/git 的命令走 runtime exclusive task。
+- 命令分层约定：**实现**（`createXxxCommand` + 逻辑/工具/UI，纯 .ts）统一在 `packages/mica-builtin-commands/commands/`，**装配**（`setupXxx(ctx)` 经 `CommandHostService` 注册，可传 `allowDuringTurn`）在 `packages/mica-builtin-commands/plugins/command-*.ts`，两者均由 `packages/mica-builtin-commands/index.ts` 统一导出；`apps/cli/src/plugins/commands/index.ts` 的 `BuiltInCommandsPlugin` 是另一条 quick-commands 注册路径。
 - `ALLOW_DURING_TURN_COMMANDS`：`status`、`context`、`agents`、`new`、`fork`、`exit`、`rename`、`task`（exclusive task 期间额外 `status`/`task`/`agents`/`new`）。`/model`、`/effort` 打开 selector 前检查 busy 并二次 guard。交互反馈统一用 `services.showNotice`，不用 `showMessage`。
-- 当前内置命令：`/clear`、`/resume`、`/model`、`/effort`、`/role`、`/status`、`/context`、`/compact`、`/commit`、`/new`、`/fork`、`/task`、`/rewind`、`/mcp`、`/skills`、`/rename`、`/exit`、`/loop`。要点：`/compact` 与 headless `mica compact --session` 走同一 `CompactionService`；`--prune-only` 只做本地清理、不调用模型，工具结果与工具参数无条件替换为合法 JSON 占位符（`TOOL_ARGUMENTS_PLACEHOLDER`，否则 provider 400）；headless `mica commit` 复用 `commitRunner.ts`，只发一次模型请求。`/loop <间隔> <任务描述>` 由 `plugins/builtin/loop.ts` 注册（`LoopController` 进程内调度、定时器 unref），循环运行时经 `system-prompt:build`（priority 20）在 system prompt 末尾追加 loop 指引，每轮经 `submitAgentSessionInput` 以 after_turn 提交任务、忙时由 message-queue 兜底排队；`/loop stop` 停止并移除指引。loop 运行期间同时注册 `loop_status`/`loop_set_interval`/`loop_set_task`/`loop_stop` 工具（`primaryAgentOnly`，实现位于 `packages/mica-builtin-commands/commands/loop-tools.ts`，插件装配在 `plugins/builtin/loop.ts`），供模型在对话中查看/修改间隔（`LoopController.updateInterval` 重新计时）与任务或停止循环；工具校验调用者是主 agent 且循环 owner 是当前会话。
-- 新增/删除命令时检查：`apps/cli/src/plugins/commands/index.ts`、`packages/mica-builtin-commands/index.ts` + README、根 `README.md`、`AGENT.md`。
+- 当前内置命令：`/clear`、`/resume`、`/model`、`/effort`、`/role`、`/status`、`/context`、`/compact`、`/commit`、`/new`、`/fork`、`/task`、`/rewind`、`/mcp`、`/skills`、`/rename`、`/exit`、`/loop`。要点：`/compact` 与 headless `mica compact --session` 走同一 `CompactionService`；`--prune-only` 只做本地清理、不调用模型，工具结果与工具参数无条件替换为合法 JSON 占位符（`TOOL_ARGUMENTS_PLACEHOLDER`，否则 provider 400）；headless `mica commit` 复用 `commitRunner.ts`，只发一次模型请求。`/loop <间隔> <任务描述>` 由 `packages/mica-builtin-commands/plugins/loop.ts` 注册（`LoopController` 进程内调度、定时器 unref），循环运行时经 `system-prompt:build`（priority 20）在 system prompt 末尾追加 loop 指引，每轮经 `submitAgentSessionInput` 以 after_turn 提交任务、忙时由 message-queue 兜底排队；`/loop stop` 停止并移除指引。loop 运行期间同时注册 `loop_status`/`loop_set_interval`/`loop_set_task`/`loop_stop` 工具（`primaryAgentOnly`，实现位于 `packages/mica-builtin-commands/commands/loop.ts`，插件装配在 `packages/mica-builtin-commands/plugins/loop.ts`），供模型在对话中查看/修改间隔（`LoopController.updateInterval` 重新计时）与任务或停止循环；工具校验调用者是主 agent 且循环 owner 是当前会话。
+- 新增/删除命令时检查：`apps/cli/src/plugins/commands/index.ts`、`packages/mica-builtin-commands/index.ts` + README、`packages/mica-builtin-commands/index.ts`、根 `README.md`、`AGENT.md`。
 
 ## Tools、MCP 与 Skills
 
 - `packages/mica-tools` 是唯一工具 registry；运行期产品工具优先由插件 `ctx.tools.register()` 注册。新增工具继承 `MicaTool`（参数 schema、展示文案、错误格式化、只读属性）。retry 可重放依赖 `micaTools.isReadOnly`，内置只读语义有全集测试锁死（`packages/mica-tools/tests/MicaTool.test.ts`）：纯查询类（read_file/read_image/list_files/grep_search/web_fetch/web_search/Skill/background_tasks/read_task_output）必须 `readOnly: true`，写/执行类（write_file/apply_patch/run_shell/kill_task 及 pty 系列）不得标；改标记同步更新该测试。
 - PTY 工具（pty_spawn/send/read/wait/kill）驱动交互式 TUI 验证：node-pty 在 Bun 进程内不工作，PTY 会话由懒启动的 Node 子进程（`packages/mica-pty/src/server.mjs`，JSONL over stdio）承载，首次调用动态 import `@packages/mica-pty/src/manager.js`。**node-pty 必须保持 external，禁止静态 import `node-pty` 或 `mica-pty/index.js`**。`ptyServerSource.ts` 是 `server.mjs` 的 JSON 转义内嵌；改 `server.mjs` 后必须跑 `bun run scripts/generate-pty-server-source.mjs`（`serverSource.test.ts` 校验同步）。
 - 当前内置工具：read_file、read_image、write_file、apply_patch、list_files、grep_search、run_shell、background_tasks、read_task_output、kill_task、pty_spawn/pty_send/pty_read/pty_wait/pty_kill、web_fetch、web_search、Skill。交互模式 `TodoWrite` 由 Todo 插件注册（headless 也有独立实例，不依赖 React/Ink）；Todo 状态只属当前进程/turn、不写 session，turn 正常结束把所有未完成项（in_progress 与 pending）标 completed（否则残留的 pending 项会让列表永远显示 remaining），abort/error 把 in_progress 转 pending。
-- `session_*` 会话自治工具族由 `plugins/builtin/session-autonomy/` 注册（`primaryAgentOnly: true`，交互与 headless 都注册）：`session_info` 保持 `readOnly: true`；`session_compact` 是延迟写——工具执行只登记，**turn 正常完成后（`turn:after` 且 outcome 为 completed）立即应用**，该 handler 的 priority 是 50，必须保持在 message-queue 的 turn:after（100，会启动下一轮）之前，否则应用与下一轮请求构建竞态；`turn:before`（10）兜底并 await 在途应用（`applyingByOwner`）。不能在工具执行时改 snapshot（agent 正 busy）。引导文字必须固定（动态数字会打散 prompt cache）。
-- `plugins/builtin/context-pressure/` 订阅 `ctx.events` 的 `context:changed`（TUI 由 `MicaUiRuntimeBridge.onUsage` 发布、headless 由 HeadlessPluginHost 发布），红色区阈值在 `packages/mica-ui/panels/contextThresholds.ts`（ratio ≥ 0.7 或 tokens ≥ 300k，与 WorkingStatus 着色同源），经 `submitAgentSessionInput` 注入固定模板消息（after_turn）；改动阈值同步两处。
+- `session_*` 会话自治工具族由 `packages/mica-builtin-commands/plugins/session-autonomy/` 注册（`primaryAgentOnly: true`，交互与 headless 都注册）：`session_info` 保持 `readOnly: true`；`session_compact` 是延迟写——工具执行只登记，**turn 正常完成后（`turn:after` 且 outcome 为 completed）立即应用**，该 handler 的 priority 是 50，必须保持在 message-queue 的 turn:after（100，会启动下一轮）之前，否则应用与下一轮请求构建竞态；`turn:before`（10）兜底并 await 在途应用（`applyingByOwner`）。不能在工具执行时改 snapshot（agent 正 busy）。引导文字必须固定（动态数字会打散 prompt cache）。
+- `packages/mica-builtin-commands/plugins/context-pressure/` 订阅 `ctx.events` 的 `context:changed`（TUI 由 `MicaUiRuntimeBridge.onUsage` 发布、headless 由 HeadlessPluginHost 发布），红色区阈值在 `packages/mica-ui/panels/contextThresholds.ts`（ratio ≥ 0.7 或 tokens ≥ 300k，与 WorkingStatus 着色同源），经 `submitAgentSessionInput` 注入固定模板消息（after_turn）；改动阈值同步两处。
 - MCP：`packages/mica-mcp` 管理 server 生命周期（配置在 config.json 的 `mcpServers`）；远端工具经 `micaTools.registerMcp()` 接入，server 断开/重连失败/关闭时同步清理对应工具（`/mcp reconnect` 失败后也要刷新）。Headless run 显式初始化/关闭 MCP。
 - Web：`web_search` 用 `serperApiKey` 或 `SERPER_API_KEY`；`web_fetch` 负责 URL 抓取和 HTML→Markdown。用户询问当前/最新/官方/模型能力/provider 行为/API 行为/价格/法规等可变事实时，先联网或读官方资料查证，无法查证时明确说明。
 - Skills：`packages/mica-skills` 只扫描、解析和缓存，不执行。用户级 `~/.mica/skills`（跟随 MICA_HOME），项目级 `.mica/skills`、`.agents/skills`、`.deveco/skills`、`.agent_context/skills`。每个 skill 是含 `SKILL.md` 的目录；skill 内容是用户数据和任务说明，不能覆盖安全规则、系统指令或当前用户请求。
@@ -150,7 +151,7 @@ bun run format
 ## 构建、安装与发布
 
 - `bun run build` = `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`（prebuild 是 `bunx tsc --noEmit`，postbuild 是 `bun scripts/install.mjs`），`bun build --compile` 输出无外部运行时依赖的 `dist/mica`。install.mjs 默认装到 `$HOME/.local/lib/mica` + `$HOME/.local/bin/mica` 薄 launcher（`MICA_INSTALL_DIR`/`MICA_INSTALL_PACKAGE_DIR`/`MICA_BIN_NAME` 可覆盖）。
-- 内置 models.dev 种子由 `scripts/update-models-dev-seed.mjs` 刷新（下载→校验→gzip→base64 原子写入 `plugins/builtin/model-effort-context/seed/models-dev.seed.ts`）；CI 在 release 构建前 best-effort 刷新，失败仅 warning、用仓库固定副本，绝不阻断构建。
+- 内置 models.dev 种子由 `scripts/update-models-dev-seed.mjs` 刷新（下载→校验→gzip→base64 原子写入 `packages/mica-builtin-commands/startup/model-effort-context/seed/models-dev.seed.ts`）；CI 在 release 构建前 best-effort 刷新，失败仅 warning、用仓库固定副本，绝不阻断构建。
 - 用户报告启动、startup UI、build/install 行为与源码不一致时，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`dist/mica` 可能不一致。
 - deploy-pages：`actions/configure-pages` **只暴露 outputs，不会注入 `PAGES_BASE_PATH` 环境变量**，Build 步骤用 `env.PAGES_BASE_PATH` 显式传入；Astro 不会自动给硬编码绝对路径加 base 前缀，布局/页面里所有内部链接必须用 `import.meta.env.BASE_URL` 拼接。
 

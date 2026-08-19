@@ -5,7 +5,7 @@ const stack = [
   { name: 'Bun + TypeScript + React + Ink', desc: '终端 TUI 与运行时底座：CLI 启动、turn loop、模型 provider、UI 状态分层管理。' },
   { name: 'packages/ 可复用包', desc: 'agent 抽象、工具 registry、MCP、UI、runtime 协议、session、config、commands、skills、plugin 等按职责拆分为独立包。' },
   { name: 'apps/cli/ 应用装配层', desc: '负责应用级 wiring、生命周期和跨包编排：Application、LocalRuntimeController、多 agent session 管理。' },
-  { name: 'plugins/builtin/ 官方插件', desc: '产品策略与流程插件：Todo、MCP、message queue、文件 mention、命令插件。' },
+  { name: 'packages/mica-builtin-commands 官方插件', desc: '产品命令与内置插件：commands 命令实现、plugins 插件装配（Todo、MCP、message queue、文件 mention）、startup 启动扩展。' },
   { name: 'mica-code-app', desc: '终端风格的桌面 Web 渲染，通过 app-server 协议驱动 mica 子进程。' },
 ];
 ---

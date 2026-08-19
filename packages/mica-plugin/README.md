@@ -48,7 +48,7 @@ context.onDispose(() => hook.dispose());
 
 - 本包只提供插件机制，不包含具体产品插件。
 - 插件通过 context、hooks 和 services 与外部交互，避免直接耦合应用层单例。
-- 官方运行期插件位于 `plugins/builtin`，不应反向导入 `src/**`。
+- 官方运行期插件位于 `packages/mica-builtin-commands/plugins`，不应反向导入 `src/**`。
 - 生命周期中注册的资源需要可释放，避免长期运行中的泄漏。
 
 ## 目录说明
