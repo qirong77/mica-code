@@ -1,7 +1,21 @@
 #!/usr/bin/env bun
 
 import React, { useCallback } from 'react';
-import { Ansi, Box, Text, useInput, useDeclaredCursor, useTerminalFocus, stringWidth, wrapAnsi } from '@anthropic/ink';
+import {
+  Ansi,
+  Box,
+  Text,
+  color,
+  useInput,
+  useTheme,
+  useDeclaredCursor,
+  useTerminalFocus,
+  stringWidth,
+  wrapAnsi,
+} from '@anthropic/ink';
+import { quickCommands } from '../bottom/dropdown/state.js';
+import { themeColors } from '../theme.js';
+import { useScheduleState } from '../hooks/index.js';
 
 let _graphemeSegmenter: Intl.Segmenter | null = null;
 function getGraphemeSegmenter(): Intl.Segmenter {
@@ -250,6 +264,14 @@ class MeasuredText {
     if (endLine - startLine < maxVisibleLines) startLine = Math.max(0, endLine - maxVisibleLines);
     return startLine;
   }
+
+  /** 第 line 行渲染文本（含首行 trimStart）第一个字符在原始文本中的偏移。 */
+  getLineStartOffset(line: number): number {
+    const wrappedLine = this.wrappedLines[Math.max(0, Math.min(line, this.wrappedLines.length - 1))];
+    if (!wrappedLine) return 0;
+    const rendered = wrappedLine.isPrecededByNewline ? wrappedLine.text : wrappedLine.text.trimStart();
+    return wrappedLine.startOffset + (wrappedLine.text.length - rendered.length);
+  }
 }
 
 export class Cursor {
@@ -410,7 +432,13 @@ export class Cursor {
     return Cursor.fromText(newText, this.columns, Math.min(start, newText.length));
   }
 
-  render(cursorChar: string, invert: (text: string) => string, maxVisibleLines?: number): string {
+  render(
+    cursorChar: string,
+    invert: (text: string) => string,
+    maxVisibleLines?: number,
+    highlight?: { start: number; end: number },
+    wrapHighlight?: (text: string) => string,
+  ): string {
     const { line, column } = this.getPosition();
     const allLines = this.measuredText.getWrappedText();
     const startLine = this.measuredText.getViewportStartLine(maxVisibleLines, this.offset);
@@ -422,29 +450,48 @@ export class Cursor {
       .slice(startLine, endLine)
       .map((text, i) => {
         const currentLine = i + startLine;
+        const lineStart = this.measuredText.getLineStartOffset(currentLine);
+        if (line !== currentLine) {
+          return this.decorateLine(text.trimEnd(), lineStart, highlight, wrapHighlight);
+        }
         let beforeCursor = '',
           atCursor = cursorChar,
           afterCursor = '',
           currentWidth = 0,
           cursorFound = false;
-        if (line !== currentLine) return text.trimEnd();
         for (const { segment } of getGraphemeSegmenter().segment(text)) {
           if (cursorFound) {
             afterCursor += segment;
-            continue;
-          }
-          const nextWidth = currentWidth + stringWidth(segment);
-          if (nextWidth > column) {
-            atCursor = segment;
-            cursorFound = true;
           } else {
-            currentWidth = nextWidth;
-            beforeCursor += segment;
+            const nextWidth = currentWidth + stringWidth(segment);
+            if (nextWidth > column) {
+              atCursor = segment;
+              cursorFound = true;
+            } else {
+              currentWidth = nextWidth;
+              beforeCursor += segment;
+            }
           }
         }
-        return beforeCursor + (cursorChar ? invert(atCursor) : atCursor) + afterCursor.trimEnd();
+        const beforeHighlighted = this.decorateLine(beforeCursor, lineStart, highlight, wrapHighlight);
+        const afterStart = lineStart + beforeCursor.length + atCursor.length;
+        const afterHighlighted = this.decorateLine(afterCursor.trimEnd(), afterStart, highlight, wrapHighlight);
+        return beforeHighlighted + (cursorChar ? invert(atCursor) : atCursor) + afterHighlighted;
       })
       .join('\n');
+  }
+
+  private decorateLine(
+    text: string,
+    lineStart: number,
+    highlight: { start: number; end: number } | undefined,
+    wrapHighlight: ((text: string) => string) | undefined,
+  ): string {
+    if (!highlight || !wrapHighlight) return text;
+    const from = Math.max(0, highlight.start - lineStart);
+    const to = Math.min(text.length, highlight.end - lineStart);
+    if (from >= to) return text;
+    return text.slice(0, from) + wrapHighlight(text.slice(from, to)) + text.slice(to);
   }
 }
 
@@ -473,6 +520,8 @@ function buildTextHandler({
   maxVisibleLines,
   disableCursorMovementForUpDownKeys,
   shouldIgnoreInput,
+  highlight,
+  wrapHighlight,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -489,6 +538,8 @@ function buildTextHandler({
   maxVisibleLines?: number;
   disableCursorMovementForUpDownKeys: boolean;
   shouldIgnoreInput?: (input: string, key: any) => boolean;
+  highlight?: { start: number; end: number };
+  wrapHighlight?: (text: string) => string;
 }): { onInput: (input: string, key: any) => void; renderedValue: string; cursorLine: number; cursorColumn: number } {
   const offset = externalOffset;
   const setOffset = onOffsetChange;
@@ -675,7 +726,7 @@ function buildTextHandler({
   const startLine = cursor.measuredText.getViewportStartLine(maxVisibleLines, cursor.offset);
   return {
     onInput,
-    renderedValue: cursor.render(cursorChar, invert, maxVisibleLines),
+    renderedValue: cursor.render(cursorChar, invert, maxVisibleLines, highlight, wrapHighlight),
     cursorLine: cursorPos.line - startLine,
     cursorColumn: cursorPos.column,
   };
@@ -698,12 +749,21 @@ interface SimpleTextInputProps {
   showCursor?: boolean;
   shouldIgnoreInput?: (input: string, key: any) => boolean;
   suggestion?: string;
+  /** 输入以 / 开头且命令名已知时，高亮命令名（默认开启）。 */
+  commandHighlight?: boolean;
 }
 
 export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   const terminalFocus = useTerminalFocus();
+  const [themeName] = useTheme();
+  const commands = useScheduleState(quickCommands);
 
   const invert = useCallback((text: string) => `\x1b[7m${text}\x1b[27m`, []);
+  const highlight = React.useMemo(
+    () => resolveCommandHighlight(props.value, props.commandHighlight !== false, commands),
+    [props.value, props.commandHighlight, commands],
+  );
+  const wrapHighlight = highlight ? color(themeColors.accent, themeName, 'foreground') : undefined;
   const [cursorBlinkOn, setCursorBlinkOn] = React.useState(true);
   const cursorShouldShow = Boolean(props.focus && props.showCursor !== false && terminalFocus);
   const hasContent = Boolean(props.value);
@@ -740,6 +800,8 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
     maxVisibleLines: props.maxVisibleLines,
     disableCursorMovementForUpDownKeys: false,
     shouldIgnoreInput: props.shouldIgnoreInput,
+    highlight: highlight ?? undefined,
+    wrapHighlight,
   });
 
   const cursorRef = useDeclaredCursor({
@@ -788,4 +850,28 @@ function getSuggestionSuffix(value: string, suggestion?: string): string {
   if (suggestion === value) return '';
   if (!suggestion.startsWith(value)) return '';
   return suggestion.slice(value.length);
+}
+
+type CommandHighlightRange = { start: number; end: number };
+
+/** 输入首行以 / 开头时，返回命令名 token 在原始文本中的字符区间；否则返回 null。 */
+export function getCommandHighlightRange(value: string): CommandHighlightRange | null {
+  const firstLine = value.split('\n', 1)[0] ?? '';
+  if (!firstLine.startsWith('/')) return null;
+  const match = /^\/[^\s/]+/u.exec(firstLine);
+  if (!match) return null;
+  return { start: 0, end: match[0].length };
+}
+
+/** 命令名已知（quick commands 已注册）时返回高亮区间，未知命令或普通文本不高亮。 */
+export function resolveCommandHighlight(
+  value: string,
+  enabled: boolean,
+  commands: ReadonlyArray<{ name: string }>,
+): CommandHighlightRange | null {
+  if (!enabled) return null;
+  const range = getCommandHighlightRange(value);
+  if (!range) return null;
+  const token = value.slice(range.start, range.end);
+  return commands.some((command) => `/${command.name}` === token) ? range : null;
 }

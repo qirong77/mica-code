@@ -60,6 +60,22 @@ declare module '@anthropic/ink' {
   }
   export const Text: ComponentType<InkTextProps>;
 
+  export type ThemeName =
+    | 'dark'
+    | 'light'
+    | 'light-daltonized'
+    | 'dark-daltonized'
+    | 'light-ansi'
+    | 'dark-ansi';
+  export type ThemeSetting = 'auto' | ThemeName;
+  export function useTheme(): [ThemeName, (setting: ThemeSetting) => void];
+  /** Theme-aware color helper: resolves theme keys to ANSI SGR sequences. */
+  export function color(
+    c: string | undefined,
+    theme: ThemeName,
+    type?: 'foreground' | 'background',
+  ): (text: string) => string;
+
   interface AnsiProps {
     children: string;
     dimColor?: boolean;
