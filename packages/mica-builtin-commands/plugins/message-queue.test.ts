@@ -114,6 +114,30 @@ describe('message-queue', () => {
       displayText: next.displayText,
     });
   });
+
+  it.each(['error', 'aborted'] as const)(
+    'keeps the queued input pending when the turn %s so it can still be re-edited',
+    async (outcome) => {
+      const owner = { id: 'owner' };
+      const next = micaRuntime.createRuntimeInput('queued follow-up', 'ui', {
+        queueMode: 'after_turn',
+        displayText: 'Queued follow-up',
+      });
+      const harness = createHarness({ initialQueues: [[owner, [next]]] });
+
+      await harness.hooks.emit('turn:after', {
+        owner,
+        input: micaRuntime.createRuntimeInput('current turn'),
+        elapsedMs: 10,
+        hasError: outcome === 'error',
+        outcome,
+      });
+
+      expect(harness.queue.dequeue).not.toHaveBeenCalledWith(owner);
+      expect(harness.submit).not.toHaveBeenCalled();
+      expect(harness.queues.get(owner)).toEqual([next]);
+    },
+  );
 });
 
 function createHarness(

@@ -323,6 +323,17 @@ function TerminalInput() {
       event?.preventDefault?.();
       event?.stopImmediatePropagation?.();
       queueCurrentInput(key.shift ? 'after_iteration' : 'after_turn');
+      // CursorInput's own Tab handler (insert 4 spaces) may still run after
+      // this branch with the pre-clear value, re-populating the box with the
+      // just-queued message + trailing spaces. That ghost text makes the
+      // `localText.length === 0` guard on the shift+left re-edit fail, so the
+      // queued message can never be pulled back. Re-clear in a microtask to
+      // wipe any such stale synchronous write.
+      queueMicrotask(() => {
+        input.text.set('');
+        setLocalText('');
+        setCursorOffset(0);
+      });
       return;
     }
 

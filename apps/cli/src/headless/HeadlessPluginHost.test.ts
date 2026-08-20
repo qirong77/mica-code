@@ -153,7 +153,7 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     const [sessionId, text, options] = submitSpy.mock.calls[0]!;
     expect(sessionId).toBe('sess-headless');
     expect(text).toContain('80%');
-    expect(options).toMatchObject({ queueMode: 'after_turn' });
+    expect(options).toMatchObject({ queueMode: 'after_iteration' });
     await host.dispose();
   });
 

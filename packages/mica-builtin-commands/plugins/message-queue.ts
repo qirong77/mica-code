@@ -45,6 +45,13 @@ export default function setupMessageQueue(ctx: PluginContext): void {
     'turn:after',
     async (event) => {
       if (queue.isBusy(event.owner)) return;
+      // Only auto-deliver after a successfully completed turn. When the turn
+      // failed or was aborted, keep the queued input pending so the user can
+      // still retract it (shift + left to re-edit); the next completed turn
+      // delivers it. Auto-firing right after a failed/aborted turn steals the
+      // retract window and can cascade provider failures (loop turns with a
+      // flaky provider are a common hit).
+      if (event.outcome !== 'completed') return;
 
       const next = queue.dequeue(event.owner);
       ctx.events.publish({

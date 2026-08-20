@@ -87,7 +87,7 @@ describe('context-pressure plugin', () => {
     expect(sessionId).toBe('sess-1');
     expect(text).toContain('80%');
     expect(text).toContain('session_compact');
-    expect(options).toMatchObject({ queueMode: 'after_turn' });
+    expect(options).toMatchObject({ queueMode: 'after_iteration' });
     dispose();
   });
 

@@ -12,6 +12,8 @@
 
 > **更新（后续迭代）**：本文描述的 `session_history` / `session_rewrite` / `session_set_prompt` 三个工具已在后续版本中移除。当前会话自治工具族只保留 `session_info`（只读观察）和 `session_compact`（压缩历史），其余内容（延迟应用到 turn 结束、`primaryAgentOnly` 隔离、context-pressure 自动提醒）仍然有效。
 
+> **更新（上下文提醒时机）**：context-pressure 提醒的注入时机已从 `after_turn`（turn 结束后另开一轮）改为 `after_iteration`——在下一个工具迭代边界注入**同一次** provider loop，agent 可在当前 turn 内直接响应压缩；若 turn 结束仍无后续迭代，由 message-queue 的 `turn:after` 兜底发送（行为与旧版一致）。
+
 ---
 
 ## 一、MemGPT 在讲什么：把 LLM 当操作系统
@@ -126,18 +128,19 @@ ratio ≥ 0.7  或  tokens ≥ 300k   →  进入红色区
 60s 冷却兜底
 ```
 
-触发时机选在 `contextSize` 更新之后——它每轮 turn 结束更新，正好是 agent 空闲、可以注入的时候。注入的消息走 `queueMode: 'after_turn'`，busy 时由 message-queue 排队，UI 只显示一行 `displayText`（"（系统提醒）上下文占用 85%，建议压缩"），完整文本只进 provider。
+触发时机选在 `context:changed` 发布之后——它每次模型请求（每个工具迭代与 turn 完成）都会发布，正好是 agent 空闲、可以注入的时候。注入的消息走 `queueMode: 'after_iteration'`，在**下一个工具迭代边界**进入同一次 provider loop：agent 在下一轮工具调用结束后就能看到提醒并直接 `session_compact`，不必等当前 turn 全部跑完。若 turn 结束仍无后续迭代，message-queue 的 `turn:after` 兜底在下一轮发送。busy 时由 message-queue 排队，UI 只显示一行 `displayText`（"（系统提醒）上下文占用 85%，建议压缩"），完整文本只进 provider。
 
 实测链路（mock provider，850k tokens / 1M window）：
 
 ```txt
-turn 1 完成（usage 报 850k）
-   │ contextSize 更新 → 插件判定红区
+某次模型请求（usage 报 850k）
+   │ context:changed 发布 → 插件判定红区
    ▼
 自动注入："当前上下文占用已达 85%……请使用 session_compact 工具压缩历史"
-   │ after_turn 排队
+   │ after_iteration：下一个工具迭代边界
    ▼
-模型下一轮读到提醒 → 决定是否调用 session_compact
+模型在同一个 provider loop 里读到提醒 → 决定是否调用 session_compact
+（若 turn 结束无后续迭代，message-queue 的 turn:after 兜底在下一轮发送）
 ```
 
 端到端验证确认了两件事：提醒只注入一次（闩锁生效，红色区间内不重复轰炸）；模型确实收到了完整提醒文本（在 provider history 里可见）。

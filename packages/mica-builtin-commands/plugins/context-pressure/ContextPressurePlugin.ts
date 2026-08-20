@@ -51,15 +51,21 @@ export default function setupContextPressure(ctx: PluginContext): void {
     const text = `（系统自动提醒）当前上下文占用已达 ${pct}%（${contextTokens.toLocaleString()} tokens）。如果对话历史过长，请使用 session_compact 工具压缩历史后再继续。`;
     warned = true;
     lastWarnAt = Date.now();
+    // Inject at the next completed tool iteration boundary (same provider loop)
+    // instead of waiting for the current turn to finish: the agent sees the
+    // reminder right after the next tool call and can compact immediately
+    // instead of finishing all remaining work first. If the turn ends with no
+    // further iteration, the message-queue plugin's turn:after dequeue still
+    // sends it as a fallback (dequeue does not filter by queueMode).
     void services.submitAgentSessionInput(sessionId, text, {
-      queueMode: 'after_turn',
+      queueMode: 'after_iteration',
       displayText: `（系统提醒）上下文占用 ${pct}%，建议压缩`,
     });
   };
 
-  // context:changed is published whenever a turn finishes (usage event /
-  // session restore), which is exactly when the agent is idle and a reminder
-  // can be submitted. tokens 0 never triggers the red zone.
+  // context:changed is published after every model request (each tool
+  // iteration and turn completion), so the reminder can reach an in-flight
+  // turn at its next iteration boundary. tokens 0 never triggers the red zone.
   const eventDisposable = ctx.events.on('event', (event) => {
     if (event.type !== 'context:changed') return;
     evaluate(event.tokens, event.windowSize);
