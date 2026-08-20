@@ -62,9 +62,6 @@ export function applyStatus(status: AgentRuntimeStatus) {
     case 'calling_tool':
       micaUi.panels.status.callingTool(status.toolNames, undefined, status.startedAt, status.moduleStartedAt);
       break;
-    case 'retrying':
-      micaUi.panels.status.retrying(status.attempt, status.startedAt, status.moduleStartedAt);
-      break;
     case 'completed':
       micaUi.panels.status.completed(status.elapsedMs, status.startedAt);
       break;

@@ -200,4 +200,92 @@ describe('LocalRuntimeController queue drain', () => {
     expect(runtime.editLastPendingInput()).toBe('second message');
     expect(runtime.listQueueForAgent(agent)).toEqual([]);
   });
+
+  it('shows provider-level retries as an in-place conversation notice', async () => {
+    const { LocalRuntimeController } = await import('./LocalRuntimeController.js');
+    const { SessionController } = await import('../../session/SessionController.js');
+    const { micaCommands } = await import('@packages/mica-commands/index.js');
+    const { micaPlugin } = await import('@packages/mica-plugin/index.js');
+    const { setActiveContext } = await import('../activeContext.js');
+
+    const snapshot: AgentRuntimeSnapshot = {
+      providerId: 'openai',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+
+    const fakeSession = {
+      uiState: {
+        conversationMessages: [] as unknown[],
+        responseText: '',
+        pendingInputs: [] as string[],
+        pendingQueueMode: null,
+        messageBarMessages: [] as unknown[],
+        agentTurnLogItems: [] as unknown[],
+        commandPanelItems: [] as unknown[],
+        thinkingText: '',
+        workingStatus: { type: 'connecting' },
+        lastTurnOutcome: undefined,
+      },
+    };
+    setActiveContext({
+      agentSessions: { findByAgent: () => fakeSession },
+      uiBridge: { syncAgentStatusItems: vi.fn() },
+    });
+
+    try {
+      let runId = 0;
+      const agent = {
+        events: { on: vi.fn(), off: vi.fn() },
+        reserveRunId: () => ++runId,
+        isCurrent: () => true,
+        captureClientSnapshot: () => undefined,
+        run: vi.fn(
+          (
+            _content: unknown,
+            options: { onRetry?: (info: { attempt: number; error: Error; delayMs: number }) => void },
+          ) => {
+            options?.onRetry?.({
+              attempt: 1,
+              error: new Error('503 Our servers are currently overloaded. Please try again later.'),
+              delayMs: 2000,
+            });
+            options?.onRetry?.({
+              attempt: 2,
+              error: new Error('503 Our servers are currently overloaded. Please try again later.'),
+              delayMs: 4000,
+            });
+            return Promise.resolve({ runId, text: 'ok' });
+          },
+        ),
+        toConversationMessages: () => [],
+        getSnapshot: () => snapshot,
+        setSessionId: vi.fn(),
+        loadSnapshot: vi.fn(),
+        reloadConfig: vi.fn(),
+        preserveAbortedTurn: vi.fn(),
+      } as unknown as AgentRuntime;
+
+      const sessionController = new SessionController(agent);
+      const hooks = new micaPlugin.HookRegistry();
+      const services = new micaPlugin.ServiceContainer();
+      const commands = new micaCommands.CommandRegistry();
+      const runtime = new LocalRuntimeController(agent, sessionController, commands, hooks, services);
+
+      await runtime.submit('hello');
+
+      const notices = fakeSession.uiState.conversationMessages.filter((m) => (m as { role?: string }).role === 'notice');
+      expect(notices).toHaveLength(1);
+      const content = String((notices[0] as { content?: unknown })?.content);
+      expect(content).toContain('请求暂时失败');
+      expect(content).toContain('第 2/5 次重试');
+    } finally {
+      setActiveContext(null);
+    }
+  });
 });

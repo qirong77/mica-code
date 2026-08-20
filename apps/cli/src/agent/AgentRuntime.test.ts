@@ -81,16 +81,10 @@ describe('AgentRuntime tool status', () => {
     expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
   });
 
-  it('emits a retrying status when the provider reports a retry', async () => {
+  it('forwards provider retry info to the run onRetry callback', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
-    const statuses: Array<{ type: string; attempt?: number }> = [];
-
-    agent.events.on('status', (status) => {
-      statuses.push(
-        status.type === 'retrying' ? { type: status.type, attempt: status.attempt } : { type: status.type },
-      );
-    });
+    const retries: Array<{ attempt: number; message: string; delayMs: number }> = [];
     modelClient.queryImpl = async (_question, options) => {
       options?.onRetry?.({
         attempt: 2,
@@ -100,10 +94,15 @@ describe('AgentRuntime tool status', () => {
       return 'ok';
     };
 
-    await agent.run('hello');
+    await agent.run('hello', {
+      onRetry: (info) => {
+        retries.push({ attempt: info.attempt, message: (info.error as Error).message, delayMs: info.delayMs });
+      },
+    });
 
-    expect(statuses).toContainEqual({ type: 'retrying', attempt: 2 });
-    expect(statuses).toContainEqual({ type: 'completed' });
+    expect(retries).toEqual([
+      { attempt: 2, message: '503 Our servers are currently overloaded. Please try again later.', delayMs: 4000 },
+    ]);
   });
 
   it('tracks each active module start time separately', async () => {

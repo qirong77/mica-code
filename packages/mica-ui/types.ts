@@ -37,7 +37,6 @@ export type MicaUiWorkingStatus =
   | { type: 'thinking'; startedAt?: number; moduleStartedAt?: number }
   | { type: 'streaming'; startedAt?: number; moduleStartedAt?: number }
   | { type: 'calling_tool'; startedAt?: number; moduleStartedAt?: number; elapsedMs?: number; toolNames?: string[] }
-  | { type: 'retrying'; startedAt?: number; moduleStartedAt?: number; attempt?: number; message?: string }
   | { type: 'plugin_task'; text: string; level?: 'info' | 'warn' | 'error' }
   | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message?: string };

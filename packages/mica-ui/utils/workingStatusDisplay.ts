@@ -21,10 +21,6 @@ export function getWorkingStatusDisplay(status: MicaUiWorkingStatus): WorkingSta
       const elapsed = status.elapsedMs != null ? ` ${formatElapsed(status.elapsedMs)}` : '';
       return { text: `${base}${elapsed}`, color: themeColors.statusRunning, spinning: true };
     }
-    case 'retrying': {
-      const attempt = status.attempt != null ? ` ${status.attempt}` : '';
-      return { text: `retrying${attempt}`, color: themeColors.statusWarning, spinning: true };
-    }
     case 'plugin_task':
       return {
         text: status.text,
@@ -59,7 +55,6 @@ function getActiveTurnStartedAt(status: MicaUiWorkingStatus): number | undefined
     case 'thinking':
     case 'streaming':
     case 'calling_tool':
-    case 'retrying':
       return status.startedAt;
     default:
       return undefined;

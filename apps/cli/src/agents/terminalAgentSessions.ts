@@ -288,14 +288,6 @@ export function toMicaUiWorkingStatus(status: AgentRuntimeStatus): MicaUiWorking
         moduleStartedAt: status.moduleStartedAt,
         toolNames: status.toolNames,
       };
-    case 'retrying':
-      return {
-        type: 'retrying',
-        startedAt: status.startedAt,
-        moduleStartedAt: status.moduleStartedAt,
-        attempt: status.attempt,
-        message: status.message,
-      };
     case 'completed':
       return { type: 'completed', startedAt: status.startedAt, elapsedMs: status.elapsedMs };
     case 'error':

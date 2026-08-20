@@ -590,6 +590,9 @@ export class LocalRuntimeController implements RuntimeController {
       const runContent = promptBuildEvent.content ?? content;
 
       let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
+      // provider 层重试 notice：每个 turn 只占一个槽位，后续重试在原消息上原地更新，
+      // 避免多次请求 × 每次最多 5 次重试刷屏。
+      let providerRetryNoticeIndex = -1;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
         const attemptSystemInputs: RuntimeInput[] = [];
         if (attempt > 0) {
@@ -633,6 +636,39 @@ export class LocalRuntimeController implements RuntimeController {
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);
               return this.takeQueuedIterationInput(agent, attemptSystemInputs);
+            },
+            onRetry: (info) => {
+              if (!session && !this.isActiveAgent(agent)) return;
+              const retryNotice = createRetryNoticeMessage(info.error, info.attempt, info.delayMs);
+              if (session) {
+                if (
+                  providerRetryNoticeIndex >= 0 &&
+                  session.uiState.conversationMessages[providerRetryNoticeIndex]?.role === 'notice'
+                ) {
+                  session.uiState = normalizeUiState({
+                    ...session.uiState,
+                    conversationMessages: [
+                      ...session.uiState.conversationMessages.slice(0, providerRetryNoticeIndex),
+                      retryNotice,
+                      ...session.uiState.conversationMessages.slice(providerRetryNoticeIndex + 1),
+                    ],
+                  });
+                } else {
+                  session.uiState = normalizeUiState({
+                    ...session.uiState,
+                    conversationMessages: [...session.uiState.conversationMessages, retryNotice],
+                  });
+                  providerRetryNoticeIndex = session.uiState.conversationMessages.length - 1;
+                }
+                if (this.isActiveAgent(agent)) {
+                  micaUi.conversation.setMessages(session.uiState.conversationMessages);
+                }
+              } else if (this.isActiveAgent(agent)) {
+                micaUi.conversation.appendNoticeMessage(retryNotice.content, {
+                  variant: retryNotice.variant,
+                  command: retryNotice.command,
+                });
+              }
             },
           });
           runId = result.runId;
