@@ -27,6 +27,7 @@ export type AgentRuntimeStatus =
   | { type: 'thinking'; startedAt?: number; moduleStartedAt?: number }
   | { type: 'streaming'; startedAt?: number; moduleStartedAt?: number }
   | { type: 'calling_tool'; startedAt?: number; moduleStartedAt?: number; toolNames?: string[] }
+  | { type: 'retrying'; startedAt?: number; moduleStartedAt?: number; attempt?: number; message?: string }
   | { type: 'completed'; startedAt?: number; elapsedMs?: number }
   | { type: 'error'; message: string };
 
@@ -372,6 +373,15 @@ export class AgentRuntime {
         signal: abortController.signal,
         shouldContinue: () => this.isCurrent(runId),
         maxTurns: options.maxTurns,
+        onRetry: (info) => {
+          if (!this.isCurrent(runId)) return;
+          this.emitStatus({
+            type: 'retrying',
+            startedAt: this.activeRunStartedAt ?? undefined,
+            attempt: info.attempt,
+            message: info.error instanceof Error ? info.error.message : String(info.error),
+          });
+        },
         onIterationComplete: async () => {
           if (!this.isCurrent(runId)) return null;
           this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
@@ -475,6 +485,7 @@ export class AgentRuntime {
       case 'thinking':
       case 'streaming':
       case 'calling_tool':
+      case 'retrying':
         return { ...status, moduleStartedAt: this.activeStatusModuleStartedAt };
       default:
         return status;
@@ -528,6 +539,7 @@ function statusModuleKey(status: AgentRuntimeStatus): string {
     case 'connecting':
     case 'thinking':
     case 'streaming':
+    case 'retrying':
       return status.type;
     case 'calling_tool':
       return `${status.type}:${status.toolNames?.join(',') ?? ''}`;

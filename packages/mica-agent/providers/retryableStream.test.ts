@@ -224,6 +224,56 @@ describe('retryable provider streams', () => {
     expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(2);
     expect(onThinking).toHaveBeenCalledWith('thinking...');
   });
+
+  it('Responses retries an HTTP 503 rejection from create() (server overloaded at request time)', async () => {
+    vi.useFakeTimers();
+    // 真实 HTTP 503：openai-node SDK 在 create() 阶段直接抛 InternalServerError，
+    // 带 status=503、message 含 "503 " 前缀（不同于 krill 的 200+JSON 迭代抛错形态）。
+    const http503 = Object.assign(new Error('503 Our servers are currently overloaded. Please try again later.'), {
+      status: 503,
+    });
+    openaiMocks.responsesCreate
+      .mockRejectedValueOnce(http503)
+      .mockResolvedValueOnce(
+        streamOf(
+          { type: 'response.output_text.delta', delta: 'ok' },
+          {
+            type: 'response.completed',
+            response: { model: 'test-model', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } },
+          },
+        ),
+      );
+    const client = new ResponsesClient(options('openai_responses'));
+
+    const promise = client.query('hello');
+    await vi.advanceTimersByTimeAsync(2100);
+
+    await expect(promise).resolves.toBe('ok');
+    expect(openaiMocks.responsesCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('Chat Completions retries an HTTP 503 rejection from create()', async () => {
+    vi.useFakeTimers();
+    const http503 = Object.assign(new Error('503 Our servers are currently overloaded. Please try again later.'), {
+      status: 503,
+    });
+    openaiMocks.chatCreate
+      .mockRejectedValueOnce(http503)
+      .mockResolvedValueOnce(
+        streamOf({
+          model: 'test-model',
+          choices: [{ delta: { content: 'ok' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    const client = new ChatCompletionsClient(options('openai_chat_completions'));
+
+    const promise = client.query('hello');
+    await vi.advanceTimersByTimeAsync(2100);
+
+    await expect(promise).resolves.toBe('ok');
+    expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(2);
+  });
 });
 
 async function* streamOf(...events: unknown[]): AsyncGenerator<unknown> {

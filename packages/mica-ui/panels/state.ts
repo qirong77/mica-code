@@ -59,6 +59,8 @@ export const status = {
     setWorkingStatus({ type: 'streaming', startedAt, moduleStartedAt }),
   callingTool: (toolNames?: string[], elapsedMs?: number, startedAt?: number, moduleStartedAt?: number) =>
     setWorkingStatus({ type: 'calling_tool', startedAt, moduleStartedAt, toolNames, elapsedMs }),
+  retrying: (attempt?: number, startedAt?: number, moduleStartedAt?: number) =>
+    setWorkingStatus({ type: 'retrying', startedAt, moduleStartedAt, attempt }),
   pluginTask: (text: string, level?: 'info' | 'warn' | 'error') =>
     setWorkingStatus({ type: 'plugin_task', text, level }),
   completed: (elapsedMs?: number, startedAt?: number) => setWorkingStatus({ type: 'completed', startedAt, elapsedMs }),

@@ -174,6 +174,13 @@ export function WorkingStatus() {
               <Text color={statusDisplay.color}>{statusText}</Text>
             </Box>
           );
+        case 'retrying':
+          return (
+            <Box>
+              <Spin />
+              <Text color={statusDisplay.color}>{statusText}</Text>
+            </Box>
+          );
         case 'plugin_task':
           return (
             <Box>

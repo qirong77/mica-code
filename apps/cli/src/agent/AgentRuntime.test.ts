@@ -81,6 +81,31 @@ describe('AgentRuntime tool status', () => {
     expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
   });
 
+  it('emits a retrying status when the provider reports a retry', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const statuses: Array<{ type: string; attempt?: number }> = [];
+
+    agent.events.on('status', (status) => {
+      statuses.push(
+        status.type === 'retrying' ? { type: status.type, attempt: status.attempt } : { type: status.type },
+      );
+    });
+    modelClient.queryImpl = async (_question, options) => {
+      options?.onRetry?.({
+        attempt: 2,
+        error: new Error('503 Our servers are currently overloaded. Please try again later.'),
+        delayMs: 4000,
+      });
+      return 'ok';
+    };
+
+    await agent.run('hello');
+
+    expect(statuses).toContainEqual({ type: 'retrying', attempt: 2 });
+    expect(statuses).toContainEqual({ type: 'completed' });
+  });
+
   it('tracks each active module start time separately', async () => {
     vi.useFakeTimers();
     try {

@@ -243,15 +243,16 @@ export class ChatCompletionsClient extends BaseAgent<
         },
         {
           signal: options?.signal,
-          maxRetries: 4,
+          maxRetries: 5,
           delayMs: 2000,
           backoffFactor: 2,
-          maxDelayMs: 16000,
+          maxDelayMs: 30000,
           shouldRetry: (error) => !attemptHadOutput && isRetryableError(error),
-          onRetry: ({ attempt, error }) => {
+          onRetry: ({ attempt, error, delayMs }) => {
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
             );
+            options?.onRetry?.({ attempt, error, delayMs });
           },
         },
       );

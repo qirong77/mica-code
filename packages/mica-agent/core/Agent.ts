@@ -31,6 +31,9 @@ export type AgentQueryOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /** Maximum number of model requests in one agentic query, including the initial request. */
   maxTurns?: number;
+  /** Provider-level retry progress (safe zero-output replay only). Used to surface
+   *  retrying to the caller (e.g. a `retrying` working status in the UI). */
+  onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
 };
 
 export class AgentMaxTurnsError extends Error {
