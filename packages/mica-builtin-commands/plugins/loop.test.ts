@@ -6,6 +6,7 @@ import { CompactionNotNeededError } from '@packages/mica-context/index.js';
 import {
   LoopController,
   parseDuration,
+  DEFAULT_LOOP_INTERVAL_MS,
   parseLoopArgs,
   ToolLoopSetInterval,
   ToolLoopSetTask,
@@ -62,10 +63,23 @@ describe('parseLoopArgs', () => {
     expect(parseLoopArgs('60m')).toMatchObject({ kind: 'error' });
   });
 
-  it('rejects an invalid interval', () => {
+  it('uses the default interval when no interval is given', () => {
+    const result = parseLoopArgs('推送一个 BBC 的新闻');
+    expect(result).toMatchObject({
+      kind: 'start',
+      intervalMs: DEFAULT_LOOP_INTERVAL_MS,
+      intervalLabel: '30 分钟',
+      task: '推送一个 BBC 的新闻',
+    });
+  });
+
+  it('treats the whole input as the task when the first token is not a duration', () => {
     const result = parseLoopArgs('abc 推送新闻');
-    expect(result).toMatchObject({ kind: 'error' });
-    if (result.kind === 'error') expect(result.message).toContain('无法解析循环间隔');
+    expect(result).toMatchObject({
+      kind: 'start',
+      intervalMs: DEFAULT_LOOP_INTERVAL_MS,
+      task: 'abc 推送新闻',
+    });
   });
 
   it('rejects an interval shorter than the minimum', () => {
@@ -157,7 +171,7 @@ describe('LoopController', () => {
     });
     expect(controller.active?.fireCount).toBe(0);
     expect(controller.buildSystemPromptSuffix()).toContain('新任务');
-    expect(controller.buildSystemPromptSuffix()).not.toContain('旧任务');
+    expect(controller.buildSystemPromptSuffix()).not.toContain('每次任务内容：旧任务');
   });
 });
 
@@ -198,8 +212,8 @@ describe('loop plugin', () => {
     await command.action('');
     expect(notices.some((n) => n.includes('当前没有运行的定时循环任务'))).toBe(true);
 
-    await command.action('abc 任务');
-    expect(notices.some((n) => n.includes('无法解析循环间隔'))).toBe(true);
+    await command.action('60m');
+    expect(notices.some((n) => n.includes('缺少任务描述'))).toBe(true);
   });
 
   it('registers the loop adjustment tools for the primary agent', () => {
@@ -475,7 +489,7 @@ describe('LoopController interval/task updates', () => {
     const updated = controller.updateTask('新任务');
     expect(updated?.task).toBe('新任务');
     expect(controller.buildSystemPromptSuffix()).toContain('新任务');
-    expect(controller.buildSystemPromptSuffix()).not.toContain('旧任务');
+    expect(controller.buildSystemPromptSuffix()).not.toContain('每次任务内容：旧任务');
   });
 
   it('updateInterval/updateTask return null when not running', () => {

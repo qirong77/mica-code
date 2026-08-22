@@ -1,9 +1,12 @@
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   symlinkSync,
   type Stats,
@@ -11,6 +14,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { RewindFileAction, RewindFileChange, RuntimeInput } from '@packages/mica-runtime/index.js';
 import type {
@@ -43,6 +47,8 @@ type FileStateSnapshot =
 
 type RewindCheckpoint = {
   id: string;
+  /** Owning agent identity (agent.taskOwnerId); used to scope disk-backed checkpoints. */
+  agentId: string;
   createdAt: string;
   conversationLabel: string;
   inputText: string;
@@ -83,14 +89,110 @@ const MAX_CHECKPOINT_SNAPSHOT_CHARS = 1_500_000;
 const MAX_DIRTY_FILES = 120;
 const MAX_FILE_SNAPSHOT_BYTES = 1 * 1024 * 1024;
 const MAX_FILE_SNAPSHOT_TOTAL_BYTES = 4 * 1024 * 1024;
+/** Checkpoints older than this are pruned on every write. */
+const REWIND_RETENTION_MS = 24 * 60 * 60 * 1000;
+const REWIND_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'rewind');
+const REWIND_FILE_VERSION = 1;
+
+type SerializedCheckpoint = {
+  version: number;
+  id: string;
+  agentId: string;
+  createdAt: string;
+  conversationLabel: string;
+  inputText: string;
+  conversationMessages: unknown[];
+  snapshot: AgentRuntimeSnapshot;
+  fileState: SerializedFileState;
+};
+
+type SerializedFileState = {
+  available: boolean;
+  root: string;
+  headOid?: string;
+  error?: string;
+  entries: Array<[string, SerializedFileSnapshotEntry]>;
+};
+
+type SerializedFileSnapshotEntry =
+  | { kind: 'absent' }
+  | { kind: 'symlink'; target: string }
+  | { kind: 'file'; data: string; mode: number };
+
+function checkpointFileName(agentId: string, id: string): string {
+  const safeAgent = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${safeAgent}__${safeId}.json`;
+}
+
+function serializeCheckpoint(checkpoint: RewindCheckpoint): SerializedCheckpoint {
+  return {
+    version: REWIND_FILE_VERSION,
+    id: checkpoint.id,
+    agentId: checkpoint.agentId,
+    createdAt: checkpoint.createdAt,
+    conversationLabel: checkpoint.conversationLabel,
+    inputText: checkpoint.inputText,
+    conversationMessages: checkpoint.conversationMessages,
+    snapshot: checkpoint.snapshot,
+    fileState: {
+      available: checkpoint.fileState.available,
+      root: checkpoint.fileState.root,
+      headOid: checkpoint.fileState.available ? checkpoint.fileState.headOid : undefined,
+      error: checkpoint.fileState.available ? undefined : checkpoint.fileState.error,
+      entries: [...checkpoint.fileState.entries.entries()].map(([path, entry]) => [
+        path,
+        entry.kind === 'file' ? { kind: 'file' as const, data: entry.data.toString('base64'), mode: entry.mode } : entry,
+      ]),
+    },
+  };
+}
+
+function deserializeCheckpoint(data: SerializedCheckpoint): RewindCheckpoint {
+  const fileState: FileStateSnapshot = data.fileState.available
+    ? {
+        available: true,
+        root: data.fileState.root,
+        headOid: data.fileState.headOid ?? '',
+        entries: new Map(
+          data.fileState.entries.map(([path, entry]) => [
+            path,
+            entry.kind === 'file'
+              ? { kind: 'file' as const, data: Buffer.from(entry.data, 'base64'), mode: entry.mode }
+              : entry,
+          ]),
+        ),
+      }
+    : {
+        available: false,
+        root: data.fileState.root,
+        error: data.fileState.error ?? 'unknown error',
+        entries: new Map(),
+      };
+  return {
+    id: data.id,
+    agentId: data.agentId,
+    createdAt: data.createdAt,
+    conversationLabel: data.conversationLabel,
+    inputText: data.inputText,
+    conversationMessages: data.conversationMessages,
+    snapshot: data.snapshot,
+    fileState,
+  };
+}
+
+function agentIdOf(agent: AgentRuntime): string {
+  return agent.taskOwnerId ?? 'agent-default';
+}
 
 export class RewindCheckpointManager {
-  private readonly checkpoints = new WeakMap<AgentRuntime, RewindCheckpoint[]>();
   private readonly previewPlans = new WeakMap<AgentRuntime, Map<string, RewindPreviewPlan>>();
   private nextCheckpointId = 1;
 
+  constructor(private readonly dir: string = REWIND_DIR) {}
+
   capture(agent: AgentRuntime, input: RuntimeInput, conversationMessages: unknown[] = []): string | null {
-    if ((this.checkpoints.get(agent)?.length ?? 0) === 0) {
+    if (this.listCheckpoints(agent).length === 0) {
       try {
         this.restoreConversationHistory(agent, conversationMessages);
       } catch {
@@ -111,6 +213,7 @@ export class RewindCheckpointManager {
 
       const checkpoint: RewindCheckpoint = {
         id: `${input.id}-${Date.now()}-${this.nextCheckpointId++}`,
+        agentId: agentIdOf(agent),
         createdAt: new Date().toISOString(),
         conversationLabel: labelForInput(input.displayText ?? input.text),
         inputText: input.text,
@@ -118,8 +221,7 @@ export class RewindCheckpointManager {
         snapshot: cloneSnapshot(snapshot),
         fileState: captureFileState(),
       };
-      const next = [...(this.checkpoints.get(agent) ?? []), checkpoint].slice(-MAX_CHECKPOINTS_PER_AGENT);
-      this.checkpoints.set(agent, next);
+      this.writeCheckpoint(checkpoint);
       this.previewPlans.delete(agent);
       return checkpoint.id;
     } catch {
@@ -129,7 +231,7 @@ export class RewindCheckpointManager {
   }
 
   finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): void {
-    const checkpoint = this.find(agent, id);
+    const checkpoint = this.readCheckpoint(agentIdOf(agent), id);
     if (!checkpoint) return;
     try {
       const snapshot = agent.getSnapshot();
@@ -140,9 +242,13 @@ export class RewindCheckpointManager {
         this.remove(agent, id);
         return;
       }
-      checkpoint.snapshot = cloneSnapshot(snapshot);
-      checkpoint.conversationMessages = cloneJson(conversationMessages);
-      checkpoint.fileState = captureFileState();
+      const updated: RewindCheckpoint = {
+        ...checkpoint,
+        snapshot: cloneSnapshot(snapshot),
+        conversationMessages: cloneJson(conversationMessages),
+        fileState: captureFileState(),
+      };
+      this.writeCheckpoint(updated);
       this.previewPlans.delete(agent);
     } catch {
       // Never expose a checkpoint with the old pre-turn semantics.
@@ -151,7 +257,7 @@ export class RewindCheckpointManager {
   }
 
   clear(agent: AgentRuntime): void {
-    this.checkpoints.delete(agent);
+    this.removeAgentCheckpoints(agentIdOf(agent));
     this.previewPlans.delete(agent);
   }
 
@@ -179,6 +285,7 @@ export class RewindCheckpointManager {
 
       restored.push({
         id: `history-${restoredAt}-${this.nextCheckpointId++}`,
+        agentId: agentIdOf(agent),
         createdAt: new Date(restoredAt - (turnBoundaries.length - turn) * 1000).toISOString(),
         conversationLabel: labelForInput(displayText),
         inputText,
@@ -197,13 +304,16 @@ export class RewindCheckpointManager {
       });
     }
 
-    this.checkpoints.set(agent, restored);
+    this.removeAgentCheckpoints(agentIdOf(agent));
+    for (const checkpoint of restored) {
+      this.writeCheckpoint(checkpoint);
+    }
     this.previewPlans.delete(agent);
     return restored.length;
   }
 
   list(agent: AgentRuntime): RewindCheckpointSummary[] {
-    return (this.checkpoints.get(agent) ?? []).map(checkpointSummary);
+    return this.listCheckpoints(agent).map(checkpointSummary);
   }
 
   preview(agent: AgentRuntime, id?: string): RewindPreviewResult {
@@ -235,7 +345,8 @@ export class RewindCheckpointManager {
   }
 
   apply(agent: AgentRuntime, request: RewindApplyRequest): RewindApplyResult {
-    const stack = this.checkpoints.get(agent) ?? [];
+    const agentId = agentIdOf(agent);
+    const stack = this.listCheckpoints(agent);
     const index = stack.findIndex((checkpoint) => checkpoint.id === request.id);
     if (index === -1) throw new Error('rewind checkpoint not found');
 
@@ -285,7 +396,7 @@ export class RewindCheckpointManager {
       const prefix = files.length > 0 ? 'rewind files changed, but conversation restore failed' : 'rewind failed';
       throw new Error(`${prefix}: ${errorMessage(error)}`);
     }
-    this.checkpoints.set(agent, stack.slice(0, index + 1));
+    this.keepCheckpointsUpTo(agentId, stack[index]!);
     this.previewPlans.delete(agent);
 
     return {
@@ -304,20 +415,125 @@ export class RewindCheckpointManager {
   }
 
   private find(agent: AgentRuntime, id: string): RewindCheckpoint | null {
-    return this.checkpoints.get(agent)?.find((checkpoint) => checkpoint.id === id) ?? null;
+    return this.readCheckpoint(agentIdOf(agent), id);
   }
 
   private latest(agent: AgentRuntime): RewindCheckpoint | null {
-    return this.checkpoints.get(agent)?.at(-1) ?? null;
+    return this.listCheckpoints(agent).at(-1) ?? null;
   }
 
   private remove(agent: AgentRuntime, id: string): void {
-    const checkpoints = this.checkpoints.get(agent) ?? [];
-    this.checkpoints.set(
-      agent,
-      checkpoints.filter((checkpoint) => checkpoint.id !== id),
-    );
+    const path = this.checkpointPath(agentIdOf(agent), id);
+    if (existsSync(path)) rmSync(path, { force: true });
     this.previewPlans.delete(agent);
+  }
+
+  /** Read all checkpoints for an agent from disk, oldest first, capped to the retention window. */
+  private listCheckpoints(agent: AgentRuntime): RewindCheckpoint[] {
+    const agentId = agentIdOf(agent);
+    const cutoff = Date.now() - REWIND_RETENTION_MS;
+    const result: RewindCheckpoint[] = [];
+    let files: string[];
+    try {
+      files = readdirSync(this.dir).filter((file) => file.startsWith(`${safeAgentPrefix(agentId)}__`));
+    } catch {
+      return [];
+    }
+    for (const file of files) {
+      const checkpoint = readCheckpointFile(resolve(this.dir, file));
+      if (!checkpoint) continue;
+      if (Date.parse(checkpoint.createdAt) < cutoff) continue;
+      result.push(checkpoint);
+    }
+    return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  private writeCheckpoint(checkpoint: RewindCheckpoint): void {
+    mkdirSync(this.dir, { recursive: true });
+    const path = this.checkpointPath(checkpoint.agentId, checkpoint.id);
+    const tmpPath = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmpPath, `${JSON.stringify(serializeCheckpoint(checkpoint))}\n`, 'utf-8');
+    renameSync(tmpPath, path);
+    this.pruneExpired();
+  }
+
+  private readCheckpoint(agentId: string, id: string): RewindCheckpoint | null {
+    return readCheckpointFile(this.checkpointPath(agentId, id));
+  }
+
+  private removeAgentCheckpoints(agentId: string): void {
+    const prefix = `${safeAgentPrefix(agentId)}__`;
+    let files: string[];
+    try {
+      files = readdirSync(this.dir).filter((file) => file.startsWith(prefix));
+    } catch {
+      return;
+    }
+    for (const file of files) rmSync(resolve(this.dir, file), { force: true });
+  }
+
+  /** After applying a rewind, drop every checkpoint created after the selected one. */
+  private keepCheckpointsUpTo(agentId: string, selected: RewindCheckpoint): void {
+    const prefix = `${safeAgentPrefix(agentId)}__`;
+    let files: string[];
+    try {
+      files = readdirSync(this.dir).filter((file) => file.startsWith(prefix));
+    } catch {
+      return;
+    }
+    for (const file of files) {
+      const checkpoint = readCheckpointFile(resolve(this.dir, file));
+      if (!checkpoint) continue;
+      if (checkpoint.createdAt > selected.createdAt) rmSync(resolve(this.dir, file), { force: true });
+    }
+  }
+
+  /** Remove checkpoints older than the retention window and cap each agent to the max count. */
+  private pruneExpired(): void {
+    let files: string[];
+    try {
+      files = readdirSync(this.dir).filter((file) => file.endsWith('.json'));
+    } catch {
+      return;
+    }
+    const cutoff = Date.now() - REWIND_RETENTION_MS;
+    const byAgent = new Map<string, Array<{ file: string; createdAt: string }>>();
+    for (const file of files) {
+      const checkpoint = readCheckpointFile(resolve(this.dir, file));
+      if (!checkpoint) continue;
+      if (Date.parse(checkpoint.createdAt) < cutoff) {
+        rmSync(resolve(this.dir, file), { force: true });
+        continue;
+      }
+      const bucket = byAgent.get(checkpoint.agentId) ?? [];
+      bucket.push({ file, createdAt: checkpoint.createdAt });
+      byAgent.set(checkpoint.agentId, bucket);
+    }
+    for (const bucket of byAgent.values()) {
+      bucket.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      for (const entry of bucket.slice(0, Math.max(0, bucket.length - MAX_CHECKPOINTS_PER_AGENT))) {
+        rmSync(resolve(this.dir, entry.file), { force: true });
+      }
+    }
+  }
+
+  private checkpointPath(agentId: string, id: string): string {
+    return resolve(this.dir, checkpointFileName(agentId, id));
+  }
+}
+
+function safeAgentPrefix(agentId: string): string {
+  return agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function readCheckpointFile(path: string): RewindCheckpoint | null {
+  try {
+    if (!existsSync(path)) return null;
+    const data = JSON.parse(readFileSync(path, 'utf-8')) as SerializedCheckpoint;
+    if (!data || data.version !== REWIND_FILE_VERSION) return null;
+    return deserializeCheckpoint(data);
+  } catch {
+    return null;
   }
 }
 

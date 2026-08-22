@@ -31,6 +31,7 @@ export const micaBuiltinCommands = {
 
 export {
   createLoopCommand,
+  DEFAULT_LOOP_INTERVAL_MS,
   formatDuration,
   LoopController,
   MIN_LOOP_INTERVAL_MS,

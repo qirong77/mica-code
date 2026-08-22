@@ -1,11 +1,33 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import { RewindCheckpointManager } from './RewindCheckpointManager.js';
 
 describe('RewindCheckpointManager conversation fallback', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  });
+
+  function makeManager(): RewindCheckpointManager {
+    const dir = mkdtempSync(join(tmpdir(), 'rewind-test-'));
+    tempDirs.push(dir);
+    return new RewindCheckpointManager(dir);
+  }
+
   it('rebuilds resumed turns and keeps the selected turn including tool messages', () => {
-    const manager = new RewindCheckpointManager();
+    const manager = makeManager();
     let currentSnapshot = makeSnapshot([
       { role: 'user', content: 'first request' },
       {
@@ -73,7 +95,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
   });
 
   it('restores old history before capturing the first new turn after resume', () => {
-    const manager = new RewindCheckpointManager();
+    const manager = makeManager();
     let currentSnapshot = makeSnapshot([
       { role: 'user', content: 'resumed request' },
       { role: 'assistant', content: 'resumed answer' },
@@ -97,7 +119,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
   });
 
   it('only exposes visible user turns when provider history contains hidden inputs', () => {
-    const manager = new RewindCheckpointManager();
+    const manager = makeManager();
     const snapshot = makeSnapshot([
       { role: 'user', content: 'first visible' },
       { role: 'assistant', content: 'first answer' },
@@ -125,7 +147,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
   });
 
   it('does not expose compact metadata as a user-selectable turn', () => {
-    const manager = new RewindCheckpointManager();
+    const manager = makeManager();
     const snapshot = makeSnapshot([
       { role: 'user', content: '[Mica compact boundary]\n\n{}' },
       { role: 'user', content: '[Mica compact checkpoint]\n\nsummary' },
@@ -143,7 +165,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
   });
 
   it('keeps a live checkpoint at the state after its selected turn', () => {
-    const manager = new RewindCheckpointManager();
+    const manager = makeManager();
     let currentSnapshot = makeSnapshot([]);
     const agent = makeAgent(
       () => currentSnapshot,
@@ -209,5 +231,5 @@ function makeAgent(
   getSnapshot: () => AgentRuntimeSnapshot,
   loadSnapshot: (snapshot: AgentRuntimeSnapshot) => void,
 ): AgentRuntime {
-  return { getSnapshot, loadSnapshot } as unknown as AgentRuntime;
+  return { getSnapshot, loadSnapshot, taskOwnerId: 'agent-test' } as unknown as AgentRuntime;
 }

@@ -4,6 +4,8 @@ import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/m
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
 
 export const MIN_LOOP_INTERVAL_MS = 10_000;
+/** `/loop <任务描述>` 不带间隔时的默认触发间隔（30 分钟）。 */
+export const DEFAULT_LOOP_INTERVAL_MS = 30 * 60_000;
 
 const DURATION_UNITS: Record<'s' | 'm' | 'h' | 'd', number> = {
   s: 1_000,
@@ -79,19 +81,26 @@ export function parseLoopArgs(args: string): LoopParseResult {
   if (['stop', 'off', 'cancel', 'end'].includes(lower)) return { kind: 'stop' };
   if (lower === 'status') return { kind: 'status' };
 
-  const [rawDuration, ...rest] = trimmed.split(/\s+/);
-  const intervalMs = parseDuration(rawDuration ?? '');
-  if (intervalMs === null) {
-    return { kind: 'error', message: `无法解析循环间隔「${rawDuration}」；请使用 30s / 15m / 2h / 1d 之类的格式` };
+  const [first, ...rest] = trimmed.split(/\s+/);
+  const intervalMs = parseDuration(first ?? '');
+  if (intervalMs !== null) {
+    // 第一个词是间隔：/loop <间隔> <任务描述>
+    const task = rest.join(' ').trim();
+    if (!task) {
+      return { kind: 'error', message: '缺少任务描述；用法：/loop <任务描述>（默认每 30 分钟）或 /loop <间隔> <任务描述>' };
+    }
+    if (intervalMs < MIN_LOOP_INTERVAL_MS) {
+      return { kind: 'error', message: '循环间隔太短，最少 10 秒' };
+    }
+    return { kind: 'start', intervalMs, intervalLabel: formatDuration(intervalMs), task };
   }
-  const task = rest.join(' ').trim();
-  if (!task) {
-    return { kind: 'error', message: '缺少任务描述；用法：/loop <间隔> <任务描述>，例如 /loop 60m 推送一个 BBC 的新闻' };
-  }
-  if (intervalMs < MIN_LOOP_INTERVAL_MS) {
-    return { kind: 'error', message: '循环间隔太短，最少 10 秒' };
-  }
-  return { kind: 'start', intervalMs, intervalLabel: formatDuration(intervalMs), task };
+  // 第一个词不是间隔：整个输入作为任务，使用默认间隔
+  return {
+    kind: 'start',
+    intervalMs: DEFAULT_LOOP_INTERVAL_MS,
+    intervalLabel: formatDuration(DEFAULT_LOOP_INTERVAL_MS),
+    task: trimmed,
+  };
 }
 
 /**
@@ -231,7 +240,7 @@ export function createLoopCommand(
 ): BuiltInCommandItem {
   return {
     name: 'loop',
-    description: '启动定时循环任务：/loop <间隔> <任务描述>；/loop stop 停止；/loop 查看状态',
+    description: '启动定时循环任务：/loop <任务描述>（默认每 30 分钟）或 /loop <间隔> <任务描述>；/loop stop 停止；/loop 查看状态',
     completionItems: [
       { arg: 'stop', description: '停止当前定时循环任务' },
       { arg: 'status', description: '查看当前循环状态' },
@@ -244,7 +253,7 @@ export function createLoopCommand(
           const state = controller.active;
           if (!state) {
             services.showNotice(
-              '当前没有运行的定时循环任务。用法：/loop <间隔> <任务描述>，例如 /loop 60m 推送一个 BBC 的新闻',
+              '当前没有运行的定时循环任务。用法：/loop <任务描述>（默认每 30 分钟）或 /loop <间隔> <任务描述>，例如 /loop 推送一个 BBC 的新闻',
               ownerSessionId,
               { command: '/loop', status: 'info' },
             );
