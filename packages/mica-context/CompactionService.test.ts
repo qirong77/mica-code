@@ -286,7 +286,7 @@ describe('CompactionService', () => {
     expect(JSON.stringify(result.messages)).toContain(COMPACT_SUMMARY_PREFIX);
   });
 
-  it('preserves opaque Responses encrypted reasoning during lightweight prune-only compact', async () => {
+  it('strips opaque Responses encrypted reasoning during lightweight prune-only compact', async () => {
     const service = new CompactionService();
     const encryptedContent = 'A'.repeat(8_000);
     const messages = [
@@ -325,13 +325,12 @@ describe('CompactionService', () => {
     });
 
     expect(result.strategy).toBe('prune_only');
-    expect(result.messages).toContainEqual(
-      expect.objectContaining({
-        type: 'reasoning',
-        id: 'rs_test',
-        encrypted_content: encryptedContent,
-      }),
-    );
+    // Reasoning ciphertext must not survive compaction: replaying a stale chain
+    // against rewritten tool results/media makes the model stall into
+    // reasoning-only turns (committed as empty responses). Dropping it here lets
+    // ResponsesClient stripUnusableResponseInputItems discard the item on replay.
+    expect(JSON.stringify(result.messages)).not.toContain(encryptedContent);
+    expect(JSON.stringify(result.messages)).not.toContain('"encrypted_content"');
     expect(JSON.stringify(result.messages)).not.toContain('[omitted base64 data:');
   });
 

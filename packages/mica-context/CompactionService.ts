@@ -714,10 +714,14 @@ function pruneValue(value: unknown, options: PruneOptions): unknown {
 
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) {
-    // Responses API reasoning payloads are opaque, authenticated ciphertext.
-    // Changing them makes the next request fail with invalid_encrypted_content.
+    // Never carry Responses reasoning ciphertext across a compaction. These
+    // payloads are opaque, authenticated ciphertext bound to the exact prior
+    // context; prune-only/summarized compact rewrites tool results & media, so
+    // replaying a stale chain makes the model stall (reasoning-only turns
+    // committed as empty responses). Dropping encrypted_content lets
+    // stripUnusableResponseInputItems (ResponsesClient) discard the item on
+    // replay, so the model re-reasons cleanly against the compacted context.
     if (key === 'encrypted_content') {
-      next[key] = child;
       continue;
     }
     if (key === 'toolUseResult') {
@@ -771,7 +775,6 @@ function pruneProtocolSensitiveRecord(record: Record<string, unknown>, options: 
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) {
     if (key === 'encrypted_content') {
-      next[key] = child;
       continue;
     }
     if (key === 'tool_calls' && Array.isArray(child)) {
