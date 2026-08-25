@@ -25,6 +25,12 @@ Codex-family drivers that spawn `app-server --listen stdio://` (Multica does thi
 are also accepted: `mica app-server` recognizes and ignores the `--listen`
 / `--stdio` transport flags, since Mica's app-server always speaks stdio.
 
+The driver-selected model is honored on both `thread/start` and `thread/resume`:
+their `model` field is resolved like `turn/start` (longest configured provider
+prefix wins, so a `krill/gpt-5.6-terra` id routes to the `krill` provider). This
+matters because Multica conveys the agent model via `thread/start` (or
+`thread/resume`) rather than a launch flag, so `--model` is optional.
+
 ## Register in Multica
 
 If the release binary is available as `mica` on the daemon host:

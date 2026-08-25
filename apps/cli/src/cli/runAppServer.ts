@@ -671,6 +671,29 @@ async function handleCodexRequest(
       const cwdParam = paramString(params, 'cwd');
       if (cwdParam) process.chdir(resolve(cwdParam));
       warnIfCodexPolicyCannotBeEnforced(ctx, params);
+      // A codex-family driver (e.g. Multica) conveys the agent's model via
+      // thread/start's `model` field, not via a launch flag. Honor it here like
+      // turn/start does, otherwise the requested model is silently replaced by
+      // the persisted default provider/model (MUL-…).
+      const model = paramString(params, 'model');
+      const effort = paramString(params, 'effort');
+      if (model || effort) {
+        try {
+          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
+          ctx.agent.configureForRun(
+            {
+              providerId: override.providerId,
+              model: override.model,
+              effort: override.effort,
+            },
+            true,
+          );
+          await ensureChatHostModelRule(override.model ?? ctx.agent.config.model);
+        } catch (error) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
       const thread = threadSnapshot(ctx, ctx.agent.config.model);
       ctx.writeNotification(CODEX_NOTIFICATIONS.threadStarted, { thread });
       ctx.writeResponse(threadResponse(ctx));
@@ -693,14 +716,28 @@ async function handleCodexRequest(
       }
       ctx.sessionId = threadId;
       ctx.setSessionId(threadId);
-      // Same override-priority logic as the --session resume path above: a
-      // --model/--variant CLI override must survive thread/resume, otherwise
-      // the session snapshot silently replaces it.
-      const overrideModel = ctx.runtimeOverride.model ?? ctx.agent.config.model;
+      // Same override-priority logic as the --session resume path above, but a
+      // codex-family driver (e.g. Multica) also conveys the model via the
+      // thread/resume `model` field (see codex.go thread/resume params). Honor
+      // that first so a driver-selected model survives resume instead of being
+      // replaced by the CLI override or the persisted snapshot. Order:
+      // params.model → CLI --model/--variant → session snapshot.
+      const paramsModel = paramString(params, 'model');
+      const paramsEffort = paramString(params, 'effort');
+      let resumeOverride = ctx.runtimeOverride;
+      if (paramsModel || paramsEffort) {
+        try {
+          resumeOverride = resolveRuntimeConfigOverride(micaConfig.get(), paramsModel, paramsEffort);
+        } catch (error) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
+      const overrideModel = resumeOverride.model ?? ctx.agent.config.model;
       await ensureChatHostModelRule(overrideModel);
       ctx.agent.configureForRun(
-        hasRuntimeOverride(ctx.runtimeOverride)
-          ? ctx.runtimeOverride
+        hasRuntimeOverride(resumeOverride)
+          ? resumeOverride
           : {
               providerId: ctx.agent.config.provider.id,
               model: ctx.agent.config.model,
