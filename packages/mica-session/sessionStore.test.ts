@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +38,37 @@ describe('SessionStore path', () => {
       store.save(makeSession('middle', '/tmp/middle', '2026-01-02T00:00:00.000Z'));
 
       expect(store.listRecent(2).map((session) => session.id)).toEqual(['newest', 'middle']);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('SessionStore metadata index', () => {
+  it('persists recency order and reloads from the index without parsing session bodies', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-index-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+
+      store.save(makeSession('newest', '/tmp/newest', '2026-01-03T00:00:00.000Z'));
+      store.save(makeSession('middle', '/tmp/middle', '2026-01-02T00:00:00.000Z'));
+      store.save(makeSession('oldest', '/tmp/oldest', '2026-01-01T00:00:00.000Z'));
+
+      // The index lives outside sessions/ so directory scans stay unaffected.
+      const indexFile = join(micaHome, 'session-index.json');
+      expect(existsSync(indexFile)).toBe(true);
+      expect(existsSync(join(SESSION_DIR, 'session-index.json'))).toBe(false);
+
+      // A fresh store reads the index: a corrupt session body must be ignored.
+      writeFileSync(join(SESSION_DIR, 'newest.json'), '{ not valid json', 'utf-8');
+      const reloaded = new SessionStore();
+      expect(reloaded.listRecent(10).map((session) => session.id)).toEqual(['newest', 'middle', 'oldest']);
+
+      reloaded.delete('newest');
+      expect(reloaded.listRecent(10).map((session) => session.id)).toEqual(['middle', 'oldest']);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }

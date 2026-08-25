@@ -25,7 +25,7 @@ describe('cd command', () => {
     ]);
   });
 
-  it('queries 300 recent sessions and changes the process cwd when Enter is pressed', async () => {
+  it('queries 100 recent sessions and changes the process cwd when Enter is pressed', async () => {
     const target = makeTemporaryDirectory();
     const expectedCwd = realpathSync(target);
     const listRecent = vi.fn(() => [session(target), session(target)]);
@@ -42,7 +42,7 @@ describe('cd command', () => {
     panel?.onInput?.('', { return: true });
     await vi.waitFor(() => expect(process.cwd()).toBe(expectedCwd));
 
-    expect(listRecent).toHaveBeenCalledWith(300);
+    expect(listRecent).toHaveBeenCalledWith(100);
     expect(services.showNotice).toHaveBeenCalledWith(`Working directory: ${expectedCwd}`, undefined, {
       command: '/cd',
       status: 'success',

@@ -233,6 +233,17 @@ export function parseCliArgs(argv: string[]): CliInvocation {
         if (valueOption.name === '--mcp-init-timeout-ms') mcpInitTimeoutMs = Number(valueOption.value);
         continue;
       }
+      // Codex app-server transport flags. A codex-family driver (e.g. Multica)
+      // spawns `<agent> app-server --listen stdio://`; Mica's app-server is
+      // always stdio, so accept and drop the transport flag instead of
+      // rejecting it as an unknown option.
+      if (arg === '--stdio') continue;
+      if (arg === '--listen') {
+        const transport = argv[index + 1];
+        if (transport !== undefined && !transport.startsWith('--')) index++;
+        continue;
+      }
+      if (arg.startsWith('--listen=')) continue;
       if (arg === '--strict-mcp-config') {
         strictMcpConfig = true;
         continue;

@@ -90,6 +90,7 @@ bun run format
 - `packages/mica-config` 是配置与本地状态的唯一入口，UI/commands/runtime/adapter 不自己读写路径。默认 `~/.mica/{config.json,storage.json,sessions}`，`MICA_HOME` 时全部跟随；测试和临时 repro 用临时 `MICA_HOME`，不污染真实 `~/.mica`。
 - `PersistedMicaConfig` 只存静态字段（providers 等）；顶层 `provider`/`model`/`effort`/`contextWindowSize` 是运行时合成字段，经 `stripRuntimeFields` 去掉不写回 config.json。协议只支持 chat_completions/responses；启动迁移与语义校验统一在 `packages/mica-builtin-commands/startup/validate-config.js`（配置 Web 保存也复用），不要在别处另建校验规则。
 - session 文件是 version 1 JSON（id/title/createdAt/updatedAt/cwd/snapshot）；snapshot 含 providerId/model/effort/role/history/conversationMessages/usage。`subagentUsageHistory` 必须独立存放（相对子 agent 自身消息数组，不能混入主 usageHistory，否则破坏 rewind 裁剪语义）。新增字段必须有版本策略、默认值和 sanitize/parse。
+- `SessionStore.list`/`listRecent` 通过 `$MICA_HOME/session-index.json`（session 元数据索引，放 MICA_HOME 根而非 `sessions/` 内，避免被 config-web/sync 的 session 目录扫描误识别）快速列出，不再逐个 `JSON.parse` session；索引由 `save`/`delete` 同步维护，缺失/过期时用「读文件头部提取元数据」轻量重建（兜底全量 parse）。它只是可随时重建的缓存，不作为事实来源；`/cd` 取最近 cwd 上限 100，`/resume` 仍可读全量索引。
 - `SessionController.saveCurrent` 用持久化签名检测"另一进程写盘"，签名不匹配时**降级写盘**（revision+1、以内存快照为准）而不是永久跳过，否则 headless host 后续 turn 不落盘；`refreshFromStore` 会在下次刷新收敛。
 
 ## 模型、Effort 与 Context

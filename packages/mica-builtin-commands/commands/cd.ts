@@ -3,7 +3,7 @@ import type { BuiltInCommandItem } from '../commandHost.js';
 import type { CommandRuntimeServices, CommandSessionController, SessionSummary } from '../services.js';
 import { showSelectCommand } from '../shared/selectCommand.js';
 
-const RECENT_SESSION_LIMIT = 300;
+const RECENT_SESSION_LIMIT = 100;
 
 export function createCdCommand(
   sessionController: CommandSessionController,

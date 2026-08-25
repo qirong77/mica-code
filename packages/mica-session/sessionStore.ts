@@ -5,6 +5,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -81,42 +82,26 @@ export type SessionTurnLease = {
   release(): void;
 };
 
-export const SESSION_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'sessions');
+const MICA_HOME = process.env.MICA_HOME || resolve(homedir(), '.mica');
+export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
+const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
 const MALFORMED_LEASE_STALE_MS = 60_000;
+const SUMMARY_HEAD_BYTES = 16 * 1024;
 
 export class SessionStore implements SessionStoreLike {
+  /** In-memory metadata summaries sorted by updatedAt descending. Lazily built. */
+  private cachedIndex: SessionSummary[] | null = null;
+
   list(limit = 20): SessionSummary[] {
-    ensureSessionDir();
-    return readdirSync(SESSION_DIR)
-      .filter((file) => file.endsWith('.json'))
-      .map((file) => this.read(resolve(SESSION_DIR, file)))
-      .filter((session): session is PersistedSession => Boolean(session))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    return this.ensureIndex()
       .slice(0, limit)
-      .map((session) => ({
-        id: session.id,
-        title: session.title,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-        cwd: session.cwd,
-        providerId: session.snapshot.providerId,
-        model: session.snapshot.model,
-        uncompleted: session.turnState !== 'completed',
-        turnState: session.turnState,
-        effort: session.snapshot.effort,
-        role: session.snapshot.role,
-      }));
+      .map((session) => ({ ...session }));
   }
 
   listRecent(limit = 20): SessionSummary[] {
-    ensureSessionDir();
-    return readdirSync(SESSION_DIR)
-      .filter((file) => file.endsWith('.json'))
-      .map((file) => this.read(resolve(SESSION_DIR, file)))
-      .filter((session): session is PersistedSession => Boolean(session))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    return this.ensureIndex()
       .slice(0, limit)
-      .map(toSessionSummary);
+      .map((session) => ({ ...session }));
   }
 
   /** Reads current snapshots plus the legacy message-array format used by older Mica builds. */
@@ -142,6 +127,11 @@ export class SessionStore implements SessionStoreLike {
     const tmpPath = `${path}.${process.pid}.tmp`;
     writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, 'utf-8');
     renameSync(tmpPath, path);
+    try {
+      this.updateIndexForSave(session);
+    } catch {
+      // best-effort metadata index; a rebuild reconciles it on the next list.
+    }
   }
 
   replaceValidated(id: string, content: string): PersistedSession {
@@ -175,7 +165,94 @@ export class SessionStore implements SessionStoreLike {
     const path = sessionPath(safeId);
     if (!existsSync(path)) return false;
     rmSync(path, { force: true });
+    try {
+      this.removeFromIndex(safeId);
+    } catch {
+      // best-effort metadata index; a rebuild reconciles it on the next list.
+    }
     return true;
+  }
+
+  /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */
+  private ensureIndex(): SessionSummary[] {
+    if (this.cachedIndex) return this.cachedIndex;
+    const fromDisk = this.readIndexFromDisk();
+    if (fromDisk) {
+      this.cachedIndex = fromDisk;
+      return fromDisk;
+    }
+    this.cachedIndex = this.rebuildIndex();
+    this.persistIndex();
+    return this.cachedIndex;
+  }
+
+  private readIndexFromDisk(): SessionSummary[] | null {
+    try {
+      if (!existsSync(SESSION_INDEX_FILE)) return null;
+      // A newer directory mtime means a session file was added/removed/renamed
+      // somewhere else (e.g. sync daemon), so the index may be stale.
+      if (statSync(SESSION_DIR).mtimeMs > statSync(SESSION_INDEX_FILE).mtimeMs) return null;
+      const data = JSON.parse(readFileSync(SESSION_INDEX_FILE, 'utf-8')) as unknown;
+      if (!data || typeof data !== 'object') return null;
+      const sessions = (data as { sessions?: unknown }).sessions;
+      if (!Array.isArray(sessions)) return null;
+      const summaries = sessions.filter(isSessionSummary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      return summaries;
+    } catch {
+      return null;
+    }
+  }
+
+  private rebuildIndex(): SessionSummary[] {
+    ensureSessionDir();
+    return readdirSync(SESSION_DIR)
+      .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
+      .map((file) => this.readSummary(resolve(SESSION_DIR, file)))
+      .filter((session): session is SessionSummary => Boolean(session))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Reads summary metadata from the head of a session file, falling back to a
+   * full parse only when the head cannot yield a complete summary. */
+  private readSummary(path: string): SessionSummary | null {
+    const head = readFileHead(path, SUMMARY_HEAD_BYTES);
+    if (head) {
+      const summary = extractSummaryFromHead(head);
+      if (summary) return summary;
+    }
+    const session = this.read(path);
+    return session ? toSessionSummary(session) : null;
+  }
+
+  private persistIndex(): void {
+    const content = JSON.stringify({ version: 1, sessions: this.cachedIndex ?? [] }, null, 2);
+    const tmpPath = `${SESSION_INDEX_FILE}.${process.pid}.tmp`;
+    mkdirSync(MICA_HOME, { recursive: true });
+    writeFileSync(tmpPath, `${content}\n`, 'utf-8');
+    renameSync(tmpPath, SESSION_INDEX_FILE);
+  }
+
+  private updateIndexForSave(session: PersistedSession): void {
+    const summary = toSessionSummary(session);
+    this.mutateIndex((index) => {
+      const existing = index.findIndex((entry) => entry.id === summary.id);
+      if (existing >= 0) index[existing] = summary;
+      else index.push(summary);
+      index.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    });
+  }
+
+  private removeFromIndex(id: string): void {
+    this.mutateIndex((index) => {
+      const existing = index.findIndex((entry) => entry.id === id);
+      if (existing >= 0) index.splice(existing, 1);
+    });
+  }
+
+  private mutateIndex(mutate: (index: SessionSummary[]) => void): void {
+    const index = this.ensureIndex();
+    mutate(index);
+    this.persistIndex();
   }
 
   private read(path: string): PersistedSession | null {
@@ -269,6 +346,72 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
     effort: session.snapshot.effort,
     role: session.snapshot.role,
   };
+}
+
+function isSessionSummary(value: unknown): value is SessionSummary {
+  if (!value || typeof value !== 'object') return false;
+  const session = value as Record<string, unknown>;
+  return (
+    typeof session.id === 'string' &&
+    typeof session.title === 'string' &&
+    typeof session.cwd === 'string' &&
+    typeof session.updatedAt === 'string' &&
+    typeof session.providerId === 'string' &&
+    typeof session.model === 'string' &&
+    typeof session.uncompleted === 'boolean'
+  );
+}
+
+function readFileHead(path: string, bytes: number): string | null {
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(bytes);
+      const length = readSync(fd, buffer, 0, buffer.length, 0);
+      return buffer.toString('utf-8', 0, length);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+function extractSummaryFromHead(head: string): SessionSummary | null {
+  const id = pickString(head, 'id');
+  const title = pickString(head, 'title');
+  const createdAt = pickString(head, 'createdAt');
+  const updatedAt = pickString(head, 'updatedAt');
+  const cwd = pickString(head, 'cwd');
+  const turnState = pickString(head, 'turnState');
+  const providerId = pickString(head, 'providerId');
+  const model = pickString(head, 'model');
+  const effort = pickString(head, 'effort');
+  const role = pickString(head, 'role');
+  if (!id || !title || !cwd || !updatedAt || !providerId || !model) return null;
+  return {
+    id,
+    title,
+    createdAt,
+    updatedAt,
+    cwd,
+    providerId,
+    model,
+    uncompleted: turnState !== undefined && turnState !== 'completed',
+    turnState: isPersistedSessionTurnState(turnState) ? turnState : 'completed',
+    effort: isEffortOption(effort) ? effort : 'none',
+    role: role ?? 'default',
+  };
+}
+
+function pickString(text: string, key: string): string | undefined {
+  const match = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  if (!match) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return undefined;
+  }
 }
 
 function createSessionStore(): SessionStore {

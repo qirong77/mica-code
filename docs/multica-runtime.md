@@ -21,6 +21,10 @@ types `agent_message`/`reasoning`/`command_execution`). `mica app-server` mirror
 notifications over stdout. Mica keeps diagnostics on stderr and uses exit code
 `0` for success, `1` for failure, and `130` for an interrupted run.
 
+Codex-family drivers that spawn `app-server --listen stdio://` (Multica does this)
+are also accepted: `mica app-server` recognizes and ignores the `--listen`
+/ `--stdio` transport flags, since Mica's app-server always speaks stdio.
+
 ## Register in Multica
 
 If the release binary is available as `mica` on the daemon host:

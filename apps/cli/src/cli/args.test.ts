@@ -154,4 +154,18 @@ describe('parseCliArgs', () => {
     });
     expect(parseCliArgs(['run', '--format=json', 'hi'])).toMatchObject({ mode: 'interactive' });
   });
+
+  it('accepts codex app-server transport flags (Multica --listen)', () => {
+    expect(parseCliArgs(['app-server', '--listen', 'stdio://', '--dir', '/work'])).toMatchObject({
+      mode: 'app-server',
+      cwd: '/work',
+    });
+    expect(
+      parseCliArgs(['app-server', '--listen=stdio://', '--model', 'openai/gpt-5']),
+    ).toMatchObject({ mode: 'app-server', model: 'openai/gpt-5' });
+    expect(parseCliArgs(['app-server', '--stdio'])).toMatchObject({ mode: 'app-server' });
+    expect(parseCliArgs(['app-server', '--listen', 'stdio://', '--nope'])).toMatchObject({
+      mode: 'error',
+    });
+  });
 });
