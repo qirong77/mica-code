@@ -63,6 +63,7 @@ describe('Responses input normalization', () => {
     const reasoning = input[1]!;
     expect(reasoning.type).toBe('reasoning');
     expect(reasoning).not.toHaveProperty('status');
+    expect(reasoning).not.toHaveProperty('id');
     expect(reasoning.encrypted_content).toBe('enc-1');
 
     const assistant = input[2]!;
@@ -116,11 +117,42 @@ describe('Responses input normalization', () => {
     const input = (captured as { input: Array<Record<string, unknown>> }).input;
     expect(input.map((item) => item.type)).toEqual(['message', 'reasoning', 'message', 'message']);
     expect(input[1]).not.toHaveProperty('status');
+    expect(input[1]).not.toHaveProperty('id');
     expect(input[1]!.encrypted_content).toBe('enc-9');
     expect(input[2]).not.toHaveProperty('status');
     expect(input[2]).not.toHaveProperty('id');
     expect(input[2]).not.toHaveProperty('phase');
     expect(JSON.stringify(input)).not.toContain('"status"');
+  });
+
+  it('keeps a valid rs_ prefixed reasoning id on the wire', async () => {
+    openaiMocks.responsesCreate
+      .mockResolvedValueOnce(
+        streamOf({
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: {
+            type: 'reasoning',
+            id: 'rs_abcdef',
+            status: 'completed',
+            summary: [],
+            content: [{ type: 'reasoning_text', text: 'thinking' }],
+            encrypted_content: 'enc-2',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(streamOf({ type: 'response.output_text.delta', delta: 'second reply' }));
+    const client = new ResponsesClient(options('openai_responses'));
+
+    await expect(client.query('first')).resolves.toBe('');
+    await expect(client.query('second')).resolves.toBe('second reply');
+
+    const request = openaiMocks.responsesCreate.mock.calls[1]![0] as {
+      input: Array<Record<string, unknown>>;
+    };
+    const reasoning = request.input.find((item) => item.type === 'reasoning')!;
+    expect(reasoning.id).toBe('rs_abcdef');
+    expect(reasoning).not.toHaveProperty('status');
   });
 });
 

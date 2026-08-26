@@ -12,7 +12,13 @@ const MAX_FILES = 50_000;
 // `@doc` surfaces the most relevant docs/ + files instead of a wall of
 // basename-only-substring matches (file_type_docusaurus.svg etc).
 const MAX_RESULTS = 20;
-const CACHE_TTL_MS = 3_000;
+// A 3s TTL makes a short pause while typing `@doc` (or a slow keystroke) fall
+// outside the cache window and re-trigger a full `git ls-files` scan (1.7s on
+// a large repo), which is what users actually feel as "slow". Long enough to
+// cover a whole `@`-mention typing burst, short enough that a stale working
+// tree does not linger. Snapshot freshness is not critical here: results are
+// only used for inline completion suggestions.
+const CACHE_TTL_MS = 45_000;
 const MAX_CACHED_ROOTS = 4;
 const execFileAsync = promisify(execFile);
 
@@ -28,16 +34,122 @@ type RankedFile = {
 const cache = new Map<string, CacheEntry>();
 
 export default function setup(ctx: PluginContext): void {
+  // Prewarm the workspace file list so the first `@` (which otherwise cold
+  // starts a full `git ls-files` scan ~1.7s on a large repo) hits the cache
+  // instead of blocking the user's first keystroke. Fire-and-forget: never
+  // block plugin setup or surface an error to the UI.
+  void getWorkspaceFiles(process.cwd()).catch(() => {});
   const disposable = ctx.ui?.input?.registerFileMentionProvider((query) => findFileMentions(process.cwd(), query));
   if (disposable) ctx.onDispose(() => disposable.dispose());
 }
 
 export async function findFileMentions(root: string, query: string): Promise<TerminalFileMentionItem[]> {
-  const files = await getWorkspaceFiles(root);
   const needle = normalizePathQuery(query);
+  if (needle) {
+    const fdPath = await getFdExecutable();
+    if (fdPath) {
+      try {
+        return await findFileMentionsWithFd(root, fdPath, needle);
+      } catch {
+        // fd failed (e.g. binary race, permission) — fall back to a full
+        // workspace scan so `@` still resolves.
+      }
+    }
+  }
+  const files = await getWorkspaceFiles(root);
   return matchWorkspaceFiles(files, needle)
     .slice(0, MAX_RESULTS)
     .map(({ path, label, description, labelHighlights }) => ({ path, label, description, labelHighlights }));
+}
+
+let detectedFdExecutable: string | null | undefined;
+
+/**
+ * Resolve the `fd` (or Debian `fdfind`) executable, cached for the process.
+ * `fd` pushes the query down to the filesystem (C implementation) instead of
+ * enumerating the whole tree, which is what makes kimi's `@` completion feel
+ * instant. We only use it when present; the workspace scan remains the fallback.
+ */
+async function getFdExecutable(): Promise<string | null> {
+  if (detectedFdExecutable !== undefined) return detectedFdExecutable;
+  for (const candidate of ['fd', 'fdfind']) {
+    try {
+      await execFileAsync(candidate, ['--version'], { timeout: 2_000 });
+      detectedFdExecutable = candidate;
+      return candidate;
+    } catch {
+      // try the next candidate
+    }
+  }
+  detectedFdExecutable = null;
+  return null;
+}
+
+async function findFileMentionsWithFd(
+  root: string,
+  fdPath: string,
+  query: string,
+): Promise<TerminalFileMentionItem[]> {
+  // `--full-path` keeps mica's path-level match semantics (e.g. `@node` must
+  // surface `src/mynode/helper.ts`), which basename-only fd matching would drop.
+  // `--ignore-case` aligns with the case-insensitive scoring below.
+  const args = [
+    '--base-directory',
+    root,
+    '--full-path',
+    '--max-results',
+    '100',
+    '--type',
+    'f',
+    '--type',
+    'd',
+    '--ignore-case',
+    '--hidden',
+    '--exclude',
+    '.git',
+    '--exclude',
+    '.git/*',
+    '--exclude',
+    '.git/**',
+    query,
+  ];
+  const { stdout } = await execFileAsync(fdPath, args, {
+    encoding: 'utf8',
+    maxBuffer: 20 * 1024 * 1024,
+    timeout: 10_000,
+  });
+
+  const ranked: RankedFile[] = [];
+  for (const line of stdout.split('\n')) {
+    const display = line.replace(/\\/gu, '/');
+    if (!display) continue;
+    const isDirectory = display.endsWith('/');
+    const clean = isDirectory ? display.slice(0, -1) : display;
+    if (!clean || clean === '.git' || clean.startsWith('.git/') || clean.includes('/.git/')) continue;
+    if (!isWorkspaceFile(clean)) continue;
+    const { score, basenameMatch } = scorePath(clean, query, isDirectory);
+    if (score <= 0) continue;
+    const name = basename(clean);
+    ranked.push({
+      path: isDirectory ? `${clean}/` : clean,
+      label: isDirectory ? `${name}/` : name,
+      description: clean,
+      labelHighlights: basenameMatch ? computeLabelHighlights(name, query) : [],
+      score,
+      isDirectory,
+    });
+  }
+  ranked.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    return comparePaths(a.path, b.path);
+  });
+  return ranked.slice(0, MAX_RESULTS).map(({ path, label, description, labelHighlights }) => ({
+    path,
+    label,
+    description,
+    labelHighlights,
+  }));
 }
 
 /**

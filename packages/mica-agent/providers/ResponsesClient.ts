@@ -529,9 +529,15 @@ function normalizeResponsesInputItem(item: ResponseInputItem): ResponseInputItem
     return { type: 'function_call_output', call_id: item.call_id, output: item.output } as ResponseInputItem;
   }
   if (item.type === 'reasoning') {
+    // Strict Responses-compatible gateways validate the item id prefix against
+    // the concrete item type: reasoning ids must begin with `rs_`. A foreign
+    // provider may echo back a generically-prefixed or UUID id, which the
+    // gateway then rejects with invalid_id_prefix. Only carry a valid id
+    // through; drop the server-side-only field otherwise (mirrors how the
+    // `message` branch strips `status`/`id`/`phase`).
     return {
       type: 'reasoning',
-      id: item.id,
+      ...(item.id && item.id.startsWith('rs_') ? { id: item.id } : {}),
       summary: item.summary,
       ...(item.content ? { content: item.content } : {}),
       ...(item.encrypted_content ? { encrypted_content: item.encrypted_content } : {}),
