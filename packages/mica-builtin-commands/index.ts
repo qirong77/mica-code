@@ -50,6 +50,7 @@ export { createNewCommand } from './commands/new.js';
 export { createRenameCommand } from './commands/rename.js';
 export { createResumeCommand, formatResumeSessionTitle } from './commands/resume.js';
 export { createRewindCommand, rewindCheckpointCells } from './commands/rewind.js';
+export { createBtwCommand, parseBtwArgs, formatBtwNotice, buildBtwSystemPrompt, messagesToTranscript } from './commands/btw.js';
 
 export type {
   ClearIdleAgentsResult,
@@ -85,6 +86,7 @@ export type { BuiltInCommandItem, CommandHostService } from './commandHost.js';
 export { default as setupCommandCd } from './plugins/command-cd.js';
 export { default as setupCommandClear } from './plugins/command-clear.js';
 export { default as setupCommandCompact } from './plugins/command-compact.js';
+export { default as setupCommandBtw } from './plugins/command-btw.js';
 export { default as setupCommandExit } from './plugins/command-exit.js';
 export { default as setupCommandFork } from './plugins/command-fork.js';
 export { default as setupCommandNew } from './plugins/command-new.js';

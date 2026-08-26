@@ -150,7 +150,7 @@ export type CommandNoticeOptions = {
   variant?: 'commit' | 'config' | 'compact' | 'error';
   command?: string;
   surface?: 'conversation' | 'command_panel';
-  status?: 'success' | 'warning' | 'error' | 'info';
+  status?: 'running' | 'success' | 'warning' | 'error' | 'info';
 };
 
 export type CommandRuntimeServices = {
