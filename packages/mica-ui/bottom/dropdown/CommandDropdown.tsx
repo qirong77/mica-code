@@ -30,9 +30,9 @@ export function CommandDropdown({
     () =>
       getOneLineColumnWidth(
         items.map((item) => item.label),
-        { min: MIN_LABEL_COL, max: 34, padding: 1 },
+        { min: kind === 'file' ? 8 : MIN_LABEL_COL, max: 34, padding: 1 },
       ),
-    [items],
+    [items, kind],
   );
   const selectItems: CommandSelectItem[] = useMemo(
     () => items.map((item) => ({ key: item.key, label: item.label, source: item })),
@@ -41,7 +41,7 @@ export function CommandDropdown({
 
   const renderItem = (item: CommandSelectItem, isSelected: boolean, index: number) => {
     const { source } = item;
-    if (source.kind === 'file') return renderFileItem(source, isSelected, index);
+    if (source.kind === 'file') return renderFileItem(source, isSelected, index, labelWidth);
 
     const primaryColor = isSelected ? themeColors.accent : themeColors.textSecondary;
     const secondaryColor = isSelected ? themeColors.accent : themeColors.dim;
@@ -95,8 +95,14 @@ export function CommandDropdown({
   return list;
 }
 
-function renderFileItem(source: MicaUiDropdownItem, isSelected: boolean, index: number): React.ReactNode {
+function renderFileItem(
+  source: MicaUiDropdownItem,
+  isSelected: boolean,
+  index: number,
+  labelWidth: number,
+): React.ReactNode {
   const primaryColor = isSelected ? themeColors.accent : themeColors.text;
+  const secondaryColor = isSelected ? themeColors.accent : themeColors.dim;
   return (
     <Box
       width="100%"
@@ -110,15 +116,18 @@ function renderFileItem(source: MicaUiDropdownItem, isSelected: boolean, index: 
           {
             key: 'label',
             content: highlightedLabel(source.label, source.labelHighlights, primaryColor, isSelected),
-            minWidth: 0,
-            flexGrow: 1,
+            width: labelWidth,
+            flexGrow: 0,
             flexShrink: 1,
+            minWidth: 0,
           },
           {
-            key: 'suffix',
-            content: source.suffix?.text,
-            flexShrink: 0,
-            color: isSelected ? (source.suffix?.color ?? themeColors.success) : themeColors.dim,
+            key: 'description',
+            content: source.description,
+            flexGrow: 1,
+            flexShrink: 1,
+            minWidth: 0,
+            color: secondaryColor,
             dimColor: !isSelected,
           },
         ]}

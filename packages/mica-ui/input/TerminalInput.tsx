@@ -183,7 +183,8 @@ function TerminalInput() {
               const insertText = localText.slice(0, fileMention.start) + inserted + localText.slice(cursorOffset);
               return {
                 key: `file:${item.path}`,
-                label: item.path,
+                label: item.label ?? item.path,
+                description: item.description,
                 labelHighlights: item.labelHighlights,
                 insertText,
                 cursorOffset: fileMention.start + inserted.length,

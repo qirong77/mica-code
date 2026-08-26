@@ -23,10 +23,10 @@ vi.mock('./CommandDropdown.js', () => ({
 const { DropDownSelect } = await import('./DropDownSelect.js');
 
 describe('DropDownSelect', () => {
-  it('lets file search reuse the self-sized list layout used by plugin dialogs', () => {
+  it('lets file search size its list to the number of results and show from the top', () => {
     const html = renderToStaticMarkup(React.createElement(DropDownSelect));
 
     expect(html).toContain('data-testid="command-dropdown"');
-    expect(html).not.toContain('data-height');
+    expect(html).toContain('data-height="1"');
   });
 });

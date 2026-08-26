@@ -18,7 +18,7 @@ export function DropDownSelect() {
       selectedIndex={selectedIndex}
       title={dropdown.title}
       emptyMessage={dropdown.emptyMessage}
-      height={dropdown.kind === 'file' ? undefined : height}
+      height={dropdown.kind === 'file' ? dropdown.items.length : height}
     />
   );
 }

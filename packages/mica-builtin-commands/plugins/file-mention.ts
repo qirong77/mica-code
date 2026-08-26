@@ -1,19 +1,30 @@
 import { execFile } from 'node:child_process';
 import { opendir } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type { TerminalFileMentionItem } from '@packages/mica-ui/index.js';
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out']);
 const MAX_FILES = 50_000;
-const MAX_RESULTS = 100;
+// Kimi-code's getFuzzyFileSuggestions keeps only the top 20 scored candidates
+// for `@` file mention (scored.slice(0, 20)). Keep the truncation aligned so
+// `@doc` surfaces the most relevant docs/ + files instead of a wall of
+// basename-only-substring matches (file_type_docusaurus.svg etc).
+const MAX_RESULTS = 20;
 const CACHE_TTL_MS = 3_000;
 const MAX_CACHED_ROOTS = 4;
 const execFileAsync = promisify(execFile);
 
 type CacheEntry = { expiresAt: number; files: Promise<string[]> };
-type RankedFile = { path: string; labelHighlights: number[] };
+type RankedFile = {
+  path: string;
+  label: string;
+  description: string | undefined;
+  labelHighlights: number[];
+  score: number;
+  isDirectory: boolean;
+};
 const cache = new Map<string, CacheEntry>();
 
 export default function setup(ctx: PluginContext): void {
@@ -26,60 +37,113 @@ export async function findFileMentions(root: string, query: string): Promise<Ter
   const needle = normalizePathQuery(query);
   return matchWorkspaceFiles(files, needle)
     .slice(0, MAX_RESULTS)
-    .map(({ path, labelHighlights }) => ({ path, label: path, labelHighlights }));
+    .map(({ path, label, description, labelHighlights }) => ({ path, label, description, labelHighlights }));
 }
 
+/**
+ * Rank every workspace file/directory against `query` using kimi-code's graded
+ * substring scoring: exact basename > basename prefix > basename substring >
+ * path substring. Higher score = better match, and directories outrank files
+ * at equal score (so `@doc` puts the `docs/` entries first). Candidates that do
+ * not contain the query anywhere are dropped, so `@doc` only surfaces
+ * files/directories whose name or path actually holds "doc" — not unrelated
+ * files whose full path merely contains the letters d-o-c out of order.
+ * Mirrors kimi-code's `scoreCandidate`; keep the two in sync.
+ */
 function matchWorkspaceFiles(files: string[], query: string): RankedFile[] {
   if (!query) {
-    return files.toSorted(comparePaths).map((path) => ({ path, labelHighlights: [] }));
+    return files.toSorted(comparePaths).map((path) => ({
+      path,
+      label: basename(path),
+      description: path,
+      labelHighlights: [],
+      score: 0,
+      isDirectory: false,
+    }));
   }
 
-  if (query.includes('/')) {
-    const directoryQuery = query.replace(/\/+$/u, '');
-    const directoryPrefix = `${directoryQuery}/`;
-    const exactDirectoryFiles = files.filter((path) => path.toLocaleLowerCase().startsWith(directoryPrefix));
-    if (exactDirectoryFiles.length > 0) {
-      return exactDirectoryFiles.toSorted(comparePaths).map((path) => ({
-        path,
-        labelHighlights: Array.from({ length: directoryQuery.length }, (_, index) => index),
-      }));
+  const results: RankedFile[] = [];
+  for (const path of files) {
+    const { score, basenameMatch } = scorePath(path, query, false);
+    if (score <= 0) continue;
+    results.push({
+      path,
+      label: basename(path),
+      description: path,
+      labelHighlights: basenameMatch ? computeLabelHighlights(basename(path), query) : [],
+      score,
+      isDirectory: false,
+    });
+  }
+  for (const directory of collectDirectoryPaths(files)) {
+    const { score, basenameMatch } = scorePath(directory, query, true);
+    if (score <= 0) continue;
+    const name = basename(directory);
+    results.push({
+      path: `${directory}/`,
+      label: `${name}/`,
+      description: directory,
+      labelHighlights: basenameMatch ? computeLabelHighlights(name, query) : [],
+      score,
+      isDirectory: true,
+    });
+  }
+  results.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+    return comparePaths(left.path, right.path);
+  });
+  return results;
+}
+
+/**
+ * Every directory reachable from the workspace files, as relative paths. Used
+ * to surface directory completions (e.g. `docs/`) ahead of path-only matches.
+ */
+function collectDirectoryPaths(files: string[]): string[] {
+  const directories = new Set<string>();
+  for (const file of files) {
+    let directory = dirname(file);
+    while (directory && directory !== '.') {
+      directories.add(directory);
+      directory = dirname(directory);
     }
-
-    const separatorIndex = query.lastIndexOf('/');
-    const parentDirectory = query.slice(0, separatorIndex).replace(/\/+$/u, '');
-    const nameQuery = query.slice(separatorIndex + 1);
-    if (!parentDirectory || !nameQuery) return [];
-    const parentPrefix = `${parentDirectory}/`;
-    const scopedFiles = files.filter((path) => path.toLocaleLowerCase().startsWith(parentPrefix));
-    return rankFiles(scopedFiles, nameQuery);
   }
-
-  return rankFiles(files, query);
+  return [...directories];
 }
 
-function rankFiles(files: string[], query: string): RankedFile[] {
-  return files
-    .map((path) => ({ path, score: scoreFileMatch(path, query) }))
-    .filter((match): match is { path: string; score: number } => match.score !== null)
-    .sort((left, right) => left.score - right.score || comparePaths(left.path, right.path))
-    .map(({ path }) => ({ path, labelHighlights: fileHighlightIndices(path, query) }));
+/**
+ * Mirrors kimi-code's `scoreCandidate`: base name beats path, within the base
+ * name an exact match beats a prefix which beats a substring, and directories
+ * get a small bonus so workspace folders surface ahead of files.
+ */
+function scorePath(path: string, query: string, isDirectory: boolean): { score: number; basenameMatch: boolean } {
+  const lowerQuery = query.toLowerCase();
+  const lowerPath = path.toLowerCase();
+  const lowerBase = basename(path).toLowerCase();
+  let score = 0;
+  let basenameMatch = false;
+  if (lowerBase === lowerQuery) {
+    score = 100;
+    basenameMatch = true;
+  } else if (lowerBase.startsWith(lowerQuery)) {
+    score = 80;
+    basenameMatch = true;
+  } else if (lowerBase.includes(lowerQuery)) {
+    score = 50;
+    basenameMatch = true;
+  } else if (lowerPath.includes(lowerQuery)) {
+    score = 30;
+  }
+  if (isDirectory && score > 0) score += 10;
+  return { score, basenameMatch };
 }
 
-function fileHighlightIndices(path: string, query: string): number[] {
-  const lowerPath = path.toLocaleLowerCase();
-  const segments = lowerPath.split('/');
-  const name = segments.at(-1) ?? lowerPath;
-  if (name.startsWith(query)) {
-    const nameOffset = path.length - name.length;
-    return Array.from({ length: query.length }, (_, index) => nameOffset + index);
-  }
-  const segmentIndex = segments.findIndex((segment) => segment.startsWith(query));
-  if (segmentIndex < 0) return [];
-  let offset = 0;
-  for (let index = 0; index < segmentIndex; index += 1) {
-    offset += segments[index]!.length + 1;
-  }
-  return Array.from({ length: query.length }, (_, index) => offset + index);
+/** Character indexes into `label` for the query substring, or [] when absent. */
+function computeLabelHighlights(label: string, query: string): number[] {
+  const index = label.toLowerCase().indexOf(query.toLowerCase());
+  if (index < 0) return [];
+  return Array.from({ length: query.length }, (_, offset) => index + offset);
 }
 
 function normalizePathQuery(query: string): string {
@@ -166,28 +230,6 @@ async function walkWorkspaceFiles(root: string): Promise<string[]> {
   }
 
   return files;
-}
-
-function scoreFileMatch(path: string, query: string): number | null {
-  const lowerPath = path.toLocaleLowerCase();
-  const segments = lowerPath.split('/');
-  const name = segments.at(-1) ?? lowerPath;
-
-  const nameMatch = prefixMatch(name, query);
-  if (nameMatch) return nameMatch.score;
-
-  const segmentIndex = segments.findIndex((segment) => segment.startsWith(query));
-  if (segmentIndex < 0) return null;
-  const segmentMatch = prefixMatch(segments[segmentIndex]!, query);
-  return segmentMatch ? 10_000 + segmentIndex * 100 + segmentMatch.score : null;
-}
-
-function prefixMatch(value: string, query: string): { score: number; indices: number[] } | null {
-  if (!value.startsWith(query)) return null;
-  return {
-    score: value === query ? -300 : -200 + value.length / 1_000,
-    indices: Array.from({ length: query.length }, (_, index) => index),
-  };
 }
 
 function comparePaths(left: string, right: string): number {

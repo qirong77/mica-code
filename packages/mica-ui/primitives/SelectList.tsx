@@ -288,7 +288,13 @@ export function SelectList<T extends SelectItem>({
   }, [clampedSelectedIdx, height, items.length, maxHeight, selectedKey]);
 
   const body = (
-    <BottomScrollBox ref={scrollRef} height={height} maxHeight={maxHeight} bottomReservedRows={bottomReservedRows}>
+    <BottomScrollBox
+      ref={scrollRef}
+      height={height}
+      maxHeight={maxHeight}
+      bottomReservedRows={bottomReservedRows}
+      stickyScroll={false}
+    >
       {items.length === 0 ? (
         empty
       ) : (
