@@ -72,6 +72,7 @@ describe('createBtwCommand / runBtw', () => {
     expect(services.showNotice).toHaveBeenCalledWith('> 这个方案可行吗\n\n正在思考…', undefined, {
       command: '/btw',
       status: 'running',
+      surface: 'command_panel',
     });
     expect(services.showNotice).toHaveBeenLastCalledWith(
       expect.stringContaining('> 这个方案可行吗'),

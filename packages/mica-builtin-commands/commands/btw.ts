@@ -6,9 +6,9 @@ import type { CommandAgent, CommandRuntimeServices } from '../services.js';
  *
  * 它在一个隔离子代理里执行，不阻塞也不影响主流程：
  * - 子代理拿到「主流程用户/助手文字对话记录 + btw 模式约束」作为上下文；
- * - 结果以一条 conversation notice 呈现：运行中固定在输入框上方（不被主流程
- *   回复顶掉，直到任务完成），完成后作为普通 notice 展示，并在末尾给出
- *   `/btw -continue` 继续追问的提示。
+ * - 结果以一条 conversation notice 呈现：运行中固定在输入框上方的命令面板
+ *   （不被主流程回复顶掉，直到任务完成），完成后作为普通 notice 展示，并在
+ *   末尾给出 `/btw -continue` 继续追问的提示。
  *
  * `agent.createSubAgent` 本身是可复用的隔离子代理，`/btw -continue` 复用同一
  * 个子代理来延续对话（它有之前的 btw 上下文）。
@@ -140,5 +140,11 @@ function upsertBtwNotice(
   content: string,
   status: 'running' | 'success' | 'error' | 'info',
 ): void {
-  services.showNotice(content, undefined, { command: '/btw', status });
+  // 运行中固定在输入框上方的命令面板（同 /commit、/compact），避免被主流程
+  // 回复顶掉；btw 子代理完成后把结果作为普通 conversation notice 发送出去。
+  services.showNotice(content, undefined, {
+    command: '/btw',
+    status,
+    ...(status === 'running' ? { surface: 'command_panel' as const } : {}),
+  });
 }
