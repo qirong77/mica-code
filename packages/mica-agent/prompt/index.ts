@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
+import { applyBrandTemplate } from './brandTemplate.js';
 
 export { DEFAULT_ROLE_NAME, getAgentRole, getRolesDirectory, listAgentRoles } from './roles.js';
 export type { AgentRole } from './roles.js';
@@ -24,7 +25,7 @@ class SystemPromptBuilder {
   private prompt = '';
 
   constructor(options: BuildSystemPromptOptions = {}) {
-    this.prompt = wrapSection('system', options.baseSystemPrompt ?? DEFAULT_SYSTEM_PROMPT);
+    this.prompt = wrapSection('system', applyBrandTemplate(options.baseSystemPrompt ?? DEFAULT_SYSTEM_PROMPT));
 
     const projectInstructions =
       options.projectInstructions === undefined

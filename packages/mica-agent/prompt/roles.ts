@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
+import { applyBrandTemplate } from './brandTemplate.js';
 
 export const DEFAULT_ROLE_NAME = 'default';
 
@@ -63,7 +64,7 @@ export function getAgentRole(name: string): AgentRole | undefined {
 function defaultRole(): AgentRole {
   return {
     name: DEFAULT_ROLE_NAME,
-    prompt: DEFAULT_SYSTEM_PROMPT,
+    prompt: applyBrandTemplate(DEFAULT_SYSTEM_PROMPT),
     builtIn: true,
   };
 }
