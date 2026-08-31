@@ -11,8 +11,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortOption,
@@ -82,7 +82,7 @@ export type SessionTurnLease = {
   release(): void;
 };
 
-const MICA_HOME = process.env.MICA_HOME || resolve(homedir(), '.mica');
+const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
 const MALFORMED_LEASE_STALE_MS = 60_000;

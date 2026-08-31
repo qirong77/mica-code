@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { VERSION_LABEL } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { prepareImageForApi } from '@packages/mica-common/index.js';
@@ -660,7 +661,7 @@ async function handleCodexRequest(
     case CODEX_METHODS.initialize: {
       ctx.writeResponse({
         capabilities: { protocolVersion: 2 },
-        userAgent: 'mica-code/app-server',
+        userAgent: `${VERSION_LABEL}/app-server`,
         codexHome: process.env.MICA_HOME || '',
         platformFamily: 'unix',
         platformOs: process.platform,

@@ -5,6 +5,8 @@
 配置文件默认位于：`~/.mica/config.json`。当配置文件不存在时，会基于 `default.json` 自动创建。
 本地状态默认位于：`~/.mica/storage.json`，其中最后一次使用的 provider/model/effort 按精确当前目录保存，输入框历史等数据仍为所有 Mica Code 实例共享。
 
+默认的 `~/.mica` 目录名是构建期的品牌化值：由根 `mica.build.env` 的 `MICA_CONFIG_DIR_NAME` 经 `bun build --define` 注入，经 `brand.ts` 暴露为 `CONFIG_DIR_NAME`。`MICA_HOME` 环境变量显式设置时始终优先；路径解析统一走 `brand.ts` 的 `resolveMicaHome`/`resolveMicaHomePath`。
+
 ## 主要能力
 
 - 读取磁盘配置：`micaConfig.read()`。
@@ -57,6 +59,7 @@ micaConfig.update((current) => ({
 模型 client 使用协议注册表创建。当前配置只开放两种已实现的 OpenAI 协议；未来接入 Anthropic 等实现时，可新增 client 并通过 `registerModelClient` 注册，无需修改 `AgentRuntime`。
 
 - `runtimeEnv.ts`：运行时环境变量读取。
+- `brand.ts`：构建期品牌常量（`RUNTIME_NAME`/`VERSION_LABEL`/`APP_NAME`/`CONFIG_DIR_NAME`）与 `resolveMicaHome`/`resolveMicaHomePath`，默认 `~/.mica` 目录由 `MICA_CONFIG_DIR_NAME` 决定。
 - `types.ts`：配置与 provider 的类型定义。
 - `default.json`：首次启动时使用的默认配置模板。
 - `index.ts`：公共 API 聚合导出。

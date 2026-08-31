@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { writeTextFileAtomic } from './atomicWrite.js';
+import { resolveMicaHomePath } from './brand.js';
 
 export const MICA_STORAGE_PATH = resolveMicaHomePath('storage.json');
 
@@ -231,9 +231,4 @@ function isStringArray(value: unknown): value is string[] {
 
 function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
-}
-
-function resolveMicaHomePath(...parts: string[]): string {
-  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
-  return resolve(micaHome, ...parts);
 }

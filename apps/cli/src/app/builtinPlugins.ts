@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
+import { APP_NAME } from '@packages/mica-config/brand.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
 import {
   setupCommandCd,
@@ -45,7 +46,7 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({
     id: 'builtin.mica-code-app-notify',
-    name: 'Built-in Mica Code App Notify',
+    name: `Built-in ${APP_NAME} App Notify`,
     required: false,
     setup: setupMicaCodeAppNotify,
   });

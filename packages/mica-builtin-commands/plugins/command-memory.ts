@@ -1,5 +1,5 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 
 type SystemPromptBuildEvent = {
@@ -8,7 +8,7 @@ type SystemPromptBuildEvent = {
 };
 
 export default function setupCommandMemory(ctx: PluginContext): void {
-  const configDir = ctx.paths?.config ?? process.env.MICA_HOME ?? join(homedir(), '.mica');
+  const configDir = ctx.paths?.config ?? resolveMicaHome();
   const sessionsDir = join(configDir, 'sessions');
   const guidance = buildMemoryGuidance(sessionsDir);
 

@@ -1,3 +1,5 @@
+import { RUNTIME_NAME } from '@packages/mica-config/brand.js';
+
 export type ExecCliInvocation = {
   mode: 'exec';
   json: boolean;
@@ -65,16 +67,16 @@ export type CliInvocation =
 
 export const CLI_USAGE = [
   'Usage:',
-  '  mica',
-  '  mica --resume <session-id>',
-  '  mica --version',
-  '  mica models',
-  '  mica models --json',
-  '  mica exec [--json] [options] "<prompt>"',
-  '  mica daemon [--server <url>] [--name <name>]',
-  '  mica compact --session <id> [--dir <path>] [--force] [--prune-only]',
-  '  mica commit [--dir <path>]',
-  '  mica app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]',
+  `  ${RUNTIME_NAME}`,
+  `  ${RUNTIME_NAME} --resume <session-id>`,
+  `  ${RUNTIME_NAME} --version`,
+  `  ${RUNTIME_NAME} models`,
+  `  ${RUNTIME_NAME} models --json`,
+  `  ${RUNTIME_NAME} exec [--json] [options] "<prompt>"`,
+  `  ${RUNTIME_NAME} daemon [--server <url>] [--name <name>]`,
+  `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only]`,
+  `  ${RUNTIME_NAME} commit [--dir <path>]`,
+  `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',

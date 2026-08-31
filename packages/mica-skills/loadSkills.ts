@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { Skill } from './types.js';
 
 function getSkillsDirs(): string[] {
-  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(homedir(), '.mica');
+  const micaHome = resolveMicaHome();
   const cwd = process.cwd();
   return [
     join(cwd, '.mica', 'skills'),

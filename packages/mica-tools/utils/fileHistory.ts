@@ -1,9 +1,9 @@
 import { access, copyFile, mkdir } from 'fs/promises';
 import { basename, resolve } from 'path';
-import { homedir } from 'os';
 import { createHash } from 'crypto';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 
-const FILE_HISTORY_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'file-history');
+const FILE_HISTORY_DIR = resolve(resolveMicaHome(), 'file-history');
 
 function historyEntryDir(filePath: string): string {
   const resolvedPath = resolve(filePath);

@@ -1,4 +1,5 @@
 import { micaAgent } from '@packages/mica-agent/index.js';
+import { APP_NAME } from '@packages/mica-config/brand.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 
 export type SubagentContextMode = 'none' | 'brief' | 'recent' | 'files';
@@ -30,7 +31,7 @@ export type SubagentDefinition = {
 
 const SUBAGENT_INSTRUCTIONS = [
   '<subagent-instructions>',
-  'You are running as a subagent for the primary Mica Code agent.',
+  `You are running as a subagent for the primary ${APP_NAME} agent.`,
   'Complete only the delegated task and return a concise, evidence-backed summary for the parent agent.',
   'Do not ask the user for follow-up unless the delegated task is impossible without it.',
   'If you read files or run commands, mention the key paths, commands, and outcomes that matter.',

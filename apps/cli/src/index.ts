@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
-import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import startConfigWebWorker from './app/configWebWorker.js';
 import setupProcessDiagnostics from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
 import { applyConfigDefaultsToFile } from '@packages/mica-builtin-commands/startup/validate-config.js';
+import { VERSION_LABEL, resolveMicaHomePath } from '@packages/mica-config/brand.js';
 import { CLI_USAGE, parseCliArgs } from './cli/args.js';
 import { VERSION } from './buildMeta.js';
 import { ensureDaemonRunning } from './features/sync-daemon/ensureDaemonRunning.js';
@@ -23,7 +23,7 @@ if (invocation.mode === 'help') {
   await exitAfterStdoutFlush(0);
 }
 if (invocation.mode === 'version') {
-  console.log(`mica-code ${VERSION}`);
+  console.log(`${VERSION_LABEL} ${VERSION}`);
   await exitAfterStdoutFlush(0);
 }
 
@@ -40,8 +40,7 @@ if (invocation.mode === 'exec' && invocation.cwd) {
   }
 }
 
-const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
-applyConfigDefaultsToFile(resolve(micaHome, 'config.json'));
+applyConfigDefaultsToFile(resolveMicaHomePath('config.json'));
 
 if (invocation.mode === 'models') {
   const { listRuntimeModelIds } = await import('./cli/modelCatalog.js');

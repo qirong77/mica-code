@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 
 export type DaemonConfig = {
   serverUrl: string;
@@ -9,12 +10,12 @@ export type DaemonConfig = {
 };
 
 export function daemonConfigPath(): string {
-  const micaHome = process.env.MICA_HOME ? resolveHome(process.env.MICA_HOME) : join(homedir(), '.mica');
+  const micaHome = process.env.MICA_HOME ? resolveHome(process.env.MICA_HOME) : join(homedir(), CONFIG_DIR_NAME);
   return join(micaHome, 'sync.json');
 }
 
 function resolveHome(value: string): string {
-  return value === '~' ? join(homedir(), '.mica') : value;
+  return value === '~' ? join(homedir(), CONFIG_DIR_NAME) : value;
 }
 
 export function loadDaemonConfig(): DaemonConfig | null {

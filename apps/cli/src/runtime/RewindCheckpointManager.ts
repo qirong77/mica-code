@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { homedir } from 'node:os';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { RewindFileAction, RewindFileChange, RuntimeInput } from '@packages/mica-runtime/index.js';
 import type {
@@ -91,7 +91,7 @@ const MAX_FILE_SNAPSHOT_BYTES = 1 * 1024 * 1024;
 const MAX_FILE_SNAPSHOT_TOTAL_BYTES = 4 * 1024 * 1024;
 /** Checkpoints older than this are pruned on every write. */
 const REWIND_RETENTION_MS = 24 * 60 * 60 * 1000;
-const REWIND_DIR = resolve(process.env.MICA_HOME || resolve(homedir(), '.mica'), 'rewind');
+const REWIND_DIR = resolve(resolveMicaHome(), 'rewind');
 const REWIND_FILE_VERSION = 1;
 
 type SerializedCheckpoint = {

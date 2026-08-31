@@ -3,17 +3,18 @@ import { openSync, readFileSync, unlinkSync, writeFileSync, mkdirSync } from 'no
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 import { loadDaemonConfig } from './config.js';
 
 export function daemonPidPath(): string {
   const micaHome = process.env.MICA_HOME
     ? resolveHome(process.env.MICA_HOME)
-    : join(homedir(), '.mica');
+    : join(homedir(), CONFIG_DIR_NAME);
   return join(micaHome, 'daemon.pid');
 }
 
 function resolveHome(value: string): string {
-  return value === '~' ? join(homedir(), '.mica') : resolve(value);
+  return value === '~' ? join(homedir(), CONFIG_DIR_NAME) : resolve(value);
 }
 
 export function isPidAlive(pid: number): boolean {

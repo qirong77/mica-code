@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync, watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 import type { PersistedSession } from '@packages/mica-session/index.js';
 
 export type SessionChangeHandler = (session: PersistedSession | null, sessionId: string) => void;
@@ -131,10 +132,10 @@ function readSessionFile(path: string): PersistedSession | null {
 }
 
 export function sessionDir(): string {
-  const micaHome = process.env.MICA_HOME ? resolveHome(process.env.MICA_HOME) : join(homedir(), '.mica');
+  const micaHome = process.env.MICA_HOME ? resolveHome(process.env.MICA_HOME) : join(homedir(), CONFIG_DIR_NAME);
   return join(micaHome, 'sessions');
 }
 
 function resolveHome(value: string): string {
-  return value === '~' ? join(homedir(), '.mica') : value;
+  return value === '~' ? join(homedir(), CONFIG_DIR_NAME) : value;
 }

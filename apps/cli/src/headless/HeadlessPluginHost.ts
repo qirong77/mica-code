@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { APP_NAME, resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
@@ -148,7 +149,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     { id: 'command-memory', name: 'Command Memory', setup: setupCommandMemory },
     { id: 'session-autonomy', name: 'Session Autonomy', setup: setupSessionAutonomy },
     { id: 'context-pressure', name: 'Context Pressure', setup: setupContextPressure },
-    { id: 'builtin.mica-code-app-notify', name: 'Built-in Mica Code App Notify', setup: setupMicaCodeAppNotify },
+    { id: 'builtin.mica-code-app-notify', name: `Built-in ${APP_NAME} App Notify`, setup: setupMicaCodeAppNotify },
   ];
   for (const plugin of builtinPlugins) {
     plugins.register({
@@ -264,7 +265,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
 function createHeadlessPluginPaths() {
   const home = homedir();
-  const config = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(home, '.mica');
+  const config = resolveMicaHome();
   return {
     home,
     config,

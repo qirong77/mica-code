@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { prepareImageForApi, type SupportedImageMediaType } from './imageResize.js';
 
-const IMAGES_DIR = resolve(homedir(), '.mica', 'images');
+const IMAGES_DIR = resolve(resolveMicaHome(), 'images');
 const SUPPORTED_IMAGE_TYPES = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',

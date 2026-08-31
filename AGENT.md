@@ -87,7 +87,7 @@ bun run format
 
 ## 配置、本地数据与 MICA_HOME
 
-- `packages/mica-config` 是配置与本地状态的唯一入口，UI/commands/runtime/adapter 不自己读写路径。默认 `~/.mica/{config.json,storage.json,sessions}`，`MICA_HOME` 时全部跟随；测试和临时 repro 用临时 `MICA_HOME`，不污染真实 `~/.mica`。
+- `packages/mica-config` 是配置与本地状态的唯一入口，UI/commands/runtime/adapter 不自己读写路径。默认 `~/.{config.json,storage.json,sessions}` 的目录名由构建期 `MICA_CONFIG_DIR_NAME`（默认 `.mica`，来自根 `mica.build.env`，经 `packages/mica-config/brand.ts` 暴露为 `CONFIG_DIR_NAME`）决定；`MICA_HOME` 显式设置时全部跟随 `MICA_HOME`，否则走品牌化默认目录（`brand.ts` 的 `resolveMicaHome`/`resolveMicaHomePath`）。测试和临时 repro 用临时 `MICA_HOME`，不污染真实目录。
 - `PersistedMicaConfig` 只存静态字段（providers 等）；顶层 `provider`/`model`/`effort`/`contextWindowSize` 是运行时合成字段，经 `stripRuntimeFields` 去掉不写回 config.json。协议只支持 chat_completions/responses；启动迁移与语义校验统一在 `packages/mica-builtin-commands/startup/validate-config.js`（配置 Web 保存也复用），不要在别处另建校验规则。
 - session 文件是 version 1 JSON（id/title/createdAt/updatedAt/cwd/snapshot）；snapshot 含 providerId/model/effort/role/history/conversationMessages/usage。`subagentUsageHistory` 必须独立存放（相对子 agent 自身消息数组，不能混入主 usageHistory，否则破坏 rewind 裁剪语义）。新增字段必须有版本策略、默认值和 sanitize/parse。
 - `SessionStore.list`/`listRecent` 通过 `$MICA_HOME/session-index.json`（session 元数据索引，放 MICA_HOME 根而非 `sessions/` 内，避免被 config-web/sync 的 session 目录扫描误识别）快速列出，不再逐个 `JSON.parse` session；索引由 `save`/`delete` 同步维护，缺失/过期时用「读文件头部提取元数据」轻量重建（兜底全量 parse）。它只是可随时重建的缓存，不作为事实来源；`/cd` 取最近 cwd 上限 100，`/resume` 仍可读全量索引。
@@ -152,6 +152,7 @@ bun run format
 ## 构建、安装与发布
 
 - `bun run build` = `MICA_PREBUILD_DONE=1 bun scripts/build.mjs`（prebuild 是 `bunx tsc --noEmit`，postbuild 是 `bun scripts/install.mjs`），`bun build --compile` 输出无外部运行时依赖的 `dist/mica`。install.mjs 默认装到 `$HOME/.local/lib/mica` + `$HOME/.local/bin/mica` 薄 launcher（`MICA_INSTALL_DIR`/`MICA_INSTALL_PACKAGE_DIR`/`MICA_BIN_NAME` 可覆盖）。
+- build.mjs 读取根 `mica.build.env`（键 `MICA_RUNTIME_NAME`/`MICA_VERSION_LABEL`/`MICA_APP_NAME`/`MICA_CONFIG_DIR_NAME`，构建期同名 `MICA_*` 环境变量优先于文件）经 `bun build --define` 注入 `__MICA_*__` 常量，由 `packages/mica-config/brand.ts` 统一暴露为 `RUNTIME_NAME`/`VERSION_LABEL`/`APP_NAME`/`CONFIG_DIR_NAME` 与 `resolveMicaHome`/`resolveMicaHomePath`。它们驱动 `--version` 标签、CLI 用法命令名、默认配置目录与 UI/插件产品名；未定义时全部回落为上游默认值（源码运行与未改构建行为不变）。install.mjs 的 `MICA_BIN_NAME` 默认也取 `MICA_RUNTIME_NAME`。**改动品牌键必须同步根 `mica.build.env` 与本文件**。
 - 内置 models.dev 种子由 `scripts/update-models-dev-seed.mjs` 刷新（下载→校验→gzip→base64 原子写入 `packages/mica-builtin-commands/startup/model-effort-context/seed/models-dev.seed.ts`）；CI 在 release 构建前 best-effort 刷新，失败仅 warning、用仓库固定副本，绝不阻断构建。
 - 用户报告启动、startup UI、build/install 行为与源码不一致时，先确认实际运行的是哪个入口：`~/.local/bin/mica` launcher、`~/.local/lib/mica/mica`、`dist/mica` 可能不一致。
 - deploy-pages：`actions/configure-pages` **只暴露 outputs，不会注入 `PAGES_BASE_PATH` 环境变量**，Build 步骤用 `env.PAGES_BASE_PATH` 显式传入；Astro 不会自动给硬编码绝对路径加 base 前缀，布局/页面里所有内部链接必须用 `import.meta.env.BASE_URL` 拼接。

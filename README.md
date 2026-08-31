@@ -26,7 +26,7 @@ mica
 
 ## 配置模型
 
-首次运行会创建本地配置文件：`~/.mica/config.json`。可以运行 /config 打开配置页面。典型 provider 配置：
+首次运行会创建本地配置文件：`~/.mica/config.json`（默认目录名由构建期 `mica.build.env` 的 `MICA_CONFIG_DIR_NAME` 决定，`MICA_HOME` 环境变量可强制指定目录）。可以运行 /config 打开配置页面。典型 provider 配置：
 
 ```json
 {

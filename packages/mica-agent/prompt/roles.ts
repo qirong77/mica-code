@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, join } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 
 export const DEFAULT_ROLE_NAME = 'default';
@@ -13,7 +13,7 @@ export type AgentRole = {
 };
 
 export function getRolesDirectory(): string {
-  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(homedir(), '.mica');
+  const micaHome = resolveMicaHome();
   return join(micaHome, 'role');
 }
 

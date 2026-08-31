@@ -124,3 +124,11 @@ export {
   updateProviderPreference,
 } from './micaStorage.js';
 export type { LastUsedConfig, MicaStorageFile, ProviderPreference } from './micaStorage.js';
+export {
+  APP_NAME,
+  CONFIG_DIR_NAME,
+  RUNTIME_NAME,
+  VERSION_LABEL,
+  resolveMicaHome,
+  resolveMicaHomePath,
+} from './brand.js';

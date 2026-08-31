@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -19,7 +20,7 @@ export type FilePluginLoadResult = {
 };
 
 export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Promise<FilePluginLoadResult> {
-  const pluginsDir = options.pluginsDir ?? join(options.homeDir ?? homedir(), '.mica', 'plugins');
+  const pluginsDir = options.pluginsDir ?? join(options.homeDir ?? homedir(), CONFIG_DIR_NAME, 'plugins');
   const result: FilePluginLoadResult = { plugins: [], loaded: [], failed: [] };
   let entries: string[];
 

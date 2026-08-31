@@ -1,5 +1,4 @@
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolveMicaHomePath } from './brand.js';
 
 export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
 export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses'] as const;
@@ -89,9 +88,4 @@ export function requireProvider(config: IMicaConfig, providerId: string): Provid
     throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
   return provider;
-}
-
-function resolveMicaHomePath(...parts: string[]): string {
-  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
-  return resolve(micaHome, ...parts);
 }

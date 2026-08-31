@@ -10,7 +10,8 @@ if (!existsSync(outFile)) {
 }
 
 const home = homedir();
-const binName = process.env.MICA_BIN_NAME ?? 'mica';
+const buildEnv = readBuildEnv();
+const binName = process.env.MICA_BIN_NAME ?? buildEnv.MICA_RUNTIME_NAME ?? 'mica';
 // Keep the compiled binary in a stable location and expose it through a thin launcher.
 const packageDir = process.env.MICA_INSTALL_PACKAGE_DIR ?? resolve(home, '.local/lib/mica');
 const binDir = process.env.MICA_INSTALL_DIR ?? resolve(home, '.local/bin');
@@ -70,4 +71,26 @@ try {
 } catch (error) {
   console.log(`Warning: install skipped (${error instanceof Error ? error.message : String(error)}).`);
   console.log(`You can copy ${outFile} to ${binDir} manually, or set MICA_INSTALL_DIR to a writable directory.`);
+}
+
+function readBuildEnv() {
+  const envFile = join(import.meta.dirname, '..', 'mica.build.env');
+  const result = {};
+  try {
+    for (const rawLine of readFileSync(envFile, 'utf-8').split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      result[key] = value;
+    }
+  } catch {
+    // No mica.build.env: use the default install name.
+  }
+  return result;
 }

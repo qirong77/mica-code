@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import type { ModelRule, ProviderProtocol } from '@packages/mica-config/types.js';
@@ -178,7 +178,7 @@ async function writeCacheAtomically(entry: CacheEntry): Promise<void> {
 }
 
 function cachePath(): string {
-  const micaHome = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : resolve(homedir(), '.mica');
+  const micaHome = resolveMicaHome();
   return resolve(micaHome, 'cache', 'models-dev.json');
 }
 

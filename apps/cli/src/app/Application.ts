@@ -1,7 +1,8 @@
 import React from 'react';
 import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { Box, Text } from '@anthropic/ink';
 import { ThemeProvider } from '../../../../packages/@anthropic/ink/src/theme/ThemeProvider.js';
 import { wrappedRender } from '@anthropic/ink';
@@ -334,7 +335,7 @@ function showPluginMessage(text: string, ttl: number): void {
 
 function createPluginPaths() {
   const home = homedir();
-  const config = process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(home, '.mica');
+  const config = resolveMicaHome();
   return {
     home,
     config,
