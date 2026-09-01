@@ -163,12 +163,28 @@ export class SessionStore implements SessionStoreLike {
     const safeId = sanitizeSessionId(id);
     if (!safeId) return false;
     const path = sessionPath(safeId);
-    if (!existsSync(path)) return false;
+    if (!existsSync(path)) {
+      // The session file is gone, so any lock for it is an orphan. Clear it so a
+      // later continue/resume of the same id is never blocked by a stale lock.
+      try {
+        rmSync(turnLockPath(safeId), { force: true });
+      } catch {
+        // best-effort; a leftover lock is reconciled on acquire if it persists.
+      }
+      return false;
+    }
     rmSync(path, { force: true });
     try {
       this.removeFromIndex(safeId);
     } catch {
       // best-effort metadata index; a rebuild reconciles it on the next list.
+    }
+    // Drop the turn-lock alongside the session so a removed id never leaves a
+    // lock behind. The lease dir is not part of the session scan, so it leaks.
+    try {
+      rmSync(turnLockPath(safeId), { force: true });
+    } catch {
+      // best-effort; a leftover lock is reconciled on acquire if it persists.
     }
     return true;
   }
@@ -291,7 +307,7 @@ export function acquireSessionTurnLease(sessionId: string): SessionTurnLease | n
   ensureSessionDir();
   const lockDir = resolve(SESSION_DIR, '.turn-locks');
   mkdirSync(lockDir, { recursive: true });
-  const lockPath = resolve(lockDir, `${safeId}.lock`);
+  const lockPath = turnLockPath(safeId);
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -424,6 +440,10 @@ function ensureSessionDir() {
 
 function sessionPath(id: string): string {
   return resolve(SESSION_DIR, `${id}.json`);
+}
+
+function turnLockPath(id: string): string {
+  return resolve(SESSION_DIR, '.turn-locks', `${id}.lock`);
 }
 
 function sanitizeSessionId(id: string): string | null {

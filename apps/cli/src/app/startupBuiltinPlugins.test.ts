@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import startConfigWebWorker from './configWebWorker.js';
 import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-commands/startup/file-plugins.js';
-import setupProcessDiagnostics from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
+import setupProcessDiagnostics, {
+  defaultProcessTitle,
+} from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
 
 const tempDirectories: string[] = [];
 
@@ -107,7 +109,7 @@ describe('process-diagnostics startup plugin', () => {
     runtimeProcess.emit('uncaughtException', uncaught);
     runtimeProcess.emit('unhandledRejection', rejection);
 
-    expect(runtimeProcess.title).toBe('mica');
+    expect(runtimeProcess.title).toBe(defaultProcessTitle());
     expect(reportError).toHaveBeenNthCalledWith(1, uncaught, '未捕获异常');
     expect(reportError).toHaveBeenNthCalledWith(2, rejection, '未处理的异步错误');
 

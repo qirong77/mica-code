@@ -43,6 +43,7 @@ function changeWorkingDirectory(cwd: string, services: CommandRuntimeServices): 
   try {
     process.chdir(cwd);
     services.showNotice(`Working directory: ${process.cwd()}`, undefined, { command: '/cd', status: 'success' });
+    services.syncAgentStatusItems?.();
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

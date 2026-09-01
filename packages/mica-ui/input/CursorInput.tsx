@@ -438,6 +438,7 @@ export class Cursor {
     maxVisibleLines?: number,
     highlight?: { start: number; end: number },
     wrapHighlight?: (text: string) => string,
+    selection?: { start: number; end: number },
   ): string {
     const { line, column } = this.getPosition();
     const allLines = this.measuredText.getWrappedText();
@@ -452,7 +453,7 @@ export class Cursor {
         const currentLine = i + startLine;
         const lineStart = this.measuredText.getLineStartOffset(currentLine);
         if (line !== currentLine) {
-          return this.decorateLine(text.trimEnd(), lineStart, highlight, wrapHighlight);
+          return this.decorateLine(text.trimEnd(), lineStart, highlight, wrapHighlight, selection, invert);
         }
         let beforeCursor = '',
           atCursor = cursorChar,
@@ -473,9 +474,23 @@ export class Cursor {
             }
           }
         }
-        const beforeHighlighted = this.decorateLine(beforeCursor, lineStart, highlight, wrapHighlight);
+        const beforeHighlighted = this.decorateLine(
+          beforeCursor,
+          lineStart,
+          highlight,
+          wrapHighlight,
+          selection,
+          invert,
+        );
         const afterStart = lineStart + beforeCursor.length + atCursor.length;
-        const afterHighlighted = this.decorateLine(afterCursor.trimEnd(), afterStart, highlight, wrapHighlight);
+        const afterHighlighted = this.decorateLine(
+          afterCursor.trimEnd(),
+          afterStart,
+          highlight,
+          wrapHighlight,
+          selection,
+          invert,
+        );
         return beforeHighlighted + (cursorChar ? invert(atCursor) : atCursor) + afterHighlighted;
       })
       .join('\n');
@@ -486,7 +501,15 @@ export class Cursor {
     lineStart: number,
     highlight: { start: number; end: number } | undefined,
     wrapHighlight: ((text: string) => string) | undefined,
+    selection: { start: number; end: number } | undefined,
+    invert: (text: string) => string,
   ): string {
+    if (selection) {
+      const from = Math.max(0, selection.start - lineStart);
+      const to = Math.min(text.length, selection.end - lineStart);
+      if (from < to) return text.slice(0, from) + invert(text.slice(from, to)) + text.slice(to);
+      return text;
+    }
     if (!highlight || !wrapHighlight) return text;
     const from = Math.max(0, highlight.start - lineStart);
     const to = Math.min(text.length, highlight.end - lineStart);

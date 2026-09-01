@@ -125,6 +125,48 @@ describe('session turn lease', () => {
       rmSync(micaHome, { recursive: true, force: true });
     }
   });
+
+  it('deletes a session together with any leftover turn-lock', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-delete-lock-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('to-delete', '/tmp/to-delete', '2026-01-01T00:00:00.000Z'));
+
+      const lockPath = resolve(SESSION_DIR, '.turn-locks', 'to-delete.lock');
+      mkdirSync(resolve(SESSION_DIR, '.turn-locks'), { recursive: true });
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: 'x' }), 'utf-8');
+
+      expect(store.delete('to-delete')).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('clears an orphan turn-lock when deleting an id whose session file is already gone', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-delete-orphan-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+
+      // A crash left a lock behind after the session file was removed elsewhere.
+      // Deleting the id must clean up the orphan lock even though no session file
+      // exists anymore, otherwise a later continue/resume of the id stays stuck.
+      const lockPath = resolve(SESSION_DIR, '.turn-locks', 'gone-session.lock');
+      mkdirSync(resolve(SESSION_DIR, '.turn-locks'), { recursive: true });
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: 'x' }), 'utf-8');
+
+      expect(store.delete('gone-session')).toBe(false);
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('SessionStore.replaceValidated', () => {

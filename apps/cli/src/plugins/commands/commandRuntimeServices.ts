@@ -514,6 +514,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       context.events.publish({ type: 'session:invalidated', reason: 'resume', owner: session.agent });
       context.uiBridge.syncAgentStatusItems();
     },
+    syncAgentStatusItems() {
+      currentContext()?.uiBridge.syncAgentStatusItems();
+    },
     listRewindCheckpoints() {
       return currentContext()?.runtime.listRewindCheckpoints() ?? [];
     },

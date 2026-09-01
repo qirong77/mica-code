@@ -185,6 +185,7 @@ export type CommandRuntimeServices = {
   forkCurrentAgent(): ForkAgentResult;
   switchAgentSession(id: string): RunningAgentRecord;
   refreshCurrentAgentSessionUi(): void;
+  syncAgentStatusItems?(): void;
   listRewindCheckpoints(): RewindCheckpointSummary[];
   getRewindPreview(id?: string): RewindPreviewResult;
   applyRewind(request: RewindApplyRequest): RewindApplyResult;

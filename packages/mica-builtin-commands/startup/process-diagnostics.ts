@@ -1,4 +1,6 @@
+import { basename } from 'node:path';
 import type { EventEmitter } from 'node:events';
+import { RUNTIME_NAME } from '@packages/mica-config/brand.js';
 
 type DiagnosticsProcess = EventEmitter & { title: string };
 
@@ -7,6 +9,12 @@ type ProcessDiagnosticsContext = {
   reportError?: (error: unknown, prefix?: string) => void;
   title?: string;
 };
+
+/** Branded process title with the current working directory base, e.g. `mica/vs-go`. */
+export function defaultProcessTitle(cwd: string = process.cwd()): string {
+  const base = basename(cwd);
+  return base ? `${RUNTIME_NAME}/${base}` : RUNTIME_NAME;
+}
 
 /**
  * Installs foreground-process diagnostics without coupling the startup entry to
@@ -23,7 +31,7 @@ export default function setupProcessDiagnostics(ctx: ProcessDiagnosticsContext):
     throw new Error('process-diagnostics requires an EventEmitter-compatible process');
   }
 
-  runtimeProcess.title = ctx?.title ?? 'mica';
+  runtimeProcess.title = ctx?.title ?? defaultProcessTitle();
 
   const onUncaughtException = (error: unknown) => {
     reportError(error, '未捕获异常');
