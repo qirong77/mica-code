@@ -527,13 +527,65 @@ function normalizeInsertedInput(input: string): string {
     .join('\n');
 }
 
-function buildTextHandler({
+export type EditSnapshot = { text: string; offset: number };
+
+/** 输入框编辑历史（undo/redo）。栈按「编辑前的快照」记录，供撤销时回放。 */
+export class MinimalEditHistory {
+  private undoStack: EditSnapshot[] = [];
+  private redoStack: EditSnapshot[] = [];
+
+  constructor(public readonly maxDepth: number = 500) {}
+
+  /** 在一次会改变文本的编辑应用前调用，记录编辑前的状态，并清空 redo 栈。 */
+  record(snapshot: EditSnapshot): void {
+    this.undoStack.push(snapshot);
+    if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
+    this.redoStack.length = 0;
+  }
+
+  /** 撤销：把当前状态压入 redo，返回应恢复的先前快照；无可用撤销返回 null。 */
+  undo(current: EditSnapshot): EditSnapshot | null {
+    const prev = this.undoStack.pop();
+    if (!prev) return null;
+    this.redoStack.push(current);
+    return prev;
+  }
+
+  /** 重做：把当前状态压回 undo，返回应恢复的后继快照；无可用重做返回 null。 */
+  redo(current: EditSnapshot): EditSnapshot | null {
+    const next = this.redoStack.pop();
+    if (!next) return null;
+    this.undoStack.push(current);
+    return next;
+  }
+}
+
+/** 撤销快捷键：macOS Cmd+Z，以及终端通用的 Ctrl+Z（ASCII 26）。 */
+export function isUndoShortcut(key: any, input: string): boolean {
+  if (key.ctrl && !key.shift && input === '\x1a') return true;
+  // 支持 CSI u（kitty/iTerm2 等）把 Ctrl+Z 表达为 'z' + ctrl 的情况。
+  if (key.ctrl && !key.shift && (input === 'z' || input === 'Z')) return true;
+  if (key.meta && !key.shift && (input === 'z' || input === 'Z')) return true;
+  return false;
+}
+
+/** 重做快捷键：macOS Cmd+Shift+Z、Ctrl+Y，以及尽力支持的 Ctrl+Shift+Z。 */
+export function isRedoShortcut(key: any, input: string): boolean {
+  if (key.meta && key.shift && (input === 'z' || input === 'Z')) return true;
+  if (key.ctrl && input === '\x19') return true; // Ctrl+Y（ASCII 25）
+  if (key.ctrl && key.shift && input === '\x1a') return true;
+  if (key.ctrl && key.shift && (input === 'z' || input === 'Z')) return true; // CSI u Ctrl+Shift+Z
+  return false;
+}
+
+export function buildTextHandler({
   value,
   onChange,
   onSubmit,
   onExit,
   onHistoryUp,
   onHistoryDown,
+  editingHistory,
   multiline,
   cursorChar,
   invert,
@@ -547,6 +599,8 @@ function buildTextHandler({
   wrapHighlight,
 }: {
   value: string;
+  /** 编辑撤销/重做历史。省略则不启用 undo/redo。 */
+  editingHistory?: MinimalEditHistory;
   onChange: (value: string) => void;
   onSubmit?: (value: string) => void;
   onExit?: () => void;
@@ -613,6 +667,25 @@ function buildTextHandler({
         setOffset(0);
       } else onExit?.();
       return;
+    }
+    if (editingHistory) {
+      const current = { text: value, offset: cursor.offset };
+      if (isRedoShortcut(key, input)) {
+        const restored = editingHistory.redo(current);
+        if (restored) {
+          if (restored.text !== value) onChange(restored.text);
+          setOffset(restored.offset);
+        }
+        return;
+      }
+      if (isUndoShortcut(key, input)) {
+        const restored = editingHistory.undo(current);
+        if (restored) {
+          if (restored.text !== value) onChange(restored.text);
+          setOffset(restored.offset);
+        }
+        return;
+      }
     }
     let nextCursor: Cursor | void;
     while (true) {
@@ -740,7 +813,10 @@ function buildTextHandler({
       break;
     }
     if (nextCursor && nextCursor instanceof Cursor && !cursor.equals(nextCursor)) {
-      if (cursor.text !== nextCursor.text) onChange(nextCursor.text);
+      if (cursor.text !== nextCursor.text) {
+        editingHistory?.record({ text: value, offset: cursor.offset });
+        onChange(nextCursor.text);
+      }
       setOffset(nextCursor.offset);
     }
   }
@@ -780,6 +856,9 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
   const terminalFocus = useTerminalFocus();
   const [themeName] = useTheme();
   const commands = useScheduleState(quickCommands);
+  // 编辑历史需跨渲染存活（buildTextHandler 每次 render 重新构建），放在 ref 里。
+  const editingHistoryRef = React.useRef<MinimalEditHistory | null>(null);
+  if (editingHistoryRef.current === null) editingHistoryRef.current = new MinimalEditHistory();
 
   const invert = useCallback((text: string) => `\x1b[7m${text}\x1b[27m`, []);
   const highlight = React.useMemo(
@@ -825,6 +904,7 @@ export function SimpleTextInput(props: SimpleTextInputProps): React.ReactNode {
     shouldIgnoreInput: props.shouldIgnoreInput,
     highlight: highlight ?? undefined,
     wrapHighlight,
+    editingHistory: editingHistoryRef.current!,
   });
 
   const cursorRef = useDeclaredCursor({

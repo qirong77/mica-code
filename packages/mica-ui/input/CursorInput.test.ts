@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { Cursor, getCommandHighlightRange, resolveCommandHighlight } from './CursorInput.js';
+import {
+  Cursor,
+  buildTextHandler,
+  getCommandHighlightRange,
+  isRedoShortcut,
+  isUndoShortcut,
+  MinimalEditHistory,
+  resolveCommandHighlight,
+} from './CursorInput.js';
 
 function cursorAt(text: string, offset: number): Cursor {
   return Cursor.fromText(text, 80, offset);
@@ -99,5 +107,92 @@ describe('command highlight range', () => {
     expect(resolveCommandHighlight('/loop', true, commands)).toEqual({ start: 0, end: 5 });
     expect(resolveCommandHighlight('/unknown xxx', true, commands)).toBeNull();
     expect(resolveCommandHighlight('/rename xxx', false, commands)).toBeNull();
+  });
+});
+
+describe('undo/redo shortcuts', () => {
+  it('detects Ctrl+Z as undo and Ctrl+Y / Cmd+Shift+Z as redo', () => {
+    expect(isUndoShortcut({ ctrl: true }, '\x1a')).toBe(true);
+    expect(isUndoShortcut({ ctrl: true }, 'z')).toBe(true); // CSI u Ctrl+Z
+    expect(isUndoShortcut({ ctrl: true }, 'Z')).toBe(true);
+    expect(isUndoShortcut({ meta: true }, 'z')).toBe(true);
+    expect(isUndoShortcut({ meta: true }, 'Z')).toBe(true);
+    expect(isUndoShortcut({ ctrl: true, shift: true }, '\x1a')).toBe(false);
+    expect(isUndoShortcut({ ctrl: true, shift: true }, 'z')).toBe(false); // Ctrl+Shift+Z 是 redo
+    expect(isUndoShortcut({ meta: true, shift: true }, 'z')).toBe(false);
+    expect(isUndoShortcut({ meta: true }, 'x')).toBe(false);
+
+    expect(isRedoShortcut({ meta: true, shift: true }, 'z')).toBe(true);
+    expect(isRedoShortcut({ meta: true, shift: true }, 'Z')).toBe(true);
+    expect(isRedoShortcut({ ctrl: true }, '\x19')).toBe(true); // Ctrl+Y
+    expect(isRedoShortcut({ ctrl: true }, 'y')).toBe(false); // 'y' 不是 Ctrl+Y 的 ASCII
+    expect(isRedoShortcut({ ctrl: true, shift: true }, '\x1a')).toBe(true);
+    expect(isRedoShortcut({ ctrl: true, shift: true }, 'z')).toBe(true);
+    expect(isRedoShortcut({ ctrl: true }, '\x1a')).toBe(false);
+  });
+});
+
+function createEditor(initial: string = '') {
+  let value = initial;
+  let offset = initial.length;
+  const history = new MinimalEditHistory();
+  function call(input: string, key: any) {
+    const { onInput } = buildTextHandler({
+      value,
+      onChange: (v) => {
+        value = v;
+      },
+      onOffsetChange: (o) => {
+        offset = o;
+      },
+      multiline: true,
+      cursorChar: '',
+      invert: (t) => t,
+      columns: 80,
+      externalOffset: offset,
+      maxVisibleLines: 6,
+      disableCursorMovementForUpDownKeys: false,
+      editingHistory: history,
+    });
+    onInput(input, key);
+    return { value, offset };
+  }
+  return { history, call };
+}
+
+describe('input undo/redo', () => {
+  const undoKey = () => ({ ctrl: true });
+  const redoKey = () => ({ ctrl: true, shift: true });
+
+  it('undoes and redoes sequential character edits', () => {
+    const { call } = createEditor();
+    call('h', {});
+    call('i', {});
+    expect(call('\x1a', undoKey()).value).toBe('h');
+    expect(call('\x1a', undoKey()).value).toBe('');
+    expect(call('\x1a', undoKey()).value).toBe(''); // nothing left to undo
+
+    expect(call('\x1a', redoKey()).value).toBe('h');
+    expect(call('\x1a', redoKey()).value).toBe('hi');
+  });
+
+  it('clears the redo stack once a new edit is made after undo', () => {
+    const { call } = createEditor();
+    call('a', {});
+    call('b', {});
+    call('\x1a', undoKey()); // undo to 'a'
+    call('x', {}); // new edit after undo
+    expect(call('\x1a', redoKey()).value).toBe('ax'); // redo cleared
+    expect(call('\x1a', undoKey()).value).toBe('a'); // undo 'x'
+    expect(call('\x1a', undoKey()).value).toBe(''); // undo 'a'
+  });
+
+  it('tracks the cursor offset across undo/redo', () => {
+    const { call } = createEditor();
+    call('a', {});
+    call('b', {});
+    expect(call('\x1a', undoKey())).toEqual({ value: 'a', offset: 1 });
+    expect(call('\x1a', undoKey())).toEqual({ value: '', offset: 0 });
+    expect(call('\x1a', redoKey())).toEqual({ value: 'a', offset: 1 });
   });
 });

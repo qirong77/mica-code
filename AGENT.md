@@ -132,6 +132,7 @@ bun run format
 - `packages/mica-ui` 只做终端 UI 组件与状态 store；Runtime→UI 映射由 `MicaUiRuntimeBridge` + `runtime/uiBridge.ts`。主要状态入口：conversation、terminalInput、dropdown、bottom、panels；对话消息可携带 `displayContent`（只改 UI 展示，不改发给 agent 的真实 content）。
 - `TerminalAgentSessionManager` 为每个 agent 保存独立 UI snapshot（conversationMessages、responseText、pendingInputs、thinkingText、workingStatus、contextSize 等），多 agent 切换时从 uiState 恢复，不要从 active agent 或 provider history 临时拼装。UI hot path 有截断上限。
 - Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 Buffer（该层负责增量 UTF-8 解码和 DEC 8-bit C1 规范化）；不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`。
+- 输入框（`SimpleTextInput`/`buildTextHandler`）支持编辑撤销/重做：`Ctrl+Z`/`Cmd+Z` 撤销、`Cmd+Shift+Z`/`Ctrl+Y`（终端尽力支持的 `Ctrl+Shift+Z`）重做；历史按「编辑前快照」逐字符记录于 `MinimalEditHistory`，新编辑清空 redo 栈，历史栈在组件 ref 中跨渲染存活。
 - `mica-code-app` 是终端风格 Web 渲染（等宽字体、紧凑行高、主文本共享 `--chat-text-size`，不在局部硬编码字号）。桌面进程不经过 shell：`desktop-process-env.js` 追加用户工具目录（不插到 PATH 前面），`shell-env.js` 采集 profile env 并缓存（超时静默跳过），供 chat/commit/models/compact 子进程 spawn 合并。
 
 ## 多 Agent、Session、Rewind、Compact
