@@ -5,7 +5,6 @@ import {
   openSync,
   readdirSync,
   readFileSync,
-  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -86,20 +85,30 @@ const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
 const MALFORMED_LEASE_STALE_MS = 60_000;
-const SUMMARY_HEAD_BYTES = 16 * 1024;
+// A session persistent without any conversation is a leftover from an
+// allowEmpty turn-start save (see SessionController.saveCurrent) that never
+// produced content before the process exited. It carries no user message, so
+// deriveTitle falls back to this placeholder; we treat it as garbage and hide
+// it from /resume (and delete the file on rebuild, except for running ones).
+const UNTITLED_SESSION_TITLE = 'Untitled session';
 
 export class SessionStore implements SessionStoreLike {
   /** In-memory metadata summaries sorted by updatedAt descending. Lazily built. */
   private cachedIndex: SessionSummary[] | null = null;
+  /** Directory mtime when cachedIndex was built, so a session persisted by
+   * another process (daemon / app-server / another CLI) invalidates the cache. */
+  private cachedIndexDirMtime = 0;
 
   list(limit = 20): SessionSummary[] {
     return this.ensureIndex()
+      .filter((session) => !isJunkSummary(session))
       .slice(0, limit)
       .map((session) => ({ ...session }));
   }
 
   listRecent(limit = 20): SessionSummary[] {
     return this.ensureIndex()
+      .filter((session) => !isJunkSummary(session))
       .slice(0, limit)
       .map((session) => ({ ...session }));
   }
@@ -191,15 +200,44 @@ export class SessionStore implements SessionStoreLike {
 
   /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */
   private ensureIndex(): SessionSummary[] {
-    if (this.cachedIndex) return this.cachedIndex;
-    const fromDisk = this.readIndexFromDisk();
-    if (fromDisk) {
-      this.cachedIndex = fromDisk;
-      return fromDisk;
-    }
-    this.cachedIndex = this.rebuildIndex();
-    this.persistIndex();
+    const dirMtime = dirMtimeMs();
+    if (this.cachedIndex && this.cachedIndexDirMtime === dirMtime) return this.cachedIndex;
+    this.cachedIndex = this.buildIndexFromDiskOrRebuild();
+    this.cachedIndexDirMtime = dirMtime;
     return this.cachedIndex;
+  }
+
+  /** Returns the on-disk index when it is complete and current, otherwise
+   * rebuilds it from the session files so entries dropped by concurrent
+   * writers (or missing legacy files) are reconciled. */
+  private buildIndexFromDiskOrRebuild(): SessionSummary[] {
+    const fromDisk = this.readIndexFromDisk();
+    if (fromDisk && this.indexMatchesDisk(fromDisk)) return fromDisk;
+    const rebuilt = this.rebuildIndex();
+    if (!this.cachedIndex) {
+      // First build: persist so later readers get a complete index instead of
+      // re-deriving it from a partial one on disk.
+      this.cachedIndex = rebuilt;
+      this.persistIndex();
+    }
+    return rebuilt;
+  }
+
+  /** True when the index contains exactly the session ids currently on disk.
+   * A mismatch means another process registered/removed sessions that our
+   * (or the on-disk) index is missing, so a rebuild is the safe source. */
+  private indexMatchesDisk(index: SessionSummary[]): boolean {
+    try {
+      const fileIds = new Set(
+        readdirSync(SESSION_DIR)
+          .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
+          .map((file) => file.slice(0, -'.json'.length)),
+      );
+      if (fileIds.size !== index.length) return false;
+      return index.every((summary) => fileIds.has(summary.id));
+    } catch {
+      return false;
+    }
   }
 
   private readIndexFromDisk(): SessionSummary[] | null {
@@ -221,23 +259,30 @@ export class SessionStore implements SessionStoreLike {
 
   private rebuildIndex(): SessionSummary[] {
     ensureSessionDir();
-    return readdirSync(SESSION_DIR)
-      .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
-      .map((file) => this.readSummary(resolve(SESSION_DIR, file)))
-      .filter((session): session is SessionSummary => Boolean(session))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }
-
-  /** Reads summary metadata from the head of a session file, falling back to a
-   * full parse only when the head cannot yield a complete summary. */
-  private readSummary(path: string): SessionSummary | null {
-    const head = readFileHead(path, SUMMARY_HEAD_BYTES);
-    if (head) {
-      const summary = extractSummaryFromHead(head);
-      if (summary) return summary;
+    const summaries: SessionSummary[] = [];
+    for (const file of readdirSync(SESSION_DIR)) {
+      if (!file.endsWith('.json') || file === 'index.json' || file === 'session-index.json') continue;
+      const path = resolve(SESSION_DIR, file);
+      const session = this.read(path);
+      if (!session) continue;
+      if (isJunkEmptySession(session)) {
+        // A session with no user/assistant conversation and no usage is a
+        // leftover from an allowEmpty turn-start save. Drop it entirely unless
+        // it is running (an active turn may still be writing to it). Running
+        // junk is skipped below so it never shows in /resume either.
+        if (session.turnState !== 'running') {
+          try {
+            rmSync(path, { force: true });
+          } catch {
+            // best-effort; the file is simply skipped on the next scan.
+          }
+        }
+        continue;
+      }
+      const summary = toSessionSummary(session);
+      if (summary) summaries.push(summary);
     }
-    const session = this.read(path);
-    return session ? toSessionSummary(session) : null;
+    return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   private persistIndex(): void {
@@ -266,8 +311,13 @@ export class SessionStore implements SessionStoreLike {
   }
 
   private mutateIndex(mutate: (index: SessionSummary[]) => void): void {
-    const index = this.ensureIndex();
+    // Merge against the latest on-disk index rather than a possibly-stale
+    // in-memory cache, so a process that saves after another process already
+    // persisted its own session never drops that other process's entries.
+    const index = this.buildIndexFromDiskOrRebuild();
     mutate(index);
+    this.cachedIndex = index;
+    this.cachedIndexDirMtime = dirMtimeMs();
     this.persistIndex();
   }
 
@@ -364,6 +414,43 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
   };
 }
 
+function dirMtimeMs(): number {
+  try {
+    return statSync(SESSION_DIR).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** An index entry is junk when it has only the default placeholder title,
+ * which means the session never carried a real user-authored prompt. */
+function isJunkSummary(summary: SessionSummary): boolean {
+  return summary.title === UNTITLED_SESSION_TITLE;
+}
+
+/** A persisted session is junk when it holds no user/assistant conversation,
+ * no model usage, and only the default title: a leftover from an allowEmpty
+ * turn-start save that never produced content before the process exited. */
+function isJunkEmptySession(session: PersistedSession): boolean {
+  if (session.title !== UNTITLED_SESSION_TITLE) return false;
+  if (hasConversationData(session.snapshot)) return false;
+  return (session.snapshot.usageHistory?.length ?? 0) === 0;
+}
+
+function hasConversationData(snapshot: PersistedRuntimeSnapshot): boolean {
+  const hasConversationMessage = snapshot.conversationMessages?.some((message) => {
+    if (!message || typeof message !== 'object') return false;
+    const role = (message as { role?: unknown }).role;
+    return role === 'user' || role === 'assistant';
+  });
+  if (hasConversationMessage) return true;
+  return snapshot.messages?.some((message) => {
+    if (!message || typeof message !== 'object') return false;
+    const role = (message as { role?: unknown }).role;
+    return role === 'user' || role === 'assistant';
+  });
+}
+
 function isSessionSummary(value: unknown): value is SessionSummary {
   if (!value || typeof value !== 'object') return false;
   const session = value as Record<string, unknown>;
@@ -376,58 +463,7 @@ function isSessionSummary(value: unknown): value is SessionSummary {
     typeof session.model === 'string' &&
     typeof session.uncompleted === 'boolean'
   );
-}
 
-function readFileHead(path: string, bytes: number): string | null {
-  try {
-    const fd = openSync(path, 'r');
-    try {
-      const buffer = Buffer.allocUnsafe(bytes);
-      const length = readSync(fd, buffer, 0, buffer.length, 0);
-      return buffer.toString('utf-8', 0, length);
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-    return null;
-  }
-}
-
-function extractSummaryFromHead(head: string): SessionSummary | null {
-  const id = pickString(head, 'id');
-  const title = pickString(head, 'title');
-  const createdAt = pickString(head, 'createdAt');
-  const updatedAt = pickString(head, 'updatedAt');
-  const cwd = pickString(head, 'cwd');
-  const turnState = pickString(head, 'turnState');
-  const providerId = pickString(head, 'providerId');
-  const model = pickString(head, 'model');
-  const effort = pickString(head, 'effort');
-  const role = pickString(head, 'role');
-  if (!id || !title || !cwd || !updatedAt || !providerId || !model) return null;
-  return {
-    id,
-    title,
-    createdAt,
-    updatedAt,
-    cwd,
-    providerId,
-    model,
-    uncompleted: turnState !== undefined && turnState !== 'completed',
-    turnState: isPersistedSessionTurnState(turnState) ? turnState : 'completed',
-    effort: isEffortOption(effort) ? effort : 'none',
-    role: role ?? 'default',
-  };
-}
-
-function pickString(text: string, key: string): string | undefined {
-  const match = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
-  if (!match) return undefined;
-  try {
-    return JSON.parse(`"${match[1]}"`) as string;
-  } catch {
-    return undefined;
-  }
 }
 
 function createSessionStore(): SessionStore {

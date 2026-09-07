@@ -248,6 +248,92 @@ describe('SessionStore.replaceValidated', () => {
   });
 });
 
+describe('SessionStore index reconciliation', () => {
+  it('rebuilds the index to recover sessions a stale index dropped', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-recover-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('real', '/tmp/real', '2026-01-01T00:00:00.000Z'));
+
+      // Simulate another process persisting a session without updating the
+      // index (as happens when a stale in-memory index overwrites the file).
+      writeFileSync(
+        join(SESSION_DIR, 'orphan.json'),
+        JSON.stringify(makeSession('orphan', '/tmp/orphan', '2026-01-02T00:00:00.000Z')),
+        'utf-8',
+      );
+
+      expect(store.listRecent(10).map((session) => session.id)).toEqual(['orphan', 'real']);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps sessions saved by another store instance instead of dropping them', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-merge-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore } = await import('./sessionStore.js');
+      const first = new SessionStore();
+      first.save(makeSession('a', '/tmp/a', '2026-01-01T00:00:00.000Z'));
+      const second = new SessionStore();
+      second.save(makeSession('b', '/tmp/b', '2026-01-02T00:00:00.000Z'));
+
+      // The second writer must not clobber the first writer's entry from the index.
+      expect(new SessionStore().listRecent(10).map((session) => session.id)).toEqual(['b', 'a']);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('SessionStore junk session cleanup', () => {
+  it('removes empty Untitled sessions that never carried a conversation', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-junk-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('real', '/tmp/real', '2026-01-01T00:00:00.000Z'));
+
+      const junkId = 'junk-completed';
+      const junkPath = join(SESSION_DIR, `${junkId}.json`);
+      writeFileSync(junkPath, JSON.stringify(junkSession(junkId, 'completed')), 'utf-8');
+
+      // A stale index cannot account for the extra file, so the rebuild drops
+      // the empty completed session and hides it from the listing.
+      expect(store.listRecent(10).map((session) => session.id)).toEqual(['real']);
+      expect(existsSync(junkPath)).toBe(false);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('hides a junk running session from the listing but leaves the file for the active turn', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-junk-running-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('real', '/tmp/real', '2026-01-01T00:00:00.000Z'));
+
+      const runningPath = join(SESSION_DIR, 'junk-running.json');
+      writeFileSync(runningPath, JSON.stringify(junkSession('junk-running', 'running')), 'utf-8');
+
+      expect(store.listRecent(10).map((session) => session.id)).toEqual(['real']);
+      expect(existsSync(runningPath)).toBe(true);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+});
+
 function makeSession(id: string, cwd: string, updatedAt: string): PersistedSession {
   return {
     version: 1,
@@ -257,6 +343,29 @@ function makeSession(id: string, cwd: string, updatedAt: string): PersistedSessi
     updatedAt,
     cwd,
     turnState: 'completed',
+    snapshot: {
+      providerId: 'test',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      messages: [],
+      conversationMessages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    },
+  };
+}
+
+function junkSession(id: string, turnState: 'running' | 'completed'): PersistedSession {
+  return {
+    version: 1,
+    id,
+    title: 'Untitled session',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    cwd: '/tmp',
+    turnState,
     snapshot: {
       providerId: 'test',
       protocol: 'openai_chat_completions',
