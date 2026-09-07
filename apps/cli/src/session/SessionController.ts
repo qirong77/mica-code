@@ -146,7 +146,12 @@ export class SessionController {
       turnState: this.currentTurnState,
       snapshot: toPersistedSnapshot(snapshot, conversationMessages),
     };
-    if (existing && sessionsEqual(existing, session)) {
+    // If the turn-state already changed, the persisted document is definitely
+    // different, so skip the expensive full-session equality JSON comparison
+    // (which stringifies both sides) and go straight to the write. This keeps a
+    // large active session from being serialized several times per turn.
+    const stateChanged = existing?.turnState !== this.currentTurnState;
+    if (existing && !stateChanged && sessionsEqual(existing, session)) {
       this.currentPersistedSignature = sessionSignature(existing);
       return true;
     }
@@ -226,6 +231,18 @@ export class SessionController {
     const session = this.store.load(this.currentSessionId);
     if (!session || sessionSignature(session) === this.currentPersistedSignature) return null;
     return this.resumeLoaded(session);
+  }
+
+  /**
+   * Loads the current session once and reports whether another process changed
+   * it, without resuming. Used by the idle external-session poller so it can
+   * skip the expensive full load on every tick; only a real external change is
+   * resumed via {@link resumeLoaded}.
+   */
+  peekExternalChange(): { session: PersistedSession; changed: boolean } | null {
+    const session = this.store.load(this.currentSessionId);
+    if (!session) return null;
+    return { session, changed: sessionSignature(session) !== this.currentPersistedSignature };
   }
 
   private discardCurrentIfEmpty(): boolean {

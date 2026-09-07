@@ -81,6 +81,15 @@ export type SessionTurnLease = {
   release(): void;
 };
 
+export type SessionGcResult = {
+  /** 回收的孤儿 turn-lock 数量（owner pid 已死）。 */
+  reclaimedLocks: number;
+  /** 被收敛为 aborted 的 running 会话数量（强杀后卡在 running 的残留）。 */
+  demotedSessions: number;
+  /** 删除的垃圾空会话数量（无对话、无 usage、非 running）。 */
+  deletedSessions: number;
+};
+
 const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
@@ -198,6 +207,86 @@ export class SessionStore implements SessionStoreLike {
     return true;
   }
 
+  /**
+   * 单实例安全执行的垃圾回收：回收孤儿 turn-lock、把强杀后卡在 running
+   * 的会话收敛为 aborted、清理垃圾空会话。只在 owner pid 已死时才回收/收敛，
+   * 因此多个进程即使并发调用也不会误伤仍活着的 turn。返回本轮的清理统计。
+   */
+  performGarbageCollection(): SessionGcResult {
+    ensureSessionDir();
+    const result: SessionGcResult = { reclaimedLocks: 0, demotedSessions: 0, deletedSessions: 0 };
+
+    // 1) 回收孤儿 turn-lock：owner pid 已死（或损坏且超过宽松时限）的锁直接删除。
+    const lockDir = resolve(SESSION_DIR, '.turn-locks');
+    if (existsSync(lockDir)) {
+      for (const file of readdirSync(lockDir)) {
+        if (!file.endsWith('.lock')) continue;
+        const lockPath = resolve(lockDir, file);
+        if (removeStaleTurnLease(lockPath)) result.reclaimedLocks += 1;
+      }
+    }
+
+    // 2) 扫一遍会话文件，把「锁已死 / 无活锁」的 running 会话收敛为 aborted。
+    for (const file of readdirSync(SESSION_DIR)) {
+      if (!file.endsWith('.json') || file === 'index.json' || file === 'session-index.json') continue;
+      const path = resolve(SESSION_DIR, file);
+      const session = this.read(path);
+      if (!session) continue;
+
+      if (session.turnState === 'running' && !this.hasLiveTurnLock(session.id)) {
+        const demoted: PersistedSession = {
+          ...session,
+          revision: (session.revision ?? 0) + 1,
+          updatedAt: new Date().toISOString(),
+          turnState: 'aborted',
+        };
+        // Write the demoted session directly. this.save() would re-trigger
+        // rebuildIndex, which itself deletes junk empty sessions; a freshly
+        // demoted running junk session would then vanish mid-sweep and pollute
+        // the counters. A file-level atomic write keeps the sweep deterministic.
+        const tmpPath = `${path}.${process.pid}.gc.tmp`;
+        writeFileSync(tmpPath, `${JSON.stringify(demoted, null, 2)}\n`, 'utf-8');
+        renameSync(tmpPath, path);
+        result.demotedSessions += 1;
+        continue;
+      }
+
+      if (session.turnState !== 'running' && isJunkEmptySession(session)) {
+        rmSync(path, { force: true });
+        result.deletedSessions += 1;
+      }
+    }
+
+    // Reconcile the metadata index once so the just-changed files are reflected
+    // without the per-save rebuildIndex re-running its own junk deletion (which
+    // would otherwise race this sweep's counters).
+    try {
+      this.rebuildIndex();
+    } catch {
+      // best-effort; the next list() rebuild reconciles a stale index.
+    }
+
+    return result;
+  }
+
+  /** 会话是否仍有活 turn 锁（owner pid 存在）。锁不存在/损坏/已死均视为无活锁。 */
+  private hasLiveTurnLock(sessionId: string): boolean {
+    const lockPath = turnLockPath(sessionId);
+    try {
+      if (!existsSync(lockPath)) return false;
+      const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { pid?: unknown };
+      if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || owner.pid <= 0) return false;
+      try {
+        process.kill(owner.pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+      }
+    } catch {
+      return false;
+    }
+  }
+
   /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */
   private ensureIndex(): SessionSummary[] {
     const dirMtime = dirMtimeMs();
@@ -214,12 +303,12 @@ export class SessionStore implements SessionStoreLike {
     const fromDisk = this.readIndexFromDisk();
     if (fromDisk && this.indexMatchesDisk(fromDisk)) return fromDisk;
     const rebuilt = this.rebuildIndex();
-    if (!this.cachedIndex) {
-      // First build: persist so later readers get a complete index instead of
-      // re-deriving it from a partial one on disk.
-      this.cachedIndex = rebuilt;
-      this.persistIndex();
-    }
+    // Persist the rebuilt index even if we already had a cache: an incomplete
+    // on-disk index (e.g. another process added sessions, or an earlier build
+    // never persisted) would otherwise force every subsequent reader to rescan
+    // and re-parse every session file.
+    this.cachedIndex = rebuilt;
+    this.persistIndex(rebuilt);
     return rebuilt;
   }
 
@@ -243,9 +332,6 @@ export class SessionStore implements SessionStoreLike {
   private readIndexFromDisk(): SessionSummary[] | null {
     try {
       if (!existsSync(SESSION_INDEX_FILE)) return null;
-      // A newer directory mtime means a session file was added/removed/renamed
-      // somewhere else (e.g. sync daemon), so the index may be stale.
-      if (statSync(SESSION_DIR).mtimeMs > statSync(SESSION_INDEX_FILE).mtimeMs) return null;
       const data = JSON.parse(readFileSync(SESSION_INDEX_FILE, 'utf-8')) as unknown;
       if (!data || typeof data !== 'object') return null;
       const sessions = (data as { sessions?: unknown }).sessions;
@@ -269,15 +355,17 @@ export class SessionStore implements SessionStoreLike {
         // A session with no user/assistant conversation and no usage is a
         // leftover from an allowEmpty turn-start save. Drop it entirely unless
         // it is running (an active turn may still be writing to it). Running
-        // junk is skipped below so it never shows in /resume either.
+        // junk is kept and indexed so the id-set still matches the files on
+        // disk (which keeps indexMatchesDisk happy) but is hidden from /resume
+        // by isJunkSummary.
         if (session.turnState !== 'running') {
           try {
             rmSync(path, { force: true });
           } catch {
             // best-effort; the file is simply skipped on the next scan.
           }
+          continue;
         }
-        continue;
       }
       const summary = toSessionSummary(session);
       if (summary) summaries.push(summary);
@@ -285,8 +373,8 @@ export class SessionStore implements SessionStoreLike {
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  private persistIndex(): void {
-    const content = JSON.stringify({ version: 1, sessions: this.cachedIndex ?? [] }, null, 2);
+  private persistIndex(index: SessionSummary[] = this.cachedIndex ?? []): void {
+    const content = JSON.stringify({ version: 1, sessions: index }, null, 2);
     const tmpPath = `${SESSION_INDEX_FILE}.${process.pid}.tmp`;
     mkdirSync(MICA_HOME, { recursive: true });
     writeFileSync(tmpPath, `${content}\n`, 'utf-8');
@@ -314,11 +402,24 @@ export class SessionStore implements SessionStoreLike {
     // Merge against the latest on-disk index rather than a possibly-stale
     // in-memory cache, so a process that saves after another process already
     // persisted its own session never drops that other process's entries.
-    const index = this.buildIndexFromDiskOrRebuild();
+    //
+    // Never re-parse every session file on the save path: a turn persists the
+    // session several times, so the merge base must be the cheap on-disk index
+    // read instead of a full scan+parse. Id-set drift (addition/removal by
+    // another process or an incomplete index) is repaired by the read path
+    // (buildIndexFromDiskOrRebuild), which rescans and persists a complete
+    // index once; the live turn stays responsive.
+    let index = this.readIndexFromDisk();
+    if (!index) {
+      index =
+        this.cachedIndex && this.indexMatchesDisk(this.cachedIndex)
+          ? this.cachedIndex
+          : this.rebuildIndex();
+    }
     mutate(index);
     this.cachedIndex = index;
     this.cachedIndexDirMtime = dirMtimeMs();
-    this.persistIndex();
+    this.persistIndex(index);
   }
 
   private read(path: string): PersistedSession | null {

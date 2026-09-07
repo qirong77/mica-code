@@ -459,10 +459,16 @@ export class LocalRuntimeController implements RuntimeController {
       const agent = this.agent;
       const sessionController = this.sessionController;
       if (this.stopping || this.isAgentBusy(agent)) return;
-      const latest = sessionController.load(sessionController.getCurrentSessionId());
-      if (!latest || latest.turnState === 'running') return;
+      // Inspect the current session once (not twice): skip when it is running
+      // in another process or unchanged, and only then resume on a real
+      // external change. This keeps the per-second poll cheap even for large
+      // sessions, where the old double-load + full signature compare blocked
+      // the main thread for ~100ms+ every tick.
+      const peek = sessionController.peekExternalChange();
+      if (!peek || peek.session.turnState === 'running') return;
+      if (!peek.changed) return;
       const draft = micaUi.terminalInput.text.get();
-      const refreshed = sessionController.refreshFromStore();
+      const refreshed = sessionController.resumeLoaded(peek.session);
       if (!refreshed?.ok) return;
       this.applyRefreshedSession(agent, refreshed.session.turnState);
       micaUi.terminalInput.text.set(draft);

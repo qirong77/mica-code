@@ -8,6 +8,7 @@ import { VERSION_LABEL, resolveMicaHomePath } from '@packages/mica-config/brand.
 import { CLI_USAGE, parseCliArgs } from './cli/args.js';
 import { VERSION } from './buildMeta.js';
 import { ensureDaemonRunning } from './features/sync-daemon/ensureDaemonRunning.js';
+import { ensureGcRunning } from './features/session-gc/index.js';
 
 if (await startConfigWebWorker()) {
   await new Promise(() => undefined);
@@ -215,6 +216,11 @@ if (invocation.mode === 'daemon') {
   process.exit(0);
 }
 
+if (invocation.mode === 'gc') {
+  const { runSessionGc } = await import('./features/session-gc/index.js');
+  await runSessionGc();
+}
+
 const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
   import('./app/index.js'),
   import('./runtime/uiBridge.js'),
@@ -229,6 +235,7 @@ const app = createApplication({ sessionId: invocation.mode === 'interactive' ? i
 // MICA_NO_DAEMON=1.
 if (invocation.mode === 'interactive') {
   void ensureDaemonRunning();
+  void ensureGcRunning();
 }
 
 const SIGNAL_EXIT_FORCE_TIMEOUT_MS = 10_000;
