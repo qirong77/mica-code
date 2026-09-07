@@ -50,7 +50,11 @@ describe('role command', () => {
     expect(setRole).toHaveBeenCalledWith('reviewer');
     expect(saveCurrent).toHaveBeenCalledOnce();
     expect(syncModelDisplay).toHaveBeenCalledWith(agent);
-    expect(showNotice).toHaveBeenCalledWith('Role: reviewer', 'agent-1', { command: '/role', status: 'success' });
+    expect(showNotice).toHaveBeenCalledTimes(1);
+    expect(showNotice).toHaveBeenCalledWith('Role: reviewer; Prompt cache may be invalidated. Consider /compact', 'agent-1', {
+      command: '/role',
+      status: 'success',
+    });
   });
 
   it('does not switch to an unknown role', () => {
@@ -94,7 +98,10 @@ describe('role command', () => {
     expect(setRole).toHaveBeenCalledWith('reviewer');
     expect(saveCurrent).toHaveBeenCalledOnce();
     expect(syncModelDisplay).toHaveBeenCalledWith(agent);
-    expect(showNotice).toHaveBeenCalledWith('Role: reviewer', 'agent-1', { command: '/role', status: 'success' });
+    expect(showNotice).toHaveBeenCalledWith('Role: reviewer; Prompt cache may be invalidated. Consider /compact', 'agent-1', {
+      command: '/role',
+      status: 'success',
+    });
   });
 
   it('wraps role cycle from the last role back to default', () => {

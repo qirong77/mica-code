@@ -92,19 +92,19 @@ describe('createBtwCommand / runBtw', () => {
     );
   });
 
-  it('falls back to a new thread and warns when continuing with no prior btw', async () => {
+  it('falls back to a new thread and notes it when continuing with no prior btw', async () => {
     const query = vi.fn(async () => '答案');
     const agent = makeAgent(query);
     const services = makeServices();
 
     await runBtw(agent, services, '-continue 没有前文');
 
-    expect(services.showNotice).toHaveBeenCalledWith(
-      '没有可延续的 btw 对话，将作为一条新问题处理',
-      undefined,
-      { command: '/btw', status: 'info' },
-    );
     expect(query).toHaveBeenCalledWith('没有前文');
+    expect(services.showNotice).toHaveBeenLastCalledWith(
+      expect.stringContaining('没有可延续的 btw 对话，已作为一条新问题处理'),
+      undefined,
+      { command: '/btw', status: 'success' },
+    );
   });
 
   it('emits an error notice when the subagent throws', async () => {

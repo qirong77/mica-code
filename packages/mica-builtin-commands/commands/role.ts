@@ -101,14 +101,10 @@ function applyRoleSelection(
     }
     if (role.name === agent.role) return true;
 
-    services.showNotice('Role changed, prompt cache may be invalidated. Consider /compact', services.getCurrentAgentSessionId(), {
-      command: '/role',
-      status: 'warning',
-    });
     agent.setRole(role.name);
     sessionController.saveCurrent();
     services.syncModelDisplay(agent);
-    services.showNotice(`Role: ${role.name}`, services.getCurrentAgentSessionId(), {
+    services.showNotice(`Role: ${role.name}; Prompt cache may be invalidated. Consider /compact`, services.getCurrentAgentSessionId(), {
       command: '/role',
       status: 'success',
     });

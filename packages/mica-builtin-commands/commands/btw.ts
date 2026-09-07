@@ -40,12 +40,7 @@ export async function runBtw(agent: CommandAgent, services: CommandRuntimeServic
   const { question, isContinue } = parsed;
 
   let subagent = isContinue ? btwThreads.get(agent as object)?.subagent : undefined;
-  if (isContinue && !subagent) {
-    services.showNotice('没有可延续的 btw 对话，将作为一条新问题处理', undefined, {
-      command: '/btw',
-      status: 'info',
-    });
-  }
+  const isFallback = isContinue && !subagent;
   if (!subagent) {
     subagent = createBtwSubagent(agent, messagesToTranscript(agent.getSnapshot().messages));
     btwThreads.set(agent as object, { subagent });
@@ -55,7 +50,7 @@ export async function runBtw(agent: CommandAgent, services: CommandRuntimeServic
 
   try {
     const reply = await subagent.query(question);
-    upsertBtwNotice(services, formatBtwNotice(question, reply), 'success');
+    upsertBtwNotice(services, formatBtwNotice(question, reply, isFallback), 'success');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     upsertBtwNotice(services, `> ${question}\n\nbtw 出错：${message}`, 'error');
@@ -118,9 +113,11 @@ export function buildBtwSystemPrompt(transcript: string): string {
   ].join('\n');
 }
 
-export function formatBtwNotice(question: string, answer: string): string {
+export function formatBtwNotice(question: string, answer: string, isFallback = false): string {
+  const fallback = isFallback ? ['', '_没有可延续的 btw 对话，已作为一条新问题处理_'] : [];
   return [
     `> ${question}`,
+    ...fallback,
     '',
     answer,
     '',
