@@ -429,6 +429,9 @@ export default function App() {
   const [error, setError] = useState('')
   const [nodes, setNodes] = useState([])
   const nodesRef = useLatest(nodes)
+  // 右侧面板终端区域的独立 shell 终端 Tab（与左侧对话会话树解耦）
+  const [rightTerms, setRightTerms] = useState([])
+  const [rightActiveTerm, setRightActiveTerm] = useState(null)
   const [activeId, setActiveId] = useState(null)
   const activeRef = useLatest(activeId)
   const [selectedId, setSelectedId] = useState(null)
@@ -787,6 +790,33 @@ export default function App() {
       setActiveId(id)
     },
     [nodesRef]
+  )
+
+  const createRightTerm = useCallback(() => {
+    const id = uid('rt')
+    const count = rightTerms.length + 1
+    const cwd = terminalCwd(activeRef.current) || recentChatCwd() || null
+    setRightTerms((items) => [
+      ...items,
+      { id, text: `终端 ${count}`, cwd, type: 'terminal', sessionId: null, command: null }
+    ])
+    setRightActiveTerm(id)
+    setRightPanelTab('terminal')
+  }, [activeRef, rightTerms.length, terminalCwd])
+
+  const closeRightTerm = useCallback((id) => {
+    setRightTerms((items) => {
+      const next = items.filter((item) => item.id !== id)
+      setRightActiveTerm((current) => (current === id ? (next[0]?.id ?? null) : current))
+      return next
+    })
+    terminalRef.current
+      ?.dispose(id)
+      .catch((error) => console.error('dispose right term failed', error))
+  }, [])
+  const rightTermCwd = useCallback(
+    (id) => rightTerms.find((item) => item.id === id)?.cwd || null,
+    [rightTerms]
   )
 
   const createSession = useCallback(
@@ -1327,12 +1357,20 @@ export default function App() {
               <IconTerminal2 size={13} className="shrink-0 opacity-75" />
               <span>终端</span>
             </button>
+            <button
+              type="button"
+              title="新建终端"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+              onClick={createRightTerm}
+            >
+              <IconPlus size={14} />
+            </button>
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {rightPanelTab === 'terminal' && (
               <div className="flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-white/10 px-1 no-drag">
-                {terminalNodes.map((node) => {
-                  const active = node.id === activeId
+                {rightTerms.map((node) => {
+                  const active = node.id === rightActiveTerm
                   return (
                     <div
                       key={node.id}
@@ -1346,7 +1384,7 @@ export default function App() {
                         type="button"
                         title={node.text}
                         className="flex min-w-0 items-center gap-1.5"
-                        onClick={() => selectNode(node)}
+                        onClick={() => setRightActiveTerm(node.id)}
                       >
                         <IconTerminal2 size={12} className="shrink-0 opacity-75" />
                         <span className="max-w-36 truncate">{node.text}</span>
@@ -1355,24 +1393,13 @@ export default function App() {
                         type="button"
                         title="关闭终端"
                         className="grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 opacity-0 transition-opacity hover:bg-white/[.08] hover:text-white group-hover:opacity-100"
-                        onClick={() => closeTerminal(node.id)}
+                        onClick={() => closeRightTerm(node.id)}
                       >
                         <IconX size={11} />
                       </button>
                     </div>
                   )
                 })}
-                <button
-                  type="button"
-                  title="新建终端"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                  onClick={() => {
-                    setRightPanelTab('terminal')
-                    createTerminal()
-                  }}
-                >
-                  <IconPlus size={14} />
-                </button>
               </div>
             )}
             <FilesView
@@ -1387,16 +1414,16 @@ export default function App() {
             />
             <TerminalHost
               ref={terminalRef}
-              nodes={terminalNodes}
-              activeId={activeId}
+              nodes={rightTerms}
+              activeId={rightActiveTerm}
               visible={rightPanelTab === 'terminal'}
               pane="terminal"
               docked={false}
               sidebarCollapsed={sidebarCollapsed}
-              resolveCwd={terminalCwd}
+              resolveCwd={rightTermCwd}
               commandFor={commandFor}
               onRead={(id, reason) => notifications.markRead(id, reason)}
-              onMicaExit={closeTerminal}
+              onMicaExit={closeRightTerm}
             />
           </div>
         </aside>
