@@ -13,6 +13,7 @@ export type CodexNotificationWriter = (method: string, params: unknown) => void;
 type PendingCommandItem = {
   itemId: string;
   name: string;
+  args: string;
   displayText: string;
 };
 
@@ -172,7 +173,7 @@ export function attachCodexProjector(
     toolCall: ({ name, args, id }) => {
       const itemId = id || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const displayText = toolDisplayText(name, args || '');
-      pendingCommands.set(itemId, { itemId, name, displayText });
+      pendingCommands.set(itemId, { itemId, name, args: args || '', displayText });
       emitItemStarted({
         type: 'commandExecution',
         id: itemId,
@@ -201,8 +202,11 @@ export function attachCodexProjector(
       emitItemCompleted({
         type: 'commandExecution',
         id: itemId,
-        command: pending?.name || name,
-        displayText: pending?.displayText ?? toolDisplayText(name, result || ''),
+        // Keep the same `command` shape as item/started (name + JSON args) so
+        // clients that re-derive the tool name/input from it see the same call,
+        // and never feed the tool *result* back into the display-text formatter.
+        command: formatCommand(pending?.name ?? name, pending?.args ?? ''),
+        displayText: pending?.displayText ?? name,
         cwd,
         status: 'completed',
         aggregatedOutput: truncated,

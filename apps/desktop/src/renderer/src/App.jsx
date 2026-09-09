@@ -3,10 +3,8 @@ import {
   BarChart3,
   Folder,
   GitBranch,
-  GitCompare,
   FolderOpen,
   MessageSquare,
-  NotebookPen,
   PanelLeft,
   Rocket,
   Settings,
@@ -15,8 +13,6 @@ import {
 import { BranchPicker } from './BranchPicker'
 import { ChatView, shortPath } from './ChatView'
 import { FilesView } from './FilesView'
-import { GitView } from './GitView'
-import { NotesView } from './NotesView'
 import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
 import { SettingsView } from './SettingsView'
@@ -394,14 +390,20 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
   return { states, markRead }
 }
 
-const tabClass =
-  'no-drag relative flex min-w-19 items-center gap-1.5 px-2.5 text-xs hover:bg-white/[.04] hover:text-white/90'
 const DEFAULT_TERMINAL_PANEL_HEIGHT = 260
 const MIN_TERMINAL_PANEL_HEIGHT = 120
 const MIN_FILE_PANEL_HEIGHT = 140
 const DEFAULT_SIDEBAR_WIDTH = 260
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
+
+// 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
+const PAGE_HEADER = {
+  files: { label: '工作文件', Icon: Folder },
+  terminal: { label: '终端', Icon: SquareTerminal },
+  stats: { label: 'Stats', Icon: BarChart3 },
+  settings: { label: 'Settings', Icon: Settings }
+}
 
 function savedSidebarWidth() {
   const value = Number(localStorage.getItem('mica.sidebarWidth'))
@@ -710,11 +712,13 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) {
-        refreshGit({ quiet: true })
+        // 用节点自身的 cwd 刷新，而不是 PTY 里 shell 的 cwd：底部路径与分支
+        // 必须始终描述同一个目录，否则 shell cd 之后两边会各说各话。
+        refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
       }
     }, 10000)
     return () => clearInterval(timer)
-  }, [refreshGit])
+  }, [activeRef, refreshGit, terminalCwd])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -789,7 +793,7 @@ export default function App() {
     (node, activate = true) => {
       setSelectedId(node.id)
       if (activate && node.type === 'terminal') {
-        if (view === 'stats' || view === 'settings') setView('chat')
+        if (view !== 'chat') setView('chat')
         setActiveId(node.id)
         setNodes((items) =>
           items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
@@ -899,7 +903,6 @@ export default function App() {
     }
   }, [activeCwd])
   const repository = gitIsCurrent ? git.repository : null
-  const gitCount = repository?.files?.length ? repository : null
   const getSearchRoot = useCallback(
     () => terminalRef.current?.getCwd(activeRef.current),
     [activeRef]
@@ -1072,8 +1075,6 @@ export default function App() {
       </div>
     )
 
-  const isPageView = view === 'stats' || view === 'settings'
-
   return (
     <>
       <div
@@ -1085,7 +1086,7 @@ export default function App() {
         }
       >
         <aside
-          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#1c1c1d] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
+          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
           style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
           {!sidebarCollapsed && (
@@ -1099,44 +1100,67 @@ export default function App() {
             />
           )}
           <div className="h-8.5 shrink-0 drag-region" aria-hidden="true" />
-          <nav className="no-drag shrink-0 px-2.5 pb-1.5 pt-1">
+          <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
             <button
               type="button"
               title="New Session"
-              className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/75 transition-colors hover:bg-white/[.06] hover:text-white"
               onClick={() => createSession()}
             >
-              <Rocket size={14} className="shrink-0 opacity-80" />
+              <Rocket size={14} className="shrink-0 opacity-75" />
               <span>New Session</span>
             </button>
             <button
               type="button"
               aria-pressed={view === 'stats'}
               title="查看使用统计"
-              className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium transition-colors ${
+              className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
                 view === 'stats'
-                  ? 'bg-white/[.09] text-white'
+                  ? 'bg-white/[.10] text-white'
                   : 'text-white/60 hover:bg-white/[.05] hover:text-white'
               }`}
               onClick={() => setView('stats')}
             >
-              <BarChart3 size={14} className="shrink-0 opacity-80" />
+              <BarChart3 size={14} className="shrink-0 opacity-75" />
               <span>Stats</span>
             </button>
             <button
               type="button"
               aria-pressed={view === 'settings'}
               title="打开 Mica 配置页面"
-              className={`mt-px flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] font-medium transition-colors ${
+              className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
                 view === 'settings'
-                  ? 'bg-white/[.09] text-white'
+                  ? 'bg-white/[.10] text-white'
                   : 'text-white/60 hover:bg-white/[.05] hover:text-white'
               }`}
               onClick={() => setView('settings')}
             >
-              <Settings size={14} className="shrink-0 opacity-80" />
+              <Settings size={14} className="shrink-0 opacity-75" />
               <span>Settings</span>
             </button>
+            <div className="mb-0.5 mt-1.5 px-2.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[.16em] text-white/35">
+              工作区
+            </div>
+            {[
+              ['files', 'Files', Folder],
+              ['terminal', '终端', SquareTerminal]
+            ].map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={view === id}
+                title={label}
+                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
+                  view === id
+                    ? 'bg-white/[.10] text-white'
+                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+                }`}
+                onClick={() => setView(id)}
+              >
+                <Icon size={14} className="shrink-0 opacity-75" />
+                <span>{label}</span>
+              </button>
+            ))}
           </nav>
           <SessionTree
             sessions={sessions}
@@ -1147,7 +1171,6 @@ export default function App() {
             activeSessionId={activeSessionId}
             selectedId={selectedId}
             unread={notifications.states}
-            homeDir={window.mica.homeDir}
             onOpenSession={openSession}
             onSelectDraft={(node) => selectNode(node)}
             onTogglePin={togglePin}
@@ -1168,56 +1191,33 @@ export default function App() {
             }
             onCloseSession={closeSession}
             onCloseDraft={closeTerminal}
-            onCreateSession={createSession}
           />
         </aside>
         <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e]">
-          {isPageView ? (
+          {view !== 'chat' && PAGE_HEADER[view] && (
             <header
               className={`drag-region flex h-8.5 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
             >
-              {view === 'stats' ? (
-                <BarChart3 size={13} className="shrink-0 opacity-80" />
-              ) : (
-                <Settings size={13} className="shrink-0 opacity-80" />
-              )}
-              <span>{view === 'stats' ? 'Stats' : 'Settings'}</span>
+              {(() => {
+                const { label, Icon } = PAGE_HEADER[view]
+                return (
+                  <>
+                    <Icon size={13} className="shrink-0 opacity-80" />
+                    <span>{label}</span>
+                    <button
+                      type="button"
+                      title="返回对话"
+                      aria-label="返回对话"
+                      className="ml-auto flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+                      onClick={() => setView('chat')}
+                    >
+                      <MessageSquare size={13} />
+                      <span>返回对话</span>
+                    </button>
+                  </>
+                )
+              })()}
             </header>
-          ) : (
-            <nav
-              role="tablist"
-              aria-label="工作区视图"
-              className={`drag-region mb-0.5 flex h-9 shrink-0 items-stretch border-b border-white/10 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
-            >
-              {[
-                ['chat', 'Chat', MessageSquare],
-                ['terminal', '终端', SquareTerminal],
-                ['files', '文件夹', Folder],
-                ['git-compare', 'Git', GitCompare],
-                ['notes', 'Notes', NotebookPen]
-              ].map(([id, label, Icon]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={view === id}
-                  className={`${tabClass} ${view === id ? 'text-white' : 'text-white/40'}`}
-                  onClick={() => setView(id)}
-                >
-                  <Icon size={14} />
-                  <span>{label}</span>
-                  {id === 'git-compare' && gitCount && (
-                    <span className="ml-0.5 flex gap-1 font-mono text-[10px]">
-                      <span className="text-[#55b982]">+{gitCount.additions}</span>
-                      <span className="text-[#e06c75]">−{gitCount.deletions}</span>
-                    </span>
-                  )}
-                  {view === id && (
-                    <span className="absolute inset-x-2.5 bottom-[-1px] h-px bg-white/90" />
-                  )}
-                </button>
-              ))}
-            </nav>
           )}
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <FilesView
@@ -1225,15 +1225,11 @@ export default function App() {
               root={gitIsCurrent ? git.cwd : null}
               visible={view === 'files'}
               askText={askText}
+              gitCwd={gitIsCurrent ? git.cwd : null}
+              gitRepository={repository}
+              gitLoading={gitIsCurrent ? git.loading : true}
               onCornerResizeStart={terminalPanelOpen ? startTerminalResize : null}
             />
-            <GitView
-              cwd={gitIsCurrent ? git.cwd : null}
-              repository={repository}
-              loading={gitIsCurrent ? git.loading : true}
-              visible={view === 'git-compare'}
-            />
-            <NotesView visible={view === 'notes'} />
             <StatsView visible={view === 'stats'} />
             <SettingsView visible={view === 'settings'} />
             <ChatView
@@ -1284,7 +1280,7 @@ export default function App() {
               onMicaExit={closeTerminal}
             />
           </div>
-          {!activeId && view !== 'stats' && view !== 'settings' && (
+          {!activeId && view === 'chat' && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">
               {error || '选择或新建一个会话'}
             </div>

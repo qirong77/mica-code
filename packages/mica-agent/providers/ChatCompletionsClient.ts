@@ -21,7 +21,7 @@ import { providerContentToAgentContent } from '../core/Content.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
-import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -294,29 +294,31 @@ export class ChatCompletionsClient extends BaseAgent<
         }
         messages.push(message);
         const toolImageContent: AgentContentBlockParam[] = [];
-        for (const tc of message.tool_calls) {
-          throwIfQueryStopped(options);
-          if (tc.type !== 'function') continue;
-          const { result, images } = await executeProviderToolCall({
-            name: tc.function.name,
-            argsText: tc.function.arguments,
-            id: tc.id,
-            parseArgs: () => JSON.parse(tc.function.arguments),
-            signal: options?.signal,
-            context: this.toolContext,
-            toolFilter: this.toolFilter,
-            onToolCall: this.onToolCall,
-            onToolResult: this.onToolResult,
-          });
-          throwIfQueryStopped(options);
+        const outcomes = await executeProviderToolCalls({
+          calls: message.tool_calls
+            .filter((tc) => tc.type === 'function')
+            .map((tc) => ({
+              name: tc.function.name,
+              argsText: tc.function.arguments,
+              id: tc.id,
+              parseArgs: () => JSON.parse(tc.function.arguments),
+            })),
+          signal: options?.signal,
+          context: this.toolContext,
+          toolFilter: this.toolFilter,
+          onToolCall: this.onToolCall,
+          onToolResult: this.onToolResult,
+          checkpoint: () => throwIfQueryStopped(options),
+        });
+        for (const { id, name, result, images } of outcomes) {
           messages.push({
             role: 'tool',
-            tool_call_id: tc.id,
+            tool_call_id: id ?? '',
             content: result,
           });
           if (images.length > 0) {
             toolImageContent.push(
-              { type: 'text', text: `Image output from ${tc.function.name} (tool call ${tc.id}):` },
+              { type: 'text', text: `Image output from ${name} (tool call ${id}):` },
               ...images,
             );
           }

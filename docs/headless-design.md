@@ -125,16 +125,27 @@ reload, and MCP re-init.
   `model` on `turn/start`. Priority is `params.model` → CLI `--model/--variant`
   → persisted session snapshot.
 - **Startup resilience**: a stale/deleted `--dir` does not kill the host (writes
-  an `error` notification and keeps serving); a failed `--session` resume
-  degrades to a fresh session with the real reason surfaced; MCP init failures
-  degrade to host-without-MCP-tools rather than `exit(1)`. The host installs
-  `unhandledRejection` (log + notify, keep serving) and `uncaughtException`
-  (notify then exit) handlers so it never dies silently with a bare code 1.
+  a `warning` notification and keeps serving); a failed `--session` resume
+  degrades to a fresh session with the real reason surfaced as an `error`
+  notification (the client's thread assumption is broken, so it must not be a
+  warning); MCP init failures degrade to host-without-MCP-tools rather than
+  `exit(1)`. Non-fatal degradations (`--dir`, MCP init, stray rejection) are
+  always `warning`, never `error`: clients treat `error` as terminal for the
+  run. The host installs `unhandledRejection` (log + warn, keep serving) and
+  `uncaughtException` (error notification then exit) handlers so it never dies
+  silently with a bare code 1.
 - **Lifecycle**: `turn/steer` maps to the executor's `after_iteration` queue
   (iteration-boundary injection, matching Shift+Tab in the app); `turn/start`
-  starts a fresh turn when idle; `turn/interrupt` aborts the active turn. The
-  host exits when stdin closes or on SIGINT/SIGTERM/SIGHUP, flushing stdout and
-  stderr before `exit(code)` so the client sees the real reason.
+  starts a fresh turn when idle; `turn/interrupt` aborts the active turn.
+  **Every** executor turn owns a turn id and emits `turn/started` +
+  `turn/completed` — including turns the host drains from its own queue (plugin
+  `after_turn` inputs, leftovers of an aborted turn) — and each turn attaches a
+  fresh projector so deltas carry that turn's id. `turn/start` therefore does
+  not pre-assign the turn id; a client that never learns about a drained turn
+  would look idle while the host rejects its next `turn/start` with
+  "A turn is already active". The host exits when stdin closes or on
+  SIGINT/SIGTERM/SIGHUP, flushing stdout and stderr before `exit(code)` so the
+  client sees the real reason.
 
 ## Mica extension notifications
 
@@ -144,7 +155,11 @@ or a replaced session history. Mica adds these as **incremental extensions**
 
 - `mica/queue/{queued,dequeue,changed}` (`MICA_QUEUE_NOTIFICATIONS`): drive
   queue state so a client learns a `turn/steer` input is waiting at the host for
-  its iteration boundary.
+  its iteration boundary. Each carries the full pending snapshot (`pending`),
+  so a client renders the waiting row from the notification alone; `dequeue`
+  clears it. The host-side slot is single-slot and separate from any local
+  after_turn queue the client keeps, so clients must merge both into one view
+  instead of assuming their local queue is complete.
 - `mica/backgroundTasks/updated`, `mica/subagentTasks/updated`
   (`MICA_TASK_NOTIFICATIONS`): snapshot pushes of long-lived host state that
   outlives a turn (background `run_shell` tasks, running subagents including

@@ -233,6 +233,29 @@ describe('structured activity state', () => {
     expect(historyBeforeRunReplay(messages, 'active prompt')).toEqual(messages.slice(0, 3))
   })
 
+  it('keeps user messages persisted inside the active turn when trimming for replay', () => {
+    const messages = [
+      { role: 'user', text: 'active prompt' },
+      { role: 'assistant', text: 'first answer' },
+      { role: 'user', text: 'steered follow-up' },
+      { role: 'assistant', text: 'second answer' }
+    ]
+
+    expect(historyBeforeRunReplay(messages, 'active prompt')).toEqual([messages[0], messages[2]])
+  })
+
+  it('matches the active prompt across the persisted image placeholder', () => {
+    const messages = [
+      { role: 'user', text: 'look at [Image](~/.mica/images/a.png)[图片]' },
+      { role: 'assistant', text: 'checkpointed answer' }
+    ]
+
+    expect(historyBeforeRunReplay(messages, 'look at [Image](~/.mica/images/a.png)')).toEqual([
+      messages[0]
+    ])
+    expect(hasPersistedTurn(messages, 'look at [Image](~/.mica/images/a.png)')).toBe(true)
+  })
+
   it('keeps current-turn logs separate from active subagent status', () => {
     const messages = [
       { id: 'old', kind: 'reasoning', turnId: 'turn-1', text: 'old thought' },

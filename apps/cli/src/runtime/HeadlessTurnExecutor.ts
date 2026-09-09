@@ -62,9 +62,10 @@ export type HeadlessTurnExecutorOptions = {
  * - one agent runs one turn at a time; while busy, new inputs are queued
  *   (after_iteration inputs are injected at a completed tool iteration,
  *   after_turn inputs start once the current turn ends);
- * - turn lifecycle is reported through `onEvent`; streamed text/tool/usage
- *   stays on the consumer side (CodexProjector or sync-event mapping), so
- *   this class never owns an output protocol;
+ * - turn lifecycle is reported through `onEvent` — every turn, including
+ *   queued ones drained after the first, emits `turn:start` + `turn:finish`;
+ *   streamed text/tool/usage stays on the consumer side (CodexProjector or
+ *   sync-event mapping), so this class never owns an output protocol;
  * - aborts stop the active turn but keep the queue draining, matching the
  *   desktop app's current abort-then-continue behavior.
  *
@@ -168,7 +169,14 @@ export class HeadlessTurnExecutor {
 
   private async loop(firstInput: RuntimeInput): Promise<void> {
     let input: RuntimeInput | null = firstInput;
+    let first = true;
     while (input) {
+      // `start()` announced the first turn; every drained turn needs its own
+      // turn:start too, otherwise consumers that map the event to a per-turn
+      // lifecycle (app-server turn/started, sync daemon "running" state) never
+      // learn that the executor is still working on a queued input.
+      if (!first) this.options.onEvent({ type: 'turn:start', input });
+      first = false;
       try {
         await this.runTurn(input);
       } catch (error) {

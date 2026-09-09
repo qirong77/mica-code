@@ -130,21 +130,32 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   const writeNotification = (method: string, params: unknown) => {
     process.stdout.write(encodeCodexNotification(method, params));
   };
+  /**
+   * Non-fatal degradation (stale --dir, failed MCP init, stray rejection).
+   * Never a Codex `error` notification: clients treat `error` as terminal for
+   * the run, so the host would look crashed even though it keeps serving.
+   */
+  const writeWarning = (threadId: string, message: string) => {
+    try {
+      writeNotification(CODEX_NOTIFICATIONS.warning, {
+        threadId,
+        turnId: '',
+        warning: { message },
+      });
+    } catch {
+      // stdout may be gone at shutdown; the call site's console.error is the fallback.
+    }
+  };
   const disposeModelEffortContext = setupModelEffortContext();
   if (options.cwd) {
     try {
       process.chdir(resolve(options.cwd));
     } catch (error) {
-      // A stale/deleted --dir must not kill the whole host: notify the client
-      // with the real reason and keep serving from the current directory.
-      process.stdout.write(
-        encodeCodexNotification(CODEX_NOTIFICATIONS.error, {
-          error: { message: error instanceof Error ? error.message : String(error) },
-          willRetry: false,
-          threadId: '',
-          turnId: '',
-        }),
-      );
+      // A stale/deleted --dir must not kill the whole host: surface the real
+      // reason and keep serving from the current directory.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      writeWarning('', message);
     }
   }
 
@@ -158,7 +169,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let mcpInitPromise: Promise<unknown> | null = null;
   let sessionId = '';
   let currentTurnId: string | null = null;
-  let initialized = false;
   let taskSnapshotTimer: NodeJS.Timeout | null = null;
 
   const cleanup = async (): Promise<void> => {
@@ -286,8 +296,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     // ready 路径上，慢 MCP 会把整个 host 就绪卡住。改成后台初始化后 host 立即
     // 发出首帧快照（可服务），turn/start 开始前才等待 mcpReady——用户打字到
     // 发送之间的间隔通常已覆盖 MCP 初始化，首轮感知延迟接近零。
-    // init 失败降级：记录 stderr + 发 error 通知，host 继续服务（无 MCP 工具），
+    // init 失败降级：记录 stderr + 发 warning 通知，host 继续服务（无 MCP 工具），
     // 与交互模式 mcp.mjs 的"初始化失败只报错不崩溃"语义一致，不 exit(1)。
+    // 单台 server 连接/超时失败不会走到这里（micaMcp.init 内部 markFailed 后返回），
+    // 这里只覆盖配置读取失败等整层失败。
     mcpStarted = true;
     mcpInitPromise = micaMcp
       .init({
@@ -299,17 +311,38 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`MCP init failed: ${message}`);
-        try {
-          writeNotification(CODEX_NOTIFICATIONS.error, {
-            error: { message: `MCP init failed: ${message}` },
-            willRetry: false,
-            threadId: sessionId,
-            turnId: '',
-          });
-        } catch {
-          // stdout may be gone at shutdown
-        }
+        writeWarning(sessionId, `MCP init failed: ${message}`);
       });
+
+    /**
+     * Start a turn's protocol lifecycle: allocate the turn id, attach a fresh
+     * projector (turn deltas are scoped to one turn) and emit turn/started.
+     * Driven by the executor's `turn:start` event, not by the turn/start
+     * request, so turns the host drains from its own queue (plugin after_turn
+     * inputs, leftovers of an aborted turn) get the same lifecycle instead of
+     * running invisibly while the client still believes it is idle.
+     */
+    const beginTurn = (): string => {
+      const turnId = randomUUID();
+      currentTurnId = turnId;
+      projector?.dispose();
+      projector = attachCodexProjector(agent!, writeNotification, {
+        threadId: sessionId,
+        turnId,
+        cwd: process.cwd(),
+        thinking: options.thinking === true,
+      });
+      writeNotification(CODEX_NOTIFICATIONS.turnStarted, {
+        threadId: sessionId,
+        turn: turnSnapshot(turnId, 'inProgress'),
+      });
+      return turnId;
+    };
+    const endTurn = () => {
+      currentTurnId = null;
+      projector?.dispose();
+      projector = null;
+    };
 
     executor = new HeadlessTurnExecutor({
       agent,
@@ -317,10 +350,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       maxTurns: options.maxTurns,
       onEvent: (event) => {
         if (event.type === 'turn:finish') projector?.completeAgentMessage();
-        handleTurnEvent(writeNotification, event, sessionId, () => {
-          const turnId = currentTurnId;
-          currentTurnId = null;
-          return turnId;
+        handleTurnEvent(writeNotification, event, sessionId, {
+          beginTurn,
+          getTurnId: () => currentTurnId,
+          endTurn,
         });
       },
     });
@@ -399,23 +432,16 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   process.once('SIGHUP', () => void exit(0));
 
   // Guard the long-lived host against silent crashes: an unhandled rejection
-  // (e.g. a stray provider/tool promise) must surface as an error notification
-  // instead of exiting with a bare code 1 that the app reports as
-  // "mica 进程已退出（code 1）" with no reason. Uncaught exceptions still
-  // terminate after the notification so corrupted state cannot keep serving.
+  // (e.g. a stray provider/tool promise) must surface to the client instead of
+  // exiting with a bare code 1 that the app reports as
+  // "mica 进程已退出（code 1）" with no reason. It is non-fatal (the host keeps
+  // serving), so it is a warning: an `error` notification would make clients
+  // end the run. Uncaught exceptions still terminate after the notification so
+  // corrupted state cannot keep serving.
   process.on('unhandledRejection', (reason) => {
     const message = reason instanceof Error ? reason.message : String(reason);
     console.error(`Unhandled rejection: ${message}`);
-    try {
-      writeNotification(CODEX_NOTIFICATIONS.error, {
-        error: { message: `Unhandled rejection: ${message}` },
-        willRetry: false,
-        threadId: sessionId,
-        turnId: currentTurnId ?? '',
-      });
-    } catch {
-      // stdout may be gone at shutdown; stderr above is the fallback.
-    }
+    writeWarning(sessionId, `Unhandled rejection: ${message}`);
   });
   process.on('uncaughtException', (error) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -451,8 +477,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     if ('id' in message && 'error' in message) continue; // client error
     if (!('method' in message)) continue;
     if (!('id' in message)) {
-      // Client notification. `initialized` is the only one codex clients send.
-      if (message.method === CODEX_METHODS.clientInitialized) initialized = true;
+      // Client notification (`initialized`); no handshake gate is enforced, so
+      // only `shutdown` matters here.
       if (message.method === 'shutdown') break;
       continue;
     }
@@ -477,16 +503,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         writeNotification,
         writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
         writeError: (code, errorMessage, data) => process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
-        attachProjector: (turnId) => {
-          projector?.dispose();
-          projector = attachCodexProjector(agent!, writeNotification, {
-            threadId: sessionId,
-            turnId,
-            cwd: process.cwd(),
-            thinking: options.thinking === true,
-          });
-        },
-        initialized,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -511,8 +527,6 @@ type HostContext = {
   writeNotification: (method: string, params: unknown) => void;
   writeResponse: (result: unknown) => void;
   writeError: (code: number, message: string, data?: unknown) => void;
-  attachProjector: (turnId: string) => void;
-  initialized: boolean;
 };
 
 function threadSnapshot(ctx: HostContext, model: string): CodexThread {
@@ -797,22 +811,28 @@ async function handleCodexRequest(
       // MCP init 与 host ready 解耦：首个 turn 在这里等后台 MCP 连接完成，
       // 用户打字间隔通常已覆盖初始化，首轮感知延迟接近零。
       await ctx.mcpReady;
-      const turnId = randomUUID();
-      ctx.setCurrentTurnId(turnId);
-      ctx.attachProjector(turnId);
       const result = await ctx.executor.start(
         micaRuntime.createRuntimeInput(input.text, 'ui', {
           queueMode: 'after_iteration',
           ...(input.content ? { content: input.content } : {}),
         }),
       );
-      if (result === 'rejected') {
+      if (result !== 'started') {
+        // 'rejected': the single queue slot is occupied. 'queued': the plugin
+        // layer took the input instead of starting a turn. Either way no turn
+        // exists, so no turn/started was emitted — report it instead of
+        // answering with a turn the client would wait on forever.
         ctx.setCurrentTurnId(null);
         ctx.writeError(CODEX_ERROR_INTERNAL, '已有一条排队消息，等待发送或重新编辑');
         return;
       }
+      // turn/started was already emitted by the executor's turn:start event.
+      const turnId = ctx.getCurrentTurnId();
+      if (!turnId) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'turn started without a turn id');
+        return;
+      }
       const turn = turnSnapshot(turnId, 'inProgress');
-      ctx.writeNotification(CODEX_NOTIFICATIONS.turnStarted, { threadId: ctx.sessionId, turn });
       ctx.writeResponse({ turn });
       return;
     }
@@ -893,15 +913,30 @@ async function handleCodexRequest(
   }
 }
 
+/** Per-turn protocol lifecycle owned by the executor's event stream. */
+type TurnLifecycle = {
+  /** Allocate a turn id, attach a fresh projector and emit turn/started. */
+  beginTurn: () => string;
+  getTurnId: () => string | null;
+  /** Clear the active turn id and detach the projector. */
+  endTurn: () => void;
+};
+
 function handleTurnEvent(
   writeNotification: (method: string, params: unknown) => void,
   event: HeadlessTurnEvent,
   sessionId: string,
-  takeTurnId: () => string | null,
+  lifecycle: TurnLifecycle,
 ): void {
   switch (event.type) {
     case 'turn:start':
-      break; // turn/started is emitted by the request handler with the turn id
+      // Every executor turn owns a turn id and a turn/started, including turns
+      // drained from the host queue. The request handler no longer pre-assigns
+      // the id: a drained turn used to run with no turn/started and no
+      // turn/completed, leaving the client idle while the host rejected its
+      // next turn/start with "A turn is already active".
+      lifecycle.beginTurn();
+      break;
     case 'turn:retrying':
       // The host retries transient provider errors (same policy as the CLI).
       // Log to stderr only: a Codex `error` notification would make the desktop
@@ -913,7 +948,8 @@ function handleTurnEvent(
       );
       break;
     case 'turn:finish': {
-      const turnId = takeTurnId();
+      const turnId = lifecycle.getTurnId();
+      lifecycle.endTurn();
       if (!turnId) break;
       const status = event.status === 'completed' ? 'completed' : event.status === 'aborted' ? 'interrupted' : 'failed';
       const turn: CodexTurn = {

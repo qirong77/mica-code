@@ -252,11 +252,21 @@ function createEmptyUiState(): TerminalAgentUiState {
 }
 
 function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']>): string {
-  const firstUserMessage = messages.find((message) => message.role === 'user');
-  const text = firstUserMessage ? contentToText(firstUserMessage.content) : '';
+  // Follow the latest user prompt so the agent list shows what the session is
+  // currently about, not what it started with.
+  const lastUserMessage = messages.findLast(isTitleUserMessage);
+  const text = lastUserMessage ? contentToText(lastUserMessage.content) : '';
   const title = text.replace(/\s+/g, ' ').trim();
   if (!title) return 'New session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
+}
+
+function isTitleUserMessage(message: ReturnType<AgentRuntime['toConversationMessages']>[number]): boolean {
+  if (message.role !== 'user') return false;
+  // Plugin-injected prompts (context-pressure reminders, ...) are submitted
+  // with a displayText, so their displayContent differs from the real content.
+  if (message.displayContent === undefined) return true;
+  return contentToText(message.displayContent).trim() === contentToText(message.content).trim();
 }
 
 function normalizeTitle(title: string): string {

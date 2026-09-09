@@ -3,6 +3,14 @@
 
 @theme {
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --color-surface-1: #0e0e0e;
+  --color-surface-2: #191919;
+  --color-surface-3: #202020;
+  --color-surface-4: #2a2a2a;
+  --color-accent: #d77757;
+  --color-accent-subtle: rgb(215 119 87 / 14%);
+  --color-accent-region: rgb(215 119 87 / 22%);
+  --radius-ui: 6px;
 }
 
 @layer base {
@@ -181,6 +189,20 @@ body.is-resizing.is-resizing-terminal {
   animation: chat-dot-unread 1.4s ease-in-out 1;
 }
 
+/* 运行中的会话：标题文字呼吸绿（一会淡一会亮），不再用旋转图标。 */
+@keyframes chat-running-breathe {
+  0%,
+  100% {
+    color: rgb(70 197 122 / 42%);
+  }
+  50% {
+    color: rgb(70 197 122 / 100%);
+  }
+}
+.chat-running-text {
+  animation: chat-running-breathe 1.8s ease-in-out infinite;
+}
+
 /* Chat keeps Mica's terminal grammar: compact gutter rows, muted activity logs,
    and a prompt/status surface anchored at the bottom. */
 .chat-view {
@@ -196,6 +218,10 @@ body.is-resizing.is-resizing-terminal {
   --chat-user: #373737;
   --chat-accent: #d77757;
   --chat-thinking: #c9a227;
+  /* Raised surfaces: the top bar and the turn log read as separate bands
+     from the transcript (#0e0e0e) without turning into hard panels. */
+  --chat-surface-bar: #1a1a1a;
+  --chat-surface-log: #161616;
   --chat-row-marker-width: 18px;
   --chat-text-size: 13px;
   --chat-font:
@@ -212,6 +238,35 @@ body.is-resizing.is-resizing-terminal {
   overflow-anchor: none;
   scroll-behavior: auto;
   font-family: var(--chat-font);
+}
+
+/* 会话顶部的最后一条用户消息：单行、超出省略，始终可见。 */
+.chat-last-prompt {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 12px 0 6px;
+  background: var(--chat-surface-bar);
+  border-bottom: 1px solid var(--chat-border);
+  color: rgb(255 255 255 / 58%);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+
+.chat-last-prompt-marker {
+  flex: 0 0 auto;
+  color: var(--chat-accent);
+}
+
+.chat-last-prompt-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .chat-transcript {
@@ -1154,7 +1209,8 @@ body.is-resizing.is-resizing-terminal {
   min-width: 0;
   border-top: 1px solid rgb(255 255 255 / 10%);
   border-bottom: 1px solid rgb(255 255 255 / 6%);
-  background: linear-gradient(90deg, rgb(118 169 216 / 5%), transparent 26px), #090909;
+  background:
+    linear-gradient(90deg, rgb(118 169 216 / 8%), transparent 26px), var(--chat-surface-log);
   color: #828282;
   font-family: var(--chat-font);
   font-size: 11.5px;
@@ -1208,7 +1264,9 @@ body.is-resizing.is-resizing-terminal {
   min-width: 0;
   margin: 1px 0 7px;
   border-left: 2px solid rgb(118 169 216 / 24%);
-  padding-left: 9px;
+  border-radius: 0 4px 4px 0;
+  background: rgb(118 169 216 / 6%);
+  padding: 3px 9px;
   color: #8a8a8a;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

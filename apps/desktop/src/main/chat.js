@@ -18,7 +18,7 @@ import { savePastedImage } from './chat-images'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
-import { createChatQueue, resolveBusyDispatch } from './chat-queue'
+import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 
@@ -78,14 +78,7 @@ function queuedItems(id) {
 // Merge the local after_turn queue with the host-side after_iteration queue.
 // The single-slot rule means at most one of the two is ever non-empty.
 function allQueuedItems(id, run) {
-  const host = (run?.hostPending || []).map((item, index) => ({
-    id: item.id || `host:${id}:${index}`,
-    text: item.text || '',
-    position: index + 1,
-    queueMode: item.queueMode || 'after_iteration',
-    pending: true
-  }))
-  return [...host, ...queuedItems(id)]
+  return mergeQueuedItems(id, run?.hostPending, queuedItems(id))
 }
 
 function pushQueueState(id, run) {
@@ -100,16 +93,18 @@ function pushQueueState(id, run) {
 }
 
 function recallQueuedRun(sender, id, clientMessageId) {
-  if (!clientMessageId || typeof clientMessageId !== 'string') {
-    return { ok: false, error: '排队消息 id 缺失', queuedItems: queuedItems(id) }
-  }
   const run = runs.get(id)
   if (run?.child) run.sender = sender
+  if (!clientMessageId || typeof clientMessageId !== 'string') {
+    return { ok: false, error: '排队消息 id 缺失', queuedItems: allQueuedItems(id, run) }
+  }
   const removed = queuedRuns.remove(
     id,
     (item) => item.sender === sender && item.payload?.clientMessageId === clientMessageId
   )
-  const items = queuedItems(id)
+  // Same merged view as `chat:queue-state`: recalling a local after_turn item
+  // must not drop the host's pending after_iteration row from the renderer.
+  const items = allQueuedItems(id, run)
   if (!removed) {
     return {
       ok: false,
@@ -418,17 +413,21 @@ function startRun(sender, id, payload) {
     if (existing.running) {
       // 单槽排队（对齐 CLI）：已有任意排队（本地 after_turn 或 host
       // after_iteration）时，Enter/Tab/Shift+Tab 都拒绝新的排队输入。
+      // host 侧队列必须计入：否则第二次 Enter 会走到 turn/steer，被 host 以
+      // 「已有一条排队消息」拒绝，变成一条与消息不对应的错误事件。
+      const queuedItemsNow = allQueuedItems(id, existing)
+      const queuedCount = queuedItemsNow.length
       const dispatch = resolveBusyDispatch({
         running: true,
         queueMode: payload.queueMode,
-        queuedCount: queuedRuns.size(id)
+        queuedCount
       })
       if (dispatch.action === 'reject') {
         return {
           ok: false,
           error: dispatch.message,
-          queuedCount: queuedRuns.size(id),
-          queuedItems: queuedItems(id)
+          queuedCount,
+          queuedItems: queuedItemsNow
         }
       }
       if (dispatch.action === 'steer') {
@@ -443,18 +442,17 @@ function startRun(sender, id, payload) {
         return {
           ok: false,
           error: '排队消息已达上限，请先发送或取消排队',
-          queuedCount: queuedRuns.size(id),
-          queuedItems: queuedItems(id)
+          queuedCount,
+          queuedItems: allQueuedItems(id, existing)
         }
       }
-      if (existing.sender && !existing.sender.isDestroyed()) {
-        existing.sender.send('chat:queue-state', {
-          id,
-          queuedCount: queuedRuns.size(id),
-          queuedItems: queuedItems(id)
-        })
+      pushQueueState(id, existing)
+      return {
+        ok: true,
+        queued: true,
+        position: enqueued.position,
+        queuedItems: allQueuedItems(id, existing)
       }
-      return { ok: true, queued: true, position: enqueued.position, queuedItems: queuedItems(id) }
     }
     const accepted = sendTurnStart(existing, payload)
     if (!accepted) {
@@ -467,7 +465,6 @@ function startRun(sender, id, payload) {
   const spawned = spawnChatHost(id, sender, payload)
   if (!spawned.ok) return spawned
   const run = runs.get(id)
-  run.prompt = prompt
   // Optimistically mark the host busy so a rapid second message queues instead
   // of racing ahead of turn/started; the turn/completed event clears it.
   run.running = true
@@ -496,11 +493,22 @@ function sendCodexRequest(run, method, params) {
 }
 
 function sendTurnStart(run, payload) {
+  // A resident host serves many turns, so the replay buffer and `prompt` must
+  // describe the turn being started. The renderer trims persisted history at
+  // this prompt boundary before replaying `run.events`; keeping a previous
+  // turn's prompt (or its buffered events) makes it replay an answer the
+  // session file already contains, which renders the same message twice.
+  run.prompt = String(payload.prompt || '').trim()
+  run.events = []
   const params = { threadId: run.sessionId || run.requestedSessionId || '' }
   params.input = [{ type: 'text', text: String(payload.prompt || '') }]
   if (payload.cwd) params.cwd = payload.cwd
   if (payload.model) params.model = payload.model
   if (payload.variant) params.effort = payload.variant
+  // Mica extension: correlate a rejected turn/start with the optimistic
+  // message the renderer already rendered so it can be rolled back. Codex
+  // clients never send this field; the host ignores unknown params.
+  if (payload.clientMessageId) params.clientMessageId = payload.clientMessageId
   return sendCodexRequest(run, 'turn/start', params)
 }
 
@@ -662,22 +670,48 @@ function handleHostResponse(id, run, message) {
   const pending = run.pendingRequests?.get(message.id)
   run.pendingRequests?.delete(message.id)
   if (!pending) return
-  if (message.error) {
-    // Request-level errors (busy turn/start, steer mismatch, ...). Surface as
-    // an error event so the renderer sees why a message did not start.
-    const errorMessage = message.error.message || 'chat host 请求失败'
-    const record = {
-      sequence: ++run.sequence,
-      event: {
-        type: 'error',
-        timestamp: Date.now(),
-        sessionID: run.sessionId,
-        error: { name: 'MicaRuntimeError', data: { message: errorMessage } }
-      }
+  if (!message.error) return
+  // Request-level errors (busy turn/start, steer mismatch, ...). Surface as
+  // an error event so the renderer sees why a message did not start.
+  const errorMessage = message.error.message || 'chat host 请求失败'
+  if (pending.method === 'turn/start' || pending.method === 'turn/steer') {
+    // The message never reached the host queue. Tell the renderer so it can
+    // roll back the optimistic bubble instead of leaving it looking sent (and
+    // queued) forever.
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:queue-error', {
+        id,
+        method: pending.method,
+        clientMessageId: pending.params?.clientMessageId || null,
+        text: pending.params?.input?.[0]?.text || null,
+        error: errorMessage
+      })
     }
-    appendBufferedEvent(run.events, record)
-    run.eventPacer.push(record)
+    run.hostPending = []
+    if (pending.method === 'turn/start') {
+      // No turn exists, so no turn/completed will arrive: clear the optimistic
+      // running state (the host itself stays alive for the next message).
+      // exitSent must be re-armed: it is only cleared by turn/started, so a
+      // second failed start would otherwise leave the renderer stuck running.
+      run.running = false
+      run.currentTurnId = null
+      run.exitSent = false
+      sendChatExit(id, run, { exitCode: null, signal: null })
+    }
+    pushQueueState(id, run)
+    return
   }
+  const record = {
+    sequence: ++run.sequence,
+    event: {
+      type: 'error',
+      timestamp: Date.now(),
+      sessionID: run.sessionId,
+      error: { name: 'MicaRuntimeError', data: { message: errorMessage } }
+    }
+  }
+  appendBufferedEvent(run.events, record)
+  run.eventPacer.push(record)
 }
 
 function handleHostNotification(id, run, notification) {
@@ -815,28 +849,12 @@ function pushChatEvent(run, event) {
 function replayQueuedTurn(id, run) {
   const next = queuedRuns.take(id)
   if (!next) {
-    if (run.sender && !run.sender.isDestroyed()) {
-      run.sender.send('chat:queue-state', {
-        id,
-        queuedCount: queuedRuns.size(id),
-        queuedItems: queuedItems(id)
-      })
-    }
+    pushQueueState(id, run)
     return
   }
-  if (run.sender && !run.sender.isDestroyed()) {
-    run.sender.send('chat:queue-state', {
-      id,
-      queuedCount: queuedRuns.size(id),
-      queuedItems: queuedItems(id)
-    })
-  }
+  pushQueueState(id, run)
   run.running = true
-  if (sendTurnStart(run, next.payload)) {
-    run.prompt = next.payload.prompt || run.prompt
-  } else {
-    run.running = false
-  }
+  if (!sendTurnStart(run, next.payload)) run.running = false
 }
 
 function sendChatExit(id, run, payload) {
@@ -855,13 +873,14 @@ function sendChatExit(id, run, payload) {
     completedRuns.delete(completedRuns.keys().next().value)
   }
   if (run.sender && !run.sender.isDestroyed()) {
+    const items = allQueuedItems(id, run)
     run.sender.send('chat:exit', {
       id,
       sessionId: run.sessionId || run.requestedSessionId,
       ...payload,
       aborted: run.aborting,
-      queuedCount: queuedRuns.size(id),
-      queuedItems: queuedItems(id)
+      queuedCount: items.length,
+      queuedItems: items
     })
   }
 }
@@ -1167,6 +1186,13 @@ export function registerChatIpc() {
   ipcMain.handle('chat:is-running', (event, { id } = {}) => {
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
+    // Restoring a chat node must see the same queue as a live `chat:queue-state`
+    // push: the host-side after_iteration slot (`run.hostPending`) lives outside
+    // the local after_turn queue, and returning only `queuedItems(id)` here
+    // would drop the waiting row (and the optimistic message's queued marker)
+    // as soon as the user switches away and back.
+    const items = run ? allQueuedItems(id, run) : queuedItems(id)
+    const queuedState = { queuedCount: items.length, queuedItems: items }
     if (!run) {
       const completed = completedRuns.get(id)
       return completed
@@ -1175,16 +1201,14 @@ export function registerChatIpc() {
             running: false,
             sessionId: null,
             events: [],
-            queuedCount: queuedRuns.size(id),
-            queuedItems: queuedItems(id)
+            ...queuedState
           }
     }
     if (!run.running) {
       return {
         running: false,
         finished: !run.exitSent,
-        queuedCount: queuedRuns.size(id),
-        queuedItems: queuedItems(id),
+        ...queuedState,
         sessionId: run.sessionId,
         events: run.events.slice(),
         prompt: run.prompt,
@@ -1193,8 +1217,7 @@ export function registerChatIpc() {
     }
     return {
       running: true,
-      queuedCount: queuedRuns.size(id),
-      queuedItems: queuedItems(id),
+      ...queuedState,
       sessionId: run.sessionId,
       events: run.events.slice(),
       prompt: run.prompt,

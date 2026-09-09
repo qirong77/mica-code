@@ -127,8 +127,9 @@ describe('attachCodexProjector thinking', () => {
     };
     expect(completedItem.aggregatedOutput).toBe('line1\nline2');
     expect(completedItem.status).toBe('completed');
-    // item/completed 的 command 只有工具名；完整命令（含参数）在 item/started 上。
-    expect(completedItem.command).toBe('run_shell');
+    // item/completed 与 item/started 的 command 形状一致（工具名 + JSON 参数），
+    // 客户端据此还原 tool 名与入参；不要再从工具结果里反推展示文案。
+    expect(completedItem.command).toBe('run_shell {"command":"echo hi"}');
   });
 
   it('aggregates agent message deltas into item/completed', () => {

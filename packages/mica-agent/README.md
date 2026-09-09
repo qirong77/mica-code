@@ -10,6 +10,7 @@
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
+- 同一条消息内的工具调用按并行安全分组执行：只读工具与 `Agent` 调用并发，写/执行类工具串行，结果按原始顺序回填。
 - 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载 `.md` 用户 role，以文件名（不含扩展名）作为 role 名，并保留不可覆盖的内置 `default`。
 
 ## 使用入口

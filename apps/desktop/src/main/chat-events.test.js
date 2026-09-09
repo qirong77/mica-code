@@ -187,6 +187,21 @@ describe('chat CLI arguments', () => {
     })
   })
 
+  it('maps codex warning notifications to a non-terminal notice event', () => {
+    const event = codexNotificationToEvent({
+      method: 'warning',
+      emittedAtMs: 99,
+      params: { threadId: 's1', turnId: '', warning: { message: 'MCP init failed: boom' } }
+    })
+    expect(event).toMatchObject({
+      type: 'notice',
+      timestamp: 99,
+      sessionID: 's1',
+      variant: 'warn',
+      text: 'MCP init failed: boom'
+    })
+  })
+
   it('maps codex agentMessage/reasoning deltas to text/reasoning events', () => {
     expect(
       codexNotificationToEvent({
@@ -251,6 +266,24 @@ describe('chat CLI arguments', () => {
         state: { status: 'completed', output: 'out' }
       }
     })
+  })
+
+  it('parses tool input on the first space so JSON string runs of spaces survive', () => {
+    const event = codexNotificationToEvent({
+      method: 'item/started',
+      params: {
+        threadId: 's1',
+        turnId: 't1',
+        item: {
+          type: 'commandExecution',
+          id: 'c2',
+          command: 'write_file {"path":"a.txt","text":"a  b"}',
+          status: 'inProgress'
+        }
+      }
+    })
+    expect(event.part.tool).toBe('write_file')
+    expect(event.part.state.input).toEqual({ path: 'a.txt', text: 'a  b' })
   })
 
   it('maps codex turn/completed and token usage for step_finish', () => {

@@ -246,6 +246,17 @@ export function codexNotificationToEvent(notification) {
         timestamp,
         sessionID
       }
+    case 'warning':
+      // Non-fatal host degradation (stale --dir, failed MCP init, stray
+      // rejection). Deliberately NOT mapped onto the error path: the host
+      // keeps serving, so the renderer must show a notice and keep the run.
+      return {
+        type: 'notice',
+        timestamp,
+        sessionID,
+        variant: 'warn',
+        text: params.warning?.message || ''
+      }
     case 'error':
       return {
         type: 'error',
@@ -286,15 +297,18 @@ export function tokensFromCodexUsage(tokenUsage) {
 }
 
 function commandToolName(command) {
-  return String(command || '').split(/\s+/)[0] || 'tool'
+  const text = String(command || '')
+  const separator = text.indexOf(' ')
+  return (separator < 0 ? text : text.slice(0, separator)) || 'tool'
 }
 
 function commandInput(command) {
-  const rest = String(command || '')
-    .split(/\s+/)
-    .slice(1)
-    .join(' ')
-    .trim()
+  // The host encodes the call as `name + ' ' + JSON.stringify(args)`, so split
+  // on the first space only: `split(/\s+/)` + `join(' ')` would collapse runs
+  // of spaces inside JSON string values and silently corrupt the tool input.
+  const text = String(command || '')
+  const separator = text.indexOf(' ')
+  const rest = separator < 0 ? '' : text.slice(separator + 1).trim()
   if (!rest) return {}
   try {
     const value = JSON.parse(rest)

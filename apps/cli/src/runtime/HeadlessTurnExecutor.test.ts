@@ -120,6 +120,11 @@ describe('HeadlessTurnExecutor', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     // Drain loop started the second turn automatically.
     expect(agent.runCalls).toHaveLength(2);
+    // The drained turn announces its own turn:start, so per-turn consumers
+    // (app-server turn/started, sync daemon running state) see every turn.
+    const starts = events.filter((event) => event.type === 'turn:start');
+    expect(starts).toHaveLength(2);
+    expect(starts[1]).toMatchObject({ input: expect.objectContaining({ text: 'second' }) });
   });
 
   it('rejects a third queued input (single-slot queue)', async () => {

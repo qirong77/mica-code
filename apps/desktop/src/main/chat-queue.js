@@ -65,3 +65,20 @@ export function resolveBusyDispatch({ running, queueMode, queuedCount }) {
   if (queueMode === 'after_iteration') return { action: 'steer' }
   return { action: 'enqueue' }
 }
+
+/**
+ * Merge the host-side after_iteration slot (`mica/queue/*` notifications) with
+ * the local after_turn queue into the single list the renderer renders. Host
+ * items come first (they were accepted earlier) and are flagged `pending` so
+ * the renderer disables recall — only the local queue can be recalled.
+ */
+export function mergeQueuedItems(id, hostPending, localItems) {
+  const host = (hostPending || []).map((item, index) => ({
+    id: item.id || `host:${id}:${index}`,
+    text: item.text || '',
+    position: index + 1,
+    queueMode: item.queueMode || 'after_iteration',
+    pending: true
+  }))
+  return [...host, ...(localItems || [])]
+}

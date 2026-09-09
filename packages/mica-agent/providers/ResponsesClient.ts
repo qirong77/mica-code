@@ -31,7 +31,7 @@ import {
 import { isRetryableError, withRetry } from '../core/retry.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
-import { executeProviderToolCall, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -363,23 +363,24 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         this.onText?.('\n\n');
       }
 
-      for (const toolCall of completedToolCalls) {
-        throwIfQueryStopped(options);
-        const { result, images } = await executeProviderToolCall({
+      const outcomes = await executeProviderToolCalls({
+        calls: completedToolCalls.map((toolCall) => ({
           name: toolCall.name,
           argsText: toolCall.arguments,
           id: toolCall.callId,
           parseArgs: () => JSON.parse(toolCall.arguments || '{}'),
-          signal: options?.signal,
-          context: this.toolContext,
-          toolFilter: this.toolFilter,
-          onToolCall: this.onToolCall,
-          onToolResult: this.onToolResult,
-        });
-        throwIfQueryStopped(options);
+        })),
+        signal: options?.signal,
+        context: this.toolContext,
+        toolFilter: this.toolFilter,
+        onToolCall: this.onToolCall,
+        onToolResult: this.onToolResult,
+        checkpoint: () => throwIfQueryStopped(options),
+      });
+      for (const { id, result, images } of outcomes) {
         messages.push({
           type: 'function_call_output',
-          call_id: toolCall.callId,
+          call_id: id ?? '',
           output: responsesToolOutput(result, images),
         });
       }

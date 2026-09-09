@@ -1462,10 +1462,19 @@ function historyMessages(rows, key) {
   }))
 }
 
+// 会话里的用户文本把图片块渲染成 [图片] 占位符，输入框原文是 [Image](路径)；
+// 比对用户消息边界时忽略占位符与首尾空白，否则带图片的输入永远匹配不到。
+function promptKey(text) {
+  return String(text || '')
+    .replace(/\[图片\]/g, '')
+    .trim()
+}
+
 export function hasPersistedTurn(messages, prompt) {
   if (!prompt) return false
+  const key = promptKey(prompt)
   const userIndex = messages.findLastIndex(
-    (message) => message.role === 'user' && message.text === prompt
+    (message) => message.role === 'user' && promptKey(message.text) === key
   )
   return (
     userIndex >= 0 &&
@@ -1475,10 +1484,17 @@ export function hasPersistedTurn(messages, prompt) {
 
 export function historyBeforeRunReplay(messages, prompt) {
   if (!prompt) return messages
+  const key = promptKey(prompt)
   const userIndex = messages.findLastIndex(
-    (message) => message.role === 'user' && message.text === prompt
+    (message) => message.role === 'user' && promptKey(message.text) === key
   )
-  return userIndex >= 0 ? messages.slice(0, userIndex + 1) : messages
+  if (userIndex < 0) return messages
+  // 只丢掉会被事件重放重建的 assistant 输出；本轮内持久化的用户消息
+  // （shift+tab 注入的排队输入夹在回答之间）必须保留，否则重开后消失。
+  return [
+    ...messages.slice(0, userIndex + 1),
+    ...messages.slice(userIndex + 1).filter((message) => message.role === 'user')
+  ]
 }
 
 export function isPersistedRunComplete(meta, startedAt) {
@@ -1516,6 +1532,18 @@ export function activateQueuedMessage(messages, queuedMessageId) {
     ...messages.slice(index + 1),
     { ...queuedMessage, queued: false }
   ]
+}
+
+// 会话顶部「最后一条用户消息」栏：取最后一条已发送的用户消息。排队中的消息不算
+// （它们在输入框上方的 queue dock 里单独展示），空文本消息也不参与。
+export function lastUserPromptText(messages = []) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role !== 'user' || message.queued) continue
+    const text = typeof message.text === 'string' ? message.text.trim() : ''
+    if (text) return text
+  }
+  return ''
 }
 
 // 输入框内 Tab / Shift+Tab 的行为：
@@ -1676,7 +1704,6 @@ export function ChatView({
   const [contextDetail, setContextDetail] = useState(false)
   const [commitRunning, setCommitRunning] = useState(false)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
-  const commitNoticeTextRef = useRef('')
   const pickerRef = useRef(null)
   const messagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
@@ -1963,6 +1990,11 @@ export function ChatView({
           appendNotice(event.error?.data?.message || event.error?.name || '运行出错', 'error')
           setPhase('error')
           break
+        case 'notice':
+          // Host 侧非致命降级（stale --dir、MCP 初始化失败、游离 rejection）：
+          // 只提示，不改变运行状态，turn 继续。
+          if (event.text) appendNotice(event.text, event.variant || 'info')
+          break
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
@@ -2116,7 +2148,20 @@ export function ChatView({
     })
     const offQueueError = window.mica.chat.onQueueError((payload) => {
       if (payload.id !== nodeIdRef.current) return
-      appendNotice(`排队消息发送失败：${payload.error || '未知错误'}`, 'error')
+      // turn/start 或 turn/steer 被 host 拒绝：这条消息从未进入队列，撤回
+      // 乐观气泡（否则它会永远显示为"已排队"），输入框空闲时把原文放回去，
+      // 语义对齐 CLI 撤回排队消息。
+      const rejectedId = payload.clientMessageId
+      if (rejectedId) {
+        queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((id) => id !== rejectedId)
+        updateMessages((previous) => previous.filter((message) => message.id !== rejectedId))
+        setQueuedItems((items) => items.filter((item) => item.id !== rejectedId))
+      }
+      if (payload.text && !(inputRef.current || '').trim()) {
+        draftsRef.current.set(nodeIdRef.current, payload.text)
+        setInput(payload.text)
+      }
+      appendNotice(payload.error || '消息发送失败', 'error')
     })
     return () => {
       offEvent?.()
@@ -2270,25 +2315,44 @@ export function ChatView({
         await restoreFinalSession(finalSessionId, rows)
         return
       }
+      const replayEvents = mergeReplayEvents(state?.events, pendingEventsRef.current)
+      // 磁盘上的中间 checkpoint（每个工具迭代边界保存）与完成保存已经把本轮
+      // 已生成的回答写进 conversationMessages，host 的事件缓冲又会重建同一段
+      // 内容：重放前必须先裁掉本轮已持久化的 assistant 输出，否则切换节点
+      // 回来会看到同一条消息渲染两遍。
+      const trimActiveTurn = (messages) =>
+        replayEvents.length > 0 ? historyBeforeRunReplay(messages, state.prompt) : messages
+
       if (state?.running) {
         if (state.sessionId && !sessionIdRef.current) {
           sessionIdRef.current = state.sessionId
           onSessionBoundRef.current?.(nodeId, state.sessionId)
         }
-        if (state.prompt && restored.at(-1)?.text !== state.prompt) {
-          updateMessages((previous) => [
-            ...previous,
-            { id: uid('msg'), kind: 'message', role: 'user', text: state.prompt, done: true }
-          ])
+        updateMessages(trimActiveTurn(restored))
+        // 裁剪后本轮用户消息仍在列表里；只有匹配不到边界（例如带图片的输入
+        // 文本与会话展示文本不一致）时才补一条，避免重复渲染同一条用户消息。
+        if (state.prompt) {
+          const key = promptKey(state.prompt)
+          const hasPrompt = messagesRef.current.some(
+            (message) => message.role === 'user' && promptKey(message.text) === key
+          )
+          if (!hasPrompt) {
+            updateMessages((previous) => [
+              ...previous,
+              { id: uid('msg'), kind: 'message', role: 'user', text: state.prompt, done: true }
+            ])
+          }
         }
         setRunStartedAt(state.startedAt || Date.now())
         setRunning(true)
         finishedRef.current = false
       } else if (cachedTranscript && canReuseVisualTranscript(cachedTranscript, restored)) {
-        updateMessages(cachedTranscript)
+        updateMessages(trimActiveTurn(cachedTranscript))
+      } else {
+        updateMessages(trimActiveTurn(restored))
       }
 
-      for (const event of mergeReplayEvents(state?.events, pendingEventsRef.current)) {
+      for (const event of replayEvents) {
         applyEventRef.current(event)
       }
       pendingEventsRef.current = []
@@ -2966,8 +3030,7 @@ export function ChatView({
               )
             )
             setQueuedItems((items) => items.filter((item) => item.id !== optimisticId))
-            if (result.busy) rollback('该会话暂时无法排队，请稍后重试', 'error')
-            else if (result.error) rollback(result.error)
+            if (result.error) rollback(result.error)
           }
         })
         .catch((error) => rollback(error instanceof Error ? error.message : String(error)))
@@ -3021,6 +3084,7 @@ export function ChatView({
     () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
     [messages]
   )
+  const lastPromptText = useMemo(() => lastUserPromptText(transcriptMessages), [transcriptMessages])
   const queuedDisplayItems = useMemo(() => {
     const items = [...queuedItems]
     for (const message of messages) {
@@ -3187,7 +3251,6 @@ export function ChatView({
     const cwd = cwdRef.current
     const noticeId = appendNotice('commit: 正在分析 Git 变化...', 'info')
     commitTaskRef.current = { id: commitId, noticeId, cwd, nodeId: nodeIdRef.current }
-    commitNoticeTextRef.current = ''
     setCommitRunning(true)
     window.mica.chat
       .commit({ commitId, cwd })
@@ -3207,17 +3270,6 @@ export function ChatView({
   }, [appendNotice, cwdRef, nodeIdRef, updateNotice])
 
   useEffect(() => {
-    const offEvent = window.mica.chat.onCommitEvent(({ commitId, event }) => {
-      const task = commitTaskRef.current
-      if (!task || task.id !== commitId) return
-      if (event?.type === 'tool_use' && event.part?.tool) {
-        updateNotice(task.noticeId, `commit: 正在执行 ${event.part.tool} ...`, 'info')
-      } else if (event?.type === 'text' && event.part?.text) {
-        commitNoticeTextRef.current = `${commitNoticeTextRef.current}${event.part.text}`.slice(-400)
-      } else if (event?.type === 'reasoning') {
-        updateNotice(task.noticeId, 'commit: 正在分析提交信息...', 'info')
-      }
-    })
     const offExit = window.mica.chat.onCommitExit(({ commitId, exitCode, error, summary }) => {
       const task = commitTaskRef.current
       if (!task || task.id !== commitId) return
@@ -3228,7 +3280,7 @@ export function ChatView({
       } else if (exitCode !== 0) {
         updateNotice(task.noticeId, `commit 异常退出（code ${exitCode}）`, 'error')
       } else {
-        const text = (summary || commitNoticeTextRef.current).trim()
+        const text = (summary || '').trim()
         updateNotice(
           task.noticeId,
           text ? `commit: 已完成 ${compactLine(text, 300)}` : 'commit: 已完成',
@@ -3237,7 +3289,6 @@ export function ChatView({
       }
     })
     return () => {
-      offEvent?.()
       offExit?.()
     }
   }, [updateNotice])
@@ -3419,6 +3470,14 @@ export function ChatView({
       onMouseUp={focusComposerFromShell}
       onContextMenu={openChatContextMenu}
     >
+      {lastPromptText && (
+        <div className="chat-last-prompt" title={compactLine(lastPromptText, 400)}>
+          <span className="chat-last-prompt-marker" aria-hidden="true">
+            ▌
+          </span>
+          <span className="chat-last-prompt-text">{lastPromptText}</span>
+        </div>
+      )}
       <div
         ref={listRef}
         className="chat-scroll thin-scrollbar"

@@ -848,6 +848,34 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect((completed.params?.turn as { status?: string }).status).toBe('completed');
   });
 
+  itE2E('degraded MCP config warns instead of erroring and the host keeps serving', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const home = makeHome('mcp-warning');
+    // A missing --mcp-config makes micaMcp.init() reject. That is a degradation
+    // (host serves without MCP tools), so it must be a `warning` notification:
+    // a Codex `error` would make the desktop app end the run it is about to run.
+    const host = spawnHost('mcp-warning', ['--mcp-config', join(home, 'missing-mcp.json')], home);
+    hosts.push(host);
+
+    const warning = await waitFor(host, (m) => m.method === 'warning', 'degradation warning', 30_000);
+    expect(JSON.stringify(warning.params)).toContain('MCP init failed');
+    expect(host.lines.some((m) => m.method === 'error')).toBe(false);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '降级后仍可对话' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started after degradation');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed after degradation', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('completed');
+  });
+
   itE2E('ran and immediately stopped -> turn/interrupt -> interrupted without error', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -939,26 +967,25 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // A pure-text iteration has a single iteration boundary, so an after_iteration
     // input drains as the next turn once the current one ends (matching the
     // interactive runtime: "若 agent 已直接结束，则按 turn 完成队列发送").
-    // Host-queued turns run silently (no turn/started notification — that is
-    // only emitted for client-initiated turn/start requests), so wait for the
-    // provider to receive the queued text as its second request instead.
-    const secondRequestAt = Date.now();
-    while (Date.now() - secondRequestAt < 30_000) {
-      if (mock!.state.requests.length >= 2) break;
-      await sleep(100);
-    }
+    // The drained turn is a real turn for the client: it announces its own
+    // turn/started (new id) and finishes with turn/completed, so the app can
+    // abort it and knows when the host is idle again.
+    const started2 = await waitFor(
+      host,
+      (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turn1,
+      'drained turn/started (2)',
+      30_000,
+    );
+    const turn2 = (started2.params?.turn as { id?: string }).id!;
+    const completed2 = await waitFor(host, turnCompleted(turn2), 'turn/completed (2)', 30_000);
+    expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
     expect(mock!.state.requests.length).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(mock!.state.requests[1]?.input ?? [])).toContain('第二句话（排队注入）');
 
-    // The queued turn runs silently; wait for its provider response to finish.
-    const secondResponseDeadline = Date.now() + 30_000;
-    while (mock!.state.responsesFinished < 2 && Date.now() < secondResponseDeadline) await sleep(100);
-    expect(mock!.state.responsesFinished).toBeGreaterThanOrEqual(2);
-
     // A new explicit turn reuses the same resident host and session id (no
-    // re-spawn). Retry turn/start while the host is still draining the queued
-    // turn (it rejects with "A turn is already active") instead of guessing a
-    // sleep — timing-independent and stable under CI load.
+    // re-spawn). Retry turn/start in case the host is still winding down (it
+    // rejects with "A turn is already active") instead of guessing a sleep —
+    // timing-independent and stable under CI load.
     let started3: HostMessage | null = null;
     for (let attempt = 0; attempt < 50 && !started3; attempt++) {
       await send(host, 100 + attempt, 'turn/start', {
@@ -968,7 +995,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
       const reply = await waitFor(
         host,
         (m) =>
-          (m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turn1) ||
+          (m.method === 'turn/started' &&
+            (m.params?.turn as { id?: string })?.id !== turn1 &&
+            (m.params?.turn as { id?: string })?.id !== turn2) ||
           (m.id === 100 + attempt && m.error !== undefined),
         `turn/start reply (attempt ${attempt})`,
         10_000,
@@ -1297,6 +1326,23 @@ suite('mica app-server real-user flows (mock provider)', () => {
     }
     // The queued text reached the provider as the second request after abort.
     expect(JSON.stringify(mock!.state.requests[1]?.input ?? [])).toContain('排队的话（abort 后继续）');
+
+    // The drained turn is a real turn for the client: it must announce its own
+    // turn/started (new id), scope its deltas to it, and finish with
+    // turn/completed. Without this the app stayed "idle" while the host was
+    // busy, so stop did nothing and the next message was rejected.
+    const started2 = await waitFor(
+      host,
+      (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turn1,
+      'drained turn/started',
+      30_000,
+    );
+    const turn2 = (started2.params?.turn as { id?: string }).id!;
+    expect(turn2).not.toBe(turn1);
+    const completed2 = await waitFor(host, turnCompleted(turn2), 'drained turn/completed', 30_000);
+    expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
+    const drainedDelta = host.lines.find((m) => m.method === 'item/agentMessage/delta' && m.params?.turnId === turn2);
+    expect(drainedDelta).toBeTruthy();
   });
 
   itE2E('two hosts racing on one session keep persisting both turns (no silent skip)', async () => {

@@ -147,6 +147,24 @@ describe('incremental session scanner', () => {
     expect(harness.reads.at(-1)).toBe(join(harness.dir, 'two.json'))
   })
 
+  test('rereads metadata when only the session title changes', () => {
+    const harness = createHarness()
+    harness.write('one', fixture('one', { title: 'First prompt' }))
+
+    expect(harness.scanner.scanMeta()).toEqual([
+      expect.objectContaining({ id: 'one', title: 'First prompt' })
+    ])
+
+    // The CLI rewrites title on every turn, so the sidebar must pick the new
+    // value up from the next scan without any other field changing.
+    harness.write('one', fixture('one', { title: 'A much later prompt' }))
+
+    expect(harness.scanner.scanMeta()).toEqual([
+      expect.objectContaining({ id: 'one', title: 'A much later prompt' })
+    ])
+    expect(harness.reads).toHaveLength(2)
+  })
+
   test('adding a file only reads the new file', () => {
     const harness = createHarness()
     harness.write('one', fixture('one'))

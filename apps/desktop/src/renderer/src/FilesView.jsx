@@ -4,15 +4,19 @@ import {
   ChevronRight,
   Clipboard,
   Copy,
+  Files,
   FilePlus,
   FolderOpen,
   FolderPlus,
+  GitBranch,
   Pencil,
   RefreshCw,
+  Search,
   Trash2,
   X
 } from 'lucide-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
+import { GitDiffEditor, GitPanel, SearchPanel } from './FileSidePanels'
 import { useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, monaco } from './monaco'
 
@@ -308,7 +312,7 @@ function FileTreeRows({
 }
 
 export const FilesView = forwardRef(function FilesView(
-  { root, visible, askText, onCornerResizeStart },
+  { root, visible, askText, onCornerResizeStart, gitCwd, gitRepository, gitLoading },
   ref
 ) {
   const viewRef = useRef(null)
@@ -342,6 +346,8 @@ export const FilesView = forwardRef(function FilesView(
     transient: false,
     error: false
   })
+  const [activePanel, setActivePanel] = useState('explorer')
+  const [gitSelectedFile, setGitSelectedFile] = useState(null)
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -358,6 +364,16 @@ export const FilesView = forwardRef(function FilesView(
     if (transient) {
       messageTimer.current = window.setTimeout(() => setMessage(null), error ? 4000 : 1800)
     }
+  }, [])
+
+  const selectGitFile = useCallback((file) => {
+    if (file && file.path) setGitSelectedFile(file)
+  }, [])
+
+  const closeGitDiff = useCallback(() => setGitSelectedFile(null), [])
+
+  const switchPanel = useCallback((panel) => {
+    setActivePanel((current) => (current === panel ? 'explorer' : panel))
   }, [])
 
   useEffect(() => {
@@ -1057,102 +1073,141 @@ export const FilesView = forwardRef(function FilesView(
       ref={viewRef}
       className={`relative min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
     >
+      <nav
+        className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-[#111] py-1.5"
+        aria-label="活动栏"
+      >
+        {[
+          ['explorer', Files, '资源管理器'],
+          ['search', Search, '搜索'],
+          ['git', GitBranch, '源代码管理']
+        ].map(([id, Icon, label]) => {
+          const active = activePanel === id
+          return (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={active}
+              className={`grid size-9 place-items-center rounded-md transition-colors ${active ? 'bg-white/[.09] text-white' : 'text-white/45 hover:bg-white/[.05] hover:text-white'}`}
+              onClick={() => switchPanel(id)}
+            >
+              <Icon size={17} className="shrink-0" />
+            </button>
+          )
+        })}
+      </nav>
       <aside
         className="flex min-h-0 shrink-0 flex-col bg-[#111]"
         style={{ width }}
-        aria-label="文件资源管理器"
+        aria-label="侧边面板"
       >
-        <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-white/[.07] px-2">
-          <button
-            type="button"
-            disabled={!tree.parent}
-            title="返回上级目录"
-            aria-label="返回上级目录"
-            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
-            onClick={() => loadRoot(tree.parent)}
-          >
-            <ArrowUp size={15} />
-          </button>
-          <div
-            className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/65"
-            title={tree.root || ''}
-          >
-            {tree.root}
-          </div>
-          <button
-            type="button"
-            disabled={!tree.root}
-            title="新建文件"
-            aria-label="新建文件"
-            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
-            onClick={() =>
-              runFileAction('new-file', {
-                path: tree.root,
-                type: 'directory',
-                name: fileName(tree.root)
-              })
-            }
-          >
-            <FilePlus size={14} />
-          </button>
-          <button
-            type="button"
-            disabled={!tree.root}
-            title="新建文件夹"
-            aria-label="新建文件夹"
-            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
-            onClick={() =>
-              runFileAction('new-directory', {
-                path: tree.root,
-                type: 'directory',
-                name: fileName(tree.root)
-              })
-            }
-          >
-            <FolderPlus size={14} />
-          </button>
-          <button
-            type="button"
-            title="刷新"
-            aria-label="刷新"
-            className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
-            onClick={refresh}
-          >
-            <RefreshCw size={14} />
-          </button>
-        </header>
-        <div className="relative min-h-0 flex-1">
-          <div
-            className="thin-scrollbar h-full overflow-auto px-1.5 py-1 select-none"
-            role="tree"
-            aria-label="文件目录"
-          >
-            <FileTreeRows
-              nodes={applyOrder(tree.children, tree.root, orderMap)}
-              activePath={activePath}
-              dragPath={dragPath}
-              dropPath={dropPath}
-              siblingDrop={siblingDrop}
-              orderMap={orderMap}
-              onToggle={toggleDirectory}
-              onOpen={openFile}
-              onContextMenu={openContextMenu}
-              onDragStart={startFileDrag}
-              onDragEnd={finishFileDrag}
-              onDrop={handleFileDrop}
-              onSiblingHover={handleSiblingHover}
-              onSiblingDrop={handleSiblingDrop}
-            />
-          </div>
-          {tree.status && (
-            <div
-              role="status"
-              className="absolute inset-0 grid place-items-center bg-[#111] px-4 text-center text-[11px] text-white/35"
-            >
-              {tree.status}
+        {activePanel === 'search' ? (
+          <SearchPanel root={root} onOpenFile={openFile} activePath={activePath} />
+        ) : activePanel === 'git' ? (
+          <GitPanel
+            cwd={gitCwd || null}
+            repository={gitRepository}
+            loading={gitLoading}
+            selectedPath={gitSelectedFile?.path}
+            onSelectFile={selectGitFile}
+          />
+        ) : (
+          <>
+            <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-white/[.07] px-2">
+              <button
+                type="button"
+                disabled={!tree.parent}
+                title="返回上级目录"
+                aria-label="返回上级目录"
+                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                onClick={() => loadRoot(tree.parent)}
+              >
+                <ArrowUp size={15} />
+              </button>
+              <div
+                className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/65"
+                title={tree.root || ''}
+              >
+                {tree.root}
+              </div>
+              <button
+                type="button"
+                disabled={!tree.root}
+                title="新建文件"
+                aria-label="新建文件"
+                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                onClick={() =>
+                  runFileAction('new-file', {
+                    path: tree.root,
+                    type: 'directory',
+                    name: fileName(tree.root)
+                  })
+                }
+              >
+                <FilePlus size={14} />
+              </button>
+              <button
+                type="button"
+                disabled={!tree.root}
+                title="新建文件夹"
+                aria-label="新建文件夹"
+                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                onClick={() =>
+                  runFileAction('new-directory', {
+                    path: tree.root,
+                    type: 'directory',
+                    name: fileName(tree.root)
+                  })
+                }
+              >
+                <FolderPlus size={14} />
+              </button>
+              <button
+                type="button"
+                title="刷新"
+                aria-label="刷新"
+                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
+                onClick={refresh}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </header>
+            <div className="relative min-h-0 flex-1">
+              <div
+                className="thin-scrollbar h-full overflow-auto px-1.5 py-1 select-none"
+                role="tree"
+                aria-label="文件目录"
+              >
+                <FileTreeRows
+                  nodes={applyOrder(tree.children, tree.root, orderMap)}
+                  activePath={activePath}
+                  dragPath={dragPath}
+                  dropPath={dropPath}
+                  siblingDrop={siblingDrop}
+                  orderMap={orderMap}
+                  onToggle={toggleDirectory}
+                  onOpen={openFile}
+                  onContextMenu={openContextMenu}
+                  onDragStart={startFileDrag}
+                  onDragEnd={finishFileDrag}
+                  onDrop={handleFileDrop}
+                  onSiblingHover={handleSiblingHover}
+                  onSiblingDrop={handleSiblingDrop}
+                />
+              </div>
+              {tree.status && (
+                <div
+                  role="status"
+                  className="absolute inset-0 grid place-items-center bg-[#111] px-4 text-center text-[11px] text-white/35"
+                >
+                  {tree.status}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </aside>
       {contextMenu && (
         <FileContextMenu
@@ -1193,108 +1248,117 @@ export const FilesView = forwardRef(function FilesView(
         className="flex min-w-0 min-h-0 flex-1 flex-col"
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
-        <div
-          ref={tabListRef}
-          className="thin-scrollbar flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111]"
-          role="tablist"
-          aria-label="打开的文件"
-        >
-          {tabs.map((tab) => (
+        {activePanel === 'git' && gitSelectedFile ? (
+          <GitDiffEditor cwd={gitCwd || null} file={gitSelectedFile} onClose={closeGitDiff} />
+        ) : (
+          <>
             <div
-              key={tab.path}
-              data-path={tab.path}
-              title={tab.path}
-              className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
-              onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
+              ref={tabListRef}
+              className="thin-scrollbar flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111]"
+              role="tablist"
+              aria-label="打开的文件"
             >
-              {tab.path === activePath && (
-                <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[#5aa7e8]" />
-              )}
-              <button
-                type="button"
-                role="tab"
-                tabIndex={tab.path === activePath ? 0 : -1}
-                aria-selected={tab.path === activePath}
-                aria-controls="file-editor-panel"
-                aria-label={`${tab.name}${tabNameCounts.get(tab.name) > 1 ? `，${parentName(tab.path)} 文件夹` : ''}${tab.dirty ? '，未保存' : ''}${tab.loading ? '，正在打开' : ''}${tab.saving ? '，正在保存' : ''}`}
-                className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-hidden text-left"
-                onClick={() => activateFile(tab.path)}
-                onKeyDown={(event) => handleTabKeyDown(event, tab.path)}
-              >
-                <FileIcon name={tab.name} className="size-4" />
-                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-                  <span className="min-w-0 truncate">{tab.name}</span>
-                  {tabNameCounts.get(tab.name) > 1 && (
-                    <span className="shrink truncate text-[9px] text-white/30">
-                      {parentName(tab.path)}
-                    </span>
+              {tabs.map((tab) => (
+                <div
+                  key={tab.path}
+                  data-path={tab.path}
+                  title={tab.path}
+                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
+                  onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
+                >
+                  {tab.path === activePath && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-x-0 top-0 h-px bg-[#5aa7e8]"
+                    />
                   )}
-                </span>
-              </button>
-              <span className="relative grid size-5 shrink-0 place-items-center">
-                {(tab.loading || tab.saving) && (
-                  <span
-                    className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
-                    aria-hidden="true"
-                  />
-                )}
-                {tab.dirty && !tab.loading && !tab.saving && (
-                  <span
-                    className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
-                    aria-hidden="true"
-                  />
-                )}
-                {!tab.loading && !tab.saving && (
                   <button
                     type="button"
+                    role="tab"
                     tabIndex={tab.path === activePath ? 0 : -1}
-                    title={`关闭 ${tab.name}`}
-                    aria-label={`关闭 ${tab.name}`}
-                    className={`${tab.dirty || tab.path !== activePath ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100' : ''} absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      closeFile(tab.path)
-                    }}
+                    aria-selected={tab.path === activePath}
+                    aria-controls="file-editor-panel"
+                    aria-label={`${tab.name}${tabNameCounts.get(tab.name) > 1 ? `，${parentName(tab.path)} 文件夹` : ''}${tab.dirty ? '，未保存' : ''}${tab.loading ? '，正在打开' : ''}${tab.saving ? '，正在保存' : ''}`}
+                    className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-hidden text-left"
+                    onClick={() => activateFile(tab.path)}
+                    onKeyDown={(event) => handleTabKeyDown(event, tab.path)}
                   >
-                    <X size={12} />
+                    <FileIcon name={tab.name} className="size-4" />
+                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+                      <span className="min-w-0 truncate">{tab.name}</span>
+                      {tabNameCounts.get(tab.name) > 1 && (
+                        <span className="shrink truncate text-[9px] text-white/30">
+                          {parentName(tab.path)}
+                        </span>
+                      )}
+                    </span>
                   </button>
-                )}
-              </span>
+                  <span className="relative grid size-5 shrink-0 place-items-center">
+                    {(tab.loading || tab.saving) && (
+                      <span
+                        className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {tab.dirty && !tab.loading && !tab.saving && (
+                      <span
+                        className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {!tab.loading && !tab.saving && (
+                      <button
+                        type="button"
+                        tabIndex={tab.path === activePath ? 0 : -1}
+                        title={`关闭 ${tab.name}`}
+                        aria-label={`关闭 ${tab.name}`}
+                        className={`${tab.dirty || tab.path !== activePath ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100' : ''} absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          closeFile(tab.path)
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        {activeTab && (
-          <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-white/[.07] px-3 text-[10px] text-white/40">
-            {breadcrumbs.map((part, index) => (
-              <span key={`${part}-${index}`} className="contents">
-                {index > 0 && <span className="shrink-0 text-sm text-white/25">›</span>}
-                <span
-                  className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/60' : ''}`}
-                >
-                  {part}
+            {activeTab && (
+              <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-white/[.07] px-3 text-[10px] text-white/40">
+                {breadcrumbs.map((part, index) => (
+                  <span key={`${part}-${index}`} className="contents">
+                    {index > 0 && <span className="shrink-0 text-sm text-white/25">›</span>}
+                    <span
+                      className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/60' : ''}`}
+                    >
+                      {part}
+                    </span>
+                  </span>
+                ))}
+                <span className="ml-auto shrink-0">
+                  {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
                 </span>
-              </span>
-            ))}
-            <span className="ml-auto shrink-0">
-              {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
-            </span>
-          </div>
-        )}
-        <div className="relative min-h-0 flex-1">
-          <div ref={editorHostRef} className="size-full" />
-          {message && (
-            <div
-              role="status"
-              className={
-                message.transient
-                  ? `absolute bottom-3.5 right-4 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`
-                  : 'absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35'
-              }
-            >
-              {message.text}
+              </div>
+            )}
+            <div className="relative min-h-0 flex-1">
+              <div ref={editorHostRef} className="size-full" />
+              {message && (
+                <div
+                  role="status"
+                  className={
+                    message.transient
+                      ? `absolute bottom-3.5 right-4 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`
+                      : 'absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35'
+                  }
+                >
+                  {message.text}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </section>
     </section>
   )

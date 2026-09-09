@@ -154,7 +154,7 @@ export class SubagentTaskManager {
     ).length;
     if (activeCount >= this.maxConcurrentTasks) {
       throw new Error(
-        `Too many background subagents are running (${activeCount}/${this.maxConcurrentTasks}). Read or stop an existing task first.`,
+        `Too many subagents are running (${activeCount}/${this.maxConcurrentTasks}). Read or stop an existing task first.`,
       );
     }
 

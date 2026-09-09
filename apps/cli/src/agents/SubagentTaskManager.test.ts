@@ -20,7 +20,7 @@ describe('SubagentTaskManager', () => {
     expect(manager.kill(task.id, secondOwner)).toBeUndefined();
   });
 
-  it('enforces the background concurrency limit', () => {
+  it('enforces the subagent concurrency limit', () => {
     const owner = {} as AgentRuntime;
     const manager = new SubagentTaskManager({ maxConcurrentTasks: 1 });
     manager.start({
@@ -41,7 +41,7 @@ describe('SubagentTaskManager', () => {
         effort: 'low',
         run: async () => ({ result: 'ok' }),
       }),
-    ).toThrow('Too many background subagents');
+    ).toThrow('Too many subagents');
   });
 
   it('applies concurrency limits per parent owner', () => {

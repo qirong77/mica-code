@@ -79,6 +79,7 @@ export class ToolAgent extends MicaTool {
         'subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。',
         '可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。',
         'Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。',
+        '前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。',
         `可用 subagent_type: ${listSubagents()
           .map((agent) => `${agent.name} (${agent.description})`)
           .join('; ')}。`,
@@ -97,7 +98,7 @@ export class ToolAgent extends MicaTool {
           subagent_type: { type: 'string', description: 'subagent 类型，默认 general-purpose。' },
           run_in_background: {
             type: 'boolean',
-            description: '设为 true 在后台运行并返回 task_id。默认 false。',
+            description: '设为 true 在后台运行并立即返回 task_id（主流程继续推进）。默认 false，前台会阻塞当前 turn。',
           },
           effort: {
             type: 'string',

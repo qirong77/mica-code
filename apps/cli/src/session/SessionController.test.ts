@@ -368,6 +368,131 @@ describe('SessionController', () => {
     expect(saves.at(-1)?.title).toBe('Fix the resume session title');
   });
 
+  it('derives the session title from the latest user message', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    const messages = [
+      { role: 'user' as const, content: 'First task' },
+      { role: 'assistant' as const, content: 'done' },
+      { role: 'user' as const, content: 'Latest task' },
+    ];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages,
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => messages),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.saveCurrent();
+
+    expect(saves.at(-1)?.title).toBe('Latest task');
+  });
+
+  it('skips plugin-injected user messages when deriving the session title', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    const messages = [
+      { role: 'user' as const, content: 'Real user task' },
+      { role: 'assistant' as const, content: 'working' },
+      {
+        role: 'user' as const,
+        content: 'Auto reminder: context is full',
+        displayContent: 'Reminder: compact now',
+      },
+    ];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages,
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => messages),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.find((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.saveCurrent();
+
+    expect(saves.at(-1)?.title).toBe('Real user task');
+  });
+
+  it('rewrites the persisted title when later user messages arrive', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const saves: PersistedSession[] = [];
+    const messages = [{ role: 'user' as const, content: 'First task' }];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages,
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => messages),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn((id: string) => saves.findLast((session) => session.id === id) ?? null),
+      save: vi.fn((session: PersistedSession) => {
+        saves.push(session);
+      }),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.saveCurrent();
+    expect(saves.at(-1)?.title).toBe('First task');
+
+    messages.push(
+      { role: 'assistant' as const, content: 'done' },
+      { role: 'user' as const, content: 'Follow-up task' },
+    );
+    controller.saveCurrent();
+
+    expect(saves.at(-1)?.title).toBe('Follow-up task');
+    expect(saves.at(-1)?.titleSource).toBe('derived');
+  });
+
   it('preserves the persisted title when compact replaces the visible conversation', async () => {
     const { SessionController } = await import('./SessionController.js');
     const saves: PersistedSession[] = [];

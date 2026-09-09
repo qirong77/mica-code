@@ -482,8 +482,10 @@ export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): Persiste
 }
 
 function deriveTitle(messages: MicaUiConversationMessage[]): string {
-  const firstUserMessage = messages.find(isTitleUserMessage);
-  const text = firstUserMessage ? contentToText(firstUserMessage.content) : '';
+  // The title tracks what the session is currently about, so it follows the
+  // most recent user prompt instead of the first one.
+  const lastUserMessage = messages.findLast(isTitleUserMessage);
+  const text = lastUserMessage ? contentToText(lastUserMessage.content) : '';
   const title = text.replace(/\s+/g, ' ').trim();
   if (!title) return 'Untitled session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
@@ -491,8 +493,19 @@ function deriveTitle(messages: MicaUiConversationMessage[]): string {
 
 function isTitleUserMessage(message: MicaUiConversationMessage): boolean {
   if (message.role !== 'user') return false;
+  if (isInjectedUserMessage(message)) return false;
   const text = contentToText(message.content).trimStart();
   return !isInternalCompactText(text);
+}
+
+/**
+ * Plugin-injected prompts (context-pressure reminders and friends) are
+ * submitted with a `displayText`, so their `displayContent` differs from the
+ * real wire content. They are not user input and must never become the title.
+ */
+function isInjectedUserMessage(message: MicaUiConversationMessage): boolean {
+  if (message.displayContent === undefined) return false;
+  return contentToText(message.displayContent).trim() !== contentToText(message.content).trim();
 }
 
 function isInternalCompactText(text: string): boolean {

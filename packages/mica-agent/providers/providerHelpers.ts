@@ -19,6 +19,90 @@ export function interruptedToolOutput(): string {
   });
 }
 
+export type ProviderToolCall = {
+  name: string;
+  argsText: string;
+  id?: string;
+  parseArgs: () => ToolInput;
+};
+
+export type ProviderToolCallOutcome = {
+  name: string;
+  id?: string;
+  result: string;
+  images: ToolResultImageBlock[];
+  isError: boolean;
+};
+
+/**
+ * Executes the tool calls of one provider message. A maximal run of
+ * parallel-safe calls (read-only tools and `Agent`) runs concurrently; any
+ * other tool is a serial barrier of its own, so write/exec side effects keep
+ * their declared order. Outcomes come back in the original call order.
+ *
+ * `checkpoint` is invoked before and after every batch, preserving the
+ * existing abort checkpoints (`throwIfQueryStopped`) of the provider loop.
+ */
+export async function executeProviderToolCalls(params: {
+  calls: ProviderToolCall[];
+  signal?: AbortSignal;
+  context: unknown;
+  toolFilter: ModelClientOptions['toolFilter'];
+  onToolCall?: AgentCallbacks['onToolCall'];
+  onToolResult?: AgentCallbacks['onToolResult'];
+  checkpoint?: () => void;
+}): Promise<ProviderToolCallOutcome[]> {
+  const outcomes: ProviderToolCallOutcome[] = [];
+  let index = 0;
+
+  while (index < params.calls.length) {
+    const batch: ProviderToolCall[] = [];
+    if (isParallelSafeTool(params.calls[index]!.name)) {
+      while (index < params.calls.length && isParallelSafeTool(params.calls[index]!.name)) {
+        batch.push(params.calls[index++]!);
+      }
+    } else {
+      batch.push(params.calls[index++]!);
+    }
+
+    params.checkpoint?.();
+    const batchOutcomes = await Promise.all(
+      batch.map(async (call) => {
+        const outcome = await executeProviderToolCall({
+          name: call.name,
+          argsText: call.argsText,
+          id: call.id,
+          parseArgs: call.parseArgs,
+          signal: params.signal,
+          context: params.context,
+          toolFilter: params.toolFilter,
+          onToolCall: params.onToolCall,
+          onToolResult: params.onToolResult,
+        });
+        return { name: call.name, id: call.id, ...outcome };
+      }),
+    );
+    params.checkpoint?.();
+    outcomes.push(...batchOutcomes);
+  }
+
+  return outcomes;
+}
+
+/**
+ * Read-only tools never mutate local state, and `Agent` calls own their child
+ * agent/task state, so both are safe to run concurrently. Everything else
+ * (write/exec tools) must stay serial.
+ */
+function isParallelSafeTool(name: string): boolean {
+  if (name === 'Agent') return true;
+  try {
+    return micaTools.isReadOnly(name);
+  } catch {
+    return false;
+  }
+}
+
 export async function executeProviderToolCall(params: {
   name: string;
   argsText: string;
