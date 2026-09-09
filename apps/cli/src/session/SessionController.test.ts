@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/index.js';
+import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import type { SessionAgentAdapter } from './SessionController.js';
 
@@ -453,7 +454,7 @@ describe('SessionController', () => {
   it('rewrites the persisted title when later user messages arrive', async () => {
     const { SessionController } = await import('./SessionController.js');
     const saves: PersistedSession[] = [];
-    const messages = [{ role: 'user' as const, content: 'First task' }];
+    const messages: MicaUiConversationMessage[] = [{ role: 'user', content: 'First task' }];
     const agent: SessionAgentAdapter = {
       getSnapshot: vi.fn(() => ({
         providerId: 'openai',
