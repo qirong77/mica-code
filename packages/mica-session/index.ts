@@ -13,7 +13,6 @@ export type {
   PersistedRuntimeSnapshot,
   PersistedSession,
   PersistedSessionTurnState,
-  SessionGcResult,
   SessionStoreLike,
   SessionSummary,
   SessionTurnLease,

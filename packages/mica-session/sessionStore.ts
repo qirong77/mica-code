@@ -81,15 +81,6 @@ export type SessionTurnLease = {
   release(): void;
 };
 
-export type SessionGcResult = {
-  /** 回收的孤儿 turn-lock 数量（owner pid 已死）。 */
-  reclaimedLocks: number;
-  /** 被收敛为 aborted 的 running 会话数量（强杀后卡在 running 的残留）。 */
-  demotedSessions: number;
-  /** 删除的垃圾空会话数量（无对话、无 usage、非 running）。 */
-  deletedSessions: number;
-};
-
 const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
@@ -206,87 +197,6 @@ export class SessionStore implements SessionStoreLike {
     }
     return true;
   }
-
-  /**
-   * 单实例安全执行的垃圾回收：回收孤儿 turn-lock、把强杀后卡在 running
-   * 的会话收敛为 aborted、清理垃圾空会话。只在 owner pid 已死时才回收/收敛，
-   * 因此多个进程即使并发调用也不会误伤仍活着的 turn。返回本轮的清理统计。
-   */
-  performGarbageCollection(): SessionGcResult {
-    ensureSessionDir();
-    const result: SessionGcResult = { reclaimedLocks: 0, demotedSessions: 0, deletedSessions: 0 };
-
-    // 1) 回收孤儿 turn-lock：owner pid 已死（或损坏且超过宽松时限）的锁直接删除。
-    const lockDir = resolve(SESSION_DIR, '.turn-locks');
-    if (existsSync(lockDir)) {
-      for (const file of readdirSync(lockDir)) {
-        if (!file.endsWith('.lock')) continue;
-        const lockPath = resolve(lockDir, file);
-        if (removeStaleTurnLease(lockPath)) result.reclaimedLocks += 1;
-      }
-    }
-
-    // 2) 扫一遍会话文件，把「锁已死 / 无活锁」的 running 会话收敛为 aborted。
-    for (const file of readdirSync(SESSION_DIR)) {
-      if (!file.endsWith('.json') || file === 'index.json' || file === 'session-index.json') continue;
-      const path = resolve(SESSION_DIR, file);
-      const session = this.read(path);
-      if (!session) continue;
-
-      if (session.turnState === 'running' && !this.hasLiveTurnLock(session.id)) {
-        const demoted: PersistedSession = {
-          ...session,
-          revision: (session.revision ?? 0) + 1,
-          updatedAt: new Date().toISOString(),
-          turnState: 'aborted',
-        };
-        // Write the demoted session directly. this.save() would re-trigger
-        // rebuildIndex, which itself deletes junk empty sessions; a freshly
-        // demoted running junk session would then vanish mid-sweep and pollute
-        // the counters. A file-level atomic write keeps the sweep deterministic.
-        const tmpPath = `${path}.${process.pid}.gc.tmp`;
-        writeFileSync(tmpPath, `${JSON.stringify(demoted, null, 2)}\n`, 'utf-8');
-        renameSync(tmpPath, path);
-        result.demotedSessions += 1;
-        continue;
-      }
-
-      if (session.turnState !== 'running' && isJunkEmptySession(session)) {
-        rmSync(path, { force: true });
-        result.deletedSessions += 1;
-      }
-    }
-
-    // Reconcile the metadata index once so the just-changed files are reflected
-    // without the per-save rebuildIndex re-running its own junk deletion (which
-    // would otherwise race this sweep's counters).
-    try {
-      this.rebuildIndex();
-    } catch {
-      // best-effort; the next list() rebuild reconciles a stale index.
-    }
-
-    return result;
-  }
-
-  /** 会话是否仍有活 turn 锁（owner pid 存在）。锁不存在/损坏/已死均视为无活锁。 */
-  private hasLiveTurnLock(sessionId: string): boolean {
-    const lockPath = turnLockPath(sessionId);
-    try {
-      if (!existsSync(lockPath)) return false;
-      const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { pid?: unknown };
-      if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || owner.pid <= 0) return false;
-      try {
-        process.kill(owner.pid, 0);
-        return true;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === 'EPERM';
-      }
-    } catch {
-      return false;
-    }
-  }
-
   /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */
   private ensureIndex(): SessionSummary[] {
     const dirMtime = dirMtimeMs();

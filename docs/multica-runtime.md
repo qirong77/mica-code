@@ -105,8 +105,8 @@ because task runners write task context into that directory. Mica loads both
 - `.agent_context/skills`
 
 It continues to load user skills from `$MICA_HOME/skills` (or
-`~/.mica/skills`). When `MICA_HOME` is not set, it also recognizes the
-`~/.config/deveco/skills` directory.
+`~/.mica/skills`). When `MICA_HOME` is not set, it also recognizes the shared
+global roots `~/.agents/skills` and `~/.config/deveco/skills`.
 
 ## MCP and current limits
 

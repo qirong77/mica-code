@@ -57,7 +57,7 @@ bun run format
 2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 `--version`/`models`/headless `exec`/`commit`/`compact` 与交互模式；`packages/mica-builtin-commands/startup/validate-config.js` 补齐向后兼容的配置默认值。
 3. `Application.start()` 启动 Ink UI → 完整配置校验 → `ensureInitialModelSelection()`（仅 `get_model_url` 动态 provider 且顶层 model 为空时）。
 4. 创建 AgentRuntime、SessionController、CommandRegistry、HookRegistry、ServiceContainer、PluginManager、TerminalAgentSessionManager、LocalRuntimeController、MicaUiRuntimeBridge、SubagentTaskManager；当前 agent 经 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
-5. `setActiveContext` 暴露 ApplicationContext；`useBuiltinPlugins()` 注册 command host 与内置插件（MCP 随 runtime start/stop 建连）；`$MICA_HOME/plugins` 用户插件 `setupAll` 并写 `plugin-status.json`；最后 `uiBridge.start()`、`runtime.start()`。交互模式还会 fire-and-forget `ensureGcRunning()`（见 配置、本地数据），后台拉起单实例 session GC 守护。
+5. `setActiveContext` 暴露 ApplicationContext；`useBuiltinPlugins()` 注册 command host 与内置插件（MCP 随 runtime start/stop 建连）；`$MICA_HOME/plugins` 用户插件 `setupAll` 并写 `plugin-status.json`；最后 `uiBridge.start()`、`runtime.start()`。交互模式还会 fire-and-forget `ensureDaemonRunning()` 后台拉起 sync daemon（见 Mica Sync 远程会话同步）。
 6. 启动失败：UI 提示修复配置后重启，`unregisterRuntime('Agent')`、清理插件与 session、`process.exitCode = 1`。插件 setup 期间 `ctx.onDispose()` 登记的资源在失败时逆序回滚；新增 capability 必须同步登记 disposer。
 
 ## Active Context 约定
@@ -94,8 +94,6 @@ bun run format
 - `SessionStore` 把「无 user/assistant 对话、无 usage、仅默认标题 `Untitled session`」的 session 视为垃圾（来自 `saveCurrent({ allowEmpty: true })` 的 turn 启动占位，进程异常退出后残留），`list`/`listRecent` 不展示；重建索引时删除 `turnState !== 'running'` 的垃圾文件。`turnState === 'running'` 的垃圾（可能有活跃 turn 正在写）**保留文件并被索引**（避免磁盘 id 集合与索引不一致导致每次读取都触发全量重扫），但 `list`/`listRecent` 仍通过 `isJunkSummary` 隐藏它，不占用 /resume 列表。
 - `SessionController.saveCurrent` 用持久化签名检测"另一进程写盘"，签名不匹配时**降级写盘**（revision+1、以内存快照为准）而不是永久跳过，否则 headless host 后续 turn 不落盘；`refreshFromStore` 会在下次刷新收敛。
 - turn lease 是 `sessions/.turn-locks/<id>.lock` 的 `wx` 文件锁，回收靠 owner pid 存活判定（`process.kill(pid, 0)`）。进程异常退出留下的孤儿锁会在下次 acquire 时随 pid 死亡回收；`SessionStore.delete` 会同步清理对应 turn-lock（session 文件已不存在也清孤儿锁），避免孤儿锁阻塞后续 continue/resume 并误报「正在另一个终端运行」。pid 被系统复用时无法只凭存活判定回收，属已知边界。
-- **Session GC 清理**：`SessionStore.performGarbageCollection()` 做三件事——回收 owner pid 已死的孤儿 turn-lock、把「强杀/崩溃后无活主锁」的 `running` 会话收敛为 `aborted`、删除「无对话/无 usage/仅默认标题」的非 running 垃圾会话。它只对「owner pid 已死」的对象动手，因此多进程并发调用也不会误伤仍活着的 turn。内部对会话文件的收敛/删除用**原子文件级写**（写 `.tmp` 再 `renameSync` / 直接 `rmSync`），统一在末尾 `rebuildIndex()` 一次性对账，避免逐次 `save`/`delete` 触发的 `rebuildIndex` 在中途删除刚收敛的垃圾文件而污染统计。已收敛为 `aborted` 的 running 垃圾会被 `rebuildIndex` 当作「非 running 垃圾」删除，属预期。
-- **单实例 GC 守护**（`apps/cli/src/features/session-gc/index.ts`）：交互式 mica 启动时 `ensureGcRunning()` fire-and-forget 后台拉起 `mica gc`（detached）；用 `$MICA_HOME/session-gc.pid` + `isPidAlive` 互斥，任何时刻至多一个实例运行。被强杀后 pid 文件残留，下一个实例启动时以 `isPidAlive` 判定接管并覆盖。`runSessionGc()` 每 `GC_INTERVAL_MS`（5 分钟，timer `unref`，进程由不 resolve 的 promise 保活）跑一轮 `performGarbageCollection()`，`SIGINT`/`SIGTERM` 时清 pid 文件退出；`MICA_NO_GC=1` 可禁用（CI/测试）。
 
 ## 模型、Effort 与 Context
 
@@ -128,7 +126,7 @@ bun run format
 - `packages/mica-builtin-commands/plugins/context-pressure/` 订阅 `ctx.events` 的 `context:changed`（TUI 由 `MicaUiRuntimeBridge.onUsage` 发布、headless 由 HeadlessPluginHost 发布，每次模型请求后都会发布，不只 turn 结束），红色区阈值在 `packages/mica-ui/panels/contextThresholds.ts`（ratio ≥ 0.7 或 tokens ≥ 300k，与 WorkingStatus 着色同源），经 `submitAgentSessionInput` 注入固定模板消息（`after_iteration`：在下一个工具迭代边界注入同一次 provider loop，agent 可在当前 turn 内直接响应压缩；turn 结束无后续迭代时由 message-queue 的 turn:after 兜底发送）；改动阈值同步两处。
 - MCP：`packages/mica-mcp` 管理 server 生命周期（配置在 config.json 的 `mcpServers`）；远端工具经 `micaTools.registerMcp()` 接入，server 断开/重连失败/关闭时同步清理对应工具（`/mcp reconnect` 失败后也要刷新）。Headless run 显式初始化/关闭 MCP。
 - Web：`web_search` 用 `serperApiKey` 或 `SERPER_API_KEY`；`web_fetch` 负责 URL 抓取和 HTML→Markdown。用户询问当前/最新/官方/模型能力/provider 行为/API 行为/价格/法规等可变事实时，先联网或读官方资料查证，无法查证时明确说明。
-- Skills：`packages/mica-skills` 只扫描、解析和缓存，不执行。用户级 `~/.mica/skills`（跟随 MICA_HOME），项目级 `.mica/skills`、`.agents/skills`、`.deveco/skills`、`.agent_context/skills`。每个 skill 是含 `SKILL.md` 的目录；skill 内容是用户数据和任务说明，不能覆盖安全规则、系统指令或当前用户请求。
+- Skills：`packages/mica-skills` 只扫描、解析和缓存，不执行。用户级 `~/.mica/skills`（跟随 MICA_HOME），未设置 `MICA_HOME` 时还共享扫描 `~/.agents/skills` 与 `~/.config/deveco/skills`；项目级 `.mica/skills`、`.agents/skills`、`.deveco/skills`、`.agent_context/skills`。每个 skill 是含 `SKILL.md` 的目录；skill 内容是用户数据和任务说明，不能覆盖安全规则、系统指令或当前用户请求。
 
 ## UI 状态与 Ink 约定
 

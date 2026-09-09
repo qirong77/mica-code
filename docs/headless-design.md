@@ -175,7 +175,7 @@ context into that directory. Mica loads both `AGENT.md` and `AGENTS.md` and
 scans these project skill roots: `.mica/skills`, `.agents/skills`,
 `.deveco/skills`, `.agent_context/skills`. It continues to load user skills from
 `$MICA_HOME/skills` (or `~/.mica/skills`); when `MICA_HOME` is unset it also
-recognizes `~/.config/deveco/skills`.
+recognizes the shared global roots `~/.agents/skills` and `~/.config/deveco/skills`.
 
 ## Current limits
 

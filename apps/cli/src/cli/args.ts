@@ -24,10 +24,6 @@ export type DaemonCliInvocation = {
   name?: string;
 };
 
-export type GcCliInvocation = {
-  mode: 'gc';
-};
-
 export type CompactCliInvocation = {
   mode: 'compact';
   sessionId: string;
@@ -61,7 +57,6 @@ export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | ExecCliInvocation
   | DaemonCliInvocation
-  | GcCliInvocation
   | CompactCliInvocation
   | CommitCliInvocation
   | AppServerCliInvocation
@@ -153,10 +148,6 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       return cliError(`Unknown daemon option: ${arg}`);
     }
     return { mode: 'daemon', server, name };
-  }
-  if (argv[0] === 'gc') {
-    // Internal single-instance session garbage collector; not exposed in usage.
-    return { mode: 'gc' };
   }
   if (argv[0] === 'compact') {
     let sessionId: string | undefined;

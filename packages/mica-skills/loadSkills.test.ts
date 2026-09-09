@@ -5,6 +5,16 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const previousMicaHome = process.env.MICA_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'mica-skills-'));
+const mockAgentHome = mkdtempSync(join(tmpdir(), 'mica-agents-home-'));
+
+// 隔离 homedir，使 ~/.agents/skills 与 ~/.config/deveco/skills 落到临时目录，避免污染真实 home。
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual<typeof import('node:os')>('node:os');
+  return {
+    ...actual,
+    homedir: () => mockAgentHome,
+  };
+});
 
 afterAll(() => {
   if (previousMicaHome === undefined) {
@@ -13,6 +23,7 @@ afterAll(() => {
     process.env.MICA_HOME = previousMicaHome;
   }
   rmSync(tempHome, { recursive: true, force: true });
+  rmSync(mockAgentHome, { recursive: true, force: true });
 });
 
 describe('loadSkills', () => {
@@ -71,6 +82,27 @@ describe('loadSkills', () => {
     } finally {
       process.chdir(previousCwd);
       rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('loads shared global skills from ~/.agents/skills when MICA_HOME is unset', async () => {
+    delete process.env.MICA_HOME;
+    const skillDir = join(mockAgentHome, '.agents', 'skills', 'agents-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      ['---', 'name: agents-skill', 'description: Shared global skill', '---', '', '# Instructions'].join('\n'),
+      'utf-8',
+    );
+
+    try {
+      vi.resetModules();
+      const { reloadSkills } = (await import('./loadSkills.js')) as typeof import('./loadSkills.js');
+      const skill = reloadSkills().find((item) => item.name === 'agents-skill');
+      expect(skill).toBeDefined();
+      expect(skill?.baseDir).toMatch(/\.agents\/skills\/agents-skill$/);
+    } finally {
+      rmSync(skillDir, { recursive: true, force: true });
     }
   });
 });

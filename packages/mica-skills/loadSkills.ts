@@ -13,7 +13,9 @@ function getSkillsDirs(): string[] {
     join(cwd, '.deveco', 'skills'),
     join(cwd, '.agent_context', 'skills'),
     join(micaHome, 'skills'),
-    ...(process.env.MICA_HOME ? [] : [join(homedir(), '.config', 'deveco', 'skills')]),
+    ...(process.env.MICA_HOME
+      ? []
+      : [join(homedir(), '.agents', 'skills'), join(homedir(), '.config', 'deveco', 'skills')]),
   ];
 }
 
