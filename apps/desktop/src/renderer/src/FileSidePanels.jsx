@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Search } from 'lucide-react'
+import { IconChevronRight, IconSearch } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
 import { editorOptions, languageFor, monaco } from './monaco'
 
@@ -72,7 +72,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 py-2">
         <div className="flex h-6 flex-1 items-center gap-1.5 rounded-sm border border-white/[.07] bg-white/[.03] px-2">
-          <Search size={12} className="shrink-0 text-white/40" />
+          <IconSearch size={12} className="shrink-0 text-white/40" />
           <input
             ref={inputRef}
             type="text"
@@ -151,7 +151,10 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
               style={{ paddingLeft: 5 + depth * 13 }}
               onClick={() => onToggle(key)}
             >
-              <ChevronRight size={13} className={`text-white/35 ${closed ? '' : 'rotate-90'}`} />
+              <IconChevronRight
+                size={13}
+                className={`text-white/35 ${closed ? '' : 'rotate-90'}`}
+              />
               <FileSystemIcon name={name} type="directory" expanded={!closed} className="size-4" />
               <span className="truncate">{name}</span>
             </button>
@@ -342,7 +345,7 @@ export function GitDiffEditor({ cwd, file, onClose }) {
               className="shrink-0 rounded-sm px-1 text-white/45 hover:bg-white/10 hover:text-white"
               onClick={onClose}
             >
-              <ChevronRight size={13} className="rotate-90" />
+              <IconChevronRight size={13} className="rotate-90" />
             </button>
           )}
         </header>

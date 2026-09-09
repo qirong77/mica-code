@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  BarChart3,
-  Folder,
-  GitBranch,
-  FolderOpen,
-  MessageSquare,
-  PanelLeft,
-  Rocket,
-  Settings,
-  SquareTerminal
-} from 'lucide-react'
+  IconChartBar,
+  IconFolderOpen,
+  IconGitBranch,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
+  IconMessage,
+  IconPlus,
+  IconRocket,
+  IconSettings,
+  IconTerminal2,
+  IconX
+} from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView, shortPath } from './ChatView'
 import { FilesView } from './FilesView'
@@ -17,7 +20,7 @@ import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
 import { SettingsView } from './SettingsView'
 import { StatsView } from './stats/StatsView'
-import { SIDEBAR_TRANSITION_MS, TerminalHost } from './TerminalHost'
+import { TerminalHost } from './TerminalHost'
 import { useLatest } from './hooks'
 import {
   createColdStartTerminal,
@@ -87,7 +90,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
               })
           }}
         >
-          <FolderOpen size={13} />
+          <IconFolderOpen size={13} />
           选择文件夹…
         </button>
         {dirs.length > 0 && (
@@ -390,19 +393,17 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
   return { states, markRead }
 }
 
-const DEFAULT_TERMINAL_PANEL_HEIGHT = 260
-const MIN_TERMINAL_PANEL_HEIGHT = 120
-const MIN_FILE_PANEL_HEIGHT = 140
 const DEFAULT_SIDEBAR_WIDTH = 260
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
+const DEFAULT_RIGHT_PANEL_WIDTH = 400
+const MIN_RIGHT_PANEL_WIDTH = 280
+const MAX_RIGHT_PANEL_WIDTH = 720
 
 // 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
 const PAGE_HEADER = {
-  files: { label: '工作文件', Icon: Folder },
-  terminal: { label: '终端', Icon: SquareTerminal },
-  stats: { label: 'Stats', Icon: BarChart3 },
-  settings: { label: 'Settings', Icon: Settings }
+  stats: { label: 'Stats', Icon: IconChartBar },
+  settings: { label: 'Settings', Icon: IconSettings }
 }
 
 function savedSidebarWidth() {
@@ -412,11 +413,11 @@ function savedSidebarWidth() {
     : DEFAULT_SIDEBAR_WIDTH
 }
 
-function savedTerminalPanelHeight() {
-  const value = Number(localStorage.getItem('mica.terminalPanelHeight'))
-  return Number.isFinite(value) && value >= MIN_TERMINAL_PANEL_HEIGHT
+function savedRightPanelWidth() {
+  const value = Number(localStorage.getItem('mica.rightPanelWidth'))
+  return Number.isFinite(value) && value >= MIN_RIGHT_PANEL_WIDTH && value <= MAX_RIGHT_PANEL_WIDTH
     ? value
-    : DEFAULT_TERMINAL_PANEL_HEIGHT
+    : DEFAULT_RIGHT_PANEL_WIDTH
 }
 
 export default function App() {
@@ -431,11 +432,17 @@ export default function App() {
   const [activeId, setActiveId] = useState(null)
   const activeRef = useLatest(activeId)
   const [selectedId, setSelectedId] = useState(null)
-  const [view, setView] = useState('terminal')
-  const [terminalPanelHeight, setTerminalPanelHeight] = useState(savedTerminalPanelHeight)
-  const terminalPanelHeightPreferenceRef = useRef(terminalPanelHeight)
-  const [terminalPanelOpen, setTerminalPanelOpen] = useState(true)
-  const [resizingTerminal, setResizingTerminal] = useState(false)
+  // 中间主区视图：chat | stats | settings（files/terminal 移入右侧 Panel）
+  const [view, setView] = useState('chat')
+  // 右侧 Panel：是否展开、当前 Tab（files | terminal）
+  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [rightPanelTab, setRightPanelTab] = useState('files')
+  // 右侧 Panel 宽度（可拖拽）
+  const [rightPanelWidth, setRightPanelWidth] = useState(savedRightPanelWidth)
+  // 右侧 Panel 最大化（占满窗口）
+  const [rightPanelMaximized, setRightPanelMaximized] = useState(false)
+  const [resizingRightPanel, setResizingRightPanel] = useState(false)
+  const rightPanelWidthRef = useRef(rightPanelWidth)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
   )
@@ -443,6 +450,7 @@ export default function App() {
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
   const dragStartRef = useRef(null)
+  const rightPanelDragStartRef = useRef(null)
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
@@ -792,17 +800,18 @@ export default function App() {
   const selectNode = useCallback(
     (node, activate = true) => {
       setSelectedId(node.id)
+      // 选中终端节点时始终激活右侧 Panel 的终端，确保 PTY 会话跟随
+      if (activate && node.type === 'terminal') {
+        terminalRef.current
+          ?.activate(node.id)
+          .catch((activateError) => console.error('activate terminal failed', activateError))
+      }
       if (activate && node.type === 'terminal') {
         if (view !== 'chat') setView('chat')
         setActiveId(node.id)
         setNodes((items) =>
           items.map((item) => (item.id === node.id ? { ...item, lastActiveAt: Date.now() } : item))
         )
-        if (view === 'terminal' || view === 'files') {
-          terminalRef.current
-            ?.activate(node.id)
-            .catch((activateError) => console.error('activate terminal failed', activateError))
-        }
       }
     },
     [view]
@@ -908,14 +917,23 @@ export default function App() {
     [activeRef]
   )
   const openSearchFile = useCallback(async (path, position) => {
-    setView('files')
+    setView('chat')
+    setRightPanelOpen(true)
+    setRightPanelTab('files')
     await filesRef.current?.openFile(path, position)
   }, [])
   const openChatFile = useCallback(async (path, position) => {
-    setView('files')
+    setView('chat')
+    setRightPanelOpen(true)
+    setRightPanelTab('files')
     await filesRef.current?.openFile(path, position)
   }, [])
-  const openChatTerminal = useCallback(() => setView('terminal'), [])
+  const openChatTerminal = useCallback(() => {
+    setRightPanelOpen(true)
+    setRightPanelTab('terminal')
+    const id = activeRef.current
+    if (id) terminalRef.current?.activate(id).catch(() => {})
+  }, [activeRef])
   const createChatSession = useCallback(
     (cwd = null) => {
       setView('chat')
@@ -947,8 +965,8 @@ export default function App() {
     [activeRef, refreshGit]
   )
   const closeSearchFile = useCallback(
-    () => view === 'files' && !!filesRef.current?.closeActive(),
-    [view]
+    () => rightPanelOpen && rightPanelTab === 'files' && !!filesRef.current?.closeActive(),
+    [rightPanelOpen, rightPanelTab]
   )
   const canChangeBranch = useCallback(
     () =>
@@ -967,48 +985,6 @@ export default function App() {
       return !value
     })
   }
-  const clampTerminalPanelHeight = useCallback((height) => {
-    const available = contentRef.current?.clientHeight || window.innerHeight
-    return Math.round(
-      Math.min(
-        Math.max(MIN_TERMINAL_PANEL_HEIGHT, available - MIN_FILE_PANEL_HEIGHT),
-        Math.max(MIN_TERMINAL_PANEL_HEIGHT, height)
-      )
-    )
-  }, [])
-  const resizeTerminalPanel = useCallback(
-    (height) => {
-      const next = clampTerminalPanelHeight(height)
-      terminalPanelHeightPreferenceRef.current = next
-      setTerminalPanelHeight(next)
-      localStorage.setItem('mica.terminalPanelHeight', String(next))
-    },
-    [clampTerminalPanelHeight]
-  )
-  const startTerminalResize = useCallback(
-    (event) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      setResizingTerminal(true)
-      document.body.classList.add('is-resizing-terminal')
-
-      const onMove = (moveEvent) => {
-        const bottom = contentRef.current?.getBoundingClientRect().bottom
-        if (bottom != null) resizeTerminalPanel(bottom - moveEvent.clientY)
-      }
-      const finish = () => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', finish)
-        window.removeEventListener('pointercancel', finish)
-        document.body.classList.remove('is-resizing-terminal')
-        setResizingTerminal(false)
-      }
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', finish)
-      window.addEventListener('pointercancel', finish)
-    },
-    [resizeTerminalPanel]
-  )
   const startSidebarResize = useCallback((event) => {
     if (event.button !== 0) return
     event.preventDefault()
@@ -1038,35 +1014,52 @@ export default function App() {
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth
   }, [sidebarWidth])
-  useEffect(() => {
-    if (view !== 'files') return undefined
-    const fitPanel = () => {
-      setTerminalPanelHeight(clampTerminalPanelHeight(terminalPanelHeightPreferenceRef.current))
-    }
-    fitPanel()
-    window.addEventListener('resize', fitPanel)
-    return () => window.removeEventListener('resize', fitPanel)
-  }, [clampTerminalPanelHeight, view])
-  useEffect(() => {
-    const toggleTerminalPanel = (event) => {
-      if (
-        view !== 'files' ||
-        resizingTerminal ||
-        event.repeat ||
-        !event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        event.shiftKey ||
-        event.code !== 'Backquote'
+  // 右侧 Panel 宽度拖拽
+  const startRightPanelResize = useCallback((event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    rightPanelDragStartRef.current = { x: event.clientX, width: rightPanelWidthRef.current }
+    setResizingRightPanel(true)
+    document.body.classList.add('is-resizing-right-panel')
+
+    const onMove = (moveEvent) => {
+      const width = rightPanelDragStartRef.current
+        ? rightPanelDragStartRef.current.width -
+          (moveEvent.clientX - rightPanelDragStartRef.current.x)
+        : rightPanelWidthRef.current
+      setRightPanelWidth(
+        Math.round(Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
       )
-        return
+    }
+    const finish = () => {
+      rightPanelDragStartRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      document.body.classList.remove('is-resizing-right-panel')
+      setResizingRightPanel(false)
+      localStorage.setItem('mica.rightPanelWidth', String(rightPanelWidthRef.current))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }, [])
+  useEffect(() => {
+    rightPanelWidthRef.current = rightPanelWidth
+  }, [rightPanelWidth])
+  // Cmd/Ctrl+` 切换右侧 Panel 的文件/终端 Tab
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.repeat || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+      if (event.code !== 'Backquote') return
       event.preventDefault()
       event.stopPropagation()
-      setTerminalPanelOpen((open) => !open)
+      setRightPanelOpen(true)
+      setRightPanelTab((tab) => (tab === 'terminal' ? 'files' : 'terminal'))
     }
-    window.addEventListener('keydown', toggleTerminalPanel, true)
-    return () => window.removeEventListener('keydown', toggleTerminalPanel, true)
-  }, [resizingTerminal, view])
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   if (!ready)
     return (
@@ -1078,15 +1071,16 @@ export default function App() {
   return (
     <>
       <div
-        className={`grid size-full transition-[grid-template-columns] ${sidebarCollapsed ? 'grid-cols-[0_1fr]' : ''}`}
-        style={
-          sidebarCollapsed
-            ? { transitionDuration: `${SIDEBAR_TRANSITION_MS}ms` }
-            : { gridTemplateColumns: `${sidebarWidth}px 1fr`, transition: 'none' }
-        }
+        className="grid size-full transition-[grid-template-columns]"
+        style={{
+          gridTemplateColumns: rightPanelMaximized
+            ? '0px 0px 1fr'
+            : `${sidebarCollapsed ? 0 : sidebarWidth}px 1fr ${rightPanelOpen ? `${rightPanelWidth}px` : '0px'}`,
+          transition: rightPanelOpen ? 'none' : 'none'
+        }}
       >
         <aside
-          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed ? 'invisible pointer-events-none border-r-0' : ''}`}
+          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`}
           style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
           {!sidebarCollapsed && (
@@ -1099,15 +1093,15 @@ export default function App() {
               onPointerDown={startSidebarResize}
             />
           )}
-          <div className="h-8.5 shrink-0 drag-region" aria-hidden="true" />
+          <div className="h-10 shrink-0 drag-region" aria-hidden="true" />
           <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
             <button
               type="button"
               title="New Session"
-              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/75 transition-colors hover:bg-white/[.06] hover:text-white"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
               onClick={() => createSession()}
             >
-              <Rocket size={14} className="shrink-0 opacity-75" />
+              <IconRocket size={14} className="shrink-0 opacity-60" />
               <span>New Session</span>
             </button>
             <button
@@ -1121,7 +1115,7 @@ export default function App() {
               }`}
               onClick={() => setView('stats')}
             >
-              <BarChart3 size={14} className="shrink-0 opacity-75" />
+              <IconChartBar size={14} className="shrink-0 opacity-75" />
               <span>Stats</span>
             </button>
             <button
@@ -1135,32 +1129,9 @@ export default function App() {
               }`}
               onClick={() => setView('settings')}
             >
-              <Settings size={14} className="shrink-0 opacity-75" />
+              <IconSettings size={14} className="shrink-0 opacity-75" />
               <span>Settings</span>
             </button>
-            <div className="mb-0.5 mt-1.5 px-2.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[.16em] text-white/35">
-              工作区
-            </div>
-            {[
-              ['files', 'Files', Folder],
-              ['terminal', '终端', SquareTerminal]
-            ].map(([id, label, Icon]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={view === id}
-                title={label}
-                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
-                  view === id
-                    ? 'bg-white/[.10] text-white'
-                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
-                }`}
-                onClick={() => setView(id)}
-              >
-                <Icon size={14} className="shrink-0 opacity-75" />
-                <span>{label}</span>
-              </button>
-            ))}
           </nav>
           <SessionTree
             sessions={sessions}
@@ -1193,43 +1164,54 @@ export default function App() {
             onCloseDraft={closeTerminal}
           />
         </aside>
-        <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e]">
-          {view !== 'chat' && PAGE_HEADER[view] && (
-            <header
-              className={`drag-region flex h-8.5 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
+        <main
+          className={`relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e] ${rightPanelMaximized ? 'invisible' : ''}`}
+        >
+          <header
+            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
+          >
+            {view === 'chat' ? (
+              <span className="min-w-0 truncate text-white/75">
+                {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
+              </span>
+            ) : PAGE_HEADER[view] ? (
+              <>
+                {(() => {
+                  const { label, Icon } = PAGE_HEADER[view]
+                  return (
+                    <>
+                      <Icon size={13} className="shrink-0 opacity-80" />
+                      <span>{label}</span>
+                    </>
+                  )
+                })()}
+                <button
+                  type="button"
+                  title="返回对话"
+                  aria-label="返回对话"
+                  className="no-drag ml-auto flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+                  onClick={() => setView('chat')}
+                >
+                  <IconMessage size={13} />
+                  <span>返回对话</span>
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
+              aria-label={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
+              className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+              onClick={() => setRightPanelOpen((open) => !open)}
             >
-              {(() => {
-                const { label, Icon } = PAGE_HEADER[view]
-                return (
-                  <>
-                    <Icon size={13} className="shrink-0 opacity-80" />
-                    <span>{label}</span>
-                    <button
-                      type="button"
-                      title="返回对话"
-                      aria-label="返回对话"
-                      className="ml-auto flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
-                      onClick={() => setView('chat')}
-                    >
-                      <MessageSquare size={13} />
-                      <span>返回对话</span>
-                    </button>
-                  </>
-                )
-              })()}
-            </header>
-          )}
+              {rightPanelOpen ? (
+                <IconLayoutSidebarRightCollapse size={15} />
+              ) : (
+                <IconLayoutSidebarRightExpand size={15} />
+              )}
+            </button>
+          </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <FilesView
-              ref={filesRef}
-              root={gitIsCurrent ? git.cwd : null}
-              visible={view === 'files'}
-              askText={askText}
-              gitCwd={gitIsCurrent ? git.cwd : null}
-              gitRepository={repository}
-              gitLoading={gitIsCurrent ? git.loading : true}
-              onCornerResizeStart={terminalPanelOpen ? startTerminalResize : null}
-            />
             <StatsView visible={view === 'stats'} />
             <SettingsView visible={view === 'settings'} />
             <ChatView
@@ -1243,45 +1225,9 @@ export default function App() {
               onOpenTerminal={openChatTerminal}
               onSessionRenamed={refreshSessions}
             />
-            {view === 'files' && terminalPanelOpen && (
-              <div
-                className="terminal-panel-resizer z-20 h-2.5 shrink-0 no-drag"
-                role="separator"
-                aria-label="调整终端高度"
-                aria-orientation="horizontal"
-                aria-valuemin={MIN_TERMINAL_PANEL_HEIGHT}
-                aria-valuemax={Math.max(
-                  MIN_TERMINAL_PANEL_HEIGHT,
-                  (contentRef.current?.clientHeight || window.innerHeight) - MIN_FILE_PANEL_HEIGHT
-                )}
-                aria-valuenow={terminalPanelHeight}
-                data-resizing={resizingTerminal}
-                tabIndex={0}
-                onPointerDown={startTerminalResize}
-                onKeyDown={(event) => {
-                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-                  event.preventDefault()
-                  resizeTerminalPanel(terminalPanelHeight + (event.key === 'ArrowUp' ? 20 : -20))
-                }}
-              />
-            )}
-            <TerminalHost
-              ref={terminalRef}
-              nodes={terminalNodes}
-              activeId={activeId}
-              visible={view === 'terminal' || (view === 'files' && terminalPanelOpen)}
-              pane="terminal"
-              docked={view === 'files'}
-              height={terminalPanelHeight}
-              sidebarCollapsed={sidebarCollapsed}
-              resolveCwd={terminalCwd}
-              commandFor={commandFor}
-              onRead={(id, reason) => notifications.markRead(id, reason)}
-              onMicaExit={closeTerminal}
-            />
           </div>
           {!activeId && view === 'chat' && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-9 grid place-items-center text-[13px] text-white/25">
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-10 grid place-items-center text-[13px] text-white/25">
               {error || '选择或新建一个会话'}
             </div>
           )}
@@ -1296,7 +1242,7 @@ export default function App() {
                 className="-ml-1.5 flex h-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white"
                 onClick={() => setBranchPickerOpen(true)}
               >
-                <GitBranch size={13} className="shrink-0" />
+                <IconGitBranch size={13} className="shrink-0" />
                 <span className="truncate">{git.status.branch || 'detached'}</span>
               </button>
             ) : null}
@@ -1320,23 +1266,161 @@ export default function App() {
             )}
           </footer>
         </main>
+        <aside
+          className={`relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`}
+          style={{ width: rightPanelMaximized ? undefined : rightPanelOpen ? rightPanelWidth : 0 }}
+          aria-label="右侧面板"
+        >
+          {rightPanelOpen && !rightPanelMaximized && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整右侧面板宽度"
+              title="拖动调整右侧面板宽度"
+              className={`absolute inset-y-0 left-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingRightPanel ? 'bg-white/30' : ''}`}
+              onPointerDown={startRightPanelResize}
+            />
+          )}
+          <div
+            className="flex h-10 shrink-0 items-center gap-1 border-b border-white/10 px-2"
+            style={{ paddingLeft: rightPanelMaximized ? 74 : undefined }}
+          >
+            <button
+              type="button"
+              title={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
+              aria-label={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
+              aria-pressed={rightPanelMaximized}
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+              onClick={() => setRightPanelMaximized((value) => !value)}
+            >
+              {rightPanelMaximized ? (
+                <IconLayoutSidebarRightCollapse size={14} />
+              ) : (
+                <IconLayoutSidebarRightExpand size={14} />
+              )}
+            </button>
+            <button
+              type="button"
+              aria-pressed={rightPanelTab === 'files'}
+              title="文件"
+              className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                rightPanelTab === 'files'
+                  ? 'bg-white/[.10] text-white'
+                  : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+              }`}
+              onClick={() => setRightPanelTab('files')}
+            >
+              <IconFolderOpen size={13} className="shrink-0 opacity-75" />
+              <span>文件</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={rightPanelTab === 'terminal'}
+              title="终端"
+              className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                rightPanelTab === 'terminal'
+                  ? 'bg-white/[.10] text-white'
+                  : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+              }`}
+              onClick={() => setRightPanelTab('terminal')}
+            >
+              <IconTerminal2 size={13} className="shrink-0 opacity-75" />
+              <span>终端</span>
+            </button>
+          </div>
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {rightPanelTab === 'terminal' && (
+              <div className="flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-white/10 px-1 no-drag">
+                {terminalNodes.map((node) => {
+                  const active = node.id === activeId
+                  return (
+                    <div
+                      key={node.id}
+                      className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                        active
+                          ? 'bg-white/[.10] text-white'
+                          : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        title={node.text}
+                        className="flex min-w-0 items-center gap-1.5"
+                        onClick={() => selectNode(node)}
+                      >
+                        <IconTerminal2 size={12} className="shrink-0 opacity-75" />
+                        <span className="max-w-36 truncate">{node.text}</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="关闭终端"
+                        className="grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 opacity-0 transition-opacity hover:bg-white/[.08] hover:text-white group-hover:opacity-100"
+                        onClick={() => closeTerminal(node.id)}
+                      >
+                        <IconX size={11} />
+                      </button>
+                    </div>
+                  )
+                })}
+                <button
+                  type="button"
+                  title="新建终端"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                  onClick={() => {
+                    setRightPanelTab('terminal')
+                    createTerminal()
+                  }}
+                >
+                  <IconPlus size={14} />
+                </button>
+              </div>
+            )}
+            <FilesView
+              ref={filesRef}
+              root={gitIsCurrent ? git.cwd : null}
+              visible={rightPanelTab === 'files'}
+              askText={askText}
+              gitCwd={gitIsCurrent ? git.cwd : null}
+              gitRepository={repository}
+              gitLoading={gitIsCurrent ? git.loading : true}
+              onCornerResizeStart={null}
+            />
+            <TerminalHost
+              ref={terminalRef}
+              nodes={terminalNodes}
+              activeId={activeId}
+              visible={rightPanelTab === 'terminal'}
+              pane="terminal"
+              docked={false}
+              sidebarCollapsed={sidebarCollapsed}
+              resolveCwd={terminalCwd}
+              commandFor={commandFor}
+              onRead={(id, reason) => notifications.markRead(id, reason)}
+              onMicaExit={closeTerminal}
+            />
+          </div>
+        </aside>
       </div>
-      <button
-        type="button"
-        title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-        aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-        aria-expanded={!sidebarCollapsed}
-        className="fixed left-21.5 top-2 z-50 grid h-5.5 w-5 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white no-drag"
-        onClick={setCollapsed}
-      >
-        <PanelLeft size={16} />
-      </button>
-      <QuickSearch
-        getRoot={getSearchRoot}
-        openFile={openSearchFile}
-        closeActiveFile={closeSearchFile}
-        disabled={branchPickerOpen || !!prompt}
-      />
+      {!rightPanelMaximized && (
+        <button
+          type="button"
+          title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+          aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+          aria-expanded={!sidebarCollapsed}
+          className="fixed left-21.5 top-2 z-50 grid h-5.5 w-5 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white no-drag"
+          onClick={setCollapsed}
+        >
+          <IconLayoutSidebarLeftCollapse size={16} />
+        </button>
+      )}
+      {!rightPanelMaximized && (
+        <QuickSearch
+          getRoot={getSearchRoot}
+          openFile={openSearchFile}
+          closeActiveFile={closeSearchFile}
+          disabled={branchPickerOpen || !!prompt}
+        />
+      )}
       {branchPickerOpen && git.cwd && (
         <BranchPicker
           cwd={git.cwd}

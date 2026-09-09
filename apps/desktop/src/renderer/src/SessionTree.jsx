@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bell, ChevronRight, ListTree, MoreHorizontal, Pin, Search, X } from 'lucide-react'
+import {
+  IconBell,
+  IconChevronRight,
+  IconDots,
+  IconListTree,
+  IconPin,
+  IconSearch,
+  IconX
+} from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
 import { buildInboxItems, liveSessionRowState } from './session-state'
 
@@ -54,27 +62,10 @@ function RenameInput({ value, onCommit, onCancel }) {
   )
 }
 
-function RowTail({ relativeTime, editingThis, onMenu }) {
+function RowTail({ relativeTime }) {
   return (
     <span className="relative flex min-w-4 shrink-0 items-center justify-end">
-      <span
-        className={`block shrink-0 text-[11px] tabular-nums text-white/30 transition-opacity ${
-          editingThis ? '' : 'group-hover:opacity-0 group-focus-within:opacity-0'
-        }`}
-      >
-        {relativeTime}
-      </span>
-      {!editingThis && (
-        <button
-          type="button"
-          title="更多操作"
-          aria-label="更多操作"
-          className="absolute right-0 grid size-5 place-items-center rounded text-white/40 opacity-0 transition-opacity hover:bg-white/[.12] hover:text-white group-hover:opacity-100 focus:opacity-100"
-          onClick={onMenu}
-        >
-          <MoreHorizontal size={14} />
-        </button>
-      )}
+      <span className="block shrink-0 text-[11px] tabular-nums text-white/30">{relativeTime}</span>
     </span>
   )
 }
@@ -95,6 +86,8 @@ function RowLeading({ state, unreadKey }) {
 }
 
 function ContextMenu({ menu, onClose, onAction }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
     const close = (event) => {
       if (!event.target.closest?.('[data-session-menu]')) onClose()
@@ -108,37 +101,35 @@ function ContextMenu({ menu, onClose, onAction }) {
     }
   }, [onClose])
 
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const w = ref.current.offsetWidth
+    const h = ref.current.offsetHeight
+    let px = menu.x
+    let py = menu.y
+    if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
+    if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
+    setPos({ x: px, y: py })
+  }, [menu.x, menu.y])
+
   const items = menu.items || []
-  const rect = menu.rect
-  // 打开方向：优先向下，空间不足向上翻转
-  const viewport = typeof window !== 'undefined' ? window.innerHeight : 720
-  const panelMaxH = 260
-  const spaceBelow = rect ? viewport - rect.bottom : 0
-  const openUp = rect ? spaceBelow < panelMaxH && rect.top > spaceBelow : false
-  const top = rect ? (openUp ? undefined : rect.bottom + 4) : menu.y
-  const bottom = rect ? (openUp ? viewport - rect.top + 4 : undefined) : undefined
-  const left = rect
-    ? Math.min(
-        rect.left,
-        Math.max(8, (typeof window !== 'undefined' ? window.innerWidth : 0) - 184)
-      )
-    : menu.x
   return createPortal(
     <div
+      ref={ref}
       data-session-menu
-      className="fixed z-[10000] min-w-[180px] overflow-hidden rounded-lg border border-white/12 bg-[#1c1c1e]/98 py-1 shadow-2xl backdrop-blur"
-      style={{ top, bottom, left }}
+      className="fixed z-[10000] min-w-[200px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
+      style={{ left: pos.x, top: pos.y }}
     >
       {items.map((item, index) => {
         if (item === 'separator')
-          return <div key={`sep-${index}`} className="my-1 h-px bg-white/10" />
+          return <div key={`sep-${index}`} className="mx-1 my-1 h-px bg-white/10" />
         const [action, label, danger] = item
         return (
           <button
             key={action}
             type="button"
             aria-label={label}
-            className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
+            className={`flex h-7 w-full items-center px-2 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
               danger ? 'text-[#e75e78]' : 'text-white/90'
             }`}
             onClick={() => {
@@ -230,12 +221,10 @@ export function SessionTree({
   const openMenu = (event, payload) => {
     event.preventDefault()
     event.stopPropagation()
-    const rect = event.currentTarget.getBoundingClientRect()
     setMenu({
       ...payload,
-      rect,
-      x: Math.max(4, Math.min(event.clientX, window.innerWidth - 160)),
-      y: Math.max(4, Math.min(event.clientY, window.innerHeight - 190))
+      x: event.clientX,
+      y: event.clientY
     })
   }
 
@@ -377,11 +366,7 @@ export function SessionTree({
               {session.title || session.id}
             </span>
           )}
-          <RowTail
-            relativeTime={relativeTime}
-            editingThis={editingThis}
-            onMenu={(event) => openMenu(event, { session, items: sessionMenuItems(session) })}
-          />
+          <RowTail relativeTime={relativeTime} />
         </div>
       </li>
     )
@@ -423,16 +408,7 @@ export function SessionTree({
               {node.text}
             </span>
           )}
-          <RowTail
-            relativeTime=""
-            editingThis={editingThis}
-            onMenu={(event) =>
-              openMenu(event, {
-                draft: node,
-                items: [['rename', '重命名'], 'separator', ['close', '关闭对话', true]]
-              })
-            }
-          />
+          <RowTail relativeTime="" />
         </div>
       </li>
     )
@@ -447,7 +423,7 @@ export function SessionTree({
         aria-expanded={sectionOpen(name)}
         onClick={() => toggleSection(name)}
       >
-        <ChevronRight
+        <IconChevronRight
           size={14}
           className={`shrink-0 text-white/30 transition-transform ${sectionOpen(name) ? 'rotate-90' : ''}`}
         />
@@ -461,7 +437,7 @@ export function SessionTree({
     <>
       <div className="hidden-scrollbar min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
         <div className="mb-1.5 flex h-7 items-center gap-1.5 rounded-md bg-white/[.05] px-2 transition-colors focus-within:bg-white/[.08]">
-          <Search size={13} className="shrink-0 text-white/35" />
+          <IconSearch size={13} className="shrink-0 text-white/35" />
           <input
             type="search"
             value={query}
@@ -478,7 +454,7 @@ export function SessionTree({
               className="grid size-5 shrink-0 place-items-center rounded text-white/40 hover:bg-white/[.1] hover:text-white"
               onClick={() => setQuery('')}
             >
-              <X size={14} />
+              <IconX size={14} />
             </button>
           )}
         </div>
@@ -490,11 +466,11 @@ export function SessionTree({
             aria-expanded={inboxOpen}
             onClick={() => setInboxOpen((value) => !value)}
           >
-            <ChevronRight
+            <IconChevronRight
               size={14}
               className={`shrink-0 text-white/30 transition-transform ${inboxOpen ? 'rotate-90' : ''}`}
             />
-            <Bell size={14} className="shrink-0 text-white/30" />
+            <IconBell size={14} className="shrink-0 text-white/30" />
             <span className="min-w-0 flex-1">Inbox</span>
             {inboxItems.length > 0 && (
               <span className="rounded-full bg-white/[.08] px-1.5 text-[10px] tabular-nums text-white/55">
@@ -521,7 +497,7 @@ export function SessionTree({
                       }
                     >
                       <span className="grid w-4 shrink-0 place-items-center text-white/45">
-                        <Bell size={13} />
+                        <IconBell size={13} />
                       </span>
                       <span
                         className={`min-w-0 flex-1 truncate text-left ${item.state.running ? 'chat-running-text' : ''}`}
@@ -544,7 +520,7 @@ export function SessionTree({
 
         <div className="flex flex-col gap-px">
           <section>
-            {renderSectionHeader('pinned', 'Pinned', Pin)}
+            {renderSectionHeader('pinned', 'Pinned', IconPin)}
             {sectionOpen('pinned') &&
               (pinned.length ? (
                 <ul className="flex flex-col gap-px">
@@ -556,7 +532,7 @@ export function SessionTree({
           </section>
 
           <section>
-            {renderSectionHeader('recent', 'Recent', ListTree)}
+            {renderSectionHeader('recent', 'Recent', IconListTree)}
             {sectionOpen('recent') &&
               (recentList.length || draftTabs.length ? (
                 <>
@@ -572,7 +548,7 @@ export function SessionTree({
                       onClick={() => setExpandedRecent(true)}
                     >
                       <span className="grid w-4 shrink-0 place-items-center text-white/35">
-                        <MoreHorizontal size={14} />
+                        <IconDots size={14} />
                       </span>
                       <span className="min-w-0 flex-1 truncate text-left text-[13px]">
                         Show {recentOverflow} more

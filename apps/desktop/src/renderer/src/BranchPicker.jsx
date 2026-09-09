@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, GitBranch, GitBranchPlus, Plus, Tag } from 'lucide-react'
+import { IconCheck, IconGitBranch, IconGitFork, IconPlus, IconTag } from '@tabler/icons-react'
 
 const actions = [
-  { id: 'create', label: '创建新分支…', icon: Plus },
-  { id: 'createFrom', label: '从…创建新分支…', icon: GitBranchPlus }
+  { id: 'create', label: '创建新分支…', icon: IconPlus },
+  { id: 'createFrom', label: '从…创建新分支…', icon: IconGitFork }
 ]
 
 const searchable = (item) =>
   [item.name, item.subject, item.author, item.hash, item.upstream].filter(Boolean).join(' ')
 
 function RefRow({ item }) {
-  const Icon = item.kind === 'tag' ? Tag : GitBranch
+  const Icon = item.kind === 'tag' ? IconTag : IconGitBranch
   return (
     <>
       <Icon size={15} className="mt-0.5 shrink-0 text-white/55" />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
           <strong className="truncate text-[13px] font-medium text-white/90">{item.name}</strong>
-          {item.current && <Check size={13} className="shrink-0 text-[#4fa7ff]" />}
+          {item.current && <IconCheck size={13} className="shrink-0 text-[#4fa7ff]" />}
           {item.tracking && (
             <span className="shrink-0 text-[11px] text-white/40">{item.tracking}</span>
           )}

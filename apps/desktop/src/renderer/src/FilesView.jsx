@@ -1,20 +1,28 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import {
-  ArrowUp,
-  ChevronRight,
-  Clipboard,
-  Copy,
-  Files,
-  FilePlus,
-  FolderOpen,
-  FolderPlus,
-  GitBranch,
-  Pencil,
-  RefreshCw,
-  Search,
-  Trash2,
-  X
-} from 'lucide-react'
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
+import {
+  IconArrowUp,
+  IconChevronRight,
+  IconClipboard,
+  IconCopy,
+  IconFilePlus,
+  IconFiles,
+  IconFolderOpen,
+  IconFolderPlus,
+  IconGitBranch,
+  IconPencil,
+  IconRefresh,
+  IconSearch,
+  IconTrash,
+  IconX
+} from '@tabler/icons-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
 import { GitDiffEditor, GitPanel, SearchPanel } from './FileSidePanels'
 import { useLatest, usePaneWidth } from './hooks'
@@ -123,6 +131,8 @@ function applyOrder(children, directory, orderMap) {
 }
 
 function FileContextMenu({ menu, onAction, onClose }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
     const close = () => onClose()
     const keydown = (event) => event.key === 'Escape' && onClose()
@@ -135,44 +145,57 @@ function FileContextMenu({ menu, onAction, onClose }) {
       window.removeEventListener('keydown', keydown)
     }
   }, [onClose])
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const w = ref.current.offsetWidth
+    const h = ref.current.offsetHeight
+    let px = menu.x
+    let py = menu.y
+    if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
+    if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
+    setPos({ x: px, y: py })
+  }, [menu.x, menu.y])
   const directory = menu.node.type === 'directory'
   const items = [
     ...(directory
       ? [
-          { id: 'new-file', label: '新建文件', icon: FilePlus },
-          { id: 'new-directory', label: '新建文件夹', icon: FolderPlus },
+          { id: 'new-file', label: '新建文件', icon: IconFilePlus },
+          { id: 'new-directory', label: '新建文件夹', icon: IconFolderPlus },
           { separator: true }
         ]
       : []),
-    { id: 'rename', label: '重命名', icon: Pencil },
-    { id: 'duplicate', label: '创建副本', icon: Copy },
+    { id: 'rename', label: '重命名', icon: IconPencil },
+    { id: 'duplicate', label: '创建副本', icon: IconCopy },
     { separator: true },
-    { id: 'copy-path', label: '复制路径', icon: Clipboard },
-    { id: 'copy-relative-path', label: '复制相对路径', icon: Clipboard },
-    { id: 'reveal', label: '在文件管理器中显示', icon: FolderOpen },
+    { id: 'copy-path', label: '复制路径', icon: IconClipboard },
+    { id: 'copy-relative-path', label: '复制相对路径', icon: IconClipboard },
+    { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen },
     { separator: true },
-    { id: 'delete', label: '删除', icon: Trash2, danger: true }
+    { id: 'delete', label: '删除', icon: IconTrash, danger: true }
   ]
   return (
     <div
-      className="fixed z-[10000] min-w-48 rounded-md border border-white/15 bg-[#181818]/98 p-1.5 text-xs shadow-2xl backdrop-blur"
-      style={{ left: menu.x, top: menu.y }}
+      ref={ref}
+      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
+      style={{ left: pos.x, top: pos.y }}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
       {items.map((item, index) =>
         item.separator ? (
-          <div key={`separator-${index}`} className="my-1 border-t border-white/10" />
+          <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-white/10" />
         ) : (
           <button
             key={item.id}
             type="button"
             role="menuitem"
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left hover:bg-white/[.08] ${item.danger ? 'text-[#ef7288]' : 'text-white/75 hover:text-white'}`}
+            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] ${item.danger ? 'text-[#ef7288]' : 'text-white/90 hover:text-white'}`}
             onClick={() => onAction(item.id, menu.node)}
           >
-            <item.icon size={14} className="shrink-0 opacity-75" />
-            {item.label}
+            <span className="grid w-4 shrink-0 place-items-center">
+              <item.icon size={14} className="shrink-0 opacity-75" />
+            </span>
+            <span className="flex-1">{item.label}</span>
           </button>
         )
       )}
@@ -258,7 +281,7 @@ function FileTreeRows({
           <span
             className={`grid size-3.5 shrink-0 place-items-center text-white/35 ${node.expanded ? 'rotate-90' : ''}`}
           >
-            {directory && <ChevronRight size={13} />}
+            {directory && <IconChevronRight size={13} />}
           </span>
           <span className="grid size-4 shrink-0 place-items-center text-white/50">
             <FileSystemIcon
@@ -777,8 +800,8 @@ export const FilesView = forwardRef(function FilesView(
     event.stopPropagation()
     setContextMenu({
       node,
-      x: Math.min(event.clientX, window.innerWidth - 210),
-      y: Math.min(event.clientY, window.innerHeight - (node.type === 'directory' ? 305 : 240))
+      x: event.clientX,
+      y: event.clientY
     })
   }, [])
 
@@ -1078,9 +1101,9 @@ export const FilesView = forwardRef(function FilesView(
         aria-label="活动栏"
       >
         {[
-          ['explorer', Files, '资源管理器'],
-          ['search', Search, '搜索'],
-          ['git', GitBranch, '源代码管理']
+          ['explorer', IconFiles, '资源管理器'],
+          ['search', IconSearch, '搜索'],
+          ['git', IconGitBranch, '源代码管理']
         ].map(([id, Icon, label]) => {
           const active = activePanel === id
           return (
@@ -1124,7 +1147,7 @@ export const FilesView = forwardRef(function FilesView(
                 className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
                 onClick={() => loadRoot(tree.parent)}
               >
-                <ArrowUp size={15} />
+                <IconArrowUp size={15} />
               </button>
               <div
                 className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/65"
@@ -1146,7 +1169,7 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <FilePlus size={14} />
+                <IconFilePlus size={14} />
               </button>
               <button
                 type="button"
@@ -1162,7 +1185,7 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <FolderPlus size={14} />
+                <IconFolderPlus size={14} />
               </button>
               <button
                 type="button"
@@ -1171,7 +1194,7 @@ export const FilesView = forwardRef(function FilesView(
                 className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
                 onClick={refresh}
               >
-                <RefreshCw size={14} />
+                <IconRefresh size={14} />
               </button>
             </header>
             <div className="relative min-h-0 flex-1">
@@ -1318,7 +1341,7 @@ export const FilesView = forwardRef(function FilesView(
                           closeFile(tab.path)
                         }}
                       >
-                        <X size={12} />
+                        <IconX size={12} />
                       </button>
                     )}
                   </span>

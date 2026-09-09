@@ -8,22 +8,23 @@ import {
   useState
 } from 'react'
 import {
-  ArrowDown,
-  Check,
-  Command,
-  Copy,
-  ExternalLink,
-  GitCommitHorizontal,
-  GitFork,
-  LoaderCircle,
-  Minimize2,
-  Send,
-  Square,
-  Terminal,
-  Trash2,
-  Undo2,
-  Zap
-} from 'lucide-react'
+  IconArrowDown,
+  IconBolt,
+  IconCheck,
+  IconCommand,
+  IconCopy,
+  IconCornerUpLeft,
+  IconExternalLink,
+  IconGitCommit,
+  IconGitFork,
+  IconGripHorizontal,
+  IconLoader2,
+  IconMinimize,
+  IconSend,
+  IconSquare,
+  IconTerminal,
+  IconTrash
+} from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
@@ -130,7 +131,7 @@ function CodeBlock({ children }) {
       <div className="chat-code-header">
         <span>{language}</span>
         <button type="button" onClick={() => copy(code)} aria-label="复制代码">
-          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
           <span>{copied ? '已复制' : '复制'}</span>
         </button>
       </div>
@@ -217,9 +218,9 @@ function QueueDock({ items, onRecall, recallingId }) {
               onClick={() => onRecall(item.id)}
             >
               {recallingId === item.id ? (
-                <LoaderCircle size={11} className="animate-spin" />
+                <IconLoader2 size={11} className="animate-spin" />
               ) : (
-                <Undo2 size={11} />
+                <IconCornerUpLeft size={11} />
               )}
             </button>
           </div>
@@ -893,7 +894,7 @@ function MessageActions({ text }) {
       title={copied ? '已复制' : '复制'}
       onClick={() => copy(text)}
     >
-      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
     </button>
   )
 }
@@ -976,7 +977,7 @@ function TodoDock({ items, hidden }) {
               {item.status === 'completed' ? (
                 '✓'
               ) : item.status === 'in_progress' ? (
-                <LoaderCircle size={10} className="animate-spin" />
+                <IconLoader2 size={10} className="animate-spin" />
               ) : (
                 '○'
               )}
@@ -1003,9 +1004,9 @@ function CommandRow({ message, onCommandAction }) {
       </div>
       {message.action && (
         <button type="button" onClick={() => onCommandAction?.(message)}>
-          {message.action === 'terminal' && <Terminal size={12} />}
+          {message.action === 'terminal' && <IconTerminal size={12} />}
           {message.actionLabel || '打开'}
-          <ExternalLink size={10} />
+          <IconExternalLink size={10} />
         </button>
       )}
     </div>
@@ -1057,7 +1058,7 @@ function TurnLogItem({ message, now }) {
       <div className="chat-turn-log-tool-row">
         {running && (
           <span className="chat-turn-log-spinner" aria-hidden="true">
-            <LoaderCircle size={10} className="animate-spin" />
+            <IconLoader2 size={10} className="animate-spin" />
           </span>
         )}
         <span className="chat-turn-log-icon">{getToolIcon(tool.tool)}</span>
@@ -1159,6 +1160,8 @@ function TurnLogDock({ messages, now = Date.now() }) {
 }
 
 function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
     const close = () => onClose()
     const keydown = (event) => event.key === 'Escape' && onClose()
@@ -1171,43 +1174,54 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
       window.removeEventListener('keydown', keydown)
     }
   }, [onClose])
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const w = ref.current.offsetWidth
+    const h = ref.current.offsetHeight
+    let px = menu.x
+    let py = menu.y
+    if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
+    if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
+    setPos({ x: px, y: py })
+  }, [menu.x, menu.y])
   const items = [
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
       title: '本地压缩：工具调用参数与结果全部占位，清理图片/文档，必要时丢弃最早轮次；不调用模型',
-      icon: Zap,
+      icon: IconBolt,
       disabled: !menu.hasSession || menu.running
     },
     {
       id: 'compact-model',
       label: '模型压缩',
       title: '调用模型生成会话摘要',
-      icon: Minimize2,
+      icon: IconMinimize,
       disabled: !menu.hasSession || menu.running
     },
     {
       id: 'commit',
       label: 'Commit',
-      icon: GitCommitHorizontal,
+      icon: IconGitCommit,
       disabled: menu.running || commitRunning,
       title: commitRunning ? 'commit 任务正在执行' : undefined
     },
-    { id: 'fork', label: 'Fork', icon: GitFork, disabled: !menu.hasSession || menu.running },
+    { id: 'fork', label: 'Fork', icon: IconGitFork, disabled: !menu.hasSession || menu.running },
     { separator: true },
-    { id: 'clear', label: 'Clear', icon: Trash2, disabled: menu.running, danger: true }
+    { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
   ]
   return (
     <div
-      className="fixed z-[10000] min-w-40 rounded-md border border-white/15 bg-[#181818]/98 p-1.5 text-xs shadow-2xl backdrop-blur"
-      style={{ left: menu.x, top: menu.y }}
+      ref={ref}
+      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
+      style={{ left: pos.x, top: pos.y }}
       role="menu"
       data-no-chat-focus
       onPointerDown={(event) => event.stopPropagation()}
     >
       {items.map((item, index) =>
         item.separator ? (
-          <div key={`separator-${index}`} className="my-1 border-t border-white/10" />
+          <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-white/10" />
         ) : (
           <button
             key={item.id}
@@ -1215,11 +1229,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
             role="menuitem"
             disabled={item.disabled}
             title={item.title}
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-[#ef7288]' : 'text-white/75 enabled:hover:text-white'}`}
+            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-[#ef7288]' : 'text-white/90 enabled:hover:text-white'}`}
             onClick={() => onAction(item.id)}
           >
-            <item.icon size={14} className="shrink-0 opacity-75" />
-            {item.label}
+            <span className="grid w-4 shrink-0 place-items-center">
+              <item.icon size={14} className="shrink-0 opacity-75" />
+            </span>
+            <span className="flex-1">{item.label}</span>
           </button>
         )
       )}
@@ -1246,7 +1262,7 @@ function SelectPalette({
       aria-label={title}
     >
       <div className="chat-command-palette-title">
-        <Command size={12} /> {title}
+        <IconCommand size={12} /> {title}
         <span>↑↓ 选择 · Enter 确认 · Esc 关闭</span>
       </div>
       {loading && <div className="chat-select-empty">正在加载…</div>}
@@ -1704,6 +1720,8 @@ export function ChatView({
   const [contextDetail, setContextDetail] = useState(false)
   const [commitRunning, setCommitRunning] = useState(false)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
+  // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
+  const [composerMinHeight, setComposerMinHeight] = useState(null)
   const pickerRef = useRef(null)
   const messagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
@@ -2436,6 +2454,36 @@ export function ChatView({
     element.style.height = `${Math.max(30, Math.min(element.scrollHeight, MAX_INPUT_ROWS * 22))}px`
   }, [])
 
+  const startComposerResize = useCallback((event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startY = event.clientY
+    const startH = textareaRef.current?.parentElement?.offsetHeight ?? 30
+    const resizer = event.currentTarget
+    const onMove = (moveEvent) => {
+      const delta = startY - moveEvent.clientY
+      const next = Math.max(30, Math.min(400, startH + delta))
+      setComposerMinHeight(next)
+      composerDockRef.current?.style.setProperty('--chat-composer-min-h', `${next}px`)
+      composerDockRef.current?.style.setProperty(
+        '--chat-composer-max-h',
+        `${Math.max(next, 180)}px`
+      )
+      resizer.classList.add('is-dragging')
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      resizer.classList.remove('is-dragging')
+      document.body.classList.remove('is-resizing-composer')
+    }
+    document.body.classList.add('is-resizing-composer')
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }, [])
+
   useEffect(() => resizeTextarea(), [input, resizeTextarea])
 
   const rememberInput = useCallback(
@@ -3084,7 +3132,6 @@ export function ChatView({
     () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
     [messages]
   )
-  const lastPromptText = useMemo(() => lastUserPromptText(transcriptMessages), [transcriptMessages])
   const queuedDisplayItems = useMemo(() => {
     const items = [...queuedItems]
     for (const message of messages) {
@@ -3237,8 +3284,8 @@ export function ChatView({
       event.preventDefault()
       setPicker(null)
       setContextMenu({
-        x: Math.max(4, Math.min(event.clientX, window.innerWidth - 172)),
-        y: Math.max(4, Math.min(event.clientY, window.innerHeight - 196)),
+        x: event.clientX,
+        y: event.clientY,
         hasSession: Boolean(sessionIdRef.current),
         running
       })
@@ -3389,7 +3436,7 @@ export function ChatView({
       <div className="chat-status-primary">
         {running ? (
           <>
-            <LoaderCircle size={11} className="animate-spin" />
+            <IconLoader2 size={11} className="animate-spin" />
             <span>{statusLabel(phase, runningToolNames)}</span>
             {phaseElapsed > 0 && (
               <span className="chat-status-phase-elapsed">{formatLogElapsed(phaseElapsed)}</span>
@@ -3470,14 +3517,6 @@ export function ChatView({
       onMouseUp={focusComposerFromShell}
       onContextMenu={openChatContextMenu}
     >
-      {lastPromptText && (
-        <div className="chat-last-prompt" title={compactLine(lastPromptText, 400)}>
-          <span className="chat-last-prompt-marker" aria-hidden="true">
-            ▌
-          </span>
-          <span className="chat-last-prompt-text">{lastPromptText}</span>
-        </div>
-      )}
       <div
         ref={listRef}
         className="chat-scroll thin-scrollbar"
@@ -3528,7 +3567,7 @@ export function ChatView({
               if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
             }}
           >
-            <ArrowDown size={13} /> 最新消息
+            <IconArrowDown size={13} /> 最新消息
           </button>
         )}
         {picker && (
@@ -3566,7 +3605,24 @@ export function ChatView({
         />
         <div
           className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
+          style={
+            composerMinHeight != null
+              ? {
+                  '--chat-composer-min-h': `${composerMinHeight}px`,
+                  '--chat-composer-max-h': `${Math.max(composerMinHeight, 180)}px`
+                }
+              : undefined
+          }
         >
+          <button
+            type="button"
+            className="chat-composer-resizer"
+            aria-label="拖动调整输入框高度"
+            title="拖动调整输入框高度"
+            onPointerDown={startComposerResize}
+          >
+            <IconGripHorizontal size={15} stroke={1.6} />
+          </button>
           {queueReady && (
             <span className="chat-composer-frame-label">
               Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送
@@ -3720,14 +3776,14 @@ export function ChatView({
                     aria-label="加入发送队列"
                     onClick={send}
                   >
-                    <Send size={13} />
+                    <IconSend size={13} />
                   </button>
                 )}
                 <button type="button" title="停止生成" aria-label="停止生成" onClick={stop}>
                   {stopping ? (
-                    <LoaderCircle size={13} className="animate-spin" />
+                    <IconLoader2 size={13} className="animate-spin" />
                   ) : (
-                    <Square size={12} />
+                    <IconSquare size={12} />
                   )}
                 </button>
               </>
@@ -3739,7 +3795,7 @@ export function ChatView({
                 disabled={!input.trim()}
                 onClick={send}
               >
-                <Send size={13} />
+                <IconSend size={13} />
               </button>
             ) : null}
           </div>
