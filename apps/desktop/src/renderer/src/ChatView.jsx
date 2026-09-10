@@ -14,10 +14,10 @@ import {
   IconCommand,
   IconCopy,
   IconCornerUpLeft,
+  IconDots,
   IconExternalLink,
   IconGitCommit,
   IconGitFork,
-  IconGripHorizontal,
   IconLoader2,
   IconMinimize,
   IconPhoto,
@@ -3692,7 +3692,7 @@ export function ChatView({
             title="拖动调整输入框高度"
             onPointerDown={startComposerResize}
           >
-            <IconGripHorizontal size={15} stroke={1.6} />
+            <IconDots size={14} stroke={1.6} />
           </button>
           {queueReady && (
             <span className="chat-composer-frame-label">

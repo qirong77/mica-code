@@ -38,14 +38,14 @@ const MONTH_SHORT = [
   'Dec'
 ]
 const CALENDAR_RAMP = [
-  'var(--color-raised)',
+  'var(--color-canvas)',
   'var(--color-fg-ghost)',
   'var(--color-fg-faint)',
   'var(--color-fg-muted)',
   'var(--color-fg-strong)'
 ]
 
-const CARD_CLASS = 'rounded-[5px] border border-line bg-raised'
+const CARD_CLASS = 'rounded-[5px] border border-line bg-panel'
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
 function isDayRange(range) {
@@ -263,7 +263,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   }, [allDays])
 
   const cellBorder = (i) =>
-    `border-line-soft ${(i + 1) % 4 === 0 ? '' : 'border-r'} ${i < 4 ? 'border-b' : ''}`
+    `border-line ${(i + 1) % 4 === 0 ? '' : 'border-r'} ${i < 4 ? 'border-b' : ''}`
 
   const byDayMap = useMemo(() => bucketByDay(sessions), [sessions])
   const calendarWeeks = calendar.calendarWeeks
@@ -345,7 +345,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           value={topModel?.model || '—'}
         />
       </div>
-      <div aria-hidden className="h-px bg-panel" />
+      <div aria-hidden className="h-px bg-panel-hi" />
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
           <h2 className={OVERLINE_CLASS}>Contributions</h2>
@@ -354,7 +354,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
             onChange={(e) =>
               calendar.onYear(e.target.value === 'trailing' ? null : Number(e.target.value))
             }
-            className="rounded-[4px] border border-line bg-raised px-3 py-1.5 text-xs text-fg-muted"
+            className="rounded-[4px] border border-line bg-panel-hi px-3 py-1.5 text-xs text-fg-muted"
             aria-label="Contributions year"
           >
             <option value="trailing">Last 12 months</option>
@@ -387,7 +387,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           ariaLabelOf={describeDay}
           monthLabels={monthLabels}
         />
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft pt-3 text-[11px] text-fg-faint">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] text-fg-faint">
           <span>
             Busiest day{' '}
             <strong className="font-medium text-fg-muted">
@@ -609,7 +609,7 @@ function BySubagentCard({ scoped }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.type} className="border-t border-line-soft">
+              <tr key={row.type} className="border-t border-line">
                 <td className="py-1 pr-3 text-xs text-fg-strong">{row.type}</td>
                 <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {row.tasks}
@@ -661,7 +661,7 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
       <div>
         {shown.map((row, index) => (
           <Fragment key={row.cwd}>
-            <div className={`pt-1.5 ${index === 0 ? '' : 'mt-1 border-t border-line-soft pt-2'}`}>
+            <div className={`pt-1.5 ${index === 0 ? '' : 'mt-1 border-t border-line pt-2'}`}>
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-xs text-fg-strong" title={row.cwd}>
                   {row.project}
@@ -670,7 +670,7 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
                   {row.sessions} sessions · {tokensShort(row.tokens)}
                 </span>
               </div>
-              <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-panel">
+              <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-panel-hi">
                 <div
                   className="h-full rounded-full bg-fg"
                   style={{ width: `${max > 0 ? (row.tokens / max) * 100 : 0}%` }}
@@ -798,7 +798,7 @@ function BySessionCard({ scoped, onDetail }) {
           </thead>
           <tbody>
             {top.map((s) => (
-              <tr key={s.id} className="border-t border-line-soft">
+              <tr key={s.id} className="border-t border-line">
                 <td className="py-1 pr-3">
                   <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
                     {s.title || basename(s.cwd)}
@@ -836,7 +836,7 @@ function BySessionCard({ scoped, onDetail }) {
                   <button
                     type="button"
                     onClick={() => onDetail(s.id)}
-                    className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
+                    className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
                   >
                     查看详情
                   </button>
@@ -943,7 +943,7 @@ export function StatsView({ visible }) {
                   type="button"
                   onClick={() => setRangePreset('30d')}
                   title="清除单日筛选"
-                  className="flex items-center gap-1 rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
+                  className="flex items-center gap-1 rounded-[4px] border border-line bg-panel px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                 >
                   {dayShort(range.day)}
                   <span aria-hidden className="text-fg-faint">
@@ -951,7 +951,7 @@ export function StatsView({ visible }) {
                   </span>
                 </button>
               )}
-              <div className="flex items-center gap-0.5 rounded-[4px] border border-line bg-raised p-0.5 text-[11px]">
+              <div className="flex items-center gap-0.5 rounded-[4px] border border-line bg-panel p-0.5 text-[11px]">
                 {RANGE_OPTIONS.map(([value, label]) => (
                   <button
                     key={value}

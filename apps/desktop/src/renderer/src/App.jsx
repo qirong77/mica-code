@@ -76,7 +76,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-white/15 bg-raised/98 p-3.5 shadow-2xl"
+        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
       >
         <h2 className="mb-2.5 text-sm font-semibold text-white/95">工作目录</h2>
         {invalid && (
@@ -211,12 +211,12 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-white/15 bg-raised/98 shadow-2xl"
+        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-line bg-panel/98 shadow-2xl"
       >
-        <h2 className="shrink-0 border-b border-white/10 px-3.5 py-2.5 text-sm font-semibold text-white/95">
+        <h2 className="shrink-0 border-b border-line px-3.5 py-2.5 text-sm font-semibold text-white/95">
           选择文件夹
         </h2>
-        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-white/10 px-3.5 py-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-line px-3.5 py-2">
           <button
             type="button"
             title="上级目录"
@@ -253,7 +253,7 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
             ))
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2 border-t border-white/10 px-3.5 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-line px-3.5 py-2.5">
           <button
             type="button"
             disabled={!current}
@@ -291,7 +291,7 @@ function TextPrompt({ prompt, onClose }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="w-[min(420px,calc(100vw-32px))] rounded-md border border-white/15 bg-raised/98 p-3.5 shadow-2xl"
+        className="w-[min(420px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
       >
         <h2 className="mb-1.5 text-sm font-semibold text-white/95">{prompt.title}</h2>
         {prompt.hint && <p className="mb-3 text-xs leading-5 text-white/45">{prompt.hint}</p>}
@@ -327,7 +327,7 @@ function TextPrompt({ prompt, onClose }) {
           </button>
           <button
             type="button"
-            className="h-7 min-w-16 rounded-sm border border-white/10 bg-white/[.06] px-3 text-xs text-white hover:bg-white/10"
+            className="h-7 min-w-16 rounded-sm border border-line bg-white/[.06] px-3 text-xs text-white hover:bg-white/10"
             onClick={submit}
           >
             确定
@@ -1317,10 +1317,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-white/10 bg-raised shadow-2xl transition-transform duration-200 ${
+              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-raised ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={isMobile ? undefined : { width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
@@ -1335,7 +1335,7 @@ export default function App() {
             />
           )}
           {isMobile ? (
-            <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 pl-3.5 pr-2">
+            <div className="flex h-10 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
               <span className="text-xs font-semibold text-white/70">会话</span>
               <button
                 type="button"
@@ -1440,7 +1440,7 @@ export default function App() {
           className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
         >
           <header
-            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
           >
             {isMobile && (
               <button
@@ -1562,10 +1562,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-white/10 bg-raised shadow-2xl transition-transform duration-200 ${
+              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'right' ? 'translate-x-0' : 'translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-raised ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
+              : `relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
           }
           style={
             isMobile
@@ -1585,7 +1585,7 @@ export default function App() {
             />
           )}
           <div
-            className="flex h-10 shrink-0 items-center gap-1 border-b border-white/10 px-2"
+            className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2"
             style={{ paddingLeft: !isMobile && rightPanelMaximized ? 74 : undefined }}
           >
             <button
@@ -1644,7 +1644,7 @@ export default function App() {
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {rightPanelTab === 'terminal' && (
-              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-white/10 px-1 no-drag">
+              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
                 <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
                   {rightTerms.map((node) => {
                     const active = node.id === rightActiveTerm

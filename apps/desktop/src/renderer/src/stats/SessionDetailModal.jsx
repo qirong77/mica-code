@@ -33,7 +33,7 @@ const ROLE_LABEL = { user: 'You', assistant: 'Assistant', tool: 'Tool' }
 function MessageRow({ message, index }) {
   const role = message.role || 'assistant'
   return (
-    <div className="flex flex-col gap-1.5 border-b border-line-soft py-3 last:border-b-0">
+    <div className="flex flex-col gap-1.5 border-b border-line py-3 last:border-b-0">
       <div className="flex items-center gap-2">
         <span
           className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROLE_STYLE[role] || ROLE_STYLE.assistant}`}
@@ -61,7 +61,7 @@ function MessageRow({ message, index }) {
           {message.toolCalls.map((tc, i) => (
             <details
               key={`${tc.id || i}`}
-              className="group rounded-[4px] border border-line bg-raised px-2 py-1"
+              className="group rounded-[4px] border border-line bg-panel-hi px-2 py-1"
             >
               <summary className="cursor-pointer select-none font-mono text-[11px] text-warn">
                 {tc.name || 'tool_call'}
@@ -151,7 +151,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
           </thead>
           <tbody>
             {shown.map((u, i) => (
-              <tr key={u.usageId || `${title}-${i}`} className="border-t border-line-soft">
+              <tr key={u.usageId || `${title}-${i}`} className="border-t border-line">
                 <td className="py-1 pr-2 whitespace-nowrap font-mono text-[10px] text-fg-dim tabular-nums">
                   {fmtTime(u.occurredAt)}
                 </td>
@@ -190,7 +190,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               setPageSize(Number(e.target.value))
               setPage(0)
             }}
-            className="rounded-[4px] border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
+            className="rounded-[4px] border border-line bg-panel-hi px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
             aria-label="每页条数"
           >
             {pageSizeOptions.map((size) => (
@@ -207,7 +207,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               type="button"
               disabled={current === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
+              className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               上一页
             </button>
@@ -218,7 +218,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               type="button"
               disabled={current >= totalPages - 1}
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
+              className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               下一页
             </button>
@@ -233,7 +233,7 @@ function SubagentCard({ record }) {
   const requests = record.requests || []
   const summary = record.summary || {}
   return (
-    <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+    <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="rounded-[3px] bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
           {record.subagentType || 'subagent'}
@@ -365,7 +365,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] border border-line bg-raised shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] border border-line bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
@@ -399,7 +399,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="shrink-0 rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
+            className="shrink-0 rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
           >
             Esc ✕
           </button>
@@ -417,7 +417,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
               <section>
                 <h3 className={OVERLINE_CLASS}>Token 情况</h3>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
                     <div className="text-[10px] uppercase tracking-wide text-fg-faint">
                       主 agent
                     </div>
@@ -428,7 +428,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                       {tokensShort(totals.main.input)} in · {tokensShort(totals.main.output)} out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
                     <div className="text-[10px] uppercase tracking-wide text-fg-faint">
                       sub-agents
                     </div>
@@ -439,7 +439,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                       {tokensShort(totals.sub.input)} in · {tokensShort(totals.sub.output)} out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
                     <div className="text-[10px] uppercase tracking-wide text-fg-faint">合计</div>
                     <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {tokensShort(totals.all.total)}
@@ -449,7 +449,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                       out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
                     <div className="text-[10px] uppercase tracking-wide text-fg-faint">缓存率</div>
                     <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {totals.all.input > 0
@@ -481,7 +481,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                     <button
                       type="button"
                       onClick={() => setVisible((v) => v + BATCH)}
-                      className="mt-2 w-full rounded-[4px] border border-line bg-raised py-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
+                      className="mt-2 w-full rounded-[4px] border border-line bg-panel-hi py-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                     >
                       显示更多（{messages.length - visible} 条）
                     </button>

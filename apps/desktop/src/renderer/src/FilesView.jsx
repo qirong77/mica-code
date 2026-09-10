@@ -1257,7 +1257,7 @@ export const FilesView = forwardRef(function FilesView(
       className={`relative min-h-0 flex-1 bg-canvas no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <nav
-        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-raised py-1.5 ${
+        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-1.5 ${
           isMobile && editorOpen ? 'hidden' : 'flex'
         }`}
         aria-label="活动栏"
@@ -1293,7 +1293,7 @@ export const FilesView = forwardRef(function FilesView(
         })}
       </nav>
       <aside
-        className={`min-h-0 flex-col bg-raised ${
+        className={`min-h-0 flex-col bg-panel ${
           isMobile && editorOpen ? 'hidden' : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
         }`}
         style={editorOpen && !isMobile ? { width } : undefined}
@@ -1408,7 +1408,7 @@ export const FilesView = forwardRef(function FilesView(
               {tree.status && (
                 <div
                   role="status"
-                  className="absolute inset-0 grid place-items-center bg-raised px-4 text-center text-[11px] text-white/35"
+                  className="absolute inset-0 grid place-items-center bg-panel px-4 text-center text-[11px] text-white/35"
                 >
                   {tree.status}
                 </div>
@@ -1469,7 +1469,7 @@ export const FilesView = forwardRef(function FilesView(
           <>
             <div
               ref={tabListRef}
-              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-raised ${tabs.length ? 'flex' : 'hidden'}`}
+              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-line bg-panel ${tabs.length ? 'flex' : 'hidden'}`}
               role="tablist"
               aria-label="打开的文件"
             >
@@ -1478,7 +1478,7 @@ export const FilesView = forwardRef(function FilesView(
                   type="button"
                   title="返回文件列表"
                   aria-label="返回文件列表"
-                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-white/[.07] bg-raised text-white/60"
+                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-line bg-panel text-white/60"
                   onClick={() => setMobileTreeVisible(true)}
                 >
                   <IconArrowLeft size={15} />
@@ -1489,7 +1489,7 @@ export const FilesView = forwardRef(function FilesView(
                   key={tab.path}
                   data-path={tab.path}
                   title={tab.path}
-                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-canvas text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
+                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[11px] ${tab.path === activePath ? 'bg-canvas text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
                   onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
                 >
                   {tab.path === activePath && (
@@ -1555,7 +1555,7 @@ export const FilesView = forwardRef(function FilesView(
               ))}
             </div>
             {activeTab && (
-              <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-white/[.07] px-3 text-[10px] text-white/40">
+              <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[10px] text-white/40">
                 {breadcrumbs.map((part, index) => (
                   <span key={`${part}-${index}`} className="contents">
                     {index > 0 && <span className="shrink-0 text-sm text-white/25">›</span>}
@@ -1588,7 +1588,7 @@ export const FilesView = forwardRef(function FilesView(
       {message?.transient && (
         <div
           role="status"
-          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-raised/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-danger/40 text-danger-soft' : 'border-white/15 text-white/70'}`}
+          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-panel/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-danger/40 text-danger-soft' : 'border-white/15 text-white/70'}`}
         >
           {message.text}
         </div>

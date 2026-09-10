@@ -182,7 +182,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           {ticks.map((t) => (
             <span
               key={t}
-              className="pointer-events-none absolute inset-x-0 border-t border-line-soft"
+              className="pointer-events-none absolute inset-x-0 border-t border-line"
               style={{ bottom: `${(t / axisMax) * 100}%` }}
             />
           ))}

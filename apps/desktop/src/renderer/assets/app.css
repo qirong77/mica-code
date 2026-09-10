@@ -14,17 +14,16 @@
 @theme {
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
 
-  /* Surfaces: editor.background → tab.activeBackground */
-  --color-canvas: #2b2b2b;
-  --color-raised: #323232;
-  --color-panel: #3c3f41;
-  --color-panel-hi: #46484a; /* derived: panel → active */
-  --color-active: #515658;
+  /* Surfaces — content → chrome. `derived` marks steps that have no
+     counterpart in the original theme. */
+  --color-canvas: #2b2b2b; /* editor/terminal.background — content areas */
+  --color-panel: #3c3f41; /* activityBar/sideBar/panel/statusBar/input/menu — chrome */
+  --color-panel-hi: #46484a; /* derived: surface nested inside chrome */
+  --color-active: #515658; /* tab.activeBackground — selected */
 
-  /* Hairlines: *.border */
+  /* Hairlines — every *.border key in the theme is this one value. */
   --color-line: #4b4b4b;
-  --color-line-soft: #323232;
-  --color-line-strong: #5a5a5a; /* derived */
+  --color-line-strong: #5a5a5a; /* derived: emphasis edge */
 
   /* Foreground ramp — the theme's own neutral steps, brightest first:
        #ffffff activityBar.foreground      #d4d4d4 tokenColors (default text)
@@ -182,8 +181,8 @@ body.is-resizing {
   position: relative;
   cursor: ns-resize;
   touch-action: none;
-  border-block: 1px solid rgb(255 255 255 / 8%);
-  background: var(--color-raised);
+  border-block: 1px solid var(--color-line);
+  background: var(--color-panel);
 }
 .terminal-panel-resizer:hover,
 .terminal-panel-resizer:focus-visible,
@@ -271,14 +270,14 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg-strong);
   --chat-muted: rgb(255 255 255 / 42%);
   --chat-subtle: rgb(255 255 255 / 25%);
-  --chat-border: rgb(255 255 255 / 10%);
+  --chat-border: var(--color-line);
   --chat-user: var(--color-panel-hi);
   --chat-accent: var(--color-accent);
   --chat-thinking: var(--color-warn);
-  /* Raised surfaces: the top bar and the turn log read as separate bands
-     from the transcript (--color-canvas) without turning into hard panels. */
-  --chat-surface-bar: var(--color-raised);
-  --chat-surface-log: var(--color-raised);
+  /* Chrome bands: the top bar and the turn log read as separate surfaces
+     from the transcript (--color-canvas). */
+  --chat-surface-bar: var(--color-panel);
+  --chat-surface-log: var(--color-panel);
   --chat-row-marker-width: 18px;
   --chat-text-size: 13px;
   --chat-font:
@@ -458,10 +457,10 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-notice-compact {
-  background: var(--color-raised);
+  background: var(--color-panel);
   box-shadow:
-    24px 0 0 var(--color-raised),
-    -24px 0 0 var(--color-raised);
+    24px 0 0 var(--color-panel),
+    -24px 0 0 var(--color-panel);
   color: var(--color-fg);
 }
 
@@ -717,7 +716,7 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-markdown th {
-  background: var(--color-raised);
+  background: var(--color-panel);
   color: rgb(255 255 255 / 72%);
   font-weight: 600;
 }
@@ -1240,11 +1239,9 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-turn-log {
   min-width: 0;
-  border-top: 1px solid rgb(255 255 255 / 10%);
-  border-bottom: 1px solid rgb(255 255 255 / 6%);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--color-info) 8%, transparent), transparent 26px),
-    var(--chat-surface-log);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--chat-surface-log);
   color: var(--color-fg-dim);
   font-family: var(--chat-font);
   font-size: 11.5px;
@@ -1269,12 +1266,12 @@ body.is-resizing.is-resizing-terminal {
   cursor: ns-resize;
   touch-action: none;
   user-select: none;
-  border-top: 1px solid rgb(255 255 255 / 6%);
+  border-top: 1px solid var(--color-line);
 }
 
 .chat-turn-log-resizer-top {
   border-top: none;
-  border-bottom: 1px solid rgb(255 255 255 / 6%);
+  border-bottom: 1px solid var(--color-line);
 }
 
 .chat-turn-log-resizer::after {
@@ -1492,7 +1489,7 @@ body.is-resizing.is-resizing-terminal {
   max-height: min(390px, 52vh);
   overflow: auto;
   border: 1px solid rgb(255 255 255 / 13%);
-  background: var(--color-raised);
+  background: var(--color-panel);
   box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
   padding: 4px;
   color: rgb(255 255 255 / 48%);
@@ -1897,7 +1894,7 @@ body.is-resizing.is-resizing-terminal {
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 14%);
   border-radius: 6px;
-  background: var(--color-raised);
+  background: var(--color-panel);
   box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
   color: rgb(255 255 255 / 60%);
   font-family: var(--chat-font);
@@ -1960,7 +1957,7 @@ body.is-resizing.is-resizing-terminal {
   overflow: hidden;
   border: 1px solid var(--color-line);
   border-radius: 6px;
-  background: var(--color-raised);
+  background: var(--color-panel);
   box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
   font-family: var(--chat-font);
   font-size: var(--chat-text-size);
@@ -1981,7 +1978,7 @@ body.is-resizing.is-resizing-terminal {
   flex-shrink: 0;
   border: 1px solid var(--color-line);
   border-radius: 4px;
-  background: var(--color-raised);
+  background: var(--color-panel-hi);
   padding: 2px 8px;
   color: var(--color-fg-soft);
   font-size: 11px;
@@ -2162,7 +2159,7 @@ body.is-resizing.is-resizing-terminal {
   margin-top: 4px;
   border: 1px solid var(--color-line);
   border-radius: 4px;
-  background: var(--color-raised);
+  background: var(--color-panel-hi);
   padding: 4px 6px;
 }
 .chat-ctx-modal-detail-tc-name {
@@ -2275,36 +2272,49 @@ body.is-resizing.is-resizing-terminal {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: end;
   border: 0;
-  border-top: 2px solid rgb(140 140 140 / 55%);
+  border-top: 1px solid var(--color-line-strong);
   border-bottom: 1px solid var(--color-line-strong);
   border-radius: 0;
   background: var(--color-canvas);
   box-shadow: none;
 }
 
+/* Drag handle: a short, wide button straddling the composer's top edge. The
+   icon is deliberately taller than the content box — only the middle row of
+   dots gets painted, so `place-content` keeps it centred while the box itself
+   stays short. The padding box starts one border-width below the top edge, so
+   `top` is (height / 2) + 1px to put the button's centre on the edge instead
+   of hanging below it. */
 .chat-composer-resizer {
   position: absolute;
-  top: -8px;
+  top: -6px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
   display: grid;
-  width: 56px;
-  height: 16px;
+  width: 18px;
+  height: 10px;
+  place-content: center;
   place-items: center;
-  border: 0;
-  background: transparent;
-  color: rgb(255 255 255 / 42%);
+  border: 1px solid var(--color-line);
+  border-radius: 2px;
+  background: var(--color-panel);
+  color: var(--color-fg-dim);
   cursor: ns-resize;
   touch-action: none;
   user-select: none;
   -webkit-app-region: no-drag;
-  transition: color 120ms ease;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .chat-composer-resizer:hover,
 .chat-composer-resizer.is-dragging {
-  color: rgb(255 255 255 / 92%);
+  border-color: var(--color-line-strong);
+  background: var(--color-panel-hi);
+  color: var(--color-fg);
 }
 
 .chat-composer-input {
