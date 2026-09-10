@@ -1,9 +1,7 @@
-// Shared presentation helpers for the web UIs (apps/sync/web and
-// apps/desktop renderer). Pure functions only: no React, no runtime deps, so
-// both build pipelines (Vite + TS and electron-vite renderer) can consume it.
+// Shared presentation helpers for the desktop renderer and runtime. Pure
+// functions only: no React, no runtime deps, so the electron-vite renderer and
+// the runtime bundle can both consume it.
 
-export { formatTime, formatRelative, relativeTimeShort } from './time.js';
-export { formatStatus, formatTokens, tokenCount, formatElapsedMs } from './format.js';
+export { relativeTimeShort } from './time.js';
+export { formatTokens } from './format.js';
 export { toolIcon, toolLabel } from './tools.js';
-export { usageValues, modelLabel, contextUsage } from './context.js';
-export type { UsageValues, ContextUsage, ContextTone } from './context.js';

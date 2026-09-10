@@ -238,6 +238,9 @@ function readSessionMeta(sessionId) {
       0
     )
     const lastUsage = snapshot.lastUsage || usageHistory.at(-1) || null
+    // compact 之后磁盘上的 lastUsage 仍是压缩前那次真实请求（Stats 对账口径），
+    // 上下文徽标要显示压缩后的占用，直到下一次真实请求替换它。
+    const displayTokens = Number(snapshot.displayUsage?.totalTokens) || 0
     return {
       providerId: snapshot.providerId || null,
       model: snapshot.model || null,
@@ -246,7 +249,16 @@ function readSessionMeta(sessionId) {
       cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
       protocol: protocolForProviderId(snapshot.providerId),
       contextWindowSize: Number(snapshot.contextWindowSize) || null,
-      lastUsage,
+      lastUsage:
+        displayTokens > 0
+          ? {
+              // 与 ChatView 的 applyCompactMeta 保持同一种形状：只描述上下文占用
+              totalTokens: displayTokens,
+              inputTokens: displayTokens,
+              outputTokens: 0,
+              cachedInputTokens: 0
+            }
+          : lastUsage,
       cachedRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0,
       turnState: raw.turnState || 'completed',
       updatedAt: raw.updatedAt || null
@@ -774,6 +786,15 @@ function handleHostNotification(id, run, notification) {
     }
   } else if (method === 'thread/tokenUsage/updated') {
     if (params.tokenUsage) run.lastTokenUsage = params.tokenUsage
+    // host 每个工具迭代（每次模型请求）都会推一次用量：立刻转发给渲染层，
+    // 让输入框状态栏的 tokens/cached/ctx 在长 turn 期间持续刷新，而不是等
+    // turn/completed 的 step_finish 才更新一次。频率是一次模型请求一条，
+    // 远低于 text delta，走常规事件缓冲即可；恢复重放时最后一条 usage 也会
+    // 正确覆盖旧值。tokens 复刻 step_finish 的形状，渲染层共用一套解析。
+    if (event && params.tokenUsage) {
+      event.tokens = tokensFromCodexUsage(params.tokenUsage)
+      pushChatEvent(run, event)
+    }
     return
   } else if (method === 'mica/queue/queued') {
     // Host accepted an after_iteration steer input; show it as a waiting

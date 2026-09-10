@@ -358,7 +358,7 @@ function spawnHost(tag: string, extraArgs: string[] = [], homeOverride?: string)
     [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), 'app-server', '--dir', cwd, ...extraArgs],
     {
       cwd: ROOT,
-      env: { ...process.env, MICA_HOME: home, MICA_NO_DAEMON: '1' },
+      env: { ...process.env, MICA_HOME: home },
       stdio: ['pipe', 'pipe', 'pipe'],
     },
   );

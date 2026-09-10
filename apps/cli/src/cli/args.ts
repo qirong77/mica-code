@@ -18,12 +18,6 @@ export type ExecCliInvocation = {
   mcpInitTimeoutMs?: number;
 };
 
-export type DaemonCliInvocation = {
-  mode: 'daemon';
-  server?: string;
-  name?: string;
-};
-
 export type CompactCliInvocation = {
   mode: 'compact';
   sessionId: string;
@@ -56,7 +50,6 @@ export type AppServerCliInvocation = {
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | ExecCliInvocation
-  | DaemonCliInvocation
   | CompactCliInvocation
   | CommitCliInvocation
   | AppServerCliInvocation
@@ -73,7 +66,6 @@ export const CLI_USAGE = [
   `  ${RUNTIME_NAME} models`,
   `  ${RUNTIME_NAME} models --json`,
   `  ${RUNTIME_NAME} exec [--json] [options] "<prompt>"`,
-  `  ${RUNTIME_NAME} daemon [--server <url>] [--name <name>]`,
   `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only]`,
   `  ${RUNTIME_NAME} commit [--dir <path>]`,
   `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
@@ -92,10 +84,6 @@ export const CLI_USAGE = [
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
   '  --mcp-init-timeout-ms <ms>        Limit connect + tools/list time per MCP server',
-  '',
-  'Daemon options:',
-  '  --server <url>                    Sync server base URL',
-  '  --name <name>                     Machine display name (default: hostname)',
   '',
   'Compact options:',
   '  --session <id>                    Compress the given session into a checkpoint',
@@ -130,24 +118,6 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       return { mode: 'models', verbose: options.has('--verbose'), json: options.has('--json') };
     }
     return { mode: 'error', message: `Unknown models option: ${rest.join(' ')}` };
-  }
-  if (argv[0] === 'daemon') {
-    let server: string | undefined;
-    let name: string | undefined;
-    for (let index = 1; index < argv.length; index++) {
-      const arg = argv[index]!;
-      const valueOption = parseValueOption(arg, argv, index, ['--server', '--name']);
-      if (valueOption) {
-        if (!valueOption.ok) return valueOption.error;
-        index = valueOption.nextIndex;
-        if (valueOption.name === '--server') server = valueOption.value;
-        if (valueOption.name === '--name') name = valueOption.value;
-        continue;
-      }
-      if (arg === '--help' || arg === '-h') return { mode: 'help' };
-      return cliError(`Unknown daemon option: ${arg}`);
-    }
-    return { mode: 'daemon', server, name };
   }
   if (argv[0] === 'compact') {
     let sessionId: string | undefined;

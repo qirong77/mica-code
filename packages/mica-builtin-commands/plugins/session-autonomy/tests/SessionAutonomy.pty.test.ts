@@ -266,7 +266,7 @@ suite('session-autonomy PTY end-to-end (mock provider)', () => {
       cols: 140,
       rows: 40,
       cwd: wd,
-      env: { MICA_HOME: home, MICA_NO_DAEMON: '1' },
+      env: { MICA_HOME: home },
       logPath: join(home, 'pty.raw'),
     });
 

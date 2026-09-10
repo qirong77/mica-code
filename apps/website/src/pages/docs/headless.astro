@@ -78,21 +78,6 @@ const appServerSteer = `# 上一轮 turn 未完成时注入新输入（expectedT
 {"id":5,"result":{}}
 {"method":"turn/completed","params":{"turn":{"id":"3f373392-...","status":"interrupted",...}},"emittedAtMs":...}`;
 
-const sseExample = `# 新建会话（服务器生成 sessionId 与 commandId，下发给 daemon 执行）
-$ curl -s -X POST http://<server>:5560/api/machines/<machineId>/sessions \\
-  -H 'Content-Type: application/json' -d '{"text":"总结 README","cwd":"/work/mica-code"}'
-{"sessionId":"8f3a2c1e-...","commandId":"0f8df6f3-..."}
-
-# 订阅事件流（SSE 首行是 ": connected" 注释）
-$ curl -N 'http://<server>:5560/api/machines/<machineId>/sessions/8f3a2c1e/events?since=0'
-: connected
-data: {"type":"user_input","text":"总结 README",...}
-data: {"type":"thinking","text":"让我先读一下 README…",...}
-data: {"type":"tool_call","name":"read_file","args":"README.md",...}
-data: {"type":"tool_result","name":"read_file","content":"# Mica Code\\n…",...}
-data: {"type":"text_delta","text":"README 介绍了安装方式…",...}
-data: {"type":"usage","inputTokens":1832,"cachedInputTokens":1690,"outputTokens":412,...}
-data: {"type":"turn","state":"completed",...}`;
 ---
 
 <DocLayout title="Headless 协议" active="headless" description="mica models / mica exec / mica compact / mica commit / mica app-server 等无 UI 调用方式">
@@ -109,7 +94,6 @@ data: {"type":"turn","state":"completed",...}`;
       <tr><td><code>mica exec ... "&lt;prompt&gt;"</code></td><td>一次性执行一轮任务</td><td>文本 / ThreadEvent JSONL</td></tr>
       <tr><td><code>mica compact --session &lt;id&gt;</code></td><td>把会话压缩为 checkpoint</td><td>JSON</td></tr>
       <tr><td><code>mica commit</code></td><td>分析 git 变化并提交推送</td><td>JSON</td></tr>
-      <tr><td><code>mica daemon --server &lt;url&gt;</code></td><td>Mica Sync 常驻进程（见 <a href={`${base}docs/sync`}>Mica Sync</a>）</td><td>日志</td></tr>
       <tr><td><code>mica app-server</code></td><td>每会话常驻进程，暴露 Codex v2 App Server 协议</td><td>JSONL（stdin 请求 / stdout 通知）</td></tr>
       <tr><td><code>mica --version</code> / <code>mica --help</code></td><td>版本号 / 完整用法</td><td>文本</td></tr>
     </tbody>

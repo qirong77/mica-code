@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe('SessionStore path', () => {
-  it('keeps daemon sessions inside MICA_HOME when it is set', async () => {
+  it('keeps headless sessions inside MICA_HOME when it is set', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-home-'));
     try {
       process.env.MICA_HOME = micaHome;
@@ -100,14 +100,14 @@ describe('session turn lease', () => {
     }
   });
 
-  it('reclaims a stale lock left by a dead daemon process', async () => {
+  it('reclaims a stale lock left by a dead host process', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-stale-'));
     try {
       process.env.MICA_HOME = micaHome;
       vi.resetModules();
       const { acquireSessionTurnLease, SESSION_DIR } = await import('./sessionStore.js');
 
-      // Simulate a daemon that crashed mid-turn: its pid is no longer alive and
+      // Simulate a host that crashed mid-turn: its pid is no longer alive and
       // the lock file was never released. A fresh acquire must reclaim it.
       const lockDir = resolve(SESSION_DIR, '.turn-locks');
       mkdirSync(lockDir, { recursive: true });

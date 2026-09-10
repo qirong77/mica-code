@@ -7,7 +7,6 @@ import { applyConfigDefaultsToFile } from '@packages/mica-builtin-commands/start
 import { VERSION_LABEL, resolveMicaHomePath } from '@packages/mica-config/brand.js';
 import { CLI_USAGE, parseCliArgs } from './cli/args.js';
 import { VERSION } from './buildMeta.js';
-import { ensureDaemonRunning } from './features/sync-daemon/ensureDaemonRunning.js';
 
 if (await startConfigWebWorker()) {
   await new Promise(() => undefined);
@@ -206,15 +205,6 @@ if (invocation.mode === 'app-server') {
   await exitAfterStdoutFlush(Number(process.exitCode ?? 0));
 }
 
-if (invocation.mode === 'daemon') {
-  const { runDaemon } = await import('./features/sync-daemon/index.js');
-  await runDaemon({
-    server: invocation.server,
-    name: invocation.name,
-  });
-  process.exit(0);
-}
-
 const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
   import('./app/index.js'),
   import('./runtime/uiBridge.js'),
@@ -222,14 +212,6 @@ const [{ createApplication }, { reportRuntimeError }] = await Promise.all([
 const processDiagnostics = setupProcessDiagnostics({ reportError: reportRuntimeError });
 
 const app = createApplication({ sessionId: invocation.mode === 'interactive' ? invocation.sessionId : undefined });
-
-// Every interactive launch makes sure the sync daemon is running (only when a
-// sync server is configured), so the web console sees this machine online.
-// Best-effort and non-blocking; headless runs and CI can opt out with
-// MICA_NO_DAEMON=1.
-if (invocation.mode === 'interactive') {
-  void ensureDaemonRunning();
-}
 
 const SIGNAL_EXIT_FORCE_TIMEOUT_MS = 10_000;
 let signalExitStarted = false;

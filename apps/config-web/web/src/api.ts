@@ -9,7 +9,6 @@ import type {
   ConfigWebSessionDetails,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
-  ConfigWebSyncDetails,
 } from '../../src/shared/types.js';
 
 export async function readConfigFile(): Promise<ConfigWebFilePayload> {
@@ -94,20 +93,6 @@ export async function readSessionContextAnalysis(id: string): Promise<ConfigWebC
 
 export async function readRolesDetails(): Promise<ConfigWebRolesDetails> {
   const response = await fetch('/api/details/roles');
-  return readJson(response);
-}
-
-export async function readSyncDetails(): Promise<ConfigWebSyncDetails> {
-  const response = await fetch('/api/details/sync');
-  return readJson(response);
-}
-
-export async function writeSyncConfig(serverUrl: string, name?: string): Promise<ConfigWebSyncDetails> {
-  const response = await fetch('/api/files/sync', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ serverUrl, name }),
-  });
   return readJson(response);
 }
 

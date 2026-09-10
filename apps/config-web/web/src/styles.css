@@ -2036,39 +2036,6 @@ textarea {
   }
 }
 
-/* Sync page */
-
-.sync-page {
-  display: grid;
-  align-content: start;
-  gap: 14px;
-  padding-bottom: 2px;
-}
-
-.sync-page > .ui-alert {
-  margin-bottom: 0;
-}
-
-.sync-card {
-  overflow: hidden;
-}
-
-.sync-card-header {
-  padding: 14px 16px 13px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.sync-card-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.sync-card-body {
-  padding: 15px 16px 16px;
-}
-
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2114,43 +2081,6 @@ textarea {
   box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
 }
 
-.sync-form-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  min-height: 55px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--line-soft);
-  background: rgb(255 255 255 / 1.5%);
-}
-
-.sync-command {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-}
-
-.sync-command > span {
-  flex: 0 0 auto;
-  color: var(--text-faint);
-  font-size: var(--text-aux);
-}
-
-.sync-command code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-soft);
-  font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: var(--panel-muted);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 3px 7px;
-}
-
 .status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2187,20 +2117,6 @@ textarea {
   color: var(--text);
   font-size: var(--text-aux);
   font-family: var(--font-mono);
-}
-
-.sync-count {
-  min-width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel-muted);
-  color: var(--text-soft);
-  font-family: var(--font-mono);
-  font-size: var(--text-micro);
 }
 
 .machine-list {
@@ -2269,13 +2185,6 @@ textarea {
   color: var(--text-soft);
 }
 
-.sync-empty {
-  padding: 30px 16px;
-  color: var(--text-faint);
-  font-size: var(--text-body);
-  text-align: center;
-}
-
 /* Online/offline status lamp (code-by-wire parity) */
 .status-lamp {
   width: 7px;
@@ -2297,21 +2206,6 @@ textarea {
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;
-  }
-
-  .sync-form-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .sync-form-footer .ui-button {
-    width: 100%;
-  }
-
-  .sync-command {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 5px;
   }
 
   .status-grid {

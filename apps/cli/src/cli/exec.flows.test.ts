@@ -395,7 +395,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--model', 'mock/mock-chat-override', '你好'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(0);
@@ -412,7 +411,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     const home = makeHome('exec-provider-error');
 
-    const result = await runCli(['exec', '--json', '你好'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '你好'], { MICA_HOME: home });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('mock provider rejected the request');
@@ -435,7 +434,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     const home = makeHome('exec-stream-error');
 
-    const result = await runCli(['exec', '--json', '流式请求失败'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '流式请求失败'], { MICA_HOME: home });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('mock_stream_error: mock provider stream failed after partial output');
@@ -451,7 +450,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     const home = makeHome('exec-repeated-error');
     const prompt = '重复提示需要保留两次';
     mock!.state.mode = 'ok';
-    const first = await runCli(['exec', '--json', prompt], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const first = await runCli(['exec', '--json', prompt], { MICA_HOME: home });
     expect(first.code).toBe(0);
     const sessionFiles = readdirSync(join(home, 'sessions')).filter((file) => file.endsWith('.json'));
     expect(sessionFiles).toHaveLength(1);
@@ -461,7 +460,6 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.errorMessage = 'repeated prompt provider failure';
     const second = await runCli(['exec', '--json', '--session', sessionId, prompt], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
     expect(second.code).toBe(1);
     const persisted = JSON.parse(readFileSync(join(home, 'sessions', sessionFiles[0]!), 'utf8')) as unknown;
@@ -480,7 +478,7 @@ suite('mica exec real-user flows (mock provider)', () => {
       [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), 'exec', '--json', '等待期间中断'],
       {
         cwd: ROOT,
-        env: { ...process.env, MICA_HOME: home, MICA_NO_DAEMON: '1' },
+        env: { ...process.env, MICA_HOME: home },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
@@ -525,7 +523,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--session', 'missing-session-id', '继续之前的对话'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(1);
@@ -546,7 +543,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--no-save', '触发 provider 错误'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(1);
@@ -560,7 +556,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     const home = makeHome('exec-model-resume');
 
     // Phase 1: create a session with the default model (mock/mock-chat).
-    const phase1 = await runCli(['exec', '--json', '初始化会话'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const phase1 = await runCli(['exec', '--json', '初始化会话'], { MICA_HOME: home });
     expect(phase1.code).toBe(0);
 
     // Extract sessionId from the turn.completed event's JSONL output.
@@ -577,7 +573,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     const phase2 = await runCli(
       ['exec', '--json', '--session', sessionId, '--model', 'mock/mock-chat-override', '续聊'],
-      { MICA_HOME: home, MICA_NO_DAEMON: '1' },
+      { MICA_HOME: home },
     );
 
     expect(phase2.code).toBe(0);
@@ -592,7 +588,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--variant', 'high', '你好'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(0);
@@ -610,7 +605,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--dir', cwd, '请调用 write_file 工具'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(0);
@@ -640,7 +634,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--dir', cwd, '--max-turns', '1', '执行一次工具'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(1);
@@ -656,7 +649,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.responsesFinished = 0;
     const home = makeHome('exec-session-tool');
 
-    const result = await runCli(['exec', '--json', '查看会话信息'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '查看会话信息'], { MICA_HOME: home });
 
     expect(result.code).toBe(0);
     // The first request carries the session_info tool definition (the headless
@@ -680,7 +673,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', '--role', 'reviewer', '请审查这个任务'], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(0);
@@ -704,7 +696,6 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const result = await runCli(['exec', '--json', `请描述这张图 [Image](${imagePath})`], {
       MICA_HOME: home,
-      MICA_NO_DAEMON: '1',
     });
 
     expect(result.code).toBe(0);
@@ -719,7 +710,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     const home = makeHome('exec-no-save');
 
-    const result = await runCli(['exec', '--json', '--no-save', '你好'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '--no-save', '你好'], { MICA_HOME: home });
 
     expect(result.code).toBe(0);
 
@@ -732,7 +723,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     const home = makeHome('exec-json-format');
 
-    const result = await runCli(['exec', '--json', '你好'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '你好'], { MICA_HOME: home });
 
     expect(result.code).toBe(0);
 
@@ -751,7 +742,7 @@ suite('mica exec real-user flows (mock provider)', () => {
     mock!.state.includeReasoning = true;
     const home = makeHome('exec-thinking');
 
-    const result = await runCli(['exec', '--json', '--thinking', '你好'], { MICA_HOME: home, MICA_NO_DAEMON: '1' });
+    const result = await runCli(['exec', '--json', '--thinking', '你好'], { MICA_HOME: home });
 
     expect(result.code).toBe(0);
 

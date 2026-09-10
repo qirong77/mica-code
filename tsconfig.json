@@ -13,8 +13,6 @@
     "packages/mica-ui",
     "packages/mica-config",
     "apps/config-web",
-    "apps/sync/server",
-    "apps/sync/web/src",
     "packages/mica-session",
     "packages/mica-skills",
     "packages/mica-mcp",

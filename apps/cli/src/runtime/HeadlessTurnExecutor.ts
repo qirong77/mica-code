@@ -55,7 +55,7 @@ export type HeadlessTurnExecutorOptions = {
 
 /**
  * UI-agnostic turn executor shared by the per-session chat host (`mica
- * app-server`), `mica exec` and the sync daemon's CommandExecutor. Implements
+ * app-server`) and `mica exec`. Implements
  * the same single-slot message queue and after_iteration iteration-boundary
  * injection as the interactive runtime, minus all Ink/UI coupling:
  *
@@ -64,8 +64,8 @@ export type HeadlessTurnExecutorOptions = {
  *   after_turn inputs start once the current turn ends);
  * - turn lifecycle is reported through `onEvent` — every turn, including
  *   queued ones drained after the first, emits `turn:start` + `turn:finish`;
- *   streamed text/tool/usage stays on the consumer side (CodexProjector or
- *   sync-event mapping), so this class never owns an output protocol;
+ *   streamed text/tool/usage stays on the consumer side (CodexProjector or a
+ *   caller's event sink), so this class never owns an output protocol;
  * - aborts stop the active turn but keep the queue draining, matching the
  *   desktop app's current abort-then-continue behavior.
  *
@@ -173,7 +173,7 @@ export class HeadlessTurnExecutor {
     while (input) {
       // `start()` announced the first turn; every drained turn needs its own
       // turn:start too, otherwise consumers that map the event to a per-turn
-      // lifecycle (app-server turn/started, sync daemon "running" state) never
+      // lifecycle (app-server turn/started) never
       // learn that the executor is still working on a queued input.
       if (!first) this.options.onEvent({ type: 'turn:start', input });
       first = false;
@@ -216,7 +216,7 @@ export class HeadlessTurnExecutor {
     }
     try {
       // Refresh the persisted signature before this turn's saves: another host
-      // (a second app-server for the same session, the sync daemon or a CLI
+      // (a second app-server for the same session or a CLI
       // resume) may have written the session file since our last save. Without
       // this, saveCurrent's "another process wrote" guard would skip every
       // save of this turn and the conversation would be lost on restart.

@@ -7,8 +7,6 @@
     "example:task": "bun run packages/mica-ui/examples/example-task.tsx",
     "build:config-web": "vite build --config apps/config-web/web/vite.config.ts && bun scripts/generate-config-web-assets.mjs",
     "dev:config-web": "MICA_CONFIG_WEB_DEV=1 bun scripts/dev-config-web.mjs",
-    "build:sync-web": "vite build --config apps/sync/web/vite.config.ts",
-    "build:sync-server": "bun build apps/sync/server/src/main.ts --target=node --outfile=dist/mica-sync-server.js",
     "build": "MICA_PREBUILD_DONE=1 bun scripts/build.mjs",
     "prebuild": "bunx tsc --noEmit",
     "postbuild": "bun scripts/install.mjs",

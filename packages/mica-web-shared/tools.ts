@@ -1,4 +1,4 @@
-// Tool display vocabulary shared by apps/sync/web and apps/desktop renderer.
+// Tool display vocabulary shared by the desktop renderer and runtime.
 // Pure functions only, matching the desktop ChatView tool-row grammar so both
 // UIs show the same icon/label for the same tool.
 

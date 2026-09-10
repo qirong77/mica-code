@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  IconArrowUp,
   IconChartBar,
+  IconFolder,
   IconFolderOpen,
   IconGitBranch,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
+  IconMenu2,
   IconMessage,
   IconPlus,
   IconRocket,
@@ -21,7 +24,7 @@ import { SessionTree } from './SessionTree'
 import { SettingsView } from './SettingsView'
 import { StatsView } from './stats/StatsView'
 import { TerminalHost } from './TerminalHost'
-import { useLatest } from './hooks'
+import { useIsMobile, useLatest } from './hooks'
 import {
   createColdStartTerminal,
   normalizeNodes,
@@ -29,6 +32,7 @@ import {
   resolveDefaultCwd,
   uid
 } from './workspace'
+import { runningTerminalSessions } from './session-state'
 
 /** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
 function nodeIdFor(ptyId) {
@@ -47,6 +51,7 @@ function recentChatCwd() {
 
 function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   const [value, setValue] = useState(cwd || '')
+  const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef(null)
   useEffect(() => {
     const onKey = (event) => {
@@ -83,6 +88,11 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
           type="button"
           className="mb-2.5 flex h-8 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-white/15 bg-white/[.02] text-xs text-white/60 hover:border-white/35 hover:text-white"
           onClick={() => {
+            // 浏览器里没有原生目录选择器，改用应用内浏览（浏览的是服务端目录）
+            if (window.mica?.isWeb) {
+              setPickerOpen(true)
+              return
+            }
             void window.mica.workspace
               .selectDirectory({ title: '选择工作目录', defaultPath: cwd })
               .then((result) => {
@@ -138,6 +148,126 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
             onClick={submit}
           >
             应用
+          </button>
+        </div>
+      </section>
+      {pickerOpen && (
+        <DirectoryPicker
+          initialPath={value.trim() || cwd}
+          onClose={() => setPickerOpen(false)}
+          onPick={(dir) => {
+            setPickerOpen(false)
+            onApply(dir)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** 浏览器端的工作目录选择器：在服务端目录树里逐级浏览，替代 Electron 的原生选择器 */
+function DirectoryPicker({ initialPath, onClose, onPick }) {
+  const [current, setCurrent] = useState('')
+  const [parent, setParent] = useState(null)
+  const [entries, setEntries] = useState([])
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async (target) => {
+    setLoading(true)
+    setError('')
+    try {
+      const result = await window.mica.files.list(target || window.mica.homeDir)
+      setCurrent(result?.path || target)
+      setParent(result?.parentPath || null)
+      setEntries((result?.entries || []).filter((entry) => entry.type === 'directory'))
+    } catch (err) {
+      setError(err?.message || String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load(initialPath)
+  }, [initialPath, load])
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[12000] grid place-items-center bg-black/55 no-drag"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-white/15 bg-[#181818]/98 shadow-2xl"
+      >
+        <h2 className="shrink-0 border-b border-white/10 px-3.5 py-2.5 text-sm font-semibold text-white/95">
+          选择文件夹
+        </h2>
+        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-white/10 px-3.5 py-2">
+          <button
+            type="button"
+            title="上级目录"
+            aria-label="上级目录"
+            disabled={!parent}
+            className="grid size-6 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/[.08] hover:text-white disabled:opacity-30"
+            onClick={() => void load(parent)}
+          >
+            <IconArrowUp size={14} />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-xs text-white/55" title={current}>
+            {current || '…'}
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
+          {error ? (
+            <p className="px-2 py-1.5 text-xs leading-5 text-red-300">{error}</p>
+          ) : loading ? (
+            <p className="px-2 py-1.5 text-xs text-white/40">读取中…</p>
+          ) : entries.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-white/35">没有子目录</p>
+          ) : (
+            entries.map((entry) => (
+              <button
+                key={entry.path}
+                type="button"
+                title={entry.path}
+                className="flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
+                onClick={() => void load(entry.path)}
+              >
+                <IconFolder size={14} className="shrink-0 opacity-70" />
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2 border-t border-white/10 px-3.5 py-2.5">
+          <button
+            type="button"
+            disabled={!current}
+            className="h-9 flex-1 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:text-white/25"
+            onClick={() => current && onPick(current)}
+          >
+            选择此文件夹
+          </button>
+          <button
+            type="button"
+            className="h-9 rounded-sm border border-white/15 px-3.5 text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
+            onClick={onClose}
+          >
+            取消
           </button>
         </div>
       </section>
@@ -228,6 +358,8 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
           next[id] = {
             unread: !!state.unread,
             running: !!state.running,
+            // 会话树据此区分「终端前台进程在跑」与「Mica turn 在跑」
+            processRunning: !!state.processRunning,
             lastType: state.lastType ?? null,
             lastEventAt: state.lastEventAt ?? Date.now()
           }
@@ -247,6 +379,7 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
           next[id] = {
             unread: !!item.unread,
             running: !!item.running,
+            processRunning: !!item.processRunning,
             lastType: item.lastType ?? null,
             lastEventAt: item.lastEventAt ?? null
           }
@@ -399,6 +532,10 @@ const MAX_SIDEBAR_WIDTH = 640
 const DEFAULT_RIGHT_PANEL_WIDTH = 400
 const MIN_RIGHT_PANEL_WIDTH = 280
 const MAX_RIGHT_PANEL_WIDTH = 720
+// 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
+// —— 86px 是 macOS 上让开交通灯后的位置，右侧面板标题栏的 pl-30 按它预留
+const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
+const SIDEBAR_TOGGLE_GUTTER = 30
 
 // 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
 const PAGE_HEADER = {
@@ -446,6 +583,10 @@ export default function App() {
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false)
   const [resizingRightPanel, setResizingRightPanel] = useState(false)
   const rightPanelWidthRef = useRef(rightPanelWidth)
+  // 移动端：三栏退化为单栏，侧栏与右面板改为覆盖式抽屉
+  const isMobile = useIsMobile()
+  const isMobileRef = useLatest(isMobile)
+  const [mobileDrawer, setMobileDrawer] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
   )
@@ -458,6 +599,18 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
+  // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
+  // 打开终端）都会同步打开抽屉，不必逐个改调用点
+  const previousRightPanelOpen = useRef(rightPanelOpen)
+  useEffect(() => {
+    const wasOpen = previousRightPanelOpen.current
+    previousRightPanelOpen.current = rightPanelOpen
+    if (isMobile && rightPanelOpen && !wasOpen) setMobileDrawer('right')
+  }, [isMobile, rightPanelOpen])
+  useEffect(() => {
+    if (!isMobile) setMobileDrawer(null)
+  }, [isMobile])
+  const closeMobileDrawer = useCallback(() => setMobileDrawer(null), [])
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -796,13 +949,17 @@ export default function App() {
     const id = uid('rt')
     const count = rightTerms.length + 1
     const cwd = terminalCwd(activeRef.current) || recentChatCwd() || null
+    // 终端是在当前会话的上下文里开的，记下归属会话，左侧会话树才能标出
+    // 「这个会话有终端在跑」（右侧终端本身不在 nodes 里，只能靠这份映射关联）。
+    const sessionId =
+      nodesRef.current.find((node) => node.id === activeRef.current)?.sessionId || null
     setRightTerms((items) => [
       ...items,
-      { id, text: `终端 ${count}`, cwd, type: 'terminal', sessionId: null, command: null }
+      { id, text: `终端 ${count}`, cwd, type: 'terminal', sessionId, command: null }
     ])
     setRightActiveTerm(id)
     setRightPanelTab('terminal')
-  }, [activeRef, rightTerms.length, terminalCwd])
+  }, [activeRef, nodesRef, rightTerms.length, terminalCwd])
 
   const closeRightTerm = useCallback((id) => {
     setRightTerms((items) => {
@@ -818,6 +975,14 @@ export default function App() {
     (id) => rightTerms.find((item) => item.id === id)?.cwd || null,
     [rightTerms]
   )
+  const openRightTerminalTab = useCallback(() => {
+    // 切到终端 Tab 时至少要有一个终端，否则用户还得先手动新建第一个。
+    if (rightTerms.length === 0) {
+      createRightTerm()
+      return
+    }
+    setRightPanelTab('terminal')
+  }, [createRightTerm, rightTerms.length])
 
   const createSession = useCallback(
     (cwd = null) => {
@@ -913,6 +1078,12 @@ export default function App() {
     return map
   }, [terminalNodes])
   const draftTabs = useMemo(() => terminalNodes.filter((node) => !node.sessionId), [terminalNodes])
+  // 右侧终端不在 nodes 里，靠它们创建时记下的归属会话，把「这个终端有前台进程在跑」
+  // 映射回左侧会话行（notify 状态按 PTY id 保存，折成终端节点 id 后即可对齐）。
+  const sessionsWithRunningTerminal = useMemo(
+    () => runningTerminalSessions(rightTerms, notifications.states),
+    [notifications.states, rightTerms]
+  )
   const activeSessionId = useMemo(() => {
     const node = nodes.find((item) => item.id === activeId)
     return node?.sessionId || null
@@ -946,24 +1117,41 @@ export default function App() {
     () => terminalRef.current?.getCwd(activeRef.current),
     [activeRef]
   )
-  const openSearchFile = useCallback(async (path, position) => {
-    setView('chat')
-    setRightPanelOpen(true)
-    setRightPanelTab('files')
-    await filesRef.current?.openFile(path, position)
-  }, [])
-  const openChatFile = useCallback(async (path, position) => {
-    setView('chat')
-    setRightPanelOpen(true)
-    setRightPanelTab('files')
-    await filesRef.current?.openFile(path, position)
-  }, [])
+  const openSearchFile = useCallback(
+    async (path, position) => {
+      setView('chat')
+      setRightPanelOpen(true)
+      setRightPanelTab('files')
+      if (isMobileRef.current) setMobileDrawer('right')
+      await filesRef.current?.openFile(path, position)
+    },
+    [isMobileRef]
+  )
+  const openChatFile = useCallback(
+    async (path, position) => {
+      setView('chat')
+      setRightPanelOpen(true)
+      setRightPanelTab('files')
+      if (isMobileRef.current) setMobileDrawer('right')
+      await filesRef.current?.openFile(path, position)
+    },
+    [isMobileRef]
+  )
+  // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
+  useEffect(() => {
+    const handler = (event) => {
+      const detail = event.detail || {}
+      if (detail.path) void openChatFile(detail.path, detail)
+    }
+    window.addEventListener('mica:open-file', handler)
+    return () => window.removeEventListener('mica:open-file', handler)
+  }, [openChatFile])
   const openChatTerminal = useCallback(() => {
     setRightPanelOpen(true)
-    setRightPanelTab('terminal')
+    openRightTerminalTab()
     const id = activeRef.current
     if (id) terminalRef.current?.activate(id).catch(() => {})
-  }, [activeRef])
+  }, [activeRef, openRightTerminalTab])
   const createChatSession = useCallback(
     (cwd = null) => {
       setView('chat')
@@ -1085,11 +1273,12 @@ export default function App() {
       event.preventDefault()
       event.stopPropagation()
       setRightPanelOpen(true)
-      setRightPanelTab((tab) => (tab === 'terminal' ? 'files' : 'terminal'))
+      if (rightPanelTab === 'terminal') setRightPanelTab('files')
+      else openRightTerminalTab()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  }, [openRightTerminalTab, rightPanelTab])
 
   if (!ready)
     return (
@@ -1098,22 +1287,44 @@ export default function App() {
       </div>
     )
 
+  const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
   return (
     <>
       <div
-        className="grid size-full transition-[grid-template-columns]"
-        style={{
-          gridTemplateColumns: rightPanelMaximized
-            ? '0px 0px 1fr'
-            : `${sidebarCollapsed ? 0 : sidebarWidth}px 1fr ${rightPanelOpen ? `${rightPanelWidth}px` : '0px'}`,
-          transition: rightPanelOpen ? 'none' : 'none'
-        }}
+        className={
+          isMobile
+            ? 'relative flex size-full flex-col overflow-hidden'
+            : 'grid size-full transition-[grid-template-columns]'
+        }
+        style={
+          isMobile
+            ? undefined
+            : {
+                gridTemplateColumns: rightPanelMaximized
+                  ? '0px 0px 1fr'
+                  : `${sidebarCollapsed ? 0 : sidebarWidth}px 1fr ${rightPanelOpen ? `${rightPanelWidth}px` : '0px'}`,
+                transition: rightPanelOpen ? 'none' : 'none'
+              }
+        }
       >
+        {isMobile && mobileDrawer && (
+          <div
+            className="fixed inset-0 z-[9050] bg-black/55"
+            aria-hidden="true"
+            onClick={closeMobileDrawer}
+          />
+        )}
         <aside
-          className={`relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`}
-          style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
+          className={
+            isMobile
+              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] shadow-2xl transition-transform duration-200 ${
+                  mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
+                }`
+              : `relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+          }
+          style={isMobile ? undefined : { width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
-          {!sidebarCollapsed && (
+          {!isMobile && !sidebarCollapsed && (
             <div
               role="separator"
               aria-orientation="vertical"
@@ -1123,13 +1334,31 @@ export default function App() {
               onPointerDown={startSidebarResize}
             />
           )}
-          <div className="h-10 shrink-0 drag-region" aria-hidden="true" />
+          {isMobile ? (
+            <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 pl-3.5 pr-2">
+              <span className="text-xs font-semibold text-white/70">会话</span>
+              <button
+                type="button"
+                title="关闭"
+                aria-label="关闭会话列表"
+                className="grid size-7 place-items-center rounded-md text-white/55 hover:bg-white/[.08] hover:text-white"
+                onClick={closeMobileDrawer}
+              >
+                <IconX size={15} />
+              </button>
+            </div>
+          ) : (
+            <div className="h-10 shrink-0 drag-region" aria-hidden="true" />
+          )}
           <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
             <button
               type="button"
               title="New Session"
               className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
-              onClick={() => createSession()}
+              onClick={() => {
+                closeMobileDrawer()
+                createSession()
+              }}
             >
               <IconRocket size={14} className="shrink-0 opacity-60" />
               <span>New Session</span>
@@ -1143,7 +1372,10 @@ export default function App() {
                   ? 'bg-white/[.10] text-white'
                   : 'text-white/60 hover:bg-white/[.05] hover:text-white'
               }`}
-              onClick={() => setView('stats')}
+              onClick={() => {
+                closeMobileDrawer()
+                setView('stats')
+              }}
             >
               <IconChartBar size={14} className="shrink-0 opacity-75" />
               <span>Stats</span>
@@ -1157,7 +1389,10 @@ export default function App() {
                   ? 'bg-white/[.10] text-white'
                   : 'text-white/60 hover:bg-white/[.05] hover:text-white'
               }`}
-              onClick={() => setView('settings')}
+              onClick={() => {
+                closeMobileDrawer()
+                setView('settings')
+              }}
             >
               <IconSettings size={14} className="shrink-0 opacity-75" />
               <span>Settings</span>
@@ -1172,8 +1407,15 @@ export default function App() {
             activeSessionId={activeSessionId}
             selectedId={selectedId}
             unread={notifications.states}
-            onOpenSession={openSession}
-            onSelectDraft={(node) => selectNode(node)}
+            terminalSessions={sessionsWithRunningTerminal}
+            onOpenSession={(sessionId) => {
+              closeMobileDrawer()
+              openSession(sessionId)
+            }}
+            onSelectDraft={(node) => {
+              closeMobileDrawer()
+              selectNode(node)
+            }}
             onTogglePin={togglePin}
             onReorderSessions={reorderSessions}
             onRenameSession={(sessionId, title) => {
@@ -1195,11 +1437,25 @@ export default function App() {
           />
         </aside>
         <main
-          className={`relative flex min-w-0 min-h-0 flex-col overflow-hidden bg-[#0e0e0e] ${rightPanelMaximized ? 'invisible' : ''}`}
+          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-[#0e0e0e] ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
         >
           <header
-            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
           >
+            {isMobile && (
+              <button
+                type="button"
+                title="会话列表"
+                aria-label="会话列表"
+                aria-expanded={mobileDrawer === 'sessions'}
+                className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-white/55 hover:bg-white/[.06] hover:text-white"
+                onClick={() =>
+                  setMobileDrawer((value) => (value === 'sessions' ? null : 'sessions'))
+                }
+              >
+                <IconMenu2 size={16} />
+              </button>
+            )}
             {view === 'chat' ? (
               <span className="min-w-0 truncate text-white/75">
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
@@ -1229,12 +1485,19 @@ export default function App() {
             ) : null}
             <button
               type="button"
-              title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
-              aria-label={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
+              title={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
+              aria-label={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
               className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-              onClick={() => setRightPanelOpen((open) => !open)}
+              onClick={() => {
+                if (isMobile) {
+                  setRightPanelOpen(true)
+                  setMobileDrawer((value) => (value === 'right' ? null : 'right'))
+                  return
+                }
+                setRightPanelOpen((open) => !open)
+              }}
             >
-              {rightPanelOpen ? (
+              {rightPanelVisible ? (
                 <IconLayoutSidebarRightCollapse size={15} />
               ) : (
                 <IconLayoutSidebarRightExpand size={15} />
@@ -1297,11 +1560,21 @@ export default function App() {
           </footer>
         </main>
         <aside
-          className={`relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`}
-          style={{ width: rightPanelMaximized ? undefined : rightPanelOpen ? rightPanelWidth : 0 }}
+          className={
+            isMobile
+              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] shadow-2xl transition-transform duration-200 ${
+                  mobileDrawer === 'right' ? 'translate-x-0' : 'translate-x-full'
+                }`
+              : `relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
+          }
+          style={
+            isMobile
+              ? undefined
+              : { width: rightPanelMaximized ? undefined : rightPanelOpen ? rightPanelWidth : 0 }
+          }
           aria-label="右侧面板"
         >
-          {rightPanelOpen && !rightPanelMaximized && (
+          {!isMobile && rightPanelOpen && !rightPanelMaximized && (
             <div
               role="separator"
               aria-orientation="vertical"
@@ -1313,14 +1586,14 @@ export default function App() {
           )}
           <div
             className="flex h-10 shrink-0 items-center gap-1 border-b border-white/10 px-2"
-            style={{ paddingLeft: rightPanelMaximized ? 74 : undefined }}
+            style={{ paddingLeft: !isMobile && rightPanelMaximized ? 74 : undefined }}
           >
             <button
               type="button"
               title={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
               aria-label={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
               aria-pressed={rightPanelMaximized}
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+              className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
               onClick={() => setRightPanelMaximized((value) => !value)}
             >
               {rightPanelMaximized ? (
@@ -1352,7 +1625,7 @@ export default function App() {
                   ? 'bg-white/[.10] text-white'
                   : 'text-white/55 hover:bg-white/[.05] hover:text-white'
               }`}
-              onClick={() => setRightPanelTab('terminal')}
+              onClick={openRightTerminalTab}
             >
               <IconTerminal2 size={13} className="shrink-0 opacity-75" />
               <span>终端</span>
@@ -1360,11 +1633,22 @@ export default function App() {
             <button
               type="button"
               title="新建终端"
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+              className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
               onClick={createRightTerm}
             >
               <IconPlus size={14} />
             </button>
+            {isMobile && (
+              <button
+                type="button"
+                title="关闭"
+                aria-label="关闭右侧面板"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                onClick={closeMobileDrawer}
+              >
+                <IconX size={14} />
+              </button>
+            )}
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {rightPanelTab === 'terminal' && (
@@ -1392,7 +1676,9 @@ export default function App() {
                       <button
                         type="button"
                         title="关闭终端"
-                        className="grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 opacity-0 transition-opacity hover:bg-white/[.08] hover:text-white group-hover:opacity-100"
+                        className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
+                          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        }`}
                         onClick={() => closeRightTerm(node.id)}
                       >
                         <IconX size={11} />
@@ -1428,13 +1714,18 @@ export default function App() {
           </div>
         </aside>
       </div>
-      {!rightPanelMaximized && (
+      {!rightPanelMaximized && !isMobile && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-expanded={!sidebarCollapsed}
-          className="fixed left-21.5 top-2 z-50 grid h-5.5 w-5 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white no-drag"
+          className="fixed top-2 z-50 grid h-5.5 w-5 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white no-drag"
+          style={{
+            left: sidebarCollapsed
+              ? SIDEBAR_TOGGLE_COLLAPSED_LEFT
+              : sidebarWidth - SIDEBAR_TOGGLE_GUTTER
+          }}
           onClick={setCollapsed}
         >
           <IconLayoutSidebarLeftCollapse size={16} />

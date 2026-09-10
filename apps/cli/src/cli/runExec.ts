@@ -89,7 +89,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     sessionController = new SessionController({
       agent,
       // AgentRuntime.loadSnapshot restores the provider/model from the session
-      // itself. Avoid persisting a daemon-selected model into Mica's user-level
+      // itself. Avoid persisting a run-selected model into Mica's user-level
       // last-used preferences while running headlessly.
       config: { apply() {} },
       ui: {

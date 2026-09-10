@@ -29,12 +29,23 @@ export type PersistedRuntimeSnapshot = {
   /** Model context window in tokens; informational for the web console's
    *  context usage display. Optional so older snapshots parse cleanly. */
   contextWindowSize?: number;
+  /** Context occupancy to display after a compact. Compacting deliberately keeps
+   *  `lastUsage` / `usageHistory` untouched so Stats stays continuous, so the
+   *  post-compact figure is stored separately and dropped as soon as a newer
+   *  usage record exists. Display-only; optional for older snapshots. */
+  displayUsage?: PersistedSnapshotDisplayUsage;
   messages: unknown[];
   conversationMessages: unknown[];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
   /** Subagent task usage appended by the Agent tool; optional for older snapshots. */
   subagentUsageHistory?: SubagentUsageRecord[];
+};
+
+export type PersistedSnapshotDisplayUsage = {
+  totalTokens: number;
+  /** ISO time of the compact that produced `totalTokens`. */
+  compactedAt: string;
 };
 
 export type PersistedSessionTurnState = 'running' | 'completed' | 'aborted' | 'error';
@@ -96,7 +107,7 @@ export class SessionStore implements SessionStoreLike {
   /** In-memory metadata summaries sorted by updatedAt descending. Lazily built. */
   private cachedIndex: SessionSummary[] | null = null;
   /** Directory mtime when cachedIndex was built, so a session persisted by
-   * another process (daemon / app-server / another CLI) invalidates the cache. */
+   * another process (app-server / desktop runtime / another CLI) invalidates the cache. */
   private cachedIndexDirMtime = 0;
 
   list(limit = 20): SessionSummary[] {
@@ -564,8 +575,18 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       ...session.snapshot,
       protocol,
       role,
+      displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
     },
   } as PersistedSession;
+}
+
+function normalizeDisplayUsage(value: unknown): PersistedSnapshotDisplayUsage | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Partial<PersistedSnapshotDisplayUsage>;
+  const totalTokens = Number(record.totalTokens);
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return undefined;
+  if (!isNonEmptyString(record.compactedAt)) return undefined;
+  return { totalTokens, compactedAt: record.compactedAt };
 }
 
 function isNonEmptyString(value: unknown): value is string {

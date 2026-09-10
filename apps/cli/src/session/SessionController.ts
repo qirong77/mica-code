@@ -12,6 +12,7 @@ import {
   micaSession,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
+  type PersistedSnapshotDisplayUsage,
   type PersistedSessionTurnState,
   type SessionStoreLike,
   type SessionSummary,
@@ -106,6 +107,8 @@ export class SessionController {
       turnState?: PersistedSessionTurnState;
       preserveTitle?: boolean;
       conversationMessages?: MicaUiConversationMessage[];
+      /** 压缩后的上下文占用，仅供界面展示（见 resolveDisplayUsage）。 */
+      displayUsage?: PersistedSnapshotDisplayUsage;
     } = {},
   ): boolean {
     const snapshot = this.agent.getSnapshot();
@@ -122,7 +125,7 @@ export class SessionController {
       if (!existing) return false;
       if (sessionSignature(existing) !== this.currentPersistedSignature) {
         // Another process persisted the session file since our last save
-        // (a second app-server host, the sync daemon or a CLI resume).
+        // (a second app-server host or a CLI resume).
         // Prefer keeping the other writer's snapshot authoritative, but never
         // skip the save forever: headless hosts (app-server / exec) do not
         // call refreshFromStore between turns, so a permanent skip would
@@ -144,7 +147,14 @@ export class SessionController {
       updatedAt: existing?.updatedAt ?? now,
       cwd: process.cwd(),
       turnState: this.currentTurnState,
-      snapshot: toPersistedSnapshot(snapshot, conversationMessages),
+      snapshot: {
+        ...toPersistedSnapshot(snapshot, conversationMessages),
+        displayUsage: resolveDisplayUsage(
+          options.displayUsage,
+          existing?.snapshot.displayUsage,
+          snapshot.lastUsage,
+        ),
+      },
     };
     // If the turn-state already changed, the persisted document is definitely
     // different, so skip the expensive full-session equality JSON comparison
@@ -315,6 +325,23 @@ function isSessionControllerOptions(
   value: SessionAgentAdapter | SessionControllerOptions,
 ): value is SessionControllerOptions {
   return Boolean(value && typeof value === 'object' && 'agent' in value);
+}
+
+/**
+ * compact 后的上下文占用只用于展示：`lastUsage` / `usageHistory` 继续作为
+ * Stats 的对账口径保持不动，所以压缩结果单独存一份。一旦出现更晚的真实
+ * 用量记录（下一次模型请求）就丢弃它，避免盖住新值。
+ */
+function resolveDisplayUsage(
+  requested: PersistedSnapshotDisplayUsage | undefined,
+  existing: PersistedSnapshotDisplayUsage | undefined,
+  lastUsage: AgentRuntimeSnapshot['lastUsage'],
+): PersistedSnapshotDisplayUsage | undefined {
+  if (requested) return requested;
+  if (!existing) return undefined;
+  const occurredAt = lastUsage?.occurredAt;
+  if (!occurredAt) return existing;
+  return existing.compactedAt > occurredAt ? existing : undefined;
 }
 
 function toPersistedSnapshot(

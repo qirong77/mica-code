@@ -43,7 +43,6 @@ const stack = [
   agents/                   终端内多 agent session 与后台 subagent 管理
   runtime/                  Rewind checkpoint、ToolLog、Headless turn 执行器、Codex 投影
   session/                  session 保存、恢复、重命名与 UI restore
-  daemon/                   mica daemon：注册/心跳/长轮询/远程续聊
   tools/                    Agent 工具的 subagent 生命周期
 
 packages/
@@ -61,8 +60,7 @@ packages/
   mica-plugin               插件生命周期、hooks、service container
   mica-common               跨包共享底层工具
   mica-pty                  PTY 测试驱动 + 内置 PTY 工具
-  mica-sync-server          中心聚合服务（零依赖 Node 单文件）
-  mica-sync-web             Web 控制台（查看会话 + 远程续聊）</code></pre>
+</code></pre>
 
   <h2>Turn loop 与缓存</h2>
   <p>普通输入的关键路径：trim 输入 → 命令分发 → busy 检查与排队（单槽队列，支持 after_iteration / after_turn）→ turn 开始捕获 rewind checkpoint → <code>agent.run</code> 迭代执行工具 → 每轮迭代保存可恢复 checkpoint → 成功后写入 assistant message 并保存 completed 快照。turn 级错误最多重试 5 次，每次间隔 10 秒；只有可安全重放（只读工具阶段）的错误才自动重试。</p>

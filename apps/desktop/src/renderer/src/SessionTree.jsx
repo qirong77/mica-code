@@ -7,10 +7,12 @@ import {
   IconListTree,
   IconPin,
   IconSearch,
+  IconTerminal2,
   IconX
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
 import { buildInboxItems, liveSessionRowState } from './session-state'
+import { longPressHandlers } from './hooks'
 
 const rowClass =
   'group relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 pl-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
@@ -70,14 +72,28 @@ function RowTail({ relativeTime }) {
   )
 }
 
-// 左侧只保留未读圆点：运行中的会话改用标题文字呼吸绿，不再有旋转图标。
-function RowLeading({ state, unreadKey }) {
+// 行首状态位固定 w-4：终端前台进程在跑（如 npm run dev）时显示终端图标，否则显示
+// 未读圆点。两者同时存在时把未读点叠在图标右上角，绝不额外占位——否则这一行整体
+// 右推，与相邻行的缩进对不齐。运行中的会话改用标题文字呼吸绿，不再有旋转图标。
+function RowLeading({ state, unreadKey, terminal }) {
+  const unread = state === 'unread'
   return (
-    <span className="grid w-4 shrink-0 place-items-center">
-      {state === 'unread' && (
+    <span className="relative grid w-4 shrink-0 place-items-center">
+      {terminal ? (
+        <span className="text-[#46c57a] chat-terminal-active" title="该会话有终端在运行">
+          <IconTerminal2 size={13} stroke={2} />
+        </span>
+      ) : unread ? (
         <span
           key={unreadKey}
           className="size-2 shrink-0 rounded-full bg-[#5aa7e8] chat-dot-unread"
+          title="有未读结果"
+        />
+      ) : null}
+      {terminal && unread && (
+        <span
+          key={unreadKey}
+          className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-[#5aa7e8] chat-dot-unread"
           title="有未读结果"
         />
       )}
@@ -155,6 +171,7 @@ export function SessionTree({
   activeSessionId,
   selectedId,
   unread,
+  terminalSessions,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
@@ -339,8 +356,15 @@ export function SessionTree({
           onDrop={reorderable ? dropRow(section, session.id) : undefined}
           onClick={() => onOpenSession(session)}
           onContextMenu={(event) => openMenu(event, { session, items: sessionMenuItems(session) })}
+          {...longPressHandlers((event) =>
+            openMenu(event, { session, items: sessionMenuItems(session) })
+          )}
         >
-          <RowLeading state={state} unreadKey={unreadState?.lastEventAt ?? 'running'} />
+          <RowLeading
+            state={state}
+            unreadKey={unreadState?.lastEventAt ?? 'running'}
+            terminal={!!session.id && !!terminalSessions?.has(session.id)}
+          />
           {cwdLabel && (
             <span
               className="max-w-[45%] shrink-0 truncate text-[11px] text-white/30"
@@ -389,6 +413,12 @@ export function SessionTree({
               items: [['rename', '重命名'], 'separator', ['close', '关闭对话', true]]
             })
           }
+          {...longPressHandlers((event) =>
+            openMenu(event, {
+              draft: node,
+              items: [['rename', '重命名'], 'separator', ['close', '关闭对话', true]]
+            })
+          )}
         >
           <RowLeading state={state} unreadKey={unread[node.id]?.lastEventAt ?? 'running'} />
           {editingThis ? (

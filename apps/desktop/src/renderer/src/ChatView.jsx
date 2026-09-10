@@ -34,7 +34,7 @@ function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
 }
 import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
-import { useLatest } from './hooks'
+import { longPressHandlers, useLatest } from './hooks'
 import { uid } from './workspace'
 import TerminalComposer from './TerminalComposer'
 
@@ -152,6 +152,10 @@ function resolveImageSource(source) {
   const expanded = value.startsWith('~/') && homeDir ? `${homeDir}${value.slice(1)}` : value
   if (/^(?:\/|[a-zA-Z]:[\\/])/.test(expanded)) {
     const normalized = expanded.replace(/\\/g, '/')
+    // 浏览器无法加载 file://，HTTP 部署时改由服务端按路径回吐图片
+    if (typeof window !== 'undefined' && window.mica?.isWeb) {
+      return `/api/image?path=${encodeURIComponent(normalized)}`
+    }
     return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`
   }
   return expanded
@@ -1907,6 +1911,22 @@ export function ChatView({
     })
   }, [])
 
+  // host 每个工具迭代都会推一次实时用量：长 turn 期间用它刷新输入框状态栏的
+  // tokens/cached/ctx，而不是等 step_finish。刻意不动 turnState/updatedAt——
+  // 它们参与 isPersistedRunComplete 的「本轮是否已落盘」判定，运行中改写会让
+  // 恢复流程误判本轮已结束。
+  const applyStreamingUsageMeta = useCallback((tokens) => {
+    const usage = metaUsageFromStepTokens(tokens)
+    if (!usage) return
+    setMeta((previous) => {
+      const cachedRate =
+        usage.inputTokens > 0
+          ? usage.cachedInputTokens / usage.inputTokens
+          : previous?.cachedRate || 0
+      return { ...(previous || {}), lastUsage: usage, cachedRate }
+    })
+  }, [])
+
   const applyCompactMeta = useCallback((result) => {
     const totalTokens = Number(result?.afterTokenEstimate) || 0
     if (totalTokens <= 0 && !result?.contextWindowSize) return
@@ -2013,6 +2033,10 @@ export function ChatView({
           // 只提示，不改变运行状态，turn 继续。
           if (event.text) appendNotice(event.text, event.variant || 'info')
           break
+        case 'usage':
+          // 实时用量（每次模型请求后到达）：只刷新状态栏数字，不改变 turn 状态。
+          if (event.tokens) applyStreamingUsageMeta(event.tokens)
+          break
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
@@ -2099,6 +2123,7 @@ export function ChatView({
       nodeIdRef,
       onSessionBoundRef,
       applyLiveUsageMeta,
+      applyStreamingUsageMeta,
       refreshMetaSoon,
       updateMessages,
       setBackgroundTasks,
@@ -3516,6 +3541,7 @@ export function ChatView({
       onPointerMoveCapture={trackShellPointerMove}
       onMouseUp={focusComposerFromShell}
       onContextMenu={openChatContextMenu}
+      {...longPressHandlers(openChatContextMenu)}
     >
       <div
         ref={listRef}
@@ -3643,13 +3669,15 @@ export function ChatView({
               setInput(nextValue)
             }}
             onPaste={(event) => {
-              const hasImage = Array.from(event.clipboardData?.items ?? []).some((item) =>
+              const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) =>
                 item.type.startsWith('image/')
               )
-              if (!hasImage) return
+              if (!imageItem) return
               event.preventDefault()
+              // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
+              const file = imageItem.getAsFile?.() || null
               window.mica.chat
-                .savePastedImage()
+                .savePastedImage(window.mica.isWeb ? { file } : undefined)
                 .then((result) => {
                   const element = textareaRef.current
                   const start = element?.selectionStart ?? input.length

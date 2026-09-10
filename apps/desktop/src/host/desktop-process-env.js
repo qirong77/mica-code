@@ -208,6 +208,25 @@ export function initializeDesktopProcessPath(options = {}) {
   return nextPath
 }
 
+// Markers the Electron container injects so the runtime boots with Node semantics
+// (see src/main/index.js). They are meaningful to the runtime process itself and
+// must never reach the processes it spawns on the user's behalf.
+const CONTAINER_ENV_KEYS = ['ELECTRON_RUN_AS_NODE']
+
+/**
+ * Drop container-only markers from one process environment in place.
+ *
+ * Everything the runtime spawns (PTY terminals, `mica` chat/commit children, the
+ * login-shell env capture, the config-web worker) inherits `process.env`. If
+ * `ELECTRON_RUN_AS_NODE` survives, a user shell running `electron` (e.g.
+ * `electron-vite dev`) starts as plain Node there: `require('electron')` yields the
+ * executable path instead of the API, so `electron.app.isPackaged` throws.
+ */
+export function stripContainerEnv(env = process.env) {
+  for (const key of CONTAINER_ENV_KEYS) delete env[key]
+  return env
+}
+
 function platformPathKey(env) {
   const hasUppercasePath = Object.prototype.hasOwnProperty.call(env, 'PATH')
   const hasWindowsPath = Object.prototype.hasOwnProperty.call(env, 'Path')

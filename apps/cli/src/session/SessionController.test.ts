@@ -275,6 +275,69 @@ describe('SessionController', () => {
     expect(persisted.updatedAt).toBe('2026-07-20T02:00:00.000Z');
   });
 
+  it('keeps the post-compact context figure until a newer usage record replaces it', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const compactedAt = '2026-08-01T10:00:00.000Z';
+    const usage = {
+      provider: 'openai',
+      turnId: 1,
+      requestIndex: 0,
+      messageCount: 1,
+      inputTokens: 200_000,
+      outputTokens: 100,
+      totalTokens: 200_100,
+      paidTokenRate: 0,
+      occurredAt: '2026-08-01T09:00:00.000Z',
+    };
+    let lastUsage = usage;
+    const saved: PersistedSession[] = [];
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: 'openai',
+          protocol: 'openai_chat_completions',
+          model: 'test-model',
+          effort: 'none',
+          role: 'default',
+          messages: [{ role: 'user', content: 'my prompt' }],
+          usageHistory: [usage],
+          lastUsage,
+        }),
+      ),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'my prompt' }]),
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        load: () => saved.at(-1) ?? null,
+        save: (session) => {
+          saved.push(session);
+        },
+        delete: () => false,
+      },
+      config: { apply: vi.fn() },
+      ui: { restore: vi.fn() },
+    });
+
+    controller.saveCurrent({ displayUsage: { totalTokens: 20_000, compactedAt } });
+    expect(saved.at(-1)?.snapshot.displayUsage).toEqual({ totalTokens: 20_000, compactedAt });
+    // 压缩不改变对账口径：真实用量记录原样保留
+    expect(saved.at(-1)?.snapshot.lastUsage).toEqual(usage);
+
+    // 之后再存（没有新的真实请求）：压缩后的展示值继续生效
+    controller.saveCurrent();
+    expect(saved.at(-1)?.snapshot.displayUsage).toEqual({ totalTokens: 20_000, compactedAt });
+
+    // 下一次真实请求产生了更晚的用量 → 丢弃展示值
+    lastUsage = { ...usage, occurredAt: '2026-08-01T11:00:00.000Z' };
+    controller.saveCurrent();
+    expect(saved.at(-1)?.snapshot.displayUsage).toBeUndefined();
+  });
+
   it('keeps saving when another process rewrote the session file (no permanent skip)', async () => {
     const { SessionController } = await import('./SessionController.js');
     let disk: PersistedSession | null = null;

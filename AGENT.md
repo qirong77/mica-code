@@ -27,9 +27,13 @@ bun run format
 
 局部验证：`bunx tsc --noEmit`、`bun run test -- <测试文件>`、`git diff --check`。
 
+`apps/desktop` 用 npm（在 `apps/desktop/` 内执行）：`npm run dev`/`npm test`（bun test）/
+`npm run build`（外壳 + 运行时）/ `npm run start:web`（只跑运行时供浏览器访问，见下文
+「apps/desktop 的架构」）。改动 desktop 后至少跑 `npx eslint src/` 与 `npm test`。
+
 ## 源码结构
 
-- `apps/`：`cli/`（主应用：装配、turn loop、headless、sync daemon）、`desktop/`（Electron）、`config-web/`（本地配置 Web）、`sync/server/`（中心聚合服务，零依赖 Node 单文件）、`sync/web/`（控制台）、`website/`（官网 Astro）。
+- `apps/`：`cli/`（主应用：装配、turn loop、headless）、`desktop/`（Web 运行时 + Electron 容器，见下文）、`config-web/`（本地配置 Web）、`website/`（官网 Astro）。
 - `packages/`：
   - `mica-agent`：agent 抽象、provider adapter、prompt 构建
   - `mica-tools`：唯一工具 registry（内置工具 + MCP 工具接入）
@@ -39,7 +43,7 @@ bun run format
   - `mica-commands`：通用命令机制；`mica-builtin-commands`：产品命令
   - `mica-skills`：skills 扫描解析缓存；`mica-plugin`：插件机制；`mica-common`：跨包底层工具（图片识别）
   - `mica-pty`：PTY 测试驱动 + 内置 PTY 工具 Node helper（node-pty 只在 Node 子进程加载）
-  - `mica-sync-protocol`：sync 三端 wire 类型；`mica-web-shared`：sync web 与 desktop 共用展示纯函数
+  - `mica-web-shared`：desktop renderer 与运行时共用的展示纯函数
 - `packages/mica-builtin-commands/`：产品命令与全部内置插件——`commands/` 命令实现、`plugins/` 运行期插件装配（Todo、MCP、message queue、文件 mention、`command-*.ts`、session-autonomy、context-pressure、loop）、`startup/` 启动扩展（validate-config、process-diagnostics、file-plugins、model-effort-context）；运行期插件与启动扩展统一从 `index.ts` 导出。`config-web-worker` 因依赖 `apps/config-web` 保留在 `apps/cli/src/app/configWebWorker.ts`。
 - `temp/`（git 忽略）与 `.backups/` 不属默认源码、测试、格式化、构建或搜索范围。
 
@@ -57,7 +61,7 @@ bun run format
 2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 `--version`/`models`/headless `exec`/`commit`/`compact` 与交互模式；`packages/mica-builtin-commands/startup/validate-config.js` 补齐向后兼容的配置默认值。
 3. `Application.start()` 启动 Ink UI → 完整配置校验 → `ensureInitialModelSelection()`（仅 `get_model_url` 动态 provider 且顶层 model 为空时）。
 4. 创建 AgentRuntime、SessionController、CommandRegistry、HookRegistry、ServiceContainer、PluginManager、TerminalAgentSessionManager、LocalRuntimeController、MicaUiRuntimeBridge、SubagentTaskManager；当前 agent 经 `micaTools.registerRuntime(new ToolAgent(agent, subagentTasks))` 注册运行时工具上下文。
-5. `setActiveContext` 暴露 ApplicationContext；`useBuiltinPlugins()` 注册 command host 与内置插件（MCP 随 runtime start/stop 建连）；`$MICA_HOME/plugins` 用户插件 `setupAll` 并写 `plugin-status.json`；最后 `uiBridge.start()`、`runtime.start()`。交互模式还会 fire-and-forget `ensureDaemonRunning()` 后台拉起 sync daemon（见 Mica Sync 远程会话同步）。
+5. `setActiveContext` 暴露 ApplicationContext；`useBuiltinPlugins()` 注册 command host 与内置插件（MCP 随 runtime start/stop 建连）；`$MICA_HOME/plugins` 用户插件 `setupAll` 并写 `plugin-status.json`；最后 `uiBridge.start()`、`runtime.start()`。
 6. 启动失败：UI 提示修复配置后重启，`unregisterRuntime('Agent')`、清理插件与 session、`process.exitCode = 1`。插件 setup 期间 `ctx.onDispose()` 登记的资源在失败时逆序回滚；新增 capability 必须同步登记 disposer。
 
 ## Active Context 约定
@@ -90,9 +94,9 @@ bun run format
 
 - `packages/mica-config` 是配置与本地状态的唯一入口，UI/commands/runtime/adapter 不自己读写路径。默认 `~/.{config.json,storage.json,sessions}` 的目录名由构建期 `MICA_CONFIG_DIR_NAME`（默认 `.mica`，来自根 `mica.build.env`，经 `packages/mica-config/brand.ts` 暴露为 `CONFIG_DIR_NAME`）决定；`MICA_HOME` 显式设置时全部跟随 `MICA_HOME`，否则走品牌化默认目录（`brand.ts` 的 `resolveMicaHome`/`resolveMicaHomePath`）。测试和临时 repro 用临时 `MICA_HOME`，不污染真实目录。
 - `PersistedMicaConfig` 只存静态字段（providers 等）；顶层 `provider`/`model`/`effort`/`contextWindowSize` 是运行时合成字段，经 `stripRuntimeFields` 去掉不写回 config.json。协议只支持 chat_completions/responses；启动迁移与语义校验统一在 `packages/mica-builtin-commands/startup/validate-config.js`（配置 Web 保存也复用），不要在别处另建校验规则。
-- session 文件是 version 1 JSON（id/title/createdAt/updatedAt/cwd/snapshot）；snapshot 含 providerId/model/effort/role/history/conversationMessages/usage。`subagentUsageHistory` 必须独立存放（相对子 agent 自身消息数组，不能混入主 usageHistory，否则破坏 rewind 裁剪语义）。新增字段必须有版本策略、默认值和 sanitize/parse。
+- session 文件是 version 1 JSON（id/title/createdAt/updatedAt/cwd/snapshot）；snapshot 含 providerId/model/effort/role/history/conversationMessages/usage。`subagentUsageHistory` 必须独立存放（相对子 agent 自身消息数组，不能混入主 usageHistory，否则破坏 rewind 裁剪语义）。`displayUsage`（`{totalTokens, compactedAt}`，`SessionController.resolveDisplayUsage` 维护）是 compact 后的**展示用**上下文占用：compact 刻意保留 `lastUsage`/`usageHistory` 作为 Stats 对账口径，所以界面上的 ctx 必须读它，否则压缩后一切换/重载就回退成压缩前的值；下一次真实请求（`lastUsage.occurredAt` 更晚）时自动丢弃。新增字段必须有版本策略、默认值和 sanitize/parse。
 - 派生标题（无 `/rename` 手动标题时）取**最后一条真实用户消息**（`SessionController.deriveTitle`，超长截断 60 字符）；compact 元数据按前缀跳过，插件注入消息（`submitAgentSessionInput` 带 `displayText`，如 context-pressure 提醒）按 `displayContent` 与 `content` 文本不一致跳过——它们不是用户输入，不得成为标题。`/agents` 列表标题（`apps/cli/src/agents/terminalAgentSessions.ts`）用同一规则，占位符是 `New session`。
-- `SessionStore.list`/`listRecent` 通过 `$MICA_HOME/session-index.json`（session 元数据索引，放 MICA_HOME 根而非 `sessions/` 内，避免被 config-web/sync 的 session 目录扫描误识别）快速列出，不再逐个 `JSON.parse` session；索引由 `save`/`delete` 同步维护。写入（save/delete）都以「磁盘最新索引」为 base **廉价合并**后落盘（只读索引文件、不重扫会话），避免多进程（交互/headless/sync daemon）用陈旧内存缓存覆盖彼此 entry，也避免在大会话目录下每个 turn 的多次 save 反复全量读取所有 session 文件；读取时校验索引 id 集合与 `sessions/*.json` 一致，不一致（另一进程新增/删除，或索引被覆盖丢 entry）则**重建并立即持久化**拯救。重建结果始终落盘（不只在首次构建），使不完整索引自愈，后续读取不再重复重扫。它只是可随时重建的缓存，不作为事实来源；`/cd` 取最近 cwd 上限 100，`/resume` 仍可读全量索引。
+- `SessionStore.list`/`listRecent` 通过 `$MICA_HOME/session-index.json`（session 元数据索引，放 MICA_HOME 根而非 `sessions/` 内，避免被 config-web 的 session 目录扫描误识别）快速列出，不再逐个 `JSON.parse` session；索引由 `save`/`delete` 同步维护。写入（save/delete）都以「磁盘最新索引」为 base **廉价合并**后落盘（只读索引文件、不重扫会话），避免多进程（交互/headless/桌面运行时）用陈旧内存缓存覆盖彼此 entry，也避免在大会话目录下每个 turn 的多次 save 反复全量读取所有 session 文件；读取时校验索引 id 集合与 `sessions/*.json` 一致，不一致（另一进程新增/删除，或索引被覆盖丢 entry）则**重建并立即持久化**拯救。重建结果始终落盘（不只在首次构建），使不完整索引自愈，后续读取不再重复重扫。它只是可随时重建的缓存，不作为事实来源；`/cd` 取最近 cwd 上限 100，`/resume` 仍可读全量索引。
 - `SessionStore` 把「无 user/assistant 对话、无 usage、仅默认标题 `Untitled session`」的 session 视为垃圾（来自 `saveCurrent({ allowEmpty: true })` 的 turn 启动占位，进程异常退出后残留），`list`/`listRecent` 不展示；重建索引时删除 `turnState !== 'running'` 的垃圾文件。`turnState === 'running'` 的垃圾（可能有活跃 turn 正在写）**保留文件并被索引**（避免磁盘 id 集合与索引不一致导致每次读取都触发全量重扫），但 `list`/`listRecent` 仍通过 `isJunkSummary` 隐藏它，不占用 /resume 列表。
 - `SessionController.saveCurrent` 用持久化签名检测"另一进程写盘"，签名不匹配时**降级写盘**（revision+1、以内存快照为准）而不是永久跳过，否则 headless host 后续 turn 不落盘；`refreshFromStore` 会在下次刷新收敛。
 - turn lease 是 `sessions/.turn-locks/<id>.lock` 的 `wx` 文件锁，回收靠 owner pid 存活判定（`process.kill(pid, 0)`）。进程异常退出留下的孤儿锁会在下次 acquire 时随 pid 死亡回收；`SessionStore.delete` 会同步清理对应 turn-lock（session 文件已不存在也清孤儿锁），避免孤儿锁阻塞后续 continue/resume 并误报「正在另一个终端运行」。pid 被系统复用时无法只凭存活判定回收，属已知边界。
@@ -107,7 +111,7 @@ bun run format
 ## Headless 执行与 app-server
 
 - `apps/cli/src/runtime/HeadlessTurnExecutor.ts` 是无 UI turn 执行核心（单槽队列、发布 turn:start/finish/retrying/queued/dequeue 等事件、不触碰 Ink/UI）。**每个 turn 必须发 `turn:finish`（completed/aborted/error 三态之一）**，不要在 `runTurn` 里静默 return；**每个 turn 开始前先 `sessionController.refreshFromStore()` 再 `reserveRunId()`**，顺序颠倒会把本轮误判为 abort；重试策略与交互式 runtime 一致（见 Runtime Turn Loop 的 Retry 条目）。
-- **headless 也跑内置插件**：`apps/cli/src/headless/HeadlessPluginHost.ts` 是 headless 版插件装配层，`runExec`/`runAppServer`/sync `CommandExecutor` 三个入口统一用它。**新增插件若 headless 也应具备，必须同步注册到 HeadlessPluginHost**，否则 headless 与 TUI 能力分叉。与 TUI 的刻意差异只在无等价物处：MCP 不注册插件（headless 手工参数化 `micaMcp.init`，支持 `--mcp-config`/`--strict-mcp-config`/`--mcp-init-timeout-ms`），file-mention、命令插件、用户文件插件不注册（无输入框/UI）。`attachPluginLayer()` 必须同时替换内部 queue（插件 enqueue 到 host.queue、loop 从 executor.queue dequeue，两个实例会卡死排队输入）。
+- **headless 也跑内置插件**：`apps/cli/src/headless/HeadlessPluginHost.ts` 是 headless 版插件装配层，`runExec`/`runAppServer` 两个入口统一用它。**新增插件若 headless 也应具备，必须同步注册到 HeadlessPluginHost**，否则 headless 与 TUI 能力分叉。与 TUI 的刻意差异只在无等价物处：MCP 不注册插件（headless 手工参数化 `micaMcp.init`，支持 `--mcp-config`/`--strict-mcp-config`/`--mcp-init-timeout-ms`），file-mention、命令插件、用户文件插件不注册（无输入框/UI）。`attachPluginLayer()` 必须同时替换内部 queue（插件 enqueue 到 host.queue、loop 从 executor.queue dequeue，两个实例会卡死排队输入）。
 - `mica app-server` 是**每会话常驻进程**：stdin 读 Codex v2 协议（`initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt`，每行一个 JSON），stdout 写 v2 通知；持有 AgentRuntime + SessionController + MCP + HeadlessTurnExecutor 直到会话关闭。**不要改成全局单 daemon**。协议实现在 `packages/mica-runtime/codexProtocol.ts`（framing/编解码）+ `apps/cli/src/runtime/CodexProjector.ts`（事件→v2 通知投影，`commandExecution` 带 `displayText`）。Mica 增量扩展（纯增量、对 Codex 客户端无害）：`mica/queue/*`、`mica/backgroundTasks/updated`、`mica/subagentTasks/updated`、`mica/sessionHistory/replaced` 三类通知，mica-code-app 直接送渲染层不进 turn 事件缓冲。
 - **每个 executor turn 都必须有完整的 `turn/started` + `turn/completed`**（turnId 由 executor 的 `turn:start` 事件分配，`turn/start` 请求不再预分配；每轮 attach 新 projector 使 delta 归属本轮）。这覆盖 host 自己从队列 drain 出来的轮次（插件 `after_turn` 输入、abort 后的残留队列）——漏发会让客户端停在 idle、无法中断且下一条 `turn/start` 被 "A turn is already active" 拒绝。
 - 容错约定：`--session` resume 失败、`--dir` chdir 失败、MCP 初始化失败都**降级继续**，不退出进程；但只有 resume 失败发 Codex `error`（客户端的 thread 假设已被破坏），`--dir`/MCP 初始化失败/游离 `unhandledRejection` 一律发 `warning`（非致命，客户端不得据此结束 run；mica-code-app 映射成 `notice` 事件）。进程注册 `unhandledRejection`（记录+warning、不退出）与 `uncaughtException`（error 通知后退出）兜底；`exit(code)` 前先 flush stdout/stderr。
@@ -137,8 +141,26 @@ bun run format
 - `TerminalAgentSessionManager` 为每个 agent 保存独立 UI snapshot（conversationMessages、responseText、pendingInputs、thinkingText、workingStatus、contextSize 等），多 agent 切换时从 uiState 恢复，不要从 active agent 或 provider history 临时拼装。UI hot path 有截断上限。
 - Ink stdin 在 `parse-keypress.ts` 解析前必须保持原始 Buffer（该层负责增量 UTF-8 解码和 DEC 8-bit C1 规范化）；不要在 `App.tsx` 提前调用 `stdin.setEncoding('utf8')`。
 - 输入框（`SimpleTextInput`/`buildTextHandler`）支持编辑撤销/重做：`Ctrl+Z`/`Cmd+Z` 撤销、`Cmd+Shift+Z`/`Ctrl+Y`（终端尽力支持的 `Ctrl+Shift+Z`）重做；历史按「编辑前快照」逐字符记录于 `MinimalEditHistory`，新编辑清空 redo 栈，历史栈在组件 ref 中跨渲染存活。
-- `mica-code-app` 是终端风格 Web 渲染（等宽字体、紧凑行高、主文本共享 `--chat-text-size`，不在局部硬编码字号）。桌面进程不经过 shell：`desktop-process-env.js` 追加用户工具目录（不插到 PATH 前面），`shell-env.js` 采集 profile env 并缓存（超时静默跳过），供 chat/commit/models/compact 子进程 spawn 合并。
-- `apps/desktop` 的 chat host（`src/main/chat.js`）对 app-server 的**请求级错误**（`turn/start`/`turn/steer` 被拒）必须走 `chat:queue-error` 撤回乐观消息并恢复输入草稿，不能只发 `error` 事件（否则消息看似已发、运行态卡住）。队列展示只有一个事实来源：`src/main/chat-queue.js` 的 `mergeQueuedItems(id, hostPending, localItems)`（host 侧 after_iteration 在前、标 `pending` 不可撤回），`chat:start` 的单槽判定、`chat:queue-state`、`chat:exit`、`chat:recall-queued`、`chat:is-running` 都必须用它——漏掉 host 侧 `hostPending` 会让第二次输入被 host 以「已有一条排队消息」拒绝，或切走再切回后等待中的消息消失。`src/main/chat-events.js` 解析 `commandExecution.command` 必须按**第一个空格**切分（host 侧格式是 `name + ' ' + JSON.stringify(args)`）；`split(/\s+/)` + `join(' ')` 会压掉 JSON 字符串里的连续空格、静默改坏工具入参。常驻 host 的恢复重放缓冲 `run.events` 与 `run.prompt` 必须在每次 `sendTurnStart` 时按轮重置（只描述本轮）；`ChatView` 恢复时先用 `historyBeforeRunReplay` 裁到本轮用户消息边界再重放——磁盘中间 checkpoint 与完成保存已把本轮回答写进 `conversationMessages`，不裁就重放会把同一条消息渲染两遍。
+- `mica-code-app` 是终端风格 Web 渲染（等宽字体、紧凑行高、主文本共享 `--chat-text-size`，不在局部硬编码字号）。运行时进程不经过 shell：`desktop-process-env.js` 追加用户工具目录（不插到 PATH 前面），`shell-env.js` 采集 profile env 并缓存（超时静默跳过），供 chat/commit/models/compact 子进程 spawn 合并。
+- `apps/desktop` 的 chat host（`src/host/chat.js`）对 app-server 的**请求级错误**（`turn/start`/`turn/steer` 被拒）必须走 `chat:queue-error` 撤回乐观消息并恢复输入草稿，不能只发 `error` 事件（否则消息看似已发、运行态卡住）。队列展示只有一个事实来源：`src/host/chat-queue.js` 的 `mergeQueuedItems(id, hostPending, localItems)`（host 侧 after_iteration 在前、标 `pending` 不可撤回），`chat:start` 的单槽判定、`chat:queue-state`、`chat:exit`、`chat:recall-queued`、`chat:is-running` 都必须用它——漏掉 host 侧 `hostPending` 会让第二次输入被 host 以「已有一条排队消息」拒绝，或切走再切回后等待中的消息消失。`src/host/chat-events.js` 解析 `commandExecution.command` 必须按**第一个空格**切分（host 侧格式是 `name + ' ' + JSON.stringify(args)`）；`split(/\s+/)` + `join(' ')` 会压掉 JSON 字符串里的连续空格、静默改坏工具入参。常驻 host 的恢复重放缓冲 `run.events` 与 `run.prompt` 必须在每次 `sendTurnStart` 时按轮重置（只描述本轮）；`ChatView` 恢复时先用 `historyBeforeRunReplay` 裁到本轮用户消息边界再重放——磁盘中间 checkpoint 与完成保存已把本轮回答写进 `conversationMessages`，不裁就重放会把同一条消息渲染两遍。`thread/tokenUsage/updated` 必须**每次模型请求后立即转发**给渲染层（不能只攒到 `turn/completed` 的 `step_finish`），否则长 turn（大量工具迭代/长流式输出）期间输入框状态栏的 tokens/cached/ctx 不刷新；状态栏的 tokens/cached/ctx 必须取 `tokenUsage.last`（最近一次请求=当前上下文占用，与 TUI `uiState.contextSize` 同源），不能用 projector 的 turn 级累加 `total`（多迭代 turn 会显示成累加值、严重偏大）。`usage` 实时事件只更新 `lastUsage`/`cachedRate`，**不得**改动 `turnState`/`updatedAt`（它们参与 `isPersistedRunComplete` 判定，运行中改写会让恢复流程误判本轮已结束）。
+
+### apps/desktop 的架构：Web 运行时 + Electron 容器
+
+应用的本体是一个 Web 页面，由 `src/server/` 的运行时托管；Electron 只是它的容器，**不含业务逻辑**。这套边界不能倒过来：
+
+- `src/host/`：业务核心（terminals / chat / files / git / stats / workspace / settings / notifyServer / chat-\* 等），只跑在运行时进程里。
+- `src/server/index.js`：运行时本体。零依赖 Node HTTP 服务，托管 renderer 产物、把 host 能力暴露为 `POST /api/invoke`，推送走 `GET /api/events`（SSE），并**广播给所有客户端**（手机与桌面窗口共享同一状态）。`vite.server.config.mjs` 把 `electron` 别名到 `src/server/electron-shim.js`（`ipcMain.handle` → channel 注册表、进程内单例 `event.sender`、`app.getPath`/`shell`/`clipboard`/`dialog` 的纯 Node 实现）。
+- `src/main/index.js`：Electron 外壳。只做三件事——拉起运行时（`spawn(process.execPath, [out/server/index.mjs], { ELECTRON_RUN_AS_NODE: '1' })`，用 stdin 管道保证父进程退出时运行时跟着退）、把窗口 `loadURL` 到运行时地址、订阅 SSE 把未读数映射成 dock 徽标 / 任务栏闪烁。**不要在外壳里注册业务 IPC，也不要加回 preload**：页面里的 `window.mica` 始终由 renderer 的 transport 经 HTTP + SSE 建立，加回 preload 会让页面走 IPC 而运行时里没有对应 handler。
+- `src/renderer/`：页面。`transport.js` 是 `window.mica` 的实现（`main.jsx` 挂载前经 `ensureMicaApi()` 安装），`window.mica.isWeb` 用来分支那些只有本机窗口才成立的行为；**不要在业务组件里直接判断运行环境**，平台差异收敛在 transport 层。连不上运行时时 `main.jsx` 渲染可读提示而不是白屏。
+
+- 命令（在 `apps/desktop/` 内）：`npm run dev`（先构建运行时，再 `electron-vite dev`；页面走 Vite dev server，`electron.vite.config.mjs` 把 `/api` 代理到运行时）、`npm run build`（= `build:app` + `build:server`）、`npm start`（跑构建产物）、`npm run start:web`/`serve:web`（只跑运行时供浏览器访问）。因没有 preload 段，electron-vite 命令都带 `--ignoreConfigWarning`。
+- 运行时参数：`--host/--port/--renderer/--allow-missing-renderer` 或 `MICA_DESKTOP_{HOST,PORT,RENDERER}`，默认 `0.0.0.0:8787`；端口被占用时回退随机端口并在 stdout 打印 `[mica-desktop] ready {json}`（外壳据此拿实际地址）。`GET /api/health` 用于探活与「这个端口上是不是本应用」。`MICA_DESKTOP_EXIT_ON_STDIN_CLOSE=1` 让运行时在 stdin 关闭时退出，避免孤儿进程占着端口与 PTY。
+- 降级点（改动时勿回退）：目录选择器改应用内 `DirectoryPicker`；`files.copyPath/copyRelativePath` 在浏览器本地写剪贴板（http 局域网非 secure context，需 `execCommand` 兜底）；外链在浏览器打开；终端文件链接派发 `mica:open-file` 交 `App.jsx` 打开应用内编辑器；`settings:open` 的 URL 主机重写为 `location.hostname`，运行时以 `MICA_CONFIG_WEB_HOST=0.0.0.0` 拉起 config-web 并放宽 `frame-src`（配置页 iframe 里的 127.0.0.1 会指向客户端自己）；窗口聚焦/可见由 `document.visibilityState` + focus/blur 推导。
+- `MICA_DESKTOP_USER_DATA`（外壳传 `app.getPath('userData')`）与 shim 的默认值必须解析到同一个 `mica-code-app` 目录，否则 workspace/file-order/session-pins 在两套运行方式之间不共享。
+- 容器注入的 `ELECTRON_RUN_AS_NODE` 只对运行时进程自身有意义，**绝不能外泄**：`startDesktopServer()` 一进来就调 `stripContainerEnv()`（`src/host/desktop-process-env.js`）把它从 `process.env` 摘掉，之后派生的 PTY 终端、`mica` chat/commit 子进程、shell env 采样、config-web worker 才不会继承它。泄漏后果是用户在自己的终端里跑 `electron`（例如 `electron-vite dev`）会被当成纯 Node 启动——`require('electron')` 只拿到可执行文件路径，`electron.app.isPackaged` 直接抛 `Cannot read properties of undefined`。改动启动顺序或新增 spawn 点时，保持 `stripContainerEnv()` 在所有派生之前。
+- 移动端：< 768px 时 shell 由三栏网格切为单栏 + 抽屉（会话列表、右侧面板），Files 面板在目录树与编辑器之间切换（带返回按钮），右键菜单配 `longPressHandlers` 触屏长按等价（该 helper 对鼠标指针直接跳过，不影响桌面）。`?layout=mobile` / `?layout=desktop` 可强制布局用于预览。
+- 会话行的终端标记：右侧面板终端不在 `nodes` 里，创建时把当前会话 id 记进 `rightTerms` 条目（`App.jsx` 的 `createRightTerm`），`sessionsWithRunningTerminal` 再用 notify 状态里的 `processRunning`（`serializeStates` 必须同时透出 `agentRunning`/`processRunning`，`running` 是二者合并值、分不出终端）映射回左侧会话行，行首显示高亮终端图标。`processRunning` 由 `terminals.js` 的前台进程轮询（≥1.2s 才算，仅 macOS/Linux）经 notify server 上报。该标记与未读圆点共用 `SessionTree.jsx` 行首那个固定 `w-4` 的状态位（`RowLeading`）：终端图标优先、同时未读时把圆点绝对定位叠在图标右上角，**不要另起一个 flex 兄弟节点**，否则这一行会比相邻行多占「图标宽 + gap」（22px）、标题缩进对不齐。
+- 运行时**无认证**：能连上端口就等于拿到宿主 shell。默认绑定 `127.0.0.1` 之外必须在文档中显式提示风险（当前默认 `0.0.0.0` 是产品决定，改动时同步 README）。
 
 ## 多 Agent、Session、Rewind、Compact
 
@@ -147,15 +169,6 @@ bun run format
 - subagent 默认按 `context_mode`（none|brief|recent|files）注入 `<delegated-context>`，默认 `brief` 不继承完整历史；可写 subagent 用 `owned_paths` 路径租约（Implementer/Tester/Proposal 必填），写工具与 run_shell cwd 校验所有权；`maxTurns` 必须传到 provider query loop；未知 subagent_type 报错不得静默降级。内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal。
 - `RewindCheckpointManager` turn 前创建对话和文件 checkpoint，保留"用户输入之前"的状态。`packages/mica-context` 提供 `CompactionService`，compact 结果经 runtime/session 层接入，provider adapter 不直接感知 compact 策略。
 - compact 可裁剪 tool result、媒体和 base64，**绝不能把 tool-call `arguments` 截成自由文本**（过长或损坏参数必须改写成合法 JSON 占位，否则 provider 400）；应用 checkpoint 时必须保留原 `usageHistory`/`lastUsage`（禁止清零，否则 Stats 对账缺口）。compact/review/commit 等需模型调用的命令走 subagent 或 exclusive task，不污染当前正在运行的 turn。
-
-## Mica Sync 远程会话同步
-
-`mica daemon` + `apps/sync/server` + `apps/sync/web`：所有机器上的会话镜像到一台中心服务器，浏览器实时查看并回源续聊。三端 wire 类型在 `packages/mica-sync-protocol`，改协议形状时同步检查该包与三端引用。
-
-- daemon 主动**出站**连接（register/beat 20s/poll 长轮询 ≤25s/session/events），同一时刻只执行一个 turn（busy 发 run_rejected）。配置 `~/.mica/sync.json`；交互模式 fire-and-forget `ensureDaemonRunning()` 后台拉起 daemon（pid `$MICA_HOME/daemon.pid`），`MICA_NO_DAEMON=1` 禁用。
-- 中心服务器零第三方依赖、JSON 文件存储、每会话 500 条事件缓冲、SSE 用 `since` 序号断线补拉。**无认证**：Web API 完全开放，公网部署需自行 Nginx 基本认证或防火墙。构建：`bun run build:sync-server` / `build:sync-web`（vite `base: './'`）。
-- `CommandExecutor` 复用 HeadlessTurnExecutor + **每会话常驻 host**（MCP 保持 daemon 生命周期常开），turn 前 chdir 到会话 cwd；`create` 指令构造 PersistedSession 时必须先用非空标题落盘，否则 `saveCurrent` 会因磁盘无文件拒绝写入。abort 依赖 `AgentRuntime.abort()`，不要另造中断机制。会话文件由 SessionWatcher 推送（fs.watch 在 macOS 可能丢事件，有 30s 周期 rescan 兜底）；本地与 daemon 用跨进程 turn lease + 单调 revision 防快照相互覆盖。
-- sync web 与 mica-code-app renderer 共用同一套展示词汇（终端风格、`--chat-*` 变量、消息/工具行/状态行布局），展示数据计算在 `packages/mica-web-shared`，改任何一侧展示形态时同步检查另一侧。
 
 ## 构建、安装与发布
 
@@ -177,4 +190,4 @@ bun run format
 
 - 开始修改前查看 `git status --short`；不要回滚、覆盖、格式化或删除与任务无关的用户改动；修改已有未提交改动的文件时先读清当前内容再补丁合并。不使用 `git reset --hard`、`git checkout --`、强推、批量删除；不用 `--no-verify` 过检查；不自动 commit、push、建分支或开 PR。
 - 递归搜索用 `rg` 或 `rg --files` 并排除 `temp/`、`node_modules/`、`dist/`，例如 `rg "pattern" src packages scripts docs blogs --glob '!temp/**'`；只有用户明确要求才进入这些目录。
-- 变更前检查：provider/model/effort/role 切换（busy guard、config/storage 分离、effort clamp、context size、role 回退）；provider 协议（请求参数与 history normalizer）；turn loop（queue/retry/abort/partial response/session save/hooks）；UI 状态（uiState、conversationMessages、responseText、thinkingText、workingStatus）；多 agent（active proxy、owner-aware queue、background agent、session switch）；MCP/tools（registry 清理、readOnly 标记、输出截断）；skills；session/rewind/compact（snapshot 版本、UI restore、display state 边界）；build/install（本地 dist 与已安装 mica 一致）；docs（本文件、README、package README 同步）。只要答案是"会影响"，就把文档同步作为本次交付的一部分。
+- 变更前检查：provider/model/effort/role 切换（busy guard、config/storage 分离、effort clamp、context size、role 回退）；provider 协议（请求参数与 history normalizer）；turn loop（queue/retry/abort/partial response/session save/hooks）；UI 状态（uiState、conversationMessages、responseText、thinkingText、workingStatus）；多 agent（active proxy、owner-aware queue、background agent、session switch）；MCP/tools（registry 清理、readOnly 标记、输出截断）；skills；session/rewind/compact（snapshot 版本、UI restore、display state 边界）；desktop（业务代码只能进 `src/host`，运行时与外壳的边界不倒退，本机专属 API 在 `transport.js`/`electron-shim.js` 都有降级，移动端断点与长按）；build/install（本地 dist 与已安装 mica 一致）；docs（本文件、README、package README 同步）。只要答案是"会影响"，就把文档同步作为本次交付的一部分。

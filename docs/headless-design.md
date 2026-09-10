@@ -16,7 +16,6 @@ abort, plugin hooks, session persistence):
 | -------------------------- | ------------------------------------ | -------------------------------- |
 | One-shot                   | `mica exec [--json] "<prompt>"`      | stdout text or Codex ThreadEvent |
 | Resident per-session host  | `mica app-server`                    | Codex v2 JSON-RPC over stdio    |
-| Sync daemon command host   | `CommandExecutor`                    | Codex v2 JSON-RPC over stdio    |
 
 All three build the same `HeadlessTurnExecutor` and attach the same
 `HeadlessPluginHost`; the only differences are the output protocol and how
@@ -27,7 +26,7 @@ stdin/input arrives.
 `apps/cli/src/runtime/HeadlessTurnExecutor.ts` is the UI-agnostic turn loop. It
 owns the message queue and turn lifecycle, and never touches Ink/UI or an output
 protocol — streamed text/tool/usage events are surfaced on the consumer side
-(`CodexProjector`, sync-event mapping, or the last text result).
+(`CodexProjector`, a caller's event sink, or the last text result).
 
 Key behaviors that mirror the interactive `LocalRuntimeController`:
 
@@ -177,7 +176,7 @@ or a replaced session history. Mica adds these as **incremental extensions**
   the runtime loads via `ensureChatHostModelRule` / `ensureHeadlessModelRule`.
   Headless mode logs a missing metadata error to **stderr** and falls back to the
   generic rule — it never pollutes protocol stdout.
-- A daemon-selected model/effort is a session-local override and does not change
+- A headless-selected model/effort is a session-local override and does not change
   Mica's persisted last-used preference (`SessionController` config `apply()`
   is a no-op in headless mode). `--model`/`--variant` are merged by
   `resolveRuntimeConfigOverride` and take priority over the session snapshot on
@@ -197,7 +196,7 @@ recognizes the shared global roots `~/.agents/skills` and `~/.config/deveco/skil
 - `mica exec --json` has no reasoning event by default; pass `--thinking` to
   project `reasoning` items.
 - Mica runs tools autonomously; `--dangerously-skip-permissions` acknowledges
-  the daemon policy but does not switch a separate permission engine. The
+  the policy but does not switch a separate permission engine. The
   app-server advertises `approvalPolicy=never` / `sandboxPolicy=dangerFullAccess`
   and warns when a client requests a different policy it cannot enforce.
 - `codex exec` flags not implemented: `--sandbox <mode>`, `--full-auto`,

@@ -24,7 +24,6 @@ import {
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { resolveConfigWebAdvertisedUrl, resolveConfigWebBindHost } from './publicUrl.js';
-import { getSyncDetails, writeSyncConfig } from './syncDetails.js';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -229,23 +228,6 @@ async function handleApiRequest(
     }
   }
   if (url.pathname === '/api/details/roles') return json(getRolesDetails());
-  if (url.pathname === '/api/details/sync') return json(await getSyncDetails());
-
-  if (url.pathname === '/api/files/sync') {
-    try {
-      if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
-      const body = (await request.json()) as { serverUrl?: unknown; name?: unknown };
-      if (typeof body.serverUrl !== 'string' || !body.serverUrl.trim()) {
-        return json({ error: 'serverUrl is required' }, 400);
-      }
-      if (body.name !== undefined && typeof body.name !== 'string') {
-        return json({ error: 'name must be string' }, 400);
-      }
-      return json(await writeSyncConfig(body.serverUrl, body.name ?? undefined));
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-  }
 
   if (url.pathname === '/api/files/session') {
     try {

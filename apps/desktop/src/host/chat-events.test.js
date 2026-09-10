@@ -331,7 +331,7 @@ describe('chat CLI arguments', () => {
     })
   })
 
-  it('builds step_finish tokens from the cumulative codex usage', () => {
+  it('builds status-line tokens from the latest request, not the turn total', () => {
     expect(
       tokensFromCodexUsage({
         total: {
@@ -352,11 +352,28 @@ describe('chat CLI arguments', () => {
         }
       })
     ).toEqual({
+      total: 10,
+      input: 4,
+      output: 6,
+      reasoning: 1,
+      cache: { read: 2, write: 3 }
+    })
+    // 回退：没有 last 时仍用 total（单次请求或旧协议）。
+    expect(
+      tokensFromCodexUsage({
+        total: {
+          total_tokens: 100,
+          input_tokens: 40,
+          cached_input_tokens: 20,
+          output_tokens: 60
+        }
+      })
+    ).toEqual({
       total: 100,
       input: 40,
       output: 60,
-      reasoning: 10,
-      cache: { read: 20, write: 5 }
+      reasoning: 0,
+      cache: { read: 20, write: 0 }
     })
     expect(tokensFromCodexUsage(null)).toEqual({
       total: 0,

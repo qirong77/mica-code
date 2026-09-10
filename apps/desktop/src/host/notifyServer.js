@@ -229,6 +229,10 @@ function serializeStates(states) {
     terminalId: item.terminalId,
     unread: !!item.unread,
     running: !!item.running,
+    // 分项保留：会话树用 processRunning 单独标出「这个会话的终端在跑」，
+    // running 是二者的合并值，无法区分是 Mica turn 还是终端前台进程。
+    agentRunning: !!item.agentRunning,
+    processRunning: !!item.processRunning,
     lastType: item.lastType ?? null,
     lastEventAt: item.lastEventAt ?? null,
     summary: item.summary,

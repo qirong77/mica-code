@@ -11,6 +11,7 @@ export const micaSession = {
 
 export type {
   PersistedRuntimeSnapshot,
+  PersistedSnapshotDisplayUsage,
   PersistedSession,
   PersistedSessionTurnState,
   SessionStoreLike,

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildDesktopPath, initializeDesktopProcessPath } from './desktop-process-env'
+import {
+  buildDesktopPath,
+  initializeDesktopProcessPath,
+  stripContainerEnv
+} from './desktop-process-env'
 
 const temporaryDirectories = []
 
@@ -182,5 +186,24 @@ describe('desktop process PATH', () => {
     })
 
     expect(env).toEqual({ Path: `C:\\Windows\\System32;${localBin}` })
+  })
+})
+
+describe('container env hygiene', () => {
+  test('drops the container marker while keeping the rest of the environment', () => {
+    const env = { ELECTRON_RUN_AS_NODE: '1', PATH: '/bin', SHELL: '/bin/zsh' }
+
+    stripContainerEnv(env)
+
+    expect(env).toEqual({ PATH: '/bin', SHELL: '/bin/zsh' })
+  })
+
+  test('is idempotent and safe on an environment without the marker', () => {
+    const env = { PATH: '/bin' }
+
+    stripContainerEnv(env)
+    stripContainerEnv(env)
+
+    expect(env).toEqual({ PATH: '/bin' })
   })
 })

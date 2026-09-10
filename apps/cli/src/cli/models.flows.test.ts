@@ -37,7 +37,7 @@ function runCli(args: string[], micaHome: string) {
     [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), ...args],
     {
       cwd: ROOT,
-      env: { ...process.env, MICA_HOME: micaHome, MICA_NO_DAEMON: '1' },
+      env: { ...process.env, MICA_HOME: micaHome },
       encoding: 'utf-8',
       timeout: 30_000,
     },

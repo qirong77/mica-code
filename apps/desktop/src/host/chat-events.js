@@ -279,19 +279,22 @@ export function codexTurnStatusToReason(status) {
 }
 
 export function tokensFromCodexUsage(tokenUsage) {
-  // CodexProjector emits cumulative `total` plus the per-record `last`.
-  // The old run-JSON protocol reported accumulated usage, so surface `total`
-  // to keep context/cached figures matching the pre-codex UI.
-  const total = tokenUsage?.total || tokenUsage?.last
-  if (!total) return { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  // CodexProjector emits the per-request `last` plus a `total` accumulated over
+  // every model request in one turn (the projector is rebuilt per turn). The
+  // status line's tokens/cached/ctx describe current context occupancy, which is
+  // the latest request, so `last` is the right source: `total` sums up every
+  // tool iteration and inflates long multi-iteration turns. The TUI reports
+  // uiState.contextSize from that same single record.
+  const usage = tokenUsage?.last || tokenUsage?.total
+  if (!usage) return { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
   return {
-    total: total.total_tokens || 0,
-    input: total.input_tokens || 0,
-    output: total.output_tokens || 0,
-    reasoning: total.reasoning_output_tokens || 0,
+    total: usage.total_tokens || 0,
+    input: usage.input_tokens || 0,
+    output: usage.output_tokens || 0,
+    reasoning: usage.reasoning_output_tokens || 0,
     cache: {
-      read: total.cached_input_tokens || 0,
-      write: total.cache_write_input_tokens || 0
+      read: usage.cached_input_tokens || 0,
+      write: usage.cache_write_input_tokens || 0
     }
   }
 }

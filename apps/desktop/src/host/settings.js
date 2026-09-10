@@ -120,7 +120,9 @@ async function startConfigWebWorker(cliPath, previousPid) {
     env: {
       ...process.env,
       MICA_CONFIG_WEB_PERSIST: '1',
-      MICA_CONFIG_WEB_HOST: '127.0.0.1'
+      // 默认只听本机；HTTP 服务端模式下由 server 覆盖为 0.0.0.0，让配置页
+      // 也能从局域网设备以 iframe 内嵌加载（iframe 里 127.0.0.1 指向客户端自己）
+      MICA_CONFIG_WEB_HOST: process.env.MICA_CONFIG_WEB_HOST || '127.0.0.1'
     }
   })
   managedChild = child

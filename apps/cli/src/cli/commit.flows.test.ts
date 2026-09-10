@@ -196,7 +196,7 @@ function runCli(
       [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), ...args],
       {
         cwd: ROOT,
-        env: { ...process.env, ...env, MICA_NO_DAEMON: '1' },
+        env: { ...process.env, ...env },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     ) as ChildProcess;

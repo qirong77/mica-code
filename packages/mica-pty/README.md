@@ -136,15 +136,6 @@ bun run build   # 先生成 dist/mica
 MICA_PTY_SMOKE=1 npx vitest run packages/mica-pty/tests/mica.smoke.test.ts
 ```
 
-`tests/mica-sync.smoke.test.ts` 会启动隔离的 Sync Server、daemon 和本地 PTY，验证同一会话按“本地 → 远程 → 本地”交替后历史不丢失，并确认远程完成后原终端会自动显示新消息：
-
-```bash
-bun run build
-bun run build:sync-server
-MICA_PTY_SOURCE_HOME="$HOME/.mica" MICA_PTY_SYNC_SMOKE=1 \
-  npx vitest run packages/mica-pty/tests/mica-sync.smoke.test.ts
-```
-
 `tests/user-flows.smoke.test.ts` 是真实用户流套件：通过 PTY 驱动 `dist/mica` 覆盖全新配置启动、全部内置命令面板、真实模型多轮对话与文件工具、多 agent（`/new` `/fork` `/task`）、`/clear` 会话隔离、`--resume` 跨重启恢复、Shift+Tab role 切换，以及随机命令序列 + resize + 快速输入的压测：
 
 ```bash

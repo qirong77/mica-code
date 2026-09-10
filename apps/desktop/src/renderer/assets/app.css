@@ -203,6 +203,12 @@ body.is-resizing.is-resizing-terminal {
   animation: chat-running-breathe 1.8s ease-in-out infinite;
 }
 
+/* 会话行行首的终端标记：该会话有终端前台进程在跑，常亮高亮即可（不再呼吸，
+   避免与标题的 running 动画抢注意力）。 */
+.chat-terminal-active {
+  filter: drop-shadow(0 0 4px rgb(70 197 122 / 55%));
+}
+
 /* Chat keeps Mica's terminal grammar: compact gutter rows, muted activity logs,
    and a prompt/status surface anchored at the bottom. */
 .chat-view {
@@ -2428,6 +2434,47 @@ body.is-resizing.is-resizing-terminal {
   .chat-status-meta,
   .chat-composer-hint > :last-child {
     display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- 移动端 */
+
+@media (max-width: 767px) {
+  /* 手机浏览器地址栏会伸缩，100% 会露出一截；dvh 跟随可视视口 */
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+
+  body {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* 允许在抽屉/对话区滚动时不被整体回弹或下拉刷新打断 */
+  #root {
+    overscroll-behavior: none;
+  }
+
+  /* 桌面端用来拖窗口的区块在网页端没有意义，且会挡住顶栏点击 */
+  .drag-region {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  /* 触屏没有 hover：把依赖 hover 才可见的行内操作按钮改为常驻并放大点击区域 */
+  .touch-target {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  /* 终端和编辑器在窄屏上需要更大的行高才好点选 */
+  .terminal-pane .xterm {
+    font-size: 12px;
+  }
+
+  .chat-scroll {
+    -webkit-overflow-scrolling: touch;
   }
 }
 

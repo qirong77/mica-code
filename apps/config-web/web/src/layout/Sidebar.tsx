@@ -10,7 +10,6 @@ const items = [
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
   { key: 'plugins', label: 'Plugins' },
-  { key: 'sync', label: 'Sync' },
 ] satisfies Array<{ key: ConfigWebAppSection; label: string }>;
 
 type SidebarProps = {

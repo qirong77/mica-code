@@ -60,7 +60,7 @@ function spawnMica(home: string, cwd: string, tag: string, extraArgs: string[] =
     cols: 120,
     rows: 40,
     cwd,
-    env: { MICA_HOME: home, MICA_NO_DAEMON: '1' },
+    env: { MICA_HOME: home },
     logPath: `${ROOT}/${tag}.raw`,
   });
 }

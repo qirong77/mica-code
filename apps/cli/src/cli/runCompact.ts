@@ -51,7 +51,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     let sessionCwd: string | null = null;
     const sessionController = new SessionController({
       agent,
-      // Do not write daemon/headless-selected config into user-level last-used
+      // Do not write the run-selected config into user-level last-used
       // preferences while compacting; mirrors headless run.
       config: { apply() {} },
       ui: {
@@ -170,6 +170,12 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       preserveTitle: true,
       turnState: 'completed',
       conversationMessages: conversationMessages as MicaUiConversationMessage[],
+      // 压缩后的上下文占用：磁盘上的 lastUsage 仍是压缩前那次真实请求
+      // （Stats 对账口径），界面上的 ctx 需要这个值才不会回退。
+      displayUsage:
+        result.afterTokenEstimate > 0
+          ? { totalTokens: result.afterTokenEstimate, compactedAt: new Date().toISOString() }
+          : undefined,
     });
     return {
       ok: true,

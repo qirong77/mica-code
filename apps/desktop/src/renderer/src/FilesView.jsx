@@ -8,6 +8,7 @@ import {
   useState
 } from 'react'
 import {
+  IconArrowLeft,
   IconArrowUp,
   IconChevronRight,
   IconClipboard,
@@ -25,7 +26,7 @@ import {
 } from '@tabler/icons-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
 import { GitDiffEditor, GitPanel, SearchPanel } from './FileSidePanels'
-import { useLatest, usePaneWidth } from './hooks'
+import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, monaco } from './monaco'
 
 const makeNode = (entry) => ({
@@ -250,6 +251,7 @@ function FileTreeRows({
           }}
           onClick={() => (directory ? onToggle(node) : onOpen(node.path))}
           onContextMenu={(event) => onContextMenu(event, node)}
+          {...longPressHandlers((event) => onContextMenu(event, node))}
           onDragStart={(event) => onDragStart(event, node)}
           onDragEnd={onDragEnd}
           onDragOver={(event) => {
@@ -364,11 +366,7 @@ export const FilesView = forwardRef(function FilesView(
   const [siblingDrop, setSiblingDrop] = useState(null) // { path, position: 'before'|'after' }
   const [orderMap, setOrderMap] = useState({})
   const orderMapRef = useRef({})
-  const [message, setMessage] = useState({
-    text: '从左侧目录选择文件以开始编辑',
-    transient: false,
-    error: false
-  })
+  const [message, setMessage] = useState(null)
   const [activePanel, setActivePanel] = useState('explorer')
   const [gitSelectedFile, setGitSelectedFile] = useState(null)
 
@@ -593,7 +591,7 @@ export const FilesView = forwardRef(function FilesView(
         if (next) activateFile(next.path, false)
         else {
           setActivePath(null)
-          showMessage('从左侧目录选择文件以开始编辑')
+          showMessage('')
         }
       }
       return true
@@ -1047,7 +1045,7 @@ export const FilesView = forwardRef(function FilesView(
   })
   useEffect(() => {
     if (visible) requestAnimationFrame(layout)
-  }, [layout, visible, width])
+  }, [layout, visible, width, tabs.length])
 
   useEffect(() => {
     if (!activePath) return
@@ -1086,6 +1084,15 @@ export const FilesView = forwardRef(function FilesView(
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
+  // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个右侧面板
+  const hasEditorContent =
+    tabs.length > 0 ||
+    (activePanel === 'git' && !!gitSelectedFile) ||
+    (!!message && !message.transient)
+  // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树
+  const isMobile = useIsMobile()
+  const [mobileTreeVisible, setMobileTreeVisible] = useState(false)
+  const editorOpen = hasEditorContent && !(isMobile && mobileTreeVisible)
   const tabNameCounts = tabs.reduce((counts, tab) => {
     counts.set(tab.name, (counts.get(tab.name) || 0) + 1)
     return counts
@@ -1097,7 +1104,9 @@ export const FilesView = forwardRef(function FilesView(
       className={`relative min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <nav
-        className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-[#111] py-1.5"
+        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-[#111] py-1.5 ${
+          isMobile && editorOpen ? 'hidden' : 'flex'
+        }`}
         aria-label="活动栏"
       >
         {[
@@ -1122,8 +1131,10 @@ export const FilesView = forwardRef(function FilesView(
         })}
       </nav>
       <aside
-        className="flex min-h-0 shrink-0 flex-col bg-[#111]"
-        style={{ width }}
+        className={`min-h-0 flex-col bg-[#111] ${
+          isMobile && editorOpen ? 'hidden' : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
+        }`}
+        style={editorOpen && !isMobile ? { width } : undefined}
         aria-label="侧边面板"
       >
         {activePanel === 'search' ? (
@@ -1211,7 +1222,10 @@ export const FilesView = forwardRef(function FilesView(
                   siblingDrop={siblingDrop}
                   orderMap={orderMap}
                   onToggle={toggleDirectory}
-                  onOpen={openFile}
+                  onOpen={(path) => {
+                    setMobileTreeVisible(false)
+                    openFile(path)
+                  }}
                   onContextMenu={openContextMenu}
                   onDragStart={startFileDrag}
                   onDragEnd={finishFileDrag}
@@ -1241,7 +1255,7 @@ export const FilesView = forwardRef(function FilesView(
       )}
       <div
         {...separatorProps}
-        className="pane-resizer z-10 w-1.25 shrink-0"
+        className={`pane-resizer z-10 w-1.25 shrink-0 ${editorOpen && !isMobile ? '' : 'hidden'}`}
         role="separator"
         aria-label="调整文件目录宽度"
         aria-orientation="vertical"
@@ -1268,7 +1282,7 @@ export const FilesView = forwardRef(function FilesView(
       <section
         id="file-editor-panel"
         role="tabpanel"
-        className="flex min-w-0 min-h-0 flex-1 flex-col"
+        className={`min-w-0 min-h-0 flex-1 flex-col ${editorOpen ? 'flex' : 'hidden'}`}
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
         {activePanel === 'git' && gitSelectedFile ? (
@@ -1277,10 +1291,21 @@ export const FilesView = forwardRef(function FilesView(
           <>
             <div
               ref={tabListRef}
-              className="thin-scrollbar flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111]"
+              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111] ${tabs.length ? 'flex' : 'hidden'}`}
               role="tablist"
               aria-label="打开的文件"
             >
+              {isMobile && (
+                <button
+                  type="button"
+                  title="返回文件列表"
+                  aria-label="返回文件列表"
+                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-white/[.07] bg-[#111] text-white/60"
+                  onClick={() => setMobileTreeVisible(true)}
+                >
+                  <IconArrowLeft size={15} />
+                </button>
+              )}
               {tabs.map((tab) => (
                 <div
                   key={tab.path}
@@ -1335,7 +1360,13 @@ export const FilesView = forwardRef(function FilesView(
                         tabIndex={tab.path === activePath ? 0 : -1}
                         title={`关闭 ${tab.name}`}
                         aria-label={`关闭 ${tab.name}`}
-                        className={`${tab.dirty || tab.path !== activePath ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100' : ''} absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                        className={`${
+                          tab.dirty || tab.path !== activePath
+                            ? isMobile
+                              ? 'opacity-70'
+                              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+                            : ''
+                        } absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
                         onClick={(event) => {
                           event.stopPropagation()
                           closeFile(tab.path)
@@ -1367,14 +1398,10 @@ export const FilesView = forwardRef(function FilesView(
             )}
             <div className="relative min-h-0 flex-1">
               <div ref={editorHostRef} className="size-full" />
-              {message && (
+              {message && !message.transient && (
                 <div
                   role="status"
-                  className={
-                    message.transient
-                      ? `absolute bottom-3.5 right-4 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`
-                      : 'absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35'
-                  }
+                  className="absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35"
                 >
                   {message.text}
                 </div>
@@ -1383,6 +1410,14 @@ export const FilesView = forwardRef(function FilesView(
           </>
         )}
       </section>
+      {message?.transient && (
+        <div
+          role="status"
+          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`}
+        >
+          {message.text}
+        </div>
+      )}
     </section>
   )
 })

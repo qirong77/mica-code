@@ -224,9 +224,9 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().subagentUsageHistory).toEqual([]);
   });
 
-  it('applies a daemon-selected model without mutating global config and forwards maxTurns', async () => {
+  it('applies a run-selected model without mutating global config and forwards maxTurns', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
-    const agent = new AgentRuntime({ model: 'daemon-model', effort: 'high' });
+    const agent = new AgentRuntime({ model: 'run-model', effort: 'high' });
     let queryOptions: AgentQueryOptions | undefined;
     modelClient.queryImpl = async (_question, options) => {
       queryOptions = options;
@@ -236,7 +236,7 @@ describe('AgentRuntime tool status', () => {
     await agent.run('hello', { maxTurns: 4 });
     agent.configureForRun({ effort: 'low' });
 
-    expect(agent.config.model).toBe('daemon-model');
+    expect(agent.config.model).toBe('run-model');
     expect(configState?.model).toBe('test-model');
     expect(queryOptions?.maxTurns).toBe(4);
   });
