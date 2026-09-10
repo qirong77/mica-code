@@ -28,7 +28,7 @@ export function SettingsView({ visible }) {
       aria-hidden={!visible}
     >
       {snap.status === 'ready' && snap.url ? (
-        <iframe title="Mica 配置" src={snap.url} className="size-full border-0 bg-[#0e0e0e]" />
+        <iframe title="Mica 配置" src={snap.url} className="size-full border-0 bg-canvas" />
       ) : (
         <div className="grid size-full place-items-center">
           <div className="flex max-w-md flex-col items-center gap-2 px-6 text-center">

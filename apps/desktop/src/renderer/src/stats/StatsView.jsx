@@ -37,10 +37,16 @@ const MONTH_SHORT = [
   'Nov',
   'Dec'
 ]
-const CALENDAR_RAMP = ['#1e1e1e', '#525252', '#707070', '#9a9a9a', '#eaeaea']
+const CALENDAR_RAMP = [
+  'var(--color-raised)',
+  'var(--color-fg-ghost)',
+  'var(--color-fg-faint)',
+  'var(--color-fg-muted)',
+  'var(--color-fg-strong)'
+]
 
-const CARD_CLASS = 'rounded-[5px] border border-[#2a2a2a] bg-[#141414]'
-const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a8a8a]'
+const CARD_CLASS = 'rounded-[5px] border border-line bg-raised'
+const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
 function isDayRange(range) {
   return typeof range === 'object'
@@ -169,7 +175,7 @@ function KpiTile({ label, value, title, className = '' }) {
   return (
     <div className={`flex min-w-0 flex-col px-4 py-3.5 ${className}`} title={title}>
       <div className={OVERLINE_CLASS}>{label}</div>
-      <div className="mt-1.5 truncate font-mono text-base font-medium leading-tight tracking-tight text-[#eaeaea] tabular-nums">
+      <div className="mt-1.5 truncate font-mono text-base font-medium leading-tight tracking-tight text-fg-strong tabular-nums">
         {value}
       </div>
     </div>
@@ -257,7 +263,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   }, [allDays])
 
   const cellBorder = (i) =>
-    `border-[#1e1e1e] ${(i + 1) % 4 === 0 ? '' : 'border-r'} ${i < 4 ? 'border-b' : ''}`
+    `border-line-soft ${(i + 1) % 4 === 0 ? '' : 'border-r'} ${i < 4 ? 'border-b' : ''}`
 
   const byDayMap = useMemo(() => bucketByDay(sessions), [sessions])
   const calendarWeeks = calendar.calendarWeeks
@@ -339,7 +345,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           value={topModel?.model || '—'}
         />
       </div>
-      <div aria-hidden className="h-px bg-[#1e1e1e]" />
+      <div aria-hidden className="h-px bg-panel" />
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
           <h2 className={OVERLINE_CLASS}>Contributions</h2>
@@ -348,7 +354,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
             onChange={(e) =>
               calendar.onYear(e.target.value === 'trailing' ? null : Number(e.target.value))
             }
-            className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-3 py-1.5 text-xs text-[#9a9a9a]"
+            className="rounded-[4px] border border-line bg-raised px-3 py-1.5 text-xs text-fg-muted"
             aria-label="Contributions year"
           >
             <option value="trailing">Last 12 months</option>
@@ -381,25 +387,25 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           ariaLabelOf={describeDay}
           monthLabels={monthLabels}
         />
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#1e1e1e] pt-3 text-[11px] text-[#707070]">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft pt-3 text-[11px] text-fg-faint">
           <span>
             Busiest day{' '}
-            <strong className="font-medium text-[#9a9a9a]">
+            <strong className="font-medium text-fg-muted">
               {mostActive ? `${dayShort(mostActive.day)} · ${mostActive.sessions} sessions` : '—'}
             </strong>
           </span>
           <span>
             Longest streak{' '}
-            <strong className="font-medium text-[#9a9a9a]">{streaks.longest} days</strong>
+            <strong className="font-medium text-fg-muted">{streaks.longest} days</strong>
           </span>
           <span>
             Current streak{' '}
-            <strong className="font-medium text-[#9a9a9a]">{streaks.current} days</strong>
+            <strong className="font-medium text-fg-muted">{streaks.current} days</strong>
           </span>
           {topModel && totals.processedTokens > 0 && (
             <span>
               Top model share{' '}
-              <strong className="font-medium text-[#9a9a9a]">
+              <strong className="font-medium text-fg-muted">
                 {((topModel.tokens / totals.processedTokens) * 100).toFixed(1)}%
               </strong>
             </span>
@@ -453,7 +459,7 @@ function DailyCard({ sessions, range }) {
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-4 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>Tokens per day</h2>
-        <span className="text-[11px] text-[#707070]">
+        <span className="text-[11px] text-fg-faint">
           {isDayRange(range)
             ? dayShort(range.day)
             : range === 'all'
@@ -518,15 +524,15 @@ function ByModelCard({ scoped }) {
         {rows.map((r) => (
           <div key={r.model} className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="size-2 shrink-0 rounded-full bg-[#c8c8c8]" />
-              <span className="truncate font-mono text-xs text-[#eaeaea]" title={r.model}>
+              <span className="size-2 shrink-0 rounded-full bg-fg" />
+              <span className="truncate font-mono text-xs text-fg-strong" title={r.model}>
                 {r.model}
               </span>
-              <span className="ml-auto shrink-0 font-mono text-[11px] text-[#707070] tabular-nums">
+              <span className="ml-auto shrink-0 font-mono text-[11px] text-fg-faint tabular-nums">
                 {totalTokens > 0 ? `${((r.tokens / totalTokens) * 100).toFixed(1)}%` : '—'}
               </span>
             </div>
-            <div className="mt-0.5 pl-4 font-mono text-[11px] text-[#707070] tabular-nums">
+            <div className="mt-0.5 pl-4 font-mono text-[11px] text-fg-faint tabular-nums">
               {r.sessions} sessions · {r.requests} requests · {tokensShort(r.tokens)} tokens
             </div>
           </div>
@@ -571,7 +577,7 @@ function BySubagentCard({ scoped }) {
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-2 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By subagent</h2>
-        <span className="text-[11px] text-[#707070]">{rows.length} types</span>
+        <span className="text-[11px] text-fg-faint">{rows.length} types</span>
       </header>
       <div className="overflow-x-auto thin-scrollbar">
         <table className="w-full min-w-[560px] table-fixed text-[13px]">
@@ -583,7 +589,7 @@ function BySubagentCard({ scoped }) {
             <col className="w-[17%]" />
           </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-[#707070]">
+            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
               <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
                 Type
               </th>
@@ -603,18 +609,18 @@ function BySubagentCard({ scoped }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.type} className="border-t border-[#1e1e1e]">
-                <td className="py-1 pr-3 text-xs text-[#eaeaea]">{row.type}</td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+              <tr key={row.type} className="border-t border-line-soft">
+                <td className="py-1 pr-3 text-xs text-fg-strong">{row.type}</td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {row.tasks}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {row.requests.toLocaleString()}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {tokensShort(row.inputTokens)}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {tokensShort(row.outputTokens)}
                 </td>
               </tr>
@@ -650,23 +656,23 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-3 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By project</h2>
-        <span className="text-[11px] text-[#707070]">{rows.length} projects</span>
+        <span className="text-[11px] text-fg-faint">{rows.length} projects</span>
       </header>
       <div>
         {shown.map((row, index) => (
           <Fragment key={row.cwd}>
-            <div className={`pt-1.5 ${index === 0 ? '' : 'mt-1 border-t border-[#1e1e1e] pt-2'}`}>
+            <div className={`pt-1.5 ${index === 0 ? '' : 'mt-1 border-t border-line-soft pt-2'}`}>
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-xs text-[#eaeaea]" title={row.cwd}>
+                <span className="min-w-0 flex-1 truncate text-xs text-fg-strong" title={row.cwd}>
                   {row.project}
                 </span>
-                <span className="shrink-0 font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <span className="shrink-0 font-mono text-[11px] text-fg-muted tabular-nums">
                   {row.sessions} sessions · {tokensShort(row.tokens)}
                 </span>
               </div>
-              <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-[#1e1e1e]">
+              <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-panel">
                 <div
-                  className="h-full rounded-full bg-[#c8c8c8]"
+                  className="h-full rounded-full bg-fg"
                   style={{ width: `${max > 0 ? (row.tokens / max) * 100 : 0}%` }}
                 />
               </div>
@@ -678,7 +684,7 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
         <button
           type="button"
           onClick={onShowMore}
-          className="mt-2 text-[11px] text-[#707070] transition-colors hover:text-[#9a9a9a]"
+          className="mt-2 text-[11px] text-fg-faint transition-colors hover:text-fg-muted"
         >
           Show {Math.min(PROJECT_BATCH, rest)} more
         </button>
@@ -744,7 +750,7 @@ function BySessionCard({ scoped, onDetail }) {
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-2 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By session</h2>
-        <span className="text-[11px] text-[#707070]">{sorted.length} sessions</span>
+        <span className="text-[11px] text-fg-faint">{sorted.length} sessions</span>
       </header>
       <div className="overflow-x-auto thin-scrollbar">
         <table className="w-full min-w-[940px] table-fixed text-[13px]">
@@ -758,7 +764,7 @@ function BySessionCard({ scoped, onDetail }) {
             <col className="w-[8%]" />
           </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-[#707070]">
+            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
               {SESSION_COLUMNS.map(([key, label, sortable]) => (
                 <th
                   key={key}
@@ -773,8 +779,8 @@ function BySessionCard({ scoped, onDetail }) {
                     <button
                       type="button"
                       onClick={() => toggle(key)}
-                      className={`inline-flex items-center gap-0.5 uppercase transition-colors hover:text-[#eaeaea] ${
-                        sortKey === key ? 'text-[#c8c8c8]' : ''
+                      className={`inline-flex items-center gap-0.5 uppercase transition-colors hover:text-fg-strong ${
+                        sortKey === key ? 'text-fg' : ''
                       }`}
                     >
                       {label}
@@ -792,36 +798,36 @@ function BySessionCard({ scoped, onDetail }) {
           </thead>
           <tbody>
             {top.map((s) => (
-              <tr key={s.id} className="border-t border-[#1e1e1e]">
+              <tr key={s.id} className="border-t border-line-soft">
                 <td className="py-1 pr-3">
-                  <span className="block truncate text-xs text-[#eaeaea]" title={s.cwd}>
+                  <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
                     {s.title || basename(s.cwd)}
                   </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-[#707070]">
+                  <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
                     {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
                     {Number(s.subagentTasks) > 0 && (
-                      <span className="text-[#8a7b52]"> · {s.subagentTasks} sub</span>
+                      <span className="text-warn-soft"> · {s.subagentTasks} sub</span>
                     )}
                   </span>
                 </td>
                 <td className="py-1 pr-3">
                   <span
-                    className="block truncate font-mono text-[11px] text-[#9a9a9a]"
+                    className="block truncate font-mono text-[11px] text-fg-muted"
                     title={s.model}
                   >
                     {s.model || '—'}
                   </span>
                 </td>
-                <td className="py-1 pr-3 text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-[11px] text-fg-muted tabular-nums">
                   {agoShort(s.updatedAtMs, now)}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {s.requests.toLocaleString()}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {tokensShort(s.totalTokens)}
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {s.inputTokens > 0
                     ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
                     : '—'}
@@ -830,7 +836,7 @@ function BySessionCard({ scoped, onDetail }) {
                   <button
                     type="button"
                     onClick={() => onDetail(s.id)}
-                    className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[11px] text-[#9a9a9a] transition-colors hover:border-[#3a3a3a] hover:text-[#eaeaea]"
+                    className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
                   >
                     查看详情
                   </button>
@@ -844,7 +850,7 @@ function BySessionCard({ scoped, onDetail }) {
         <button
           type="button"
           onClick={() => setVisible((v) => v + SESSION_BATCH)}
-          className="mt-2 text-[11px] text-[#707070] transition-colors hover:text-[#9a9a9a]"
+          className="mt-2 text-[11px] text-fg-faint transition-colors hover:text-fg-muted"
         >
           Show {Math.min(SESSION_BATCH, rest)} more
         </button>
@@ -937,15 +943,15 @@ export function StatsView({ visible }) {
                   type="button"
                   onClick={() => setRangePreset('30d')}
                   title="清除单日筛选"
-                  className="flex items-center gap-1 rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[11px] text-[#9a9a9a] transition-colors hover:text-[#eaeaea]"
+                  className="flex items-center gap-1 rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                 >
                   {dayShort(range.day)}
-                  <span aria-hidden className="text-[#707070]">
+                  <span aria-hidden className="text-fg-faint">
                     ×
                   </span>
                 </button>
               )}
-              <div className="flex items-center gap-0.5 rounded-[4px] border border-[#2a2a2a] bg-[#181818] p-0.5 text-[11px]">
+              <div className="flex items-center gap-0.5 rounded-[4px] border border-line bg-raised p-0.5 text-[11px]">
                 {RANGE_OPTIONS.map(([value, label]) => (
                   <button
                     key={value}
@@ -954,8 +960,8 @@ export function StatsView({ visible }) {
                     onClick={() => setRangePreset(value)}
                     className={`rounded-sm px-2 py-0.5 transition-colors ${
                       range === value
-                        ? 'bg-[#3a3a3a] text-[#eaeaea]'
-                        : 'text-[#707070] hover:text-[#9a9a9a]'
+                        ? 'bg-active text-fg-strong'
+                        : 'text-fg-faint hover:text-fg-muted'
                     }`}
                   >
                     {label}
@@ -965,7 +971,7 @@ export function StatsView({ visible }) {
             </div>
           </div>
           {!hasAny ? (
-            <div className="grid place-items-center rounded-[5px] border border-dashed border-[#2a2a2a] py-16 text-xs text-[#707070]">
+            <div className="grid place-items-center rounded-[5px] border border-dashed border-line py-16 text-xs text-fg-faint">
               No usage yet. Complete an AI session to see statistics.
             </div>
           ) : (
@@ -977,7 +983,7 @@ export function StatsView({ visible }) {
                 calendar={calendar}
               />
               {legacyUsageRecords > 0 && (
-                <div className="rounded-[5px] border border-[#332f24] bg-[#19170f] px-3 py-2 text-[11px] text-[#a89b78]">
+                <div className="rounded-[5px] border border-warn/30 bg-warn/8 px-3 py-2 text-[11px] text-warn-soft">
                   {legacyUsageRecords.toLocaleString()} 条旧 usage
                   没有请求时间，已稳定归档到会话创建日（subagent
                   记录归档到任务开始时间）；升级后产生的数据会按实际请求时间统计。

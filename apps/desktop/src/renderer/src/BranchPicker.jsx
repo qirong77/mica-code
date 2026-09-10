@@ -17,7 +17,7 @@ function RefRow({ item }) {
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
           <strong className="truncate text-[13px] font-medium text-white/90">{item.name}</strong>
-          {item.current && <IconCheck size={13} className="shrink-0 text-[#4fa7ff]" />}
+          {item.current && <IconCheck size={13} className="shrink-0 text-info-soft" />}
           {item.tracking && (
             <span className="shrink-0 text-[11px] text-white/40">{item.tracking}</span>
           )}
@@ -175,7 +175,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-[calc(100vh-92px)] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden rounded-md border border-white/15 bg-[#202021]/98 shadow-[0_18px_70px_rgba(0,0,0,.55)]"
+        className="flex max-h-[calc(100vh-92px)] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden rounded-md border border-white/15 bg-panel/98 shadow-[0_18px_70px_rgba(0,0,0,.55)]"
       >
         <div className="border-b border-white/10 p-2.5">
           <input
@@ -185,7 +185,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
             aria-label={title}
             placeholder={title}
             spellCheck={false}
-            className="h-9 w-full rounded-sm border border-[#1684d8] bg-white/[.06] px-3 text-[13px] text-white outline-none placeholder:text-white/35 focus:border-[#2899eb] focus:ring-1 focus:ring-[#2899eb]/30"
+            className="h-9 w-full rounded-sm border border-info-deep bg-white/[.06] px-3 text-[13px] text-white outline-none placeholder:text-white/35 focus:border-info focus:ring-1 focus:ring-info/30"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
@@ -225,7 +225,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
         </div>
 
         {error && (
-          <div className="border-b border-[#d46a6a]/25 bg-[#d46a6a]/10 px-3 py-2 text-xs leading-5 text-[#ffaaaa]">
+          <div className="border-b border-danger-soft/25 bg-danger-soft/10 px-3 py-2 text-xs leading-5 text-danger-soft">
             {error}
           </div>
         )}
@@ -251,7 +251,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
                   disabled={busy}
                   className={`flex w-full gap-2.5 rounded-sm px-2.5 text-left transition-colors ${
                     item.type === 'action' ? 'min-h-9 items-center' : 'min-h-12 items-start py-1.5'
-                  } ${index === selected ? 'bg-[#075b91] text-white' : 'text-white/75 hover:bg-white/[.06]'}`}
+                  } ${index === selected ? 'bg-info-deep text-white' : 'text-white/75 hover:bg-white/[.06]'}`}
                   onMouseEnter={() => setSelected(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(item)}

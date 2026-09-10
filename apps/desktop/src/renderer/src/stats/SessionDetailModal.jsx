@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 const BATCH = 50
-const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a8a8a]'
+const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
 function fmtTime(iso) {
   if (!iso) return '—'
@@ -24,16 +24,16 @@ function rate(u) {
 }
 
 const ROLE_STYLE = {
-  user: 'bg-[#232a3a] text-[#9fb4e8]',
-  assistant: 'bg-[#2a2a2a] text-[#eaeaea]',
-  tool: 'bg-[#1e2e26] text-[#7fc79a]'
+  user: 'bg-info/12 text-info-soft',
+  assistant: 'bg-panel-hi text-fg-strong',
+  tool: 'bg-success/12 text-success-soft'
 }
 const ROLE_LABEL = { user: 'You', assistant: 'Assistant', tool: 'Tool' }
 
 function MessageRow({ message, index }) {
   const role = message.role || 'assistant'
   return (
-    <div className="flex flex-col gap-1.5 border-b border-[#1e1e1e] py-3 last:border-b-0">
+    <div className="flex flex-col gap-1.5 border-b border-line-soft py-3 last:border-b-0">
       <div className="flex items-center gap-2">
         <span
           className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROLE_STYLE[role] || ROLE_STYLE.assistant}`}
@@ -41,19 +41,17 @@ function MessageRow({ message, index }) {
           {ROLE_LABEL[role] || role}
         </span>
         {role === 'tool' && message.toolCallId && (
-          <span className="truncate font-mono text-[10px] text-[#707070]">
-            {message.toolCallId}
-          </span>
+          <span className="truncate font-mono text-[10px] text-fg-faint">{message.toolCallId}</span>
         )}
-        <span className="ml-auto font-mono text-[10px] text-[#4a4a4a]">#{index + 1}</span>
+        <span className="ml-auto font-mono text-[10px] text-fg-ghost">#{index + 1}</span>
       </div>
       {message.content ? (
         <details className="group">
-          <summary className="cursor-pointer select-none text-[10px] text-[#707070] transition-colors hover:text-[#9a9a9a]">
+          <summary className="cursor-pointer select-none text-[10px] text-fg-faint transition-colors hover:text-fg-muted">
             <span className="group-open:hidden">展开内容</span>
             <span className="hidden group-open:inline">收起</span>
           </summary>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-[#d6d6d6]">
+          <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-fg">
             {message.content}
           </pre>
         </details>
@@ -63,19 +61,19 @@ function MessageRow({ message, index }) {
           {message.toolCalls.map((tc, i) => (
             <details
               key={`${tc.id || i}`}
-              className="group rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2 py-1"
+              className="group rounded-[4px] border border-line bg-raised px-2 py-1"
             >
-              <summary className="cursor-pointer select-none font-mono text-[11px] text-[#d0a86a]">
+              <summary className="cursor-pointer select-none font-mono text-[11px] text-warn">
                 {tc.name || 'tool_call'}
                 {tc.arguments ? (
-                  <span className="ml-1.5 text-[10px] text-[#707070]">
+                  <span className="ml-1.5 text-[10px] text-fg-faint">
                     <span className="group-open:hidden">展开参数</span>
                     <span className="hidden group-open:inline">收起参数</span>
                   </span>
                 ) : null}
               </summary>
               {tc.arguments ? (
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-[#9a9a9a]">
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-fg-muted">
                   {tc.arguments}
                 </pre>
               ) : null}
@@ -106,12 +104,12 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
   )
   return (
     <div className="mt-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[#9a9a9a]">
-        <span className="text-[#707070]">{title}</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-fg-muted">
+        <span className="text-fg-faint">{title}</span>
         <span className="tabular-nums">
           {rows.length} req · {tokensShort(total.input)} in · {tokensShort(total.output)} out
         </span>
-        <span className="tabular-nums text-[#8a8a8a]">
+        <span className="tabular-nums text-fg-dim">
           缓存率 {total.input > 0 ? `${((total.cached / total.input) * 100).toFixed(1)}%` : '—'}
         </span>
       </div>
@@ -127,7 +125,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
             <col className="w-[9%]" />
           </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-[#707070]">
+            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
               <th scope="col" className="whitespace-nowrap pb-1 text-left font-normal">
                 时间
               </th>
@@ -153,29 +151,29 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
           </thead>
           <tbody>
             {shown.map((u, i) => (
-              <tr key={u.usageId || `${title}-${i}`} className="border-t border-[#1e1e1e]">
-                <td className="py-1 pr-2 whitespace-nowrap font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+              <tr key={u.usageId || `${title}-${i}`} className="border-t border-line-soft">
+                <td className="py-1 pr-2 whitespace-nowrap font-mono text-[10px] text-fg-dim tabular-nums">
                   {fmtTime(u.occurredAt)}
                 </td>
                 <td
-                  className="truncate py-1 pr-2 font-mono text-[10px] text-[#9a9a9a]"
+                  className="truncate py-1 pr-2 font-mono text-[10px] text-fg-muted"
                   title={u.model}
                 >
                   {u.model || '—'}
                 </td>
-                <td className="py-1 pr-2 text-right font-mono text-[10px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
                   {(u.inputTokens || 0).toLocaleString()}
                 </td>
-                <td className="py-1 pr-2 text-right font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-dim tabular-nums">
                   {(u.cachedInputTokens || 0).toLocaleString()}
                 </td>
-                <td className="py-1 pr-2 text-right font-mono text-[10px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
                   {((u.inputTokens || 0) - (u.cachedInputTokens || 0)).toLocaleString()}
                 </td>
-                <td className="py-1 pr-2 text-right font-mono text-[10px] text-[#9a9a9a] tabular-nums">
+                <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
                   {(u.outputTokens || 0).toLocaleString()}
                 </td>
-                <td className="py-1 pr-2 text-right font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-dim tabular-nums">
                   {rate(u)}
                 </td>
               </tr>
@@ -184,7 +182,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
         </table>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-1.5">
-        <label className="flex items-center gap-1 text-[10px] text-[#707070]">
+        <label className="flex items-center gap-1 text-[10px] text-fg-faint">
           每页
           <select
             value={pageSize}
@@ -192,7 +190,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               setPageSize(Number(e.target.value))
               setPage(0)
             }}
-            className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-1.5 py-0.5 font-mono text-[10px] text-[#9a9a9a]"
+            className="rounded-[4px] border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
             aria-label="每页条数"
           >
             {pageSizeOptions.map((size) => (
@@ -209,18 +207,18 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               type="button"
               disabled={current === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[10px] text-[#9a9a9a] transition-colors enabled:hover:text-[#eaeaea] disabled:opacity-40"
+              className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               上一页
             </button>
-            <span className="font-mono text-[10px] text-[#707070] tabular-nums">
+            <span className="font-mono text-[10px] text-fg-faint tabular-nums">
               {current + 1} / {totalPages}
             </span>
             <button
               type="button"
               disabled={current >= totalPages - 1}
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              className="rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[10px] text-[#9a9a9a] transition-colors enabled:hover:text-[#eaeaea] disabled:opacity-40"
+              className="rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               下一页
             </button>
@@ -235,32 +233,32 @@ function SubagentCard({ record }) {
   const requests = record.requests || []
   const summary = record.summary || {}
   return (
-    <div className="rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2.5 py-2">
+    <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className="rounded-[3px] bg-[#332b1a] px-1.5 py-0.5 text-[10px] font-semibold text-[#d0a86a]">
+        <span className="rounded-[3px] bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
           {record.subagentType || 'subagent'}
         </span>
         <span
           className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium uppercase ${
             record.status === 'completed'
-              ? 'bg-[#1e2e26] text-[#7fc79a]'
+              ? 'bg-success/12 text-success-soft'
               : record.status === 'failed'
-                ? 'bg-[#331f1f] text-[#e08a8a]'
-                : 'bg-[#2a2a2a] text-[#c8c8c8]'
+                ? 'bg-danger/12 text-danger-soft'
+                : 'bg-panel-hi text-fg'
           }`}
         >
           {record.status || '—'}
         </span>
         {record.description && (
-          <span className="truncate text-[11px] text-[#d6d6d6]" title={record.description}>
+          <span className="truncate text-[11px] text-fg" title={record.description}>
             {record.description}
           </span>
         )}
-        <span className="ml-auto font-mono text-[10px] text-[#707070] tabular-nums">
+        <span className="ml-auto font-mono text-[10px] text-fg-faint tabular-nums">
           {requests.length} req · {tokensShort(summary.totalTokens || 0)} tokens
         </span>
       </div>
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-[#707070]">
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-fg-faint">
         {record.taskId && <span title={record.taskId}>task {record.taskId}</span>}
         {record.initiatedByCallId && (
           <span title={record.initiatedByCallId}>call {record.initiatedByCallId}</span>
@@ -276,7 +274,7 @@ function SubagentCard({ record }) {
       </div>
       {requests.length > 0 && (
         <details className="group mt-1">
-          <summary className="cursor-pointer select-none text-[10px] text-[#707070] hover:text-[#9a9a9a]">
+          <summary className="cursor-pointer select-none text-[10px] text-fg-faint hover:text-fg-muted">
             <span className="group-open:hidden">展开逐条请求</span>
             <span className="hidden group-open:inline">收起逐条请求</span>
           </summary>
@@ -367,15 +365,15 @@ export function SessionDetailModal({ sessionId, onClose }) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] border border-[#2a2a2a] bg-[#141414] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] border border-line bg-raised shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-3 border-b border-[#2a2a2a] px-4 py-3">
+        <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium text-[#eaeaea]">
+            <h2 className="truncate text-sm font-medium text-fg-strong">
               {detail?.title || 'Session detail'}
             </h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-[#707070]">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-fg-faint">
               <span className="font-mono">{detail?.id ? detail.id.slice(0, 12) : ''}</span>
               {detail?.model && <span>{detail.model}</span>}
               {detail?.effort && <span>effort {detail.effort}</span>}
@@ -383,16 +381,16 @@ export function SessionDetailModal({ sessionId, onClose }) {
               <span
                 className={
                   detail?.turnState === 'completed'
-                    ? 'text-[#7fc79a]'
+                    ? 'text-success-soft'
                     : detail?.turnState === 'aborted'
-                      ? 'text-[#d0a86a]'
-                      : 'text-[#e08a8a]'
+                      ? 'text-warn'
+                      : 'text-danger-soft'
                 }
               >
                 {detail?.turnState || '—'}
               </span>
             </div>
-            <div className="mt-0.5 text-[10px] text-[#4a4a4a]">
+            <div className="mt-0.5 text-[10px] text-fg-ghost">
               {fmtTime(detail?.createdAt)} → {fmtTime(detail?.updatedAt)}
               {detail?.cwd ? ` · ${detail.cwd}` : ''}
             </div>
@@ -401,7 +399,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="shrink-0 rounded-[4px] border border-[#2a2a2a] bg-[#181818] px-2 py-0.5 text-[11px] text-[#9a9a9a] transition-colors hover:text-[#eaeaea]"
+            className="shrink-0 rounded-[4px] border border-line bg-raised px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
           >
             Esc ✕
           </button>
@@ -409,56 +407,56 @@ export function SessionDetailModal({ sessionId, onClose }) {
 
         <div className="min-h-0 flex-1 overflow-y-auto thin-scrollbar px-4 py-3">
           {error ? (
-            <div className="rounded-[4px] border border-[#332424] bg-[#1a1414] px-3 py-2 text-xs text-[#e08a8a]">
+            <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
               {error}
             </div>
           ) : !detail ? (
-            <div className="py-10 text-center text-xs text-[#707070]">加载中…</div>
+            <div className="py-10 text-center text-xs text-fg-faint">加载中…</div>
           ) : (
             <div className="flex flex-col gap-5">
               <section>
                 <h3 className={OVERLINE_CLASS}>Token 情况</h3>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-[#707070]">
+                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">
                       主 agent
                     </div>
-                    <div className="mt-0.5 font-mono text-xs text-[#eaeaea] tabular-nums">
+                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {usageHistory.length} req
                     </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
                       {tokensShort(totals.main.input)} in · {tokensShort(totals.main.output)} out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-[#707070]">
+                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">
                       sub-agents
                     </div>
-                    <div className="mt-0.5 font-mono text-xs text-[#eaeaea] tabular-nums">
+                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {subRequests.length} req
                     </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
                       {tokensShort(totals.sub.input)} in · {tokensShort(totals.sub.output)} out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-[#707070]">合计</div>
-                    <div className="mt-0.5 font-mono text-xs text-[#eaeaea] tabular-nums">
+                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">合计</div>
+                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {tokensShort(totals.all.total)}
                     </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
                       {totals.all.input.toLocaleString()} in · {totals.all.output.toLocaleString()}{' '}
                       out
                     </div>
                   </div>
-                  <div className="rounded-[4px] border border-[#2a2a2a] bg-[#161616] px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-[#707070]">缓存率</div>
-                    <div className="mt-0.5 font-mono text-xs text-[#eaeaea] tabular-nums">
+                  <div className="rounded-[4px] border border-line bg-raised px-2.5 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">缓存率</div>
+                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
                       {totals.all.input > 0
                         ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
                         : '—'}
                     </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-[#8a8a8a] tabular-nums">
+                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
                       {totals.all.cached.toLocaleString()} cached
                     </div>
                   </div>
@@ -468,12 +466,12 @@ export function SessionDetailModal({ sessionId, onClose }) {
 
               <section>
                 <h3 className={OVERLINE_CLASS}>对话 / 工具调用</h3>
-                <p className="mt-1 text-[10px] text-[#4a4a4a]">
+                <p className="mt-1 text-[10px] text-fg-ghost">
                   按模型请求顺序展示；思考内容不随会话持久化，历史会话无法还原思考过程。
                 </p>
                 <div className="mt-2">
                   {messages.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-[#707070]">无消息记录</div>
+                    <div className="py-4 text-center text-[11px] text-fg-faint">无消息记录</div>
                   ) : (
                     messages
                       .slice(0, visible)
@@ -483,7 +481,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                     <button
                       type="button"
                       onClick={() => setVisible((v) => v + BATCH)}
-                      className="mt-2 w-full rounded-[4px] border border-[#2a2a2a] bg-[#181818] py-1.5 text-[11px] text-[#9a9a9a] transition-colors hover:text-[#eaeaea]"
+                      className="mt-2 w-full rounded-[4px] border border-line bg-raised py-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                     >
                       显示更多（{messages.length - visible} 条）
                     </button>

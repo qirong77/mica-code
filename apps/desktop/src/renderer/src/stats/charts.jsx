@@ -71,7 +71,7 @@ export function CalendarHeatmap({
           {CAL_WEEKDAYS.map(({ row, label }) => (
             <span
               key={label}
-              className="absolute right-0 text-[11px] text-[#8a8a8a]"
+              className="absolute right-0 text-[11px] text-fg-dim"
               style={{ top: row * step + cellSize / 2 - 7 }}
             >
               {label}
@@ -84,7 +84,7 @@ export function CalendarHeatmap({
               {monthLabels.map((m) => (
                 <span
                   key={`${m.col}-${m.label}`}
-                  className="absolute text-[11px] text-[#8a8a8a]"
+                  className="absolute text-[11px] text-fg-dim"
                   style={{ left: m.col * step }}
                 >
                   {m.label}
@@ -130,13 +130,13 @@ export function CalendarHeatmap({
       </div>
       {hovered && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-white/15 bg-[#1e1e1e] px-2 py-1.5 text-xs shadow-xl"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-white/15 bg-panel px-2 py-1.5 text-xs shadow-xl"
           style={{ left: hovered.x, top: CAL_MONTH_ROW_H + hovered.y - 4 }}
         >
           {renderTooltip(hovered.day)}
         </div>
       )}
-      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#8a8a8a]">
+      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-fg-dim">
         <span>Less</span>
         {colors.map((c, i) => (
           <span
@@ -170,7 +170,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
         {ticks.map((t) => (
           <span
             key={t}
-            className="absolute right-0 translate-y-[calc(-50%_+_5px)] text-[11px] leading-none tabular-nums text-[#8a8a8a]"
+            className="absolute right-0 translate-y-[calc(-50%_+_5px)] text-[11px] leading-none tabular-nums text-fg-dim"
             style={{ bottom: `${(t / axisMax) * 100}%` }}
           >
             {formatTick(t)}
@@ -182,7 +182,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           {ticks.map((t) => (
             <span
               key={t}
-              className="pointer-events-none absolute inset-x-0 border-t border-[#1e1e1e]"
+              className="pointer-events-none absolute inset-x-0 border-t border-line-soft"
               style={{ bottom: `${(t / axisMax) * 100}%` }}
             />
           ))}
@@ -212,7 +212,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
                   width={0.8}
                   y={PLOT_VH - h}
                   height={h}
-                  fill="#c8c8c8"
+                  fill="var(--color-fg)"
                   className="pointer-events-none"
                 />
               ) : null
@@ -220,7 +220,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           </svg>
           {hovered != null && (
             <div
-              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-[#1e1e1e] px-2 py-1.5 text-xs shadow-xl"
+              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-panel px-2 py-1.5 text-xs shadow-xl"
               style={{ left: `${((hovered + 0.5) / Math.max(n, 1)) * 100}%` }}
             >
               {renderTooltip(hovered)}
@@ -231,7 +231,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           {xLabels.map(({ index, label }) => (
             <span
               key={index}
-              className="absolute -translate-x-1/2 whitespace-nowrap text-[11px] tabular-nums text-[#8a8a8a]"
+              className="absolute -translate-x-1/2 whitespace-nowrap text-[11px] tabular-nums text-fg-dim"
               style={{ left: `${((index + 0.5) / Math.max(n, 1)) * 100}%` }}
             >
               {label}

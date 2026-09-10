@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState
 } from 'react'
@@ -11,8 +12,10 @@ import {
   IconArrowLeft,
   IconArrowUp,
   IconChevronRight,
+  IconChristmasTree,
   IconClipboard,
   IconCopy,
+  IconDots,
   IconFilePlus,
   IconFiles,
   IconFolderOpen,
@@ -21,11 +24,13 @@ import {
   IconPencil,
   IconRefresh,
   IconSearch,
+  IconSquareMinus,
   IconTrash,
   IconX
 } from '@tabler/icons-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
 import { GitDiffEditor, GitPanel, SearchPanel } from './FileSidePanels'
+import { buildGitDecorations, relativeToRoot, statusColor, statusLabel } from './git-decorations'
 import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, monaco } from './monaco'
 
@@ -56,6 +61,15 @@ function expandedPaths(nodes, output = new Set()) {
     expandedPaths(node.children || [], output)
   }
   return output
+}
+
+// 折叠全部：丢掉已加载的子树，下次展开时重新读取，避免展开后看到过期内容
+function collapseNodes(nodes) {
+  return nodes.map((node) =>
+    node.expanded || node.loaded
+      ? { ...node, expanded: false, loaded: false, loading: false, error: '', children: [] }
+      : node
+  )
 }
 
 function relativeParts(rootPath, filePath) {
@@ -131,11 +145,15 @@ function applyOrder(children, directory, orderMap) {
   return [...known, ...rest]
 }
 
-function FileContextMenu({ menu, onAction, onClose }) {
+function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children }) {
   const ref = useRef(null)
-  const [pos, setPos] = useState({ x: menu.x, y: menu.y })
+  const [pos, setPos] = useState({ x, y })
   useEffect(() => {
-    const close = () => onClose()
+    // 常驻按钮自己负责开合：按压事件不关菜单，否则按下即关、点开又被重新打开，无法收起
+    const close = (event) => {
+      if (ignoreSelector && event.target?.closest?.(ignoreSelector)) return
+      onClose()
+    }
     const keydown = (event) => event.key === 'Escape' && onClose()
     window.addEventListener('pointerdown', close)
     window.addEventListener('blur', close)
@@ -145,17 +163,54 @@ function FileContextMenu({ menu, onAction, onClose }) {
       window.removeEventListener('blur', close)
       window.removeEventListener('keydown', keydown)
     }
-  }, [onClose])
+  }, [ignoreSelector, onClose])
   useLayoutEffect(() => {
     if (!ref.current) return
     const w = ref.current.offsetWidth
     const h = ref.current.offsetHeight
-    let px = menu.x
-    let py = menu.y
+    let px = x
+    let py = y
     if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
     if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
     setPos({ x: px, y: py })
-  }, [menu.x, menu.y])
+  }, [x, y])
+  return (
+    <div
+      ref={ref}
+      className="fixed z-[10000] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
+      style={{ left: pos.x, top: pos.y, minWidth }}
+      role="menu"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {children}
+    </div>
+  )
+}
+
+function MenuSeparator() {
+  return <div className="mx-1 my-1 h-px bg-white/10" />
+}
+
+function MenuItem({ icon: Icon, label, danger, disabled, onClick }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] disabled:opacity-40 disabled:hover:bg-transparent ${
+        danger ? 'text-danger-soft' : 'text-white/90 hover:text-white'
+      }`}
+      onClick={onClick}
+    >
+      <span className="grid w-4 shrink-0 place-items-center">
+        <Icon size={14} className="shrink-0 opacity-75" />
+      </span>
+      <span className="flex-1">{label}</span>
+    </button>
+  )
+}
+
+function FileContextMenu({ menu, onAction, onClose }) {
   const directory = menu.node.type === 'directory'
   const items = [
     ...(directory
@@ -175,32 +230,58 @@ function FileContextMenu({ menu, onAction, onClose }) {
     { id: 'delete', label: '删除', icon: IconTrash, danger: true }
   ]
   return (
-    <div
-      ref={ref}
-      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
-      style={{ left: pos.x, top: pos.y }}
-      role="menu"
-      onPointerDown={(event) => event.stopPropagation()}
+    <FloatingMenu x={menu.x} y={menu.y} minWidth={220} onClose={onClose}>
+      {items.map((item, index) =>
+        item.separator ? (
+          <MenuSeparator key={`separator-${index}`} />
+        ) : (
+          <MenuItem
+            key={item.id}
+            icon={item.icon}
+            label={item.label}
+            danger={item.danger}
+            onClick={() => onAction(item.id, menu.node)}
+          />
+        )
+      )}
+    </FloatingMenu>
+  )
+}
+
+// 资源管理器标题栏的「更多操作」：VS Code 把刷新、折叠、返回上级都收在这里
+function ExplorerMenu({ menu, onAction, onClose }) {
+  const items = [
+    { id: 'new-file', label: '新建文件', icon: IconFilePlus, disabled: !menu.root },
+    { id: 'new-directory', label: '新建文件夹', icon: IconFolderPlus, disabled: !menu.root },
+    { id: 'refresh', label: '刷新', icon: IconRefresh, disabled: !menu.root },
+    { id: 'collapse-all', label: '折叠所有文件夹', icon: IconSquareMinus, disabled: !menu.root },
+    { separator: true },
+    { id: 'open-parent', label: '返回上级目录', icon: IconArrowUp, disabled: !menu.parent },
+    { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen, disabled: !menu.root },
+    { id: 'copy-path', label: '复制路径', icon: IconClipboard, disabled: !menu.root }
+  ]
+  return (
+    <FloatingMenu
+      x={menu.x}
+      y={menu.y}
+      minWidth={200}
+      onClose={onClose}
+      ignoreSelector='[data-menu-anchor="explorer"]'
     >
       {items.map((item, index) =>
         item.separator ? (
-          <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-white/10" />
+          <MenuSeparator key={`separator-${index}`} />
         ) : (
-          <button
+          <MenuItem
             key={item.id}
-            type="button"
-            role="menuitem"
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] ${item.danger ? 'text-[#ef7288]' : 'text-white/90 hover:text-white'}`}
-            onClick={() => onAction(item.id, menu.node)}
-          >
-            <span className="grid w-4 shrink-0 place-items-center">
-              <item.icon size={14} className="shrink-0 opacity-75" />
-            </span>
-            <span className="flex-1">{item.label}</span>
-          </button>
+            icon={item.icon}
+            label={item.label}
+            disabled={item.disabled}
+            onClick={() => onAction(item.id, menu)}
+          />
         )
       )}
-    </div>
+    </FloatingMenu>
   )
 }
 
@@ -212,6 +293,8 @@ function FileTreeRows({
   dropPath,
   siblingDrop,
   orderMap,
+  gitRoot,
+  gitDecorations,
   onToggle,
   onOpen,
   onContextMenu,
@@ -223,6 +306,10 @@ function FileTreeRows({
 }) {
   return nodes.map((node) => {
     const directory = node.type === 'directory'
+    const relative = relativeToRoot(gitRoot, node.path)
+    const fileStatus = !directory && relative ? gitDecorations.files.get(relative) : null
+    const folderStatus = directory && relative ? gitDecorations.folders.get(relative) : null
+    const decoration = fileStatus || folderStatus
     const siblingOver =
       siblingDrop?.path === node.path
         ? siblingDrop.position === 'before'
@@ -239,7 +326,7 @@ function FileTreeRows({
           title={node.path}
           className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] hover:text-white ${
             node.path === activePath ? 'bg-white/[.075] text-white' : 'text-white/70'
-          } ${dragPath === node.path ? 'opacity-40' : ''} ${dropPath === node.path ? 'ring-1 ring-inset ring-[#5aa7e8]/70 bg-[#5aa7e8]/10' : ''}`}
+          } ${dragPath === node.path ? 'opacity-40' : ''} ${dropPath === node.path ? 'ring-1 ring-inset ring-info/70 bg-info/10' : ''}`}
           style={{
             paddingLeft: 5 + depth * 13,
             boxShadow:
@@ -293,14 +380,34 @@ function FileTreeRows({
               className="size-4"
             />
           </span>
-          <span className="min-w-0 flex-1 truncate">{node.name}</span>
+          <span
+            className="min-w-0 flex-1 truncate"
+            style={decoration ? { color: statusColor(decoration) } : undefined}
+          >
+            {node.name}
+          </span>
           {node.loading && <span className="text-white/35">…</span>}
+          {fileStatus && (
+            <span
+              className="shrink-0 font-mono text-[10px] font-semibold"
+              style={{ color: statusColor(fileStatus) }}
+            >
+              {statusLabel(fileStatus)}
+            </span>
+          )}
+          {folderStatus && (
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: statusColor(folderStatus), opacity: 0.75 }}
+            />
+          )}
         </button>
         {directory &&
           node.expanded &&
           (node.error ? (
             <div
-              className="py-1 pr-2 text-[11px] text-[#e75e78]/85"
+              className="py-1 pr-2 text-[11px] text-danger/85"
               style={{ paddingLeft: 35 + (depth + 1) * 13 }}
             >
               无法读取：{node.error}
@@ -321,6 +428,8 @@ function FileTreeRows({
               dropPath={dropPath}
               siblingDrop={siblingDrop}
               orderMap={orderMap}
+              gitRoot={gitRoot}
+              gitDecorations={gitDecorations}
               onToggle={onToggle}
               onOpen={onOpen}
               onContextMenu={onContextMenu}
@@ -337,7 +446,7 @@ function FileTreeRows({
 }
 
 export const FilesView = forwardRef(function FilesView(
-  { root, visible, askText, onCornerResizeStart, gitCwd, gitRepository, gitLoading },
+  { root, visible, askText, onCornerResizeStart, gitCwd, gitRepository, gitLoading, gitBranch },
   ref
 ) {
   const viewRef = useRef(null)
@@ -361,6 +470,7 @@ export const FilesView = forwardRef(function FilesView(
   const [activePath, setActivePathState] = useState(null)
   const activeRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null)
+  const [explorerMenu, setExplorerMenu] = useState(null)
   const [dragPath, setDragPath] = useState(null)
   const [dropPath, setDropPath] = useState(null)
   const [siblingDrop, setSiblingDrop] = useState(null) // { path, position: 'before'|'after' }
@@ -369,6 +479,10 @@ export const FilesView = forwardRef(function FilesView(
   const [message, setMessage] = useState(null)
   const [activePanel, setActivePanel] = useState('explorer')
   const [gitSelectedFile, setGitSelectedFile] = useState(null)
+
+  // 目录树上的 Git 装饰：改动文件染成对应状态色并带状态字母，其所有上级文件夹继承最主要的状态
+  const gitDecorations = useMemo(() => buildGitDecorations(gitRepository), [gitRepository])
+  const gitRoot = gitRepository?.root || null
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -719,6 +833,10 @@ export const FilesView = forwardRef(function FilesView(
     }
   }, [restoreExpanded, treeRef])
 
+  const collapseAll = useCallback(() => {
+    setTree((value) => ({ ...value, children: collapseNodes(value.children) }))
+  }, [])
+
   const closeTabsUnder = useCallback(
     (path) => {
       const affected = tabsRef.current.filter((tab) => isSameOrChildPath(tab.path, path))
@@ -802,6 +920,39 @@ export const FilesView = forwardRef(function FilesView(
       y: event.clientY
     })
   }, [])
+
+  const openExplorerMenu = useCallback(
+    (event) => {
+      if (explorerMenu) {
+        setExplorerMenu(null)
+        return
+      }
+      const rect = event.currentTarget.getBoundingClientRect()
+      setExplorerMenu({
+        x: Math.max(4, rect.right - 200),
+        y: rect.bottom + 4,
+        root: treeRef.current.root,
+        parent: treeRef.current.parent
+      })
+    },
+    [explorerMenu, treeRef]
+  )
+
+  const runExplorerAction = useCallback(
+    (action, menu) => {
+      setExplorerMenu(null)
+      if (action === 'refresh') return refresh()
+      if (action === 'collapse-all') return collapseAll()
+      if (action === 'open-parent') return loadRoot(menu.parent)
+      // 根目录当普通目录节点复用文件操作（新建、显示、复制路径）
+      return runFileAction(action, {
+        path: menu.root,
+        type: 'directory',
+        name: fileName(menu.root)
+      })
+    },
+    [collapseAll, loadRoot, refresh, runFileAction]
+  )
 
   const startFileDrag = useCallback((event, node) => {
     setContextMenu(null)
@@ -1084,11 +1235,11 @@ export const FilesView = forwardRef(function FilesView(
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
+  const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
+  const changeCount = gitRepository?.files?.length || 0
   // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个右侧面板
   const hasEditorContent =
-    tabs.length > 0 ||
-    (activePanel === 'git' && !!gitSelectedFile) ||
-    (!!message && !message.transient)
+    tabs.length > 0 || (isGitPanel && !!gitSelectedFile) || (!!message && !message.transient)
   // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树
   const isMobile = useIsMobile()
   const [mobileTreeVisible, setMobileTreeVisible] = useState(false)
@@ -1097,14 +1248,16 @@ export const FilesView = forwardRef(function FilesView(
     counts.set(tab.name, (counts.get(tab.name) || 0) + 1)
     return counts
   }, new Map())
+  // 活动栏徽标：有 Git 改动时在图标右下角显示改动条数（与 VS Code 源代码管理一致）
+  const badges = changeCount ? { git: changeCount > 99 ? '99+' : String(changeCount) } : {}
 
   return (
     <section
       ref={viewRef}
-      className={`relative min-h-0 flex-1 bg-[#0e0e0e] no-drag ${visible ? 'flex' : 'hidden'}`}
+      className={`relative min-h-0 flex-1 bg-canvas no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <nav
-        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-[#111] py-1.5 ${
+        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-white/[.07] bg-raised py-1.5 ${
           isMobile && editorOpen ? 'hidden' : 'flex'
         }`}
         aria-label="活动栏"
@@ -1112,7 +1265,8 @@ export const FilesView = forwardRef(function FilesView(
         {[
           ['explorer', IconFiles, '资源管理器'],
           ['search', IconSearch, '搜索'],
-          ['git', IconGitBranch, '源代码管理']
+          ['git', IconGitBranch, '源代码管理'],
+          ['git-tree', IconChristmasTree, 'Git 变更树']
         ].map(([id, Icon, label]) => {
           const active = activePanel === id
           return (
@@ -1120,18 +1274,26 @@ export const FilesView = forwardRef(function FilesView(
               key={id}
               type="button"
               title={label}
-              aria-label={label}
+              aria-label={badges?.[id] ? `${label}，${changeCount} 处改动` : label}
               aria-pressed={active}
-              className={`grid size-9 place-items-center rounded-md transition-colors ${active ? 'bg-white/[.09] text-white' : 'text-white/45 hover:bg-white/[.05] hover:text-white'}`}
+              className={`relative grid size-9 place-items-center rounded-md transition-colors ${active ? 'bg-white/[.09] text-white' : 'text-white/45 hover:bg-white/[.05] hover:text-white'}`}
               onClick={() => switchPanel(id)}
             >
               <Icon size={17} className="shrink-0" />
+              {badges[id] && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -right-0.5 -bottom-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white"
+                >
+                  {badges[id]}
+                </span>
+              )}
             </button>
           )
         })}
       </nav>
       <aside
-        className={`min-h-0 flex-col bg-[#111] ${
+        className={`min-h-0 flex-col bg-raised ${
           isMobile && editorOpen ? 'hidden' : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
         }`}
         style={editorOpen && !isMobile ? { width } : undefined}
@@ -1139,32 +1301,24 @@ export const FilesView = forwardRef(function FilesView(
       >
         {activePanel === 'search' ? (
           <SearchPanel root={root} onOpenFile={openFile} activePath={activePath} />
-        ) : activePanel === 'git' ? (
+        ) : isGitPanel ? (
           <GitPanel
             cwd={gitCwd || null}
             repository={gitRepository}
             loading={gitLoading}
             selectedPath={gitSelectedFile?.path}
             onSelectFile={selectGitFile}
+            heading={activePanel === 'git-tree' ? 'GIT TREE' : 'CHANGES'}
+            rootLabel={activePanel === 'git-tree' ? gitBranch || null : null}
           />
         ) : (
           <>
-            <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-white/[.07] px-2">
-              <button
-                type="button"
-                disabled={!tree.parent}
-                title="返回上级目录"
-                aria-label="返回上级目录"
-                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
-                onClick={() => loadRoot(tree.parent)}
-              >
-                <IconArrowUp size={15} />
-              </button>
+            <header className="flex h-9 shrink-0 items-center gap-0.5 px-2">
               <div
-                className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/65"
+                className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/70"
                 title={tree.root || ''}
               >
-                {tree.root}
+                {tree.root ? fileName(tree.root) : '资源管理器'}
               </div>
               <button
                 type="button"
@@ -1180,7 +1334,7 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <IconFilePlus size={14} />
+                <IconFilePlus size={15} />
               </button>
               <button
                 type="button"
@@ -1196,16 +1350,31 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <IconFolderPlus size={14} />
+                <IconFolderPlus size={15} />
               </button>
               <button
                 type="button"
-                title="刷新"
-                aria-label="刷新"
-                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
-                onClick={refresh}
+                disabled={!tree.root}
+                title="折叠所有文件夹"
+                aria-label="折叠所有文件夹"
+                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                onClick={collapseAll}
               >
-                <IconRefresh size={14} />
+                <IconSquareMinus size={15} />
+              </button>
+              <button
+                type="button"
+                title="更多操作"
+                aria-label="更多操作"
+                aria-haspopup="menu"
+                data-menu-anchor="explorer"
+                aria-expanded={explorerMenu ? 'true' : 'false'}
+                className={`grid size-6.5 shrink-0 place-items-center rounded-sm hover:bg-white/[.06] hover:text-white ${
+                  explorerMenu ? 'bg-white/[.06] text-white' : 'text-white/45'
+                }`}
+                onClick={openExplorerMenu}
+              >
+                <IconDots size={15} />
               </button>
             </header>
             <div className="relative min-h-0 flex-1">
@@ -1221,6 +1390,8 @@ export const FilesView = forwardRef(function FilesView(
                   dropPath={dropPath}
                   siblingDrop={siblingDrop}
                   orderMap={orderMap}
+                  gitRoot={gitRoot}
+                  gitDecorations={gitDecorations}
                   onToggle={toggleDirectory}
                   onOpen={(path) => {
                     setMobileTreeVisible(false)
@@ -1237,7 +1408,7 @@ export const FilesView = forwardRef(function FilesView(
               {tree.status && (
                 <div
                   role="status"
-                  className="absolute inset-0 grid place-items-center bg-[#111] px-4 text-center text-[11px] text-white/35"
+                  className="absolute inset-0 grid place-items-center bg-raised px-4 text-center text-[11px] text-white/35"
                 >
                   {tree.status}
                 </div>
@@ -1251,6 +1422,13 @@ export const FilesView = forwardRef(function FilesView(
           menu={contextMenu}
           onAction={runFileAction}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {explorerMenu && (
+        <ExplorerMenu
+          menu={explorerMenu}
+          onAction={runExplorerAction}
+          onClose={() => setExplorerMenu(null)}
         />
       )}
       <div
@@ -1285,13 +1463,13 @@ export const FilesView = forwardRef(function FilesView(
         className={`min-w-0 min-h-0 flex-1 flex-col ${editorOpen ? 'flex' : 'hidden'}`}
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
-        {activePanel === 'git' && gitSelectedFile ? (
+        {isGitPanel && gitSelectedFile ? (
           <GitDiffEditor cwd={gitCwd || null} file={gitSelectedFile} onClose={closeGitDiff} />
         ) : (
           <>
             <div
               ref={tabListRef}
-              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-[#111] ${tabs.length ? 'flex' : 'hidden'}`}
+              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-white/[.07] bg-raised ${tabs.length ? 'flex' : 'hidden'}`}
               role="tablist"
               aria-label="打开的文件"
             >
@@ -1300,7 +1478,7 @@ export const FilesView = forwardRef(function FilesView(
                   type="button"
                   title="返回文件列表"
                   aria-label="返回文件列表"
-                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-white/[.07] bg-[#111] text-white/60"
+                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-white/[.07] bg-raised text-white/60"
                   onClick={() => setMobileTreeVisible(true)}
                 >
                   <IconArrowLeft size={15} />
@@ -1311,14 +1489,11 @@ export const FilesView = forwardRef(function FilesView(
                   key={tab.path}
                   data-path={tab.path}
                   title={tab.path}
-                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-[#0e0e0e] text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
+                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-white/[.07] px-2.5 text-[11px] ${tab.path === activePath ? 'bg-canvas text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
                   onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
                 >
                   {tab.path === activePath && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute inset-x-0 top-0 h-px bg-[#5aa7e8]"
-                    />
+                    <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-info" />
                   )}
                   <button
                     type="button"
@@ -1401,7 +1576,7 @@ export const FilesView = forwardRef(function FilesView(
               {message && !message.transient && (
                 <div
                   role="status"
-                  className="absolute inset-0 grid place-items-center bg-[#0e0e0e] p-6 text-center text-xs text-white/35"
+                  className="absolute inset-0 grid place-items-center bg-canvas p-6 text-center text-xs text-white/35"
                 >
                   {message.text}
                 </div>
@@ -1413,7 +1588,7 @@ export const FilesView = forwardRef(function FilesView(
       {message?.transient && (
         <div
           role="status"
-          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-[#181818]/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-[#e75e78]/40 text-[#f08a9d]' : 'border-white/15 text-white/70'}`}
+          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-raised/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-danger/40 text-danger-soft' : 'border-white/15 text-white/70'}`}
         >
           {message.text}
         </div>

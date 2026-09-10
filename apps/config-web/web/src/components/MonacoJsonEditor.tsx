@@ -16,24 +16,26 @@ type MonacoJsonEditorProps = {
 };
 
 const beforeMount: BeforeMount = (monaco) => {
+  // Monaco cannot read CSS custom properties, so this mirrors the Darcula tokens
+  // from src/styles.css by hand. Keep it in sync when the palette changes.
   monaco.editor.defineTheme('mica-dark', {
     base: 'vs-dark',
     inherit: true,
     rules: [],
     colors: {
-      'editor.background': '#161616',
-      'editorGutter.background': '#161616',
-      'editor.lineHighlightBackground': '#1a1a1a',
-      'editorLineNumber.foreground': '#555555',
-      'editorLineNumber.activeForeground': '#9a9a9a',
-      'editorCursor.foreground': '#eaeaea',
-      'editor.selectionBackground': '#454545',
-      'editorIndentGuide.background1': '#242424',
-      'editorIndentGuide.activeBackground1': '#3a3a3a',
-      'editorWidget.background': '#1e1e1e',
-      'editorWidget.border': '#2a2a2a',
-      'scrollbarSlider.background': '#3a3a3a66',
-      'scrollbarSlider.hoverBackground': '#4a4a4a88',
+      'editor.background': '#3c3f41',
+      'editorGutter.background': '#3c3f41',
+      'editor.lineHighlightBackground': '#46484a',
+      'editorLineNumber.foreground': '#606366',
+      'editorLineNumber.activeForeground': '#999999',
+      'editorCursor.foreground': '#a9b7c6',
+      'editor.selectionBackground': '#214283',
+      'editorIndentGuide.background1': '#434547',
+      'editorIndentGuide.activeBackground1': '#5a5a5a',
+      'editorWidget.background': '#46484a',
+      'editorWidget.border': '#4b4b4b',
+      'scrollbarSlider.background': '#4b4b4b66',
+      'scrollbarSlider.hoverBackground': '#5a5a5a88',
       'scrollbarSlider.activeBackground': '#5a5a5aaa',
     },
   });

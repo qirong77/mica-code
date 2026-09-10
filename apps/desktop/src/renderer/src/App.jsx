@@ -76,7 +76,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-white/15 bg-[#181818]/98 p-3.5 shadow-2xl"
+        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-white/15 bg-raised/98 p-3.5 shadow-2xl"
       >
         <h2 className="mb-2.5 text-sm font-semibold text-white/95">工作目录</h2>
         {invalid && (
@@ -211,7 +211,7 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-white/15 bg-[#181818]/98 shadow-2xl"
+        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-white/15 bg-raised/98 shadow-2xl"
       >
         <h2 className="shrink-0 border-b border-white/10 px-3.5 py-2.5 text-sm font-semibold text-white/95">
           选择文件夹
@@ -291,7 +291,7 @@ function TextPrompt({ prompt, onClose }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="w-[min(420px,calc(100vw-32px))] rounded-md border border-white/15 bg-[#181818]/98 p-3.5 shadow-2xl"
+        className="w-[min(420px,calc(100vw-32px))] rounded-md border border-white/15 bg-raised/98 p-3.5 shadow-2xl"
       >
         <h2 className="mb-1.5 text-sm font-semibold text-white/95">{prompt.title}</h2>
         {prompt.hint && <p className="mb-3 text-xs leading-5 text-white/45">{prompt.hint}</p>}
@@ -1282,7 +1282,7 @@ export default function App() {
 
   if (!ready)
     return (
-      <div className="grid size-full place-items-center bg-[#0e0e0e] text-xs text-white/35">
+      <div className="grid size-full place-items-center bg-canvas text-xs text-white/35">
         正在加载工作区…
       </div>
     )
@@ -1317,10 +1317,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] shadow-2xl transition-transform duration-200 ${
+              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-white/10 bg-raised shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-[#191919] ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `relative flex min-w-0 flex-col overflow-hidden border-r border-white/10 bg-raised ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={isMobile ? undefined : { width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
@@ -1437,7 +1437,7 @@ export default function App() {
           />
         </aside>
         <main
-          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-[#0e0e0e] ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
+          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
         >
           <header
             className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-white/10 px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
@@ -1562,10 +1562,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] shadow-2xl transition-transform duration-200 ${
+              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-white/10 bg-raised shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'right' ? 'translate-x-0' : 'translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-[#191919] ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
+              : `relative flex min-w-0 flex-col overflow-hidden border-l border-white/10 bg-raised ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
           }
           style={
             isMobile
@@ -1699,6 +1699,7 @@ export default function App() {
               gitCwd={gitIsCurrent ? git.cwd : null}
               gitRepository={repository}
               gitLoading={gitIsCurrent ? git.loading : true}
+              gitBranch={gitIsCurrent ? git.status?.branch || null : null}
               onCornerResizeStart={null}
             />
             <TerminalHost

@@ -45,20 +45,23 @@ const languages = {
   yml: 'yaml'
 }
 
+// Monaco cannot resolve CSS custom properties, so this mirrors the Darcula
+// tokens from assets/app.css by hand. Keep it in sync when the palette changes.
 monaco.editor.defineTheme('mica-dark', {
   base: 'vs-dark',
   inherit: true,
   rules: [],
   colors: {
-    'editor.background': '#0e0e0e',
-    'editorGutter.background': '#0e0e0e',
-    'editorLineNumber.foreground': '#555555',
-    'editorLineNumber.activeForeground': '#a0a0a0',
-    'editor.selectionBackground': '#4a4a4a80',
-    'diffEditor.insertedTextBackground': '#1f6b403f',
-    'diffEditor.removedTextBackground': '#9b33413f',
-    'diffEditor.insertedLineBackground': '#183d2b66',
-    'diffEditor.removedLineBackground': '#49242a66'
+    'editor.background': '#2b2b2b',
+    'editorGutter.background': '#2b2b2b',
+    'editorLineNumber.foreground': '#606366',
+    'editorLineNumber.activeForeground': '#999999',
+    // JetBrains Darcula selection blue.
+    'editor.selectionBackground': '#214283',
+    'diffEditor.insertedTextBackground': '#2944364f',
+    'diffEditor.removedTextBackground': '#4b2d2d4f',
+    'diffEditor.insertedLineBackground': '#2944364d',
+    'diffEditor.removedLineBackground': '#4b2d2d4d'
   }
 })
 

@@ -78,7 +78,7 @@ function Highlight({ text, query, fuzzy = false }) {
     const textChunk = value.slice(start, index)
     chunks.push(
       marked ? (
-        <mark key={start} className="rounded-xs bg-[#c08532]/20 font-semibold text-[#dfbe84]">
+        <mark key={start} className="rounded-xs bg-warn/20 font-semibold text-warn-soft">
           {textChunk}
         </mark>
       ) : (
@@ -277,7 +277,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
         aria-modal="true"
         aria-labelledby="quick-search-mode"
         aria-busy={busy}
-        className="flex max-h-[min(620px,calc(90vh-42px))] w-[min(720px,calc(100vw-32px))] flex-col self-start overflow-hidden rounded-md border border-white/20 bg-[#151515] shadow-[0_16px_48px_rgb(0_0_0/.58)]"
+        className="flex max-h-[min(620px,calc(90vh-42px))] w-[min(720px,calc(100vw-32px))] flex-col self-start overflow-hidden rounded-md border border-white/20 bg-raised shadow-[0_16px_48px_rgb(0_0_0/.58)]"
       >
         <div className="flex min-h-12 shrink-0 items-center gap-2.5 border-b border-white/10 px-2.5 py-1.5">
           <span

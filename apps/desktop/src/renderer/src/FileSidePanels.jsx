@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { IconChevronRight, IconSearch } from '@tabler/icons-react'
+import { IconChevronRight, IconGitBranch, IconSearch } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
+import { statusColor, statusLabel } from './git-decorations'
 import { editorOptions, languageFor, monaco } from './monaco'
 
 const MAX_RESULTS = 200
@@ -14,7 +15,7 @@ function Highlight({ text, query }) {
   return (
     <>
       {value.slice(0, index)}
-      <mark className="rounded-xs bg-[#c08532]/20 font-semibold text-[#dfbe84]">
+      <mark className="rounded-xs bg-warn/20 font-semibold text-warn-soft">
         {value.slice(index, index + needle.length)}
       </mark>
       {value.slice(index + needle.length)}
@@ -133,10 +134,6 @@ function makeGitTree(files) {
   return root
 }
 
-function statusLabel(status) {
-  return status === 'added' ? 'A' : status === 'deleted' ? 'D' : 'M'
-}
-
 function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath, onSelect }) {
   return (
     <>
@@ -185,7 +182,8 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
           <FileSystemIcon name={file.name} className="size-4" />
           <span className="truncate">{file.name}</span>
           <span
-            className={`justify-self-end font-mono text-[10px] font-semibold ${file.status === 'added' ? 'text-[#55b982]' : file.status === 'deleted' ? 'text-[#e06c75]' : 'text-[#d7ae5d]'}`}
+            className="justify-self-end font-mono text-[10px] font-semibold"
+            style={{ color: statusColor(file.status) }}
           >
             {statusLabel(file.status)}
           </span>
@@ -195,11 +193,20 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
   )
 }
 
-export function GitPanel({ cwd, repository, loading, onSelectFile, selectedPath }) {
+export function GitPanel({
+  cwd,
+  repository,
+  loading,
+  onSelectFile,
+  selectedPath,
+  rootLabel = null,
+  heading = 'CHANGES'
+}) {
   const [collapsed, setCollapsed] = useState(new Set())
   const tree = useMemo(() => makeGitTree(repository?.files || []), [repository])
 
   const root = repository?.root || cwd
+  const rootClosed = collapsed.has('__root__')
 
   const toggle = useCallback((key) => {
     setCollapsed((current) => {
@@ -213,7 +220,7 @@ export function GitPanel({ cwd, repository, loading, onSelectFile, selectedPath 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center px-3 pt-2">
-        <span className="text-[10px] font-semibold tracking-[.08em] text-white/45">CHANGES</span>
+        <span className="text-[10px] font-semibold tracking-[.08em] text-white/45">{heading}</span>
         {loading && (
           <span
             className="ml-2 size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
@@ -244,13 +251,34 @@ export function GitPanel({ cwd, repository, loading, onSelectFile, selectedPath 
           <div className="px-3 py-6 text-center text-[11px] text-white/35">工作区没有文件变化</div>
         )}
         {repository && repository.files.length > 0 && (
-          <GitRows
-            node={tree}
-            collapsed={collapsed}
-            selectedPath={selectedPath}
-            onToggle={toggle}
-            onSelect={onSelectFile}
-          />
+          <>
+            {rootLabel && (
+              <button
+                type="button"
+                title={rootLabel}
+                className="grid h-6.5 w-full grid-cols-[14px_16px_minmax(0,1fr)] items-center gap-1 rounded-sm pr-1.5 text-left text-xs text-info hover:bg-white/[.045]"
+                style={{ paddingLeft: 5 }}
+                onClick={() => toggle('__root__')}
+              >
+                <IconChevronRight
+                  size={13}
+                  className={`text-white/35 ${rootClosed ? '' : 'rotate-90'}`}
+                />
+                <IconGitBranch size={14} className="shrink-0" />
+                <span className="truncate">{rootLabel}</span>
+              </button>
+            )}
+            {!rootClosed && (
+              <GitRows
+                node={tree}
+                depth={rootLabel ? 1 : 0}
+                collapsed={collapsed}
+                selectedPath={selectedPath}
+                onToggle={toggle}
+                onSelect={onSelectFile}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

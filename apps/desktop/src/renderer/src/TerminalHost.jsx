@@ -14,26 +14,28 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { createFileLinkProvider, openWebLink } from './terminal-links'
 import { useLatest } from './hooks'
 
+/* xterm.js paints on a canvas and cannot read CSS custom properties, so this
+   mirrors the Darcula tokens from assets/app.css by hand. Keep it in sync. */
 const terminalTheme = {
-  background: '#0e0e0e',
-  foreground: '#eaeaea',
-  cursor: '#eaeaea',
-  selectionBackground: 'rgba(234, 234, 234, 0.22)',
-  black: '#1a1a1a',
-  red: '#e75e78',
-  green: '#55a583',
-  yellow: '#c08532',
-  blue: '#8a8a8a',
-  magenta: '#9e94d5',
-  cyan: '#6f9ba6',
-  white: '#eaeaea',
-  brightBlack: '#6a6a6a',
-  brightRed: '#f2685c',
-  brightGreen: '#46c57a',
-  brightYellow: '#f2b33d',
-  brightBlue: '#b0b0b0',
-  brightMagenta: '#907bc9',
-  brightCyan: '#2dd4bf',
+  background: '#2b2b2b',
+  foreground: '#a9b7c6',
+  cursor: '#a9b7c6',
+  selectionBackground: 'rgba(33, 66, 131, 0.6)',
+  black: '#3c3f41',
+  red: '#ff6b68',
+  green: '#a8c023',
+  yellow: '#d6bf55',
+  blue: '#5394ec',
+  magenta: '#ae8abe',
+  cyan: '#299999',
+  white: '#bababa',
+  brightBlack: '#606366',
+  brightRed: '#ff8785',
+  brightGreen: '#a8c023',
+  brightYellow: '#ffff00',
+  brightBlue: '#7eaef1',
+  brightMagenta: '#ff99ff',
+  brightCyan: '#6cdada',
   brightWhite: '#ffffff'
 }
 
@@ -144,7 +146,7 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
   return (
     <div
       ref={hostRef}
-      className={`terminal-pane absolute inset-0 overflow-hidden bg-[#0e0e0e] ${active ? 'block' : 'hidden'}`}
+      className={`terminal-pane absolute inset-0 overflow-hidden bg-canvas ${active ? 'block' : 'hidden'}`}
       data-id={ptyId}
     />
   )
@@ -450,7 +452,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
   return (
     <section
       ref={hostRef}
-      className={`relative min-h-0 overflow-hidden bg-[#0e0e0e] no-drag ${docked ? 'shrink-0' : 'flex-1'} ${visible ? '' : 'hidden'}`}
+      className={`relative min-h-0 overflow-hidden bg-canvas no-drag ${docked ? 'shrink-0' : 'flex-1'} ${visible ? '' : 'hidden'}`}
       style={docked ? { height } : undefined}
     >
       {mountedIds.map((sessionId) => {
@@ -459,7 +461,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         return (
           <div
             key={sessionId}
-            className={`absolute inset-0 min-h-0 bg-[#0e0e0e] ${isActiveSession ? 'block' : 'hidden'}`}
+            className={`absolute inset-0 min-h-0 bg-canvas ${isActiveSession ? 'block' : 'hidden'}`}
           >
             {panes.has(PANE_MICA) && (
               <TerminalPane

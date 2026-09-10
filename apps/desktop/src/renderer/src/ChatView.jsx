@@ -261,10 +261,10 @@ function ImagePreviewModal({ source, alt, onClose }) {
 }
 
 const CTX_ROLE_STYLE = {
-  user: 'bg-[#232a3a] text-[#9fb4e8]',
-  assistant: 'bg-[#2a2a2a] text-[#eaeaea]',
-  tool: 'bg-[#1e2e26] text-[#7fc79a]',
-  system: 'bg-[#2a2333] text-[#c4a0e8]'
+  user: 'bg-info/12 text-info-soft',
+  assistant: 'bg-panel-hi text-fg-strong',
+  tool: 'bg-success/12 text-success-soft',
+  system: 'bg-purple/12 text-purple'
 }
 const CTX_ROLE_LABEL = {
   user: 'User',
@@ -1218,7 +1218,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
   return (
     <div
       ref={ref}
-      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
+      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y }}
       role="menu"
       data-no-chat-focus
@@ -1234,7 +1234,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
             role="menuitem"
             disabled={item.disabled}
             title={item.title}
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-[#ef7288]' : 'text-white/90 enabled:hover:text-white'}`}
+            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-danger-soft' : 'text-white/90 enabled:hover:text-white'}`}
             onClick={() => onAction(item.id)}
           >
             <span className="grid w-4 shrink-0 place-items-center">

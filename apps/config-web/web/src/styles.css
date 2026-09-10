@@ -1,24 +1,26 @@
 :root {
   color-scheme: dark;
-  /* Mono grayscale skin (code-by-wire / hermes "Mono" family): neutral surfaces,
-     primary = foreground, small radii, hairline strokes. Status hues are reserved
-     for state, never decorative. */
-  --bg: #0e0e0e; /* chrome canvas */
-  --panel: #161616; /* cards, rails, popovers */
-  --panel-muted: #1e1e1e; /* raised: hover, inputs, tags */
-  --panel-hover: #212121; /* hover on raised surfaces */
-  --sidebar-bg: #0a0a0a; /* recessed sidebar */
-  --line: #2a2a2a; /* hairline border */
-  --line-soft: #232323; /* faint divider */
-  --text: #eaeaea; /* primary foreground */
-  --text-soft: #9a9a9a; /* secondary */
-  --text-faint: #6e6e6e; /* tertiary */
-  --accent: #eaeaea; /* primary = foreground */
-  --accent-hover: #c8c8c8;
-  --blue: #7aa7b5; /* cyan-leaning steel blue */
-  --green: #55a583;
-  --red: #e75e78;
-  --amber: #c08532;
+  /* Darcula skin (JetBrains Darcula colour theme). Light chrome wraps a darker
+     content canvas, strokes stay hairline, status hues are reserved for state.
+     Values are the theme's own `colors`/terminal entries; `derived` marks a
+     blended step that the original theme does not define. */
+  --bg: #2b2b2b; /* chrome canvas — editor.background */
+  --panel: #3c3f41; /* cards, rails, popovers — panel.background */
+  --panel-muted: #46484a; /* raised: hover, inputs, tags — derived */
+  --panel-hover: #515658; /* hover on raised surfaces — tab.activeBackground */
+  --sidebar-bg: #3c3f41; /* navigation rail — sideBar.background */
+  --line: #4b4b4b; /* hairline border — *.border */
+  --line-soft: #434547; /* faint divider — derived */
+  --line-strong: #5a5a5a; /* hover/focus strokes — derived */
+  --text: #d4d4d4; /* primary foreground — tokenColors default text */
+  --text-soft: #a1a1a1; /* secondary — tab.inactiveForeground */
+  --text-faint: #707070; /* tertiary — scrollbarSlider.activeBackground */
+  --accent: #cc7832; /* activityBarBadge.background */
+  --accent-hover: #d98d4f; /* derived */
+  --blue: #5394ec; /* terminal.ansiBlue */
+  --green: #a8c023; /* terminal.ansiGreen */
+  --red: #ff6b68; /* terminal.ansiRed */
+  --amber: #d6bf55; /* terminal.ansiYellow */
 
   /* Type scale — one principled ladder (code-by-wire parity). px shown at the 16px root. */
   --text-micro: 0.6875rem; /* 11px — micro overlines, tabular meta */
@@ -96,12 +98,12 @@ pre,
 *::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 5px;
-  background: #3a3a3a;
+  background: var(--panel-muted);
   background-clip: content-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #4a4a4a;
+  background: var(--panel-muted);
   background-clip: content-box;
 }
 
@@ -309,7 +311,7 @@ textarea {
 }
 
 .ui-button:hover:not(:disabled) {
-  border-color: #3a3a3a;
+  border-color: var(--line);
   background: var(--panel-hover);
   color: var(--text);
 }
@@ -324,31 +326,31 @@ textarea {
 }
 
 .ui-button[aria-pressed='true'] {
-  border-color: #464646;
+  border-color: var(--line);
   background: var(--panel-hover);
   color: var(--text);
 }
 
 .ui-button-primary {
-  border-color: #464646;
-  background: #292929;
+  border-color: var(--line);
+  background: var(--panel-muted);
   color: var(--text);
   font-weight: 600;
 }
 
 .ui-button-primary:hover:not(:disabled) {
-  border-color: #5a5a5a;
-  background: #343434;
+  border-color: var(--line-strong);
+  background: var(--panel-muted);
 }
 
 .ui-button-danger {
-  border-color: rgb(231 94 120 / 40%);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
   color: var(--red);
 }
 
 .ui-button-danger:hover:not(:disabled) {
-  border-color: rgb(231 94 120 / 60%);
-  background: rgb(231 94 120 / 10%);
+  border-color: color-mix(in srgb, var(--red) 60%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .ui-button-icon {
@@ -388,10 +390,10 @@ textarea {
 .ui-alert {
   margin-bottom: 16px;
   padding: 10px 13px;
-  border: 1px solid rgb(231 94 120 / 35%);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   border-radius: var(--radius-md);
-  background: rgb(231 94 120 / 10%);
-  color: #f09aae;
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--red);
   font-size: var(--text-body);
 }
 
@@ -495,7 +497,7 @@ textarea {
 }
 
 .collapsible-card:hover {
-  border-color: #343434;
+  border-color: var(--line);
 }
 
 .collapsible-summary {
@@ -591,20 +593,20 @@ textarea {
 
 .ui-tag-green {
   color: var(--green);
-  border-color: rgb(85 165 131 / 30%);
-  background: rgb(85 165 131 / 9%);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
 }
 
 .ui-tag-red {
   color: var(--red);
-  border-color: rgb(231 94 120 / 30%);
-  background: rgb(231 94 120 / 9%);
+  border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
 }
 
 .ui-tag-blue {
   color: var(--blue);
-  border-color: rgb(122 167 181 / 30%);
-  background: rgb(122 167 181 / 9%);
+  border-color: color-mix(in srgb, var(--blue) 30%, transparent);
+  background: color-mix(in srgb, var(--blue) 9%, transparent);
 }
 
 .simple-row {
@@ -736,7 +738,7 @@ textarea {
 
 .session-picker-trigger:focus-visible,
 .session-picker-search:focus-within {
-  border-color: #565656;
+  border-color: var(--line-strong);
   box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
 }
 
@@ -858,8 +860,8 @@ textarea {
 }
 
 .session-picker-option-active {
-  border-color: rgb(122 167 181 / 40%);
-  background: rgb(122 167 181 / 10%);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
 }
 
 .session-picker-option-copy {
@@ -969,7 +971,7 @@ textarea {
 }
 
 .role-list-item-active {
-  box-shadow: inset 2px 0 0 #686868;
+  box-shadow: inset 2px 0 0 var(--line-strong);
 }
 
 .role-list-item > span:first-child {
@@ -1097,12 +1099,12 @@ textarea {
 }
 
 .conversation-item-user .conversation-sequence {
-  border-color: rgb(122 167 181 / 40%);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
   color: var(--blue);
 }
 
 .conversation-item-assistant .conversation-sequence {
-  border-color: rgb(85 165 131 / 40%);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
   color: var(--green);
 }
 
@@ -1253,10 +1255,10 @@ textarea {
 .chat-notice {
   margin-bottom: 10px;
   padding: 10px 12px;
-  border: 1px solid rgb(85 165 131 / 35%);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   border-radius: 5px;
-  background: rgb(85 165 131 / 10%);
-  color: #7ec9a8;
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  color: var(--green);
   font-size: 13px;
 }
 
@@ -1646,13 +1648,13 @@ textarea {
 }
 
 .chat-bubble-user .chat-bubble-content {
-  border-color: rgb(122 167 181 / 40%);
-  background: rgb(122 167 181 / 10%);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
 }
 
 .chat-bubble-assistant .chat-bubble-content {
-  border-color: rgb(85 165 131 / 40%);
-  background: rgb(85 165 131 / 10%);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .chat-bubble-tool .chat-bubble-content {
@@ -1690,7 +1692,7 @@ textarea {
 }
 
 .chat-composer textarea:focus {
-  border-color: #565656;
+  border-color: var(--line-strong);
   box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
   background: var(--panel);
 }
@@ -2076,7 +2078,7 @@ textarea {
 }
 
 .text-input:focus {
-  border-color: #565656;
+  border-color: var(--line-strong);
   background: var(--panel);
   box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
 }
@@ -2196,7 +2198,7 @@ textarea {
 
 .status-lamp-online {
   background: var(--green);
-  box-shadow: 0 0 0 3px rgb(85 165 131 / 15%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent);
 }
 
 .status-lamp-offline {
@@ -2678,15 +2680,15 @@ textarea {
 }
 
 .context-entry-bar-conversation {
-  --entry-bar-color: rgb(122 167 181 / 18%);
+  --entry-bar-color: color-mix(in srgb, var(--blue) 18%, transparent);
 }
 
 .context-entry-bar-tools {
-  --entry-bar-color: rgb(85 165 131 / 18%);
+  --entry-bar-color: color-mix(in srgb, var(--green) 18%, transparent);
 }
 
 .context-entry-bar-thinking {
-  --entry-bar-color: rgb(192 133 50 / 22%);
+  --entry-bar-color: color-mix(in srgb, var(--amber) 22%, transparent);
 }
 
 .context-entry-header:hover::before {

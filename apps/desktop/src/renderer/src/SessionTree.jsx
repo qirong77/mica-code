@@ -79,20 +79,20 @@ function RowLeading({ state, unreadKey, terminal }) {
   return (
     <span className="relative grid w-4 shrink-0 place-items-center">
       {terminal ? (
-        <span className="text-[#46c57a] chat-terminal-active" title="该会话有终端在运行">
+        <span className="text-success chat-terminal-active" title="该会话有终端在运行">
           <IconTerminal2 size={13} stroke={2} />
         </span>
       ) : unread ? (
         <span
           key={unreadKey}
-          className="size-2 shrink-0 rounded-full bg-[#5aa7e8] chat-dot-unread"
+          className="size-2 shrink-0 rounded-full bg-info chat-dot-unread"
           title="有未读结果"
         />
       ) : null}
       {terminal && unread && (
         <span
           key={unreadKey}
-          className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-[#5aa7e8] chat-dot-unread"
+          className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-info chat-dot-unread"
           title="有未读结果"
         />
       )}
@@ -132,7 +132,7 @@ function ContextMenu({ menu, onClose, onAction }) {
     <div
       ref={ref}
       data-session-menu
-      className="fixed z-[10000] min-w-[200px] rounded-md border border-white/12 bg-[#1c1c1e]/98 p-1 shadow-2xl backdrop-blur"
+      className="fixed z-[10000] min-w-[200px] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y }}
     >
       {items.map((item, index) => {
@@ -145,7 +145,7 @@ function ContextMenu({ menu, onClose, onAction }) {
             type="button"
             aria-label={label}
             className={`flex h-7 w-full items-center px-2 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
-              danger ? 'text-[#e75e78]' : 'text-white/90'
+              danger ? 'text-danger' : 'text-white/90'
             }`}
             onClick={() => {
               onClose()
