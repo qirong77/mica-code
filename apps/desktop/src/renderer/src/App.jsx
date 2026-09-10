@@ -1630,14 +1630,6 @@ export default function App() {
               <IconTerminal2 size={13} className="shrink-0 opacity-75" />
               <span>终端</span>
             </button>
-            <button
-              type="button"
-              title="新建终端"
-              className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
-              onClick={createRightTerm}
-            >
-              <IconPlus size={14} />
-            </button>
             {isMobile && (
               <button
                 type="button"
@@ -1652,40 +1644,51 @@ export default function App() {
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {rightPanelTab === 'terminal' && (
-              <div className="flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-white/10 px-1 no-drag">
-                {rightTerms.map((node) => {
-                  const active = node.id === rightActiveTerm
-                  return (
-                    <div
-                      key={node.id}
-                      className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
-                        active
-                          ? 'bg-white/[.10] text-white'
-                          : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        title={node.text}
-                        className="flex min-w-0 items-center gap-1.5"
-                        onClick={() => setRightActiveTerm(node.id)}
-                      >
-                        <IconTerminal2 size={12} className="shrink-0 opacity-75" />
-                        <span className="max-w-36 truncate">{node.text}</span>
-                      </button>
-                      <button
-                        type="button"
-                        title="关闭终端"
-                        className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
-                          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-white/10 px-1 no-drag">
+                <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+                  {rightTerms.map((node) => {
+                    const active = node.id === rightActiveTerm
+                    return (
+                      <div
+                        key={node.id}
+                        className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                          active
+                            ? 'bg-white/[.10] text-white'
+                            : 'text-white/55 hover:bg-white/[.05] hover:text-white'
                         }`}
-                        onClick={() => closeRightTerm(node.id)}
                       >
-                        <IconX size={11} />
-                      </button>
-                    </div>
-                  )
-                })}
+                        <button
+                          type="button"
+                          title={node.text}
+                          className="flex min-w-0 items-center gap-1.5"
+                          onClick={() => setRightActiveTerm(node.id)}
+                        >
+                          <IconTerminal2 size={12} className="shrink-0 opacity-75" />
+                          <span className="max-w-36 truncate">{node.text}</span>
+                        </button>
+                        <button
+                          type="button"
+                          title="关闭终端"
+                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
+                            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                          onClick={() => closeRightTerm(node.id)}
+                        >
+                          <IconX size={11} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+                <button
+                  type="button"
+                  title="新建终端"
+                  aria-label="新建终端"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                  onClick={createRightTerm}
+                >
+                  <IconPlus size={14} />
+                </button>
               </div>
             )}
             <FilesView

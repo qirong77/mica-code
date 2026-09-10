@@ -15,7 +15,7 @@ import { registerStatsIpc } from '../host/stats.js'
 import { disposeSettings, registerSettingsIpc } from '../host/settings.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
-import { saveImagePng } from '../host/chat-images.js'
+import { saveImageDataUrl } from '../host/chat-images.js'
 
 /**
  * Mica Code 桌面端的运行时本体：`src/host` 下的能力（PTY 终端、mica app-server
@@ -48,6 +48,7 @@ const MIME_TYPES = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8'
 }
 
@@ -197,12 +198,7 @@ async function handlePasteImage(req, res) {
   try {
     const body = JSON.parse((await readBody(req)) || '{}')
     const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : ''
-    const comma = dataUrl.indexOf(',')
-    if (!dataUrl.startsWith('data:image/') || comma < 0) {
-      sendJson(res, 200, { ok: false, error: '缺少图片数据' })
-      return
-    }
-    sendJson(res, 200, saveImagePng(Buffer.from(dataUrl.slice(comma + 1), 'base64')))
+    sendJson(res, 200, saveImageDataUrl(dataUrl))
   } catch (error) {
     sendJson(res, 200, { ok: false, error: errorMessage(error) })
   }

@@ -2468,6 +2468,34 @@ body.is-resizing.is-resizing-terminal {
     min-width: 36px;
   }
 
+  /* iOS Safari 聚焦字号小于 16px 的输入控件时会自动放大整页，而且不会随失焦还原
+     ——退回会话列表后页面仍是放大的。窄屏给表单控件统一下限 16px；用 #root 提升
+     优先级压过组件上的 Tailwind 字号工具类。monaco 自带的隐藏 textarea 不参与，
+     避免打乱编辑器的测量与 IME 定位。 */
+  #root input,
+  #root select,
+  #root textarea:not(.inputarea) {
+    font-size: 16px;
+  }
+
+  /* 上面的规则只覆盖到了 textarea 本身。composer 显示文字的是 .chat-composer-markdown-layer
+     （textarea 是透明的），两者必须同字号，否则自绘光标和选区会和文字错开；它们本来就
+     共用 --chat-text-size，所以在 composer 上改这一个变量即可（.chat-view 是它的祖先）。 */
+  .chat-composer {
+    --chat-text-size: 16px;
+  }
+
+  /* 发送/上传按钮 25px 在触屏上太小，动作区整体加高 */
+  .chat-composer-actions {
+    height: 32px;
+    min-height: 32px;
+  }
+
+  .chat-composer-actions button {
+    width: 32px;
+    height: 32px;
+  }
+
   /* 终端和编辑器在窄屏上需要更大的行高才好点选 */
   .terminal-pane .xterm {
     font-size: 12px;

@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  IconBell,
   IconChevronRight,
   IconDots,
   IconListTree,
@@ -11,7 +10,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
-import { buildInboxItems, liveSessionRowState } from './session-state'
+import { liveSessionRowState } from './session-state'
 import { longPressHandlers } from './hooks'
 
 const rowClass =
@@ -188,7 +187,6 @@ export function SessionTree({
     pinned: false,
     recent: false
   })
-  const [inboxOpen, setInboxOpen] = useState(true)
   const [expandedRecent, setExpandedRecent] = useState(false)
   const [drag, setDrag] = useState(null) // { section, id }
   const [over, setOver] = useState(null) // { section, id, position: 'before'|'after' }
@@ -229,10 +227,6 @@ export function SessionTree({
   useEffect(() => {
     if (normalizedQuery) setExpandedRecent(false)
   }, [normalizedQuery])
-  const inboxItems = useMemo(
-    () => buildInboxItems({ sessions, draftTabs, openBySession, unread }),
-    [draftTabs, openBySession, sessions, unread]
-  )
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
   const openMenu = (event, payload) => {
@@ -488,65 +482,6 @@ export function SessionTree({
             </button>
           )}
         </div>
-
-        <section className="mb-1">
-          <button
-            type="button"
-            className="flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium text-white/50 transition-colors hover:bg-white/[.05] hover:text-white/85"
-            aria-expanded={inboxOpen}
-            onClick={() => setInboxOpen((value) => !value)}
-          >
-            <IconChevronRight
-              size={14}
-              className={`shrink-0 text-white/30 transition-transform ${inboxOpen ? 'rotate-90' : ''}`}
-            />
-            <IconBell size={14} className="shrink-0 text-white/30" />
-            <span className="min-w-0 flex-1">Inbox</span>
-            {inboxItems.length > 0 && (
-              <span className="rounded-full bg-white/[.08] px-1.5 text-[10px] tabular-nums text-white/55">
-                {inboxItems.length}
-              </span>
-            )}
-          </button>
-          {inboxOpen && (
-            <div className="flex flex-col gap-px">
-              {inboxItems.length ? (
-                inboxItems.map((item) => {
-                  const active = item.session
-                    ? activeSessionId === item.session.id
-                    : item.nodeId === selectedId
-                  const title = item.session?.title || item.draft?.text || item.nodeId
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`${rowClass} ${active ? 'bg-white/[.09] text-white' : 'text-white/70'}`}
-                      title={title}
-                      onClick={() =>
-                        item.session ? onOpenSession(item.session) : onSelectDraft(item.draft)
-                      }
-                    >
-                      <span className="grid w-4 shrink-0 place-items-center text-white/45">
-                        <IconBell size={13} />
-                      </span>
-                      <span
-                        className={`min-w-0 flex-1 truncate text-left ${item.state.running ? 'chat-running-text' : ''}`}
-                      >
-                        {title}
-                      </span>
-                      <span
-                        className="size-2 shrink-0 rounded-full bg-[#5aa7e8] chat-dot-unread"
-                        title="有未读结果"
-                      />
-                    </button>
-                  )
-                })
-              ) : (
-                <div className="px-7 py-1 text-xs text-white/30">暂无消息</div>
-              )}
-            </div>
-          )}
-        </section>
 
         <div className="flex flex-col gap-px">
           <section>

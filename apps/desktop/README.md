@@ -23,12 +23,12 @@ The Chat tab replaces the old terminal-hosted Mica view: every chat node keeps o
 
 The Chat tab talks to the Mica CLI via `mica app-server`, a per-chat-node resident process speaking the Codex v2 App Server protocol subset over stdio (JSON-RPC style, one JSON object per line): the app sends `initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt` and consumes v2 notifications (`turn/started`, `turn/completed`, `item/agentMessage/delta` for text, `item/reasoning/textDelta` for thinking, `item/commandExecution/outputDelta` plus `item/started`/`item/completed` for tool calls — pending then completed with the same item id, `thread/tokenUsage/updated` for usage). Mica extension notifications surface long-lived host state: `mica/queue/*` for the after_iteration queue and `mica/backgroundTasks/updated`/`mica/subagentTasks/updated` snapshots for background shell tasks and running subagents (including background subagents still active after the parent turn), which the renderer keeps as resident rows above the composer — the same task status area the CLI shows above its input. The runtime (`src/host/chat.js`) maps these notifications back to the renderer's internal event shape (forwarding each `thread/tokenUsage/updated` as it arrives, so the composer status line's tokens/cached/ctx keep refreshing during long turns instead of only at `turn/completed`; those figures come from `tokenUsage.last`, the current context occupancy), paces adjacent text/reasoning deltas, and keeps the host alive across turns (skipping process startup, session reload and MCP re-init; Shift+Tab steers into the active turn for after_iteration injection, plain Tab queues locally for after_turn). Aborts send `turn/interrupt` instead of killing the process (SIGTERM fallback). Conversation history plus model/context metadata is read from `~/.mica/sessions/*.json` when a session is reopened, and turn lifecycle notifications are posted to the local notify server so sidebar dots and unread badges behave exactly like PTY-hosted Mica sessions.
 
-The sidebar intentionally has only two activity indicators: the row title breathes green (`chat-running-text`) while a Mica turn or terminal process is running, and a blue dot marks a result the user has not read yet. Merely opening an idle session never creates a status dot; running takes precedence if both flags are present (the title animates and no dot is shown). Recent rows lead with the working directory base name in muted text, so sessions from different projects stay distinguishable. Closing a conversation is no longer a hover affordance on the left — the row's more-actions menu and the right-click context menu own it. The Inbox section only lists finished work that is still unread — a running turn stays out of it until it produces a result to review.
+The sidebar intentionally has only two activity indicators: the row title breathes green (`chat-running-text`) while a Mica turn or terminal process is running, and a blue dot marks a result the user has not read yet. Merely opening an idle session never creates a status dot; running takes precedence if both flags are present (the title animates and no dot is shown). Recent rows lead with the working directory base name in muted text, so sessions from different projects stay distinguishable. Closing a conversation is no longer a hover affordance on the left — the row's more-actions menu and the right-click context menu own it.
 
 Chat Markdown uses `react-markdown` with GFM support. Raw HTML is not rendered; tables, task lists, fenced code, nested lists and streaming incomplete blocks are handled by the parser, while code blocks, messages and tool details expose copy actions. `TodoWrite` drives a plan dock above the composer, and Agent/background-shell calls receive dedicated activity summaries.
 
 The Chat view keeps the same minimal status line as the Mica terminal: the left side shows the running indicator, and the right side shows `model_effort` and context usage as plain text. A single-line bar above the transcript always shows the newest sent user message (`lastUserPromptText`, ellipsised; queued messages stay in the queue dock instead), so the current task stays visible while scrolling. Clicking the model text opens a selection panel (catalog from `mica models`), clicking the `ctx` text opens a context-usage modal with a token bar and the same breakdown as `/context`; both apply on the next message via `--model`/`--variant`/`--role` headless overrides that persist into the session snapshot. The app footer pairs the Git branch (left) with the working directory (right), and both always describe the same directory: the active chat node's working directory, never the `cd` of a shell running in the terminal tab. Clicking the directory opens a picker (recent directories aggregated from session history, a system folder chooser, and manual input); switching re-points the current chat and becomes the default directory, so New Session starts in the most recently used directory. Typing `/` opens a Web command palette for the remaining Chat commands (`/help`, `/status`, `/rename`, `/resume`, `/todo`, `/config`, `/compact`, plus explicit `/model` `/effort` `/role` values); `/compact` runs the headless `mica compact --session <id>` (same `CompactionService` as the terminal, with a busy guard and a before/after token summary) and refreshes the conversation. Remaining selector-heavy Ink commands like `/rewind` are never sent to the model and instead offer a copy-and-open-Terminal handoff. Auto-scroll follows output only while the reader remains near the bottom, with resize anchoring for streaming Markdown and reasoning.
-Pasting an image into the composer saves it into `~/.mica/images/` (mirroring the terminal input) and inserts an `[Image](...)` ref; the headless run resolves the ref into a multimodal content block before calling the model, so vision-capable models see the pasted image directly. Models whose API rejects image input (e.g. DeepSeek chat completions) surface the provider error in the conversation instead.
+Pasting an image into the composer saves it into `~/.mica/images/` (mirroring the terminal input) and inserts an `[Image](...)` ref; the headless run resolves the ref into a multimodal content block before calling the model, so vision-capable models see the pasted image directly. Models whose API rejects image input (e.g. DeepSeek chat completions) surface the provider error in the conversation instead. The photo button next to send covers the same path for devices without a clipboard paste (phones): it opens a file picker limited to the formats the CLI can read (`accept="image/png,image/jpeg,image/webp,image/gif"`, which is also what makes iOS transcode HEIC to JPEG), uploads every selected file through `POST /api/paste-image`, and inserts the refs at the caret. `saveImageDataUrl` (`src/host/chat-images.js`) names the stored file after the data URL's media type — falling back to magic-byte sniffing — instead of always writing `.png`, which is what previously mislabelled a pasted JPEG.
 
 ## Recommended IDE Setup
 
@@ -146,6 +146,14 @@ editor behind a back button, and right-click-only actions gain long-press equiva
 (`longPressHandlers` ignores mouse pointers, so desktop behaviour is unchanged). `?layout=mobile`
 and `?layout=desktop` force a layout for previewing on a large screen.
 
+The mobile block in `assets/app.css` also floors every form control at `16px`. iOS Safari zooms the
+whole page when a control with a smaller computed font size takes focus, and it does not zoom back
+out on blur — the page stays magnified after leaving the composer. The rule is scoped as
+`#root input, #root select, #root textarea:not(.inputarea)` so it outranks Tailwind's per-component
+`text-[13px]` utilities, and it exempts monaco's hidden `inputarea` textarea (the editor measures
+and positions IME candidates off that element). The composer action buttons grow to 32px at the same
+breakpoint because 25px is below a comfortable touch target.
+
 > There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
 > binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
 
@@ -167,3 +175,19 @@ $ npm run icons:generate
 ```
 
 The script renders the SVG at 4x and downscales with LANCZOS, so the gradient stays clean at 1024px without dithering noise.
+
+The same run writes the **web icons** into `src/renderer/public/`, which Vite copies verbatim into
+the renderer output (so the runtime serves them at `/`):
+
+| file | consumer |
+| --- | --- |
+| `favicon-32.png` | browser tab (declared in `src/renderer/index.html`) |
+| `apple-touch-icon.png` (180px) | iOS "Add to Home Screen" |
+| `icon-192.png` / `icon-512.png` | `manifest.webmanifest` (PWA install, Android home screen) |
+
+These are **full-bleed**: the script crops the 80.46875%-wide tile out of the rendered SVG before
+downscaling. iOS applies its own 22.375% corner mask to `apple-touch-icon` (the SVG's `rx` is
+exactly that value), so handing it the desktop artwork with its transparent margin would shrink the
+icon on the home screen and leave a ring of wallpaper around it. `manifest.webmanifest` declares
+`display: standalone` — inert for a plain-HTTP LAN page (browsers only apply it to installed apps),
+but it makes the served page installable as a real web app once it is reached over HTTPS.

@@ -20,6 +20,7 @@ import {
   IconGripHorizontal,
   IconLoader2,
   IconMinimize,
+  IconPhoto,
   IconSend,
   IconSquare,
   IconTerminal,
@@ -1735,6 +1736,7 @@ export function ChatView({
   const transcriptRef = useRef(null)
   const composerDockRef = useRef(null)
   const textareaRef = useRef(null)
+  const imageInputRef = useRef(null)
 
   const updateMessages = useCallback((update) => {
     const next = typeof update === 'function' ? update(messagesRef.current) : update
@@ -1836,6 +1838,49 @@ export function ChatView({
       return id
     },
     [updateMessages]
+  )
+
+  // 把文本插到光标处（粘贴图片与移动端「上传照片」共用）。以 textarea 当前的值为准，
+  // 因为选照片/上传是异步的，回调执行时闭包里的 input 可能已经过期。
+  const insertComposerText = useCallback(
+    (text) => {
+      if (!text) return
+      const element = textareaRef.current
+      const current = element?.value ?? inputRef.current ?? ''
+      const start = element?.selectionStart ?? current.length
+      const end = element?.selectionEnd ?? current.length
+      const next = current.slice(0, start) + text + current.slice(end)
+      draftsRef.current.set(nodeId, next)
+      setInput(next)
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.setSelectionRange(start + text.length, start + text.length)
+        el.focus()
+      })
+    },
+    [inputRef, nodeId]
+  )
+
+  // 相册/拍照选到的图片与粘贴一样：先落到 mica 的 images 目录，再把 [Image](...) 引用
+  // 插进输入框（引用格式由 CLI 解析，见 host/chat-images.js）。
+  const attachImages = useCallback(
+    async (files) => {
+      const list = Array.from(files || [])
+      if (!list.length) return
+      const refs = []
+      for (const file of list) {
+        try {
+          const result = await window.mica.chat.savePastedImage({ file })
+          if (result?.ok && result.ref) refs.push(result.ref)
+          else appendNotice(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
+        } catch (error) {
+          appendNotice(`上传 ${file.name || '图片'} 失败：${error?.message || error}`, 'error')
+        }
+      }
+      if (refs.length) insertComposerText(refs.map((ref) => `[Image](${ref})`).join(' '))
+    },
+    [appendNotice, insertComposerText]
   )
 
   const updateNotice = useCallback(
@@ -3657,6 +3702,23 @@ export function ChatView({
           <span className="chat-prompt-mark" aria-hidden="true">
             {queueReady ? '↳' : '›'}
           </span>
+          {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
+              CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="sr-only"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(event) => {
+              const files = Array.from(event.target.files || [])
+              // 先取走 FileList 再清空，否则同一个文件不会二次触发 change
+              event.target.value = ''
+              void attachImages(files)
+            }}
+          />
           <TerminalComposer
             value={input}
             placeholder={
@@ -3676,23 +3738,12 @@ export function ChatView({
               event.preventDefault()
               // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
               const file = imageItem.getAsFile?.() || null
+              const fallback = event.clipboardData?.getData('text/plain') ?? ''
               window.mica.chat
                 .savePastedImage(window.mica.isWeb ? { file } : undefined)
-                .then((result) => {
-                  const element = textareaRef.current
-                  const start = element?.selectionStart ?? input.length
-                  const end = element?.selectionEnd ?? input.length
-                  const insertion = result?.ok
-                    ? `[Image](${result.ref})`
-                    : (event.clipboardData?.getData('text/plain') ?? '')
-                  const next = input.slice(0, start) + insertion + input.slice(end)
-                  draftsRef.current.set(nodeId, next)
-                  setInput(next)
-                  requestAnimationFrame(() => {
-                    const el = textareaRef.current
-                    if (el) el.setSelectionRange(start + insertion.length, start + insertion.length)
-                  })
-                })
+                .then((result) =>
+                  insertComposerText(result?.ok ? `[Image](${result.ref})` : fallback)
+                )
                 .catch(() => {})
             }}
             onKeyDown={(event) => {
@@ -3794,6 +3845,14 @@ export function ChatView({
             }}
           />
           <div className="chat-composer-actions">
+            <button
+              type="button"
+              title="上传图片"
+              aria-label="上传图片"
+              onClick={() => imageInputRef.current?.click()}
+            >
+              <IconPhoto size={13} />
+            </button>
             <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
             {running ? (
               <>

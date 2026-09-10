@@ -7,6 +7,14 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:; frame-src http://127.0.0.1:*"
     />
+    <!-- 图标用相对路径：Electron 走 file:// 加载、局域网走 http，两种方式都能命中
+         renderer 根目录下的产物（由 scripts/generate-icons.py 生成）。 -->
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#0e0e0e" />
+    <meta name="application-name" content="Mica Code" />
     <title>Mica Code</title>
   </head>
   <body>
