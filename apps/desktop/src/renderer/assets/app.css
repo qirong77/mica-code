@@ -362,8 +362,10 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-message-user {
-  align-items: center;
   margin-top: 10px;
+  /* Same block padding as .chat-notice, otherwise the text hugs the top and
+     bottom edges of the highlight while the notice has breathing room. */
+  padding-block: 5px;
   background: var(--chat-user);
   box-shadow:
     4px 0 0 var(--chat-user),
@@ -378,9 +380,12 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-message-user .chat-message-marker {
-  /* Keep the user marker on the same inset as Notice and assistant rows. */
-  margin-left: 4px;
-  color: var(--color-fg-soft);
+  /* Mirror Notice's ▌ so the two read as one symbol: same size (11.5px, from
+     .chat-notice), same --color-fg, same column inset. Do not add
+     `align-items: center` to the row: it parks the marker in the vertical
+     middle of multi-line messages instead of the first line. */
+  color: var(--color-fg);
+  font-size: 11.5px;
 }
 
 .chat-message-queued {

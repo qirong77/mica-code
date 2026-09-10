@@ -18,6 +18,8 @@ const rowClass =
 
 const RECENT_PREVIEW_LIMIT = 6
 
+const RECENT_PAGE_SIZE = 10
+
 /** 取路径最后一段作为文件夹名 */
 function baseName(cwd) {
   const trimmed = String(cwd || '').replace(/\/+$/, '')
@@ -187,7 +189,7 @@ export function SessionTree({
     pinned: false,
     recent: false
   })
-  const [expandedRecent, setExpandedRecent] = useState(false)
+  const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
   const [drag, setDrag] = useState(null) // { section, id }
   const [over, setOver] = useState(null) // { section, id, position: 'before'|'after' }
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -217,15 +219,13 @@ export function SessionTree({
     [pins, searchable]
   )
   const recentList = useMemo(
-    () =>
-      normalizedQuery || expandedRecent
-        ? recentCandidates
-        : recentCandidates.slice(0, RECENT_PREVIEW_LIMIT),
-    [expandedRecent, normalizedQuery, recentCandidates]
+    () => (normalizedQuery ? recentCandidates : recentCandidates.slice(0, recentLimit)),
+    [normalizedQuery, recentCandidates, recentLimit]
   )
   const recentOverflow = Math.max(0, recentCandidates.length - recentList.length)
+  const recentPageSize = Math.min(RECENT_PAGE_SIZE, recentOverflow)
   useEffect(() => {
-    if (normalizedQuery) setExpandedRecent(false)
+    if (normalizedQuery) setRecentLimit(RECENT_PREVIEW_LIMIT)
   }, [normalizedQuery])
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
@@ -510,13 +510,13 @@ export function SessionTree({
                       type="button"
                       className={`${rowClass} w-full text-white/45 hover:text-white/75`}
                       style={{ paddingLeft: 8 }}
-                      onClick={() => setExpandedRecent(true)}
+                      onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
                     >
                       <span className="grid w-4 shrink-0 place-items-center text-white/35">
                         <IconDots size={14} />
                       </span>
                       <span className="min-w-0 flex-1 truncate text-left text-[13px]">
-                        Show {recentOverflow} more
+                        Show {recentPageSize} more
                       </span>
                     </button>
                   )}
