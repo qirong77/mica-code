@@ -1279,7 +1279,7 @@ export const FilesView = forwardRef(function FilesView(
               className={`relative grid size-9 place-items-center rounded-md transition-colors ${active ? 'bg-white/[.09] text-white' : 'text-white/45 hover:bg-white/[.05] hover:text-white'}`}
               onClick={() => switchPanel(id)}
             >
-              <Icon size={17} className="shrink-0" />
+              <Icon size={22} className="shrink-0" />
               {badges[id] && (
                 <span
                   aria-hidden="true"

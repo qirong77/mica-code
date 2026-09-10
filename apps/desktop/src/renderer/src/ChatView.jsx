@@ -3859,6 +3859,7 @@ export function ChatView({
                 {input.trim() && (
                   <button
                     type="button"
+                    className="chat-composer-queue-send"
                     title="加入发送队列"
                     aria-label="加入发送队列"
                     onClick={send}
@@ -3866,7 +3867,13 @@ export function ChatView({
                     <IconSend size={13} />
                   </button>
                 )}
-                <button type="button" title="停止生成" aria-label="停止生成" onClick={stop}>
+                <button
+                  type="button"
+                  className="chat-composer-stop"
+                  title="停止生成"
+                  aria-label="停止生成"
+                  onClick={stop}
+                >
                   {stopping ? (
                     <IconLoader2 size={13} className="animate-spin" />
                   ) : (
