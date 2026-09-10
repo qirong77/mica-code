@@ -6,21 +6,19 @@
       <stop offset="100%" stop-color="#22d3ee"/>
     </linearGradient>
   </defs>
-  <!-- macOS 26 Tahoe renders any legacy icon whose shape it does not read as
-       a rounded rectangle on a gray "icon jail" plate. The trigger is the
-       corner radius, not the transparent margin: verified on macOS 26.0 via
-       IconServices that rx <= 19/64 renders normally and rx >= 20/64 gets
-       jailed. Keep rx at Apple's 22.375% (14.32/64) with headroom.
-       The 6.25/64 margin keeps the classic 824/1024 grid on macOS <= 15;
-       Tahoe scales the artwork up to fill the tile either way. -->
-  <g transform="translate(6.25 6.25) scale(0.8046875)">
-    <rect width="64" height="64" rx="14.32" fill="url(#mica-bg)"/>
-    <!-- handwritten M: four uneven strokes, slightly curved and tilted -->
-    <g transform="rotate(-2 32 32)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20.4 43.2 Q19.4 32.6 20.6 22.6" stroke-width="6.9"/>
-      <path d="M22 21.4 L32.4 34.2" stroke-width="6.5"/>
-      <path d="M32.4 34.2 L41.4 21.8" stroke-width="6.6"/>
-      <path d="M42.8 22.6 Q45.4 32.6 44.2 43" stroke-width="6.3"/>
-    </g>
+  <!-- 全仓库唯一的品牌标志：桌面 App、官网、config-web、README 都引用这一份，不要再复制副本。
+       这里画的是「满幅」形态（瓦片铺满 viewBox）——网页图标必须满幅，否则浏览器标签、
+       iOS「添加到主屏幕」（自己会套 22.375% 圆角遮罩）里的图标会缩一圈。
+       macOS 原生图标要的 824/1024 经典网格外边距不在这里，由
+       apps/desktop/scripts/generate-icons.py 渲染时外扩 viewBox 补上。
+       圆角用 Apple 规范的 22.375%（14.32/64）：macOS 26 Tahoe 会把 rx >= 20/64 的
+       legacy 图标套上灰色 "icon jail" 底板，22.375% 仍在安全范围内。 -->
+  <rect width="64" height="64" rx="14.32" fill="url(#mica-bg)"/>
+  <!-- handwritten M: four uneven strokes, slightly curved and tilted -->
+  <g transform="rotate(-2 32 32)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.4 43.2 Q19.4 32.6 20.6 22.6" stroke-width="6.9"/>
+    <path d="M22 21.4 L32.4 34.2" stroke-width="6.5"/>
+    <path d="M32.4 34.2 L41.4 21.8" stroke-width="6.6"/>
+    <path d="M42.8 22.6 Q45.4 32.6 44.2 43" stroke-width="6.3"/>
   </g>
 </svg>

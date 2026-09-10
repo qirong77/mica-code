@@ -1,4 +1,4 @@
-# <img src="./images/mica.svg" alt="Mica" width="40" height="40" align="absmiddle"> Mica Code
+# <img src="./apps/desktop/resources/icon.svg" alt="Mica" width="40" height="40" align="absmiddle"> Mica Code
 
 > **MICA — Minimal, Intelligent, Cache-first Agent.**
 >

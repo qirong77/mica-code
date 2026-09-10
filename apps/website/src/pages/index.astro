@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { features, protocolItems } from '../content/home';
+import markUrl from '../../../desktop/resources/icon.svg?url&no-inline';
 
 const base = import.meta.env.BASE_URL;
 
@@ -29,7 +30,7 @@ const heroTerm = `$ mica
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <img class="hero-logo" src={`${base}mica.svg`} alt="Mica Code logo" />
+      <img class="hero-logo" src={markUrl} alt="Mica Code logo" />
       <h1>Mica Code</h1>
       <div class="tagline">Minimal, Intelligent, Cache-first Agent.</div>
       <p class="sub">

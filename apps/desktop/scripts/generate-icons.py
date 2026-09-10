@@ -4,14 +4,20 @@
 macOS only: uses sips to rasterize the SVG and iconutil to build the .icns.
 Pillow is used for supersampled downscaling and PNG re-encoding.
 
-Also writes the web icons (tab favicon, iOS home-screen icon, PWA manifest icons)
-into src/renderer/public, which Vite copies into the renderer output.
+resources/icon.svg 是满幅形态（瓦片铺满 viewBox），也是全仓库唯一的品牌标志：官网、
+config-web、README 直接引用同一份文件。这里只负责桌面端需要的位图：
+
+  - 原生图标（.icns/.ico 与 resources/build 下的 icon.png）按 macOS 经典网格补上
+    824/1024 的透明外边距——渲染时外扩 viewBox，不动物件本身；
+  - 网页图标（tab favicon、iOS 主屏图标、PWA manifest 图标）直接满幅渲染后写进
+    src/renderer/public，由 Vite 复制进 renderer 产物。
 
 Usage:
     python3 scripts/generate-icons.py
 """
 
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -26,10 +32,9 @@ WEB_DIR = os.path.join(ROOT, "src", "renderer", "public")
 SS = 4  # supersample factor: render 4x, then downscale with LANCZOS
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 ICNS_SIZES = (16, 32, 128, 256, 512)
-# icon.svg 里那块瓦片只占画布的 80.46875%（6.25/64 的透明外边距 + scale(0.8046875)）。
-# 网页图标必须满幅：iOS「添加到主屏幕」自己会套 22.375% 的圆角遮罩（icon.svg 的 rx
-# 正是这个值），留出透明外边距会让图标在桌面上缩一圈。
-WEB_TILE_RATIO = 0.8046875
+# macOS 经典网格：圆角方块占画布 824/1024，四周留白。icon.svg 本身是满幅的，渲染
+# 原生图标时把 viewBox 按这个比例外扩，等价于原来的透明外边距。
+NATIVE_TILE_RATIO = 0.8046875
 WEB_ICONS = (
     ("favicon-32.png", 32),
     ("apple-touch-icon.png", 180),
@@ -38,11 +43,11 @@ WEB_ICONS = (
 )
 
 
-def render(size, out):
+def render(size, out, svg=SVG):
     big = size * SS
     tmp = os.path.join(tempfile.gettempdir(), "mica-icon-%d.png" % big)
     subprocess.run(
-        ["sips", "-s", "format", "png", "-z", str(big), str(big), SVG, "--out", tmp],
+        ["sips", "-s", "format", "png", "-z", str(big), str(big), svg, "--out", tmp],
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -52,21 +57,21 @@ def render(size, out):
     image.save(out, "PNG", optimize=True, compress_level=9)
 
 
-def render_full_bleed(size, out):
-    """渲染网页图标：把 icon.svg 里那块瓦片裁到满幅再缩放到目标尺寸。"""
-    big = int(round(size * SS / WEB_TILE_RATIO))
-    tmp = os.path.join(tempfile.gettempdir(), "mica-icon-web-%d.png" % big)
-    subprocess.run(
-        ["sips", "-s", "format", "png", "-z", str(big), str(big), SVG, "--out", tmp],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    inset = int(round(big * (1 - WEB_TILE_RATIO) / 2))
-    image = Image.open(tmp).convert("RGBA")
-    image = image.crop((inset, inset, big - inset, big - inset))
-    image.resize((size, size), Image.LANCZOS).save(out, "PNG", optimize=True, compress_level=9)
-    os.remove(tmp)
+def native_svg():
+    """把 icon.svg 的 viewBox 外扩到 macOS 经典网格，落到临时文件供 sips 渲染。"""
+    with open(SVG, encoding="utf-8") as handle:
+        markup = handle.read()
+    view_box = re.search(r'viewBox="([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)"', markup)
+    if not view_box:
+        sys.exit("missing viewBox in %s" % SVG)
+    x, y, width, height = (float(value) for value in view_box.groups())
+    scale = 1 / NATIVE_TILE_RATIO
+    box = (x - width * (scale - 1) / 2, y - height * (scale - 1) / 2, width * scale, height * scale)
+    boxed = markup[: view_box.start()] + 'viewBox="%s"' % " ".join(str(round(v, 6)) for v in box) + markup[view_box.end() :]
+    path = os.path.join(tempfile.gettempdir(), "mica-icon-native.svg")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(boxed)
+    return path
 
 
 def report(path):
@@ -96,23 +101,25 @@ def main():
     if not os.path.exists(SVG):
         sys.exit("missing %s" % SVG)
 
+    native = native_svg()
+
     for target in ("resources/icon.png", "build/icon.png"):
         path = os.path.join(ROOT, target)
-        render(1024, path)
+        render(1024, path, native)
         report(path)
 
     os.makedirs(WEB_DIR, exist_ok=True)
     for name, size in WEB_ICONS:
         path = os.path.join(WEB_DIR, name)
-        render_full_bleed(size, path)
+        render(size, path)
         report(path)
 
     with tempfile.TemporaryDirectory() as tmp:
         iconset = os.path.join(tmp, "icon.iconset")
         os.makedirs(iconset)
         for size in ICNS_SIZES:
-            render(size, os.path.join(iconset, "icon_%dx%d.png" % (size, size)))
-            render(size * 2, os.path.join(iconset, "icon_%dx%d@2x.png" % (size, size)))
+            render(size, os.path.join(iconset, "icon_%dx%d.png" % (size, size)), native)
+            render(size * 2, os.path.join(iconset, "icon_%dx%d@2x.png" % (size, size)), native)
         icns = os.path.join(ROOT, "build", "icon.icns")
         subprocess.run(
             ["iconutil", "-c", "icns", iconset, "-o", icns],
@@ -123,7 +130,7 @@ def main():
         pngs = []
         for size in ICO_SIZES:
             path = os.path.join(tmp, "ico-%d.png" % size)
-            render(size, path)
+            render(size, path, native)
             pngs.append((size, path))
         write_ico(pngs, os.path.join(ROOT, "build", "icon.ico"))
 

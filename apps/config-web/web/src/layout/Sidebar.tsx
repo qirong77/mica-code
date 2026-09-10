@@ -1,5 +1,7 @@
 import type { ConfigWebSection } from '../../../src/shared/types.js';
 import { appIcons } from '../icons.js';
+// 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），这里直接引用，不要另存副本。
+import markUrl from '../../../../desktop/resources/icon.svg?url&no-inline';
 
 export type ConfigWebAppSection = ConfigWebSection;
 
@@ -40,12 +42,7 @@ export function Sidebar({ section, onChange }: SidebarProps) {
 }
 
 function MicaMark() {
-  return (
-    <svg className="brand-mark" viewBox="0 0 32 32" role="img" aria-label="Mica">
-      <rect width="32" height="32" rx="7" fill="currentColor" />
-      <path d="M8 22V10h3.2l4.8 6.5 4.8-6.5H24v12h-3.2v-6.7L16 21.5l-4.8-6.2V22H8z" fill="var(--bg)" />
-    </svg>
-  );
+  return <img className="brand-mark" src={markUrl} alt="Mica" />;
 }
 
 function SidebarItem({

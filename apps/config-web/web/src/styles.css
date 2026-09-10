@@ -149,10 +149,10 @@ textarea {
 }
 
 .brand-mark {
+  display: block;
   width: 26px;
   height: 26px;
   flex: 0 0 auto;
-  color: var(--accent);
 }
 
 .brand {

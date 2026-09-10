@@ -73,17 +73,23 @@ function RowTail({ relativeTime }) {
   )
 }
 
-// 行首状态位固定 w-4：终端前台进程在跑（如 npm run dev）时显示终端图标，否则显示
-// 未读圆点。两者同时存在时把未读点叠在图标右上角，绝不额外占位——否则这一行整体
-// 右推，与相邻行的缩进对不齐。运行中的会话改用标题文字呼吸绿，不再有旋转图标。
+// 行首状态位固定 w-4：终端前台进程在跑（如 npm run dev）时显示终端图标，Mica 对话
+// 运行中显示呼吸绿点，否则显示未读圆点。终端图标与未读点同时存在时把未读点叠在图标
+// 右上角，绝不额外占位——否则这一行整体右推，与相邻行的缩进对不齐。
 function RowLeading({ state, unreadKey, terminal }) {
   const unread = state === 'unread'
+  const running = state === 'running'
   return (
     <span className="relative grid w-4 shrink-0 place-items-center">
       {terminal ? (
         <span className="text-success chat-terminal-active" title="该会话有终端在运行">
           <IconTerminal2 size={13} stroke={2} />
         </span>
+      ) : running ? (
+        <span
+          className="size-2 shrink-0 rounded-full bg-success chat-dot-running"
+          title="对话正在运行"
+        />
       ) : unread ? (
         <span
           key={unreadKey}
@@ -378,11 +384,7 @@ export function SessionTree({
               onCancel={() => setEditing(null)}
             />
           ) : (
-            <span
-              className={`min-w-0 flex-1 truncate ${state === 'running' ? 'chat-running-text' : ''}`}
-            >
-              {session.title || session.id}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{session.title || session.id}</span>
           )}
           <RowTail relativeTime={relativeTime} />
         </div>
@@ -426,11 +428,7 @@ export function SessionTree({
               onCancel={() => setEditing(null)}
             />
           ) : (
-            <span
-              className={`min-w-0 flex-1 truncate ${state === 'running' ? 'chat-running-text' : ''}`}
-            >
-              {node.text}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{node.text}</span>
           )}
           <RowTail relativeTime="" />
         </div>

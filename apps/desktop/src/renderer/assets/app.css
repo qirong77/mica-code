@@ -202,20 +202,19 @@ body.is-resizing.is-resizing-terminal {
   box-shadow: none !important;
 }
 
-/* 侧栏只有两种状态灯：running 绿色呼吸，unread 蓝色短闪后静止。 */
+/* 侧栏只有三种状态灯：running 绿色呼吸，unread 蓝色短闪后静止，终端进程靠
+   常亮终端图标表达。呼吸只做透明度（不再 scale），否则 8px 圆点会看起来在抖。 */
 @keyframes chat-dot-breathe {
   0%,
   100% {
     opacity: 1;
-    transform: scale(1);
   }
   50% {
-    opacity: 0.45;
-    transform: scale(0.72);
+    opacity: 0.35;
   }
 }
 .chat-dot-running {
-  animation: chat-dot-breathe 1.6s ease-in-out infinite;
+  animation: chat-dot-breathe 2.4s ease-in-out infinite;
 }
 
 @keyframes chat-dot-unread {
@@ -233,22 +232,8 @@ body.is-resizing.is-resizing-terminal {
   animation: chat-dot-unread 1.4s ease-in-out 1;
 }
 
-/* 运行中的会话：标题文字呼吸绿（一会淡一会亮），不再用旋转图标。 */
-@keyframes chat-running-breathe {
-  0%,
-  100% {
-    color: color-mix(in srgb, var(--color-success) 42%, transparent);
-  }
-  50% {
-    color: color-mix(in srgb, var(--color-success) 100%, transparent);
-  }
-}
-.chat-running-text {
-  animation: chat-running-breathe 1.8s ease-in-out infinite;
-}
-
-/* 会话行行首的终端标记：该会话有终端前台进程在跑，常亮高亮即可（不再呼吸，
-   避免与标题的 running 动画抢注意力）。 */
+/* 会话行行首的终端标记：该会话有终端前台进程在跑，常亮高亮即可（与 running 的
+   呼吸绿点同一个状态位，同一时刻只会出现一个，不额外呼吸抢注意力）。 */
 .chat-terminal-active {
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-success) 55%, transparent));
 }
@@ -415,13 +400,24 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-message-copy {
-  align-self: start;
+  /* Absolute so the 23px button never stretches the grid row: as an in-flow grid
+     item it made a one-line message 33px tall (23px button + block padding)
+     instead of 26.6px, leaving a gap under the first line while multi-line
+     messages looked fine. Hover affordances should not participate in layout. */
+  position: absolute;
+  top: 0;
+  right: 0;
   display: grid;
   width: 23px;
   height: 23px;
   place-items: center;
   border-radius: 3px;
   color: transparent;
+}
+
+.chat-message-user .chat-message-copy {
+  /* Follow the first text line, not the top edge of the highlight block. */
+  top: 5px;
 }
 
 .chat-message:hover .chat-message-copy,
