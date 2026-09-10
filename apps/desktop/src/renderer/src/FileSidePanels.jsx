@@ -97,7 +97,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
         </span>
         <span className="ml-2 shrink-0 tabular-nums">{message}</span>
       </div>
-      <div className="thin-scrollbar min-h-0 flex-1 overflow-auto py-1">
+      <div className="min-h-0 flex-1 overflow-auto py-1">
         {results.map((result, index) => (
           <button
             key={`${result.path}-${result.line}-${index}`}
@@ -231,7 +231,7 @@ export function GitPanel({
       <div className="truncate px-3 py-1 font-mono text-[10px] text-white/30" title={root || ''}>
         {root}
       </div>
-      <div className="thin-scrollbar min-h-0 flex-1 overflow-auto px-1.5 pb-3">
+      <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
         {!cwd && (
           <div className="px-3 py-6 text-center text-[11px] text-white/35">
             选择一个终端会话以查看 Git 变化

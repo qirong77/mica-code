@@ -1532,7 +1532,10 @@ export default function App() {
                 title="切换或创建 Git 分支"
                 aria-haspopup="dialog"
                 aria-expanded={branchPickerOpen}
-                className="-ml-1.5 flex h-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white"
+                // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
+                  activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                }`}
                 onClick={() => setBranchPickerOpen(true)}
               >
                 <IconGitBranch size={13} className="shrink-0" />
@@ -1547,7 +1550,7 @@ export default function App() {
                     ? activeCwd
                     : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
                 }
-                className={`ml-auto min-w-0 max-w-[45%] truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
+                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
                   cwdValid
                     ? 'text-white/35 hover:text-white/75'
                     : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'

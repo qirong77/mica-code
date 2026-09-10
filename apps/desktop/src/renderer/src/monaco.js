@@ -69,6 +69,9 @@ export const editorOptions = {
   theme: 'mica-dark',
   automaticLayout: true,
   minimap: { enabled: false },
+  // Scrollbars are hidden app-wide (see assets/app.css); Monaco paints its own
+  // DOM scrollbars, so it needs the option instead of the CSS rule.
+  scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
   fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
   fontSize: 12,
   lineHeight: 20,

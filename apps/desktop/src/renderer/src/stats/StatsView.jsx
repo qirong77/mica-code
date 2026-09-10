@@ -579,7 +579,7 @@ function BySubagentCard({ scoped }) {
         <h2 className={OVERLINE_CLASS}>By subagent</h2>
         <span className="text-[11px] text-fg-faint">{rows.length} types</span>
       </header>
-      <div className="overflow-x-auto thin-scrollbar">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] table-fixed text-[13px]">
           <colgroup>
             <col className="w-[34%]" />
@@ -752,7 +752,7 @@ function BySessionCard({ scoped, onDetail }) {
         <h2 className={OVERLINE_CLASS}>By session</h2>
         <span className="text-[11px] text-fg-faint">{sorted.length} sessions</span>
       </header>
-      <div className="overflow-x-auto thin-scrollbar">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[940px] table-fixed text-[13px]">
           <colgroup>
             <col className="w-[31%]" />
@@ -934,7 +934,7 @@ export function StatsView({ visible }) {
       className={`min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
       aria-hidden={!visible}
     >
-      <div className="h-full min-h-0 overflow-y-auto thin-scrollbar">
+      <div className="h-full min-h-0 overflow-y-auto">
         <div className="mx-auto flex max-w-[1100px] flex-col gap-4 px-6 py-6">
           <div className="flex items-center justify-end gap-2">
             <div className="flex items-center gap-2">

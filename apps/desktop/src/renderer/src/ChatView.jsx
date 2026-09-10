@@ -387,7 +387,7 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
             Esc ✕
           </button>
         </div>
-        <div className="chat-ctx-modal-body thin-scrollbar">
+        <div className="chat-ctx-modal-body">
           {error ? (
             <div className="chat-ctx-modal-empty">{error}</div>
           ) : !detail ? (
@@ -613,7 +613,7 @@ export function Markdown({ text, muted = false, onOpenFile, onPreviewImage }) {
       ),
       pre: CodeBlock,
       table: ({ children }) => (
-        <div className="chat-table-wrap thin-scrollbar">
+        <div className="chat-table-wrap">
           <table>{children}</table>
         </div>
       ),
@@ -971,7 +971,7 @@ function TodoDock({ items, hidden }) {
         </span>
         <span className="chat-task-description">{remaining} remaining</span>
       </div>
-      <div className="chat-task-children thin-scrollbar">
+      <div className="chat-task-children">
         {items.map((item, index) => (
           <div
             key={`${index}:${item.content}`}
@@ -1142,7 +1142,7 @@ function TurnLogDock({ messages, now = Date.now() }) {
       />
       <div
         ref={scrollRef}
-        className="chat-turn-log-scroll thin-scrollbar"
+        className="chat-turn-log-scroll"
         style={height != null ? { height, maxHeight: 'none' } : undefined}
         onScroll={(event) => {
           const element = event.currentTarget
@@ -3590,7 +3590,7 @@ export function ChatView({
     >
       <div
         ref={listRef}
-        className="chat-scroll thin-scrollbar"
+        className="chat-scroll"
         onScroll={(event) => {
           const element = event.currentTarget
           const atBottom =

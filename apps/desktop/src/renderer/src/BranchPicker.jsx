@@ -230,7 +230,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
           </div>
         )}
 
-        <div role="listbox" className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">
+        <div role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {loading && (
             <p className="px-2.5 py-5 text-center text-xs text-white/35">正在读取 Git 分支…</p>
           )}

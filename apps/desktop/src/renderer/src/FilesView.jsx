@@ -1379,7 +1379,7 @@ export const FilesView = forwardRef(function FilesView(
             </header>
             <div className="relative min-h-0 flex-1">
               <div
-                className="thin-scrollbar h-full overflow-auto px-1.5 py-1 select-none"
+                className="h-full overflow-auto px-1.5 py-1 select-none"
                 role="tree"
                 aria-label="文件目录"
               >
@@ -1469,7 +1469,7 @@ export const FilesView = forwardRef(function FilesView(
           <>
             <div
               ref={tabListRef}
-              className={`thin-scrollbar h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-line bg-panel ${tabs.length ? 'flex' : 'hidden'}`}
+              className={`h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-line bg-panel ${tabs.length ? 'flex' : 'hidden'}`}
               role="tablist"
               aria-label="打开的文件"
             >

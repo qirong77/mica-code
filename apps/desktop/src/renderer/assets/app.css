@@ -126,33 +126,27 @@
   app-region: no-drag;
 }
 
+/*
+ * 全应用不显示滚动条（内容照旧可用滚轮、触控板、键盘滚动）。不要在这里
+ * 恢复 ::-webkit-scrollbar 的尺寸或颜色：滚动容器的标记类已随之移除。
+ */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 .terminal-pane .xterm {
   height: 100%;
   /* padding: 6px 8px; */
 }
-.terminal-pane .xterm-viewport {
-  scrollbar-width: thin;
-}
 .xterm-scrollable-element {
   height: 100%;
 }
-.thin-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 6px;
-}
-.thin-scrollbar::-webkit-scrollbar-thumb {
-  border-radius: 8px;
-  background: rgb(255 255 255 / 12%);
-}
-.thin-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 20%);
-}
-.hidden-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.hidden-scrollbar::-webkit-scrollbar {
-  display: none;
+/* xterm 的滚动条由 VS Code ScrollableElement 用 DOM 绘制，不是原生滚动条。 */
+.terminal-pane .xterm-scrollable-element > .scrollbar {
+  visibility: hidden;
 }
 
 .pane-resizer {
@@ -827,7 +821,6 @@ body.is-resizing.is-resizing-terminal {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 
 .chat-reasoning-content {
@@ -1026,7 +1019,6 @@ body.is-resizing.is-resizing-terminal {
   overflow-y: auto;
   border-left: 1px solid color-mix(in srgb, var(--color-warn) 25%, transparent);
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 
 .chat-activity-stream-thinking,
@@ -1254,7 +1246,6 @@ body.is-resizing.is-resizing-terminal {
   overflow-y: auto;
   padding: 8px 14px 9px 13px;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 
 .chat-turn-log-resizer {

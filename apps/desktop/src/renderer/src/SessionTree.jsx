@@ -459,7 +459,7 @@ export function SessionTree({
 
   return (
     <>
-      <div className="hidden-scrollbar min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
         <div className="mb-1.5 flex h-7 items-center gap-1.5 rounded-md bg-white/[.05] px-2 transition-colors focus-within:bg-white/[.08]">
           <IconSearch size={13} className="shrink-0 text-white/35" />
           <input

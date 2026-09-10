@@ -327,7 +327,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
               id="quick-search-results"
               role="listbox"
               aria-label="搜索结果"
-              className="thin-scrollbar max-h-[min(510px,calc(90vh-142px))] overflow-y-auto p-1.25"
+              className="max-h-[min(510px,calc(90vh-142px))] overflow-y-auto p-1.25"
             >
               {results.map((result, index) => (
                 <button
