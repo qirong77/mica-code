@@ -156,6 +156,45 @@ out on blur — the page stays magnified after leaving the composer. The rule is
 and positions IME candidates off that element). The composer action buttons grow to 32px at the same
 breakpoint because 25px is below a comfortable touch target.
 
+The terminal tab gets a `TerminalKeyBar` below 768px, under the terminal: a soft keyboard has no
+Esc, Tab, Ctrl or arrow keys, which leaves shell completion, interrupt and history unreachable —
+the desktop modifier mapping in `TerminalHost.jsx` only sees physical keyboards. The bar sends the
+same raw sequences through `TerminalHost`'s `input()` → `term.input()`, so they take xterm's own
+input path (`term.input` → `onData`) rather than writing to the PTY directly (`terminal-keys.js`
+holds the table and the clipboard read). Its buttons cancel `pointerdown` so tapping a key never
+pulls focus out of xterm's hidden textarea: losing focus dismisses the keyboard, which would take
+the bar down with it.
+The paste button reads `navigator.clipboard`, which is unavailable over plain http in a LAN (not a
+secure context), so an unreadable clipboard shows a hint pointing at the system keyboard's own
+paste instead of failing silently.
+
+Plain typing needed a fix too, and not one of ours: xterm 6's `_inputEvent` only accepts an `input`
+event satisfying `!e.composed || !_keyDownSeen`. Browsers dispatch `input` with `composed === true`
+and `_keyDownSeen` is true between `keydown` and `keyup`, so **any `input` that follows a `keydown`
+is dropped**. Space and A–Z only ever travel that path — xterm sends nothing for them from `keydown`
+(it defers to the `keypress` that desktop browsers fire and mobile ones do not) — so they vanished,
+leaving stray characters in the hidden textarea. `attachCustomKeyEventHandler` now re-sends those
+two classes of key on `(pointer: coarse)` via `softKeyboardFallbackKey` (`terminal-keys.js`),
+calling `preventDefault()` itself (otherwise the browser still writes the character into the
+textarea and a desktop `keypress` would send it a second time) and letting `keyCode` 229/0 through
+to xterm's own Android composition handling. Upstream fixed this in PR #5614 (`!isComposing &&
+!isSendingComposition`), which is not in 6.0.0 — drop the re-send and re-verify when xterm is
+upgraded. Input with no `keydown` at all (CJK IME punctuation, dictation) still drops.
+
+The terminal is already rendered as HTML: xterm 6's core renderer is the DOM one, so rows are
+`<span>`s inside `.xterm-rows` and the only real `<canvas>` on screen is the overview ruler. That is
+also why its font size cannot come from CSS — the DOM renderer writes an inline `font-size` on
+`.xterm-rows` derived from the `fontSize` option, so any rule on `.terminal-pane .xterm` is dead.
+Change the option instead. None of this makes the terminal behave like an `<input>`: it is a
+character grid painted from whatever the PTY emitted, so there is no native caret to tap into and no
+text selection to drag — the arrow keys on the key bar are how the cursor moves.
+
+Keyboard avoidance is shared by every bottom-anchored element: when the keyboard opens, iOS Safari
+and Android Chrome shrink only the visual viewport, not the layout viewport, and `dvh` follows the
+URL bar rather than the keyboard. `useVisualViewportHeight` (`hooks.js`) writes the visible height
+into `--vvh`, and the narrow-screen root height is `var(--vvh, 100dvh)`, so the composer and the
+terminal key bar rise above the keyboard instead of being covered by it.
+
 > There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
 > binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
 

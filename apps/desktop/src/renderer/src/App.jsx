@@ -24,7 +24,8 @@ import { SessionTree } from './SessionTree'
 import { SettingsView } from './SettingsView'
 import { StatsView } from './stats/StatsView'
 import { TerminalHost } from './TerminalHost'
-import { useIsMobile, useLatest } from './hooks'
+import TerminalKeyBar from './TerminalKeyBar'
+import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import {
   createColdStartTerminal,
   normalizeNodes,
@@ -586,6 +587,8 @@ export default function App() {
   // 移动端：三栏退化为单栏，侧栏与右面板改为覆盖式抽屉
   const isMobile = useIsMobile()
   const isMobileRef = useLatest(isMobile)
+  // 软键盘弹起时让根容器跟着可见区缩，否则底部输入条/终端键栏会被键盘盖住
+  useVisualViewportHeight()
   const [mobileDrawer, setMobileDrawer] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
@@ -975,6 +978,11 @@ export default function App() {
     (id) => rightTerms.find((item) => item.id === id)?.cwd || null,
     [rightTerms]
   )
+  // 移动端键栏：走 xterm 自己的输入通道（term.input → onData），与键盘敲出来的
+  // 字符同一条路，不要绕过去直写 PTY。
+  const sendTerminalKey = useCallback((data) => {
+    terminalRef.current?.input(data)
+  }, [])
   const openRightTerminalTab = useCallback(() => {
     // 切到终端 Tab 时至少要有一个终端，否则用户还得先手动新建第一个。
     if (rightTerms.length === 0) {
@@ -1718,6 +1726,9 @@ export default function App() {
               onRead={(id, reason) => notifications.markRead(id, reason)}
               onMicaExit={closeRightTerm}
             />
+            {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (
+              <TerminalKeyBar onSend={sendTerminalKey} />
+            )}
           </div>
         </aside>
       </div>

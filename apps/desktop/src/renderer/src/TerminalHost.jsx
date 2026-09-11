@@ -12,10 +12,13 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { createFileLinkProvider, openWebLink } from './terminal-links'
+import { softKeyboardFallbackKey } from './terminal-keys'
 import { useLatest } from './hooks'
 
-/* xterm.js paints on a canvas and cannot read CSS custom properties, so this
-   mirrors the Darcula tokens from assets/app.css by hand. Keep it in sync. */
+/* xterm 6's core only ships the DOM renderer (rows are spans inside .xterm-rows;
+   the single real <canvas> is the overview ruler), and it takes colors from this
+   options object instead of CSS custom properties. Either way the Darcula tokens
+   in assets/app.css have to be mirrored here by hand. Keep them in sync. */
 const terminalTheme = {
   background: '#2b2b2b',
   foreground: '#a9b7c6',
@@ -45,7 +48,7 @@ const SIDEBAR_FIT_SETTLE_MS = SIDEBAR_TRANSITION_MS + 20
 export const PANE_MICA = 'mica'
 export const PANE_TERMINAL = 'terminal'
 
-function ptyIdFor(sessionId, pane) {
+export function ptyIdFor(sessionId, pane) {
   return `${sessionId}:${pane}`
 }
 
@@ -106,6 +109,10 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
     term.open(host)
     term.registerLinkProvider(createFileLinkProvider(term, ptyId, window.mica.platform))
 
+    // 触屏软键盘没有 keypress 兜底，xterm 会丢掉空格与 A–Z（见 terminal-keys.js 的
+    // softKeyboardFallbackKey）。桌面端这些键由 xterm 自己的 keypress 路径处理，不动。
+    const softKeyboard = window.matchMedia('(pointer: coarse)').matches
+
     const input = term.onData((data) => {
       window.mica.terminal.write(ptyId, data)
       onReadRef.current(sessionId, 'input')
@@ -126,6 +133,14 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
           .clear(ptyId)
           .catch((error) => console.error('clear terminal failed', error))
         return false
+      }
+      if (softKeyboard) {
+        const fallback = softKeyboardFallbackKey(event)
+        if (fallback !== null) {
+          event.preventDefault()
+          term.input(fallback)
+          return false
+        }
       }
       return true
     })
@@ -313,6 +328,13 @@ export const TerminalHost = forwardRef(function TerminalHost(
     () => ({
       activate(sessionId) {
         return activate(sessionId, activePane(), true)
+      },
+      // 移动端键栏与补发按键共用这条通道：term.input 会走 onData，和键盘敲出来的
+      // 字符是同一条路（含写入 PTY 与 onRead 记账）。
+      input(data) {
+        const sessionId = activeRef.current
+        if (!sessionId) return
+        entries.current.get(ptyIdFor(sessionId, activePane()))?.term.input(data)
       },
       async getCwd(sessionId = activeRef.current) {
         if (!sessionId) return null

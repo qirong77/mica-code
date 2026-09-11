@@ -2502,11 +2502,14 @@ body.is-resizing.is-resizing-terminal {
 /* ---------------------------------------------------------------- 移动端 */
 
 @media (max-width: 767px) {
-  /* 手机浏览器地址栏会伸缩，100% 会露出一截；dvh 跟随可视视口 */
+  /* 手机浏览器地址栏会伸缩，100% 会露出一截；dvh 跟随可视视口。--vvh 由
+     hooks.js 的 useVisualViewportHeight 写入，软键盘弹起时可见区变小 —— dvh 只
+     跟随地址栏、不跟随键盘，底部输入条和终端功能键条会留在键盘下面。未挂载
+     visualViewport（老浏览器）时回落 100dvh，与原来等价。 */
   html,
   body,
   #root {
-    height: 100dvh;
+    height: var(--vvh, 100dvh);
   }
 
   body {
@@ -2558,10 +2561,9 @@ body.is-resizing.is-resizing-terminal {
     height: 32px;
   }
 
-  /* 终端和编辑器在窄屏上需要更大的行高才好点选 */
-  .terminal-pane .xterm {
-    font-size: 12px;
-  }
+  /* 终端字号不要写在这里：xterm 的 DOM 渲染器给 `.xterm-rows` 写内联 font-size
+     （由 Terminal 的 fontSize 选项推导），CSS 字号一律被它盖掉，写了也是死规则。
+     要调字号请改 Terminal 的 fontSize / 运行时 term.options.fontSize，改完 fit()。 */
 
   .chat-scroll {
     -webkit-overflow-scrolling: touch;

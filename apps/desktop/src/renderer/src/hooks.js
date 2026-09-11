@@ -28,6 +28,41 @@ export function useIsMobile() {
 }
 
 /**
+ * 把可见视口高度写到 `--vvh` 上，供窄屏的根容器（app.css 的移动端块）使用。
+ *
+ * 软键盘弹起时 iOS Safari 和 Android Chrome 都只缩 visual viewport、不缩布局视口，
+ * 高度写死成 100dvh 的容器会把底部内容（对话输入条、终端功能键条）留在键盘下面：
+ * 看不见也点不到。`--vvh` 跟着可见区走，键盘弹起时底部自己让上来。
+ *
+ * 双指缩放同样会让 visualViewport 变小，但那不是键盘：按 scale 还原成布局像素，
+ * 缩放时高度不变。每次只在整数值变化时写，避免亚像素抖动触发终端反复重排。
+ */
+export function useVisualViewportHeight() {
+  useEffect(() => {
+    const viewport = typeof window === 'undefined' ? null : window.visualViewport
+    const root = typeof document === 'undefined' ? null : document.documentElement
+    if (!viewport || !root) return undefined
+
+    let applied = null
+    const update = () => {
+      const next = Math.round(viewport.height * (viewport.scale || 1))
+      if (next === applied || next <= 0) return
+      applied = next
+      root.style.setProperty('--vvh', `${next}px`)
+    }
+
+    update()
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    return () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+      root.style.removeProperty('--vvh')
+    }
+  }, [])
+}
+
+/**
  * 触屏长按等价于右键：只在非鼠标指针下生效，桌面端的右键菜单行为完全不受影响。
  *
  * 计时器挂在元素上（WeakMap）而不是组件 state，因此可以在列表的 render 函数里
