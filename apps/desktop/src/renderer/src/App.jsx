@@ -1317,10 +1317,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
+              ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={isMobile ? undefined : { width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
@@ -1440,7 +1440,7 @@ export default function App() {
           className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
         >
           <header
-            className={`drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
           >
             {isMobile && (
               <button
@@ -1524,7 +1524,7 @@ export default function App() {
               {error || '选择或新建一个会话'}
             </div>
           )}
-          <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
+          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
             {gitIsCurrent && git.status?.root ? (
               <button
                 ref={branchButtonRef}
@@ -1565,10 +1565,10 @@ export default function App() {
         <aside
           className={
             isMobile
-              ? `absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
+              ? `safe-top safe-bottom absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'right' ? 'translate-x-0' : 'translate-x-full'
                 }`
-              : `relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
+              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
           }
           style={
             isMobile

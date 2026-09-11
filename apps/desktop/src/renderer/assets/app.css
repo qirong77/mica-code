@@ -2494,7 +2494,6 @@ body.is-resizing.is-resizing-terminal {
 }
 
 @media (max-width: 720px) {
-  .chat-status-meta,
   .chat-composer-hint > :last-child {
     display: none;
   }
@@ -2566,6 +2565,44 @@ body.is-resizing.is-resizing-terminal {
 
   .chat-scroll {
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* 状态行一行放不下「状态 + 模型/用量」，拆成两行：状态在上，模型/推理强度与
+     tokens/cached/ctx 折到下一行。窄屏不要恢复成一行的
+     grid-template-columns: minmax(0, 1fr) auto，那会把右侧内容挤出屏幕。 */
+  .chat-status-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px 0;
+    padding: 0 12px 3px;
+  }
+
+  .chat-status-primary {
+    flex-wrap: wrap;
+  }
+
+  .chat-status-meta {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+  }
+}
+
+/* ---------------------------------------------------------------- 安全区 */
+
+/*
+ * 页面按 viewport-fit=cover 铺满整屏后，手机圆角、刘海与 home indicator 会压住
+ * 贴边的顶栏和底部状态栏：带上 .safe-* 的元素自己让开。content-box 让内边距加在
+ * h-10 / h-7 之外（原高度留给内容，不被内边距挤扁），元素自身的背景色会铺满
+ * 内边距，与相邻区域无缝。桌面端（含 Electron）env() 一律为 0，等价于无操作。
+ */
+@media (max-width: 767px), (display-mode: standalone), (pointer: coarse) {
+  .safe-top {
+    box-sizing: content-box;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-bottom {
+    box-sizing: content-box;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 

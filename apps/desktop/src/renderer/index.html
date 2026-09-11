@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：页面铺满整屏，手机圆角/刘海/home indicator 由 app.css
+         的安全区规则（.safe-top/.safe-bottom）让开，不要改回默认值。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:; frame-src http://127.0.0.1:*"
@@ -15,6 +17,10 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <meta name="theme-color" content="#2b2b2b" />
     <meta name="application-name" content="Mica Code" />
+    <!-- iOS 添加到主屏后状态栏跟随深色页面（配合安全区上内边距） -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Mica" />
     <title>Mica Code</title>
   </head>
   <body>
