@@ -224,7 +224,9 @@ export class HeadlessTurnExecutor {
       // the run id, and reserving first would make this turn look aborted.
       this.options.sessionController.refreshFromStore();
       const reservedRunId = agent.reserveRunId();
-      this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+      const pendingUserMessage: MicaUiConversationMessage | undefined =
+        input.source === 'ui' ? { role: 'user', content } : undefined;
+      this.saveCurrent({ allowEmpty: true, turnState: 'running' }, pendingUserMessage);
       let runContent = content;
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:before', { runtime: this.options.host, input, content });
@@ -255,7 +257,7 @@ export class HeadlessTurnExecutor {
             // Restore client state to before the turn, clearing partial output.
             if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
             this.responseBuffer = '';
-            this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, pendingUserMessage);
             await waitForRetryDelay(agent, retryDelayMs);
           }
           try {
@@ -360,9 +362,23 @@ export class HeadlessTurnExecutor {
     });
   }
 
-  private saveCurrent(options: { allowEmpty?: boolean; turnState: 'running' | 'completed' | 'aborted' | 'error' }): void {
+  /**
+   * `pendingUserMessage` carries the prompt of a turn that has not reached the
+   * provider history yet (the turn-start / pre-retry save, before `agent.run`
+   * appends it). Without it a turn killed during its first request persists a
+   * conversation-less placeholder that the session list classifies as junk and
+   * hides, so the session looks lost after an unexpected termination. The
+   * interactive runtime persists the same in-flight message for its uiState.
+   */
+  private saveCurrent(
+    options: { allowEmpty?: boolean; turnState: 'running' | 'completed' | 'aborted' | 'error' },
+    pendingUserMessage?: MicaUiConversationMessage,
+  ): void {
     if (this.options.save === false) return;
-    const conversationMessages = this.options.getConversationMessages?.();
+    const hostMessages = this.options.getConversationMessages?.();
+    const conversationMessages = pendingUserMessage
+      ? [...(hostMessages ?? this.options.agent.toConversationMessages()), pendingUserMessage]
+      : hostMessages;
     this.options.sessionController.saveCurrent(conversationMessages ? { ...options, conversationMessages } : options);
   }
 

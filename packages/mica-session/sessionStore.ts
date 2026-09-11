@@ -75,6 +75,13 @@ export type SessionSummary = {
   turnState?: PersistedSessionTurnState;
   effort?: EffortOption;
   role?: string;
+  /** True when the persisted snapshot holds user/assistant conversation data.
+   *  Carried on the summary so the list path can apply the junk rule (which
+   *  must not hide a session that has content) without parsing session bodies. */
+  hasConversation: boolean;
+  /** True when the snapshot recorded model usage; a session that was already
+   *  used for a request is never junk even if its title is still a placeholder. */
+  hasUsage: boolean;
 };
 
 export type SessionStoreLike = {
@@ -433,6 +440,8 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
     turnState: session.turnState,
     effort: session.snapshot.effort,
     role: session.snapshot.role,
+    hasConversation: hasConversationData(session.snapshot),
+    hasUsage: (session.snapshot.usageHistory?.length ?? 0) > 0,
   };
 }
 
@@ -444,19 +453,44 @@ function dirMtimeMs(): number {
   }
 }
 
-/** An index entry is junk when it has only the default placeholder title,
- * which means the session never carried a real user-authored prompt. */
+/**
+ * Hides (and, on rebuild, deletes) a leftover from an allowEmpty turn-start
+ * save that never produced any content.
+ *
+ * Only the placeholder title is not enough to call a session junk: a session
+ * whose stored title is still `Untitled session` may well carry a real
+ * conversation (the title is re-derived on later saves, and `deriveTitle`
+ * cannot always find a user prompt). Junk therefore requires *no* conversation
+ * data and no usage, matching {@link isJunkEmptySession}.
+ *
+ * A `running` session is never junk: it marks a turn that was in flight when
+ * the process went away, which is exactly the crash residue the product keeps
+ * on disk so the session can be found in /resume and resumed (rendered as
+ * `（uncompleted）` / the red "did not finish" indicator).
+ */
 function isJunkSummary(summary: SessionSummary): boolean {
-  return summary.title === UNTITLED_SESSION_TITLE;
+  if (!isJunkPlaceholder(summary)) return false;
+  return summary.turnState !== 'running';
 }
 
 /** A persisted session is junk when it holds no user/assistant conversation,
  * no model usage, and only the default title: a leftover from an allowEmpty
  * turn-start save that never produced content before the process exited. */
 function isJunkEmptySession(session: PersistedSession): boolean {
-  if (session.title !== UNTITLED_SESSION_TITLE) return false;
-  if (hasConversationData(session.snapshot)) return false;
-  return (session.snapshot.usageHistory?.length ?? 0) === 0;
+  return isJunkPlaceholder({
+    title: session.title,
+    hasConversation: hasConversationData(session.snapshot),
+    hasUsage: (session.snapshot.usageHistory?.length ?? 0) > 0,
+  });
+}
+
+/** Shared rule behind hiding a summary and deleting a rebuilt session file:
+ * the placeholder title plus no content of any kind. The `running` exception
+ * is applied by the callers (a live/interrupted turn must stay on disk). */
+function isJunkPlaceholder(summary: Pick<SessionSummary, 'title' | 'hasConversation' | 'hasUsage'>): boolean {
+  if (summary.title !== UNTITLED_SESSION_TITLE) return false;
+  if (summary.hasConversation) return false;
+  return !summary.hasUsage;
 }
 
 function hasConversationData(snapshot: PersistedRuntimeSnapshot): boolean {
@@ -483,9 +517,14 @@ function isSessionSummary(value: unknown): value is SessionSummary {
     typeof session.updatedAt === 'string' &&
     typeof session.providerId === 'string' &&
     typeof session.model === 'string' &&
-    typeof session.uncompleted === 'boolean'
+    typeof session.uncompleted === 'boolean' &&
+    // Entries written before the junk rule started honouring conversation
+    // content lack these fields. Rejecting them forces one rebuild (the index
+    // is only a cache), which also guarantees the junk rule never reads an
+    // `undefined` flag as "no content" and hides a real session.
+    typeof session.hasConversation === 'boolean' &&
+    typeof session.hasUsage === 'boolean'
   );
-
 }
 
 function createSessionStore(): SessionStore {

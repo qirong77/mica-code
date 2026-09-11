@@ -150,6 +150,60 @@ describe('SessionController', () => {
     expect(persisted).toBeNull();
   });
 
+  it('keeps persisting after an empty save removed the session file', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let messages: Array<{ role: string; content: string }> = [];
+    let persisted: PersistedSession | null = null;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages,
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(
+        () => messages.map((message) => ({ role: message.role, content: message.content })) as MicaUiConversationMessage[],
+      ),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => persisted),
+      save: vi.fn((session: PersistedSession) => {
+        persisted = session;
+      }),
+      delete: vi.fn(() => {
+        const deleted = persisted !== null;
+        persisted = null;
+        return deleted;
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
+    messages = [{ role: 'user', content: 'before the switch' }];
+    expect(controller.saveCurrent({ allowEmpty: true, turnState: 'running' })).toBe(true);
+    expect(persisted).not.toBeNull();
+
+    // `/model` and `/role` save without allowEmpty; on a momentarily empty
+    // conversation that removes the file (see the empty-session test above).
+    messages = [];
+    expect(controller.saveCurrent()).toBe(false);
+    expect(persisted).toBeNull();
+
+    // The session is still the live one, so later saves must write again:
+    // returning early here left the whole conversation in memory only, and an
+    // unexpected termination lost it (the reported "session disappeared").
+    messages = [{ role: 'user', content: 'after the switch' }];
+    expect(controller.saveCurrent({ allowEmpty: true, turnState: 'running' })).toBe(true);
+    expect((persisted as PersistedSession | null)?.title).toBe('after the switch');
+  });
+
   it('still allows an explicit empty crash-recovery checkpoint', async () => {
     const { SessionController } = await import('./SessionController.js');
     const save = vi.fn();
@@ -645,6 +699,8 @@ describe('SessionController', () => {
           providerId: session.snapshot.providerId,
           model: session.snapshot.model,
           uncompleted: false,
+          hasConversation: true,
+          hasUsage: false,
         },
       ]),
       listRecent: vi.fn(() => []),

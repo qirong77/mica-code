@@ -27,6 +27,8 @@ const sessions = store.list(10);
 - 会话 ID 和路径需要做安全处理，避免越权读取任意文件。
 - 保存内容应是可序列化快照，便于后续 resume、fork 或 session graph 扩展。
 - `turnState` 记录最近一轮是 `running`、`completed`、`aborted` 还是 `error`；旧会话缺少该字段时按 `completed` 读取。
+- 列表里的垃圾会话（`list`/`listRecent` 不展示、重建索引时删文件）指**占位标题 `Untitled session` + 无 user/assistant 对话 + 无 usage** 的空占位；`SessionSummary` 的 `hasConversation`/`hasUsage` 承载后两项，隐藏与删除共用同一谓词。`turnState === 'running'` 的会话一律保留且照常列出：那是异常终止留下的、需要用户找回并续跑的会话。
+- `session-index.json` 是元数据缓存，不是事实来源；字段不完整（例如旧版本写入、缺少 `hasConversation`/`hasUsage`）时整条 entry 会被拒绝并触发一次重建，避免把缺字段误读成「无内容」而隐藏真实会话。
 - `snapshot.subagentUsageHistory`（可选）保存该会话 owner 发起的 subagent 任务 usage（逐条请求 + 任务元数据）；旧快照缺少该字段时按空数组读取。
 - 新增会话字段时应明确版本策略和默认值。
 

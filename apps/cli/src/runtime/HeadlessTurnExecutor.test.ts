@@ -44,6 +44,13 @@ class MockAgent {
     return true;
   }
 
+  /** Mirrors AgentRuntime.toConversationMessages(): the provider history
+   *  projection the executor falls back to when no host messages are set. */
+  conversationHistory: Array<{ role: string; content: unknown }> = [];
+  toConversationMessages(): Array<{ role: string; content: unknown }> {
+    return this.conversationHistory;
+  }
+
   async run(
     content: unknown,
     options: { onIterationComplete?: () => unknown | Promise<unknown> } = {},
@@ -69,10 +76,12 @@ function createHarness() {
   const agent = new MockAgent();
   const events: HeadlessTurnEvent[] = [];
   const savedStates: string[] = [];
+  const savedConversations: Array<Array<{ role: string }> | undefined> = [];
   const sessionController = {
     getCurrentSessionId: () => 'session-1',
-    saveCurrent: (options: { turnState?: string } = {}) => {
+    saveCurrent: (options: { turnState?: string; conversationMessages?: Array<{ role: string }> } = {}) => {
       savedStates.push(options.turnState ?? 'completed');
+      savedConversations.push(options.conversationMessages);
       return true;
     },
     refreshFromStore: () => null,
@@ -89,7 +98,7 @@ function createHarness() {
     },
     parseImageRefs: (text: string) => Promise.resolve(text),
   });
-  return { agent, events, executor, savedStates, getIdleCount: () => idleCount };
+  return { agent, events, executor, savedStates, savedConversations, getIdleCount: () => idleCount };
 }
 
 function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
@@ -144,6 +153,28 @@ describe('HeadlessTurnExecutor', () => {
     // The injected input is returned to the provider loop at the second
     // iteration boundary (mirrors CLI after_iteration semantics).
     expect(agent.iterationBoundaryResults[1]).toBe('queued');
+  });
+
+  it('persists the in-flight prompt on the turn-start save so a killed turn is recoverable', async () => {
+    const { agent, executor, savedConversations } = createHarness();
+    agent.conversationHistory = [{ role: 'notice', content: 'previous turn notice' }];
+    await executor.start(input('hello'));
+
+    // The first save happens before agent.run appends the prompt to the
+    // provider history, so the executor records it: without it the persisted
+    // session is a content-less placeholder that the session list hides, which
+    // is how a session looks lost after an unexpected termination.
+    expect(savedConversations[0]?.map((message) => message.role)).toEqual(['notice', 'user']);
+    expect(savedConversations[0]?.at(-1)).toMatchObject({ content: 'hello' });
+    // The iteration-boundary saves fall back to the provider history, which
+    // already holds the prompt: appending it again would duplicate the turn.
+    expect(savedConversations.slice(1).every((messages) => messages === undefined)).toBe(true);
+  });
+
+  it('does not persist plugin or system inputs as the user prompt', async () => {
+    const { executor, savedConversations } = createHarness();
+    await executor.start({ ...input('【系统提醒】上下文占用偏高'), source: 'system' });
+    expect(savedConversations[0]).toBeUndefined();
   });
 
   it('keeps draining after_turn inputs until the queue is empty, then reports idle', async () => {

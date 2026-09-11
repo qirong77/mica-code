@@ -314,7 +314,7 @@ describe('SessionStore junk session cleanup', () => {
     }
   });
 
-  it('hides a junk running session from the listing but leaves the file for the active turn', async () => {
+  it('lists an interrupted running session so a crashed turn stays recoverable', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-junk-running-'));
     try {
       process.env.MICA_HOME = micaHome;
@@ -326,8 +326,80 @@ describe('SessionStore junk session cleanup', () => {
       const runningPath = join(SESSION_DIR, 'junk-running.json');
       writeFileSync(runningPath, JSON.stringify(junkSession('junk-running', 'running')), 'utf-8');
 
-      expect(store.listRecent(10).map((session) => session.id)).toEqual(['real']);
+      // `running` marks a turn that was in flight when the process went away.
+      // Hiding it would make the session look lost after an unexpected
+      // termination, which is exactly the case the user must be able to find
+      // in /resume (rendered as `（uncompleted）`).
+      expect(store.listRecent(10).map((session) => session.id).sort()).toEqual(['junk-running', 'real']);
       expect(existsSync(runningPath)).toBe(true);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('lists a session whose stored title is still the placeholder but which has content', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-junk-title-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      mkdirSync(SESSION_DIR, { recursive: true });
+
+      // A crash can land before the title is re-derived from the prompt; the
+      // placeholder title alone must never hide a session that holds a
+      // conversation (the deletion rule already spares it).
+      for (const [id, turnState] of [
+        ['placeholder-with-conversation', 'completed'],
+        ['placeholder-usage-only', 'completed'],
+      ] as const) {
+        writeFileSync(join(SESSION_DIR, `${id}.json`), JSON.stringify(placeholderSession(id, turnState)), 'utf-8');
+      }
+
+      const listed = store.listRecent(10).map((session) => session.id).sort();
+      expect(listed).toEqual(['placeholder-usage-only', 'placeholder-with-conversation']);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rebuilds an index written before the junk rule honoured conversation content', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-index-legacy-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      mkdirSync(SESSION_DIR, { recursive: true });
+      writeFileSync(
+        join(SESSION_DIR, 'placeholder-with-conversation.json'),
+        JSON.stringify(placeholderSession('placeholder-with-conversation', 'running')),
+        'utf-8',
+      );
+      // Legacy index entry: same id, but without the content flags the current
+      // junk rule needs. Treating its missing flags as "no content" would hide
+      // a real session, so the entry must be rejected and rebuilt instead.
+      writeFileSync(
+        join(micaHome, 'session-index.json'),
+        JSON.stringify({
+          version: 1,
+          sessions: [
+            {
+              id: 'placeholder-with-conversation',
+              title: 'Untitled session',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              cwd: '/tmp',
+              providerId: 'test',
+              model: 'test-model',
+              uncompleted: true,
+              turnState: 'running',
+            },
+          ],
+        }),
+        'utf-8',
+      );
+
+      expect(store.listRecent(10).map((session) => session.id)).toEqual(['placeholder-with-conversation']);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }
@@ -375,6 +447,47 @@ function junkSession(id: string, turnState: 'running' | 'completed'): PersistedS
       messages: [],
       conversationMessages: [],
       usageHistory: [],
+      lastUsage: undefined,
+    },
+  };
+}
+
+/** A placeholder-titled session that already carries real content: a real user
+ *  message (`placeholder-with-conversation`) or model usage
+ *  (`placeholder-usage-only`). */
+function placeholderSession(id: string, turnState: 'running' | 'completed'): PersistedSession {
+  const withConversation = id === 'placeholder-with-conversation';
+  return {
+    version: 1,
+    id,
+    title: 'Untitled session',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    cwd: '/tmp',
+    turnState,
+    snapshot: {
+      providerId: 'test',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      messages: withConversation ? [{ role: 'user', content: 'hello' }] : [],
+      conversationMessages: withConversation ? [{ role: 'user', content: 'hello' }] : [],
+      usageHistory: withConversation
+        ? []
+        : [
+            {
+              provider: 'openai_chat_completions',
+              turnId: 1,
+              requestIndex: 0,
+              messageCount: 1,
+              inputTokens: 10,
+              cachedInputTokens: 0,
+              outputTokens: 5,
+              totalTokens: 15,
+              paidTokenRate: 1,
+            },
+          ],
       lastUsage: undefined,
     },
   };

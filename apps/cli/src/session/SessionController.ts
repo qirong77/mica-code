@@ -116,24 +116,31 @@ export class SessionController {
     this.currentTurnState = options.turnState ?? this.currentTurnState;
     if (!hasConversation(snapshot.messages, conversationMessages) && !options.allowEmpty) {
       this.store.delete(this.currentSessionId);
+      // The file is gone, so the recorded signature no longer describes
+      // anything on disk. Clearing it keeps the next save (this session is
+      // still the live one) from being treated as "another writer owns it".
+      this.currentPersistedSignature = null;
       return false;
     }
 
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
-    if (this.currentPersistedSignature !== null) {
-      if (!existing) return false;
-      if (sessionSignature(existing) !== this.currentPersistedSignature) {
-        // Another process persisted the session file since our last save
-        // (a second app-server host or a CLI resume).
-        // Prefer keeping the other writer's snapshot authoritative, but never
-        // skip the save forever: headless hosts (app-server / exec) do not
-        // call refreshFromStore between turns, so a permanent skip would
-        // silently drop every later turn of this host. Falling back to writing
-        // the current in-memory snapshot (revision bump below) guarantees the
-        // host's own turns survive; the next refresh converges the signature.
-      }
+    if (this.currentPersistedSignature !== null && !existing) {
+      // The file was removed underneath us (another process, or our own empty
+      // save above) while this session stayed the live one. Returning early
+      // would turn every later save of this process into a silent no-op and
+      // lose the whole conversation at the next unexpected termination, so
+      // forget the stale signature and write again.
+      this.currentPersistedSignature = null;
     }
+    // A signature mismatch against an existing file means another process
+    // persisted the session since our last save (a second app-server host or a
+    // CLI resume). Prefer keeping the other writer's snapshot authoritative,
+    // but never skip the save forever: headless hosts (app-server / exec) do
+    // not call refreshFromStore between turns, so a permanent skip would
+    // silently drop every later turn of this host. Falling back to writing the
+    // current in-memory snapshot (revision bump below) guarantees the host's
+    // own turns survive; the next refresh converges the signature.
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     const persistedTitle =
       options.preserveTitle && existing && !isInternalCompactText(existing.title) ? existing.title : undefined;

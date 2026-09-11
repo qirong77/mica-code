@@ -1,9 +1,16 @@
 /**
  * Sidebar activity is process-local. A persisted session snapshot may retain
  * turnState="running" after a crash, so it must never drive the live dot.
+ *
+ * The red dot is the one persisted signal the sidebar shows, and it is decided
+ * host-side (`interrupted`: turnState is error, or running with nobody holding
+ * the turn lease) so a session another process is actively running is never
+ * labelled as unexpectedly terminated.
  */
-export function liveSessionRowState({ notificationState }) {
+export function liveSessionRowState({ notificationState, interrupted }) {
   if (notificationState?.running) return 'running'
+  if (notificationState?.lastType === 'turn.error') return 'error'
+  if (interrupted) return 'error'
   if (notificationState?.unread) return 'unread'
   return null
 }

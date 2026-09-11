@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -35,7 +35,7 @@ const suite = bunAvailable ? describe : describe.skip;
  * calls, or optionally include reasoning events before the text events. */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'stream-error' | 'tool' | 'session-tool',
+    mode: 'ok' as 'ok' | 'error' | 'stream-error' | 'tool' | 'session-tool' | 'hang',
     errorMessage: '',
     requests: [] as Array<{
       model: string;
@@ -79,6 +79,18 @@ function createMockProvider() {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         const text = '你好，我是 mock 模型的回复';
         const emit = (event: Record<string, unknown>) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+        if (state.mode === 'hang') {
+          // Accept the request and stream headers, then never finish: the turn
+          // stays running so a test can kill the CLI mid-request.
+          emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { id: 'msg_1', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
+          });
+          return;
+        }
         const emitCompleted = () => {
           emit({
             type: 'response.completed',
@@ -375,6 +387,25 @@ function itE2E(name: string, fn: () => Promise<void>): void {
   it(name, fn, 60_000);
 }
 
+/** Session ids the real SessionStore lists for a MICA_HOME — the same source
+ *  `/resume` reads. The module graph is re-bound to that home on each call. */
+async function listSessionIds(micaHome: string): Promise<string[]> {
+  const previous = process.env.MICA_HOME;
+  process.env.MICA_HOME = micaHome;
+  vi.resetModules();
+  try {
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    return micaSession
+      .createStore()
+      .listRecent(10)
+      .map((session) => session.id);
+  } finally {
+    if (previous === undefined) delete process.env.MICA_HOME;
+    else process.env.MICA_HOME = previous;
+    vi.resetModules();
+  }
+}
+
 suite('mica exec real-user flows (mock provider)', () => {
   afterEach(() => {
     // Reset mock state between tests.
@@ -515,6 +546,52 @@ suite('mica exec real-user flows (mock provider)', () => {
       turnState?: string;
     };
     expect(session.turnState).toBe('aborted');
+  });
+
+  itE2E('a SIGKILL mid-turn keeps the session listed with its prompt for resume', async () => {
+    mock!.state.mode = 'hang';
+    mock!.state.requests = [];
+    const home = makeHome('exec-sigkill');
+    const prompt = '进程被杀后这次对话不能丢';
+
+    const child = spawn(
+      process.env.MICA_BIN ?? 'bun',
+      [...(process.env.MICA_BIN ? [] : ['apps/cli/src/index.ts']), 'exec', '--json', prompt],
+      {
+        cwd: ROOT,
+        env: { ...process.env, MICA_HOME: home },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    child.stdout?.on('data', () => {});
+    child.stderr?.on('data', () => {});
+
+    const requestDeadline = Date.now() + 15_000;
+    while (mock!.state.requests.length === 0 && Date.now() < requestDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    // The turn-start save has landed by now; kill the process the way an
+    // unexpected termination (OOM, crash, terminal closed) would.
+    child.kill('SIGKILL');
+    await new Promise<void>((resolve) => child.once('close', () => resolve()));
+
+    const sessionFiles = readdirSync(join(home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      id: string;
+      title: string;
+      turnState: string;
+      snapshot: { conversationMessages: Array<{ role: string }> };
+    };
+    expect(session.turnState).toBe('running');
+    // The interrupted turn keeps the prompt, so resuming shows what was asked
+    // instead of an untitled empty session.
+    expect(session.title).toBe(prompt);
+    expect(session.snapshot.conversationMessages.map((message) => message.role)).toEqual(['user']);
+    // /resume must still show it: the file alone is not enough, the listing
+    // rule has to treat an interrupted turn as recoverable rather than junk.
+    await expect(listSessionIds(home)).resolves.toEqual([session.id]);
   });
 
   itE2E('missing exec sessions fail before contacting the provider', async () => {

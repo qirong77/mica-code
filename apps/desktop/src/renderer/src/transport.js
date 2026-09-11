@@ -275,9 +275,17 @@ function createWebApi(env) {
       sessionTitle: (sessionId) => invoke('stats:session-title', { sessionId }),
       renameSession: (sessionId, title) => invoke('stats:rename-session', { sessionId, title }),
       listPins: () => invoke('stats:list-pins'),
-      setPin: (sessionId, pinned) => invoke('stats:set-pin', { sessionId, pinned }),
       listSort: () => invoke('stats:list-sort'),
-      setSort: (section, ids) => invoke('stats:set-sort', { section, ids })
+      setSort: (section, ids) => invoke('stats:set-sort', { section, ids }),
+      listProjects: () => invoke('stats:list-projects'),
+      createProjectGroup: (name, parentId = null) =>
+        invoke('stats:create-project-group', { name, parentId }),
+      renameProjectGroup: (groupId, name) =>
+        invoke('stats:rename-project-group', { groupId, name }),
+      deleteProjectGroup: (groupId) => invoke('stats:delete-project-group', { groupId }),
+      // 侧栏唯一的「换位置」入口：pinned / project / recent 三选一
+      moveSession: (sessionId, section, groupId = null) =>
+        invoke('stats:move-session', { sessionId, section, groupId })
     },
 
     settings: {

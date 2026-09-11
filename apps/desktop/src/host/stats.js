@@ -1,8 +1,18 @@
 import { app, ipcMain } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { isChatSessionRunning } from './chat'
+import {
+  createGroup,
+  deleteGroup,
+  emptyProjects,
+  normalizeProjects,
+  renameGroup,
+  setAssignment
+} from './session-projects'
 import { projectMessages, projectSubagentRecords, projectUsage } from './stats-core'
+import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 
 /**
@@ -18,6 +28,12 @@ function sessionsDir() {
 }
 
 const statsScanner = createStatsScanner({ directory: sessionsDir })
+
+const hasLiveTurnLease = createTurnLeaseProbe({
+  lockDir: () => join(sessionsDir(), '.turn-locks')
+})
+
+let metaInterrupted = { rows: null, key: '', value: null }
 
 function sessionTitle(sessionId) {
   const file = sessionFile(sessionId)
@@ -82,15 +98,58 @@ function setPin(sessionId, pinned) {
   const next = readPins()
   if (pinned) next[sessionId] = Date.now()
   else delete next[sessionId]
-  const file = pinsFile()
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  writeJson(pinsFile(), next)
   return next
+}
+
+function writeJson(file, value) {
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+/** Projects 分区存储：userData/session-projects.json（可嵌套分组 + 会话归属）。 */
+function projectsFile() {
+  return join(app.getPath('userData'), 'session-projects.json')
+}
+
+function readProjects() {
+  try {
+    return normalizeProjects(JSON.parse(readFileSync(projectsFile(), 'utf8')))
+  } catch {
+    return emptyProjects()
+  }
+}
+
+function writeProjects(projects) {
+  const normalized = normalizeProjects(projects)
+  writeJson(projectsFile(), normalized)
+  return normalized
+}
+
+/**
+ * 侧栏唯一一次「换位置」：pinned / projects / recent 三选一。
+ *
+ * 一次调用同时落盘 pins 与 projects，两个分区不会短暂地同时列着同一个会话。
+ */
+function moveSession({ sessionId, section, groupId } = {}) {
+  if (typeof sessionId !== 'string' || !sessionId) {
+    return { pins: readPins(), projects: readProjects() }
+  }
+  const pinned = section === 'pinned'
+  const target = section === 'project' ? groupId : null
+  const projects = writeProjects(setAssignment(readProjects(), sessionId, target))
+  return { pins: setPin(sessionId, pinned), projects }
 }
 
 /** 侧栏手动拖拽排序：userData/session-sort.json，{ [section]: [sessionId, ...] } */
 function sortFile() {
   return join(app.getPath('userData'), 'session-sort.json')
+}
+
+function validSection(section) {
+  if (section === 'pinned' || section === 'sessions' || section === 'recent') return true
+  // 分组内顺序按 `project:<groupId>` 单独存一份，分组删除后遗留的条目无害
+  return typeof section === 'string' && /^project:[^:]+$/.test(section)
 }
 
 function readSort() {
@@ -101,6 +160,10 @@ function readSort() {
       const list = raw?.[section]
       sort[section] = Array.isArray(list) ? list.filter((id) => typeof id === 'string' && id) : []
     }
+    for (const [section, list] of Object.entries(raw || {})) {
+      if (!section.startsWith('project:')) continue
+      sort[section] = Array.isArray(list) ? list.filter((id) => typeof id === 'string' && id) : []
+    }
     return sort
   } catch {
     return { pinned: [], sessions: [], recent: [] }
@@ -108,12 +171,10 @@ function readSort() {
 }
 
 function setSectionSort(section, ids) {
-  if (!['pinned', 'sessions', 'recent'].includes(section)) return readSort()
+  if (!validSection(section)) return readSort()
   const next = readSort()
   next[section] = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string' && id) : []
-  const file = sortFile()
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  writeJson(sortFile(), next)
   return next
 }
 
@@ -122,9 +183,24 @@ function sessionFile(sessionId) {
   return join(sessionsDir(), `${sessionId}.json`)
 }
 
-/** 扫描全部 session 轻量元数据，按最近更新降序。 */
+/**
+ * 扫描全部 session 轻量元数据，按最近更新降序。`interrupted` 标记按次探测（见
+ * isInterruptedSession：turn lease 的存活判定不能进扫描器的文件签名缓存，持有者可能
+ * 在文件没变的情况下消失），但结果不变时要把数组与行对象的引用原样交回去——侧栏用
+ * 引用相等来判断是否需要重渲染，每次 refresh 都换新数组会让它白刷一遍。
+ */
 function scanMeta() {
-  return statsScanner.scanMeta()
+  const rows = statsScanner.scanMeta()
+  const ids = []
+  for (const row of rows) if (isInterruptedSession(row, hasLiveTurnLease)) ids.push(row.id)
+  const key = ids.join(',')
+  if (metaInterrupted.key === key && metaInterrupted.rows === rows) return metaInterrupted.value
+  const interrupted = new Set(ids)
+  const value = ids.length
+    ? rows.map((row) => (interrupted.has(row.id) ? { ...row, interrupted: true } : row))
+    : rows
+  metaInterrupted = { rows, key, value }
+  return value
 }
 
 /** 扫描全部 session 统计，并由 stats-core 过滤、去重。 */
@@ -168,9 +244,19 @@ export function registerStatsIpc() {
     renameSession(sessionId, title)
   )
   ipcMain.handle('stats:list-pins', () => readPins())
-  ipcMain.handle('stats:set-pin', (_event, { sessionId, pinned } = {}) =>
-    setPin(sessionId, !!pinned)
-  )
+  ipcMain.handle('stats:move-session', (_event, payload = {}) => moveSession(payload))
   ipcMain.handle('stats:list-sort', () => readSort())
   ipcMain.handle('stats:set-sort', (_event, { section, ids } = {}) => setSectionSort(section, ids))
+  ipcMain.handle('stats:list-projects', () => readProjects())
+  ipcMain.handle('stats:create-project-group', (_event, { name, parentId } = {}) =>
+    writeProjects(
+      createGroup(readProjects(), { id: randomUUID(), name, parentId, now: Date.now() })
+    )
+  )
+  ipcMain.handle('stats:rename-project-group', (_event, { groupId, name } = {}) =>
+    writeProjects(renameGroup(readProjects(), groupId, name))
+  )
+  ipcMain.handle('stats:delete-project-group', (_event, { groupId } = {}) =>
+    writeProjects(deleteGroup(readProjects(), groupId))
+  )
 }

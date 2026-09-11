@@ -26,6 +26,7 @@ import { StatsView } from './stats/StatsView'
 import { TerminalHost } from './TerminalHost'
 import TerminalKeyBar from './TerminalKeyBar'
 import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
+import { resolveGroupCwd } from './session-projects'
 import {
   createColdStartTerminal,
   normalizeNodes,
@@ -627,6 +628,12 @@ export default function App() {
   const [sessions, setSessions] = useState([])
   const [pins, setPins] = useState({})
   const [sortOrder, setSortOrder] = useState({ pinned: [], sessions: [], recent: [] })
+  const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
+  const projectsRef = useLatest(projects)
+  const sessionsRef = useLatest(sessions)
+  // 新建但还没绑定真实会话的草稿归属：草稿是进程内的临时节点，只存在渲染层
+  const [draftGroups, setDraftGroups] = useState({})
+  const draftGroupsRef = useLatest(draftGroups)
 
   const applySessions = useCallback((list) => {
     const meta = {}
@@ -669,21 +676,53 @@ export default function App() {
       .catch((error) => console.error('load pins failed', error))
   }, [])
 
+  const refreshProjects = useCallback(() => {
+    window.mica.stats
+      .listProjects()
+      .then((result) =>
+        setProjects({
+          version: result?.version || 1,
+          groups: Array.isArray(result?.groups) ? result.groups : [],
+          assignments: result?.assignments || {}
+        })
+      )
+      .catch((error) => console.error('load projects failed', error))
+  }, [])
+
+  const applyMoveResult = useCallback((result) => {
+    if (result?.pins) setPins(result.pins)
+    if (result?.projects) {
+      setProjects({
+        version: result.projects.version || 1,
+        groups: Array.isArray(result.projects.groups) ? result.projects.groups : [],
+        assignments: result.projects.assignments || {}
+      })
+    }
+  }, [])
+
+  /**
+   * 侧栏唯一一次「换位置」：Pinned / 某个项目分组 / Recent 三选一。
+   * 落在哪个分区完全由这次调用决定，所以同一个会话不会同时出现在两处。
+   */
+  const moveSession = useCallback(
+    (sessionId, target = {}) => {
+      const section =
+        target.section === 'pinned' ? 'pinned' : target.section === 'project' ? 'project' : 'recent'
+      const groupId = section === 'project' ? target.groupId || null : null
+      if (section === 'project' && !groupId) return
+      window.mica.stats
+        .moveSession(sessionId, section, groupId)
+        .then(applyMoveResult)
+        .catch((error) => console.error('move session failed', error))
+    },
+    [applyMoveResult]
+  )
+
   const togglePin = useCallback(
     (sessionId) => {
-      const next = !pins[sessionId]
-      setPins((current) => {
-        const updated = { ...current }
-        if (next) updated[sessionId] = Date.now()
-        else delete updated[sessionId]
-        return updated
-      })
-      window.mica.stats
-        .setPin(sessionId, next)
-        .then(setPins)
-        .catch((error) => console.error('set pin failed', error))
+      moveSession(sessionId, { section: pins[sessionId] ? 'recent' : 'pinned' })
     },
-    [pins]
+    [moveSession, pins]
   )
 
   const refreshSort = useCallback(() => {
@@ -779,9 +818,23 @@ export default function App() {
             : node
         )
       )
+      // 在某个项目分组里新建的会话，拿到 sessionId 的这一刻才真正归属该分组
+      const groupId = draftGroupsRef.current?.[id]
+      if (groupId) {
+        setDraftGroups((prev) => {
+          if (!prev[id]) return prev
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+        window.mica.stats
+          .moveSession(value, 'project', groupId)
+          .then(applyMoveResult)
+          .catch((error) => console.error('assign session to project failed', error))
+      }
       refreshSessions()
     },
-    [refreshSessions]
+    [applyMoveResult, draftGroupsRef, refreshSessions]
   )
   const canBindSessionId = useCallback(
     (nodeId) => {
@@ -796,11 +849,12 @@ export default function App() {
     refreshSessions()
     refreshPins()
     refreshSort()
+    refreshProjects()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
     }, 3000)
     return () => clearInterval(timer)
-  }, [refreshPins, refreshSessions, refreshSort])
+  }, [refreshPins, refreshProjects, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
@@ -926,6 +980,8 @@ export default function App() {
           ? options.text.trim()
           : `新对话 ${count}`
       const cwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
+      const groupId =
+        typeof options.groupId === 'string' && options.groupId ? options.groupId : null
       setNodes((items) => {
         return [
           ...items,
@@ -942,10 +998,19 @@ export default function App() {
           }
         ]
       })
+      if (groupId) {
+        // 恢复已有会话时归属可以立刻落盘；新草稿要等它拿到 sessionId 再绑定
+        if (resumeSessionId)
+          window.mica.stats
+            .moveSession(resumeSessionId, 'project', groupId)
+            .then(applyMoveResult)
+            .catch((error) => console.error('assign session to project failed', error))
+        else setDraftGroups((prev) => ({ ...prev, [id]: groupId }))
+      }
       setSelectedId(id)
       setActiveId(id)
     },
-    [nodesRef]
+    [applyMoveResult, nodesRef]
   )
 
   const createRightTerm = useCallback(() => {
@@ -1000,6 +1065,66 @@ export default function App() {
     [activeRef, createTerminal, terminalCwd]
   )
 
+  // 分组里新建会话：默认工作目录取该分组（含子分组）里最近一条会话的 cwd，
+  // 分组还是空的就沿用当前默认目录。
+  const createSessionInGroup = useCallback(
+    (groupId) => {
+      if (!groupId) return
+      setView('chat')
+      const cwd =
+        resolveGroupCwd(projectsRef.current, sessionsRef.current, groupId) ||
+        terminalCwd(activeRef.current) ||
+        recentChatCwd() ||
+        null
+      createTerminal({ cwd, groupId })
+    },
+    [activeRef, createTerminal, projectsRef, sessionsRef, terminalCwd]
+  )
+
+  const moveDraft = useCallback((nodeId, target = {}) => {
+    const groupId = target.section === 'project' ? target.groupId || null : null
+    setDraftGroups((prev) => {
+      const next = { ...prev }
+      if (groupId) next[nodeId] = groupId
+      else delete next[nodeId]
+      return next
+    })
+  }, [])
+
+  const createGroup = useCallback(
+    async (parentId) => {
+      const name = await askText(parentId ? '新建子分组' : '新建分组', '')
+      if (!name || !name.trim()) return
+      window.mica.stats
+        .createProjectGroup(name.trim(), parentId || null)
+        .then(setProjects)
+        .catch((error) => console.error('create project group failed', error))
+    },
+    [askText]
+  )
+
+  const renameGroup = useCallback((groupId, name) => {
+    window.mica.stats
+      .renameProjectGroup(groupId, name)
+      .then(setProjects)
+      .catch((error) => console.error('rename project group failed', error))
+  }, [])
+
+  const deleteGroup = useCallback(
+    (groupId) => {
+      const group = projectsRef.current?.groups?.find((item) => item.id === groupId)
+      if (
+        !window.confirm(`确定删除分组「${group?.name || ''}」及其子分组吗？组内会话会回到 Recent。`)
+      )
+        return
+      window.mica.stats
+        .deleteProjectGroup(groupId)
+        .then(setProjects)
+        .catch((error) => console.error('delete project group failed', error))
+    },
+    [projectsRef]
+  )
+
   const selectNode = useCallback(
     (node, activate = true) => {
       setSelectedId(node.id)
@@ -1045,6 +1170,12 @@ export default function App() {
       const current = nodesRef.current
       const next = removeNode(current, node.id)
       setNodes((items) => removeNode(items, node.id))
+      setDraftGroups((prev) => {
+        if (!prev[node.id]) return prev
+        const updated = { ...prev }
+        delete updated[node.id]
+        return updated
+      })
       if (node.id === activeRef.current) {
         const terminal = next.find((item) => item.type === 'terminal')
         setActiveId(terminal?.id || null)
@@ -1410,6 +1541,8 @@ export default function App() {
             sessions={sessions}
             pins={pins}
             sortOrder={sortOrder}
+            projects={projects}
+            draftGroups={draftGroups}
             draftTabs={draftTabs}
             openBySession={openBySession}
             activeSessionId={activeSessionId}
@@ -1425,7 +1558,13 @@ export default function App() {
               selectNode(node)
             }}
             onTogglePin={togglePin}
+            onMoveSession={moveSession}
+            onMoveDraft={moveDraft}
             onReorderSessions={reorderSessions}
+            onCreateGroup={createGroup}
+            onRenameGroup={renameGroup}
+            onDeleteGroup={deleteGroup}
+            onCreateSessionInGroup={createSessionInGroup}
             onRenameSession={(sessionId, title) => {
               const text = (title || '').trim()
               if (text) {
