@@ -17,6 +17,7 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
+  MICA_METHODS,
   MICA_QUEUE_NOTIFICATIONS,
   MICA_SESSION_NOTIFICATIONS,
   MICA_TASK_NOTIFICATIONS,
@@ -49,6 +50,7 @@ import {
   type HeadlessTurnEvent,
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
+import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
@@ -905,6 +907,83 @@ async function handleCodexRequest(
       }
       ctx.executor.abort();
       ctx.writeResponse({});
+      return;
+    }
+    case MICA_METHODS.editMessage: {
+      // Mica extension: 改写一条已发送的用户消息并重跑（desktop 双击编辑）。
+      // Codex 协议只能追加 turn，历史必须先在 host 侧截断，否则编辑后的内容会
+      // 带着旧问答一起发给模型。
+      if (ctx.executor.isBusy) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'Mica 正在运行，空闲后才能编辑重发');
+        return;
+      }
+      const prompt = (paramString(params, 'prompt') ?? '').trim();
+      const text = (paramString(params, 'text') ?? '').trim();
+      if (!prompt || !text) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'prompt 与 text 不能为空');
+        return;
+      }
+      const occurrenceParam = Number(params.occurrenceFromEnd);
+      const previous = ctx.agent.getSnapshot();
+      const truncated = truncateHistoryBeforeUserMessage(previous, {
+        prompt,
+        occurrenceFromEnd: Number.isFinite(occurrenceParam) && occurrenceParam > 0 ? occurrenceParam : 1,
+      });
+      if (!truncated.ok) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, truncated.message);
+        return;
+      }
+      const model = paramString(params, 'model');
+      const effort = paramString(params, 'effort');
+      if (model || effort) {
+        try {
+          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
+          ctx.agent.configureForRun(
+            {
+              providerId: override.providerId,
+              model: override.model,
+              effort: override.effort,
+            },
+            true,
+          );
+        } catch (error) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
+      const cwdParam = paramString(params, 'cwd');
+      if (cwdParam) process.chdir(resolve(cwdParam));
+      // 截断只动 provider history：UI conversationMessages 由 client 从 provider
+      // messages 派生（ChatCompletionsClient/ResponsesClient.toConversationMessages），
+      // loadSnapshot 会一并重建，所以这里不能单独截 UI 层，否则两边错位。
+      ctx.agent.loadSnapshot({ ...previous, ...truncated.snapshot });
+      await ctx.mcpReady;
+      // 落盘要在通知之前：turn 启动后的首次保存跑在 executor.start 之后的异步
+      // 路径上（runTurn 里先 await parseImageRefs），此刻客户端若直接读文件会拿到
+      // 截断后、还没有本轮用户消息的历史，界面上的消息会凭空消失。
+      ctx.sessionController.saveCurrent({
+        allowEmpty: true,
+        conversationMessages: [...ctx.agent.toConversationMessages(), { role: 'user', content: text }],
+      });
+      ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
+      const result = await ctx.executor.start(
+        micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' }),
+      );
+      if (result !== 'started') {
+        // 新 turn 没起来（单槽队列被占）：把历史恢复成编辑前的样子再通知重载，
+        // 否则会话被截断却没有任何东西补回来。
+        ctx.agent.loadSnapshot(previous);
+        ctx.sessionController.saveCurrent({ allowEmpty: true });
+        ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
+        ctx.writeError(CODEX_ERROR_INTERNAL, '已有一条排队消息，等待发送或重新编辑');
+        return;
+      }
+      const turnId = ctx.getCurrentTurnId();
+      if (!turnId) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'turn started without a turn id');
+        return;
+      }
+      ctx.writeResponse({ turn: turnSnapshot(turnId, 'inProgress') });
       return;
     }
     default:

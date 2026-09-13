@@ -141,6 +141,34 @@ export const MICA_SESSION_NOTIFICATIONS = {
   historyReplaced: 'mica/sessionHistory/replaced',
 } as const;
 
+/**
+ * Mica extension requests (client -> host). The Codex protocol can only append
+ * turns, so an "edit a message that was already sent" affordance (the desktop
+ * app's double-click editor) needs a way to rewind the conversation first.
+ * `mica/turn/editMessage` locates the user message by its (whitespace-folded)
+ * text — persisted histories carry no per-message id — truncates it and
+ * everything after it, saves the session and starts a fresh turn with the
+ * edited text. Codex clients never send it; the host answers unknown methods
+ * with method-not-found, so a Codex driver is unaffected.
+ */
+export const MICA_METHODS = {
+  editMessage: 'mica/turn/editMessage',
+} as const;
+
+export type MicaEditMessageParams = {
+  /** Original text of the message being edited (matched against user messages). */
+  prompt: string;
+  /** Replacement text; runs as the new turn's input. */
+  text: string;
+  /**
+   * 1-based index counting matching user messages from the end, for sessions
+   * where the same text was sent more than once. Defaults to 1 (the newest).
+   */
+  occurrenceFromEnd?: number;
+  model?: string;
+  effort?: string;
+};
+
 export type MicaBackgroundTaskItem = {
   id: string;
   command: string;

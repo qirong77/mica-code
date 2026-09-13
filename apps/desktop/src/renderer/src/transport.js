@@ -180,6 +180,8 @@ function createWebApi(env) {
       start: (payload) => invoke('chat:start', payload),
       abort: (id) => invoke('chat:abort', { id }),
       recallQueued: (id, clientMessageId) => invoke('chat:recall-queued', { id, clientMessageId }),
+      // 改写一条已发送的用户消息并重跑（Codex 协议扩展 mica/turn/editMessage）
+      editMessage: (payload) => invoke('chat:edit-message', payload),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),
@@ -274,6 +276,7 @@ function createWebApi(env) {
       listSessions: () => invoke('stats:list-sessions'),
       sessionTitle: (sessionId) => invoke('stats:session-title', { sessionId }),
       renameSession: (sessionId, title) => invoke('stats:rename-session', { sessionId, title }),
+      deleteSession: (sessionId) => invoke('stats:delete-session', { sessionId }),
       listPins: () => invoke('stats:list-pins'),
       listSort: () => invoke('stats:list-sort'),
       setSort: (section, ids) => invoke('stats:set-sort', { section, ids }),

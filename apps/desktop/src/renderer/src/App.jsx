@@ -1200,14 +1200,48 @@ export default function App() {
     [closeTab, nodesRef]
   )
 
-  const closeSession = useCallback(
-    (sessionId) => {
+  /**
+   * 删除一个会话：二次确认后连同磁盘上的会话记录一起删掉（置顶 / 项目归属 / 手动排序
+   * 由 host 在同一次调用里清理），再把它的标签页关掉。会话正在跑时 host 会拒绝。
+   */
+  const deleteSession = useCallback(
+    async (sessionId) => {
+      const title = sessionsRef.current.find((item) => item.id === sessionId)?.title
+      if (
+        !window.confirm(`确定删除对话「${title || sessionId}」？会话记录会从磁盘删除，无法恢复。`)
+      )
+        return
+      let result
+      try {
+        result = await window.mica.stats.deleteSession(sessionId)
+      } catch (error) {
+        window.alert(`删除对话失败：${error?.message || error}`)
+        return
+      }
+      if (result?.pins) setPins(result.pins)
+      if (result?.projects)
+        setProjects({
+          version: result.projects.version || 1,
+          groups: Array.isArray(result.projects.groups) ? result.projects.groups : [],
+          assignments: result.projects.assignments || {}
+        })
+      if (result?.sort) setSortOrder(result.sort)
       const node = nodesRef.current.find(
         (item) => item.type === 'terminal' && item.sessionId === sessionId
       )
       if (node) closeTab(node)
+      refreshSessions()
     },
-    [closeTab, nodesRef]
+    [closeTab, nodesRef, refreshSessions, sessionsRef]
+  )
+
+  /** 草稿（还没绑定真实会话）只活在进程内，删除就是丢掉这个标签页。 */
+  const deleteDraft = useCallback(
+    (nodeId) => {
+      if (!window.confirm('确定删除这个新对话？')) return
+      closeTerminal(nodeId)
+    },
+    [closeTerminal]
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
@@ -1404,6 +1438,27 @@ export default function App() {
   useEffect(() => {
     rightPanelWidthRef.current = rightPanelWidth
   }, [rightPanelWidth])
+  const toggleRightPanel = useCallback(() => {
+    if (isMobile) {
+      setRightPanelOpen(true)
+      setMobileDrawer((value) => (value === 'right' ? null : 'right'))
+      return
+    }
+    setRightPanelOpen((open) => !open)
+  }, [isMobile])
+  // Cmd/Ctrl+Shift+I 显示/隐藏右侧 Panel
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.repeat || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey)
+        return
+      if (event.code !== 'KeyI') return
+      event.preventDefault()
+      event.stopPropagation()
+      toggleRightPanel()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [toggleRightPanel])
   // Cmd/Ctrl+` 切换右侧 Panel 的文件/终端 Tab
   useEffect(() => {
     const onKey = (event) => {
@@ -1579,8 +1634,8 @@ export default function App() {
                 items.map((node) => (node.id === nodeId ? { ...node, text } : node))
               )
             }
-            onCloseSession={closeSession}
-            onCloseDraft={closeTerminal}
+            onDeleteSession={deleteSession}
+            onDeleteDraft={deleteDraft}
           />
         </aside>
         <main
@@ -1632,17 +1687,10 @@ export default function App() {
             ) : null}
             <button
               type="button"
-              title={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
+              title={rightPanelVisible ? '收起右侧面板 (⇧⌘I)' : '展开右侧面板 (⇧⌘I)'}
               aria-label={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
               className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-              onClick={() => {
-                if (isMobile) {
-                  setRightPanelOpen(true)
-                  setMobileDrawer((value) => (value === 'right' ? null : 'right'))
-                  return
-                }
-                setRightPanelOpen((open) => !open)
-              }}
+              onClick={toggleRightPanel}
             >
               {rightPanelVisible ? (
                 <IconLayoutSidebarRightCollapse size={15} />

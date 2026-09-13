@@ -498,6 +498,17 @@ function runCli(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** UI conversation message content -> plain text (string or content blocks). */
+function contentTextOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) =>
+      part && typeof part === 'object' && 'text' in part && typeof part.text === 'string' ? part.text : '',
+    )
+    .join('');
+}
+
 /** E2E tests spawn a real child process and wait on protocol notifications; the
  * 5s vitest default is too short (host boot alone takes ~1.5s). */
 function itE2E(name: string, fn: () => Promise<void>): void {
@@ -571,6 +582,64 @@ suite('mica app-server real-user flows (mock provider)', () => {
       turnState?: string;
     };
     expect(session.turnState).toBe('completed');
+  });
+
+  itE2E('mica/turn/editMessage rewrites a sent message, drops what followed it and reruns', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('edit-message');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '第一条' }] });
+    const firstStart = await waitFor(host, (m) => m.method === 'turn/started', 'first turn/started');
+    const firstTurnId = (firstStart.params?.turn as { id: string }).id;
+    await waitFor(host, turnCompleted(firstTurnId), 'first turn/completed');
+
+    await send(host, 2, 'turn/start', { threadId: '', input: [{ type: 'text', text: '第二条' }] });
+    const secondStart = await waitFor(
+      host,
+      (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== firstTurnId,
+      'second turn/started',
+    );
+    const secondTurnId = (secondStart.params?.turn as { id: string }).id;
+    await waitFor(host, turnCompleted(secondTurnId), 'second turn/completed');
+
+    const requestsBeforeEdit = mock!.state.requests.length;
+
+    await send(host, 3, 'mica/turn/editMessage', { prompt: '第一条', text: '第一条（改）' });
+
+    // 客户端先收到历史替换（据此重载会话），再是新一轮的 turn 生命周期。
+    await waitFor(host, (m) => m.method === 'mica/sessionHistory/replaced', 'history replaced');
+    const editedStart = await waitFor(
+      host,
+      (m) =>
+        m.method === 'turn/started' &&
+        ![firstTurnId, secondTurnId].includes((m.params?.turn as { id?: string })?.id ?? ''),
+      'edited turn/started',
+    );
+    const editedTurnId = (editedStart.params?.turn as { id: string }).id;
+    await waitFor(host, turnCompleted(editedTurnId), 'edited turn/completed');
+
+    // 被编辑消息之后的整轮（第二条 + 它的回答）必须从会话里消失，只剩改写后的那条。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      snapshot?: { conversationMessages?: Array<{ role?: string; content?: unknown }> };
+    };
+    const userTexts = (session.snapshot?.conversationMessages ?? [])
+      .filter((message) => message.role === 'user')
+      .map((message) => contentTextOf(message.content));
+    expect(userTexts).toEqual(['第一条（改）']);
+
+    // 重跑时发给模型的历史里不能再带被截断的那一轮。
+    expect(mock!.state.requests.length).toBeGreaterThan(requestsBeforeEdit);
+    const rerunInput = JSON.stringify(mock!.state.requests.at(-1)!.input);
+    expect(rerunInput).toContain('第一条（改）');
+    expect(rerunInput).not.toContain('第二条');
   });
 
   itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {

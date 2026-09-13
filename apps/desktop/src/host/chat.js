@@ -494,12 +494,12 @@ function writeHostRequest(run, request) {
   return true
 }
 
-function sendCodexRequest(run, method, params) {
+function sendCodexRequest(run, method, params, options = {}) {
   if (!run?.child?.stdin?.writable) return false
   run.requestSeq = (run.requestSeq || 0) + 1
   const id = run.requestSeq
   run.pendingRequests = run.pendingRequests || new Map()
-  run.pendingRequests.set(id, { method, params })
+  run.pendingRequests.set(id, { method, params, resolve: options.resolve })
   run.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   return true
 }
@@ -538,6 +538,69 @@ function sendInterrupt(run) {
   return sendCodexRequest(run, 'turn/interrupt', {
     threadId: run.sessionId || run.requestedSessionId || '',
     turnId: run.currentTurnId || ''
+  })
+}
+
+/** The host answers within one request round-trip; an edit that never comes back
+ * (child died between write and reply) must not leave the editor spinning. */
+const EDIT_MESSAGE_TIMEOUT_MS = 30_000
+
+/**
+ * Mica extension (`mica/turn/editMessage`): rewrite an already-sent user message
+ * and run it again. The app-server truncates the session history at that message
+ * (the Codex protocol can only append turns), saves it, and starts a fresh turn
+ * with the edited text. Only allowed while the session is idle — the truncated
+ * history and the new turn must not race an in-flight one.
+ */
+function editRunMessage(sender, id, payload = {}) {
+  const prompt = String(payload.prompt || '').trim()
+  const text = String(payload.text || '').trim()
+  if (!prompt || !text) return Promise.resolve({ ok: false, error: '编辑内容为空' })
+
+  let run = runs.get(id)
+  if (run?.child) {
+    run.sender = sender
+    if (run.running) {
+      return Promise.resolve({ ok: false, error: 'Mica 正在运行，空闲后才能重新发送' })
+    }
+    if (allQueuedItems(id, run).length > 0) {
+      return Promise.resolve({ ok: false, error: '已有等待发送的消息，请先撤回后再编辑' })
+    }
+  } else {
+    // Editing a history row in a session that has not been messaged in this
+    // process yet: the resident host does not exist, so start it first (it
+    // resumes the session from disk like chat:start does).
+    const spawned = spawnChatHost(id, sender, payload)
+    if (!spawned.ok) return Promise.resolve(spawned)
+    run = runs.get(id)
+  }
+
+  const params = { threadId: run.sessionId || run.requestedSessionId || '' }
+  params.prompt = prompt
+  params.text = text
+  if (Number.isInteger(payload.occurrenceFromEnd) && payload.occurrenceFromEnd > 0) {
+    params.occurrenceFromEnd = payload.occurrenceFromEnd
+  }
+  if (payload.model) params.model = payload.model
+  if (payload.variant) params.effort = payload.variant
+  // Like sendTurnStart: the replay buffer and `prompt` describe the turn being
+  // started, otherwise a renderer reload trims the transcript at the previous
+  // turn's boundary and replays the wrong run.
+  run.prompt = text
+  run.events = []
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(
+      () => resolve({ ok: false, error: '编辑重发超时，请重试' }),
+      EDIT_MESSAGE_TIMEOUT_MS
+    )
+    const settle = (result) => {
+      clearTimeout(timer)
+      resolve(result)
+    }
+    if (!sendCodexRequest(run, 'mica/turn/editMessage', params, { resolve: settle })) {
+      settle({ ok: false, error: 'chat host 不可用，请重试' })
+    }
   })
 }
 
@@ -682,10 +745,23 @@ function handleHostResponse(id, run, message) {
   const pending = run.pendingRequests?.get(message.id)
   run.pendingRequests?.delete(message.id)
   if (!pending) return
-  if (!message.error) return
+  if (!message.error) {
+    // Request-level results the renderer awaits over IPC (chat:edit-message).
+    // Turn/steer acks carry nothing the event stream does not already say.
+    pending.resolve?.({ ok: true, result: message.result })
+    return
+  }
   // Request-level errors (busy turn/start, steer mismatch, ...). Surface as
   // an error event so the renderer sees why a message did not start.
   const errorMessage = message.error.message || 'chat host 请求失败'
+  if (pending.resolve) {
+    // A caller is awaiting this request over IPC (chat:edit-message). Hand it the
+    // reason and stop here: pushing an `error` event for a turn that never
+    // existed would make the renderer mark the run failed and show the message
+    // twice.
+    pending.resolve({ ok: false, error: errorMessage })
+    return
+  }
   if (pending.method === 'turn/start' || pending.method === 'turn/steer') {
     // The message never reached the host queue. Tell the renderer so it can
     // roll back the optimistic bubble instead of leaving it looking sent (and
@@ -1181,6 +1257,12 @@ export function registerChatIpc() {
   ipcMain.handle('chat:recall-queued', (event, { id, clientMessageId } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失', queuedCount: 0, queuedItems: [] }
     return recallQueuedRun(event.sender, id, clientMessageId)
+  })
+
+  ipcMain.handle('chat:edit-message', (event, payload = {}) => {
+    const id = payload.id
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    return editRunMessage(event.sender, id, payload)
   })
 
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {

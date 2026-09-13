@@ -15,7 +15,6 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
-import { micaContext } from '@packages/mica-context/index.js';
 import type { RewindFileAction, RewindFileChange, RuntimeInput } from '@packages/mica-runtime/index.js';
 import type {
   RewindApplyRequest,
@@ -25,6 +24,13 @@ import type {
 } from '@packages/mica-runtime/Rewind.js';
 import { gitBuffer, gitText } from '@packages/mica-common/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import {
+  comparableMessageText,
+  displayMessageText,
+  messageText,
+  usageBeforeMessage,
+  userMessageIndexes,
+} from './conversationHistory.js';
 
 type FileSnapshotEntry =
   | { kind: 'absent' }
@@ -952,20 +958,6 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function userMessageIndexes(messages: unknown[]): number[] {
-  const indexes: number[] = [];
-  for (let index = 0; index < messages.length; index++) {
-    const message = messages[index];
-    if (!message || typeof message !== 'object' || !('role' in message) || message.role !== 'user') continue;
-    const text = comparableMessageText(message);
-    if (text.startsWith(micaContext.COMPACT_BOUNDARY_PREFIX) || text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)) {
-      continue;
-    }
-    indexes.push(index);
-  }
-  return indexes;
-}
-
 function visibleUserTurnBoundaries(
   providerMessages: unknown[],
   uiMessages: unknown[],
@@ -992,43 +984,6 @@ function visibleUserTurnBoundaries(
     uiCursor = matchedUiCursor - 1;
   }
   return reversed.reverse();
-}
-
-function comparableMessageText(message: unknown): string {
-  return messageText(message).replace(/\s+/g, ' ').trim();
-}
-
-function usageBeforeMessage(
-  protocol: AgentRuntimeSnapshot['protocol'],
-  usageHistory: AgentRuntimeSnapshot['usageHistory'],
-  messageIndex: number,
-): AgentRuntimeSnapshot['usageHistory'] {
-  const messageCountLimit = protocol === 'openai_chat_completions' ? messageIndex + 1 : messageIndex;
-  return usageHistory.filter((usage) => usage.messageCount <= messageCountLimit);
-}
-
-function displayMessageText(message: unknown): string {
-  if (!message || typeof message !== 'object' || !('displayContent' in message)) return '';
-  return contentText(message.displayContent);
-}
-
-function messageText(message: unknown): string {
-  if (!message || typeof message !== 'object' || !('content' in message)) return '';
-  return contentText(message.content);
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part) => {
-      if (!part || typeof part !== 'object') return '';
-      if ('text' in part && typeof part.text === 'string') return part.text;
-      if ('type' in part && typeof part.type === 'string' && part.type.includes('image')) return '[Image]';
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
 }
 
 function errorMessage(error: unknown): string {

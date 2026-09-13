@@ -14,6 +14,7 @@ import {
 import { projectMessages, projectSubagentRecords, projectUsage } from './stats-core'
 import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
+import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -174,13 +175,42 @@ function setSectionSort(section, ids) {
   if (!validSection(section)) return readSort()
   const next = readSort()
   next[section] = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string' && id) : []
-  writeJson(sortFile(), next)
-  return next
+  return writeSort(next)
+}
+
+function writeSort(sort) {
+  writeJson(sortFile(), sort)
+  return sort
 }
 
 function sessionFile(sessionId) {
   if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null
   return join(sessionsDir(), `${sessionId}.json`)
+}
+
+/** turn lease 目录：正在跑的 turn 在这里留下持有者 pid（见 session-lease.js）。 */
+function turnLocksDir() {
+  return join(sessionsDir(), '.turn-locks')
+}
+
+/**
+ * 删除一个会话：磁盘上的会话文件、它的 turn lease 锁，以及宿主的侧栏元数据（置顶 /
+ * 项目归属 / 手动排序）。会话文件不存在也继续清理元数据，好让悬空条目收敛掉。
+ *
+ * 正在跑的 turn 一律拒绝：本进程的 Chat turn 由 `isChatSessionRunning` 拦，另一个终端里
+ * 跑同一个会话的 TUI 由 turn lease 的持有者存活判定拦——这两种情况下删文件都会让那一轮
+ * 的落盘把它重新写回来。
+ */
+function deleteSession(sessionId) {
+  if (!isValidSessionId(sessionId)) throw new Error('Invalid session id')
+  if (isChatSessionRunning(sessionId) || hasLiveTurnLease(sessionId))
+    throw new Error('Cannot delete a session while its turn is running')
+  deleteSessionFiles({ directory: sessionsDir(), lockDir: turnLocksDir(), sessionId })
+  return {
+    pins: setPin(sessionId, false),
+    projects: writeProjects(setAssignment(readProjects(), sessionId, null)),
+    sort: writeSort(stripSessionFromSort(readSort(), sessionId))
+  }
 }
 
 /**
@@ -243,6 +273,7 @@ export function registerStatsIpc() {
   ipcMain.handle('stats:rename-session', (_event, { sessionId, title } = {}) =>
     renameSession(sessionId, title)
   )
+  ipcMain.handle('stats:delete-session', (_event, { sessionId } = {}) => deleteSession(sessionId))
   ipcMain.handle('stats:list-pins', () => readPins())
   ipcMain.handle('stats:move-session', (_event, payload = {}) => moveSession(payload))
   ipcMain.handle('stats:list-sort', () => readSort())

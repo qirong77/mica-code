@@ -904,6 +904,92 @@ function MessageActions({ text }) {
   )
 }
 
+/** 双击用户消息进入的就地编辑：确认由 host 侧（app-server 的 mica/turn/editMessage）
+ *  截断该消息及其之后的会话历史并用新文本重跑。截断后的历史不能与在跑的 turn
+ *  竞争，所以确认只在 mica 空闲（!running）且有内容时可用。 */
+export function canSubmitMessageEdit({ running, text }) {
+  return !running && String(text ?? '').trim().length > 0
+}
+
+/** 与 app-server 的 `comparableText` 同款的定位归一化：折叠空白，并把 UI 侧的
+ *  图片占位符统一成 CLI 的写法（host 的 readHistory 产出「[图片]」，provider
+ *  历史里的图片块产出「[Image]」）。两边不一致定位就会错位。 */
+function messageEditKey(text) {
+  return String(text ?? '')
+    .replace(/\[图片\]/g, '[Image]')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** 同文本的用户消息在会话里出现多次时，被编辑的是从末尾数第几条（1 起）。
+ *  持久化历史没有逐条消息 id，app-server 只能按文本定位，必须用同一套计数。 */
+export function promptOccurrenceFromEnd(messages = [], messageId) {
+  const index = messages.findIndex((message) => message.id === messageId)
+  if (index < 0) return 1
+  const key = messageEditKey(messages[index]?.text)
+  if (!key) return 1
+  let occurrence = 1
+  for (let cursor = index + 1; cursor < messages.length; cursor++) {
+    const message = messages[cursor]
+    if (message?.role !== 'user' || message.queued) continue
+    if (messageEditKey(message.text) === key) occurrence += 1
+  }
+  return occurrence
+}
+
+function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return undefined
+    // composer 的聚焦也在 mouseup 的 rAF 里排队，编辑框必须更晚拿到焦点。
+    const frame = requestAnimationFrame(() => {
+      element.focus()
+      element.setSelectionRange(element.value.length, element.value.length)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  return (
+    <div className="chat-message-edit" data-no-chat-focus>
+      <textarea
+        ref={ref}
+        className="chat-message-edit-input"
+        value={text}
+        spellCheck={false}
+        aria-label="编辑消息"
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+            return
+          }
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault()
+            if (canSubmit) onSubmit()
+          }
+        }}
+      />
+      <div className="chat-message-edit-actions">
+        {busy && <span className="chat-message-edit-hint">Mica 正在运行，空闲后才能确认</span>}
+        <button type="button" className="chat-message-edit-cancel" onClick={onCancel}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="chat-message-edit-confirm"
+          disabled={!canSubmit}
+          title={busy ? 'Mica 正在运行，空闲后才能确认' : '改写这条消息并重新运行 mica'}
+          onClick={onSubmit}
+        >
+          确认
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function latestTodoState(messages) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
@@ -1322,7 +1408,17 @@ export function shortPath(path, max = 46) {
   return `${head}…/${tail}`.slice(0, max)
 }
 
-function MessageRow({ message, onOpenFile, onPreviewImage, onCommandAction }) {
+function MessageRow({
+  message,
+  onOpenFile,
+  onPreviewImage,
+  onCommandAction,
+  edit,
+  onEditStart,
+  onEditChange,
+  onEditCancel,
+  onEditSubmit
+}) {
   if (message.kind === 'command') {
     return <CommandRow message={message} onCommandAction={onCommandAction} />
   }
@@ -1360,9 +1456,28 @@ function MessageRow({ message, onOpenFile, onPreviewImage, onCommandAction }) {
     return null
   }
   if (message.role === 'user') {
+    if (edit) {
+      return (
+        <div className="chat-message chat-message-user chat-message-editing">
+          <div className="chat-message-marker">▌</div>
+          <UserMessageEditor
+            text={edit.text}
+            busy={edit.busy}
+            canSubmit={edit.canSubmit}
+            onChange={onEditChange}
+            onCancel={onEditCancel}
+            onSubmit={onEditSubmit}
+          />
+        </div>
+      )
+    }
     return (
       <div
         className={`chat-message chat-message-user ${message.queued ? 'chat-message-queued' : ''}`}
+        onDoubleClick={(event) => {
+          if (event.target.closest('button')) return
+          onEditStart?.(message)
+        }}
       >
         <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
         <div className="chat-message-body whitespace-pre-wrap break-words">{message.text}</div>
@@ -1724,6 +1839,8 @@ export function ChatView({
   const [imagePreview, setImagePreview] = useState(null)
   const [contextDetail, setContextDetail] = useState(false)
   const [commitRunning, setCommitRunning] = useState(false)
+  // 双击用户消息进入的就地编辑（单槽位）：{ id, prompt, text } | null
+  const [messageEdit, setMessageEdit] = useState(null)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
   // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
   const [composerMinHeight, setComposerMinHeight] = useState(null)
@@ -3176,6 +3293,69 @@ export function ChatView({
       })
   }, [nodeId, nodeIdRef, stopping])
 
+  const startMessageEdit = useCallback((message) => {
+    if (!message?.id || message.queued) return
+    const text = String(message.text ?? '')
+    // prompt 留作定位依据：会话历史里没有逐条消息 id，host 只能按原文匹配。
+    setMessageEdit({ id: message.id, prompt: text, text })
+  }, [])
+
+  const changeMessageEdit = useCallback((value) => {
+    setMessageEdit((current) => (current ? { ...current, text: value } : current))
+  }, [])
+
+  const cancelMessageEdit = useCallback(() => setMessageEdit(null), [])
+
+  const submitMessageEdit = useCallback(() => {
+    const current = messageEdit
+    if (!current || running) return
+    const text = current.text.trim()
+    if (!text) return
+    const targetNodeId = nodeId
+    setMessageEdit(null)
+    // 编辑重发走 host 的就地改写（截断历史 + 新 turn），不是 send：send 会追加
+    // 一条新的用户消息，旧问答仍留在上下文里。成功后由 mica/sessionHistory/replaced
+    // 事件把 transcript 换成截断后的历史；失败则把编辑框交还给用户。
+    const overrides = overridesRef.current.get(nodeId) || {}
+    window.mica.chat
+      .editMessage({
+        id: nodeId,
+        sessionId: sessionIdRef.current || null,
+        cwd: cwdRef.current || null,
+        prompt: current.prompt,
+        text,
+        occurrenceFromEnd: promptOccurrenceFromEnd(messagesRef.current, current.id),
+        model: overrides.model || null,
+        variant: overrides.variant || null
+      })
+      .then((result) => {
+        if (nodeIdRef.current !== targetNodeId) return
+        if (result?.ok) return
+        appendNotice(result?.error || '编辑重发失败', 'error')
+        setMessageEdit(current)
+      })
+      .catch((error) => {
+        if (nodeIdRef.current !== targetNodeId) return
+        appendNotice(
+          `编辑重发失败：${error instanceof Error ? error.message : String(error)}`,
+          'error'
+        )
+        setMessageEdit(current)
+      })
+  }, [appendNotice, cwdRef, messageEdit, nodeId, nodeIdRef, running])
+
+  // 编辑中的消息从历史里消失（clear / compact / 恢复快照）时收起编辑框；
+  // 切换会话（nodeId 变化）同样收起。
+  useEffect(() => {
+    setMessageEdit(null)
+  }, [nodeId])
+
+  useEffect(() => {
+    if (!messageEdit) return
+    if (messages.some((message) => message.id === messageEdit.id)) return
+    setMessageEdit(null)
+  }, [messageEdit, messages])
+
   const navigateInputHistory = useCallback(
     (direction) => {
       const value = navigateChatHistory(
@@ -3619,6 +3799,19 @@ export function ChatView({
                     onOpenTerminalRef.current?.()
                   }
                 }}
+                edit={
+                  messageEdit?.id === message.id
+                    ? {
+                        text: messageEdit.text,
+                        busy: running,
+                        canSubmit: canSubmitMessageEdit({ running, text: messageEdit.text })
+                      }
+                    : null
+                }
+                onEditStart={startMessageEdit}
+                onEditChange={changeMessageEdit}
+                onEditCancel={cancelMessageEdit}
+                onEditSubmit={submitMessageEdit}
               />
             )
           })}

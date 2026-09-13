@@ -14,6 +14,7 @@ import {
 import { relativeTimeShort } from './relative-time'
 import { liveSessionRowState } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
+import { draftMenuItems, sessionMenuItems } from './session-menu'
 import { childGroups, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
 
@@ -189,8 +190,8 @@ export function SessionTree({
   onMoveDraft,
   onRenameSession,
   onRenameDraft,
-  onCloseSession,
-  onCloseDraft,
+  onDeleteSession,
+  onDeleteDraft,
   onReorderSessions,
   onCreateGroup,
   onRenameGroup,
@@ -321,28 +322,21 @@ export function SessionTree({
     if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
     else if (action === 'rename') setEditing({ kind: 'session', id: menuPayload.session.id })
-    else if (action === 'close')
+    else if (action === 'delete')
       menuPayload.session
-        ? onCloseSession(menuPayload.session.id)
-        : onCloseDraft(menuPayload.draft.id)
+        ? onDeleteSession(menuPayload.session.id)
+        : onDeleteDraft(menuPayload.draft.id)
     else if (action === 'rename-group') setEditing({ kind: 'group', id: menuPayload.group.id })
     else if (action === 'new-subgroup') onCreateGroup(menuPayload.group.id)
     else if (action === 'new-session') onCreateSessionInGroup(menuPayload.group.id)
     else if (action === 'delete-group') onDeleteGroup(menuPayload.group.id)
   }
 
-  const sessionMenuItems = (session) => {
-    const items = []
-    if (pins[session.id]) items.push(['unpin', '取消置顶'])
-    else items.push(['pin', '置顶'])
-    if (sectionOf(session.id).section === 'project') items.push(['unassign', '移出项目分组'])
-    items.push(['rename', '重命名'])
-    if (openBySession[session.id]) {
-      items.push('separator')
-      items.push(['close', '关闭对话', true])
-    }
-    return items
-  }
+  const menuItemsFor = (session) =>
+    sessionMenuItems({
+      pinned: !!pins[session.id],
+      inProject: sectionOf(session.id).section === 'project'
+    })
 
   const groupMenuItems = () => [
     ['new-session', '在此新建会话'],
@@ -461,9 +455,9 @@ export function SessionTree({
           onDragOver={hoverRow(section, session.id, groupId)}
           onDrop={dropRow(section, session.id, groupId)}
           onClick={() => onOpenSession(session)}
-          onContextMenu={(event) => openMenu(event, { session, items: sessionMenuItems(session) })}
+          onContextMenu={(event) => openMenu(event, { session, items: menuItemsFor(session) })}
           {...longPressHandlers((event) =>
-            openMenu(event, { session, items: sessionMenuItems(session) })
+            openMenu(event, { session, items: menuItemsFor(session) })
           )}
         >
           <RowLeading
@@ -504,7 +498,7 @@ export function SessionTree({
     const editingThis = editing?.kind === 'draft' && editing.id === node.id
     const dropSection = groupId ? 'project' : 'recent'
     const isOver = rowOverState(dropSection, node.id, groupId)
-    const items = [['rename', '重命名'], 'separator', ['close', '关闭对话', true]]
+    const items = draftMenuItems()
     return (
       <li key={node.id}>
         <div
