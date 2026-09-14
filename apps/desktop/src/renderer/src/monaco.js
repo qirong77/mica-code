@@ -1,22 +1,10 @@
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution'
-import 'monaco-editor/esm/vs/basic-languages/css/css.contribution'
-import 'monaco-editor/esm/vs/basic-languages/go/go.contribution'
-import 'monaco-editor/esm/vs/basic-languages/html/html.contribution'
-import 'monaco-editor/esm/vs/basic-languages/java/java.contribution'
-import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution'
-import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution'
-import 'monaco-editor/esm/vs/basic-languages/python/python.contribution'
-import 'monaco-editor/esm/vs/basic-languages/rust/rust.contribution'
-import 'monaco-editor/esm/vs/basic-languages/scss/scss.contribution'
-import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution'
-import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution'
-import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'
-import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution'
-import 'monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution'
-
-self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
+/**
+ * 编辑器的纯逻辑与按需装载入口。
+ *
+ * 这里**不**静态 import monaco：monaco 压缩后仍有约 4MB，而它只在用户真正打开
+ * 文件（或 Git diff）时才需要。启动路径只用到 fileName / languageFor / editorOptions，
+ * 这些都不依赖 monaco 本体，所以把它们和 `loadMonaco()` 放在同一个模块是安全的。
+ */
 
 const languages = {
   c: 'c',
@@ -45,26 +33,6 @@ const languages = {
   yml: 'yaml'
 }
 
-// Monaco cannot resolve CSS custom properties, so this mirrors the Darcula
-// tokens from assets/app.css by hand. Keep it in sync when the palette changes.
-monaco.editor.defineTheme('mica-dark', {
-  base: 'vs-dark',
-  inherit: true,
-  rules: [],
-  colors: {
-    'editor.background': '#2b2b2b',
-    'editorGutter.background': '#2b2b2b',
-    'editorLineNumber.foreground': '#606366',
-    'editorLineNumber.activeForeground': '#999999',
-    // JetBrains Darcula selection blue.
-    'editor.selectionBackground': '#214283',
-    'diffEditor.insertedTextBackground': '#2944364f',
-    'diffEditor.removedTextBackground': '#4b2d2d4f',
-    'diffEditor.insertedLineBackground': '#2944364d',
-    'diffEditor.removedLineBackground': '#4b2d2d4d'
-  }
-})
-
 export const editorOptions = {
   theme: 'mica-dark',
   automaticLayout: true,
@@ -91,4 +59,10 @@ export function languageFor(path) {
   return languages[extension] || 'plaintext'
 }
 
-export { monaco }
+let pending = null
+
+/** 按需加载 monaco 本体；重复调用共享同一次装载（含 worker 与 15 种基础语言）。 */
+export function loadMonaco() {
+  if (!pending) pending = import('./monaco-runtime').then((module) => module.monaco)
+  return pending
+}

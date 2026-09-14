@@ -67,6 +67,25 @@ the runtime, so the page always talks to `/api` on its own origin.
 $ npm run build          # = build:app (shell + renderer) + build:server (runtime)
 ```
 
+The renderer bundle is minified and split into on-demand chunks:
+
+- `electron.vite.config.mjs` sets `build.minify: true` explicitly — electron-vite leaves `minify`
+  off for all three (main / preload / renderer) segments, so without the override the page ships a
+  ~11.5 MB unminified bundle. With it plus `React.lazy`, the entry chunk is ~0.5 MB.
+- Monaco (the file editor and Git diff) is never in the startup path. `monaco.js` exports only the
+  pure helpers plus `loadMonaco()`; the editor itself lives in `monaco-runtime.js`, which is reached
+  by a dynamic import and by the lazily-loaded `GitDiffEditor`. `FilesView` creates its editor through
+  `ensureEditor()` on the first file open, so ~3.7 MB of Monaco is fetched only when you actually open
+  a file.
+- Everything heavy is a separate chunk: `FilesView`, `TerminalHost` (xterm), `StatsView`,
+  `SettingsView`, `QuickSearch`, `GitDiffEditor`.
+- The 1500+ file-type icons are emitted as individual assets (`?url&no-inline`); inlining them put
+  ~2.2 MB of data URIs into the entry chunk.
+- The runtime's static handler gzips text assets on the fly and marks content-hashed assets
+  `immutable`, so the Monaco chunk crosses a LAN at ~0.9 MB instead of ~3.7 MB, and repeat loads come
+  from cache. This is deliberately local rather than a CDN: the page's CSP is `script-src 'self'`, and
+  both the Electron window and the LAN mode must work offline.
+
 ### Package
 
 ```bash

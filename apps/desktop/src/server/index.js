@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { networkInterfaces, release as osRelease } from 'node:os'
+import { createGzip } from 'node:zlib'
 import { setBroadcast, invokeChannel, ipcMain } from './electron-shim.js'
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
@@ -124,7 +125,13 @@ function broadcast(channel, payload) {
 
 /* ------------------------------------------------------------------ 静态资源 */
 
-async function serveStatic(res, rendererRoot, urlPath) {
+/** 能显著压小的文本类资源；图片/字体/worker 不列进来（压缩比低或本身已压缩）。 */
+const COMPRESSIBLE = /^(?:text\/|application\/(?:javascript|json|manifest\+json))/
+const GZIP_MIN_BYTES = 1024
+/** Vite 产物名带 8 位内容 hash（如 `index-DBO-oDRP.js`），内容变则名变。 */
+const HASHED_ASSET = /-[A-Za-z0-9_-]{8}\.[a-z0-9]+$/
+
+async function serveStatic(req, res, rendererRoot, urlPath) {
   const relative = decodeURIComponent(urlPath).replace(/^\/+/, '')
   const candidate = resolve(rendererRoot, normalize(relative || 'index.html'))
   const insideRoot = candidate === rendererRoot || candidate.startsWith(rendererRoot + sep)
@@ -156,20 +163,52 @@ async function serveStatic(res, rendererRoot, urlPath) {
     return
   }
 
-  res.writeHead(200, {
-    'content-type': MIME_TYPES[extension] || 'application/octet-stream',
-    'cache-control': 'public, max-age=3600'
-  })
+  const contentType = MIME_TYPES[extension] || 'application/octet-stream'
+  const headers = {
+    'content-type': contentType,
+    // 带 hash 的产物可以永久缓存：改内容必然改名，不改名就不必重新下载。
+    // 固定名的（favicon、manifest 之类）仍走短缓存。
+    'cache-control': HASHED_ASSET.test(file)
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=3600'
+  }
+
+  // 运行时的重资源是 monaco/xterm 那几个 chunk，走局域网时压缩能把它们压到约 1/4。
+  // 只压文本类且够大的文件，小文件压了反而多一层开销。
+  const compressible = COMPRESSIBLE.test(contentType)
+  if (compressible) headers.vary = 'accept-encoding'
+  const size = statSync(file).size
+  if (
+    compressible &&
+    size >= GZIP_MIN_BYTES &&
+    /\bgzip\b/.test(req.headers['accept-encoding'] || '')
+  ) {
+    headers['content-encoding'] = 'gzip'
+    res.writeHead(200, headers)
+    pipeFile(res, file, createGzip({ level: 6 }))
+    return
+  }
+
+  headers['content-length'] = String(size)
+  res.writeHead(200, headers)
   pipeFile(res, file)
 }
 
-function pipeFile(res, file) {
-  const stream = createReadStream(file)
-  stream.on('error', () => {
+function pipeFile(res, file, transform) {
+  const source = createReadStream(file)
+  const fail = () => {
     if (!res.headersSent) sendJson(res, 500, { error: '读取文件失败' })
     else res.end()
-  })
-  stream.pipe(res)
+  }
+  // 两个流都要接 error：pipe() 只转发数据不转发错误，只挂在末端的话
+  // 读文件失败会在 source 上冒出未捕获异常。
+  source.on('error', fail)
+  if (!transform) {
+    source.pipe(res)
+    return
+  }
+  transform.on('error', fail)
+  source.pipe(transform).pipe(res)
 }
 
 /* -------------------------------------------------------------------- 路由 */
@@ -361,7 +400,7 @@ export async function startDesktopServer(options = {}) {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return sendJson(res, 405, { error: 'Method not allowed' })
         }
-        return await serveStatic(res, rendererRoot, url.pathname)
+        return await serveStatic(req, res, rendererRoot, url.pathname)
       } catch (error) {
         if (!res.headersSent) sendJson(res, 500, { error: errorMessage(error) })
         else res.end()

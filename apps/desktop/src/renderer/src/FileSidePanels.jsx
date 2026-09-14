@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconChevronRight, IconGitBranch, IconSearch } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
 import { statusColor, statusLabel } from './git-decorations'
-import { editorOptions, languageFor, monaco } from './monaco'
+import { languageFor } from './monaco'
 
 const MAX_RESULTS = 200
 
@@ -286,99 +286,3 @@ export function GitPanel({
 }
 
 export { languageFor }
-
-export function GitDiffEditor({ cwd, file, onClose }) {
-  const hostRef = useRef(null)
-  const editorRef = useRef(null)
-  const modelsRef = useRef([])
-  const requestRef = useRef(0)
-  const modeRef = useRef(null)
-
-  useEffect(() => {
-    if (!hostRef.current) return undefined
-    const editor = monaco.editor.create(hostRef.current, editorOptions)
-    editorRef.current = editor
-    return () => {
-      requestRef.current += 1
-      for (const model of modelsRef.current) model?.dispose()
-      modelsRef.current = []
-      editor.dispose()
-      editorRef.current = null
-      modeRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!file || !cwd) return
-    const request = ++requestRef.current
-    ;(async () => {
-      try {
-        const content = await window.mica.git.file(cwd, file.path)
-        if (request !== requestRef.current || !editorRef.current) return
-        for (const model of modelsRef.current) model?.dispose()
-        modelsRef.current = []
-        if (content.binary || file.binary) {
-          editorRef.current?.setModel(null)
-          return
-        }
-        const language = languageFor(file.path)
-        if (file.status === 'added' || file.status === 'deleted') {
-          modeRef.current = 'single'
-          const model = monaco.editor.createModel(
-            file.status === 'added' ? content.modified : content.original,
-            language
-          )
-          modelsRef.current = [model]
-          editorRef.current?.setModel(model)
-        } else {
-          if (modeRef.current !== 'diff') {
-            editorRef.current?.dispose()
-            editorRef.current = monaco.editor.createDiffEditor(hostRef.current, {
-              ...editorOptions,
-              originalEditable: false,
-              renderSideBySide: true,
-              useInlineViewWhenSpaceIsLimited: false
-            })
-            modeRef.current = 'diff'
-          }
-          const original = monaco.editor.createModel(content.original, language)
-          const modified = monaco.editor.createModel(content.modified, language)
-          modelsRef.current = [original, modified]
-          editorRef.current?.setModel({ original, modified })
-        }
-        requestAnimationFrame(() => editorRef.current?.layout())
-      } catch {
-        if (request !== requestRef.current) return
-        editorRef.current?.setModel(null)
-      }
-    })()
-  }, [cwd, file])
-
-  useEffect(() => {
-    if (file) requestAnimationFrame(() => editorRef.current?.layout())
-  }, [file])
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      {file && (
-        <header className="flex h-8 shrink-0 items-center gap-3 border-b border-white/[.07] px-3 text-[11px] text-white/65">
-          <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
-            {file.path}
-          </span>
-          {onClose && (
-            <button
-              type="button"
-              title="关闭 diff"
-              aria-label="关闭 diff"
-              className="shrink-0 rounded-sm px-1 text-white/45 hover:bg-white/10 hover:text-white"
-              onClick={onClose}
-            >
-              <IconChevronRight size={13} className="rotate-90" />
-            </button>
-          )}
-        </header>
-      )}
-      <div ref={hostRef} className="min-h-0 flex-1" />
-    </div>
-  )
-}

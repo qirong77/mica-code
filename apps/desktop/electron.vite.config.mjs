@@ -31,6 +31,15 @@ export default defineConfig({
       proxy: {
         '/api': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false }
       }
+    },
+    build: {
+      // electron-vite 的 renderer 默认 build.minify = false（它只对 main/preload
+      // 有合理理由），不覆盖会让页面装载一份十几 MB 未压缩的 bundle。
+      minify: true,
+      reportCompressedSize: true,
+      // 拆包后单个 chunk 会明显变大（monaco 独立成块），阈值跟着放宽，
+      // 否则每次构建都刷一条误导性的告警。
+      chunkSizeWarningLimit: 2048
     }
   }
 })

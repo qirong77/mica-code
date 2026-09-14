@@ -5,9 +5,13 @@ import {
   resolveFolderIconName
 } from './fileIconResolver'
 
+// `?no-inline` 必须保留：内联阈值以下的图标会被 Vite 塞成 data URI，1567 个图标
+// 里有 1429 个能整块进主 bundle（约 2.1MB），而这些图标只在对应行渲染时才需要。
+// 产出成独立文件后，映射表只留短 URL，图标由浏览器按需取（Electron 走 file://、
+// 网页走运行时静态服务，两种方式都命中）。
 const iconModules = import.meta.glob('../assets/file-icons/*.svg', {
   eager: true,
-  query: '?url',
+  query: '?url&no-inline',
   import: 'default'
 })
 

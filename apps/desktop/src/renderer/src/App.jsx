@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconArrowUp,
   IconChartBar,
@@ -18,13 +18,19 @@ import {
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView, shortPath } from './ChatView'
-import { FilesView } from './FilesView'
-import { QuickSearch } from './QuickSearch'
 import { SessionTree } from './SessionTree'
-import { SettingsView } from './SettingsView'
-import { StatsView } from './stats/StatsView'
-import { TerminalHost } from './TerminalHost'
 import TerminalKeyBar from './TerminalKeyBar'
+
+// 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
+// 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
+// 按需加载才能让首屏不必先解析它们 —— 见下方 lazyViews 的说明。
+const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
+  FilesView: lazy(() => import('./FilesView').then((m) => ({ default: m.FilesView }))),
+  QuickSearch: lazy(() => import('./QuickSearch').then((m) => ({ default: m.QuickSearch }))),
+  SettingsView: lazy(() => import('./SettingsView').then((m) => ({ default: m.SettingsView }))),
+  StatsView: lazy(() => import('./stats/StatsView').then((m) => ({ default: m.StatsView }))),
+  TerminalHost: lazy(() => import('./TerminalHost').then((m) => ({ default: m.TerminalHost })))
+}
 import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { resolveGroupCwd } from './session-projects'
 import {
@@ -1852,8 +1858,12 @@ export default function App() {
             </button>
           </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <StatsView visible={view === 'stats'} />
-            <SettingsView visible={view === 'settings'} />
+            <Suspense fallback={null}>
+              <StatsView visible={view === 'stats'} />
+            </Suspense>
+            <Suspense fallback={null}>
+              <SettingsView visible={view === 'settings'} />
+            </Suspense>
             <ChatView
               node={terminalNodes.find((node) => node.id === activeId)}
               cwd={terminalCwd(activeId)}
@@ -2043,33 +2053,37 @@ export default function App() {
                 </button>
               </div>
             )}
-            <FilesView
-              ref={filesRef}
-              root={gitIsCurrent ? git.cwd : null}
-              visible={rightPanelTab === 'files'}
-              askText={askText}
-              gitCwd={gitIsCurrent ? git.cwd : null}
-              gitRepository={repository}
-              gitLoading={gitIsCurrent ? git.loading : true}
-              gitBranch={gitIsCurrent ? git.status?.branch || null : null}
-              onCornerResizeStart={null}
-            />
-            <TerminalHost
-              ref={terminalRef}
-              nodes={allRightTerms}
-              activeId={rightActiveTerm}
-              visible={rightPanelTab === 'terminal'}
-              pane="terminal"
-              docked={false}
-              sidebarCollapsed={sidebarCollapsed}
-              resolveCwd={rightTermCwd}
-              commandFor={commandFor}
-              onRead={(id, reason) => {
-                touchRightTerm(id)
-                notifications.markRead(id, reason)
-              }}
-              onMicaExit={closeRightTerm}
-            />
+            <Suspense fallback={null}>
+              <FilesView
+                ref={filesRef}
+                root={gitIsCurrent ? git.cwd : null}
+                visible={rightPanelTab === 'files'}
+                askText={askText}
+                gitCwd={gitIsCurrent ? git.cwd : null}
+                gitRepository={repository}
+                gitLoading={gitIsCurrent ? git.loading : true}
+                gitBranch={gitIsCurrent ? git.status?.branch || null : null}
+                onCornerResizeStart={null}
+              />
+            </Suspense>
+            <Suspense fallback={null}>
+              <TerminalHost
+                ref={terminalRef}
+                nodes={allRightTerms}
+                activeId={rightActiveTerm}
+                visible={rightPanelTab === 'terminal'}
+                pane="terminal"
+                docked={false}
+                sidebarCollapsed={sidebarCollapsed}
+                resolveCwd={rightTermCwd}
+                commandFor={commandFor}
+                onRead={(id, reason) => {
+                  touchRightTerm(id)
+                  notifications.markRead(id, reason)
+                }}
+                onMicaExit={closeRightTerm}
+              />
+            </Suspense>
             {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (
               <TerminalKeyBar onSend={sendTerminalKey} />
             )}
@@ -2094,12 +2108,14 @@ export default function App() {
         </button>
       )}
       {!rightPanelMaximized && (
-        <QuickSearch
-          getRoot={getSearchRoot}
-          openFile={openSearchFile}
-          closeActiveFile={closeSearchFile}
-          disabled={branchPickerOpen || !!prompt}
-        />
+        <Suspense fallback={null}>
+          <QuickSearch
+            getRoot={getSearchRoot}
+            openFile={openSearchFile}
+            closeActiveFile={closeSearchFile}
+            disabled={branchPickerOpen || !!prompt}
+          />
+        </Suspense>
       )}
       {branchPickerOpen && git.cwd && (
         <BranchPicker

@@ -1,5 +1,7 @@
 import {
+  Suspense,
   forwardRef,
+  lazy,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -29,10 +31,15 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
-import { GitDiffEditor, GitPanel, SearchPanel } from './FileSidePanels'
+import { GitPanel, SearchPanel } from './FileSidePanels'
 import { buildGitDecorations, relativeToRoot, statusColor, statusLabel } from './git-decorations'
 import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
-import { editorOptions, fileName, languageFor, monaco } from './monaco'
+import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
+
+// diff 视图静态依赖 monaco 本体，拆成独立模块后只在挑选 diff 时才下载。
+const GitDiffEditor = lazy(() =>
+  import('./GitDiffEditor').then((module) => ({ default: module.GitDiffEditor }))
+)
 
 const makeNode = (entry) => ({
   name: entry.name,
@@ -452,6 +459,8 @@ export const FilesView = forwardRef(function FilesView(
   const viewRef = useRef(null)
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
+  /** ensureEditor() 的单调 promise：monaco 装载 + 编辑器创建只做一次 */
+  const editorReadyRef = useRef(null)
   const tabListRef = useRef(null)
   const requestRef = useRef(0)
   const reloadRef = useRef(0)
@@ -512,9 +521,6 @@ export const FilesView = forwardRef(function FilesView(
   }, [])
 
   useEffect(() => {
-    const editor = monaco.editor.create(editorHostRef.current, { ...editorOptions, model: null })
-    editorRef.current = editor
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActionRef.current?.())
     return () => {
       lifecycleRef.current += 1
       reloadRef.current += 1
@@ -526,9 +532,35 @@ export const FilesView = forwardRef(function FilesView(
         tab.subscription?.dispose()
         tab.model?.dispose()
       }
-      editor.dispose()
+      editorRef.current?.dispose()
       editorRef.current = null
+      editorReadyRef.current = null
     }
+  }, [])
+
+  /**
+   * 首次真正需要编辑器时才加载 monaco 并建实例（启动路径完全不碰它）。
+   * 返回 monaco 本体，供 createModel / Uri 使用；已建好时立即 resolve。
+   */
+  const ensureEditor = useCallback(() => {
+    if (!editorReadyRef.current) {
+      const generation = lifecycleRef.current
+      editorReadyRef.current = (async () => {
+        const monaco = await loadMonaco()
+        // 等待期间卸载/重挂过就不要往旧 host 上建
+        if (generation !== lifecycleRef.current || !editorHostRef.current) return monaco
+        const editor = monaco.editor.create(editorHostRef.current, {
+          ...editorOptions,
+          model: null
+        })
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () =>
+          saveActionRef.current?.()
+        )
+        editorRef.current = editor
+        return monaco
+      })()
+    }
+    return editorReadyRef.current
   }, [])
 
   const activateFile = useCallback(
@@ -605,6 +637,9 @@ export const FilesView = forwardRef(function FilesView(
       try {
         const result = await window.mica.files.read(path)
         if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
+        // 首次打开文件时这里才真正装载 monaco；装载期间用户可能切走/关掉页签。
+        const monaco = await ensureEditor()
+        if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
         const model = monaco.editor.createModel(
           result.content,
           languageFor(path),
@@ -653,7 +688,7 @@ export const FilesView = forwardRef(function FilesView(
         }
       }
     },
-    [activateFile, revealPosition, setActivePath, setTabs, showMessage]
+    [activateFile, ensureEditor, revealPosition, setActivePath, setTabs, showMessage]
   )
 
   const saveActive = useCallback(async () => {
@@ -1464,7 +1499,9 @@ export const FilesView = forwardRef(function FilesView(
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
         {isGitPanel && gitSelectedFile ? (
-          <GitDiffEditor cwd={gitCwd || null} file={gitSelectedFile} onClose={closeGitDiff} />
+          <Suspense fallback={null}>
+            <GitDiffEditor cwd={gitCwd || null} file={gitSelectedFile} onClose={closeGitDiff} />
+          </Suspense>
         ) : (
           <>
             <div
