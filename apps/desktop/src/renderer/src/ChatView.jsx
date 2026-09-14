@@ -1795,6 +1795,10 @@ export function ChatView({
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
   const [running, setRunning] = useState(false)
+  // 这个会话正被别处跑着（另一窗口/页签，或另一个进程持着它的 turn lease）：
+  // 本窗口拿不到那一轮的事件流，只能显示状态并挡下发送，等它结束后自己收敛。
+  const [remoteRunning, setRemoteRunning] = useState(false)
+  const remoteRunningRef = useLatest(remoteRunning)
   const [queuedItems, setQueuedItems] = useState([])
   const [recallingQueueId, setRecallingQueueId] = useState(null)
   // 跨 turn 常驻的后台任务 / subagent 状态（来自 app-server 快照通知，
@@ -2463,8 +2467,11 @@ export function ChatView({
       setMeta(sessionMeta)
       setHistoryLoaded(true)
 
-      const state = await window.mica.chat.isRunning(nodeId).catch(() => null)
+      const state = await window.mica.chat
+        .isRunning(nodeId, sessionId || sessionIdRef.current || null)
+        .catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      setRemoteRunning(Boolean(state?.remoteRunning))
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
       const stateSessionId = state?.sessionId || sessionIdRef.current
       if (state?.running && stateSessionId && hasPersistedTurn(restored, state.prompt)) {
@@ -2592,6 +2599,26 @@ export function ChatView({
     const timer = window.setInterval(update, 250)
     return () => clearInterval(timer)
   }, [runStartedAt, running])
+
+  // 别处那一轮结束后本窗口自己收敛：复查 turn lease，释放了就解除只读并重拉会话历史
+  // （那一轮的 assistant 消息由对方的进程写进文件，本窗口没有对应的事件流）。
+  useEffect(() => {
+    if (!remoteRunning) return undefined
+    const timer = window.setInterval(async () => {
+      const state = await window.mica.chat
+        .isRunning(nodeIdRef.current, sessionIdRef.current || null)
+        .catch(() => null)
+      if (!state || state.remoteRunning || state.running) return
+      setRemoteRunning(false)
+      const finalSessionId = state.sessionId || sessionIdRef.current
+      if (!finalSessionId) return
+      const rows = await window.mica.chat.history(finalSessionId).catch(() => null)
+      if (!Array.isArray(rows)) return
+      updateMessages(historyMessages(rows, finalSessionId))
+      refreshMetaSoon(finalSessionId)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [remoteRunning, nodeIdRef, refreshMetaSoon, updateMessages])
 
   useLayoutEffect(() => {
     if (!stickToBottomRef.current) return undefined
@@ -3179,6 +3206,11 @@ export function ChatView({
     (requestedInput, options = {}) => {
       const text = (typeof requestedInput === 'string' ? requestedInput : input).trim()
       if (!text || !nodeId) return
+      // 会话正被别处跑着：host 会拒绝这一条，先在本地挡下，避免乐观消息闪现再回滚。
+      if (remoteRunningRef.current) {
+        appendNotice('该会话正在另一处运行，请等待完成后再发送', 'warn')
+        return
+      }
       const optimisticId = uid('msg')
       const queueing = running || !finishedRef.current
       // 单槽排队（对齐 CLI）：已有排队消息时拒绝新的排队输入，避免乐观消息闪现后回滚。
@@ -3201,6 +3233,7 @@ export function ChatView({
         streamRef.current = { id: null, kind: null, turnId: turnRef.current }
         finishedRef.current = false
         turnStartedAtRef.current = Date.now()
+        setRemoteRunning(false)
         setRunning(true)
         setStopping(false)
         setPhase('connecting')
@@ -3270,7 +3303,17 @@ export function ChatView({
         })
         .catch((error) => rollback(error instanceof Error ? error.message : String(error)))
     },
-    [appendNotice, cwdRef, input, nodeId, nodeIdRef, rememberInput, running, updateMessages]
+    [
+      appendNotice,
+      cwdRef,
+      input,
+      nodeId,
+      nodeIdRef,
+      rememberInput,
+      remoteRunningRef,
+      running,
+      updateMessages
+    ]
   )
 
   const stop = useCallback(() => {
@@ -3684,7 +3727,12 @@ export function ChatView({
   const statusLine = (
     <div className="chat-status-line">
       <div className="chat-status-primary">
-        {running ? (
+        {remoteRunning ? (
+          <>
+            <IconLoader2 size={11} className="animate-spin" />
+            <span>正在另一处运行</span>
+          </>
+        ) : running ? (
           <>
             <IconLoader2 size={11} className="animate-spin" />
             <span>{statusLabel(phase, runningToolNames)}</span>
@@ -4077,9 +4125,9 @@ export function ChatView({
             ) : input.trim() ? (
               <button
                 type="button"
-                title="发送"
+                title={remoteRunning ? '该会话正在另一处运行' : '发送'}
                 aria-label="发送"
-                disabled={!input.trim()}
+                disabled={!input.trim() || remoteRunning}
                 onClick={send}
               >
                 <IconSend size={13} />

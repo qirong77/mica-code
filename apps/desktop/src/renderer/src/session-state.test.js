@@ -81,4 +81,16 @@ describe('liveSessionRowState', () => {
       'error'
     )
   })
+
+  it('breathes green for a turn another window or runtime is holding the lease for', () => {
+    expect(liveSessionRowState({ remoteRunning: true })).toBe('running')
+    // 别处正在跑比上一轮的错误更贴近现状：这条会话现在确实在动。
+    expect(
+      liveSessionRowState({ remoteRunning: true, notificationState: { lastType: 'turn.error' } })
+    ).toBe('running')
+    expect(liveSessionRowState({ remoteRunning: true, notificationState: { unread: true } })).toBe(
+      'running'
+    )
+    expect(liveSessionRowState({ remoteRunning: false })).toBe(null)
+  })
 })

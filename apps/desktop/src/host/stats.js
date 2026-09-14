@@ -214,21 +214,39 @@ function deleteSession(sessionId) {
 }
 
 /**
- * 扫描全部 session 轻量元数据，按最近更新降序。`interrupted` 标记按次探测（见
- * isInterruptedSession：turn lease 的存活判定不能进扫描器的文件签名缓存，持有者可能
- * 在文件没变的情况下消失），但结果不变时要把数组与行对象的引用原样交回去——侧栏用
- * 引用相等来判断是否需要重渲染，每次 refresh 都换新数组会让它白刷一遍。
+ * 扫描全部 session 轻量元数据，按最近更新降序。`interrupted` / `remoteRunning` 标记
+ * 按次探测（见 isInterruptedSession：turn lease 的存活判定不能进扫描器的文件签名缓存，
+ * 持有者可能在文件没变的情况下消失），但结果不变时要把数组与行对象的引用原样交回去——
+ * 侧栏用引用相等来判断是否需要重渲染，每次 refresh 都换新数组会让它白刷一遍。
  */
 function scanMeta() {
   const rows = statsScanner.scanMeta()
+  // `interrupted`（running 但没人持锁 = 崩溃残留）与 `remoteRunning`（有活租约 =
+  // 某个进程正在写这个会话，可能是另一个窗口/另一个运行时实例）是同一次探测的两种
+  // 结论，所以每个会话只读一次锁文件，两个标记也一起进缓存键。
+  const probes = new Map()
+  const probe = (id) => {
+    if (!probes.has(id)) probes.set(id, hasLiveTurnLease(id))
+    return probes.get(id)
+  }
   const ids = []
-  for (const row of rows) if (isInterruptedSession(row, hasLiveTurnLease)) ids.push(row.id)
-  const key = ids.join(',')
+  const runningIds = []
+  for (const row of rows) {
+    if (isInterruptedSession(row, probe)) ids.push(row.id)
+    else if (row.turnState === 'running') runningIds.push(row.id)
+  }
+  const key = `${ids.join(',')}|${runningIds.join(',')}`
   if (metaInterrupted.key === key && metaInterrupted.rows === rows) return metaInterrupted.value
   const interrupted = new Set(ids)
-  const value = ids.length
-    ? rows.map((row) => (interrupted.has(row.id) ? { ...row, interrupted: true } : row))
-    : rows
+  const running = new Set(runningIds)
+  const value =
+    ids.length || runningIds.length
+      ? rows.map((row) => {
+          if (interrupted.has(row.id)) return { ...row, interrupted: true }
+          if (running.has(row.id)) return { ...row, remoteRunning: true }
+          return row
+        })
+      : rows
   metaInterrupted = { rows, key, value }
   return value
 }

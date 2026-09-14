@@ -3,12 +3,19 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
+import { micaSession, type SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
+
+/**
+ * `busy-remote`: another process (a second app-server, the desktop chat host or a
+ * TUI terminal) holds this session's turn lease, so this turn must not run.
+ */
+export type HeadlessTurnStartResult = 'started' | 'queued' | 'rejected' | 'busy-remote';
 
 export type HeadlessTurnEvent =
   | { type: 'turn:start'; input: RuntimeInput }
@@ -17,6 +24,9 @@ export type HeadlessTurnEvent =
   | { type: 'queued'; input: RuntimeInput; position: number; pending: RuntimeInput[] }
   | { type: 'dequeue'; input: RuntimeInput }
   | { type: 'queue:changed'; pending: RuntimeInput[] };
+
+/** Shown when the session is running somewhere else (another window or terminal). */
+export const REMOTE_TURN_MESSAGE = '该会话正在另一个窗口或终端运行，请等待完成后再发送';
 
 // Mirrors the interactive runtime's turn-level retry policy
 // (LocalRuntimeController): at most 5 attempts with a fixed 10s delay, only
@@ -83,6 +93,7 @@ export class HeadlessTurnExecutor {
   private readonly parseImageRefs: (text: string) => Promise<AgentQueryContent>;
   private running = false;
   private responseBuffer = '';
+  private lease: SessionTurnLease | null = null;
 
   constructor(options: HeadlessTurnExecutorOptions) {
     this.options = options;
@@ -99,6 +110,15 @@ export class HeadlessTurnExecutor {
 
   get pendingInputs(): RuntimeInput[] {
     return this.queue.list();
+  }
+
+  /**
+   * Whether this executor owns the session file. One-shot tasks
+   * (`save: false`) never persist, so they neither take the turn lease nor can
+   * be blocked by someone else holding it.
+   */
+  private get persistsSession(): boolean {
+    return this.options.save !== false;
   }
 
   /**
@@ -120,7 +140,7 @@ export class HeadlessTurnExecutor {
     this.queue = layer.queue;
   }
 
-  async start(input: RuntimeInput): Promise<'started' | 'queued' | 'rejected'> {
+  async start(input: RuntimeInput): Promise<HeadlessTurnStartResult> {
     if (this.options.hooks) {
       const guardResult = await this.options.hooks.guard('input:received', {
         input,
@@ -147,6 +167,12 @@ export class HeadlessTurnExecutor {
       this.options.onEvent({ type: 'queued', input, position: this.queue.count(), pending: this.queue.list() });
       return 'queued';
     }
+    // Take the cross-process lease before the turn is announced: refusing here
+    // lets the client roll the optimistic message back instead of discovering
+    // the conflict halfway through a turn.
+    const lease = this.acquireTurnLease();
+    if (this.persistsSession && !lease) return 'busy-remote';
+    this.lease = lease;
     this.running = true;
     this.options.onEvent({ type: 'turn:start', input });
     void this.loop(input);
@@ -176,26 +202,73 @@ export class HeadlessTurnExecutor {
       // lifecycle (app-server turn/started) never
       // learn that the executor is still working on a queued input.
       if (!first) this.options.onEvent({ type: 'turn:start', input });
+      // Each turn owns a fresh lease; the previous one was released before its
+      // turn:after (see releaseTurnLease), so a queued input never inherits a
+      // stale lock.
+      const lease = first ? this.lease : this.acquireTurnLease();
       first = false;
-      try {
-        await this.runTurn(input);
-      } catch (error) {
-        // runTurn handles abort/error itself; this guards the drain loop.
-        if (this.options.hooks) await this.emitTurnAfter(input, 'error', 0, true);
+      if (this.persistsSession && !lease) {
+        // Another window/terminal claimed this session between our turns. The
+        // queued input cannot run without writing a file someone else is
+        // editing, so fail that turn instead of racing it. turn:start was
+        // emitted above so the client receives a matching turn/completed
+        // (failed) rather than a turn it never hears about.
         this.options.onEvent({
           type: 'turn:finish',
           input,
           status: 'error',
           elapsedMs: 0,
-          error: error instanceof Error ? error.message : String(error),
+          error: REMOTE_TURN_MESSAGE,
         });
+      } else {
+        this.lease = lease;
+        try {
+          await this.runTurn(input);
+        } catch (error) {
+          // runTurn handles abort/error itself; this guards the drain loop.
+          if (this.options.hooks) await this.emitTurnAfter(input, 'error', 0, true);
+          this.options.onEvent({
+            type: 'turn:finish',
+            input,
+            status: 'error',
+            elapsedMs: 0,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          this.releaseTurnLease();
+        }
       }
       input = this.queue.dequeue();
       if (input) this.options.onEvent({ type: 'dequeue', input });
     }
+    this.releaseTurnLease();
     this.running = false;
     this.options.onEvent({ type: 'queue:changed', pending: this.queue.list() });
     this.options.onIdle?.();
+  }
+
+  /**
+   * The turn lease is the cross-process fact that a session is being written by
+   * a live turn (see `packages/mica-session/sessionStore.ts`). The interactive
+   * runtime takes it in `LocalRuntimeController.submit`; headless hosts
+   * (app-server for the desktop/web chat, `mica exec`) must do the same,
+   * otherwise `turnState: "running"` sits on disk with nobody holding the lock,
+   * and another client cannot tell a live turn from crash residue.
+   */
+  private acquireTurnLease(): SessionTurnLease | null {
+    if (!this.persistsSession) return null;
+    return micaSession.acquireTurnLease(this.options.sessionController.getCurrentSessionId());
+  }
+
+  private releaseTurnLease(): void {
+    const lease = this.lease;
+    if (!lease) return;
+    this.lease = null;
+    try {
+      lease.release();
+    } catch {
+      // Release is best effort; the orphan lock is reclaimed by pid liveness.
+    }
   }
 
   private async runTurn(input: RuntimeInput): Promise<void> {
@@ -353,6 +426,11 @@ export class HeadlessTurnExecutor {
     elapsedMs: number,
     hasError: boolean,
   ): Promise<void> {
+    // The lease must be gone before turn:after: the message-queue plugin starts
+    // the next turn from that hook, and a lease we still hold would make the
+    // session look busy to its own process (the interactive runtime releases it
+    // in the same place for the same reason).
+    this.releaseTurnLease();
     await this.options.hooks?.emit('turn:after', {
       input,
       elapsedMs,

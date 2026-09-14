@@ -28,15 +28,28 @@ export function createTurnLeaseProbe({
   if (typeof lockDir !== 'function') throw new TypeError('lockDir must be a function')
 
   return function hasLiveTurnLease(sessionId) {
-    if (typeof sessionId !== 'string' || !sessionId) return false
-    let owner
-    try {
-      owner = JSON.parse(readFile(join(lockDir(), `${sessionId}.lock`)))
-    } catch {
-      // 没有锁文件 / 内容损坏都按「无人持有」处理，与回收逻辑一致。
-      return false
-    }
-    return isAlive(owner?.pid)
+    const owner = readTurnLeaseOwner(sessionId, { lockDir, readFile })
+    return owner ? isAlive(owner.pid) : false
+  }
+}
+
+/**
+ * 读出 turn lease 的持有者（`{ pid, token, createdAt }`），没有锁文件或内容损坏返回 null。
+ * 需要知道「谁在跑」时用它：桌面的 host 自己从不取 lease（它的 turn 由 spawn 出去的
+ * app-server 子进程持有），因此只看 pid 与存活即可判断是不是别的进程在写这个会话。
+ */
+export function readTurnLeaseOwner(
+  sessionId,
+  { lockDir, readFile = (path) => readFileSync(path, 'utf8') } = {}
+) {
+  if (typeof sessionId !== 'string' || !sessionId) return null
+  if (typeof lockDir !== 'function') return null
+  try {
+    const owner = JSON.parse(readFile(join(lockDir(), `${sessionId}.lock`)))
+    return owner && typeof owner === 'object' ? owner : null
+  } catch {
+    // 没有锁文件 / 内容损坏都按「无人持有」处理，与回收逻辑一致。
+    return null
   }
 }
 

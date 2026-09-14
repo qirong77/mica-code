@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import mitt from 'mitt';
 import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
@@ -72,13 +74,18 @@ class MockAgent {
   }
 }
 
+let harnessSeq = 0;
+
 function createHarness() {
   const agent = new MockAgent();
   const events: HeadlessTurnEvent[] = [];
   const savedStates: string[] = [];
   const savedConversations: Array<Array<{ role: string }> | undefined> = [];
+  // 每个 harness 一个独立 session id：executor 现在按轮取 turn lease，共用同一个 id
+  // 会让上一个测试里还没跑完的后台 turn 把下一个测试挡成 busy-remote。
+  const sessionId = `session-${++harnessSeq}`;
   const sessionController = {
-    getCurrentSessionId: () => 'session-1',
+    getCurrentSessionId: () => sessionId,
     saveCurrent: (options: { turnState?: string; conversationMessages?: Array<{ role: string }> } = {}) => {
       savedStates.push(options.turnState ?? 'completed');
       savedConversations.push(options.conversationMessages);
@@ -98,7 +105,15 @@ function createHarness() {
     },
     parseImageRefs: (text: string) => Promise.resolve(text),
   });
-  return { agent, events, executor, savedStates, savedConversations, getIdleCount: () => idleCount };
+  return {
+    agent,
+    events,
+    executor,
+    sessionId,
+    savedStates,
+    savedConversations,
+    getIdleCount: () => idleCount,
+  };
 }
 
 function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
@@ -289,5 +304,49 @@ describe('HeadlessTurnExecutor', () => {
     expect(result).toBe('queued');
     const queued = events.find((event) => event.type === 'queued');
     expect(queued).toMatchObject({ position: 1 });
+  });
+});
+
+describe('HeadlessTurnExecutor turn lease', () => {
+  function lockPath(sessionId: string) {
+    return join(process.env.MICA_HOME!, 'sessions', '.turn-locks', `${sessionId}.lock`);
+  }
+
+  function writeForeignLease(sessionId: string) {
+    mkdirSync(join(process.env.MICA_HOME!, 'sessions', '.turn-locks'), { recursive: true });
+    // The runner's own pid is alive, so the lock is never reclaimed as orphaned.
+    writeFileSync(lockPath(sessionId), JSON.stringify({ pid: process.pid, token: 'foreign' }), 'utf8');
+  }
+
+  it('refuses to run while another process holds the session lease', async () => {
+    const { agent, executor, events, sessionId } = createHarness();
+    writeForeignLease(sessionId);
+    try {
+      const result = await executor.start(input('hello'));
+      expect(result).toBe('busy-remote');
+      expect(agent.runCalls).toHaveLength(0);
+      expect(events).toHaveLength(0);
+    } finally {
+      rmSync(lockPath(sessionId), { force: true });
+    }
+  });
+
+  it('holds the lease for the duration of a turn and releases it on completion', async () => {
+    const { executor, sessionId } = createHarness();
+    rmSync(lockPath(sessionId), { force: true });
+    expect(await executor.start(input('hello'))).toBe('started');
+    // The turn is still running (the mock agent yields before finishing).
+    expect(existsSync(lockPath(sessionId))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(existsSync(lockPath(sessionId))).toBe(false);
+  });
+
+  it('releases the lease when the turn fails', async () => {
+    const { agent, executor, sessionId } = createHarness();
+    rmSync(lockPath(sessionId), { force: true });
+    agent.nextErrors = [new Error('boom')];
+    expect(await executor.start(input('hello'))).toBe('started');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(existsSync(lockPath(sessionId))).toBe(false);
   });
 });

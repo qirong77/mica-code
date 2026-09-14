@@ -1356,6 +1356,74 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
   });
 
+  itE2E('turn/start is refused while another process holds the session turn lease', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.longText = '';
+
+    const home = makeHome('remote-lease');
+    const host = spawnHost('remote-lease', [], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // First turn creates the session and must release the lease when it ends.
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '先建一个会话' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (first)');
+    const sessionId = (started.params?.threadId as string) || '';
+    expect(sessionId).toBeTruthy();
+    const turn1 = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turn1), 'turn/completed (first)', 30_000);
+
+    const lockDir = join(home, 'sessions', '.turn-locks');
+    const lockPath = join(lockDir, `${sessionId}.lock`);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(mock!.state.requests.length).toBe(1);
+
+    // A browser tab driven by the other runtime instance (or a TUI terminal)
+    // starts a turn on the same session: its turn lease is alive, so this host
+    // must refuse instead of writing the same session file concurrently.
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: process.pid, token: 'another-process', createdAt: new Date().toISOString() }),
+      'utf8',
+    );
+
+    await send(host, 2, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '别处正在跑时发的这条' }],
+    });
+    const rejected = await waitFor(host, (m) => m.id === 2, 'turn/start reject response', 10_000);
+    expect(rejected.error).toBeTruthy();
+    expect(JSON.stringify(rejected.error)).toContain('另一个窗口或终端');
+    // No turn started and the prompt never reached the provider.
+    expect(host.lines.filter((m) => m.method === 'turn/started').length).toBe(1);
+    expect(mock!.state.requests.length).toBe(1);
+
+    // Once the other process releases the lease the same host works again.
+    rmSync(lockPath, { force: true });
+    await send(host, 3, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '锁释放后的这条' }],
+    });
+    const started2 = await waitFor(
+      host,
+      (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turn1,
+      'turn/started (after release)',
+      30_000,
+    );
+    const completed2 = await waitFor(
+      host,
+      turnCompleted((started2.params?.turn as { id?: string }).id!),
+      'turn/completed (after release)',
+      30_000,
+    );
+    expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
+    expect(mock!.state.requests.length).toBe(2);
+  });
+
   itE2E('abort keeps the queued input draining on the same host', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

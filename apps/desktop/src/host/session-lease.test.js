@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
-import { createTurnLeaseProbe, isInterruptedSession, isPidAlive } from './session-lease'
+import {
+  createTurnLeaseProbe,
+  isInterruptedSession,
+  isPidAlive,
+  readTurnLeaseOwner
+} from './session-lease'
 
 function lockDirWith(id, content) {
   const dir = mkdtempSync(join(tmpdir(), 'mica-lease-'))
@@ -45,6 +50,37 @@ describe('isPidAlive', () => {
     expect(isPidAlive(-1)).toBe(false)
     expect(isPidAlive(1.5)).toBe(false)
     expect(isPidAlive('123')).toBe(false)
+  })
+})
+
+describe('readTurnLeaseOwner', () => {
+  it('returns the owner record so callers can tell which process is running', () => {
+    const dir = lockDirWith('s1', JSON.stringify({ pid: 4242, token: 't', createdAt: 'now' }))
+    expect(readTurnLeaseOwner('s1', { lockDir: () => join(dir, '.turn-locks') })).toMatchObject({
+      pid: 4242,
+      token: 't'
+    })
+  })
+
+  it('returns null for a missing, malformed, or empty id lookup', () => {
+    const empty = lockDirWith('s1')
+    const broken = lockDirWith('s2', '{not json')
+    const probe = (dir) => ({ lockDir: () => join(dir, '.turn-locks') })
+    expect(readTurnLeaseOwner('s1', probe(empty))).toBe(null)
+    expect(readTurnLeaseOwner('s2', probe(broken))).toBe(null)
+    expect(readTurnLeaseOwner('', probe(empty))).toBe(null)
+    expect(readTurnLeaseOwner('s1', {})).toBe(null)
+  })
+
+  it('keeps the alive/dead distinction in the probe built on top of it', () => {
+    const alive = lockDirWith('s1', JSON.stringify({ pid: process.pid, token: 't' }))
+    const dead = lockDirWith('s2', JSON.stringify({ pid: 2147483647, token: 't' }))
+    const probe = (dir) => createTurnLeaseProbe({ lockDir: () => join(dir, '.turn-locks') })
+    expect(probe(alive)('s1')).toBe(true)
+    expect(readTurnLeaseOwner('s2', { lockDir: () => join(dead, '.turn-locks') })?.pid).toBe(
+      2147483647
+    )
+    expect(probe(dead)('s2')).toBe(false)
   })
 })
 

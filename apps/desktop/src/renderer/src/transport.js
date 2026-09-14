@@ -206,7 +206,7 @@ function createWebApi(env) {
         return response.json()
       },
       dispose: (id) => invoke('chat:dispose', { id }),
-      isRunning: (id) => invoke('chat:is-running', { id }),
+      isRunning: (id, sessionId) => invoke('chat:is-running', { id, sessionId }),
       onEvent: (callback) => subscribe('chat:event', callback),
       onExit: (callback) => subscribe('chat:exit', callback),
       onQueueState: (callback) => subscribe('chat:queue-state', callback),

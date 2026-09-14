@@ -421,7 +421,8 @@ export function SessionTree({
     const active = !!nodeId && activeSessionId === session.id
     const state = liveSessionRowState({
       notificationState: unread[nodeId],
-      interrupted: session.interrupted
+      interrupted: session.interrupted,
+      remoteRunning: session.remoteRunning
     })
     const unreadState = unread[nodeId]
     const editingThis = editing?.kind === 'session' && editing.id === session.id

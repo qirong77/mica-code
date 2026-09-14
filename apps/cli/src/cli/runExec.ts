@@ -10,7 +10,11 @@ import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { attachCodexExecProjector, type CodexExecProjector } from '../runtime/CodexExecProjector.js';
-import { HeadlessTurnExecutor, MAX_TURN_RETRIES } from '../runtime/HeadlessTurnExecutor.js';
+import {
+  HeadlessTurnExecutor,
+  MAX_TURN_RETRIES,
+  REMOTE_TURN_MESSAGE,
+} from '../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
@@ -177,6 +181,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
 
     try {
       const started = await executor.start(micaRuntime.createRuntimeInput(prompt, 'ui'));
+      if (started === 'busy-remote') throw new Error(REMOTE_TURN_MESSAGE);
       if (started === 'rejected') throw new Error('The turn was rejected (queue full or blocked)');
       await waitForIdle(executor);
       // Drain pending plugin ops (session_compact queued by the final turn) as

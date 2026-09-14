@@ -6,9 +6,14 @@
  * host-side (`interrupted`: turnState is error, or running with nobody holding
  * the turn lease) so a session another process is actively running is never
  * labelled as unexpectedly terminated.
+ *
+ * `remoteRunning` is the same probe read the other way: a live turn lease means
+ * another window (or another runtime/terminal on this machine) is writing the
+ * session right now, so the row breathes green instead of looking idle.
  */
-export function liveSessionRowState({ notificationState, interrupted }) {
+export function liveSessionRowState({ notificationState, interrupted, remoteRunning }) {
   if (notificationState?.running) return 'running'
+  if (remoteRunning) return 'running'
   if (notificationState?.lastType === 'turn.error') return 'error'
   if (interrupted) return 'error'
   if (notificationState?.unread) return 'unread'

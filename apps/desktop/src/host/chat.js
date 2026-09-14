@@ -21,6 +21,7 @@ import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
+import { createTurnLeaseProbe } from './session-lease'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -136,6 +137,25 @@ export function isChatSessionRunning(sessionId) {
 function sessionsDir() {
   const micaHome = process.env.MICA_HOME
   return micaHome ? join(micaHome, 'sessions') : join(homedir(), '.mica', 'sessions')
+}
+
+/**
+ * 另一个进程（第二个运行时实例，或终端里的 TUI / `mica exec`）是否正持有该 session 的
+ * turn lease。桌面 host 自己从不取 lease——它的 turn 跑在 spawn 出去的 app-server 子进程里，
+ * 由那个子进程持锁——所以本进程里跑着的会话由 `isChatSessionRunning` 拦，这里管的是别处。
+ */
+const hasLiveTurnLease = createTurnLeaseProbe({ lockDir: () => join(sessionsDir(), '.turn-locks') })
+
+/**
+ * 会话级的「正在别处运行」判定：同一进程里另一个 chat 节点（另一个窗口/页签，node id 不同）
+ * 正在跑，或另一个进程持着 turn lease。调用点只在本节点空闲、准备发起新 turn 时才问它，
+ * 因此不与「本节点自己的 run」重叠。
+ */
+function sessionBusyElsewhere(sessionId) {
+  if (!sessionId) return null
+  if (isChatSessionRunning(sessionId)) return '该会话正在另一个窗口里运行，请等待完成后再发送'
+  if (hasLiveTurnLease(sessionId)) return '该会话正在另一个窗口或终端运行，请等待完成后再发送'
+  return null
 }
 
 function micaHomeDir() {
@@ -474,6 +494,15 @@ function startRun(sender, id, payload) {
     return { ok: true }
   }
 
+  // 本节点空闲，准备真的发起一个新 turn：先确认这个会话没有在别处跑。
+  // 同一进程里另一个窗口跑着由 `isChatSessionRunning` 拦，别的进程（另一个运行时实例、
+  // 终端里的 TUI/exec）由 app-server 子进程写的 turn lease 拦——两处都会同时写同一个
+  // session 文件，必须先拒绝，而不是等子进程报错或把历史写坏。
+  const unavailable = sessionBusyElsewhere(
+    payload.sessionId || existing?.sessionId || existing?.requestedSessionId || ''
+  )
+  if (unavailable) return { ok: false, error: unavailable }
+
   const spawned = spawnChatHost(id, sender, payload)
   if (!spawned.ok) return spawned
   const run = runs.get(id)
@@ -557,7 +586,15 @@ function editRunMessage(sender, id, payload = {}) {
   const text = String(payload.text || '').trim()
   if (!prompt || !text) return Promise.resolve({ ok: false, error: '编辑内容为空' })
 
-  let run = runs.get(id)
+  const existingRun = runs.get(id)
+  // 会话在别处跑着时不能编辑：截断历史会立刻落盘，而那一轮的持有者还在写同一个
+  // session 文件。与 startRun 同一个判定，理由相同。
+  const unavailable = sessionBusyElsewhere(
+    payload.sessionId || existingRun?.sessionId || existingRun?.requestedSessionId || ''
+  )
+  if (unavailable) return Promise.resolve({ ok: false, error: unavailable })
+
+  let run = existingRun
   if (run?.child) {
     run.sender = sender
     if (run.running) {
@@ -1286,7 +1323,7 @@ export function registerChatIpc() {
     return true
   })
 
-  ipcMain.handle('chat:is-running', (event, { id } = {}) => {
+  ipcMain.handle('chat:is-running', (event, { id, sessionId } = {}) => {
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
     // Restoring a chat node must see the same queue as a live `chat:queue-state`
@@ -1296,12 +1333,32 @@ export function registerChatIpc() {
     // as soon as the user switches away and back.
     const items = run ? allQueuedItems(id, run) : queuedItems(id)
     const queuedState = { queuedCount: items.length, queuedItems: items }
+    // 本节点没在跑，但这个会话正被别处跑着：同一进程里另一个 chat 节点（另一个窗口/
+    // 页签，node id 不同）在跑，或另一个进程持着 turn lease。客户端据此显示
+    // 「正在另一处运行」并让发送走拒绝路径，而不是以为会话空闲。
+    const leaseSessionId =
+      (typeof sessionId === 'string' && sessionId) ||
+      run?.sessionId ||
+      run?.requestedSessionId ||
+      ''
+    const remoteRunning =
+      !run?.running &&
+      Boolean(leaseSessionId) &&
+      (isChatSessionRunning(leaseSessionId) || hasLiveTurnLease(leaseSessionId))
     if (!run) {
       const completed = completedRuns.get(id)
       return completed
-        ? { running: false, finished: true, queuedCount: 0, queuedItems: [], ...completed }
+        ? {
+            running: false,
+            finished: true,
+            remoteRunning,
+            queuedCount: 0,
+            queuedItems: [],
+            ...completed
+          }
         : {
             running: false,
+            remoteRunning,
             sessionId: null,
             events: [],
             ...queuedState
@@ -1311,6 +1368,7 @@ export function registerChatIpc() {
       return {
         running: false,
         finished: !run.exitSent,
+        remoteRunning,
         ...queuedState,
         sessionId: run.sessionId,
         events: run.events.slice(),
@@ -1320,6 +1378,7 @@ export function registerChatIpc() {
     }
     return {
       running: true,
+      remoteRunning: false,
       ...queuedState,
       sessionId: run.sessionId,
       events: run.events.slice(),

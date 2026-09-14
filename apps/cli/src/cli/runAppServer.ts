@@ -47,7 +47,9 @@ import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/Subagent
 import {
   HeadlessTurnExecutor,
   MAX_TURN_RETRIES,
+  REMOTE_TURN_MESSAGE,
   type HeadlessTurnEvent,
+  type HeadlessTurnStartResult,
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
@@ -825,7 +827,7 @@ async function handleCodexRequest(
         // exists, so no turn/started was emitted — report it instead of
         // answering with a turn the client would wait on forever.
         ctx.setCurrentTurnId(null);
-        ctx.writeError(CODEX_ERROR_INTERNAL, '已有一条排队消息，等待发送或重新编辑');
+        ctx.writeError(CODEX_ERROR_INTERNAL, turnStartFailureMessage(result));
         return;
       }
       // turn/started was already emitted by the executor's turn:start event.
@@ -975,7 +977,7 @@ async function handleCodexRequest(
         ctx.agent.loadSnapshot(previous);
         ctx.sessionController.saveCurrent({ allowEmpty: true });
         ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
-        ctx.writeError(CODEX_ERROR_INTERNAL, '已有一条排队消息，等待发送或重新编辑');
+        ctx.writeError(CODEX_ERROR_INTERNAL, turnStartFailureMessage(result));
         return;
       }
       const turnId = ctx.getCurrentTurnId();
@@ -990,6 +992,15 @@ async function handleCodexRequest(
       ctx.writeError(CODEX_ERROR_METHOD_NOT_FOUND, `Method not found: ${method}`);
       return;
   }
+}
+
+/**
+ * `turn/start` (and the edit-message replay) failed before any turn existed.
+ * `busy-remote` means another process owns this session's turn lease: the app
+ * shows this message and rolls its optimistic message back.
+ */
+function turnStartFailureMessage(result: HeadlessTurnStartResult): string {
+  return result === 'busy-remote' ? REMOTE_TURN_MESSAGE : '已有一条排队消息，等待发送或重新编辑';
 }
 
 /** Per-turn protocol lifecycle owned by the executor's event stream. */

@@ -35,6 +35,7 @@ import {
   TodoPlugin,
 } from '@packages/mica-builtin-commands/index.js';
 import { createHeadlessRuntimeServices, type HeadlessUiState } from './headlessRuntimeServices.js';
+import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
 
 export type HeadlessPluginHostOptions = {
   hooks: HookRegistry;
@@ -70,14 +71,18 @@ export type HeadlessPluginHost = {
  * Bridges a HeadlessTurnExecutor.start() result into the plugin-facing
  * SubmitResult shape, so plugins (message-queue, context-pressure) can submit
  * inputs through ctx.runtime.submit exactly like in the interactive runtime.
+ *
+ * A `busy-remote` start (another process owns the session's turn lease) is
+ * reported as `busy` too: the plugin's input was not accepted, and the desktop
+ * app surfaces the same state through the turn-level rejection.
  */
 export async function startAsSubmit(
-  start: (input: RuntimeInput) => Promise<'started' | 'queued' | 'rejected'>,
+  start: (input: RuntimeInput) => Promise<HeadlessTurnStartResult>,
   text: string,
   options?: SubmitOptions,
 ): Promise<SubmitResult> {
   const result = await start(micaRuntime.createRuntimeInput(text, 'plugin', options));
-  if (result === 'rejected') return { ok: false, reason: 'busy' };
+  if (result === 'rejected' || result === 'busy-remote') return { ok: false, reason: 'busy' };
   return { ok: true, handled: result === 'queued', queued: result === 'queued' };
 }
 
