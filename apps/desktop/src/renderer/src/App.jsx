@@ -28,6 +28,12 @@ import TerminalKeyBar from './TerminalKeyBar'
 import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { resolveGroupCwd } from './session-projects'
 import {
+  RIGHT_PANEL_SWEEP_MS,
+  activeRightTermId,
+  reclaimableRightTermIds,
+  staleRightTermIds
+} from './right-terms'
+import {
   createColdStartTerminal,
   normalizeNodes,
   removeNode,
@@ -568,11 +574,22 @@ export default function App() {
   const [error, setError] = useState('')
   const [nodes, setNodes] = useState([])
   const nodesRef = useLatest(nodes)
-  // 右侧面板终端区域的独立 shell 终端 Tab（与左侧对话会话树解耦）
-  const [rightTerms, setRightTerms] = useState([])
-  const [rightActiveTerm, setRightActiveTerm] = useState(null)
+  // 右侧面板终端区域的独立 shell 终端 Tab，按会话（左侧对话节点 id）分组归属：
+  // 切换会话时整组跟着切走，PTY 的 cwd 也跟随所属会话的路径。
+  const [rightTermsByChat, setRightTermsByChat] = useState({})
+  const rightTermsByChatRef = useLatest(rightTermsByChat)
+  const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
+  // 右侧终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
+  // 白白重渲染整个面板，所以放 ref 里。
+  const rightTermActivityRef = useRef(new Map())
   const [activeId, setActiveId] = useState(null)
   const activeRef = useLatest(activeId)
+  // 面板里可见的是活跃会话那一组；TerminalHost 拿到的是全量列表，别的会话的
+  // PTY 只是被隐藏，切回来时不会重开 shell。
+  const rightTerms = useMemo(() => rightTermsByChat[activeId] || [], [activeId, rightTermsByChat])
+  const allRightTerms = useMemo(() => Object.values(rightTermsByChat).flat(), [rightTermsByChat])
+  const allRightTermsRef = useLatest(allRightTerms)
+  const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
   const [selectedId, setSelectedId] = useState(null)
   // 中间主区视图：chat | stats | settings（files/terminal 移入右侧 Panel）
   const [view, setView] = useState('chat')
@@ -615,6 +632,7 @@ export default function App() {
     if (!isMobile) setMobileDrawer(null)
   }, [isMobile])
   const closeMobileDrawer = useCallback(() => setMobileDrawer(null), [])
+  const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -844,6 +862,9 @@ export default function App() {
     [nodesRef]
   )
   const notifications = useNotifications(activeId, setSessionId, canBindSessionId)
+  // 终端是否空闲只用于「重开之前先看一眼」，走 ref 读取：进 deps 会让前台进程一
+  // 结束就立刻重开终端，把用户刚跑完的那条命令的输出吞掉。
+  const notificationStatesRef = useLatest(notifications.states)
 
   useEffect(() => {
     refreshSessions()
@@ -1014,39 +1035,76 @@ export default function App() {
   )
 
   const createRightTerm = useCallback(() => {
+    const chatId = activeRef.current
+    if (!chatId) return
     const id = uid('rt')
-    const count = rightTerms.length + 1
-    const cwd = terminalCwd(activeRef.current) || recentChatCwd() || null
+    rightTermActivityRef.current.set(id, Date.now())
+    const cwd = terminalCwd(chatId) || recentChatCwd() || null
     // 终端是在当前会话的上下文里开的，记下归属会话，左侧会话树才能标出
     // 「这个会话有终端在跑」（右侧终端本身不在 nodes 里，只能靠这份映射关联）。
-    const sessionId =
-      nodesRef.current.find((node) => node.id === activeRef.current)?.sessionId || null
-    setRightTerms((items) => [
-      ...items,
-      { id, text: `终端 ${count}`, cwd, type: 'terminal', sessionId, command: null }
-    ])
-    setRightActiveTerm(id)
-    setRightPanelTab('terminal')
-  }, [activeRef, nodesRef, rightTerms.length, terminalCwd])
-
-  const closeRightTerm = useCallback((id) => {
-    setRightTerms((items) => {
-      const next = items.filter((item) => item.id !== id)
-      setRightActiveTerm((current) => (current === id ? (next[0]?.id ?? null) : current))
-      return next
+    const sessionId = nodesRef.current.find((node) => node.id === chatId)?.sessionId || null
+    setRightTermsByChat((prev) => {
+      const list = prev[chatId] || []
+      return {
+        ...prev,
+        [chatId]: [
+          ...list,
+          { id, text: `终端 ${list.length + 1}`, cwd, type: 'terminal', sessionId, command: null }
+        ]
+      }
     })
-    terminalRef.current
-      ?.dispose(id)
-      .catch((error) => console.error('dispose right term failed', error))
-  }, [])
-  const rightTermCwd = useCallback(
-    (id) => rightTerms.find((item) => item.id === id)?.cwd || null,
-    [rightTerms]
+    setRightActiveTermByChat((prev) => ({ ...prev, [chatId]: id }))
+    setRightPanelTab('terminal')
+  }, [activeRef, nodesRef, terminalCwd])
+
+  const closeRightTerm = useCallback(
+    (id) => {
+      const current = rightTermsByChatRef.current
+      const owner = Object.keys(current).find((chatId) =>
+        current[chatId].some((term) => term.id === id)
+      )
+      if (!owner) return
+      const remaining = current[owner].filter((term) => term.id !== id)
+      rightTermActivityRef.current.delete(id)
+      setRightTermsByChat((prev) => ({ ...prev, [owner]: remaining }))
+      setRightActiveTermByChat((prev) =>
+        prev[owner] === id ? { ...prev, [owner]: remaining[0]?.id ?? null } : prev
+      )
+      terminalRef.current
+        ?.dispose(id)
+        .catch((error) => console.error('dispose right term failed', error))
+    },
+    [rightTermsByChatRef]
   )
+  const rightTermCwd = useCallback(
+    (id) => allRightTermsRef.current.find((item) => item.id === id)?.cwd || null,
+    [allRightTermsRef]
+  )
+  // 会话路径变化后把该会话下「空闲」的终端重新加载到新目录：dispose 掉旧 PTY
+  // 再按新 cwd 重开，TerminalHost 的 activate 会读更新后的 resolveCwd。
+  const respawnRightTerm = useCallback(async (chatId, termId, cwd) => {
+    setRightTermsByChat((prev) => {
+      const list = prev[chatId]
+      if (!list) return prev
+      let changed = false
+      const next = list.map((term) => {
+        if (term.id !== termId || term.cwd === cwd) return term
+        changed = true
+        return { ...term, cwd }
+      })
+      return changed ? { ...prev, [chatId]: next } : prev
+    })
+    await terminalRef.current?.dispose(termId)
+    await terminalRef.current?.activate(termId)
+  }, [])
   // 移动端键栏：走 xterm 自己的输入通道（term.input → onData），与键盘敲出来的
   // 字符同一条路，不要绕过去直写 PTY。
   const sendTerminalKey = useCallback((data) => {
     terminalRef.current?.input(data)
+  }, [])
+  // 面板终端的活动时间（敲键、翻页、点选）只喂给定时回收，不进 state。
+  const touchRightTerm = useCallback((id) => {
+    rightTermActivityRef.current.set(id, Date.now())
   }, [])
   const openRightTerminalTab = useCallback(() => {
     // 切到终端 Tab 时至少要有一个终端，否则用户还得先手动新建第一个。
@@ -1056,6 +1114,92 @@ export default function App() {
     }
     setRightPanelTab('terminal')
   }, [createRightTerm, rightTerms.length])
+
+  // 右侧面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
+  // 否则切过去只能看到一片空白。只在这一区域真正可见时才补，免得用户点过的每个
+  // 会话都被拉起一个 PTY。
+  useEffect(() => {
+    if (!activeId || !rightPanelVisible || rightPanelTab !== 'terminal') return
+    if ((rightTermsByChatRef.current[activeId] || []).length > 0) return
+    createRightTerm()
+  }, [activeId, createRightTerm, rightPanelTab, rightPanelVisible, rightTermsByChatRef])
+
+  // 会话路径（底部状态栏切换 cwd、恢复会话）变化后，该会话下空闲的终端重新加载
+  // 到新目录；有前台进程在跑的保持不动。
+  const activeChatCwd = terminalCwd(activeId)
+  useEffect(() => {
+    if (!activeId || !activeChatCwd) return
+    const terms = rightTermsByChatRef.current[activeId] || []
+    const stale = staleRightTermIds(terms, activeChatCwd, notificationStatesRef.current)
+    for (const id of stale) respawnRightTerm(activeId, id, activeChatCwd)
+  }, [activeChatCwd, activeId, notificationStatesRef, respawnRightTerm, rightTermsByChatRef])
+
+  // 会话关闭后它名下的终端一起回收：右侧终端不在工作区 nodes 里，只能按归属会话
+  // 判断，否则那些 PTY 会一直挂到进程退出。
+  useEffect(() => {
+    const alive = new Set(nodes.map((node) => node.id))
+    const orphaned = Object.keys(rightTermsByChatRef.current).filter((chatId) => !alive.has(chatId))
+    if (orphaned.length === 0) return
+    const termIds = orphaned.flatMap((chatId) =>
+      rightTermsByChatRef.current[chatId].map((term) => term.id)
+    )
+    setRightTermsByChat((prev) => {
+      const next = { ...prev }
+      for (const chatId of orphaned) delete next[chatId]
+      return next
+    })
+    for (const id of termIds) {
+      terminalRef.current
+        ?.dispose(id)
+        .catch((error) => console.error('dispose right term failed', error))
+    }
+  }, [nodes, rightTermsByChatRef])
+
+  // 右侧终端是每个会话一组真 PTY，应用开着不放会越积越多，所以定时回收：8h 没被
+  // 碰过的会话、以及 8h 没有任何活动的终端都释放，下次切过去再按需重开。当前正在
+  // 看的会话整组跳过——回收要悄悄做，不能当面把用户看着的终端关掉。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      const states = notificationStatesRef.current
+      const activityAt = Object.fromEntries(rightTermActivityRef.current)
+      const reclaim = []
+      for (const [chatId, terms] of Object.entries(rightTermsByChatRef.current)) {
+        if (chatId === activeRef.current) continue
+        const node = nodesRef.current.find((item) => item.id === chatId)
+        const session = node?.sessionId
+          ? sessionsRef.current.find((row) => row.id === node.sessionId)
+          : null
+        const ids = reclaimableRightTermIds({
+          terms,
+          lastUsedAt: Math.max(Number(node?.lastActiveAt) || 0, Number(session?.updatedAtMs) || 0),
+          activityAt,
+          states,
+          now
+        })
+        if (ids.length > 0) reclaim.push([chatId, new Set(ids)])
+      }
+      if (reclaim.length === 0) return
+      for (const [, ids] of reclaim) {
+        for (const id of ids) {
+          rightTermActivityRef.current.delete(id)
+          terminalRef.current
+            ?.dispose(id)
+            .catch((error) => console.error('reclaim right term failed', error))
+        }
+      }
+      setRightTermsByChat((prev) => {
+        const next = { ...prev }
+        for (const [chatId, ids] of reclaim) {
+          const remaining = (prev[chatId] || []).filter((term) => !ids.has(term.id))
+          if (remaining.length > 0) next[chatId] = remaining
+          else delete next[chatId]
+        }
+        return next
+      })
+    }, RIGHT_PANEL_SWEEP_MS)
+    return () => window.clearInterval(timer)
+  }, [activeRef, nodesRef, notificationStatesRef, rightTermsByChatRef, sessionsRef])
 
   const createSession = useCallback(
     (cwd = null) => {
@@ -1108,6 +1252,14 @@ export default function App() {
       .renameProjectGroup(groupId, name)
       .then(setProjects)
       .catch((error) => console.error('rename project group failed', error))
+  }, [])
+
+  /** 拖拽嵌套：分组换父级，parentId 为 null 即移回根。 */
+  const moveGroup = useCallback((groupId, parentId = null) => {
+    window.mica.stats
+      .moveProjectGroup(groupId, parentId)
+      .then(setProjects)
+      .catch((error) => console.error('move project group failed', error))
   }, [])
 
   const deleteGroup = useCallback(
@@ -1254,8 +1406,8 @@ export default function App() {
   // 右侧终端不在 nodes 里，靠它们创建时记下的归属会话，把「这个终端有前台进程在跑」
   // 映射回左侧会话行（notify 状态按 PTY id 保存，折成终端节点 id 后即可对齐）。
   const sessionsWithRunningTerminal = useMemo(
-    () => runningTerminalSessions(rightTerms, notifications.states),
-    [notifications.states, rightTerms]
+    () => runningTerminalSessions(allRightTerms, notifications.states),
+    [allRightTerms, notifications.states]
   )
   const activeSessionId = useMemo(() => {
     const node = nodes.find((item) => item.id === activeId)
@@ -1481,7 +1633,6 @@ export default function App() {
       </div>
     )
 
-  const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
   return (
     <>
       <div
@@ -1618,6 +1769,7 @@ export default function App() {
             onReorderSessions={reorderSessions}
             onCreateGroup={createGroup}
             onRenameGroup={renameGroup}
+            onMoveGroup={moveGroup}
             onDeleteGroup={deleteGroup}
             onCreateSessionInGroup={createSessionInGroup}
             onRenameSession={(sessionId, title) => {
@@ -1859,7 +2011,9 @@ export default function App() {
                           type="button"
                           title={node.text}
                           className="flex min-w-0 items-center gap-1.5"
-                          onClick={() => setRightActiveTerm(node.id)}
+                          onClick={() =>
+                            setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
+                          }
                         >
                           <IconTerminal2 size={12} className="shrink-0 opacity-75" />
                           <span className="max-w-36 truncate">{node.text}</span>
@@ -1902,7 +2056,7 @@ export default function App() {
             />
             <TerminalHost
               ref={terminalRef}
-              nodes={rightTerms}
+              nodes={allRightTerms}
               activeId={rightActiveTerm}
               visible={rightPanelTab === 'terminal'}
               pane="terminal"
@@ -1910,7 +2064,10 @@ export default function App() {
               sidebarCollapsed={sidebarCollapsed}
               resolveCwd={rightTermCwd}
               commandFor={commandFor}
-              onRead={(id, reason) => notifications.markRead(id, reason)}
+              onRead={(id, reason) => {
+                touchRightTerm(id)
+                notifications.markRead(id, reason)
+              }}
               onMicaExit={closeRightTerm}
             />
             {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (

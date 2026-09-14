@@ -5,6 +5,7 @@ import {
   deleteGroup,
   emptyProjects,
   groupSubtreeIds,
+  moveGroup,
   normalizeProjects,
   renameGroup,
   setAssignment
@@ -92,5 +93,22 @@ describe('group tree edits', () => {
     projects = setAssignment(projects, 's1', null)
     expect(assignmentOf(projects, 's1')).toBeNull()
     expect(setAssignment(projects, 's1', 'ghost').assignments).toEqual({})
+  })
+
+  it('reparents a group when dragging it into another group', () => {
+    let projects = createGroup(emptyProjects(), { id: 'a', name: 'A' })
+    projects = createGroup(projects, { id: 'b', name: 'B' })
+    projects = createGroup(projects, { id: 'c', name: 'C', parentId: 'b' })
+
+    const nested = moveGroup(projects, 'a', 'c')
+    expect(nested.groups.find((group) => group.id === 'a').parentId).toBe('c')
+    // 回到根
+    const rooted = moveGroup(nested, 'a', null)
+    expect(rooted.groups.find((group) => group.id === 'a').parentId).toBeNull()
+    // 悬空父级 / 自己 / 自己的后代 / 无变化都不动
+    expect(moveGroup(projects, 'a', 'ghost')).toEqual(projects)
+    expect(moveGroup(projects, 'b', 'b')).toEqual(projects)
+    expect(moveGroup(projects, 'b', 'c')).toEqual(projects)
+    expect(moveGroup(projects, 'c', 'b')).toEqual(projects)
   })
 })

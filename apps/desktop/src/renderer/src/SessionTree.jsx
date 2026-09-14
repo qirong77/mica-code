@@ -4,6 +4,7 @@ import {
   IconChevronRight,
   IconDots,
   IconFolder,
+  IconFolderOpen,
   IconListTree,
   IconPin,
   IconPlus,
@@ -15,20 +16,45 @@ import { relativeTimeShort } from './relative-time'
 import { liveSessionRowState } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
-import { childGroups, sessionSectionOf, sessionsByGroup } from './session-projects'
+import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
 
 const rowClass =
-  'group relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 pl-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
+  'group relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
 
 const groupRowClass =
-  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 pl-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white'
+  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white'
 
 const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
+
+// 侧栏的列栅格：每一行（分区标题 / 分组 / 会话）都是同样的
+// `[操作列 w-4][图标列 w-4][名称]`，行内左右各 8px、列间距 8px（gap-2），
+// 名称因此落在「行左 + 56px」（绝对 64px）。
+// 会话行第一列留空、状态位放进图标列，所以分区标题、分组名、会话标题全在同一个名称列上。
+// **只有容器再套容器（分组套分组）才右移 TREE_STEP**：容器里的会话/草稿与容器同列，
+// 这样一级分组的会话和 Recent 的会话严格对齐，树的缩进档位只有「每层分组」这一种。
+// 改这几列时必须同步 renderSectionHeader 与空状态，否则又会错开一列。
+const ROW_PAD = 8
+
+const COLUMN = 16 // w-4
+
+const GAP = 8 // gap-2
+
+// 一层分组恰好右移一整列（列宽 + 列间距）：嵌套分组的箭头正好落在父分组的图标列上。
+const TREE_STEP = COLUMN + GAP
+
+const NAME_OFFSET = ROW_PAD + COLUMN + GAP + COLUMN + GAP
+
+const rowIndent = (depth) => ROW_PAD + depth * TREE_STEP
+
+/** 固定宽度的列位：没有内容时也占位，保证各行的名称都在同一列。 */
+function Slot({ children }) {
+  return <span className="grid w-4 shrink-0 place-items-center">{children}</span>
+}
 
 /** 取路径最后一段作为文件夹名 */
 function baseName(cwd) {
@@ -62,9 +88,16 @@ function RenameInput({ value, onCommit, onCancel }) {
   )
 }
 
-function RowTail({ relativeTime }) {
+// 行尾固定右对齐：可选的工作目录标签 + 相对时间。工作目录放在行尾（而不是标题前）
+// 是为了让 Recent 的标题都在同一列——标签宽度随目录名变化会把标题推得参差不齐。
+function RowTail({ label, labelTitle, relativeTime }) {
   return (
-    <span className="relative flex min-w-4 shrink-0 items-center justify-end">
+    <span className="relative flex min-w-4 shrink-0 items-center justify-end gap-2">
+      {label && (
+        <span className="max-w-[88px] truncate text-[11px] text-white/30" title={labelTitle}>
+          {label}
+        </span>
+      )}
       <span className="block shrink-0 text-[11px] tabular-nums text-white/30">{relativeTime}</span>
     </span>
   )
@@ -195,6 +228,7 @@ export function SessionTree({
   onReorderSessions,
   onCreateGroup,
   onRenameGroup,
+  onMoveGroup,
   onDeleteGroup,
   onCreateSessionInGroup
 }) {
@@ -208,7 +242,7 @@ export function SessionTree({
   })
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
-  const [drag, setDrag] = useState(null) // { kind, id, section, groupId }
+  const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const sectionOf = useCallback(
@@ -365,10 +399,41 @@ export function SessionTree({
     else onMoveSession?.(source.id, target)
   }
 
+  /** 分组行的落点是否成立：不能落进自己或自己的子树，也不能是当前父级。 */
+  const canNestInto = (draggedId, targetGroupId) => {
+    if (!draggedId || !targetGroupId || draggedId === targetGroupId) return false
+    if (groupSubtreeIds(projects, draggedId).has(targetGroupId)) return false
+    const dragged = (projects?.groups || []).find((group) => group.id === draggedId)
+    return (dragged?.parentId ?? null) !== targetGroupId
+  }
+
+  // 一次 drop 的统一出口：分组落到分组行/Projects 标题 = 换父级，会话照旧搬分区或重排。
+  const applyDrop = (
+    source,
+    { section, targetId = null, groupId = null, items, order, position }
+  ) => {
+    const plan = resolveDrop({
+      drag: source,
+      section,
+      targetId,
+      groupId,
+      groups: projects?.groups || [],
+      items,
+      order,
+      position
+    })
+    if (!plan) return
+    if (plan.kind === 'move') moveDragged(source, plan.target)
+    else if (plan.kind === 'move-group') onMoveGroup?.(plan.groupId, plan.parentId)
+    else onReorderSessions(sectionOrderKey(section, groupId), plan.ids)
+  }
+
   const hoverRow =
     (section, id, groupId = null) =>
     (event) => {
       if (!drag || drag.id === id) return
+      // 分组只落在分组行与 Projects 标题上，落到会话行不做任何反应
+      if (drag.kind === 'group') return
       event.preventDefault()
       event.stopPropagation()
       const sameTarget = (drag.groupId ?? null) === (groupId ?? null)
@@ -397,10 +462,10 @@ export function SessionTree({
       const source = drag
       const position = over?.section === section && over?.id === targetId ? over.position : null
       clearDrag()
+      if (source?.kind === 'group') return
       const items =
         (section === 'project' ? groupSessions.get(groupId) : sectionItems[section]) || []
-      const plan = resolveDrop({
-        drag: source,
+      applyDrop(source, {
         section,
         targetId,
         groupId,
@@ -408,9 +473,6 @@ export function SessionTree({
         order: sortOrder[sectionOrderKey(section, groupId)] || [],
         position
       })
-      if (!plan) return
-      if (plan.kind === 'move') moveDragged(source, plan.target)
-      else onReorderSessions(sectionOrderKey(section, groupId), plan.ids)
     }
 
   const rowOverState = (section, id, groupId = null) =>
@@ -429,14 +491,14 @@ export function SessionTree({
     const isOver = rowOverState(section, session.id, groupId)
     const draggingThis = drag?.id === session.id && drag?.kind === 'session'
     const relativeTime = section === 'recent' ? relativeTimeShort(session.updatedAtMs) : ''
-    // Recent 行首显示工作目录名，方便区分同名会话。
+    // Recent 行尾显示工作目录名，方便区分同名会话。
     const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
     return (
       <li key={session.id}>
         <div
           className={`${rowClass} ${active ? 'bg-white/[.1] text-white' : 'text-white/70'} ${draggingThis ? 'opacity-40' : ''}`}
           style={{
-            paddingLeft: 8 + indent * 13,
+            paddingLeft: rowIndent(indent),
             boxShadow: isOver
               ? over.cross
                 ? dropShadow
@@ -451,29 +513,23 @@ export function SessionTree({
               : session.title || session.id
           }
           draggable={!editingThis}
+          // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
+          {...longPressHandlers((event) =>
+            openMenu(event, { session, items: menuItemsFor(session) })
+          )}
           onDragStart={(event) => startDrag(event, 'session', section, session.id, groupId)}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(section, session.id, groupId)}
           onDrop={dropRow(section, session.id, groupId)}
           onClick={() => onOpenSession(session)}
           onContextMenu={(event) => openMenu(event, { session, items: menuItemsFor(session) })}
-          {...longPressHandlers((event) =>
-            openMenu(event, { session, items: menuItemsFor(session) })
-          )}
         >
+          <Slot />
           <RowLeading
             state={state}
             unreadKey={unreadState?.lastEventAt ?? 'running'}
             terminal={!!session.id && !!terminalSessions?.has(session.id)}
           />
-          {cwdLabel && (
-            <span
-              className="max-w-[45%] shrink-0 truncate text-[11px] text-white/30"
-              title={session.cwd}
-            >
-              {cwdLabel}
-            </span>
-          )}
           {editingThis ? (
             <RenameInput
               value={session.title || session.id}
@@ -487,7 +543,7 @@ export function SessionTree({
           ) : (
             <span className="min-w-0 flex-1 truncate">{session.title || session.id}</span>
           )}
-          <RowTail relativeTime={relativeTime} />
+          <RowTail label={cwdLabel} labelTitle={session.cwd} relativeTime={relativeTime} />
         </div>
       </li>
     )
@@ -505,19 +561,20 @@ export function SessionTree({
         <div
           className={`${rowClass} ${active ? 'bg-white/[.1] text-white' : 'text-white/70'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
           style={{
-            paddingLeft: 8 + indent * 13,
+            paddingLeft: rowIndent(indent),
             boxShadow: isOver ? dropShadow : undefined
           }}
           title="尚未关联真实会话的新对话"
           draggable={!editingThis}
+          {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
           onDragStart={(event) => startDrag(event, 'draft', 'draft', node.id, groupId)}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(dropSection, node.id, groupId)}
           onDrop={dropRow(dropSection, node.id, groupId)}
           onClick={() => onSelectDraft(node)}
           onContextMenu={(event) => openMenu(event, { draft: node, items })}
-          {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
         >
+          <Slot />
           <RowLeading state={state} unreadKey={unread[node.id]?.lastEventAt ?? 'running'} />
           {editingThis ? (
             <RenameInput
@@ -548,24 +605,34 @@ export function SessionTree({
     const open = normalizedQuery ? true : !collapsed
     const editingThis = editing?.kind === 'group' && editing.id === groupId
     const isOver = over?.section === 'project' && over?.groupId === groupId && over?.onGroup
+    // 只有子分组右移一层；分组里的会话/草稿与分组名同列（和 Recent 的会话对齐）。
     const childRows = [
       ...nesting.map((child) => renderGroup(child, depth + 1)).filter(Boolean),
-      ...draftsHere.map((node) => renderDraftRow(node, depth + 1, groupId)),
-      ...sessionsHere.map((session) => renderSessionRow(session, depth + 1, 'project', groupId))
+      ...draftsHere.map((node) => renderDraftRow(node, depth, groupId)),
+      ...sessionsHere.map((session) => renderSessionRow(session, depth, 'project', groupId))
     ]
     const toggleOpen = () => setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
     return (
       <li key={groupId}>
         <div
-          className={groupRowClass}
-          style={{ paddingLeft: 8 + depth * 13, boxShadow: isOver ? dropShadow : undefined }}
+          className={`${groupRowClass} ${drag?.kind === 'group' && drag.id === groupId ? 'opacity-40' : ''}`}
+          style={{ paddingLeft: rowIndent(depth), boxShadow: isOver ? dropShadow : undefined }}
           title={group.name}
+          draggable={!editingThis}
+          // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
+          {...longPressHandlers((event) => openMenu(event, { group, items: groupMenuItems() }))}
+          onDragStart={(event) =>
+            startDrag(event, 'group', 'project', groupId, group.parentId ?? null)
+          }
+          onDragEnd={clearDrag}
           onClick={toggleOpen}
           onContextMenu={(event) => openMenu(event, { group, items: groupMenuItems() })}
-          {...longPressHandlers((event) => openMenu(event, { group, items: groupMenuItems() }))}
           onDragOver={(event) => {
             if (!drag) return
-            if (drag.section === 'project' && drag.groupId === groupId) return
+            if (drag.kind === 'group') {
+              // 拖进自己的子树会成环；本来就挂在这个父级下也没什么可做的
+              if (!canNestInto(drag.id, groupId)) return
+            } else if (drag.section === 'project' && drag.groupId === groupId) return
             event.preventDefault()
             event.stopPropagation()
             setOver({ section: 'project', groupId, onGroup: true })
@@ -575,23 +642,34 @@ export function SessionTree({
             event.stopPropagation()
             const source = drag
             clearDrag()
-            // 落到分组行本身就是「移入这个分组」；已经在该分组里的会话会在决策里被判为无操作
-            const plan = resolveDrop({ drag: source, section: 'project', targetId: null, groupId })
-            if (plan?.kind === 'move') moveDragged(source, plan.target)
+            // 落到分组行本身就是「移入这个分组」/「挂到这个分组下」；
+            // 已经在里面的会在决策里被判为无操作
+            applyDrop(source, { section: 'project', groupId })
           }}
         >
-          <button
-            type="button"
-            aria-label={open ? `折叠 ${group.name}` : `展开 ${group.name}`}
-            aria-expanded={open}
-            className="grid size-4 shrink-0 place-items-center rounded text-white/35 hover:text-white"
-            onClick={toggleOpen}
-          >
-            <IconChevronRight
-              size={13}
-              className={`transition-transform ${open ? 'rotate-90' : ''}`}
-            />
-          </button>
+          <Slot>
+            <button
+              type="button"
+              aria-label={open ? `折叠 ${group.name}` : `展开 ${group.name}`}
+              aria-expanded={open}
+              className="grid size-4 place-items-center rounded text-white/35 hover:text-white"
+              // 冒泡到分组行会再触发一次 toggleOpen，两次抵消等于点了没反应
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleOpen()
+              }}
+            >
+              <IconChevronRight
+                size={13}
+                className={`transition-transform ${open ? 'rotate-90' : ''}`}
+              />
+            </button>
+          </Slot>
+          <Slot>
+            <span className="text-white/40" title="分组">
+              {open ? <IconFolderOpen size={14} /> : <IconFolder size={14} />}
+            </span>
+          </Slot>
           {editingThis ? (
             <RenameInput
               value={group.name}
@@ -636,16 +714,19 @@ export function SessionTree({
 
   const menuNode = menu
   const renderSectionHeader = (name, label, Icon, options = {}) => {
-    const { onAdd, addTitle, dropSection } = options
+    const { onAdd, addTitle, dropSection, accepts } = options
     const isOverHeader = !!dropSection && over?.header === dropSection
+    // 默认只接会话/草稿：分组换父级是 Projects 标题与分组行的事，落到别处不做任何反应
+    const acceptsDrag = (source) =>
+      !!source && (accepts ? accepts(source) : source.kind !== 'group')
     return (
       <div
         className="group/header mt-1 flex h-6 items-center rounded-md"
-        style={{ boxShadow: isOverHeader ? dropShadow : undefined }}
+        style={{ paddingLeft: rowIndent(0), boxShadow: isOverHeader ? dropShadow : undefined }}
         onDragOver={
           dropSection
             ? (event) => {
-                if (!drag) return
+                if (!acceptsDrag(drag)) return
                 event.preventDefault()
                 setOver({ header: dropSection })
               }
@@ -654,31 +735,30 @@ export function SessionTree({
         onDrop={
           dropSection
             ? (event) => {
+                if (!acceptsDrag(drag)) return
                 event.preventDefault()
                 const source = drag
                 clearDrag()
-                const plan = resolveDrop({
-                  drag: source,
-                  section: dropSection,
-                  targetId: null,
-                  groupId: null
-                })
-                if (plan?.kind === 'move') moveDragged(source, plan.target)
+                applyDrop(source, { section: dropSection })
               }
             : undefined
         }
       >
         <button
           type="button"
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium text-white/45 transition-colors hover:bg-white/[.05] hover:text-white/85"
+          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-white/45 transition-colors hover:bg-white/[.05] hover:text-white/85"
           aria-expanded={sectionOpen(name)}
           onClick={() => toggleSection(name)}
         >
-          <IconChevronRight
-            size={14}
-            className={`shrink-0 text-white/30 transition-transform ${sectionOpen(name) ? 'rotate-90' : ''}`}
-          />
-          <Icon size={14} className="shrink-0 text-white/30" />
+          <Slot>
+            <IconChevronRight
+              size={14}
+              className={`text-white/30 transition-transform ${sectionOpen(name) ? 'rotate-90' : ''}`}
+            />
+          </Slot>
+          <Slot>
+            <Icon size={14} className="text-white/30" />
+          </Slot>
           <span className="flex-1 truncate text-white/50">{label}</span>
         </button>
         {onAdd && (
@@ -731,14 +811,19 @@ export function SessionTree({
                   {pinned.map((session) => renderSessionRow(session, 0, 'pinned'))}
                 </ul>
               ) : (
-                <p className="py-1 pl-8 pr-2 text-xs text-white/35">暂无置顶会话。</p>
+                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
+                  暂无置顶会话。
+                </p>
               ))}
           </section>
 
           <section>
             {renderSectionHeader('project', 'Projects', IconFolder, {
               onAdd: () => onCreateGroup(null),
-              addTitle: '新建分组'
+              addTitle: '新建分组',
+              // 会话没有「Projects 根」这一级（取消归属是拖到 Recent），这里只接分组
+              dropSection: 'project',
+              accepts: (source) => source.kind === 'group'
             })}
             {sectionOpen('project') &&
               (projects?.groups?.length ? (
@@ -746,7 +831,7 @@ export function SessionTree({
                   {childGroups(projects, null).map((group) => renderGroup(group))}
                 </ul>
               ) : (
-                <p className="py-1 pl-8 pr-2 text-xs text-white/35">
+                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
                   暂无项目分组，先新建一个分组。
                 </p>
               ))}
@@ -765,12 +850,13 @@ export function SessionTree({
                     <button
                       type="button"
                       className={`${rowClass} w-full text-white/45 hover:text-white/75`}
-                      style={{ paddingLeft: 8 }}
+                      style={{ paddingLeft: rowIndent(0) }}
                       onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
                     >
-                      <span className="grid w-4 shrink-0 place-items-center text-white/35">
+                      <Slot />
+                      <Slot>
                         <IconDots size={14} />
-                      </span>
+                      </Slot>
                       <span className="min-w-0 flex-1 truncate text-left text-[13px]">
                         Show {recentPageSize} more
                       </span>
@@ -778,7 +864,9 @@ export function SessionTree({
                   )}
                 </>
               ) : (
-                <p className="py-1 pl-8 pr-2 text-xs text-white/35">暂无最近会话。</p>
+                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
+                  暂无最近会话。
+                </p>
               ))}
           </section>
         </div>

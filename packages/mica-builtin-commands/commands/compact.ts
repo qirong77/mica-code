@@ -3,7 +3,8 @@ import { isCompactionNotNeededError, type CompactResult } from '@packages/mica-c
 import type { BuiltInCommandItem } from '../commandHost.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
-const MANUAL_COMPACT_OPTIONS = {
+// `/compact llm`：显式要求生成 LLM 摘要 checkpoint（会重写历史，默认路径不用它）。
+const LLM_COMPACT_OPTIONS = {
   aggressive: true,
   force: true,
   lightweightPrune: true,
@@ -21,8 +22,8 @@ export function createCompactCommand(
 ): BuiltInCommandItem {
   return {
     name: 'compact',
-    description: '压缩当前会话上下文为 checkpoint；使用 `llm` 参数固定生成摘要',
-    completionItems: [{ arg: 'llm', description: '固定使用 LLM 生成摘要' }],
+    description: '把工具结果替换为占位符，不改动对话内容；使用 `llm` 参数改为生成摘要 checkpoint',
+    completionItems: [{ arg: 'llm', description: '生成 LLM 摘要 checkpoint（会重写历史）' }],
     async action(rawArgs) {
       const ownerSessionId = services.getCurrentAgentSessionId();
       const targetAgent = services.getCurrentAgent() ?? agent;
@@ -44,11 +45,17 @@ export function createCompactCommand(
       }
 
       try {
-        const compactOptions = {
-          ...MANUAL_COMPACT_OPTIONS,
-          contextWindowSize: targetAgent.config.provider.contextWindowSize,
-          ...(mode === 'llm' ? { forceSummary: true } : {}),
-        };
+        const compactOptions =
+          mode === 'llm'
+            ? {
+                ...LLM_COMPACT_OPTIONS,
+                contextWindowSize: targetAgent.config.provider.contextWindowSize,
+                forceSummary: true,
+              }
+            : {
+                toolResultsOnly: true,
+                contextWindowSize: targetAgent.config.provider.contextWindowSize,
+              };
         const result = await services.runExclusiveTask(
           targetAgent,
           {
@@ -96,14 +103,17 @@ function formatCompactNotice(result: CompactResult) {
   const ratio = Math.round(result.savedRatio * 100);
   const mode = result.mode === 'pruned' ? 'pruned' : 'summarized';
   const strategy = result.strategy.replace(/_/g, ' ');
-  const lines = [
-    `**${prefix} complete**`,
-    '',
-    `- Mode: ${mode} (${strategy})`,
-    `- Messages: ${result.beforeCount} -> ${result.afterCount}`,
-    `- Saved: ~${saved} tokens (${ratio}%)`,
-    `- Recent kept: ${result.keptCount} messages`,
-  ];
+  const lines = [`**${prefix} complete**`, '', `- Mode: ${mode} (${strategy})`];
+  if (result.strategy === 'tool_results_only') {
+    lines.push(`- Tool results replaced: ${result.toolResultsReplaced ?? 0}`);
+    lines.push(`- Messages: ${result.beforeCount} (unchanged)`);
+  } else {
+    lines.push(`- Messages: ${result.beforeCount} -> ${result.afterCount}`);
+  }
+  lines.push(`- Saved: ~${saved} tokens (${ratio}%)`);
+  if (result.strategy !== 'tool_results_only') {
+    lines.push(`- Recent kept: ${result.keptCount} messages`);
+  }
   if (result.contextUsageRatio !== undefined) {
     lines.push(`- Context after compact: ${Math.round(result.contextUsageRatio * 100)}%`);
   }

@@ -5,6 +5,7 @@
 ## 主要能力
 
 - 提供 `CompactionService`，封装上下文压缩流程。
+- `toolResultsOnly` 快速压缩：只把工具结果替换为占位符，不生成 checkpoint、不丢轮次、不调用模型（可重复执行，没有可替换内容时报 not needed）。
 - 将长对话整理为摘要消息，降低后续 prompt 的上下文压力。
 - 先裁剪媒体、base64 和旧工具结果，再按上下文预算决定 prune-only 或 summary + recent checkpoint。
 - 保留完整 recent round，并避免把 tool call / tool result 切成不合法的 provider 历史。

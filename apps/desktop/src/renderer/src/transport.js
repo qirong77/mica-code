@@ -285,6 +285,8 @@ function createWebApi(env) {
         invoke('stats:create-project-group', { name, parentId }),
       renameProjectGroup: (groupId, name) =>
         invoke('stats:rename-project-group', { groupId, name }),
+      moveProjectGroup: (groupId, parentId = null) =>
+        invoke('stats:move-project-group', { groupId, parentId }),
       deleteProjectGroup: (groupId) => invoke('stats:delete-project-group', { groupId }),
       // 侧栏唯一的「换位置」入口：pinned / project / recent 三选一
       moveSession: (sessionId, section, groupId = null) =>

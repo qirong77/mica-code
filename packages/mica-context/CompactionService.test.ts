@@ -728,6 +728,89 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
+  it('tool-results-only compact replaces tool results and leaves every other message untouched', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const messages = [
+      { role: 'user', content: 'keep user text' },
+      {
+        role: 'assistant',
+        content: 'keep assistant text',
+        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/example.ts"}' } }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-1',
+        content: `RAW_TOOL_RESULT: ${'x'.repeat(4_000)}`,
+        toolUseResult: { stdout: 'RAW_NESTED_TOOL_RESULT' },
+      },
+      { type: 'function_call', call_id: 'rc-1', name: 'run_shell', arguments: '{"cmd":"ls packages"}' },
+      { type: 'function_call_output', call_id: 'rc-1', output: `RAW_RESPONSES_OUTPUT: ${'y'.repeat(4_000)}` },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'keep this image' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: IMAGE_BASE64 } },
+        ],
+      },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      summarize,
+    });
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.mode).toBe('pruned');
+    expect(result.strategy).toBe('tool_results_only');
+    expect(result.toolResultsReplaced).toBe(2);
+    expect(result.beforeCount).toBe(messages.length);
+    expect(result.afterCount).toBe(messages.length);
+    expect(result.messages[0]).toEqual(messages[0]);
+    expect(result.messages[1]).toEqual(messages[1]);
+    expect(result.messages[3]).toEqual(messages[3]);
+    expect(result.messages[5]).toEqual(messages[5]);
+    expect(contentOf(result.messages[2])).toBe('[Old tool result content cleared during compact]');
+    expect(JSON.stringify(result.messages[2])).not.toContain('RAW_TOOL_RESULT');
+    expect(JSON.stringify(result.messages[4])).not.toContain('RAW_RESPONSES_OUTPUT');
+    // 没有任何 checkpoint 消息被插入，工具参数与媒体原样保留
+    const serialized = JSON.stringify(result.messages);
+    expect(serialized).not.toContain(COMPACT_BOUNDARY_PREFIX);
+    expect(serialized).not.toContain(COMPACT_SUMMARY_PREFIX);
+    expect(serialized).toContain(IMAGE_BASE64);
+  });
+
+  it('tool-results-only compact is repeatable and stops when nothing is left to replace', async () => {
+    const service = new CompactionService();
+    const summarize = vi.fn(async () => FULL_SUMMARY);
+    const messages = makeToolMessages(2);
+    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
+
+    const first = await service.compact({ messages, options, summarize });
+    expect(first.toolResultsReplaced).toBeGreaterThan(0);
+
+    await expect(service.compact({ messages: first.messages, options, summarize })).rejects.toBeInstanceOf(
+      CompactionNotNeededError,
+    );
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it('tool-results-only compact preview keeps the original messages', async () => {
+    const service = new CompactionService();
+    const messages = makeToolMessages(2);
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, preview: true, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    expect(result.preview).toBe(true);
+    expect(result.messages).toEqual(messages);
+    expect(result.toolResultsReplaced).toBeGreaterThan(0);
+  });
+
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {

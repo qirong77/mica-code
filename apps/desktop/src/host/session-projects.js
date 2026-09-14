@@ -113,6 +113,24 @@ export function renameGroup(projects, groupId, name) {
   return current
 }
 
+/**
+ * 分组换父级（拖拽嵌套）：`parentId` 为 null 即移回根。
+ * 目标是分组自己、或落在自己的子树里（会成环）时原样返回。
+ */
+export function moveGroup(projects, groupId, parentId = null) {
+  const current = normalizeProjects(projects)
+  const group = current.groups.find((item) => item.id === groupId)
+  if (!group) return current
+  const parent = typeof parentId === 'string' && parentId.trim() ? parentId.trim() : null
+  if (parent) {
+    if (!current.groups.some((item) => item.id === parent)) return current
+    if (groupSubtreeIds(current, groupId).has(parent)) return current
+  }
+  if ((group.parentId || null) === parent) return current
+  group.parentId = parent
+  return current
+}
+
 /** 删除分组连同其子树；落在子树里的会话回到 Recent（即清掉归属）。 */
 export function deleteGroup(projects, groupId) {
   const current = normalizeProjects(projects)

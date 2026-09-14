@@ -5,6 +5,7 @@ import {
   Markdown,
   canReuseVisualTranscript,
   chatUrlTransform,
+  completeRemainingTodoItems,
   currentTurnActivityMessages,
   fileTarget,
   hasPersistedTurn,
@@ -306,5 +307,35 @@ describe('structured activity state', () => {
     expect(todoItemsForTurn(messages, 'turn-1', true)[0].status).toBe('in_progress')
     expect(todoItemsForTurn(messages, 'turn-1', false)[0].status).toBe('pending')
     expect(todoItemsForTurn(messages, 'turn-2', true)[0].status).toBe('pending')
+  })
+
+  it('completes the leftover plan once the turn finished', () => {
+    const messages = [
+      {
+        kind: 'tool',
+        turnId: 'turn-1',
+        tool: {
+          tool: 'TodoWrite',
+          status: 'completed',
+          input: {
+            todos: [
+              { content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
+              { content: 'Test', activeForm: 'Testing', status: 'in_progress' },
+              { content: 'Ship', activeForm: 'Shipping', status: 'pending' }
+            ]
+          }
+        }
+      }
+    ]
+
+    expect(latestTodoItems(completeRemainingTodoItems(messages))).toEqual([
+      { content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
+      { content: 'Test', activeForm: 'Testing', status: 'completed' },
+      { content: 'Ship', activeForm: 'Shipping', status: 'completed' }
+    ])
+    // 已收口 / 没有计划时保持原引用，避免运行结束时的无谓重渲染。
+    expect(completeRemainingTodoItems([])).toEqual([])
+    const closed = completeRemainingTodoItems(messages)
+    expect(completeRemainingTodoItems(closed)).toBe(closed)
   })
 })

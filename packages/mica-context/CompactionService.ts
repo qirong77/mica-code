@@ -28,7 +28,7 @@ export type CompactInput = {
 };
 
 export type CompactMode = 'summarized' | 'pruned';
-export type CompactStrategy = 'prune_only' | 'summary_with_recent' | 'summary_only_fallback';
+export type CompactStrategy = 'prune_only' | 'summary_with_recent' | 'summary_only_fallback' | 'tool_results_only';
 
 export type CompactOptions = {
   customInstructions?: string;
@@ -37,6 +37,8 @@ export type CompactOptions = {
   force?: boolean;
   preview?: boolean;
   pruneOnly?: boolean;
+  /** 只把工具结果替换为占位符：不生成 checkpoint、不丢轮次、不调用模型（可重复执行）。 */
+  toolResultsOnly?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -76,6 +78,8 @@ export type CompactResult = {
   recentTokenEstimate?: number;
   summaryInputTokenEstimate?: number;
   reducedRecentRounds?: number;
+  /** toolResultsOnly：被替换掉工具结果的消息数。 */
+  toolResultsReplaced?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -101,6 +105,10 @@ export class CompactionService {
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
     const options = input.options ?? {};
+    // 快速压缩（/compact）：只把工具结果替换为占位符。消息条数、顺序、文本与
+    // 工具参数都保持不变，不生成 boundary/summary、不丢轮次、不调用模型，所以
+    // 连续执行不会丢失对话信息（没有可替换内容时报 not needed）。
+    if (options.toolResultsOnly) return compactToolResultsOnly(originalMessages, options);
     const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
     if (beforeCount < minMessages) {
       throw new CompactionNotNeededError();
@@ -679,6 +687,91 @@ function clampRatio(value: unknown, fallback: number): number {
 function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
   return messages.map((message) => pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }));
+}
+
+// 快速压缩（/compact）唯一的动作：把工具结果替换为占位符。媒体、base64、
+// 工具参数、用户与助手文本一律原样保留，也不插入 boundary/summary 消息，
+// 因此它不改变对话信息，只是把不再需要的大块工具输出腾出来。
+function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
+  const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
+  let replacedMessages = 0;
+  const compactedMessages = messages.map((message) => {
+    const counter = { replaced: 0 };
+    const next = pruneToolResultPayload(message, placeholder, counter);
+    if (counter.replaced > 0) replacedMessages++;
+    return next;
+  });
+  if (replacedMessages === 0) {
+    throw new CompactionNotNeededError('当前会话没有可清理的工具结果，暂不需要快速压缩');
+  }
+
+  const beforeTokenEstimate = estimateMessagesTokens(messages);
+  const afterTokenEstimate = estimateMessagesTokens(compactedMessages);
+  const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
+  const contextWindowSize = positiveNumber(options.contextWindowSize);
+  return {
+    messages: options.preview ? cloneJson(messages) : compactedMessages,
+    summary: 'Tool results replaced with placeholders; no message was summarized, dropped, or rewritten.',
+    mode: 'pruned',
+    strategy: 'tool_results_only',
+    beforeCount: messages.length,
+    afterCount: compactedMessages.length,
+    summarizedCount: 0,
+    keptCount: compactedMessages.length,
+    beforeTokenEstimate,
+    afterTokenEstimate,
+    savedTokenEstimate,
+    savedRatio: beforeTokenEstimate > 0 ? savedTokenEstimate / beforeTokenEstimate : 0,
+    boundaryIndex: -1,
+    promptTooLongRetries: 0,
+    forced: Boolean(options.force),
+    preview: Boolean(options.preview),
+    contextWindowSize,
+    contextUsageRatio: usageRatio(afterTokenEstimate, contextWindowSize),
+    lightweightTokenEstimate: afterTokenEstimate,
+    recentTokenEstimate: afterTokenEstimate,
+    summaryInputTokenEstimate: 0,
+    reducedRecentRounds: 0,
+    toolResultsReplaced: replacedMessages,
+  };
+}
+
+// 未改动时返回原引用，避免无谓的深拷贝；替换数量记在 counter 上。
+function pruneToolResultPayload(value: unknown, placeholder: string, counter: { replaced: number }): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const pruned = pruneToolResultPayload(item, placeholder, counter);
+      if (pruned !== item) changed = true;
+      return pruned;
+    });
+    return changed ? next : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    // 与其它压缩路径一致：Responses 的加密推理链绑定压缩前的精确上下文，
+    // 工具结果被改写后重放会失效，去掉它让 ResponsesClient 丢弃该 item。
+    if (key === 'encrypted_content') {
+      changed = true;
+      continue;
+    }
+    if (key === 'toolUseResult' || (isToolResultRecord(record) && (key === 'content' || key === 'output'))) {
+      if (child !== placeholder) {
+        changed = true;
+        counter.replaced++;
+      }
+      next[key] = placeholder;
+      continue;
+    }
+    const pruned = pruneToolResultPayload(child, placeholder, counter);
+    if (pruned !== child) changed = true;
+    next[key] = pruned;
+  }
+  return changed ? next : value;
 }
 
 function countChangedMessages(before: unknown[], after: unknown[]): number {

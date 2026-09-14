@@ -106,4 +106,50 @@ describe('resolveDrop', () => {
   it('drops nothing when there is no drag in flight', () => {
     expect(resolveDrop({ drag: null, section: 'pinned', targetId: 'a' })).toBeNull()
   })
+
+  describe('dragging a group', () => {
+    const groups = [
+      { id: 'g1', parentId: null },
+      { id: 'g2', parentId: 'g1' },
+      { id: 'g3', parentId: 'g2' },
+      { id: 'g4', parentId: null }
+    ]
+    const dragGroup = (id, parentId = null) => ({
+      kind: 'group',
+      id,
+      section: 'project',
+      groupId: parentId
+    })
+
+    it('nests a group under the group row it was dropped on', () => {
+      expect(
+        resolveDrop({ drag: dragGroup('g4'), section: 'project', groupId: 'g1', groups })
+      ).toEqual({ kind: 'move-group', groupId: 'g4', parentId: 'g1' })
+    })
+
+    it('moves a group back to the root when dropped on the Projects header', () => {
+      expect(resolveDrop({ drag: dragGroup('g3', 'g2'), section: 'project', groups })).toEqual({
+        kind: 'move-group',
+        groupId: 'g3',
+        parentId: null
+      })
+    })
+
+    it('refuses itself, its own subtree, its current parent and other sections', () => {
+      // 自己
+      expect(
+        resolveDrop({ drag: dragGroup('g1'), section: 'project', groupId: 'g1', groups })
+      ).toBeNull()
+      // 自己的后代（会成环）
+      expect(
+        resolveDrop({ drag: dragGroup('g1'), section: 'project', groupId: 'g3', groups })
+      ).toBeNull()
+      // 已经在那个父级下
+      expect(
+        resolveDrop({ drag: dragGroup('g3', 'g2'), section: 'project', groupId: 'g2', groups })
+      ).toBeNull()
+      // 分区标题只接会话
+      expect(resolveDrop({ drag: dragGroup('g1'), section: 'recent', groups })).toBeNull()
+    })
+  })
 })

@@ -3,6 +3,8 @@
  * 这里能覆盖「同分区重排 / 跨分区移动 / 不合法 drop」的全部分支，组件只负责调用。
  */
 
+import { groupSubtreeIds } from './session-projects'
+
 export function byUpdatedDesc(a, b) {
   return (b.updatedAtMs || 0) - (a.updatedAtMs || 0)
 }
@@ -23,8 +25,22 @@ function sameGroup(a, b) {
 }
 
 /**
+ * 分组换父级：落到分组行 = 挂进那个分组，落到 Projects 标题 = 回到根。
+ * 自己、自己的子树、以及本来就在那个父级下的落点都返回 null（不产生变更）。
+ */
+function resolveGroupDrop({ drag, section, groupId, groups }) {
+  if (section !== 'project') return null
+  const parentId = groupId ?? null
+  if (parentId === drag.id) return null
+  if (parentId && groupSubtreeIds({ groups }, drag.id).has(parentId)) return null
+  if ((drag.groupId ?? null) === parentId) return null
+  return { kind: 'move-group', groupId: drag.id, parentId }
+}
+
+/**
  * 一次 drop 该做什么：
  * - 跨分区（或跨分组）= 移动，目标分区由落点决定（Pinned / 某个分组 / Recent 三选一）；
+ * - 拖的是分组 = 换父级（嵌套），见 resolveGroupDrop；
  * - 同分区 = 手动重排（Recent 按时间排序，不参与）；
  * - 其余情况返回 null，表示这次 drop 不产生任何变更。
  */
@@ -33,11 +49,13 @@ export function resolveDrop({
   section,
   targetId,
   groupId = null,
+  groups = [],
   items = [],
   order = [],
   position = null
 }) {
   if (!drag) return null
+  if (drag.kind === 'group') return resolveGroupDrop({ drag, section, groupId, groups })
   if (drag.id === targetId) return null
   const sameTarget = drag.section === section && (drag.groupId ?? null) === (groupId ?? null)
   if (!sameTarget) return { kind: 'move', target: { section, groupId } }

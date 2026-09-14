@@ -7,10 +7,10 @@ describe('createCompactCommand', () => {
   it('advertises the llm argument', () => {
     const command = createCompactCommand(makeAgent(), makeSession(), makeServices({}));
 
-    expect(command.completionItems).toEqual([{ arg: 'llm', description: '固定使用 LLM 生成摘要' }]);
+    expect(command.completionItems).toEqual([{ arg: 'llm', description: '生成 LLM 摘要 checkpoint（会重写历史）' }]);
   });
 
-  it('passes current session controller, owner session, and fixed compact options', async () => {
+  it('replaces tool results only by default', async () => {
     const agent = makeAgent();
     const currentAgent = makeAgent();
     const session = makeSession();
@@ -22,14 +22,7 @@ describe('createCompactCommand', () => {
     await command.action();
 
     expect(services.compact).toHaveBeenCalledWith(currentAgent, currentSession, 'session-1', {
-      aggressive: true,
-      force: true,
-      lightweightPrune: true,
-      pruneOnlyThresholdRatio: 0.3,
-      targetContextRatio: 0.35,
-      maxPromptTooLongRetries: 4,
-      minRecentRounds: 1,
-      maxRecentRounds: 3,
+      toolResultsOnly: true,
       contextWindowSize: 1000,
     });
     expect(services.showNotice).toHaveBeenCalledWith(expect.stringContaining('**compact complete**'), 'session-1', {
@@ -38,6 +31,28 @@ describe('createCompactCommand', () => {
       status: 'success',
     });
     expect(services.showMessage).not.toHaveBeenCalled();
+  });
+
+  it('reports replaced tool results without claiming history was rewritten', async () => {
+    const services = makeServices({
+      result: makeResult({
+        mode: 'pruned',
+        strategy: 'tool_results_only',
+        beforeCount: 20,
+        afterCount: 20,
+        keptCount: 20,
+        toolResultsReplaced: 5,
+        savedRatio: 0.4,
+      }),
+    });
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action();
+
+    const notice = String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
+    expect(notice).toContain('- Tool results replaced: 5');
+    expect(notice).toContain('- Messages: 20 (unchanged)');
+    expect(notice).not.toContain('Recent kept');
   });
 
   it('forces LLM summarization when the llm argument is used', async () => {

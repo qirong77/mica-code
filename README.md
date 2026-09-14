@@ -13,7 +13,7 @@
 - 📎 **文件引用更快**：输入 `@` 即可搜索当前工作区文件，方向键选择后用 Enter 或 Tab 插入
 - 🎭 **Role 即工作流**：`/role` 整段替换 system prompt，写码、审查、规划各用一套人格
 - 🧩 **工具可拼装**：文件 / 搜索 / shell / 网页 / skills 开箱即用，MCP 接个人脚本与团队服务
-- ⏪ **可回退、可压缩、可定时**：`/rewind` 可回到所选历史对话节点；有文件检查点时也可恢复文件，`/compact` 在上下文吃紧时收束历史，`/loop` 可按固定间隔自动循环执行任务（每轮开始前自动压缩一次历史）
+- ⏪ **可回退、可压缩、可定时**：`/rewind` 可回到所选历史对话节点；有文件检查点时也可恢复文件，`/compact` 只把工具结果换成占位符、不改动对话内容（要用模型摘要换上下文时显式 `/compact llm`），`/loop` 可按固定间隔自动循环执行任务（每轮开始前自动压缩一次历史）
 
 ## 快速开始
 
@@ -81,7 +81,7 @@ mica exec [--json] [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [--mc
 mica compact --session <id> [--dir <cwd>] [--force]
 ```
 
-`mica compact` 复用交互式 `/compact` 的 `CompactionService`（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
+`mica compact` 走与 `/compact llm` 相同的 `CompactionService` 摘要路径（模型摘要 + 最近轮次保留；`--prune-only` 只做本地清理、不调用模型），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
 
 一次性的 Git 提交（右键 commit 等一次性消费方用）：
 

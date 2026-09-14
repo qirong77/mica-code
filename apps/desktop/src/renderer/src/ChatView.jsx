@@ -990,7 +990,7 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
   )
 }
 
-function latestTodoState(messages) {
+function lastTodoState(messages) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
     if (message.kind !== 'tool' || message.tool?.tool !== 'TodoWrite') continue
@@ -1018,13 +1018,44 @@ function latestTodoState(messages) {
       if (item.status === 'in_progress') inProgress += 1
       normalized.push({ content, activeForm, status: item.status })
     }
-    if (valid && inProgress <= 1) return { items: normalized, turnId: message.turnId || null }
+    if (valid && inProgress <= 1) {
+      return { items: normalized, turnId: message.turnId || null, index }
+    }
   }
-  return { items: [], turnId: null }
+  return null
+}
+
+function latestTodoState(messages) {
+  return lastTodoState(messages) ?? { items: [], turnId: null }
 }
 
 export function latestTodoItems(messages) {
   return latestTodoState(messages).items
+}
+
+// 与 Todo 插件的 turn:after 规则同款：正常结束的 turn 把未完成项（in_progress 与
+// pending）全部标为 completed，列表随之隐藏，否则残留的 pending 项会让计划面板在
+// 运行结束后一直显示 "N remaining"。桌面端没有插件状态、计划是从工具事件重建的，
+// 所以在 turn 正常结束时就地收口；abort/error 交给 todoItemsForTurn 的暂停展示。
+export function completeRemainingTodoItems(messages) {
+  const state = lastTodoState(messages)
+  if (!state || state.items.every((item) => item.status === 'completed')) return messages
+  return messages.map((message, index) => {
+    if (index !== state.index) return message
+    const todos = message.tool.input.todos
+    return {
+      ...message,
+      tool: {
+        ...message.tool,
+        input: {
+          ...message.tool.input,
+          todos: todos.map((item) =>
+            item.status === 'completed' ? item : { ...item, status: 'completed' }
+          )
+        }
+      }
+    }
+  })
 }
 
 export function todoItemsForTurn(messages, turnId, running) {
@@ -2206,6 +2237,10 @@ export function ChatView({
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
+          // 对齐 Todo 插件的 turn:after：正常结束的 turn 之后不再展示残留计划项。
+          if (event.part?.reason === 'completed') {
+            updateMessages(completeRemainingTodoItems)
+          }
           // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
           // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
           // 用户看到“运行了又马上停止”却没有任何提示。
