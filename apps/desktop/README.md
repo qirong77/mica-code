@@ -228,6 +228,16 @@ URL bar rather than the keyboard. `useVisualViewportHeight` (`hooks.js`) writes 
 into `--vvh`, and the narrow-screen root height is `var(--vvh, 100dvh)`, so the composer and the
 terminal key bar rise above the keyboard instead of being covered by it.
 
+Height alone is not enough on iOS: to reveal the focused input Safari also shifts the whole layout
+viewport, reported as `visualViewport.offsetTop`. By then the app has already shrunk to the visible
+height, so without compensation it hangs off the top of the screen and leaves a blank strip below —
+the composer ends up under the status bar. The same hook therefore writes that shift into
+`--vvh-top` (unit conversion and rounding live in the pure `viewport-metrics.js`; the shift only
+applies while unzoomed, since the same value during pinch-zoom comes from panning, not the
+keyboard) and the narrow-screen `#root` is `position: fixed` plus `translateY(var(--vvh-top,
+0px))`. The fixed positioning is load-bearing: `html`/`body` are `overflow: hidden` at that same
+visible height, so an in-flow root would be clipped the moment it is translated.
+
 > There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
 > binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
 

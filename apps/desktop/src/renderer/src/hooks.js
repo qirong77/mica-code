@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { viewportMetrics } from './viewport-metrics'
 
 /** 移动端断点：< 768px 时 shell 从三栏网格切换为单栏 + 抽屉 */
 export const MOBILE_QUERY = '(max-width: 767px)'
@@ -28,14 +29,17 @@ export function useIsMobile() {
 }
 
 /**
- * 把可见视口高度写到 `--vvh` 上，供窄屏的根容器（app.css 的移动端块）使用。
+ * 把可见视口的高度与位移写到 `--vvh` / `--vvh-top` 上，供窄屏的根容器（app.css 的
+ * 移动端块）使用。
  *
  * 软键盘弹起时 iOS Safari 和 Android Chrome 都只缩 visual viewport、不缩布局视口，
  * 高度写死成 100dvh 的容器会把底部内容（对话输入条、终端功能键条）留在键盘下面：
  * 看不见也点不到。`--vvh` 跟着可见区走，键盘弹起时底部自己让上来。
  *
- * 双指缩放同样会让 visualViewport 变小，但那不是键盘：按 scale 还原成布局像素，
- * 缩放时高度不变。每次只在整数值变化时写，避免亚像素抖动触发终端反复重排。
+ * 光有高度还不够：iOS 为了让被聚焦的输入框露出来，还会把布局视口整体上移
+ * （`visualViewport.offsetTop`）。应用此时已经缩到可见区那么高，不补偿就会整体偏出
+ * 屏幕上方、底下空出一块 —— 输入框跑到状态栏底下、中间一片空白。`--vvh-top` 记下这个
+ * 位移，根容器按它平移回来（见 viewport-metrics.js 的单位换算）。
  */
 export function useVisualViewportHeight() {
   useEffect(() => {
@@ -43,21 +47,40 @@ export function useVisualViewportHeight() {
     const root = typeof document === 'undefined' ? null : document.documentElement
     if (!viewport || !root) return undefined
 
-    let applied = null
+    let appliedHeight = null
+    let appliedTop = null
     const update = () => {
-      const next = Math.round(viewport.height * (viewport.scale || 1))
-      if (next === applied || next <= 0) return
-      applied = next
-      root.style.setProperty('--vvh', `${next}px`)
+      const metrics = viewportMetrics(viewport)
+      if (!metrics || metrics.height <= 0) return
+      if (metrics.height !== appliedHeight) {
+        appliedHeight = metrics.height
+        root.style.setProperty('--vvh', `${metrics.height}px`)
+      }
+      if (metrics.top !== appliedTop) {
+        appliedTop = metrics.top
+        if (metrics.top > 0) root.style.setProperty('--vvh-top', `${metrics.top}px`)
+        else root.style.removeProperty('--vvh-top')
+      }
+    }
+
+    // 键盘动画、以及 Safari 在 resize 之后才把布局视口推上去的那一步都不一定会再发
+    // 事件，所以可见区每次变化后再延迟复查几次。值没变就不写，复查几乎无成本。
+    let settleTimers = []
+    const onViewportResize = () => {
+      update()
+      settleTimers.forEach(clearTimeout)
+      settleTimers = [80, 240, 500].map((delay) => setTimeout(update, delay))
     }
 
     update()
-    viewport.addEventListener('resize', update)
+    viewport.addEventListener('resize', onViewportResize)
     viewport.addEventListener('scroll', update)
     return () => {
-      viewport.removeEventListener('resize', update)
+      settleTimers.forEach(clearTimeout)
+      viewport.removeEventListener('resize', onViewportResize)
       viewport.removeEventListener('scroll', update)
       root.style.removeProperty('--vvh')
+      root.style.removeProperty('--vvh-top')
     }
   }, [])
 }
