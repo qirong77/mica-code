@@ -35,6 +35,15 @@ function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
 }
 import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
+import {
+  backgroundTaskStatusLabel,
+  buildSubagentTimeline,
+  isBackgroundTaskRunning,
+  isSubagentRunning,
+  subagentStatusLabel,
+  taskElapsedMs,
+  taskOutputWindowLabel
+} from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
 import { uid } from './workspace'
 import TerminalComposer from './TerminalComposer'
@@ -722,7 +731,22 @@ function buildTaskForest(tasks) {
   return { roots, childrenByParent }
 }
 
-function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs }) {
+function shellBaseName(shell) {
+  return (
+    String(shell || '')
+      .split('/')
+      .filter(Boolean)
+      .pop() || 'shell'
+  )
+}
+
+// 详情字段可能是对象（工具结果 / 错误对象），直接渲染会抛 React 子节点错误。
+function textOf(value) {
+  if (value == null) return ''
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen }) {
   const activities = (task.activities || []).filter((activity) => activity.toolName !== 'Agent')
   const childTasks = childrenByParent.get(task.taskId) || []
   const age = formatLogElapsed(Math.max(0, nowMs - (Date.parse(task.startedAt) || nowMs)))
@@ -742,16 +766,17 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs }) {
   )
   return (
     <div>
-      {depth > 0 ? (
-        <div
-          className="chat-task-summary-row chat-task-summary-row-nested"
-          style={{ paddingLeft: indent }}
-        >
-          {summaryRow}
-        </div>
-      ) : (
-        <div className="chat-task-summary-row">{summaryRow}</div>
-      )}
+      <button
+        type="button"
+        className={`chat-task-summary-row chat-task-openable ${
+          depth > 0 ? 'chat-task-summary-row-nested' : ''
+        }`}
+        style={depth > 0 ? { paddingLeft: indent } : undefined}
+        title="查看 subagent 详情"
+        onClick={() => onOpen?.(task)}
+      >
+        {summaryRow}
+      </button>
       {activities.map((activity) => (
         <div className="chat-task-child" key={activity.id} style={{ paddingLeft: indent }}>
           <span className="chat-task-child-prefix"> ⎿ </span>
@@ -765,13 +790,14 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs }) {
           childrenByParent={childrenByParent}
           depth={depth + 1}
           nowMs={nowMs}
+          onOpen={onOpen}
         />
       ))}
     </div>
   )
 }
 
-function SubagentStatusDock({ tasks, now = Date.now() }) {
+function SubagentStatusDock({ tasks, now = Date.now(), onOpen }) {
   const { roots, childrenByParent } = useMemo(() => buildTaskForest(tasks), [tasks])
   if (!roots.length) return null
   return (
@@ -782,34 +808,353 @@ function SubagentStatusDock({ tasks, now = Date.now() }) {
           task={task}
           childrenByParent={childrenByParent}
           nowMs={now}
+          onOpen={onOpen}
         />
       ))}
     </section>
   )
 }
 
-function BackgroundTasksDock({ tasks, now = Date.now() }) {
+function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingId }) {
   if (!tasks.length) return null
   return (
     <section className="chat-task-dock chat-background-dock" aria-label="运行中的后台任务">
       {tasks.map((task) => {
         const age = formatLogElapsed(Math.max(0, now - (Date.parse(task.startedAt) || now)))
-        const shell =
-          String(task.shell || '')
-            .split('/')
-            .filter(Boolean)
-            .pop() || 'shell'
+        const shell = shellBaseName(task.shell)
         return (
-          <div className="chat-task-summary-row" key={task.id}>
-            <span className="chat-task-kind">$ ({shell})</span>
-            <span className="chat-task-status chat-task-status-running">{task.status}</span>
-            <span className="chat-task-runtime">{age}</span>
-            <span className="chat-task-type">{task.id}</span>
-            <span className="chat-task-description">{compactLine(task.command, 180)}</span>
+          <div className="chat-task-row" key={task.id}>
+            <button
+              type="button"
+              className="chat-task-summary-row chat-task-openable"
+              title="查看输出"
+              onClick={() => onOpen?.(task)}
+            >
+              <span className="chat-task-kind">$ ({shell})</span>
+              <span className="chat-task-status chat-task-status-running">{task.status}</span>
+              <span className="chat-task-runtime">{age}</span>
+              <span className="chat-task-type">{task.id}</span>
+              <span className="chat-task-description">{compactLine(task.command, 180)}</span>
+            </button>
+            <button
+              type="button"
+              className="chat-task-action"
+              title="终止后台任务"
+              aria-label={`终止后台任务 ${task.id}`}
+              disabled={killingId === task.id}
+              onClick={() => onKill(task)}
+            >
+              ✕
+            </button>
           </div>
         )
       })}
     </section>
+  )
+}
+
+function useTaskPolling({ task, isRunning, intervalMs, load }) {
+  const [detail, setDetail] = useState(null)
+  const [error, setError] = useState(null)
+  const [now, setNow] = useState(() => Date.now())
+  const mountedRef = useRef(true)
+  const inFlightRef = useRef(false)
+
+  const poll = useCallback(async () => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    try {
+      const res = await load()
+      if (!mountedRef.current) return
+      if (!res?.ok) {
+        setError(res?.error || '获取详情失败')
+        return
+      }
+      // host 侧成功，但 app-server 说这个任务不存在（已被回收/从未存在）。
+      if (res.result?.ok === false) {
+        setError(res.result.message || '获取详情失败')
+        return
+      }
+      setDetail(res.result)
+      setError(null)
+    } catch (err) {
+      if (mountedRef.current) setError(String(err?.message || err))
+    } finally {
+      inFlightRef.current = false
+    }
+  }, [load])
+
+  useEffect(() => {
+    mountedRef.current = true
+    poll()
+    return () => {
+      mountedRef.current = false
+    }
+  }, [poll])
+
+  const running = isRunning(detail?.task || task)
+
+  useEffect(() => {
+    if (!running) return undefined
+    const timer = window.setInterval(poll, intervalMs)
+    const ticker = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => {
+      clearInterval(timer)
+      clearInterval(ticker)
+    }
+  }, [running, intervalMs, poll])
+
+  return { detail, error, running, now }
+}
+
+function useStickToBottom(watch) {
+  const bodyRef = useRef(null)
+  const stickToBottomRef = useRef(true)
+
+  // 与 TurnLogDock 一致：只有读者停留在底部时才跟随滚动。
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (body && stickToBottomRef.current) body.scrollTop = body.scrollHeight
+  }, [watch])
+
+  const onBodyScroll = (event) => {
+    const body = event.currentTarget
+    stickToBottomRef.current =
+      body.scrollHeight - body.scrollTop - body.clientHeight < SCROLL_BOTTOM_THRESHOLD
+  }
+
+  return { bodyRef, onBodyScroll }
+}
+
+function TaskDetailModal({ title, actions, onClose, bodyRef, onBodyScroll, children }) {
+  useEffect(() => {
+    const onKeyDown = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="chat-ctx-modal-overlay no-drag"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="chat-ctx-modal chat-task-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="chat-ctx-modal-header">
+          <span className="chat-task-modal-title">{title}</span>
+          <div className="chat-task-modal-header-actions">
+            {actions}
+            <button type="button" onClick={onClose} aria-label="关闭">
+              Esc ✕
+            </button>
+          </div>
+        </div>
+        <div ref={bodyRef} className="chat-ctx-modal-body" onScroll={onBodyScroll}>
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SubagentTimelineStep({ step }) {
+  if (step.kind === 'thinking') {
+    return <div className="chat-task-modal-thinking">{step.text}</div>
+  }
+  if (step.kind === 'text') {
+    return <Markdown text={step.text} />
+  }
+  if (step.kind === 'tool') {
+    return (
+      <details className="chat-task-modal-step">
+        <summary>
+          {step.toolName} {compactLine(step.text, 90)}
+        </summary>
+        <pre>{step.text}</pre>
+      </details>
+    )
+  }
+  return (
+    <details className="chat-task-modal-step">
+      <summary>{step.toolName} 结果</summary>
+      <pre>{step.text}</pre>
+    </details>
+  )
+}
+
+function SubagentDetailModal({ nodeId, task: initialTask, onClose, onStop }) {
+  const load = useCallback(
+    () => window.mica.chat.subagentDetail(nodeId, initialTask.taskId),
+    [nodeId, initialTask.taskId]
+  )
+  const { detail, error, running, now } = useTaskPolling({
+    task: initialTask,
+    isRunning: isSubagentRunning,
+    intervalMs: 1000,
+    load
+  })
+  const [stopping, setStopping] = useState(false)
+  const task = detail?.task || initialTask
+  const steps = useMemo(() => buildSubagentTimeline(task), [task])
+  const { bodyRef, onBodyScroll } = useStickToBottom(task)
+  const elapsed = taskElapsedMs(task, now)
+  const usage = task.usage
+
+  const stop = async () => {
+    if (stopping) return
+    setStopping(true)
+    try {
+      await onStop?.(task.taskId)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  return (
+    <TaskDetailModal
+      title={`🤖 ${task.subagentType || 'subagent'} · ${compactLine(task.description, 60)}`}
+      onClose={onClose}
+      bodyRef={bodyRef}
+      onBodyScroll={onBodyScroll}
+      actions={
+        running ? (
+          <button type="button" disabled={stopping} onClick={stop}>
+            停止
+          </button>
+        ) : null
+      }
+    >
+      {error && <div className="chat-task-modal-muted">{error}</div>}
+      <div className="chat-ctx-modal-summary">
+        <span>{subagentStatusLabel(task.status)}</span>
+        {elapsed != null && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
+          </>
+        )}
+        {task.model && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span>{task.model}</span>
+          </>
+        )}
+        {task.effort && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span>{task.effort}</span>
+          </>
+        )}
+        <span className="chat-ctx-modal-sep">·</span>
+        <span>{task.taskId}</span>
+      </div>
+      {usage && (
+        <div className="chat-ctx-modal-summary">
+          <span className="tabular-nums">
+            {usage.records} requests · in {formatTokens(usage.inputTokens)} · out{' '}
+            {formatTokens(usage.outputTokens)} · cached {formatTokens(usage.cachedInputTokens)} ·
+            total {formatTokens(usage.totalTokens)}
+          </span>
+        </div>
+      )}
+      {task.prompt && (
+        <details className="chat-task-modal-step">
+          <summary>任务提示词</summary>
+          <pre className="chat-task-modal-pre">{textOf(task.prompt)}</pre>
+        </details>
+      )}
+      {task.timelineTruncated && <div className="chat-task-modal-muted">较早的步骤已省略。</div>}
+      {steps.map((step) => (
+        <SubagentTimelineStep key={step.key} step={step} />
+      ))}
+      {!running && <div className="chat-task-modal-muted">{subagentStatusLabel(task.status)}</div>}
+      {task.result && (
+        <div className="chat-task-modal-result">
+          <div className="chat-task-modal-muted">结果</div>
+          <Markdown text={textOf(task.result)} />
+        </div>
+      )}
+      {task.error && <div className="chat-task-modal-error">{textOf(task.error)}</div>}
+    </TaskDetailModal>
+  )
+}
+
+function BackgroundTaskModal({ nodeId, task: initialTask, onClose, onKill }) {
+  const load = useCallback(
+    () => window.mica.chat.backgroundTaskOutput(nodeId, initialTask.id, 32000),
+    [nodeId, initialTask.id]
+  )
+  const { detail, error, running, now } = useTaskPolling({
+    task: initialTask,
+    isRunning: isBackgroundTaskRunning,
+    intervalMs: 1500,
+    load
+  })
+  const task = detail?.task || initialTask
+  const content = detail?.content || ''
+  const { bodyRef, onBodyScroll } = useStickToBottom(detail)
+  const elapsed = taskElapsedMs(task, now)
+
+  return (
+    <TaskDetailModal
+      title={`$ (${shellBaseName(task.shell)}) · ${task.id}`}
+      onClose={onClose}
+      bodyRef={bodyRef}
+      onBodyScroll={onBodyScroll}
+      actions={
+        running ? (
+          <button
+            type="button"
+            className="chat-task-modal-danger"
+            disabled={!onKill}
+            onClick={() => onKill(task)}
+          >
+            终止
+          </button>
+        ) : null
+      }
+    >
+      {error && <div className="chat-task-modal-muted">{error}</div>}
+      <div className="chat-ctx-modal-summary">
+        <span>{backgroundTaskStatusLabel(task.status)}</span>
+        {elapsed != null && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
+          </>
+        )}
+        {task.exitCode != null && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span className="tabular-nums">exit {task.exitCode}</span>
+          </>
+        )}
+        {task.signal && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span>{task.signal}</span>
+          </>
+        )}
+        {detail && (
+          <>
+            <span className="chat-ctx-modal-sep">·</span>
+            <span className="tabular-nums">{taskOutputWindowLabel(detail)}</span>
+          </>
+        )}
+        <span className="chat-ctx-modal-sep">·</span>
+        <span className="chat-task-modal-muted" title={task.cwd}>
+          {compactLine(task.cwd, 60)}
+        </span>
+      </div>
+      <div className="chat-task-modal-muted">{task.command}</div>
+      {content ? (
+        <pre className="chat-task-modal-output">{content}</pre>
+      ) : (
+        <div className="chat-ctx-modal-empty">（暂无输出）</div>
+      )}
+    </TaskDetailModal>
   )
 }
 
@@ -1837,6 +2182,9 @@ export function ChatView({
   const [backgroundTasks, setBackgroundTasks] = useState([])
   const [subagentTasks, setSubagentTasks] = useState([])
   const [taskNow, setTaskNow] = useState(() => Date.now())
+  // 点开的任务详情弹窗（单槽位）：{ kind: 'subagent' | 'background', task } | null
+  const [taskDetail, setTaskDetail] = useState(null)
+  const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [runStartedAt, setRunStartedAt] = useState(0)
@@ -1990,6 +2338,47 @@ export function ChatView({
       return id
     },
     [updateMessages]
+  )
+
+  const openTaskDetail = useCallback((kind, task) => setTaskDetail({ kind, task }), [])
+
+  const killBackgroundTask = useCallback(
+    async (task) => {
+      if (
+        !window.confirm(`确定要终止后台任务 ${task.id} 吗？\n\n${compactLine(task.command, 160)}`)
+      ) {
+        return
+      }
+      setKillingTaskId(task.id)
+      try {
+        const res = await window.mica.chat.killBackgroundTask(nodeId, task.id)
+        if (!res?.ok || res.result?.ok === false) {
+          appendNotice(res?.error || res?.result?.message || '终止后台任务失败', 'error')
+        } else if (res.result?.stillRunning) {
+          appendNotice(res.result.message || '后台任务仍在运行', 'warn')
+        }
+      } catch (error) {
+        appendNotice(`终止后台任务失败：${error?.message || error}`, 'error')
+      } finally {
+        setKillingTaskId(null)
+      }
+    },
+    [appendNotice, nodeId]
+  )
+
+  const stopSubagent = useCallback(
+    async (taskId) => {
+      if (!window.confirm('确定要停止这个 subagent 任务吗？')) return
+      try {
+        const res = await window.mica.chat.killSubagent(nodeId, taskId)
+        if (!res?.ok || res.result?.ok === false) {
+          appendNotice(res?.error || res?.result?.message || '停止 subagent 失败', 'error')
+        }
+      } catch (error) {
+        appendNotice(`停止 subagent 失败：${error?.message || error}`, 'error')
+      }
+    },
+    [appendNotice, nodeId]
   )
 
   // 把文本插到光标处（粘贴图片与移动端「上传照片」共用）。以 textarea 当前的值为准，
@@ -3939,8 +4328,18 @@ export function ChatView({
           />
         )}
         <TodoDock items={todoItems} hidden={todoHidden} />
-        <SubagentStatusDock tasks={subagentTasks} now={taskNow} />
-        <BackgroundTasksDock tasks={backgroundTasks} now={taskNow} />
+        <SubagentStatusDock
+          tasks={subagentTasks}
+          now={taskNow}
+          onOpen={(task) => openTaskDetail('subagent', task)}
+        />
+        <BackgroundTasksDock
+          tasks={backgroundTasks}
+          now={taskNow}
+          onOpen={(task) => openTaskDetail('background', task)}
+          onKill={killBackgroundTask}
+          killingId={killingTaskId}
+        />
         <QueueDock
           items={queuedDisplayItems}
           onRecall={recallQueued}
@@ -4184,6 +4583,22 @@ export function ChatView({
           sessionId={sessionIdRef.current}
           contextWindowSize={windowSize}
           onClose={() => setContextDetail(false)}
+        />
+      )}
+      {taskDetail?.kind === 'subagent' && (
+        <SubagentDetailModal
+          nodeId={nodeId}
+          task={taskDetail.task}
+          onClose={() => setTaskDetail(null)}
+          onStop={stopSubagent}
+        />
+      )}
+      {taskDetail?.kind === 'background' && (
+        <BackgroundTaskModal
+          nodeId={nodeId}
+          task={taskDetail.task}
+          onClose={() => setTaskDetail(null)}
+          onKill={killBackgroundTask}
         />
       )}
       {contextMenu && (

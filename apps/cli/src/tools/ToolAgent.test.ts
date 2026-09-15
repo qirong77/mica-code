@@ -554,6 +554,55 @@ describe('ToolAgent', () => {
     vi.advanceTimersByTime(2_000);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('records the child stream into the task timeline the desktop detail modal reads', async () => {
+    const deferred = createDeferred<string>();
+    const query = vi.fn(() => deferred.promise);
+    const { runtime, child } = createRuntimeStub(query);
+    const taskManager = new SubagentTaskManager();
+    const tool = new ToolAgent(runtime, taskManager);
+    const started = await tool.execute({
+      description: 'stream events',
+      prompt: 'Stream events.',
+      run_in_background: true,
+      context_mode: 'none',
+    });
+    const taskId = started.match(/task_id: (\S+)/)?.[1] ?? '';
+    await flushAsyncWork();
+
+    child.onThinking?.('先看目录');
+    child.onThinking?.('，再读文件');
+    child.onText?.('开始处理');
+    child.onToolCall?.('read_file', '{"file_path":"a.ts"}', 'tool-1');
+    child.onToolResult?.('read_file', 'file contents', 'tool-1');
+    // 嵌套 Agent 调用不进活动行，同样不进时间线。
+    child.onToolCall?.('Agent', '{"operation":"read"}', 'tool-2');
+
+    expect(taskManager.get(taskId, runtime)?.timeline).toEqual([
+      { id: 'thinking', kind: 'thinking', text: '先看目录，再读文件', at: expect.any(String) },
+      { id: 'text', kind: 'text', text: '开始处理', at: expect.any(String) },
+      {
+        id: 'tool:tool-1',
+        kind: 'tool',
+        text: '{"file_path":"a.ts"}',
+        toolName: 'read_file',
+        at: expect.any(String),
+      },
+      {
+        id: 'result:tool-1',
+        kind: 'tool_result',
+        text: 'file contents',
+        toolName: 'read_file',
+        at: expect.any(String),
+      },
+    ]);
+
+    deferred.resolve('done');
+    await flushAsyncWork();
+    // 结束后时间线保留（弹窗要能回看已完成的 subagent），活动行则被清空。
+    expect(taskManager.get(taskId, runtime)).toMatchObject({ status: 'completed', activities: [] });
+    expect(taskManager.get(taskId, runtime)?.timeline).toHaveLength(4);
+  });
 });
 
 function createRuntimeStub(query = vi.fn(async () => 'child result')) {

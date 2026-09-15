@@ -13,7 +13,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
-import { liveSessionRowState } from './session-state'
+import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
 import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
@@ -53,7 +53,7 @@ const rowIndent = (depth) => ROW_PAD + depth * TREE_STEP
 
 /** 固定宽度的列位：没有内容时也占位，保证各行的名称都在同一列。 */
 function Slot({ children }) {
-  return <span className="grid w-4 shrink-0 place-items-center">{children}</span>
+  return <span className="relative grid w-4 shrink-0 place-items-center">{children}</span>
 }
 
 /** 取路径最后一段作为文件夹名 */
@@ -140,6 +140,25 @@ function RowLeading({ state, unreadKey, terminal }) {
         />
       ) : null}
     </span>
+  )
+}
+
+// 折叠起来的容器（分组 / 分区 / Recent 的 Show more）自己看不见里面的会话，就替
+// 它们显示状态：图标列已被文件夹/分区图标占着，所以圆点按角标叠在图标右上角——
+// 和 RowLeading 里「终端图标 + 未读」同一种做法，绝不额外占位，否则这一行的名称
+// 会错开一列。`scope` 是容器名，只用来把 tooltip 说清楚。异常中断的会话不上浮
+// （见 session-state.js 的 mergeRowStates），所以这里只有 running / unread 两种。
+function RowBadge({ state, scope }) {
+  if (!state) return null
+  const className = state === 'running' ? 'bg-success chat-dot-running' : 'bg-info chat-dot-unread'
+  const what = state === 'running' ? '有会话正在运行' : '有未读结果'
+  return (
+    <span
+      // 状态从 running 变 unread 时要重放那一下短闪，和 RowLeading 同款
+      key={state}
+      className={`absolute -top-0.5 -right-0.5 size-2 rounded-full ${className}`}
+      title={scope ? `${scope}里${what}` : what}
+    />
   )
 }
 
@@ -308,17 +327,20 @@ export function SessionTree({
     () => new Set((projects?.groups || []).map((group) => group.id)),
     [projects]
   )
-  const rootDrafts = []
-  const draftsByGroup = new Map()
-  for (const node of draftTabs) {
-    const groupId = draftGroups?.[node.id]
-    if (groupId && groupIds.has(groupId)) {
-      if (!draftsByGroup.has(groupId)) draftsByGroup.set(groupId, [])
-      draftsByGroup.get(groupId).push(node)
-    } else {
-      rootDrafts.push(node)
+  const { rootDrafts, draftsByGroup } = useMemo(() => {
+    const root = []
+    const byGroup = new Map()
+    for (const node of draftTabs) {
+      const groupId = draftGroups?.[node.id]
+      if (groupId && groupIds.has(groupId)) {
+        if (!byGroup.has(groupId)) byGroup.set(groupId, [])
+        byGroup.get(groupId).push(node)
+      } else {
+        root.push(node)
+      }
     }
-  }
+    return { rootDrafts: root, draftsByGroup: byGroup }
+  }, [draftGroups, draftTabs, groupIds])
 
   /** 搜索时只保留命中会话所在的分组（含其祖先分组）。 */
   const visibleGroups = useMemo(() => {
@@ -336,6 +358,73 @@ export function SessionTree({
 
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
+
+  // 侧栏看不见的会话——分组折叠、分区折叠、Recent 的 Show more 分页——由第一个可见的
+  // 祖先代为显示状态。行的状态判定与 renderSessionRow/renderDraftRow 共用同一份回调，
+  // 否则「代显的状态」和「真正被藏起来的行」会分叉。
+  const rowStateOfSession = useCallback(
+    (session) =>
+      liveSessionRowState({
+        notificationState: unread[openBySession[session.id]],
+        interrupted: session.interrupted,
+        remoteRunning: session.remoteRunning
+      }),
+    [openBySession, unread]
+  )
+  const rowStateOfDraft = useCallback(
+    (node) => liveSessionRowState({ notificationState: unread[node.id] }),
+    [unread]
+  )
+
+  /** 分组子树（含后代分组）的合并状态；展开的分组不代显，子行自己会显示。 */
+  const hiddenGroupStates = useMemo(
+    () =>
+      collectGroupStates({
+        projects,
+        sessionsByGroup: groupSessions,
+        draftsByGroup,
+        stateOfSession: rowStateOfSession,
+        stateOfDraft: rowStateOfDraft
+      }),
+    [draftsByGroup, groupSessions, projects, rowStateOfDraft, rowStateOfSession]
+  )
+
+  /**
+   * 折叠起来的容器要代显的状态。每个被藏起来的行只有一个代显者：分区折叠由标题
+   * 代显，分组折叠由分组图标代显，Recent 的分页由「Show N more」那一行代显。
+   */
+  const hiddenStates = useMemo(() => {
+    const hidden = (name) => !normalizedQuery && !!collapsedSections[name]
+    const overflow = normalizedQuery ? [] : recentCandidates.slice(recentList.length)
+    return {
+      pinned: hidden('pinned') ? mergeRowStates(pinned.map(rowStateOfSession)) : null,
+      project: hidden('project')
+        ? mergeRowStates(
+            childGroups(projects, null).map((group) => hiddenGroupStates.get(group.id))
+          )
+        : null,
+      // 折叠时整个分区都看不见（根草稿也在里面），展开时只剩被 Show more 截掉的那些
+      recent: hidden('recent')
+        ? mergeRowStates([
+            ...recentCandidates.map(rowStateOfSession),
+            ...rootDrafts.map(rowStateOfDraft)
+          ])
+        : null,
+      recentOverflow: mergeRowStates(overflow.map(rowStateOfSession))
+    }
+  }, [
+    collapsedSections,
+    hiddenGroupStates,
+    normalizedQuery,
+    pinned,
+    projects,
+    recentCandidates,
+    recentList,
+    rootDrafts,
+    rowStateOfDraft,
+    rowStateOfSession
+  ])
+
   const openMenu = (event, payload) => {
     event.preventDefault()
     event.stopPropagation()
@@ -481,11 +570,7 @@ export function SessionTree({
   const renderSessionRow = (session, indent, section, groupId = null) => {
     const nodeId = openBySession[session.id]
     const active = !!nodeId && activeSessionId === session.id
-    const state = liveSessionRowState({
-      notificationState: unread[nodeId],
-      interrupted: session.interrupted,
-      remoteRunning: session.remoteRunning
-    })
+    const state = rowStateOfSession(session)
     const unreadState = unread[nodeId]
     const editingThis = editing?.kind === 'session' && editing.id === session.id
     const isOver = rowOverState(section, session.id, groupId)
@@ -551,7 +636,7 @@ export function SessionTree({
 
   const renderDraftRow = (node, indent = 0, groupId = null) => {
     const active = node.id === activeSessionId || node.id === selectedId
-    const state = liveSessionRowState({ notificationState: unread[node.id] })
+    const state = rowStateOfDraft(node)
     const editingThis = editing?.kind === 'draft' && editing.id === node.id
     const dropSection = groupId ? 'project' : 'recent'
     const isOver = rowOverState(dropSection, node.id, groupId)
@@ -669,6 +754,7 @@ export function SessionTree({
             <span className="text-white/40" title="分组">
               {open ? <IconFolderOpen size={14} /> : <IconFolder size={14} />}
             </span>
+            <RowBadge state={open ? null : hiddenGroupStates.get(groupId)} scope={group.name} />
           </Slot>
           {editingThis ? (
             <RenameInput
@@ -714,7 +800,7 @@ export function SessionTree({
 
   const menuNode = menu
   const renderSectionHeader = (name, label, Icon, options = {}) => {
-    const { onAdd, addTitle, dropSection, accepts } = options
+    const { onAdd, addTitle, dropSection, accepts, hiddenState } = options
     const isOverHeader = !!dropSection && over?.header === dropSection
     // 默认只接会话/草稿：分组换父级是 Projects 标题与分组行的事，落到别处不做任何反应
     const acceptsDrag = (source) =>
@@ -747,7 +833,8 @@ export function SessionTree({
         <button
           type="button"
           className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-white/45 transition-colors hover:bg-white/[.05] hover:text-white/85"
-          aria-expanded={sectionOpen(name)}
+          // sectionOpen 返回的是查询串或布尔值，aria 只接受 "true"/"false"
+          aria-expanded={!!sectionOpen(name)}
           onClick={() => toggleSection(name)}
         >
           <Slot>
@@ -758,6 +845,7 @@ export function SessionTree({
           </Slot>
           <Slot>
             <Icon size={14} className="text-white/30" />
+            <RowBadge state={hiddenState} scope={label} />
           </Slot>
           <span className="flex-1 truncate text-white/50">{label}</span>
         </button>
@@ -804,7 +892,10 @@ export function SessionTree({
 
         <div className="flex flex-col gap-px">
           <section>
-            {renderSectionHeader('pinned', 'Pinned', IconPin, { dropSection: 'pinned' })}
+            {renderSectionHeader('pinned', 'Pinned', IconPin, {
+              dropSection: 'pinned',
+              hiddenState: hiddenStates.pinned
+            })}
             {sectionOpen('pinned') &&
               (pinned.length ? (
                 <ul className="flex flex-col gap-px">
@@ -823,7 +914,8 @@ export function SessionTree({
               addTitle: '新建分组',
               // 会话没有「Projects 根」这一级（取消归属是拖到 Recent），这里只接分组
               dropSection: 'project',
-              accepts: (source) => source.kind === 'group'
+              accepts: (source) => source.kind === 'group',
+              hiddenState: hiddenStates.project
             })}
             {sectionOpen('project') &&
               (projects?.groups?.length ? (
@@ -838,7 +930,10 @@ export function SessionTree({
           </section>
 
           <section>
-            {renderSectionHeader('recent', 'Recent', IconListTree, { dropSection: 'recent' })}
+            {renderSectionHeader('recent', 'Recent', IconListTree, {
+              dropSection: 'recent',
+              hiddenState: hiddenStates.recent
+            })}
             {sectionOpen('recent') &&
               (recentList.length || rootDrafts.length ? (
                 <>
@@ -856,6 +951,7 @@ export function SessionTree({
                       <Slot />
                       <Slot>
                         <IconDots size={14} />
+                        <RowBadge state={hiddenStates.recentOverflow} scope="Recent" />
                       </Slot>
                       <span className="min-w-0 flex-1 truncate text-left text-[13px]">
                         Show {recentPageSize} more

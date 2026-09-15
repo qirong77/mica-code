@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX_METHODS,
   CODEX_ERROR_METHOD_NOT_FOUND,
+  MICA_METHODS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -11,6 +12,18 @@ import {
 describe('codex protocol framing', () => {
   it('advertises the standard thread resume method', () => {
     expect(CODEX_METHODS.threadResume).toBe('thread/resume');
+  });
+
+  // The desktop host sends these literal method names to `mica app-server`;
+  // renaming one side silently turns the request into method-not-found.
+  it('pins the Mica extension request names', () => {
+    expect(MICA_METHODS).toEqual({
+      editMessage: 'mica/turn/editMessage',
+      killBackgroundTask: 'mica/backgroundTasks/kill',
+      backgroundTaskOutput: 'mica/backgroundTasks/output',
+      subagentTaskDetail: 'mica/subagentTasks/detail',
+      killSubagentTask: 'mica/subagentTasks/kill',
+    });
   });
 
   it('parses a JSON-RPC request with id/method/params', () => {

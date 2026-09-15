@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { MICA_QUEUE_NOTIFICATIONS } from '@packages/mica-runtime/index.js';
 import {
   codexInputToRuntimePayload,
+  projectBackgroundTask,
   projectBackgroundTasks,
+  projectSubagentTaskDetail,
   projectSubagentTasks,
   turnEventToQueueNotification,
 } from './runAppServer.js';
@@ -160,6 +162,29 @@ describe('task snapshot projection (mica task extension)', () => {
     });
   });
 
+  it('projects a single finished task keeping finish metadata for the output view', () => {
+    // The snapshot filter drops finished rows; the on-demand output request uses
+    // this projector so the client can still show status + exit code.
+    const result = projectBackgroundTask(
+      task({
+        id: 'done',
+        status: 'finished',
+        finished_at: '2026-08-06T00:01:00.000Z',
+        exit_code: 0,
+      }),
+    );
+    expect(result).toEqual({
+      id: 'done',
+      command: 'npm run dev',
+      cwd: '/tmp/proj',
+      shell: '/bin/bash',
+      status: 'finished',
+      startedAt: '2026-08-06T00:00:00.000Z',
+      finishedAt: '2026-08-06T00:01:00.000Z',
+      exitCode: 0,
+    });
+  });
+
   it('projects only running subagents with nested activities', () => {
     const record = (partial: Partial<SubagentTaskRecord>): SubagentTaskRecord => ({
       id: 'task-1',
@@ -194,5 +219,87 @@ describe('task snapshot projection (mica task extension)', () => {
         ],
       },
     ]);
+  });
+});
+
+describe('subagent task detail projection (mica task extension)', () => {
+  const record = (partial: Partial<SubagentTaskRecord> = {}): SubagentTaskRecord => ({
+    id: 'task-1',
+    description: 'find usages',
+    prompt: 'grep for it',
+    subagent_type: 'Explore',
+    model: 'gpt-5',
+    effort: 'medium',
+    status: 'running',
+    started_at: '2026-08-06T00:00:00.000Z',
+    ...partial,
+  });
+
+  it('copies the timeline, usage numbers and truncation flag', () => {
+    const detail = projectSubagentTaskDetail(
+      record({
+        max_turns: 8,
+        context_mode: 'recent',
+        write_mode: 'owned_paths',
+        owned_paths: ['src/a.ts'],
+        context_files: ['src/b.ts'],
+        timeline: [
+          { id: 'thinking', kind: 'thinking', text: 'hmm', at: '2026-08-06T00:00:01.000Z' },
+          {
+            id: 'tool:call-1',
+            kind: 'tool',
+            text: '{"file_path":"a.ts"}',
+            toolName: 'read_file',
+            at: '2026-08-06T00:00:02.000Z',
+          },
+        ],
+        timeline_truncated: true,
+        usage: { records: 2, inputTokens: 10, outputTokens: 20, cachedInputTokens: 3, totalTokens: 30 },
+      }),
+    );
+
+    expect(detail).toMatchObject({
+      taskId: 'task-1',
+      subagentType: 'Explore',
+      description: 'find usages',
+      status: 'running',
+      startedAt: '2026-08-06T00:00:00.000Z',
+      model: 'gpt-5',
+      effort: 'medium',
+      maxTurns: 8,
+      contextMode: 'recent',
+      writeMode: 'owned_paths',
+      ownedPaths: ['src/a.ts'],
+      contextFiles: ['src/b.ts'],
+      prompt: 'grep for it',
+      timelineTruncated: true,
+      usage: { records: 2, inputTokens: 10, outputTokens: 20, cachedInputTokens: 3, totalTokens: 30 },
+    });
+    expect(detail.timeline?.map((entry) => entry.id)).toEqual(['thinking', 'tool:call-1']);
+    expect(detail.timeline?.[1]).toMatchObject({ kind: 'tool', toolName: 'read_file' });
+  });
+
+  it('omits absent optional fields and keeps finishedAt for a completed task', () => {
+    const detail = projectSubagentTaskDetail(
+      record({ id: 'task-2', status: 'completed', finished_at: '2026-08-06T00:05:00.000Z' }),
+    );
+    expect(detail.finishedAt).toBe('2026-08-06T00:05:00.000Z');
+    expect(detail).not.toHaveProperty('timeline');
+    expect(detail).not.toHaveProperty('timelineTruncated');
+    expect(detail).not.toHaveProperty('usage');
+    expect(detail).not.toHaveProperty('ownedPaths');
+    expect(detail).not.toHaveProperty('maxTurns');
+  });
+
+  it('truncates a long result at 40k characters keeping the head', () => {
+    const long = 'a'.repeat(40_001);
+    const detail = projectSubagentTaskDetail(record({ status: 'completed', result: long }));
+    expect(detail.result).toBe(`${'a'.repeat(40_000)}\n…[truncated]`);
+  });
+
+  it('leaves a result at or below the cap untouched', () => {
+    const exact = 'b'.repeat(40_000);
+    const detail = projectSubagentTaskDetail(record({ status: 'completed', result: exact }));
+    expect(detail.result).toBe(exact);
   });
 });

@@ -65,6 +65,7 @@ export {
   cleanBackgroundTaskOutput,
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
+  loadBackgroundTask,
   readBackgroundTaskOutput,
   killBackgroundTask,
   terminateCurrentBackgroundTasks,

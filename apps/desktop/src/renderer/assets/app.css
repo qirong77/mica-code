@@ -1814,6 +1814,151 @@ body.is-resizing.is-resizing-terminal {
   text-decoration-color: rgb(255 255 255 / 12%);
 }
 
+/* 任务行：整行可点开详情弹窗，行尾单独一个终止按钮（终止不触发打开）。 */
+.chat-task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-task-row .chat-task-summary-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* grid 行的 width: 100% 会顶掉 flex-basis，让它按可用宽度收缩 */
+  width: auto;
+}
+
+.chat-task-openable {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-task-openable:hover {
+  color: var(--color-fg-strong);
+}
+
+.chat-task-openable:focus-visible {
+  outline: 1px solid var(--color-line-strong);
+  outline-offset: 1px;
+}
+
+.chat-task-action {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  padding: 0;
+  color: var(--color-fg-faint);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.chat-task-action:hover {
+  background: var(--color-panel-hi);
+  color: var(--color-danger);
+}
+
+.chat-task-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-ctx-modal.chat-task-modal {
+  max-width: 720px;
+}
+
+.chat-task-modal-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-task-modal-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-ctx-modal-header .chat-task-modal-danger {
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-line));
+  color: var(--color-danger);
+}
+
+.chat-ctx-modal-header .chat-task-modal-danger:hover {
+  color: var(--color-danger-soft);
+}
+
+.chat-task-modal-thinking {
+  margin: 0 0 6px;
+  color: var(--color-fg-faint);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-task-modal-step {
+  margin: 0 0 6px;
+}
+
+.chat-task-modal-step > summary {
+  color: var(--color-fg-faint);
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.chat-task-modal-step > summary:hover {
+  color: var(--color-fg-strong);
+}
+
+.chat-task-modal-step pre,
+.chat-task-modal-pre,
+.chat-task-modal-output {
+  margin: 4px 0 0;
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-canvas);
+  padding: 6px 8px;
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 后台输出交给弹窗主体滚动，不再套第二层滚动条。 */
+.chat-task-modal-output {
+  max-height: none;
+}
+
+.chat-task-modal-result {
+  margin-top: 8px;
+}
+
+.chat-task-modal-error {
+  margin-top: 8px;
+  color: var(--color-danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-task-modal-muted {
+  color: var(--color-fg-faint);
+}
+
 .chat-status-line,
 .chat-composer {
   width: 100%;
@@ -2498,8 +2643,11 @@ body.is-resizing.is-resizing-terminal {
   position: relative;
   z-index: 1;
   width: 100%;
-  min-height: 30px;
-  max-height: 180px;
+  /* 高度范围必须和 .chat-composer-input 用同一组变量：渲染层（markdown-layer）和
+     textarea 是两个独立的滚动视口，视口高度不一致时 layer.scrollTop = ta.scrollTop
+     会被钳到不同的最大值，拖高输入框后可见文字与选区高亮、自绘光标、点击落点全部错位。 */
+  min-height: var(--chat-composer-min-h, 30px);
+  max-height: var(--chat-composer-max-h, 180px);
   field-sizing: content;
   resize: none;
   display: block;

@@ -746,6 +746,7 @@ function attachSubagentActivityTracking(options: {
   options.child.onText = (text) => {
     previousOnText?.(text);
     if (disposed) return;
+    options.taskManager.appendTimeline(options.taskId, options.owner, { id: 'text', kind: 'text', text });
     clearWaiting();
     if (!text.trim() || responseTimer) return;
     responseTimer = setTimeout(() => {
@@ -757,6 +758,11 @@ function attachSubagentActivityTracking(options: {
   options.child.onThinking = (thinking) => {
     previousOnThinking?.(thinking);
     if (disposed) return;
+    options.taskManager.appendTimeline(options.taskId, options.owner, {
+      id: 'thinking',
+      kind: 'thinking',
+      text: thinking,
+    });
     clearWaiting();
     clearResponse();
     if (thinking) showModelPhase('Thinking…');
@@ -764,6 +770,14 @@ function attachSubagentActivityTracking(options: {
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
     if (disposed) return;
+    if (name !== 'Agent') {
+      options.taskManager.appendTimeline(options.taskId, options.owner, {
+        id: `tool:${id ?? name}`,
+        kind: 'tool',
+        text: args ?? '',
+        toolName: name,
+      });
+    }
     clearWaiting();
     clearResponse();
     if (name === 'Agent') return;
@@ -772,6 +786,13 @@ function attachSubagentActivityTracking(options: {
   };
   options.child.onToolResult = (name, result, id) => {
     previousOnToolResult?.(name, result, id);
+    if (disposed) return;
+    options.taskManager.appendTimeline(options.taskId, options.owner, {
+      id: `result:${id ?? name}`,
+      kind: 'tool_result',
+      text: result ?? '',
+      toolName: name,
+    });
   };
   if (options.signal?.aborted) dispose();
   else {

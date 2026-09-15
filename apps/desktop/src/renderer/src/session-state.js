@@ -1,3 +1,5 @@
+import { childGroups } from './session-projects'
+
 /**
  * Sidebar activity is process-local. A persisted session snapshot may retain
  * turnState="running" after a crash, so it must never drive the live dot.
@@ -32,4 +34,58 @@ export function runningTerminalSessions(rightTerms = [], states = {}) {
     if (term?.sessionId && states?.[term.id]?.processRunning) ids.add(term.sessionId)
   }
   return ids
+}
+
+/**
+ * 折叠起来的分组/分区会把里面的行从侧栏藏掉，那一层必须替它显示状态，否则
+ * 「正在跑」和「有未读」在折叠状态下完全不可见。合并优先级与 RowLeading 的
+ * 显示分支同源：运行中 > 未读。
+ *
+ * 异常中断（error）刻意不参与合并：它是单个会话自己的状态——用户点进去才需要
+ * 关心是哪一条没跑完，而折叠容器上挂一个红灯只会指不出对象、还让「展开找红灯」
+ * 变成必然操作。所以 error 只留在会话行自身（liveSessionRowState），不上浮。
+ */
+const ROW_STATE_RANK = { running: 2, unread: 1 }
+
+export function mergeRowStates(states = []) {
+  let best = null
+  let rank = 0
+  for (const state of states) {
+    const current = ROW_STATE_RANK[state] || 0
+    if (current > rank) {
+      rank = current
+      best = state
+    }
+  }
+  return best
+}
+
+/**
+ * groupId -> 该分组子树（含自己、含后代分组）里所有会话与草稿的合并状态。
+ * 传进来的必须是渲染时用的同一份归属数据，这样「代显的状态」与「折叠后真正
+ * 看不见的行」才不会分叉。
+ */
+export function collectGroupStates({
+  projects,
+  sessionsByGroup,
+  draftsByGroup,
+  stateOfSession,
+  stateOfDraft
+}) {
+  const states = new Map()
+  const walk = (group) => {
+    const collected = []
+    for (const session of sessionsByGroup?.get(group.id) || []) {
+      collected.push(stateOfSession(session))
+    }
+    for (const draft of draftsByGroup?.get(group.id) || []) {
+      collected.push(stateOfDraft(draft))
+    }
+    for (const child of childGroups(projects, group.id)) collected.push(walk(child))
+    const state = mergeRowStates(collected)
+    states.set(group.id, state)
+    return state
+  }
+  for (const group of childGroups(projects, null)) walk(group)
+  return states
 }

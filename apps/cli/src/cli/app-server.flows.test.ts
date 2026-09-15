@@ -34,7 +34,7 @@ const suite = bunAvailable ? describe : describe.skip;
  * before the text arrives (to keep a turn busy long enough to steer into it). */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'tool',
+    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell',
     errorMessage: '',
     delayBeforeTextMs: 0,
     requests: [] as Array<{ model: string; input: unknown[]; reasoning?: { effort?: string } }>,
@@ -48,6 +48,9 @@ function createMockProvider() {
     toolFileContent: 'hello from mock',
     /** Second tool call content (kept separate so the two calls are distinct). */
     toolFileContent2: 'hello from mock (second call)',
+    /** `shell` mode: the command the mock asks `run_shell` to start in the
+     * background, so the tests can drive `mica/backgroundTasks/*`. */
+    shellCommand: 'echo tick-1; echo tick-2; sleep 60',
     /** Override reply text; compact tests use a long reply so the checkpoint
      * exceeds the recent-token budget and actually summarizes. */
     longText: '',
@@ -194,6 +197,50 @@ function createMockProvider() {
           if (state.delayBeforeTextMs > 0) setTimeout(finishTool, state.delayBeforeTextMs);
           else finishTool();
         };
+        /** `shell` mode: one background `run_shell` call, answered immediately —
+         * the task it starts outlives this response (and the turn), which is
+         * exactly the state `mica/backgroundTasks/*` has to reach. */
+        const emitShellCallEvents = () => {
+          const argumentsText = JSON.stringify({
+            command: state.shellCommand,
+            run_in_background: true,
+          });
+          emit({ type: 'response.created', response: { id: 'resp_3', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_3', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+              id: 'fc_shell',
+              type: 'function_call',
+              status: 'in_progress',
+              call_id: 'call_shell',
+              name: 'run_shell',
+              arguments: '',
+            },
+          });
+          emit({
+            type: 'response.function_call_arguments.done',
+            output_index: 0,
+            item_id: 'fc_shell',
+            arguments: argumentsText,
+          });
+          emit({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'fc_shell',
+              type: 'function_call',
+              status: 'completed',
+              call_id: 'call_shell',
+              name: 'run_shell',
+              arguments: argumentsText,
+            },
+          });
+          emitCompleted();
+          res.end();
+          state.responsesFinished += 1;
+        };
         const emitCompleted = () => {
           emit({
             type: 'response.completed',
@@ -220,6 +267,10 @@ function createMockProvider() {
             emitToolCallEvents(requestIndex);
             // emitToolCallEvents already schedules its own completion via
             // delayBeforeTextMs; res.end happens inside emitCompleted.
+            return;
+          }
+          if (state.mode === 'shell' && requestIndex === 1) {
+            emitShellCallEvents();
             return;
           }
           emitTextEvents();
@@ -534,6 +585,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
     mock!.state.toolFilePath = '';
+    mock!.state.shellCommand = 'echo tick-1; echo tick-2; sleep 60';
     mock!.state.longText = '';
     mock!.state.includeReasoning = false;
   });
@@ -1756,5 +1808,101 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(mock!.state.requests.length).toBeGreaterThan(0);
     expect(mock!.state.requests[0].model).toBe('mock-chat-override');
     expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
+  });
+
+  itE2E('mica/backgroundTasks/{output,kill} read and stop a real background shell task', async () => {
+    mock!.state.mode = 'shell';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('background-tasks');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '起一个后台任务' }] });
+    await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+
+    // The snapshot only carries tasks that are still starting/running, so its
+    // arrival is also the proof that the tool really spawned one.
+    const snapshotWithTask = await waitFor(
+      host,
+      (m) =>
+        m.method === 'mica/backgroundTasks/updated' &&
+        Array.isArray(m.params?.tasks) &&
+        (m.params.tasks as unknown[]).length > 0,
+      'background task snapshot',
+    );
+    const task = (snapshotWithTask.params!.tasks as Array<{ id: string; status: string; command: string }>)[0]!;
+    expect(task.status === 'running' || task.status === 'starting').toBe(true);
+    expect(task.command).toContain('tick-1');
+
+    // Output: the host reads the task's own output file and reports the window
+    // it returned, so the desktop can show what it is not seeing.
+    await send(host, 2, 'mica/backgroundTasks/output', { taskId: task.id, tailBytes: 4096 });
+    const outputResponse = await waitFor(host, (m) => m.id === 2 && m.result !== undefined, 'output response');
+    const output = outputResponse.result as {
+      ok: boolean;
+      content: string;
+      size: number;
+      task: { status: string } | null;
+    };
+    expect(output.ok).toBe(true);
+    expect(output.content).toContain('tick-1');
+    expect(output.size).toBeGreaterThan(0);
+    expect(output.task?.status === 'running' || output.task?.status === 'starting').toBe(true);
+
+    // Unknown ids degrade with a result instead of an error notification.
+    await send(host, 3, 'mica/backgroundTasks/output', { taskId: 'ffffffffffff' });
+    const unknown = await waitFor(host, (m) => m.id === 3 && m.result !== undefined, 'unknown task response');
+    expect(unknown.result).toMatchObject({ ok: false, content: '', task: null });
+
+    // Kill: the same request the desktop's ✕ button sends.
+    await send(host, 4, 'mica/backgroundTasks/kill', { taskId: task.id });
+    const killResponse = await waitFor(host, (m) => m.id === 4 && m.result !== undefined, 'kill response');
+    expect(killResponse.result).toMatchObject({ ok: true });
+
+    // The host pushes an immediate snapshot, and a stopped task is no longer in it.
+    await waitFor(
+      host,
+      (m) => m.method === 'mica/backgroundTasks/updated' && (m.params?.tasks as unknown[]).length === 0,
+      'empty task snapshot after kill',
+    );
+
+    // A finished task is gone from the snapshot, so the output request has to
+    // carry its final status (otherwise the modal would keep showing "running").
+    await send(host, 5, 'mica/backgroundTasks/output', { taskId: task.id });
+    const afterKill = await waitFor(host, (m) => m.id === 5 && m.result !== undefined, 'post-kill output');
+    expect((afterKill.result as { task: { status: string } }).task.status).toBe('killed');
+  });
+
+  itE2E('mica/subagentTasks/{detail,kill} answer for unknown ids without breaking the host', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('subagent-detail');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'mica/subagentTasks/detail', { taskId: 'agent-task-missing' });
+    const detail = await waitFor(host, (m) => m.id === 1 && m.result !== undefined, 'detail response');
+    expect(detail.result).toMatchObject({ ok: false });
+
+    await send(host, 2, 'mica/subagentTasks/kill', { taskId: 'agent-task-missing' });
+    const killed = await waitFor(host, (m) => m.id === 2 && m.result !== undefined, 'kill response');
+    expect(killed.result).toMatchObject({ ok: false });
+
+    // Missing params are a protocol error (-32602), not a silently empty result.
+    await send(host, 3, 'mica/subagentTasks/detail', {});
+    const invalid = await waitFor(host, (m) => m.id === 3 && m.error !== undefined, 'invalid params error');
+    expect((invalid.error as { code: number }).code).toBe(-32602);
+
+    // The resident host is still usable after all of the above.
+    await send(host, 4, 'turn/start', { threadId: '', input: [{ type: 'text', text: '还在吗' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id: string }).id;
+    await waitFor(host, turnCompleted(turnId), 'turn/completed');
   });
 });

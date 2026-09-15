@@ -168,6 +168,28 @@ or a replaced session history. Mica adds these as **incremental extensions**
   `session_compact` tool replaced the persisted history mid-host; the client
   reloads the session instead of showing a stale transcript.
 
+## Mica extension requests
+
+`MICA_METHODS` adds requests the Codex protocol has no equivalent for. They are
+plain queries/commands — they never start a turn, so they stay usable while one
+is streaming, and a Codex driver never sends them (the host answers unknown
+methods with `-32601`):
+
+- `mica/turn/editMessage` (`MicaEditMessageParams`): rewrite a user message that
+  was already sent and rerun it. The message is located by its whitespace-folded
+  text plus a from-the-end occurrence counter (persisted histories carry no
+  per-message ids), everything after it is truncated, saved, and replayed.
+- `mica/backgroundTasks/kill` / `mica/backgroundTasks/output`: background shell
+  tasks are owned by the host process, so the desktop app's task-dock ✕ button
+  and output modal go through here. The running-only snapshot drops a task the
+  moment it stops, so the `output` response also carries a
+  `MicaBackgroundTaskItem` projection with the final status and exit code.
+- `mica/subagentTasks/detail` / `mica/subagentTasks/kill`: read (prompt, bounded
+  transcript timeline, result, usage) or stop one subagent task. Subagent
+  records live only in the host's `SubagentTaskManager`, and the transcript is
+  deliberately kept out of the per-second snapshot, so it is fetched on demand
+  while a detail modal is open.
+
 ## Model, effort, and context resolution
 
 - `mica models` prints one `<provider-id>/<model-id>` per line (line-delimited),

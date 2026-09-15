@@ -32,12 +32,17 @@ import {
   type CodexUserInput,
   type MicaBackgroundTaskItem,
   type MicaQueueItem,
+  type MicaSubagentTaskDetail,
   type MicaSubagentTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import {
+  cleanBackgroundTaskOutput,
+  killBackgroundTask as killBackgroundTaskById,
   listBackgroundTasks,
+  loadBackgroundTask,
   micaTools,
+  readBackgroundTaskOutput,
   terminateCurrentBackgroundTasks,
   type BackgroundTaskMeta,
 } from '@packages/mica-tools/index.js';
@@ -71,23 +76,33 @@ export type AppServerOptions = {
   thinking?: boolean;
 };
 
+/**
+ * Project one background shell task. Shared by the running-only snapshot and
+ * the on-demand output request: the latter must also carry the status of a task
+ * that already finished (with its exit code), because the snapshot drops it the
+ * moment it stops running.
+ */
+export function projectBackgroundTask(task: BackgroundTaskMeta): MicaBackgroundTaskItem {
+  return {
+    id: task.id,
+    command: task.command,
+    cwd: task.cwd,
+    shell: task.shell,
+    status: task.status,
+    startedAt: task.started_at,
+    ...(task.finished_at ? { finishedAt: task.finished_at } : {}),
+    ...(task.exit_code !== undefined && task.exit_code !== null ? { exitCode: task.exit_code } : {}),
+    ...(task.signal ? { signal: task.signal } : {}),
+  };
+}
+
 /** Project active background shell tasks for the `mica/backgroundTasks/updated`
  * snapshot. Only tasks still starting/running are surfaced (matches the CLI
  * TaskStatusBar, which hides finished rows). */
 export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgroundTaskItem[] {
   return tasks
     .filter((task) => task.status === 'starting' || task.status === 'running')
-    .map((task) => ({
-      id: task.id,
-      command: task.command,
-      cwd: task.cwd,
-      shell: task.shell,
-      status: task.status,
-      startedAt: task.started_at,
-      ...(task.finished_at ? { finishedAt: task.finished_at } : {}),
-      ...(task.exit_code !== undefined && task.exit_code !== null ? { exitCode: task.exit_code } : {}),
-      ...(task.signal ? { signal: task.signal } : {}),
-    }));
+    .map((task) => projectBackgroundTask(task));
 }
 
 /** Project running subagents (foreground + background) for the
@@ -111,6 +126,46 @@ export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentT
         startedAt: activity.startedAt,
       })),
     }));
+}
+
+/** Cap the projected result so the on-demand detail response stays small. The
+ * record itself keeps up to 200k (in memory), but the desktop modal never needs
+ * a whole result inline. Keeps the head, mirroring the transcript clamp. */
+const SUBAGENT_DETAIL_RESULT_MAX_CHARS = 40_000;
+
+function clampDetailResult(result: string): string {
+  if (result.length <= SUBAGENT_DETAIL_RESULT_MAX_CHARS) return result;
+  return `${result.slice(0, SUBAGENT_DETAIL_RESULT_MAX_CHARS)}\n…[truncated]`;
+}
+
+/**
+ * Project one subagent task (including finished ones) for the desktop's
+ * on-demand detail modal. The periodic `mica/subagentTasks/updated` snapshot
+ * stays lean; this carries the prompt, streamed timeline, result and usage.
+ */
+export function projectSubagentTaskDetail(record: SubagentTaskRecord): MicaSubagentTaskDetail {
+  return {
+    taskId: record.id,
+    ...(record.parent_task_id ? { parentTaskId: record.parent_task_id } : {}),
+    subagentType: record.subagent_type,
+    description: record.description,
+    status: record.status,
+    startedAt: record.started_at,
+    ...(record.finished_at ? { finishedAt: record.finished_at } : {}),
+    model: record.model,
+    effort: record.effort,
+    ...(record.max_turns === undefined ? {} : { maxTurns: record.max_turns }),
+    ...(record.context_mode === undefined ? {} : { contextMode: record.context_mode }),
+    ...(record.write_mode === undefined ? {} : { writeMode: record.write_mode }),
+    ...(record.owned_paths ? { ownedPaths: [...record.owned_paths] } : {}),
+    ...(record.context_files ? { contextFiles: [...record.context_files] } : {}),
+    ...(record.prompt === undefined ? {} : { prompt: record.prompt }),
+    ...(record.result === undefined ? {} : { result: clampDetailResult(record.result) }),
+    ...(record.error === undefined ? {} : { error: record.error }),
+    ...(record.usage ? { usage: { ...record.usage } } : {}),
+    ...(record.timeline ? { timeline: record.timeline.map((entry) => ({ ...entry })) } : {}),
+    ...(record.timeline_truncated ? { timelineTruncated: true } : {}),
+  };
 }
 
 /**
@@ -174,6 +229,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let sessionId = '';
   let currentTurnId: string | null = null;
   let taskSnapshotTimer: NodeJS.Timeout | null = null;
+  // Assigned inside the try block once the host state exists; the request
+  // handlers (kill/output) call it to push an immediate snapshot after a
+  // mutation instead of waiting for the 1s interval.
+  let pushTaskSnapshots: () => void = () => {};
 
   const cleanup = async (): Promise<void> => {
     if (taskSnapshotTimer) {
@@ -395,7 +454,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     // same task rows above the composer as the CLI shows above its input.
     let lastBackgroundTasksKey = '';
     let lastSubagentTasksKey = '';
-    const pushTaskSnapshots = () => {
+    pushTaskSnapshots = () => {
       if (!agent || !subagentTasks) return;
       const backgroundTasks = projectBackgroundTasks(listBackgroundTasks({ status: 'all' }));
       const backgroundKey = JSON.stringify(backgroundTasks);
@@ -493,6 +552,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       await handleCodexRequest(id, method, params, {
         agent: agent!,
         sessionController: sessionController!,
+        subagentTasks: subagentTasks!,
+        refreshTaskSnapshots: () => pushTaskSnapshots(),
         runtimeOverride,
         executor: executor!,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
@@ -520,6 +581,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 type HostContext = {
   agent: AgentRuntime;
   sessionController: SessionController;
+  /** Live subagent task manager: the desktop detail modal reads records here. */
+  subagentTasks: SubagentTaskManager;
+  /** Push a fresh background/subagent snapshot after a task mutation. */
+  refreshTaskSnapshots: () => void;
   runtimeOverride: AgentRuntimeConfigOverride;
   executor: HeadlessTurnExecutor;
   /** Resolves once the background MCP init finished (never rejects). */
@@ -986,6 +1051,95 @@ async function handleCodexRequest(
         return;
       }
       ctx.writeResponse({ turn: turnSnapshot(turnId, 'inProgress') });
+      return;
+    }
+    case MICA_METHODS.killBackgroundTask: {
+      // Mica extension: background shell tasks are owned by the host process, so
+      // the desktop can only stop one through it (mirrors the CLI kill_task tool).
+      const taskId = paramString(params, 'taskId');
+      if (!taskId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
+        return;
+      }
+      const forceAfterParam = Number(params.forceAfterMs);
+      const forceAfterMs = Number.isFinite(forceAfterParam) && forceAfterParam >= 0 ? forceAfterParam : 1500;
+      const result = await killBackgroundTaskById(taskId, 'SIGTERM', forceAfterMs);
+      ctx.refreshTaskSnapshots();
+      ctx.writeResponse({
+        ok: result.ok,
+        message: result.message,
+        ...(result.stillRunning === undefined ? {} : { stillRunning: result.stillRunning }),
+      });
+      return;
+    }
+    case MICA_METHODS.backgroundTaskOutput: {
+      // The periodic snapshot drops a task the moment it stops running, so the
+      // response carries its own task projection (status + exit code) too.
+      const taskId = paramString(params, 'taskId');
+      if (!taskId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
+        return;
+      }
+      const meta = loadBackgroundTask(taskId);
+      if (!meta) {
+        ctx.writeResponse({
+          ok: false,
+          message: `未知后台任务: ${taskId}`,
+          content: '',
+          size: 0,
+          start: 0,
+          end: 0,
+          task: null,
+        });
+        return;
+      }
+      const tailParam = Number(params.tailBytes);
+      const tailBytes = Number.isFinite(tailParam) && tailParam > 0 ? Math.min(Math.floor(tailParam), 200_000) : 32_000;
+      const range = readBackgroundTaskOutput(meta, { tailBytes, maxBytes: tailBytes });
+      ctx.writeResponse({
+        ok: true,
+        content: cleanBackgroundTaskOutput(range.content),
+        size: range.size,
+        start: range.start,
+        end: range.end,
+        task: projectBackgroundTask(meta),
+      });
+      return;
+    }
+    case MICA_METHODS.subagentTaskDetail: {
+      // Subagent records (prompt, timeline, result, usage) live only in the
+      // host's SubagentTaskManager; the desktop fetches them on demand.
+      const taskId = paramString(params, 'taskId');
+      if (!taskId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
+        return;
+      }
+      const record = ctx.subagentTasks.get(taskId, ctx.agent);
+      if (!record) {
+        ctx.writeResponse({ ok: false, message: `未找到 subagent 任务: ${taskId}` });
+        return;
+      }
+      ctx.writeResponse({ ok: true, task: projectSubagentTaskDetail(record) });
+      return;
+    }
+    case MICA_METHODS.killSubagentTask: {
+      const taskId = paramString(params, 'taskId');
+      if (!taskId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
+        return;
+      }
+      const record = ctx.subagentTasks.get(taskId, ctx.agent);
+      if (!record) {
+        ctx.writeResponse({ ok: false, message: `未找到 subagent 任务: ${taskId}` });
+        return;
+      }
+      if (record.status !== 'running') {
+        ctx.writeResponse({ ok: false, message: `subagent ${taskId} 当前状态为 ${record.status}，无需停止。` });
+        return;
+      }
+      ctx.subagentTasks.kill(taskId, ctx.agent);
+      ctx.refreshTaskSnapshots();
+      ctx.writeResponse({ ok: true, message: `已请求停止 subagent ${taskId}。` });
       return;
     }
     default:

@@ -336,6 +336,145 @@ describe('SubagentTaskManager', () => {
       }),
     ).toThrow('task manager is stopping');
   });
+
+  it('merges consecutive same-id same-kind timeline deltas into one entry', () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'timeline task',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: 'hello ' });
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: 'world' });
+
+    const timeline = manager.get(task.id, owner)?.timeline ?? [];
+    expect(timeline).toHaveLength(1);
+    expect(timeline[0]).toMatchObject({ id: 'text', kind: 'text', text: 'hello world' });
+  });
+
+  it('starts a new timeline entry when the id or kind changes', () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'timeline task',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: 'answer' });
+    manager.appendTimeline(task.id, owner, { id: 'thinking', kind: 'thinking', text: 'hmm' });
+    manager.appendTimeline(task.id, owner, {
+      id: 'tool:call-1',
+      kind: 'tool',
+      text: '{"file_path":"a.ts"}',
+      toolName: 'read_file',
+    });
+    manager.appendTimeline(task.id, owner, { id: 'result:call-1', kind: 'tool_result', text: 'ok' });
+
+    const timeline = manager.get(task.id, owner)?.timeline ?? [];
+    expect(timeline.map((entry) => entry.kind)).toEqual(['text', 'thinking', 'tool', 'tool_result']);
+    expect(timeline[2]).toMatchObject({ id: 'tool:call-1', toolName: 'read_file' });
+  });
+
+  it('retains the timeline after the task completes', async () => {
+    const owner = {} as AgentRuntime;
+    const deferred = createDeferred<{ result: string }>();
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'retain me',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => deferred.promise,
+    });
+
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: 'done soon' });
+    deferred.resolve({ result: 'done' });
+    await flushAsyncWork();
+
+    const record = manager.get(task.id, owner);
+    expect(record?.status).toBe('completed');
+    expect(record?.timeline?.map((entry) => entry.text)).toEqual(['done soon']);
+
+    // Recording after completion is a no-op: the transcript is frozen.
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: ' late' });
+    expect(manager.get(task.id, owner)?.timeline?.[0]?.text).toBe('done soon');
+  });
+
+  it('caps the timeline at 120 entries and flags truncation', () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'many steps',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    for (let index = 0; index < 121; index++) {
+      manager.appendTimeline(task.id, owner, { id: `step-${index}`, kind: 'text', text: `step ${index}` });
+    }
+
+    const record = manager.get(task.id, owner);
+    expect(record?.timeline).toHaveLength(120);
+    expect(record?.timeline_truncated).toBe(true);
+    // Oldest entries are dropped from the front.
+    expect(record?.timeline?.[0]?.text).toBe('step 1');
+    expect(record?.timeline?.at(-1)?.text).toBe('step 120');
+  });
+
+  it('returns clone-isolated timeline entries from get()', () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'clone me',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: 'original' });
+    const fetched = manager.get(task.id, owner);
+    fetched!.timeline![0]!.text = 'mutated';
+    fetched!.timeline!.push({ id: 'extra', kind: 'text', text: 'extra', at: new Date(0).toISOString() });
+
+    const fresh = manager.get(task.id, owner);
+    expect(fresh?.timeline).toHaveLength(1);
+    expect(fresh?.timeline?.[0]?.text).toBe('original');
+  });
+
+  it('ignores empty timeline text and unknown owners', () => {
+    const owner = {} as AgentRuntime;
+    const otherOwner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'guarded',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    manager.appendTimeline(task.id, owner, { id: 'text', kind: 'text', text: '' });
+    manager.appendTimeline(task.id, otherOwner, { id: 'text', kind: 'text', text: 'nope' });
+    manager.appendTimeline('missing-task', owner, { id: 'text', kind: 'text', text: 'nope' });
+
+    expect(manager.get(task.id, owner)?.timeline ?? []).toEqual([]);
+  });
 });
 
 async function flushAsyncWork(): Promise<void> {

@@ -142,17 +142,32 @@ export const MICA_SESSION_NOTIFICATIONS = {
 } as const;
 
 /**
- * Mica extension requests (client -> host). The Codex protocol can only append
- * turns, so an "edit a message that was already sent" affordance (the desktop
- * app's double-click editor) needs a way to rewind the conversation first.
- * `mica/turn/editMessage` locates the user message by its (whitespace-folded)
- * text — persisted histories carry no per-message id — truncates it and
- * everything after it, saves the session and starts a fresh turn with the
- * edited text. Codex clients never send it; the host answers unknown methods
- * with method-not-found, so a Codex driver is unaffected.
+ * Mica extension requests (client -> host). The Codex protocol has no request
+ * for these, so the desktop app needs Mica-specific ones:
+ *
+ * - `mica/turn/editMessage`: the Codex protocol can only append turns, so an
+ *   "edit a message that was already sent" affordance (the desktop app's
+ *   double-click editor) needs a way to rewind the conversation first. The
+ *   message is located by its (whitespace-folded) text — persisted histories
+ *   carry no per-message id — then truncated together with everything after it,
+ *   saved, and rerun with the edited text.
+ * - `mica/backgroundTasks/kill` / `mica/backgroundTasks/output`: long-lived
+ *   background shell tasks are owned by the host process, so stopping one or
+ *   reading its output can only go through it.
+ * - `mica/subagentTasks/detail` / `mica/subagentTasks/kill`: subagent records
+ *   (prompt, streamed timeline, result, usage) live in the host's
+ *   `SubagentTaskManager` and are never persisted, so the desktop's detail modal
+ *   reads them from the host.
+ *
+ * Codex clients never send them; the host answers unknown methods with
+ * method-not-found, so a Codex driver is unaffected.
  */
 export const MICA_METHODS = {
   editMessage: 'mica/turn/editMessage',
+  killBackgroundTask: 'mica/backgroundTasks/kill',
+  backgroundTaskOutput: 'mica/backgroundTasks/output',
+  subagentTaskDetail: 'mica/subagentTasks/detail',
+  killSubagentTask: 'mica/subagentTasks/kill',
 } as const;
 
 export type MicaEditMessageParams = {
@@ -190,6 +205,107 @@ export type MicaSubagentTaskItem = {
   startedAt: string;
   finishedAt?: string | null;
   activities?: { id: string; summary: string; toolName?: string; startedAt: string }[];
+};
+
+export type MicaKillBackgroundTaskParams = {
+  taskId: string;
+  /** Milliseconds to wait before escalating to SIGKILL; the host defaults it. */
+  forceAfterMs?: number;
+};
+
+export type MicaKillBackgroundTaskResult = {
+  ok: boolean;
+  message: string;
+  stillRunning?: boolean;
+};
+
+export type MicaBackgroundTaskOutputParams = {
+  taskId: string;
+  /** Read the last N bytes instead of the head; the host clamps it to its own cap. */
+  tailBytes?: number;
+};
+
+export type MicaBackgroundTaskOutputResult = {
+  ok: boolean;
+  message?: string;
+  /** Cleaned output (Mica bookkeeping markers stripped, no ANSI). */
+  content: string;
+  /** Total size of the task's output file, so the client can show what it is not seeing. */
+  size: number;
+  start: number;
+  end: number;
+  /**
+   * Current projection of the task. The periodic snapshot only carries running
+   * tasks, so a client showing a task's output would otherwise lose the status
+   * (and the exit code) the moment it finishes.
+   */
+  task?: MicaBackgroundTaskItem | null;
+};
+
+/** One streamed step of a subagent's own activity, in the order it happened. */
+export type MicaSubagentTimelineEntry = {
+  id: string;
+  kind: 'thinking' | 'text' | 'tool' | 'tool_result';
+  /** Thinking/text content, tool arguments, or the tool result. */
+  text: string;
+  toolName?: string;
+  at: string;
+};
+
+export type MicaSubagentUsageSummary = {
+  records: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
+};
+
+/**
+ * One subagent task as the desktop's detail modal needs it. The periodic
+ * `mica/subagentTasks/updated` snapshot stays lean (running tasks only, no
+ * transcript); this is fetched on demand while a detail modal is open.
+ */
+export type MicaSubagentTaskDetail = {
+  taskId: string;
+  parentTaskId?: string | null;
+  subagentType: string;
+  description: string;
+  status: 'running' | 'completed' | 'failed' | 'killed';
+  startedAt: string;
+  finishedAt?: string | null;
+  model?: string;
+  effort?: string;
+  maxTurns?: number;
+  contextMode?: string;
+  writeMode?: string;
+  ownedPaths?: string[];
+  contextFiles?: string[];
+  prompt?: string;
+  result?: string;
+  error?: string;
+  usage?: MicaSubagentUsageSummary;
+  timeline?: MicaSubagentTimelineEntry[];
+  /** True once older timeline entries were dropped to bound the record. */
+  timelineTruncated?: boolean;
+};
+
+export type MicaSubagentTaskDetailParams = {
+  taskId: string;
+};
+
+export type MicaSubagentTaskDetailResult = {
+  ok: boolean;
+  message?: string;
+  task?: MicaSubagentTaskDetail;
+};
+
+export type MicaKillSubagentTaskParams = {
+  taskId: string;
+};
+
+export type MicaKillSubagentTaskResult = {
+  ok: boolean;
+  message: string;
 };
 
 export type CodexTurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';

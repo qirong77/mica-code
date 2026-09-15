@@ -12,6 +12,20 @@ import type { SubagentContextMode, SubagentWriteMode } from './subagentDefinitio
 const DEFAULT_MAX_CONCURRENT_TASKS = 4;
 const DEFAULT_MAX_RETAINED_TASKS = 100;
 const MAX_RETAINED_RESULT_CHARS = 200_000;
+/**
+ * Bound the per-task transcript the desktop's subagent detail modal reads: the
+ * modal fetches it on demand, so the whole record must stay small enough to
+ * ship on every poll. Entries are dropped from the front (oldest first) once
+ * either bound is exceeded.
+ */
+const MAX_TIMELINE_ENTRIES = 120;
+const MAX_TIMELINE_TOTAL_CHARS = 60_000;
+const TIMELINE_CHAR_LIMITS: Record<SubagentTaskTimelineKind, number> = {
+  thinking: 3_000,
+  text: 6_000,
+  tool: 1_200,
+  tool_result: 1_200,
+};
 
 export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
 
@@ -20,6 +34,22 @@ export type SubagentTaskActivity = {
   summary: string;
   toolName?: string;
   startedAt: string;
+};
+
+export type SubagentTaskTimelineKind = 'thinking' | 'text' | 'tool' | 'tool_result';
+
+/**
+ * One streamed step of a subagent's own activity. The manager keeps it in
+ * memory only: it is what the desktop's subagent detail modal renders as a live
+ * transcript, and it deliberately stays out of the periodic task snapshot (a
+ * full transcript per running task per second would dwarf the snapshot itself).
+ */
+export type SubagentTaskTimelineEntry = {
+  id: string;
+  kind: SubagentTaskTimelineKind;
+  text: string;
+  toolName?: string;
+  at: string;
 };
 
 export type SubagentTaskRecord = {
@@ -37,6 +67,9 @@ export type SubagentTaskRecord = {
   status: SubagentTaskStatus;
   parent_task_id?: string;
   activities?: SubagentTaskActivity[];
+  timeline?: SubagentTaskTimelineEntry[];
+  /** True once older timeline entries were dropped to bound the record. */
+  timeline_truncated?: boolean;
   started_at: string;
   finished_at?: string;
   result?: string;
@@ -243,6 +276,64 @@ export class SubagentTaskManager {
     return cloneRecord(task.record);
   }
 
+  /**
+   * Append one streamed step to a task's transcript. Consecutive deltas that
+   * share an `id` (one assistant text phase, one thinking phase, one tool call)
+   * are merged into the same entry, so the caller can forward raw provider
+   * deltas without buffering them itself.
+   *
+   * Deliberately does not notify change listeners: the transcript is only read
+   * on demand by the desktop detail modal, and the periodic
+   * `mica/subagentTasks/updated` snapshot (driven by those listeners) must stay
+   * lean and change-driven.
+   */
+  appendTimeline(
+    id: string,
+    owner: AgentRuntime,
+    entry: { id: string; kind: SubagentTaskTimelineKind; text: string; toolName?: string },
+  ): void {
+    const task = this.tasks.get(id);
+    if (!task || task.owner !== owner || task.record.status !== 'running') return;
+    if (!entry.text) return;
+    const limit = TIMELINE_CHAR_LIMITS[entry.kind];
+    const entries = [...(task.record.timeline ?? [])];
+    const last = entries.at(-1);
+    if (last && last.id === entry.id && last.kind === entry.kind) {
+      entries[entries.length - 1] = {
+        ...last,
+        // A full entry keeps its head: clamping `head + delta` on every later
+        // delta would splice the truncation marker into the middle instead.
+        text: last.text.length >= limit ? last.text : clampTimelineText(last.text + entry.text, limit),
+        ...(entry.toolName ? { toolName: entry.toolName } : {}),
+      };
+    } else {
+      entries.push({
+        id: entry.id,
+        kind: entry.kind,
+        text: clampTimelineText(entry.text, limit),
+        ...(entry.toolName ? { toolName: entry.toolName } : {}),
+        at: new Date().toISOString(),
+      });
+    }
+    let next = entries;
+    let dropped = false;
+    if (next.length > MAX_TIMELINE_ENTRIES) {
+      next = next.slice(next.length - MAX_TIMELINE_ENTRIES);
+      dropped = true;
+    }
+    let total = next.reduce((sum, item) => sum + item.text.length, 0);
+    while (next.length > 1 && total > MAX_TIMELINE_TOTAL_CHARS) {
+      total -= next[0]!.text.length;
+      next = next.slice(1);
+      dropped = true;
+    }
+    task.record = {
+      ...task.record,
+      timeline: next,
+      ...(dropped || task.record.timeline_truncated ? { timeline_truncated: true } : {}),
+    };
+  }
+
   async awaitTasks(
     owner: AgentRuntime,
     taskIds: string[],
@@ -443,10 +534,18 @@ function cloneRecord(record: SubagentTaskRecord): SubagentTaskRecord {
   return {
     ...record,
     ...(record.activities ? { activities: record.activities.map((activity) => ({ ...activity })) } : {}),
+    ...(record.timeline ? { timeline: record.timeline.map((entry) => ({ ...entry })) } : {}),
     ...(record.usage ? { usage: { ...record.usage } } : {}),
     ...(record.context_files ? { context_files: [...record.context_files] } : {}),
     ...(record.owned_paths ? { owned_paths: [...record.owned_paths] } : {}),
   };
+}
+
+/** Keep the head of a streaming entry: a transcript reads from the start, and
+ * the task's final answer is retained separately as `result`. */
+function clampTimelineText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n…[truncated]`;
 }
 
 function tailText(text: string, maxChars: number): string {

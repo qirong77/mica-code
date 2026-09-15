@@ -641,6 +641,28 @@ function editRunMessage(sender, id, payload = {}) {
   })
 }
 
+/** One request round-trip to the resident host. Unlike turn/start these are pure
+ * queries/commands: a missing child (or a host that died between write and reply)
+ * must resolve as a failure instead of leaving the caller spinning. */
+const HOST_TASK_REQUEST_TIMEOUT_MS = 15_000
+function hostTaskRequest(run, method, params) {
+  if (!run?.child?.stdin?.writable)
+    return Promise.resolve({ ok: false, error: 'chat host 不可用，请重试' })
+  return new Promise((resolve) => {
+    const timer = setTimeout(
+      () => resolve({ ok: false, error: 'chat host 请求超时，请重试' }),
+      HOST_TASK_REQUEST_TIMEOUT_MS
+    )
+    const settle = (result) => {
+      clearTimeout(timer)
+      resolve(result)
+    }
+    if (!sendCodexRequest(run, method, params, { resolve: settle })) {
+      settle({ ok: false, error: 'chat host 不可用，请重试' })
+    }
+  })
+}
+
 function spawnChatHost(id, sender, payload) {
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
@@ -1300,6 +1322,44 @@ export function registerChatIpc() {
     const id = payload.id
     if (!id) return { ok: false, error: 'chat id 缺失' }
     return editRunMessage(event.sender, id, payload)
+  })
+
+  // Mica extensions (mica/backgroundTasks/*, mica/subagentTasks/*): the tasks
+  // live in the resident host process, so these are plain request round-trips,
+  // not turn starts. They never touch run.running/hostPending and stay usable
+  // while a turn is streaming.
+  ipcMain.handle('chat:kill-background-task', (event, { id, taskId, forceAfterMs } = {}) => {
+    if (!id || !taskId) return { ok: false, error: '参数缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/backgroundTasks/kill', {
+      taskId,
+      ...(forceAfterMs === undefined ? {} : { forceAfterMs })
+    })
+  })
+
+  ipcMain.handle('chat:background-task-output', (event, { id, taskId, tailBytes } = {}) => {
+    if (!id || !taskId) return { ok: false, error: '参数缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/backgroundTasks/output', {
+      taskId,
+      ...(tailBytes ? { tailBytes } : {})
+    })
+  })
+
+  ipcMain.handle('chat:subagent-detail', (event, { id, taskId } = {}) => {
+    if (!id || !taskId) return { ok: false, error: '参数缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/subagentTasks/detail', { taskId })
+  })
+
+  ipcMain.handle('chat:kill-subagent', (event, { id, taskId } = {}) => {
+    if (!id || !taskId) return { ok: false, error: '参数缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/subagentTasks/kill', { taskId })
   })
 
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {

@@ -182,6 +182,14 @@ function createWebApi(env) {
       recallQueued: (id, clientMessageId) => invoke('chat:recall-queued', { id, clientMessageId }),
       // 改写一条已发送的用户消息并重跑（Codex 协议扩展 mica/turn/editMessage）
       editMessage: (payload) => invoke('chat:edit-message', payload),
+      // 终止一个后台 shell 任务 / 读取它的输出（Codex 协议扩展 mica/backgroundTasks/*）
+      killBackgroundTask: (id, taskId, forceAfterMs) =>
+        invoke('chat:kill-background-task', { id, taskId, forceAfterMs }),
+      backgroundTaskOutput: (id, taskId, tailBytes) =>
+        invoke('chat:background-task-output', { id, taskId, tailBytes }),
+      // 读取 / 停止一个 subagent 任务（Codex 协议扩展 mica/subagentTasks/*）
+      subagentDetail: (id, taskId) => invoke('chat:subagent-detail', { id, taskId }),
+      killSubagent: (id, taskId) => invoke('chat:kill-subagent', { id, taskId }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),
