@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as Reac
 import { readSessionContent, readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
 import { ContextPane } from '../components/ContextPane.js';
 import { ConversationPane } from '../components/ConversationPane.js';
+import { confirmDialog } from '../components/DialogHost.js';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
@@ -87,9 +88,17 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
     }
   }
 
-  function selectSession(id: string) {
+  async function selectSession(id: string) {
     if (id === selectedIdRef.current) return;
-    if (dirtyRef.current && !window.confirm('当前 Session 有未保存的修改，确定要切换吗？')) return;
+    if (dirtyRef.current) {
+      const confirmed = await confirmDialog({
+        title: '放弃未保存的修改',
+        message: '当前 Session 有未保存的修改，确定要切换吗？',
+        confirmText: '切换',
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
     selectedIdRef.current = id;
     setSelectedId(id);
     setHeader(null);

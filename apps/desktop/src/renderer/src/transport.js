@@ -238,7 +238,15 @@ function createWebApi(env) {
 
     app: {
       getWindowState: async () => ({ ...appState }),
-      onWindowState: (callback) => subscribe('app:window-state', callback)
+      onWindowState: (callback) => subscribe('app:window-state', callback),
+      // 「切换 Mica 服务器」：清单落盘在运行时所在机器上，目标探活也由运行时代查
+      // （页面跨源 fetch 受 CORS 限制读不到结果）
+      servers: {
+        list: () => invoke('app:servers:list'),
+        remember: (url) => invoke('app:servers:remember', { url }),
+        forget: (url) => invoke('app:servers:forget', { url }),
+        probe: (url) => invoke('app:servers:probe', { url })
+      }
     },
 
     files: {

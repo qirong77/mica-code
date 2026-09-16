@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createMcpServer, deleteMcpServer, readMcpDetails, writeMcpServer } from '../api.js';
+import { confirmDialog, promptDialog } from '../components/DialogHost.js';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
@@ -32,7 +33,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
   }
 
   async function load() {
-    if (saving || !confirmDiscardChanges()) return;
+    if (saving || !(await confirmDiscardChanges())) return;
     setLoading(true);
     setError(null);
     try {
@@ -60,8 +61,16 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
   }
 
   async function addServer() {
-    if (saving || !confirmDiscardChanges()) return;
-    const name = window.prompt('MCP server 名称')?.trim();
+    if (saving || !(await confirmDiscardChanges())) return;
+    const name = (
+      await promptDialog({
+        title: '新建 MCP server',
+        message: '将写入 config.json 的 mcpServers。',
+        label: '名称',
+        placeholder: '例如 sequential-thinking',
+        confirmText: '创建',
+      })
+    )?.trim();
     if (!name) return;
     setError(null);
     try {
@@ -73,7 +82,13 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
 
   async function removeServer() {
     if (!selectedServer || saving) return;
-    if (!window.confirm(`确定删除 MCP server "${selectedServer.name}" 吗？此操作不可撤销。`)) return;
+    const confirmed = await confirmDialog({
+      title: `删除 MCP server「${selectedServer.name}」`,
+      message: '此操作不可撤销。',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!confirmed) return;
     setSaving(true);
     setError(null);
     try {
@@ -86,8 +101,8 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
     }
   }
 
-  function selectServer(name: string) {
-    if (saving || name === selectedName || !confirmDiscardChanges()) return;
+  async function selectServer(name: string) {
+    if (saving || name === selectedName || !(await confirmDiscardChanges())) return;
     const server = details?.servers.find((item) => item.name === name);
     setSelectedName(name);
     setContent(server?.config ?? '');
@@ -111,8 +126,15 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
     };
   }, [dirty, onDirtyChange]);
 
-  function confirmDiscardChanges(): boolean {
-    return !dirty || window.confirm('当前 MCP 配置有未保存的修改，确定要放弃吗？');
+  function confirmDiscardChanges(): Promise<boolean> {
+    return !dirty
+      ? Promise.resolve(true)
+      : confirmDialog({
+          title: '放弃未保存的修改',
+          message: '当前 MCP 配置有未保存的修改，确定要放弃吗？',
+          confirmText: '放弃修改',
+          danger: true,
+        });
   }
 
   return (
@@ -160,7 +182,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                   type="button"
                   className={`role-list-item ${selectedName === server.name ? 'role-list-item-active' : ''}`}
                   disabled={saving}
-                  onClick={() => selectServer(server.name)}
+                  onClick={() => void selectServer(server.name)}
                 >
                   <span>{server.name}</span>
                   <Tag tone={statusColor(server.status)}>{server.status}</Tag>

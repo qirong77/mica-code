@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createSkill, deleteSkill, readSkillsDetails, writeSkill } from '../api.js';
+import { confirmDialog, promptDialog } from '../components/DialogHost.js';
 import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
@@ -32,7 +33,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
   }
 
   async function load() {
-    if (saving || !confirmDiscardChanges()) return;
+    if (saving || !(await confirmDiscardChanges())) return;
     setLoading(true);
     setError(null);
     try {
@@ -60,8 +61,16 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
   }
 
   async function addSkill() {
-    if (saving || !confirmDiscardChanges()) return;
-    const name = window.prompt('Skill 名称（将创建为 skills/<name>/SKILL.md）')?.trim();
+    if (saving || !(await confirmDiscardChanges())) return;
+    const name = (
+      await promptDialog({
+        title: '新建 Skill',
+        message: `将创建为 ${details?.root ?? 'skills'}/<名称>/SKILL.md`,
+        label: 'Skill 名称',
+        placeholder: '例如 pdf-processing',
+        confirmText: '创建',
+      })
+    )?.trim();
     if (!name) return;
     setError(null);
     try {
@@ -73,7 +82,13 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
 
   async function removeSkill() {
     if (!selectedSkill || !selectedSkill.editable || saving) return;
-    if (!window.confirm(`确定删除 Skill "${selectedSkill.name}" 吗？此操作不可撤销。`)) return;
+    const confirmed = await confirmDialog({
+      title: `删除 Skill「${selectedSkill.name}」`,
+      message: `目录 ${selectedSkill.baseDir} 会被整个删除，此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!confirmed) return;
     setSaving(true);
     setError(null);
     try {
@@ -86,8 +101,8 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
     }
   }
 
-  function selectSkill(name: string) {
-    if (saving || name === selectedName || !confirmDiscardChanges()) return;
+  async function selectSkill(name: string) {
+    if (saving || name === selectedName || !(await confirmDiscardChanges())) return;
     const skill = details?.skills.find((item) => item.name === name);
     setSelectedName(name);
     setContent(skill?.content ?? '');
@@ -111,8 +126,15 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
     };
   }, [dirty, onDirtyChange]);
 
-  function confirmDiscardChanges(): boolean {
-    return !dirty || window.confirm('当前 Skill 有未保存的修改，确定要放弃吗？');
+  function confirmDiscardChanges(): Promise<boolean> {
+    return !dirty
+      ? Promise.resolve(true)
+      : confirmDialog({
+          title: '放弃未保存的修改',
+          message: '当前 Skill 有未保存的修改，确定要放弃吗？',
+          confirmText: '放弃修改',
+          danger: true,
+        });
   }
 
   return (
@@ -154,7 +176,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
                   type="button"
                   className={`role-list-item ${selectedName === skill.name ? 'role-list-item-active' : ''}`}
                   disabled={saving}
-                  onClick={() => selectSkill(skill.name)}
+                  onClick={() => void selectSkill(skill.name)}
                 >
                   <span>{skill.name}</span>
                   <Tag>{skill.editable ? 'editable' : 'read-only'}</Tag>

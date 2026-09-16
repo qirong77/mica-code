@@ -7,6 +7,7 @@ type ButtonProps = {
   loading?: boolean;
   disabled?: boolean;
   pressed?: boolean;
+  autoFocus?: boolean;
   variant?: 'primary' | 'danger' | 'default';
   title?: string;
   ariaLabel?: string;
@@ -19,6 +20,7 @@ export function Button({
   loading = false,
   disabled = false,
   pressed,
+  autoFocus = false,
   variant = 'default',
   title,
   ariaLabel,
@@ -34,6 +36,7 @@ export function Button({
       aria-busy={loading || undefined}
       disabled={loading || disabled}
       aria-pressed={pressed}
+      autoFocus={autoFocus}
       onClick={onClick}
     >
       <span className="ui-button-icon" aria-hidden="true">

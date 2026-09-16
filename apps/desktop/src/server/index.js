@@ -13,6 +13,7 @@ import { registerWorkspaceIpc } from '../host/workspace.js'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
+import { registerServersIpc } from '../host/servers.js'
 import { disposeSettings, registerSettingsIpc } from '../host/settings.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
@@ -356,6 +357,7 @@ export async function startDesktopServer(options = {}) {
   registerFilesIpc()
   registerGitIpc()
   registerStatsIpc()
+  registerServersIpc()
   registerSettingsIpc()
 
   // renderer 会用「窗口是否聚焦/可见」决定是否把通知标记为已读；网页端没有窗口，

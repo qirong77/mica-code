@@ -113,7 +113,9 @@ $ npm run build:linux
   (`ELECTRON_RUN_AS_NODE`), loads the window at the runtime URL, mirrors unread notifications onto
   the dock badge (and flashes the taskbar on Windows), and stops the runtime on quit. It registers
   no business IPC and injects no preload: the page always builds `window.mica` from HTTP + SSE, so
-  the window and a phone browser run byte-identical UI code.
+  the window and a phone browser run byte-identical UI code. It also owns the navigation policy and
+  the "which server am I on" state (title suffix, badge subscription, ⇧⌘M) whenever the window is
+  pointed at another machine's runtime — see *Switching Mica servers* below.
 - `ELECTRON_RUN_AS_NODE` is a bootstrap marker for the runtime process only. The runtime calls
   `stripContainerEnv()` before it derives any child environment, so PTY terminals, `mica` children
   and the shell-env capture never inherit it — otherwise running `electron` from a terminal inside
@@ -153,6 +155,14 @@ already serving Mica Code.
   resolve to the same `mica-code-app` directory, so `workspace.json`, `file-order.json` and
   `session-pins.json`, `session-projects.json` and `session-sort.json` are shared between the
   desktop app and a standalone runtime.
+
+### Switching Mica servers
+
+The window can point at another machine's Mica runtime: the sidebar's `Server` row opens a dialog with the current server, the `本机` shortcut, the recently used addresses and an address field. Switching is a plain full-page navigation — a page is served by whichever runtime hosts it, so "which server am I on" is just `location.origin` — which is also why nothing is proxied and no cross-origin call is made.
+
+The two things the page cannot do itself are delegated to the runtime (`src/host/servers.js`, with the pure logic in `servers-core.js` and the list in `mica-servers.json` next to `workspace.json`): probing `GET /api/health` on the target, because a cross-origin `fetch` from the page is unreadable under CORS, and persisting the list (twelve non-loopback addresses, most recent first). The `本机` entry is the fixed `http://127.0.0.1:8787` shortcut and never enters the list.
+
+The container owns the navigation policy and everything that must survive a page change (`src/main/index.js`). `will-navigate` used to hand every non-local navigation to the system browser; it now probes first and only loads the target when `/api/health` reports `app: 'mica-code-app'`, recording it in `mica-active-server.json`. `did-navigate` re-points the unread-badge subscription at the new origin and appends `— host:port` to the window title, and the next launch restores the recorded server — after probing it, falling back to the local runtime and clearing the record when it is unreachable, so a dead address can never strand the app on an error page. Because the server you switch to may be running an older bundle with no switcher of its own, **⇧⌘M** (shell level, `before-input-event`) always brings the window back to its own runtime, and the boot-error page offers 返回本机 whenever the current origin is not loopback.
 
 ### What the page does differently from a native app
 

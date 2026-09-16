@@ -2624,6 +2624,40 @@ textarea {
   padding: 14px 16px;
 }
 
+/* 应用内对话框（prompt / confirm）。配置页在桌面端是跨源 iframe：Electron 不支持
+   window.prompt()，confirm() 在窗口未激活时会静默返回 false，跨源 iframe 的 JS
+   弹窗在现代 Chromium 中同样被禁止 —— 所以这里一律走应用内弹窗。 */
+
+.dialog-form {
+  display: grid;
+  gap: 13px;
+}
+
+.dialog-message {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.dialog-field {
+  display: grid;
+  gap: 6px;
+}
+
+.dialog-field > span {
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  font-weight: 500;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .context-detail-summary {
   display: grid;
   gap: 10px;

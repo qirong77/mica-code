@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DialogHost, confirmDialog } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { McpPage } from './pages/McpPage.js';
@@ -12,9 +13,15 @@ export function App() {
   const [section, setSection] = useState<ConfigWebAppSection>(readInitialSection);
   const [dirtySection, setDirtySection] = useState<ConfigWebAppSection | null>(null);
 
-  function changeSection(nextSection: ConfigWebAppSection) {
-    if (dirtySection && dirtySection !== nextSection && !window.confirm('当前页面有未保存的修改，确定要离开吗？')) {
-      return;
+  async function changeSection(nextSection: ConfigWebAppSection) {
+    if (dirtySection && dirtySection !== nextSection) {
+      const confirmed = await confirmDialog({
+        title: '放弃未保存的修改',
+        message: '当前页面有未保存的修改，确定要离开吗？',
+        confirmText: '离开',
+        danger: true,
+      });
+      if (!confirmed) return;
     }
     setSection(nextSection);
     const url = new URL(window.location.href);
@@ -35,19 +42,22 @@ export function App() {
   }, []);
 
   return (
-    <main className="app-shell">
-      <Sidebar section={section} onChange={changeSection} />
-      <div className="content-shell">
-        {section === 'config' ? <ConfigPage /> : null}
-        {section === 'sessions' ? (
-          <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
-        ) : null}
-        {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
-        {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
-        {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
-        {section === 'plugins' ? <PluginsPage /> : null}
-      </div>
-    </main>
+    <>
+      <main className="app-shell">
+        <Sidebar section={section} onChange={(next) => void changeSection(next)} />
+        <div className="content-shell">
+          {section === 'config' ? <ConfigPage /> : null}
+          {section === 'sessions' ? (
+            <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
+          ) : null}
+          {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
+          {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
+          {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
+          {section === 'plugins' ? <PluginsPage /> : null}
+        </div>
+      </main>
+      <DialogHost />
+    </>
   );
 }
 

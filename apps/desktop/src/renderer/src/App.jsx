@@ -12,14 +12,17 @@ import {
   IconMessage,
   IconPlus,
   IconRocket,
+  IconServer,
   IconSettings,
   IconTerminal2,
   IconX
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView, shortPath } from './ChatView'
+import { ServerDialog } from './ServerDialog'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
+import { currentServerUrl, serverLabel } from './servers'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -626,6 +629,9 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
+  // 「切换 Mica 服务器」：切换 = 整页导航到另一台运行时的地址（见 ServerDialog）
+  const [serverDialogOpen, setServerDialogOpen] = useState(false)
+  const currentServer = currentServerUrl(window.location)
   // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
   // 打开终端）都会同步打开抽屉，不必逐个改调用点
   const previousRightPanelOpen = useRef(rightPanelOpen)
@@ -1748,6 +1754,21 @@ export default function App() {
               <IconSettings size={14} className="shrink-0 opacity-75" />
               <span>Settings</span>
             </button>
+            <button
+              type="button"
+              title="切换 Mica 服务器（连接另一台机器上的 Mica）"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+              onClick={() => {
+                closeMobileDrawer()
+                setServerDialogOpen(true)
+              }}
+            >
+              <IconServer size={14} className="shrink-0 opacity-60" />
+              <span className="shrink-0">Server</span>
+              <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
+                {serverLabel(currentServer)}
+              </span>
+            </button>
           </nav>
           <SessionTree
             sessions={sessions}
@@ -2137,6 +2158,13 @@ export default function App() {
             setCwdModalOpen(false)
             changeChatCwd(dir)
           }}
+        />
+      )}
+      {serverDialogOpen && (
+        <ServerDialog
+          current={currentServer}
+          onClose={() => setServerDialogOpen(false)}
+          onSwitch={(url) => window.location.assign(url)}
         />
       )}
     </>
