@@ -548,7 +548,6 @@ const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
 const DEFAULT_RIGHT_PANEL_WIDTH = 400
 const MIN_RIGHT_PANEL_WIDTH = 280
-const MAX_RIGHT_PANEL_WIDTH = 720
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
 // —— 86px 是 macOS 上让开交通灯后的位置，右侧面板标题栏的 pl-30 按它预留
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
@@ -569,9 +568,17 @@ function savedSidebarWidth() {
 
 function savedRightPanelWidth() {
   const value = Number(localStorage.getItem('mica.rightPanelWidth'))
-  return Number.isFinite(value) && value >= MIN_RIGHT_PANEL_WIDTH && value <= MAX_RIGHT_PANEL_WIDTH
+  return Number.isFinite(value) && value >= MIN_RIGHT_PANEL_WIDTH
     ? value
     : DEFAULT_RIGHT_PANEL_WIDTH
+}
+
+// 右侧面板没有固定的最大宽度：拖到哪算哪，只按「窗口宽度 - 可见侧栏」封顶。三个网格列
+// 都是硬宽度时，侧栏 + 面板一旦超过窗口宽，网格就整体溢出、面板右半截跑到屏幕外。
+function rightPanelWidthLimit(viewport, sidebarWidth, sidebarCollapsed) {
+  if (!Number.isFinite(viewport) || viewport <= 0) return Infinity
+  const reserved = sidebarCollapsed ? 0 : sidebarWidth
+  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.round(viewport - reserved))
 }
 
 export default function App() {
@@ -623,6 +630,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
+  const sidebarCollapsedRef = useRef(sidebarCollapsed)
   const dragStartRef = useRef(null)
   const rightPanelDragStartRef = useRef(null)
   const [prompt, setPrompt] = useState(null)
@@ -1638,6 +1646,9 @@ export default function App() {
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth
   }, [sidebarWidth])
+  useEffect(() => {
+    sidebarCollapsedRef.current = sidebarCollapsed
+  }, [sidebarCollapsed])
   // 右侧 Panel 宽度拖拽
   const startRightPanelResize = useCallback((event) => {
     if (event.button !== 0) return
@@ -1646,14 +1657,21 @@ export default function App() {
     setResizingRightPanel(true)
     document.body.classList.add('is-resizing-right-panel')
 
+    // 拖动过程中连续 pointermove 之间 React 可能还没提交渲染，收尾时读 rightPanelWidthRef
+    // 会写回上一次的值，所以本次拖动的宽度就地记下来。
+    let draggedWidth = rightPanelWidthRef.current
     const onMove = (moveEvent) => {
       const width = rightPanelDragStartRef.current
         ? rightPanelDragStartRef.current.width -
           (moveEvent.clientX - rightPanelDragStartRef.current.x)
         : rightPanelWidthRef.current
-      setRightPanelWidth(
-        Math.round(Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
+      const limit = rightPanelWidthLimit(
+        window.innerWidth,
+        sidebarWidthRef.current,
+        sidebarCollapsedRef.current
       )
+      draggedWidth = Math.round(Math.min(limit, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
+      setRightPanelWidth(draggedWidth)
     }
     const finish = () => {
       rightPanelDragStartRef.current = null
@@ -1662,7 +1680,7 @@ export default function App() {
       window.removeEventListener('pointercancel', finish)
       document.body.classList.remove('is-resizing-right-panel')
       setResizingRightPanel(false)
-      localStorage.setItem('mica.rightPanelWidth', String(rightPanelWidthRef.current))
+      localStorage.setItem('mica.rightPanelWidth', String(draggedWidth))
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -1671,6 +1689,24 @@ export default function App() {
   useEffect(() => {
     rightPanelWidthRef.current = rightPanelWidth
   }, [rightPanelWidth])
+  // 窗口变小或侧栏重新展开后，已保存的面板宽度可能超过可用空间：粘住上限，别让网格溢出。
+  useEffect(() => {
+    // 移动端面板是覆盖式抽屉、宽度由 CSS 决定，别按窄屏把桌面用的宽度压小。
+    const clamp = () => {
+      if (isMobile) return
+      setRightPanelWidth((value) => {
+        const limit = rightPanelWidthLimit(
+          window.innerWidth,
+          sidebarWidthRef.current,
+          sidebarCollapsedRef.current
+        )
+        return value > limit ? Math.max(MIN_RIGHT_PANEL_WIDTH, limit) : value
+      })
+    }
+    clamp()
+    window.addEventListener('resize', clamp)
+    return () => window.removeEventListener('resize', clamp)
+  }, [isMobile, sidebarCollapsed, sidebarWidth])
   const toggleRightPanel = useCallback(() => {
     if (isMobile) {
       setRightPanelOpen(true)

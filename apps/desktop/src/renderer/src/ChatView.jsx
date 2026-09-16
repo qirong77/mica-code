@@ -4374,9 +4374,20 @@ export function ChatView({
               Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送
             </span>
           )}
-          <span className="chat-prompt-mark" aria-hidden="true">
-            {queueReady ? '↳' : '›'}
-          </span>
+          {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
+          <button
+            type="button"
+            className="chat-prompt-mark"
+            title={`当前角色：${activeRole}（点击切换）`}
+            aria-label="切换角色"
+            data-chat-picker-trigger
+            onClick={() => openPicker('role')}
+          >
+            {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
+            <span className="chat-prompt-caret" aria-hidden="true">
+              {queueReady ? '↳' : '›'}
+            </span>
+          </button>
           {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
               CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
           <input

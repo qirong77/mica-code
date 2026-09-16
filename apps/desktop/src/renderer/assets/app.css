@@ -2486,7 +2486,8 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  /* 第一列是角色切换入口：默认角色时只有 26px 的箭头，显示角色名时按内容变宽 */
+  grid-template-columns: minmax(26px, auto) minmax(0, 1fr) auto;
   align-items: end;
   border: 0;
   border-top: 1px solid var(--color-line-strong);
@@ -2628,15 +2629,41 @@ body.is-resizing.is-resizing-terminal {
 .chat-prompt-mark {
   display: flex;
   height: 30px;
+  min-width: 26px;
+  max-width: 160px;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   align-self: end;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
   color: var(--color-fg);
   font-size: 18px;
   font-weight: 700;
   line-height: 20px;
   text-align: center;
   user-select: none;
+}
+
+.chat-prompt-mark:hover {
+  background: rgb(255 255 255 / 7%);
+}
+
+/* 角色名跟 CLI 的 prompt 前缀一样用标记同色、更小一号；过长不换行，直接省略 */
+.chat-prompt-role {
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0.72;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-prompt-caret {
+  flex: 0 0 auto;
 }
 
 .chat-composer textarea {
