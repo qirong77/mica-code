@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Mica Code CLI 运行时架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "mica-code-cli.html",
+    "views": [
+      {
+        "id": "turn-path",
+        "label": "一次 turn 的主路径",
+        "focus": [
+          "tui",
+          "runtime",
+          "agent",
+          "llm"
+        ],
+        "note": "输入经命令分发与 turn loop 进入 agent，再由 provider adapter 发出流式请求。"
+      },
+      {
+        "id": "capabilities",
+        "label": "工具、插件与 MCP",
+        "focus": [
+          "agent",
+          "tools",
+          "plugins",
+          "mcp",
+          "mcpsrv"
+        ],
+        "note": "插件与 MCP 都把能力注册进唯一的工具 registry，agent 只面向 registry。"
+      },
+      {
+        "id": "headless",
+        "label": "Headless 与桌面端",
+        "focus": [
+          "desktopapp",
+          "headless",
+          "runtime",
+          "localstate"
+        ],
+        "note": "app-server 复用同一条 turn loop，会话落盘由 turn lease 仲裁单写者。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "desktopapp",
+      "type": "frontend",
+      "label": "mica-code-app",
+      "sublabel": "Web / Electron",
+      "pos": [
+        40,
+        70
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "headless",
+      "type": "backend",
+      "label": "Headless 执行",
+      "sublabel": "exec · app-server",
+      "pos": [
+        320,
+        70
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "tui",
+      "type": "frontend",
+      "label": "终端 TUI",
+      "sublabel": "Ink · mica-ui",
+      "pos": [
+        40,
+        270
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "运行时核心",
+      "sublabel": "apps/cli · turn loop",
+      "pos": [
+        320,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "mica-agent",
+      "sublabel": "prompt · provider adapter",
+      "pos": [
+        600,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM API",
+      "sublabel": "chat / responses",
+      "pos": [
+        1150,
+        270
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "localstate",
+      "type": "database",
+      "label": "本地状态",
+      "sublabel": "$MICA_HOME · sessions",
+      "pos": [
+        40,
+        470
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "plugins",
+      "type": "backend",
+      "label": "内置插件 / 命令",
+      "sublabel": "hooks · 命令 · 工具",
+      "pos": [
+        320,
+        470
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "mica-tools",
+      "sublabel": "唯一工具 registry",
+      "pos": [
+        600,
+        470
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "backend",
+      "label": "mica-mcp",
+      "sublabel": "MCP 生命周期",
+      "pos": [
+        880,
+        470
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "mcpsrv",
+      "type": "external",
+      "label": "MCP Servers",
+      "sublabel": "远端工具",
+      "pos": [
+        1150,
+        470
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "本机进程（Bun 运行时）",
+      "wraps": [
+        "desktopapp",
+        "headless",
+        "tui",
+        "runtime",
+        "agent",
+        "localstate",
+        "plugins",
+        "tools",
+        "mcp"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "外部依赖（网络）",
+      "wraps": [
+        "llm",
+        "mcpsrv"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "app-to-headless",
+      "from": "desktopapp",
+      "to": "headless",
+      "label": "chat 请求",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "headless-to-runtime",
+      "from": "headless",
+      "to": "runtime",
+      "label": "同一 turn loop",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        410,
+        202
+      ]
+    },
+    {
+      "id": "tui-to-runtime",
+      "from": "tui",
+      "to": "runtime",
+      "label": "输入 · 渲染",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "runtime-to-agent",
+      "from": "runtime",
+      "to": "agent",
+      "label": "agent.run",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "agent-to-llm",
+      "from": "agent",
+      "to": "llm",
+      "label": "流式请求（SSE）",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "agent-to-tools",
+      "from": "agent",
+      "to": "tools",
+      "label": "工具调用",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        690,
+        402
+      ]
+    },
+    {
+      "id": "plugins-to-tools",
+      "from": "plugins",
+      "to": "tools",
+      "label": "注册工具",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "runtime-to-state",
+      "from": "runtime",
+      "to": "localstate",
+      "label": "snapshot · turn lease",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        260,
+        402
+      ]
+    },
+    {
+      "id": "mcp-to-tools",
+      "from": "mcp",
+      "to": "tools",
+      "label": "远端工具",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "mcp-to-servers",
+      "from": "mcp",
+      "to": "mcpsrv",
+      "label": "MCP 协议",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "入口与界面",
+      "items": [
+        "交互模式由 Ink TUI 直接驱动同一个 turn loop",
+        "headless：mica exec 一次性执行，app-server 常驻讲 Codex v2 协议",
+        "命令经 CommandRegistry 分发，busy 时由单槽 message queue 排队"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Turn loop 与本地状态",
+      "items": [
+        "turn 级最多重试 5 次（间隔 10s），只重放尚未产生副作用的阶段",
+        "provider 内建 5 次指数退避，仅在本次尝试还没有输出时重发",
+        "会话 JSON + turn lease 单写者，$MICA_HOME 收拢 config / sessions / cache"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "扩展点与集成",
+      "items": [
+        "插件经 PluginContext 注册工具、hooks 与服务，TUI 与 headless 各有一套装配层",
+        "mica-mcp 管理 server 生命周期，远端工具接入同一个 registry，断开即清理",
+        "skills 只在 system prompt 里放索引，正文按需读取以保住 prompt cache 前缀"
+      ]
+    }
+  ]
+}

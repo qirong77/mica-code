@@ -12,6 +12,11 @@ export type CompactCliOptions = {
   cwd?: string;
   force?: boolean;
   pruneOnly?: boolean;
+  /**
+   * 与交互式 `/compact` 同源：只把工具结果替换为占位符，不改动对话文本、
+   * 不丢轮次、不调用模型（可重复执行）。
+   */
+  toolResultsOnly?: boolean;
   signal?: AbortSignal;
 };
 
@@ -33,6 +38,8 @@ export type CompactCliResult = {
   contextWindowSize?: number;
   contextUsageRatio?: number;
   summary?: string;
+  /** tool-results-only 模式：被替换掉工具结果的消息数。 */
+  toolResultsReplaced?: number;
 };
 
 const SUMMARIZE_INSTRUCTIONS = [
@@ -46,7 +53,8 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
   const disposeModelEffortContext = setupModelEffortContext();
   let agent: AgentRuntime | null = null;
   try {
-    if (!options.pruneOnly) await ensureCompactModelRule(micaConfig.get().model, options.signal);
+    const needsModel = !options.pruneOnly && !options.toolResultsOnly;
+    if (needsModel) await ensureCompactModelRule(micaConfig.get().model, options.signal);
     agent = new AgentRuntime({});
     let sessionCwd: string | null = null;
     const sessionController = new SessionController({
@@ -74,7 +82,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         // Best-effort: an unreachable session cwd must not fail compact.
       }
     }
-    if (!options.pruneOnly) {
+    if (needsModel) {
       await ensureCompactModelRule(agent.config.model, options.signal);
       agent.configureForRun(
         {
@@ -99,13 +107,19 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     const service = new micaContext.CompactionService();
     const result = await service.compact({
       messages: snapshot.messages,
-      options: {
-        force: options.pruneOnly === true || options.force === true,
-        pruneOnly: options.pruneOnly === true,
-        lightweightPrune: options.pruneOnly === true,
-        contextWindowSize:
-          snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
-      },
+      options: options.toolResultsOnly
+        ? {
+            toolResultsOnly: true,
+            contextWindowSize:
+              snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+          }
+        : {
+            force: options.pruneOnly === true || options.force === true,
+            pruneOnly: options.pruneOnly === true,
+            lightweightPrune: options.pruneOnly === true,
+            contextWindowSize:
+              snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+          },
       summarize: async (transcript, prompt) => {
         if (!agent) throw new Error('Agent is not available for summarization');
         const subAgent = agent.createSubAgent({ systemPrompt: prompt });
@@ -130,6 +144,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         contextWindowSize: result.contextWindowSize,
         contextUsageRatio: result.contextUsageRatio,
         summary: result.summary,
+        toolResultsReplaced: result.toolResultsReplaced,
       };
     }
 
@@ -193,6 +208,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       contextWindowSize: result.contextWindowSize,
       contextUsageRatio: result.contextUsageRatio,
       summary: result.summary,
+      toolResultsReplaced: result.toolResultsReplaced,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

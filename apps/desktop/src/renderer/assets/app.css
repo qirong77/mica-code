@@ -238,6 +238,12 @@ body.is-resizing.is-resizing-terminal {
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-success) 55%, transparent));
 }
 
+/* 会话行行首的未发送文本标记：输入框里的草稿切走之后就看不见了，靠这个呼吸的
+   铅笔把「这条会话说了一半」捞回来（同一套呼吸节奏，只是换成提示色）。 */
+.chat-draft-pending {
+  animation: chat-dot-breathe 2.4s ease-in-out infinite;
+}
+
 /* Chat keeps Mica's terminal grammar: compact gutter rows, muted activity logs,
    and a prompt/status surface anchored at the bottom. */
 .chat-view {

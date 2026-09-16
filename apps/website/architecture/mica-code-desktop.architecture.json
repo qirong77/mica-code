@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Mica Code Desktop 运行时架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "mica-code-desktop.html",
+    "views": [
+      {
+        "id": "web-runtime",
+        "label": "Web 运行时三层",
+        "focus": [
+          "page",
+          "runtime",
+          "host"
+        ],
+        "note": "页面是应用本体，经 HTTP 与 SSE 访问 host 能力；Electron 只是容器。"
+      },
+      {
+        "id": "child-processes",
+        "label": "子进程与终端",
+        "focus": [
+          "host",
+          "mica",
+          "pty",
+          "llm"
+        ],
+        "note": "host 派生的 mica 子进程持有模型与 MCP 连接，PTY 终端是真终端。"
+      },
+      {
+        "id": "container",
+        "label": "容器与配置页",
+        "focus": [
+          "shell",
+          "page",
+          "configweb",
+          "fs"
+        ],
+        "note": "外壳负责拉起运行时与跨机导航，配置页是跨源 iframe，数据都落在本机。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "shell",
+      "type": "frontend",
+      "label": "Electron 外壳",
+      "sublabel": "main · 无 preload",
+      "pos": [
+        40,
+        70
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "configweb",
+      "type": "backend",
+      "label": "config-web 配置页",
+      "sublabel": "跨源 iframe",
+      "pos": [
+        600,
+        70
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "page",
+      "type": "frontend",
+      "label": "Renderer 页面",
+      "sublabel": "React · transport.js",
+      "pos": [
+        40,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "运行时",
+      "sublabel": "HTTP /api/invoke",
+      "pos": [
+        320,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Host 业务核心",
+      "sublabel": "chat · terminals · files",
+      "pos": [
+        600,
+        270
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "mica",
+      "type": "backend",
+      "label": "mica 子进程",
+      "sublabel": "app-server · commit",
+      "pos": [
+        890,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "pty",
+      "type": "backend",
+      "label": "PTY 终端",
+      "sublabel": "node-pty 真终端",
+      "pos": [
+        320,
+        470
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "fs",
+      "type": "database",
+      "label": "本机数据",
+      "sublabel": "userData · 会话文件",
+      "pos": [
+        600,
+        470
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM API",
+      "sublabel": "模型 · MCP servers",
+      "pos": [
+        890,
+        470
+      ],
+      "size": [
+        180,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "无认证 HTTP 端口（等价宿主 shell）",
+      "wraps": [
+        "runtime",
+        "host"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "shell-to-page",
+      "from": "shell",
+      "to": "page",
+      "label": "loadURL 加载页面",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        130,
+        202
+      ]
+    },
+    {
+      "id": "shell-to-runtime",
+      "from": "shell",
+      "to": "runtime",
+      "label": "拉起运行时",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top",
+      "labelAt": [
+        315,
+        102
+      ]
+    },
+    {
+      "id": "page-to-runtime",
+      "from": "page",
+      "to": "runtime",
+      "label": "HTTP · SSE",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "runtime-to-host",
+      "from": "runtime",
+      "to": "host",
+      "label": "invoke 分发",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "host-to-mica",
+      "from": "host",
+      "to": "mica",
+      "label": "spawn 子进程",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "mica-to-llm",
+      "from": "mica",
+      "to": "llm",
+      "label": "模型 · MCP 请求",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        980,
+        402
+      ]
+    },
+    {
+      "id": "host-to-configweb",
+      "from": "host",
+      "to": "configweb",
+      "label": "拉起配置页",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        695,
+        202
+      ]
+    },
+    {
+      "id": "host-to-fs",
+      "from": "host",
+      "to": "fs",
+      "label": "userData · 会话文件",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        695,
+        440
+      ]
+    },
+    {
+      "id": "host-to-pty",
+      "from": "host",
+      "to": "pty",
+      "label": "PTY 会话",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        550,
+        402
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "三层边界",
+      "items": [
+        "Electron 外壳只做容器：拉运行时、loadURL、徽标与服务器导航",
+        "运行时是零依赖 Node HTTP：/api/invoke 调用面 + /api/events SSE",
+        "同一页面服务桌面、浏览器与手机，window.mica 由 transport.js 建立"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Host 业务核心",
+      "items": [
+        "chat / terminals / files / git / stats 只跑在运行时进程里",
+        "每个 chat 会话派生一个常驻 mica app-server 子进程",
+        "终端是真 PTY（node-pty），空闲 8 小时回收"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "配置页与安全边界",
+      "items": [
+        "配置页是跨源 iframe 内嵌的 config-web，无 preload",
+        "运行时无认证：连上端口就等于拿到宿主 shell，默认 0.0.0.0",
+        "ELECTRON_RUN_AS_NODE 在派生子进程之前剥离"
+      ]
+    }
+  ]
+}

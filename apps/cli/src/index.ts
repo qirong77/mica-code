@@ -130,6 +130,7 @@ if (invocation.mode === 'compact') {
       cwd: invocation.cwd,
       force: invocation.force,
       pruneOnly: invocation.pruneOnly,
+      toolResultsOnly: invocation.toolResultsOnly,
       signal: abortController.signal,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);

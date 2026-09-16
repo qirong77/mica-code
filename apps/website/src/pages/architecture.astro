@@ -1,0 +1,69 @@
+---
+// 架构图页：内嵌两张 Archify 生成的自包含交互式架构图（源文件见 /architecture/*.architecture.json）。
+// 产物是静态文件（public/architecture/*.html），iframe 里用 ?theme=dark 对齐官网的深色主题。
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const base = import.meta.env.BASE_URL;
+
+const diagrams = [
+  {
+    file: 'mica-code-cli.html',
+    title: 'CLI 运行时',
+    desc: '终端 TUI 与 headless 共用同一条 turn loop：命令分发 → mica-agent → provider adapter，工具统一走 mica-tools registry，插件与 MCP 都向它注册；会话落盘由 turn lease 仲裁单写者。',
+    source: 'mica-code-cli.architecture.json',
+  },
+  {
+    file: 'mica-code-desktop.html',
+    title: 'Desktop 运行时',
+    desc: '应用本体是一张 Web 页面，Electron 只是外壳：Node 运行时用 HTTP + SSE 把 host 能力（chat、终端、文件、git、stats）暴露给页面，每个会话派生一个常驻 mica app-server 子进程。',
+    source: 'mica-code-desktop.architecture.json',
+  },
+];
+---
+
+<BaseLayout
+  title="架构图"
+  description="Mica Code 的 CLI 与 Desktop 运行时架构图，可交互查看节点、上下游与引导故事"
+>
+  <div class="container">
+    <section class="arch">
+      <h1>架构图</h1>
+      <p class="arch-intro">
+        两张交互式运行时地图，源码即图纸：图中的节点、连线和卡片都由
+        <a href={`${base}architecture/${diagrams[0].source}`}>规格 JSON</a>
+        渲染而来，可搜索节点（<code>/</code>）、追踪上下游、探路径、播放引导故事，也能切换主题并导出
+        PNG / SVG。
+      </p>
+
+      {
+        diagrams.map((d) => (
+          <div class="arch-block">
+            <div class="arch-head">
+              <h2>{d.title}</h2>
+              <a
+                class="btn btn-ghost"
+                href={`${base}architecture/${d.file}`}
+                target="_blank"
+                rel="noopener"
+              >
+                全屏打开 ↗
+              </a>
+            </div>
+            <p class="arch-desc">{d.desc}</p>
+            <div class="arch-frame">
+              <iframe
+                src={`${base}architecture/${d.file}?theme=dark`}
+                title={`Mica Code ${d.title}架构图`}
+                loading="lazy"
+              />
+            </div>
+            <p class="arch-foot">
+              规格源文件：
+              <a href={`${base}architecture/${d.source}`}>{d.source}</a>
+            </p>
+          </div>
+        ))
+      }
+    </section>
+  </div>
+</BaseLayout>

@@ -115,6 +115,7 @@ describe('parseCliArgs', () => {
       cwd: '/work',
       force: true,
       pruneOnly: false,
+      toolResultsOnly: false,
       format: 'json',
     });
     expect(parseCliArgs(['compact', '--session=abc'])).toMatchObject({
@@ -122,11 +123,17 @@ describe('parseCliArgs', () => {
       sessionId: 'abc',
       force: false,
       pruneOnly: false,
+      toolResultsOnly: false,
     });
     expect(parseCliArgs(['compact', '--session=abc', '--prune-only'])).toMatchObject({
       mode: 'compact',
       sessionId: 'abc',
       pruneOnly: true,
+    });
+    expect(parseCliArgs(['compact', '--session=abc', '--tool-results-only'])).toMatchObject({
+      mode: 'compact',
+      sessionId: 'abc',
+      toolResultsOnly: true,
     });
     expect(parseCliArgs(['compact'])).toMatchObject({ mode: 'error' });
     expect(parseCliArgs(['compact', '--nope', 'x'])).toMatchObject({ mode: 'error' });

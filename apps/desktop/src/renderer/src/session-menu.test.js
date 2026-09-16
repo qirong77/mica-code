@@ -7,6 +7,7 @@ describe('sessionMenuItems', () => {
     expect(items.at(-1)).toEqual(['delete', '删除对话', true])
     expect(items.map((item) => (item === 'separator' ? item : item[0]))).toEqual([
       'pin',
+      'detail',
       'rename',
       'separator',
       'delete'
@@ -18,12 +19,18 @@ describe('sessionMenuItems', () => {
     expect(items.map((item) => (item === 'separator' ? item : item[0]))).toEqual([
       'unpin',
       'unassign',
+      'detail',
       'rename',
       'separator',
       'delete'
     ])
     expect(items[0]).toEqual(['unpin', '取消置顶'])
     expect(items[1]).toEqual(['unassign', '移出项目分组'])
+  })
+
+  it('offers 查看详情 for the real session', () => {
+    const items = sessionMenuItems({ pinned: false, inProject: false })
+    expect(items).toContainEqual(['detail', '查看详情'])
   })
 })
 

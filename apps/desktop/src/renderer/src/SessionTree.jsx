@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconChevronRight,
@@ -6,6 +15,7 @@ import {
   IconFolder,
   IconFolderOpen,
   IconListTree,
+  IconPencil,
   IconPin,
   IconPlus,
   IconSearch,
@@ -18,6 +28,11 @@ import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
 import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
+
+// 会话详情弹窗复用 Stats 页的组件，按需加载——stats 目录的代码不进启动路径。
+const SessionDetailModal = lazy(() =>
+  import('./stats/SessionDetailModal').then((m) => ({ default: m.SessionDetailModal }))
+)
 
 const rowClass =
   'group relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
@@ -103,20 +118,33 @@ function RowTail({ label, labelTitle, relativeTime }) {
   )
 }
 
-// 行首状态位固定 w-4：终端前台进程在跑（如 npm run dev）时显示终端图标，Mica 对话
-// 运行中显示呼吸绿点，上一轮没跑完（中断/崩溃）显示常亮红点，否则显示未读圆点。
-// 终端图标与圆点同时存在时把圆点叠在图标右上角，绝不额外占位——否则这一行整体右推，
-// 与相邻行的缩进对不齐。
-function RowLeading({ state, unreadKey, terminal }) {
+// 行首状态位固定 w-4：终端前台进程在跑（如 npm run dev）时显示终端图标，输入框里还
+// 有没发出去的文本时显示呼吸的铅笔（切走之后输入框看不见了，只能靠这里提示），Mica
+// 对话运行中显示呼吸绿点，上一轮没跑完（中断/崩溃）显示常亮红点，否则显示未读圆点。
+// 主图标（终端 / 未发送文本）占状态位、turn 状态缩成右上角小圆点叠在它上面，绝不额外
+// 占位——否则这一行整体右推，与相邻行的缩进对不齐。
+function RowLeading({ state, unreadKey, terminal, draft }) {
   const unread = state === 'unread'
   const running = state === 'running'
   const errored = state === 'error'
-  const corner = errored ? 'bg-danger' : unread ? 'bg-info chat-dot-unread' : null
+  const icon = terminal ? 'terminal' : draft ? 'draft' : null
+  const corner = errored
+    ? 'bg-danger'
+    : unread
+      ? 'bg-info chat-dot-unread'
+      : running
+        ? 'bg-success chat-dot-running'
+        : null
+  const cornerTitle = errored ? '上一轮没有正常运行完成' : unread ? '有未读结果' : '对话正在运行'
   return (
     <span className="relative grid w-4 shrink-0 place-items-center">
-      {terminal ? (
+      {icon === 'terminal' ? (
         <span className="text-success chat-terminal-active" title="该会话有终端在运行">
           <IconTerminal2 size={13} stroke={2} />
+        </span>
+      ) : icon === 'draft' ? (
+        <span className="text-warn chat-draft-pending" title="输入框里还有未发送的内容">
+          <IconPencil size={13} stroke={2} />
         </span>
       ) : running ? (
         <span
@@ -132,11 +160,11 @@ function RowLeading({ state, unreadKey, terminal }) {
           title="有未读结果"
         />
       ) : null}
-      {terminal && corner ? (
+      {icon && corner ? (
         <span
-          key={errored ? 'error' : unreadKey}
+          key={errored ? 'error' : unread ? unreadKey : 'running'}
           className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${corner}`}
-          title={errored ? '上一轮没有正常运行完成' : '有未读结果'}
+          title={cornerTitle}
         />
       ) : null}
     </span>
@@ -235,6 +263,7 @@ export function SessionTree({
   selectedId,
   unread,
   terminalSessions,
+  draftNodes,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
@@ -252,6 +281,7 @@ export function SessionTree({
   onCreateSessionInGroup
 }) {
   const [menu, setMenu] = useState(null)
+  const [detailSessionId, setDetailSessionId] = useState(null)
   const [editing, setEditing] = useState(null) // { kind: 'session'|'draft'|'group', id }
   const [query, setQuery] = useState('')
   const [collapsedSections, setCollapsedSections] = useState({
@@ -444,6 +474,7 @@ export function SessionTree({
   const runAction = (action, menuPayload) => {
     if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
+    else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
     else if (action === 'rename') setEditing({ kind: 'session', id: menuPayload.session.id })
     else if (action === 'delete')
       menuPayload.session
@@ -614,6 +645,7 @@ export function SessionTree({
             state={state}
             unreadKey={unreadState?.lastEventAt ?? 'running'}
             terminal={!!session.id && !!terminalSessions?.has(session.id)}
+            draft={!!nodeId && !!draftNodes?.has(nodeId)}
           />
           {editingThis ? (
             <RenameInput
@@ -660,7 +692,11 @@ export function SessionTree({
           onContextMenu={(event) => openMenu(event, { draft: node, items })}
         >
           <Slot />
-          <RowLeading state={state} unreadKey={unread[node.id]?.lastEventAt ?? 'running'} />
+          <RowLeading
+            state={state}
+            unreadKey={unread[node.id]?.lastEventAt ?? 'running'}
+            draft={!!draftNodes?.has(node.id)}
+          />
           {editingThis ? (
             <RenameInput
               value={node.text}
@@ -970,6 +1006,16 @@ export function SessionTree({
       {menuNode && (
         <ContextMenu menu={menuNode} onClose={() => setMenu(null)} onAction={runAction} />
       )}
+      {detailSessionId &&
+        createPortal(
+          <Suspense fallback={null}>
+            <SessionDetailModal
+              sessionId={detailSessionId}
+              onClose={() => setDetailSessionId(null)}
+            />
+          </Suspense>,
+          document.body
+        )}
     </>
   )
 }

@@ -3,8 +3,32 @@ import {
   collectGroupStates,
   liveSessionRowState,
   mergeRowStates,
+  nextDraftMarkers,
   runningTerminalSessions
 } from './session-state'
+
+describe('nextDraftMarkers', () => {
+  it('adds and removes a node as its unsent text appears and goes away', () => {
+    const empty = new Set()
+    const withA = nextDraftMarkers(empty, 'a', 'hello')
+    expect([...withA]).toEqual(['a'])
+    expect([...nextDraftMarkers(withA, 'a', '')]).toEqual([])
+    // 空白文本不算未发送内容（输入几个空格就亮图标没有意义）
+    expect([...nextDraftMarkers(empty, 'a', '   \n')]).toEqual([])
+  })
+
+  it('keeps the same reference when nothing changes, so the sidebar does not rerender', () => {
+    const markers = nextDraftMarkers(new Set(), 'a', 'x')
+    expect(nextDraftMarkers(markers, 'a', 'yy')).toBe(markers)
+    expect(nextDraftMarkers(markers, 'b', '')).toBe(markers)
+    expect(nextDraftMarkers(markers, null, 'x')).toBe(markers)
+  })
+
+  it('tracks one node without touching the others', () => {
+    const markers = nextDraftMarkers(nextDraftMarkers(new Set(), 'a', 'x'), 'b', 'y')
+    expect([...nextDraftMarkers(markers, 'a', '')]).toEqual(['b'])
+  })
+})
 
 describe('runningTerminalSessions', () => {
   const terms = [

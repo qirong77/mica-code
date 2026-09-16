@@ -127,11 +127,13 @@ const appServerSteer = `# 上一轮 turn 未完成时注入新输入（expectedT
   <pre><code>{execExample}</code></pre>
 
   <h2>上下文压缩：mica compact</h2>
-  <pre><code>mica compact --session &lt;id&gt; [--dir &lt;cwd&gt;] [--force] [--prune-only]</code></pre>
-  <p>复用交互式 <code>/compact</code> 的 <code>CompactionService</code>，把压缩后的 checkpoint 写回会话文件并输出一行 JSON。不指定 <code>--prune-only</code> 时是模型摘要 + 最近轮次保留；会话内容较少时返回 <code>code: "not_needed"</code>。</p>
+  <pre><code>mica compact --session &lt;id&gt; [--dir &lt;cwd&gt;] [--force] [--prune-only] [--tool-results-only]</code></pre>
+  <p>复用交互式 <code>/compact</code> 的 <code>CompactionService</code>，把压缩后的 checkpoint 写回会话文件并输出一行 JSON。默认是模型摘要 + 最近轮次保留；会话内容较少时返回 <code>code: "not_needed"</code>。</p>
   <ul>
     <li>输出字段：<code>ok</code>、<code>mode</code>（<code>summarized</code> / <code>kept</code>）、<code>strategy</code>、<code>beforeCount</code> / <code>afterCount</code> / <code>summarizedCount</code> / <code>keptCount</code>、<code>beforeTokenEstimate</code> / <code>afterTokenEstimate</code> / <code>savedTokenEstimate</code> / <code>savedRatio</code>，附带 <code>contextWindowSize</code> / <code>contextUsageRatio</code> 供消费方直接展示压缩后的上下文占用。</li>
-    <li><code>--force</code>：会话内容较少时也强制摘要；<code>--prune-only</code> 只做本地清理、<strong>不调用模型</strong>：把工具结果与参数替换为占位符、按尺寸修剪图片/超长文本，无内容可清理时沿轮次边界丢弃最早轮次；两者都返回 <code>code: "not_needed"</code> 表示无可快速清理内容。</li>
+    <li><code>--force</code>：会话内容较少时也强制摘要。</li>
+    <li><code>--tool-results-only</code>：与交互式 <code>/compact</code> 同源，<strong>不调用模型</strong>且无损——只把工具结果替换为占位符，对话文本、工具参数与消息条数全部不变，可重复执行（另有 <code>toolResultsReplaced</code> 字段）；无工具结果可替换时返回 <code>code: "not_needed"</code>。桌面端的「快速压缩（本地）」用的就是它。</li>
+    <li><code>--prune-only</code>：更激进的本地清理，<strong>不调用模型</strong>——把工具结果与参数替换为占位符、按尺寸修剪图片/超长文本，单条消息已无可清理内容时沿轮次边界丢弃最早轮次（<strong>有损</strong>）；无内容可清理时同样返回 <code>code: "not_needed"</code>。</li>
     <li>压缩会保留原 <code>usageHistory</code> / <code>lastUsage</code>，不会清零 token 统计。</li>
   </ul>
 

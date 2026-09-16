@@ -348,3 +348,85 @@ suite('mica compact --prune-only flows', () => {
     });
   });
 });
+
+suite('mica compact --tool-results-only flows', () => {
+  itE2E('--tool-results-only replaces tool results and keeps conversation, arguments, and count intact', async () => {
+    const home = makeHome('tool-results-only');
+    const sessionId = 'test-tool-results-only';
+    const now = new Date().toISOString();
+    writeSession(home, sessionId, {
+      version: 1,
+      id: sessionId,
+      title: 'Tool Results Only Test',
+      createdAt: now,
+      updatedAt: now,
+      cwd: SESSION_CWD,
+      turnState: 'completed',
+      revision: 1,
+      snapshot: {
+        providerId: 'mock',
+        model: 'mock-chat',
+        effort: 'low',
+        role: 'default',
+        protocol: 'openai_responses',
+        messages: [
+          { type: 'message', role: 'user', content: '读取文件并总结' },
+          {
+            type: 'function_call',
+            id: 'call_1',
+            call_id: 'call_1',
+            name: 'read_file',
+            arguments: JSON.stringify({ file_path: '/tmp/target.txt' }),
+          },
+          { type: 'function_call_output', call_id: 'call_1', output: `文件内容 ${'y'.repeat(4_000)}` },
+          { type: 'message', role: 'assistant', content: '这是模型回复，必须保留' },
+        ],
+        conversationMessages: [
+          { role: 'user', content: '读取文件并总结' },
+          { role: 'assistant', content: '这是模型回复，必须保留' },
+        ],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    });
+
+    const first = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
+      MICA_HOME: home,
+    });
+
+    expect(first.code).toBe(0);
+    const parsedFirst = JSON.parse(first.stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(parsedFirst.ok).toBe(true);
+    expect(parsedFirst.strategy).toBe('tool_results_only');
+    expect(parsedFirst.toolResultsReplaced).toBeGreaterThan(0);
+    expect(parsedFirst.afterCount).toBe(parsedFirst.beforeCount);
+
+    const after = readSession(home, sessionId);
+    const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
+    expect(messages.length).toBe(4);
+    expect(messages[0]!.content).toBe('读取文件并总结');
+    expect(messages[3]!.content).toBe('这是模型回复，必须保留');
+    // Tool arguments are part of the request, not the tool output: keep them.
+    expect(String(messages[1]!.arguments)).toContain('/tmp/target.txt');
+    // Only the tool result payload is cleared.
+    const output = String(messages[2]!.output);
+    expect(output).not.toContain('y'.repeat(50));
+    expect(output).toContain('cleared during compact');
+
+    // Running it again has nothing left to replace and must never drop rounds.
+    const second = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
+      MICA_HOME: home,
+    });
+
+    expect(second.code).toBe(0);
+    const parsedSecond = JSON.parse(second.stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(parsedSecond.ok).toBe(false);
+    expect(parsedSecond.code).toBe('not_needed');
+
+    const afterSecond = readSession(home, sessionId);
+    const messagesSecond = (afterSecond.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
+    expect(messagesSecond.length).toBe(4);
+    expect(messagesSecond[0]!.content).toBe('读取文件并总结');
+    expect(messagesSecond[3]!.content).toBe('这是模型回复，必须保留');
+  });
+});

@@ -49,7 +49,7 @@ import {
   resolveDefaultCwd,
   uid
 } from './workspace'
-import { runningTerminalSessions } from './session-state'
+import { nextDraftMarkers, runningTerminalSessions } from './session-state'
 
 /** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
 function nodeIdFor(ptyId) {
@@ -741,6 +741,12 @@ export default function App() {
   // 新建但还没绑定真实会话的草稿归属：草稿是进程内的临时节点，只存在渲染层
   const [draftGroups, setDraftGroups] = useState({})
   const draftGroupsRef = useLatest(draftGroups)
+  // 输入框里有未发送文本的 chat 节点（ChatView 上报）。切走之后输入框就看不见了，
+  // 侧栏这一行必须替它显示「还有话没发」，否则用户完全感知不到自己留了半句话。
+  const [draftNodes, setDraftNodes] = useState(() => new Set())
+  const handleDraftChange = useCallback((nodeId, text) => {
+    setDraftNodes((prev) => nextDraftMarkers(prev, nodeId, text))
+  }, [])
 
   const applySessions = useCallback((list) => {
     const meta = {}
@@ -1417,6 +1423,7 @@ export default function App() {
         delete updated[node.id]
         return updated
       })
+      setDraftNodes((prev) => nextDraftMarkers(prev, node.id, ''))
       if (node.id === activeRef.current) {
         const terminal = next.find((item) => item.type === 'terminal')
         setActiveId(terminal?.id || null)
@@ -1907,6 +1914,7 @@ export default function App() {
             selectedId={selectedId}
             unread={notifications.states}
             terminalSessions={sessionsWithRunningTerminal}
+            draftNodes={draftNodes}
             onOpenSession={(sessionId) => {
               closeMobileDrawer()
               openSession(sessionId)
@@ -2020,6 +2028,7 @@ export default function App() {
               onResumeSession={openSession}
               onOpenTerminal={openChatTerminal}
               onSessionRenamed={refreshSessions}
+              onDraftChange={handleDraftChange}
             />
           </div>
           {!activeId && view === 'chat' && (

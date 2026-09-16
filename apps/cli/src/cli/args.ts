@@ -24,6 +24,7 @@ export type CompactCliInvocation = {
   cwd?: string;
   force: boolean;
   pruneOnly: boolean;
+  toolResultsOnly: boolean;
   format: 'json';
 };
 
@@ -66,7 +67,7 @@ export const CLI_USAGE = [
   `  ${RUNTIME_NAME} models`,
   `  ${RUNTIME_NAME} models --json`,
   `  ${RUNTIME_NAME} exec [--json] [options] "<prompt>"`,
-  `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only]`,
+  `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only] [--tool-results-only]`,
   `  ${RUNTIME_NAME} commit [--dir <path>]`,
   `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
   '',
@@ -90,6 +91,7 @@ export const CLI_USAGE = [
   '  --dir <path>                      Set the working directory',
   '  --force                           Force a summary even when history is short',
   '  --prune-only                      Only perform local cleanup; never call a model',
+  '  --tool-results-only               Replace tool results with placeholders in place; never call a model or drop rounds',
   '',
   'Commit options:',
   '  --dir <path>                      Set the working directory',
@@ -124,6 +126,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     let cwd: string | undefined;
     let force = false;
     let pruneOnly = false;
+    let toolResultsOnly = false;
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index]!;
       const valueOption = parseValueOption(arg, argv, index, ['--session', '--dir']);
@@ -142,11 +145,15 @@ export function parseCliArgs(argv: string[]): CliInvocation {
         pruneOnly = true;
         continue;
       }
+      if (arg === '--tool-results-only') {
+        toolResultsOnly = true;
+        continue;
+      }
       if (arg === '--help' || arg === '-h') return { mode: 'help' };
       return cliError(`Unknown compact option: ${arg}`);
     }
     if (!sessionId) return cliError('Missing value for --session.');
-    return { mode: 'compact', sessionId, cwd, force, pruneOnly, format: 'json' };
+    return { mode: 'compact', sessionId, cwd, force, pruneOnly, toolResultsOnly, format: 'json' };
   }
   if (argv[0] === 'commit') {
     let cwd: string | undefined;

@@ -1655,7 +1655,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
-      title: '本地压缩：工具调用参数与结果全部占位，清理图片/文档，必要时丢弃最早轮次；不调用模型',
+      title: '本地压缩：仅把工具结果替换为占位符，不改动对话内容、不丢弃轮次；不调用模型',
       icon: IconBolt,
       disabled: !menu.hasSession || menu.running
     },
@@ -2132,7 +2132,8 @@ export function ChatView({
   onNewSession,
   onResumeSession,
   onOpenTerminal,
-  onSessionRenamed
+  onSessionRenamed,
+  onDraftChange
 }) {
   const nodeId = node?.id || null
   const nodeIdRef = useLatest(nodeId)
@@ -2143,6 +2144,7 @@ export function ChatView({
   const onResumeSessionRef = useLatest(onResumeSession)
   const onOpenTerminalRef = useLatest(onOpenTerminal)
   const onSessionRenamedRef = useLatest(onSessionRenamed)
+  const onDraftChangeRef = useLatest(onDraftChange)
   const sessionIdRef = useRef(node?.sessionId || null)
   const streamRef = useRef({ id: null, kind: null, turnId: null })
   const turnRef = useRef(null)
@@ -2157,6 +2159,9 @@ export function ChatView({
   const loadedNodeRef = useRef(null)
   const transcriptCacheRef = useRef(new Map())
   const draftsRef = useRef(new Map())
+  // 已经上报给侧栏的「哪个节点的未发送文本」，用来去重（每次按键都 setState 会把
+  // 整个 App 拖着重渲染）。
+  const draftReportRef = useRef({ nodeId: null, text: '' })
   const todoHiddenRef = useRef(new Map())
   // 输入历史与 CLI 共享（~/.mica/storage.json 的 inputHistory），跨节点共用
   // 一份数组；挂载时从磁盘加载，发送时异步回写。
@@ -2804,6 +2809,18 @@ export function ChatView({
     }
   }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
+  // 切走之后输入框就看不见了，未发送的文本由侧栏那行代为提示。必须声明在下面那个
+  // 切换 effect 之前：切换那一帧 input 还是上一个会话的，先让它按 nodeId 覆盖式上报，
+  // 紧接着切换 effect 会把旧节点的文本与落到本节点上的草稿各上报一次，收敛到正确值。
+  useEffect(() => {
+    if (!nodeId) return
+    const text = input || ''
+    const reported = draftReportRef.current
+    if (reported.nodeId === nodeId && reported.text === text) return
+    draftReportRef.current = { nodeId, text }
+    onDraftChangeRef.current?.(nodeId, text)
+  }, [input, nodeId])
+
   useEffect(() => {
     if (!nodeId) return undefined
     const previousNodeId = loadedNodeRef.current
@@ -2811,6 +2828,11 @@ export function ChatView({
       transcriptCacheRef.current.set(previousNodeId, messagesRef.current)
     }
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
+    if (previousNodeId && previousNodeId !== nodeId) {
+      onDraftChangeRef.current?.(previousNodeId, inputRef.current)
+    }
+    draftReportRef.current = { nodeId, text: nextInput || '' }
+    onDraftChangeRef.current?.(nodeId, nextInput)
     loadedNodeRef.current = nodeId
     const cachedTranscript = transcriptCacheRef.current.get(nodeId)
     const generation = ++restoreGenerationRef.current
@@ -3485,7 +3507,10 @@ export function ChatView({
               Number(result.savedTokenEstimate) || beforeTokens - afterTokens
             )
             const savedPercent = Math.round((Number(result.savedRatio) || 0) * 100)
-            const strategy = String(result.strategy || '').replaceAll('_', ' ')
+            const rawStrategy = String(result.strategy || '')
+            const strategy = rawStrategy.replaceAll('_', ' ')
+            // 与交互式 /compact 同源：只替换工具结果，消息条数不变。
+            const toolResultsOnly = rawStrategy === 'tool_results_only'
             const mode = `${result.mode || (compactMode === 'local' ? 'pruned' : 'summarized')}${strategy ? ` (${strategy})` : ''}`
             const contextAfter =
               result.contextUsageRatio != null
@@ -3497,9 +3522,18 @@ export function ChatView({
               'compact complete',
               '',
               `- Mode: ${mode}`,
-              `- Messages: ${Number(result.beforeCount) || 0} → ${Number(result.afterCount) || 0}`,
+              ...(toolResultsOnly
+                ? [
+                    `- Tool results replaced: ${Number(result.toolResultsReplaced) || 0}`,
+                    `- Messages: ${Number(result.beforeCount) || 0} (unchanged)`
+                  ]
+                : [
+                    `- Messages: ${Number(result.beforeCount) || 0} → ${Number(result.afterCount) || 0}`
+                  ]),
               `- Saved: ~${formatTokens(savedTokens).toLowerCase()} tokens (${savedPercent}%)`,
-              `- Recent kept: ${Number(result.keptCount) || 0} messages`,
+              ...(toolResultsOnly
+                ? []
+                : [`- Recent kept: ${Number(result.keptCount) || 0} messages`]),
               `- Context after compact: ${contextAfter}`
             ].join('\n')
             applyCompactMeta(result)
@@ -3519,7 +3553,7 @@ export function ChatView({
               ])
             }
           } else if (result?.code === 'not_needed') {
-            const localHint = String(result?.error || '').includes('没有可本地清理')
+            const localHint = String(result?.error || '').includes('可清理')
               ? '\n提示：上下文大主要是由大量小消息构成，本地压缩无法缩减；如需摘要压缩请使用「模型压缩」。'
               : ''
             updateNotice(

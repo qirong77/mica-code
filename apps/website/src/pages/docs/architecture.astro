@@ -8,10 +8,17 @@ const stack = [
   { name: 'packages/mica-builtin-commands 官方插件', desc: '产品命令与内置插件：commands 命令实现、plugins 插件装配（Todo、MCP、message queue、文件 mention）、startup 启动扩展。' },
   { name: 'mica-code-app', desc: '终端风格的桌面 Web 渲染，通过 app-server 协议驱动 mica 子进程。' },
 ];
+
+const base = import.meta.env.BASE_URL;
 ---
 
 <DocLayout title="架构概览" active="architecture" description="Mica Code 的源码结构与设计理念">
   <h1>架构概览</h1>
+
+  <p>
+    想看可交互的运行时地图？<a href={`${base}architecture`}>架构图</a>
+    里有两张自包含的图（CLI 运行时 / Desktop 运行时），支持节点搜索、上下游追踪、路径探测与导出。
+  </p>
 
   <h2>设计理念</h2>
   <ul>

@@ -1217,7 +1217,10 @@ function runCompactSession(sessionId, mode = 'model') {
           sessionId,
           '--dir',
           compactCwd,
-          ...(mode === 'local' ? ['--prune-only'] : [])
+          // 「快速压缩（本地）」与交互式 /compact 同源：无损，只把工具结果换成
+          // 占位符，不改对话文本、不丢轮次。--prune-only 是 lossy 的（无内容
+          // 可清理时会丢弃最早轮次），不要在这里使用。
+          ...(mode === 'local' ? ['--tool-results-only'] : [])
         ],
         {
           cwd: compactCwd,
@@ -1280,7 +1283,8 @@ function runCompactSession(sessionId, mode = 'model') {
             savedTokenEstimate: result.savedTokenEstimate,
             savedRatio: result.savedRatio,
             contextWindowSize: result.contextWindowSize,
-            contextUsageRatio: result.contextUsageRatio
+            contextUsageRatio: result.contextUsageRatio,
+            toolResultsReplaced: result.toolResultsReplaced
           })
           return
         }

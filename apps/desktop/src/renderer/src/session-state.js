@@ -37,6 +37,24 @@ export function runningTerminalSessions(rightTerms = [], states = {}) {
 }
 
 /**
+ * 输入框里还没发出去的文本只活在 ChatView 里（切走时按节点收进它自己的草稿表），
+ * 侧栏要能指着那条会话说「你还有话没发」就只能由 ChatView 上报。标记按 chat 节点
+ * id 记，会话行用它 openBySession 映射出来的节点查，草稿页签直接用节点 id 查。
+ *
+ * 与 running/unread 那类 turn 状态无关，也不参与折叠容器的状态合并：它和红灯一样
+ * 属于单个会话自己的编辑态，挂在容器上指不出是哪一条有没发出去的文本。
+ */
+export function nextDraftMarkers(markers, nodeId, text) {
+  const hasText = !!String(text ?? '').trim()
+  if (!nodeId) return markers
+  if (markers.has(nodeId) === hasText) return markers
+  const next = new Set(markers)
+  if (hasText) next.add(nodeId)
+  else next.delete(nodeId)
+  return next
+}
+
+/**
  * 折叠起来的分组/分区会把里面的行从侧栏藏掉，那一层必须替它显示状态，否则
  * 「正在跑」和「有未读」在折叠状态下完全不可见。合并优先级与 RowLeading 的
  * 显示分支同源：运行中 > 未读。
