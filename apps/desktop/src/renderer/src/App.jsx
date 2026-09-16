@@ -19,10 +19,10 @@ import {
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView, shortPath } from './ChatView'
-import { ServerDialog } from './ServerDialog'
+import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
-import { currentServerUrl, serverLabel } from './servers'
+import { currentServerUrl, serverEntryFor, serverEntryLabel, serverLabel } from './servers'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -629,9 +629,15 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
-  // 「切换 Mica 服务器」：切换 = 整页导航到另一台运行时的地址（见 ServerDialog）
-  const [serverDialogOpen, setServerDialogOpen] = useState(false)
+  // 「切换 Mica 服务器」：切换 = 整页导航到另一台运行时的地址（见 ServerCard）。
+  // 桌面上鼠标移到 Server 行就浮出卡片（强阻断的弹窗在这里没有必要），手机上点一下
+  // 在抽屉里原地展开。
+  const [serverMenuOpen, setServerMenuOpen] = useState(false)
+  const [serverList, setServerList] = useState([])
+  const serverRowRef = useRef(null)
+  const serverCloseTimer = useRef(null)
   const currentServer = currentServerUrl(window.location)
+  const currentServerEntry = serverEntryFor(serverList, currentServer)
   // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
   // 打开终端）都会同步打开抽屉，不必逐个改调用点
   const previousRightPanelOpen = useRef(rightPanelOpen)
@@ -645,6 +651,69 @@ export default function App() {
   }, [isMobile])
   const closeMobileDrawer = useCallback(() => setMobileDrawer(null), [])
   const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
+
+  // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
+  // 点一下切换。清单由 App 持有，这样侧栏那行也能显示用户给当前服务器起的备注。
+  const coarsePointer = useMemo(
+    () => typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
+    []
+  )
+  const openServerMenu = useCallback(() => {
+    clearTimeout(serverCloseTimer.current)
+    setServerMenuOpen(true)
+  }, [])
+  const scheduleServerMenuClose = useCallback(() => {
+    clearTimeout(serverCloseTimer.current)
+    serverCloseTimer.current = setTimeout(() => setServerMenuOpen(false), 160)
+  }, [])
+  const toggleServerMenu = useCallback(() => {
+    // 桌面端点行不关卡片（悬停已经把它打开了，点一下就关会很难用）
+    if (!coarsePointer) {
+      openServerMenu()
+      return
+    }
+    setServerMenuOpen((open) => !open)
+  }, [coarsePointer, openServerMenu])
+  const hoverServerRow = !isMobile && !coarsePointer
+
+  useEffect(() => {
+    let alive = true
+    window.mica.app.servers
+      .list()
+      .then((list) => {
+        if (alive) setServerList(Array.isArray(list) ? list : [])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!serverMenuOpen) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') setServerMenuOpen(false)
+    }
+    const onPointerDown = (event) => {
+      if (event.target.closest?.('[data-server-card]')) return
+      if (serverRowRef.current?.contains(event.target)) return
+      setServerMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [serverMenuOpen])
+
+  useEffect(() => {
+    if (isMobile && !mobileDrawer) setServerMenuOpen(false)
+  }, [isMobile, mobileDrawer])
+
+  // 切到另一台运行时 = 整页导航到它的地址，和用浏览器直接打开那个地址完全等价
+  const switchServer = useCallback((url) => window.location.assign(url), [])
+
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
     terminalId: null,
@@ -1754,22 +1823,42 @@ export default function App() {
               <IconSettings size={14} className="shrink-0 opacity-75" />
               <span>Settings</span>
             </button>
-            <button
-              type="button"
-              title="切换 Mica 服务器（连接另一台机器上的 Mica）"
-              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
-              onClick={() => {
-                closeMobileDrawer()
-                setServerDialogOpen(true)
-              }}
+            <div
+              ref={serverRowRef}
+              className="relative"
+              onMouseEnter={hoverServerRow ? openServerMenu : undefined}
+              onMouseLeave={hoverServerRow ? scheduleServerMenuClose : undefined}
             >
-              <IconServer size={14} className="shrink-0 opacity-60" />
-              <span className="shrink-0">Server</span>
-              <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
-                {serverLabel(currentServer)}
-              </span>
-            </button>
+              <button
+                type="button"
+                aria-expanded={serverMenuOpen}
+                title="切换 Mica 服务器（连接另一台机器上的 Mica）"
+                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-white/[.05] hover:text-white ${
+                  serverMenuOpen ? 'bg-white/[.05] text-white' : 'text-white/60'
+                }`}
+                onClick={toggleServerMenu}
+              >
+                <IconServer size={14} className="shrink-0 opacity-60" />
+                <span className="shrink-0">Server</span>
+                <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
+                  {currentServerEntry
+                    ? serverEntryLabel(currentServerEntry)
+                    : serverLabel(currentServer)}
+                </span>
+              </button>
+            </div>
           </nav>
+          {serverMenuOpen && isMobile && (
+            <div className="no-drag shrink-0 px-2 pb-2">
+              <ServerCard
+                current={currentServer}
+                servers={serverList}
+                onServersChange={setServerList}
+                onSwitch={switchServer}
+                onDismiss={() => setServerMenuOpen(false)}
+              />
+            </div>
+          )}
           <SessionTree
             sessions={sessions}
             pins={pins}
@@ -2160,11 +2249,16 @@ export default function App() {
           }}
         />
       )}
-      {serverDialogOpen && (
-        <ServerDialog
+      {serverMenuOpen && !isMobile && (
+        <ServerCardPopover
+          anchorRef={serverRowRef}
+          onPointerEnter={openServerMenu}
+          onPointerLeave={scheduleServerMenuClose}
           current={currentServer}
-          onClose={() => setServerDialogOpen(false)}
-          onSwitch={(url) => window.location.assign(url)}
+          servers={serverList}
+          onServersChange={setServerList}
+          onSwitch={switchServer}
+          onDismiss={() => setServerMenuOpen(false)}
         />
       )}
     </>

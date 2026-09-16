@@ -11,6 +11,9 @@ export const DEFAULT_SERVER_PORT = 8787
 /** 默认端口上的回环地址：窗口/浏览器所在的这台机器，也就是「本机」 */
 export const LOCAL_SERVER_URL = `http://127.0.0.1:${DEFAULT_SERVER_PORT}`
 
+/** 备注上限，与 host 侧 servers-core.js 的 MAX_SERVER_NOTE 一致 */
+export const MAX_SERVER_NOTE = 40
+
 /** 当前页面所在的服务器（页面就是它托管的，所以 origin 即地址） */
 export function currentServerUrl(location) {
   return String(location?.origin || '')
@@ -48,4 +51,17 @@ export function serverLabel(url) {
   if (!parsed) return String(url || '')
   if (isLoopbackServer(url)) return '本机'
   return parsed.host || parsed.hostname
+}
+
+/** 用户在清单里给这台机器起的备注优先，没备注时才回落到 host:port */
+export function serverEntryLabel(entry) {
+  const note = String(entry?.note ?? '').trim()
+  return note || serverLabel(entry?.url)
+}
+
+/** 清单里当前这一台的条目（用来把备注显示到侧栏上） */
+export function serverEntryFor(servers, url) {
+  return (
+    (Array.isArray(servers) ? servers : []).find((entry) => isSameServer(entry?.url, url)) || null
+  )
 }

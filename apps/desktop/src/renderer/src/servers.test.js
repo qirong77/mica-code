@@ -4,6 +4,8 @@ import {
   currentServerUrl,
   isLoopbackServer,
   isSameServer,
+  serverEntryFor,
+  serverEntryLabel,
   serverLabel
 } from './servers'
 
@@ -38,5 +40,30 @@ describe('isSameServer', () => {
     expect(isSameServer('http://box:8787', 'http://box:8787/api/health')).toBe(true)
     expect(isSameServer('http://box:8787', 'http://box:9000')).toBe(false)
     expect(isSameServer('http://box:8787', 'not a url')).toBe(false)
+  })
+})
+
+describe('serverEntryLabel', () => {
+  test('prefers the note the user gave the machine', () => {
+    expect(serverEntryLabel({ url: 'http://192.168.1.5:8787', note: '构建机' })).toBe('构建机')
+  })
+
+  test('falls back to host:port without a note', () => {
+    expect(serverEntryLabel({ url: 'http://192.168.1.5:8787', note: '' })).toBe('192.168.1.5:8787')
+    expect(serverEntryLabel({ url: 'http://192.168.1.5:8787' })).toBe('192.168.1.5:8787')
+    expect(serverEntryLabel({ url: LOCAL_SERVER_URL, note: '   ' })).toBe('本机')
+    expect(serverEntryLabel(null)).toBe('')
+  })
+})
+
+describe('serverEntryFor', () => {
+  test('finds the entry of the server hosting the page', () => {
+    const servers = [
+      { url: 'http://192.168.1.5:8787', note: '构建机' },
+      { url: 'http://box:9000', note: '' }
+    ]
+    expect(serverEntryFor(servers, 'http://192.168.1.5:8787')).toMatchObject({ note: '构建机' })
+    expect(serverEntryFor(servers, 'http://elsewhere:8787')).toBeNull()
+    expect(serverEntryFor(undefined, 'http://box:9000')).toBeNull()
   })
 })

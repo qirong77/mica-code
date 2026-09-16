@@ -205,14 +205,15 @@ async function loadPage(url) {
 /** 页面请求切到另一个地址：确认是 Mica 运行时才放行，否则交回系统浏览器 */
 async function navigateToServer(target) {
   const origin = originOf(target)
-  if (!origin || (await probeMicaRuntime(origin))) {
-    await loadPage(origin || target)
+  // 默认端口上的回环地址一律理解成「本机」，必须先于探活判定：本机运行时的 8787 被
+  // 别的服务（或同一台机器上的另一个 mica 实例）占着时它会回退到随机端口，而页面只
+  // 知道约定地址。先探活会连到恰好占着 8787 的那个实例上，那不是「本机」。
+  if (origin && origin === `http://127.0.0.1:${DEFAULT_PORT}` && localPageUrl) {
+    await loadPage(localPageUrl)
     return
   }
-  // 默认端口上的回环地址一律理解成「本机」：本机运行时的 8787 被别的服务占着时
-  // 它会回退到随机端口，而页面只知道约定地址。
-  if (origin === `http://127.0.0.1:${DEFAULT_PORT}` && localPageUrl) {
-    await loadPage(localPageUrl)
+  if (!origin || (await probeMicaRuntime(origin))) {
+    await loadPage(origin || target)
     return
   }
   shell.openExternal(target)

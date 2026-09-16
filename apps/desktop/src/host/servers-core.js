@@ -13,12 +13,19 @@ import { dirname, join } from 'path'
 const STORE_FILE = 'mica-servers.json'
 const STORE_VERSION = 1
 const MAX_SERVERS = 12
+export const MAX_SERVER_NOTE = 40
 
 export const DEFAULT_SERVER_PORT = 8787
 export const PROBE_TIMEOUT_MS = 2000
 
 export function serverStorePath(userDataDir) {
   return join(userDataDir, STORE_FILE)
+}
+
+/** 备注是用户给连接过的机器起的名字：单行、去首尾空白、超长截断 */
+export function normalizeServerNote(input) {
+  if (typeof input !== 'string') return ''
+  return input.replace(/\s+/g, ' ').trim().slice(0, MAX_SERVER_NOTE)
 }
 
 /**
@@ -56,6 +63,7 @@ export function sanitizeServerStore(data) {
     if (!url || servers.some((entry) => entry.url === url)) continue
     servers.push({
       url,
+      note: normalizeServerNote(item?.note),
       lastUsedAt: typeof item?.lastUsedAt === 'string' ? item.lastUsedAt : new Date(0).toISOString()
     })
     if (servers.length >= MAX_SERVERS) break
@@ -63,14 +71,27 @@ export function sanitizeServerStore(data) {
   return { version: STORE_VERSION, servers }
 }
 
-/** 最近用过的排最前，同一个地址只留一条 */
+/** 最近用过的排最前，同一个地址只留一条；已存在的备注跟着保留 */
 export function mergeServerUrl(servers, url, now = new Date().toISOString()) {
-  const rest = (Array.isArray(servers) ? servers : []).filter((entry) => entry?.url !== url)
-  return [{ url, lastUsedAt: now }, ...rest].slice(0, MAX_SERVERS)
+  const list = Array.isArray(servers) ? servers : []
+  const existing = list.find((entry) => entry?.url === url)
+  const rest = list.filter((entry) => entry?.url !== url)
+  return [{ url, note: normalizeServerNote(existing?.note), lastUsedAt: now }, ...rest].slice(
+    0,
+    MAX_SERVERS
+  )
 }
 
 export function removeServerUrl(servers, url) {
   return (Array.isArray(servers) ? servers : []).filter((entry) => entry?.url !== url)
+}
+
+/** 改备注：地址不在清单里就原样返回（不给没连接过的地址凭空建条目） */
+export function setServerNote(servers, url, note) {
+  const text = normalizeServerNote(note)
+  return (Array.isArray(servers) ? servers : []).map((entry) =>
+    entry?.url === url ? { ...entry, note: text } : entry
+  )
 }
 
 export function readServerStore(userDataDir) {

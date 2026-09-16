@@ -5,12 +5,15 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   DEFAULT_SERVER_PORT,
+  MAX_SERVER_NOTE,
   mergeServerUrl,
   normalizeServerUrl,
+  normalizeServerNote,
   probeServer,
   readServerStore,
   removeServerUrl,
   sanitizeServerStore,
+  setServerNote,
   serverStorePath,
   writeServerStore
 } from './servers-core'
@@ -70,8 +73,8 @@ describe('server list', () => {
 
     expect(store.version).toBe(1)
     expect(store.servers).toEqual([
-      { url: 'http://192.168.1.5:8787', lastUsedAt: '2026-01-01T00:00:00.000Z' },
-      { url: 'http://box:9000', lastUsedAt: new Date(0).toISOString() }
+      { url: 'http://192.168.1.5:8787', note: '', lastUsedAt: '2026-01-01T00:00:00.000Z' },
+      { url: 'http://box:9000', note: '', lastUsedAt: new Date(0).toISOString() }
     ])
   })
 
@@ -82,8 +85,8 @@ describe('server list', () => {
 
     servers = mergeServerUrl(servers, 'http://a:8787', '2026-01-03T00:00:00.000Z')
     expect(servers).toEqual([
-      { url: 'http://a:8787', lastUsedAt: '2026-01-03T00:00:00.000Z' },
-      { url: 'http://b:8787', lastUsedAt: '2026-01-02T00:00:00.000Z' }
+      { url: 'http://a:8787', note: '', lastUsedAt: '2026-01-03T00:00:00.000Z' },
+      { url: 'http://b:8787', note: '', lastUsedAt: '2026-01-02T00:00:00.000Z' }
     ])
 
     expect(removeServerUrl(servers, 'http://a:8787').map((entry) => entry.url)).toEqual([
@@ -91,6 +94,46 @@ describe('server list', () => {
     ])
   })
 
+  test('keeps the note of an address that is re-used', () => {
+    let servers = mergeServerUrl([], 'http://a:8787', '2026-01-01T00:00:00.000Z')
+    servers = setServerNote(servers, 'http://a:8787', ' 公司的构建机 ')
+    expect(servers).toEqual([
+      { url: 'http://a:8787', note: '公司的构建机', lastUsedAt: '2026-01-01T00:00:00.000Z' }
+    ])
+
+    servers = mergeServerUrl(servers, 'http://a:8787', '2026-01-02T00:00:00.000Z')
+    expect(servers[0]).toMatchObject({ note: '公司的构建机' })
+  })
+})
+
+describe('server notes', () => {
+  test('normalizes a note into a single truncated line', () => {
+    expect(normalizeServerNote(undefined)).toBe('')
+    expect(normalizeServerNote(42)).toBe('')
+    expect(normalizeServerNote('  开发机\n\t二号  ')).toBe('开发机 二号')
+    expect(normalizeServerNote('x'.repeat(MAX_SERVER_NOTE + 10))).toHaveLength(MAX_SERVER_NOTE)
+  })
+
+  test('only writes a note for an address already in the list', () => {
+    const servers = [{ url: 'http://a:8787', note: 'a', lastUsedAt: '2026-01-01T00:00:00.000Z' }]
+    expect(setServerNote(servers, 'http://b:8787', 'b').map((entry) => entry.url)).toEqual([
+      'http://a:8787'
+    ])
+    expect(setServerNote(servers, 'http://a:8787', '').map((entry) => entry.note)).toEqual([''])
+  })
+
+  test('drops a note that is not a string when reading the store', () => {
+    const store = sanitizeServerStore({
+      servers: [
+        { url: 'http://a:8787', note: { evil: true } },
+        { url: 'http://b:8787', note: ' b ' }
+      ]
+    })
+    expect(store.servers.map((entry) => entry.note)).toEqual(['', 'b'])
+  })
+})
+
+describe('server store files', () => {
   test('reads an unreadable or missing store as empty', () => {
     const dir = makeUserDataDir()
     expect(readServerStore(dir).servers).toEqual([])
@@ -101,8 +144,14 @@ describe('server list', () => {
 
   test('round-trips through disk', () => {
     const dir = makeUserDataDir()
-    writeServerStore(dir, { version: 1, servers: mergeServerUrl([], 'http://box:8787') })
+    const servers = setServerNote(
+      mergeServerUrl([], 'http://box:8787'),
+      'http://box:8787',
+      '构建机'
+    )
+    writeServerStore(dir, { version: 1, servers })
     expect(readServerStore(dir).servers.map((entry) => entry.url)).toEqual(['http://box:8787'])
+    expect(readServerStore(dir).servers[0].note).toBe('构建机')
   })
 })
 

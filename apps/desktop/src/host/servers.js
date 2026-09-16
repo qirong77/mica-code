@@ -5,11 +5,12 @@ import {
   probeServer,
   readServerStore,
   removeServerUrl,
+  setServerNote,
   writeServerStore
 } from './servers-core'
 
 /**
- * 「切换 Mica 服务器」的 IPC 面：清单读写 + 目标探活。
+ * 「切换 Mica 服务器」的 IPC 面：清单读写 + 备注 + 目标探活。
  *
  * 清单与 workspace.json / session-pins.json 同目录（`app.getPath('userData')`，
  * 服务端模式下由 electron-shim 解析到同一个 `mica-code-app` 目录），因此 Electron
@@ -39,6 +40,18 @@ export function registerServersIpc() {
     const next = {
       version: STORE_VERSION,
       servers: removeServerUrl(store.servers, String(payload?.url ?? '').trim())
+    }
+    writeServerStore(storePath(), next)
+    return next.servers
+  })
+
+  ipcMain.handle('app:servers:note', (_event, payload) => {
+    const url = normalizeServerUrl(payload?.url)
+    if (!url) throw new Error('地址格式不正确')
+    const store = readServerStore(storePath())
+    const next = {
+      version: STORE_VERSION,
+      servers: setServerNote(store.servers, url, payload?.note)
     }
     writeServerStore(storePath(), next)
     return next.servers

@@ -3,6 +3,7 @@ import { execFile, spawn } from 'child_process'
 import { readFileSync, statSync } from 'fs'
 import os from 'os'
 import { basename, join, resolve } from 'path'
+import { resolveDefaultShell } from './shell-path'
 
 /**
  * Settings 视图：拉起/复用 mica 的 Config Web（mica --config-web-worker），
@@ -79,7 +80,11 @@ async function resolveMicaCli() {
   if (isExecutable(defaultPath)) return defaultPath
 
   // 从 Dock 启动的应用 PATH 精简，走登录 shell 才能拿到用户的完整 PATH（与内置终端一致）
-  const shell = process.env.SHELL || '/bin/zsh'
+  const shell = resolveDefaultShell({
+    platform: process.platform,
+    env: process.env,
+    exists: isExecutable
+  })
   const shellName = basename(shell).toLowerCase()
   const flags = shellName === 'fish' ? '-lc' : '-ilc'
   const resolved = await execFileText(shell, [flags, 'command -v mica'])

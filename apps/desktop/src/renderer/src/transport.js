@@ -245,6 +245,7 @@ function createWebApi(env) {
         list: () => invoke('app:servers:list'),
         remember: (url) => invoke('app:servers:remember', { url }),
         forget: (url) => invoke('app:servers:forget', { url }),
+        note: (url, note) => invoke('app:servers:note', { url, note }),
         probe: (url) => invoke('app:servers:probe', { url })
       }
     },

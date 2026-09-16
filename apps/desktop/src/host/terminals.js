@@ -7,6 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import pty from 'node-pty'
 import { normalizeMicaCommand } from './mica-cli'
+import { resolveDefaultShell } from './shell-path'
 
 const sessions = new Map()
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
@@ -153,10 +154,11 @@ function assertSessionOwner(event, session) {
 }
 
 function getDefaultShell() {
-  if (process.platform === 'win32') {
-    return process.env.COMSPEC || 'powershell.exe'
-  }
-  return process.env.SHELL || '/bin/zsh'
+  return resolveDefaultShell({
+    platform: process.platform,
+    env: process.env,
+    exists: existsSync
+  })
 }
 
 function getShellArgs(shellPath) {
