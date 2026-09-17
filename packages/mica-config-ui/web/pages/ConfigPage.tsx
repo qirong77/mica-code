@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
+import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
@@ -77,7 +77,7 @@ export function ConfigPage() {
         {error ? <Alert message={error} /> : null}
         {loading && !content ? <div className="editor-loading">正在加载配置…</div> : null}
         <div className="editor-host editor-host-large">
-          <MonacoJsonEditor
+          <JsonEditor
             value={content}
             language="json"
             readOnly={loading || saving || !path}

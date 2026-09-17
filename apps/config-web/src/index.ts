@@ -1,4 +1,6 @@
 export { startConfigWeb } from './server/startConfigWeb.js';
-export { buildConfigWebConversationDetails } from './conversation.js';
-export type { ConfigWebConversationSource } from './conversation.js';
-export type { ConfigWebServerInfo } from './shared/types.js';
+export { buildConfigWebConversationDetails } from '@packages/mica-config-ui/index.js';
+export type {
+  ConfigWebConversationSource,
+  ConfigWebServerInfo,
+} from '@packages/mica-config-ui/index.js';

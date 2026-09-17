@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRole, deleteRole, readRolesDetails, writeRole } from '../api.js';
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
-import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
+import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
-import type { ConfigWebRolesDetails } from '../../../src/shared/types.js';
+import type { ConfigWebRolesDetails } from '../../src/shared/types.js';
 
 export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
   const [details, setDetails] = useState<ConfigWebRolesDetails | null>(null);
@@ -190,7 +190,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
                 {selectedRole?.builtIn ? <span className="muted-text">内置 Role 只读</span> : null}
               </div>
               <div className="editor-host role-editor-host">
-                <MonacoJsonEditor
+                <JsonEditor
                   value={content}
                   language="markdown"
                   readOnly={(selectedRole?.builtIn ?? true) || saving}

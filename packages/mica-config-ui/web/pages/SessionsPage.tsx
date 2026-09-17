@@ -3,7 +3,7 @@ import { readSessionContent, readSessionDetails, readSessionsDetails, writeSessi
 import { ContextPane } from '../components/ContextPane.js';
 import { ConversationPane } from '../components/ConversationPane.js';
 import { confirmDialog } from '../components/DialogHost.js';
-import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
+import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
@@ -11,7 +11,7 @@ import type {
   ConfigWebSessionDetails,
   ConfigWebSessionOption,
   ConfigWebSessionsDetails,
-} from '../../../src/shared/types.js';
+} from '../../src/shared/types.js';
 
 type SessionTab = 'conversation' | 'context' | 'json';
 
@@ -263,7 +263,7 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
                 ) : null}
                 {tab === 'json' ? (
                   <div className="editor-host session-raw-editor">
-                    <MonacoJsonEditor
+                    <JsonEditor
                       value={rawContent}
                       language="json"
                       readOnly={saving || header.turnState === 'running'}

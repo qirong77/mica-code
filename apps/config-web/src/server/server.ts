@@ -1,26 +1,4 @@
-import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
-import {
-  createMcpServer,
-  createRole,
-  createSkill,
-  deleteMcpServer,
-  deleteRole,
-  deleteSkill,
-  getMcpDetails,
-  getPluginsDetails,
-  getRolesDetails,
-  getSessionContent,
-  getSessionContextAnalysis,
-  getSessionConversationPage,
-  getSessionDetails,
-  getSessionItem,
-  getSessionsDetails,
-  getSkillsDetails,
-  writeMcpServer,
-  writeRole,
-  writeSessionDetails,
-  writeSkill,
-} from './details.js';
+import { runConfigWebAction, type ConfigWebActionName } from '@packages/mica-config-ui/index.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { resolveConfigWebAdvertisedUrl, resolveConfigWebBindHost } from './publicUrl.js';
@@ -50,6 +28,11 @@ export type RunningConfigWebServer = {
   stop(): void;
 };
 
+/**
+ * 浏览器端的 Config Web：把 `packages/mica-config-ui` 的动作表挂成 HTTP 路由，并托管由
+ * `bun run build:config-web` 内嵌进来的页面产物。桌面端不用这个服务——它在运行时里把同一
+ * 张动作表直接暴露成 IPC（见 apps/desktop 的 src/host/configWeb.js）。
+ */
 export async function startConfigWebServer(options: ConfigWebServerOptions): Promise<RunningConfigWebServer> {
   const preferredPort = options.preferredPort ?? readPreferredPort();
   const bindHost = resolveConfigWebBindHost();
@@ -95,9 +78,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
     port: preferredPort ?? DEFAULT_PORT,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
-      if (url.pathname.startsWith('/api/')) {
-        return handleApiRequest(request, server, url, clients);
-      }
+      if (url.pathname.startsWith('/api/')) return handleApiRequest(request, server, url);
       if (url.pathname === '/favicon.ico') return new Response(null, { status: 204 });
       return serveGeneratedStaticAsset(url.pathname) ?? json({ error: 'Config web assets are not built' }, 500);
     },
@@ -143,8 +124,7 @@ async function startDevConfigWebServer(
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request: Request, server: Bun.Server<unknown>) {
-      const url = new URL(request.url);
-      return handleApiRequest(request, server, url, getClients());
+      return handleApiRequest(request, server, new URL(request.url));
     },
     websocket: {
       open(socket: Bun.ServerWebSocket<unknown>) {
@@ -196,140 +176,117 @@ async function startDevConfigWebServer(
   };
 }
 
+/* ------------------------------------------------------------------ HTTP → 动作 */
+
+type ApiCall = { action: ConfigWebActionName; input: Record<string, unknown> };
+
+const NOT_FOUND = Symbol('not-found');
+const METHOD_NOT_ALLOWED = Symbol('method-not-allowed');
+
+/**
+ * 路径与方法 → 动作表。路径是前端 api 实现的既有约定，保持稳定；参数校验、错误语义都在
+ * packages/mica-config-ui 的 actions.ts 里，这里只做搬运与状态码映射。
+ */
 async function handleApiRequest(
   request: Request,
   server: Bun.Server<unknown>,
   url: URL,
-  clients: number,
 ): Promise<Response | undefined> {
-  if (url.pathname === '/api/ping') return json({ ok: true, clients });
-  if (url.pathname === '/api/details/mcp') return json(await getMcpDetails());
-  if (url.pathname === '/api/details/skills') return json(getSkillsDetails());
-  if (url.pathname === '/api/details/plugins') return json(getPluginsDetails());
-  if (url.pathname === '/api/details/sessions') return json(getSessionsDetails());
-  if (url.pathname === '/api/details/session') {
-    try {
-      const id = url.searchParams.get('id') ?? '';
-      const view = url.searchParams.get('view') ?? 'header';
-      if (view === 'json') return json(getSessionContent(id));
-      if (view === 'conversation') {
-        const offset = parsePositiveInt(url.searchParams.get('offset'), 0);
-        const limit = parsePositiveInt(url.searchParams.get('limit'), 80);
-        const tail = url.searchParams.get('tail') === '1';
-        return json(getSessionConversationPage(id, offset, limit, tail));
-      }
-      if (view === 'item') {
-        return json(getSessionItem(id, parsePositiveInt(url.searchParams.get('sequence'), 1)));
-      }
-      if (view === 'context') return json(getSessionContextAnalysis(id));
-      return json(getSessionDetails(id));
-    } catch (error) {
-      return json({ error: formatError(error) }, 404);
-    }
-  }
-  if (url.pathname === '/api/details/roles') return json(getRolesDetails());
-
-  if (url.pathname === '/api/files/session') {
-    try {
-      if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
-      const body = (await request.json()) as { id?: unknown; content?: unknown };
-      if (typeof body.id !== 'string' || !body.id.trim()) return json({ error: 'id is required' }, 400);
-      if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-      return json(writeSessionDetails(body.id, body.content));
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-  }
-
-  if (url.pathname === '/api/files/role') {
-    try {
-      const body = (await request.json()) as { name?: unknown; content?: unknown };
-      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
-      if (request.method === 'POST') {
-        if (body.content !== undefined && typeof body.content !== 'string') {
-          return json({ error: 'content must be string' }, 400);
-        }
-        return json(createRole(body.name, body.content ?? ''));
-      }
-      if (request.method === 'PUT') {
-        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-        return json(writeRole(body.name, body.content));
-      }
-      if (request.method === 'DELETE') {
-        return json(deleteRole(body.name));
-      }
-      return json({ error: 'Method not allowed' }, 405);
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-  }
-
-  if (url.pathname === '/api/files/mcp') {
-    try {
-      const body = (await request.json()) as { name?: unknown; content?: unknown };
-      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
-      if (request.method === 'POST') {
-        if (body.content !== undefined && typeof body.content !== 'string') {
-          return json({ error: 'content must be string' }, 400);
-        }
-        return json(await createMcpServer(body.name, body.content ?? ''));
-      }
-      if (request.method === 'PUT') {
-        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-        return json(await writeMcpServer(body.name, body.content));
-      }
-      if (request.method === 'DELETE') {
-        return json(await deleteMcpServer(body.name));
-      }
-      return json({ error: 'Method not allowed' }, 405);
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-  }
-
-  if (url.pathname === '/api/files/skill') {
-    try {
-      const body = (await request.json()) as { name?: unknown; content?: unknown };
-      if (typeof body.name !== 'string') return json({ error: 'name must be string' }, 400);
-      if (request.method === 'POST') {
-        if (body.content !== undefined && typeof body.content !== 'string') {
-          return json({ error: 'content must be string' }, 400);
-        }
-        return json(createSkill(body.name, body.content ?? ''));
-      }
-      if (request.method === 'PUT') {
-        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-        return json(writeSkill(body.name, body.content));
-      }
-      if (request.method === 'DELETE') {
-        return json(deleteSkill(body.name));
-      }
-      return json({ error: 'Method not allowed' }, 405);
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-  }
-
   if (url.pathname === '/api/events') {
     if (server.upgrade(request, { data: {} })) return undefined;
     return json({ error: 'Upgrade failed' }, 400);
   }
 
-  if (url.pathname === '/api/files/config') {
-    try {
-      if (request.method === 'GET') return json(readConfigWebFile());
-      if (request.method === 'PUT') {
-        const body = (await request.json()) as { content?: unknown };
-        if (typeof body.content !== 'string') return json({ error: 'content must be string' }, 400);
-        return json(writeConfigWebFile(body.content));
-      }
-    } catch (error) {
-      return json({ error: formatError(error) }, 400);
-    }
-    return json({ error: 'Method not allowed' }, 405);
+  try {
+    const call = await resolveApiCall(request, url);
+    if (call === NOT_FOUND) return json({ error: 'Not found' }, 404);
+    if (call === METHOD_NOT_ALLOWED) return json({ error: 'Method not allowed' }, 405);
+    return json(await runConfigWebAction(call.action, call.input));
+  } catch (error) {
+    return json({ error: formatError(error) }, url.pathname === '/api/details/session' ? 404 : 400);
   }
+}
 
-  return json({ error: 'Not found' }, 404);
+async function resolveApiCall(
+  request: Request,
+  url: URL,
+): Promise<ApiCall | typeof NOT_FOUND | typeof METHOD_NOT_ALLOWED> {
+  const method = request.method;
+  const query = Object.fromEntries(url.searchParams.entries());
+  const get = (action: ConfigWebActionName, input: Record<string, unknown> = {}): ApiCall => ({
+    action,
+    input,
+  });
+  const body = method === 'GET' ? {} : await readBody(request);
+
+  switch (url.pathname) {
+    case '/api/ping':
+      return method === 'GET' ? get('ping') : METHOD_NOT_ALLOWED;
+
+    case '/api/files/config':
+      if (method === 'GET') return get('readConfigFile');
+      if (method === 'PUT') return get('writeConfigFile', { content: body.content });
+      return METHOD_NOT_ALLOWED;
+
+    case '/api/details/session':
+      if (method !== 'GET') return METHOD_NOT_ALLOWED;
+      if (query.view === 'json') return get('readSessionContent', { id: query.id });
+      if (query.view === 'conversation') return get('readSessionConversationPage', query);
+      if (query.view === 'item') return get('readSessionItem', query);
+      if (query.view === 'context') return get('readSessionContextAnalysis', { id: query.id });
+      return get('readSessionDetails', { id: query.id });
+
+    case '/api/files/session':
+      if (method !== 'PUT') return METHOD_NOT_ALLOWED;
+      return get('writeSession', { id: body.id, content: body.content });
+
+    case '/api/details/mcp':
+      return method === 'GET' ? get('readMcpDetails') : METHOD_NOT_ALLOWED;
+    case '/api/details/skills':
+      return method === 'GET' ? get('readSkillsDetails') : METHOD_NOT_ALLOWED;
+    case '/api/details/roles':
+      return method === 'GET' ? get('readRolesDetails') : METHOD_NOT_ALLOWED;
+    case '/api/details/plugins':
+      return method === 'GET' ? get('readPluginsDetails') : METHOD_NOT_ALLOWED;
+    case '/api/details/sessions':
+      return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
+
+    case '/api/files/mcp':
+    case '/api/files/skill':
+    case '/api/files/role':
+      return resolveFileCall(url.pathname, method, body, get);
+
+    default:
+      return NOT_FOUND;
+  }
+}
+
+/** role / skill / mcp 三个文件接口的形状一致：POST 新建、PUT 保存、DELETE 删除 */
+function resolveFileCall(
+  pathname: string,
+  method: string,
+  body: Record<string, unknown>,
+  get: (action: ConfigWebActionName, input?: Record<string, unknown>) => ApiCall,
+): ApiCall | typeof METHOD_NOT_ALLOWED {
+  const kind = pathname.slice('/api/files/'.length);
+  const names = {
+    role: { read: 'readRolesDetails', create: 'createRole', write: 'writeRole', remove: 'deleteRole' },
+    skill: { read: 'readSkillsDetails', create: 'createSkill', write: 'writeSkill', remove: 'deleteSkill' },
+    mcp: { read: 'readMcpDetails', create: 'createMcpServer', write: 'writeMcpServer', remove: 'deleteMcpServer' },
+  }[kind] as
+    | { read: ConfigWebActionName; create: ConfigWebActionName; write: ConfigWebActionName; remove: ConfigWebActionName }
+    | undefined;
+  if (!names) return METHOD_NOT_ALLOWED;
+
+  if (method === 'POST') return get(names.create, { name: body.name, content: body.content ?? '' });
+  if (method === 'PUT') return get(names.write, { name: body.name, content: body.content });
+  if (method === 'DELETE') return get(names.remove, { name: body.name });
+  return METHOD_NOT_ALLOWED;
+}
+
+async function readBody(request: Request): Promise<Record<string, unknown>> {
+  const parsed = await request.json().catch(() => null);
+  return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
 }
 
 function json(value: unknown, status = 200): Response {
@@ -341,10 +298,4 @@ function json(value: unknown, status = 200): Response {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function parsePositiveInt(value: string | null, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
-  return parsed;
 }

@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -10,7 +9,8 @@ import icon from '../../resources/icon.png?asset'
  *
  * 应用的主体是一个 Web 页面：由 `src/server` 的运行时（out/server/index.mjs）
  * 托管，同一个地址也能被局域网里的浏览器直接访问。这个进程只做三件事：
- * 拉起运行时、用窗口装载页面、补上只有容器才能提供的原生体验（dock 徽标等）。
+ * 拉起运行时、装载页面、补上只有容器才能提供的原生体验（dock 徽标等）。切换 Mica
+ * 服务器在这里体现为「再开一个窗口」——一个窗口一台服务器，彼此互不影响。
  *
  * 因此这里不注册任何业务 IPC，也不注入 preload —— 页面里的 `window.mica`
  * 始终由 renderer 自己的 transport 适配层通过 HTTP + SSE 建立。
@@ -21,22 +21,21 @@ const DEFAULT_PORT = 8787
 const READY_PREFIX = '[mica-desktop] ready '
 const HEADER_HEIGHT_PX = 34
 const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 12 }
-const ACTIVE_SERVER_FILE = 'mica-active-server.json'
 
-let mainWindow = null
 let runtime = null
-let stopBadgeWatcher = null
 let quitting = false
-/**
- * 「切换 Mica 服务器」在窗口侧的状态：
- * - `localPageUrl`：窗口里「本机」的页面地址（dev 下是 Vite dev server）
- * - `activeApiUrl`：徽标/未读订阅当前该看的那台运行时（切到别的 mica 后跟着走）
- * - `serverSuffix`/`pageTitle`：标题拼成「<页面标题> — <服务器>」，让用户一眼知道连的是哪台
- */
+/** 「本机」页面地址（dev 下是 Vite dev server），⇧⌘M 与默认端口上的回环目标都回到它 */
 let localPageUrl = ''
-let activeApiUrl = ''
-let serverSuffix = ''
-let pageTitle = 'Mica Code'
+/**
+ * 一个服务器一个窗口。启动时开的是本机窗口（`primary`，关闭时只隐藏），页面里请求
+ * 切到另一台机器的运行时则当场再开一个。每个窗口自己持有它那台的状态：
+ * - `server`/`local`：窗口当前显示的 origin，以及它是不是本机运行时（did-navigate 更新）
+ * - `apiUrl`/`unread`/`stopBadgeWatcher`：未读徽标订阅跟着这个窗口的那台走
+ * - `title`/`suffix`：标题拼成「<页面标题> — <服务器>」，让用户一眼知道连的是哪台
+ */
+const windows = new Set()
+let primaryWindow = null
+let lastFocusedWindow = null
 
 /* ------------------------------------------------------------------ 运行时 */
 
@@ -115,7 +114,7 @@ function spawnRuntime(port, { pageFromDevServer }) {
       if (!quitting) {
         console.error(`[mica-code-app] 运行时进程已退出（code=${code} signal=${signal}）`)
         runtime = null
-        if (mainWindow && !mainWindow.isDestroyed()) {
+        if (primaryWindow && !primaryWindow.win.isDestroyed()) {
           dialog.showErrorBox('Mica Code 运行时已退出', '请重新启动应用。')
         }
       }
@@ -137,9 +136,11 @@ async function resolveRuntime({ pageFromDevServer }) {
 /* ------------------------------------------------------------ 切换 Mica 服务器 */
 
 /**
- * 页面可以切到另一台机器上的 Mica 运行时 —— 那就是一次整页导航，和用浏览器直接打开
- * 那个地址完全等价。外壳在这里做三件页面做不到的事：确认目标地址上确实是一台 Mica
- * 运行时（页面跨源 fetch 读不到结果）、把「上次连的是哪台」记下来、让徽标订阅跟着走。
+ * 页面可以切到另一台机器上的 Mica 运行时 —— 页面侧就是一次 `location.assign`，外壳
+ * 接管它并**弹出一个新窗口**（一窗口一台服务器，原来那台仍留在自己的窗口里）。外壳
+ * 在这里做三件页面做不到的事：确认目标地址上确实是一台 Mica 运行时（页面跨源 fetch
+ * 读不到结果）、把新窗口接上自己的状态（标题后缀、徽标订阅）、把不认识的跳转仍交回
+ * 系统浏览器。
  */
 
 function originOf(value) {
@@ -164,90 +165,113 @@ async function probeMicaRuntime(origin) {
   }
 }
 
-function activeServerPath() {
-  return join(app.getPath('userData'), ACTIVE_SERVER_FILE)
+function applyWindowTitle(state) {
+  if (state.win.isDestroyed()) return
+  state.win.setTitle(`${state.title}${state.suffix ? ` — ${state.suffix}` : ''}`)
 }
 
-/** 上次连的是哪台（null 表示本机）；启动时据此直接回到那台 */
-function readActiveServer() {
+async function loadPage(state, url) {
+  if (!state || state.win.isDestroyed()) return
   try {
-    const data = JSON.parse(readFileSync(activeServerPath(), 'utf8'))
-    const url = typeof data?.url === 'string' ? data.url.trim() : ''
-    return url || null
-  } catch {
-    return null
-  }
-}
-
-function writeActiveServer(url) {
-  try {
-    mkdirSync(app.getPath('userData'), { recursive: true })
-    writeFileSync(activeServerPath(), JSON.stringify({ url: url || null }, null, 2), 'utf8')
-  } catch (error) {
-    console.error('[mica-code-app] 记录当前服务器失败', error)
-  }
-}
-
-function applyWindowTitle() {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.setTitle(`${pageTitle}${serverSuffix ? ` — ${serverSuffix}` : ''}`)
-}
-
-async function loadPage(url) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  try {
-    await mainWindow.loadURL(url)
+    await state.win.loadURL(url)
   } catch (error) {
     console.error('[mica-code-app] 页面加载失败', error)
   }
 }
 
-/** 页面请求切到另一个地址：确认是 Mica 运行时才放行，否则交回系统浏览器 */
-async function navigateToServer(target) {
+function showWindow(state) {
+  if (state.win.isDestroyed()) return
+  if (state.win.isMinimized()) state.win.restore()
+  state.win.show()
+  state.win.focus()
+}
+
+/** 已经开着某台服务器时不再开第二个窗口，直接把它端到前面 —— 切回来才不用重新加载 */
+function findServerWindow(origin) {
+  if (!origin) return null
+  const localOrigin = originOf(localPageUrl)
+  return (
+    [...windows].find(
+      (item) =>
+        !item.win.isDestroyed() &&
+        (item.server === origin || (item.local && origin === localOrigin))
+    ) || null
+  )
+}
+
+/**
+ * 页面请求切到另一个地址：已经开着的服务器把窗口端到前面，没开过的在**新窗口**里打开，
+ * 其余交回系统浏览器。
+ */
+async function navigateToServer(state, target) {
   const origin = originOf(target)
   // 默认端口上的回环地址一律理解成「本机」，必须先于探活判定：本机运行时的 8787 被
   // 别的服务（或同一台机器上的另一个 mica 实例）占着时它会回退到随机端口，而页面只
-  // 知道约定地址。先探活会连到恰好占着 8787 的那个实例上，那不是「本机」。
+  // 知道约定地址。先探活会连到恰好占着 8787 的那个实例上，那不是「本机」。（dev 下
+  // 本机页面在 Vite dev server 上，这条分支把它换回本机页面地址。）
   if (origin && origin === `http://127.0.0.1:${DEFAULT_PORT}` && localPageUrl) {
-    await loadPage(localPageUrl)
+    const existing = findServerWindow(originOf(localPageUrl))
+    if (existing && existing !== state) {
+      showWindow(existing)
+      return
+    }
+    // 自己就是本机页面（启动失败页上的「返回本机」）时重新加载，别让这一下变成空点
+    await loadPage(state, localPageUrl)
     return
   }
-  if (!origin || (await probeMicaRuntime(origin))) {
-    await loadPage(origin || target)
+  if (!origin) {
+    shell.openExternal(target)
+    return
+  }
+  const existing = findServerWindow(origin)
+  if (existing && existing !== state) {
+    showWindow(existing)
+    return
+  }
+  if (await probeMicaRuntime(origin)) {
+    createWindow(origin)
     return
   }
   shell.openExternal(target)
 }
 
-/** 页面落在哪台运行时上：徽标订阅、标题后缀、启动恢复记录都跟着它 */
-function syncActiveServer(target) {
+/** 窗口落在哪台运行时上：标题后缀与未读徽标订阅都跟着它 */
+function syncWindowServer(state, target) {
   const origin = originOf(target)
-  const isLocal = origin === originOf(localPageUrl)
-  const apiUrl = isLocal ? runtime?.url || origin : origin
-  if (apiUrl && apiUrl !== activeApiUrl) {
-    activeApiUrl = apiUrl
-    if (typeof stopBadgeWatcher === 'function') stopBadgeWatcher()
-    stopBadgeWatcher = startBadgeWatcher(apiUrl)
+  const local = Boolean(localPageUrl) && origin === originOf(localPageUrl)
+  state.server = origin
+  state.local = local
+  const apiUrl = local ? runtime?.url || origin : origin
+  if (apiUrl && apiUrl !== state.apiUrl) {
+    state.apiUrl = apiUrl
+    watchUnread(state, apiUrl)
   }
-  serverSuffix = isLocal ? '' : origin.replace(/^https?:\/\//i, '')
-  writeActiveServer(isLocal ? null : origin)
-  applyWindowTitle()
+  state.suffix = local ? '' : origin.replace(/^https?:\/\//i, '')
+  applyWindowTitle(state)
+  refreshBadge()
 }
 
-/** 回到本机页面（⇧⌘M）——切到别台之后即使那个页面里没有切换入口也能回来 */
-function backToLocalPage() {
+/**
+ * 回到本机（⇧⌘M）：本机窗口还在就把它端到前面，否则把当前窗口带回本机页面。
+ * 切过去的那台可能跑着更旧的 bundle（页面里根本没有切换入口），回程只能由壳提供。
+ */
+function backToLocalPage(state) {
+  const local = [...windows].find((item) => item.local && !item.win.isDestroyed())
+  if (local) {
+    showWindow(local)
+    return
+  }
   if (!localPageUrl) return
-  if (originOf(mainWindow?.webContents.getURL()) === originOf(localPageUrl)) return
-  void loadPage(localPageUrl)
+  void loadPage(state, localPageUrl)
 }
 
 /* ---------------------------------------------------------------- 原生体验 */
 
 /**
- * 页面的未读状态由它自己维护（页面聚焦/可见时标记已读），这里只订阅运行时的
- * 通知流，把「有多少条未读」映射成 dock 徽标 / 任务栏闪烁。
+ * 页面的未读状态由它自己维护（页面聚焦/可见时标记已读），这里为每个窗口订阅它自己
+ * 那台运行时的通知流，把「有多少条未读」映射成 dock 徽标 / 任务栏闪烁。
  */
-function startBadgeWatcher(url) {
+function startUnreadWatcher(url, onCount) {
   const controller = new AbortController()
 
   const refresh = async () => {
@@ -260,7 +284,7 @@ function startBadgeWatcher(url) {
       const body = await response.json()
       const states = Array.isArray(body?.result) ? body.result : []
       const count = states.reduce((sum, item) => sum + (item?.unread ? 1 : 0), 0)
-      applyBadge(count)
+      onCount(count)
     } catch {
       // 运行时正忙/已退出，保留上一次的徽标
     }
@@ -314,24 +338,48 @@ function startBadgeWatcher(url) {
   return () => controller.abort()
 }
 
+/** 窗口跟着自己那台走：换服务器就换订阅 */
+function watchUnread(state, url) {
+  stopUnreadWatcher(state)
+  state.stopBadgeWatcher = startUnreadWatcher(url, (count) => {
+    state.unread = count
+    if (state.win.isDestroyed()) return
+    // Windows 没有计数徽标，用任务栏闪烁表达「有未读且窗口不在前台」
+    if (process.platform === 'win32') state.win.flashFrame(count > 0 && !state.win.isFocused())
+    refreshBadge()
+  })
+}
+
+function stopUnreadWatcher(state) {
+  if (typeof state.stopBadgeWatcher === 'function') state.stopBadgeWatcher()
+  state.stopBadgeWatcher = null
+}
+
+/** 徽标反映当前聚焦窗口那台服务器的未读；都不可用时回落到本机窗口 */
+function refreshBadge() {
+  const focused = [...windows].find((state) => !state.win.isDestroyed() && state.win.isFocused())
+  const fallback = primaryWindow && !primaryWindow.win.isDestroyed() ? primaryWindow : null
+  const state = focused || fallback || [...windows].find((item) => !item.win.isDestroyed()) || null
+  applyBadge(state ? state.unread : 0)
+}
+
 function applyBadge(count) {
   app.setBadgeCount(count)
 
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setBadge(count > 0 ? String(count) : '')
   }
-
-  // Windows 没有计数徽标，用任务栏闪烁表达「有未读且窗口不在前台」
-  if (process.platform === 'win32' && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.flashFrame(count > 0 && !mainWindow.isFocused())
-  }
 }
 
 /* ------------------------------------------------------------------ 窗口 */
 
-function createWindow(url) {
+/**
+ * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
+ * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
+ */
+function createWindow(url, { primary = false } = {}) {
   const isMac = process.platform === 'darwin'
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -354,62 +402,90 @@ function createWindow(url) {
     }
   })
 
+  const state = {
+    win,
+    primary,
+    server: originOf(url),
+    local: false,
+    apiUrl: '',
+    unread: 0,
+    stopBadgeWatcher: null,
+    title: 'Mica Code',
+    suffix: ''
+  }
+  windows.add(state)
+  if (primary) primaryWindow = state
+
   if (isMac) {
-    mainWindow.setSheetOffset(HEADER_HEIGHT_PX)
+    win.setSheetOffset(HEADER_HEIGHT_PX)
   }
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  win.on('ready-to-show', () => {
+    win.show()
   })
 
-  mainWindow.on('close', (event) => {
-    if (!quitting) {
+  win.on('close', (event) => {
+    if (!quitting && primary) {
       event.preventDefault()
-      mainWindow.hide()
+      win.hide()
     }
   })
 
-  mainWindow.on('focus', () => {
-    if (process.platform === 'win32') mainWindow.flashFrame(false)
+  win.on('closed', () => {
+    stopUnreadWatcher(state)
+    windows.delete(state)
+    if (primaryWindow === state) primaryWindow = null
+    if (lastFocusedWindow === state) lastFocusedWindow = null
+    refreshBadge()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  win.on('focus', () => {
+    lastFocusedWindow = state
+    refreshBadge()
+    if (process.platform === 'win32') win.flashFrame(false)
+  })
+
+  win.webContents.setWindowOpenHandler((details) => {
     if (/^https?:/i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('will-navigate', (event, target) => {
-    // 本机页面内部跳转直接放行，其余跳转交给系统浏览器（除非目标是另一台 mica）
-    if (localPageUrl && target.startsWith(localPageUrl)) return
+  win.webContents.on('will-navigate', (event, target) => {
+    // 窗口自己那台上的跳转（含本机页面内部）直接放行 —— 同一台服务器换个路径不是
+    // 「切换服务器」，不该再开一个窗口。其余交给 navigateToServer 判断：另一台 mica
+    // 开新窗口，普通链接仍给系统浏览器。
+    const origin = originOf(target)
+    if (origin && (origin === state.server || origin === originOf(localPageUrl))) return
     event.preventDefault()
     if (!/^https?:/i.test(target)) return
-    // 也可能是切换到另一台 mica：确认过才放行，普通链接仍交给系统浏览器
-    void navigateToServer(target)
+    void navigateToServer(state, target)
   })
 
-  mainWindow.webContents.on('did-navigate', (_event, target) => {
-    syncActiveServer(target)
+  win.webContents.on('did-navigate', (_event, target) => {
+    syncWindowServer(state, target)
   })
 
   // 页面自己的 title 会被壳子接管，这里补上当前服务器，切到别台时也看得出来
-  mainWindow.webContents.on('page-title-updated', (event, title) => {
+  win.webContents.on('page-title-updated', (event, title) => {
     event.preventDefault()
-    pageTitle = title || 'Mica Code'
-    applyWindowTitle()
+    state.title = title || 'Mica Code'
+    applyWindowTitle(state)
   })
 
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
     const modifier = process.platform === 'darwin' ? input.meta : input.control
     if (!modifier || !input.shift || input.key.toLowerCase() !== 'm') return
     event.preventDefault()
-    backToLocalPage()
+    backToLocalPage(state)
   })
 
-  mainWindow.loadURL(url).catch((error) => {
+  win.loadURL(url).catch((error) => {
     console.error('[mica-code-app] 页面加载失败', error)
     dialog.showErrorBox('页面加载失败', `${url}\n\n${error?.message || error}`)
   })
+
+  return state
 }
 
 /* ---------------------------------------------------------------- 生命周期 */
@@ -433,32 +509,22 @@ app.whenReady().then(async () => {
     return
   }
 
-  activeApiUrl = runtime.url
-  stopBadgeWatcher = startBadgeWatcher(activeApiUrl)
-
-  const pageUrl = devPageUrl || runtime.url
-  localPageUrl = pageUrl
-  // 上次连的是另一台机器上的 mica 时直接回到那台；那台探不通（关机/换网了）就回本机，
-  // 不能把用户丢在一个连不上的页面上。
-  const remembered = readActiveServer()
-  const rememberedOrigin = originOf(remembered)
-  const restored =
-    rememberedOrigin && rememberedOrigin !== originOf(pageUrl) ? rememberedOrigin : null
-  const target = restored && (await probeMicaRuntime(restored)) ? restored : pageUrl
-  if (restored && target === pageUrl) {
-    console.warn(`[mica-code-app] 上次的服务器 ${restored} 连不上，回到本机`)
-    writeActiveServer(null)
-  }
-  createWindow(target)
+  localPageUrl = devPageUrl || runtime.url
+  // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
+  createWindow(localPageUrl, { primary: true })
 
   app.on('activate', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
+    // 回到用户最后用的那个窗口（关掉的窗口还在 windows 里时就轮到本机窗口）
+    const state =
+      (lastFocusedWindow && !lastFocusedWindow.win.isDestroyed() && lastFocusedWindow) ||
+      (primaryWindow && !primaryWindow.win.isDestroyed() && primaryWindow) ||
+      [...windows].find((item) => !item.win.isDestroyed()) ||
+      null
+    if (state) {
+      showWindow(state)
       return
     }
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(pageUrl)
+    if (localPageUrl) createWindow(localPageUrl, { primary: true })
   })
 })
 
@@ -470,10 +536,7 @@ app.on('before-quit', () => {
   quitting = true
   app.setBadgeCount(0)
   if (process.platform === 'darwin' && app.dock) app.dock.setBadge('')
-  if (typeof stopBadgeWatcher === 'function') {
-    stopBadgeWatcher()
-    stopBadgeWatcher = null
-  }
+  for (const state of windows) stopUnreadWatcher(state)
   // 只结束自己拉起的运行时；复用的那个（dev 下已在跑）留给它的属主
   if (runtime?.owned && runtime.child) {
     try {

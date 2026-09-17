@@ -22,7 +22,7 @@ import { ChatView, shortPath } from './ChatView'
 import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
-import { currentServerUrl, serverEntryFor, serverEntryLabel, serverLabel } from './servers'
+import { currentServerUrl, openServerTarget, serverLabel } from './servers'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -637,15 +637,13 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
-  // 「切换 Mica 服务器」：切换 = 整页导航到另一台运行时的地址（见 ServerCard）。
+  // 「切换 Mica 服务器」：切换 = 打开另一台运行时的地址（见 ServerCard）。
   // 桌面上鼠标移到 Server 行就浮出卡片（强阻断的弹窗在这里没有必要），手机上点一下
   // 在抽屉里原地展开。
   const [serverMenuOpen, setServerMenuOpen] = useState(false)
-  const [serverList, setServerList] = useState([])
   const serverRowRef = useRef(null)
   const serverCloseTimer = useRef(null)
   const currentServer = currentServerUrl(window.location)
-  const currentServerEntry = serverEntryFor(serverList, currentServer)
   // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
   // 打开终端）都会同步打开抽屉，不必逐个改调用点
   const previousRightPanelOpen = useRef(rightPanelOpen)
@@ -661,7 +659,7 @@ export default function App() {
   const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
 
   // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
-  // 点一下切换。清单由 App 持有，这样侧栏那行也能显示用户给当前服务器起的备注。
+  // 点一下切换。
   const coarsePointer = useMemo(
     () => typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
     []
@@ -685,19 +683,6 @@ export default function App() {
   const hoverServerRow = !isMobile && !coarsePointer
 
   useEffect(() => {
-    let alive = true
-    window.mica.app.servers
-      .list()
-      .then((list) => {
-        if (alive) setServerList(Array.isArray(list) ? list : [])
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  useEffect(() => {
     if (!serverMenuOpen) return undefined
     const onKey = (event) => {
       if (event.key === 'Escape') setServerMenuOpen(false)
@@ -719,8 +704,8 @@ export default function App() {
     if (isMobile && !mobileDrawer) setServerMenuOpen(false)
   }, [isMobile, mobileDrawer])
 
-  // 切到另一台运行时 = 整页导航到它的地址，和用浏览器直接打开那个地址完全等价
-  const switchServer = useCallback((url) => window.location.assign(url), [])
+  // 切到另一台运行时 = 打开它的地址：外壳里由主进程弹一个新窗口，浏览器里开新标签页
+  const switchServer = useCallback((url) => openServerTarget(url), [])
 
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
@@ -1884,9 +1869,7 @@ export default function App() {
                 <IconServer size={14} className="shrink-0 opacity-60" />
                 <span className="shrink-0">Server</span>
                 <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
-                  {currentServerEntry
-                    ? serverEntryLabel(currentServerEntry)
-                    : serverLabel(currentServer)}
+                  {serverLabel(currentServer)}
                 </span>
               </button>
             </div>
@@ -1895,8 +1878,6 @@ export default function App() {
             <div className="no-drag shrink-0 px-2 pb-2">
               <ServerCard
                 current={currentServer}
-                servers={serverList}
-                onServersChange={setServerList}
                 onSwitch={switchServer}
                 onDismiss={() => setServerMenuOpen(false)}
               />
@@ -2027,6 +2008,7 @@ export default function App() {
               onNewSession={createChatSession}
               onResumeSession={openSession}
               onOpenTerminal={openChatTerminal}
+              onOpenSettings={() => setView('settings')}
               onSessionRenamed={refreshSessions}
               onDraftChange={handleDraftChange}
             />
@@ -2300,8 +2282,6 @@ export default function App() {
           onPointerEnter={openServerMenu}
           onPointerLeave={scheduleServerMenuClose}
           current={currentServer}
-          servers={serverList}
-          onServersChange={setServerList}
           onSwitch={switchServer}
           onDismiss={() => setServerMenuOpen(false)}
         />

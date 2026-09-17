@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSessionConversationPage } from '../api.js';
 import { Tag } from './Ui.js';
 import { appIcons } from '../icons.js';
-import type { ConfigWebConversationItem, ConfigWebConversationItemType } from '../../../src/shared/types.js';
+import type { ConfigWebConversationItem, ConfigWebConversationItemType } from '../../src/shared/types.js';
 
 const PAGE_SIZE = 80;
 

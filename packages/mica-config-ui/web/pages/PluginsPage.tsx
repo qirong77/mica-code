@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, CollapsiblePanel, Empty, Tag } from '../components/Ui.js';
 import { readPluginsDetails } from '../api.js';
-import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../../src/shared/types.js';
+import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 
 export function PluginsPage() {

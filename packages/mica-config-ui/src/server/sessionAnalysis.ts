@@ -5,7 +5,7 @@ import type {
   ConfigWebContextEntry,
   ConfigWebContextTurn,
   ConfigWebConversationItem,
-} from './shared/types.js';
+} from '../shared/types.js';
 
 /** Rough per-image token cost when the provider stored an image in history. */
 export const IMAGE_TOKENS_PER_IMAGE = 850;

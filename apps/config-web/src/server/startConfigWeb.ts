@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { probeConfigWebState, readConfigWebState } from './singleton.js';
 import { resolveConfigWebAdvertisedUrl, resolveConfigWebBindHost } from './publicUrl.js';
-import type { ConfigWebServerInfo } from '../shared/types.js';
+import type { ConfigWebServerInfo } from '@packages/mica-config-ui/index.js';
 
 export async function startConfigWeb(
   options: { persistent?: boolean } = {},

@@ -19,6 +19,7 @@
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的展示纯函数（时间/状态/token 格式化），无 React、无运行时依赖。
+- `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
 
 ## 应用目录
 
@@ -26,7 +27,7 @@
 
 - `apps/cli`：Mica CLI 主应用（`apps/cli/src`，原根目录 `src/`）。
 - `apps/desktop`：Electron 桌面应用（原 `mica-code-app/`）。
-- `apps/config-web`：本地配置 Web，server + 内嵌静态资源（原 `packages/mica-config-web/`）。
+- `apps/config-web`：本地配置 Web 的**浏览器宿主**：Bun HTTP 服务 + 内嵌静态资源（页面与数据层在 `packages/mica-config-ui`）。
 - `apps/website`：官网与文档站（Astro，原 `mica-code-website/`）。
 
 ## 包规范

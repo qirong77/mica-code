@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { getConfigWebStatePath } from './paths.js';
+import { getConfigWebStatePath } from '@packages/mica-config-ui/index.js';
 
 export type ConfigWebState = {
   pid: number;

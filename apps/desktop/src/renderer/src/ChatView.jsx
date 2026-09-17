@@ -1946,6 +1946,7 @@ export function ChatView({
   onNewSession,
   onResumeSession,
   onOpenTerminal,
+  onOpenSettings,
   onSessionRenamed,
   onDraftChange
 }) {
@@ -1957,6 +1958,7 @@ export function ChatView({
   const onNewSessionRef = useLatest(onNewSession)
   const onResumeSessionRef = useLatest(onResumeSession)
   const onOpenTerminalRef = useLatest(onOpenTerminal)
+  const onOpenSettingsRef = useLatest(onOpenSettings)
   const onSessionRenamedRef = useLatest(onSessionRenamed)
   const onDraftChangeRef = useLatest(onDraftChange)
   const sessionIdRef = useRef(node?.sessionId || null)
@@ -3239,7 +3241,7 @@ export function ChatView({
       }
 
       if (parsed.name === 'config') {
-        await window.mica.settings.open()
+        onOpenSettingsRef.current?.()
         if (isCurrentNode()) appendCommandResult(parsed.raw, '已打开 Mica 配置')
         return
       }
@@ -3462,6 +3464,7 @@ export function ChatView({
       appendCommandResult,
       appendNotice,
       cwdRef,
+      onOpenSettingsRef,
       meta,
       nodeId,
       nodeIdRef,

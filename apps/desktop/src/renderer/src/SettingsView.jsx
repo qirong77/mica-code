@@ -1,55 +1,32 @@
 import { useEffect, useState } from 'react'
+import { ConfigWebApp, setConfigWebClient, setConfigWebEditor } from '@mica-config-ui/web'
+import { createDesktopConfigWebClient } from './config-web'
+import { LocalJsonEditor } from './config-web-editor'
 
-/** Settings 视图：在主进程拉起/复用 mica 的 Config Web 后，用 iframe 内嵌加载配置页面 */
+// 宿主接线只做一次：数据源走运行时 IPC、编辑器用应用自带的 monaco；页面组件本身来自
+// packages/mica-config-ui（浏览器端 apps/config-web 用同一份源码，见那里的 main.tsx）。
+setConfigWebClient(createDesktopConfigWebClient())
+setConfigWebEditor(LocalJsonEditor)
+
+/**
+ * Settings 视图：直接渲染配置页组件。
+ *
+ * 数据来自页面所连的那台运行时，所以「切到另一台服务器」之后这个视图改的就是那台的
+ * 配置——不再依赖本机拉起 config-web 子进程，也没有跨源 iframe。
+ */
 export function SettingsView({ visible }) {
-  const [snap, setSnap] = useState({ status: 'idle' })
-  const [retryTick, setRetryTick] = useState(0)
-
+  // 首次打开才挂载，之后保持挂载以保留页内状态（与其它视图的常驻方式一致）
+  const [mounted, setMounted] = useState(visible)
   useEffect(() => {
-    if (!visible) return undefined
-    let alive = true
-    setSnap({ status: 'starting' })
-    window.mica.settings
-      .open()
-      .then((info) => {
-        if (alive) setSnap({ status: 'ready', url: info?.url || '' })
-      })
-      .catch((error) => {
-        if (alive) setSnap({ status: 'error', message: error?.message || String(error) })
-      })
-    return () => {
-      alive = false
-    }
-  }, [visible, retryTick])
+    if (visible) setMounted(true)
+  }, [visible])
 
   return (
     <section
       className={`min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
       aria-hidden={!visible}
     >
-      {snap.status === 'ready' && snap.url ? (
-        <iframe title="Mica 配置" src={snap.url} className="size-full border-0 bg-canvas" />
-      ) : (
-        <div className="grid size-full place-items-center">
-          <div className="flex max-w-md flex-col items-center gap-2 px-6 text-center">
-            {snap.status === 'error' ? (
-              <>
-                <p className="text-sm text-white/70">配置页面启动失败</p>
-                <p className="text-xs leading-5 text-white/40">{snap.message}</p>
-                <button
-                  type="button"
-                  onClick={() => setRetryTick((value) => value + 1)}
-                  className="mt-2 rounded-sm border border-white/10 bg-white/[.06] px-3 py-1 text-xs text-white hover:bg-white/10"
-                >
-                  重试
-                </button>
-              </>
-            ) : (
-              <p className="text-sm text-white/45">正在启动配置页面…</p>
-            )}
-          </div>
-        </div>
-      )}
+      {mounted ? <ConfigWebApp /> : null}
     </section>
   )
 }

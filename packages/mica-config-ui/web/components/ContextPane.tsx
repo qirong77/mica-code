@@ -7,7 +7,7 @@ import type {
   ConfigWebContextEntry,
   ConfigWebContextTurn,
   ConfigWebConversationItemType,
-} from '../../../src/shared/types.js';
+} from '../../src/shared/types.js';
 
 export function ContextPane({ sessionId, refreshToken }: { sessionId: string; refreshToken: number }) {
   const [analysis, setAnalysis] = useState<ConfigWebContextAnalysis | null>(null);

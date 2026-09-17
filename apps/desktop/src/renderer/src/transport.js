@@ -7,7 +7,6 @@
  * - 剪贴板 / 打开外链由浏览器自己做（运行时拿不到用户的剪贴板，也打不开用户的浏览器）
  * - 窗口聚焦/可见状态由 `document.visibilityState` + focus/blur 推导
  * - 系统文件夹选择器换成应用内目录选择器（见 App.jsx 的 CwdModal）
- * - 配置页 iframe 的 127.0.0.1 重写成服务端地址
  */
 
 const EVENT_CHANNELS = [
@@ -239,13 +238,9 @@ function createWebApi(env) {
     app: {
       getWindowState: async () => ({ ...appState }),
       onWindowState: (callback) => subscribe('app:window-state', callback),
-      // 「切换 Mica 服务器」：清单落盘在运行时所在机器上，目标探活也由运行时代查
-      // （页面跨源 fetch 受 CORS 限制读不到结果）
+      // 「切换 Mica 服务器」：目标探活由运行时代查（页面跨源 fetch 受 CORS 限制读不到
+      // 结果）；打开新窗口/新标签页由页面自己做，见 renderer 的 servers.js
       servers: {
-        list: () => invoke('app:servers:list'),
-        remember: (url) => invoke('app:servers:remember', { url }),
-        forget: (url) => invoke('app:servers:forget', { url }),
-        note: (url, note) => invoke('app:servers:note', { url, note }),
         probe: (url) => invoke('app:servers:probe', { url })
       }
     },
@@ -310,19 +305,10 @@ function createWebApi(env) {
         invoke('stats:move-session', { sessionId, section, groupId })
     },
 
-    settings: {
-      // 配置页由服务端所在机器拉起；iframe 必须指向服务端地址而不是 127.0.0.1
-      open: async () => {
-        const info = await invoke('settings:open')
-        if (!info?.url) return info
-        try {
-          const url = new URL(info.url)
-          url.hostname = window.location.hostname
-          return { ...info, url: url.toString().replace(/\/$/, '') }
-        } catch {
-          return info
-        }
-      }
+    configWeb: {
+      // 配置页的数据面：动作名 + 参数交给运行时（见 src/host/configWeb.js），
+      // 页面组件在 SettingsView 里直接渲染，不经 iframe
+      invoke: (action, input) => invoke('config-web:invoke', { action, input })
     }
   }
 }

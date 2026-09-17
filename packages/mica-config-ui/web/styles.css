@@ -1,4 +1,11 @@
-:root {
+/**
+ * Mica Config Web 的样式：一份源码，两个宿主（apps/config-web 的浏览器页面、apps/desktop
+ * 里内嵌的设置视图）。
+ *
+ * 所有规则都限定在 `.mica-config-ui` 容器内，自定义属性也定义在容器上而不是 `:root`——
+ * 桌面端把它当普通视图渲染时，既不泄漏样式到应用其余部分，也不会被应用的同名变量覆盖。
+ */
+.mica-config-ui {
   color-scheme: dark;
   /* Darcula skin (JetBrains Darcula colour theme). Light chrome wraps a darker
      content canvas, strokes stay hairline, status hues are reserved for state.
@@ -42,18 +49,9 @@
   --radius-md: calc(var(--radius-scalar) * 0.625rem); /* 3px */
   --radius-lg: calc(var(--radius-scalar) * 0.75rem); /* 3.6px */
   --radius-xl: calc(var(--radius-scalar) * 1rem); /* 4.8px */
-}
-
-html,
-body,
-#root {
   width: 100%;
   height: 100%;
   min-height: 0;
-  margin: 0;
-}
-
-body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -63,6 +61,32 @@ body {
   letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  box-sizing: border-box;
+}
+
+/* 浏览器整页打开时的根高度链；桌面端由宿主容器提供高度，不依赖它 */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+@scope (.mica-config-ui) {
+/* 宿主没有注册编辑器时的兜底文本域（见 web/editor.ts） */
+.json-editor-fallback {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-aux);
+  resize: none;
 }
 
 code,
@@ -123,8 +147,7 @@ textarea {
   display: grid;
   grid-template-columns: 188px minmax(0, 1fr);
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -2806,4 +2829,5 @@ textarea {
     width: 100%;
     max-height: 90dvh;
   }
+}
 }

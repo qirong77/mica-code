@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createMcpServer, deleteMcpServer, readMcpDetails, writeMcpServer } from '../api.js';
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
-import { MonacoJsonEditor } from '../components/MonacoJsonEditor.js';
+import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
-import type { ConfigWebMcpDetails } from '../../../src/shared/types.js';
+import type { ConfigWebMcpDetails } from '../../src/shared/types.js';
 
 export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
   const [details, setDetails] = useState<ConfigWebMcpDetails | null>(null);
@@ -203,7 +203,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                 {selectedServer ? <Tag tone={statusColor(selectedServer.status)}>{selectedServer.status}</Tag> : null}
               </div>
               <div className="editor-host role-editor-host">
-                <MonacoJsonEditor
+                <JsonEditor
                   value={content}
                   language="json"
                   readOnly={saving || !selectedServer}

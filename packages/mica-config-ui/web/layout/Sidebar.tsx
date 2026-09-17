@@ -1,7 +1,7 @@
-import type { ConfigWebSection } from '../../../src/shared/types.js';
+import type { ConfigWebSection } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），这里直接引用，不要另存副本。
-import markUrl from '../../../../desktop/resources/icon.svg?url&no-inline';
+import markUrl from '../../../../apps/desktop/resources/icon.svg?url&no-inline';
 
 export type ConfigWebAppSection = ConfigWebSection;
 

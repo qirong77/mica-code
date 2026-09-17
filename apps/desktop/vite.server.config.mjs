@@ -13,7 +13,16 @@ const external = [...builtinModules, ...builtinModules.map((name) => `node:${nam
 
 export default defineConfig({
   resolve: {
-    alias: [{ find: /^electron$/, replacement: resolve('src/server/electron-shim.js') }]
+    alias: [
+      { find: /^electron$/, replacement: resolve('src/server/electron-shim.js') },
+      // 配置页的数据层与页面组件来自 packages/mica-config-ui：显式指向 .ts 入口，
+      // 这个项目的宿主代码是 .js，写 `.../index.js` 不会回退到 TypeScript 源码。
+      {
+        find: '@mica-config-ui/session-view',
+        replacement: resolve('../../packages/mica-config-ui/src/server/sessionView.ts')
+      },
+      { find: '@packages', replacement: resolve('../../packages') }
+    ]
   },
   build: {
     ssr: resolve('src/server/index.js'),

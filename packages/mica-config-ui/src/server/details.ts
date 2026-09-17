@@ -16,7 +16,7 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { buildConfigWebConversationItems } from '../conversation.js';
+import { buildConfigWebConversationItems } from './conversation.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
@@ -34,7 +34,7 @@ import type {
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
 import type { PersistedSession } from '@packages/mica-session/index.js';
-import { buildConfigWebContextAnalysis } from '../sessionAnalysis.js';
+import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
 
 let mcpInitialized = false;
 

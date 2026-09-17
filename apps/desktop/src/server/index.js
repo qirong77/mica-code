@@ -14,7 +14,7 @@ import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerServersIpc } from '../host/servers.js'
-import { disposeSettings, registerSettingsIpc } from '../host/settings.js'
+import { registerConfigWebIpc } from '../host/configWeb.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
@@ -150,17 +150,11 @@ async function serveStatic(req, res, rendererRoot, urlPath) {
 
   const extension = extname(file).toLowerCase()
   if (extension === '.html') {
-    // Electron 版用 file:// 加载，只允许 frame 到本机 config-web；服务端模式下
-    // 配置页与主页面同源（经 host 重写），这里放宽 frame-src 以允许任意来源。
-    const html = (await readFile(file, 'utf8')).replace(
-      'frame-src http://127.0.0.1:*',
-      'frame-src http: https:'
-    )
     res.writeHead(200, {
       'content-type': MIME_TYPES['.html'],
       'cache-control': 'no-store'
     })
-    res.end(html)
+    res.end(await readFile(file))
     return
   }
 
@@ -340,9 +334,6 @@ export async function startDesktopServer(options = {}) {
   stripContainerEnv()
   initializeDesktopProcessPath()
   warmShellEnv()
-  // 配置页（config web）由主进程按需拉起；局域网访问时它也要能被别的设备内嵌加载，
-  // 否则 iframe 里的 127.0.0.1 指向的是客户端自己（见 main/settings.js 的 spawn env）
-  if (!process.env.MICA_CONFIG_WEB_HOST) process.env.MICA_CONFIG_WEB_HOST = '0.0.0.0'
 
   const notifyServer = await createNotifyServer()
   setNotifyServer(notifyServer)
@@ -358,7 +349,7 @@ export async function startDesktopServer(options = {}) {
   registerGitIpc()
   registerStatsIpc()
   registerServersIpc()
-  registerSettingsIpc()
+  registerConfigWebIpc()
 
   // renderer 会用「窗口是否聚焦/可见」决定是否把通知标记为已读；网页端没有窗口，
   // 统一返回可见（真实的可读性由浏览器 tab 的 document.visibilityState 参与判断）
@@ -427,7 +418,6 @@ export async function startDesktopServer(options = {}) {
     sseClients.clear()
     disposeAllTerminals()
     disposeAllChatRuns()
-    disposeSettings()
     stopNotifyBridge()
     await notifyServer.close()
     await new Promise((resolvePromise) => server.close(() => resolvePromise()))

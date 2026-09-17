@@ -42,7 +42,7 @@ export function App() {
   }, []);
 
   return (
-    <>
+    <div className="mica-config-ui">
       <main className="app-shell">
         <Sidebar section={section} onChange={(next) => void changeSection(next)} />
         <div className="content-shell">
@@ -57,7 +57,7 @@ export function App() {
         </div>
       </main>
       <DialogHost />
-    </>
+    </div>
   );
 }
 

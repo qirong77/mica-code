@@ -103,7 +103,7 @@ $ npm run build:linux
 
 ## Architecture: web runtime + Electron container
 
-- `src/host/` — the business core (terminals, chat, files, Git, stats, workspace, settings, notify
+- `src/host/` — the business core (terminals, chat, files, Git, stats, workspace, configWeb, notify
   server). It runs inside the runtime process only.
 - `src/server/` — the runtime. A dependency-free Node HTTP + SSE server that hosts the renderer
   bundle and exposes `src/host` over `/api`. `vite.server.config.mjs` aliases `electron` to
@@ -114,8 +114,8 @@ $ npm run build:linux
   the dock badge (and flashes the taskbar on Windows), and stops the runtime on quit. It registers
   no business IPC and injects no preload: the page always builds `window.mica` from HTTP + SSE, so
   the window and a phone browser run byte-identical UI code. It also owns the navigation policy and
-  the "which server am I on" state (title suffix, badge subscription, ⇧⌘M) whenever the window is
-  pointed at another machine's runtime — see *Switching Mica servers* below.
+  one window per server — title suffix, badge subscription and ⇧⌘M are tracked per window — see
+  *Switching Mica servers* below.
 - `ELECTRON_RUN_AS_NODE` is a bootstrap marker for the runtime process only. The runtime calls
   `stripContainerEnv()` before it derives any child environment, so PTY terminals, `mica` children
   and the shell-env capture never inherit it — otherwise running `electron` from a terminal inside
@@ -158,11 +158,13 @@ already serving Mica Code.
 
 ### Switching Mica servers
 
-The window can point at another machine's Mica runtime: hovering the sidebar's `Server` row floats a card next to it (`ServerCard.jsx`) with the current server, the `本机` way back, every machine you have connected to, and an address field — the card is deliberately not a modal, so nothing blocks the rest of the UI. On a touch screen there is no hover, so tapping the row expands the same card in place inside the drawer. Switching is a plain full-page navigation — a page is served by whichever runtime hosts it, so "which server am I on" is just `location.origin` — which is also why nothing is proxied and no cross-origin call is made.
+A window can point at another machine's Mica runtime: hovering the sidebar's `Server` row floats a card next to it (`ServerCard.jsx`) with the current server, the servers you have connected to, the `本机` way back and an address field — the card is deliberately not a modal, so nothing blocks the rest of the UI. On a touch screen there is no hover, so tapping the row expands the same card in place inside the drawer. A page is served by whichever runtime hosts it, so "which server am I on" is just `location.origin` — nothing is proxied and no cross-origin call is made.
 
-The two things the page cannot do itself are delegated to the runtime (`src/host/servers.js`, with the pure logic in `servers-core.js` and the list in `mica-servers.json` next to `workspace.json`): probing `GET /api/health` on the target, because a cross-origin `fetch` from the page is unreadable under CORS, and persisting the list (twelve non-loopback addresses, most recent first). Every entry is a machine you have connected to and can be given a note — the note becomes its display name (also on the sidebar row while that server is the current one), and trims to a single line of at most 40 characters. The `本机` entry is the fixed `http://127.0.0.1:8787` shortcut; it never enters the list and is only offered while the page is hosted by a non-loopback runtime (when it is, you are already home). Note that the list belongs to the machine you are currently on: after switching you see that machine's own list.
+Switching opens that address in **a new window** (desktop app) or **a new tab** (browser), so the server you are on keeps its own window instead of being replaced. `renderer/src/servers.js` picks the branch by user agent (`isElectronShell`): inside the container it hands the navigation to the shell (`location.assign`, intercepted by `will-navigate`), anywhere else it calls `window.open(url, '_blank')` and severs `window.opener` afterwards — deliberately not the `noopener` feature string, which makes `window.open` return `null` and would hide a blocked popup — falling back to the current tab when the popup *is* blocked.
 
-The container owns the navigation policy and everything that must survive a page change (`src/main/index.js`). `will-navigate` used to hand every non-local navigation to the system browser; it now probes first and only loads the target when `/api/health` reports `app: 'mica-code-app'`, recording it in `mica-active-server.json`. `did-navigate` re-points the unread-badge subscription at the new origin and appends `— host:port` to the window title, and the next launch restores the recorded server — after probing it, falling back to the local runtime and clearing the record when it is unreachable, so a dead address can never strand the app on an error page. Because the server you switch to may be running an older bundle with no switcher of its own, **⇧⌘M** (shell level, `before-input-event`) always brings the window back to its own runtime, and the boot-error page offers 返回本机 whenever the current origin is not loopback.
+The one thing the page cannot do itself is delegated to the runtime (`src/host/servers.js`, pure logic in `servers-core.js`): probing `GET /api/health` on the target, because a cross-origin `fetch` from the page is unreadable under CORS. Everything else is page-side: a successful probe is recorded by `servers.js` in `localStorage` (key `mica-servers`, newest first, eight addresses max, deduplicated by host) and rendered as rows in the same style as the current server, so getting back to a machine is a click instead of retyping its address. There are no notes and no manual add/remove — the list only ever holds addresses that answered as a Mica Code runtime, and it follows the page's origin, so a window on another machine has its own list. The `本机` entry is the fixed `http://127.0.0.1:8787` shortcut, only offered while the page is hosted by a non-loopback runtime (when it is, you are already home); the current server and that shortcut never appear twice in the list.
+
+The container owns the navigation policy and one window per server (`src/main/index.js`). `will-navigate` lets a window's own origin (and the local page) navigate in place, hands the navigation to the window that already shows that server (focused, not reloaded), otherwise opens a new window when `/api/health` of the target reports `app: 'mica-code-app'`, and sends everything else to the system browser. Each window keeps its own state — `did-navigate` re-points that window's unread-badge subscription at the origin it shows and appends `— host:port` to its title, and the dock badge reflects the focused window. The first window is the local one and closing it only hides it; windows opened for other machines close for real. The app always starts on the local runtime (there is no "last server" record to restore). Because the server you switch to may be running an older bundle with no switcher of its own, **⇧⌘M** (shell level, `before-input-event`) always brings the local window to the front (loading it into the current window if it is gone), and the boot-error page offers 返回本机 whenever the current origin is not loopback — that click reloads the local page rather than focusing a window when the error page *is* the local window, so it stays a recovery action.
 
 ### What the page does differently from a native app
 
@@ -174,10 +176,11 @@ The container owns the navigation policy and everything that must survive a page
 - **External links open in the browser tab**, not on the server.
 - **Terminal file links open the in-app editor** instead of VS Code: the transport dispatches a
   `mica:open-file` event that `App.jsx` routes to the Files panel.
-- **The Settings iframe points at the server.** `settings:open` returns a `127.0.0.1` URL that the
-  transport rewrites to `location.hostname`; the server starts the config-web worker with
-  `MICA_CONFIG_WEB_HOST=0.0.0.0` so other devices can embed it, and widens the `frame-src` CSP
-  directive in the served HTML.
+- **Settings is inlined, not framed.** The view renders the config page components from
+  `packages/mica-config-ui` directly and gets its data through `config-web:invoke`
+  (`src/host/configWebData.js`, which reads this machine's `$MICA_HOME`). Nothing is spawned and no
+  iframe is used, so the page always configures the runtime that serves it — switching to another
+  server configures *that* machine.
 - **Window focus/visibility comes from the page**: `document.visibilityState` plus `focus`/`blur`.
 - **Row drag & drop is plain HTML5 DnD.** Section changes go through one `stats:move-session`
   call rather than a client-side list juggling act, which is also why the sidebar in two browser

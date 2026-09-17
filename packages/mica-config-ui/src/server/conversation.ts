@@ -1,8 +1,9 @@
-import { type ConversationContentBlock, type ConversationItem } from '@packages/mica-agent/index.js';
+// 从具体文件取类型：这个模块会被桌面运行时复用，经 `index.js` 会拖进整个 agent 包
+import type { ConversationContentBlock, ConversationItem } from '@packages/mica-agent/core/Conversation.js';
 import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
 import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import type { ConfigWebConversationDetails, ConfigWebConversationItem } from './shared/types.js';
+import type { ConfigWebConversationDetails, ConfigWebConversationItem } from '../shared/types.js';
 
 export type ConfigWebConversationSource = {
   providerId: string;

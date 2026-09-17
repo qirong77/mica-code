@@ -10,7 +10,7 @@ let previousMicaHome: string | undefined;
 
 beforeEach(() => {
   previousMicaHome = process.env.MICA_HOME;
-  home = mkdtempSync(join(tmpdir(), 'mica-config-web-role-'));
+  home = mkdtempSync(join(tmpdir(), 'mica-config-ui-role-'));
   process.env.MICA_HOME = home;
 });
 
@@ -55,7 +55,7 @@ describe('config web roles', () => {
 
 describe('config web sessions', () => {
   const previousMicaHome = process.env.MICA_HOME;
-  const sessionHome = mkdtempSync(join(tmpdir(), 'mica-config-web-session-'));
+  const sessionHome = mkdtempSync(join(tmpdir(), 'mica-config-ui-session-'));
   let detailsApi: typeof import('./details.js');
 
   beforeAll(async () => {
