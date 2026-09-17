@@ -16,6 +16,40 @@ const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
 const MIN_SUMMARY_INPUT_TOKENS = 8_000;
 const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
 const TOOL_ARGUMENTS_PLACEHOLDER = '{"_truncated":true,"note":"tool arguments cleared during compact"}';
+// ── 工具调用参数的语义化裁剪（快速压缩） ────────────────────────────────
+// 工具结果被换成占位符后，「这次调用到底做了什么」就只剩参数在承载。
+// 参数里真正吃上下文的是「正文型」字段（写文件的正文、patch、内联脚本），
+// 而「指向性」字段（路径 / pattern / name）极小却决定了这次调用的意义。
+// 所以按字段语义保留指向性摘要、丢掉正文，而不是按长度一刀切。
+/** 正文型字段名：值是内容本身，历史里没有复用价值。 */
+const TOOL_ARGUMENT_CONTENT_FIELDS = new Set([
+  'content',
+  'body',
+  'patch',
+  'code',
+  'text',
+  'file_content',
+  'file_text',
+  'source_code',
+  'new_string',
+  'old_string',
+  'new_str',
+  'old_str',
+  'new_text',
+  'old_text',
+]);
+/** 命令型字段：本身就是「这次调用做了什么」，只有长到像内联脚本时才摘要。 */
+const TOOL_ARGUMENT_COMMAND_FIELDS = new Set(['command', 'cmd', 'script']);
+/**
+ * 参数值不超过该长度时原样保留。正文与命令分两档：命令 p90 只有约 300 字符，
+ * 按 200 会把「cd x && node script」这种完整命令也摘要掉，反而丢掉关键信息。
+ */
+const TOOL_ARGUMENT_KEEP_CHARS = 200;
+const TOOL_ARGUMENT_COMMAND_KEEP_CHARS = 400;
+/** 摘要前缀；同时是幂等标记，第二次快速压缩不会再动已裁剪过的值。 */
+const TOOL_ARGUMENT_OMIT_PREFIX = '[omitted ';
+/** apply_patch 正文里的文件声明行（用于把 patch 还原成「改了哪些文件」）。 */
+const PATCH_FILE_LINE = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/;
 // 快速压缩（prune-only）找不到单条消息内可清理内容时，允许本地丢弃最早轮次。
 // 只有节省量达到这两个下限之一才丢弃，避免把内容本来就不多的小会话也删掉。
 const MIN_LOCAL_ROUND_DROP_SAVED_TOKENS = 8_000;
@@ -39,6 +73,11 @@ export type CompactOptions = {
   pruneOnly?: boolean;
   /** 只把工具结果替换为占位符：不生成 checkpoint、不丢轮次、不调用模型（可重复执行）。 */
   toolResultsOnly?: boolean;
+  /**
+   * 快速压缩时顺带把工具调用参数的正文型字段换成指向性摘要（默认开启）。
+   * 设为 false 可退回「只清工具结果、参数一字不动」的旧行为。
+   */
+  trimToolArguments?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -82,6 +121,8 @@ export type CompactResult = {
   toolResultsReplaced?: number;
   /** toolResultsOnly：被丢弃的失效 Responses reasoning 条目数。 */
   reasoningItemsDropped?: number;
+  /** toolResultsOnly：被裁剪掉正文的工具调用数（其 arguments 换成了指向性摘要）。 */
+  toolArgumentsTrimmed?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -344,7 +385,8 @@ export class CompactionService {
         summarizedCount: summarizedMessageCount,
         keptCount: finalKeptMessages.length,
         keptTokenEstimate: estimateMessagesTokens(finalKeptMessages),
-        keptCompacted: estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(activeMessages.slice(splitIndex)),
+        keptCompacted:
+          estimateMessagesTokens(finalKeptMessages) < estimateMessagesTokens(activeMessages.slice(splitIndex)),
         promptTooLongRetries,
         trigger: 'manual',
         contextWindowSize: budget.contextWindowSize,
@@ -450,7 +492,11 @@ function chooseRecentStartIndex(messages: unknown[], compactedMessages: unknown[
   return start >= messages.length ? 0 : start;
 }
 
-function chooseForcedRecentStartIndex(messages: unknown[], compactedMessages: unknown[], options: CompactOptions): number {
+function chooseForcedRecentStartIndex(
+  messages: unknown[],
+  compactedMessages: unknown[],
+  options: CompactOptions,
+): number {
   const rounds = groupMessagesByRound(messages);
   if (rounds.length < 2) return 0;
   const keepRounds = Math.max(1, Math.floor(options.keepRecentRounds ?? options.minRecentRounds ?? 1));
@@ -532,7 +578,10 @@ function buildLocalRoundDrop(params: {
       beforeTokenEstimate: params.beforeTokenEstimate,
       prunedCount: droppedCount,
       keptCount: keptMessages.length,
-      droppedRounds: Math.max(0, groupMessagesByRound(params.messages).length - groupMessagesByRound(keptMessages).length),
+      droppedRounds: Math.max(
+        0,
+        groupMessagesByRound(params.messages).length - groupMessagesByRound(keptMessages).length,
+      ),
       trigger: 'manual',
       contextWindowSize: params.budget.contextWindowSize,
       pruneOnlyThresholdRatio: params.pruneOnlyThresholdRatio,
@@ -688,16 +737,22 @@ function clampRatio(value: unknown, fallback: number): number {
 
 function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
-  return messages.map((message) => pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }));
+  return messages.map((message) =>
+    pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }),
+  );
 }
 
 // 快速压缩（/compact）唯一的动作：把工具结果替换为占位符。媒体、base64、
-// 工具参数、用户与助手文本一律原样保留，也不插入 boundary/summary 消息，
-// 因此它不改变对话信息，只是把不再需要的大块工具输出腾出来。
+// 用户与助手文本一律原样保留，也不插入 boundary/summary 消息，因此它不重写
+// 对话内容，只是把不再需要的大块工具输出腾出来。工具调用参数一并按字段语义
+// 裁剪（正文型字段换成指向性摘要，见 trimToolArguments）——工具结果都被清掉后，
+// 保留写入正文既没有复用价值又是压缩后剩下的最大一块。
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
+  const trimArguments = options.trimToolArguments !== false;
   let replacedMessages = 0;
   let droppedReasoningItems = 0;
+  let trimmedArguments = 0;
   const compactedMessages: unknown[] = [];
   for (const message of messages) {
     // 这条路径会剥掉 encrypted_content，reasoning 条目随之永久失效：ResponsesClient
@@ -709,12 +764,17 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
       continue;
     }
     const counter = { replaced: 0 };
-    const next = pruneToolResultPayload(message, placeholder, counter);
+    let next = pruneToolResultPayload(message, placeholder, counter);
+    if (trimArguments) {
+      const argumentCounter = { trimmed: 0 };
+      next = trimToolArguments(next, argumentCounter);
+      trimmedArguments += argumentCounter.trimmed;
+    }
     if (counter.replaced > 0) replacedMessages++;
     compactedMessages.push(next);
   }
-  if (replacedMessages === 0 && droppedReasoningItems === 0) {
-    throw new CompactionNotNeededError('当前会话没有可清理的工具结果，暂不需要快速压缩');
+  if (replacedMessages === 0 && droppedReasoningItems === 0 && trimmedArguments === 0) {
+    throw new CompactionNotNeededError('当前会话没有可清理的工具结果或工具参数，暂不需要快速压缩');
   }
 
   const beforeTokenEstimate = estimateMessagesTokens(messages);
@@ -747,7 +807,124 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     reducedRecentRounds: 0,
     toolResultsReplaced: replacedMessages,
     reasoningItemsDropped: droppedReasoningItems,
+    toolArgumentsTrimmed: trimmedArguments,
   };
+}
+
+// 找出消息里所有工具调用的 arguments 并做语义化裁剪。Responses 的
+// function_call 是 `{ name, arguments }`，Chat Completions 的 tool_calls 条目是
+// `{ function: { name, arguments } }`——两条路径的 arguments 都与 name 同级，
+// 所以这里按 `arguments` 键递归即可，不需要额外定位工具名。
+function trimToolArguments(value: unknown, counter: { trimmed: number }): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const trimmed = trimToolArguments(item, counter);
+      if (trimmed !== item) changed = true;
+      return trimmed;
+    });
+    return changed ? next : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'arguments' && typeof child === 'string') {
+      const trimmed = trimArgumentJson(child);
+      if (trimmed !== child) {
+        changed = true;
+        counter.trimmed++;
+      }
+      next[key] = trimmed;
+      continue;
+    }
+    const trimmed = trimToolArguments(child, counter);
+    if (trimmed !== child) changed = true;
+    next[key] = trimmed;
+  }
+  return changed ? next : value;
+}
+
+// arguments 必须是合法 JSON 字符串（provider 硬约束），所以裁剪后重新 stringify
+// 保证协议安全。解析失败说明格式异常，原样保留比整体替换安全——用户要的是
+// 「关键信息还在」，而不是把不确定的内容一并抹掉。
+function trimArgumentJson(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return raw;
+  const counter = { changed: 0 };
+  const next = trimArgumentFields(parsed as Record<string, unknown>, counter);
+  if (counter.changed === 0) return raw;
+  return JSON.stringify(next);
+}
+
+// 只动正文型字段：其它字段（路径 / pattern / name / offset…）无论长短都是这次
+// 调用的指向性信息，必须原样保留。未改动时返回原对象引用。
+function isTrimmableArgumentField(key: string): boolean {
+  return TOOL_ARGUMENT_CONTENT_FIELDS.has(key) || TOOL_ARGUMENT_COMMAND_FIELDS.has(key);
+}
+
+function trimArgumentFields(record: Record<string, unknown>, counter: { changed: number }): Record<string, unknown> {
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === 'string' && isTrimmableArgumentField(key) && !value.startsWith(TOOL_ARGUMENT_OMIT_PREFIX)) {
+      const limit = TOOL_ARGUMENT_COMMAND_FIELDS.has(key) ? TOOL_ARGUMENT_COMMAND_KEEP_CHARS : TOOL_ARGUMENT_KEEP_CHARS;
+      if (value.length <= limit) {
+        next[key] = value;
+        continue;
+      }
+      next[key] = summarizeArgumentContent(key, value);
+      counter.changed++;
+      changed = true;
+      continue;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = trimArgumentFields(value as Record<string, unknown>, counter);
+      if (nested !== value) changed = true;
+      next[key] = nested;
+      continue;
+    }
+    next[key] = value;
+  }
+  return changed ? next : record;
+}
+
+// 摘要只回答「这次调用做了什么」：patch 说改了哪些文件，命令说跑了哪条命令，
+// 其余正文只留尺寸。指向性信息（路径 / 命令首行）才是历史里值得留下的部分。
+function summarizeArgumentContent(field: string, value: string): string {
+  if (field === 'patch') {
+    const files = patchFiles(value);
+    if (files.length > 0) {
+      const shown = files.slice(0, 5).join(', ');
+      const more = files.length > 5 ? `, +${files.length - 5} more` : '';
+      return `${TOOL_ARGUMENT_OMIT_PREFIX}${files.length} files: ${shown}${more}]`;
+    }
+    return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars]`;
+  }
+  if (TOOL_ARGUMENT_COMMAND_FIELDS.has(field)) {
+    const lines = value.split('\n');
+    const head = (lines[0] ?? '').slice(0, 80);
+    const suffix = lines.length > 1 ? ` / ${lines.length} lines` : '';
+    return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars${suffix}: ${head}…]`;
+  }
+  return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars]`;
+}
+
+function patchFiles(patchText: string): string[] {
+  const files: string[] = [];
+  for (const line of patchText.split('\n')) {
+    const match = PATCH_FILE_LINE.exec(line.trim());
+    const file = match?.[1]?.trim();
+    if (file) files.push(file);
+  }
+  return files;
 }
 
 // 压缩会剥掉 encrypted_content（见 pruneToolResultPayload/pruneValue），Responses 的
@@ -814,7 +991,9 @@ type PruneOptions = {
 
 function pruneValue(value: unknown, options: PruneOptions): unknown {
   if (typeof value === 'string') {
-    return options.mode === 'old' ? pruneOldString(value, options.maxStringChars) : pruneString(value, options.maxStringChars);
+    return options.mode === 'old'
+      ? pruneOldString(value, options.maxStringChars)
+      : pruneString(value, options.maxStringChars);
   }
   if (Array.isArray(value)) return value.map((item) => pruneValue(item, options));
   if (!value || typeof value !== 'object') return value;
@@ -947,7 +1126,12 @@ function preserveProtocolSensitiveValue(value: unknown, options: PruneOptions, k
   const record = value as Record<string, unknown>;
   const next: Record<string, unknown> = {};
   for (const [childKey, child] of Object.entries(record)) {
-    if (isProtocolSensitiveKey(childKey) || childKey === 'function' || childKey === 'tool_calls' || key === 'function') {
+    if (
+      isProtocolSensitiveKey(childKey) ||
+      childKey === 'function' ||
+      childKey === 'tool_calls' ||
+      key === 'function'
+    ) {
       next[childKey] = preserveProtocolSensitiveValue(child, options, childKey);
       continue;
     }
@@ -1036,7 +1220,11 @@ function usageRatio(tokens: number, contextWindowSize: number | undefined): numb
   return tokens / contextWindowSize;
 }
 
-function compactKeptMessages(messages: unknown[], options: CompactOptions, tokenBudget = getRecentTokenBudget(options)): unknown[] {
+function compactKeptMessages(
+  messages: unknown[],
+  options: CompactOptions,
+  tokenBudget = getRecentTokenBudget(options),
+): unknown[] {
   const budget = Math.max(1, tokenBudget);
   const sanitized = messages.map((message) =>
     pruneValue(message, { maxStringChars: Number.MAX_SAFE_INTEGER, mode: 'kept' }),
@@ -1331,7 +1519,9 @@ function truncateHeadForPromptTooLongRetry(messages: unknown[]): unknown[] {
 
 function stripPromptTooLongRetryMarker(messages: unknown[]): unknown[] {
   const [first] = messages;
-  return getStringContent(first) === '[earlier conversation truncated for compaction retry]' ? messages.slice(1) : messages;
+  return getStringContent(first) === '[earlier conversation truncated for compaction retry]'
+    ? messages.slice(1)
+    : messages;
 }
 
 function isPromptTooLongError(error: unknown): boolean {

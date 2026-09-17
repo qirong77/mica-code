@@ -22,7 +22,8 @@ export function createCompactCommand(
 ): BuiltInCommandItem {
   return {
     name: 'compact',
-    description: '把工具结果替换为占位符，不改动对话内容；使用 `llm` 参数改为生成摘要 checkpoint',
+    description:
+      '把工具结果与工具调用参数的正文换成占位符/摘要，不改动对话文本；使用 `llm` 参数改为生成摘要 checkpoint',
     completionItems: [{ arg: 'llm', description: '生成 LLM 摘要 checkpoint（会重写历史）' }],
     async action(rawArgs) {
       const ownerSessionId = services.getCurrentAgentSessionId();
@@ -106,6 +107,11 @@ function formatCompactNotice(result: CompactResult) {
   const lines = [`**${prefix} complete**`, '', `- Mode: ${mode} (${strategy})`];
   if (result.strategy === 'tool_results_only') {
     lines.push(`- Tool results replaced: ${result.toolResultsReplaced ?? 0}`);
+    // 工具参数里的正文型字段（写文件正文 / patch / 内联脚本）会换成指向性摘要，
+    // 这是压缩后剩下的最大一块，条数变化不影响对话文本，所以单独报一行。
+    if (result.toolArgumentsTrimmed) {
+      lines.push(`- Tool arguments trimmed: ${result.toolArgumentsTrimmed}`);
+    }
     // 失效的 Responses reasoning 条目会被一并丢弃（不再发送也不再落盘），
     // 它们本来就不算对话内容，所以条数变化时不用 "unchanged" 误导用户。
     if (result.reasoningItemsDropped) {

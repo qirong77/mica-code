@@ -1469,7 +1469,8 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
-      title: '本地压缩：仅把工具结果替换为占位符，不改动对话内容、不丢弃轮次；不调用模型',
+      title:
+        '本地压缩：把工具结果与工具参数的正文换成占位符/摘要（保留路径、命令等关键信息），不改动对话文本、不丢弃轮次；不调用模型',
       icon: IconBolt,
       disabled: !menu.hasSession || menu.running
     },
@@ -3341,6 +3342,9 @@ export function ChatView({
               ...(toolResultsOnly
                 ? [
                     `- Tool results replaced: ${Number(result.toolResultsReplaced) || 0}`,
+                    ...(Number(result.toolArgumentsTrimmed) > 0
+                      ? [`- Tool arguments trimmed: ${Number(result.toolArgumentsTrimmed)}`]
+                      : []),
                     ...(Number(result.reasoningItemsDropped) > 0
                       ? [`- Stale reasoning items dropped: ${Number(result.reasoningItemsDropped)}`]
                       : []),

@@ -81,9 +81,9 @@ mica exec [--json] [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [--mc
 mica compact --session <id> [--dir <cwd>] [--force] [--prune-only] [--tool-results-only]
 ```
 
-`mica compact` 走与 `/compact llm` 相同的 `CompactionService` 摘要路径（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`，`--tool-results-only` 另有 `toolResultsReplaced`/`reasoningItemsDropped`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
+`mica compact` 走与 `/compact llm` 相同的 `CompactionService` 摘要路径（模型摘要 + 最近轮次保留），完成后把压缩后的 checkpoint 写回会话文件并输出一行 JSON（`ok`、`mode`、`strategy`、before/after token 估计、`savedRatio`，以及供消费方展示压缩后上下文占用的 `contextWindowSize`/`contextUsageRatio` 与 `summarizedCount`/`keptCount`，`--tool-results-only` 另有 `toolResultsReplaced`/`toolArgumentsTrimmed`/`reasoningItemsDropped`）；会话内容较少时返回 `code: "not_needed"`。`--force` 强制即使历史较短也生成摘要。
 
-两个不调用模型的本地清理选项：`--tool-results-only` 与交互式 `/compact` 同源，只把工具结果替换为占位符并丢弃失效的 Responses `reasoning` 条目（它们既不会被发送也不会被落盘），对话文本、工具参数与轮次全部不变，可重复执行（桌面端「快速压缩（本地）」用的就是它）；`--prune-only` 更激进，先替换工具结果/参数、修剪媒体，单条消息已无可清理内容时会沿轮次边界丢弃最早轮次（有损）。
+两个不调用模型的本地清理选项：`--tool-results-only` 与交互式 `/compact` 同源，把工具结果替换为占位符、把工具调用参数里的正文型字段（写文件正文 / patch / 内联脚本）换成指向性摘要（保留路径、改了哪些文件、命令首行，其余参数一字不动），并丢弃失效的 Responses `reasoning` 条目（它们既不会被发送也不会被落盘），对话文本与轮次不变，可重复执行（桌面端「快速压缩（本地）」用的就是它）；`--prune-only` 更激进，先替换工具结果/参数、修剪媒体，单条消息已无可清理内容时会沿轮次边界丢弃最早轮次（有损）。
 
 一次性的 Git 提交（右键 commit 等一次性消费方用）：
 

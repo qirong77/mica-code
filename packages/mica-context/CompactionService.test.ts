@@ -459,7 +459,7 @@ describe('CompactionService', () => {
 
   it('keeps Chat Completions and Responses tool-call arguments as valid JSON during prune-only compact', async () => {
     const service = new CompactionService();
-    const hugeArgs = JSON.stringify({ command: 'python3 - <<\'PY\'\n' + 'print("x")\n'.repeat(400) + 'PY' });
+    const hugeArgs = JSON.stringify({ command: "python3 - <<'PY'\n" + 'print("x")\n'.repeat(400) + 'PY' });
     const messages = [
       {
         role: 'user',
@@ -528,14 +528,15 @@ describe('CompactionService', () => {
         Array.isArray((message as Record<string, unknown>).tool_calls),
     ) as Record<string, unknown>;
     const toolCalls = assistant.tool_calls as Array<Record<string, unknown>>;
-    const chatArgs = ((toolCalls[0]!.function as Record<string, unknown>).arguments as string);
+    const chatArgs = (toolCalls[0]!.function as Record<string, unknown>).arguments as string;
     expect(JSON.parse(chatArgs)).toEqual({
       _truncated: true,
       note: 'tool arguments cleared during compact',
     });
 
     const functionCall = result.messages.find(
-      (message) => message && typeof message === 'object' && (message as Record<string, unknown>).type === 'function_call',
+      (message) =>
+        message && typeof message === 'object' && (message as Record<string, unknown>).type === 'function_call',
     ) as Record<string, unknown>;
     expect(JSON.parse(String(functionCall.arguments))).toEqual({
       _truncated: true,
@@ -602,8 +603,8 @@ describe('CompactionService', () => {
         (message as Record<string, unknown>).role === 'assistant' &&
         Array.isArray((message as Record<string, unknown>).tool_calls),
     ) as Record<string, unknown>;
-    const args = (((assistant.tool_calls as Array<Record<string, unknown>>)[0]!.function as Record<string, unknown>)
-      .arguments as string);
+    const args = ((assistant.tool_calls as Array<Record<string, unknown>>)[0]!.function as Record<string, unknown>)
+      .arguments as string;
     expect(JSON.parse(args)).toEqual({
       _truncated: true,
       note: 'tool arguments cleared during compact',
@@ -736,7 +737,13 @@ describe('CompactionService', () => {
       {
         role: 'assistant',
         content: 'keep assistant text',
-        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/example.ts"}' } }],
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"packages/example.ts"}' },
+          },
+        ],
       },
       {
         role: 'tool',
@@ -860,6 +867,119 @@ describe('CompactionService', () => {
     expect(result.afterCount).toBe(2);
   });
 
+  it('trims tool arguments to pointing summaries instead of raw payloads', async () => {
+    const service = new CompactionService();
+    const content = `export const value = 1;\n${'// filler line\n'.repeat(60)}`;
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: packages/mica-context/CompactionService.ts',
+      '@@',
+      `+${'x'.repeat(400)}`,
+      '*** Add File: packages/mica-context/trimmed.ts',
+      '@@',
+      `+${'y'.repeat(400)}`,
+      '*** End Patch',
+    ].join('\n');
+    const command = `cat > /tmp/probe.mjs <<'EOF'\n${'console.log(1)\n'.repeat(40)}EOF`;
+    const call = (callId: string, name: string, args: Record<string, unknown>) => [
+      { type: 'function_call', call_id: callId, name, arguments: JSON.stringify(args) },
+      { type: 'function_call_output', call_id: callId, output: `RAW OUTPUT ${'y'.repeat(600)}` },
+    ];
+    const messages: unknown[] = [
+      ...call('c1', 'write_file', { file_path: 'packages/example.ts', content }),
+      ...call('c2', 'apply_patch', { patch }),
+      ...call('c3', 'run_shell', { command, cwd: 'packages' }),
+      ...call('c4', 'read_file', { file_path: 'packages/example.ts', offset: 1, limit: 40 }),
+      // 320 字符的完整命令：命令是「做了什么」本身，不到摘要线就原样留着。
+      ...call('c5', 'run_shell', { command: `cd packages && ${'echo padding; '.repeat(22)}` }),
+      ...call('c6', 'run_shell', { command: `node -e '${'x'.repeat(500)}'` }),
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    const argsOf = (index: number) =>
+      JSON.parse(String((result.messages[index] as { arguments: string }).arguments)) as Record<string, unknown>;
+
+    expect(result.toolArgumentsTrimmed).toBe(4);
+    // 指向性字段（路径）留住，正文换成尺寸；patch 还原成「改了哪些文件」，
+    // 命令还原成首行 + 行数——历史里值得留的是「做过什么」，不是正文本身。
+    expect(argsOf(0)).toEqual({ file_path: 'packages/example.ts', content: `[omitted ${content.length} chars]` });
+    expect(argsOf(2)).toEqual({
+      patch: '[omitted 2 files: packages/mica-context/CompactionService.ts, packages/mica-context/trimmed.ts]',
+    });
+    expect(argsOf(4).command).toContain('cat > /tmp/probe.mjs');
+    expect(argsOf(4).command).toContain(`/ ${command.split('\n').length} lines`);
+    expect(argsOf(4).cwd).toBe('packages');
+    // 短参数本身就是这次调用的指向性信息，原样保留。
+    expect(argsOf(6)).toEqual({ file_path: 'packages/example.ts', offset: 1, limit: 40 });
+    expect(argsOf(8).command).toBe(`cd packages && ${'echo padding; '.repeat(22)}`);
+    expect(argsOf(10).command).toContain('node -e');
+    expect(String(argsOf(10).command).startsWith('[omitted ')).toBe(true);
+
+    // 裁剪后仍然是合法 JSON 字符串（provider 硬约束），且正文没被留在历史里。
+    for (const index of [0, 2, 4, 6, 8, 10]) {
+      expect(() => JSON.parse(String((result.messages[index] as { arguments: string }).arguments))).not.toThrow();
+    }
+    expect(JSON.stringify(result.messages)).not.toContain('export const value = 1;');
+    expect(JSON.stringify(result.messages)).not.toContain('console.log(1)');
+  });
+
+  it('tool argument trimming is repeatable and leaves non-JSON arguments alone', async () => {
+    const service = new CompactionService();
+    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
+    const content = 'z'.repeat(600);
+    const rawArguments = 'not-json '.repeat(60);
+    const messages: unknown[] = [
+      {
+        type: 'function_call',
+        call_id: 'c1',
+        name: 'write_file',
+        arguments: JSON.stringify({ file_path: 'a.ts', content }),
+      },
+      { type: 'function_call_output', call_id: 'c1', output: 'written' },
+      { type: 'function_call', call_id: 'c2', name: 'read_file', arguments: JSON.stringify({ file_path: 'a.ts' }) },
+      { type: 'function_call_output', call_id: 'c2', output: 'content' },
+      { type: 'function_call', call_id: 'c3', name: 'odd_tool', arguments: rawArguments },
+      { type: 'function_call_output', call_id: 'c3', output: 'odd' },
+    ];
+
+    const first = await service.compact({ messages, options, summarize: async () => FULL_SUMMARY });
+    expect(first.toolArgumentsTrimmed).toBe(1);
+    // 解析不出 JSON 的参数原样保留：宁可占点空间，也不把内容整体抹掉。
+    expect((first.messages[4] as { arguments: string }).arguments).toBe(rawArguments);
+
+    // 再跑一次：工具结果与参数都已归档，不该再有可清理内容。
+    await expect(
+      service.compact({ messages: first.messages, options, summarize: async () => FULL_SUMMARY }),
+    ).rejects.toBeInstanceOf(CompactionNotNeededError);
+  });
+
+  it('keeps tool arguments untouched when argument trimming is disabled', async () => {
+    const service = new CompactionService();
+    const content = 'z'.repeat(600);
+    const messages: unknown[] = [
+      {
+        type: 'function_call',
+        call_id: 'c1',
+        name: 'write_file',
+        arguments: JSON.stringify({ file_path: 'a.ts', content }),
+      },
+      { type: 'function_call_output', call_id: 'c1', output: `RAW: ${'y'.repeat(600)}` },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, trimToolArguments: false, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    expect(result.toolArgumentsTrimmed).toBe(0);
+    expect(JSON.stringify(result.messages)).toContain(content);
+  });
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {

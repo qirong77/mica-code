@@ -42,6 +42,8 @@ export type CompactCliResult = {
   toolResultsReplaced?: number;
   /** tool-results-only 模式：被丢弃的失效 Responses reasoning 条目数。 */
   reasoningItemsDropped?: number;
+  /** tool-results-only 模式：被裁剪掉正文的工具调用数。 */
+  toolArgumentsTrimmed?: number;
 };
 
 const SUMMARIZE_INSTRUCTIONS = [
@@ -112,15 +114,13 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       options: options.toolResultsOnly
         ? {
             toolResultsOnly: true,
-            contextWindowSize:
-              snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+            contextWindowSize: snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
           }
         : {
             force: options.pruneOnly === true || options.force === true,
             pruneOnly: options.pruneOnly === true,
             lightweightPrune: options.pruneOnly === true,
-            contextWindowSize:
-              snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+            contextWindowSize: snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
           },
       summarize: async (transcript, prompt) => {
         if (!agent) throw new Error('Agent is not available for summarization');
@@ -148,6 +148,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         summary: result.summary,
         toolResultsReplaced: result.toolResultsReplaced,
         reasoningItemsDropped: result.reasoningItemsDropped,
+        toolArgumentsTrimmed: result.toolArgumentsTrimmed,
       };
     }
 
@@ -213,6 +214,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       summary: result.summary,
       toolResultsReplaced: result.toolResultsReplaced,
       reasoningItemsDropped: result.reasoningItemsDropped,
+      toolArgumentsTrimmed: result.toolArgumentsTrimmed,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
