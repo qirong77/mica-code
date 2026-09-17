@@ -429,4 +429,67 @@ suite('mica compact --tool-results-only flows', () => {
     expect(messagesSecond[0]!.content).toBe('读取文件并总结');
     expect(messagesSecond[3]!.content).toBe('这是模型回复，必须保留');
   });
+
+  itE2E('--tool-results-only drops reasoning items whose encrypted chain it just stripped', async () => {
+    const home = makeHome('tool-results-only-reasoning');
+    const sessionId = 'test-tool-results-only-reasoning';
+    const now = new Date().toISOString();
+    writeSession(home, sessionId, {
+      version: 1,
+      id: sessionId,
+      title: 'Tool Results Only Reasoning Test',
+      createdAt: now,
+      updatedAt: now,
+      cwd: SESSION_CWD,
+      turnState: 'completed',
+      revision: 1,
+      snapshot: {
+        providerId: 'mock',
+        model: 'mock-chat',
+        effort: 'low',
+        role: 'default',
+        protocol: 'openai_responses',
+        messages: [
+          { type: 'message', role: 'user', content: '设计一个架构图' },
+          {
+            type: 'reasoning',
+            id: 'rs_1',
+            summary: [{ type: 'summary_text', text: `推理过程 ${'r'.repeat(4_000)}` }],
+            encrypted_content: 'encrypted-chain',
+          },
+          {
+            type: 'function_call',
+            id: 'call_1',
+            call_id: 'call_1',
+            name: 'read_file',
+            arguments: JSON.stringify({ file_path: '/tmp/target.txt' }),
+          },
+          { type: 'function_call_output', call_id: 'call_1', output: `文件内容 ${'y'.repeat(4_000)}` },
+        ],
+        conversationMessages: [{ role: 'user', content: '设计一个架构图' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    });
+
+    const result = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
+      MICA_HOME: home,
+    });
+
+    expect(result.code).toBe(0);
+    const parsed = JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(parsed.ok).toBe(true);
+    // 剥掉 encrypted_content 后这条 reasoning 永远不会再被发送，必须整条丢弃，
+    // 否则它只会让界面上的上下文占用虚高。
+    expect(parsed.reasoningItemsDropped).toBe(1);
+    expect(parsed.afterCount).toBe(parsed.beforeCount - 1);
+
+    const after = readSession(home, sessionId);
+    const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
+    expect(messages.some((message) => message.type === 'reasoning')).toBe(false);
+    expect(messages.length).toBe(3);
+    // 工具参数与其余消息仍然原样保留。
+    expect(String(messages[1]!.arguments)).toContain('/tmp/target.txt');
+    expect(messages[0]!.content).toBe('设计一个架构图');
+  });
 });

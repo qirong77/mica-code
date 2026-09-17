@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ContextUsageSection } from './ContextUsagePanel'
+import { formatTokens } from './context-usage'
 
-const BATCH = 50
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
 function fmtTime(iso) {
@@ -11,81 +12,22 @@ function fmtTime(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-function tokensShort(n) {
-  const value = Number(n) || 0
-  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`
-  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}k`
-  return String(value)
-}
-
 function rate(u) {
   const input = u.inputTokens || 0
   return input > 0 ? `${(((u.cachedInputTokens || 0) / input) * 100).toFixed(0)}%` : '—'
 }
 
-const ROLE_STYLE = {
-  user: 'bg-info/12 text-info-soft',
-  assistant: 'bg-panel-hi text-fg-strong',
-  tool: 'bg-success/12 text-success-soft'
-}
-const ROLE_LABEL = { user: 'You', assistant: 'Assistant', tool: 'Tool' }
-
-function MessageRow({ message, index }) {
-  const role = message.role || 'assistant'
+function StatCard({ label, primary, secondary }) {
   return (
-    <div className="flex flex-col gap-1.5 border-b border-line py-3 last:border-b-0">
-      <div className="flex items-center gap-2">
-        <span
-          className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROLE_STYLE[role] || ROLE_STYLE.assistant}`}
-        >
-          {ROLE_LABEL[role] || role}
-        </span>
-        {role === 'tool' && message.toolCallId && (
-          <span className="truncate font-mono text-[10px] text-fg-faint">{message.toolCallId}</span>
-        )}
-        <span className="ml-auto font-mono text-[10px] text-fg-ghost">#{index + 1}</span>
-      </div>
-      {message.content ? (
-        <details className="group">
-          <summary className="cursor-pointer select-none text-[10px] text-fg-faint transition-colors hover:text-fg-muted">
-            <span className="group-open:hidden">展开内容</span>
-            <span className="hidden group-open:inline">收起</span>
-          </summary>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-fg">
-            {message.content}
-          </pre>
-        </details>
-      ) : null}
-      {Array.isArray(message.toolCalls) && message.toolCalls.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {message.toolCalls.map((tc, i) => (
-            <details
-              key={`${tc.id || i}`}
-              className="group rounded-[4px] border border-line bg-panel-hi px-2 py-1"
-            >
-              <summary className="cursor-pointer select-none font-mono text-[11px] text-warn">
-                {tc.name || 'tool_call'}
-                {tc.arguments ? (
-                  <span className="ml-1.5 text-[10px] text-fg-faint">
-                    <span className="group-open:hidden">展开参数</span>
-                    <span className="hidden group-open:inline">收起参数</span>
-                  </span>
-                ) : null}
-              </summary>
-              {tc.arguments ? (
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-fg-muted">
-                  {tc.arguments}
-                </pre>
-              ) : null}
-            </details>
-          ))}
-        </div>
-      )}
+    <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
+      <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">{primary}</div>
+      <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">{secondary}</div>
     </div>
   )
 }
 
-function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defaultPageSize = 5 }) {
+function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defaultPageSize = 10 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(defaultPageSize)
   if (!rows || rows.length === 0) return null
@@ -107,7 +49,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-fg-muted">
         <span className="text-fg-faint">{title}</span>
         <span className="tabular-nums">
-          {rows.length} req · {tokensShort(total.input)} in · {tokensShort(total.output)} out
+          {rows.length} req · {formatTokens(total.input)} in · {formatTokens(total.output)} out
         </span>
         <span className="tabular-nums text-fg-dim">
           缓存率 {total.input > 0 ? `${((total.cached / total.input) * 100).toFixed(1)}%` : '—'}
@@ -255,7 +197,7 @@ function SubagentCard({ record }) {
           </span>
         )}
         <span className="ml-auto font-mono text-[10px] text-fg-faint tabular-nums">
-          {requests.length} req · {tokensShort(summary.totalTokens || 0)} tokens
+          {requests.length} req · {formatTokens(summary.totalTokens || 0)} tokens
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-fg-faint">
@@ -288,13 +230,11 @@ function SubagentCard({ record }) {
 export function SessionDetailModal({ sessionId, onClose }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
-  const [visible, setVisible] = useState(BATCH)
 
   useEffect(() => {
     let alive = true
     setDetail(null)
     setError(null)
-    setVisible(BATCH)
     window.mica.stats
       .sessionDetail(sessionId)
       .then((data) => {
@@ -316,7 +256,6 @@ export function SessionDetailModal({ sessionId, onClose }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const messages = detail?.messages || []
   const usageHistory = useMemo(() => detail?.usageHistory || [], [detail])
   const subagents = useMemo(() => detail?.subagentUsageHistory || [], [detail])
   const subRequests = useMemo(
@@ -365,7 +304,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] border border-line bg-panel shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[6px] border border-line bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
@@ -390,7 +329,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                 {detail?.turnState || '—'}
               </span>
             </div>
-            <div className="mt-0.5 text-[10px] text-fg-ghost">
+            <div className="mt-0.5 truncate text-[10px] text-fg-ghost">
               {fmtTime(detail?.createdAt)} → {fmtTime(detail?.updatedAt)}
               {detail?.cwd ? ` · ${detail.cwd}` : ''}
             </div>
@@ -415,78 +354,53 @@ export function SessionDetailModal({ sessionId, onClose }) {
           ) : (
             <div className="flex flex-col gap-5">
               <section>
-                <h3 className={OVERLINE_CLASS}>Token 情况</h3>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">
-                      主 agent
-                    </div>
-                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
-                      {usageHistory.length} req
-                    </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
-                      {tokensShort(totals.main.input)} in · {tokensShort(totals.main.output)} out
-                    </div>
-                  </div>
-                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">
-                      sub-agents
-                    </div>
-                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
-                      {subRequests.length} req
-                    </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
-                      {tokensShort(totals.sub.input)} in · {tokensShort(totals.sub.output)} out
-                    </div>
-                  </div>
-                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">合计</div>
-                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
-                      {tokensShort(totals.all.total)}
-                    </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
-                      {totals.all.input.toLocaleString()} in · {totals.all.output.toLocaleString()}{' '}
-                      out
-                    </div>
-                  </div>
-                  <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-fg-faint">缓存率</div>
-                    <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">
-                      {totals.all.input > 0
-                        ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
-                        : '—'}
-                    </div>
-                    <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">
-                      {totals.all.cached.toLocaleString()} cached
-                    </div>
-                  </div>
+                <h3 className={OVERLINE_CLASS}>上下文占用</h3>
+                <p className="mt-1 text-[10px] text-fg-ghost">
+                  按持久化消息体的类别估算（chars/4，与 CLI 的 ctx
+                  同口径）；点开单条可看内容与体积。
+                </p>
+                <div className="mt-2">
+                  <ContextUsageSection
+                    context={detail.context}
+                    messages={detail.messages}
+                    contextWindowSize={detail.contextWindowSize}
+                  />
                 </div>
-                <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
               </section>
 
               <section>
-                <h3 className={OVERLINE_CLASS}>对话 / 工具调用</h3>
-                <p className="mt-1 text-[10px] text-fg-ghost">
-                  按模型请求顺序展示；思考内容不随会话持久化，历史会话无法还原思考过程。
-                </p>
-                <div className="mt-2">
-                  {messages.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-fg-faint">无消息记录</div>
-                  ) : (
-                    messages
-                      .slice(0, visible)
-                      .map((message, i) => <MessageRow key={i} message={message} index={i} />)
-                  )}
-                  {messages.length > visible && (
-                    <button
-                      type="button"
-                      onClick={() => setVisible((v) => v + BATCH)}
-                      className="mt-2 w-full rounded-[4px] border border-line bg-panel-hi py-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
-                    >
-                      显示更多（{messages.length - visible} 条）
-                    </button>
-                  )}
+                <h3 className={OVERLINE_CLASS}>请求用量</h3>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <StatCard
+                    label="主 agent"
+                    primary={`${usageHistory.length} req`}
+                    secondary={`${formatTokens(totals.main.input)} in · ${formatTokens(totals.main.output)} out`}
+                  />
+                  <StatCard
+                    label="sub-agents"
+                    primary={`${subRequests.length} req`}
+                    secondary={`${formatTokens(totals.sub.input)} in · ${formatTokens(totals.sub.output)} out`}
+                  />
+                  <StatCard
+                    label="合计"
+                    primary={formatTokens(totals.all.total)}
+                    secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
+                  />
+                  <StatCard
+                    label="缓存率"
+                    primary={
+                      totals.all.input > 0
+                        ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
+                        : '—'
+                    }
+                    secondary={`${totals.all.cached.toLocaleString()} cached`}
+                  />
                 </div>
+                <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
+                <p className="mt-1 text-[10px] leading-relaxed text-fg-ghost">
+                  输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
+                  input，所以「输出」和「输入增长」会一起变大。
+                </p>
               </section>
 
               {subagents.length > 0 && (
@@ -495,7 +409,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                   <div className="mt-2 flex flex-col gap-2">
                     {subagents.map((record) => (
                       <SubagentCard
-                        key={record.taskId || record.initiatedByCallId || Math.random()}
+                        key={record.taskId || record.initiatedByCallId || record.description}
                         record={record}
                       />
                     ))}

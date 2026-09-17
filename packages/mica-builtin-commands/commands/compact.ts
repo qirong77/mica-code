@@ -106,7 +106,16 @@ function formatCompactNotice(result: CompactResult) {
   const lines = [`**${prefix} complete**`, '', `- Mode: ${mode} (${strategy})`];
   if (result.strategy === 'tool_results_only') {
     lines.push(`- Tool results replaced: ${result.toolResultsReplaced ?? 0}`);
-    lines.push(`- Messages: ${result.beforeCount} (unchanged)`);
+    // 失效的 Responses reasoning 条目会被一并丢弃（不再发送也不再落盘），
+    // 它们本来就不算对话内容，所以条数变化时不用 "unchanged" 误导用户。
+    if (result.reasoningItemsDropped) {
+      lines.push(`- Stale reasoning items dropped: ${result.reasoningItemsDropped}`);
+    }
+    lines.push(
+      result.afterCount === result.beforeCount
+        ? `- Messages: ${result.beforeCount} (unchanged)`
+        : `- Messages: ${result.beforeCount} -> ${result.afterCount}`,
+    );
   } else {
     lines.push(`- Messages: ${result.beforeCount} -> ${result.afterCount}`);
   }

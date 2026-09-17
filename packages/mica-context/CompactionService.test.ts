@@ -811,6 +811,55 @@ describe('CompactionService', () => {
     expect(result.toolResultsReplaced).toBeGreaterThan(0);
   });
 
+  it('tool-results-only compact drops stale Responses reasoning items', async () => {
+    const service = new CompactionService();
+    const reasoningText = 'r'.repeat(4_000);
+    const messages: unknown[] = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'design an architecture' }] },
+      {
+        type: 'reasoning',
+        id: 'rs_1',
+        summary: [{ type: 'summary_text', text: reasoningText }],
+        encrypted_content: 'encrypted-chain',
+      },
+      { type: 'function_call', call_id: 'rc-1', name: 'run_shell', arguments: '{"cmd":"ls packages"}' },
+      { type: 'function_call_output', call_id: 'rc-1', output: `RAW_RESPONSES_OUTPUT: ${'y'.repeat(2_000)}` },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    // 剥掉 encrypted_content 后这条 reasoning 既不会被发送也不会被落盘，
+    // 所以整条丢弃，估算里不能再把它算进去。
+    expect(result.reasoningItemsDropped).toBe(1);
+    expect(result.messages.some((message) => (message as { type?: string }).type === 'reasoning')).toBe(false);
+    expect(result.beforeCount).toBe(4);
+    expect(result.afterCount).toBe(3);
+    expect(result.savedTokenEstimate).toBeGreaterThan(Math.ceil(reasoningText.length / 4));
+  });
+
+  it('tool-results-only compact cleans stale reasoning even when no tool result is left', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+      { type: 'function_call_output', call_id: 'rc-1', output: '[Old tool result content cleared during compact]' },
+      { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'encrypted-chain' },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    expect(result.toolResultsReplaced).toBe(0);
+    expect(result.reasoningItemsDropped).toBe(1);
+    expect(result.afterCount).toBe(2);
+  });
+
 });
 
 function makeMessages(rounds: number, offset = 0): unknown[] {

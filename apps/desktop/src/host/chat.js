@@ -1284,7 +1284,8 @@ function runCompactSession(sessionId, mode = 'model') {
             savedRatio: result.savedRatio,
             contextWindowSize: result.contextWindowSize,
             contextUsageRatio: result.contextUsageRatio,
-            toolResultsReplaced: result.toolResultsReplaced
+            toolResultsReplaced: result.toolResultsReplaced,
+            reasoningItemsDropped: result.reasoningItemsDropped
           })
           return
         }

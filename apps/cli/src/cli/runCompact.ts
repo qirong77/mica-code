@@ -40,6 +40,8 @@ export type CompactCliResult = {
   summary?: string;
   /** tool-results-only 模式：被替换掉工具结果的消息数。 */
   toolResultsReplaced?: number;
+  /** tool-results-only 模式：被丢弃的失效 Responses reasoning 条目数。 */
+  reasoningItemsDropped?: number;
 };
 
 const SUMMARIZE_INSTRUCTIONS = [
@@ -145,6 +147,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         contextUsageRatio: result.contextUsageRatio,
         summary: result.summary,
         toolResultsReplaced: result.toolResultsReplaced,
+        reasoningItemsDropped: result.reasoningItemsDropped,
       };
     }
 
@@ -209,6 +212,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       contextUsageRatio: result.contextUsageRatio,
       summary: result.summary,
       toolResultsReplaced: result.toolResultsReplaced,
+      reasoningItemsDropped: result.reasoningItemsDropped,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

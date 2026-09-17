@@ -55,6 +55,29 @@ describe('createCompactCommand', () => {
     expect(notice).not.toContain('Recent kept');
   });
 
+  it('reports dropped stale reasoning items and the changed message count', async () => {
+    const services = makeServices({
+      result: makeResult({
+        mode: 'pruned',
+        strategy: 'tool_results_only',
+        beforeCount: 20,
+        afterCount: 18,
+        keptCount: 18,
+        toolResultsReplaced: 5,
+        reasoningItemsDropped: 2,
+        savedRatio: 0.4,
+      }),
+    });
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action();
+
+    const notice = String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
+    expect(notice).toContain('- Stale reasoning items dropped: 2');
+    expect(notice).toContain('- Messages: 20 -> 18');
+    expect(notice).not.toContain('(unchanged)');
+  });
+
   it('forces LLM summarization when the llm argument is used', async () => {
     const services = makeServices({});
     const command = createCompactCommand(makeAgent(), makeSession(), services);

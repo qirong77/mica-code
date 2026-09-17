@@ -10,7 +10,7 @@
     "icons:generate": "python3 scripts/generate-icons.py",
     "icons:sync": "bun scripts/sync-vscode-icons.mjs",
     "lint": "eslint --cache .",
-    "test": "bun test src/host/*.test.js src/renderer/src/*.test.js",
+    "test": "bun test src/host src/renderer/src",
     "start": "electron-vite preview --ignoreConfigWarning",
     "dev": "npm run build:server && electron-vite dev --ignoreConfigWarning",
     "build": "npm run build:app && npm run build:server",

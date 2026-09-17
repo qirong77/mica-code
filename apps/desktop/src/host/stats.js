@@ -12,7 +12,12 @@ import {
   renameGroup,
   setAssignment
 } from './session-projects'
-import { projectMessages, projectSubagentRecords, projectUsage } from './stats-core'
+import {
+  projectMessages,
+  projectSubagentRecords,
+  projectUsage,
+  summarizeContext
+} from './stats-core'
 import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
@@ -267,6 +272,8 @@ export function registerStatsIpc() {
     if (!file || !existsSync(file)) throw new Error('Session not found')
     const raw = JSON.parse(readFileSync(file, 'utf8'))
     const snap = raw.snapshot || {}
+    const messages = Array.isArray(snap.messages) ? snap.messages : []
+    const lastUsage = snap.lastUsage ? projectUsage(snap.lastUsage) : null
     return {
       id: raw.id || null,
       title: raw.title || null,
@@ -279,9 +286,14 @@ export function registerStatsIpc() {
       effort: snap.effort || null,
       role: snap.role || null,
       contextWindowSize: snap.contextWindowSize || null,
-      messages: projectMessages(Array.isArray(snap.messages) ? snap.messages : []),
+      messages: projectMessages(messages),
+      // 弹窗的「谁占了 context」分解，按原始消息体积估算（与 CLI 的 chars/4 同口径）。
+      context: summarizeContext(messages, {
+        lastInputTokens: lastUsage?.inputTokens || 0,
+        contextWindowSize: snap.contextWindowSize || null
+      }),
       usageHistory: (Array.isArray(snap.usageHistory) ? snap.usageHistory : []).map(projectUsage),
-      lastUsage: snap.lastUsage ? projectUsage(snap.lastUsage) : null,
+      lastUsage,
       subagentUsageHistory: projectSubagentRecords(
         Array.isArray(snap.subagentUsageHistory) ? snap.subagentUsageHistory : []
       )

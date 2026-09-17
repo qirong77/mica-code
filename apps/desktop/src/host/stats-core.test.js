@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import {
   dedupeStatsSessions,
+  estimateTokens,
   normalizeUsageEvent,
   parseStatsSession,
   projectContent,
   projectMessages,
   projectSubagentRecords,
-  projectUsage
+  projectUsage,
+  summarizeContext
 } from './stats-core'
 
 describe('Stats usage aggregation', () => {
@@ -207,15 +209,114 @@ describe('Stats usage aggregation', () => {
       },
       { role: 'tool', tool_call_id: 'call_1', content: 'no match' }
     ])
-    expect(out).toEqual([
-      { role: 'user', content: 'hi' },
+    expect(out.map((message) => message.kind)).toEqual(['user', 'assistant', 'tool_result'])
+    expect(out[0]).toMatchObject({ role: 'user', content: 'hi' })
+    expect(out[1]).toMatchObject({
+      role: 'assistant',
+      content: 'let me check',
+      toolCalls: [{ id: 'call_1', name: 'grep_search', arguments: '{"pattern":"x"}' }]
+    })
+    expect(out[2]).toMatchObject({ role: 'tool', toolCallId: 'call_1', content: 'no match' })
+    // 文本与工具参数分开计：assistant 那一条同时给两类贡献体积。
+    expect(out[1].parts.assistant).toBe('let me check'.length)
+    expect(out[1].parts.tool_call).toBe('{"pattern":"x"}'.length)
+  })
+
+  test('classifies flattened Responses items instead of dropping them', () => {
+    const out = projectMessages([
       {
-        role: 'assistant',
-        content: 'let me check',
-        toolCalls: [{ id: 'call_1', name: 'grep_search', arguments: '{"pattern":"x"}' }]
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'draw an architecture' }]
       },
-      { role: 'tool', toolCallId: 'call_1', content: 'no match' }
+      {
+        type: 'reasoning',
+        summary: [{ type: 'summary_text', text: 'thinking' }],
+        encrypted_content: 'x'.repeat(400)
+      },
+      {
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'run_shell',
+        arguments: '{"command":"ls"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_1',
+        output: '[Old tool result content cleared during compact]'
+      }
     ])
+    expect(out.map((message) => message.kind)).toEqual([
+      'user',
+      'reasoning',
+      'tool_call',
+      'tool_result'
+    ])
+    expect(out[1].content).toBe('thinking')
+    expect(out[1].encryptedChars).toBe(400)
+    expect(out[2]).toMatchObject({ name: 'run_shell', toolCallId: 'call_1' })
+    expect(out[3].cleared).toBe(true)
+  })
+
+  test('counts images by number instead of their base64 payload', () => {
+    const items = projectMessages([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'look at this' },
+          {
+            type: 'input_image',
+            image_url: `data:image/png;base64,${'X'.repeat(200_000)}`
+          }
+        ]
+      }
+    ])
+    // base64 长度与 vision token 无关，按字符算会把一条贴图消息估成 5 万 token。
+    expect(items[0].imageCount).toBe(1)
+    expect(items[0].hasImage).toBe(true)
+    expect(items[0].content).toContain('[image]')
+    expect(items[0].tokens).toBeLessThan(100)
+  })
+
+  test('summarizes context by category and keeps the request overhead separate', () => {
+    const messages = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'a'.repeat(400) }] },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'b'.repeat(400) }]
+      },
+      { type: 'reasoning', summary: [{ type: 'summary_text', text: 'c'.repeat(400) }] },
+      {
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'read_file',
+        arguments: '{"file_path":"a"}'.repeat(10)
+      },
+      { type: 'function_call_output', call_id: 'call_1', output: 'd'.repeat(800) }
+    ]
+    const summary = summarizeContext(messages, {
+      lastInputTokens: 41_146,
+      contextWindowSize: 1_000_000
+    })
+    expect(summary.items).toBe(5)
+    expect(summary.categories.map((row) => row.kind).sort()).toEqual([
+      'assistant',
+      'reasoning',
+      'tool_call',
+      'tool_result',
+      'user'
+    ])
+    const byKind = Object.fromEntries(summary.categories.map((row) => [row.kind, row]))
+    expect(byKind.reasoning.chars).toBe(400)
+    expect(byKind.tool_result.chars).toBe(800)
+    expect(byKind.tool_call.chars).toBe('{"file_path":"a"}'.repeat(10).length)
+    expect(byKind.reasoning.tokens).toBe(estimateTokens(400))
+    // 分类明细必须能对上总量：界面上的占比就是以这个口径算的。
+    expect(summary.messageTokens).toBe(summary.categories.reduce((sum, row) => sum + row.tokens, 0))
+    expect(summary.overheadTokens).toBe(41_146 - summary.messageTokens)
+    expect(summary.contextWindowSize).toBe(1_000_000)
   })
 
   test('projects usage and subagent records to a compact renderer shape', () => {

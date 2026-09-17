@@ -80,6 +80,8 @@ export type CompactResult = {
   reducedRecentRounds?: number;
   /** toolResultsOnly：被替换掉工具结果的消息数。 */
   toolResultsReplaced?: number;
+  /** toolResultsOnly：被丢弃的失效 Responses reasoning 条目数。 */
+  reasoningItemsDropped?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -695,13 +697,23 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
   let replacedMessages = 0;
-  const compactedMessages = messages.map((message) => {
+  let droppedReasoningItems = 0;
+  const compactedMessages: unknown[] = [];
+  for (const message of messages) {
+    // 这条路径会剥掉 encrypted_content，reasoning 条目随之永久失效：ResponsesClient
+    // 发送请求与恢复快照时都会丢弃没有 encrypted_content 的 reasoning item
+    // （stripUnusableResponseInputItems），所以留着它既不会被发送也不会被落盘，
+    // 只会让 afterTokenEstimate（以及界面上的 ctx）虚高。
+    if (isStaleReasoningItem(message)) {
+      droppedReasoningItems++;
+      continue;
+    }
     const counter = { replaced: 0 };
     const next = pruneToolResultPayload(message, placeholder, counter);
     if (counter.replaced > 0) replacedMessages++;
-    return next;
-  });
-  if (replacedMessages === 0) {
+    compactedMessages.push(next);
+  }
+  if (replacedMessages === 0 && droppedReasoningItems === 0) {
     throw new CompactionNotNeededError('当前会话没有可清理的工具结果，暂不需要快速压缩');
   }
 
@@ -711,7 +723,8 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   const contextWindowSize = positiveNumber(options.contextWindowSize);
   return {
     messages: options.preview ? cloneJson(messages) : compactedMessages,
-    summary: 'Tool results replaced with placeholders; no message was summarized, dropped, or rewritten.',
+    summary:
+      'Tool results replaced and stale Responses reasoning items dropped; no message was summarized or rewritten.',
     mode: 'pruned',
     strategy: 'tool_results_only',
     beforeCount: messages.length,
@@ -733,7 +746,16 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     summaryInputTokenEstimate: 0,
     reducedRecentRounds: 0,
     toolResultsReplaced: replacedMessages,
+    reasoningItemsDropped: droppedReasoningItems,
   };
+}
+
+// 压缩会剥掉 encrypted_content（见 pruneToolResultPayload/pruneValue），Responses 的
+// reasoning 条目随即失效。判定与 ResponsesClient 的 stripUnusableResponseInputItems
+// 同源：没有 encrypted_content 的 reasoning item 永远上不了线，因此可以整条丢弃。
+function isStaleReasoningItem(item: unknown): boolean {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  return (item as { type?: unknown }).type === 'reasoning';
 }
 
 // 未改动时返回原引用，避免无谓的深拷贝；替换数量记在 counter 上。
