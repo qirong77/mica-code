@@ -113,6 +113,49 @@ describe('createCompactCommand', () => {
     );
   });
 
+  it('reports replaced media items when quick compact clears pasted images', async () => {
+    const services = makeServices({
+      result: makeResult({
+        mode: 'pruned',
+        strategy: 'tool_results_only',
+        beforeCount: 20,
+        afterCount: 20,
+        keptCount: 20,
+        toolResultsReplaced: 0,
+        mediaItemsReplaced: 3,
+        savedRatio: 0.4,
+      }),
+    });
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action();
+
+    const notice = String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
+    expect(notice).toContain('- Media items replaced: 3');
+    expect(notice).toContain('- Messages: 20 (unchanged)');
+  });
+
+  it('hides the media line when no media was replaced', async () => {
+    const services = makeServices({
+      result: makeResult({
+        mode: 'pruned',
+        strategy: 'tool_results_only',
+        beforeCount: 20,
+        afterCount: 20,
+        keptCount: 20,
+        toolResultsReplaced: 5,
+        mediaItemsReplaced: 0,
+        savedRatio: 0.4,
+      }),
+    });
+    const command = createCompactCommand(makeAgent(), makeSession(), services);
+
+    await command.action();
+
+    const notice = String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
+    expect(notice).not.toContain('Media items replaced');
+  });
+
   it('shows not-needed compaction as a normal message', async () => {
     const services = makeServices({ error: new CompactionNotNeededError('too small') });
     const command = createCompactCommand(makeAgent(), makeSession(), services);

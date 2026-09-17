@@ -3,6 +3,7 @@ import {
   appendBufferedEvent,
   buildAppServerArgs,
   buildChatEnv,
+  buildTurnStartParams,
   CHAT_MCP_INIT_TIMEOUT_MS,
   codexNotificationToEvent,
   createChatEventPacer,
@@ -171,6 +172,35 @@ describe('chat CLI arguments', () => {
     for (const flag of ['--session', '--dir', '--model', '--variant', '--role', '--max-turns']) {
       expect(args).not.toContain(flag)
     }
+  })
+
+  it('forwards the composer role so a resident host can switch without respawning', () => {
+    expect(
+      buildTurnStartParams({
+        threadId: 's1',
+        prompt: 'hi',
+        cwd: '/tmp/work',
+        model: 'krill/gpt-5.6-terra',
+        variant: 'high',
+        role: 'reviewer',
+        clientMessageId: 'm1'
+      })
+    ).toEqual({
+      threadId: 's1',
+      input: [{ type: 'text', text: 'hi' }],
+      cwd: '/tmp/work',
+      model: 'krill/gpt-5.6-terra',
+      effort: 'high',
+      role: 'reviewer',
+      clientMessageId: 'm1'
+    })
+  })
+
+  it('omits the Mica-only params when the composer has no override', () => {
+    const params = buildTurnStartParams({ threadId: '', prompt: 'hi' })
+    expect(params).toEqual({ threadId: '', input: [{ type: 'text', text: 'hi' }] })
+    expect(params).not.toHaveProperty('role')
+    expect(params).not.toHaveProperty('clientMessageId')
   })
 
   it('maps codex turn/started to a step_start app event', () => {

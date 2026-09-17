@@ -729,7 +729,7 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
-  it('tool-results-only compact replaces tool results and leaves every other message untouched', async () => {
+  it('tool-results-only compact replaces tool results and media and leaves every other message untouched', async () => {
     const service = new CompactionService();
     const summarize = vi.fn(async () => FULL_SUMMARY);
     const messages = [
@@ -777,15 +777,83 @@ describe('CompactionService', () => {
     expect(result.messages[0]).toEqual(messages[0]);
     expect(result.messages[1]).toEqual(messages[1]);
     expect(result.messages[3]).toEqual(messages[3]);
-    expect(result.messages[5]).toEqual(messages[5]);
+    // 只有媒体块被换掉，同一条消息里的文本块原样保留
+    const mediaMessageContent = (result.messages[5] as { content: unknown[] }).content;
+    expect(mediaMessageContent[0]).toEqual((messages[5] as { content: unknown[] }).content[0]);
     expect(contentOf(result.messages[2])).toBe('[Old tool result content cleared during compact]');
     expect(JSON.stringify(result.messages[2])).not.toContain('RAW_TOOL_RESULT');
     expect(JSON.stringify(result.messages[4])).not.toContain('RAW_RESPONSES_OUTPUT');
-    // 没有任何 checkpoint 消息被插入，工具参数与媒体原样保留
+    // 粘贴的图片以 base64 常驻历史，快速压缩把它换成占位符后 base64 才真的离开上下文
+    expect(result.mediaItemsReplaced).toBe(1);
+    // 没有任何 checkpoint 消息被插入，工具参数与对话文本原样保留
     const serialized = JSON.stringify(result.messages);
     expect(serialized).not.toContain(COMPACT_BOUNDARY_PREFIX);
     expect(serialized).not.toContain(COMPACT_SUMMARY_PREFIX);
-    expect(serialized).toContain(IMAGE_BASE64);
+    expect(serialized).not.toContain(IMAGE_BASE64);
+    expect(serialized).toContain('keep user text');
+    expect(serialized).toContain('keep assistant text');
+    expect(serialized).toContain('keep this image');
+    expect(JSON.stringify(result.messages[5])).toContain('[image omitted during compact]');
+  });
+
+  it('tool-results-only compact clears pasted media without touching text or message count', async () => {
+    const service = new CompactionService();
+    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
+    const messages: unknown[] = [
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
+          {
+            type: 'input_image',
+            detail: 'auto',
+            image_url: `data:image/png;base64,${IMAGE_BASE64}`,
+          },
+        ],
+      },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '先看堆栈', annotations: [] }] },
+    ];
+
+    const first = await service.compact({ messages, options, summarize: async () => FULL_SUMMARY });
+
+    expect(first.mediaItemsReplaced).toBe(1);
+    expect(first.beforeCount).toBe(messages.length);
+    expect(first.afterCount).toBe(messages.length);
+    expect(JSON.stringify(first.messages)).not.toContain(IMAGE_BASE64);
+    // `[Image](路径)` 那行引用文本仍在，需要时可以再次内联
+    expect(JSON.stringify(first.messages)).toContain('[Image](~/.mica/images/shot.png)');
+    expect(JSON.stringify(first.messages)).toContain('[image omitted during compact]');
+    expect(first.savedTokenEstimate).toBeGreaterThan(IMAGE_BASE64.length / 5);
+
+    // 第二次没有可清理的媒体，报 not needed 而不是把对话文本也削掉
+    await expect(
+      service.compact({ messages: first.messages, options, summarize: async () => FULL_SUMMARY }),
+    ).rejects.toBeInstanceOf(CompactionNotNeededError);
+  });
+
+  it('tool-results-only compact also clears Chat Completions image_url parts', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看这张图' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${IMAGE_BASE64}` } },
+        ],
+      },
+      { role: 'assistant', content: '收到' },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    expect(result.mediaItemsReplaced).toBe(1);
+    expect(JSON.stringify(result.messages)).not.toContain(IMAGE_BASE64);
+    expect(JSON.stringify(result.messages)).toContain('[image omitted during compact]');
   });
 
   it('tool-results-only compact is repeatable and stops when nothing is left to replace', async () => {

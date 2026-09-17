@@ -71,7 +71,10 @@ export type CompactOptions = {
   force?: boolean;
   preview?: boolean;
   pruneOnly?: boolean;
-  /** 只把工具结果替换为占位符：不生成 checkpoint、不丢轮次、不调用模型（可重复执行）。 */
+  /**
+   * 只把工具结果与媒体块（图片/文档）替换为占位符：不生成 checkpoint、不丢轮次、
+   * 不调用模型（可重复执行）。
+   */
   toolResultsOnly?: boolean;
   /**
    * 快速压缩时顺带把工具调用参数的正文型字段换成指向性摘要（默认开启）。
@@ -123,6 +126,8 @@ export type CompactResult = {
   reasoningItemsDropped?: number;
   /** toolResultsOnly：被裁剪掉正文的工具调用数（其 arguments 换成了指向性摘要）。 */
   toolArgumentsTrimmed?: number;
+  /** toolResultsOnly：被替换为占位符的媒体块数（图片/文档）。 */
+  mediaItemsReplaced?: number;
 };
 
 export class CompactionNotNeededError extends Error {
@@ -148,9 +153,9 @@ export class CompactionService {
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
     const options = input.options ?? {};
-    // 快速压缩（/compact）：只把工具结果替换为占位符。消息条数、顺序、文本与
-    // 工具参数都保持不变，不生成 boundary/summary、不丢轮次、不调用模型，所以
-    // 连续执行不会丢失对话信息（没有可替换内容时报 not needed）。
+    // 快速压缩（/compact）：只把工具结果与媒体块替换为占位符。消息条数、顺序、
+    // 文本与工具参数都保持不变，不生成 boundary/summary、不丢轮次、不调用模型，
+    // 所以连续执行不会丢失对话信息（没有可替换内容时报 not needed）。
     if (options.toolResultsOnly) return compactToolResultsOnly(originalMessages, options);
     const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
     if (beforeCount < minMessages) {
@@ -742,17 +747,21 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
   );
 }
 
-// 快速压缩（/compact）唯一的动作：把工具结果替换为占位符。媒体、base64、
-// 用户与助手文本一律原样保留，也不插入 boundary/summary 消息，因此它不重写
-// 对话内容，只是把不再需要的大块工具输出腾出来。工具调用参数一并按字段语义
-// 裁剪（正文型字段换成指向性摘要，见 trimToolArguments）——工具结果都被清掉后，
-// 保留写入正文既没有复用价值又是压缩后剩下的最大一块。
+// 快速压缩（/compact）的动作只有三类：把工具结果替换为占位符、把媒体块（图片/
+// 文档）替换为占位符、把工具调用参数的正文型字段换成指向性摘要。用户与助手文本
+// 一律原样保留，也不插入 boundary/summary 消息，因此它不重写对话内容，只是把
+// 不再需要的大块内容腾出来。工具参数一并裁剪的理由：工具结果都被清掉后，保留
+// 写入正文既没有复用价值又是压缩后剩下的最大一块。媒体一并替换的理由：粘贴的
+// 截图/文档以 base64 常驻历史，是本路径下唯一能占到几十万 token 估算量级的单块
+// 内容。替换媒体不算丢信息——`[Image](路径)` 那行引用文本仍在、原文件也仍在磁盘，
+// 需要重新看图时再次内联即可。
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
   const trimArguments = options.trimToolArguments !== false;
   let replacedMessages = 0;
   let droppedReasoningItems = 0;
   let trimmedArguments = 0;
+  let replacedMediaItems = 0;
   const compactedMessages: unknown[] = [];
   for (const message of messages) {
     // 这条路径会剥掉 encrypted_content，reasoning 条目随之永久失效：ResponsesClient
@@ -765,6 +774,9 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     }
     const counter = { replaced: 0 };
     let next = pruneToolResultPayload(message, placeholder, counter);
+    const mediaCounter = { replaced: 0 };
+    next = replaceMediaWithPlaceholder(next, mediaCounter);
+    replacedMediaItems += mediaCounter.replaced;
     if (trimArguments) {
       const argumentCounter = { trimmed: 0 };
       next = trimToolArguments(next, argumentCounter);
@@ -773,8 +785,8 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     if (counter.replaced > 0) replacedMessages++;
     compactedMessages.push(next);
   }
-  if (replacedMessages === 0 && droppedReasoningItems === 0 && trimmedArguments === 0) {
-    throw new CompactionNotNeededError('当前会话没有可清理的工具结果或工具参数，暂不需要快速压缩');
+  if (replacedMessages === 0 && droppedReasoningItems === 0 && trimmedArguments === 0 && replacedMediaItems === 0) {
+    throw new CompactionNotNeededError('当前会话没有可清理的工具结果、工具参数或图片，暂不需要快速压缩');
   }
 
   const beforeTokenEstimate = estimateMessagesTokens(messages);
@@ -784,7 +796,7 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   return {
     messages: options.preview ? cloneJson(messages) : compactedMessages,
     summary:
-      'Tool results replaced and stale Responses reasoning items dropped; no message was summarized or rewritten.',
+      'Tool results and media replaced, stale Responses reasoning items dropped; no message was summarized or rewritten.',
     mode: 'pruned',
     strategy: 'tool_results_only',
     beforeCount: messages.length,
@@ -808,6 +820,7 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     toolResultsReplaced: replacedMessages,
     reasoningItemsDropped: droppedReasoningItems,
     toolArgumentsTrimmed: trimmedArguments,
+    mediaItemsReplaced: replacedMediaItems,
   };
 }
 
@@ -969,6 +982,39 @@ function pruneToolResultPayload(value: unknown, placeholder: string, counter: { 
     const pruned = pruneToolResultPayload(child, placeholder, counter);
     if (pruned !== child) changed = true;
     next[key] = pruned;
+  }
+  return changed ? next : value;
+}
+
+// 与 prune-only 路径共用 mediaPlaceholder()：识别到的媒体块（图片/文档/文件）
+// 整体换成一行占位文本，base64 随之从历史里消失。只替换能识别的块类型——未知
+// 结构里的 url/data 字段是 schema-bearing 值，改了会让 provider 报 400。
+// 未改动时返回原引用，避免无谓的深拷贝。
+function replaceMediaWithPlaceholder(value: unknown, counter: { replaced: number }): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const replaced = replaceMediaWithPlaceholder(item, counter);
+      if (replaced !== item) changed = true;
+      return replaced;
+    });
+    return changed ? next : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  const mediaReplacement = mediaPlaceholder(record);
+  if (mediaReplacement) {
+    counter.replaced++;
+    return mediaReplacement;
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    const replaced = replaceMediaWithPlaceholder(child, counter);
+    if (replaced !== child) changed = true;
+    next[key] = replaced;
   }
   return changed ? next : value;
 }

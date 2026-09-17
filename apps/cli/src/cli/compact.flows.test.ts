@@ -430,6 +430,77 @@ suite('mica compact --tool-results-only flows', () => {
     expect(messagesSecond[3]!.content).toBe('这是模型回复，必须保留');
   });
 
+  itE2E('--tool-results-only clears pasted image base64 while keeping the conversation', async () => {
+    const home = makeHome('tool-results-only-media');
+    const sessionId = 'test-tool-results-only-media';
+    const now = new Date().toISOString();
+    const imageBase64 = 'QUJD'.repeat(2_000);
+    writeSession(home, sessionId, {
+      version: 1,
+      id: sessionId,
+      title: 'Tool Results Only Media Test',
+      createdAt: now,
+      updatedAt: now,
+      cwd: SESSION_CWD,
+      turnState: 'completed',
+      revision: 1,
+      snapshot: {
+        providerId: 'mock',
+        model: 'mock-chat',
+        effort: 'low',
+        role: 'default',
+        protocol: 'openai_responses',
+        messages: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              { type: 'input_text', text: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
+              { type: 'input_image', detail: 'auto', image_url: `data:image/png;base64,${imageBase64}` },
+            ],
+          },
+          { type: 'message', role: 'assistant', content: '这是模型回复，必须保留' },
+        ],
+        conversationMessages: [
+          { role: 'user', content: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
+          { role: 'assistant', content: '这是模型回复，必须保留' },
+        ],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    });
+
+    const first = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
+      MICA_HOME: home,
+    });
+
+    expect(first.code).toBe(0);
+    const parsedFirst = JSON.parse(first.stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(parsedFirst.ok).toBe(true);
+    expect(parsedFirst.mediaItemsReplaced).toBe(1);
+    expect(parsedFirst.afterCount).toBe(parsedFirst.beforeCount);
+
+    const raw = readFileSync(join(home, 'sessions', `${sessionId}.json`), 'utf8');
+    // 粘贴图常驻的 base64 必须真的从落盘历史里消失，否则每个请求都要重发这几十万字符。
+    expect(raw).not.toContain(imageBase64);
+    const after = readSession(home, sessionId);
+    const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
+    expect(messages.length).toBe(2);
+    expect(JSON.stringify(messages[0])).toContain('[Image](~/.mica/images/shot.png)');
+    expect(JSON.stringify(messages[0])).toContain('[image omitted during compact]');
+    expect(messages[1]!.content).toBe('这是模型回复，必须保留');
+
+    // 图已清掉，再跑一次没有可清理内容，且不能把对话文本也削掉。
+    const second = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
+      MICA_HOME: home,
+    });
+
+    expect(second.code).toBe(0);
+    const parsedSecond = JSON.parse(second.stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(parsedSecond.ok).toBe(false);
+    expect(parsedSecond.code).toBe('not_needed');
+  });
+
   itE2E('--tool-results-only drops reasoning items whose encrypted chain it just stripped', async () => {
     const home = makeHome('tool-results-only-reasoning');
     const sessionId = 'test-tool-results-only-reasoning';

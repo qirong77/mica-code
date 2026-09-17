@@ -703,6 +703,33 @@ async function loadCodexImage(
 const MICA_APPROVAL_POLICY = 'never';
 const MICA_SANDBOX_POLICY = { type: 'dangerFullAccess' };
 
+/**
+ * Mica extension: `turn/start` and `mica/turn/editMessage` may carry `role`.
+ * The resident chat host is spawned once, so `--role` never changes for its
+ * lifetime; without applying the param here a role switched in the app would
+ * stay in the renderer only — the session snapshot keeps the role it was opened
+ * with, and the composer silently reverts on the next launch. Applying it
+ * before the turn starts is also what makes the turn's running checkpoint (and
+ * every later save) persist the new role.
+ */
+function applyRoleOverride(ctx: HostContext, params: Record<string, unknown>): void {
+  const role = paramString(params, 'role');
+  if (!role || role === ctx.agent.role) return;
+  try {
+    ctx.agent.setRole(role);
+  } catch (error) {
+    // A deleted role file must not block the message: keep the current role and
+    // degrade to a non-fatal warning (same policy as resume's role fallback).
+    ctx.writeNotification(CODEX_NOTIFICATIONS.warning, {
+      threadId: ctx.sessionId,
+      turnId: '',
+      warning: {
+        message: `Role "${role}" could not be applied: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    });
+  }
+}
+
 function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
   const approval = params.approvalPolicy;
   const sandbox = params.sandboxPolicy ?? params.sandbox;
@@ -853,6 +880,7 @@ async function handleCodexRequest(
         return;
       }
       warnIfCodexPolicyCannotBeEnforced(ctx, params);
+      applyRoleOverride(ctx, params);
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
       if (model || effort) {
@@ -1024,6 +1052,9 @@ async function handleCodexRequest(
       // messages 派生（ChatCompletionsClient/ResponsesClient.toConversationMessages），
       // loadSnapshot 会一并重建，所以这里不能单独截 UI 层，否则两边错位。
       ctx.agent.loadSnapshot({ ...previous, ...truncated.snapshot });
+      // 必须在 loadSnapshot 之后：loadSnapshot 会按快照里的 role 重置 currentRole，
+      // 先应用角色会被上面这份「截断前快照」覆盖回旧角色。
+      applyRoleOverride(ctx, params);
       await ctx.mcpReady;
       // 落盘要在通知之前：turn 启动后的首次保存跑在 executor.start 之后的异步
       // 路径上（runTurn 里先 await parseImageRefs），此刻客户端若直接读文件会拿到

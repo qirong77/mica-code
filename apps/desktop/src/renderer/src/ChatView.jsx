@@ -3395,7 +3395,7 @@ export function ChatView({
             const savedPercent = Math.round((Number(result.savedRatio) || 0) * 100)
             const rawStrategy = String(result.strategy || '')
             const strategy = rawStrategy.replaceAll('_', ' ')
-            // 与交互式 /compact 同源：只替换工具结果，消息条数不变。
+            // 与交互式 /compact 同源：只替换工具结果与媒体，消息条数不变。
             const toolResultsOnly = rawStrategy === 'tool_results_only'
             const mode = `${result.mode || (compactMode === 'local' ? 'pruned' : 'summarized')}${strategy ? ` (${strategy})` : ''}`
             const contextAfter =
@@ -3411,6 +3411,9 @@ export function ChatView({
               ...(toolResultsOnly
                 ? [
                     `- Tool results replaced: ${Number(result.toolResultsReplaced) || 0}`,
+                    ...(Number(result.mediaItemsReplaced) > 0
+                      ? [`- Media items replaced: ${Number(result.mediaItemsReplaced)}`]
+                      : []),
                     ...(Number(result.toolArgumentsTrimmed) > 0
                       ? [`- Tool arguments trimmed: ${Number(result.toolArgumentsTrimmed)}`]
                       : []),
@@ -3448,7 +3451,7 @@ export function ChatView({
             }
           } else if (result?.code === 'not_needed') {
             const localHint = String(result?.error || '').includes('可清理')
-              ? '\n提示：上下文大主要是由大量小消息构成，本地压缩无法缩减；如需摘要压缩请使用「模型压缩」。'
+              ? '\n提示：工具结果、图片与工具参数都已清理过，剩下的主要是对话文本与轮次，本地压缩无法缩减；如需摘要压缩请使用「模型压缩」。'
               : ''
             updateNotice(
               compactNoticeId,
@@ -3724,7 +3727,8 @@ export function ChatView({
         text,
         occurrenceFromEnd: promptOccurrenceFromEnd(messagesRef.current, current.id),
         model: overrides.model || null,
-        variant: overrides.variant || null
+        variant: overrides.variant || null,
+        role: overrides.role || null
       })
       .then((result) => {
         if (nodeIdRef.current !== targetNodeId) return

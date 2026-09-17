@@ -9,6 +9,7 @@ import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
   buildAppServerArgs,
+  buildTurnStartParams,
   CHAT_MCP_INIT_TIMEOUT_MS,
   codexNotificationToEvent,
   createChatEventPacer,
@@ -570,15 +571,15 @@ function sendTurnStart(run, payload) {
   // session file already contains, which renders the same message twice.
   run.prompt = String(payload.prompt || '').trim()
   run.events = []
-  const params = { threadId: run.sessionId || run.requestedSessionId || '' }
-  params.input = [{ type: 'text', text: String(payload.prompt || '') }]
-  if (payload.cwd) params.cwd = payload.cwd
-  if (payload.model) params.model = payload.model
-  if (payload.variant) params.effort = payload.variant
-  // Mica extension: correlate a rejected turn/start with the optimistic
-  // message the renderer already rendered so it can be rolled back. Codex
-  // clients never send this field; the host ignores unknown params.
-  if (payload.clientMessageId) params.clientMessageId = payload.clientMessageId
+  const params = buildTurnStartParams({
+    threadId: run.sessionId || run.requestedSessionId || '',
+    prompt: payload.prompt,
+    cwd: payload.cwd,
+    model: payload.model,
+    variant: payload.variant,
+    role: payload.role,
+    clientMessageId: payload.clientMessageId
+  })
   return sendCodexRequest(run, 'turn/start', params)
 }
 
@@ -649,6 +650,9 @@ function editRunMessage(sender, id, payload = {}) {
   }
   if (payload.model) params.model = payload.model
   if (payload.variant) params.effort = payload.variant
+  // Same role extension as turn/start: editing a message re-runs a turn, so a
+  // role picked in the composer must apply (and persist) here too.
+  if (payload.role) params.role = payload.role
   // Like sendTurnStart: the replay buffer and `prompt` describe the turn being
   // started, otherwise a renderer reload trims the transcript at the previous
   // turn's boundary and replays the wrong run.
@@ -1305,9 +1309,9 @@ function runCompactSession(sessionId, mode = 'model') {
           sessionId,
           '--dir',
           compactCwd,
-          // 「快速压缩（本地）」与交互式 /compact 同源：无损，只把工具结果换成
-          // 占位符，不改对话文本、不丢轮次。--prune-only 是 lossy 的（无内容
-          // 可清理时会丢弃最早轮次），不要在这里使用。
+          // 「快速压缩（本地）」与交互式 /compact 同源：只把工具结果与媒体块
+          // 换成占位符，不改对话文本、不丢轮次。--prune-only 是 lossy 的（无
+          // 内容可清理时会丢弃最早轮次），不要在这里使用。
           ...(mode === 'local' ? ['--tool-results-only'] : [])
         ],
         {
@@ -1373,6 +1377,7 @@ function runCompactSession(sessionId, mode = 'model') {
             contextWindowSize: result.contextWindowSize,
             contextUsageRatio: result.contextUsageRatio,
             toolResultsReplaced: result.toolResultsReplaced,
+            mediaItemsReplaced: result.mediaItemsReplaced,
             toolArgumentsTrimmed: result.toolArgumentsTrimmed,
             reasoningItemsDropped: result.reasoningItemsDropped
           })

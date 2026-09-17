@@ -13,8 +13,8 @@ export type CompactCliOptions = {
   force?: boolean;
   pruneOnly?: boolean;
   /**
-   * 与交互式 `/compact` 同源：只把工具结果替换为占位符，不改动对话文本、
-   * 不丢轮次、不调用模型（可重复执行）。
+   * 与交互式 `/compact` 同源：只把工具结果与媒体块替换为占位符，不改动对话
+   * 文本、不丢轮次、不调用模型（可重复执行）。
    */
   toolResultsOnly?: boolean;
   signal?: AbortSignal;
@@ -44,6 +44,8 @@ export type CompactCliResult = {
   reasoningItemsDropped?: number;
   /** tool-results-only 模式：被裁剪掉正文的工具调用数。 */
   toolArgumentsTrimmed?: number;
+  /** tool-results-only 模式：被替换为占位符的媒体块数（图片/文档）。 */
+  mediaItemsReplaced?: number;
 };
 
 const SUMMARIZE_INSTRUCTIONS = [
@@ -149,6 +151,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         toolResultsReplaced: result.toolResultsReplaced,
         reasoningItemsDropped: result.reasoningItemsDropped,
         toolArgumentsTrimmed: result.toolArgumentsTrimmed,
+        mediaItemsReplaced: result.mediaItemsReplaced,
       };
     }
 
@@ -215,6 +218,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       toolResultsReplaced: result.toolResultsReplaced,
       reasoningItemsDropped: result.reasoningItemsDropped,
       toolArgumentsTrimmed: result.toolArgumentsTrimmed,
+      mediaItemsReplaced: result.mediaItemsReplaced,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

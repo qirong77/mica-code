@@ -37,7 +37,14 @@ function createMockProvider() {
     mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell',
     errorMessage: '',
     delayBeforeTextMs: 0,
-    requests: [] as Array<{ model: string; input: unknown[]; reasoning?: { effort?: string } }>,
+    requests: [] as Array<{
+      model: string;
+      input: unknown[];
+      reasoning?: { effort?: string };
+      /** System prompt the request carried (role prompt included); role-switch
+       * tests assert the switched role actually reached the provider. */
+      instructions?: string;
+    }>,
     responsesFinished: 0,
     /** `tool` mode: requests #1/#2 return write_file function calls (two tool
      * iterations), later requests return plain text. Two iterations are needed
@@ -61,14 +68,19 @@ function createMockProvider() {
       let body = '';
       req.on('data', (chunk) => (body += chunk.toString()));
       req.on('end', () => {
-        let parsed: { model?: string; input?: unknown[]; reasoning?: { effort?: string } } = {};
+        let parsed: {
+          model?: string;
+          input?: unknown[];
+          reasoning?: { effort?: string };
+          instructions?: string;
+        } = {};
         try {
           parsed = JSON.parse(body);
         } catch {
           // keep defaults
         }
-        const { model = '', input = [], reasoning } = parsed;
-        state.requests.push({ model, input, reasoning });
+        const { model = '', input = [], reasoning, instructions } = parsed;
+        state.requests.push({ model, input, reasoning, instructions });
         if (state.mode === 'error') {
           res.writeHead(400, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: { message: state.errorMessage || 'mock provider error' } }));
@@ -1635,6 +1647,75 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await waitFor(host, turnCompleted(turnId), 'role turn completed', 30_000);
     expect(mock!.state.requests.length).toBeGreaterThan(0);
     expect(JSON.stringify(mock!.state.requests[0]?.input ?? [])).toContain('请检查这个改动');
+  });
+
+  itE2E('turn/start switches the role on the resident host and persists it for the session', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const home = makeHome('role-switch-turn');
+    mkdirSync(join(home, 'role'), { recursive: true });
+    writeFileSync(join(home, 'role', 'reviewer.md'), 'Always review the change before answering.');
+    writeFileSync(join(home, 'role', 'writer.md'), 'Answer as a short poem about the request.');
+    // 常驻 host 只 spawn 一次，所以 --role 在进程生命周期内不会再变；桌面端在会话
+    // 中途换的角色只能靠 turn/start 的 role 参数（Mica 扩展）落到 agent 上。
+    const host = spawnHost('role-switch-turn', [], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'thread/start', { threadId: '' });
+    const started = await waitFor(host, (m) => m.id === 1 && m.result !== undefined, 'thread/start response');
+    const sessionId = (started.result as { thread?: { id?: string } }).thread?.id ?? '';
+    expect((started.result as { role?: string }).role).toBe('default');
+
+    await send(host, 2, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '换个角色' }],
+      role: 'reviewer',
+    });
+    const started1 = await waitFor(host, (m) => m.method === 'turn/started', 'role-switch turn 1 started', 30_000);
+    await waitFor(
+      host,
+      turnCompleted((started1.params?.turn as { id?: string }).id!),
+      'role-switch turn 1 completed',
+      30_000,
+    );
+    // 角色提示词真的进了这次请求，而不只是渲染层显示成 reviewer。
+    expect(mock!.state.requests[0]?.instructions ?? '').toContain('Always review the change');
+    // 落盘：下次打开这个 session，role 就是 reviewer（桌面端据此显示在会话框里）。
+    const sessionPath = join(home, 'sessions', `${sessionId}.json`);
+    const afterFirst = JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
+      snapshot?: { role?: string };
+    };
+    expect(afterFirst.snapshot?.role).toBe('reviewer');
+
+    // 同一个常驻 host 上再换一次同样生效（不是只在首轮碰巧走通）。
+    await send(host, 3, 'turn/start', {
+      threadId: sessionId,
+      input: [{ type: 'text', text: '再换一个角色' }],
+      role: 'writer',
+    });
+    const started2 = await waitFor(
+      host,
+      (m) =>
+        m.method === 'turn/started' &&
+        (m.params?.turn as { id?: string })?.id !== (started1.params?.turn as { id?: string })?.id,
+      'role-switch turn 2 started',
+      30_000,
+    );
+    await waitFor(
+      host,
+      turnCompleted((started2.params?.turn as { id?: string }).id!),
+      'role-switch turn 2 completed',
+      30_000,
+    );
+    expect(mock!.state.requests[1]?.instructions ?? '').toContain('Answer as a short poem');
+    const afterSecond = JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
+      snapshot?: { role?: string };
+    };
+    expect(afterSecond.snapshot?.role).toBe('writer');
   });
 
   itE2E('--max-turns stops tool iteration after the configured limit', async () => {

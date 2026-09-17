@@ -134,6 +134,32 @@ export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTu
   return args
 }
 
+// `turn/start` params. Two Mica extensions ride along: `role` (the resident
+// host applies it before the turn — see runAppServer's applyRoleOverride — so
+// switching role in the app takes effect and lands in the session snapshot
+// without respawning the host) and `clientMessageId` (correlates a rejected
+// turn/start with the optimistic message the renderer already rendered so it
+// can be rolled back). Codex clients never send either field; the host ignores
+// unknown params.
+export function buildTurnStartParams({
+  threadId,
+  prompt,
+  cwd,
+  model,
+  variant,
+  role,
+  clientMessageId
+}) {
+  const params = { threadId: threadId || '' }
+  params.input = [{ type: 'text', text: String(prompt || '') }]
+  if (cwd) params.cwd = cwd
+  if (model) params.model = model
+  if (variant) params.effort = variant
+  if (role) params.role = role
+  if (clientMessageId) params.clientMessageId = clientMessageId
+  return params
+}
+
 // Map a Codex v2 app-server notification (mica chat-host protocol) to the app's
 // internal event shape consumed by the renderer. Returns null for notifications
 // that need state accumulation (commandExecution outputDelta, token usage) or
