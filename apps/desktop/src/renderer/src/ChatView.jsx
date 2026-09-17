@@ -798,10 +798,12 @@ function SubagentTimelineStep({ step }) {
   )
 }
 
-function SubagentDetailModal({ nodeId, task: initialTask, onClose, onStop }) {
+// `runKey` 是持有这个 run 的节点 id（可能是另一个页签的 node id，见 runId 状态）：
+// 任务记录只活在 host 进程里，所以详情/停止必须打到那个 run 上。
+function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
   const load = useCallback(
-    () => window.mica.chat.subagentDetail(nodeId, initialTask.taskId),
-    [nodeId, initialTask.taskId]
+    () => window.mica.chat.subagentDetail(runKey, initialTask.taskId),
+    [runKey, initialTask.taskId]
   )
   const { detail, error, running, now } = useTaskPolling({
     task: initialTask,
@@ -895,10 +897,10 @@ function SubagentDetailModal({ nodeId, task: initialTask, onClose, onStop }) {
   )
 }
 
-function BackgroundTaskModal({ nodeId, task: initialTask, onClose, onKill }) {
+function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
   const load = useCallback(
-    () => window.mica.chat.backgroundTaskOutput(nodeId, initialTask.id, 32000),
-    [nodeId, initialTask.id]
+    () => window.mica.chat.backgroundTaskOutput(runKey, initialTask.id, 32000),
+    [runKey, initialTask.id]
   )
   const { detail, error, running, now } = useTaskPolling({
     task: initialTask,
@@ -1973,6 +1975,12 @@ export function ChatView({
   const restoreGenerationRef = useRef(0)
   const pendingEventsRef = useRef([])
   const pendingExitRef = useRef(null)
+  // 本节点持有的 run key（host 里 `runs` 的 key：一般就是 nodeId，附着到别的页签
+  // 打开的同一会话时是那个页签的 node id）。它决定事件流与中止/任务操作打给谁。
+  const runIdRef = useRef(null)
+  // 已经试着附着过的「别的节点的 run」，同一个 run 只触发一次重新附着，避免每条
+  // delta 都重跑一遍恢复流程。
+  const foreignRunRef = useRef(null)
   const loadedNodeRef = useRef(null)
   const transcriptCacheRef = useRef(new Map())
   const draftsRef = useRef(new Map())
@@ -1997,6 +2005,18 @@ export function ChatView({
   // 本窗口拿不到那一轮的事件流，只能显示状态并挡下发送，等它结束后自己收敛。
   const [remoteRunning, setRemoteRunning] = useState(false)
   const remoteRunningRef = useLatest(remoteRunning)
+  // 同一运行时里另一个页签/窗口跑着这个会话时，本窗口按 session **附着**到那个 run：
+  // 实时渲染它的思考/文本/工具/任务，但仍然不能发送（单写者）。`runId` 是那个 run 的 key，
+  // 用于中止与任务详情这类 run 级操作。
+  const [attached, setAttached] = useState(false)
+  const attachedRef = useLatest(attached)
+  const [runId, setRunId] = useState(null)
+  // 需要重新附着时递增（见 onEvent 里的发现逻辑）：复用恢复流程那条「中途接管一个
+  // 正在跑的 turn」路径，而不是在这里再写一份重放逻辑。
+  const [attachTick, setAttachTick] = useState(0)
+  // run 级操作（中止、撤回排队、任务详情/终止）打给谁：附着到别的页签的 run 时是
+  // 那个 node id，否则就是本节点。
+  const runKey = runId || nodeId
   const [queuedItems, setQueuedItems] = useState([])
   const [recallingQueueId, setRecallingQueueId] = useState(null)
   // 跨 turn 常驻的后台任务 / subagent 状态（来自 app-server 快照通知，
@@ -2173,7 +2193,7 @@ export function ChatView({
       }
       setKillingTaskId(task.id)
       try {
-        const res = await window.mica.chat.killBackgroundTask(nodeId, task.id)
+        const res = await window.mica.chat.killBackgroundTask(runKey, task.id)
         if (!res?.ok || res.result?.ok === false) {
           appendNotice(res?.error || res?.result?.message || '终止后台任务失败', 'error')
         } else if (res.result?.stillRunning) {
@@ -2185,14 +2205,14 @@ export function ChatView({
         setKillingTaskId(null)
       }
     },
-    [appendNotice, nodeId]
+    [appendNotice, runKey]
   )
 
   const stopSubagent = useCallback(
     async (taskId) => {
       if (!window.confirm('确定要停止这个 subagent 任务吗？')) return
       try {
-        const res = await window.mica.chat.killSubagent(nodeId, taskId)
+        const res = await window.mica.chat.killSubagent(runKey, taskId)
         if (!res?.ok || res.result?.ok === false) {
           appendNotice(res?.error || res?.result?.message || '停止 subagent 失败', 'error')
         }
@@ -2200,7 +2220,7 @@ export function ChatView({
         appendNotice(`停止 subagent 失败：${error?.message || error}`, 'error')
       }
     },
-    [appendNotice, nodeId]
+    [appendNotice, runKey]
   )
 
   // 把文本插到光标处（粘贴图片与移动端「上传照片」共用）。以 textarea 当前的值为准，
@@ -2559,6 +2579,9 @@ export function ChatView({
       finishedRef.current = true
       setRunning(false)
       setStopping(false)
+      // 别处那一轮结束（或被中止）：这块只读状态立刻解除，不必再等 3s 复查。
+      setRemoteRunning(false)
+      setAttached(false)
       // step_finish 已到达时保留其 phase（error 保持 error 以展示 turn log），
       // 否则（进程异常退出）回落到 idle。
       setPhase((current) => (finished ? current : 'idle'))
@@ -2572,18 +2595,36 @@ export function ChatView({
 
   useEffect(() => {
     if (!nodeId) return undefined
-    const offEvent = window.mica.chat.onEvent(({ id, sequence, event }) => {
-      if (id !== nodeIdRef.current) return
+    // 事件流是广播给所有页面的，帧里带的是持有 run 的那个节点的 id 与它所属的 session：
+    // 属于本节点或本节点已经附着的 run 才认领，别的直接丢。
+    const currentRunKey = () => runIdRef.current || nodeIdRef.current
+    const offEvent = window.mica.chat.onEvent(({ id, sessionId, sequence, event }) => {
+      if (id !== currentRunKey()) {
+        // 同一运行时里另一个页签/窗口正跑着这个会话：host 会把事件广播过来，但那个
+        // run 归对方的 node id。先重新附着一次（恢复流程会从 run 的事件缓冲里补齐已经
+        // 错过的部分），这一帧交给那次重放，不要在这里直接落地以免重复渲染。
+        const foreign = Boolean(sessionId) && sessionId === sessionIdRef.current
+        if (attachedRef.current || !foreign || id === foreignRunRef.current) return
+        foreignRunRef.current = id
+        restoringRef.current = true
+        pendingEventsRef.current.push({ sequence, event })
+        runIdRef.current = id
+        setRunId(id)
+        setAttached(true)
+        setRemoteRunning(true)
+        setAttachTick((tick) => tick + 1)
+        return
+      }
       if (restoringRef.current) pendingEventsRef.current.push({ sequence, event })
       else applyEventRef.current(event)
     })
     const offExit = window.mica.chat.onExit((payload) => {
-      if (payload.id !== nodeIdRef.current) return
+      if (payload.id !== currentRunKey()) return
       if (restoringRef.current) pendingExitRef.current = payload
       else processExitRef.current(payload)
     })
     const offQueueState = window.mica.chat.onQueueState((payload) => {
-      if (payload.id !== nodeIdRef.current) return
+      if (payload.id !== currentRunKey()) return
       const items = Array.isArray(payload.queuedItems) ? payload.queuedItems : []
       setQueuedItems(items)
       // 同步消息的排队标记：host 的 after_iteration 排队（mica/queue/queued
@@ -2624,7 +2665,7 @@ export function ChatView({
       offQueueState?.()
       offQueueError?.()
     }
-  }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
+  }, [appendNotice, applyEventRef, attachedRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
   // 切走之后输入框就看不见了，未发送的文本由侧栏那行代为提示。必须声明在下面那个
   // 切换 effect 之前：切换那一帧 input 还是上一个会话的，先让它按 nodeId 覆盖式上报，
@@ -2735,14 +2776,28 @@ export function ChatView({
         .catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       setRemoteRunning(Boolean(state?.remoteRunning))
+      // 这个会话的 run 归谁：本节点自己的 run 就是 nodeId；另一个页签/窗口跑着时
+      // host 会返回那个 run 的 key（`runId`）与它的事件缓冲，下面 `state.running`
+      // 分支就是「中途接管一个正在跑的 turn」的重放路径。
+      const runningRunId = state?.running ? state.runId || null : null
+      runIdRef.current = runningRunId || nodeId
+      setRunId(runningRunId)
+      setAttached(Boolean(state?.attached))
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
+      // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
+      // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
+      // 的那次快照（dock 一直空着）。
+      const replayEventsOf = (events, pending) => [
+        ...(Array.isArray(state?.snapshots) ? state.snapshots : []),
+        ...mergeReplayEvents(events, pending)
+      ]
       const stateSessionId = state?.sessionId || sessionIdRef.current
       if (state?.running && stateSessionId && hasPersistedTurn(restored, state.prompt)) {
         const latestMeta = await window.mica.chat.meta(stateSessionId).catch(() => null)
         if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
         if (isPersistedRunComplete(latestMeta, state.startedAt)) {
           updateMessages(historyBeforeRunReplay(restored, state.prompt))
-          for (const event of mergeReplayEvents(state.events, pendingEventsRef.current)) {
+          for (const event of replayEventsOf(state.events, pendingEventsRef.current)) {
             applyEventRef.current(event)
           }
           pendingEventsRef.current = []
@@ -2757,7 +2812,7 @@ export function ChatView({
         (record) => (record?.event || record)?.sessionID
       )?.event?.sessionID
       if (state?.finished && Array.isArray(state.events) && state.events.length > 0) {
-        const replay = mergeReplayEvents(state.events, pendingEventsRef.current)
+        const replay = replayEventsOf(state.events, pendingEventsRef.current)
         const replayFinished = replay.some((event) => event?.type === 'step_finish')
         updateMessages(historyBeforeRunReplay(restored, state.prompt))
         for (const event of replay) applyEventRef.current(event)
@@ -2783,14 +2838,14 @@ export function ChatView({
         (state?.sessionId || sessionIdRef.current || pendingSessionId)
       ) {
         const finalSessionId = state?.sessionId || sessionIdRef.current || pendingSessionId
-        for (const event of mergeReplayEvents(state?.events, pendingEventsRef.current)) {
+        for (const event of replayEventsOf(state?.events, pendingEventsRef.current)) {
           applyEventRef.current(event)
         }
         pendingEventsRef.current = []
         await restoreFinalSession(finalSessionId, rows)
         return
       }
-      const replayEvents = mergeReplayEvents(state?.events, pendingEventsRef.current)
+      const replayEvents = replayEventsOf(state?.events, pendingEventsRef.current)
       // 磁盘上的中间 checkpoint（每个工具迭代边界保存）与完成保存已经把本轮
       // 已生成的回答写进 conversationMessages，host 的事件缓冲又会重建同一段
       // 内容：重放前必须先裁掉本轮已持久化的 assistant 输出，否则切换节点
@@ -2840,6 +2895,8 @@ export function ChatView({
     void restore()
     return undefined
   }, [
+    // attachTick：发现「另一个页签正跑着这个会话」时重新附着一次，复用这条重放路径
+    attachTick,
     appendNotice,
     applyEventRef,
     finishPendingTools,
@@ -2863,16 +2920,28 @@ export function ChatView({
     return () => clearInterval(timer)
   }, [runStartedAt, running])
 
-  // 别处那一轮结束后本窗口自己收敛：复查 turn lease，释放了就解除只读并重拉会话历史
-  // （那一轮的 assistant 消息由对方的进程写进文件，本窗口没有对应的事件流）。
+  // 别处那一轮：这个 3s 复查有三个作用——① 观察者的心跳（host 据此知道还有人在看，
+  // 页签关掉后没有心跳就能回收那个常驻进程）；② 对方换了 run（原持有者的 host 重启过）
+  // 时重新附着一次；③ 那一轮结束后本窗口自己收敛——回复由对方的进程写进会话文件，
+  // 跨进程那一轮本窗口更是完全没有事件流。
   useEffect(() => {
     if (!remoteRunning) return undefined
     const timer = window.setInterval(async () => {
       const state = await window.mica.chat
         .isRunning(nodeIdRef.current, sessionIdRef.current || null)
         .catch(() => null)
-      if (!state || state.remoteRunning || state.running) return
+      if (!state) return
+      if (state.running) {
+        // 还跑着：附着着的继续只读；host 那边换了 run 就重新附着。
+        if (state.attached && state.runId && state.runId !== runIdRef.current) {
+          foreignRunRef.current = null
+          setAttachTick((tick) => tick + 1)
+        }
+        return
+      }
+      if (state.remoteRunning) return
       setRemoteRunning(false)
+      setAttached(false)
       const finalSessionId = state.sessionId || sessionIdRef.current
       if (!finalSessionId) return
       const rows = await window.mica.chat.history(finalSessionId).catch(() => null)
@@ -3606,7 +3675,9 @@ export function ChatView({
     setStopping(true)
     setPhase('stopping')
     window.mica.chat
-      .abort(nodeId)
+      // 中止打到持有这个 run 的节点上：附着在别的页签的 run 时是本节点不能直接停的，
+      // 但用户看到的就是同一轮，允许他在这里停。
+      .abort(runKey)
       .then((aborted) => {
         if (nodeIdRef.current !== targetNodeId) return
         if (!aborted) {
@@ -3618,7 +3689,7 @@ export function ChatView({
       .catch(() => {
         if (nodeIdRef.current === targetNodeId) setStopping(false)
       })
-  }, [nodeId, nodeIdRef, stopping])
+  }, [nodeId, nodeIdRef, runKey, stopping])
 
   const startMessageEdit = useCallback((message) => {
     if (!message?.id || message.queued) return
@@ -3704,7 +3775,9 @@ export function ChatView({
   )
 
   const showEmpty = historyLoaded && !running && messages.length === 0
-  const queueReady = running && input.trim().length > 0
+  // remoteRunning（尤其是附着在别的窗口那一轮上）时不能排队：单槽队列属于那个 run 的
+  // 所有者，这里只能看。输入框不再提示「可排队」，避免点下去只换来一条警告。
+  const queueReady = running && !remoteRunning && input.trim().length > 0
   const transcriptMessages = useMemo(
     () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
     [messages]
@@ -3728,7 +3801,7 @@ export function ChatView({
       recallingQueueRef.current = item.id
       setRecallingQueueId(item.id)
       try {
-        const result = await window.mica.chat.recallQueued(nodeId, item.id)
+        const result = await window.mica.chat.recallQueued(runKey, item.id)
         if (nodeIdRef.current !== targetNodeId) return
         setQueuedItems(Array.isArray(result?.queuedItems) ? result.queuedItems : [])
         if (!result?.ok) {
@@ -3762,7 +3835,7 @@ export function ChatView({
         if (nodeIdRef.current === targetNodeId) setRecallingQueueId(null)
       }
     },
-    [appendNotice, nodeId, nodeIdRef, queuedDisplayItems, updateMessages]
+    [appendNotice, nodeId, nodeIdRef, queuedDisplayItems, runKey, updateMessages]
   )
   const activityTurnId =
     turnRef.current ||
@@ -4011,12 +4084,7 @@ export function ChatView({
   const statusLine = (
     <div className="chat-status-line">
       <div className="chat-status-primary">
-        {remoteRunning ? (
-          <>
-            <IconLoader2 size={11} className="animate-spin" />
-            <span>正在另一处运行</span>
-          </>
-        ) : running ? (
+        {running ? (
           <>
             <IconLoader2 size={11} className="animate-spin" />
             <span>{statusLabel(phase, runningToolNames)}</span>
@@ -4026,6 +4094,19 @@ export function ChatView({
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
+            {attached && (
+              <span
+                className="chat-status-attached"
+                title="这个会话正在另一个窗口里运行，此处实时同步显示；发送要等它跑完"
+              >
+                另一处
+              </span>
+            )}
+          </>
+        ) : remoteRunning ? (
+          <>
+            <IconLoader2 size={11} className="animate-spin" />
+            <span>正在另一处运行</span>
           </>
         ) : lastRun ? (
           <span className={`chat-status-last-run chat-status-${lastRun.state}`}>
@@ -4402,7 +4483,7 @@ export function ChatView({
             <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
             {running ? (
               <>
-                {input.trim() && (
+                {queueReady && (
                   <button
                     type="button"
                     className="chat-composer-queue-send"
@@ -4458,7 +4539,7 @@ export function ChatView({
       )}
       {taskDetail?.kind === 'subagent' && (
         <SubagentDetailModal
-          nodeId={nodeId}
+          runKey={runKey}
           task={taskDetail.task}
           onClose={() => setTaskDetail(null)}
           onStop={stopSubagent}
@@ -4466,7 +4547,7 @@ export function ChatView({
       )}
       {taskDetail?.kind === 'background' && (
         <BackgroundTaskModal
-          nodeId={nodeId}
+          runKey={runKey}
           task={taskDetail.task}
           onClose={() => setTaskDetail(null)}
           onKill={killBackgroundTask}
