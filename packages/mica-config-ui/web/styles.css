@@ -64,15 +64,10 @@
   box-sizing: border-box;
 }
 
-/* 浏览器整页打开时的根高度链；桌面端由宿主容器提供高度，不依赖它 */
-html,
-body,
-#root {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-}
+/* 页面级的根高度链（html/body/#root）不在这里：桌面端把这份样式当视图加载，那条链会以
+   「无层级、同优先级、后加载」的身份把应用自己的 `#root` 高度顶掉（移动端的键盘避让就
+   靠它，见 apps/desktop/README.md）；谁整页托管这份页面，谁在自己那边写（浏览器宿主见
+   apps/config-web/web/src/host.css）。这里只保留 `.mica-config-ui` 容器内的规则。 */
 
 @scope (.mica-config-ui) {
 /* 宿主没有注册编辑器时的兜底文本域（见 web/editor.ts） */

@@ -28,6 +28,18 @@ export function useIsMobile() {
   return forced === null ? mobile : forced
 }
 
+/** 弹/收键盘时补量几次：事件之后 iOS 才把数字改对，个别版本干脆不发事件。 */
+const SETTLE_DELAYS = [80, 240, 500, 900]
+
+/** 布局视口（不跟键盘走的那套值）：只需要高度，用来判断键盘有没有被算进可见区。 */
+function readLayoutViewport() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return {}
+  return {
+    innerHeight: window.innerHeight,
+    clientHeight: document.documentElement?.clientHeight
+  }
+}
+
 /**
  * 把可见视口的高度与位移写到 `--vvh` / `--vvh-top` 上，供窄屏的根容器（app.css 的
  * 移动端块）使用。
@@ -39,7 +51,7 @@ export function useIsMobile() {
  * 光有高度还不够：iOS 为了让被聚焦的输入框露出来，还会把布局视口整体上移
  * （`visualViewport.offsetTop`）。应用此时已经缩到可见区那么高，不补偿就会整体偏出
  * 屏幕上方、底下空出一块 —— 输入框跑到状态栏底下、中间一片空白。`--vvh-top` 记下这个
- * 位移，根容器按它平移回来（见 viewport-metrics.js 的单位换算）。
+ * 位移，根容器按它平移回来（两个值怎么算、什么时候才该补偿见 viewport-metrics.js）。
  */
 export function useVisualViewportHeight() {
   useEffect(() => {
@@ -50,8 +62,8 @@ export function useVisualViewportHeight() {
     let appliedHeight = null
     let appliedTop = null
     const update = () => {
-      const metrics = viewportMetrics(viewport)
-      if (!metrics || metrics.height <= 0) return
+      const metrics = viewportMetrics(viewport, readLayoutViewport())
+      if (!metrics) return
       if (metrics.height !== appliedHeight) {
         appliedHeight = metrics.height
         root.style.setProperty('--vvh', `${metrics.height}px`)
@@ -63,22 +75,33 @@ export function useVisualViewportHeight() {
       }
     }
 
-    // 键盘动画、以及 Safari 在 resize 之后才把布局视口推上去的那一步都不一定会再发
-    // 事件，所以可见区每次变化后再延迟复查几次。值没变就不写，复查几乎无成本。
+    // 键盘动画、Safari 在 resize 之后才把布局视口推上去的那一步都不一定会再发事件，
+    // 所以可见区每次变化后再延迟复查几次。值没变就不写，复查几乎无成本。
     let settleTimers = []
-    const onViewportResize = () => {
+    const refresh = () => {
       update()
       settleTimers.forEach(clearTimeout)
-      settleTimers = [80, 240, 500].map((delay) => setTimeout(update, delay))
+      settleTimers = SETTLE_DELAYS.map((delay) => setTimeout(update, delay))
     }
 
     update()
-    viewport.addEventListener('resize', onViewportResize)
+    viewport.addEventListener('resize', refresh)
     viewport.addEventListener('scroll', update)
+    // 键盘也可能只动布局视口（见 viewport-metrics.js），那条路只有 window 的 resize
+    // 会响；个别版本连它都不发，就只有聚焦/失焦这一个时机能量到 —— 失焦那次同样要复查，
+    // 否则键盘收起后应用会一直停在矮了一截的状态。
+    window.addEventListener('resize', refresh)
+    window.addEventListener('orientationchange', refresh)
+    document.addEventListener('focusin', refresh)
+    document.addEventListener('focusout', refresh)
     return () => {
       settleTimers.forEach(clearTimeout)
-      viewport.removeEventListener('resize', onViewportResize)
+      viewport.removeEventListener('resize', refresh)
       viewport.removeEventListener('scroll', update)
+      window.removeEventListener('resize', refresh)
+      window.removeEventListener('orientationchange', refresh)
+      document.removeEventListener('focusin', refresh)
+      document.removeEventListener('focusout', refresh)
       root.style.removeProperty('--vvh')
       root.style.removeProperty('--vvh-top')
     }

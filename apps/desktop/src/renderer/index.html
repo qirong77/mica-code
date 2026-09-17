@@ -3,8 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <!-- viewport-fit=cover：页面铺满整屏，手机圆角/刘海/home indicator 由 app.css
-         的安全区规则（.safe-top/.safe-bottom）让开，不要改回默认值。 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+         的安全区规则（.safe-top/.safe-bottom）让开，不要改回默认值。
+         interactive-widget=resizes-content：Android Chrome 弹键盘时连布局视口一起缩，
+         底部输入条自然让上来（Safari 不认这个键，那边靠 hooks.js 的 --vvh）。 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:"

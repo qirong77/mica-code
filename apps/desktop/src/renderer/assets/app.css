@@ -2621,9 +2621,13 @@ body.is-resizing.is-resizing-terminal {
      hooks.js 的 useVisualViewportHeight 写入，软键盘弹起时可见区变小 —— dvh 只
      跟随地址栏、不跟随键盘，底部输入条和终端功能键条会留在键盘下面。未挂载
      visualViewport（老浏览器）时回落 100dvh，与原来等价。 */
+  /* #root 这条写成 `html body #root`：桌面端把配置页当视图渲染，那边曾经带进来一条
+     无层级、同优先级的 `html, body, #root { height: 100% }`，又因为加载更晚而把这一条
+     整个顶掉 —— `--vvh` 一直在写，应用却始终是整屏高，键盘弹起时输入条就留在键盘
+     下面。提高一级优先级，别让别的样式表再悄悄废掉键盘避让。 */
   html,
   body,
-  #root {
+  html body #root {
     height: var(--vvh, 100dvh);
   }
 
@@ -2631,7 +2635,10 @@ body.is-resizing.is-resizing-terminal {
      --vvh-top），否则应用不再铺满可见区：内容偏出屏幕上方、下面空出一块，看起来
      就是输入框跑到了状态栏底下。这里必须固定定位 —— html/body 的 overflow: hidden
      按它们自己的高度（同样只有可见区那么高）会把平移出去的部分裁掉，只有固定定位的
-     盒子不受祖先裁剪。固定定位同时让根容器不再随页面滚动位移。 */
+     盒子不受祖先裁剪。固定定位同时让根容器不再随页面滚动位移。
+     --vvh-top 只在可见区高度确实把键盘算进去时才由 hooks.js 写上（见
+     viewport-metrics.js）：没算进去时那次上移正是把输入条露出来的那一步，抵消掉只会
+     把它推回键盘底下。 */
   #root {
     position: fixed;
     top: 0;

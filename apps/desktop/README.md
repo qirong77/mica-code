@@ -239,17 +239,43 @@ Keyboard avoidance is shared by every bottom-anchored element: when the keyboard
 and Android Chrome shrink only the visual viewport, not the layout viewport, and `dvh` follows the
 URL bar rather than the keyboard. `useVisualViewportHeight` (`hooks.js`) writes the visible height
 into `--vvh`, and the narrow-screen root height is `var(--vvh, 100dvh)`, so the composer and the
-terminal key bar rise above the keyboard instead of being covered by it.
+terminal key bar rise above the keyboard instead of being covered by it (Android additionally gets
+`interactive-widget=resizes-content` in `index.html`, which resizes the layout viewport too —
+Safari ignores that key).
 
 Height alone is not enough on iOS: to reveal the focused input Safari also shifts the whole layout
 viewport, reported as `visualViewport.offsetTop`. By then the app has already shrunk to the visible
 height, so without compensation it hangs off the top of the screen and leaves a blank strip below —
 the composer ends up under the status bar. The same hook therefore writes that shift into
-`--vvh-top` (unit conversion and rounding live in the pure `viewport-metrics.js`; the shift only
-applies while unzoomed, since the same value during pinch-zoom comes from panning, not the
-keyboard) and the narrow-screen `#root` is `position: fixed` plus `translateY(var(--vvh-top,
+`--vvh-top` and the narrow-screen `#root` is `position: fixed` plus `translateY(var(--vvh-top,
 0px))`. The fixed positioning is load-bearing: `html`/`body` are `overflow: hidden` at that same
 visible height, so an in-flow root would be clipped the moment it is translated.
+
+Neither number is taken at face value, and both decisions live in the pure
+`viewport-metrics.js` (unit conversion, rounding, thresholds — the renderer only writes the CSS
+variables):
+
+- **Height**: iOS 26 can leave `visualViewport.height` untouched when the keyboard opens while the
+  layout viewport (`window.innerHeight` / `documentElement.clientHeight`) does shrink, so the
+  height is the smallest signal that is at least `KEYBOARD_MIN_INSET` (80px) shorter than the
+  layout viewport. Anything smaller is treated as viewport jitter rather than a keyboard, which
+  would otherwise shave a blank strip off the app.
+- **Shift**: `--vvh-top` is only written once the height actually accounts for the keyboard (the
+  app is already shorter than the layout viewport). Without that check the compensation is applied
+  to a full-height app as well, and it then cancels the very shift that brings the composer above
+  the keyboard — the composer stays hidden behind it.
+- The shift only applies while unzoomed, since the same value during pinch-zoom comes from
+  panning, not the keyboard. The hook re-measures on `visualViewport` resize/scroll plus
+  `window.resize`, `orientationchange` and `document` focusin/focusout, and re-reads the values a
+  few more times after each (`SETTLE_DELAYS`): the numbers settle after the event, and some OS
+  versions never fire one.
+- **That height must not be injected away.** The narrow-screen rule is `html body #root { height:
+  var(--vvh, 100dvh) }` rather than `html, body, #root`, because a later stylesheet from the
+  embedded config page used to ship a plain `html, body, #root { height: 100% }` of the same
+  specificity (the SettingsView chunk loads right after boot, since the view stays mounted in a
+  `Suspense` boundary), which silently won and left the app full height forever — the composer
+  stayed behind the keyboard while `--vvh` was computed perfectly. Page-level height chains belong
+  to whichever host owns the whole page, never to the shared config stylesheet.
 
 > There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
 > binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
