@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import '../assets/app.css'
 import { ensureMicaApi } from './transport'
+import { ensureUiState } from './ui-state'
 import { LOCAL_SERVER_URL, currentServerUrl, isLoopbackServer } from './servers'
 
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
@@ -14,7 +15,12 @@ ensureMicaApi()
   })
   .then((api) => {
     if (!api) return
-    createRoot(document.getElementById('root')).render(<App />)
+    // 界面状态（草稿/工作区/面板布局）来自运行时：先取回来再渲染，第一帧就是上一次
+    // 留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
+    // 比整页停在一个错误提示上可用。
+    return ensureUiState()
+      .catch((error) => console.error('初始化界面状态失败', error))
+      .then(() => createRoot(document.getElementById('root')).render(<App />))
   })
 
 function renderBootError(error) {

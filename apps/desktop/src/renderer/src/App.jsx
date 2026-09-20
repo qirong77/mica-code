@@ -49,7 +49,15 @@ import {
   resolveDefaultCwd,
   uid
 } from './workspace'
-import { nextDraftMarkers, runningTerminalSessions } from './session-state'
+import { draftMarkers, runningTerminalSessions } from './session-state'
+import {
+  claimUiStateEcho,
+  setUiState,
+  setUiStateEntries,
+  subscribeUiState,
+  uiStateKeys,
+  useUiStateValue
+} from './ui-state'
 
 /** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
 function nodeIdFor(ptyId) {
@@ -63,7 +71,8 @@ function ptyIdForNode(nodeId) {
 }
 
 function recentChatCwd() {
-  return localStorage.getItem('mica.chatDefaultCwd') || ''
+  const value = uiStateKeys().chatDefaultCwd
+  return typeof value === 'string' ? value : ''
 }
 
 function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
@@ -559,18 +568,71 @@ const PAGE_HEADER = {
   settings: { label: 'Settings', Icon: IconSettings }
 }
 
+/**
+ * 界面状态（面板布局、上次的工作目录）只有一份，放在运行时里：第二个窗口读到的是同一份，
+ * 重启后也还在。这些读函数只在首次渲染取一次初值，之后的同步见下面的 layout 镜像 effect。
+ */
+function storedLayout() {
+  const value = uiStateKeys().layout
+  return value && typeof value === 'object' ? value : {}
+}
+
 function savedSidebarWidth() {
-  const value = Number(localStorage.getItem('mica.sidebarWidth'))
+  const value = Number(storedLayout().sidebarWidth)
   return Number.isFinite(value) && value >= MIN_SIDEBAR_WIDTH && value <= MAX_SIDEBAR_WIDTH
     ? value
     : DEFAULT_SIDEBAR_WIDTH
 }
 
 function savedRightPanelWidth() {
-  const value = Number(localStorage.getItem('mica.rightPanelWidth'))
+  const value = Number(storedLayout().rightPanelWidth)
   return Number.isFinite(value) && value >= MIN_RIGHT_PANEL_WIDTH
     ? value
     : DEFAULT_RIGHT_PANEL_WIDTH
+}
+
+/**
+ * 从取回的工作区里解析出界面要用的三个值。存下来的 activeId/selectedId 可能已经不在
+ * nodes 里（另一个窗口关掉了那个页签），这两个位置全部回落到第一个页签。
+ * 没有页签时返回 null，由调用方决定「开一个干净草稿」还是「什么都不做」。
+ */
+function resolveWorkspace(stored) {
+  const nodes = stored ? normalizeNodes(stored.nodes) : []
+  if (nodes.length === 0) return null
+  const activeId = nodes.some((node) => node.id === stored.activeId) ? stored.activeId : nodes[0].id
+  const selectedId = nodes.some((node) => node.id === stored.selectedId)
+    ? stored.selectedId
+    : activeId
+  return { nodes, activeId, selectedId }
+}
+
+/** 首次运行（或工作区被清空）：开一个干净的草稿页签，沿用上次的工作目录。 */
+function coldStartWorkspace(stored) {
+  const target = createColdStartTerminal([], stored?.activeId)
+  return { nodes: [target], activeId: target.id, selectedId: target.id }
+}
+
+/** 工作区写回运行时时的投影：只留界面需要的字段（PTY 进程本身不落盘）。 */
+function workspaceSnapshot(nodes, activeId, selectedId) {
+  return {
+    version: 2,
+    activeId: activeId || null,
+    selectedId: selectedId || null,
+    nodes: (nodes || []).map((node) => ({
+      id: node.id,
+      parent: node.parent,
+      text: node.text,
+      type: node.type,
+      ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(node.type === 'terminal' && node.sessionId ? { sessionId: node.sessionId } : {}),
+      ...(node.type === 'terminal' && node.command ? { command: node.command } : {}),
+      ...(node.type === 'terminal' && node.lastActiveAt ? { lastActiveAt: node.lastActiveAt } : {}),
+      state: {
+        opened: node.type === 'folder' && !!node.state.opened,
+        selected: node.id === selectedId
+      }
+    }))
+  }
 }
 
 // 右侧面板没有固定的最大宽度：拖到哪算哪，只按「窗口宽度 - 可见侧栏」封顶。三个网格列
@@ -586,9 +648,12 @@ export default function App() {
   const filesRef = useRef(null)
   const branchButtonRef = useRef(null)
   const contentRef = useRef(null)
-  const [ready, setReady] = useState(false)
-  const [error, setError] = useState('')
-  const [nodes, setNodes] = useState([])
+  // 界面状态在渲染前已经从运行时取回（main.jsx 的 ensureUiState），所以第一帧就是上一次
+  // 退出时的样子：直接用取回的工作区播种，不再有「先画空界面再加载」的过程。
+  const [bootstrap] = useState(
+    () => resolveWorkspace(uiStateKeys().workspace) || coldStartWorkspace(uiStateKeys().workspace)
+  )
+  const [nodes, setNodes] = useState(bootstrap.nodes)
   const nodesRef = useLatest(nodes)
   // 右侧面板终端区域的独立 shell 终端 Tab，按会话（左侧对话节点 id）分组归属：
   // 切换会话时整组跟着切走，PTY 的 cwd 也跟随所属会话的路径。
@@ -598,7 +663,7 @@ export default function App() {
   // 右侧终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
   // 白白重渲染整个面板，所以放 ref 里。
   const rightTermActivityRef = useRef(new Map())
-  const [activeId, setActiveId] = useState(null)
+  const [activeId, setActiveId] = useState(bootstrap.activeId)
   const activeRef = useLatest(activeId)
   // 面板里可见的是活跃会话那一组；TerminalHost 拿到的是全量列表，别的会话的
   // PTY 只是被隐藏，切回来时不会重开 shell。
@@ -606,16 +671,27 @@ export default function App() {
   const allRightTerms = useMemo(() => Object.values(rightTermsByChat).flat(), [rightTermsByChat])
   const allRightTermsRef = useLatest(allRightTerms)
   const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
-  const [selectedId, setSelectedId] = useState(null)
+  const [selectedId, setSelectedId] = useState(bootstrap.selectedId)
+  const selectedIdRef = useLatest(selectedId)
   // 中间主区视图：chat | stats | settings（files/terminal 移入右侧 Panel）
-  const [view, setView] = useState('chat')
+  const [view, setView] = useState(() =>
+    storedLayout().view === 'stats' || storedLayout().view === 'settings'
+      ? storedLayout().view
+      : 'chat'
+  )
   // 右侧 Panel：是否展开、当前 Tab（files | terminal）
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
-  const [rightPanelTab, setRightPanelTab] = useState('files')
+  const [rightPanelOpen, setRightPanelOpen] = useState(
+    () => storedLayout().rightPanelOpen !== false
+  )
+  const [rightPanelTab, setRightPanelTab] = useState(() =>
+    storedLayout().rightPanelTab === 'terminal' ? 'terminal' : 'files'
+  )
   // 右侧 Panel 宽度（可拖拽）
   const [rightPanelWidth, setRightPanelWidth] = useState(savedRightPanelWidth)
   // 右侧 Panel 最大化（占满窗口）
-  const [rightPanelMaximized, setRightPanelMaximized] = useState(false)
+  const [rightPanelMaximized, setRightPanelMaximized] = useState(
+    () => storedLayout().rightPanelMaximized === true
+  )
   const [resizingRightPanel, setResizingRightPanel] = useState(false)
   const rightPanelWidthRef = useRef(rightPanelWidth)
   // 移动端：三栏退化为单栏，侧栏与右面板改为覆盖式抽屉
@@ -625,7 +701,7 @@ export default function App() {
   useVisualViewportHeight()
   const [mobileDrawer, setMobileDrawer] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => localStorage.getItem('mica.sidebarCollapsed') === 'true'
+    () => storedLayout().sidebarCollapsed === true
   )
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
@@ -723,14 +799,24 @@ export default function App() {
   const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
   const projectsRef = useLatest(projects)
   const sessionsRef = useLatest(sessions)
-  // 新建但还没绑定真实会话的草稿归属：草稿是进程内的临时节点，只存在渲染层
+  // 新建但还没绑定真实会话的草稿归属：草稿是界面状态里的临时节点，归属等它拿到
+  // sessionId 才落盘（见 moveSession），在那之前只记在渲染层。
   const [draftGroups, setDraftGroups] = useState({})
   const draftGroupsRef = useLatest(draftGroups)
-  // 输入框里有未发送文本的 chat 节点（ChatView 上报）。切走之后输入框就看不见了，
-  // 侧栏这一行必须替它显示「还有话没发」，否则用户完全感知不到自己留了半句话。
+  // 输入框里有未发送文本的 chat 节点。草稿本身在运行时的界面状态里（第二个窗口能看见
+  // 同一份），这里只是从草稿表推出来的侧栏标记：切走之后输入框就看不见了，侧栏这一行
+  // 必须替它显示「还有话没发」，否则用户完全感知不到自己留了半句话。
   const [draftNodes, setDraftNodes] = useState(() => new Set())
-  const handleDraftChange = useCallback((nodeId, text) => {
-    setDraftNodes((prev) => nextDraftMarkers(prev, nodeId, text))
+  const draftNodesRef = useRef(draftNodes)
+  useEffect(() => {
+    const sync = () => {
+      const next = draftMarkers(uiStateKeys().drafts, draftNodesRef.current)
+      if (next === draftNodesRef.current) return
+      draftNodesRef.current = next
+      setDraftNodes(next)
+    }
+    sync()
+    return subscribeUiState(sync)
   }, [])
 
   const applySessions = useCallback((list) => {
@@ -838,49 +924,74 @@ export default function App() {
       .catch((error) => console.error('set sort failed', error))
   }, [])
 
-  useEffect(() => {
-    window.mica.workspace
-      .get()
-      .then((workspace) => {
-        const loaded = normalizeNodes(workspace?.nodes)
-        const target = createColdStartTerminal(loaded, workspace?.activeId)
-        setNodes([target])
-        setActiveId(target.id)
-        setSelectedId(target.id)
-        setReady(true)
-      })
-      .catch((loadError) => {
-        console.error(loadError)
-        setError(String(loadError))
-        setReady(true)
-      })
-  }, [])
+  // 工作区（左侧页签与文件夹树）和面板布局都是运行时的界面状态：本地照旧直接改，
+  // 下面把它写回运行时（攒一下再发由 ui-state 负责）并广播给其它窗口；别的窗口改了同一份
+  // 时再应用回来。
+  const remoteWorkspace = useUiStateValue('workspace', null)
+  const remoteLayout = useUiStateValue('layout', null)
 
   useEffect(() => {
-    if (!ready) return undefined
     const timer = window.setTimeout(() => {
-      const workspaceNodes = nodes.map((node) => ({
-        id: node.id,
-        parent: node.parent,
-        text: node.text,
-        type: node.type,
-        ...(node.cwd ? { cwd: node.cwd } : {}),
-        ...(node.type === 'terminal' && node.sessionId ? { sessionId: node.sessionId } : {}),
-        ...(node.type === 'terminal' && node.command ? { command: node.command } : {}),
-        ...(node.type === 'terminal' && node.lastActiveAt
-          ? { lastActiveAt: node.lastActiveAt }
-          : {}),
-        state: {
-          opened: node.type === 'folder' && !!node.state.opened,
-          selected: node.id === selectedId
-        }
-      }))
-      window.mica.workspace
-        .save({ version: 1, activeId, nodes: workspaceNodes })
-        .catch((saveError) => console.error('save workspace failed', saveError))
+      setUiState(
+        'workspace',
+        workspaceSnapshot(nodesRef.current, activeRef.current, selectedIdRef.current)
+      )
     }, 200)
     return () => clearTimeout(timer)
-  }, [activeId, nodes, ready, selectedId])
+  }, [activeId, activeRef, nodes, nodesRef, selectedId, selectedIdRef])
+
+  useEffect(() => {
+    // 自己写出去的回声（可能已经落后于本页最新操作）不能应用，否则会把刚做的改动拽回去。
+    if (claimUiStateEcho('workspace', remoteWorkspace)) return
+    const next = resolveWorkspace(remoteWorkspace)
+    // 工作区被清空（没有任何页签）时保持现状：另一个窗口开了新页签马上会再推一次。
+    if (!next) return
+    setNodes(next.nodes)
+    setActiveId(next.activeId)
+    setSelectedId(next.selectedId)
+  }, [remoteWorkspace])
+
+  useEffect(() => {
+    setUiState('layout', {
+      sidebarWidth,
+      sidebarCollapsed,
+      rightPanelWidth,
+      rightPanelOpen,
+      rightPanelTab,
+      rightPanelMaximized,
+      view
+    })
+  }, [
+    rightPanelMaximized,
+    rightPanelOpen,
+    rightPanelTab,
+    rightPanelWidth,
+    sidebarCollapsed,
+    sidebarWidth,
+    view
+  ])
+
+  useEffect(() => {
+    if (!remoteLayout) return
+    if (claimUiStateEcho('layout', remoteLayout)) return
+    if (Number.isFinite(remoteLayout.sidebarWidth)) setSidebarWidth(remoteLayout.sidebarWidth)
+    if (typeof remoteLayout.sidebarCollapsed === 'boolean')
+      setSidebarCollapsed(remoteLayout.sidebarCollapsed)
+    if (Number.isFinite(remoteLayout.rightPanelWidth))
+      setRightPanelWidth(remoteLayout.rightPanelWidth)
+    if (typeof remoteLayout.rightPanelOpen === 'boolean')
+      setRightPanelOpen(remoteLayout.rightPanelOpen)
+    if (remoteLayout.rightPanelTab === 'files' || remoteLayout.rightPanelTab === 'terminal')
+      setRightPanelTab(remoteLayout.rightPanelTab)
+    if (typeof remoteLayout.rightPanelMaximized === 'boolean')
+      setRightPanelMaximized(remoteLayout.rightPanelMaximized)
+    if (
+      remoteLayout.view === 'chat' ||
+      remoteLayout.view === 'stats' ||
+      remoteLayout.view === 'settings'
+    )
+      setView(remoteLayout.view)
+  }, [remoteLayout])
 
   const terminalCwd = useCallback(
     (id) => {
@@ -1408,7 +1519,8 @@ export default function App() {
         delete updated[node.id]
         return updated
       })
-      setDraftNodes((prev) => nextDraftMarkers(prev, node.id, ''))
+      // 页签没了，它那份没发出去的草稿也一起丢掉（否则会一直挂在界面状态里）。
+      setUiStateEntries('drafts', { [node.id]: null })
       if (node.id === activeRef.current) {
         const terminal = next.find((item) => item.type === 'terminal')
         setActiveId(terminal?.id || null)
@@ -1570,7 +1682,7 @@ export default function App() {
       const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
       const id = activeRef.current
       if (!dir || !id) return
-      localStorage.setItem('mica.chatDefaultCwd', dir)
+      setUiState('chatDefaultCwd', dir)
       const node = nodesRef.current.find((item) => item.id === id)
       setNodes((items) =>
         items.map((node) =>
@@ -1604,10 +1716,7 @@ export default function App() {
     requestAnimationFrame(() => branchButtonRef.current?.focus())
   }, [])
   const setCollapsed = () => {
-    setSidebarCollapsed((value) => {
-      localStorage.setItem('mica.sidebarCollapsed', String(!value))
-      return !value
-    })
+    setSidebarCollapsed((value) => !value)
   }
   const startSidebarResize = useCallback((event) => {
     if (event.button !== 0) return
@@ -1629,7 +1738,6 @@ export default function App() {
       window.removeEventListener('pointercancel', finish)
       document.body.classList.remove('is-resizing-sidebar')
       setResizingSidebar(false)
-      localStorage.setItem('mica.sidebarWidth', String(sidebarWidthRef.current))
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -1649,8 +1757,8 @@ export default function App() {
     setResizingRightPanel(true)
     document.body.classList.add('is-resizing-right-panel')
 
-    // 拖动过程中连续 pointermove 之间 React 可能还没提交渲染，收尾时读 rightPanelWidthRef
-    // 会写回上一次的值，所以本次拖动的宽度就地记下来。
+    // 拖动过程中连续 pointermove 之间 React 可能还没提交渲染，读 rightPanelWidthRef 会拿到
+    // 上一次的值，所以本次拖动的宽度就地记下来。持久化由上面写回界面状态的 effect 负责。
     let draggedWidth = rightPanelWidthRef.current
     const onMove = (moveEvent) => {
       const width = rightPanelDragStartRef.current
@@ -1672,7 +1780,6 @@ export default function App() {
       window.removeEventListener('pointercancel', finish)
       document.body.classList.remove('is-resizing-right-panel')
       setResizingRightPanel(false)
-      localStorage.setItem('mica.rightPanelWidth', String(draggedWidth))
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -1734,13 +1841,6 @@ export default function App() {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [openRightTerminalTab, rightPanelTab])
-
-  if (!ready)
-    return (
-      <div className="grid size-full place-items-center bg-canvas text-xs text-white/35">
-        正在加载工作区…
-      </div>
-    )
 
   return (
     <>
@@ -2010,12 +2110,11 @@ export default function App() {
               onOpenTerminal={openChatTerminal}
               onOpenSettings={() => setView('settings')}
               onSessionRenamed={refreshSessions}
-              onDraftChange={handleDraftChange}
             />
           </div>
           {!activeId && view === 'chat' && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-10 grid place-items-center text-[13px] text-white/25">
-              {error || '选择或新建一个会话'}
+              选择或新建一个会话
             </div>
           )}
           <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">

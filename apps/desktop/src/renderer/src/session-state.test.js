@@ -1,32 +1,26 @@
 import { describe, expect, it } from 'bun:test'
 import {
   collectGroupStates,
+  draftMarkers,
   liveSessionRowState,
   mergeRowStates,
-  nextDraftMarkers,
   runningTerminalSessions
 } from './session-state'
 
-describe('nextDraftMarkers', () => {
-  it('adds and removes a node as its unsent text appears and goes away', () => {
-    const empty = new Set()
-    const withA = nextDraftMarkers(empty, 'a', 'hello')
-    expect([...withA]).toEqual(['a'])
-    expect([...nextDraftMarkers(withA, 'a', '')]).toEqual([])
+describe('draftMarkers', () => {
+  it('marks the nodes whose unsent text is non-empty', () => {
+    expect([...draftMarkers({ a: 'hello' })]).toEqual(['a'])
     // 空白文本不算未发送内容（输入几个空格就亮图标没有意义）
-    expect([...nextDraftMarkers(empty, 'a', '   \n')]).toEqual([])
+    expect([...draftMarkers({ a: '   \n' })]).toEqual([])
+    expect([...draftMarkers({ a: 'x', b: 'y' })]).toEqual(['a', 'b'])
+    expect([...draftMarkers(null)]).toEqual([])
   })
 
-  it('keeps the same reference when nothing changes, so the sidebar does not rerender', () => {
-    const markers = nextDraftMarkers(new Set(), 'a', 'x')
-    expect(nextDraftMarkers(markers, 'a', 'yy')).toBe(markers)
-    expect(nextDraftMarkers(markers, 'b', '')).toBe(markers)
-    expect(nextDraftMarkers(markers, null, 'x')).toBe(markers)
-  })
-
-  it('tracks one node without touching the others', () => {
-    const markers = nextDraftMarkers(nextDraftMarkers(new Set(), 'a', 'x'), 'b', 'y')
-    expect([...nextDraftMarkers(markers, 'a', '')]).toEqual(['b'])
+  it('keeps the same reference when the members are unchanged, so the sidebar does not rerender', () => {
+    const markers = draftMarkers({ a: 'x' })
+    expect(draftMarkers({ a: 'yy' }, markers)).toBe(markers)
+    expect(draftMarkers({ a: 'x', b: '' }, markers)).toBe(markers)
+    expect(draftMarkers({ a: 'x', b: 'y' }, markers)).not.toBe(markers)
   })
 })
 

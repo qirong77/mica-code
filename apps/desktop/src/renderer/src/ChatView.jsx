@@ -47,13 +47,19 @@ import {
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
 import { uid } from './workspace'
+import {
+  claimUiStateEcho,
+  setUiStateEntries,
+  uiStateKeys,
+  useUiStateValue,
+  useSharedState
+} from './ui-state'
 import TerminalComposer from './TerminalComposer'
 
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
 const MIN_TURN_LOG_HEIGHT = 60
 const MAX_TURN_LOG_HEIGHT_RATIO = 0.6
-const TURN_LOG_HEIGHT_KEY = 'mica.turnLogHeight'
 const SUPPORTS_FIELD_SIZING =
   typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
     ? CSS.supports('field-sizing', 'content')
@@ -798,7 +804,7 @@ function SubagentTimelineStep({ step }) {
   )
 }
 
-// `runKey` 是持有这个 run 的节点 id（可能是另一个页签的 node id，见 runId 状态）：
+// `runKey` 是持有这个 run 的节点 id（工作区只有一份，所以就是本节点的 id）：
 // 任务记录只活在 host 进程里，所以详情/停止必须打到那个 run 上。
 function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
   const load = useCallback(
@@ -1363,16 +1369,14 @@ function TurnLogItem({ message, now }) {
   )
 }
 
-function savedTurnLogHeight() {
-  const value = Number(localStorage.getItem(TURN_LOG_HEIGHT_KEY))
-  return Number.isFinite(value) && value >= MIN_TURN_LOG_HEIGHT
-    ? Math.min(value, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
-    : null
-}
-
 function TurnLogDock({ messages, now = Date.now() }) {
   const scrollRef = useRef(null)
-  const [height, setHeight] = useState(savedTurnLogHeight)
+  // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
+  const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
+  const height =
+    Number.isFinite(storedHeight) && storedHeight >= MIN_TURN_LOG_HEIGHT
+      ? Math.min(storedHeight, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
+      : null
   const stickToBottomRef = useRef(true)
 
   // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。
@@ -1381,33 +1385,35 @@ function TurnLogDock({ messages, now = Date.now() }) {
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
   }, [messages, height])
 
-  const startResize = useCallback((event, direction) => {
-    if (event.button !== 0) return
-    event.preventDefault()
-    document.body.classList.add('is-resizing-terminal')
-    const startY = event.clientY
-    const startHeight = scrollRef.current?.getBoundingClientRect().height || 0
-    const onMove = (moveEvent) => {
-      const delta = direction === 'top' ? startY - moveEvent.clientY : moveEvent.clientY - startY
-      const next = Math.round(
-        Math.min(
-          window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO,
-          Math.max(MIN_TURN_LOG_HEIGHT, startHeight + delta)
+  const startResize = useCallback(
+    (event, direction) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      document.body.classList.add('is-resizing-terminal')
+      const startY = event.clientY
+      const startHeight = scrollRef.current?.getBoundingClientRect().height || 0
+      const onMove = (moveEvent) => {
+        const delta = direction === 'top' ? startY - moveEvent.clientY : moveEvent.clientY - startY
+        const next = Math.round(
+          Math.min(
+            window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO,
+            Math.max(MIN_TURN_LOG_HEIGHT, startHeight + delta)
+          )
         )
-      )
-      setHeight(next)
-      localStorage.setItem(TURN_LOG_HEIGHT_KEY, String(next))
-    }
-    const finish = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', finish)
-      window.removeEventListener('pointercancel', finish)
-      document.body.classList.remove('is-resizing-terminal')
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', finish)
-    window.addEventListener('pointercancel', finish)
-  }, [])
+        setStoredHeight(next)
+      }
+      const finish = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', finish)
+        window.removeEventListener('pointercancel', finish)
+        document.body.classList.remove('is-resizing-terminal')
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', finish)
+      window.addEventListener('pointercancel', finish)
+    },
+    [setStoredHeight]
+  )
 
   if (!messages.length) return null
 
@@ -1950,8 +1956,7 @@ export function ChatView({
   onResumeSession,
   onOpenTerminal,
   onOpenSettings,
-  onSessionRenamed,
-  onDraftChange
+  onSessionRenamed
 }) {
   const nodeId = node?.id || null
   const nodeIdRef = useLatest(nodeId)
@@ -1963,7 +1968,6 @@ export function ChatView({
   const onOpenTerminalRef = useLatest(onOpenTerminal)
   const onOpenSettingsRef = useLatest(onOpenSettings)
   const onSessionRenamedRef = useLatest(onSessionRenamed)
-  const onDraftChangeRef = useLatest(onDraftChange)
   const sessionIdRef = useRef(node?.sessionId || null)
   const streamRef = useRef({ id: null, kind: null, turnId: null })
   const turnRef = useRef(null)
@@ -1975,17 +1979,19 @@ export function ChatView({
   const restoreGenerationRef = useRef(0)
   const pendingEventsRef = useRef([])
   const pendingExitRef = useRef(null)
-  // 本节点持有的 run key（host 里 `runs` 的 key：一般就是 nodeId，附着到别的页签
-  // 打开的同一会话时是那个页签的 node id）。它决定事件流与中止/任务操作打给谁。
-  const runIdRef = useRef(null)
-  // 已经试着附着过的「别的节点的 run」，同一个 run 只触发一次重新附着，避免每条
-  // delta 都重跑一遍恢复流程。
-  const foreignRunRef = useRef(null)
   const loadedNodeRef = useRef(null)
   const transcriptCacheRef = useRef(new Map())
-  const draftsRef = useRef(new Map())
-  // 已经上报给侧栏的「哪个节点的未发送文本」，用来去重（每次按键都 setState 会把
-  // 整个 App 拖着重渲染）。
+  // 未发送的草稿与运行时同源（ui-state 的 `drafts` 键）：切走、刷新、换个窗口打开都在，
+  // 别的窗口改了同一个会话的草稿这里也跟着变。ref 形态只是为了不改动读写它的那些调用点
+  // （switchChatDraft / navigateChatHistory 按 Map 的形状用它）。
+  const draftsRef = useRef(null)
+  if (!draftsRef.current) {
+    draftsRef.current = {
+      get: (id) => uiStateKeys().drafts?.[id] ?? '',
+      set: (id, text) => setUiStateEntries('drafts', { [id]: String(text ?? '') })
+    }
+  }
+  // 本页最后为某个节点设置过/应用过的草稿文本，用来区分「别的窗口改了」与「自己的回声」。
   const draftReportRef = useRef({ nodeId: null, text: '' })
   const todoHiddenRef = useRef(new Map())
   // 输入历史与 CLI 共享（~/.mica/storage.json 的 inputHistory），跨节点共用
@@ -2001,22 +2007,15 @@ export function ChatView({
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
   const [running, setRunning] = useState(false)
-  // 这个会话正被别处跑着（另一窗口/页签，或另一个进程持着它的 turn lease）：
-  // 本窗口拿不到那一轮的事件流，只能显示状态并挡下发送，等它结束后自己收敛。
+  // 这个会话正被**另一个进程**跑着（终端里的 TUI / mica exec / 另一个运行时实例持着它的
+  // turn lease）。同一运行时里的其它页面不算——工作区只有一份，它们跑的是同一个 run，
+  // 事件流本来就会广播到这里。这种情况本页拿不到事件流，只能显示状态并挡下发送。
   const [remoteRunning, setRemoteRunning] = useState(false)
   const remoteRunningRef = useLatest(remoteRunning)
-  // 同一运行时里另一个页签/窗口跑着这个会话时，本窗口按 session **附着**到那个 run：
-  // 实时渲染它的思考/文本/工具/任务，但仍然不能发送（单写者）。`runId` 是那个 run 的 key，
-  // 用于中止与任务详情这类 run 级操作。
-  const [attached, setAttached] = useState(false)
-  const attachedRef = useLatest(attached)
-  const [runId, setRunId] = useState(null)
-  // 需要重新附着时递增（见 onEvent 里的发现逻辑）：复用恢复流程那条「中途接管一个
-  // 正在跑的 turn」路径，而不是在这里再写一份重放逻辑。
-  const [attachTick, setAttachTick] = useState(0)
-  // run 级操作（中止、撤回排队、任务详情/终止）打给谁：附着到别的页签的 run 时是
-  // 那个 node id，否则就是本节点。
-  const runKey = runId || nodeId
+  // run 级操作（中止、撤回排队、任务详情/终止）打给谁。工作区只有一份，同一个会话在所有
+  // 页面里就是同一个 chat 节点、同一个 run，所以就是本节点的 id——不再需要「附着到别的
+  // 页签那个 run」的概念。
+  const runKey = nodeId
   const [queuedItems, setQueuedItems] = useState([])
   const [recallingQueueId, setRecallingQueueId] = useState(null)
   // 跨 turn 常驻的后台任务 / subagent 状态（来自 app-server 快照通知，
@@ -2579,9 +2578,8 @@ export function ChatView({
       finishedRef.current = true
       setRunning(false)
       setStopping(false)
-      // 别处那一轮结束（或被中止）：这块只读状态立刻解除，不必再等 3s 复查。
+      // 别处那一轮结束（或被中止）：只读状态立刻解除，不必再等 3s 复查。
       setRemoteRunning(false)
-      setAttached(false)
       // step_finish 已到达时保留其 phase（error 保持 error 以展示 turn log），
       // 否则（进程异常退出）回落到 idle。
       setPhase((current) => (finished ? current : 'idle'))
@@ -2595,26 +2593,11 @@ export function ChatView({
 
   useEffect(() => {
     if (!nodeId) return undefined
-    // 事件流是广播给所有页面的，帧里带的是持有 run 的那个节点的 id 与它所属的 session：
-    // 属于本节点或本节点已经附着的 run 才认领，别的直接丢。
-    const currentRunKey = () => runIdRef.current || nodeIdRef.current
-    const offEvent = window.mica.chat.onEvent(({ id, sessionId, sequence, event }) => {
-      if (id !== currentRunKey()) {
-        // 同一运行时里另一个页签/窗口正跑着这个会话：host 会把事件广播过来，但那个
-        // run 归对方的 node id。先重新附着一次（恢复流程会从 run 的事件缓冲里补齐已经
-        // 错过的部分），这一帧交给那次重放，不要在这里直接落地以免重复渲染。
-        const foreign = Boolean(sessionId) && sessionId === sessionIdRef.current
-        if (attachedRef.current || !foreign || id === foreignRunRef.current) return
-        foreignRunRef.current = id
-        restoringRef.current = true
-        pendingEventsRef.current.push({ sequence, event })
-        runIdRef.current = id
-        setRunId(id)
-        setAttached(true)
-        setRemoteRunning(true)
-        setAttachTick((tick) => tick + 1)
-        return
-      }
+    // 事件流是广播给所有页面的，帧里带的是持有 run 的那个节点的 id：工作区只有一份，
+    // 所以「本会话的 run」在所有页面里都是同一个 node id，认领它就是认领本节点。
+    const currentRunKey = () => nodeIdRef.current
+    const offEvent = window.mica.chat.onEvent(({ id, sequence, event }) => {
+      if (id !== currentRunKey()) return
       if (restoringRef.current) pendingEventsRef.current.push({ sequence, event })
       else applyEventRef.current(event)
     })
@@ -2665,19 +2648,37 @@ export function ChatView({
       offQueueState?.()
       offQueueError?.()
     }
-  }, [appendNotice, applyEventRef, attachedRef, nodeId, nodeIdRef, processExitRef, updateMessages])
+  }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
-  // 切走之后输入框就看不见了，未发送的文本由侧栏那行代为提示。必须声明在下面那个
-  // 切换 effect 之前：切换那一帧 input 还是上一个会话的，先让它按 nodeId 覆盖式上报，
-  // 紧接着切换 effect 会把旧节点的文本与落到本节点上的草稿各上报一次，收敛到正确值。
+  // 输入框内容变了就写进共享草稿表（本地立刻生效，别的窗口稍后收到广播）。发送、清空、
+  // 撤回排队消息这些路径都经由 setInput，所以在这里统一同步，不必逐个调用点去改。
+  //
+  // 必须在下面那个切换 effect 已经为**本节点**定过稿之后才写：effect 按声明顺序执行，
+  // 挂载（或切到新节点）那一帧 input 还是空的/上一个会话的，此时按 nodeId 写下去会把
+  // 这个节点已存的草稿抹成空串（第二个窗口一打开就把第一个窗口没发出去的文本清掉）。
   useEffect(() => {
-    if (!nodeId) return
+    if (!nodeId || draftReportRef.current.nodeId !== nodeId) return
     const text = input || ''
     const reported = draftReportRef.current
     if (reported.nodeId === nodeId && reported.text === text) return
     draftReportRef.current = { nodeId, text }
-    onDraftChangeRef.current?.(nodeId, text)
+    draftsRef.current.set(nodeId, text)
   }, [input, nodeId])
+
+  // 别的窗口改了本会话的草稿：跟它走（单一实例下两边是同一个界面）。自己的回声要丢掉——
+  // 广播回来的值可能落后于刚敲进去的内容，应用它会吞掉刚输入的字。
+  const sharedDrafts = useUiStateValue('drafts', null)
+  useEffect(() => {
+    if (!nodeId || !sharedDrafts) return
+    if (claimUiStateEcho('drafts', sharedDrafts)) return
+    const remote = sharedDrafts[nodeId]
+    if (remote === undefined || remote === null) return
+    if (remote === (inputRef.current || '')) return
+    // 正在翻输入历史时输入框里的内容不是草稿，别覆盖它。
+    if (historyCursorRef.current >= 0) return
+    draftReportRef.current = { nodeId, text: remote }
+    setInput(remote)
+  }, [nodeId, sharedDrafts])
 
   useEffect(() => {
     if (!nodeId) return undefined
@@ -2686,11 +2687,7 @@ export function ChatView({
       transcriptCacheRef.current.set(previousNodeId, messagesRef.current)
     }
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
-    if (previousNodeId && previousNodeId !== nodeId) {
-      onDraftChangeRef.current?.(previousNodeId, inputRef.current)
-    }
     draftReportRef.current = { nodeId, text: nextInput || '' }
-    onDraftChangeRef.current?.(nodeId, nextInput)
     loadedNodeRef.current = nodeId
     const cachedTranscript = transcriptCacheRef.current.get(nodeId)
     const generation = ++restoreGenerationRef.current
@@ -2776,13 +2773,6 @@ export function ChatView({
         .catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       setRemoteRunning(Boolean(state?.remoteRunning))
-      // 这个会话的 run 归谁：本节点自己的 run 就是 nodeId；另一个页签/窗口跑着时
-      // host 会返回那个 run 的 key（`runId`）与它的事件缓冲，下面 `state.running`
-      // 分支就是「中途接管一个正在跑的 turn」的重放路径。
-      const runningRunId = state?.running ? state.runId || null : null
-      runIdRef.current = runningRunId || nodeId
-      setRunId(runningRunId)
-      setAttached(Boolean(state?.attached))
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
       // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
       // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
@@ -2895,8 +2885,6 @@ export function ChatView({
     void restore()
     return undefined
   }, [
-    // attachTick：发现「另一个页签正跑着这个会话」时重新附着一次，复用这条重放路径
-    attachTick,
     appendNotice,
     applyEventRef,
     finishPendingTools,
@@ -2920,10 +2908,9 @@ export function ChatView({
     return () => clearInterval(timer)
   }, [runStartedAt, running])
 
-  // 别处那一轮：这个 3s 复查有三个作用——① 观察者的心跳（host 据此知道还有人在看，
-  // 页签关掉后没有心跳就能回收那个常驻进程）；② 对方换了 run（原持有者的 host 重启过）
-  // 时重新附着一次；③ 那一轮结束后本窗口自己收敛——回复由对方的进程写进会话文件，
-  // 跨进程那一轮本窗口更是完全没有事件流。
+  // 同一运行时的另一个页面跑着这个会话时，事件流本来就广播到所有页面，本页照常实时渲染；
+  // 只有「另一个进程（终端里的 TUI / mica exec / 另一个运行时实例）持着 turn lease」这一种
+  // 情况本页完全没有事件流，只能隔几秒问一次，等它跑完再把会话文件读回来。
   useEffect(() => {
     if (!remoteRunning) return undefined
     const timer = window.setInterval(async () => {
@@ -2931,17 +2918,9 @@ export function ChatView({
         .isRunning(nodeIdRef.current, sessionIdRef.current || null)
         .catch(() => null)
       if (!state) return
-      if (state.running) {
-        // 还跑着：附着着的继续只读；host 那边换了 run 就重新附着。
-        if (state.attached && state.runId && state.runId !== runIdRef.current) {
-          foreignRunRef.current = null
-          setAttachTick((tick) => tick + 1)
-        }
-        return
-      }
+      if (state.running) return
       if (state.remoteRunning) return
       setRemoteRunning(false)
-      setAttached(false)
       const finalSessionId = state.sessionId || sessionIdRef.current
       if (!finalSessionId) return
       const rows = await window.mica.chat.history(finalSessionId).catch(() => null)
@@ -3564,7 +3543,7 @@ export function ChatView({
       if (!text || !nodeId) return
       // 会话正被别处跑着：host 会拒绝这一条，先在本地挡下，避免乐观消息闪现再回滚。
       if (remoteRunningRef.current) {
-        appendNotice('该会话正在另一处运行，请等待完成后再发送', 'warn')
+        appendNotice('该会话正在另一个进程里运行（终端或另一个运行时），请等待完成后再发送', 'warn')
         return
       }
       const optimisticId = uid('msg')
@@ -4098,19 +4077,11 @@ export function ChatView({
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
-            {attached && (
-              <span
-                className="chat-status-attached"
-                title="这个会话正在另一个窗口里运行，此处实时同步显示；发送要等它跑完"
-              >
-                另一处
-              </span>
-            )}
           </>
         ) : remoteRunning ? (
           <>
             <IconLoader2 size={11} className="animate-spin" />
-            <span>正在另一处运行</span>
+            <span>正在另一个进程里运行</span>
           </>
         ) : lastRun ? (
           <span className={`chat-status-last-run chat-status-${lastRun.state}`}>
@@ -4515,7 +4486,7 @@ export function ChatView({
             ) : input.trim() ? (
               <button
                 type="button"
-                title={remoteRunning ? '该会话正在另一处运行' : '发送'}
+                title={remoteRunning ? '该会话正在另一个进程里运行' : '发送'}
                 aria-label="发送"
                 disabled={!input.trim() || remoteRunning}
                 onClick={send}

@@ -9,12 +9,12 @@ import { setBroadcast, invokeChannel, ipcMain } from './electron-shim.js'
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import { disposeAllChatRuns, registerChatIpc, setChatNotifyServer } from '../host/chat.js'
-import { registerWorkspaceIpc } from '../host/workspace.js'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerServersIpc } from '../host/servers.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
+import { flushUiState, registerUiStateIpc, setUiStateSender } from '../host/ui-state.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
@@ -339,12 +339,14 @@ export async function startDesktopServer(options = {}) {
   setNotifyServer(notifyServer)
   setChatNotifyServer(notifyServer)
   setBroadcast(broadcast)
+  // 页面 UI 状态（草稿/工作区/面板布局）由 host 持有并广播，第二个窗口看到的是同一份
+  setUiStateSender(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
   registerTerminalIpc()
   registerChatIpc()
-  registerWorkspaceIpc()
+  registerUiStateIpc()
   registerFilesIpc()
   registerGitIpc()
   registerStatsIpc()
@@ -419,6 +421,8 @@ export async function startDesktopServer(options = {}) {
     disposeAllTerminals()
     disposeAllChatRuns()
     stopNotifyBridge()
+    // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
+    flushUiState()
     await notifyServer.close()
     await new Promise((resolvePromise) => server.close(() => resolvePromise()))
   }

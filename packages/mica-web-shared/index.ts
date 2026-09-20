@@ -5,3 +5,10 @@
 export { relativeTimeShort } from './time.js';
 export { formatTokens } from './format.js';
 export { toolIcon, toolLabel } from './tools.js';
+export {
+  applyUiStatePatch,
+  isUiStateKey,
+  sanitizeUiStateKeys,
+  uiStateChangeSet,
+  uiStateValuesEqual,
+} from './ui-state.js';

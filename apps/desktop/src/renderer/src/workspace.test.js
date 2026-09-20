@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createColdStartTerminal, normalizeNodes } from './workspace'
+import { COLD_START_NODE_ID, createColdStartTerminal, normalizeNodes } from './workspace'
 
 describe('createColdStartTerminal', () => {
   it('does not restore stale session bindings or resume commands', () => {
@@ -33,6 +33,8 @@ describe('createColdStartTerminal', () => {
       lastActiveAt: 123,
       state: { opened: false, selected: true }
     })
+    // 固定 id：两个窗口在「运行时里还没有工作区」时同时冷启动会落到同一个节点上
+    expect(terminal.id).toBe(COLD_START_NODE_ID)
     expect(terminal.id).not.toBe('term-old')
   })
 

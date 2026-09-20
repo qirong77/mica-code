@@ -18,6 +18,7 @@
     "packages/mica-skills",
     "packages/mica-mcp",
     "packages/mica-pty",
+    "packages/mica-web-shared",
     "packages/@anthropic/ink/src"
   ],
   "exclude": [

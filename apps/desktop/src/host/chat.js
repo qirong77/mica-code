@@ -20,17 +20,6 @@ import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
-import {
-  findRunByOwnerId,
-  findRunForSession,
-  liveViewerIds,
-  ownerIdOf,
-  planRunRelease,
-  runSessionId,
-  shouldReapTransferredRun,
-  touchViewer,
-  VIEWER_SWEEP_MS
-} from './chat-viewers'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { createTurnLeaseProbe } from './session-lease'
@@ -43,10 +32,10 @@ import { createTurnLeaseProbe } from './session-lease'
  * The host owns the queue; chat:start forwards requests over its stdin and the
  * host acknowledges queue state via `queued`/`queue_state` events.
  *
- * A run belongs to a *session*, not to a single page: the run is keyed by the chat
- * node that spawned it, but every client shares one SSE broadcast, so a second
- * tab/window showing the same session attaches to that run as an observer and
- * renders the same stream (see chat-viewers.js). Only the owner may send.
+ * A run is keyed by the chat node that spawned it. The workspace lives in the host
+ * (see ui-state.js), so every page shows the *same* nodes and the same run: a second
+ * tab/window is just another view of it, not a separate observer that has to be
+ * attached by session. Every client shares one SSE broadcast.
  *
  * Session history is read directly from ~/.mica/sessions so the chat view can
  * restore past conversations. Turn lifecycle notifications reuse the local
@@ -76,7 +65,7 @@ function buildSpawnEnv(env = process.env) {
 }
 
 // nodeId -> resident chat host. The key is the chat node that spawned it and never
-// changes; `ownerId` is who is answerable for releasing it (see releaseRun).
+// changes. The run lives until its page is closed (chat:dispose) or the host exits.
 const runs = new Map()
 const commitRuns = new Map() // commitId -> { child, buffer, stderr }
 // after_turn inputs (plain Tab while busy) are queued here and replayed as
@@ -85,7 +74,11 @@ const commitRuns = new Map() // commitId -> { child, buffer, stderr }
 const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
 const completedRuns = new Map() // nodeId -> recently finished replay state
 let notifyServer = null
-let viewerSweepTimer = null
+
+/** 这个 run 属于哪个 session（还没绑定会话时是请求里带的那一个）。 */
+function runSessionId(run) {
+  return run?.sessionId || run?.requestedSessionId || null
+}
 
 function queuedItems(id) {
   return queuedRuns.values(id).map((item, index) => ({
@@ -177,9 +170,9 @@ function sessionsDir() {
 const hasLiveTurnLease = createTurnLeaseProbe({ lockDir: () => join(sessionsDir(), '.turn-locks') })
 
 /**
- * 会话级的「正在别处运行」判定：同一进程里另一个 chat 节点（另一个窗口/页签，node id 不同）
- * 正在跑，或另一个进程持着 turn lease。调用点只在本节点空闲、准备发起新 turn 时才问它，
- * 因此不与「本节点自己的 run」重叠。
+ * 会话级的「正在别处运行」判定。工作区在运行时只有一份，所以本进程里同一个会话不会同时挂
+ * 在两个节点上（`isChatSessionRunning` 只是防御性的一层）；真正会撞上的是另一个进程持着
+ * turn lease。调用点只在本节点空闲、准备发起新 turn 时才问它，因此不与「本节点自己的 run」重叠。
  */
 function sessionBusyElsewhere(sessionId) {
   if (!sessionId) return null
@@ -1111,50 +1104,6 @@ function disposeHost(id) {
   timer.unref?.()
 }
 
-/**
- * `chat:dispose`：一个页签关掉时释放它名下的 run。
- *
- * - 观察者（另一个页签打开同一会话）关页签只摘掉自己，绝不动别人的 run；
- * - 所有者走人时如果还有观察者，把所有权交给最近露面的那个——正在看的人应该能看完
- *   这一轮，而不是因为另一个页签被关掉就把在跑的 turn 一起杀掉；
- * - 没有观察者时照旧立刻释放。
- */
-function releaseRun(nodeId) {
-  const keyId = runs.has(nodeId) ? nodeId : (findRunByOwnerId(runs, nodeId)?.id ?? nodeId)
-  const run = runs.get(keyId)
-  if (!run) return false
-  const plan = planRunRelease({
-    keyId,
-    nodeId,
-    ownerId: ownerIdOf(keyId, run),
-    viewers: run.viewers
-  })
-  if (plan.action === 'detach') {
-    run.viewers?.delete(nodeId)
-    return false
-  }
-  if (plan.action === 'transfer') {
-    run.ownerId = plan.nextOwnerId
-    run.ownerTransferredAt = Date.now()
-    run.viewers?.delete(plan.nextOwnerId)
-    return false
-  }
-  disposeHost(keyId)
-  completedRuns.delete(keyId)
-  return true
-}
-
-/** 所有权转让过、观察者也全走了的 run 由这里兜底回收（否则常驻 app-server 会一直挂着）。 */
-function reapTransferredRuns() {
-  const now = Date.now()
-  for (const [keyId, run] of [...runs.entries()]) {
-    if (liveViewerIds(run, { now }).length > 0) continue
-    if (!shouldReapTransferredRun(run, { now })) continue
-    disposeHost(keyId)
-    completedRuns.delete(keyId)
-  }
-}
-
 function abortRun(id) {
   const run = runs.get(id)
   if (!run?.child || !run.running) return false
@@ -1395,11 +1344,6 @@ function runCompactSession(sessionId, mode = 'model') {
 }
 
 export function registerChatIpc() {
-  if (!viewerSweepTimer) {
-    viewerSweepTimer = setInterval(reapTransferredRuns, VIEWER_SWEEP_MS)
-    viewerSweepTimer.unref?.()
-  }
-
   ipcMain.handle('chat:start', (event, payload = {}) => {
     const id = payload.id
     if (!id) throw new Error('chat id is required')
@@ -1482,42 +1426,16 @@ export function registerChatIpc() {
 
   ipcMain.handle('chat:dispose', (_event, { id } = {}) => {
     if (!id) return false
-    return releaseRun(id)
+    if (!runs.has(id)) return false
+    disposeHost(id)
+    completedRuns.delete(id)
+    return true
   })
 
   ipcMain.handle('chat:is-running', (event, { id, sessionId } = {}) => {
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
     const leaseSessionId = (typeof sessionId === 'string' && sessionId) || runSessionId(run) || ''
-    // 这个会话正被同一进程里另一个节点（另一个页签/窗口）跑着。事件本来就广播给了所有
-    // 客户端，缺的只是一个「按 session 认领」的入口，以及从事件缓冲里补齐已经错过的
-    // 部分——渲染层拿到的状态与自身分支同形，会走它已有的「中途接管一个正在跑的 turn」
-    // 重放路径。
-    //
-    // 它优先于本节点自己的 run：两个页签都发过消息时 `runs` 里会有两个 run，只有正在
-    // 跑的那个才有内容可看（本节点那个空闲的 run 只是自己上一次的去留）。
-    const attachedRun = findRunForSession(runs, leaseSessionId, id)
-    if (attachedRun?.run.running) {
-      touchViewer(attachedRun.run, attachedRun.id, id)
-      const ownerId = ownerIdOf(attachedRun.id, attachedRun.run)
-      const isOwner = ownerId === id
-      const attachedItems = allQueuedItems(attachedRun.id, attachedRun.run)
-      return {
-        running: true,
-        // 观察者仍然不能发送（单写者）：只有所有者这一轮跑完才轮到它。
-        remoteRunning: !isOwner,
-        attached: !isOwner,
-        runId: attachedRun.id,
-        ownerId,
-        queuedCount: attachedItems.length,
-        queuedItems: attachedItems,
-        sessionId: runSessionId(attachedRun.run),
-        events: attachedRun.run.events.slice(),
-        snapshots: runSnapshots(attachedRun.run),
-        prompt: attachedRun.run.prompt,
-        startedAt: attachedRun.run.startedAt
-      }
-    }
     // Restoring a chat node must see the same queue as a live `chat:queue-state`
     // push: the host-side after_iteration slot (`run.hostPending`) lives outside
     // the local after_turn queue, and returning only `queuedItems(id)` here
@@ -1525,9 +1443,9 @@ export function registerChatIpc() {
     // as soon as the user switches away and back.
     const items = run ? allQueuedItems(id, run) : queuedItems(id)
     const queuedState = { queuedCount: items.length, queuedItems: items }
-    // 本节点没在跑，但这个会话正被别处跑着：同一进程里另一个 chat 节点（另一个窗口/
-    // 页签，node id 不同）在跑，或另一个进程持着 turn lease。客户端据此显示
-    // 「正在另一处运行」并让发送走拒绝路径，而不是以为会话空闲。
+    // 本节点没在跑，但同一份工作区里没有别的节点会跑这个会话（工作区在运行时只有一份，
+    // 所有页面共享同一批 node id），所以这里命中的只可能是**另一个进程**（终端里的 TUI /
+    // mica exec / 另一个运行时实例）持着 turn lease。客户端据此把发送挡在本地。
     const remoteRunning =
       !run?.running &&
       Boolean(leaseSessionId) &&
@@ -1557,8 +1475,6 @@ export function registerChatIpc() {
         running: false,
         finished: !run.exitSent,
         remoteRunning,
-        attached: false,
-        runId: id,
         ...queuedState,
         sessionId: run.sessionId,
         events: run.events.slice(),
@@ -1570,8 +1486,6 @@ export function registerChatIpc() {
     return {
       running: true,
       remoteRunning: false,
-      attached: false,
-      runId: id,
       ...queuedState,
       sessionId: run.sessionId,
       events: run.events.slice(),

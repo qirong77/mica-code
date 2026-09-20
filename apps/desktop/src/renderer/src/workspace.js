@@ -2,6 +2,13 @@ export function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+/**
+ * 空工作区里那个默认草稿页签的固定 id。工作区在运行时只有一份，两个窗口在运行时还没
+ * 有任何工作区时同时打开会各造一个页签——固定 id 让它们收敛到同一个节点，而不是各造一个
+ * 再互相把对方的页签换掉。
+ */
+export const COLD_START_NODE_ID = 'term-default'
+
 export function normalizeNodes(nodes = []) {
   const normalized = nodes.map((node) => {
     const type = node.type || (node.parent === '#' ? 'folder' : 'terminal')
@@ -27,11 +34,11 @@ export function normalizeNodes(nodes = []) {
 }
 
 /**
- * A terminal node is only an in-process tab. PTYs do not survive an app quit,
- * so restoring old terminal/session bindings makes historical sessions look
- * open and may resume one before the user clicks anything.
- *
- * Start each app process with one fresh draft while preserving the last cwd.
+ * Open a fresh draft tab for an empty workspace (first run, or after every tab
+ * was closed). The workspace itself is shared state owned by the runtime
+ * (see host/ui-state.js), so a normal start restores the tabs that were open
+ * instead of going through here — this only seeds the very first one, carrying
+ * the last working directory over.
  */
 export function createColdStartTerminal(nodes, activeId, now = Date.now()) {
   const previous =
@@ -40,7 +47,7 @@ export function createColdStartTerminal(nodes, activeId, now = Date.now()) {
   const cwd = previous?.cwd || resolveDefaultCwd(nodes, previous?.parent)
 
   return {
-    id: uid('term'),
+    id: COLD_START_NODE_ID,
     parent: '#',
     text: '新对话',
     type: 'terminal',

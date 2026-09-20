@@ -2028,17 +2028,6 @@ body.is-resizing.is-resizing-terminal {
   font-variant-numeric: tabular-nums;
 }
 
-/* 附着在别的窗口持有的 run 上时（实时同步显示，但本窗口不能发送）的角标 */
-.chat-status-attached {
-  padding: 0 5px;
-  border: 1px solid var(--color-line);
-  border-radius: 3px;
-  color: var(--color-fg-muted);
-  font-size: 10px;
-  line-height: 14px;
-  white-space: nowrap;
-}
-
 .chat-status-elapsed {
   font-variant-numeric: tabular-nums;
 }

@@ -18,6 +18,7 @@ const EVENT_CHANNELS = [
   'chat:queue-error',
   'chat:commit-exit',
   'notify:changed',
+  'ui-state:changed',
   'app:window-state'
 ]
 
@@ -223,10 +224,16 @@ function createWebApi(env) {
     },
 
     workspace: {
-      get: () => invoke('workspace:get'),
-      save: (workspace) => invoke('workspace:save', workspace),
       // 服务端没有原生选择器；网页端改用应用内目录选择器（App.jsx 的 CwdModal）
       selectDirectory: async () => ({ canceled: true })
+    },
+
+    // 界面状态的唯一事实来源在运行时（草稿 / 工作区 / 面板布局），页面返回的就是
+    // 所有窗口共享的那一份；`ui-state:changed` 会把变更推给每一个已连接页面。
+    uiState: {
+      get: () => invoke('ui-state:get'),
+      patch: (patch) => invoke('ui-state:patch', patch),
+      onChanged: (callback) => subscribe('ui-state:changed', callback)
     },
 
     notify: {
