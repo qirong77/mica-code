@@ -149,6 +149,13 @@
   visibility: hidden;
 }
 
+/* 侧栏/右面板宽度由 App 写在根节点上（拖动分隔条时直接改写，见 App.jsx 的拖拽处理）：
+   网格列宽、两侧栏宽度与侧栏切换按钮的定位都引用它们。默认值只在首帧兜底。 */
+:root {
+  --mica-sidebar-width: 260px;
+  --mica-right-panel-width: 400px;
+}
+
 .pane-resizer {
   position: relative;
   cursor: ew-resize;
@@ -169,6 +176,13 @@
 
 body.is-resizing {
   cursor: ew-resize;
+  user-select: none;
+}
+/* 拖动侧栏/右面板分隔条时锁住光标与文本选择：不加 user-select 的话，指针掠过对话区
+   会把整片文字拖成选区（又慢又像卡住）。 */
+body.is-resizing-sidebar,
+body.is-resizing-right-panel {
+  cursor: col-resize;
   user-select: none;
 }
 .terminal-panel-resizer {

@@ -1,4 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import {
   IconArrowUp,
   IconChartBar,
@@ -561,6 +570,14 @@ const MIN_RIGHT_PANEL_WIDTH = 280
 // —— 86px 是 macOS 上让开交通灯后的位置，右侧面板标题栏的 pl-30 按它预留
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
 const SIDEBAR_TOGGLE_GUTTER = 30
+// 侧栏/右面板宽度写在根节点的 CSS 变量上：网格列宽、两侧栏宽度与侧栏切换按钮的定位都引用
+// 它们，于是拖动分隔条时只要改写变量就够了，不必让 React 重渲染整个 App（见下面的拖拽处理）。
+const SIDEBAR_WIDTH_VAR = '--mica-sidebar-width'
+const RIGHT_PANEL_WIDTH_VAR = '--mica-right-panel-width'
+
+function setLayoutVar(name, value) {
+  document.documentElement.style.setProperty(name, value)
+}
 
 // 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
 const PAGE_HEADER = {
@@ -707,8 +724,13 @@ export default function App() {
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
   const sidebarCollapsedRef = useRef(sidebarCollapsed)
-  const dragStartRef = useRef(null)
-  const rightPanelDragStartRef = useRef(null)
+  // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一对变量）
+  useLayoutEffect(() => {
+    setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarCollapsed ? 0 : sidebarWidth}px`)
+  }, [sidebarCollapsed, sidebarWidth])
+  useLayoutEffect(() => {
+    setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${rightPanelOpen ? rightPanelWidth : 0}px`)
+  }, [rightPanelOpen, rightPanelWidth])
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
@@ -1718,26 +1740,42 @@ export default function App() {
   const setCollapsed = () => {
     setSidebarCollapsed((value) => !value)
   }
+  // 拖分隔条不能每个 pointermove 都 setState：那会把整个 App（长对话的 markdown、打开的文件
+  // monaco、会话树）重渲染一遍，一次 move 就要几十毫秒，拖动直接卡住。拖动期间只改写根节点上
+  // 的宽度变量（网格列宽与两侧栏宽度都读它），松手才提交回状态（持久化/别的窗口读到的是最终值）。
   const startSidebarResize = useCallback((event) => {
     if (event.button !== 0) return
     event.preventDefault()
-    dragStartRef.current = { x: event.clientX, width: sidebarWidthRef.current }
+    const startX = event.clientX
+    const startWidth = sidebarWidthRef.current
+    let width = startWidth
+    let panelWidth = rightPanelWidthRef.current
     setResizingSidebar(true)
     document.body.classList.add('is-resizing-sidebar')
 
     const onMove = (moveEvent) => {
-      const width = dragStartRef.current
-        ? dragStartRef.current.width + moveEvent.clientX - dragStartRef.current.x
-        : sidebarWidthRef.current
-      setSidebarWidth(Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width))))
+      width = Math.round(
+        Math.min(
+          MAX_SIDEBAR_WIDTH,
+          Math.max(MIN_SIDEBAR_WIDTH, startWidth + moveEvent.clientX - startX)
+        )
+      )
+      setLayoutVar(SIDEBAR_WIDTH_VAR, `${width}px`)
+      // 侧栏变宽会把右面板挤出窗口：跟着压回上限（与松手后 clamp effect 同一口径）
+      const limit = rightPanelWidthLimit(window.innerWidth, width, sidebarCollapsedRef.current)
+      if (panelWidth > limit) {
+        panelWidth = Math.max(MIN_RIGHT_PANEL_WIDTH, limit)
+        setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${panelWidth}px`)
+      }
     }
     const finish = () => {
-      dragStartRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
       document.body.classList.remove('is-resizing-sidebar')
       setResizingSidebar(false)
+      setSidebarWidth(width)
+      setRightPanelWidth(panelWidth)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -1749,37 +1787,34 @@ export default function App() {
   useEffect(() => {
     sidebarCollapsedRef.current = sidebarCollapsed
   }, [sidebarCollapsed])
-  // 右侧 Panel 宽度拖拽
+  // 右侧 Panel 宽度拖拽（同上：拖动期间只改变量，松手才提交）
   const startRightPanelResize = useCallback((event) => {
     if (event.button !== 0) return
     event.preventDefault()
-    rightPanelDragStartRef.current = { x: event.clientX, width: rightPanelWidthRef.current }
+    const startX = event.clientX
+    const startWidth = rightPanelWidthRef.current
+    let width = startWidth
     setResizingRightPanel(true)
     document.body.classList.add('is-resizing-right-panel')
 
-    // 拖动过程中连续 pointermove 之间 React 可能还没提交渲染，读 rightPanelWidthRef 会拿到
-    // 上一次的值，所以本次拖动的宽度就地记下来。持久化由上面写回界面状态的 effect 负责。
-    let draggedWidth = rightPanelWidthRef.current
     const onMove = (moveEvent) => {
-      const width = rightPanelDragStartRef.current
-        ? rightPanelDragStartRef.current.width -
-          (moveEvent.clientX - rightPanelDragStartRef.current.x)
-        : rightPanelWidthRef.current
       const limit = rightPanelWidthLimit(
         window.innerWidth,
         sidebarWidthRef.current,
         sidebarCollapsedRef.current
       )
-      draggedWidth = Math.round(Math.min(limit, Math.max(MIN_RIGHT_PANEL_WIDTH, width)))
-      setRightPanelWidth(draggedWidth)
+      width = Math.round(
+        Math.min(limit, Math.max(MIN_RIGHT_PANEL_WIDTH, startWidth - (moveEvent.clientX - startX)))
+      )
+      setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${width}px`)
     }
     const finish = () => {
-      rightPanelDragStartRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
       document.body.classList.remove('is-resizing-right-panel')
       setResizingRightPanel(false)
+      setRightPanelWidth(width)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -1856,7 +1891,7 @@ export default function App() {
             : {
                 gridTemplateColumns: rightPanelMaximized
                   ? '0px 0px 1fr'
-                  : `${sidebarCollapsed ? 0 : sidebarWidth}px 1fr ${rightPanelOpen ? `${rightPanelWidth}px` : '0px'}`,
+                  : `var(${SIDEBAR_WIDTH_VAR}) 1fr var(${RIGHT_PANEL_WIDTH_VAR})`,
                 transition: rightPanelOpen ? 'none' : 'none'
               }
         }
@@ -1876,7 +1911,11 @@ export default function App() {
                 }`
               : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
           }
-          style={isMobile ? undefined : { width: sidebarCollapsed ? undefined : sidebarWidth }}
+          style={
+            isMobile
+              ? undefined
+              : { width: sidebarCollapsed ? undefined : `var(${SIDEBAR_WIDTH_VAR})` }
+          }
         >
           {!isMobile && !sidebarCollapsed && (
             <div
@@ -2166,7 +2205,7 @@ export default function App() {
           style={
             isMobile
               ? undefined
-              : { width: rightPanelMaximized ? undefined : rightPanelOpen ? rightPanelWidth : 0 }
+              : { width: rightPanelMaximized ? undefined : `var(${RIGHT_PANEL_WIDTH_VAR})` }
           }
           aria-label="右侧面板"
         >
@@ -2336,7 +2375,7 @@ export default function App() {
           style={{
             left: sidebarCollapsed
               ? SIDEBAR_TOGGLE_COLLAPSED_LEFT
-              : sidebarWidth - SIDEBAR_TOGGLE_GUTTER
+              : `calc(var(${SIDEBAR_WIDTH_VAR}) - ${SIDEBAR_TOGGLE_GUTTER}px)`
           }}
           onClick={setCollapsed}
         >
