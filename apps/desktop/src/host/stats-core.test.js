@@ -8,6 +8,7 @@ import {
   projectMessages,
   projectSubagentRecords,
   projectUsage,
+  resolveStaleRequestInput,
   summarizeContext
 } from './stats-core'
 
@@ -279,9 +280,46 @@ describe('Stats usage aggregation', () => {
     expect(items[0].tokens).toBeLessThan(100)
   })
 
+  test('excludes media payloads nested in tool results, not only in message content', () => {
+    const image = {
+      type: 'input_image',
+      detail: 'auto',
+      image_url: `data:image/png;base64,${'X'.repeat(200_000)}`
+    }
+    const items = projectMessages([
+      {
+        type: 'function_call_output',
+        call_id: 'call_1',
+        output: [{ type: 'input_text', text: 'ok' }, image]
+      },
+      { role: 'tool', tool_call_id: 'call_2', content: [{ type: 'text', text: 'ok' }, image] }
+    ])
+    for (const item of items) {
+      // `read_image` 这类多模态工具结果曾把整段 base64 算成正文（单条 28 万 token）。
+      expect(item.imageCount).toBe(1)
+      expect(item.chars).toBeLessThan(200)
+      expect(item.tokens).toBeLessThan(60)
+      expect(item.content).toContain('[image]')
+      expect(item.content).not.toContain('XXXX')
+    }
+    const [withDocument] = projectMessages([
+      {
+        type: 'function_call_output',
+        call_id: 'call_3',
+        output: [
+          { type: 'input_text', text: 'ok' },
+          { type: 'document', data: 'Y'.repeat(90_000) }
+        ]
+      }
+    ])
+    expect(withDocument.mediaCount).toBe(1)
+    expect(withDocument.chars).toBeLessThan(200)
+  })
+
   test('summarizes context by category and keeps the request overhead separate', () => {
+    const userText = 'a'.repeat(400)
     const messages = [
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'a'.repeat(400) }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: userText }] },
       {
         type: 'message',
         role: 'assistant',
@@ -298,11 +336,13 @@ describe('Stats usage aggregation', () => {
     ]
     const summary = summarizeContext(messages, {
       lastInputTokens: 41_146,
+      fixedOverheadTokens: 12_000,
       contextWindowSize: 1_000_000
     })
     expect(summary.items).toBe(5)
     expect(summary.categories.map((row) => row.kind).sort()).toEqual([
       'assistant',
+      'envelope',
       'reasoning',
       'tool_call',
       'tool_result',
@@ -312,11 +352,131 @@ describe('Stats usage aggregation', () => {
     expect(byKind.reasoning.chars).toBe(400)
     expect(byKind.tool_result.chars).toBe(800)
     expect(byKind.tool_call.chars).toBe('{"file_path":"a"}'.repeat(10).length)
+    expect(byKind.user.chars).toBe(JSON.stringify({ type: 'input_text', text: userText }).length)
+    // 结构字段（role/type/call_id/name）单列一类，不摊到正文类别上。
+    expect(byKind.envelope.chars).toBeGreaterThan(300)
+    expect(byKind.envelope.tokens).toBe(estimateTokens(byKind.envelope.chars))
     expect(byKind.reasoning.tokens).toBe(estimateTokens(400))
     // 分类明细必须能对上总量：界面上的占比就是以这个口径算的。
     expect(summary.messageTokens).toBe(summary.categories.reduce((sum, row) => sum + row.tokens, 0))
     expect(summary.overheadTokens).toBe(41_146 - summary.messageTokens)
+    expect(summary.fixedOverheadTokens).toBe(12_000)
     expect(summary.contextWindowSize).toBe(1_000_000)
+    // 没有 compact 的时候不产生作废值，界面照旧显示差额。
+    expect(summary.staleInput).toBeNull()
+  })
+
+  test('counts the wire shape of a message, not only its正文', () => {
+    const [user] = projectMessages([{ type: 'message', role: 'user', content: 'hello' }])
+    expect(user.parts.user).toBe(5)
+    expect(user.parts.envelope).toBe(45)
+    expect(user.chars).toBe(
+      JSON.stringify({ type: 'message', role: 'user', content: 'hello' }).length
+    )
+
+    const [call] = projectMessages([
+      {
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'read_file',
+        arguments: '{"file_path":"a"}'
+      }
+    ])
+    expect(call.parts.tool_call).toBe('{"file_path":"a"}'.length)
+    expect(call.chars).toBe(
+      JSON.stringify({
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'read_file',
+        arguments: '{"file_path":"a"}'
+      }).length
+    )
+
+    // 图片块的结构字段照算，base64 一律不计。
+    const [withImage] = projectMessages([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'look' },
+          { type: 'input_image', image_url: `data:image/png;base64,${'X'.repeat(50_000)}` }
+        ]
+      }
+    ])
+    expect(withImage.parts.envelope).toBeLessThan(200)
+    expect(withImage.tokens).toBeLessThan(100)
+  })
+
+  test('drops the overhead gap when the snapshot was compacted after the last request', () => {
+    const summary = summarizeContext([{ type: 'message', role: 'user', content: 'hi' }], {
+      lastInputTokens: 0,
+      staleInput: {
+        inputTokens: 178_444,
+        reason: 'compacted',
+        compactedAt: '2026-09-21T03:46:16.382Z',
+        compactedTokens: 91_464
+      }
+    })
+    // 那次 input 描述的是压缩前的上下文：既不能当分母，也不能当差额。
+    expect(summary.overheadTokens).toBe(0)
+    expect(summary.staleInput).toEqual({
+      inputTokens: 178_444,
+      reason: 'compacted',
+      compactedAt: '2026-09-21T03:46:16.382Z',
+      compactedTokens: 91_464,
+      recordedMessages: 0,
+      currentMessages: 0
+    })
+    // 半个记录（没有 input）不算数，避免界面拿到一个空壳去渲染说明。
+    expect(summarizeContext([], { staleInput: { reason: 'compacted' } }).staleInput).toBeNull()
+  })
+
+  test('invalidates a request input that a later compact or prune left behind', () => {
+    const usage = {
+      occurredAt: '2026-09-20T07:48:40.090Z',
+      inputTokens: 178_444,
+      messageCount: 1476
+    }
+    expect(resolveStaleRequestInput({ lastUsage: usage, messageCount: 1476 })).toBeNull()
+    expect(
+      resolveStaleRequestInput({
+        lastUsage: usage,
+        displayUsage: { compactedAt: '2026-09-19T00:00:00.000Z', totalTokens: 90_000 },
+        messageCount: 1476
+      })
+    ).toBeNull()
+    expect(
+      resolveStaleRequestInput({
+        lastUsage: usage,
+        displayUsage: { compactedAt: '2026-09-21T03:46:16.382Z', totalTokens: 91_464 },
+        messageCount: 1436
+      })
+    ).toEqual({
+      inputTokens: 178_444,
+      reason: 'compacted',
+      compactedAt: '2026-09-21T03:46:16.382Z',
+      compactedTokens: 91_464
+    })
+    // 请求看到的消息比快照现在多：轮次被 prune / rewind 裁掉了，input 同样作废。
+    expect(resolveStaleRequestInput({ lastUsage: usage, messageCount: 298 })).toEqual({
+      inputTokens: 178_444,
+      reason: 'truncated',
+      recordedMessages: 1476,
+      currentMessages: 298
+    })
+    // 没有可比的时间戳时保守当作已作废，不让压缩前的 input 冒充当前占用。
+    expect(
+      resolveStaleRequestInput({
+        lastUsage: { inputTokens: 1_000 },
+        displayUsage: { compactedAt: '2026-09-21T03:46:16.382Z', totalTokens: 500 },
+        messageCount: 10
+      })
+    ).toMatchObject({ reason: 'compacted' })
+    // 没有 input 就没有参考值可谈。
+    expect(
+      resolveStaleRequestInput({ lastUsage: { occurredAt: '2026-09-20T07:48:40.090Z' } })
+    ).toBeNull()
+    expect(resolveStaleRequestInput()).toBeNull()
   })
 
   test('projects usage and subagent records to a compact renderer shape', () => {

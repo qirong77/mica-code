@@ -16,6 +16,7 @@ export const CONTEXT_KINDS = {
   reasoning: 'reasoning',
   toolCall: 'tool_call',
   toolResult: 'tool_result',
+  envelope: 'envelope',
   other: 'other'
 }
 
@@ -58,13 +59,35 @@ export function projectContent(content, limit) {
   return joined.length > limit ? `${joined.slice(0, limit)}…` : joined
 }
 
+const IMAGE_BLOCK_TYPES = new Set(['image_url', 'input_image', 'image'])
+// 媒体块（图片 + 文档/文件）的内联 payload 与 vision token 无关，一律不计字符。
+const MEDIA_BLOCK_TYPES = new Set([...IMAGE_BLOCK_TYPES, 'document', 'input_file'])
+
 function isImageBlock(block) {
   if (!block || typeof block !== 'object') return false
-  return block.type === 'image_url' || block.type === 'input_image' || block.type === 'image'
+  return IMAGE_BLOCK_TYPES.has(block.type)
 }
 
-function hasImageBlock(content) {
-  return Array.isArray(content) && content.some(isImageBlock)
+function isMediaBlock(block) {
+  if (!block || typeof block !== 'object') return false
+  return MEDIA_BLOCK_TYPES.has(block.type)
+}
+
+/**
+ * 媒体块可以出现在三处：消息 `content`、工具结果的 `output`（Responses 的多模态
+ * 工具结果就是 `[{type:'input_text'},{type:'input_image'}]`）、以及 Chat Completions
+ * 的 `role: 'tool'` content。只认第一处会把内联截图整段 base64 算成正文——
+ * 实测一条 `read_image` 结果就能估成 28 万 token（真实请求才 5.8 万）。
+ */
+function countMedia(value) {
+  if (!Array.isArray(value)) return { images: 0, others: 0 }
+  let images = 0
+  let others = 0
+  for (const block of value) {
+    if (isImageBlock(block)) images++
+    else if (isMediaBlock(block)) others++
+  }
+  return { images, others }
 }
 
 /**
@@ -77,10 +100,45 @@ function contentChars(content) {
   if (!Array.isArray(content)) return 0
   let total = 0
   for (const block of content) {
-    if (isImageBlock(block)) continue
+    if (isMediaBlock(block)) continue
     total += charLength(block)
   }
   return total
+}
+
+/**
+ * 线上体积（近似）：provider 收到的其实是整条消息的 JSON，`role`/`type`/`call_id`/`name`
+ * 这些结构字段同样占 input。只数正文会让「持久化消息体」明显小于真实上下文，多出来的
+ * 差额会全部落进 system prompt / 工具 schema 的残差里（实测一个 1436 条消息的会话
+ * 被多算了 34k tokens，界面显示成「未持久化项占 74%」）。这里按整条消息的 JSON 计，
+ * 图片块仍只留占位标记，base64 不计。
+ */
+function wireChars(message) {
+  try {
+    return JSON.stringify(wireView(message))?.length ?? 0
+  } catch {
+    return 0
+  }
+}
+
+function wireView(value, depth = 0) {
+  if (depth > 8) return '[deep]'
+  if (typeof value !== 'object' || value === null) return value
+  if (Array.isArray(value)) return value.map((item) => wireView(item, depth + 1))
+  if (isMediaBlock(value)) return { type: value.type, media: `[${value.type}]` }
+  const out = {}
+  for (const [key, item] of Object.entries(value)) out[key] = wireView(item, depth + 1)
+  return out
+}
+
+/** 预览文本：媒体 payload 只留占位标记，base64 绝不进渲染进程。 */
+function previewValue(value) {
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(wireView(value)) ?? ''
+  } catch {
+    return ''
+  }
 }
 
 function truncate(text, limit) {
@@ -93,6 +151,19 @@ function truncate(text, limit) {
  * `parts` 之和，所以逐条明细与分类汇总永远是同一口径。
  */
 function describeMessage(message) {
+  const out = describeMessageBody(message)
+  // 结构字段（消息信封）单列一类，不混进正文——混进正文后它会在线性差额里
+  // 伪装成 system prompt / 工具 schema。
+  const envelope = Math.max(0, wireChars(message) - out.chars)
+  if (envelope > 0) {
+    out.parts[CONTEXT_KINDS.envelope] = envelope
+    out.chars += envelope
+    out.tokens = estimateTokens(out.chars)
+  }
+  return out
+}
+
+function describeMessageBody(message) {
   const raw = message && typeof message === 'object' ? message : {}
   const parts = {}
   const out = {
@@ -105,6 +176,7 @@ function describeMessage(message) {
     parts,
     hasImage: false,
     imageCount: 0,
+    mediaCount: 0,
     cleared: false,
     truncated: false,
     content: null,
@@ -122,8 +194,10 @@ function describeMessage(message) {
     const full = projectContent(raw.content, Number.MAX_SAFE_INTEGER)
     if (full) out.content = truncate(full, DETAIL_CONTENT_LIMIT)
     out.truncated = full.length > DETAIL_CONTENT_LIMIT
-    out.hasImage = hasImageBlock(raw.content)
-    out.imageCount = Array.isArray(raw.content) ? raw.content.filter(isImageBlock).length : 0
+    const media = countMedia(raw.content)
+    out.hasImage = media.images > 0
+    out.imageCount = media.images
+    out.mediaCount = media.others
     parts[out.kind] = contentChars(raw.content)
     out.chars = parts[out.kind]
     out.tokens = estimateTokens(out.chars)
@@ -155,19 +229,18 @@ function describeMessage(message) {
     out.kind = CONTEXT_KINDS.toolResult
     out.role = 'tool'
     out.toolCallId = raw.call_id || null
-    const output =
-      typeof raw.output === 'string'
-        ? raw.output
-        : charLength(raw.output)
-          ? JSON.stringify(raw.output)
-          : ''
-    out.cleared = output.startsWith(CLEARED_TOOL_RESULT)
-    if (output) {
-      out.content = truncate(output, DETAIL_TOOL_LIMIT)
-      out.truncated = output.length > DETAIL_TOOL_LIMIT
+    const full = projectContent(raw.output, Number.MAX_SAFE_INTEGER) || previewValue(raw.output)
+    out.cleared = full.startsWith(CLEARED_TOOL_RESULT)
+    if (full) {
+      out.content = truncate(full, DETAIL_TOOL_LIMIT)
+      out.truncated = full.length > DETAIL_TOOL_LIMIT
     }
-    parts[CONTEXT_KINDS.toolResult] = output.length
-    out.chars = output.length
+    const media = countMedia(raw.output)
+    out.hasImage = media.images > 0
+    out.imageCount = media.images
+    out.mediaCount = media.others
+    parts[CONTEXT_KINDS.toolResult] = contentChars(raw.output)
+    out.chars = parts[CONTEXT_KINDS.toolResult]
     out.tokens = estimateTokens(out.chars)
     return out
   }
@@ -202,11 +275,15 @@ function describeMessage(message) {
     out.kind = CONTEXT_KINDS.toolResult
     out.toolCallId = raw.tool_call_id || null
     const content = raw.content
-    out.cleared = typeof content === 'string' && content.startsWith(CLEARED_TOOL_RESULT)
-    const full = projectContent(content, Number.MAX_SAFE_INTEGER)
+    const full = projectContent(content, Number.MAX_SAFE_INTEGER) || previewValue(content)
+    out.cleared = full.startsWith(CLEARED_TOOL_RESULT)
     if (full) out.content = truncate(full, DETAIL_TOOL_LIMIT)
     out.truncated = full.length > DETAIL_TOOL_LIMIT
-    parts[CONTEXT_KINDS.toolResult] = charLength(content)
+    const media = countMedia(content)
+    out.hasImage = media.images > 0
+    out.imageCount = media.images
+    out.mediaCount = media.others
+    parts[CONTEXT_KINDS.toolResult] = contentChars(content)
     out.chars = parts[CONTEXT_KINDS.toolResult]
     out.tokens = estimateTokens(out.chars)
     if (Array.isArray(raw.tool_calls) && raw.tool_calls.length > 0)
@@ -220,8 +297,10 @@ function describeMessage(message) {
     const full = projectContent(raw.content, Number.MAX_SAFE_INTEGER)
     if (full) out.content = truncate(full, DETAIL_CONTENT_LIMIT)
     out.truncated = full.length > DETAIL_CONTENT_LIMIT
-    out.hasImage = hasImageBlock(raw.content)
-    out.imageCount = Array.isArray(raw.content) ? raw.content.filter(isImageBlock).length : 0
+    const media = countMedia(raw.content)
+    out.hasImage = media.images > 0
+    out.imageCount = media.images
+    out.mediaCount = media.others
     parts[CONTEXT_KINDS.assistant] = contentChars(raw.content)
     if (Array.isArray(raw.tool_calls) && raw.tool_calls.length > 0) {
       const calls = projectToolCalls(raw.tool_calls)
@@ -260,8 +339,12 @@ export function projectMessages(messages) {
 /**
  * 上下文占用分解：按类别汇总各消息贡献的字符数（同一口径 chars/4 估 token）。
  * `overheadTokens` 是「最近一次真实请求的 input」与「持久化消息体估算」的差额——
- * system prompt、工具 schema、非持久化的 provider 项（加密推理链），以及已被
- * compact 清掉的内容都在这里面，所以只作为参考值并需在界面上说明。
+ * system prompt、工具 schema、非持久化的 provider 项（加密推理链）都在这里面。
+ *
+ * 快照在最近一次请求之后被 compact/裁剪过时，那次请求的 input 描述的是另一份
+ * 上下文：调用方要用 `resolveStaleRequestInput` 把它放进 `staleInput`、并把
+ * `lastInputTokens` 留空，否则「已被清掉的历史」会被算成差额，界面上显示成
+ * 「系统提示词 / 工具 schema 占了大部分上下文」。
  */
 export function summarizeContext(messages, options = {}) {
   const items = projectMessages(messages)
@@ -285,6 +368,8 @@ export function summarizeContext(messages, options = {}) {
   }))
   const messageTokens = list.reduce((sum, row) => sum + row.tokens, 0)
   const lastInputTokens = Number(options.lastInputTokens) || 0
+  const staleInput = normalizeStaleInput(options.staleInput)
+  const fixedOverheadTokens = Number(options.fixedOverheadTokens) || 0
   return {
     items: items.length,
     messageChars,
@@ -293,8 +378,61 @@ export function summarizeContext(messages, options = {}) {
     clearedResults,
     images: items.filter((item) => item.hasImage).length,
     lastInputTokens,
+    staleInput,
+    // 本会话出现过的最小请求 input：固定开销（system prompt + 工具 schema）的上界。
+    // 差额超过它就不可能全是固定开销，界面据此改用「其它差额」的说法。
+    fixedOverheadTokens,
     overheadTokens: lastInputTokens > messageTokens ? lastInputTokens - messageTokens : 0,
     contextWindowSize: Number(options.contextWindowSize) || null
+  }
+}
+
+/**
+ * 最近一次请求的 input 还能代表当前快照吗？不能则返回作废原因：
+ * - `compacted`：快照在那次请求之后被 compact 改写过（`displayUsage.compactedAt` 更晚）；
+ * - `truncated`：那次请求看到的消息比快照现在多（prune / rewind 裁掉了轮次）。
+ *
+ * 两种情况里 `lastUsage.inputTokens` 描述的都是**另一份**上下文：拿它当分母/被减数会把
+ * 「已经被清理掉的内容」显示成「系统提示词 / 工具 schema」（实测有会话因此显示成 74%）。
+ * 时间戳缺失时宁可当作已作废，也不要拿压缩前的 input 冒充当前占用。
+ */
+export function resolveStaleRequestInput({ lastUsage, displayUsage, messageCount } = {}) {
+  const inputTokens = Number(lastUsage?.inputTokens) || 0
+  if (inputTokens <= 0) return null
+  const compactedAtMs = Date.parse(displayUsage?.compactedAt)
+  const usedAtMs = Date.parse(lastUsage?.occurredAt)
+  if (Number.isFinite(compactedAtMs) && (!Number.isFinite(usedAtMs) || compactedAtMs > usedAtMs)) {
+    return {
+      inputTokens,
+      reason: 'compacted',
+      compactedAt: displayUsage.compactedAt,
+      compactedTokens: Number(displayUsage.totalTokens) || 0
+    }
+  }
+  const recordedMessages = Number(lastUsage?.messageCount)
+  const currentMessages = Number(messageCount)
+  if (
+    Number.isFinite(recordedMessages) &&
+    Number.isFinite(currentMessages) &&
+    recordedMessages > currentMessages
+  ) {
+    return { inputTokens, reason: 'truncated', recordedMessages, currentMessages }
+  }
+  return null
+}
+
+function normalizeStaleInput(value) {
+  if (!value || typeof value !== 'object') return null
+  const inputTokens = Number(value.inputTokens) || 0
+  if (inputTokens <= 0) return null
+  return {
+    inputTokens,
+    reason: value.reason === 'compacted' || value.reason === 'truncated' ? value.reason : 'unknown',
+    compactedAt:
+      typeof value.compactedAt === 'string' && value.compactedAt ? value.compactedAt : null,
+    compactedTokens: Number(value.compactedTokens) || 0,
+    recordedMessages: Number(value.recordedMessages) || 0,
+    currentMessages: Number(value.currentMessages) || 0
   }
 }
 

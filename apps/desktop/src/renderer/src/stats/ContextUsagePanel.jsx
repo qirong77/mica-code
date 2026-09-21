@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import {
   CONTEXT_KIND_META,
+  OVERHEAD_META,
+  bodyOverInputNote,
   contextBarSegments,
   contextItemSubtitle,
   contextItemTitle,
@@ -10,6 +12,8 @@ import {
   formatShare,
   indexContextItems,
   kindMeta,
+  overheadNote,
+  staleReferenceNote,
   sortContextItems
 } from './context-usage'
 
@@ -71,6 +75,9 @@ export function ContextUsageSection({ context, messages, contextWindowSize }) {
 
   if (!context || (categories.length === 0 && !context.overheadTokens)) return null
 
+  const staleNote = staleReferenceNote(context)
+  const bodyNote = bodyOverInputNote(context)
+  const overheadHint = overheadNote(context)
   const maxTokens = Math.max(1, ...categories.map((row) => row.tokens), context.overheadTokens || 0)
 
   return (
@@ -85,8 +92,15 @@ export function ContextUsageSection({ context, messages, contextWindowSize }) {
         {context.lastInputTokens > 0 && (
           <span>最近一次请求 input {context.lastInputTokens.toLocaleString()}</span>
         )}
+        {context.staleInput?.compactedTokens > 0 && (
+          <span>压缩后估算 ~{formatTokens(context.staleInput.compactedTokens)}</span>
+        )}
         {contextWindowSize > 0 && <span>窗口 {formatTokens(contextWindowSize)}</span>}
       </div>
+
+      {staleNote && <p className="text-[10px] leading-relaxed text-warn">{staleNote}</p>}
+      {bodyNote && <p className="text-[10px] leading-relaxed text-fg-faint">{bodyNote}</p>}
+      {overheadHint && <p className="text-[10px] leading-relaxed text-fg-faint">{overheadHint}</p>}
 
       <table className="mt-1 w-full table-fixed text-[11px]">
         <colgroup>
@@ -146,8 +160,8 @@ export function ContextUsageSection({ context, messages, contextWindowSize }) {
           {context.overheadTokens > 0 && (
             <tr className="border-t border-line">
               <td className="py-1 pr-2">
-                <span className="rounded-[3px] bg-panel-hi px-1.5 py-0.5 text-[10px] text-fg-muted">
-                  系统提示词 / 工具 schema / 未持久化项
+                <span className={`rounded-[3px] px-1.5 py-0.5 text-[10px] ${OVERHEAD_META.badge}`}>
+                  {OVERHEAD_META.label}
                 </span>
               </td>
               <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-ghost">—</td>
@@ -175,10 +189,13 @@ export function ContextUsageSection({ context, messages, contextWindowSize }) {
       </table>
 
       <p className="text-[10px] leading-relaxed text-fg-ghost">
-        「系统提示词 / 工具 schema / 未持久化项」= 最近一次请求的 input 减去持久化消息体估算， 包含
-        system prompt、AGENT.md、skills 索引、全部工具 schema，以及不落盘的思考内容 （Responses
-        的加密推理链）与已被 compact 清理的历史。图片只记张数、不计字符（base64 长度与 vision token
-        无关）。
+        「{OVERHEAD_META.label}」= 最近一次请求的 input 减去持久化消息体估算，包含 system
+        prompt、AGENT.md、skills 索引、全部工具 schema、不落盘的思考内容（Responses
+        的加密推理链），以及 chars/4 与真实 tokenize 的差（JSON 结构、id、中文都会让实际
+        更贵）。「消息结构（信封）」是每条消息的 role/type/call_id/name
+        等结构字段，线上请求同样会带上（压缩与状态栏的估算按带缩进的整份历史 JSON
+        口径，与这里的逐条口径会差一成左右）。媒体块（图片 / 文档）只记张数、不计字符 （base64
+        长度与 vision token 无关）。
       </p>
 
       <ContextItemList
