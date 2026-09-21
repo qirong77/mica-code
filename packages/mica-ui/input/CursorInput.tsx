@@ -629,34 +629,27 @@ export function buildTextHandler({
     onSubmit?.(value);
   }
 
-  function upOrHistoryUp() {
-    if (disableCursorMovementForUpDownKeys) {
-      onHistoryUp?.();
-      return cursor;
-    }
-    const cursorUp = cursor.up();
-    if (!cursorUp.equals(cursor)) return cursorUp;
-    if (multiline) {
-      const c = cursor.up();
-      if (!c.equals(cursor)) return c;
-    }
+  // 输入历史只由 Alt(Option)+↑/↓ 触发；单独的 ↑/↓ 在多行输入里只移动光标，到首/末行就停住。
+  // 终端把 Alt 折叠进 key.meta（传统 \x1b\x1b[A 与 kitty/modifyOtherKeys 的 \x1b[1;3A 都是），
+  // 所以这里判 meta。Ctrl+P/Ctrl+N 仍是等价的历史快捷键。
+  function historyUp() {
     onHistoryUp?.();
     return cursor;
   }
 
-  function downOrHistoryDown() {
-    if (disableCursorMovementForUpDownKeys) {
-      onHistoryDown?.();
-      return cursor;
-    }
-    const cursorDown = cursor.down();
-    if (!cursorDown.equals(cursor)) return cursorDown;
-    if (multiline) {
-      const c = cursor.down();
-      if (!c.equals(cursor)) return c;
-    }
+  function historyDown() {
     onHistoryDown?.();
     return cursor;
+  }
+
+  function moveCursorUp() {
+    const cursorUp = cursor.up();
+    return cursorUp.equals(cursor) ? cursor : cursorUp;
+  }
+
+  function moveCursorDown() {
+    const cursorDown = cursor.down();
+    return cursorDown.equals(cursor) ? cursor : cursorDown;
   }
 
   function onInput(input: string, key: any): void {
@@ -736,11 +729,11 @@ export function buildTextHandler({
         break;
       }
       if (key.upArrow && !key.shift) {
-        nextCursor = upOrHistoryUp();
+        nextCursor = key.meta || disableCursorMovementForUpDownKeys ? historyUp() : moveCursorUp();
         break;
       }
       if (key.downArrow && !key.shift) {
-        nextCursor = downOrHistoryDown();
+        nextCursor = key.meta || disableCursorMovementForUpDownKeys ? historyDown() : moveCursorDown();
         break;
       }
       if (key.leftArrow) {
@@ -775,10 +768,10 @@ export function buildTextHandler({
             nextCursor = cursor.deleteToLineEnd().cursor;
             break;
           case 'n':
-            nextCursor = downOrHistoryDown();
+            nextCursor = historyDown();
             break;
           case 'p':
-            nextCursor = upOrHistoryUp();
+            nextCursor = historyUp();
             break;
           case 'u':
             nextCursor = cursor.deleteToLineStart().cursor;

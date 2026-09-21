@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { INITIAL_STATE, parseMultipleKeypresses, type ParsedInput } from './parse-keypress.js';
+import type { ParsedKey } from './parse-keypress.js';
+import { InputEvent } from './events/input-event.js';
 
 function parse(input: Buffer | string): ParsedInput[] {
   return parseMultipleKeypresses({ ...INITIAL_STATE }, input)[0];
@@ -19,6 +21,35 @@ describe('terminal response parsing', () => {
   it('still parses real escape sequences as before', () => {
     const keys = parse('\x1b[A');
     expect(keys.map((k) => (k.kind === 'key' ? k.name : k.kind))).toEqual(['up']);
+  });
+
+  it.each([
+    { sequence: '\x1b\x1b[A', label: '双 ESC 编码（macOS Terminal 的 Option+↑）' },
+    { sequence: '\x1b[1;3A', label: 'xterm 修饰键编码（iTerm2/kitty 的 Option+↑）' },
+  ])('parses Alt(Option)+Up from $label into one meta arrow key', ({ sequence }) => {
+    // 输入历史绑定在 Alt+↑/↓ 上（CursorInput 判 key.meta）。双 ESC 若被拆成
+    // 「Escape + ↑」，Escape 会清空输入框、绑定也彻底失效。
+    const items = parse(sequence);
+    expect(items).toHaveLength(1);
+    const event = new InputEvent(items[0] as ParsedKey);
+    expect(event.key.upArrow).toBe(true);
+    expect(event.key.meta).toBe(true);
+  });
+
+  it('parses Alt(Option)+Down from the double-ESC encoding', () => {
+    const event = new InputEvent(parse('\x1b\x1b[B')[0] as ParsedKey);
+    expect(event.key.downArrow).toBe(true);
+    expect(event.key.meta).toBe(true);
+  });
+
+  it('still splits a lone double escape followed by plain typing', () => {
+    // esc 后紧跟普通字符不能并进 meta 序列（否则按键丢失）。
+    const keys = parse('\x1b\x1bh');
+    expect(keys.map((k) => (k.kind === 'key' ? k.name : k.kind))).toEqual([
+      'escape',
+      'escape',
+      'h',
+    ]);
   });
 
   it('parses xterm-compatible DECXCPR responses without a page', () => {

@@ -31,7 +31,27 @@ type TokenizerOptions = {
    * output streams, and enabling this there swallows display text. Default false.
    */
   x10Mouse?: boolean;
+  /**
+   * Keep `ESC ESC` + sequence introducer as one meta sequence instead of
+   * splitting it into Escape + sequence. Stdin needs this: macOS Terminal
+   * encodes Option+↑/↓ as `\x1b\x1b[A` / `\x1b\x1b[B`, and splitting it turns
+   * the binding into "clear the input box, then a bare arrow key".
+   * Output streams leave it off — `\x1b\x1b` there is not a user keypress.
+   */
+  metaEscape?: boolean;
 };
+
+/**
+ * Bytes that can follow `ESC ESC` in a meta sequence — exactly the introducers
+ * FN_KEY_RE accepts after `\x1b+` in parse-keypress. Anything else (`]`, `P`,
+ * `_`) stays split, otherwise the merge would produce a token no rule matches
+ * and the bytes would leak into the prompt as text.
+ */
+const META_SEQUENCE_INTRODUCERS = new Set<number>([
+  ESC_TYPE.CSI,
+  0x4e, // N — SS2
+  0x4f, // O — SS3
+]);
 
 /**
  * Create a streaming tokenizer for terminal input.
@@ -48,17 +68,18 @@ export function createTokenizer(options?: TokenizerOptions): Tokenizer {
   let currentState: State = 'ground';
   let currentBuffer = '';
   const x10Mouse = options?.x10Mouse ?? false;
+  const metaEscape = options?.metaEscape ?? false;
 
   return {
     feed(input: string): Token[] {
-      const result = tokenize(input, currentState, currentBuffer, false, x10Mouse);
+      const result = tokenize(input, currentState, currentBuffer, false, x10Mouse, metaEscape);
       currentState = result.state.state;
       currentBuffer = result.state.buffer;
       return result.tokens;
     },
 
     flush(): Token[] {
-      const result = tokenize('', currentState, currentBuffer, true, x10Mouse);
+      const result = tokenize('', currentState, currentBuffer, true, x10Mouse, metaEscape);
       currentState = result.state.state;
       currentBuffer = result.state.buffer;
       return result.tokens;
@@ -86,6 +107,7 @@ function tokenize(
   initialBuffer: string,
   flush: boolean,
   x10Mouse: boolean,
+  metaEscape: boolean,
 ): { tokens: Token[]; state: InternalState } {
   const tokens: Token[] = [];
   const result: InternalState = {
@@ -164,11 +186,21 @@ function tokenize(
           i++;
           emitSequence(data.slice(seqStart, i));
         } else if (code === C0.ESC) {
-          // Double escape - emit first, start new
-          emitSequence(data.slice(seqStart, i));
-          seqStart = i;
-          result.state = 'escape';
-          i++;
+          // ESC ESC 后面跟序列引导符时是一个 meta 序列（\x1b\x1b[A = Option+↑）；
+          // 拆成两个 token 会变成「Escape + ↑」——Escape 会清空输入框，绑定静默失效。
+          const next = data.charCodeAt(i + 1);
+          if (metaEscape && i + 1 < data.length && META_SEQUENCE_INTRODUCERS.has(next)) {
+            i++;
+          } else if (metaEscape && i + 1 >= data.length) {
+            // 第三个字节还没到，攒着等下一个 chunk 或 flush 再定夺。
+            i = data.length;
+          } else {
+            // Double escape - emit first, start new
+            emitSequence(data.slice(seqStart, i));
+            seqStart = i;
+            result.state = 'escape';
+            i++;
+          }
         } else {
           // 孤立 ESC（\x1b 后跟非序列字节，如 esc 键后紧接普通输入）：
           // 把 \x1b 作为独立 escape 键发出，后续字节继续按文本处理，

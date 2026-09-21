@@ -6,6 +6,7 @@
 // - 光标宽度 = 光标下字素宽度（行尾用 fallback），高度 = 当前字号，行盒内垂直居中
 // - 闪烁由 JS 控制（530ms 间隔），输入时暂停 800ms 保持常亮，失焦/有选区隐藏光标
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { resolveComposerSelection } from './chat-composer-caret'
 
 const BLINK_INTERVAL = 530
 const PAUSE_DURATION = 800
@@ -64,6 +65,8 @@ export default function TerminalComposer({
   const syncFrameRef = useRef(null)
   const blinkTimerRef = useRef(null)
   const pauseTimerRef = useRef(null)
+  // 组合期 textarea 的 selection 是「整个组合串的范围」而不是插入点，见 chat-composer-caret.js。
+  const composingRef = useRef(false)
 
   const [selection, setSelection] = useState({ start: 0, end: 0 })
   const [blinkOn, setBlinkOn] = useState(true)
@@ -133,7 +136,11 @@ export default function TerminalComposer({
     const cursor = cursorRef.current
     if (!ta || !mirror || !cursor) return
 
-    const pos = ta.selectionStart
+    const pos = resolveComposerSelection({
+      selectionStart: ta.selectionStart,
+      selectionEnd: ta.selectionEnd,
+      composing: composingRef.current
+    }).start
     // 复用 Text 和 span，避免每次光标移动都创建、回收 DOM 节点。
     if (!mirrorTextRef.current || !measureMarkerRef.current) {
       mirrorTextRef.current = document.createTextNode('')
@@ -196,12 +203,15 @@ export default function TerminalComposer({
   const sync = useCallback(() => {
     const ta = textareaRef.current
     if (!ta) return
+    const next = resolveComposerSelection({
+      selectionStart: ta.selectionStart,
+      selectionEnd: ta.selectionEnd,
+      composing: composingRef.current
+    })
     syncMirrorSize()
     updateCursorPos()
     setSelection((current) =>
-      current.start === ta.selectionStart && current.end === ta.selectionEnd
-        ? current
-        : { start: ta.selectionStart, end: ta.selectionEnd }
+      current.start === next.start && current.end === next.end ? current : next
     )
   }, [syncMirrorSize, updateCursorPos, textareaRef])
 
@@ -287,14 +297,22 @@ export default function TerminalComposer({
   const handleBlur = useCallback(() => {
     setFocused(false)
     setBlinkOn(false)
+    // 组合被 blur 打断时不一定补发 compositionend，标记要自己清掉。
+    composingRef.current = false
     if (blinkTimerRef.current) clearInterval(blinkTimerRef.current)
     if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current)
   }, [])
 
   const handleCompositionStart = useCallback(() => {
+    composingRef.current = true
     stopBlinking()
     scheduleSync()
   }, [stopBlinking, scheduleSync])
+
+  const handleCompositionEnd = useCallback(() => {
+    composingRef.current = false
+    scheduleSync()
+  }, [scheduleSync])
 
   // ---- 选区渲染（纯文本，不做 markdown 高亮） ----
   const { before, selected, after } = (() => {
@@ -360,7 +378,7 @@ export default function TerminalComposer({
         onBlur={handleBlur}
         onPaste={onPaste}
         onCompositionStart={handleCompositionStart}
-        onCompositionEnd={scheduleSync}
+        onCompositionEnd={handleCompositionEnd}
       />
     </div>
   )

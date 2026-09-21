@@ -136,6 +136,7 @@ function createEditor(initial: string = '') {
   let value = initial;
   let offset = initial.length;
   const history = new MinimalEditHistory();
+  const historyCalls: string[] = [];
   function call(input: string, key: any) {
     const { onInput } = buildTextHandler({
       value,
@@ -145,6 +146,8 @@ function createEditor(initial: string = '') {
       onOffsetChange: (o) => {
         offset = o;
       },
+      onHistoryUp: () => historyCalls.push('up'),
+      onHistoryDown: () => historyCalls.push('down'),
       multiline: true,
       cursorChar: '',
       invert: (t) => t,
@@ -157,8 +160,41 @@ function createEditor(initial: string = '') {
     onInput(input, key);
     return { value, offset };
   }
-  return { history, call };
+  return { history, call, historyCalls };
 }
+
+describe('input history keys', () => {
+  it('only recalls history with Alt(Option)+Up/Down', () => {
+    const { call, historyCalls } = createEditor('');
+    call('', { upArrow: true });
+    call('', { downArrow: true });
+    expect(historyCalls).toEqual([]);
+
+    call('', { upArrow: true, meta: true });
+    call('', { downArrow: true, meta: true });
+    expect(historyCalls).toEqual(['up', 'down']);
+  });
+
+  it('moves the caret instead of recalling history on a multi-line input', () => {
+    const { call, historyCalls } = createEditor('one\ntwo');
+    expect(call('', { upArrow: true }).offset).toBe(3);
+    // 已经在首行时停在原地，不再回落到输入历史。
+    expect(call('', { upArrow: true }).offset).toBe(3);
+    expect(historyCalls).toEqual([]);
+    expect(call('', { downArrow: true }).offset).toBe(7);
+    expect(call('', { downArrow: true }).offset).toBe(7);
+    expect(historyCalls).toEqual([]);
+  });
+
+  it('keeps Ctrl+P / Ctrl+N as history shortcuts', () => {
+    const { call, historyCalls } = createEditor('');
+    call('', { ctrl: true });
+    expect(historyCalls).toEqual([]);
+    call('p', { ctrl: true });
+    call('n', { ctrl: true });
+    expect(historyCalls).toEqual(['up', 'down']);
+  });
+});
 
 describe('input undo/redo', () => {
   const undoKey = () => ({ ctrl: true });

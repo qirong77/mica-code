@@ -305,7 +305,9 @@ export function parseMultipleKeypresses(
   const decodedInput = inputToString(prevState, input);
 
   // Get or create tokenizer
-  const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true });
+  // metaEscape: macOS Terminal 把 Option+↑/↓ 编码成 \x1b\x1b[A / \x1b\x1b[B，
+  // 必须整体留给 FN_KEY_RE 识别成 meta 方向键（输入历史绑定在它上面）。
+  const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true, metaEscape: true });
 
   // Tokenize the input
   const tokens = tokenizer.feed(decodedInput.value);

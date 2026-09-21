@@ -1931,21 +1931,6 @@ export function navigateChatHistory(drafts, history, cursorRef, direction, curre
   return nextCursor < 0 ? drafts.get(nodeId) || '' : history[nextCursor]
 }
 
-// 光标位于第一行（按 ArrowUp 触发输入历史）时返回 true；多行输入下
-// 保持"非第一行时上箭头先移动光标"的编辑习惯（对齐 ChatGPT 等终端式输入框）。
-export function isCaretOnFirstLine(element) {
-  const value = typeof element?.value === 'string' ? element.value : ''
-  const start = element?.selectionStart ?? 0
-  return value.slice(0, start).indexOf('\n') < 0
-}
-
-// 光标位于最后一行（按 ArrowDown 触发输入历史）时返回 true。
-export function isCaretOnLastLine(element) {
-  const value = typeof element?.value === 'string' ? element.value : ''
-  const end = element?.selectionEnd ?? value.length
-  return value.slice(end).indexOf('\n') < 0
-}
-
 export function ChatView({
   node,
   cwd,
@@ -4390,36 +4375,14 @@ export function ChatView({
                 void recallQueued()
                 return
               }
+              // 输入历史只由 Alt+↑/↓ 触发；单独的 ↑/↓ 交给 textarea 自己移动光标
+              // （多行输入里逐行上下移动，不做「到首/末行就翻历史」的隐式切换）。
               if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 navigateInputHistory(-1)
                 return
               }
               if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                navigateInputHistory(1)
-                return
-              }
-              if (
-                event.key === 'ArrowUp' &&
-                !event.shiftKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                !event.nativeEvent.isComposing &&
-                isCaretOnFirstLine(event.currentTarget)
-              ) {
-                event.preventDefault()
-                navigateInputHistory(-1)
-                return
-              }
-              if (
-                event.key === 'ArrowDown' &&
-                !event.shiftKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                !event.nativeEvent.isComposing &&
-                isCaretOnLastLine(event.currentTarget)
-              ) {
                 event.preventDefault()
                 navigateInputHistory(1)
                 return
