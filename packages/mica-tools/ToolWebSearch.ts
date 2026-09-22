@@ -4,11 +4,15 @@ import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { truncateDisplayText } from './utils/display.js';
 import { finalizeTextOutput } from './utils/outputLimits.js';
-// https://serper.dev/dashboard
+
+// 自托管 SearXNG 实例，需要在 settings.yml 的 search.formats 中开启 json。
+// https://docs.searxng.org/dev/search_api.html
+const DEFAULT_SEARXNG_URL = 'http://127.0.0.1:8080';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_RESULTS = 20;
 const DEFAULT_COUNT = 5;
 const MAX_OUTPUT_LENGTH = 30_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 type SearchResult = {
   title: string;
@@ -16,16 +20,22 @@ type SearchResult = {
   snippet: string;
 };
 
-type SerperResponse = {
-  organic?: { title: string; link: string; snippet: string }[];
-  answerBox?: { title?: string; answer?: string; snippet?: string; link?: string };
-  knowledgeGraph?: { title?: string; type?: string; description?: string };
+type SearxngResponse = {
+  results?: { title?: string; url?: string; content?: string }[];
+  answers?: unknown[];
+  infoboxes?: { infobox?: string; content?: string; id?: string }[];
+  suggestions?: string[];
 };
 
 const resultCache = new LRUCache<string, SearchResult[]>({
   max: 500,
   ttl: CACHE_TTL_MS,
 });
+
+function resolveSearxngUrl(): string {
+  const configured = micaConfig.get().searxngUrl || process.env.SEARXNG_URL || DEFAULT_SEARXNG_URL;
+  return String(configured).trim().replace(/\/+$/, '');
+}
 
 function buildResponseText(engine: string, query: string, results: SearchResult[], extras: string[]): string {
   const lines: string[] = [`Search results for "${query}" (${results.length} results via ${engine}):`, ''];
@@ -78,54 +88,61 @@ export class ToolWebSearch extends MicaTool {
       return buildResponseText('cache', query, cached.slice(0, count), []);
     }
 
-    const apiKey = micaConfig.get().serperApiKey || process.env.SERPER_API_KEY;
-    if (!apiKey) {
-      return '未配置 serperApiKey（配置文件 ~/.mica/config.json）或 SERPER_API_KEY 环境变量。';
-    }
-
-    return await this._searchSerper(query, count, apiKey);
+    return await this._searchSearxng(query, count, resolveSearxngUrl());
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
     return `search ${truncateDisplayText(input.query as string, 6)}`;
   }
 
-  public async _searchSerper(query: string, count: number, apiKey: string): Promise<string> {
-    const response = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ q: query, num: count }),
-      signal: AbortSignal.timeout(15_000),
-    });
+  public async _searchSearxng(query: string, count: number, baseUrl: string): Promise<string> {
+    const params = new URLSearchParams({ q: query, format: 'json' });
 
-    if (!response.ok) {
-      throw new Error(`Serper HTTP ${response.status} ${response.statusText}`);
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/search?${params.toString()}`, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `无法连接 SearXNG（${baseUrl}）：${reason}。请确认实例正在运行，并用 config.json 的 searxngUrl 或 SEARXNG_URL 指定地址。`,
+      );
     }
 
-    const data = (await response.json()) as SerperResponse;
-    const results: SearchResult[] = (data.organic ?? []).slice(0, count).map((r) => ({
-      title: r.title,
-      link: r.link,
-      snippet: r.snippet ?? '',
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error(
+          `SearXNG（${baseUrl}）返回 403：该实例未开启 JSON 输出，请在 settings.yml 的 search.formats 中加入 json。`,
+        );
+      }
+      throw new Error(`SearXNG HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as SearxngResponse;
+    const results: SearchResult[] = (data.results ?? []).slice(0, count).map((r) => ({
+      title: r.title ?? '',
+      link: r.url ?? '',
+      snippet: r.content ?? '',
     }));
 
     const extras: string[] = [];
-    if (data.answerBox) {
-      const a = data.answerBox;
-      extras.push(`Answer box: ${a.title || a.answer || a.snippet || ''}`);
+    if (data.answers?.length) {
+      extras.push(`Answers: ${data.answers.map((a) => String(a)).join(' | ')}`);
     }
-    if (data.knowledgeGraph) {
-      const k = data.knowledgeGraph;
-      extras.push(`Knowledge graph: ${k.title} (${k.type}) — ${k.description || ''}`);
+    for (const box of (data.infoboxes ?? []).slice(0, 2)) {
+      if (box?.infobox) {
+        extras.push(`Infobox: ${box.infobox} — ${box.content ?? ''}${box.id ? ` (${box.id})` : ''}`);
+      }
+    }
+    if (data.suggestions?.length) {
+      extras.push(`Related queries: ${data.suggestions.slice(0, 8).join(', ')}`);
     }
 
     if (results.length > 0) {
       resultCache.set(`${query}:${count}`, results);
     }
 
-    return buildResponseText('Serper', query, results, extras);
+    return buildResponseText('SearXNG', query, results, extras);
   }
 }

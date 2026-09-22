@@ -196,8 +196,8 @@ export function validateConfig(input: unknown): ConfigValidationResult {
     }
   });
 
-  if (config.serperApiKey !== undefined && typeof config.serperApiKey !== 'string') {
-    add('error', 'serper_api_key_invalid', 'serperApiKey', '"serperApiKey" 必须是字符串。');
+  if (config.searxngUrl !== undefined && typeof config.searxngUrl !== 'string') {
+    add('error', 'searxng_url_invalid', 'searxngUrl', '"searxngUrl" 必须是字符串。');
   }
   validateMcpServers(config.mcpServers, add);
 

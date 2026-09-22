@@ -9,7 +9,7 @@
       "api_key": ""
     }
   ],
-  "serperApiKey": "",
+  "searxngUrl": "http://127.0.0.1:8080",
   "mcpServers": {
     "sequential-thinking": {
       "command": "npx",

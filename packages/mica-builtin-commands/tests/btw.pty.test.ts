@@ -129,7 +129,7 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       join(home, 'config.json'),
       JSON.stringify({
         providers: [{ id: 'mock', name: 'Mock', api_base: baseUrl, protocol: 'openai_responses', api_key: 'test' }],
-        serperApiKey: '',
+        searxngUrl: '',
         mcpServers: {},
       }),
     );

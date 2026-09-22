@@ -24,7 +24,8 @@ export interface ProviderDefinition {
 
 export interface PersistedMicaConfig {
   providers: ProviderDefinition[];
-  serperApiKey?: string;
+  /** Base URL of the self-hosted SearXNG instance used by the `web_search` tool. */
+  searxngUrl?: string;
   [key: string]: unknown;
 }
 
