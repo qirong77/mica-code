@@ -69,10 +69,7 @@ export function toolSummary(tool, max = 0) {
     case 'kill_task':
       return compactLine(input.task_id, max)
     default:
-      return compactLine(
-        Object.values(input).find((value) => typeof value === 'string') || '',
-        max
-      )
+      return compactLine(Object.values(input).find((value) => typeof value === 'string') || '', max)
   }
 }
 

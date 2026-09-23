@@ -40,7 +40,18 @@ const MAX_PREVIEW_LENGTH = 300
 
 function normalizeDirectory(value) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('directory is required')
-  return path.resolve(value)
+  return path.resolve(expandHome(value))
+}
+
+/**
+ * 聊天里识别出的路径可能写成 `~/...`（Agent 的输出常常是这种形态）。
+ * `path.resolve` 会把 `~` 当普通目录名，所以先自己展开。
+ */
+function expandHome(value) {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (trimmed !== '~' && !trimmed.startsWith('~/') && !trimmed.startsWith('~\\')) return trimmed
+  return path.join(app.getPath('home'), trimmed.slice(1))
 }
 
 function versionOf(buffer) {
@@ -402,6 +413,26 @@ export function registerFilesIpc() {
   ipcMain.handle('files:reveal', (_event, payload = {}) => {
     shell.showItemInFolder(normalizeDirectory(payload.path))
     return true
+  })
+
+  // 聊天文本 / 回合日志里点路径的默认动作：目录交给 Finder 打开，文件在文件管理器里
+  // 定位（macOS 是 `open -R`，会选中文件本身）。路径不存在时回错，由调用方提示，
+  // 不要静默打开一个不存在的目标。
+  ipcMain.handle('files:open-path', async (_event, payload = {}) => {
+    const target = path.resolve(expandHome(payload.path))
+    let info
+    try {
+      info = await stat(target)
+    } catch {
+      return { ok: false, error: `路径不存在：${target}` }
+    }
+    if (info.isDirectory()) {
+      const message = await shell.openPath(target)
+      if (message) return { ok: false, error: message }
+      return { ok: true, kind: 'directory', path: target }
+    }
+    shell.showItemInFolder(target)
+    return { ok: true, kind: 'file', path: target }
   })
 
   ipcMain.handle('files:read', async (_event, payload = {}) => {

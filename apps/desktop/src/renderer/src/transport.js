@@ -275,6 +275,8 @@ function createWebApi(env) {
         return relative
       },
       reveal: (path) => invoke('files:reveal', { path }),
+      // 聊天里点路径的默认动作：目录用 Finder 打开，文件在文件管理器里定位
+      openPath: (path) => invoke('files:open-path', { path }),
       orderGet: () => invoke('files:order-get'),
       orderSet: (directory, names) => invoke('files:order-set', { directory, names })
     },

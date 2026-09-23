@@ -113,9 +113,7 @@ describe('remarkPathLinks', () => {
   it('turns paths in text nodes into links', () => {
     const tree = run({
       type: 'root',
-      children: [
-        { type: 'paragraph', children: [{ type: 'text', value: '打开 /Users/a/b 看看' }] }
-      ]
+      children: [{ type: 'paragraph', children: [{ type: 'text', value: '打开 /Users/a/b 看看' }] }]
     })
     const children = tree.children[0].children
     expect(children.map((child) => child.type)).toEqual(['text', 'link', 'text'])

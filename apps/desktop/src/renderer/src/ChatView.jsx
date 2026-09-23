@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  memo,
   useMemo,
   useReducer,
   useRef,
@@ -29,8 +30,11 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
-import { toolIcon as sharedToolIcon, toolLabel as sharedToolLabel } from '@packages/mica-web-shared'
+import { toolIcon as sharedToolIcon } from '@packages/mica-web-shared'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
+import { ChatPathContext, PathText, PathToken } from './PathToken'
+import { parsePathHref, remarkPathLinks } from './chat-paths'
+import { collapsedOutput, toolCallText, toolOutput } from './chat-tool-display'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -261,13 +265,18 @@ function QueueDock({ items, onRecall, recallingId }) {
   )
 }
 
-function ImagePreviewModal({ source, alt, onClose }) {
+function isLocalPath(value) {
+  return /^(?:~\/|\/|[a-zA-Z]:[\\/])/.test(String(value || '')) && !String(value).startsWith('//')
+}
+
+function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
   useEffect(() => {
     const onKeyDown = (event) => event.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  const local = isLocalPath(source)
   return (
     <div
       className="chat-image-preview-overlay"
@@ -278,9 +287,27 @@ function ImagePreviewModal({ source, alt, onClose }) {
     >
       <div className="chat-image-preview">
         <img src={resolveImageSource(source)} alt={alt || '图片预览'} />
-        <button type="button" onClick={onClose} aria-label="关闭图片预览">
-          关闭
-        </button>
+        <div className="chat-image-preview-actions">
+          {local && (
+            <>
+              <span className="chat-image-preview-path" title={source}>
+                {source}
+              </span>
+              <button type="button" onClick={() => onOpenFile?.(source)}>
+                在编辑器中打开
+              </button>
+              <button type="button" onClick={() => void onReveal?.(source)}>
+                在 Finder 中显示
+              </button>
+            </>
+          )}
+          <button type="button" onClick={() => void copyText(source)}>
+            复制路径
+          </button>
+          <button type="button" onClick={onClose} aria-label="关闭图片预览">
+            关闭
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -424,6 +451,20 @@ export function resolveChatPath(target, cwd) {
 }
 
 function MarkdownLink({ href, children, onOpenFile }) {
+  // remark 插件把普通文本里的路径换成了 `#mica-path=` 链接（见 chat-paths.js），
+  // 这里把它还原成可点的路径元素，DOM 里不会留下这个 href。
+  const pathTarget = parsePathHref(href)
+  if (pathTarget) {
+    const text = nodeText(children)
+    return (
+      <PathToken
+        path={pathTarget.path}
+        text={text || pathTarget.path}
+        line={pathTarget.line}
+        column={pathTarget.column}
+      />
+    )
+  }
   const target = fileTarget(href)
   return (
     <a
@@ -442,7 +483,10 @@ function MarkdownLink({ href, children, onOpenFile }) {
   )
 }
 
-export function Markdown({ text, muted = false, onOpenFile, onPreviewImage }) {
+// 插件数组必须是稳定引用，否则每次渲染都会让 react-markdown 重新解析整篇文档
+const CHAT_REMARK_PLUGINS = [remarkGfm, remarkPathLinks]
+
+function MarkdownView({ text, muted = false, onOpenFile, onPreviewImage }) {
   const components = useMemo(
     () => ({
       a: ({ href, children }) => (
@@ -474,7 +518,7 @@ export function Markdown({ text, muted = false, onOpenFile, onPreviewImage }) {
   return (
     <div className={`chat-markdown ${muted ? 'chat-markdown-muted' : ''}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={CHAT_REMARK_PLUGINS}
         components={components}
         urlTransform={chatUrlTransform}
         skipHtml
@@ -485,58 +529,16 @@ export function Markdown({ text, muted = false, onOpenFile, onPreviewImage }) {
   )
 }
 
+// react-markdown 每次渲染都会重新解析整篇 markdown，而 ChatView 在运行中每 250ms
+// 就要重渲染一次（状态行计时）。memo 之后只有内容真的变了的消息才会重新解析——
+// 前提是调用方别每次渲染都传新的 onOpenFile/onPreviewImage（见 transcript 那段）。
+export const Markdown = memo(MarkdownView)
+
 function compactLine(value, max = 110) {
   const line = String(value || '')
     .replace(/\s+/g, ' ')
     .trim()
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
-}
-
-function toolSummary(tool) {
-  const input = tool.input || {}
-  switch (tool.tool) {
-    case 'read_file':
-    case 'read_image':
-      return compactLine(input.file_path || input.source || input.path)
-    case 'write_file':
-      return compactLine(input.file_path)
-    case 'apply_patch':
-      return compactLine(
-        String(input.patch || '').match(/\*\*\* (?:Update|Add) File: ([^\n]+)/)?.[1] || ''
-      )
-    case 'list_files':
-      return compactLine([input.path, input.pattern].filter(Boolean).join(' · '))
-    case 'grep_search':
-      return compactLine([input.pattern, input.path].filter(Boolean).join(' · '))
-    case 'run_shell':
-      return compactLine(input.command)
-    case 'web_search':
-      return compactLine(input.query)
-    case 'web_fetch':
-      return compactLine(input.url)
-    case 'Skill':
-      return compactLine(input.skill)
-    case 'Agent':
-      return compactLine(
-        [input.subagent_type, input.description || input.operation].filter(Boolean).join(' · ')
-      )
-    case 'background_tasks':
-      return compactLine(input.status || 'all')
-    case 'read_task_output':
-    case 'kill_task':
-      return compactLine(input.task_id)
-    default:
-      return compactLine(Object.values(input).find((value) => typeof value === 'string') || '')
-  }
-}
-
-function toolDisplayName(tool) {
-  if (tool.tool === 'Agent') {
-    const operation = tool.input?.operation || 'run'
-    if (operation === 'run_many') return 'Subagents'
-    if (operation !== 'run') return `Subagent · ${operation}`
-  }
-  return sharedToolLabel(tool.tool)
 }
 
 // 后台 subagent / 后台任务与 CLI TaskStatusBar 对齐：状态来自 app-server 的
@@ -1299,7 +1301,11 @@ function CommandRow({ message, onCommandAction }) {
       </span>
       <div className="chat-command-result-body">
         <div className="chat-command-result-title">{message.title}</div>
-        {message.detail && <pre>{message.detail}</pre>}
+        {message.detail && (
+          <pre>
+            <PathText text={message.detail} />
+          </pre>
+        )}
       </div>
       {message.action && (
         <button type="button" onClick={() => onCommandAction?.(message)}>
@@ -1321,16 +1327,54 @@ export function currentTurnActivityMessages(messages, turnId) {
   return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
 }
 
-function visibleShellOutput(tool, durationMs) {
-  // 阈值与 CLI 的 MICA_RUN_SHELL_* 同源（preload 注入），默认值一致。
+// 折叠状态下展示的输出行数取自 CLI 的 MICA_RUN_SHELL_LOG_MAX_LINES，但网页不再像
+// 终端那样「只有跑得够久才显示输出」——终端省的是屏幕高度，网页上折叠起来的尾行
+// 几乎不占地方，而「刚才那条命令到底输出什么」恰恰是最常被回看的信息。
+function collapsedOutputLines() {
   const config = typeof window !== 'undefined' ? window.mica?.runShellLogConfig : undefined
-  const threshold = config?.verboseThresholdMs ?? 10_000
-  const maxLines = config?.maxLines ?? 10
-  if (tool.tool !== 'run_shell' || durationMs <= threshold || !tool.output) return []
-  return String(tool.output).replace(/\n$/, '').split('\n').slice(-maxLines)
+  return config?.maxLines ?? 10
 }
 
-function TurnLogItem({ message, now }) {
+function ToolOutputBlock({ output, maxLines }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!output) return null
+  const collapsed = collapsedOutput(output, maxLines)
+  const expandedNow = expanded && collapsed.hidden > 0
+  const lines = expandedNow ? output.lines : collapsed.lines
+  const hidden = expandedNow ? 0 : collapsed.hidden
+  return (
+    <div className="chat-turn-log-output-block">
+      {hidden > 0 && (
+        <button
+          type="button"
+          className="chat-turn-log-more"
+          onClick={() => setExpanded(true)}
+          title="展开这条工具调用的完整输出"
+        >
+          … 上方还有 {hidden} 行（共 {output.lines.length} 行），点击展开
+        </button>
+      )}
+      {lines.map((line, index) => (
+        <div className="chat-turn-log-output" key={`${index}:${line}`}>
+          <span> │ </span>
+          <PathText text={line} />
+        </div>
+      ))}
+      {expandedNow && (
+        <button type="button" className="chat-turn-log-more" onClick={() => setExpanded(false)}>
+          收起输出
+        </button>
+      )}
+      {output.capped && (
+        <div className="chat-turn-log-output chat-turn-log-output-capped">
+          输出过长，此处只展示前 {output.lines.length} 行
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TurnLogItemView({ message, now }) {
   if (message.kind === 'reasoning') {
     return <div className="chat-turn-log-thinking">{message.text}</div>
   }
@@ -1350,7 +1394,6 @@ function TurnLogItem({ message, now }) {
       (tool.startedAt || tool.updatedAt || now)
   )
   const duration = formatLogElapsed(durationMs)
-  const outputLines = visibleShellOutput(tool, durationMs)
 
   return (
     <div className={`chat-turn-log-tool ${statusClass}`}>
@@ -1362,22 +1405,25 @@ function TurnLogItem({ message, now }) {
         )}
         <span className="chat-turn-log-icon">{getToolIcon(tool.tool)}</span>
         <span className="chat-turn-log-display">
-          {tool.displayText ||
-            `${toolDisplayName(tool)}${toolSummary(tool) ? ` ${toolSummary(tool)}` : ''}`}
+          <PathText text={toolCallText(tool)} />
         </span>
         {duration && (
           <span className="chat-turn-log-duration">{running ? duration : `(${duration})`}</span>
         )}
       </div>
-      {outputLines.map((line, index) => (
-        <div className="chat-turn-log-output" key={`${index}:${line}`}>
-          <span> │ </span>
-          {line}
-        </div>
-      ))}
+      <ToolOutputBlock output={toolOutput(tool)} maxLines={collapsedOutputLines()} />
     </div>
   )
 }
+
+// 回合日志每 250ms 随 chat-status-line 一起重渲染，已完成的行没必要跟着 `now` 重算
+// （多行输出展开后一次重渲染就是几千个节点）。
+const TurnLogItem = memo(TurnLogItemView, (previous, next) => {
+  if (previous.message !== next.message) return false
+  const status = next.message?.tool?.status
+  const settled = status && !['pending', 'running'].includes(status)
+  return settled ? true : previous.now === next.now
+})
 
 function TurnLogDock({ messages, now = Date.now() }) {
   const scrollRef = useRef(null)
@@ -1649,10 +1695,14 @@ function MessageRow({
           {message.variant === 'compact' && noticeLines.length > 1 ? (
             <>
               <span className="chat-notice-summary">{noticeLines[0]}</span>
-              <span className="chat-notice-text">{noticeLines.slice(1).join('\n')}</span>
+              <span className="chat-notice-text">
+                <PathText text={noticeLines.slice(1).join('\n')} />
+              </span>
             </>
           ) : (
-            <span className="chat-notice-text">{message.text}</span>
+            <span className="chat-notice-text">
+              <PathText text={message.text} />
+            </span>
           )}
         </div>
       </div>
@@ -1689,7 +1739,10 @@ function MessageRow({
         }}
       >
         <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
-        <div className="chat-message-body whitespace-pre-wrap break-words">{message.text}</div>
+        <div className="chat-message-body whitespace-pre-wrap break-words">
+          {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的 */}
+          <PathText text={message.text} />
+        </div>
         <MessageActions text={message.text} />
       </div>
     )
@@ -1719,7 +1772,12 @@ function WelcomeHint({ cwd }) {
         <span>❯</span> mica
       </div>
       <p>输入任务开始对话。Mica 会直接在当前工作区读取代码、调用工具并持续汇报进度。</p>
-      {cwd && <code>{cwd}</code>}
+      {cwd && (
+        <code>
+          {/* 欢迎页上的工作目录直接可点：省掉「先去 Files 面板找目录」这一步 */}
+          <PathText text={cwd} />
+        </code>
+      )}
     </div>
   )
 }
@@ -2185,6 +2243,27 @@ export function ChatView({
   )
 
   const openTaskDetail = useCallback((kind, task) => setTaskDetail({ kind, task }), [])
+
+  // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
+  // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
+  const revealPathInFinder = useCallback(
+    async (target) => {
+      try {
+        const result = await window.mica.files.openPath(target)
+        if (result && result.ok === false) {
+          appendNotice(`打开路径失败：${result.error || target}`, 'warn')
+        }
+        return result
+      } catch (error) {
+        appendNotice(
+          `打开路径失败：${error instanceof Error ? error.message : String(error)}`,
+          'warn'
+        )
+        return { ok: false }
+      }
+    },
+    [appendNotice]
+  )
 
   const killBackgroundTask = useCallback(
     async (task) => {
@@ -4280,419 +4359,450 @@ export function ChatView({
     </div>
   )
 
-  return (
-    <div
-      className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
-      onPointerDownCapture={focusComposerFromShell}
-      onPointerMoveCapture={trackShellPointerMove}
-      onMouseUp={focusComposerFromShell}
-      onContextMenu={openChatContextMenu}
-      {...longPressHandlers(openChatContextMenu)}
-    >
-      <div
-        ref={listRef}
-        className="chat-scroll"
-        onScroll={(event) => {
-          const element = event.currentTarget
-          const atBottom =
-            element.scrollHeight - element.scrollTop - element.clientHeight <
-            SCROLL_BOTTOM_THRESHOLD
-          stickToBottomRef.current = atBottom
-          setShowJump(!atBottom)
-        }}
-      >
-        <div ref={transcriptRef} className="chat-transcript">
-          {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
-          {showEmpty && <WelcomeHint cwd={cwd} />}
-          {transcriptMessages.map((message) => {
-            const onOpenFile = (path, position) =>
-              onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position)
-            const onPreviewImage = (source, alt) => setImagePreview({ source, alt })
-            return (
-              <MessageRow
-                key={message.id}
-                message={message}
-                onOpenFile={onOpenFile}
-                onPreviewImage={onPreviewImage}
-                onCommandAction={(item) => {
-                  if (item.action === 'terminal') {
-                    void copyText(item.command)
-                    onOpenTerminalRef.current?.()
-                  }
-                }}
-                edit={
-                  messageEdit?.id === message.id
-                    ? {
-                        text: messageEdit.text,
-                        busy: running,
-                        canSubmit: canSubmitMessageEdit({ running, text: messageEdit.text })
-                      }
-                    : null
-                }
-                onEditStart={startMessageEdit}
-                onEditChange={changeMessageEdit}
-                onEditCancel={cancelMessageEdit}
-                onEditSubmit={submitMessageEdit}
-              />
-            )
-          })}
-          <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
-        </div>
-      </div>
+  // 打开文件 / 预览图片的回调要跨渲染保持同一引用：Markdown 的 memo 与它内部的
+  // components useMemo 都按引用比较，换新会每次都让 react-markdown 重新解析整篇
+  // markdown（运行中 ChatView 每 250ms 重渲染一次）。
+  const transcriptOpenFile = useCallback(
+    (path, position) => onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position),
+    []
+  )
+  const transcriptPreviewImage = useCallback((source, alt) => setImagePreview({ source, alt }), [])
 
-      <div ref={composerDockRef} className="chat-composer-dock">
-        {showJump && (
-          <button
-            type="button"
-            className="chat-jump"
-            onClick={() => {
-              stickToBottomRef.current = true
-              setShowJump(false)
-              const list = listRef.current
-              if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
-            }}
-          >
-            <IconArrowDown size={13} /> 最新消息
-          </button>
-        )}
-        {picker && (
-          <SelectPalette
-            paletteRef={pickerRef}
-            title={picker.title}
-            options={picker.options || []}
-            activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
-            onActiveIndex={setPickerIndex}
-            onSelect={selectPickerOption}
-            selectedValue={
-              (overridesRef.current.get(nodeId) || {})[picker.kind] ||
-              (picker.kind === 'variant'
-                ? meta?.effort || 'none'
-                : picker.kind === 'role'
-                  ? meta?.role || 'default'
-                  : meta?.model) ||
-              ''
-            }
-            loading={picker.loading}
-            error={picker.error}
-          />
-        )}
-        {completion && !picker && (
-          <ComposerCompletionPalette
-            title={completion.kind === 'skill' ? '选择 skill' : '引用文件'}
-            options={completionItems}
-            activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
-            onActiveIndex={setCompletionIndex}
-            onSelect={selectCompletion}
-            loading={completionLoading}
-            hint={completion.kind === 'skill' ? '没有匹配的 skill' : '没有匹配的文件'}
-          />
-        )}
-        <TodoDock items={todoItems} hidden={todoHidden} />
-        <SubagentStatusDock
-          tasks={subagentTasks}
-          now={taskNow}
-          onOpen={(task) => openTaskDetail('subagent', task)}
-        />
-        <BackgroundTasksDock
-          tasks={backgroundTasks}
-          now={taskNow}
-          onOpen={(task) => openTaskDetail('background', task)}
-          onKill={killBackgroundTask}
-          killingId={killingTaskId}
-        />
-        <QueueDock
-          items={queuedDisplayItems}
-          onRecall={recallQueued}
-          recallingId={recallingQueueId}
-        />
-        <ComposerImageStrip
-          text={input}
-          onPreview={(source, alt) => setImagePreview({ source, alt })}
-        />
+  // 聊天文本、notice、回合日志里的路径统一走这里：cwd 只在 ChatView 里解析一次
+  // （cwdRef 是 ref，所以这个对象可以稳定），子组件（PathToken）只负责决定
+  // 「单击 / ⌘ 单击 / 图片」分别触发哪个动作。
+  // 必须 useMemo：context 值每次渲染都换新会强制所有 PathToken 重渲染，把
+  // Markdown / TurnLogItem 的 memo 一起废掉。
+  const pathActions = useMemo(
+    () => ({
+      resolvePath: (raw) => resolveChatPath(raw, cwdRef.current),
+      openFile: transcriptOpenFile,
+      preview: (path, text) =>
+        setImagePreview({
+          source: resolveChatPath(path, cwdRef.current),
+          alt: String(path).split(/[\\/]/).filter(Boolean).pop() || text || '图片'
+        }),
+      reveal: (path) => revealPathInFinder(resolveChatPath(path, cwdRef.current))
+    }),
+    [revealPathInFinder, transcriptOpenFile]
+  )
+
+  return (
+    <ChatPathContext.Provider value={pathActions}>
+      <div
+        className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
+        onPointerDownCapture={focusComposerFromShell}
+        onPointerMoveCapture={trackShellPointerMove}
+        onMouseUp={focusComposerFromShell}
+        onContextMenu={openChatContextMenu}
+        {...longPressHandlers(openChatContextMenu)}
+      >
         <div
-          className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
-          style={
-            composerMinHeight != null
-              ? {
-                  '--chat-composer-min-h': `${composerMinHeight}px`,
-                  '--chat-composer-max-h': `${Math.max(composerMinHeight, 180)}px`
-                }
-              : undefined
-          }
+          ref={listRef}
+          className="chat-scroll"
+          onScroll={(event) => {
+            const element = event.currentTarget
+            const atBottom =
+              element.scrollHeight - element.scrollTop - element.clientHeight <
+              SCROLL_BOTTOM_THRESHOLD
+            stickToBottomRef.current = atBottom
+            setShowJump(!atBottom)
+          }}
         >
-          <button
-            type="button"
-            className="chat-composer-resizer"
-            aria-label="拖动调整输入框高度"
-            title="拖动调整输入框高度"
-            onPointerDown={startComposerResize}
-          >
-            <IconDots size={14} stroke={1.6} />
-          </button>
-          {queueReady && (
-            <span className="chat-composer-frame-label">Enter/Tab 在下一个工具调用迭代后发送</span>
-          )}
-          {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
-          <button
-            type="button"
-            className="chat-prompt-mark"
-            title={`当前角色：${activeRole}（点击切换）`}
-            aria-label="切换角色"
-            data-chat-picker-trigger
-            onClick={() => openPicker('role')}
-          >
-            {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
-            <span className="chat-prompt-caret" aria-hidden="true">
-              {queueReady ? '↳' : '›'}
-            </span>
-          </button>
-          {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
-              CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            className="sr-only"
-            aria-hidden="true"
-            tabIndex={-1}
-            onChange={(event) => {
-              const files = Array.from(event.target.files || [])
-              // 先取走 FileList 再清空，否则同一个文件不会二次触发 change
-              event.target.value = ''
-              void attachImages(files)
-            }}
-          />
-          <TerminalComposer
-            value={input}
-            placeholder={
-              running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'
-            }
-            textareaRef={textareaRef}
-            onChange={(nextValue) => {
-              draftsRef.current.set(nodeId, nextValue)
-              historyCursorRef.current = -1
-              setInput(nextValue)
-            }}
-            onPaste={(event) => {
-              const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) =>
-                item.type.startsWith('image/')
+          <div ref={transcriptRef} className="chat-transcript">
+            {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
+            {showEmpty && <WelcomeHint cwd={cwd} />}
+            {transcriptMessages.map((message) => {
+              return (
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  onOpenFile={transcriptOpenFile}
+                  onPreviewImage={transcriptPreviewImage}
+                  onCommandAction={(item) => {
+                    if (item.action === 'terminal') {
+                      void copyText(item.command)
+                      onOpenTerminalRef.current?.()
+                    }
+                  }}
+                  edit={
+                    messageEdit?.id === message.id
+                      ? {
+                          text: messageEdit.text,
+                          busy: running,
+                          canSubmit: canSubmitMessageEdit({ running, text: messageEdit.text })
+                        }
+                      : null
+                  }
+                  onEditStart={startMessageEdit}
+                  onEditChange={changeMessageEdit}
+                  onEditCancel={cancelMessageEdit}
+                  onEditSubmit={submitMessageEdit}
+                />
               )
-              if (!imageItem) return
-              event.preventDefault()
-              // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
-              const file = imageItem.getAsFile?.() || null
-              const fallback = event.clipboardData?.getData('text/plain') ?? ''
-              window.mica.chat
-                .savePastedImage(window.mica.isWeb ? { file } : undefined)
-                .then((result) =>
-                  insertComposerText(result?.ok ? `[Image](${result.ref})` : fallback)
+            })}
+            <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
+          </div>
+        </div>
+
+        <div ref={composerDockRef} className="chat-composer-dock">
+          {showJump && (
+            <button
+              type="button"
+              className="chat-jump"
+              onClick={() => {
+                stickToBottomRef.current = true
+                setShowJump(false)
+                const list = listRef.current
+                if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+              }}
+            >
+              <IconArrowDown size={13} /> 最新消息
+            </button>
+          )}
+          {picker && (
+            <SelectPalette
+              paletteRef={pickerRef}
+              title={picker.title}
+              options={picker.options || []}
+              activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
+              onActiveIndex={setPickerIndex}
+              onSelect={selectPickerOption}
+              selectedValue={
+                (overridesRef.current.get(nodeId) || {})[picker.kind] ||
+                (picker.kind === 'variant'
+                  ? meta?.effort || 'none'
+                  : picker.kind === 'role'
+                    ? meta?.role || 'default'
+                    : meta?.model) ||
+                ''
+              }
+              loading={picker.loading}
+              error={picker.error}
+            />
+          )}
+          {completion && !picker && (
+            <ComposerCompletionPalette
+              title={completion.kind === 'skill' ? '选择 skill' : '引用文件'}
+              options={completionItems}
+              activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
+              onActiveIndex={setCompletionIndex}
+              onSelect={selectCompletion}
+              loading={completionLoading}
+              hint={completion.kind === 'skill' ? '没有匹配的 skill' : '没有匹配的文件'}
+            />
+          )}
+          <TodoDock items={todoItems} hidden={todoHidden} />
+          <SubagentStatusDock
+            tasks={subagentTasks}
+            now={taskNow}
+            onOpen={(task) => openTaskDetail('subagent', task)}
+          />
+          <BackgroundTasksDock
+            tasks={backgroundTasks}
+            now={taskNow}
+            onOpen={(task) => openTaskDetail('background', task)}
+            onKill={killBackgroundTask}
+            killingId={killingTaskId}
+          />
+          <QueueDock
+            items={queuedDisplayItems}
+            onRecall={recallQueued}
+            recallingId={recallingQueueId}
+          />
+          <ComposerImageStrip
+            text={input}
+            onPreview={(source, alt) => setImagePreview({ source, alt })}
+          />
+          <div
+            className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
+            style={
+              composerMinHeight != null
+                ? {
+                    '--chat-composer-min-h': `${composerMinHeight}px`,
+                    '--chat-composer-max-h': `${Math.max(composerMinHeight, 180)}px`
+                  }
+                : undefined
+            }
+          >
+            <button
+              type="button"
+              className="chat-composer-resizer"
+              aria-label="拖动调整输入框高度"
+              title="拖动调整输入框高度"
+              onPointerDown={startComposerResize}
+            >
+              <IconDots size={14} stroke={1.6} />
+            </button>
+            {queueReady && (
+              <span className="chat-composer-frame-label">
+                Enter/Tab 在下一个工具调用迭代后发送
+              </span>
+            )}
+            {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
+            <button
+              type="button"
+              className="chat-prompt-mark"
+              title={`当前角色：${activeRole}（点击切换）`}
+              aria-label="切换角色"
+              data-chat-picker-trigger
+              onClick={() => openPicker('role')}
+            >
+              {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
+              <span className="chat-prompt-caret" aria-hidden="true">
+                {queueReady ? '↳' : '›'}
+              </span>
+            </button>
+            {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
+              CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="sr-only"
+              aria-hidden="true"
+              tabIndex={-1}
+              onChange={(event) => {
+                const files = Array.from(event.target.files || [])
+                // 先取走 FileList 再清空，否则同一个文件不会二次触发 change
+                event.target.value = ''
+                void attachImages(files)
+              }}
+            />
+            <TerminalComposer
+              value={input}
+              placeholder={
+                running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'
+              }
+              textareaRef={textareaRef}
+              onChange={(nextValue) => {
+                draftsRef.current.set(nodeId, nextValue)
+                historyCursorRef.current = -1
+                setInput(nextValue)
+              }}
+              onPaste={(event) => {
+                const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) =>
+                  item.type.startsWith('image/')
                 )
-                .catch(() => {})
-            }}
-            onKeyDown={(event) => {
-              // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
-              if (completion && completionItems.length > 0) {
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault()
-                  setCompletionIndex((value) => (value + 1) % completionItems.length)
-                  return
-                }
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  setCompletionIndex(
-                    (value) => (value - 1 + completionItems.length) % completionItems.length
+                if (!imageItem) return
+                event.preventDefault()
+                // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
+                const file = imageItem.getAsFile?.() || null
+                const fallback = event.clipboardData?.getData('text/plain') ?? ''
+                window.mica.chat
+                  .savePastedImage(window.mica.isWeb ? { file } : undefined)
+                  .then((result) =>
+                    insertComposerText(result?.ok ? `[Image](${result.ref})` : fallback)
                   )
+                  .catch(() => {})
+              }}
+              onKeyDown={(event) => {
+                // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
+                if (completion && completionItems.length > 0) {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    setCompletionIndex((value) => (value + 1) % completionItems.length)
+                    return
+                  }
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    setCompletionIndex(
+                      (value) => (value - 1 + completionItems.length) % completionItems.length
+                    )
+                    return
+                  }
+                  if (
+                    (event.key === 'Enter' || event.key === 'Tab') &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    selectCompletion(
+                      completionItems[Math.min(completionIndex, completionItems.length - 1)]
+                    )
+                    return
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setCompletion(null)
+                    return
+                  }
+                }
+                if (picker) {
+                  const options = picker.options || []
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    if (options.length) setPickerIndex((value) => (value + 1) % options.length)
+                    return
+                  }
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    if (options.length) {
+                      setPickerIndex((value) => (value - 1 + options.length) % options.length)
+                    }
+                    return
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    if (options.length) {
+                      selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
+                    }
+                    return
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setPicker(null)
+                    return
+                  }
                   return
                 }
                 if (
-                  (event.key === 'Enter' || event.key === 'Tab') &&
-                  !event.shiftKey &&
+                  event.key === 'ArrowLeft' &&
+                  event.shiftKey &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  // 与 CLI 的 TerminalInput 同一条规则：输入框为空时 shift + ← 才是
+                  // 「撤回排队消息」，非空时留给 textarea 自己扩展选区。
+                  input.length === 0 &&
+                  queuedDisplayItems.length > 0 &&
                   !event.nativeEvent.isComposing
                 ) {
                   event.preventDefault()
-                  selectCompletion(
-                    completionItems[Math.min(completionIndex, completionItems.length - 1)]
-                  )
+                  void recallQueued()
                   return
                 }
-                if (event.key === 'Escape') {
+                // 输入历史只由 Alt+↑/↓ 触发；单独的 ↑/↓ 交给 textarea 自己移动光标
+                // （多行输入里逐行上下移动，不做「到首/末行就翻历史」的隐式切换）。
+                if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
                   event.preventDefault()
-                  setCompletion(null)
+                  navigateInputHistory(-1)
                   return
                 }
-              }
-              if (picker) {
-                const options = picker.options || []
-                if (event.key === 'ArrowDown') {
+                if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
                   event.preventDefault()
-                  if (options.length) setPickerIndex((value) => (value + 1) % options.length)
+                  navigateInputHistory(1)
                   return
                 }
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  if (options.length) {
-                    setPickerIndex((value) => (value - 1 + options.length) % options.length)
+                if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
+                  const tabAction = resolveComposerTabAction({
+                    shiftKey: event.shiftKey,
+                    queueReady
+                  })
+                  if (tabAction === 'queue') {
+                    event.preventDefault()
+                    send(null, { queueMode: 'after_iteration' })
+                    return
                   }
-                  return
+                  if (tabAction === 'cycle-role') {
+                    event.preventDefault()
+                    openPicker('role')
+                    return
+                  }
                 }
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
-                  if (options.length) {
-                    selectPickerOption(options[Math.min(pickerIndex, options.length - 1)])
-                  }
-                  return
+                  // 忙时排队只有一种时机：after_iteration（在下一个工具调用迭代
+                  // 边界注入当前 turn）。与 Tab/Shift+Tab 排队同一条路径，不再等
+                  // 整个 turn 结束才作为下一条消息发出。
+                  send(null, running ? { queueMode: 'after_iteration' } : undefined)
                 }
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  setPicker(null)
-                  return
-                }
-                return
-              }
-              if (
-                event.key === 'ArrowLeft' &&
-                event.shiftKey &&
-                !event.altKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                // 与 CLI 的 TerminalInput 同一条规则：输入框为空时 shift + ← 才是
-                // 「撤回排队消息」，非空时留给 textarea 自己扩展选区。
-                input.length === 0 &&
-                queuedDisplayItems.length > 0 &&
-                !event.nativeEvent.isComposing
-              ) {
-                event.preventDefault()
-                void recallQueued()
-                return
-              }
-              // 输入历史只由 Alt+↑/↓ 触发；单独的 ↑/↓ 交给 textarea 自己移动光标
-              // （多行输入里逐行上下移动，不做「到首/末行就翻历史」的隐式切换）。
-              if (event.altKey && event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                navigateInputHistory(-1)
-                return
-              }
-              if (event.altKey && event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                navigateInputHistory(1)
-                return
-              }
-              if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
-                const tabAction = resolveComposerTabAction({
-                  shiftKey: event.shiftKey,
-                  queueReady
-                })
-                if (tabAction === 'queue') {
-                  event.preventDefault()
-                  send(null, { queueMode: 'after_iteration' })
-                  return
-                }
-                if (tabAction === 'cycle-role') {
-                  event.preventDefault()
-                  openPicker('role')
-                  return
-                }
-              }
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                // 忙时排队只有一种时机：after_iteration（在下一个工具调用迭代
-                // 边界注入当前 turn）。与 Tab/Shift+Tab 排队同一条路径，不再等
-                // 整个 turn 结束才作为下一条消息发出。
-                send(null, running ? { queueMode: 'after_iteration' } : undefined)
-              }
-            }}
-          />
-          <div className="chat-composer-actions">
-            <button
-              type="button"
-              title="上传图片"
-              aria-label="上传图片"
-              onClick={() => imageInputRef.current?.click()}
-            >
-              <IconPhoto size={13} />
-            </button>
-            <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
-            {running ? (
-              <>
-                {queueReady && (
-                  <button
-                    type="button"
-                    className="chat-composer-queue-send"
-                    title="加入发送队列"
-                    aria-label="加入发送队列"
-                    onClick={send}
-                  >
-                    <IconSend size={13} />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="chat-composer-stop"
-                  title="停止生成"
-                  aria-label="停止生成"
-                  onClick={stop}
-                >
-                  {stopping ? (
-                    <IconLoader2 size={13} className="animate-spin" />
-                  ) : (
-                    <IconSquare size={12} />
-                  )}
-                </button>
-              </>
-            ) : input.trim() ? (
+              }}
+            />
+            <div className="chat-composer-actions">
               <button
                 type="button"
-                title={remoteRunning ? '该会话正在另一个进程里运行' : '发送'}
-                aria-label="发送"
-                disabled={!input.trim() || remoteRunning}
-                onClick={send}
+                title="上传图片"
+                aria-label="上传图片"
+                onClick={() => imageInputRef.current?.click()}
               >
-                <IconSend size={13} />
+                <IconPhoto size={13} />
               </button>
-            ) : null}
+              <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
+              {running ? (
+                <>
+                  {queueReady && (
+                    <button
+                      type="button"
+                      className="chat-composer-queue-send"
+                      title="加入发送队列"
+                      aria-label="加入发送队列"
+                      onClick={send}
+                    >
+                      <IconSend size={13} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-composer-stop"
+                    title="停止生成"
+                    aria-label="停止生成"
+                    onClick={stop}
+                  >
+                    {stopping ? (
+                      <IconLoader2 size={13} className="animate-spin" />
+                    ) : (
+                      <IconSquare size={12} />
+                    )}
+                  </button>
+                </>
+              ) : input.trim() ? (
+                <button
+                  type="button"
+                  title={remoteRunning ? '该会话正在另一个进程里运行' : '发送'}
+                  aria-label="发送"
+                  disabled={!input.trim() || remoteRunning}
+                  onClick={send}
+                >
+                  <IconSend size={13} />
+                </button>
+              ) : null}
+            </div>
           </div>
+          {imagePreview && (
+            <ImagePreviewModal
+              source={imagePreview.source}
+              alt={imagePreview.alt}
+              onClose={() => setImagePreview(null)}
+              onReveal={pathActions.reveal}
+              onOpenFile={(path) => pathActions.openFile(path, {})}
+            />
+          )}
+          {statusLine}
         </div>
-        {imagePreview && (
-          <ImagePreviewModal
-            source={imagePreview.source}
-            alt={imagePreview.alt}
-            onClose={() => setImagePreview(null)}
+        {contextDetail && (
+          <ContextDetailPopover
+            sessionId={sessionIdRef.current}
+            contextWindowSize={windowSize}
+            onClose={() => setContextDetail(false)}
           />
         )}
-        {statusLine}
+        {taskDetail?.kind === 'subagent' && (
+          <SubagentDetailModal
+            runKey={runKey}
+            task={taskDetail.task}
+            onClose={() => setTaskDetail(null)}
+            onStop={stopSubagent}
+          />
+        )}
+        {taskDetail?.kind === 'background' && (
+          <BackgroundTaskModal
+            runKey={runKey}
+            task={taskDetail.task}
+            onClose={() => setTaskDetail(null)}
+            onKill={killBackgroundTask}
+          />
+        )}
+        {contextMenu && (
+          <ChatContextMenu
+            menu={contextMenu}
+            onAction={runContextMenuAction}
+            onClose={closeContextMenu}
+            commitRunning={commitRunning}
+          />
+        )}
       </div>
-      {contextDetail && (
-        <ContextDetailPopover
-          sessionId={sessionIdRef.current}
-          contextWindowSize={windowSize}
-          onClose={() => setContextDetail(false)}
-        />
-      )}
-      {taskDetail?.kind === 'subagent' && (
-        <SubagentDetailModal
-          runKey={runKey}
-          task={taskDetail.task}
-          onClose={() => setTaskDetail(null)}
-          onStop={stopSubagent}
-        />
-      )}
-      {taskDetail?.kind === 'background' && (
-        <BackgroundTaskModal
-          runKey={runKey}
-          task={taskDetail.task}
-          onClose={() => setTaskDetail(null)}
-          onKill={killBackgroundTask}
-        />
-      )}
-      {contextMenu && (
-        <ChatContextMenu
-          menu={contextMenu}
-          onAction={runContextMenuAction}
-          onClose={closeContextMenu}
-          commitRunning={commitRunning}
-        />
-      )}
-    </div>
+    </ChatPathContext.Provider>
   )
 }

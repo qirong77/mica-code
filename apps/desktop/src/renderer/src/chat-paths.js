@@ -31,10 +31,7 @@ const PATH_BODY_STOP = `\\s'"\`<>|*?,;()\\[\\]{}，。、；：！？（）【�
 const ANCHORED = `(?:[A-Za-z]:[\\\\/]|~[\\\\/]|\\.{1,2}[\\\\/]|/)[^${PATH_BODY_STOP}\\n]+`
 // 相对路径：至少一个分隔符，是否采纳交给 looksLikePath
 const RELATIVE = `(?:[\\w@+.-]+[\\\\/])+[\\w@+.-]+`
-const PATH_PATTERN = new RegExp(
-  `${BOUNDARY}(${ANCHORED}|${RELATIVE})(?::(\\d+))?(?::(\\d+))?`,
-  'g'
-)
+const PATH_PATTERN = new RegExp(`${BOUNDARY}(${ANCHORED}|${RELATIVE})(?::(\\d+))?(?::(\\d+))?`, 'g')
 
 // 路径尾部的标点：句读、右括号、引号、表格分隔符等都不属于路径本身
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}>'"`。，、；：！？）】」』》…]+$/

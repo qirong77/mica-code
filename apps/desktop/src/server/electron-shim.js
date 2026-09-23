@@ -98,13 +98,29 @@ function moveToTrash(target) {
 /** 在服务端所在的机器上打开文件所在的目录（文件本身就在这台机器上） */
 function revealItem(target) {
   const absolute = resolvePath(target)
-  const dir = isDirectory(absolute) ? absolute : dirname(absolute)
+  const command =
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+  // macOS 用 `open -R` 在 Finder 里选中文件本身；目录直接打开该目录
+  const args =
+    process.platform === 'darwin' && !isDirectory(absolute) ? ['-R', absolute] : [absolute]
+  try {
+    execFile(command, args, () => {})
+  } catch {
+    // 无桌面环境时静默跳过
+  }
+}
+
+/** 与 `shell.openPath` 对齐：目录交给系统文件管理器打开，成功返回空串 */
+function openPathItem(target) {
+  const absolute = resolvePath(target)
   const command =
     process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
   try {
-    execFile(command, [dir], () => {})
+    execFile(command, [absolute], () => {})
+    return ''
   } catch {
     // 无桌面环境时静默跳过
+    return ''
   }
 }
 
@@ -174,6 +190,9 @@ export const shell = {
   // 网页端由浏览器自己打开外链（见 renderer 的 transport 适配）
   async openExternal() {
     return true
+  },
+  async openPath(target) {
+    return openPathItem(target)
   },
   showItemInFolder(target) {
     revealItem(target)

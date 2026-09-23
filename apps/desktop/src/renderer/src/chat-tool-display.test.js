@@ -12,9 +12,7 @@ describe('toolDisplayName', () => {
   it('labels Agent variants', () => {
     expect(toolDisplayName({ tool: 'Agent', input: {} })).toBe('Subagent')
     expect(toolDisplayName({ tool: 'Agent', input: { operation: 'run_many' } })).toBe('Subagents')
-    expect(toolDisplayName({ tool: 'Agent', input: { operation: 'read' } })).toBe(
-      'Subagent · read'
-    )
+    expect(toolDisplayName({ tool: 'Agent', input: { operation: 'read' } })).toBe('Subagent · read')
   })
 
   it('falls back to the shared tool label', () => {
