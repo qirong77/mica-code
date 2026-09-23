@@ -29,7 +29,7 @@ const sessions = store.list(10);
 - `turnState` 记录最近一轮是 `running`、`completed`、`aborted` 还是 `error`；旧会话缺少该字段时按 `completed` 读取。
 - 列表里的垃圾会话（`list`/`listRecent` 不展示、重建索引时删文件）指**占位标题 `Untitled session` + 无 user/assistant 对话 + 无 usage** 的空占位；`SessionSummary` 的 `hasConversation`/`hasUsage` 承载后两项，隐藏与删除共用同一谓词。`turnState === 'running'` 的会话一律保留且照常列出：那是异常终止留下的、需要用户找回并续跑的会话。
 - `session-index.json` 是元数据缓存，不是事实来源；字段不完整（例如旧版本写入、缺少 `hasConversation`/`hasUsage`）时整条 entry 会被拒绝并触发一次重建，避免把缺字段误读成「无内容」而隐藏真实会话。
-- `snapshot.subagentUsageHistory`（可选）保存该会话 owner 发起的 subagent 任务 usage（逐条请求 + 任务元数据）；旧快照缺少该字段时按空数组读取。
+- `snapshot.subagentUsageHistory`（可选）保存该会话 owner 发起的 subagent 任务 usage（逐条请求 + 任务元数据），包括 Agent 工具的子任务与 helper 子代理（commit message / btw / compact 摘要，以及 `mica commit --session <id>` 写回的那条）；旧快照缺少该字段时按空数组读取。fork 不继承它（也不继承 `usageHistory`），只继承描述继承上下文的 `lastUsage`。
 - 新增会话字段时应明确版本策略和默认值。
 
 ## 目录说明

@@ -92,6 +92,34 @@ describe('createBtwCommand / runBtw', () => {
     );
   });
 
+  it('records every btw request as session usage exactly once', async () => {
+    const usageHistory: Array<Record<string, unknown>> = [];
+    const query = vi.fn(async () => {
+      usageHistory.push({
+        usageId: `btw-${usageHistory.length + 1}`,
+        inputTokens: 10,
+        outputTokens: 1,
+      });
+      return '答案';
+    });
+    const recordSubagentUsage = vi.fn();
+    const agent = makeAgent(query, { usageHistory, recordSubagentUsage });
+    const services = makeServices();
+
+    await runBtw(agent, services, '这个方案可行吗');
+    await runBtw(agent, services, '-continue 那具体怎么落地');
+
+    expect(recordSubagentUsage).toHaveBeenCalledTimes(2);
+    const first = recordSubagentUsage.mock.calls[0]?.[0] as { subagentType: string; description: string; requests: Array<{ usageId: string }>; summary: { records: number } };
+    expect(first.subagentType).toBe('btw');
+    expect(first.description).toBe('这个方案可行吗');
+    expect(first.requests.map((request) => request.usageId)).toEqual(['btw-1']);
+    expect(first.summary.records).toBe(1);
+    // `-continue` reuses the subagent: only the new request is billed, not the whole history again.
+    const second = recordSubagentUsage.mock.calls[1]?.[0] as { requests: Array<{ usageId: string }> };
+    expect(second.requests.map((request) => request.usageId)).toEqual(['btw-2']);
+  });
+
   it('falls back to a new thread and notes it when continuing with no prior btw', async () => {
     const query = vi.fn(async () => '答案');
     const agent = makeAgent(query);
@@ -124,10 +152,16 @@ describe('createBtwCommand / runBtw', () => {
   });
 });
 
-function makeAgent(query: () => Promise<string>): CommandAgent {
+function makeAgent(
+  query: () => Promise<string>,
+  options: { usageHistory?: unknown[]; recordSubagentUsage?: (record: unknown) => void } = {},
+): CommandAgent {
   return {
+    config: { model: 'm', effort: 'none', provider: { id: 'test' } },
+    isRunning: false,
+    recordSubagentUsage: options.recordSubagentUsage,
     getSnapshot: vi.fn(() => ({ providerId: 'test', model: 'm', effort: 'none', messages: [] })),
-    createSubAgent: vi.fn(() => ({ query })),
+    createSubAgent: vi.fn(() => ({ query, usageHistory: options.usageHistory })),
   } as unknown as CommandAgent;
 }
 

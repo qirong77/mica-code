@@ -10,7 +10,9 @@ import {
   git,
   hasUnmergedFiles,
   pushCurrentBranch,
+  type CommitMessageResult,
 } from '../git/commitRunner.js';
+import { recordHelperSubagentUsage } from '../subagentUsage.js';
 
 export function createCommitCommand(
   agent: CommandAgent,
@@ -54,7 +56,9 @@ async function runAgentCommit(
     setCommitStatus(agent, services, 'commit agent: 正在整理当前 Agent 的改动...', ownerSessionId);
     prepared = tracker.prepareIndex(agent.taskOwnerId);
     const summary = buildAgentChangeSummary(prepared.indexPath, prepared.files);
-    const commitMessage = await generateCommitMessage(agent, summary);
+    const startedAt = new Date().toISOString();
+    const { message: commitMessage, requests } = await generateCommitMessage(agent, summary);
+    recordCommitUsage(agent, services, requests, startedAt);
     setCommitStatus(agent, services, `commit agent: ${firstLine(commitMessage)}`, ownerSessionId);
     commitWithMessage(commitMessage, prepared.indexPath);
     prepared.finish();
@@ -102,6 +106,29 @@ function buildAgentChangeSummary(indexPath: string, files: string[]): string {
 const MAX_SUMMARY_CHARS = 20_000;
 const MAX_TOTAL_DIFF_CHARS = 12_000;
 
+/**
+ * commit message 的请求走 helper 子代理，用量必须记进当前会话：它同样是本会话真实
+ * 产生的开销，不记就会在 Stats / 平台对账里凭空少一批请求。
+ */
+function recordCommitUsage(
+  agent: CommandAgent,
+  services: CommandRuntimeServices,
+  requests: CommitMessageResult['requests'],
+  startedAt: string,
+) {
+  if (requests.length === 0) return;
+  recordHelperSubagentUsage(agent, services, requests, {
+    taskId: 'commit-message',
+    subagentType: 'commit',
+    description: '生成 commit message',
+    model: agent.config.model,
+    effort: 'none',
+    status: 'completed',
+    startedAt,
+    finishedAt: new Date().toISOString(),
+  });
+}
+
 function setCommitStatus(agent: CommandAgent, services: CommandRuntimeServices, text: string, ownerSessionId?: string) {
   services.setPluginStatus(agent, text, {
     ownerSessionId,
@@ -139,7 +166,9 @@ async function runCommit(agent: CommandAgent, services: CommandRuntimeServices, 
     }
 
     const summary = await buildChangeSummary(status);
-    const commitMessage = await generateCommitMessage(agent, summary);
+    const startedAt = new Date().toISOString();
+    const { message: commitMessage, requests } = await generateCommitMessage(agent, summary);
+    recordCommitUsage(agent, services, requests, startedAt);
 
     setCommitStatus(agent, services, `commit: ${firstLine(commitMessage)}`, ownerSessionId);
     git(['add', '-A']);

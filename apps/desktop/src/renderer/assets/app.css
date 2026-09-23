@@ -1664,6 +1664,23 @@ body.is-resizing.is-resizing-terminal {
   padding: 3px;
 }
 
+/* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[插入文本][说明] 两列 */
+.chat-completion-palette {
+  max-height: min(240px, 40vh);
+  border-radius: 5px;
+  padding: 3px;
+}
+
+.chat-completion-palette > button {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.chat-completion-palette code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-select-palette .chat-command-palette-title {
   min-height: 24px;
   padding: 0 5px;

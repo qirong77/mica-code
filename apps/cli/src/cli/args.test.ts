@@ -139,6 +139,25 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['compact', '--nope', 'x'])).toMatchObject({ mode: 'error' });
   });
 
+  it('parses headless commit invocations with an owning session', () => {
+    expect(parseCliArgs(['commit', '--dir', '/work'])).toEqual({
+      mode: 'commit',
+      cwd: '/work',
+      sessionId: undefined,
+      format: 'json',
+    });
+    expect(parseCliArgs(['commit', '--dir=/work', '--session=abc'])).toMatchObject({
+      mode: 'commit',
+      cwd: '/work',
+      sessionId: 'abc',
+    });
+    expect(parseCliArgs(['commit', '--session', 'abc-1'])).toMatchObject({
+      mode: 'commit',
+      sessionId: 'abc-1',
+    });
+    expect(parseCliArgs(['commit', '--nope'])).toMatchObject({ mode: 'error' });
+  });
+
   it('accepts a Multica prompt whose first character is a dash', () => {
     expect(parseCliArgs(['exec', '- fix the checklist'])).toMatchObject({
       mode: 'exec',

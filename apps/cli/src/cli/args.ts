@@ -31,6 +31,8 @@ export type CompactCliInvocation = {
 export type CommitCliInvocation = {
   mode: 'commit';
   cwd?: string;
+  /** 归属会话：把这次 commit message 请求的用量记进该会话（可选）。 */
+  sessionId?: string;
   format: 'json';
 };
 
@@ -68,7 +70,7 @@ export const CLI_USAGE = [
   `  ${RUNTIME_NAME} models --json`,
   `  ${RUNTIME_NAME} exec [--json] [options] "<prompt>"`,
   `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only] [--tool-results-only]`,
-  `  ${RUNTIME_NAME} commit [--dir <path>]`,
+  `  ${RUNTIME_NAME} commit [--dir <path>] [--session <id>]`,
   `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
   '',
   'Run options:',
@@ -95,6 +97,7 @@ export const CLI_USAGE = [
   '',
   'Commit options:',
   '  --dir <path>                      Set the working directory',
+  '  --session <id>                    Record the commit message request in this session\'s usage',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -157,14 +160,16 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   }
   if (argv[0] === 'commit') {
     let cwd: string | undefined;
+    let sessionId: string | undefined;
     let format: 'json' = 'json';
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index]!;
-      const valueOption = parseValueOption(arg, argv, index, ['--dir', '--format']);
+      const valueOption = parseValueOption(arg, argv, index, ['--dir', '--session', '--format']);
       if (valueOption) {
         if (!valueOption.ok) return valueOption.error;
         index = valueOption.nextIndex;
         if (valueOption.name === '--dir') cwd = valueOption.value;
+        if (valueOption.name === '--session') sessionId = valueOption.value;
         if (valueOption.name === '--format') {
           if (valueOption.value !== 'json') return cliError(`Unsupported --format: ${valueOption.value}`);
           format = 'json';
@@ -174,7 +179,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       if (arg === '--help' || arg === '-h') return { mode: 'help' };
       return cliError(`Unknown commit option: ${arg}`);
     }
-    return { mode: 'commit', cwd, format };
+    return { mode: 'commit', cwd, sessionId, format };
   }
   if (argv[0] === 'app-server') {
     let sessionId: string | undefined;

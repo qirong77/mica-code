@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { gitText, gitTextAsync, safeGitText, safeGitTextAsync } from '@packages/mica-common/index.js';
 
 const MAX_SUMMARY_CHARS = 20_000;
@@ -29,10 +30,23 @@ export const COMMIT_TYPES = [
 export type CommitMessageAgent = {
   createSubAgent(options?: { systemPrompt?: string | (() => string) }): {
     query(input: string): Promise<string>;
+    readonly usageHistory?: AgentUsageRecord[];
   };
 };
 
-export async function generateCommitMessage(agent: CommitMessageAgent, summary: string) {
+export type CommitMessageResult = {
+  message: string;
+  /**
+   * 生成 commit message 这次请求的用量。它走 `createSubAgent`，不会进 owner 的
+   * `usageHistory`，调用方必须记进会话（commit 自身的开销也是本会话的消耗）。
+   */
+  requests: AgentUsageRecord[];
+};
+
+export async function generateCommitMessage(
+  agent: CommitMessageAgent,
+  summary: string,
+): Promise<CommitMessageResult> {
   const subAgent = agent.createSubAgent({
     systemPrompt: [
       'You write concise git commit messages.',
@@ -60,7 +74,7 @@ export async function generateCommitMessage(agent: CommitMessageAgent, summary: 
     ].join('\n'),
   );
 
-  return sanitizeCommitMessage(response);
+  return { message: sanitizeCommitMessage(response), requests: subAgent.usageHistory ?? [] };
 }
 
 export async function buildChangeSummary(status: string) {

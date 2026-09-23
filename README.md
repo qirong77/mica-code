@@ -88,10 +88,10 @@ mica compact --session <id> [--dir <cwd>] [--force] [--prune-only] [--tool-resul
 一次性的 Git 提交（右键 commit 等一次性消费方用）：
 
 ```bash
-mica commit [--dir <cwd>]
+mica commit [--dir <cwd>] [--session <id>]
 ```
 
-`mica commit` 与交互式 `/commit` 复用同一套确定性分析/提交逻辑（`packages/mica-builtin-commands/git/commitRunner.ts`）：程序先收集 git 变化摘要，再向模型**只发一次请求**生成 commit message（不启用工具、无多轮循环），随后程序自己执行 `git add`/`commit`/`push`，最后输出单行 JSON（`ok`、`commitHash`、`subject`、`commitMessage`、`pushed`，失败时含 `code`/`error`）。
+`mica commit` 与交互式 `/commit` 复用同一套确定性分析/提交逻辑（`packages/mica-builtin-commands/git/commitRunner.ts`）：程序先收集 git 变化摘要，再向模型**只发一次请求**生成 commit message（不启用工具、无多轮循环），随后程序自己执行 `git add`/`commit`/`push`，最后输出单行 JSON（`ok`、`commitHash`、`subject`、`commitMessage`、`pushed`，失败时含 `code`/`error`）。生成 message 的那次请求会记进 `--session <id>` 指定会话的 `subagentUsageHistory`（桌面端 commit 按钮就是这么带的），交互式 `/commit` 则记进当前会话——commit 的模型开销同样是会话的消耗，不记就会在 Stats 里漏掉。
 
 常驻会话进程（桌面 App 用；每会话一个进程，暴露 Codex v2 App Server 协议子集——JSON-RPC 风格 stdio，连续对话跳过进程启动、session 重载和 MCP 重复 init，`turn/steer` 支持 after_iteration 迭代注入）：
 

@@ -8,6 +8,7 @@
 - 提供 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 三类协议 client。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
+- 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分）。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
 - 同一条消息内的工具调用按并行安全分组执行：只读工具与 `Agent` 调用并发，写/执行类工具串行，结果按原始顺序回填。

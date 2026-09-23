@@ -1,4 +1,8 @@
-import type { AgentUsageRecord, AgentUsageSummary } from '@packages/mica-agent/index.js';
+import type {
+  AgentUsageRecord,
+  AgentUsageSummary,
+  SubagentUsageRecord,
+} from '@packages/mica-agent/index.js';
 import type { EffortOption, ProviderDefinition } from '@packages/mica-config/index.js';
 import type { CompactOptions, CompactResult } from '@packages/mica-context/index.js';
 import type {
@@ -36,7 +40,14 @@ export type CommandAgent = {
   buildSystemPrompt(): string;
   createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
     query(input: string): Promise<string>;
+    /** 该子代理已发出的模型请求；命令据此把 helper 子代理的开销记进会话。 */
+    readonly usageHistory?: AgentUsageRecord[];
   };
+  /**
+   * 把 helper 子代理（commit / btw / compact 摘要）的用量写进当前会话的
+   * `subagentUsageHistory`。主请求仍走 `usageHistory`，两者不混。
+   */
+  recordSubagentUsage?(record: SubagentUsageRecord): void;
   getSnapshot(): {
     providerId: string;
     model: string;
@@ -71,7 +82,7 @@ export type CommandSessionController = {
   load?(id: string): { snapshot: { model: string } } | null;
   resume(id: string): ResumeSessionResult;
   startNewSession(): void;
-  saveCurrent(): void;
+  saveCurrent(options?: { allowEmpty?: boolean }): void;
   renameCurrent(title: string): void;
   getCurrentTitle?(): string | null;
   getCurrentSessionId?(): string;

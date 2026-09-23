@@ -2,14 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import {
   dedupeStatsSessions,
   estimateTokens,
+  filterOwnedSubagentRecords,
+  filterOwnedUsage,
   normalizeUsageEvent,
+  ownedUsageIdentities,
   parseStatsSession,
   projectContent,
   projectMessages,
   projectSubagentRecords,
   projectUsage,
   resolveStaleRequestInput,
-  summarizeContext
+  summarizeContext,
+  usageIdentity
 } from './stats-core'
 
 describe('Stats usage aggregation', () => {
@@ -144,6 +148,87 @@ describe('Stats usage aggregation', () => {
         outputTokens: 20
       })
     ])
+  })
+
+  test('gives raw records and projected events the same identity', () => {
+    const raw = { usageId: 'u1', inputTokens: 10 }
+    expect(usageIdentity(raw)).toBe('id:u1')
+    expect(normalizeUsageEvent(raw, 0, 'm').identity).toBe('id:u1')
+
+    const legacy = { turnId: 1, requestIndex: 0, inputTokens: 50, outputTokens: 5 }
+    expect(usageIdentity(legacy)).toBe(usageIdentity({ ...legacy }))
+    // Same numbers but a different record: legacy identity is content based, not value based.
+    expect(usageIdentity(legacy)).not.toBe(usageIdentity({ ...legacy, inputTokens: 51 }))
+  })
+
+  test('detail view keeps only the events the session owns after dedupe', () => {
+    const shared = { usageId: 'shared', inputTokens: 100, outputTokens: 10 }
+    const raw = (id, createdAt, usageHistory, subagentUsageHistory) => ({
+      id,
+      createdAt,
+      updatedAt: createdAt,
+      title: id,
+      cwd: '/tmp',
+      snapshot: { model: 'm', messages: [], usageHistory, subagentUsageHistory }
+    })
+    const source = parseStatsSession(raw('source', '2026-08-01T00:00:00.000Z', [shared]))
+    const subagentRecord = {
+      taskId: 'task',
+      subagentType: 'Explore',
+      description: 'look around',
+      status: 'completed',
+      startedAt: '2026-08-02T00:00:00.000Z',
+      requests: [shared, { usageId: 'sub-own', inputTokens: 30 }],
+      summary: {
+        records: 2,
+        inputTokens: 130,
+        outputTokens: 10,
+        cachedInputTokens: 0,
+        totalTokens: 140
+      }
+    }
+    const fork = parseStatsSession(
+      raw(
+        'fork',
+        '2026-08-02T00:00:00.000Z',
+        [shared, { usageId: 'own', inputTokens: 20 }],
+        [subagentRecord]
+      )
+    )
+    const sessions = dedupeStatsSessions([source, fork])
+    const sourceOwned = ownedUsageIdentities(sessions, 'source')
+    const forkOwned = ownedUsageIdentities(sessions, 'fork')
+
+    expect(filterOwnedUsage([shared], sourceOwned)).toEqual([shared])
+    expect(filterOwnedUsage([shared, { usageId: 'own', inputTokens: 20 }], forkOwned)).toEqual([
+      { usageId: 'own', inputTokens: 20 }
+    ])
+    // The fork's copied subagent request is attributed to the source, its own one stays.
+    expect(filterOwnedUsage([shared, { usageId: 'sub-own', inputTokens: 30 }], forkOwned)).toEqual([
+      { usageId: 'sub-own', inputTokens: 30 }
+    ])
+    // A session outside the deduped scan (legacy file format) keeps its records untouched.
+    expect(ownedUsageIdentities(sessions, 'missing')).toBeNull()
+    expect(filterOwnedUsage([shared], ownedUsageIdentities(sessions, 'missing'))).toEqual([shared])
+    // Records get a summary recomputed from the requests the session actually owns
+    // (same 口径 as mica-agent's summarizeUsageHistory).
+    const [record] = filterOwnedSubagentRecords(
+      [
+        {
+          ...subagentRecord,
+          requests: [shared, { usageId: 'sub-own', inputTokens: 30, totalTokens: 30 }]
+        }
+      ],
+      forkOwned
+    )
+    expect(record.requests).toEqual([{ usageId: 'sub-own', inputTokens: 30, totalTokens: 30 }])
+    expect(record.summary).toEqual({
+      records: 1,
+      inputTokens: 30,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      totalTokens: 30
+    })
   })
 
   test('falls back to the subagent task startedAt when requests lack occurredAt', () => {

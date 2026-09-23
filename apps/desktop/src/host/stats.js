@@ -13,6 +13,9 @@ import {
   setAssignment
 } from './session-projects'
 import {
+  filterOwnedSubagentRecords,
+  filterOwnedUsage,
+  ownedUsageIdentities,
   projectMessages,
   projectSubagentRecords,
   projectUsage,
@@ -303,6 +306,13 @@ export function registerStatsIpc() {
     const raw = JSON.parse(readFileSync(file, 'utf8'))
     const snap = raw.snapshot || {}
     const messages = Array.isArray(snap.messages) ? snap.messages : []
+    const usageHistory = Array.isArray(snap.usageHistory) ? snap.usageHistory : []
+    const subagentRecords = Array.isArray(snap.subagentUsageHistory)
+      ? snap.subagentUsageHistory.filter((record) => record && typeof record === 'object')
+      : []
+    // 列表与详情必须共用同一个归属口径（见 ownedUsageIdentities）。scan() 用的是带缓存
+    // 的增量扫描，打开详情不会重新读一遍所有会话文件。
+    const owned = ownedUsageIdentities(scan(), sessionId)
     const lastUsage = snap.lastUsage ? projectUsage(snap.lastUsage) : null
     const displayUsage = normalizeDisplayUsage(snap.displayUsage)
     // compact / prune 改写过这份历史：lastUsage.inputTokens 描述的是改写**之前**的
@@ -334,10 +344,12 @@ export function registerStatsIpc() {
         contextWindowSize: snap.contextWindowSize || null
       }),
       displayUsage,
-      usageHistory: (Array.isArray(snap.usageHistory) ? snap.usageHistory : []).map(projectUsage),
+      // 与列表同一个归属口径：fork 之前写入的会话文件里带着来源会话的用量副本，那些
+      // 记录归来源会话，详情视图不能把它们展示成自己的（否则列表 0 请求、详情 106 条）。
+      usageHistory: filterOwnedUsage(usageHistory, owned).map(projectUsage),
       lastUsage,
       subagentUsageHistory: projectSubagentRecords(
-        Array.isArray(snap.subagentUsageHistory) ? snap.subagentUsageHistory : []
+        filterOwnedSubagentRecords(subagentRecords, owned)
       )
     }
   })

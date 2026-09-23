@@ -57,5 +57,6 @@ packages/mica-builtin-commands/
   - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
   - `commitRunner.ts`：commit 命令与 headless `mica commit` 共享的确定性 git 分析/提交逻辑（变更摘要、commit message 生成、add/commit/push），公共入口由 `index.ts` 聚合导出。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
+- `subagentUsage.ts`：helper 子代理（commit message / btw / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。

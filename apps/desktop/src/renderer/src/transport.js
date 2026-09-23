@@ -279,6 +279,11 @@ function createWebApi(env) {
       orderSet: (directory, names) => invoke('files:order-set', { directory, names })
     },
 
+    skills: {
+      // 输入框 `/` 的 skill 候选：按会话所在目录现扫（项目级 + 用户级）
+      list: (cwd) => invoke('skills:list', { cwd })
+    },
+
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
       summary: (cwd) => invoke('git:summary', { cwd }),

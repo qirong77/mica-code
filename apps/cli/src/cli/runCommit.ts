@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
+import { buildSubagentUsageRecord, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
+import { micaSession } from '@packages/mica-session/index.js';
 import {
   buildChangeSummary,
   commitWithMessage,
@@ -13,6 +15,8 @@ import { AgentRuntime } from '../agent/AgentRuntime.js';
 
 export type CommitCliOptions = {
   cwd?: string;
+  /** 归属会话：把这次 commit message 请求的用量记进该会话（桌面端按钮会带上）。 */
+  sessionId?: string;
   signal?: AbortSignal;
 };
 
@@ -56,7 +60,10 @@ export async function runCommit(options: CommitCliOptions): Promise<CommitCliRes
       true,
     );
 
-    const commitMessage = await generateCommitMessage(agent, summary);
+    const startedAt = new Date().toISOString();
+    const { message: commitMessage, requests } = await generateCommitMessage(agent, summary);
+    // 请求已经发生（也可能已经计费），后面的 git 步骤成不成功都要记账。
+    recordCommitMessageUsage(options.sessionId, requests, agent.config.model, startedAt);
 
     gitText(['add', '-A']);
     const stagedStatus = gitText(['diff', '--cached', '--name-only']);
@@ -73,6 +80,53 @@ export async function runCommit(options: CommitCliOptions): Promise<CommitCliRes
     return { ok: false, code: 'error', error: formatExecError(error) };
   } finally {
     disposeModelEffortContext();
+  }
+}
+
+/**
+ * 把 commit message 那次请求记进归属会话的 `subagentUsageHistory`：commit 是一次性
+ * 进程，不写回会话这次开销就永远丢了。
+ *
+ * 读-改-写只发生在模型请求结束之后，且中间没有 await，尽量缩小与正在写同一会话的
+ * host（app-server / TUI）抢快照的窗口。归属会话不存在或不是 version 1 会话时静默跳过。
+ */
+function recordCommitMessageUsage(
+  sessionId: string | undefined,
+  requests: AgentUsageRecord[],
+  model: string | undefined,
+  startedAt: string,
+): void {
+  if (!sessionId || requests.length === 0) return;
+  try {
+    const store = micaSession.createStore();
+    const session = store.load(sessionId);
+    if (!session) return;
+    const finishedAt = new Date().toISOString();
+    store.save({
+      ...session,
+      revision: (session.revision ?? 0) + 1,
+      updatedAt: finishedAt,
+      snapshot: {
+        ...session.snapshot,
+        subagentUsageHistory: [
+          ...(session.snapshot.subagentUsageHistory ?? []),
+          buildSubagentUsageRecord({
+            taskId: 'commit-message',
+            subagentType: 'commit',
+            description: '生成 commit message',
+            model,
+            effort: 'none',
+            status: 'completed',
+            startedAt,
+            finishedAt,
+            requests,
+          }),
+        ],
+      },
+    });
+  } catch (error) {
+    // 记账失败不能连带让 commit 失败。
+    console.error(`Failed to record commit usage: ${formatExecError(error)}`);
   }
 }
 

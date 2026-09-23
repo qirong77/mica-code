@@ -81,6 +81,7 @@ export {
 export type { CommitMessageAgent } from './git/commitRunner.js';
 export { commandHostToken } from './commandHost.js';
 export type { BuiltInCommandItem, CommandHostService } from './commandHost.js';
+export { recordHelperSubagentUsage } from './subagentUsage.js';
 
 // 运行期插件（apps/cli 的 builtinPlugins.ts 与 HeadlessPluginHost.ts 从本入口导入）
 export { default as setupCommandCd } from './plugins/command-cd.js';

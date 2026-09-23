@@ -22,6 +22,7 @@ import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
+import { isValidSessionId } from './session-delete'
 import { createTurnLeaseProbe } from './session-lease'
 
 /**
@@ -359,6 +360,11 @@ function startCommitRun(sender, commitId, payload) {
   if (!cwd) return { ok: false, error: '缺少工作目录' }
   if (commitRuns.has(commitId)) return { ok: false, error: 'commit 任务已存在' }
 
+  // The commit message costs one model request; hand the owning chat session to the
+  // CLI so that spend is recorded in the session's usage stats instead of vanishing
+  // with the one-shot process.
+  const sessionId = isValidSessionId(payload.sessionId) ? payload.sessionId : null
+
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
 
@@ -368,7 +374,7 @@ function startCommitRun(sender, commitId, payload) {
       mica,
       // One-shot commit: mica collects the git changes, asks the model exactly
       // once for the message, then runs add/commit/push. No multi-turn loop.
-      ['commit', '--format', 'json', '--dir', cwd],
+      ['commit', '--format', 'json', '--dir', cwd, ...(sessionId ? ['--session', sessionId] : [])],
       {
         cwd,
         env: buildSpawnEnv(process.env),

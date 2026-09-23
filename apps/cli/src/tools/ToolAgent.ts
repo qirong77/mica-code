@@ -1,8 +1,7 @@
 import {
   AgentMaxTurnsError,
-  type AgentUsageRecord,
+  buildSubagentUsageRecord,
   type ModelClientOptions,
-  type SubagentUsageRecord,
 } from '@packages/mica-agent/index.js';
 import { isEffortOption, type EffortOption } from '@packages/mica-config/index.js';
 import { micaTools, MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
@@ -952,41 +951,6 @@ function humanizeToolName(name: string): string {
 
 function isAgentToolContext(value: unknown): value is AgentToolContext {
   return Boolean(value && typeof value === 'object');
-}
-
-function buildSubagentUsageRecord(options: {
-  taskId: string;
-  parentTaskId?: string;
-  initiatedByCallId?: string;
-  subagentType: string;
-  description: string;
-  model?: string;
-  effort: EffortOption;
-  status: SubagentUsageRecord['status'];
-  startedAt: string;
-  finishedAt: string;
-  requests: AgentUsageRecord[];
-}): SubagentUsageRecord {
-  return {
-    taskId: options.taskId,
-    ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
-    ...(options.initiatedByCallId ? { initiatedByCallId: options.initiatedByCallId } : {}),
-    subagentType: options.subagentType,
-    description: options.description,
-    ...(options.model ? { model: options.model } : {}),
-    effort: options.effort,
-    status: options.status,
-    startedAt: options.startedAt,
-    finishedAt: options.finishedAt,
-    // Deep copy: records outlive the subagent client, whose usageHistory is
-    // reused by subsequent subagents.
-    requests: cloneUsageRecords(options.requests),
-    summary: summarizeSubagentUsage(options.requests),
-  };
-}
-
-function cloneUsageRecords(records: AgentUsageRecord[]): AgentUsageRecord[] {
-  return JSON.parse(JSON.stringify(records)) as AgentUsageRecord[];
 }
 
 function normalizeOperation(value: unknown): AgentToolOperation {

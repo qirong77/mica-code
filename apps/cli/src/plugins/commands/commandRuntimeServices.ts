@@ -1,4 +1,4 @@
-import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
+import { calculateCachedTokenRate, recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
 import {
   micaBuiltinCommands,
   type CommandNoticeOptions,
@@ -465,6 +465,8 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const sourceSnapshot = sourceSession.agent.getForkSnapshot({
         dropLastUserMessageAndAfter: sourceWasRunning && uiConversationCount <= historyConversationCount,
       });
+      // fork 不继承来源会话的用量记账，缓存率沿用来源会话自身的历史来展示。
+      const sourceUsageHistory = sourceSession.agent.getSnapshot().usageHistory;
       const created = context.agentSessions.createSession();
       const targetSession = context.agentSessions.findById(created.id);
       if (!targetSession) throw new Error(`Forked agent session not found: ${created.id}`);
@@ -485,7 +487,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         workingStatus: { type: 'idle' },
         lastTurnOutcome: 'idle',
         contextSize: sourceSnapshot.lastUsage?.totalTokens ?? 0,
-        cachedTokenRate: calculateCachedTokenRate(sourceSnapshot.usageHistory),
+        cachedTokenRate: calculateCachedTokenRate(sourceUsageHistory),
       });
       const record = context.agentSessions.list().find((agent) => agent.id === created.id) ?? created;
       return { ...record, sourceWasRunning };
@@ -625,15 +627,31 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
             // session being compacted. Disable tools entirely.
             tools: false,
           });
-          return subAgent.query(
-            [
-              'Summarize this conversation into a compact checkpoint for the next coding agent.',
-              'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
-              'Return only the requested <analysis> and <summary> blocks.',
-              '',
-              transcript,
-            ].join('\n'),
-          );
+          const startedAt = new Date().toISOString();
+          try {
+            return await subAgent.query(
+              [
+                'Summarize this conversation into a compact checkpoint for the next coding agent.',
+                'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
+                'Return only the requested <analysis> and <summary> blocks.',
+                '',
+                transcript,
+              ].join('\n'),
+            );
+          } finally {
+            // 摘要请求走子代理，不会进主 usageHistory；它同样是本会话的模型开销，
+            // 记进 subagentUsageHistory，否则 compact 的那次调用在 Stats 里不可见。
+            recordSubagentTaskUsage(concreteAgent, subAgent, {
+              taskId: 'compact-summary',
+              subagentType: 'compact',
+              description: '生成 compact 摘要',
+              model: concreteAgent.config.model,
+              effort: 'none',
+              status: 'completed',
+              startedAt,
+              finishedAt: new Date().toISOString(),
+            });
+          }
         },
       });
 
@@ -657,6 +675,8 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
           // pre-compact token usage from Stats and the platform reconciliation.
           usageHistory: snapshot.usageHistory,
           lastUsage: snapshot.lastUsage,
+          // loadSnapshot 整组替换该字段：显式带上，别把摘要请求刚记的用量丢掉。
+          subagentUsageHistory: concreteAgent.getSubagentUsageHistory(),
         });
       } catch (error) {
         concreteAgent.loadSnapshot(snapshot);

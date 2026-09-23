@@ -1,5 +1,7 @@
+import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent, CommandRuntimeServices } from '../services.js';
+import { recordHelperSubagentUsage } from '../subagentUsage.js';
 
 /**
  * `/btw <question>` — 旁路提问。
@@ -14,8 +16,16 @@ import type { CommandAgent, CommandRuntimeServices } from '../services.js';
  * 个子代理来延续对话（它有之前的 btw 上下文）。
  */
 
-/** 每个 btw 线程的可复用子代理，按 agent（会话）维度保存，用于 `-continue` 延续。 */
-const btwThreads = new WeakMap<object, { subagent: { query(input: string): Promise<string> } }>();
+export type BtwSubagent = {
+  query(input: string): Promise<string>;
+  readonly usageHistory?: AgentUsageRecord[];
+};
+
+/**
+ * 每个 btw 线程的可复用子代理，按 agent（会话）维度保存，用于 `-continue` 延续。
+ * `recordedRequests` 记下已经写进会话用量的请求数，`-continue` 只记新增部分。
+ */
+const btwThreads = new WeakMap<object, { subagent: BtwSubagent; recordedRequests: number }>();
 
 export function createBtwCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
@@ -39,21 +49,42 @@ export async function runBtw(agent: CommandAgent, services: CommandRuntimeServic
 
   const { question, isContinue } = parsed;
 
-  let subagent = isContinue ? btwThreads.get(agent as object)?.subagent : undefined;
-  const isFallback = isContinue && !subagent;
-  if (!subagent) {
-    subagent = createBtwSubagent(agent, messagesToTranscript(agent.getSnapshot().messages));
-    btwThreads.set(agent as object, { subagent });
+  let thread = isContinue ? btwThreads.get(agent as object) : undefined;
+  const isFallback = isContinue && !thread;
+  if (!thread) {
+    thread = {
+      subagent: createBtwSubagent(agent, messagesToTranscript(agent.getSnapshot().messages)),
+      recordedRequests: 0,
+    };
+    btwThreads.set(agent as object, thread);
   }
+  const subagent = thread.subagent;
 
   upsertBtwNotice(services, `> ${question}\n\n正在思考…`, 'running');
 
+  const startedAt = new Date().toISOString();
   try {
     const reply = await subagent.query(question);
     upsertBtwNotice(services, formatBtwNotice(question, reply, isFallback), 'success');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     upsertBtwNotice(services, `> ${question}\n\nbtw 出错：${message}`, 'error');
+  } finally {
+    // btw 的请求不属于任何 turn，也不进主流程的 usageHistory，只有这里能记账。
+    const requests = subagent.usageHistory ?? [];
+    if (requests.length > thread.recordedRequests) {
+      recordHelperSubagentUsage(agent, services, requests.slice(thread.recordedRequests), {
+        taskId: 'btw',
+        subagentType: 'btw',
+        description: question,
+        model: agent.config.model,
+        effort: 'none',
+        status: 'completed',
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    }
+    thread.recordedRequests = requests.length;
   }
 }
 
@@ -125,7 +156,7 @@ export function formatBtwNotice(question: string, answer: string, isFallback = f
   ].join('\n');
 }
 
-function createBtwSubagent(agent: CommandAgent, transcript: string): { query(input: string): Promise<string> } {
+function createBtwSubagent(agent: CommandAgent, transcript: string): BtwSubagent {
   return agent.createSubAgent({
     systemPrompt: buildBtwSystemPrompt(transcript),
     tools: true,

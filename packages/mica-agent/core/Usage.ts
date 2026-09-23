@@ -56,6 +56,77 @@ export function summarizeUsageHistory(usageHistory: AgentUsageRecord[]): AgentUs
   );
 }
 
+/**
+ * 能接收 helper 子代理用量的 owner（通常是会话的 agent）。命令上下文里这个能力是
+ * 可选的，所以方法本身也允许缺失——没有它就只是不记账，不该让命令失败。
+ */
+export type SubagentUsageOwner = {
+  recordSubagentUsage?(record: SubagentUsageRecord): void;
+};
+
+export type SubagentUsageTaskMeta = {
+  /** 任务 id；Agent 工具里等于 `task_id`，helper 子代理（commit/btw/compact 摘要）用工具名。 */
+  taskId: string;
+  parentTaskId?: string;
+  initiatedByCallId?: string;
+  subagentType: string;
+  description: string;
+  model?: string;
+  effort?: string;
+  status: SubagentUsageRecord['status'];
+  startedAt: string;
+  finishedAt?: string;
+  /** 该子代理此前已记账的请求数；复用一个子代理时只记新增部分（如 `/btw -continue`）。 */
+  fromIndex?: number;
+};
+
+export function buildSubagentUsageRecord(
+  options: Omit<SubagentUsageTaskMeta, 'fromIndex'> & { requests: AgentUsageRecord[] },
+): SubagentUsageRecord {
+  return {
+    taskId: options.taskId,
+    ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
+    ...(options.initiatedByCallId ? { initiatedByCallId: options.initiatedByCallId } : {}),
+    subagentType: options.subagentType,
+    description: options.description,
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
+    status: options.status,
+    startedAt: options.startedAt,
+    ...(options.finishedAt ? { finishedAt: options.finishedAt } : {}),
+    // Deep copy: records outlive the subagent client, whose usageHistory may be
+    // reused by later tasks (e.g. `/btw -continue` keeps one subagent around).
+    requests: cloneUsageRecords(options.requests),
+    summary: summarizeUsageHistory(options.requests),
+  };
+}
+
+/**
+ * 把一次 helper 子代理（commit / btw / compact 摘要 等）的模型请求记进 owner 会话的
+ * `subagentUsageHistory`：这些请求走 `createSubAgent`，其 usageHistory 不会并进 owner 的
+ * `usageHistory`（那会污染主上下文的 ctx 与 lastUsage），但确实是本会话产生的开销，
+ * 不记账就会从 Stats 里漏掉。
+ *
+ * `fromIndex` 用于复用的子代理（`/btw -continue`）只记新增请求。返回写入的记录；
+ * 没有新增请求或没有 owner 时返回 null（不写空记录）。
+ */
+export function recordSubagentTaskUsage(
+  owner: SubagentUsageOwner | undefined,
+  source: { usageHistory?: AgentUsageRecord[] } | undefined,
+  meta: SubagentUsageTaskMeta,
+): SubagentUsageRecord | null {
+  const requests = source?.usageHistory?.slice(meta.fromIndex ?? 0) ?? [];
+  if (!owner?.recordSubagentUsage || requests.length === 0) return null;
+  const { fromIndex: _fromIndex, ...rest } = meta;
+  const record = buildSubagentUsageRecord({ ...rest, requests });
+  owner.recordSubagentUsage(record);
+  return record;
+}
+
+function cloneUsageRecords(records: AgentUsageRecord[]): AgentUsageRecord[] {
+  return JSON.parse(JSON.stringify(records)) as AgentUsageRecord[];
+}
+
 export function calculateCachedTokenRate(usageHistory: AgentUsageRecord[]): number {
   const totals = summarizeUsageHistory(usageHistory);
   return totals.inputTokens > 0 ? Math.max(0, totals.cachedInputTokens / totals.inputTokens) : 0;

@@ -224,6 +224,52 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().subagentUsageHistory).toEqual([]);
   });
 
+  it('starts a fork with its own empty usage while keeping the inherited context', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const usage: AgentUsageRecord = {
+      usageId: 'u1',
+      provider: 'openai_chat_completions',
+      turnId: 1,
+      requestIndex: 1,
+      messageCount: 1,
+      inputTokens: 120,
+      outputTokens: 8,
+      totalTokens: 128,
+      paidTokenRate: 1,
+    };
+    const messages = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+    ];
+    vi.mocked(modelClient.getSnapshot).mockReturnValue({
+      model: 'test-model',
+      messages,
+      usageHistory: [usage],
+      lastUsage: usage,
+      conversationMessages: [],
+    });
+    agent.recordSubagentUsage({
+      taskId: 'task-1',
+      subagentType: 'Explore',
+      description: 'search',
+      effort: 'none',
+      status: 'completed',
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requests: [usage],
+      summary: { records: 1, inputTokens: 120, outputTokens: 8, cachedInputTokens: 0, totalTokens: 128 },
+    });
+
+    const fork = agent.getForkSnapshot();
+
+    // 用量记账不继承：新会话的 Stats 从空开始，同一条请求不会在两个会话里各算一次。
+    expect(fork.usageHistory).toEqual([]);
+    expect(fork.subagentUsageHistory).toEqual([]);
+    // 上下文与它的占用照常继承，界面 ctx 与聊天状态栏需要 lastUsage。
+    expect(fork.messages).toBe(messages);
+    expect(fork.lastUsage).toBe(usage);
+  });
+
   it('applies a run-selected model without mutating global config and forwards maxTurns', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime({ model: 'run-model', effort: 'high' });

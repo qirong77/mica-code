@@ -479,6 +479,68 @@ function validTime(value) {
   return Number.isFinite(time) ? time : null
 }
 
+/**
+ * 一条用量记录的跨会话身份。原始持久化记录与由它投影出的事件必须算出同一个值，
+ * 会话列表和会话详情才能对「这条请求属于哪个会话」给出一致的答案。
+ *
+ * 没有 `usageId` 的老记录（该字段出现之前写入）退回整条记录的内容摘要：老的 fork
+ * 快照是逐字节复制的，摘要相同是唯一能识别出这种副本的线索。
+ */
+export function usageIdentity(usage) {
+  const usageId = typeof usage?.usageId === 'string' ? usage.usageId.trim() : ''
+  if (usageId) return `id:${usageId}`
+  return `content:${createHash('sha256').update(JSON.stringify(usage)).digest('hex')}`
+}
+
+/**
+ * 该会话在去重后真正拥有的用量事件身份集合；会话不在去重结果里（老格式文件）时返回
+ * null，调用方应保持原样。详情视图必须与列表共用同一个集合：fork 复制过来的记录归属
+ * 来源会话，详情也不能把它们算成自己的。
+ */
+export function ownedUsageIdentities(sessions, sessionId) {
+  const session = sessions.find((entry) => entry.id === sessionId)
+  if (!session) return null
+  return new Set(session.usageEvents.map((event) => event.identity))
+}
+
+/** 按 {@link ownedUsageIdentities} 过滤一份原始用量记录；identities 为 null 时原样返回。 */
+export function filterOwnedUsage(usageHistory, identities) {
+  if (!identities) return usageHistory
+  const records = Array.isArray(usageHistory) ? usageHistory : []
+  return records.filter((usage) => identities.has(usageIdentity(usage)))
+}
+
+/**
+ * 详情视图里的 subagent 记录：只保留本会话拥有的请求，并按保留后的请求重算 summary
+ * （与 mica-agent 的 `summarizeUsageHistory` 同口径）——不重算的话，老 fork 文件会在
+ * 界面上显示成「0 req · 140 tokens」。identities 为 null 时原样返回。
+ */
+export function filterOwnedSubagentRecords(records, identities) {
+  if (!identities) return records
+  return records.map((record) => {
+    const requests = filterOwnedUsage(record?.requests, identities)
+    return { ...record, requests, summary: summarizeUsageRecords(requests) }
+  })
+}
+
+export function summarizeUsageRecords(records) {
+  const summary = {
+    records: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    totalTokens: 0
+  }
+  for (const usage of Array.isArray(records) ? records : []) {
+    summary.records++
+    summary.inputTokens += tokenNumber(usage?.inputTokens)
+    summary.outputTokens += tokenNumber(usage?.outputTokens)
+    summary.cachedInputTokens += tokenNumber(usage?.cachedInputTokens)
+    summary.totalTokens += tokenNumber(usage?.totalTokens)
+  }
+  return summary
+}
+
 export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
   const inputTokens = tokenNumber(usage.inputTokens)
   const outputTokens = tokenNumber(usage.outputTokens)
@@ -487,10 +549,7 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
   return {
     usageId:
       typeof usage.usageId === 'string' && usage.usageId.trim() ? usage.usageId.trim() : null,
-    // Old fork snapshots contain byte-for-byte copies. Keep only a digest, never raw usage.
-    legacyFingerprint: usage.usageId
-      ? null
-      : createHash('sha256').update(JSON.stringify(usage)).digest('hex'),
+    identity: usageIdentity(usage),
     occurredAtMs: occurredAtMs ?? fallbackTime,
     dateAccuracy: occurredAtMs == null ? 'session-created' : 'exact',
     model: usage.model || fallbackModel || 'Unknown',
@@ -620,9 +679,15 @@ export function parseStatsSession(raw) {
 }
 
 /**
- * A fork carries its source usage history. New records have stable IDs, so assign each event to
- * the oldest surviving session and count it once. Legacy records deliberately remain untouched:
- * without an ID, identical token values are not sufficient proof that two requests are the same.
+ * A fork used to carry its source's usage history verbatim. Records have stable IDs, so assign
+ * each event to the oldest surviving session and count it once; records without an ID fall back
+ * to a digest of their own content — the only trace a legacy fork copy leaves, and it also
+ * merges two genuinely identical records (repeating the same short prompt looks exactly like a
+ * copy and nothing in the file can tell them apart).
+ *
+ * New sessions no longer inherit usage (see forkSessionSnapshot / AgentRuntime.getForkSnapshot),
+ * so this only repairs files written before that change. Attribution still follows the oldest
+ * surviving session, which is what keeps the totals from dropping when the source is deleted.
  */
 export function dedupeStatsSessions(sessions) {
   const ordered = sessions
@@ -631,9 +696,8 @@ export function dedupeStatsSessions(sessions) {
   const seen = new Set()
   const deduped = ordered.map((session) => {
     const usageEvents = session.usageEvents.filter((usage) => {
-      const identity = usage.usageId || `legacy:${usage.legacyFingerprint}`
-      if (seen.has(identity)) return false
-      seen.add(identity)
+      if (seen.has(usage.identity)) return false
+      seen.add(usage.identity)
       return true
     })
     return summarizeEvents(session, usageEvents)

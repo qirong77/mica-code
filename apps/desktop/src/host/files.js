@@ -17,6 +17,7 @@ import {
 } from 'fs/promises'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
+import { ignoredEntries } from './git-ignore'
 
 const IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -311,21 +312,29 @@ export function registerFilesIpc() {
   ipcMain.handle('files:list', async (_event, payload = {}) => {
     const directory = normalizeDirectory(payload.path)
     const entries = await readdir(directory, { withFileTypes: true })
+    const listed = entries
+      .map((entry) => ({
+        name: entry.name,
+        path: path.join(directory, entry.name),
+        type: entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'symlink' : 'file'
+      }))
+      .sort((a, b) => {
+        if (a.type === 'directory' && b.type !== 'directory') return -1
+        if (a.type !== 'directory' && b.type === 'directory') return 1
+        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      })
+    // 被 .gitignore 忽略的条目在文件树里整行置灰，标记只有 host 里的 git 能给出。
+    const ignored = await ignoredEntries(
+      directory,
+      listed.map((entry) => entry.name)
+    )
 
     return {
       path: directory,
       parentPath: path.dirname(directory) === directory ? null : path.dirname(directory),
-      entries: entries
-        .map((entry) => ({
-          name: entry.name,
-          path: path.join(directory, entry.name),
-          type: entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'symlink' : 'file'
-        }))
-        .sort((a, b) => {
-          if (a.type === 'directory' && b.type !== 'directory') return -1
-          if (a.type !== 'directory' && b.type === 'directory') return 1
-          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-        })
+      entries: listed.map((entry) =>
+        ignored.has(entry.name) ? { ...entry, ignored: true } : entry
+      )
     }
   })
 

@@ -57,8 +57,10 @@ export function GitDiffEditor({ cwd, file, onClose }) {
             editorRef.current = monaco.editor.createDiffEditor(hostRef.current, {
               ...editorOptions,
               originalEditable: false,
+              // 不锁死双列：面板宽度不够时 monaco 自己退回内联 diff
+              // （默认断点 renderSideBySideInlineBreakpoint = 900）。
               renderSideBySide: true,
-              useInlineViewWhenSpaceIsLimited: false
+              useInlineViewWhenSpaceIsLimited: true
             })
             modeRef.current = 'diff'
           }
@@ -66,6 +68,8 @@ export function GitDiffEditor({ cwd, file, onClose }) {
           const modified = monaco.editor.createModel(content.modified, language)
           modelsRef.current = [original, modified]
           editorRef.current?.setModel({ original, modified })
+          // 直接落到第一处变更（内部会等 diff 计算完成），否则只会打开文件停在首行。
+          editorRef.current?.revealFirstDiff()
         }
         requestAnimationFrame(() => editorRef.current?.layout())
       } catch {

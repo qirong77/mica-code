@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
@@ -125,9 +126,26 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
             contextWindowSize: snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
           },
       summarize: async (transcript, prompt) => {
-        if (!agent) throw new Error('Agent is not available for summarization');
-        const subAgent = agent.createSubAgent({ systemPrompt: prompt });
-        return subAgent.query([SUMMARIZE_INSTRUCTIONS, '', transcript].join('\n'));
+        const owner = agent;
+        if (!owner) throw new Error('Agent is not available for summarization');
+        const subAgent = owner.createSubAgent({ systemPrompt: prompt });
+        const startedAt = new Date().toISOString();
+        try {
+          return await subAgent.query([SUMMARIZE_INSTRUCTIONS, '', transcript].join('\n'));
+        } finally {
+          // 摘要请求走子代理，不进主 usageHistory；它同样是本会话的模型开销，
+          // 记进 subagentUsageHistory，否则 compact 的那次调用在 Stats 里不可见。
+          recordSubagentTaskUsage(owner, subAgent, {
+            taskId: 'compact-summary',
+            subagentType: 'compact',
+            description: '生成 compact 摘要',
+            model: owner.config.model,
+            effort: 'none',
+            status: 'completed',
+            startedAt,
+            finishedAt: new Date().toISOString(),
+          });
+        }
       },
     });
 
@@ -171,6 +189,8 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         // Keep usage statistics across compact so Stats stays continuous.
         usageHistory: snapshot.usageHistory,
         lastUsage: snapshot.lastUsage,
+        // loadSnapshot 整组替换该字段：显式带上，别把摘要请求刚记的用量丢掉。
+        subagentUsageHistory: agent.getSubagentUsageHistory(),
       });
     } catch (error) {
       agent.loadSnapshot(snapshot);

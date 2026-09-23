@@ -156,6 +156,7 @@ if (invocation.mode === 'commit') {
   try {
     const result = await runCommit({
       cwd: invocation.cwd,
+      sessionId: invocation.sessionId,
       signal: abortController.signal,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);

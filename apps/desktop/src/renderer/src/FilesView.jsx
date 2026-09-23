@@ -45,6 +45,7 @@ const makeNode = (entry) => ({
   name: entry.name,
   path: entry.path,
   type: entry.type,
+  ignored: !!entry.ignored,
   expanded: false,
   loaded: false,
   loading: false,
@@ -323,6 +324,14 @@ function FileTreeRows({
           ? 'before'
           : 'after'
         : null
+    const ignored = !!node.ignored
+    // 被 .gitignore 忽略的条目整体置灰（图标一并脱色），但仍然可以打开/展开
+    const tone =
+      node.path === activePath
+        ? 'bg-white/[.075] text-white'
+        : ignored
+          ? 'text-white/30 hover:text-white/50'
+          : 'text-white/70 hover:text-white'
     return (
       <div key={node.path}>
         <button
@@ -330,10 +339,10 @@ function FileTreeRows({
           role="treeitem"
           aria-expanded={directory ? node.expanded : undefined}
           draggable
-          title={node.path}
-          className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] hover:text-white ${
-            node.path === activePath ? 'bg-white/[.075] text-white' : 'text-white/70'
-          } ${dragPath === node.path ? 'opacity-40' : ''} ${dropPath === node.path ? 'ring-1 ring-inset ring-info/70 bg-info/10' : ''}`}
+          title={ignored ? `${node.path}（已被 .gitignore 忽略）` : node.path}
+          className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] ${tone} ${
+            dragPath === node.path ? 'opacity-40' : ''
+          } ${dropPath === node.path ? 'ring-1 ring-inset ring-info/70 bg-info/10' : ''}`}
           style={{
             paddingLeft: 5 + depth * 13,
             boxShadow:
@@ -384,7 +393,7 @@ function FileTreeRows({
               name={node.name}
               type={node.type}
               expanded={node.expanded}
-              className="size-4"
+              className={`size-4 ${ignored ? 'opacity-45 grayscale' : ''}`}
             />
           </span>
           <span

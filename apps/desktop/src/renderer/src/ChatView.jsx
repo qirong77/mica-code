@@ -37,6 +37,15 @@ function formatTokens(value) {
 }
 import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
 import {
+  COMPLETION_LIMIT,
+  FILE_COMPLETION_DEBOUNCE_MS,
+  activeCompletion,
+  applyCompletion,
+  completionInsertText,
+  rankCompletions
+} from './chat-completions'
+import ComposerCompletionPalette from './ComposerCompletionPalette'
+import {
   backgroundTaskStatusLabel,
   buildSubagentTimeline,
   isBackgroundTaskRunning,
@@ -2044,6 +2053,11 @@ export function ChatView({
   const forceRender = useReducer((version) => version + 1, 0)[1]
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
   const [pickerIndex, setPickerIndex] = useState(0)
+  // 输入框补全（`@` 文件 / `/` skill）：选中后只往输入框插入文本，不执行任何动作
+  const [completion, setCompletion] = useState(null) // { kind: 'file' | 'skill', start, query }
+  const [completionItems, setCompletionItems] = useState([])
+  const [completionIndex, setCompletionIndex] = useState(0)
+  const [completionLoading, setCompletionLoading] = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const [contextDetail, setContextDetail] = useState(false)
@@ -2227,6 +2241,122 @@ export function ChatView({
       })
     },
     [inputRef, nodeId]
+  )
+
+  // 补全触发器：`/` 只在行首且还没输入空白时算，`@` 要求词首；输入变化时重算一次，
+  // 只在 kind/start/query 真的变了才换对象，避免每次按键都重渲染候选列表。
+  useEffect(() => {
+    const element = textareaRef.current
+    const caret = element && element.value === input ? element.selectionStart : input.length
+    const next = activeCompletion(input, caret)
+    setCompletion((current) =>
+      current &&
+      next &&
+      current.kind === next.kind &&
+      current.start === next.start &&
+      current.query === next.query
+        ? current
+        : next
+    )
+  }, [input])
+
+  // 候选：skill 走 host 现扫（项目级 + 用户级），文件走 files:find（每次按键都全量遍历，
+  // 所以加一个防抖）。两种结果都只描述「插入什么文本」。
+  useEffect(() => {
+    if (!completion) {
+      setCompletionItems((items) => (items.length === 0 ? items : []))
+      setCompletionLoading(false)
+      return undefined
+    }
+    let cancelled = false
+    const settle = (items) => {
+      if (cancelled) return
+      setCompletionItems(items)
+      setCompletionLoading(false)
+    }
+
+    if (completion.kind === 'skill') {
+      setCompletionLoading(true)
+      window.mica.skills
+        .list(cwd || null)
+        .then((result) =>
+          settle(
+            rankCompletions(
+              (Array.isArray(result) ? result : []).map((skill) => ({
+                key: `skill:${skill.name}`,
+                kind: 'skill',
+                name: skill.name,
+                label: `/${skill.name}`,
+                description: skill.description
+              })),
+              completion.query
+            )
+          )
+        )
+        .catch(() => settle([]))
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (!cwd) {
+      setCompletionItems((items) => (items.length === 0 ? items : []))
+      return undefined
+    }
+    const timer = window.setTimeout(() => {
+      setCompletionLoading(true)
+      window.mica.files
+        .find(cwd, completion.query)
+        .then((result) =>
+          settle(
+            (Array.isArray(result) ? result : []).slice(0, COMPLETION_LIMIT).map((file) => ({
+              key: `file:${file.relativePath}`,
+              kind: 'file',
+              name: file.relativePath,
+              path: file.relativePath,
+              label: file.relativePath,
+              description: file.name
+            }))
+          )
+        )
+        .catch(() => settle([]))
+    }, FILE_COMPLETION_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [completion, cwd])
+
+  useEffect(() => {
+    setCompletionIndex(0)
+  }, [completion])
+
+  // 把光标前那段触发文本整体换成候选的插入文本（`@src/a.ts ` / `/ask `），只改输入框。
+  const selectCompletion = useCallback(
+    (item) => {
+      if (!item) return
+      const element = textareaRef.current
+      const current = element?.value ?? inputRef.current ?? ''
+      const caret = element?.selectionStart ?? current.length
+      const { text: next, caret: nextCaret } = applyCompletion(
+        current,
+        caret,
+        completion?.start ?? caret,
+        completionInsertText(item)
+      )
+      draftsRef.current.set(nodeId, next)
+      setInput(next)
+      setCompletion(null)
+      setCompletionItems([])
+      setCompletionIndex(0)
+      requestAnimationFrame(() => {
+        const node = textareaRef.current
+        if (!node) return
+        node.setSelectionRange(nextCaret, nextCaret)
+        node.focus()
+      })
+    },
+    [completion, inputRef, nodeId]
   )
 
   // 相册/拍照选到的图片与粘贴一样：先落到 mica 的 images 目录，再把 [Image](...) 引用
@@ -3045,6 +3175,8 @@ export function ChatView({
         appendNotice('当前 turn 仍在运行，请完成或停止后再切换')
         return
       }
+      // 选择面板与输入框补全不会同时用
+      setCompletion(null)
       setPickerIndex(0)
       const titles = { model: '选择模型', variant: '选择推理强度', role: '选择角色' }
       setPicker({ kind, title: titles[kind] || kind, options: [], loading: true, error: '' })
@@ -3918,7 +4050,7 @@ export function ChatView({
     commitTaskRef.current = { id: commitId, noticeId, cwd, nodeId: nodeIdRef.current }
     setCommitRunning(true)
     window.mica.chat
-      .commit({ commitId, cwd })
+      .commit({ commitId, cwd, sessionId: nodeIdRef.current })
       .then((result) => {
         if (!result?.ok) {
           const error = result?.error || 'commit 任务启动失败'
@@ -4228,6 +4360,17 @@ export function ChatView({
             error={picker.error}
           />
         )}
+        {completion && !picker && (
+          <ComposerCompletionPalette
+            title={completion.kind === 'skill' ? '选择 skill' : '引用文件'}
+            options={completionItems}
+            activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
+            onActiveIndex={setCompletionIndex}
+            onSelect={selectCompletion}
+            loading={completionLoading}
+            hint={completion.kind === 'skill' ? '没有匹配的 skill' : '没有匹配的文件'}
+          />
+        )}
         <TodoDock items={todoItems} hidden={todoHidden} />
         <SubagentStatusDock
           tasks={subagentTasks}
@@ -4334,6 +4477,37 @@ export function ChatView({
                 .catch(() => {})
             }}
             onKeyDown={(event) => {
+              // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
+              if (completion && completionItems.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setCompletionIndex((value) => (value + 1) % completionItems.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setCompletionIndex(
+                    (value) => (value - 1 + completionItems.length) % completionItems.length
+                  )
+                  return
+                }
+                if (
+                  (event.key === 'Enter' || event.key === 'Tab') &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  selectCompletion(
+                    completionItems[Math.min(completionIndex, completionItems.length - 1)]
+                  )
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setCompletion(null)
+                  return
+                }
+              }
               if (picker) {
                 const options = picker.options || []
                 if (event.key === 'ArrowDown') {

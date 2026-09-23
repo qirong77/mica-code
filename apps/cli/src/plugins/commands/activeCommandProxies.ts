@@ -38,6 +38,9 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }) {
       return current().createSubAgent(options);
     },
+    recordSubagentUsage(record) {
+      current().recordSubagentUsage(record);
+    },
     getSnapshot() {
       return current().getSnapshot();
     },
@@ -62,8 +65,8 @@ export function createActiveSessionControllerProxy(fallback: SessionController):
     startNewSession() {
       current().startNewSession();
     },
-    saveCurrent() {
-      current().saveCurrent();
+    saveCurrent(options?: { allowEmpty?: boolean }) {
+      current().saveCurrent(options);
     },
     renameCurrent(title: string) {
       current().renameCurrent(title);

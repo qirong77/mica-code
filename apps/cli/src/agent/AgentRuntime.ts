@@ -284,18 +284,17 @@ export class AgentRuntime {
 
   getForkSnapshot(options: { dropLastUserMessageAndAfter?: boolean } = {}): AgentRuntimeSnapshot {
     const snapshot = this.getSnapshot();
-    const usageHistory =
-      this.isRunning && this.activeRunUsageStartIndex !== null
-        ? snapshot.usageHistory.slice(0, this.activeRunUsageStartIndex)
-        : snapshot.usageHistory;
+    // fork 继承的是对话与上下文，不是用量记账：新会话的 Stats 从空开始（它自己这一轮
+    // 还没发生任何请求），同一条请求也就不会在两个会话里被各算一次。
+    // `lastUsage` 例外——它描述的是继承来的上下文占用，界面上的 ctx 需要它。
     return {
       ...snapshot,
       messages: options.dropLastUserMessageAndAfter
         ? dropLastUserMessageAndAfter(snapshot.messages)
         : snapshot.messages,
-      usageHistory,
-      lastUsage: usageHistory.at(-1),
-      subagentUsageHistory: this.subagentUsageHistory,
+      usageHistory: [],
+      lastUsage: snapshot.lastUsage,
+      subagentUsageHistory: [],
     };
   }
 
