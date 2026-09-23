@@ -164,6 +164,9 @@ export const MICA_SESSION_NOTIFICATIONS = {
  */
 export const MICA_METHODS = {
   editMessage: 'mica/turn/editMessage',
+  /** Pull a queued (after_iteration) input back out of the host's single slot
+   * so the client can restore it to its composer — the CLI's shift + ←. */
+  queueRecall: 'mica/queue/recall',
   killBackgroundTask: 'mica/backgroundTasks/kill',
   backgroundTaskOutput: 'mica/backgroundTasks/output',
   subagentTaskDetail: 'mica/subagentTasks/detail',

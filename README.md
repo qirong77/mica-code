@@ -75,6 +75,10 @@ mica exec [--json] [--thinking] [--no-save] [--session <id>] [--dir <cwd>] [--mc
 
 工具调用以 `command_execution` item 投影：调用时 `item.started`（`in_progress`），完成后 `item.completed`（`exit_code` + 聚合输出）。`--thinking` 控制是否投影 `reasoning` item。headless 模式也注册 `TodoWrite`。`--mcp-init-timeout-ms` 可为每个 MCP server 的 connect + tools/list 设置总截止时间，健康 server 仍会并行完成并注册工具。Responses 协议在启用 reasoning effort 时会请求 `summary: "auto"`，让支持该能力的模型产生可流式展示的思考摘要。
 
+`mica exec` 可以直接接收 codex-family driver（Terminal-Bench/Harbor、Multica 等）逐字发出的参数，因此不必再套一层包装脚本：`--cd`（等同 `--dir`）、`--enable <feature>` 与 `--skip-git-repo-check`（接受并忽略）、`--dangerously-bypass-approvals-and-sandbox`（等同 `--dangerously-skip-permissions`）、`-c model_reasoning_effort=<none|minimal|low|medium|high|xhigh|max>`（`minimal`/`max` 分别折叠为 `low`/`xhigh`）、`-c model_reasoning_summary=<mode>`（`none` 关闭 reasoning 投影）、`--` 分隔符与收尾的裸 prompt。
+
+容器等没有 `config.json` 的环境可以用环境变量提供凭据：当磁盘上没有任何 provider 配了 `api_key` 时，`OPENAI_API_KEY` + `OPENAI_BASE_URL` 会合成一个运行时 `openai` provider（协议默认 `openai_responses`，用 `MICA_PROVIDER_PROTOCOL` 覆盖），于是 `mica exec --model openai/<model> --json "<prompt>"` 开箱可用，且该 provider 不会被写回 `config.json`。
+
 对已有会话做上下文压缩（Web Chat / 自动化脚本用）：
 
 ```bash

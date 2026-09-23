@@ -220,9 +220,10 @@ function ComposerImageStrip({ text, onPreview }) {
 
 function QueueDock({ items, onRecall, recallingId }) {
   if (!items.length) return null
-  // 文案与 CLI 的 waiting queue 提示保持一致（app 用按钮撤回，不展示
-  // shift + ← 快捷键）。after_iteration 排队来自 host 的 mica/queue/queued
-  // 扩展通知（Shift+Tab 注入活跃 turn），标题区分两种发送时机。
+  // 文案与 CLI 的 waiting queue 提示完全一致（含 shift + ← 撤回提示，app 也
+  // 支持这个快捷键，另外每条还提供按钮）。忙时的 Enter/Tab/Shift+Tab 都走
+  // host 的 after_iteration 单槽（mica/queue/queued 扩展通知，注入活跃
+  // turn），after_turn 只留给显式请求，标题按投递时机区分。
   const queueMode = items[0]?.queueMode
   const headerText =
     queueMode === 'after_iteration'
@@ -232,7 +233,7 @@ function QueueDock({ items, onRecall, recallingId }) {
     <section className="chat-queue-dock" aria-label="等待发送的消息">
       <div className="chat-queue-dock-header">
         <span aria-hidden="true">↳</span>
-        <span>{headerText}</span>
+        <span>{`${headerText} · shift + ← to re-edit`}</span>
         <span>{items.length}</span>
       </div>
       <div className="chat-queue-dock-items">
@@ -242,7 +243,7 @@ function QueueDock({ items, onRecall, recallingId }) {
             <span>{item.text}</span>
             <button
               type="button"
-              title={item.pending ? '正在加入队列' : '撤回到输入框'}
+              title={item.pending ? '正在加入队列' : '撤回到输入框（shift + ←）'}
               aria-label={`撤回排队消息 ${index + 1}`}
               disabled={item.pending || Boolean(recallingId)}
               onClick={() => onRecall(item.id)}
@@ -1891,7 +1892,8 @@ export function lastUserPromptText(messages = []) {
 }
 
 // 输入框内 Tab / Shift+Tab 的行为：
-// - agent 运行中（queueReady）：Tab 与 Shift+Tab 都把当前输入排队发送（Shift+Tab 对应 CLI 的 after_iteration 快速排队）；
+// - agent 运行中（queueReady）：Tab 与 Shift+Tab 都把当前输入排队发送（after_iteration，
+//   在下一个工具调用迭代边界注入当前 turn；与忙时 Enter 同一条路径）；
 // - 空闲时 Shift+Tab：打开角色选择器，与 CLI 的 Shift+Tab 角色循环对齐；
 // - 空闲 Tab：不拦截，交给浏览器默认行为。
 export function resolveComposerTabAction({ shiftKey, queueReady }) {
@@ -2058,6 +2060,8 @@ export function ChatView({
   const [completionItems, setCompletionItems] = useState([])
   const [completionIndex, setCompletionIndex] = useState(0)
   const [completionLoading, setCompletionLoading] = useState(false)
+  // 当前候选列表属于哪一类触发字符（`@` 文件 / `/` skill），换类时先清空旧结果
+  const completionKindRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const [contextDetail, setContextDetail] = useState(false)
@@ -2264,9 +2268,16 @@ export function ChatView({
   // 所以加一个防抖）。两种结果都只描述「插入什么文本」。
   useEffect(() => {
     if (!completion) {
+      completionKindRef.current = null
       setCompletionItems((items) => (items.length === 0 ? items : []))
       setCompletionLoading(false)
       return undefined
+    }
+    // 换了触发字符（`/` ↔ `@`）就先清空：文件候选要等防抖，期间不能继续挂着 skill 的行
+    if (completionKindRef.current !== completion.kind) {
+      completionKindRef.current = completion.kind
+      setCompletionItems((items) => (items.length === 0 ? items : []))
+      setCompletionLoading(true)
     }
     let cancelled = false
     const settle = (items) => {
@@ -2309,14 +2320,19 @@ export function ChatView({
         .find(cwd, completion.query)
         .then((result) =>
           settle(
-            (Array.isArray(result) ? result : []).slice(0, COMPLETION_LIMIT).map((file) => ({
-              key: `file:${file.relativePath}`,
-              kind: 'file',
-              name: file.relativePath,
-              path: file.relativePath,
-              label: file.relativePath,
-              description: file.name
-            }))
+            (Array.isArray(result) ? result : []).slice(0, COMPLETION_LIMIT).map((file) => {
+              const relative = String(file.relativePath ?? file.name ?? '')
+              const slash = relative.lastIndexOf('/')
+              return {
+                key: `file:${relative}`,
+                kind: 'file',
+                name: relative,
+                path: relative,
+                // 名称列给文件名，目录放进说明列，避免和路径尾部重复
+                label: String(file.name ?? relative),
+                description: slash === -1 ? '' : relative.slice(0, slash)
+              }
+            })
           )
         )
         .catch(() => settle([]))
@@ -4414,9 +4430,7 @@ export function ChatView({
             <IconDots size={14} stroke={1.6} />
           </button>
           {queueReady && (
-            <span className="chat-composer-frame-label">
-              Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送
-            </span>
+            <span className="chat-composer-frame-label">Enter/Tab 在下一个工具调用迭代后发送</span>
           )}
           {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
           <button
@@ -4452,7 +4466,7 @@ export function ChatView({
           <TerminalComposer
             value={input}
             placeholder={
-              running ? '消息会在当前 turn 完成后自动发送' : 'Type something and press Enter...'
+              running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'
             }
             textareaRef={textareaRef}
             onChange={(nextValue) => {
@@ -4542,6 +4556,9 @@ export function ChatView({
                 !event.altKey &&
                 !event.ctrlKey &&
                 !event.metaKey &&
+                // 与 CLI 的 TerminalInput 同一条规则：输入框为空时 shift + ← 才是
+                // 「撤回排队消息」，非空时留给 textarea 自己扩展选区。
+                input.length === 0 &&
                 queuedDisplayItems.length > 0 &&
                 !event.nativeEvent.isComposing
               ) {
@@ -4568,7 +4585,7 @@ export function ChatView({
                 })
                 if (tabAction === 'queue') {
                   event.preventDefault()
-                  send(null, { queueMode: event.shiftKey ? 'after_iteration' : 'after_turn' })
+                  send(null, { queueMode: 'after_iteration' })
                   return
                 }
                 if (tabAction === 'cycle-role') {
@@ -4579,7 +4596,10 @@ export function ChatView({
               }
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
-                send()
+                // 忙时排队只有一种时机：after_iteration（在下一个工具调用迭代
+                // 边界注入当前 turn）。与 Tab/Shift+Tab 排队同一条路径，不再等
+                // 整个 turn 结束才作为下一条消息发出。
+                send(null, running ? { queueMode: 'after_iteration' } : undefined)
               }
             }}
           />

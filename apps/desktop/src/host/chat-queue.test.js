@@ -48,19 +48,20 @@ describe('chat run queue', () => {
       })
     })
 
-    it('enqueues plain Enter/Tab as after_turn when nothing is queued', () => {
-      expect(resolveBusyDispatch({ running: true, queueMode: null, queuedCount: 0 })).toEqual({
-        action: 'enqueue'
-      })
+    // 忙时排队只有一种时机：Enter/Tab/Shift+Tab（含未显式指定 queueMode 的
+    // Enter）都按 after_iteration 交给 host 的 turn/steer。
+    it('steers every busy queue input into the active turn', () => {
+      for (const queueMode of [null, 'after_iteration']) {
+        expect(resolveBusyDispatch({ running: true, queueMode, queuedCount: 0 })).toEqual({
+          action: 'steer'
+        })
+      }
+    })
+
+    it('keeps the local after_turn queue for an explicit request only', () => {
       expect(
         resolveBusyDispatch({ running: true, queueMode: 'after_turn', queuedCount: 0 })
       ).toEqual({ action: 'enqueue' })
-    })
-
-    it('steers Shift+Tab (after_iteration) into the active turn when nothing is queued', () => {
-      expect(
-        resolveBusyDispatch({ running: true, queueMode: 'after_iteration', queuedCount: 0 })
-      ).toEqual({ action: 'steer' })
     })
 
     it('rejects any further queue input once a message is already queued (single slot)', () => {
@@ -76,7 +77,9 @@ describe('chat run queue', () => {
   // host 侧 after_iteration 槽（mica/queue/*）与本地 after_turn 队列必须合并成
   // 同一份展示列表：漏掉 host 槽会让切换 chat 节点后等待中的消息消失。
   describe('mergeQueuedItems (host after_iteration slot + local after_turn queue)', () => {
-    it('puts host items first and flags them pending so recall stays local-only', () => {
+    // 两个槽里的条目都是真实队列项、都能撤回（host 侧走 mica/queue/recall）：
+    // 只有渲染层乐观行（还没被任何队列确认）才带 pending。
+    it('puts host items first without marking them unreachable', () => {
       const items = mergeQueuedItems(
         'node-a',
         [{ id: 'msg-1', text: 'steered', queueMode: 'after_iteration' }],
@@ -88,8 +91,7 @@ describe('chat run queue', () => {
           id: 'msg-1',
           text: 'steered',
           position: 1,
-          queueMode: 'after_iteration',
-          pending: true
+          queueMode: 'after_iteration'
         },
         { id: 'msg-2', text: 'queued', position: 1, queueMode: 'after_turn' }
       ])
@@ -101,8 +103,7 @@ describe('chat run queue', () => {
           id: 'host:node-a:0',
           text: 'no id',
           position: 1,
-          queueMode: 'after_iteration',
-          pending: true
+          queueMode: 'after_iteration'
         }
       ])
     })

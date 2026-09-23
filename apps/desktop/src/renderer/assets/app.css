@@ -1664,21 +1664,39 @@ body.is-resizing.is-resizing-terminal {
   padding: 3px;
 }
 
-/* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[插入文本][说明] 两列 */
+/* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[名称][说明] 两列 */
 .chat-completion-palette {
   max-height: min(240px, 40vh);
   border-radius: 5px;
   padding: 3px;
+  /* 浮层跟着输入框宽度走，窄的时候要能按自己的宽度降级（见下面的容器查询） */
+  container-type: inline-size;
 }
 
 .chat-completion-palette > button {
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* 名称按内容取宽但不被压缩（min 0 允许它在极窄时自己截断），说明吃剩余宽度 */
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 10px;
 }
 
 .chat-completion-palette code {
   overflow: hidden;
+  font-family: var(--chat-font);
+  font-size: 1em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-completion-palette .chat-command-description {
+  color: var(--color-fg-dim);
+}
+
+/* 窄输入框：说明挤到只剩几个字符反而更难读，只留名称；键位提示同样会折成好几行 */
+@container (max-width: 300px) {
+  .chat-completion-palette .chat-command-description,
+  .chat-completion-palette .chat-command-palette-title > span {
+    display: none;
+  }
 }
 
 .chat-select-palette .chat-command-palette-title {

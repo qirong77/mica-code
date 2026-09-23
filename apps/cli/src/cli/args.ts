@@ -75,7 +75,7 @@ export const CLI_USAGE = [
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
-  '  --dir <path>                      Set the task working directory',
+  '  --dir, --cd <path>                Set the task working directory',
   '  --model <provider/model>          Override provider and model',
   '  --variant <effort>                none|low|medium|high|xhigh',
   '  --role <name>                     Override the agent role',
@@ -87,6 +87,14 @@ export const CLI_USAGE = [
   '  --mcp-config <path>               Load MCP servers from a JSON file',
   '  --strict-mcp-config               Do not merge the local MCP config',
   '  --mcp-init-timeout-ms <ms>        Limit connect + tools/list time per MCP server',
+  '',
+  'Codex compatibility (accepted verbatim from codex-family drivers):',
+  '  -c model_reasoning_effort=<e>     none|minimal|low|medium|high|xhigh|max',
+  '  -c model_reasoning_summary=<mode> none turns reasoning events off',
+  '  --dangerously-bypass-approvals-and-sandbox',
+  '                                    Same as --dangerously-skip-permissions',
+  '  --enable <feature>, --skip-git-repo-check',
+  '                                    Accepted and ignored',
   '',
   'Compact options:',
   '  --session <id>                    Compress the given session into a checkpoint',
@@ -284,12 +292,14 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     const valueOption = parseValueOption(arg, argv, index, [
       '--session',
       '--dir',
+      '--cd',
       '--model',
       '--variant',
       '--role',
       '--max-turns',
       '--mcp-config',
       '--mcp-init-timeout-ms',
+      '--enable',
     ]);
     if (valueOption) {
       if (!valueOption.ok) return valueOption.error;
@@ -299,6 +309,8 @@ export function parseCliArgs(argv: string[]): CliInvocation {
           sessionId = valueOption.value;
           break;
         case '--dir':
+        // Codex spells the working directory `--cd`; treat both as the same knob.
+        case '--cd':
           cwd = valueOption.value;
           break;
         case '--model':
@@ -327,12 +339,42 @@ export function parseCliArgs(argv: string[]): CliInvocation {
           mcpInitTimeoutMs = parsed;
           break;
         }
+        case '--enable': {
+          // Codex feature toggles (e.g. `--enable unified_exec`) have no Mica
+          // counterpart. Accept and drop them so a codex-family driver can pass
+          // its own flags verbatim.
+          break;
+        }
       }
       continue;
     }
 
-    if (arg === '--dangerously-skip-permissions') {
+    // Codex renamed this flag to `--dangerously-bypass-approvals-and-sandbox`;
+    // both mean "do not prompt", which is already how headless Mica runs.
+    if (arg === '--dangerously-skip-permissions' || arg === '--dangerously-bypass-approvals-and-sandbox') {
       dangerouslySkipPermissions = true;
+      continue;
+    }
+    if (arg === '--skip-git-repo-check') {
+      // Codex refuses to run outside a git repository by default. Mica has no
+      // such precondition, so the flag is accepted and dropped.
+      continue;
+    }
+    if (arg === '-c' || (arg.startsWith('-c') && arg.length > 2)) {
+      const override = arg === '-c' ? argv[index + 1] : arg.slice(2);
+      if (override === undefined) return cliError('Missing value for -c.');
+      if (arg === '-c') index++;
+      const separator = override.indexOf('=');
+      const key = separator === -1 ? override : override.slice(0, separator);
+      const value = separator === -1 ? '' : override.slice(separator + 1);
+      if (key === 'model_reasoning_effort' && value) {
+        variant = mapCodexEffort(value);
+      } else if (key === 'model_reasoning_summary' && value) {
+        thinking = value !== 'none';
+      }
+      // Other `-c` overrides target Codex `config.toml` keys Mica does not
+      // model (web_search, sandbox modes, ...). Ignore them rather than
+      // rejecting an otherwise valid codex invocation.
       continue;
     }
     if (arg === '--thinking') {
@@ -414,6 +456,17 @@ function takeValue(
   const value = argv[index];
   if (!value) return { ok: false, error: cliError(`Missing value for ${name}.`) };
   return { ok: true, value };
+}
+
+/**
+ * Codex's `model_reasoning_effort` enum is wider than Mica's: `minimal` and
+ * `max` have no Mica counterpart, so collapse them onto the nearest Mica
+ * effort. Every other Codex value already matches a Mica effort name.
+ */
+const CODEX_EFFORT_ALIASES: Record<string, string> = { minimal: 'low', max: 'xhigh' };
+
+function mapCodexEffort(value: string): string {
+  return CODEX_EFFORT_ALIASES[value] ?? value;
 }
 
 function cliError(message: string): { mode: 'error'; message: string } {

@@ -10,20 +10,18 @@ export const FILE_COMPLETION_DEBOUNCE_MS = 220
 
 /**
  * 光标前是否正处在一个补全触发里。
- * - `/` 只在「当前整行就是一条命令且还没有空白」时触发（`/foo bar` 之后不再补全）。
- * - `@` 要求它在词首（行首或空白之后），且到光标之间没有空白，`mail@x.com` 这类不触发。
- * 两个条件互斥，先判 `/`。
+ * 两个触发字符规则一致：**自己在词首**（文本开头或空白之后），且到光标之间没有空白——
+ * 所以 `/` 不再要求「整行以它开头」，`看下 /co` 里的斜杠一样能补全。词里再出现一个 `/`
+ * 就当成路径（`/Users/qi`、`src/a/b.ts`），不再补全。
+ * `mail@x.com`、`and/or` 这类「贴在词中间」的触发字符不生效。两者互斥，先判 `/`。
  */
 export function activeCompletion(value, caret) {
   const text = String(value ?? '')
   const end = Number.isFinite(caret) ? Math.max(0, Math.min(caret, text.length)) : text.length
   const before = text.slice(0, end)
 
-  const lineStart = before.lastIndexOf('\n') + 1
-  const line = before.slice(lineStart)
-  if (line.startsWith('/') && !/\s/.test(line)) {
-    return { kind: 'skill', start: lineStart, query: line.slice(1) }
-  }
+  const slash = /(^|\s)\/([^\s/]*)$/.exec(before)
+  if (slash) return { kind: 'skill', start: slash.index + slash[1].length, query: slash[2] }
 
   const at = /(^|\s)@([^\s@]*)$/.exec(before)
   if (at) return { kind: 'file', start: at.index + at[1].length, query: at[2] }

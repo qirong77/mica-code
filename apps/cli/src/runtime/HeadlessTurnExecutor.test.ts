@@ -216,7 +216,7 @@ describe('HeadlessTurnExecutor', () => {
     const pending = input('pending', 'after_turn');
     await executor.start(pending);
     const removed = executor.recall(pending.id);
-    expect(removed).toBe(true);
+    expect(removed).toMatchObject({ id: pending.id, text: 'pending' });
     expect(executor.pendingInputs).toHaveLength(0);
     expect(events.some((event) => event.type === 'queue:changed')).toBe(true);
   });
@@ -226,7 +226,7 @@ describe('HeadlessTurnExecutor', () => {
     await executor.start(input('first'));
     const pending = input('pending', 'after_turn');
     await executor.start(pending);
-    expect(executor.recall('missing')).toBe(false);
+    expect(executor.recall('missing')).toBeNull();
     expect(executor.pendingInputs).toHaveLength(1);
   });
 

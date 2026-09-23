@@ -57,7 +57,8 @@ mica</code></pre>
   <ul>
     <li>输入 <code>@</code> 可搜索当前工作区文件并引用；粘贴图片时也可以用 <code>[Image](路径)</code> 引用剪贴板图片。</li>
     <li><code>Shift+Tab</code> 在输入框中按列表顺序循环切换 role（agent 运行中会被拒绝，此时表示排队发送）。</li>
-    <li>运行中再发送消息会自动排队：<code>after_iteration</code> 在当前工具迭代边界注入，<code>after_turn</code> 在当前 turn 结束后发送。</li>
+    <li>运行中再发送消息会自动排队，Enter / Tab / Shift+Tab 只有一种时机：<code>after_iteration</code>，在当前工具迭代边界注入当前 turn（本轮没有更多迭代时在 turn 结束后发送）。</li>
+    <li>排队中的消息可以用 <code>Shift+←</code> 撤回到输入框（输入框为空时才触发，否则该键留给选区），终端与桌面端一致。</li>
   </ul>
 
   <h2>运行时切换</h2>

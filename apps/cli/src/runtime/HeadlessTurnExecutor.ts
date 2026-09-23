@@ -184,13 +184,19 @@ export class HeadlessTurnExecutor {
     this.options.agent.abort();
   }
 
-  recall(clientMessageId?: string): boolean {
+  /**
+   * Pulls the queued input back out so the caller can restore it to the input
+   * box (`mica/queue/recall` mirrors the CLI's shift + ←). Returns the removed
+   * input, or null when it is gone (already injected / mismatched id).
+   */
+  recall(clientMessageId?: string): RuntimeInput | null {
     const [pending] = this.queue.list();
-    if (!pending) return false;
-    if (clientMessageId && pending.id !== clientMessageId) return false;
-    this.queue.removeLast();
+    if (!pending) return null;
+    if (clientMessageId && pending.id !== clientMessageId) return null;
+    const removed = this.queue.removeLast();
+    if (!removed) return null;
     this.options.onEvent({ type: 'queue:changed', pending: this.queue.list() });
-    return true;
+    return removed;
   }
 
   private async loop(firstInput: RuntimeInput): Promise<void> {

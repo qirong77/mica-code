@@ -69,9 +69,10 @@ function buildSpawnEnv(env = process.env) {
 // changes. The run lives until its page is closed (chat:dispose) or the host exits.
 const runs = new Map()
 const commitRuns = new Map() // commitId -> { child, buffer, stderr }
-// after_turn inputs (plain Tab while busy) are queued here and replayed as
-// turn/start once the current turn completes. Shift+Tab (after_iteration) is
-// forwarded to the host as turn/steer instead.
+// Explicit after_turn inputs are queued here and replayed as turn/start once
+// the current turn completes. Every busy Enter/Tab/Shift+Tab from the composer
+// now carries after_iteration and is forwarded to the host as turn/steer
+// instead (fastest path), so this local queue is no longer the default.
 const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
 const completedRuns = new Map() // nodeId -> recently finished replay state
 let notifyServer = null
@@ -117,31 +118,45 @@ function pushQueueState(id, run) {
   }
 }
 
-function recallQueuedRun(sender, id, clientMessageId) {
+const QUEUE_RECALL_FAILED = '该消息已开始发送或已不在队列中'
+
+/**
+ * Recall (撤回) a queued message — the CLI's shift + ←. Two slots can hold it:
+ * the local after_turn queue (explicit requests only) and the host's
+ * after_iteration slot. The host slot lives inside the app-server process, so
+ * it can only be emptied through `mica/queue/recall`; both must be recallable,
+ * otherwise a busy Enter/Tab would look permanent in the app while the CLI can
+ * always take it back.
+ */
+async function recallQueuedRun(sender, id, clientMessageId) {
   const run = runs.get(id)
   if (run?.child) run.sender = sender
+  const fail = (error) => {
+    // Same merged view as `chat:queue-state`: a failed recall must report the
+    // queue as it currently stands (and never drop the other slot's row).
+    const items = allQueuedItems(id, run)
+    return { ok: false, error, queuedCount: items.length, queuedItems: items }
+  }
   if (!clientMessageId || typeof clientMessageId !== 'string') {
-    return { ok: false, error: '排队消息 id 缺失', queuedItems: allQueuedItems(id, run) }
+    return fail('排队消息 id 缺失')
   }
   const removed = queuedRuns.remove(
     id,
     (item) => item.sender === sender && item.payload?.clientMessageId === clientMessageId
   )
-  // Same merged view as `chat:queue-state`: recalling a local after_turn item
-  // must not drop the host's pending after_iteration row from the renderer.
-  const items = allQueuedItems(id, run)
+  let text = removed?.payload?.prompt || ''
   if (!removed) {
-    return {
-      ok: false,
-      error: '该消息已开始发送或已不在队列中',
-      queuedCount: items.length,
-      queuedItems: items
-    }
+    const response = await hostTaskRequest(run, 'mica/queue/recall', { clientMessageId })
+    if (!response?.ok) return fail(response?.error || QUEUE_RECALL_FAILED)
+    const input = response.result?.input
+    if (!input) return fail(response.result?.message || QUEUE_RECALL_FAILED)
+    text = input.text || ''
   }
+  const items = allQueuedItems(id, run)
   return {
     ok: true,
     id: clientMessageId,
-    text: removed.payload?.prompt || '',
+    text,
     queuedCount: items.length,
     queuedItems: items
   }
@@ -465,11 +480,12 @@ function startRun(sender, id, payload) {
     // Resident host already running. Refresh the sender (a renderer reload
     // creates a new webContents whose listeners must receive streamed events)
     // and dispatch by bus state:
-    //   idle               -> turn/start (fresh turn)
-    //   busy + Shift+Tab   -> turn/steer (after_iteration injection into the
-    //                         active turn; host-side single-slot queue)
-    //   busy + plain Tab   -> queue locally; replayed as turn/start when the
-    //                         current turn completes (after_turn)
+    //   idle                       -> turn/start (fresh turn)
+    //   busy + queue input         -> turn/steer (after_iteration injection into
+    //                                 the active turn; host-side single-slot
+    //                                 queue; Enter/Tab/Shift+Tab all land here)
+    //   busy + explicit after_turn -> queue locally; replayed as turn/start when
+    //                                 the current turn completes
     existing.sender = sender
     if (existing.running) {
       // 单槽排队（对齐 CLI）：已有任意排队（本地 after_turn 或 host
@@ -1367,7 +1383,7 @@ export function registerChatIpc() {
     return abortRun(id)
   })
 
-  ipcMain.handle('chat:recall-queued', (event, { id, clientMessageId } = {}) => {
+  ipcMain.handle('chat:recall-queued', async (event, { id, clientMessageId } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失', queuedCount: 0, queuedItems: [] }
     return recallQueuedRun(event.sender, id, clientMessageId)
   })

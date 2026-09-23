@@ -19,6 +19,7 @@ import {
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 import { getModelRule } from './getModelRule.js';
+import { isEnvOnlyProvider, synthesizeEnvProviders } from './envProvider.js';
 
 export {
   CONFIG_PATH,
@@ -118,7 +119,9 @@ function stripRuntimeProviderFields(
   persistedProviders: ProviderDefinition[],
 ): ProviderDefinition[] {
   const persistedById = new Map(persistedProviders.map((provider) => [provider.id, provider]));
-  return providers.map((provider) => stripRuntimeProviderModels(provider, persistedById.get(provider.id)));
+  return providers
+    .filter((provider) => !isEnvOnlyProvider(provider.id))
+    .map((provider) => stripRuntimeProviderModels(provider, persistedById.get(provider.id)));
 }
 
 function stripRuntimeProviderModels(
@@ -153,7 +156,8 @@ function sortJson(value: unknown): unknown {
 }
 
 function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfig): IMicaConfig {
-  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const configured = Array.isArray(config.providers) ? config.providers : [];
+  const providers = synthesizeEnvProviders(configured);
   const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
   const provider = providers.find((item) => item.id === providerId);
   const model = resolveLastUsedModel(provider, lastUsed.model, lastUsed.providerPreferences?.[providerId]?.model);

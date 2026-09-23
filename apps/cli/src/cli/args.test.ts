@@ -194,4 +194,71 @@ describe('parseCliArgs', () => {
       mode: 'error',
     });
   });
+
+  it('accepts a codex exec invocation verbatim', () => {
+    expect(
+      parseCliArgs([
+        'exec',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--skip-git-repo-check',
+        '--model',
+        'gpt-5.5',
+        '--json',
+        '--enable',
+        'unified_exec',
+        '-c',
+        'model_reasoning_effort=high',
+        '-c',
+        'web_search=disabled',
+        '--',
+        'Fix the failing test',
+      ]),
+    ).toEqual({
+      mode: 'exec',
+      json: true,
+      prompt: 'Fix the failing test',
+      sessionId: undefined,
+      cwd: undefined,
+      model: 'gpt-5.5',
+      variant: 'high',
+      role: undefined,
+      maxTurns: undefined,
+      thinking: false,
+      noSave: false,
+      dangerouslySkipPermissions: true,
+      mcpConfigPath: undefined,
+      strictMcpConfig: false,
+      mcpInitTimeoutMs: undefined,
+    });
+  });
+
+  it('maps codex-only effort values and config overrides onto Mica options', () => {
+    expect(parseCliArgs(['exec', '-c', 'model_reasoning_effort=minimal', 'hi'])).toMatchObject({
+      variant: 'low',
+    });
+    expect(parseCliArgs(['exec', '-cmodel_reasoning_effort=max', 'hi'])).toMatchObject({
+      variant: 'xhigh',
+    });
+    expect(parseCliArgs(['exec', '-c', 'model_reasoning_summary=auto', 'hi'])).toMatchObject({
+      thinking: true,
+    });
+    expect(parseCliArgs(['exec', '-c', 'model_reasoning_summary=none', 'hi'])).toMatchObject({
+      thinking: false,
+    });
+    expect(
+      parseCliArgs(['exec', '-c', 'sandbox_workspace_write.network_access=true', 'hi']),
+    ).toMatchObject({ mode: 'exec', variant: undefined });
+    expect(parseCliArgs(['exec', '-c'])).toMatchObject({ mode: 'error' });
+  });
+
+  it('treats codex --cd as the working directory', () => {
+    expect(parseCliArgs(['exec', '--cd', '/work/task', 'hi'])).toMatchObject({
+      mode: 'exec',
+      cwd: '/work/task',
+    });
+    expect(parseCliArgs(['exec', '--cd=/work/task', 'hi'])).toMatchObject({
+      mode: 'exec',
+      cwd: '/work/task',
+    });
+  });
 });

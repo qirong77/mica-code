@@ -4,6 +4,8 @@ import { IconCommand } from '@tabler/icons-react'
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
+ * 每行是「名称 | 说明」两列：名称按内容取宽且永不压缩（它是扫描目标），说明吃掉剩余
+ * 宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的）。
  */
 export default function ComposerCompletionPalette({
   title,
@@ -37,7 +39,7 @@ export default function ComposerCompletionPalette({
           onClick={() => onSelect(item)}
         >
           <code>{item.label}</code>
-          {item.description && <span className="chat-command-description">{item.description}</span>}
+          <span className="chat-command-description">{item.description || ''}</span>
         </button>
       ))}
     </div>

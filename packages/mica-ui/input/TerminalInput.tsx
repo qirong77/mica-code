@@ -21,7 +21,7 @@ import { saveClipboardImage } from '../utils/imagePaste.js';
 import { buildLoopBadge } from '../utils/format.js';
 import { PromptFrame } from './PromptFrame.js';
 import type { DOMElement } from '@anthropic/ink';
-import type { TerminalInputQueueMode, TerminalInputSubmitOptions } from './state.js';
+import type { TerminalInputSubmitOptions } from './state.js';
 import type { PromptFrameMode } from './PromptFrame.js';
 import type { MicaUiSubagentTaskItem } from '../types.js';
 
@@ -31,7 +31,7 @@ interface YogaNodeLike {
 }
 
 const EXIT_CONFIRM_TIMEOUT_MS = 2000;
-const QUEUE_SHORTCUT_TIP = 'Enter/Tab 等 agent 执行完成后发送，shift + tab 本轮工具调用迭代后发送';
+const QUEUE_SHORTCUT_TIP = 'Enter/Tab 在下一个工具调用迭代后发送';
 const BASH_MODE_TIP = 'bash · Enter 后台执行';
 
 /** 定时循环运行期间每秒刷新一次，驱动输入框徽标的倒计时。 */
@@ -256,13 +256,13 @@ function TerminalInput() {
     input.submit(trimmed, options);
   }, []);
 
-  const queueCurrentInput = useCallback(
-    (queueMode: TerminalInputQueueMode) => {
-      if (!showQueueShortcutTip || currentPendingInputs.length > 0) return;
-      submitValue(localText, { queueMode });
-    },
-    [currentPendingInputs.length, localText, showQueueShortcutTip, submitValue],
-  );
+  // 排队只有一种时机：after_iteration。输入在下一个工具调用迭代边界注入
+  // 当前 turn（model 当轮就能看到），本轮没有更多迭代时由 message-queue 的
+  // turn:after 兜底发送；不再有「等整个 turn 结束」的第二条路径。
+  const queueCurrentInput = useCallback(() => {
+    if (!showQueueShortcutTip || currentPendingInputs.length > 0) return;
+    submitValue(localText, { queueMode: 'after_iteration' });
+  }, [currentPendingInputs.length, localText, showQueueShortcutTip, submitValue]);
 
   const armExitConfirmation = useCallback(
     (text: string) => {
@@ -323,7 +323,7 @@ function TerminalInput() {
     if (key.tab && showQueueShortcutTip) {
       event?.preventDefault?.();
       event?.stopImmediatePropagation?.();
-      queueCurrentInput(key.shift ? 'after_iteration' : 'after_turn');
+      queueCurrentInput();
       // CursorInput's own Tab handler (insert 4 spaces) may still run after
       // this branch with the pre-clear value, re-populating the box with the
       // just-queued message + trailing spaces. That ghost text makes the
@@ -445,7 +445,14 @@ function TerminalInput() {
       )
         return;
       if (isAgentRunning && currentPendingInputs.length > 0) return;
-      submitValue(value, isBashMode ? { bashMode: true } : undefined);
+      if (isBashMode) {
+        submitValue(value, { bashMode: true });
+        return;
+      }
+      // 忙时排队统一走 after_iteration：在下一个工具调用迭代边界注入当前
+      // turn。与 Tab/Shift+Tab 排队同一条路径，输入不会被等成"turn 结束后
+      // 才发出去的下一条消息"。
+      submitValue(value, isAgentRunning ? { queueMode: 'after_iteration' } : undefined);
     },
     [currentPendingInputs.length, isAgentRunning, isBashMode, submitValue],
   );

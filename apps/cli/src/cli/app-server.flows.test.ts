@@ -1367,6 +1367,59 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(completedCount).toBe(1);
   });
 
+  itE2E('mica/queue/recall pulls a queued steer back out of the host slot', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 1200;
+
+    const host = spawnHost('queue-recall');
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'recall-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '请创建文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (recall)');
+    const turn1 = (started.params?.turn as { id?: string }).id!;
+
+    // Busy Enter/Tab/Shift+Tab: the steer waits in the host's single slot.
+    await sleep(400);
+    await send(host, 2, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: turn1,
+      input: [{ type: 'text', text: '撤回我：这句话不该被注入' }],
+      clientMessageId: 'optimistic-recall',
+    });
+    await waitFor(host, (m) => m.method === 'mica/queue/queued', 'mica/queue/queued (recall)');
+
+    // shift + ← in the app: recall over the Mica extension request.
+    await send(host, 3, 'mica/queue/recall', { clientMessageId: 'optimistic-recall' });
+    const recalled = await waitFor(host, (m) => m.id === 3, 'queue recall response', 10_000);
+    expect(recalled.error).toBeFalsy();
+    expect(recalled.result).toMatchObject({
+      ok: true,
+      input: { id: 'optimistic-recall', text: '撤回我：这句话不该被注入' },
+      pending: [],
+    });
+    const changed = host.lines.filter((m) => m.method === 'mica/queue/changed').pop();
+    expect((changed?.params as { pending?: unknown[] } | undefined)?.pending).toEqual([]);
+
+    const completed = await waitFor(host, turnCompleted(turn1), 'turn/completed (recall)', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('completed');
+    // The recalled text never reached the provider, in this turn or a follow-up.
+    expect(JSON.stringify(mock!.state.requests.map((request) => request.input ?? []))).not.toContain(
+      '撤回我：这句话不该被注入',
+    );
+    // Recalling fails once the slot is empty instead of silently succeeding.
+    await send(host, 4, 'mica/queue/recall', { clientMessageId: 'optimistic-recall' });
+    const missing = await waitFor(host, (m) => m.id === 4, 'queue recall (empty) response', 10_000);
+    expect(missing.result).toMatchObject({ ok: false, input: null });
+  });
+
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

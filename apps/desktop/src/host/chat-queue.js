@@ -52,33 +52,38 @@ export function createChatQueue(maxSize = Infinity) {
 /**
  * Busy dispatch for a second message while a resident host is running.
  * Mirrors the CLI's single-slot queue semantics (MessageQueueService +
- * TerminalInput): once one message is queued — locally (plain Tab / Enter,
- * after_turn) or injected at the host (Shift+Tab, after_iteration) — any
- * further queue request is rejected with the CLI's exact notice text instead
- * of stacking a second slot.
+ * TerminalInput): once one message is queued — at the host (after_iteration)
+ * or in the local after_turn queue — any further queue request is rejected
+ * with the CLI's exact notice text instead of stacking a second slot.
+ *
+ * 用户输入只有一种排队时机：Enter/Tab/Shift+Tab 都按 after_iteration 交给
+ * host 的 turn/steer，在下一个工具调用迭代边界注入当前 turn（与 CLI 的
+ * TerminalInput 一致）。显式 after_turn 才落到本地队列等 turn 结束，renderer
+ * 不再走这条路径。
  */
 export function resolveBusyDispatch({ running, queueMode, queuedCount }) {
   if (!running) return { action: 'start' }
   if (queuedCount > 0) {
     return { action: 'reject', message: '已有一条排队消息，等待发送或重新编辑' }
   }
-  if (queueMode === 'after_iteration') return { action: 'steer' }
-  return { action: 'enqueue' }
+  if (queueMode === 'after_turn') return { action: 'enqueue' }
+  return { action: 'steer' }
 }
 
 /**
  * Merge the host-side after_iteration slot (`mica/queue/*` notifications) with
  * the local after_turn queue into the single list the renderer renders. Host
- * items come first (they were accepted earlier) and are flagged `pending` so
- * the renderer disables recall — only the local queue can be recalled.
+ * items come first (they were accepted earlier). Both are real queue entries
+ * and recallable (`mica/queue/recall` empties the host slot, the same recall
+ * the CLI offers with shift + ←); only the renderer's optimistic in-flight row
+ * is flagged `pending`.
  */
 export function mergeQueuedItems(id, hostPending, localItems) {
   const host = (hostPending || []).map((item, index) => ({
     id: item.id || `host:${id}:${index}`,
     text: item.text || '',
     position: index + 1,
-    queueMode: item.queueMode || 'after_iteration',
-    pending: true
+    queueMode: item.queueMode || 'after_iteration'
   }))
   return [...host, ...(localItems || [])]
 }

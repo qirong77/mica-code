@@ -12,9 +12,15 @@ describe('composer completions', () => {
     expect(activeCompletion('/co', 3)).toEqual({ kind: 'skill', start: 0, query: 'co' })
   })
 
-  it('stops the slash completion once the line has arguments or plain text', () => {
+  it('triggers the skill completion wherever the slash starts a word', () => {
+    expect(activeCompletion('看下 /co', 6)).toEqual({ kind: 'skill', start: 3, query: 'co' })
     expect(activeCompletion('/compact --local', 16)).toBeNull()
-    expect(activeCompletion('explain /co', 11)).toBeNull()
+  })
+
+  it('treats a second slash inside the token as a path, not a skill', () => {
+    expect(activeCompletion('看下 /Users/qi', 12)).toBeNull()
+    expect(activeCompletion('src/a/b.ts', 10)).toBeNull()
+    expect(activeCompletion('and/or', 6)).toBeNull()
   })
 
   it('triggers the file completion on the token after the at sign', () => {

@@ -134,7 +134,8 @@ reload, and MCP re-init.
   `uncaughtException` (error notification then exit) handlers so it never dies
   silently with a bare code 1.
 - **Lifecycle**: `turn/steer` maps to the executor's `after_iteration` queue
-  (iteration-boundary injection, matching Shift+Tab in the app); `turn/start`
+  (iteration-boundary injection, matching every busy Enter/Tab/Shift+Tab in
+  the app); `turn/start`
   starts a fresh turn when idle; `turn/interrupt` aborts the active turn.
   **Every** executor turn owns a turn id and emits `turn/started` +
   `turn/completed` — including turns the host drains from its own queue (plugin
@@ -179,6 +180,12 @@ methods with `-32601`):
   was already sent and rerun it. The message is located by its whitespace-folded
   text plus a from-the-end occurrence counter (persisted histories carry no
   per-message ids), everything after it is truncated, saved, and replayed.
+- `mica/queue/recall`: pull the queued after_iteration input back out of the
+  host's single slot (`{ clientMessageId }` -> `{ ok, input, pending }`), so a
+  client can restore it to its composer — the CLI's shift + ←. It only empties
+  the slot and never starts a turn, so it works while one is streaming (which is
+  exactly when a queue entry exists); an already-injected or unknown id answers
+  `{ ok: false, input: null }` instead of silently succeeding.
 - `mica/backgroundTasks/kill` / `mica/backgroundTasks/output`: background shell
   tasks are owned by the host process, so the desktop app's task-dock ✕ button
   and output modal go through here. The running-only snapshot drops a task the

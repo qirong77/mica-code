@@ -49,7 +49,7 @@ const commands = [
     </thead>
     <tbody>
       <tr><td><code>@</code></td><td>在输入框中触发当前工作区文件搜索，方向键选择，Enter 或 Tab 插入</td></tr>
-      <tr><td><code>Shift+Tab</code></td><td>按列表顺序循环切换 role（agent 运行中拒绝；输入已排队时表示 after_iteration 发送）</td></tr>
+      <tr><td><code>Shift+Tab</code></td><td>按列表顺序循环切换 role（agent 运行中拒绝；输入框有内容时与 Enter/Tab 一样按 after_iteration 排队发送）</td></tr>
       <tr><td><code>Ctrl+C</code></td><td>中止当前 turn（同步 abort 该 agent 的 running subagent，并保留已展示的部分回复）</td></tr>
     </tbody>
   </table>

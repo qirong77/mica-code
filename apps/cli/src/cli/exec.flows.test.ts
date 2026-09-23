@@ -328,6 +328,18 @@ function makeHome(tag: string): string {
   return home;
 }
 
+/**
+ * A MICA_HOME with no credentials on disk, mirroring a fresh task container.
+ * `config.json` is materialized by the CLI's own default-filling pass.
+ */
+function makeCredentialFreeHome(tag: string): string {
+  const home = join(tmpdir(), `mica-exec-flow-${process.pid}-${tag}`);
+  rmSync(home, { recursive: true, force: true });
+  mkdirSync(home, { recursive: true });
+  mkdirSync(join(home, 'sessions'), { recursive: true });
+  return home;
+}
+
 /** Run a one-shot `mica exec <args>` CLI and collect stdout/stderr. */
 function runCli(
   args: string[],
@@ -434,6 +446,48 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     const events = parseJsonl(result.stdout);
     expect(events.some((e) => e.type === 'turn.completed')).toBe(true);
+  });
+
+  itE2E('accepts a codex-style invocation authenticated from the environment', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    const home = makeCredentialFreeHome('exec-codex-env');
+
+    const result = await runCli(
+      [
+        'exec',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--skip-git-repo-check',
+        '--model',
+        'openai/mock-chat',
+        '--json',
+        '--enable',
+        'unified_exec',
+        '-c',
+        'model_reasoning_effort=high',
+        '--',
+        '你好',
+      ],
+      {
+        MICA_HOME: home,
+        OPENAI_API_KEY: 'sk-from-environment',
+        OPENAI_BASE_URL: baseUrl,
+      },
+    );
+
+    expect(result.code).toBe(0);
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(mock!.state.requests[0].model).toBe('mock-chat');
+    expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
+    expect(parseJsonl(result.stdout).some((e) => e.type === 'turn.completed')).toBe(true);
+
+    // The synthesized provider must stay runtime-only: the credentials live in
+    // the environment, never in the persisted config.
+    const persisted = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as {
+      providers: Array<{ id: string; api_key?: string }>;
+    };
+    expect(persisted.providers.some((provider) => provider.api_key === 'sk-from-environment')).toBe(false);
+    expect(persisted.providers.some((provider) => provider.id === 'openai')).toBe(false);
   });
 
   itE2E('provider errors are surfaced as JSON errors and persist an error turn', async () => {

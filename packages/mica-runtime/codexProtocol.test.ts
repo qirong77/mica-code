@@ -19,6 +19,7 @@ describe('codex protocol framing', () => {
   it('pins the Mica extension request names', () => {
     expect(MICA_METHODS).toEqual({
       editMessage: 'mica/turn/editMessage',
+      queueRecall: 'mica/queue/recall',
       killBackgroundTask: 'mica/backgroundTasks/kill',
       backgroundTaskOutput: 'mica/backgroundTasks/output',
       subagentTaskDetail: 'mica/subagentTasks/detail',

@@ -180,8 +180,8 @@ export function projectSubagentTaskDetail(record: SubagentTaskRecord): MicaSubag
  * Holds the AgentRuntime, MCP connections and the shared HeadlessTurnExecutor
  * for the whole session lifetime, so repeated turns skip process startup,
  * session reload and MCP re-init. `turn/steer` maps to the executor's
- * after_iteration queue (iteration-boundary injection, matching Shift+Tab in
- * the app); `turn/start` starts a fresh turn when idle.
+ * after_iteration queue (iteration-boundary injection, matching every busy
+ * Enter/Tab/Shift+Tab in the app); `turn/start` starts a fresh turn when idle.
  *
  * Exits when stdin closes or on SIGINT/SIGTERM.
  */
@@ -1082,6 +1082,21 @@ async function handleCodexRequest(
         return;
       }
       ctx.writeResponse({ turn: turnSnapshot(turnId, 'inProgress') });
+      return;
+    }
+    case MICA_METHODS.queueRecall: {
+      // Mica extension: pull a queued after_iteration input back out of the
+      // host's single slot so the client can restore it to its composer (the
+      // CLI's shift + ←). Not a turn, so it stays usable while one is running —
+      // which is exactly when a queue entry exists.
+      const clientMessageId = paramString(params, 'clientMessageId');
+      const removed = ctx.executor.recall(clientMessageId);
+      ctx.writeResponse({
+        ok: Boolean(removed),
+        input: removed ? inputToQueueItem(removed) : null,
+        pending: ctx.executor.pendingInputs.map(inputToQueueItem),
+        ...(removed ? {} : { message: '该消息已开始发送或已不在队列中' }),
+      });
       return;
     }
     case MICA_METHODS.killBackgroundTask: {
