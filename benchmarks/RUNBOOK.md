@@ -505,6 +505,37 @@ is ~15–25 h of pure install removed.
   0.4–2 GB each). `docker image prune -f` only removes *dangling* images, so
   these accumulate invisibly. `cell.sh` now removes them explicitly, and
   `watchdog.sh` reaps them whenever free space drops below 9 GB.
+- **Reclaiming docker while another cell is pulling an image destroys the pull.**
+  The engine used to call `reclaim_async()` on *every* cell finish. That runs
+  `docker container/network/image prune -f`, `docker builder prune -f`, `rmi -f`
+  on the leftover `*__env-main` images and `colima ssh -- sudo fstrim`. When the
+  first cell of a matrix finishes while the other agents are still pulling their
+  task image, the prune deletes containerd content out from under the in-flight
+  pull and it dies with
+  `failed to Lchown ".../clippy-driver" for UID 0, GID 0: no such file or
+  directory` (at unpack time) or
+  `failed commit on ref "layer-sha256:…": commit failed: rename
+  /var/lib/containerd/…/ingest/<id>/data …/blobs/sha256/<digest>: no such file
+  or directory` (at commit time).
+  This is what took out **all three `vf2-speedup-networkx` cells in `run-0924-1408`**:
+  mica's `wal-recovery-ordering` cell finished at 14:15:50, and every vf2 cell —
+  all of which were still mid-pull on the 5-layer, ~2 GB rustup image — died at
+  14:15:50. It is *not* a concurrency bug in the registry: pull the same image by
+  hand with no reclaim running and it succeeds. Two guards now hold it shut:
+  reclaim only fires when `Engine.busy()` is false (so it runs once, after the
+  last cell), and a single `_RECLAIM_LOCK` keeps any pull from overlapping a
+  reclaim left over from a previous run — that leftover is what made a manual
+  `docker pull` fail at 14:31 with no matrix running at all.
+
+  The same run is also why **pulling a task image up front is worth it**: three
+  cells of one task each pulled the same image independently. `task.toml` pins
+  the image for both the agent and the verifier environment
+  (`docker_image = "harborframework/terminal-bench:<task>-…@sha256:…"`), and
+  harbor *pulls* rather than builds whenever that field is set
+  (`should_use_prebuilt_docker_image`). The scheduler now reads those references
+  out of `task.toml` (`catalog.task_image_refs`) and pulls them one at a time
+  before the task's first cell starts, so the cells' compose `up` finds the image
+  already local and skips the pull entirely.
 
 ---
 

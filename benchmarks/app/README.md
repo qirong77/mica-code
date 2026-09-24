@@ -8,6 +8,7 @@ app/
     settings.json 运行配置（含密钥，chmod 600，不入 git）
     routes.json   每个 agent 的上游路由，proxy 热加载
     tools/        browse.py / shot.py：真浏览器验证辅助
+                  preflight_proxy.py：开跑前验证鉴权 / 路由 / 计费
   proxy.py        记录代理：所有 agent 的请求都过它，token / 轮次只认它的账
   runner/
     run-agent.sh  单格命令行入口（<agent> <task-id>）

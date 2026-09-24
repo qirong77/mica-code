@@ -158,6 +158,8 @@ export interface AgentTotals {
 
 export interface ResultsPayload {
   tag: string
+  /** Where the matrix rows/cols came from: this tag's own cells, or the picker. */
+  source: 'run' | 'selection'
   generated_at: number
   agents: AgentId[]
   tasks: string[]

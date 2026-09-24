@@ -336,6 +336,54 @@ def known_run_tags() -> list[str]:
     return [t for _m, t in tags]
 
 
+def cells_for_tag(
+    run_tag: str, agent_ids: list[str]
+) -> tuple[list[str], list[str]]:
+    """(agents, tasks) this tag actually created, read from its job dirs.
+
+    Driving the matrix from the *current* selection makes a live run invisible
+    whenever its tasks are not the ones ticked in the picker (and does the same
+    when an older tag is picked from the dropdown): the run is really 2 tasks x 3
+    agents, but the page shows 9 selected columns with 3 cells running.  The job
+    dirs are the honest record of what ran, so prefer them over the selection.
+
+    Matching is by known agent id rather than splitting on "__" so a task name
+    containing "__" can never be misread as an agent switch.
+    """
+    agents: list[str] = []
+    tasks: list[str] = []
+    if not JOBS_DIR.is_dir():
+        return agents, tasks
+    prefix = f"{run_tag}__"
+    for path in JOBS_DIR.iterdir():
+        if not path.is_dir() or not path.name.startswith(prefix):
+            continue
+        rest = path.name[len(prefix) :]
+        agent = next((a for a in agent_ids if rest.startswith(f"{a}__")), None)
+        if agent is not None:
+            task = rest[len(agent) + 2 :]
+        elif "__" in rest:
+            # A tag can have been run with an agent that has since left the
+            # catalog (reg2 used kimi-code and opencode).  Keep those cells
+            # visible instead of silently hiding them.
+            agent, task = rest.split("__", 1)
+        else:
+            continue
+        if not task:
+            continue
+        if agent not in agents:
+            agents.append(agent)
+        if task not in tasks:
+            tasks.append(task)
+    if tasks:
+        # Same order the task picker uses, so columns do not shuffle between runs.
+        rank = {row["name"]: i for i, row in enumerate(list_task_catalog())}
+        tasks.sort(key=lambda t: (rank.get(t, len(rank)), t))
+    order = {a: i for i, a in enumerate(agent_ids)}
+    agents.sort(key=lambda a: (order.get(a, len(order)), a))
+    return agents, tasks
+
+
 def latest_run_tag() -> str | None:
     tags = known_run_tags()
     return tags[0] if tags else None

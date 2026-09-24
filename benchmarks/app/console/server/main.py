@@ -73,7 +73,27 @@ def _payload_results(query: dict[str, list[str]]) -> dict:
     ]
     tasks = pick("tasks", settings.tasks)
     tag = (query.get("tag") or [None])[0] or results.latest_run_tag()
-    return results.build_payload(tag, agents, tasks, ENGINE.running_cells())
+
+    # Prefer the cells this tag actually created over the current selection, so a
+    # live run (and an old tag picked from the dropdown) shows what it ran rather
+    # than whatever happens to be ticked in the picker.  Falls back to the
+    # selection when the tag has no artifacts yet -- that is the "what would run
+    # if I pressed start" preview.
+    source = "selection"
+    run = ENGINE.run_state or {}
+    if run.get("active") and run.get("tag") == tag:
+        live_agents = [a for a in run["agents"] if a in AGENTS_BY_ID]
+        live_tasks = [t for t in run["tasks"] if t]
+        if live_agents and live_tasks:
+            agents, tasks, source = live_agents, live_tasks, "run"
+    else:
+        disk_agents, disk_tasks = results.cells_for_tag(tag, list(AGENTS_BY_ID))
+        if disk_agents and disk_tasks:
+            agents, tasks, source = disk_agents, disk_tasks, "run"
+
+    payload = results.build_payload(tag, agents, tasks, ENGINE.running_cells())
+    payload["source"] = source
+    return payload
 
 
 def _dispatch(handler: "Handler", method: str, path: str, query: dict, body: dict):

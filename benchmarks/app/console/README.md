@@ -89,8 +89,24 @@ agent budget is already spent, so a retry burns another ~1.7 h to land in the
 same place.
 
 Before each cell the engine refuses to start if free disk is under
-`min_free_mb`. After each cell it reclaims containers, **networks**, `*__env-main`
-images (tagged, so `image prune` never touches them) and runs `fstrim`.
+`min_free_mb`. Reclaiming containers, **networks**, `*__env-main` images (tagged,
+so `image prune` never touches them) and `fstrim` happens **once, after the last
+cell of the run**, not after every cell.
+
+That timing is load-bearing. The prune deletes containerd content, and a task
+image being pulled by another cell at that moment dies with `commit failed:
+rename /var/lib/containerd/…/ingest/<id>/data …/blobs/sha256/<digest>: no such
+file or directory`. Reclaim used to fire per cell finish, and in `run-0924-1408`
+that killed all three `vf2-speedup-networkx` cells the instant mica's first cell
+completed. A single `_RECLAIM_LOCK` additionally keeps a pull from overlapping a
+reclaim left over from the previous run; the scheduler waits it out before
+dispatching.
+
+Each task's pinned images come from its own `task.toml`
+(`catalog.task_image_refs`), and the scheduler pulls them one at a time before
+that task's first cell starts. Harbor pulls rather than builds whenever
+`docker_image` is set, so without this every agent of a task pulled the same
+image independently — three downloads and three chances to collide.
 
 The network prune is not optional: every trial creates its own bridge, and once
 colima exhausts its subnettable address space the next cell dies at setup with

@@ -49,3 +49,5 @@ tasks/<task-id>/
 ## 镜像与架构
 
 任务声明的是**预构建的 amd64 镜像**。在 arm64 机器上这意味着容器跑在模拟层里——这既是 setup 慢的主因，也让 `mica` 的 x64 二进制在 qemu 下 SIGILL。处理方式见 [`../RUNBOOK.md`](../RUNBOOK.md) 的「镜像与架构」一节。
+
+镜像是**拉取**而不是本地构建的：`task.toml` 的 `[environment]` 与 `[verifier.environment]` 各带一个 `docker_image = "harborframework/terminal-bench:<task>-…@sha256:…"`，只要这个字段在，Harbor 的 `should_use_prebuilt_docker_image` 就返回 True，旁边那份 Dockerfile 只在 `--force-build` 时用。所以 `task.toml` 是镜像引用的唯一来源；控制台按它逐个任务串行预热（`catalog.task_image_refs` + `engine._warm_task_images`），同一个任务的多个 agent 才不会各拉一遍同一个镜像。

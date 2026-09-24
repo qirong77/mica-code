@@ -11,15 +11,23 @@ interface Props {
 
 export function Matrix({ results, agents, onSelect }: Props) {
   const tasks = results.tasks
+  const { source, tag } = results
   const index = new Map(results.matrix.map((row) => [row.key, row]))
 
-  const shown = agents.filter((agent) => tasks.some((task) => index.has(`${agent.id}__${task}`)))
+  // Rows come from the payload, not the catalog: a tag may have been run with an
+  // agent that has since left the catalog (reg2 used kimi-code and opencode) and
+  // its cells should still be readable.  Unknown ids fall back to the raw id.
+  const metaById = new Map(agents.map((agent) => [agent.id, agent]))
+  const shown = results.agents.filter((id) => tasks.some((task) => index.has(`${id}__${task}`)))
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">矩阵</CardTitle>
         <p className="text-xs text-muted-foreground">
+          {source === 'run'
+            ? `以下为 ${tag} 实际跑过的 cell：`
+            : '选中的任务即下方矩阵的列：'}
           行 = agent（{shown.length}），列 = 任务（{tasks.length}），每格 = 该 agent
           在该任务上的一次运行（共 {shown.length * tasks.length}）。点击任意单元格查看测试明细（哪些用例没通过）、Token 与单 cell 操作。
         </p>
@@ -49,12 +57,12 @@ export function Matrix({ results, agents, onSelect }: Props) {
             </thead>
             <tbody>
               {shown.map((agent) => (
-                <tr key={agent.id}>
+                <tr key={agent}>
                   <td className="sticky left-0 z-10 whitespace-nowrap bg-card pr-2 text-xs font-medium">
-                    {agent.label}
+                    {metaById.get(agent)?.label ?? agent}
                   </td>
                   {tasks.map((task) => {
-                    const row = index.get(`${agent.id}__${task}`)
+                    const row = index.get(`${agent}__${task}`)
                     if (!row) {
                       return (
                         <td key={task}>

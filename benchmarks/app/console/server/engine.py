@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from . import harbor
-from .catalog import AGENTS_BY_ID, JOBS_DIR
+from .catalog import AGENTS_BY_ID, JOBS_DIR, task_image_refs
 from . import settings as settings_mod
 from .settings import (
     APP_DIR,
@@ -41,6 +41,64 @@ from .settings import (
 
 POLL_SECS = 20
 HARBOR_BIN_DIR = Path("/tmp/harbor-env/bin")
+
+# A warm-up pull is one big download; the tasks' images run to a few hundred MB.
+# Long enough for a slow link, short enough that a wedged pull cannot pin the
+# scheduler for the rest of the day.
+IMAGE_PULL_TIMEOUT_SECS = 1800.0
+
+# How long a new run waits for a reclaim left over from the previous one.
+# `rmi` of a few GB plus `fstrim` is minutes, not seconds.
+RECLAIM_WAIT_SECS = 900.0
+
+# Held while a reclaim pass runs, so pulls and reclaims never overlap.
+_RECLAIM_LOCK = threading.Lock()
+
+
+def _image_present(ref: str) -> bool:
+    """True when the pinned image is already in the local daemon.
+
+    The whole reference has to be inspected, digest included: pulling
+    ``repo:tag@sha256:...`` stores the image **untagged** in the containerd
+    store (``docker images`` shows ``repo:<none>``), so only the digest form
+    resolves.  Checking the tag alone reports every cached image as missing and
+    would re-pull it on every run.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "image", "inspect", ref],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _pull_image(ref: str) -> tuple[bool, str]:
+    """Pull one pinned image. Returns (ok, last line of output)."""
+    try:
+        proc = subprocess.run(
+            ["docker", "pull", ref],
+            capture_output=True,
+            text=True,
+            timeout=IMAGE_PULL_TIMEOUT_SECS,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timed out after {int(IMAGE_PULL_TIMEOUT_SECS)}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if proc.returncode == 0:
+        return True, ""
+    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    return False, detail[-1] if detail else f"docker pull exit {proc.returncode}"
+
+
+def _short_ref(ref: str) -> str:
+    """``repo:tag@sha256:...`` -> ``tag``; the digest adds nothing to a log line."""
+    name = ref.split("@", 1)[0]
+    return name.rsplit(":", 1)[-1] or name
 
 
 def _now() -> float:
@@ -236,6 +294,22 @@ def reclaim_async() -> None:
     """
 
     def worker() -> None:
+        # One reclaim at a time, and ``wait_for_reclaim`` lets the scheduler hold
+        # off until it is done.  Both matter: this deletes images and build cache,
+        # and a pull that loses its content out from under it dies with
+        # "commit failed: rename ... no such file or directory".
+        if not _RECLAIM_LOCK.acquire(blocking=False):
+            return
+        try:
+            _reclaim_pass()
+        finally:
+            _RECLAIM_LOCK.release()
+
+    threading.Thread(target=worker, name="reclaim", daemon=True).start()
+
+
+def _reclaim_pass() -> None:
+    def run() -> None:
         for cmd in (
             ["docker", "container", "prune", "-f"],
             # Networks matter as much as images: every trial creates its own
@@ -253,7 +327,15 @@ def reclaim_async() -> None:
             _run_quiet(["docker", "rmi", "-f", name])
         _run_quiet(["colima", "ssh", "--", "sudo", "fstrim", "-v", "/var/lib/docker"])
 
-    threading.Thread(target=worker, name="reclaim", daemon=True).start()
+    run()
+
+
+def wait_for_reclaim(timeout: float = RECLAIM_WAIT_SECS) -> bool:
+    """Block until an in-flight reclaim finishes.  False if it outlasts timeout."""
+    if not _RECLAIM_LOCK.acquire(timeout=timeout):
+        return False
+    _RECLAIM_LOCK.release()
+    return True
 
 
 def _docker_env_main_images() -> list[str]:
@@ -488,11 +570,22 @@ class Engine:
         tasks = list(run["tasks"])
         per_agent = max(1, -(-parallelism // max(1, len(agents))))
         pending = [(a, t) for a in agents for t in tasks]
+        warmed: set[str] = set()
 
         self._note(
             f"scheduler: {len(pending)} cells, parallelism {parallelism}, "
             f"max {per_agent} per agent"
         )
+
+        # A reclaim from the previous run deletes images and build cache.  Let it
+        # finish first: from here on `busy()` is true, so no new reclaim can
+        # start, and every pull below is therefore guaranteed to run alone.
+        if not wait_for_reclaim():
+            self._note(
+                "docker reclaim from a previous run is still going; "
+                "image pulls may be slow",
+                "warn",
+            )
 
         while True:
             with self._lock:
@@ -520,6 +613,9 @@ class Engine:
                     pending.pop(i)
                     continue
                 pending.pop(i)
+                if task not in warmed:
+                    warmed.add(task)
+                    self._warm_task_images(task)
                 if self._spawn(agent, task, tag):
                     started_any = True
                 i = 0
@@ -528,6 +624,35 @@ class Engine:
             time.sleep(2 if started_any else POLL_SECS)
 
         self._note("scheduler: all cells dispatched")
+
+    def _warm_task_images(self, task: str) -> None:
+        """Pull this task's pinned images, one at a time, before its cells start.
+
+        The scheduler thread is single-threaded, so doing the pulls here is what
+        makes them serial across the whole run.  That is the point: when the
+        agents of one task all launch together they each make Docker pull the
+        same image, and the concurrent layer extraction fails with
+        ``failed to Lchown ... no such file or directory`` -- three of three vf2
+        cells died that way.  Once the image is local the cells' compose ``up``
+        skips the pull entirely, so this also removes the duplicated download.
+        """
+        refs = task_image_refs(task)
+        if not refs:
+            return
+        for ref in refs:
+            with self._lock:
+                if self._run is None:
+                    return
+            if _image_present(ref):
+                continue
+            self._note(f"pulling image {_short_ref(ref)} for {task}")
+            ok, detail = _pull_image(ref)
+            if ok:
+                self._note(f"image ready for {task}: {_short_ref(ref)}")
+            else:
+                # Not fatal: the cell's own compose `up` will retry the pull and
+                # report the failure with far more context than we have here.
+                self._note(f"image pull failed for {task}: {detail}", "warn")
 
     def _cell_has_verdict(self, tag: str, agent: str, task: str) -> bool:
         job_dir = JOBS_DIR / f"{tag}__{agent}__{task}"
@@ -706,7 +831,16 @@ class Engine:
         rc, reward, wall, status = self._collect(cell)
         self._write_status(tag, cell.agent, cell.task, rc, reward, wall, status)
         self._note(f"{cell.key} -> {status} (reward {reward}, {wall}s)")
-        reclaim_async()
+        # Only once nothing else is running.  Reclaiming per cell finish used to
+        # fire `docker image/builder prune` and `rmi` while the *other* agents
+        # were still pulling their task image, and deleting content out from
+        # under an in-flight pull is what killed all three vf2 cells at once:
+        # mica's wal cell finished at 14:15:50, and every vf2 cell died at
+        # 14:15:50 with "failed to Lchown ... no such file or directory".
+        # `busy()` ignores this cell -- its process has already exited -- so the
+        # last cell to finish still triggers exactly one reclaim.
+        if not self.busy():
+            reclaim_async()
 
     def _collect(self, cell: CellRun) -> tuple[str, str, float, str]:
         wall = round(_now() - cell.started_at, 1)

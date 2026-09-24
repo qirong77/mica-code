@@ -134,6 +134,50 @@ def read_task_meta(task: str) -> TaskMeta:
     )
 
 
+# ``task.toml`` pins a prebuilt image for both the agent environment and the
+# separate verifier environment.  Harbor *pulls* those instead of building the
+# Dockerfile sitting next to them: ``should_use_prebuilt_docker_image`` returns
+# True as soon as ``docker_image`` is set.  That matters because the pull is the
+# fragile step -- several cells of the same task starting together ask Docker for
+# the same image at once and the concurrent layer extraction corrupts the image
+# store (``failed to Lchown ... no such file or directory``).  The engine pulls
+# them one at a time up front; see ``Engine._warm_task_images``.
+_DOCKER_IMAGE_RE = re.compile(r'^\s*docker_image\s*=\s*"([^"]*)"')
+
+_image_cache: dict[str, tuple[str, ...]] = {}
+
+
+def task_image_refs(task: str) -> tuple[str, ...]:
+    """Prebuilt image references for one task, agent environment first."""
+    cached = _image_cache.get(task)
+    if cached is None:
+        found: list[tuple[str, str]] = []
+        path = TASKS_ROOT / task / "task.toml"
+        if path.is_file():
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            section = ""
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("["):
+                    section = stripped
+                    continue
+                match = _DOCKER_IMAGE_RE.match(line)
+                if match:
+                    found.append((section, match.group(1)))
+        # Agent environment first: without that image no cell can start at all.
+        found.sort(key=lambda item: item[0].startswith("[verifier"))
+        ordered: list[str] = []
+        for _, ref in found:
+            if ref not in ordered:
+                ordered.append(ref)
+        cached = tuple(ordered)
+        _image_cache[task] = cached
+    return cached
+
+
 # Display order for the task groups: biggest / most familiar first.
 CATEGORY_ORDER: tuple[str, ...] = (
     "Software",
