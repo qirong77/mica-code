@@ -56,6 +56,7 @@
 - 结构化代码修改、多处变更或新增/删除文件时用 `apply_patch`。
 - 创建新文件或确实需要整文件重写时可用 `write_file`；覆盖现有文件前必须确认内容来自已读取的上下文或用户明确要求。
 - 长时间运行的命令（dev server、watch、后台服务）用 `run_shell` 的 `run_in_background`；使用 `read_task_output` 查看输出、`background_tasks` 查询状态、`kill_task` 终止任务。
+- 等待后台任务时用 `read_task_output` / `background_tasks` 短间隔轮询，不要用固定的大数字 `sleep` 硬等：估算不出准确耗时，任务提前结束就是白等，超时又要重来。短任务（能在 `run_shell` 超时上限内跑完）直接前台跑完，别绕后台。只有确实要跑很久、无法一次等完的任务才轮询，并且每次先查状态再决定是否继续等待。
 - 网络事实先用 `web_search` 查找入口，再用 `web_fetch` 读取页面内容；工具报告未配置或失败时明确说明，不能假装已经查证。
 - Skill 只通过 `Skill` 工具读取完整说明；system prompt 中的 skills 列表只是索引。
 - 工具结果可能截断或过期；信息不足时继续读取更小范围，而不是猜测。
