@@ -189,7 +189,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let toolCalls = new Map<number, PendingToolCall>();
       let hasReasoningText = false;
       let reasoningPartDone = false;
-      const wireMessages = stripImagesForVision(toWireResponsesInput(messages), this.supportsVision, this.model);
+      const wireMessages = stripImagesForVision(
+        dropReplayedReasoningItems(toWireResponsesInput(messages)),
+        this.supportsVision,
+        this.model,
+      );
 
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
@@ -695,6 +699,22 @@ function toWellFormedText(text: string): string {
 
 function stripUnusableResponseInputItems(messages: ResponseInputItem[]): ResponseInputItem[] {
   return messages.filter((item) => item.type !== 'reasoning' || Boolean(item.encrypted_content));
+}
+
+/**
+ * 发送前整条丢弃历史 reasoning。
+ *
+ * 上游会把回放的 reasoning 按完整思考内容计入 input tokens：同一份历史带上
+ * reasoning 时报 391K，去掉后只报 99K（DeepSeek `/responses` 实测），而 reasoning
+ * 在长任务的会话里占到历史体积的三分之二。模型并不需要上一轮的原始思考——丢掉后
+ * 会针对当前上下文重新推理，这也是 compact 剥掉 encrypted_content 后走同一条路径的
+ * 既有行为。
+ *
+ * 只作用于发送副本：`this.messages` 与 session 持久化仍保留 reasoning，UI 的
+ * thinking 展示不受影响（落盘侧由 stripUnusableResponseInputItems 决定）。
+ */
+function dropReplayedReasoningItems(messages: ResponseInputItem[]): ResponseInputItem[] {
+  return messages.filter((item) => item.type !== 'reasoning');
 }
 
 /**

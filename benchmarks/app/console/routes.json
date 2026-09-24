@@ -1,0 +1,18 @@
+{
+  "default": {
+    "base": "https://api.deepseek.com",
+    "path_prefix": ""
+  },
+  "mica": {
+    "base": "https://api.deepseek.com",
+    "path_prefix": ""
+  },
+  "codex": {
+    "base": "https://api.deepseek.com",
+    "path_prefix": ""
+  },
+  "claude-code": {
+    "base": "https://api.deepseek.com",
+    "path_prefix": "/anthropic"
+  }
+}

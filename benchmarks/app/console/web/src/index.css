@@ -1,0 +1,96 @@
+/*
+ * Theme tokens — light only.  Mirrors @qirong/ui/styles.css (the reference
+ * repo's single source of colour); the dark palette is deliberately not
+ * carried over, so there is one theme to keep in sync instead of two.
+ *
+ * Three project additions, all needed because this console has to signal
+ * pass/fail/running at a glance and to lift cards off the page:
+ *   --canvas   page background; --background stays the card/surface white
+ *   --success  pass / running
+ *   --warning  degraded (low disk, non-fatal)
+ * Do not define these anywhere else, or the theme drifts.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --canvas: 210 20% 96.5%;
+    --background: 0 0% 100%;
+    --foreground: 224 71% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 4%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220.9 39.3% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 94%;
+    --accent-foreground: 220.9 39.3% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 98%;
+    --success: 142 71% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 88%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scrollbar-width: none;
+    color-scheme: light;
+  }
+  html::-webkit-scrollbar {
+    display: none;
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-canvas text-foreground antialiased;
+  }
+}
+
+/* Mobile: keep form controls at 16px so iOS does not zoom the page on focus. */
+@layer base {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 0.875rem;
+    }
+  }
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tabular numerals for every metric cell: proportional digits make the
+ * progress columns jitter as numbers change. */
+.nums {
+  font-variant-numeric: tabular-nums;
+}

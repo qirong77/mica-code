@@ -58,22 +58,18 @@ describe('Responses input normalization', () => {
       input: Array<Record<string, unknown>>;
     };
     const input = request.input;
-    expect(input.map((item) => item.type)).toEqual(['message', 'reasoning', 'message', 'message']);
+    // reasoning 不回放：上游会把回放的思考内容按完整长度计入 input tokens（见
+    // dropReplayedReasoningItems），模型针对当前上下文重新推理即可。
+    expect(input.map((item) => item.type)).toEqual(['message', 'message', 'message']);
 
-    const reasoning = input[1]!;
-    expect(reasoning.type).toBe('reasoning');
-    expect(reasoning).not.toHaveProperty('status');
-    expect(reasoning).not.toHaveProperty('id');
-    expect(reasoning.encrypted_content).toBe('enc-1');
-
-    const assistant = input[2]!;
+    const assistant = input[1]!;
     expect(assistant.type).toBe('message');
     expect(assistant.role).toBe('assistant');
     expect(assistant).not.toHaveProperty('status');
     expect(assistant).not.toHaveProperty('id');
     expect(assistant).not.toHaveProperty('phase');
 
-    const user = input[3]!;
+    const user = input[2]!;
     expect(user).not.toHaveProperty('status');
     expect(JSON.stringify(input)).not.toContain('"status"');
   });
@@ -115,17 +111,14 @@ describe('Responses input normalization', () => {
     await client.query('next');
 
     const input = (captured as { input: Array<Record<string, unknown>> }).input;
-    expect(input.map((item) => item.type)).toEqual(['message', 'reasoning', 'message', 'message']);
+    expect(input.map((item) => item.type)).toEqual(['message', 'message', 'message']);
     expect(input[1]).not.toHaveProperty('status');
     expect(input[1]).not.toHaveProperty('id');
-    expect(input[1]!.encrypted_content).toBe('enc-9');
-    expect(input[2]).not.toHaveProperty('status');
-    expect(input[2]).not.toHaveProperty('id');
-    expect(input[2]).not.toHaveProperty('phase');
+    expect(input[1]).not.toHaveProperty('phase');
     expect(JSON.stringify(input)).not.toContain('"status"');
   });
 
-  it('keeps a valid rs_ prefixed reasoning id on the wire', async () => {
+  it('drops replayed reasoning items even when they carry a valid rs_ prefixed id', async () => {
     openaiMocks.responsesCreate
       .mockResolvedValueOnce(
         streamOf({
@@ -150,9 +143,7 @@ describe('Responses input normalization', () => {
     const request = openaiMocks.responsesCreate.mock.calls[1]![0] as {
       input: Array<Record<string, unknown>>;
     };
-    const reasoning = request.input.find((item) => item.type === 'reasoning')!;
-    expect(reasoning.id).toBe('rs_abcdef');
-    expect(reasoning).not.toHaveProperty('status');
+    expect(request.input.some((item) => item.type === 'reasoning')).toBe(false);
   });
 });
 

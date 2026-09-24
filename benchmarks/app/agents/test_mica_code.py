@@ -2,7 +2,7 @@
 
 Run with the Harbor environment::
 
-    /tmp/harbor-env/bin/python -m pytest benchmarks/harbor/test_mica_code.py
+    /tmp/harbor-env/bin/python -m pytest benchmarks/app/agents/test_mica_code.py
 """
 
 from __future__ import annotations
@@ -83,6 +83,11 @@ def test_parse_usage_treats_missing_fields_as_zero() -> None:
     [
         ("openai/gpt-5.5", "openai/gpt-5.5"),
         ("gpt-5.5", "openai/gpt-5.5"),
+        # mica has its own provider ids (its built-in defaults include a
+        # credential-less ``deepseek``), so Harbor's prefix must not leak
+        # through - only the bare model is kept.
+        ("deepseek/deepseek-flash", "openai/deepseek-flash"),
+        ("anything/deepseek-flash", "openai/deepseek-flash"),
     ],
 )
 def test_resolve_model_qualifies_bare_names(
@@ -91,6 +96,18 @@ def test_resolve_model_qualifies_bare_names(
     agent = MicaCode(logs_dir=tmp_path, model_name=model_name)
 
     assert agent._resolve_model() == expected
+
+
+def test_resolve_model_honors_explicit_provider(tmp_path: Path) -> None:
+    agent = MicaCode(
+        logs_dir=tmp_path, model_name="deepseek/deepseek-flash", provider="proxy"
+    )
+
+    assert agent._resolve_model() == "proxy/deepseek-flash"
+
+
+def test_resolve_model_returns_none_without_a_model(tmp_path: Path) -> None:
+    assert MicaCode(logs_dir=tmp_path)._resolve_model() is None
 
 
 def test_runtime_env_pins_mica_home_under_logs(tmp_path: Path) -> None:

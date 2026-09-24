@@ -32,11 +32,11 @@ provider-qualified: `--model openai/<model>`.
 
 ```sh
 # 1. Point MICA at a build the container can execute (see "Architecture").
-MICA_TARBALL=~/mica-bench/mica-agent.tar.gz
+MICA_TARBALL=benchmarks/app/artifacts/mica-agent.tar.gz
 
 # 2. Run Mica on a couple of Terminal-Bench tasks.
 harbor run -d terminal-bench/terminal-bench@latest \
-  --agent benchmarks.harbor.mica_code:MicaCode \
+  --agent benchmarks.app.agents.mica_code:MicaCode \
   --agent-kwarg tarball="$MICA_TARBALL" \
   --agent-env OPENAI_API_KEY=sk-... \
   --agent-env OPENAI_BASE_URL=https://api.example.com/v1 \
@@ -56,7 +56,7 @@ harbor run -d terminal-bench/terminal-bench@latest \
 
 `--agent` accepts an import path directly (it replaced the deprecated
 `--agent-import-path`). The repo root must be on `PYTHONPATH` so that
-`benchmarks.harbor.mica_code` resolves.
+`benchmarks.app.agents.mica_code` resolves.
 
 ## Agent options
 
@@ -84,7 +84,7 @@ MICA_PREBUILD_DONE=1 MICA_BUILD_TARGET=bun-linux-arm64 \
   MICA_BUILD_OUTFILE=dist/release/mica-code-linux-arm64 bun scripts/build.mjs
 
 mkdir -p /tmp/stage && cp dist/release/mica-code-linux-arm64 /tmp/stage/ \
-  && (cd /tmp/stage && tar -czf ~/mica-bench/mica-agent.tar.gz .)
+  && (cd /tmp/stage && tar -czf benchmarks/app/artifacts/mica-agent.tar.gz .)
 
 harbor run -d terminal-bench/terminal-bench@latest --force-build ...
 ```
@@ -112,7 +112,7 @@ Build with `scripts/package-release.mjs` on a matching host if you need them.
   `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` to
   `~/.docker/config.json`. Without compose, Harbor fails with
   `unknown flag: --project-name`.
-- Working smoke task: `harbor run --path benchmarks/harbor/smoke-task` exercises
+- Working smoke task: `harbor run --path benchmarks/app/agents/smoke-task` exercises
   install → run → usage → verifier on one trivial task.
 
 ## Usage reporting
@@ -132,8 +132,78 @@ The ATIF `trajectory.json` is intentionally not produced yet. It is optional for
 Harbor (only the Trajectory viewer and trajectory-seeded runs need it), so a
 first comparison does not require it.
 
+## Comparing several agents on one model
+
+Harbor's built-in `codex` and `claude-code` agents and this `mica` adapter can
+be run against the same model, but each wants a different shape of the same two
+things — the model string and the base URL. Getting these wrong is silent: an
+agent may still finish the task while talking to a *different* endpoint, or it
+may fail every request and still exit 0.
+
+The current comparison set is `mica` / `codex` / `claude-code`. Two earlier
+entrants, `opencode` and `kimi-code`, were dropped: opencode silently bypassed
+the proxy whenever its provider was not one of `openai`/`anthropic`/`google`,
+and kimi-code measured the same thing as the others at a much higher setup cost.
+
+### Route every agent through one logging proxy
+
+`benchmarks/app/proxy.py` listens on `:8899` and maps
+`/agent_bench/<agent>/<path>` onto `<upstream>/<path>`, recording one JSONL
+line per request plus the upstream `usage` block:
+
+```sh
+python3 benchmarks/app/proxy.py          # PROXY_UPSTREAM=https://api.deepseek.com
+```
+
+Containers reach it at `host.docker.internal:8899` (colima resolves this to the
+VM gateway, e.g. `192.168.5.2`). Point each agent at its own prefix so requests
+are attributable without guessing, then aggregate:
+
+```sh
+python3 benchmarks/app/legacy/summarize.py      # per-agent reqs / tokens / cache% / peak ctx
+```
+
+Streaming (`text/event-stream`) and non-streaming responses are both parsed;
+`accept-encoding` is stripped on the way out so bodies stay readable.
+
+### Model-string shape differs per agent
+
+| Agent | What it needs | Why |
+|---|---|---|
+| `mica` | bare (`deepseek-flash`) | the adapter pairs it with its own provider id |
+| `codex` | bare | forwards the name to the provider, which rejects a prefix |
+| `claude-code` | bare | goes into `ANTHROPIC_MODEL`; the adapter also pins every tier alias (`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`) to it, or the CLI would resolve `opus`/`sonnet` to a real Anthropic model |
+
+This is why the adapter takes a `provider` option: Harbor hands over a qualified
+`provider/model` string, but mica's provider ids are its own (its defaults
+include a credential-less `deepseek`), so the prefix is stripped and the
+credentialed provider is substituted.
+
+### Signals the proxy surfaced
+
+- `codex` issues `GET /responses` probes that the upstream answers with `405`;
+  harmless (it proceeds) but it inflates request counts.
+
+Matching per-agent request counts against Harbor's reported usage is the only
+way to notice this: codex still scores `reward=1`.
+
+### Faster setup
+
+`codex` and `claude-code` are installed **inside every container, at run time**
+— `apt-get install nodejs npm`, then `nvm install 22` + `npm i -g @openai/codex`
+for codex, or the `bootstrap.sh` download for claude-code. Measured on the same
+task and host, that install is ~10 min and accounts for two thirds of the cell's
+wall clock (mica ships a prebuilt binary in the tarball, which is why its setup
+is ~0).
+
+The cheap fix is to stop paying it per cell: base the task image on
+`node:22-alpine` (skips nvm entirely), pre-bake the agent into the image so
+Harbor's own "already installed" check short-circuits `install()`, or at minimum
+share an npm cache volume across cells. Full measurements and the ranked options
+are in [`../../RUNBOOK.md`](../../RUNBOOK.md) § "Setup cost".
+
 ## Tests
 
 ```sh
-/tmp/harbor-env/bin/python -m pytest benchmarks/harbor/test_mica_code.py
+/tmp/harbor-env/bin/python -m pytest benchmarks/app/agents/test_mica_code.py
 ```

@@ -22,7 +22,7 @@ on-disk config carries no api_key, so no config file needs to be written here.
 Example::
 
     harbor run -d terminal-bench/terminal-bench@2.1 \\
-      --agent-import-path benchmarks.harbor.mica_code:MicaCode \\
+      --agent benchmarks.app.agents.mica_code:MicaCode \\
       --model openai/gpt-5.5 \\
       --agent-env OPENAI_API_KEY=sk-... \\
       --agent-env OPENAI_BASE_URL=https://api.openai.com/v1 \\
@@ -83,6 +83,16 @@ class MicaCodeOptions(InstalledAgentOptions):
         description=(
             "GitHub 'owner/name' used to download release archives. "
             f"Defaults to {_DEFAULT_REPO}."
+        ),
+    )
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "mica provider id to use for the run. Harbor hands agents a "
+            "qualified 'provider/model' string, but mica's provider ids are "
+            "its own; the prefix is stripped and this value is used instead. "
+            "Defaults to 'openai', which matches the runtime provider mica "
+            "synthesizes from OPENAI_API_KEY / OPENAI_BASE_URL."
         ),
     )
     reasoning_effort: Annotated[
@@ -234,11 +244,13 @@ rm -f {_REMOTE_UPLOAD_PATH}
         """Map Harbor's model name onto mica's ``provider/model`` form."""
         if not self.model_name:
             return None
-        # Already provider-qualified (``openai/gpt-5.5``) - pass through.
-        if "/" in self.model_name:
-            return self.model_name
-        # Bare name: the environment-synthesized provider is always ``openai``.
-        return f"openai/{self.model_name}"
+        # Harbor passes the qualified ``provider/model`` string it was given.
+        # mica has its own provider ids (its built-in defaults include e.g.
+        # ``deepseek`` with no credentials), so passing the prefix through
+        # would select the wrong provider. Keep only the bare model and pair it
+        # with the provider that actually holds the credentials.
+        bare = self.model_name.split("/", 1)[-1]
+        return f"{self._provider}/{bare}"
 
     def _runtime_env(self) -> dict[str, str]:
         env = {
@@ -384,6 +396,13 @@ rm -f {_REMOTE_UPLOAD_PATH}
         if isinstance(options, MicaCodeOptions):
             return options.repo
         return None
+
+    @property
+    def _provider(self) -> str:
+        options = self.options
+        if isinstance(options, MicaCodeOptions) and options.provider:
+            return options.provider
+        return "openai"
 
     @property
     def mica_home_path(self) -> PurePosixPath:

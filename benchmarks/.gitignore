@@ -1,0 +1,24 @@
+# benchmarks/ 的空间分三块：app(代码) / persistence(记录) / <benchmark>(任务集)。
+# git 只跟踪代码与说明；persistence/ 是「跑出来的数据」，整块不入库。
+# 根 .gitignore 已经覆盖 node_modules/、dist/、*.log*、.DS_Store。
+
+# --- 密钥：由 console 生成，chmod 600，绝不入库 ---
+app/env.sh
+app/console/settings.json
+
+# --- 构建产物：可重建，体积大 ---
+app/artifacts/
+
+# --- 任务数据：从 Harbor 下载的任务包，不是本仓库编写的 ---
+terminal-bench/tasks/
+
+# --- 运行记录整块不入库：判决表(status.tsv)、结果表、Harbor 每格原始产物、
+#     代理流水、早期 ablation 记录，都是重跑即再生的数据。
+#     只留目录说明（README.md），所以不能直接写 persistence/ ——父目录被排除后
+#     gitignore 的 ! 取反不生效，必须先排除子项再单独放行。 ---
+persistence/*
+!persistence/README.md
+
+# --- python ---
+__pycache__/
+*.pyc
