@@ -3,6 +3,7 @@ import {
   activeCompletion,
   applyCompletion,
   completionInsertText,
+  fileCompletionOptions,
   rankCompletions
 } from './chat-completions'
 
@@ -37,6 +38,28 @@ describe('composer completions', () => {
     expect(completionInsertText({ kind: 'skill', name: 'ask' })).toBe('/ask ')
     expect(completionInsertText({ kind: 'file', path: 'src/a.ts' })).toBe('@src/a.ts ')
     expect(completionInsertText({ kind: 'file', path: 'a b/c.ts' })).toBe('@"a b/c.ts" ')
+  })
+
+  it('keeps the file insert text identical to the CLI mention', () => {
+    expect(completionInsertText({ kind: 'file', path: 'docs/' })).toBe('@docs/ ')
+  })
+
+  it('maps host mention candidates to palette options without re-ranking them', () => {
+    const options = fileCompletionOptions([
+      { path: 'docs/', label: 'docs/', description: 'docs', labelHighlights: [0, 1, 2, 3] },
+      { path: 'src/a.ts', label: 'a.ts', description: 'src/a.ts', labelHighlights: [0] }
+    ])
+
+    expect(options.map((option) => option.key)).toEqual(['file:docs/', 'file:src/a.ts'])
+    expect(options[0]).toMatchObject({
+      kind: 'file',
+      name: 'docs/',
+      path: 'docs/',
+      label: 'docs/',
+      description: 'docs',
+      highlights: [0, 1, 2, 3]
+    })
+    expect(fileCompletionOptions(null)).toEqual([])
   })
 
   it('ranks exact, prefix and substring matches ahead of the rest', () => {

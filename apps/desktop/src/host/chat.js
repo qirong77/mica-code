@@ -1,4 +1,5 @@
 import { clipboard, ipcMain } from 'electron'
+import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
@@ -24,6 +25,7 @@ import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { isValidSessionId } from './session-delete'
 import { createTurnLeaseProbe } from './session-lease'
+import { getUiStateKey } from './ui-state'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -164,6 +166,27 @@ async function recallQueuedRun(sender, id, clientMessageId) {
 
 export function setChatNotifyServer(server) {
   notifyServer = server
+}
+
+/**
+ * 最近一次页面调用的 sender：定时任务是在页面之外触发的，需要一个「往哪里推事件」的
+ * 目标。页面还开着时这里就是最近交互的那个窗口（shim 模式下它是广播所有 SSE 客户端的
+ * 单例）；一个窗口都没有时退回静默 sender —— turn 照样跑、历史照样落盘，通知也会经
+ * notify server 补上，只是没有实时的流式回放。
+ */
+let lastChatSender = null
+const silentSender = { send() {}, isDestroyed: () => false }
+
+function rememberChatSender(event) {
+  if (event?.sender) lastChatSender = event.sender
+}
+
+function fallbackChatSender() {
+  if (lastChatSender && !lastChatSender.isDestroyed?.()) return lastChatSender
+  for (const run of runs.values()) {
+    if (run.sender && !run.sender.isDestroyed?.()) return run.sender
+  }
+  return silentSender
 }
 
 export function isChatSessionRunning(sessionId) {
@@ -562,6 +585,57 @@ function startRun(sender, id, payload) {
   return { ok: true }
 }
 
+/** 工作区里已经打开的那个会话页签（用来让定时任务跑在用户看得见的地方）。 */
+function workspaceSessionNodeId(sessionId) {
+  const workspace = getUiStateKey('workspace')
+  const nodes = Array.isArray(workspace?.nodes) ? workspace.nodes : []
+  const node = nodes.find(
+    (item) => item?.type === 'terminal' && item.sessionId && item.sessionId === sessionId
+  )
+  return node?.id || null
+}
+
+/**
+ * 定时任务触发的一次发送（scheduled-runner 注入的 runner）。
+ *
+ * 语义上等同于用户此刻按了一下回车：走同一条 startRun，因此排队/steer/会话忙拦截都一致。
+ * 目标节点优先取工作区里已经打开的那个页签——用户能实时看到输出，也能中断；没打开时用
+ * `scheduled:<id>` 起一个独立 run，历史照样落到会话文件里，下次打开就能看到。
+ */
+export function runScheduledTurn(task) {
+  const sessionId = typeof task?.sessionId === 'string' ? task.sessionId.trim() : ''
+  const prompt = String(task?.prompt || '').trim()
+  if (!sessionId) return { ok: false, error: '定时任务还没有绑定会话' }
+  if (!prompt) return { ok: false, error: '定时任务的内容为空' }
+  // 会话文件没了（被另一个进程删掉 / 从未落盘）：把原因留给任务展示，别 spawn 一个
+  // 必然报 "Session not found" 的 app-server。删除会话时会连任务一起清掉，这里只是兜底。
+  const target = sessionFile(sessionId)
+  if (!target || !existsSync(target)) {
+    return { ok: false, skipped: true, error: '会话不存在，可能已被删除' }
+  }
+  // 会话已经在跑（用户正在聊 / 上一轮定时任务还没结束 / 别的进程持有 turn lease）：
+  // 这一轮不发，交给调度器推后一个间隔重试，不消耗次数。
+  const unavailable = sessionBusyElsewhere(sessionId)
+  if (unavailable) return { ok: false, skipped: true, error: '会话正在运行，本次已跳过' }
+
+  const nodeId = workspaceSessionNodeId(sessionId) || `scheduled:${task.id}`
+  const existing = runs.get(nodeId)
+  const sender =
+    existing?.sender && !existing.sender.isDestroyed() ? existing.sender : fallbackChatSender()
+  const accepted = startRun(sender, nodeId, {
+    sessionId,
+    cwd: task.cwd || null,
+    prompt,
+    clientMessageId: `scheduled:${task.id}`,
+    maxTurns: 9999,
+    model: task.model || null,
+    variant: task.variant || null,
+    role: task.role || null
+  })
+  if (!accepted?.ok) return { ok: false, skipped: true, error: accepted?.error || '发送失败' }
+  return { ok: true, nodeId }
+}
+
 function writeHostRequest(run, request) {
   if (!run?.child?.stdin?.writable) return false
   run.child.stdin.write(`${JSON.stringify(request)}\n`)
@@ -745,6 +819,12 @@ function spawnChatHost(id, sender, payload) {
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+
+  // `@` 补全要先有一份工作区文件列表，否则用户敲下第一个 `@` 就卡在一次完整
+  // `git ls-files`（大仓库约 1.7s）上。与 CLI 的 file-mention 插件同一时机预热，
+  // 失败静默忽略（候选仍会在真正输入时现扫）。没有 cwd 时不预热：那时的后备值是
+  // 运行时自己的 cwd（Finder 启动通常是 `/`），扫它既慢又没有意义。
+  if (cwd) prewarmFileMentions(cwd)
 
   const run = {
     child,
@@ -1367,6 +1447,7 @@ function runCompactSession(sessionId, mode = 'model') {
 
 export function registerChatIpc() {
   ipcMain.handle('chat:start', (event, payload = {}) => {
+    rememberChatSender(event)
     const id = payload.id
     if (!id) throw new Error('chat id is required')
     return startRun(event.sender, id, payload)
@@ -1433,6 +1514,7 @@ export function registerChatIpc() {
   })
 
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {
+    rememberChatSender(_event)
     if (!sessionId) return []
     return readHistory(sessionId)
   })
@@ -1442,6 +1524,7 @@ export function registerChatIpc() {
   ipcMain.handle('chat:input-history:append', (_event, { text } = {}) => appendInputHistory(text))
 
   ipcMain.handle('chat:meta', (_event, { sessionId, cwd } = {}) => {
+    rememberChatSender(_event)
     if (!sessionId) return readDefaultMeta(cwd)
     return readSessionMeta(sessionId)
   })
@@ -1455,6 +1538,7 @@ export function registerChatIpc() {
   })
 
   ipcMain.handle('chat:is-running', (event, { id, sessionId } = {}) => {
+    rememberChatSender(event)
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
     const leaseSessionId = (typeof sessionId === 'string' && sessionId) || runSessionId(run) || ''

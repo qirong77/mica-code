@@ -1,5 +1,6 @@
 import { atom } from 'nanostores';
 import mitt from 'mitt';
+import type { FileMentionItem } from '@packages/mica-file-mentions/rank.js';
 
 export type TerminalInputQueueMode = 'after_iteration' | 'after_turn';
 export type TerminalInputSubmitOptions = {
@@ -8,12 +9,7 @@ export type TerminalInputSubmitOptions = {
   bashMode?: boolean;
 };
 
-export interface TerminalFileMentionItem {
-  path: string;
-  label?: string;
-  description?: string;
-  labelHighlights?: number[];
-}
+export type TerminalFileMentionItem = FileMentionItem;
 
 export type TerminalFileMentionProvider = (query: string) => Promise<TerminalFileMentionItem[]>;
 

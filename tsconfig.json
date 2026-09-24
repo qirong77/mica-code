@@ -19,6 +19,7 @@
     "packages/mica-mcp",
     "packages/mica-pty",
     "packages/mica-web-shared",
+    "packages/mica-file-mentions",
     "packages/@anthropic/ink/src"
   ],
   "exclude": [

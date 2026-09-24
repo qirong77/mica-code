@@ -11,6 +11,7 @@
 - 支持运行时控制类命令，例如切换模型/effort、恢复会话、日志导出、上下文压缩、任务切换与分叉、定时循环任务（`/loop`，每轮执行前自动做一次本地压缩）；`/task` 会按 session 展示全部 retained subagent 与 active background shell，并可打开任务详情。
 - 导出 `cycleNextRole`，供输入框 `Shift+Tab` 快捷键循环切换 role。
 - 支持通过 `exclusive task` 执行耗时且会改上下文/文件的命令，避免用户并发切换配置导致状态抖动。
+- `plugins/file-mention.ts` 只做输入框 `@` 补全的装配（预热门 + provider），触发、工作区扫描、排序与插入文本都在 `packages/mica-file-mentions`（桌面端输入框引用同一份）。
 
 ## 使用入口
 

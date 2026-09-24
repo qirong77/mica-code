@@ -1723,6 +1723,13 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg-dim);
 }
 
+/* 名称里命中查询的字符（CLI 的文件补全同样高亮这一段） */
+.chat-completion-palette mark {
+  border-radius: 2px;
+  background: var(--color-accent-subtle);
+  color: var(--color-fg-max);
+}
+
 /* 窄输入框：说明挤到只剩几个字符反而更难读，只留名称；键位提示同样会折成好几行 */
 @container (max-width: 300px) {
   .chat-completion-palette .chat-command-description,
@@ -2695,6 +2702,243 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 15%);
 }
 
+/* 输入框右侧的定时任务入口：有进行中的任务时用提示色，并在右上角挂一个计数角标。 */
+.chat-composer-schedule {
+  position: relative;
+}
+
+.chat-composer-schedule.is-active {
+  color: var(--color-warn);
+}
+
+.chat-composer-schedule-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 11px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 8px;
+  line-height: 11px;
+  text-align: center;
+}
+
+/* 定时任务面板：和模型选择器同一个位置（浮在输入框上方，不改对话区布局），
+   宽度给窄屏留出边距。 */
+.chat-schedule-panel {
+  position: absolute;
+  z-index: 8;
+  right: 8px;
+  bottom: calc(100% + 5px);
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  border: 1px solid rgb(255 255 255 / 13%);
+  background: var(--color-panel);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
+  padding: 6px;
+  color: rgb(255 255 255 / 62%);
+  font-family: var(--chat-font);
+  font-size: 10.5px;
+}
+
+.chat-schedule-head {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+  color: rgb(255 255 255 / 45%);
+}
+
+.chat-schedule-title {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.chat-schedule-sub {
+  min-width: 0;
+  overflow: hidden;
+  margin-left: auto;
+  color: rgb(255 255 255 / 25%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedule-close {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 40%);
+}
+
+.chat-schedule-close:hover {
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+}
+
+.chat-schedule-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 4px;
+}
+
+.chat-schedule-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgb(255 255 255 / 45%);
+}
+
+.chat-schedule-field input {
+  width: 62px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--color-line);
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  font-size: 10.5px;
+}
+
+.chat-schedule-unit {
+  color: rgb(255 255 255 / 28%);
+}
+
+.chat-schedule-create {
+  height: 22px;
+  margin-left: auto;
+  padding: 0 10px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
+  color: #fff;
+}
+
+.chat-schedule-create:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.chat-schedule-create:disabled {
+  background: rgb(255 255 255 / 6%);
+  color: rgb(255 255 255 / 25%);
+}
+
+.chat-schedule-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 0 6px 6px;
+  color: rgb(255 255 255 / 32%);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.chat-schedule-preview-label {
+  color: rgb(255 255 255 / 45%);
+}
+
+.chat-schedule-error {
+  padding: 0 6px 6px;
+  color: var(--color-danger);
+}
+
+.chat-schedule-list {
+  margin-top: 2px;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  padding-top: 4px;
+}
+
+.chat-schedule-list-title {
+  padding: 2px 6px;
+  color: rgb(255 255 255 / 28%);
+  font-size: 9.5px;
+}
+
+.chat-schedule-item {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+}
+
+.chat-schedule-item:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.chat-schedule-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-fg-ghost);
+}
+
+.chat-schedule-dot-active {
+  background: var(--color-success);
+}
+
+.chat-schedule-dot-paused {
+  background: var(--color-warn);
+}
+
+.chat-schedule-item-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.chat-schedule-item-line {
+  color: var(--color-fg);
+}
+
+.chat-schedule-item-meta {
+  overflow: hidden;
+  color: rgb(255 255 255 / 30%);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedule-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.chat-schedule-actions button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 40%);
+}
+
+.chat-schedule-actions button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+.chat-schedule-actions button:disabled {
+  color: rgb(255 255 255 / 15%);
+}
+
+.chat-schedule-actions button.chat-schedule-danger:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
 /* 危险色只给「停止生成」；上传按钮与运行态无关，排队按钮走下面的 warn 配色 */
 .chat-composer-running .chat-composer-stop {
   background: color-mix(in srgb, var(--color-danger) 12%, transparent);
@@ -2810,6 +3054,12 @@ body.is-resizing.is-resizing-terminal {
   .chat-composer-actions button {
     width: 32px;
     height: 32px;
+  }
+
+  /* 面板里的操作按钮同理：20px 在触屏上点不准 */
+  .chat-schedule-actions button {
+    width: 28px;
+    height: 28px;
   }
 
   /* 终端字号不要写在这里：xterm 的 DOM 渲染器给 `.xterm-rows` 写内联 font-size

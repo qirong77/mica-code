@@ -25,6 +25,7 @@ import {
 import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
+import { dropTasksForSession } from './scheduled-runner'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -245,6 +246,8 @@ function deleteSession(sessionId) {
   if (isChatSessionRunning(sessionId) || hasLiveTurnLease(sessionId))
     throw new Error('Cannot delete a session while its turn is running')
   deleteSessionFiles({ directory: sessionsDir(), lockDir: turnLocksDir(), sessionId })
+  // 会话没了，挂在它上面的定时任务只会每次都失败：连同会话一起清掉（侧栏会广播变更）。
+  dropTasksForSession(sessionId)
   return {
     pins: setPin(sessionId, false),
     projects: writeProjects(setAssignment(readProjects(), sessionId, null)),

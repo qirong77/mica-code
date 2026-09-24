@@ -19,6 +19,7 @@ const EVENT_CHANNELS = [
   'chat:commit-exit',
   'notify:changed',
   'ui-state:changed',
+  'schedule:changed',
   'app:window-state'
 ]
 
@@ -242,6 +243,17 @@ function createWebApi(env) {
       onChanged: (callback) => subscribe('notify:changed', callback)
     },
 
+    // 定时任务（每隔 N 分钟往某个会话发一次消息）：任务本身活在运行时里，页面只是
+    // 读写视图，变更经 `schedule:changed` 广播给所有窗口。
+    schedule: {
+      list: () => invoke('schedule:list'),
+      create: (payload) => invoke('schedule:create', payload),
+      update: (id, patch) => invoke('schedule:update', { id, patch }),
+      remove: (id) => invoke('schedule:delete', { id }),
+      runNow: (id) => invoke('schedule:run-now', { id }),
+      onChanged: (callback) => subscribe('schedule:changed', callback)
+    },
+
     app: {
       getWindowState: async () => ({ ...appState }),
       onWindowState: (callback) => subscribe('app:window-state', callback),
@@ -257,7 +269,8 @@ function createWebApi(env) {
       read: (path) => invoke('files:read', { path }),
       write: (path, content, expectedVersion) =>
         invoke('files:write', { path, content, expectedVersion }),
-      find: (root, query) => invoke('files:find', { root, query }),
+      // `@` 补全候选：与 CLI 的 file-mention 插件共用 mica-file-mentions
+      mention: (root, query) => invoke('files:mention', { root, query }),
       search: (root, query) => invoke('files:search', { root, query }),
       create: (directory, name, type) => invoke('files:create', { directory, name, type }),
       rename: (path, name) => invoke('files:rename', { path, name }),

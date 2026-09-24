@@ -12,6 +12,7 @@ import {
   IconArrowDown,
   IconBolt,
   IconCheck,
+  IconClock,
   IconCommand,
   IconCopy,
   IconCornerUpLeft,
@@ -39,16 +40,28 @@ import { collapsedOutput, toolCallText, toolOutput } from './chat-tool-display'
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
 }
+
+/** 补全浮层的空态文案：加载中 / 失败 / 没有匹配（文件侧与 CLI 的措辞一致）。 */
+function completionEmptyText(kind, loading, failed) {
+  if (kind === 'skill') {
+    if (loading) return '正在加载…'
+    return failed ? '加载 skill 失败' : '没有匹配的 skill'
+  }
+  if (loading) return '正在搜索文件…'
+  return failed ? '文件搜索失败' : '没有找到匹配文件'
+}
 import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
 import {
-  COMPLETION_LIMIT,
   FILE_COMPLETION_DEBOUNCE_MS,
   activeCompletion,
   applyCompletion,
   completionInsertText,
+  fileCompletionOptions,
   rankCompletions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
+import { SchedulePopover } from './SchedulePopover'
+import { sortTasksForList, tasksOfSession } from './chat-schedule'
 import {
   backgroundTaskStatusLabel,
   buildSubagentTimeline,
@@ -2004,6 +2017,9 @@ export function ChatView({
   node,
   cwd,
   visible,
+  isMobile = false,
+  scheduledTasks = [],
+  onScheduledTasksChange,
   onSessionBound,
   onOpenFile,
   onNewSession,
@@ -2079,6 +2095,8 @@ export function ChatView({
   const [taskNow, setTaskNow] = useState(() => Date.now())
   // 点开的任务详情弹窗（单槽位）：{ kind: 'subagent' | 'background', task } | null
   const [taskDetail, setTaskDetail] = useState(null)
+  // 输入框右侧时钟图标点开的定时任务面板
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
@@ -2118,6 +2136,7 @@ export function ChatView({
   const [completionItems, setCompletionItems] = useState([])
   const [completionIndex, setCompletionIndex] = useState(0)
   const [completionLoading, setCompletionLoading] = useState(false)
+  const [completionFailed, setCompletionFailed] = useState(false)
   // 当前候选列表属于哪一类触发字符（`@` 文件 / `/` skill），换类时先清空旧结果
   const completionKindRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -2343,13 +2362,15 @@ export function ChatView({
     )
   }, [input])
 
-  // 候选：skill 走 host 现扫（项目级 + 用户级），文件走 files:find（每次按键都全量遍历，
-  // 所以加一个防抖）。两种结果都只描述「插入什么文本」。
+  // 候选：skill 走 host 现扫（项目级 + 用户级）并在这里排序；文件走 host 的 files:mention，
+  // 它和 CLI 的 `@` 共用 mica-file-mentions（同一个工作区扫描 + 同一套评分，扫描结果按
+  // 工作区缓存），这里只做「有查询挡 100ms 击键、空查询立即出列表」的防抖。
   useEffect(() => {
     if (!completion) {
       completionKindRef.current = null
       setCompletionItems((items) => (items.length === 0 ? items : []))
       setCompletionLoading(false)
+      setCompletionFailed(false)
       return undefined
     }
     // 换了触发字符（`/` ↔ `@`）就先清空：文件候选要等防抖，期间不能继续挂着 skill 的行
@@ -2357,12 +2378,20 @@ export function ChatView({
       completionKindRef.current = completion.kind
       setCompletionItems((items) => (items.length === 0 ? items : []))
       setCompletionLoading(true)
+      setCompletionFailed(false)
     }
     let cancelled = false
     const settle = (items) => {
       if (cancelled) return
       setCompletionItems(items)
       setCompletionLoading(false)
+      setCompletionFailed(false)
+    }
+    const fail = () => {
+      if (cancelled) return
+      setCompletionItems([])
+      setCompletionLoading(false)
+      setCompletionFailed(true)
     }
 
     if (completion.kind === 'skill') {
@@ -2383,7 +2412,7 @@ export function ChatView({
             )
           )
         )
-        .catch(() => settle([]))
+        .catch(fail)
       return () => {
         cancelled = true
       }
@@ -2393,29 +2422,16 @@ export function ChatView({
       setCompletionItems((items) => (items.length === 0 ? items : []))
       return undefined
     }
-    const timer = window.setTimeout(() => {
-      setCompletionLoading(true)
-      window.mica.files
-        .find(cwd, completion.query)
-        .then((result) =>
-          settle(
-            (Array.isArray(result) ? result : []).slice(0, COMPLETION_LIMIT).map((file) => {
-              const relative = String(file.relativePath ?? file.name ?? '')
-              const slash = relative.lastIndexOf('/')
-              return {
-                key: `file:${relative}`,
-                kind: 'file',
-                name: relative,
-                path: relative,
-                // 名称列给文件名，目录放进说明列，避免和路径尾部重复
-                label: String(file.name ?? relative),
-                description: slash === -1 ? '' : relative.slice(0, slash)
-              }
-            })
-          )
-        )
-        .catch(() => settle([]))
-    }, FILE_COMPLETION_DEBOUNCE_MS)
+    const timer = window.setTimeout(
+      () => {
+        setCompletionLoading(true)
+        window.mica.files
+          .mention(cwd, completion.query)
+          .then((result) => settle(fileCompletionOptions(result)))
+          .catch(fail)
+      },
+      completion.query ? FILE_COMPLETION_DEBOUNCE_MS : 0
+    )
     return () => {
       cancelled = true
       window.clearTimeout(timer)
@@ -4276,6 +4292,22 @@ export function ChatView({
     }
   }, [])
 
+  // 这条对话的定时任务：会话绑定后按 sessionId 认领（节点 id 会随页签变化），还没绑定
+  // 会话时退回节点 id（此时 host 不接受创建，面板会提示先发一条消息）。
+  const scheduleSessionId = node?.sessionId || null
+  const sessionScheduledTasks = useMemo(
+    () =>
+      sortTasksForList(tasksOfSession(scheduledTasks, { sessionId: scheduleSessionId, nodeId })),
+    [nodeId, scheduleSessionId, scheduledTasks]
+  )
+  const activeScheduledCount = sessionScheduledTasks.filter(
+    (task) => task.status === 'active'
+  ).length
+  // 切到别的对话时收起面板：它描述的是上一个会话的任务。
+  useEffect(() => {
+    setScheduleOpen(false)
+  }, [nodeId])
+
   const statusLine = (
     <div className="chat-status-line">
       <div className="chat-status-primary">
@@ -4488,8 +4520,7 @@ export function ChatView({
               activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
               onActiveIndex={setCompletionIndex}
               onSelect={selectCompletion}
-              loading={completionLoading}
-              hint={completion.kind === 'skill' ? '没有匹配的 skill' : '没有匹配的文件'}
+              emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
             />
           )}
           <TodoDock items={todoItems} hidden={todoHidden} />
@@ -4514,6 +4545,17 @@ export function ChatView({
             text={input}
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
+          {scheduleOpen && (
+            <SchedulePopover
+              tasks={sessionScheduledTasks}
+              sessionId={scheduleSessionId}
+              sessionTitle={node?.text || null}
+              draftText={input}
+              onChanged={onScheduledTasksChange}
+              onNotice={appendNotice}
+              onClose={() => setScheduleOpen(false)}
+            />
+          )}
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
             style={
@@ -4720,9 +4762,28 @@ export function ChatView({
                 <IconPhoto size={13} />
               </button>
               <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
+              <button
+                type="button"
+                className={`chat-composer-schedule ${activeScheduledCount ? 'is-active' : ''}`}
+                title={
+                  activeScheduledCount
+                    ? `定时任务：${activeScheduledCount} 个进行中`
+                    : '设置定时任务（按间隔自动发送输入框里的内容）'
+                }
+                aria-label="定时任务"
+                aria-pressed={scheduleOpen}
+                onClick={() => setScheduleOpen((open) => !open)}
+              >
+                <IconClock size={13} />
+                {activeScheduledCount > 0 && (
+                  <span className="chat-composer-schedule-count">{activeScheduledCount}</span>
+                )}
+              </button>
+              {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
+                  「停止生成」与运行态无关，两端都要有。 */}
               {running ? (
                 <>
-                  {queueReady && (
+                  {isMobile && queueReady && (
                     <button
                       type="button"
                       className="chat-composer-queue-send"
@@ -4747,7 +4808,7 @@ export function ChatView({
                     )}
                   </button>
                 </>
-              ) : input.trim() ? (
+              ) : isMobile && input.trim() ? (
                 <button
                   type="button"
                   title={remoteRunning ? '该会话正在另一个进程里运行' : '发送'}

@@ -821,6 +821,9 @@ export default function App() {
   const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
   const projectsRef = useLatest(projects)
   const sessionsRef = useLatest(sessions)
+  // 定时任务活在运行时里（页签关掉也继续跑），页面只是视图：启动时拉一次，之后跟着
+  // `schedule:changed` 广播更新——侧栏分区与输入框右侧的图标读的是同一份。
+  const [scheduledTasks, setScheduledTasks] = useState([])
   // 新建但还没绑定真实会话的草稿归属：草稿是界面状态里的临时节点，归属等它拿到
   // sessionId 才落盘（见 moveSession），在那之前只记在渲染层。
   const [draftGroups, setDraftGroups] = useState({})
@@ -874,6 +877,23 @@ export default function App() {
       .then((result) => applySessions(result?.sessions))
       .catch((error) => console.error('load sessions failed', error))
   }, [applySessions])
+
+  const applyScheduledTasks = useCallback((tasks) => {
+    setScheduledTasks(Array.isArray(tasks) ? tasks : [])
+  }, [])
+
+  const refreshScheduledTasks = useCallback(() => {
+    window.mica.schedule
+      .list()
+      .then((result) => applyScheduledTasks(result?.tasks))
+      .catch((error) => console.error('load scheduled tasks failed', error))
+  }, [applyScheduledTasks])
+
+  useEffect(() => {
+    // 变更广播由运行时发（创建/暂停/删除/每轮跑完都会发），别的窗口改了这里也跟着变。
+    const off = window.mica.schedule.onChanged((payload) => applyScheduledTasks(payload?.tasks))
+    return () => off?.()
+  }, [applyScheduledTasks])
 
   const refreshPins = useCallback(() => {
     window.mica.stats
@@ -1084,11 +1104,12 @@ export default function App() {
     refreshPins()
     refreshSort()
     refreshProjects()
+    refreshScheduledTasks()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
     }, 3000)
     return () => clearInterval(timer)
-  }, [refreshPins, refreshProjects, refreshSessions, refreshSort])
+  }, [refreshPins, refreshProjects, refreshScheduledTasks, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
@@ -1528,6 +1549,53 @@ export default function App() {
       })
     },
     [createTerminal, nodesRef, selectNode]
+  )
+
+  /** 侧栏「定时任务」分区：点一行就是打开它所属的那条会话。 */
+  const openScheduledTask = useCallback(
+    (task) => {
+      if (!task?.sessionId) return
+      const session = sessionsRef.current.find((item) => item.id === task.sessionId)
+      openSession(session || { id: task.sessionId, title: task.title, cwd: task.cwd })
+    },
+    [openSession, sessionsRef]
+  )
+
+  const updateScheduledTask = useCallback(
+    (id, patch) => {
+      window.mica.schedule
+        .update(id, patch)
+        .then((result) => {
+          if (result?.ok) applyScheduledTasks(result.tasks)
+          else console.error('update scheduled task failed', result?.error)
+        })
+        .catch((error) => console.error('update scheduled task failed', error))
+    },
+    [applyScheduledTasks]
+  )
+
+  const deleteScheduledTask = useCallback(
+    (id) => {
+      if (!window.confirm('确定删除这条定时任务？')) return
+      window.mica.schedule
+        .remove(id)
+        .then((result) => applyScheduledTasks(result?.tasks))
+        .catch((error) => console.error('delete scheduled task failed', error))
+    },
+    [applyScheduledTasks]
+  )
+
+  const runScheduledTaskNow = useCallback(
+    (id) => {
+      window.mica.schedule
+        .runNow(id)
+        .then((result) => {
+          applyScheduledTasks(result?.tasks)
+          if (result && result.ok === false) window.alert(result.error || '发送失败')
+        })
+        .catch((error) => console.error('run scheduled task failed', error))
+    },
+    [applyScheduledTasks]
   )
 
   const closeTab = useCallback(
@@ -2035,6 +2103,11 @@ export default function App() {
             unread={notifications.states}
             terminalSessions={sessionsWithRunningTerminal}
             draftNodes={draftNodes}
+            scheduledTasks={scheduledTasks}
+            onOpenScheduledTask={openScheduledTask}
+            onUpdateScheduledTask={updateScheduledTask}
+            onDeleteScheduledTask={deleteScheduledTask}
+            onRunScheduledTaskNow={runScheduledTaskNow}
             onOpenSession={(sessionId) => {
               closeMobileDrawer()
               openSession(sessionId)
@@ -2142,6 +2215,9 @@ export default function App() {
               node={terminalNodes.find((node) => node.id === activeId)}
               cwd={terminalCwd(activeId)}
               visible={view === 'chat'}
+              isMobile={isMobile}
+              scheduledTasks={scheduledTasks}
+              onScheduledTasksChange={applyScheduledTasks}
               onSessionBound={setSessionId}
               onOpenFile={openChatFile}
               onNewSession={createChatSession}

@@ -11,18 +11,28 @@ import {
 import { createPortal } from 'react-dom'
 import {
   IconChevronRight,
+  IconCheck,
+  IconClock,
   IconDots,
   IconFolder,
   IconFolderOpen,
   IconListTree,
   IconPencil,
   IconPin,
+  IconPlayerPause,
   IconPlus,
   IconSearch,
   IconTerminal2,
   IconX
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
+import {
+  countdownLabel,
+  formatIntervalMinutes,
+  sortTasksForList,
+  taskProgress,
+  taskStatusLabel
+} from './chat-schedule'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
@@ -264,11 +274,16 @@ export function SessionTree({
   unread,
   terminalSessions,
   draftNodes,
+  scheduledTasks,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
   onMoveSession,
   onMoveDraft,
+  onOpenScheduledTask,
+  onUpdateScheduledTask,
+  onDeleteScheduledTask,
+  onRunScheduledTaskNow,
   onRenameSession,
   onRenameDraft,
   onDeleteSession,
@@ -287,7 +302,8 @@ export function SessionTree({
   const [collapsedSections, setCollapsedSections] = useState({
     pinned: false,
     recent: false,
-    project: false
+    project: false,
+    scheduled: false
   })
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
@@ -389,6 +405,17 @@ export function SessionTree({
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
 
+  // 定时任务分区：进行中的排在最前（按最近到期），暂停/完成垫后。搜索时按标题与正文过滤。
+  const scheduledList = useMemo(() => {
+    const list = sortTasksForList(scheduledTasks)
+    if (!normalizedQuery) return list
+    return list.filter(
+      (task) =>
+        (task.title || '').toLocaleLowerCase().includes(normalizedQuery) ||
+        (task.prompt || '').toLocaleLowerCase().includes(normalizedQuery)
+    )
+  }, [normalizedQuery, scheduledTasks])
+
   // 侧栏看不见的会话——分组折叠、分区折叠、Recent 的 Show more 分页——由第一个可见的
   // 祖先代为显示状态。行的状态判定与 renderSessionRow/renderDraftRow 共用同一份回调，
   // 否则「代显的状态」和「真正被藏起来的行」会分叉。
@@ -455,6 +482,17 @@ export function SessionTree({
     rowStateOfSession
   ])
 
+  /** 折叠的定时任务分区：只有「有任务正在进行」值得代显（任务没有未读）。 */
+  const hiddenScheduledState = useMemo(
+    () =>
+      !normalizedQuery &&
+      collapsedSections.scheduled &&
+      scheduledList.some((task) => task.status === 'active')
+        ? 'running'
+        : null,
+    [collapsedSections.scheduled, normalizedQuery, scheduledList]
+  )
+
   const openMenu = (event, payload) => {
     event.preventDefault()
     event.stopPropagation()
@@ -484,6 +522,13 @@ export function SessionTree({
     else if (action === 'new-subgroup') onCreateGroup(menuPayload.group.id)
     else if (action === 'new-session') onCreateSessionInGroup(menuPayload.group.id)
     else if (action === 'delete-group') onDeleteGroup(menuPayload.group.id)
+    else if (action === 'scheduled-open') onOpenScheduledTask?.(menuPayload.scheduled)
+    else if (action === 'scheduled-run-now') onRunScheduledTaskNow?.(menuPayload.scheduled.id)
+    else if (action === 'scheduled-pause')
+      onUpdateScheduledTask?.(menuPayload.scheduled.id, { status: 'paused' })
+    else if (action === 'scheduled-resume')
+      onUpdateScheduledTask?.(menuPayload.scheduled.id, { status: 'active' })
+    else if (action === 'scheduled-delete') onDeleteScheduledTask?.(menuPayload.scheduled.id)
   }
 
   const menuItemsFor = (session) =>
@@ -499,6 +544,15 @@ export function SessionTree({
     'separator',
     ['delete-group', '删除分组', true]
   ]
+
+  const scheduledMenuItems = (task) => {
+    const items = [['scheduled-open', '打开对话']]
+    if (task.status === 'active')
+      items.push(['scheduled-run-now', '立即发送一次'], ['scheduled-pause', '暂停'])
+    if (task.status === 'paused') items.push(['scheduled-resume', '继续'])
+    items.push('separator', ['scheduled-delete', '删除定时任务', true])
+    return items
+  }
 
   const sectionItems = { pinned }
   const sectionOrderKey = (section, groupId) =>
@@ -711,6 +765,53 @@ export function SessionTree({
             <span className="min-w-0 flex-1 truncate">{node.text}</span>
           )}
           <RowTail relativeTime="" />
+        </div>
+      </li>
+    )
+  }
+
+  /**
+   * 定时任务行：点一下打开它所属的会话；右键/长按给出「立即发送 / 暂停 / 删除」。
+   * 行尾是进度（3/10）与状态——倒计时只出现在 tooltip 里：侧栏不做每秒 tick，
+   * 否则整棵树会随着时间白重渲染一遍。
+   */
+  const renderScheduledRow = (task) => {
+    const active = task.status === 'active'
+    const Icon = active ? IconClock : task.status === 'paused' ? IconPlayerPause : IconCheck
+    const items = scheduledMenuItems(task)
+    const tooltip = [
+      task.title,
+      `每 ${formatIntervalMinutes(task.intervalMs / 60_000)} 发送一次 · ${taskProgress(task)}`,
+      active && countdownLabel(task.nextRunAt)
+        ? `下次 ${countdownLabel(task.nextRunAt)}`
+        : taskStatusLabel(task),
+      task.lastError ? `上次：${task.lastError}` : '',
+      task.prompt
+    ]
+      .filter(Boolean)
+      .join('\n')
+    return (
+      <li key={task.id}>
+        <div
+          className={`${rowClass} text-white/70`}
+          style={{ paddingLeft: rowIndent(0) }}
+          title={tooltip}
+          {...longPressHandlers((event) => openMenu(event, { scheduled: task, items }))}
+          onClick={() => onOpenScheduledTask?.(task)}
+          onContextMenu={(event) => openMenu(event, { scheduled: task, items })}
+        >
+          <Slot />
+          <Slot>
+            <span className={active ? 'text-success chat-dot-running' : 'text-white/40'}>
+              <Icon size={13} stroke={2} />
+            </span>
+          </Slot>
+          <span className="min-w-0 flex-1 truncate">{task.title}</span>
+          <RowTail
+            label={taskProgress(task)}
+            labelTitle={`已发送 ${taskProgress(task)} 次`}
+            relativeTime={taskStatusLabel(task)}
+          />
         </div>
       </li>
     )
@@ -961,6 +1062,22 @@ export function SessionTree({
               ) : (
                 <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
                   暂无项目分组，先新建一个分组。
+                </p>
+              ))}
+          </section>
+
+          <section>
+            {renderSectionHeader('scheduled', '定时任务', IconClock, {
+              hiddenState: hiddenScheduledState
+            })}
+            {sectionOpen('scheduled') &&
+              (scheduledList.length ? (
+                <ul className="flex flex-col gap-px">
+                  {scheduledList.map((task) => renderScheduledRow(task))}
+                </ul>
+              ) : (
+                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
+                  暂无定时任务，在输入框右侧的时钟图标里创建。
                 </p>
               ))}
           </section>

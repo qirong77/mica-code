@@ -19,6 +19,7 @@
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的展示纯函数（时间/状态/token 格式化），无 React、无运行时依赖。
+- `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。
 - `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
 
 ## 应用目录

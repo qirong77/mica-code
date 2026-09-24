@@ -1,5 +1,6 @@
 import { Box, Text, stringWidth, useInput, useTerminalSize } from '@anthropic/ink';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { activeFileMention, mentionText } from '@packages/mica-file-mentions/rank.js';
 import React from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { SimpleTextInput } from './CursorInput.js';
@@ -64,17 +65,6 @@ export function shouldIgnoreTerminalTextInput(
   if (key.return && key.shift) return false;
   if (!hasDropdownItems) return false;
   return Boolean(key.escape || key.tab || key.upArrow || key.downArrow || key.return);
-}
-
-function activeFileMention(value: string, cursorOffset: number): { start: number; query: string } | null {
-  const beforeCursor = value.slice(0, cursorOffset);
-  const match = beforeCursor.match(/@([^\s@]*)$/u);
-  if (!match) return null;
-  return { start: beforeCursor.length - match[0].length, query: match[1] ?? '' };
-}
-
-function mentionPath(path: string): string {
-  return /[\s"]/u.test(path) ? JSON.stringify(path) : path;
 }
 
 function TerminalInput() {
@@ -179,7 +169,7 @@ function TerminalInput() {
           .then((items) => {
             if (request !== fileMentionRequestRef.current) return;
             const dropdownItems = items.map((item) => {
-              const inserted = `@${mentionPath(item.path)} `;
+              const inserted = mentionText(item.path);
               const insertText = localText.slice(0, fileMention.start) + inserted + localText.slice(cursorOffset);
               return {
                 key: `file:${item.path}`,

@@ -1,5 +1,6 @@
 import { app, clipboard, ipcMain, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
+import { findFileMentions } from '@packages/mica-file-mentions/index.js'
 import {
   chmod,
   copyFile,
@@ -31,7 +32,6 @@ const IGNORED_DIRECTORIES = new Set([
 ])
 const MAX_WALK_ENTRIES = 100_000
 const MAX_WALK_FILES = 50_000
-const MAX_FIND_RESULTS = 10_000
 const MAX_SEARCH_RESULTS = 200
 const MAX_SEARCH_FILE_SIZE = 2 * 1024 * 1024
 const MAX_SEARCH_BYTES = 128 * 1024 * 1024
@@ -119,19 +119,6 @@ async function availableCopyPath(source) {
     }
   }
   throw new Error('无法生成副本名称')
-}
-
-function fuzzyMatch(value, query) {
-  if (!query) return true
-  const candidate = value.toLowerCase()
-  if (candidate.includes(query)) return true
-
-  let queryIndex = 0
-  for (const character of candidate) {
-    if (character === query[queryIndex]) queryIndex += 1
-    if (queryIndex === query.length) return true
-  }
-  return false
 }
 
 async function walkFiles(root, visitor) {
@@ -262,25 +249,15 @@ export function registerFilesIpc() {
     return order
   })
 
-  ipcMain.handle('files:find', async (_event, payload = {}) => {
+  // `@` 补全候选：与 CLI 的 file-mention 插件共用 mica-file-mentions，所以两端
+  // 的排序、数量和插入文本一致（排序/截断都在那个包里，这里只做校验）。
+  ipcMain.handle('files:mention', async (_event, payload = {}) => {
     const root = normalizeRoot(payload.root)
     if (payload.query != null && typeof payload.query !== 'string') {
       throw new Error('query must be a string')
     }
-    const query = (payload.query || '').trim().toLowerCase()
-    if (query.length > MAX_QUERY_LENGTH) throw new Error('query is too long')
-
-    const results = []
-    await walkFiles(root, async (file) => {
-      if (fuzzyMatch(file.relativePath, query)) results.push(file)
-      return results.length < MAX_FIND_RESULTS
-    })
-    return results.sort((a, b) =>
-      a.relativePath.localeCompare(b.relativePath, undefined, {
-        numeric: true,
-        sensitivity: 'base'
-      })
-    )
+    if ((payload.query || '').length > MAX_QUERY_LENGTH) throw new Error('query is too long')
+    return findFileMentions(root, payload.query || '')
   })
 
   ipcMain.handle('files:search', async (_event, payload = {}) => {
