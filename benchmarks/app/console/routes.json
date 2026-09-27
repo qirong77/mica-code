@@ -4,11 +4,15 @@
     "path_prefix": ""
   },
   "mica": {
-    "base": "https://api.deepseek.com",
+    "base": "https://api-slb.krill-code.net/coding/v1",
     "path_prefix": ""
   },
   "codex": {
-    "base": "https://api.deepseek.com",
+    "base": "https://api-slb.krill-code.net/coding/v1",
+    "path_prefix": ""
+  },
+  "mcode": {
+    "base": "https://api-slb.krill-code.net/coding/v1",
     "path_prefix": ""
   },
   "claude-code": {

@@ -216,7 +216,10 @@ find "$pkg/node_modules" -name spawn-helper -exec chmod 755 {{}} + 2>/dev/null |
 
 printf '#!/bin/sh\\nexec %s/mica "$@"\\n' "$pkg" > "$bin/mica"
 chmod 755 "$bin/mica"
-rm -f {_REMOTE_UPLOAD_PATH}
+# Cleanup only. Some environments materialise the uploaded file as a read-only
+# mount, where rm fails with EPERM; under `set -e` that used to abort an install
+# that had already succeeded.
+rm -f {_REMOTE_UPLOAD_PATH} 2>/dev/null || true
 """.strip(),
         )
 

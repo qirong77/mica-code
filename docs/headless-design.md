@@ -59,8 +59,8 @@ Key behaviors that mirror the interactive `LocalRuntimeController`:
 `apps/cli/src/headless/HeadlessPluginHost.ts` runs the **same built-in plugins**
 as the interactive app, minus the inherently terminal-bound ones (file-mention,
 the `/model` / `/compact` command suite, user file plugins). The agent-shaping
-plugins — `session_*` autonomy, context-pressure red-zone reminder, message
-queueing, command-memory guide, TodoWrite, app-notify — behave identically.
+plugins — `session_*` autonomy, message queueing, command-memory guide,
+TodoWrite, app-notify — behave identically.
 
 Differences are deliberate and documented:
 
@@ -70,8 +70,6 @@ Differences are deliberate and documented:
 - `attachPluginLayer()` swaps the executor's queue to the plugin host's shared
   single-slot queue. Without this swap a plugin-enqueued input would land in a
   second queue and be stranded on dequeue, so the two must share one queue.
-- The plugin host publishes `context:changed` as an event (not a UI store), so
-  context-pressure works with no Ink dependency.
 
 ## Codex exec transport (`mica exec`)
 

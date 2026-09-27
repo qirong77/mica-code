@@ -2,23 +2,21 @@ import type { BuiltInCommandItem } from '../commandHost.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
+import {
+  DEFAULT_LOOP_INTERVAL_MS,
+  MIN_LOOP_INTERVAL_MS,
+  formatLoopInterval,
+  parseLoopArgs,
+  parseLoopDuration,
+  type LoopArgsParseResult,
+} from '@packages/mica-common/loopArgs.js';
 
-export const MIN_LOOP_INTERVAL_MS = 10_000;
-/** `/loop <任务描述>` 不带间隔时的默认触发间隔（30 分钟）。 */
-export const DEFAULT_LOOP_INTERVAL_MS = 30 * 60_000;
-
-const DURATION_UNITS: Record<'s' | 'm' | 'h' | 'd', number> = {
-  s: 1_000,
-  m: 60_000,
-  h: 3_600_000,
-  d: 86_400_000,
-};
-
-export type LoopParseResult =
-  | { kind: 'start'; intervalMs: number; intervalLabel: string; task: string }
-  | { kind: 'stop' }
-  | { kind: 'status' }
-  | { kind: 'error'; message: string };
+// `/loop` 的参数解析在 mica-common（桌面端 Web Chat 的同一命令必须接受同一套写法）。
+// 这里保留上游命名，避免改动既有的命令实现、工具与测试。
+export { DEFAULT_LOOP_INTERVAL_MS, MIN_LOOP_INTERVAL_MS, parseLoopArgs };
+export type LoopParseResult = LoopArgsParseResult;
+export const parseDuration = parseLoopDuration;
+export const formatDuration = formatLoopInterval;
 
 export type LoopState = {
   intervalMs: number;
@@ -40,68 +38,6 @@ export type LoopStartParams = {
   canFire: () => boolean;
   submit: (text: string, displayText: string) => Promise<unknown>;
 };
-
-export function parseDuration(input: string): number | null {
-  const trimmed = input.trim().toLowerCase();
-  if (!trimmed) return null;
-  // 纯数字按秒处理（如 `90` = 90 秒）
-  if (/^\d+(\.\d+)?$/.test(trimmed)) {
-    return Math.round(Number(trimmed) * 1_000);
-  }
-  // 支持复合间隔，如 `1h30m`、`45s`、`2d`
-  if (!/^(\d+(\.\d+)?[smhd])+$/.test(trimmed)) return null;
-  let total = 0;
-  let rest = trimmed;
-  while (rest.length > 0) {
-    const match = /^(\d+(?:\.\d+)?)([smhd])/.exec(rest);
-    if (!match) return null;
-    const value = Number(match[1]);
-    if (!Number.isFinite(value)) return null;
-    total += value * DURATION_UNITS[match[2] as 's' | 'm' | 'h' | 'd'];
-    rest = rest.slice(match[0].length);
-  }
-  return Math.round(total);
-}
-
-export function formatDuration(ms: number): string {
-  const seconds = Math.round(ms / 1_000);
-  if (seconds < 60) return `${seconds} 秒`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} 分钟`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} 小时`;
-  const days = Math.round(hours / 24);
-  return `${days} 天`;
-}
-
-export function parseLoopArgs(args: string): LoopParseResult {
-  const trimmed = args.trim();
-  if (!trimmed) return { kind: 'status' };
-  const lower = trimmed.toLowerCase();
-  if (['stop', 'off', 'cancel', 'end'].includes(lower)) return { kind: 'stop' };
-  if (lower === 'status') return { kind: 'status' };
-
-  const [first, ...rest] = trimmed.split(/\s+/);
-  const intervalMs = parseDuration(first ?? '');
-  if (intervalMs !== null) {
-    // 第一个词是间隔：/loop <间隔> <任务描述>
-    const task = rest.join(' ').trim();
-    if (!task) {
-      return { kind: 'error', message: '缺少任务描述；用法：/loop <任务描述>（默认每 30 分钟）或 /loop <间隔> <任务描述>' };
-    }
-    if (intervalMs < MIN_LOOP_INTERVAL_MS) {
-      return { kind: 'error', message: '循环间隔太短，最少 10 秒' };
-    }
-    return { kind: 'start', intervalMs, intervalLabel: formatDuration(intervalMs), task };
-  }
-  // 第一个词不是间隔：整个输入作为任务，使用默认间隔
-  return {
-    kind: 'start',
-    intervalMs: DEFAULT_LOOP_INTERVAL_MS,
-    intervalLabel: formatDuration(DEFAULT_LOOP_INTERVAL_MS),
-    task: trimmed,
-  };
-}
 
 /**
  * 定时循环任务调度器（进程内单例由插件持有）。定时器 unref，不阻止进程退出。

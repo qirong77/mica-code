@@ -57,7 +57,12 @@ const MIN_LOCAL_ROUND_DROP_SAVED_RATIO = 0.05;
 
 export type CompactInput = {
   messages: unknown[];
-  summarize(transcript: string, prompt: string): Promise<string>;
+  /**
+   * 生成摘要的模型调用。只有需要 checkpoint 的路径（`/compact llm`、headless
+   * `mica compact --session`、自动模型压缩）会用到它；`toolResultsOnly` 只做本地
+   * 替换、不调用模型，所以允许缺省（缺省时走到摘要路径会明确报错）。
+   */
+  summarize?(transcript: string, prompt: string): Promise<string>;
   options?: CompactOptions;
 };
 
@@ -304,11 +309,15 @@ export class CompactionService {
     };
 
     const summarizeCurrentMessages = async (): Promise<void> => {
+      const summarize = input.summarize;
+      if (!summarize) {
+        throw new Error('compact requires a summarize callback for model summarization');
+      }
       for (;;) {
         const transcript = buildTranscript(messagesToSummarize);
         summaryInputTokenEstimate = estimateTokens(transcript);
         try {
-          summary = cleanSummary(await input.summarize(transcript, prompt));
+          summary = cleanSummary(await summarize(transcript, prompt));
         } catch (error) {
           if (!isPromptTooLongError(error) || promptTooLongRetries >= maxRetries) throw error;
           promptTooLongRetries++;

@@ -75,7 +75,46 @@ case "$AGENT" in
       --agent "benchmarks.app.agents.mica_code:MicaCode" \
       --agent-kwarg "tarball=$TARBALL"
     ;;
-  codex)     exec harbor "${COMMON[@]}" "${ENV_ARGS[@]}" "$@" --agent codex ;;
+  codex)
+    # Codex decides whether it may use *remote* compaction from the provider
+    # NAME alone (`ModelProviderInfo::is_openai()` →
+    # `capabilities().remote_compaction` in model-provider/src/provider.rs) and
+    # there is no config switch for it (openai/codex#24418 is still open).  With
+    # a non-OpenAI upstream that branch is wrong twice over: codex pushes a
+    # `compaction_trigger` item into an ordinary /responses request and then
+    # demands exactly one `{type:"compaction"}` item back.  DeepSeek answers with
+    # normal items, so the turn dies with
+    #   "Error running remote compact task: ... expected exactly one compaction
+    #    output item, got 0 from 3 output items"
+    # and `codex exec` exits 1 **mid-task** — the agent is killed while it is
+    # still working, which silently truncates any long cell.
+    #
+    # Harbor's shortcut (`--agent-env OPENAI_BASE_URL=$PROXY`) keeps the provider
+    # named "openai", which is what trips this.  Declaring our own provider entry
+    # is the documented way to point codex at a third-party model, and it makes
+    # codex take the same local-compaction path it uses for any custom provider.
+    # The side effect is welcome: custom providers default to
+    # `supports_websockets = false`, which also drops the 7 x `GET /responses`
+    # 405 capability probes each codex cell used to log.
+    #
+    # `name` must differ from the built-in `OpenAI` (that string is the whole
+    # test) and the key must be a *new* one: `merge_configured_model_providers`
+    # uses `or_insert`, so `[model_providers.openai]` cannot override.
+    # Same file name as the console's own builder (console/server/harbor.py) so a
+    # by-hand cell and a UI cell resolve to the same path.
+    CODEX_CONFIG="${TMPDIR:-/tmp}/mica-bench-codex-$TASK.toml"
+    cat >"$CODEX_CONFIG" <<EOF
+model_provider = "mica-proxy"
+
+[model_providers.mica-proxy]
+name = "mica-proxy"
+base_url = "$PROXY"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+EOF
+    exec harbor "${COMMON[@]}" "${ENV_ARGS[@]}" "$@" --agent codex \
+      --agent-kwarg "config=$CODEX_CONFIG"
+    ;;
   claude-code)
     # claude-code speaks the Anthropic wire format, so it cannot share ENV_ARGS
     # with the OpenAI-family agents: it reads ANTHROPIC_BASE_URL, and the proxy

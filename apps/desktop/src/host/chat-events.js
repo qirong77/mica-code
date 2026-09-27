@@ -134,13 +134,15 @@ export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTu
   return args
 }
 
-// `turn/start` params. Two Mica extensions ride along: `role` (the resident
+// `turn/start` params. Three Mica extensions ride along: `role` (the resident
 // host applies it before the turn — see runAppServer's applyRoleOverride — so
 // switching role in the app takes effect and lands in the session snapshot
-// without respawning the host) and `clientMessageId` (correlates a rejected
-// turn/start with the optimistic message the renderer already rendered so it
-// can be rolled back). Codex clients never send either field; the host ignores
-// unknown params.
+// without respawning the host), `autoCompact` (the global auto-compact setting
+// plus this session's run counters, resolved by host/auto-compact.js; the host
+// only sees it per turn, so a resident host picks up a settings change without
+// respawning) and `clientMessageId` (correlates a rejected turn/start with the
+// optimistic message the renderer already rendered so it can be rolled back).
+// Codex clients never send any of them; the host ignores unknown params.
 export function buildTurnStartParams({
   threadId,
   prompt,
@@ -148,6 +150,7 @@ export function buildTurnStartParams({
   model,
   variant,
   role,
+  autoCompact,
   clientMessageId
 }) {
   const params = { threadId: threadId || '' }
@@ -156,6 +159,7 @@ export function buildTurnStartParams({
   if (model) params.model = model
   if (variant) params.effort = variant
   if (role) params.role = role
+  if (autoCompact) params.autoCompact = autoCompact
   if (clientMessageId) params.clientMessageId = clientMessageId
   return params
 }

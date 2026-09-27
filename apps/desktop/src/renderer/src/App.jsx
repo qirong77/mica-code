@@ -823,7 +823,7 @@ export default function App() {
   const sessionsRef = useLatest(sessions)
   // 定时任务活在运行时里（页签关掉也继续跑），页面只是视图：启动时拉一次，之后跟着
   // `schedule:changed` 广播更新——侧栏分区与输入框右侧的图标读的是同一份。
-  const [scheduledTasks, setScheduledTasks] = useState([])
+  const [loops, setLoops] = useState([])
   // 新建但还没绑定真实会话的草稿归属：草稿是界面状态里的临时节点，归属等它拿到
   // sessionId 才落盘（见 moveSession），在那之前只记在渲染层。
   const [draftGroups, setDraftGroups] = useState({})
@@ -878,22 +878,48 @@ export default function App() {
       .catch((error) => console.error('load sessions failed', error))
   }, [applySessions])
 
-  const applyScheduledTasks = useCallback((tasks) => {
-    setScheduledTasks(Array.isArray(tasks) ? tasks : [])
+  const applyLoops = useCallback((loops) => {
+    setLoops(Array.isArray(loops) ? loops : [])
   }, [])
 
-  const refreshScheduledTasks = useCallback(() => {
-    window.mica.schedule
+  const refreshLoops = useCallback(() => {
+    window.mica.loops
       .list()
-      .then((result) => applyScheduledTasks(result?.tasks))
-      .catch((error) => console.error('load scheduled tasks failed', error))
-  }, [applyScheduledTasks])
+      .then((result) => applyLoops(result?.loops))
+      .catch((error) => console.error('load loops failed', error))
+  }, [applyLoops])
 
   useEffect(() => {
-    // 变更广播由运行时发（创建/暂停/删除/每轮跑完都会发），别的窗口改了这里也跟着变。
-    const off = window.mica.schedule.onChanged((payload) => applyScheduledTasks(payload?.tasks))
+    // 变更广播由运行时发（启动/暂停/停止/每轮跑完都会发），别的窗口改了这里也跟着变。
+    const off = window.mica.loops.onChanged((payload) => applyLoops(payload?.loops))
     return () => off?.()
-  }, [applyScheduledTasks])
+  }, [applyLoops])
+
+  // 自动压缩（每完成一次模型请求检查 ctx，超过阈值就压缩）：规则活在运行时里，按 sessionId
+  // 记账，页面只是订阅者——ChatView 只读这份 props、写入直接打 `window.mica.autoCompact`，
+  // 与定时循环同一条路（详见 AGENT.md 的「apps/desktop 的架构」）。
+  const [autoCompact, setAutoCompact] = useState(null)
+  const applyAutoCompact = useCallback((payload) => {
+    if (!payload) return
+    // 广播允许只带一部分（例如只更新计数）：缺的字段沿用上一次的值，别把设置打回默认。
+    setAutoCompact((previous) => ({
+      settings: payload.settings ?? previous?.settings ?? null,
+      counters: payload.counters ?? previous?.counters ?? {}
+    }))
+  }, [])
+
+  useEffect(() => {
+    window.mica.autoCompact
+      .get()
+      .then((result) => {
+        if (result && result.ok === false) return
+        applyAutoCompact(result)
+      })
+      .catch((error) => console.error('load auto compact failed', error))
+    // 计数每跑一轮就变，设置改了也要同步——别的窗口改了这里也跟着变。
+    const off = window.mica.autoCompact.onChanged((payload) => applyAutoCompact(payload))
+    return () => off?.()
+  }, [applyAutoCompact])
 
   const refreshPins = useCallback(() => {
     window.mica.stats
@@ -1104,12 +1130,12 @@ export default function App() {
     refreshPins()
     refreshSort()
     refreshProjects()
-    refreshScheduledTasks()
+    refreshLoops()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
     }, 3000)
     return () => clearInterval(timer)
-  }, [refreshPins, refreshProjects, refreshScheduledTasks, refreshSessions, refreshSort])
+  }, [refreshPins, refreshProjects, refreshLoops, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
@@ -1264,6 +1290,7 @@ export default function App() {
       }
       setSelectedId(id)
       setActiveId(id)
+      return id
     },
     [applyMoveResult, nodesRef]
   )
@@ -1549,53 +1576,6 @@ export default function App() {
       })
     },
     [createTerminal, nodesRef, selectNode]
-  )
-
-  /** 侧栏「定时任务」分区：点一行就是打开它所属的那条会话。 */
-  const openScheduledTask = useCallback(
-    (task) => {
-      if (!task?.sessionId) return
-      const session = sessionsRef.current.find((item) => item.id === task.sessionId)
-      openSession(session || { id: task.sessionId, title: task.title, cwd: task.cwd })
-    },
-    [openSession, sessionsRef]
-  )
-
-  const updateScheduledTask = useCallback(
-    (id, patch) => {
-      window.mica.schedule
-        .update(id, patch)
-        .then((result) => {
-          if (result?.ok) applyScheduledTasks(result.tasks)
-          else console.error('update scheduled task failed', result?.error)
-        })
-        .catch((error) => console.error('update scheduled task failed', error))
-    },
-    [applyScheduledTasks]
-  )
-
-  const deleteScheduledTask = useCallback(
-    (id) => {
-      if (!window.confirm('确定删除这条定时任务？')) return
-      window.mica.schedule
-        .remove(id)
-        .then((result) => applyScheduledTasks(result?.tasks))
-        .catch((error) => console.error('delete scheduled task failed', error))
-    },
-    [applyScheduledTasks]
-  )
-
-  const runScheduledTaskNow = useCallback(
-    (id) => {
-      window.mica.schedule
-        .runNow(id)
-        .then((result) => {
-          applyScheduledTasks(result?.tasks)
-          if (result && result.ok === false) window.alert(result.error || '发送失败')
-        })
-        .catch((error) => console.error('run scheduled task failed', error))
-    },
-    [applyScheduledTasks]
   )
 
   const closeTab = useCallback(
@@ -2103,11 +2083,7 @@ export default function App() {
             unread={notifications.states}
             terminalSessions={sessionsWithRunningTerminal}
             draftNodes={draftNodes}
-            scheduledTasks={scheduledTasks}
-            onOpenScheduledTask={openScheduledTask}
-            onUpdateScheduledTask={updateScheduledTask}
-            onDeleteScheduledTask={deleteScheduledTask}
-            onRunScheduledTaskNow={runScheduledTaskNow}
+            loops={loops}
             onOpenSession={(sessionId) => {
               closeMobileDrawer()
               openSession(sessionId)
@@ -2216,8 +2192,8 @@ export default function App() {
               cwd={terminalCwd(activeId)}
               visible={view === 'chat'}
               isMobile={isMobile}
-              scheduledTasks={scheduledTasks}
-              onScheduledTasksChange={applyScheduledTasks}
+              loops={loops}
+              autoCompact={autoCompact}
               onSessionBound={setSessionId}
               onOpenFile={openChatFile}
               onNewSession={createChatSession}

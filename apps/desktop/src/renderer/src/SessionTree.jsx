@@ -11,7 +11,6 @@ import {
 import { createPortal } from 'react-dom'
 import {
   IconChevronRight,
-  IconCheck,
   IconClock,
   IconDots,
   IconFolder,
@@ -19,7 +18,6 @@ import {
   IconListTree,
   IconPencil,
   IconPin,
-  IconPlayerPause,
   IconPlus,
   IconSearch,
   IconTerminal2,
@@ -27,12 +25,13 @@ import {
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
 import {
-  countdownLabel,
-  formatIntervalMinutes,
-  sortTasksForList,
-  taskProgress,
-  taskStatusLabel
-} from './chat-schedule'
+  loopForNode,
+  loopNodeIds,
+  loopProgressLabel,
+  loopSessionIds,
+  loopStatusLabel,
+  loopTooltip
+} from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
@@ -274,16 +273,12 @@ export function SessionTree({
   unread,
   terminalSessions,
   draftNodes,
-  scheduledTasks,
+  loops,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
   onMoveSession,
   onMoveDraft,
-  onOpenScheduledTask,
-  onUpdateScheduledTask,
-  onDeleteScheduledTask,
-  onRunScheduledTaskNow,
   onRenameSession,
   onRenameDraft,
   onDeleteSession,
@@ -310,9 +305,19 @@ export function SessionTree({
   const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
   const normalizedQuery = query.trim().toLocaleLowerCase()
+  // 跑着定时循环的会话自动归到「定时任务」，除非用户已经手动置顶/放进分组（见 sessionSectionOf）。
+  const loopSessions = useMemo(() => loopSessionIds(loops), [loops])
+  const loopNodes = useMemo(() => loopNodeIds(loops), [loops])
+  const loopBySession = useMemo(() => {
+    const map = new Map()
+    for (const loop of Array.isArray(loops) ? loops : []) {
+      if (loop?.sessionId) map.set(loop.sessionId, loop)
+    }
+    return map
+  }, [loops])
   const sectionOf = useCallback(
-    (sessionId) => sessionSectionOf(sessionId, { pins, projects }),
-    [pins, projects]
+    (sessionId) => sessionSectionOf(sessionId, { pins, projects, loopSessionIds: loopSessions }),
+    [pins, projects, loopSessions]
   )
 
   const searchable = useMemo(
@@ -405,16 +410,24 @@ export function SessionTree({
   const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
 
-  // 定时任务分区：进行中的排在最前（按最近到期），暂停/完成垫后。搜索时按标题与正文过滤。
-  const scheduledList = useMemo(() => {
-    const list = sortTasksForList(scheduledTasks)
-    if (!normalizedQuery) return list
-    return list.filter(
-      (task) =>
-        (task.title || '').toLocaleLowerCase().includes(normalizedQuery) ||
-        (task.prompt || '').toLocaleLowerCase().includes(normalizedQuery)
-    )
-  }, [normalizedQuery, scheduledTasks])
+  // 定时任务分区：跑着循环的会话 + 还没拿到 sessionId 的草稿节点。
+  // 会话按最近更新排，循环自己的间隔/次数显示在行尾；标题与任务内容都参与搜索。
+  const scheduledSessions = useMemo(
+    () =>
+      searchable
+        .filter((session) => sectionOf(session.id).section === 'scheduled')
+        .sort(byUpdatedDesc),
+    [searchable, sectionOf]
+  )
+  const scheduledDrafts = useMemo(
+    () => rootDrafts.filter((node) => loopNodes.has(node.id)),
+    [rootDrafts, loopNodes]
+  )
+  // 挂了循环的草稿只在定时任务分区出现，Recent 里不再重复列一次。
+  const recentDrafts = useMemo(
+    () => rootDrafts.filter((node) => !loopNodes.has(node.id)),
+    [rootDrafts, loopNodes]
+  )
 
   // 侧栏看不见的会话——分组折叠、分区折叠、Recent 的 Show more 分页——由第一个可见的
   // 祖先代为显示状态。行的状态判定与 renderSessionRow/renderDraftRow 共用同一份回调，
@@ -482,15 +495,22 @@ export function SessionTree({
     rowStateOfSession
   ])
 
-  /** 折叠的定时任务分区：只有「有任务正在进行」值得代显（任务没有未读）。 */
+  /** 折叠的定时任务分区：只有「循环正在跑」值得代显（这个分区没有未读概念）。 */
   const hiddenScheduledState = useMemo(
     () =>
       !normalizedQuery &&
       collapsedSections.scheduled &&
-      scheduledList.some((task) => task.status === 'active')
+      (scheduledSessions.length > 0 || scheduledDrafts.length > 0) &&
+      loops.some((loop) => loop.status === 'active')
         ? 'running'
         : null,
-    [collapsedSections.scheduled, normalizedQuery, scheduledList]
+    [
+      collapsedSections.scheduled,
+      normalizedQuery,
+      scheduledSessions.length,
+      scheduledDrafts.length,
+      loops
+    ]
   )
 
   const openMenu = (event, payload) => {
@@ -522,13 +542,6 @@ export function SessionTree({
     else if (action === 'new-subgroup') onCreateGroup(menuPayload.group.id)
     else if (action === 'new-session') onCreateSessionInGroup(menuPayload.group.id)
     else if (action === 'delete-group') onDeleteGroup(menuPayload.group.id)
-    else if (action === 'scheduled-open') onOpenScheduledTask?.(menuPayload.scheduled)
-    else if (action === 'scheduled-run-now') onRunScheduledTaskNow?.(menuPayload.scheduled.id)
-    else if (action === 'scheduled-pause')
-      onUpdateScheduledTask?.(menuPayload.scheduled.id, { status: 'paused' })
-    else if (action === 'scheduled-resume')
-      onUpdateScheduledTask?.(menuPayload.scheduled.id, { status: 'active' })
-    else if (action === 'scheduled-delete') onDeleteScheduledTask?.(menuPayload.scheduled.id)
   }
 
   const menuItemsFor = (session) =>
@@ -544,15 +557,6 @@ export function SessionTree({
     'separator',
     ['delete-group', '删除分组', true]
   ]
-
-  const scheduledMenuItems = (task) => {
-    const items = [['scheduled-open', '打开对话']]
-    if (task.status === 'active')
-      items.push(['scheduled-run-now', '立即发送一次'], ['scheduled-pause', '暂停'])
-    if (task.status === 'paused') items.push(['scheduled-resume', '继续'])
-    items.push('separator', ['scheduled-delete', '删除定时任务', true])
-    return items
-  }
 
   const sectionItems = { pinned }
   const sectionOrderKey = (section, groupId) =>
@@ -663,6 +667,11 @@ export function SessionTree({
     const relativeTime = section === 'recent' ? relativeTimeShort(session.updatedAtMs) : ''
     // Recent 行尾显示工作目录名，方便区分同名会话。
     const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
+    // 定时循环按会话认领，行**在任何分区**都要带时钟标记：手动置顶或放进分组的会话不会因为
+    // 挂着循环被搬进「定时任务」分区，那就更不能因此丢掉「它挂着定时任务」这个信息。
+    // `running` 只用来区分「这一轮正在跑」与「在等下一次触发」，两种状态都点亮图标。
+    const loop = loopBySession.get(session.id) || null
+    const loopRunning = state === 'running'
     return (
       <li key={session.id}>
         <div
@@ -678,21 +687,31 @@ export function SessionTree({
               : undefined
           }}
           title={
-            session.cwd
-              ? `${session.title || session.id} — ${session.cwd}`
-              : session.title || session.id
+            loop
+              ? `${session.title || session.id}\n${loopTooltip(loop, Date.now(), loopRunning)}`
+              : session.cwd
+                ? `${session.title || session.id} — ${session.cwd}`
+                : session.title || session.id
           }
           draggable={!editingThis}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) =>
-            openMenu(event, { session, items: menuItemsFor(session) })
+            openMenu(event, {
+              session,
+              items: menuItemsFor(session)
+            })
           )}
           onDragStart={(event) => startDrag(event, 'session', section, session.id, groupId)}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(section, session.id, groupId)}
           onDrop={dropRow(section, session.id, groupId)}
           onClick={() => onOpenSession(session)}
-          onContextMenu={(event) => openMenu(event, { session, items: menuItemsFor(session) })}
+          onContextMenu={(event) =>
+            openMenu(event, {
+              session,
+              items: menuItemsFor(session)
+            })
+          }
         >
           <Slot />
           <RowLeading
@@ -712,17 +731,33 @@ export function SessionTree({
               onCancel={() => setEditing(null)}
             />
           ) : (
-            <span className="min-w-0 flex-1 truncate">{session.title || session.id}</span>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              {loop && (
+                <span className="shrink-0 text-warn">
+                  <IconClock size={12} stroke={2} />
+                </span>
+              )}
+              <span className="min-w-0 truncate">{session.title || session.id}</span>
+            </span>
           )}
-          <RowTail label={cwdLabel} labelTitle={session.cwd} relativeTime={relativeTime} />
+          <RowTail
+            label={loop ? loopProgressLabel(loop) : cwdLabel}
+            labelTitle={loop ? loop.task : session.cwd}
+            relativeTime={loop ? loopStatusLabel(loop, loopRunning) : relativeTime}
+          />
         </div>
       </li>
     )
   }
 
-  const renderDraftRow = (node, indent = 0, groupId = null) => {
+  /**
+   * 草稿行。`loop` 传入时表示这条草稿已经挂着定时循环：标题前加时钟、行尾换成循环进度与
+   * 状态（与已绑定会话的定时任务行一致）。循环本身只在输入框的时钟面板里改。
+   */
+  const renderDraftRow = (node, indent = 0, groupId = null, loop = null) => {
     const active = node.id === activeSessionId || node.id === selectedId
     const state = rowStateOfDraft(node)
+    const loopRunning = state === 'running'
     const editingThis = editing?.kind === 'draft' && editing.id === node.id
     const dropSection = groupId ? 'project' : 'recent'
     const isOver = rowOverState(dropSection, node.id, groupId)
@@ -735,7 +770,11 @@ export function SessionTree({
             paddingLeft: rowIndent(indent),
             boxShadow: isOver ? dropShadow : undefined
           }}
-          title="尚未关联真实会话的新对话"
+          title={
+            loop
+              ? `尚未关联真实会话的新对话\n${loopTooltip(loop, Date.now(), loopRunning)}`
+              : '尚未关联真实会话的新对话'
+          }
           draggable={!editingThis}
           {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
           onDragStart={(event) => startDrag(event, 'draft', 'draft', node.id, groupId)}
@@ -762,55 +801,19 @@ export function SessionTree({
               onCancel={() => setEditing(null)}
             />
           ) : (
-            <span className="min-w-0 flex-1 truncate">{node.text}</span>
-          )}
-          <RowTail relativeTime="" />
-        </div>
-      </li>
-    )
-  }
-
-  /**
-   * 定时任务行：点一下打开它所属的会话；右键/长按给出「立即发送 / 暂停 / 删除」。
-   * 行尾是进度（3/10）与状态——倒计时只出现在 tooltip 里：侧栏不做每秒 tick，
-   * 否则整棵树会随着时间白重渲染一遍。
-   */
-  const renderScheduledRow = (task) => {
-    const active = task.status === 'active'
-    const Icon = active ? IconClock : task.status === 'paused' ? IconPlayerPause : IconCheck
-    const items = scheduledMenuItems(task)
-    const tooltip = [
-      task.title,
-      `每 ${formatIntervalMinutes(task.intervalMs / 60_000)} 发送一次 · ${taskProgress(task)}`,
-      active && countdownLabel(task.nextRunAt)
-        ? `下次 ${countdownLabel(task.nextRunAt)}`
-        : taskStatusLabel(task),
-      task.lastError ? `上次：${task.lastError}` : '',
-      task.prompt
-    ]
-      .filter(Boolean)
-      .join('\n')
-    return (
-      <li key={task.id}>
-        <div
-          className={`${rowClass} text-white/70`}
-          style={{ paddingLeft: rowIndent(0) }}
-          title={tooltip}
-          {...longPressHandlers((event) => openMenu(event, { scheduled: task, items }))}
-          onClick={() => onOpenScheduledTask?.(task)}
-          onContextMenu={(event) => openMenu(event, { scheduled: task, items })}
-        >
-          <Slot />
-          <Slot>
-            <span className={active ? 'text-success chat-dot-running' : 'text-white/40'}>
-              <Icon size={13} stroke={2} />
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              {loop && (
+                <span className="shrink-0 text-warn">
+                  <IconClock size={12} stroke={2} />
+                </span>
+              )}
+              <span className="min-w-0 truncate">{node.text}</span>
             </span>
-          </Slot>
-          <span className="min-w-0 flex-1 truncate">{task.title}</span>
+          )}
           <RowTail
-            label={taskProgress(task)}
-            labelTitle={`已发送 ${taskProgress(task)} 次`}
-            relativeTime={taskStatusLabel(task)}
+            label={loop ? loopProgressLabel(loop) : ''}
+            labelTitle={loop ? loop.task : ''}
+            relativeTime={loop ? loopStatusLabel(loop, loopRunning) : ''}
           />
         </div>
       </li>
@@ -1068,16 +1071,21 @@ export function SessionTree({
 
           <section>
             {renderSectionHeader('scheduled', '定时任务', IconClock, {
+              // 这个分区没有「新增」入口：定时任务一律在会话输入框右下角的时钟面板里建
+              // （它同时是创建、改间隔、暂停/继续与停止的唯一入口）。
               hiddenState: hiddenScheduledState
             })}
             {sectionOpen('scheduled') &&
-              (scheduledList.length ? (
-                <ul className="flex flex-col gap-px">
-                  {scheduledList.map((task) => renderScheduledRow(task))}
+              (scheduledSessions.length || scheduledDrafts.length ? (
+                <ul role="tree" className="flex flex-col gap-px">
+                  {scheduledDrafts.map((node) =>
+                    renderDraftRow(node, 0, null, loopForNode(loops, node.id))
+                  )}
+                  {scheduledSessions.map((session) => renderSessionRow(session, 0, 'scheduled'))}
                 </ul>
               ) : (
                 <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
-                  暂无定时任务，在输入框右侧的时钟图标里创建。
+                  暂无定时任务，点会话输入框右下角的时钟图标即可创建。
                 </p>
               ))}
           </section>
@@ -1088,10 +1096,10 @@ export function SessionTree({
               hiddenState: hiddenStates.recent
             })}
             {sectionOpen('recent') &&
-              (recentList.length || rootDrafts.length ? (
+              (recentList.length || recentDrafts.length ? (
                 <>
                   <ul role="tree" className="flex flex-col gap-px">
-                    {rootDrafts.map((node) => renderDraftRow(node))}
+                    {recentDrafts.map((node) => renderDraftRow(node))}
                     {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
                   </ul>
                   {recentOverflow > 0 && !normalizedQuery && (

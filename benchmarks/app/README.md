@@ -30,6 +30,15 @@ app/
 
 **3. 单格执行**（`runner/run-agent.sh`）。`run-agent.sh <agent> <task-id>`，job 目录先清空，所以每个 `(agent, task)` 格子都能按 id 单独重跑。命令行入口与控制台走同一套路径常量。
 
+## agent 侧的接线例外
+
+两个 agent 不是给环境变量就能接上的，两处例外都记在 `RUNBOOK.md` §7：
+
+- **codex 需要一个自己的 provider 条目**（`console/server/harbor.py` 的 `codex_provider_config`，按格生成临时 `config.toml` 并用 `--agent-kwarg config=` 传入）。只给 `OPENAI_BASE_URL` 会让 codex 仍以 OpenAI provider 自居，从而走 remote compaction v2：它往普通 `/responses` 请求里塞 `compaction_trigger`，并要求回包恰好一个 `{type:"compaction"}` item；DeepSeek 返回普通 item，回合就以 `Error running remote compact task` 结束、`codex exec` 退出 1。判定只认 provider 名（`is_openai()`），没有开关（openai/codex#24418）。
+- **claude-code 走 `/anthropic` 路由**并需要 `HARBOR_ALLOW_INSECURE_MODEL_BASE_URL`；它的 usage 由 proxy 的 Anthropic 归一化器折算成 OpenAI 口径（`input_tokens` 是否含缓存的差异在这里抹平）。
+
+调度器**不按 `task.toml` 的 `memory_mb` 做准入**：那是 docker 的 `--memory`（每容器上限，不是预留），按它求和会让本来能 5 路并发的矩阵串行化。它只把「并行度 / 任务声明的峰值内存 / VM 给容器的可用内存（`MemTotal` − 1 GB）」写进控制台日志，由人决定。
+
 ## 路径只有一个定义
 
 目录布局的唯一定义在 `console/server/settings.py`：

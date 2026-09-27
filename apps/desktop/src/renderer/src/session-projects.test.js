@@ -39,6 +39,31 @@ describe('sessionSectionOf', () => {
     const stale = { ...projects, groups: projects.groups.slice(0, 1) }
     expect(sessionSectionOf('s2', { pins: {}, projects: stale }).section).toBe('recent')
   })
+
+  it('archives an unclassified session that runs a loop into the scheduled section', () => {
+    const loopSessionIds = new Set(['s9'])
+    expect(sessionSectionOf('s9', { pins: {}, projects, loopSessionIds })).toEqual({
+      section: 'scheduled',
+      groupId: null
+    })
+  })
+
+  it('keeps manual placement ahead of the automatic loop archive', () => {
+    const loopSessionIds = new Set(['s1', 's2'])
+    expect(sessionSectionOf('s1', { pins: { s1: 1 }, projects, loopSessionIds }).section).toBe(
+      'pinned'
+    )
+    expect(sessionSectionOf('s2', { pins: {}, projects, loopSessionIds })).toEqual({
+      section: 'project',
+      groupId: 'child'
+    })
+  })
+
+  it('leaves sessions without a loop in recent', () => {
+    expect(sessionSectionOf('s9', { pins: {}, projects, loopSessionIds: new Set() }).section).toBe(
+      'recent'
+    )
+  })
 })
 
 describe('sessionsByGroup', () => {

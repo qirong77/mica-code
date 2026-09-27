@@ -263,8 +263,8 @@ function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']
 
 function isTitleUserMessage(message: ReturnType<AgentRuntime['toConversationMessages']>[number]): boolean {
   if (message.role !== 'user') return false;
-  // Plugin-injected prompts (context-pressure reminders, ...) are submitted
-  // with a displayText, so their displayContent differs from the real content.
+  // Plugin-injected prompts are submitted with a displayText, so their
+  // displayContent differs from the real content.
   if (message.displayContent === undefined) return true;
   return contentToText(message.displayContent).trim() === contentToText(message.content).trim();
 }

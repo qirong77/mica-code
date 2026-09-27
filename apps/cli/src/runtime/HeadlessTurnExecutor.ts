@@ -39,6 +39,12 @@ export type HeadlessTurnExecutorOptions = {
   agent: AgentRuntime;
   sessionController: SessionController;
   onEvent: (event: HeadlessTurnEvent) => void;
+  /**
+   * Optional automatic context compaction. Driven by the provider's iteration
+   * boundary: after every completed model request the hook may return a smaller
+   * history, which the running turn continues with (see autoCompact.ts).
+   */
+  autoCompact?: HeadlessAutoCompactHook;
   /** Fired once the drain loop empties (all queued turns finished). */
   onIdle?: () => void;
   maxTurns?: number;
@@ -48,7 +54,7 @@ export type HeadlessTurnExecutorOptions = {
    * the interactive runtime (input:received guard, turn:before, prompt:build,
    * turn:beforePersist, turn:error/abort, turn:after) and shares the plugin
    * host's single-slot queue, so plugins (session-autonomy, message-queue,
-   * context-pressure, todo) behave identically in headless mode.
+   * todo) behave identically in headless mode.
    */
   hooks?: HookRegistry;
   /** Object surfaced to hooks as `runtime` (needs getCurrentSessionId). */
@@ -61,6 +67,11 @@ export type HeadlessTurnExecutorOptions = {
   /** Turn-level retry policy override (defaults match the interactive CLI). */
   maxTurnRetries?: number;
   retryDelayMs?: number;
+};
+
+export type HeadlessAutoCompactHook = {
+  /** Rewrites the session messages at an iteration boundary; null keeps them. */
+  rewriteIterationMessages(messages: unknown[]): Promise<unknown[] | null>;
 };
 
 /**
@@ -343,6 +354,9 @@ export class HeadlessTurnExecutor {
             runResult = await agent.run(runContent, {
               reservedRunId: attempt === 0 ? reservedRunId : undefined,
               maxTurns: this.options.maxTurns,
+              rewriteIterationMessages: this.options.autoCompact
+                ? (messages: unknown[]) => this.options.autoCompact!.rewriteIterationMessages(messages)
+                : undefined,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });
                 const replayed = replayInputs.shift();

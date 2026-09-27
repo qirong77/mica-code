@@ -17,6 +17,7 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
+  MICA_AUTO_COMPACT_NOTIFICATIONS,
   MICA_METHODS,
   MICA_QUEUE_NOTIFICATIONS,
   MICA_SESSION_NOTIFICATIONS,
@@ -57,6 +58,7 @@ import {
   type HeadlessTurnStartResult,
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
+import { AutoCompactController } from '../runtime/autoCompact.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
@@ -223,6 +225,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let subagentTasks: SubagentTaskManager | null = null;
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
+  let autoCompact: AutoCompactController | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
   let mcpInitPromise: Promise<unknown> | null = null;
@@ -288,6 +291,18 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 
     const hooks = new micaPlugin.HookRegistry();
     agent = new AgentRuntime(runtimeOverride, hooks);
+    // 自动压缩：设置与计数由桌面宿主在 turn/start 时下发（常驻 host 只 spawn 一次，
+    // 页面上改的阈值/次数只能随 turn 带过来），计数经通知回传宿主持久化。
+    autoCompact = new AutoCompactController({
+      agent,
+      onStatus: (counters) => {
+        try {
+          writeNotification(MICA_AUTO_COMPACT_NOTIFICATIONS.updated, { threadId: sessionId, ...counters });
+        } catch {
+          // stdout 在退出流程里可能已经关闭；计数回传失败不该影响 turn。
+        }
+      },
+    });
     sessionController = new SessionController({
       agent,
       config: { apply() {} },
@@ -411,6 +426,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       agent,
       sessionController,
       maxTurns: options.maxTurns,
+      autoCompact: {
+        rewriteIterationMessages: (messages) => autoCompact!.rewriteIterationMessages(messages),
+      },
       onEvent: (event) => {
         if (event.type === 'turn:finish') projector?.completeAgentMessage();
         handleTurnEvent(writeNotification, event, sessionId, {
@@ -556,6 +574,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         refreshTaskSnapshots: () => pushTaskSnapshots(),
         runtimeOverride,
         executor: executor!,
+        autoCompact: autoCompact!,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
         setSessionId: (nextSessionId) => {
@@ -587,6 +606,8 @@ type HostContext = {
   refreshTaskSnapshots: () => void;
   runtimeOverride: AgentRuntimeConfigOverride;
   executor: HeadlessTurnExecutor;
+  /** Automatic context compaction state machine (settings + run counters). */
+  autoCompact: AutoCompactController;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
   sessionId: string;
@@ -728,6 +749,18 @@ function applyRoleOverride(ctx: HostContext, params: Record<string, unknown>): v
       },
     });
   }
+}
+
+/**
+ * Mica extension: `turn/start` and `mica/turn/editMessage` carry the desktop's
+ * 自动压缩 settings (thresholds + run limits) together with this session's run
+ * counters. The resident host is spawned once and the panel can change the
+ * numbers between turns, so per-turn delivery is the only path that reaches it.
+ * Unknown/missing field types degrade to the defaults inside the controller.
+ */
+function applyAutoCompactParams(ctx: HostContext, params: Record<string, unknown>): void {
+  if (params.autoCompact === undefined) return;
+  ctx.autoCompact.setParams(params.autoCompact);
 }
 
 function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
@@ -881,6 +914,7 @@ async function handleCodexRequest(
       }
       warnIfCodexPolicyCannotBeEnforced(ctx, params);
       applyRoleOverride(ctx, params);
+      applyAutoCompactParams(ctx, params);
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
       if (model || effort) {
@@ -1055,6 +1089,7 @@ async function handleCodexRequest(
       // 必须在 loadSnapshot 之后：loadSnapshot 会按快照里的 role 重置 currentRole，
       // 先应用角色会被上面这份「截断前快照」覆盖回旧角色。
       applyRoleOverride(ctx, params);
+      applyAutoCompactParams(ctx, params);
       await ctx.mcpReady;
       // 落盘要在通知之前：turn 启动后的首次保存跑在 executor.start 之后的异步
       // 路径上（runTurn 里先 await parseImageRefs），此刻客户端若直接读文件会拿到

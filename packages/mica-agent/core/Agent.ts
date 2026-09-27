@@ -29,6 +29,21 @@ export type AgentQueryOptions = {
   signal?: AbortSignal;
   shouldContinue?: () => boolean;
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
+  /**
+   * Rewrites the in-flight session messages at an iteration boundary — the point
+   * between a completed model request (its assistant message and tool results
+   * are already appended) and the request that follows.
+   *
+   * The loop keeps its own message array, so rewriting the client's snapshot
+   * mid-query would NOT affect the rest of the turn; this hook is the only place
+   * where a context-reducing rewrite (e.g. automatic compaction) can shrink the
+   * next request. Receives the session messages without the system prompt
+   * (protocol-agnostic shape, same as `getSnapshot().messages`) and returns the
+   * list to continue with; returning null keeps the current messages.
+   */
+  rewriteIterationMessages?: (
+    messages: unknown[],
+  ) => unknown[] | null | undefined | Promise<unknown[] | null | undefined>;
   /** Maximum number of model requests in one agentic query, including the initial request. */
   maxTurns?: number;
   /** Provider-level retry progress (safe zero-output replay only). Used to surface

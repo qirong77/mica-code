@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from . import harbor
-from .catalog import AGENTS_BY_ID, JOBS_DIR, task_image_refs
+from .catalog import AGENTS_BY_ID, JOBS_DIR, task_image_refs, task_memory_mb
 from . import settings as settings_mod
 from .settings import (
     APP_DIR,
@@ -282,6 +282,43 @@ def free_mb() -> int | None:
         except OSError:
             return None
     return int(usage.free / (1024 * 1024))
+
+
+# The VM's memory as containers see it: ``MemTotal`` minus a reserve for the VM's
+# own kernel and the docker daemon.  Reported next to each run's parallelism so an
+# operator can size the tab against the machine -- and nothing else.  See the
+# scheduler note for why this is *not* used to admit cells.
+VM_MEMORY_RESERVE_MB = 1024
+_docker_mem_mb: int | None = None
+_docker_mem_checked = False
+
+
+def container_memory_budget_mb() -> int | None:
+    """Memory containers may use, in MB (None when the VM's size is unknown).
+
+    Read once per process: resizing the VM means restarting the console, which
+    is the same trade already made for the proxy and the harbor binary dir.
+    """
+    global _docker_mem_mb, _docker_mem_checked
+    if not _docker_mem_checked:
+        _docker_mem_checked = True
+        try:
+            proc = subprocess.run(
+                ["docker", "info", "--format", "{{.MemTotal}}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode == 0:
+            try:
+                _docker_mem_mb = int(proc.stdout.strip()) // (1024 * 1024)
+            except ValueError:
+                _docker_mem_mb = None
+    if _docker_mem_mb is None:
+        return None
+    return max(0, _docker_mem_mb - VM_MEMORY_RESERVE_MB)
 
 
 def reclaim_async() -> None:
@@ -543,6 +580,16 @@ class Engine:
             existing = self._cells.get(key)
             if existing is not None and existing.alive():
                 return {"ok": False, "error": f"{key} is already running"}
+            # A finished run deliberately keeps its descriptor so the UI can keep
+            # showing what it ran -- but `run_state["active"]` is derived from
+            # *any* live cell, so starting a manual cell under a different tag
+            # resurrects the old descriptor as an active run: `/api/results` then
+            # narrows the matrix to the old run's agents/tasks and the manual
+            # cell's own tag never appears.  A manual cell is not a run, so drop
+            # the stale descriptor -- but only when no scheduler owns it, since
+            # clearing it mid-run makes `_scheduler_loop` stop dispatching.
+            if self._scheduler is None or not self._scheduler.is_alive():
+                self._run = None
             proxy = self.proxy.status(settings)
         if not proxy["running"]:
             started = self.proxy.start(settings)
@@ -575,6 +622,26 @@ class Engine:
         self._note(
             f"scheduler: {len(pending)} cells, parallelism {parallelism}, "
             f"max {per_agent} per agent"
+        )
+
+        # Report the memory facts next to the parallelism, but do **not** admit
+        # cells by them.  ``memory_mb`` in ``task.toml`` is the per-container
+        # ``--memory`` *limit*, not a reservation: docker happily starts a task
+        # declaring 16 GB on this 11.66 GiB VM and only kills it if it actually
+        # gets there.  Summing those limits would therefore serialise the matrix
+        # for nothing -- ``reg2`` ran 5 cells at a time with several of them
+        # declaring 8192 MB and never OOM-killed a cell, and a budget of
+        # ``MemTotal - reserve`` would have cut that to two.  The number to watch
+        # is the host disk (``min_free_mb``), which is what has actually cost runs.
+        budget_mb = container_memory_budget_mb()
+        declared_peak = max((task_memory_mb(t) for t in tasks), default=0)
+        self._note(
+            f"scheduler: tasks declare up to {declared_peak} MB each; "
+            + (
+                f"{budget_mb} MB available to containers"
+                if budget_mb is not None
+                else "docker VM memory unknown"
+            )
         )
 
         # A reclaim from the previous run deletes images and build cache.  Let it
@@ -757,7 +824,18 @@ class Engine:
                 exec_started = bool(
                     attempt_dir and list((attempt_dir / "agent").glob("*.txt"))
                 ) if attempt_dir else False
-                in_verifier = bool(attempt_dir and (attempt_dir / "verifier").is_dir())
+                # Harbor pre-creates an empty ``verifier/`` at trial setup, so
+                # probing with ``is_dir()`` made every cell look like it had
+                # already reached the verifier phase: the idle limit became
+                # stall_secs * verify_grace from second 0, and the stall retry
+                # below was never taken.  Only a populated dir means the
+                # verifier actually started.
+                verifier_dir = (attempt_dir / "verifier") if attempt_dir else None
+                in_verifier = bool(
+                    verifier_dir is not None
+                    and verifier_dir.is_dir()
+                    and any(verifier_dir.iterdir())
+                )
 
                 if in_verifier:
                     limit = settings.stall_secs * settings.verify_grace

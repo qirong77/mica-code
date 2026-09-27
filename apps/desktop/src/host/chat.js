@@ -25,7 +25,8 @@ import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { isValidSessionId } from './session-delete'
 import { createTurnLeaseProbe } from './session-lease'
-import { getUiStateKey } from './ui-state'
+import { bindLoopSessionId } from './loops'
+import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -585,54 +586,44 @@ function startRun(sender, id, payload) {
   return { ok: true }
 }
 
-/** 工作区里已经打开的那个会话页签（用来让定时任务跑在用户看得见的地方）。 */
-function workspaceSessionNodeId(sessionId) {
-  const workspace = getUiStateKey('workspace')
-  const nodes = Array.isArray(workspace?.nodes) ? workspace.nodes : []
-  const node = nodes.find(
-    (item) => item?.type === 'terminal' && item.sessionId && item.sessionId === sessionId
-  )
-  return node?.id || null
-}
-
 /**
- * 定时任务触发的一次发送（scheduled-runner 注入的 runner）。
+ * 定时循环触发的一轮发送（loops.js 注入的 runner）。
  *
  * 语义上等同于用户此刻按了一下回车：走同一条 startRun，因此排队/steer/会话忙拦截都一致。
- * 目标节点优先取工作区里已经打开的那个页签——用户能实时看到输出，也能中断；没打开时用
- * `scheduled:<id>` 起一个独立 run，历史照样落到会话文件里，下次打开就能看到。
+ *
+ * 目标节点就是启动循环的那个工作区节点——用户能实时看到输出，也能中断。节点已被关掉时
+ * 退回 `loop:<nodeId>` 起一个独立 run，历史照样落到会话文件里，下次打开就能看到。
+ * 草稿节点（还没 sessionId）也允许：第一轮会创建会话，`turn/started` 再把 sessionId 绑回循环。
  */
-export function runScheduledTurn(task) {
-  const sessionId = typeof task?.sessionId === 'string' ? task.sessionId.trim() : ''
-  const prompt = String(task?.prompt || '').trim()
-  if (!sessionId) return { ok: false, error: '定时任务还没有绑定会话' }
+export function runLoopTurn(loop) {
+  const nodeId = typeof loop?.nodeId === 'string' ? loop.nodeId.trim() : ''
+  const prompt = String(loop?.task || '').trim()
+  if (!nodeId) return { ok: false, error: '定时任务没有归属的会话' }
   if (!prompt) return { ok: false, error: '定时任务的内容为空' }
-  // 会话文件没了（被另一个进程删掉 / 从未落盘）：把原因留给任务展示，别 spawn 一个
-  // 必然报 "Session not found" 的 app-server。删除会话时会连任务一起清掉，这里只是兜底。
-  const target = sessionFile(sessionId)
-  if (!target || !existsSync(target)) {
-    return { ok: false, skipped: true, error: '会话不存在，可能已被删除' }
-  }
-  // 会话已经在跑（用户正在聊 / 上一轮定时任务还没结束 / 别的进程持有 turn lease）：
-  // 这一轮不发，交给调度器推后一个间隔重试，不消耗次数。
-  const unavailable = sessionBusyElsewhere(sessionId)
-  if (unavailable) return { ok: false, skipped: true, error: '会话正在运行，本次已跳过' }
 
-  const nodeId = workspaceSessionNodeId(sessionId) || `scheduled:${task.id}`
+  const sessionId = typeof loop.sessionId === 'string' ? loop.sessionId.trim() : ''
+  // 会话文件没了（被另一个进程删掉）：把原因留给循环展示，别 spawn 一个必然报
+  // "Session not found" 的 app-server。删除会话时会连循环一起清掉，这里只是兜底。
+  if (sessionId) {
+    const target = sessionFile(sessionId)
+    if (!target || !existsSync(target)) return { ok: false, error: '会话不存在，可能已被删除' }
+    // 会话已经在跑（用户正在聊 / 上一轮循环还没结束 / 别的进程持有 turn lease）：
+    // 这一轮不发，交给调度器推后一个间隔重试，不计入执行次数。
+    const unavailable = sessionBusyElsewhere(sessionId)
+    if (unavailable) return { ok: false, error: '会话正在运行，本次已跳过' }
+  }
+
   const existing = runs.get(nodeId)
   const sender =
     existing?.sender && !existing.sender.isDestroyed() ? existing.sender : fallbackChatSender()
   const accepted = startRun(sender, nodeId, {
-    sessionId,
-    cwd: task.cwd || null,
+    sessionId: sessionId || null,
+    cwd: loop.cwd || null,
     prompt,
-    clientMessageId: `scheduled:${task.id}`,
-    maxTurns: 9999,
-    model: task.model || null,
-    variant: task.variant || null,
-    role: task.role || null
+    clientMessageId: `loop:${nodeId}:${loop.fireCount + 1}`,
+    maxTurns: 9999
   })
-  if (!accepted?.ok) return { ok: false, skipped: true, error: accepted?.error || '发送失败' }
+  if (!accepted?.ok) return { ok: false, error: accepted?.error || '发送失败' }
   return { ok: true, nodeId }
 }
 
@@ -659,6 +650,10 @@ function sendTurnStart(run, payload) {
   // turn's prompt (or its buffered events) makes it replay an answer the
   // session file already contains, which renders the same message twice.
   run.prompt = String(payload.prompt || '').trim()
+  // 本轮的用户消息 id（渲染层乐观行的 id / 循环的 `loop:<nodeId>:<n>`）：随
+  // `chat:run-started` 回传，渲染层据此判断这一轮的用户气泡是否已经在列表里，
+  // 而不是按文本猜——定时任务每一轮的文本都一样。
+  run.clientMessageId = payload.clientMessageId || null
   run.events = []
   const params = buildTurnStartParams({
     threadId: run.sessionId || run.requestedSessionId || '',
@@ -667,6 +662,7 @@ function sendTurnStart(run, payload) {
     model: payload.model,
     variant: payload.variant,
     role: payload.role,
+    autoCompact: readAutoCompactTurnParams(runSessionId(run)),
     clientMessageId: payload.clientMessageId
   })
   return sendCodexRequest(run, 'turn/start', params)
@@ -742,10 +738,16 @@ function editRunMessage(sender, id, payload = {}) {
   // Same role extension as turn/start: editing a message re-runs a turn, so a
   // role picked in the composer must apply (and persist) here too.
   if (payload.role) params.role = payload.role
+  // Same auto-compact extension as turn/start: the re-run turn must carry the
+  // current setting, otherwise an edit would silently run without it.
+  params.autoCompact = readAutoCompactTurnParams(runSessionId(run))
   // Like sendTurnStart: the replay buffer and `prompt` describe the turn being
   // started, otherwise a renderer reload trims the transcript at the previous
   // turn's boundary and replays the wrong run.
   run.prompt = text
+  // 编辑重发就地替换了那一行（历史被截断后由 mica/sessionHistory/replaced 交回），
+  // 没有新的乐观气泡，别把上一轮的用户消息 id 当成这一轮的。
+  run.clientMessageId = null
   run.events = []
 
   return new Promise((resolve) => {
@@ -1009,12 +1011,17 @@ function handleHostNotification(id, run, notification) {
     const sessionID = params.threadId
     if (sessionID) postNotify(`${id}:mica`, 'turn.started', { sessionId: sessionID })
     if (sessionID) run.sessionId = sessionID
+    // 草稿节点上启动的循环在这里才拿到 sessionId：补上绑定，归属与忙判定随后按会话工作。
+    if (sessionID) bindLoopSessionId(id, sessionID)
     run.currentTurnId = params.turn?.id || null
     run.running = true
     run.aborting = false
     run.startedAt = notification.emittedAtMs || Date.now()
     run.exitSent = false
     run.toolOutputs.clear()
+    // 与 turn/started 同步发出：渲染层只有在这一轮不是自己发起的时候（定时任务、
+    // after_turn 排队重放、另一个窗口发起的发送）才需要它，见 pushRunStarted。
+    pushRunStarted(id, run)
   } else if (method === 'turn/completed') {
     run.running = false
     run.currentTurnId = null
@@ -1121,6 +1128,15 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
+  } else if (method === 'mica/autoCompact/updated') {
+    // The host ran an auto-compact and reports the session's tally. It is host
+    // state, not a turn delta: the panel reads it back through the
+    // auto-compact:get IPC, so it must not enter the turn event buffer (there
+    // would be nothing to render from it) and must not touch running /
+    // hostPending — a compaction happens between two requests and does not
+    // change the lifecycle of the turn.
+    recordAutoCompactStatus(run.sessionId || params.threadId || null, params)
+    return
   } else if (method === 'error') {
     run.running = false
     run.hostPending = []
@@ -1143,6 +1159,28 @@ function pushChatEvent(run, event) {
   const record = { sequence, event }
   appendBufferedEvent(run.events, record)
   run.eventPacer.push(record)
+}
+
+/**
+ * 把本轮的起始信息（用户消息 + 起始时间）实时推给渲染层。
+ *
+ * 只有经过页面 `send()` 的一轮才有本地乐观气泡；host 主动发起的一轮（定时任务、
+ * after_turn 排队重放、另一个窗口发起的发送、编辑重发）没有任何本地插入，渲染层只能
+ * 从这里拿到用户消息——否则运行中只看到回答，用户气泡要等重新加载会话才出现。
+ *
+ * 直发而不进事件缓冲：它描述的是「这一轮」，恢复重放时由 `chat:is-running` 的
+ * `prompt` 补上同一信息（见 `restore()`），塞进缓冲只会让重放顺序变复杂。
+ */
+function pushRunStarted(id, run) {
+  const prompt = String(run?.prompt || '').trim()
+  if (!prompt || !run?.sender || run.sender.isDestroyed()) return
+  run.sender.send('chat:run-started', {
+    id,
+    sessionId: runSessionId(run),
+    prompt: run.prompt,
+    clientMessageId: run.clientMessageId || null,
+    startedAt: run.startedAt || Date.now()
+  })
 }
 
 function replayQueuedTurn(id, run) {

@@ -142,6 +142,51 @@ export const MICA_SESSION_NOTIFICATIONS = {
 } as const;
 
 /**
+ * Mica extension notification: the host ran an automatic context compaction
+ * (see `apps/cli/src/runtime/autoCompact.ts`) and reports the session's run
+ * counters afterwards. The counters are what the desktop app's 自动压缩 panel
+ * shows and what it sends back on the next `turn/start` (`autoCompact`), so
+ * every applied run — and every skipped one, via `lastNote` — must be pushed,
+ * not only the successful compactions. Emitted at an iteration boundary, i.e.
+ * while the turn is still running.
+ */
+export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
+  updated: 'mica/autoCompact/updated',
+} as const;
+
+/**
+ * Settings + per-session run counters for automatic compaction. Sent by the
+ * client on `turn/start` / `mica/turn/editMessage` (the resident host is
+ * spawned once, so the user's panel changes can only reach it per turn) and
+ * echoed back — counters only — in `MICA_AUTO_COMPACT_NOTIFICATIONS.updated`.
+ *
+ * Semantics: 快速压缩 runs when ctx ≥ `quickThresholdK` and it already ran
+ * fewer than `quickLimit` times; 模型压缩 runs when the context is still
+ * ≥ `modelThresholdK` (which is why the default 120 is BELOW the quick
+ * threshold 200) and it already ran fewer than `modelLimit` times.
+ */
+export type MicaAutoCompactParams = {
+  enabled?: boolean;
+  quickThresholdK?: number;
+  quickLimit?: number;
+  quickRuns?: number;
+  modelThresholdK?: number;
+  modelLimit?: number;
+  modelRuns?: number;
+};
+
+/** `MICA_AUTO_COMPACT_NOTIFICATIONS.updated` payload. */
+export type MicaAutoCompactStatus = {
+  threadId?: string;
+  quickRuns: number;
+  modelRuns: number;
+  lastRunAt: string | null;
+  lastKind: 'quick' | 'model' | null;
+  lastSavedTokens: number;
+  lastNote: string | null;
+};
+
+/**
  * Mica extension requests (client -> host). The Codex protocol has no request
  * for these, so the desktop app needs Mica-specific ones:
  *

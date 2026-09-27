@@ -62,6 +62,9 @@ function createMockProvider() {
      * exceeds the recent-token budget and actually summarizes. */
     longText: '',
     includeReasoning: false,
+    /** `input_tokens` reported on every completed response. Auto-compaction
+     * thresholds are compared against it, so tests raise it past a threshold. */
+    inputTokens: 10,
   };
   const server: Server = createServer((req, res) => {
     if (req.method === 'POST' && req.url?.startsWith('/v1/responses')) {
@@ -260,7 +263,11 @@ function createMockProvider() {
               id: 'resp_done',
               object: 'response',
               status: 'completed',
-              usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+              usage: {
+                input_tokens: state.inputTokens,
+                output_tokens: 5,
+                total_tokens: state.inputTokens + 5,
+              },
             },
           });
           emit({
@@ -269,7 +276,11 @@ function createMockProvider() {
               id: 'resp_done',
               object: 'response',
               status: 'completed',
-              usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+              usage: {
+                input_tokens: state.inputTokens,
+                output_tokens: 5,
+                total_tokens: state.inputTokens + 5,
+              },
             },
           });
         };
@@ -600,6 +611,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.shellCommand = 'echo tick-1; echo tick-2; sleep 60';
     mock!.state.longText = '';
     mock!.state.includeReasoning = false;
+    mock!.state.inputTokens = 10;
+    mock!.state.toolFileContent = 'hello from mock';
+    mock!.state.toolFileContent2 = 'hello from mock (second call)';
   });
 
   itE2E('new session + switched model (full provider/model id) + effort completes the turn', async () => {
@@ -1418,6 +1432,75 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 4, 'mica/queue/recall', { clientMessageId: 'optimistic-recall' });
     const missing = await waitFor(host, (m) => m.id === 4, 'queue recall (empty) response', 10_000);
     expect(missing.result).toMatchObject({ ok: false, input: null });
+  });
+
+  itE2E('auto compaction shrinks the running turn\'s next request and reports its counters', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    // 上下文占用超过快速压缩阈值（阈值的单位是 k，usage 的 input_tokens 是原始值）。
+    mock!.state.inputTokens = 250_000;
+    // 一次巨大的 write_file 正文：快速压缩把正文换成指向性摘要，同一 turn 的下一次
+    // 请求立刻变小 —— 这正是「不等所有任务跑完」才有的收益。
+    mock!.state.toolFileContent = 'y'.repeat(20_000);
+
+    const host = spawnHost('auto-compact');
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'auto-compact-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写一个很大的文件' }],
+      model: 'mock/mock-chat',
+      autoCompact: {
+        enabled: true,
+        quickThresholdK: 200,
+        quickLimit: 1,
+        modelThresholdK: 120,
+        modelLimit: 0,
+        quickRuns: 0,
+        modelRuns: 0,
+      },
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (auto compact)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    // 计数通知必须先于 turn/completed：压缩发生在「一次请求结束、下一次请求发出
+    // 之前」的迭代边界上，而不是等整个任务结束。
+    const update = await waitFor(host, (m) => m.method === 'mica/autoCompact/updated', 'auto compact update');
+    expect(update.params).toMatchObject({
+      quickRuns: 1,
+      modelRuns: 0,
+      lastKind: 'quick',
+      threadId: expect.any(String),
+    });
+    const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed (auto compact)', 30_000);
+    expect(host.lines.indexOf(update)).toBeLessThan(host.lines.indexOf(completed));
+
+    // 第二次请求带的就是压缩后的历史：2 万字符正文只剩摘要，工具结果换成占位符。
+    const secondInput = mock!.state.requests[1]!.input as Array<{
+      type?: string;
+      arguments?: string;
+      output?: unknown;
+    }>;
+    const call = secondInput.find((item) => item.type === 'function_call');
+    expect(call?.arguments).toContain('[omitted 20000 chars]');
+    expect(call?.arguments).not.toContain('yyyyyyyyyy');
+    expect(secondInput.find((item) => item.type === 'function_call_output')?.output).toBe(
+      '[Old tool result content cleared during compact]',
+    );
+
+    // 压缩后的历史随 turn 落盘（重开会话读到的就是压缩后的上下文）。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      snapshot?: { messages?: unknown[] };
+    };
+    expect(JSON.stringify(session.snapshot?.messages ?? [])).toContain(
+      '[Old tool result content cleared during compact]',
+    );
   });
 
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {

@@ -418,9 +418,13 @@ def read_events(path: Path | None = None) -> list[dict[str, Any]]:
 def attribute(rows: Iterable[dict[str, Any]], records: dict[str, CellRecord]) -> None:
     """Fold proxy rows into the matching cell records, in place.
 
-    A row belongs to the newest cell whose attribution window it falls into;
-    superseded attempts therefore stop contributing as soon as a newer attempt
-    directory appears.
+    A row belongs to the newest cell whose attribution window it falls into. An
+    attempt opens at ``attribution_since`` and — once it has a span — closes at
+    ``finished_at``, so re-running the same agent+task under a *newer tag* stops
+    feeding the older tag's row instead of inflating it. (Proxy rows carry only
+    ``agent`` and ``task``, never the tag, so this window is the only thing that
+    separates a cell from its later re-runs. A cell with no span — still running,
+    or destroyed — keeps an open window, which is what the newest attempt needs.)
     """
     windows = [
         (rec.attribution_since, rec)
@@ -439,6 +443,8 @@ def attribute(rows: Iterable[dict[str, Any]], records: dict[str, CellRecord]) ->
         if rec is None or rec.attribution_since is None:
             continue
         if ts < rec.attribution_since:
+            continue
+        if rec.finished_at is not None and ts > rec.finished_at:
             continue
         if row.get("method") == "GET":
             rec.probes += 1
@@ -482,6 +488,11 @@ def build_payload(
     for row in read_status_tsv(tag):
         rec = records.get(f"{row['agent']}__{row['task']}")
         if rec is None or rec.wall_secs is not None:
+            continue
+        if f"{row['agent']}__{row['task']}" in running_cells:
+            # status.tsv is append-only per tag, so it still holds the *older*
+            # attempt's line for a cell that has been re-run inside the same tag
+            # (e.g. "failed" after a manual stop). A live cell outranks that hint.
             continue
         try:
             rec.wall_secs = float(row["wall"])

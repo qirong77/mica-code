@@ -14,6 +14,8 @@
 
 > **更新（上下文提醒时机）**：context-pressure 提醒的注入时机已从 `after_turn`（turn 结束后另开一轮）改为 `after_iteration`——在下一个工具迭代边界注入**同一次** provider loop，agent 可在当前 turn 内直接响应压缩；若 turn 结束仍无后续迭代，由 message-queue 的 `turn:after` 兜底发送（行为与旧版一致）。
 
+> **更新（自动提醒已移除）**：context-pressure 自动提醒插件已在后续版本中整体移除——CLI 的 TUI 装配与 headless（含 `mica app-server`，即桌面端）装配一并删除，其专用事件 `context:changed` 也随之移除。上下文占用仍由 UI 着色、`/compact` 与 `session_compact` 显式触发管理，运行时不再自动注入提醒消息。本文第三节保留为当时的设计记录。
+
 ---
 
 ## 一、MemGPT 在讲什么：把 LLM 当操作系统

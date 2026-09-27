@@ -62,6 +62,10 @@ type SystemPromptBuildEvent = {
 
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
+  /** 上下文压缩钩子：在完整请求结束（工具迭代边界）时重写接下来要发送的历史。 */
+  rewriteIterationMessages?: (
+    messages: unknown[],
+  ) => unknown[] | null | undefined | Promise<unknown[] | null | undefined>;
   /** provider 层重试（零输出安全重发）每次触发前回调，供调用方展示重试状态。 */
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   maxTurns?: number;
@@ -376,6 +380,10 @@ export class AgentRuntime {
         onRetry: (info) => {
           if (!this.isCurrent(runId)) return;
           options.onRetry?.(info);
+        },
+        rewriteIterationMessages: async (messages) => {
+          if (!this.isCurrent(runId)) return null;
+          return options.rewriteIterationMessages?.(messages) ?? null;
         },
         onIterationComplete: async () => {
           if (!this.isCurrent(runId)) return null;

@@ -59,6 +59,7 @@ DEFAULT_VERIFIER_TIMEOUT_MULTIPLIER = 4.0
 AGENT_UPSTREAMS: dict[str, dict[str, str]] = {
     "mica": {"base": "https://api.deepseek.com", "path_prefix": ""},
     "codex": {"base": "https://api.deepseek.com", "path_prefix": ""},
+    "mcode": {"base": "https://api.deepseek.com", "path_prefix": ""},
     "claude-code": {"base": "https://api.deepseek.com", "path_prefix": "/anthropic"},
 }
 

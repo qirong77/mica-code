@@ -8,6 +8,7 @@ quoting stops being a source of surprise.
 from __future__ import annotations
 
 import shlex
+import tempfile
 from pathlib import Path
 
 from .catalog import AgentSpec
@@ -73,6 +74,54 @@ def build_env(agent: AgentSpec, task: str, settings: Settings) -> dict[str, str]
     return env
 
 
+def codex_provider_config(
+    agent: AgentSpec, task: str, settings: Settings
+) -> Path | None:
+    """Host path of the per-cell Codex ``config.toml``, or None for other agents.
+
+    Codex decides between remote and local compaction from the provider *name*
+    alone (``ModelProviderInfo::is_openai()`` -> ``capabilities().remote_compaction``)
+    and has no config switch for it (openai/codex#24418 is open).  Harbor's
+    shortcut of exporting ``OPENAI_BASE_URL`` leaves the provider named "openai",
+    so against a non-OpenAI upstream Codex takes the remote branch wrongly: it
+    pushes a ``compaction_trigger`` item into an ordinary ``/responses`` request
+    and then demands exactly one ``{"type":"compaction"}`` item back.  DeepSeek
+    answers with normal items, so the turn dies with
+
+        Error running remote compact task: ... expected exactly one compaction
+        output item, got 0 from 3 output items
+
+    and ``codex exec`` exits 1 **mid-task** -- which silently truncates any cell
+    long enough to need compaction.  That is what cut short codex's
+    ``vf2-speedup-networkx`` cell in ``vf2-rerun``.
+
+    Declaring our own provider entry is the documented way to point Codex at a
+    third-party model, and it makes Codex use the local-compaction path it uses
+    for any other custom provider.  Side effect, also welcome: a custom provider
+    defaults to ``supports_websockets = false``, which drops the 7 x
+    ``GET /responses`` 405 capability probes each codex cell used to log.
+
+    Two things are load-bearing: ``name`` must not be ``OpenAI`` (that string is
+    the entire test) and the key must be new, because
+    ``merge_configured_model_providers`` uses ``or_insert`` -- redefining
+    ``[model_providers.openai]`` cannot override the built-in entry.
+    """
+    if agent.id != "codex":
+        return None
+    path = Path(tempfile.gettempdir()) / f"mica-bench-codex-{task}.toml"
+    path.write_text(
+        'model_provider = "mica-proxy"\n'
+        "\n"
+        "[model_providers.mica-proxy]\n"
+        'name = "mica-proxy"\n'
+        f'base_url = "{proxy_url(agent.id, task, settings)}"\n'
+        'wire_api = "responses"\n'
+        'env_key = "OPENAI_API_KEY"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
 def build_command(
     agent: AgentSpec,
     task: str,
@@ -112,6 +161,12 @@ def build_command(
 
     for kwarg in agent.kwargs:
         argv += ["--agent-kwarg", kwarg.format(bench=BENCH_DIR)]
+
+    # Written per cell because the base URL carries the task id, which is what
+    # lets the proxy attribute every request to one (agent, task) cell.
+    codex_config = codex_provider_config(agent, task, settings)
+    if codex_config is not None:
+        argv += ["--agent-kwarg", f"config={codex_config}"]
 
     return argv
 

@@ -1,6 +1,6 @@
 # mica-builtin-commands
 
-`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、Todo、MCP、message queue、文件 mention、session-autonomy、context-pressure、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
+`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、Todo、MCP、message queue、文件 mention、session-autonomy、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
 
 ## 主要能力
 

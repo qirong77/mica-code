@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX_METHODS,
   CODEX_ERROR_METHOD_NOT_FOUND,
+  MICA_AUTO_COMPACT_NOTIFICATIONS,
   MICA_METHODS,
   encodeCodexError,
   encodeCodexNotification,
@@ -25,6 +26,12 @@ describe('codex protocol framing', () => {
       subagentTaskDetail: 'mica/subagentTasks/detail',
       killSubagentTask: 'mica/subagentTasks/kill',
     });
+  });
+
+  // Same reason as MICA_METHODS: the desktop host matches these literal strings,
+  // so renaming one side silently drops every automatic-compaction counter.
+  it('pins the Mica automatic compaction notification name', () => {
+    expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({ updated: 'mica/autoCompact/updated' });
   });
 
   it('parses a JSON-RPC request with id/method/params', () => {

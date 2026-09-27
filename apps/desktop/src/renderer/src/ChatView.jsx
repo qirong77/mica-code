@@ -24,6 +24,7 @@ import {
   IconMinimize,
   IconPhoto,
   IconSend,
+  IconSettings,
   IconSquare,
   IconTerminal,
   IconTrash
@@ -60,8 +61,15 @@ import {
   rankCompletions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
-import { SchedulePopover } from './SchedulePopover'
-import { sortTasksForList, tasksOfSession } from './chat-schedule'
+import { AutoCompactPopover } from './AutoCompactPopover'
+import { LoopBadge } from './LoopBadge'
+import { LoopPopover } from './LoopPopover'
+import {
+  DEFAULT_AUTO_COMPACT_SETTINGS,
+  autoCompactTooltip,
+  countersForSession
+} from './auto-compact'
+import { formatLoopInterval, loopForNode, loopProgressLabel } from './loop-command'
 import {
   backgroundTaskStatusLabel,
   buildSubagentTimeline,
@@ -1913,6 +1921,31 @@ export function historyBeforeRunReplay(messages, prompt) {
   ]
 }
 
+/**
+ * host 主动发起的一轮（定时任务、after_turn 排队重放、另一个窗口发起的发送）不经过本页的
+ * `send()`，用户气泡只能由 host 的 `chat:run-started` 补进对话——否则运行中只看得到回答，
+ * 用户消息要等重新加载会话才出现。
+ *
+ * 幂等：本页已经为本轮插过行（乐观行的 id 就是 clientMessageId），或对话末尾还停着一条
+ * 同样文本的用户消息（after_turn 排队行、编辑重发截断后留下的那一行）就不再追加。
+ * 不能在整篇对话里按文本去重——定时任务每一轮的文本都一样，那样从第二轮起用户行会全部消失。
+ */
+export function appendRunStartedMessage(messages, run) {
+  const text = String(run?.prompt || '').trim()
+  if (!text) return messages
+  const id = run?.clientMessageId || null
+  if (id && messages.some((message) => message.id === id)) return messages
+  // 末尾最后一条 user/assistant 消息就是这一轮的上文：它还是一条未被回答的用户消息
+  // （文本相同）时，本轮的用户行已经在列表里了；如果是 assistant 回答，则是新一轮。
+  const lastTurnMessage = [...messages]
+    .reverse()
+    .find((message) => message?.role === 'user' || message?.role === 'assistant')
+  if (lastTurnMessage?.role === 'user' && promptKey(lastTurnMessage.text) === promptKey(text)) {
+    return messages
+  }
+  return [...messages, { id: id || uid('msg'), kind: 'message', role: 'user', text, done: true }]
+}
+
 export function isPersistedRunComplete(meta, startedAt) {
   if (!meta?.turnState || meta.turnState === 'running' || !startedAt) return false
   const updatedAt = Date.parse(meta.updatedAt || '')
@@ -2018,8 +2051,8 @@ export function ChatView({
   cwd,
   visible,
   isMobile = false,
-  scheduledTasks = [],
-  onScheduledTasksChange,
+  loops = [],
+  autoCompact = null,
   onSessionBound,
   onOpenFile,
   onNewSession,
@@ -2096,7 +2129,9 @@ export function ChatView({
   // 点开的任务详情弹窗（单槽位）：{ kind: 'subagent' | 'background', task } | null
   const [taskDetail, setTaskDetail] = useState(null)
   // 输入框右侧时钟图标点开的定时任务面板
-  const [scheduleOpen, setScheduleOpen] = useState(false)
+  const [loopOpen, setLoopOpen] = useState(false)
+  // 输入框右侧齿轮图标点开的自动压缩面板
+  const [autoCompactOpen, setAutoCompactOpen] = useState(false)
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
@@ -2262,6 +2297,63 @@ export function ChatView({
   )
 
   const openTaskDetail = useCallback((kind, task) => setTaskDetail({ kind, task }), [])
+
+  /**
+   * 启动（或替换）当前会话的定时循环——输入条时钟面板（唯一入口）走这条链路。
+   * 循环按 nodeId 归属，所以草稿会话也能启动：host 会立刻跑第一轮，那一轮创建会话。
+   */
+  const startLoop = useCallback(
+    async ({ intervalMs, task }) => {
+      const result = await window.mica.loops
+        .start({
+          nodeId,
+          sessionId: sessionIdRef.current || null,
+          cwd: cwdRef.current || null,
+          intervalMs,
+          task
+        })
+        .catch((error) => ({ ok: false, error: String(error?.message || error) }))
+      if (!result?.ok) {
+        appendNotice(`定时任务启动失败：${result?.error || '未知错误'}`, 'error')
+        return false
+      }
+      appendNotice(
+        `${result.replaced ? '定时任务已更新' : '定时循环已启动'}：每 ${formatLoopInterval(intervalMs)} 执行「${task}」，首轮已开始`,
+        'success'
+      )
+      return true
+    },
+    [appendNotice, nodeId]
+  )
+
+  const handleLoopStart = useCallback(
+    ({ intervalMs, task }) => {
+      void startLoop({ intervalMs, task })
+      setLoopOpen(false)
+    },
+    [startLoop]
+  )
+
+  // 自动压缩的写入路径：设置与计数由 App 订阅广播持有（页面不自己存），这里只负责发命令，
+  // 并把失败原样交回面板的错误行。
+  const saveAutoCompact = useCallback(async (settings) => {
+    const result = await window.mica.autoCompact
+      .set(settings)
+      .catch((error) => ({ ok: false, error: String(error?.message || error) }))
+    if (result && result.ok === false) return { ok: false, error: result.error || '保存失败' }
+    return { ok: true }
+  }, [])
+
+  const resetAutoCompactCounters = useCallback(async () => {
+    const currentSessionId = sessionIdRef.current
+    // 计数是运行时按 sessionId 记的：草稿会话还没开始，没有可重置的东西。
+    if (!currentSessionId) return { ok: false, error: '会话还没开始，暂无计数可重置' }
+    const result = await window.mica.autoCompact
+      .resetCounters(currentSessionId)
+      .catch((error) => ({ ok: false, error: String(error?.message || error) }))
+    if (result && result.ok === false) return { ok: false, error: result.error || '重置计数失败' }
+    return { ok: true }
+  }, [])
 
   // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
@@ -2868,11 +2960,20 @@ export function ChatView({
       }
       appendNotice(payload.error || '消息发送失败', 'error')
     })
+    const offRunStarted = window.mica.chat.onRunStarted((payload) => {
+      if (payload.id !== currentRunKey()) return
+      // 恢复过程中先丢弃：restore() 自己会按 chat:is-running 的 prompt 补这一行，
+      // 而且它要等磁盘历史读完才能确定位置（定时任务每轮文本相同，末尾那条用户行
+      // 未必是本轮的）。
+      if (restoringRef.current) return
+      updateMessages((previous) => appendRunStartedMessage(previous, payload))
+    })
     return () => {
       offEvent?.()
       offExit?.()
       offQueueState?.()
       offQueueError?.()
+      offRunStarted?.()
     }
   }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
@@ -4292,20 +4393,24 @@ export function ChatView({
     }
   }, [])
 
-  // 这条对话的定时任务：会话绑定后按 sessionId 认领（节点 id 会随页签变化），还没绑定
-  // 会话时退回节点 id（此时 host 不接受创建，面板会提示先发一条消息）。
-  const scheduleSessionId = node?.sessionId || null
-  const sessionScheduledTasks = useMemo(
-    () =>
-      sortTasksForList(tasksOfSession(scheduledTasks, { sessionId: scheduleSessionId, nodeId })),
-    [nodeId, scheduleSessionId, scheduledTasks]
+  // 这条对话的定时循环：按 nodeId 认领（草稿会话还没有 sessionId，而循环在草稿上也能启动，
+  // 启动即触发第一轮、那一轮才创建会话）。
+  const activeLoop = useMemo(() => loopForNode(loops, nodeId), [loops, nodeId])
+  // 定时任务的两个状态：这一轮正在跑（徽标与侧栏都显示「运行中」），或在等下一次触发。
+  const loopRunning = Boolean(activeLoop) && running
+  // 挂着定时任务时输入框整体走提示色（与 CLI 的 loop prompt 同款），一眼看出这条会话在
+  // 按间隔自动发送；颜色只跟「有没有循环」有关，不随倒计时每秒变化。
+  const loopTone = activeLoop ? 'chat-composer-loop' : ''
+  // 这条对话的自动压缩设置与计数（计数按 sessionId 归属，草稿会话读到的是一份零值）。
+  const autoCompactSettings = autoCompact?.settings || DEFAULT_AUTO_COMPACT_SETTINGS
+  const autoCompactCounters = countersForSession(
+    autoCompact?.counters,
+    node?.sessionId || sessionIdRef.current || null
   )
-  const activeScheduledCount = sessionScheduledTasks.filter(
-    (task) => task.status === 'active'
-  ).length
-  // 切到别的对话时收起面板：它描述的是上一个会话的任务。
+  // 切到别的对话时收起面板：它们描述的是上一个会话的循环与计数。
   useEffect(() => {
-    setScheduleOpen(false)
+    setLoopOpen(false)
+    setAutoCompactOpen(false)
   }, [nodeId])
 
   const statusLine = (
@@ -4545,19 +4650,35 @@ export function ChatView({
             text={input}
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
-          {scheduleOpen && (
-            <SchedulePopover
-              tasks={sessionScheduledTasks}
-              sessionId={scheduleSessionId}
-              sessionTitle={node?.text || null}
-              draftText={input}
-              onChanged={onScheduledTasksChange}
-              onNotice={appendNotice}
-              onClose={() => setScheduleOpen(false)}
+          {loopOpen && (
+            <LoopPopover
+              loop={activeLoop}
+              draft={input}
+              onStart={handleLoopStart}
+              onSetInterval={(intervalMs) =>
+                activeLoop && window.mica.loops.setInterval(nodeId, intervalMs).catch(() => {})
+              }
+              onSetTask={(task) =>
+                activeLoop && window.mica.loops.setTask(nodeId, task).catch(() => {})
+              }
+              onPause={() => window.mica.loops.setStatus(nodeId, 'paused').catch(() => {})}
+              onResume={() => window.mica.loops.setStatus(nodeId, 'active').catch(() => {})}
+              onFireNow={() => window.mica.loops.fireNow(nodeId).catch(() => {})}
+              onStop={() => window.mica.loops.stop(nodeId).catch(() => {})}
+              onClose={() => setLoopOpen(false)}
+            />
+          )}
+          {autoCompactOpen && (
+            <AutoCompactPopover
+              settings={autoCompactSettings}
+              counters={autoCompactCounters}
+              onSave={saveAutoCompact}
+              onResetCounters={resetAutoCompactCounters}
+              onClose={() => setAutoCompactOpen(false)}
             />
           )}
           <div
-            className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''}`}
+            className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
             style={
               composerMinHeight != null
                 ? {
@@ -4576,23 +4697,29 @@ export function ChatView({
             >
               <IconDots size={14} stroke={1.6} />
             </button>
-            {queueReady && (
+            {/* 边框右上角只留一条标签：定时循环徽标优先（它描述的是常驻状态，与 CLI 一致），
+                排队提示只在没有循环时出现。 */}
+            {activeLoop ? (
+              <LoopBadge loop={activeLoop} running={loopRunning} />
+            ) : queueReady ? (
               <span className="chat-composer-frame-label">
                 Enter/Tab 在下一个工具调用迭代后发送
               </span>
-            )}
+            ) : null}
             {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
             <button
               type="button"
-              className="chat-prompt-mark"
-              title={`当前角色：${activeRole}（点击切换）`}
+              className={`chat-prompt-mark ${activeLoop ? 'is-loop' : ''}`}
+              title={`当前角色：${activeRole}（点击切换）${
+                activeLoop ? ` · 定时任务：每 ${formatLoopInterval(activeLoop.intervalMs)}` : ''
+              }`}
               aria-label="切换角色"
               data-chat-picker-trigger
               onClick={() => openPicker('role')}
             >
               {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
               <span className="chat-prompt-caret" aria-hidden="true">
-                {queueReady ? '↳' : '›'}
+                {queueReady ? '↳' : activeLoop ? '⏰' : '›'}
               </span>
             </button>
             {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
@@ -4764,20 +4891,33 @@ export function ChatView({
               <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
               <button
                 type="button"
-                className={`chat-composer-schedule ${activeScheduledCount ? 'is-active' : ''}`}
+                className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
                 title={
-                  activeScheduledCount
-                    ? `定时任务：${activeScheduledCount} 个进行中`
+                  activeLoop
+                    ? `定时任务：${loopProgressLabel(activeLoop)}（点击调整）`
                     : '设置定时任务（按间隔自动发送输入框里的内容）'
                 }
                 aria-label="定时任务"
-                aria-pressed={scheduleOpen}
-                onClick={() => setScheduleOpen((open) => !open)}
+                aria-pressed={loopOpen}
+                onClick={() => setLoopOpen((open) => !open)}
               >
                 <IconClock size={13} />
-                {activeScheduledCount > 0 && (
-                  <span className="chat-composer-schedule-count">{activeScheduledCount}</span>
-                )}
+              </button>
+              {/* 自动压缩：开启时点亮图标（关闭走中性色），点开齿轮面板调两条规则与计数 */}
+              <button
+                type="button"
+                className={`chat-composer-settings ${
+                  autoCompactSettings.enabled === false ? 'is-paused' : 'is-active'
+                }`}
+                title={autoCompactTooltip({
+                  settings: autoCompactSettings,
+                  counters: autoCompactCounters
+                })}
+                aria-label="自动压缩设置"
+                aria-pressed={autoCompactOpen}
+                onClick={() => setAutoCompactOpen((open) => !open)}
+              >
+                <IconSettings size={13} />
               </button>
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}

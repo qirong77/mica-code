@@ -42,7 +42,10 @@ AGENTS: tuple[AgentSpec, ...] = (
         family="openai",
         harbor_agent="benchmarks.app.agents.mica_code:MicaCode",
         blurb="本仓库的 agent，经 tarball 注入容器。",
-        kwargs=("tarball={bench}/app/artifacts/mica-agent.tar.gz",),
+        kwargs=(
+            "tarball={bench}/app/artifacts/mica-agent.tar.gz",
+            "reasoning_effort=high",
+        ),
     ),
     AgentSpec(
         id="codex",
@@ -50,6 +53,20 @@ AGENTS: tuple[AgentSpec, ...] = (
         family="openai",
         harbor_agent="codex",
         blurb="OpenAI Codex CLI，走 Responses 协议。",
+        kwargs=("reasoning_effort=high",),
+    ),
+    AgentSpec(
+        id="mcode",
+        label="MiniMax Code",
+        family="openai",
+        harbor_agent="mcode",
+        blurb="MiniMax Code CLI（mcode exec），OpenAI completions 接到同一代理。",
+        extra_env=(("HARBOR_ALLOW_INSECURE_MODEL_BASE_URL", "true"),),
+        kwargs=(
+            "api_format=openai-completions",
+            "context_window=1000000",
+            "max_output_tokens=128000",
+        ),
     ),
     AgentSpec(
         id="claude-code",
@@ -175,6 +192,39 @@ def task_image_refs(task: str) -> tuple[str, ...]:
                 ordered.append(ref)
         cached = tuple(ordered)
         _image_cache[task] = cached
+    return cached
+
+
+# ``task.toml`` also declares a hard memory limit per environment (agent and
+# verifier).  The scheduler admits cells against the VM's memory with this, so a
+# ``parallelism`` unrelated to the VM's size cannot OOM it -- nine cells of
+# ``vf2-speedup-networkx`` (8192 MB each) do not fit in this 11.66 GiB VM.
+_MEMORY_RE = re.compile(r"^\s*memory_mb\s*=\s*(\d+)\s*$")
+
+_memory_cache: dict[str, int] = {}
+
+
+def task_memory_mb(task: str) -> int:
+    """Largest ``memory_mb`` a task declares, or 0 when it declares none.
+
+    The maximum, not the agent environment's value: the verifier environment is
+    a separate container and only one of the two ever runs at a time, so the
+    larger of them is the conservative bound for a single cell.
+    """
+    cached = _memory_cache.get(task)
+    if cached is None:
+        path = TASKS_ROOT / task / "task.toml"
+        peak = 0
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            match = _MEMORY_RE.match(line)
+            if match:
+                peak = max(peak, int(match.group(1)))
+        cached = peak
+        _memory_cache[task] = cached
     return cached
 
 

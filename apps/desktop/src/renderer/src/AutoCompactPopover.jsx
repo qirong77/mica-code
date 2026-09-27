@@ -1,0 +1,196 @@
+import { useEffect, useRef, useState } from 'react'
+import { IconAlertCircle, IconSettings, IconX } from '@tabler/icons-react'
+import {
+  DEFAULT_AUTO_COMPACT_SETTINGS,
+  autoCompactDraftFromSettings,
+  autoCompactRunLabel,
+  autoCompactSettingsFromDraft
+} from './auto-compact'
+
+/**
+ * 输入框右侧齿轮图标的面板：自动压缩（快速 / 模型两条规则）。
+ *
+ * 规则与按会话记账的计数都在运行时里（`src/host/auto-compact.js`），这里只是它的表单：
+ * 保存把整份设置写回去（失败留在面板上并把原因写进错误行），重置只清当前会话的计数。
+ *
+ * 面板浮在输入框上方（与定时任务面板同一位置），不改对话区布局；窄屏下按钮放大到 28px。
+ */
+export function AutoCompactPopover({ settings, counters, onSave, onResetCounters, onClose }) {
+  const active = settings && typeof settings === 'object' ? settings : DEFAULT_AUTO_COMPACT_SETTINGS
+  const draft = autoCompactDraftFromSettings(active)
+  const draftKey = JSON.stringify(draft)
+  const [form, setForm] = useState(draft)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const appliedRef = useRef(draftKey)
+
+  // 只在设置**值**真的变了时才回填草稿：广播每跑一轮都会带一份新的 settings 对象进来，
+  // 按对象身份回填会把用户正在敲的阈值拽回旧值。
+  useEffect(() => {
+    if (appliedRef.current === draftKey) return
+    appliedRef.current = draftKey
+    setForm(draft)
+  }, [draft, draftKey])
+
+  const setField = (key) => (event) => {
+    setForm((previous) => ({ ...previous, [key]: event.target.value.replace(/[^\d]/g, '') }))
+    setError('')
+  }
+
+  const submit = async () => {
+    const parsed = autoCompactSettingsFromDraft(form)
+    if (!parsed.ok) {
+      setError(parsed.error)
+      return
+    }
+    setError('')
+    setSaving(true)
+    try {
+      const result = await onSave?.(parsed.settings)
+      if (result && result.ok === false) {
+        setError(result.error || '保存失败')
+        return
+      }
+      onClose?.()
+    } catch (failure) {
+      setError(String(failure?.message || failure))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reset = async () => {
+    setError('')
+    try {
+      const result = await onResetCounters?.()
+      if (result && result.ok === false) setError(result.error || '重置计数失败')
+    } catch (failure) {
+      setError(String(failure?.message || failure))
+    }
+  }
+
+  const enabled = form.enabled !== false
+
+  return (
+    <div className="chat-auto-compact-panel" role="dialog" aria-label="自动压缩">
+      <div className="chat-auto-compact-head">
+        <span className="chat-auto-compact-mark" aria-hidden="true">
+          <IconSettings size={13} />
+        </span>
+        <span className="chat-auto-compact-title">自动压缩</span>
+        <label
+          className="chat-auto-compact-toggle"
+          title={enabled ? '关闭自动压缩' : '开启自动压缩'}
+        >
+          <input
+            type="checkbox"
+            role="switch"
+            checked={enabled}
+            aria-label="启用自动压缩"
+            onChange={(event) => {
+              setForm((previous) => ({ ...previous, enabled: event.target.checked }))
+              setError('')
+            }}
+          />
+        </label>
+        <span className="chat-auto-compact-sub">
+          {enabled ? `已运行 ${autoCompactRunLabel(counters, active)}` : '已关闭'}
+        </span>
+        <button
+          type="button"
+          className="chat-auto-compact-close"
+          aria-label="关闭"
+          onClick={onClose}
+        >
+          <IconX size={13} />
+        </button>
+      </div>
+
+      <div className="chat-auto-compact-rows">
+        <div className="chat-auto-compact-row">
+          <span className="chat-auto-compact-kind">快速压缩</span>
+          <label className="chat-auto-compact-field">
+            阈值
+            <input
+              value={form.quickThresholdK}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="快速压缩阈值（单位 k）"
+              onChange={setField('quickThresholdK')}
+            />
+            k
+          </label>
+          <label className="chat-auto-compact-field">
+            上限
+            <input
+              value={form.quickLimit}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="快速压缩上限（次）"
+              onChange={setField('quickLimit')}
+            />
+            次
+          </label>
+          <span className="chat-auto-compact-count">
+            已运行 {Number(counters?.quickRuns) || 0} 次
+          </span>
+        </div>
+
+        <div className="chat-auto-compact-row">
+          <span className="chat-auto-compact-kind">模型压缩</span>
+          <label className="chat-auto-compact-field">
+            阈值
+            <input
+              value={form.modelThresholdK}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="模型压缩阈值（单位 k）"
+              onChange={setField('modelThresholdK')}
+            />
+            k
+          </label>
+          <label className="chat-auto-compact-field">
+            上限
+            <input
+              value={form.modelLimit}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="模型压缩上限（次）"
+              onChange={setField('modelLimit')}
+            />
+            次
+          </label>
+          <span className="chat-auto-compact-count">
+            已运行 {Number(counters?.modelRuns) || 0} 次
+          </span>
+        </div>
+
+        {/* 模型压缩的阈值比快速压缩更低，是因为它只在快速压缩之后（或快速压缩不适用时）
+            才轮到——先说清这个次序，两个数字才读得通。 */}
+        <p className="chat-auto-compact-note">
+          快速压缩是本地清理（不调用模型）；它之后 ctx 仍高于模型阈值时，才升级为模型压缩（LLM
+          摘要）。
+        </p>
+      </div>
+
+      {error ? (
+        <p className="chat-auto-compact-error">
+          <IconAlertCircle size={11} /> {error}
+        </p>
+      ) : (
+        <p className="chat-auto-compact-hint">
+          每完成一次模型请求即检查一次 ctx；超过阈值就自动压缩，不等整个任务结束。
+        </p>
+      )}
+
+      <div className="chat-auto-compact-actions">
+        <button type="button" className="chat-auto-compact-reset" onClick={reset}>
+          重置计数
+        </button>
+        <button type="button" className="chat-auto-compact-save" disabled={saving} onClick={submit}>
+          保存
+        </button>
+      </div>
+    </div>
+  )
+}

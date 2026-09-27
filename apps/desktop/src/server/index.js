@@ -11,15 +11,11 @@ import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../ho
 import {
   disposeAllChatRuns,
   registerChatIpc,
-  runScheduledTurn,
+  runLoopTurn,
   setChatNotifyServer
 } from '../host/chat.js'
-import {
-  disposeScheduled,
-  registerScheduledIpc,
-  setScheduledBroadcaster,
-  setScheduledRunner
-} from '../host/scheduled-runner.js'
+import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
+import { registerAutoCompactIpc, setAutoCompactBroadcaster } from '../host/auto-compact.js'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
@@ -353,15 +349,18 @@ export async function startDesktopServer(options = {}) {
   setBroadcast(broadcast)
   // 页面 UI 状态（草稿/工作区/面板布局）由 host 持有并广播，第二个窗口看到的是同一份
   setUiStateSender(broadcast)
-  // 定时任务跑在运行时里（页签关掉也继续），发送走 chat host 的同一条链路
-  setScheduledBroadcaster(broadcast)
-  setScheduledRunner(runScheduledTurn)
+  // 定时循环跑在运行时里（页签关掉也继续），发送走 chat host 的同一条链路
+  setLoopBroadcaster(broadcast)
+  setLoopRunner(runLoopTurn)
+  // 自动压缩的设置与计数同样由运行时持有：页面改一处、所有窗口立刻跟上
+  setAutoCompactBroadcaster(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
   registerTerminalIpc()
   registerChatIpc()
-  registerScheduledIpc()
+  registerLoopIpc()
+  registerAutoCompactIpc()
   registerUiStateIpc()
   registerFilesIpc()
   registerGitIpc()
@@ -437,7 +436,7 @@ export async function startDesktopServer(options = {}) {
     sseClients.clear()
     disposeAllTerminals()
     disposeAllChatRuns()
-    disposeScheduled()
+    disposeLoops()
     stopNotifyBridge()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()

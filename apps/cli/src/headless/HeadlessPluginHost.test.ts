@@ -136,40 +136,6 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     await host.dispose();
   });
 
-  it('context-pressure injects a reminder from the context:changed event', async () => {
-    const submitSpy = vi.fn();
-    const saveSpy = vi.fn(() => true);
-    const { host } = await mount(saveSpy);
-    // Replace the plugin host submit bridge with a spy for this assertion.
-    const commandHost = host.services.get(
-      (await import('@packages/mica-builtin-commands/commandHost.js')).commandHostToken,
-    );
-    vi.spyOn(commandHost.services, 'submitAgentSessionInput').mockImplementation(async (id, text, options) => {
-      submitSpy(id, text, options);
-      return { ok: true };
-    });
-    host.events.publish({ type: 'context:changed', tokens: 800_000, windowSize: 1_000_000, owner: {} });
-    await vi.waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1));
-    const [sessionId, text, options] = submitSpy.mock.calls[0]!;
-    expect(sessionId).toBe('sess-headless');
-    expect(text).toContain('80%');
-    expect(options).toMatchObject({ queueMode: 'after_iteration' });
-    await host.dispose();
-  });
-
-  it('publishes context:changed when the agent reports usage', async () => {
-    const agentEvents = mitt<Record<string, unknown>>();
-    const { host } = await mount(vi.fn(() => true), { events: agentEvents });
-    const seen: unknown[] = [];
-    host.events.on('event', (event) => {
-      seen.push(event);
-    });
-    (agentEvents as unknown as { emit: (name: string, payload: unknown) => void }).emit('usage', {
-      totalTokens: 500_000,
-    });
-    expect(seen.some((event) => (event as { type?: string }).type === 'context:changed')).toBe(true);
-    await host.dispose();
-  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

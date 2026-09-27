@@ -15,7 +15,6 @@ import {
   setupCommandRename,
   setupCommandResume,
   setupCommandRewind,
-  setupContextPressure,
   setupFileMention,
   setupLoop,
   setupMcp,
@@ -41,7 +40,6 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
-    .use(createBuiltinFilePlugin('context-pressure', 'Context Pressure', setupContextPressure))
     .use(new TodoPlugin())
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({

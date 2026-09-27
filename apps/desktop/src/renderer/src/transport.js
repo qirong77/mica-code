@@ -16,10 +16,12 @@ const EVENT_CHANNELS = [
   'chat:exit',
   'chat:queue-state',
   'chat:queue-error',
+  'chat:run-started',
   'chat:commit-exit',
   'notify:changed',
   'ui-state:changed',
-  'schedule:changed',
+  'loops:changed',
+  'auto-compact:changed',
   'app:window-state'
 ]
 
@@ -220,6 +222,8 @@ function createWebApi(env) {
       onExit: (callback) => subscribe('chat:exit', callback),
       onQueueState: (callback) => subscribe('chat:queue-state', callback),
       onQueueError: (callback) => subscribe('chat:queue-error', callback),
+      // host 主动发起的一轮（定时任务等）的起始信息：渲染层据此补上用户气泡
+      onRunStarted: (callback) => subscribe('chat:run-started', callback),
       commit: (payload) => invoke('chat:commit', payload),
       onCommitExit: (callback) => subscribe('chat:commit-exit', callback)
     },
@@ -243,15 +247,28 @@ function createWebApi(env) {
       onChanged: (callback) => subscribe('notify:changed', callback)
     },
 
-    // 定时任务（每隔 N 分钟往某个会话发一次消息）：任务本身活在运行时里，页面只是
-    // 读写视图，变更经 `schedule:changed` 广播给所有窗口。
-    schedule: {
-      list: () => invoke('schedule:list'),
-      create: (payload) => invoke('schedule:create', payload),
-      update: (id, patch) => invoke('schedule:update', { id, patch }),
-      remove: (id) => invoke('schedule:delete', { id }),
-      runNow: (id) => invoke('schedule:run-now', { id }),
-      onChanged: (callback) => subscribe('schedule:changed', callback)
+    // 定时循环任务（CLI `/loop` 的桌面端等价物，每隔 N 分钟把同一段任务重发一次）：
+    // 循环本身活在运行时里、按 nodeId 归属，页面只是读写视图，变更经 `loops:changed`
+    // 广播给所有窗口。`start` 会立刻跑第一轮（与 CLI「启动即执行第一次」一致）。
+    loops: {
+      list: () => invoke('loops:list'),
+      start: (payload) => invoke('loops:start', payload),
+      stop: (nodeId) => invoke('loops:stop', { nodeId }),
+      setStatus: (nodeId, status) => invoke('loops:set-status', { nodeId, status }),
+      setInterval: (nodeId, intervalMs) => invoke('loops:set-interval', { nodeId, intervalMs }),
+      setTask: (nodeId, task) => invoke('loops:set-task', { nodeId, task }),
+      fireNow: (nodeId) => invoke('loops:fire-now', { nodeId }),
+      onChanged: (callback) => subscribe('loops:changed', callback)
+    },
+
+    // 自动压缩（每完成一次模型请求检查 ctx，超过阈值就压缩）：设置与按 sessionId 记账的
+    // 计数都活在运行时里，页面只是读写视图，变更经 `auto-compact:changed` 广播给所有窗口。
+    // `get()` 不带 sessionId 时返回整张计数表（页面自己按会话取）。
+    autoCompact: {
+      get: (sessionId) => invoke('auto-compact:get', { sessionId }),
+      set: (settings) => invoke('auto-compact:set', { settings }),
+      resetCounters: (sessionId) => invoke('auto-compact:reset-counters', { sessionId }),
+      onChanged: (callback) => subscribe('auto-compact:changed', callback)
     },
 
     app: {

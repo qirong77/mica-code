@@ -533,9 +533,9 @@ function isTitleUserMessage(message: MicaUiConversationMessage): boolean {
 }
 
 /**
- * Plugin-injected prompts (context-pressure reminders and friends) are
- * submitted with a `displayText`, so their `displayContent` differs from the
- * real wire content. They are not user input and must never become the title.
+ * Plugin-injected prompts are submitted with a `displayText`, so their
+ * `displayContent` differs from the real wire content. They are not user input
+ * and must never become the title.
  */
 function isInjectedUserMessage(message: MicaUiConversationMessage): boolean {
   if (message.displayContent === undefined) return false;

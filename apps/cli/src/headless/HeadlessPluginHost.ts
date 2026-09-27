@@ -28,7 +28,6 @@ import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
 import {
   setupCommandMemory,
-  setupContextPressure,
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
@@ -69,7 +68,7 @@ export type HeadlessPluginHost = {
 
 /**
  * Bridges a HeadlessTurnExecutor.start() result into the plugin-facing
- * SubmitResult shape, so plugins (message-queue, context-pressure) can submit
+ * SubmitResult shape, so plugins (message-queue and friends) can submit
  * inputs through ctx.runtime.submit exactly like in the interactive runtime.
  *
  * A `busy-remote` start (another process owns the session's turn lease) is
@@ -97,8 +96,8 @@ export async function startAsSubmit(
  * - user file plugins ($MICA_HOME/plugins) are not scanned.
  *
  * Everything that shapes the agent's capabilities is shared: session_* tools,
- * the context-pressure reminder, message queueing, the command-memory
- * system-prompt guidance, TodoWrite and the app-notify hooks.
+ * message queueing, the command-memory system-prompt guidance, TodoWrite and
+ * the app-notify hooks.
  */
 export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): HeadlessPluginHost {
   const { hooks, agent, sessionController, subagentTasks } = options;
@@ -153,7 +152,6 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     { id: 'runtime.messageQueue', name: 'Message Queue', setup: setupMessageQueue },
     { id: 'command-memory', name: 'Command Memory', setup: setupCommandMemory },
     { id: 'session-autonomy', name: 'Session Autonomy', setup: setupSessionAutonomy },
-    { id: 'context-pressure', name: 'Context Pressure', setup: setupContextPressure },
     { id: 'builtin.mica-code-app-notify', name: `Built-in ${APP_NAME} App Notify`, setup: setupMicaCodeAppNotify },
   ];
   for (const plugin of builtinPlugins) {
@@ -232,18 +230,6 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const setupPromise = plugins.setupAll(baseContext);
 
-  // Context pressure without the UI store: publish usage as an event so the
-  // plugin's red-zone reminder works identically in TUI and headless modes.
-  const onUsage = (usage: { totalTokens: number }): void => {
-    events.publish({
-      type: 'context:changed',
-      tokens: usage.totalTokens,
-      windowSize: agent.config.provider.contextWindowSize,
-      owner: agent,
-    });
-  };
-  agent.events.on('usage', onUsage);
-
   const host: HeadlessPluginHost = {
     hooks,
     services,
@@ -261,7 +247,6 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       await hooks.emit('runtime:stop', { runtime: host });
     },
     async dispose() {
-      agent.events.off('usage', onUsage);
       await plugins.disposeAll();
     },
   };

@@ -130,14 +130,27 @@ export class ChatCompletionsClient extends BaseAgent<
   async query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string> {
     const turnId = ++this.turnId;
     let requestIndex = 0;
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: resolveSystemPrompt(this.systemPrompt) },
+    const systemMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
+      role: 'system',
+      content: resolveSystemPrompt(this.systemPrompt),
+    };
+    let messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      systemMessage,
       ...prepareHistoricalChatMessages(this.messages),
       { role: 'user', content: micaContentToOpenAIContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       const sessionMessages = messages.filter((message) => message.role !== 'system');
-      this.messages = takeNextInput ? sessionMessages : prepareHistoricalChatMessages(sessionMessages);
+      // Iteration boundary: an automatic compaction hook may return a rewritten
+      // (smaller) history. The loop below never rebuilds `messages` from
+      // `this.messages`, so the rewrite must land on this array to affect the
+      // rest of the turn; `this.messages` is kept in sync for persistence.
+      const rewritten = await options?.rewriteIterationMessages?.(sessionMessages);
+      const nextMessages = Array.isArray(rewritten)
+        ? (rewritten as OpenAI.Chat.Completions.ChatCompletionMessageParam[])
+        : sessionMessages;
+      messages = nextMessages === sessionMessages ? messages : [systemMessage, ...nextMessages];
+      this.messages = takeNextInput ? nextMessages : prepareHistoricalChatMessages(nextMessages);
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {
