@@ -242,9 +242,6 @@ bun run format
 
 ## 测试与验证
 
-- `benchmarks/` 是用同一个模型横向对比不同 coding agent harness 的基准测试工作区，固定三层：`app/`（运行 benchmark 的核心代码）、`persistence/`（运行记录）、`terminal-bench/`（一个 benchmark 的任务包）。归属规则是「git 跟踪代码 + 可复核的小文本记录，忽略可再生的原始产物」——唯一定义在 `benchmarks/.gitignore`，目录布局的唯一定义在 `benchmarks/app/console/server/settings.py`（其余模块与 `run-agent.sh` 都从它推导，新增路径不要各处硬编码）。`benchmarks/README.md` 是总览，`benchmarks/RUNBOOK.md` 是操作手册。
-  - Harbor 适配器在 `benchmarks/app/agents/mica_code.py`（导入路径 `benchmarks.app.agents.mica_code:MicaCode`，repo 根需在 `PYTHONPATH` 上；命名空间包，无需 `__init__.py`），单测 `test_mica_code.py` + `smoke-task/`、`quick-task/` 冒烟任务。它靠 `mica exec` 的 codex CLI 兼容层和 `OPENAI_API_KEY`/`OPENAI_BASE_URL` 合成的运行时 provider 工作；改这两处会连带影响它。**mica 是 `bun build --compile` 产物，x64 二进制在 qemu 模拟下 SIGILL**，而 Terminal-Bench 预构建镜像是 amd64-only，arm64 机器上必须构建同架构二进制并加 `--force-build`。该目录只跑 pytest，不进 `bun run test`。
-  - 控制台（`benchmarks/app/console`，Web UI 里跑/停/配 API/看结果矩阵）与记录代理（`benchmarks/app/proxy.py`，token 与轮次只认它的账）是核心链路，改动时同步 `benchmarks/app/README.md`。
 - **全量 `bun run test` 约 7~8 分钟**（大头是真实 spawn 的端到端套件：app-server.flows ~60s、commit.flows ~63s、pty driver ~17s、models.flows）。日常默认只跑局部：`bun run test -- <测试文件>`；全量只在发布前、改动影响跨多个慢套件或 CI 要求时跑。
 - 单元/集成测试走 `bun run test`（vitest，Node 环境；不要用 `bun test`）。交互式 TUI 测试优先 `packages/mica-pty`：`PtyDriver` 只能在 Node/vitest 下 import（Bun 下不可用），内置 PTY 工具运行时（`PtyManager` + Node helper 桥接）Bun 主进程可安全使用。
 - `apps/cli/src/cli/app-server.flows.test.ts` 真实 spawn `mica app-server` + 本地 mock OpenAI provider，**不需要真实 API key**，默认随全量运行；compact 测试需至少两轮对话且超过 recent-token budget，resume host 必须复用同一 `MICA_HOME`。
