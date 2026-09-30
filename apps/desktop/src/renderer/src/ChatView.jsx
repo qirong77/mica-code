@@ -64,6 +64,7 @@ import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { AutoCompactPopover } from './AutoCompactPopover'
 import { LoopBadge } from './LoopBadge'
 import { LoopPopover } from './LoopPopover'
+import { Popover } from './Popover'
 import {
   DEFAULT_AUTO_COMPACT_SETTINGS,
   autoCompactTooltip,
@@ -1611,7 +1612,6 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
 }
 
 function SelectPalette({
-  paletteRef,
   title,
   options,
   activeIndex,
@@ -1619,19 +1619,20 @@ function SelectPalette({
   onSelect,
   selectedValue,
   loading,
-  error
+  error,
+  onClose
 }) {
   return (
-    <div
-      ref={paletteRef}
-      className="chat-command-palette chat-select-palette"
+    <Popover
+      name="picker"
       role="listbox"
-      aria-label={title}
+      icon={<IconCommand size={13} />}
+      title={title}
+      meta="↑↓ 选择 · Enter 确认 · Esc 关闭"
+      closable={false}
+      onClose={onClose}
+      className="chat-select-palette"
     >
-      <div className="chat-command-palette-title">
-        <IconCommand size={12} /> {title}
-        <span>↑↓ 选择 · Enter 确认 · Esc 关闭</span>
-      </div>
       {loading && <div className="chat-select-empty">正在加载…</div>}
       {!loading && error && <div className="chat-select-empty chat-select-error">{error}</div>}
       {!loading &&
@@ -1651,20 +1652,8 @@ function SelectPalette({
             {option.detail && <span className="chat-select-detail">{option.detail}</span>}
           </button>
         ))}
-    </div>
+    </Popover>
   )
-}
-
-function useClickOutside(ref, active, onClose) {
-  useEffect(() => {
-    if (!active) return undefined
-    const onPointerDown = (event) => {
-      if (event.target.closest?.('[data-chat-picker-trigger]')) return
-      if (!ref.current?.contains(event.target)) onClose()
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [active, onClose, ref])
 }
 
 export function shortPath(path, max = 46) {
@@ -2183,7 +2172,6 @@ export function ChatView({
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
   // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
   const [composerMinHeight, setComposerMinHeight] = useState(null)
-  const pickerRef = useRef(null)
   const messagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
   const protocolBlockRef = useRef('')
@@ -3480,7 +3468,6 @@ export function ChatView({
   )
 
   const closePicker = useCallback(() => setPicker(null), [])
-  useClickOutside(pickerRef, Boolean(picker), closePicker)
 
   const appendCommandResult = useCallback(
     (command, title, detail = '', options = {}) => {
@@ -4350,7 +4337,7 @@ export function ChatView({
     if (!(target instanceof Element)) return
     if (
       target.closest(
-        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, [data-no-chat-focus]'
+        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="listbox"], [role="option"], .chat-command-palette, .chat-popover, [data-no-chat-focus]'
       )
     ) {
       shellPointerRef.current = null
@@ -4449,7 +4436,7 @@ export function ChatView({
               role="button"
               tabIndex={0}
               title="切换模型"
-              data-chat-picker-trigger
+              data-popover-trigger="picker"
               onClick={() => openPicker('model')}
             >
               {activeModel}
@@ -4460,7 +4447,7 @@ export function ChatView({
               role="button"
               tabIndex={0}
               title="切换推理强度"
-              data-chat-picker-trigger
+              data-popover-trigger="picker"
               onClick={() => openPicker('variant')}
             >
               {activeEffort}
@@ -4599,7 +4586,6 @@ export function ChatView({
           )}
           {picker && (
             <SelectPalette
-              paletteRef={pickerRef}
               title={picker.title}
               options={picker.options || []}
               activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
@@ -4616,6 +4602,7 @@ export function ChatView({
               }
               loading={picker.loading}
               error={picker.error}
+              onClose={closePicker}
             />
           )}
           {completion && !picker && (
@@ -4714,7 +4701,7 @@ export function ChatView({
                 activeLoop ? ` · 定时任务：每 ${formatLoopInterval(activeLoop.intervalMs)}` : ''
               }`}
               aria-label="切换角色"
-              data-chat-picker-trigger
+              data-popover-trigger="picker"
               onClick={() => openPicker('role')}
             >
               {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
@@ -4899,6 +4886,7 @@ export function ChatView({
                 }
                 aria-label="定时任务"
                 aria-pressed={loopOpen}
+                data-popover-trigger="loop"
                 onClick={() => setLoopOpen((open) => !open)}
               >
                 <IconClock size={13} />
@@ -4915,6 +4903,7 @@ export function ChatView({
                 })}
                 aria-label="自动压缩设置"
                 aria-pressed={autoCompactOpen}
+                data-popover-trigger="auto-compact"
                 onClick={() => setAutoCompactOpen((open) => !open)}
               >
                 <IconSettings size={13} />

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconAlertCircle, IconSettings, IconX } from '@tabler/icons-react'
+import { IconAlertCircle, IconSettings } from '@tabler/icons-react'
+import { Popover } from './Popover'
 import {
   DEFAULT_AUTO_COMPACT_SETTINGS,
   autoCompactDraftFromSettings,
@@ -13,7 +14,7 @@ import {
  * 规则与按会话记账的计数都在运行时里（`src/host/auto-compact.js`），这里只是它的表单：
  * 保存把整份设置写回去（失败留在面板上并把原因写进错误行），重置只清当前会话的计数。
  *
- * 面板浮在输入框上方（与定时任务面板同一位置），不改对话区布局；窄屏下按钮放大到 28px。
+ * 浮层外壳（尺寸、关闭时机）在 `Popover.jsx`，与模型选择、定时任务共用同一套。
  */
 export function AutoCompactPopover({ settings, counters, onSave, onResetCounters, onClose }) {
   const active = settings && typeof settings === 'object' ? settings : DEFAULT_AUTO_COMPACT_SETTINGS
@@ -72,12 +73,13 @@ export function AutoCompactPopover({ settings, counters, onSave, onResetCounters
   const enabled = form.enabled !== false
 
   return (
-    <div className="chat-auto-compact-panel" role="dialog" aria-label="自动压缩">
-      <div className="chat-auto-compact-head">
-        <span className="chat-auto-compact-mark" aria-hidden="true">
-          <IconSettings size={13} />
-        </span>
-        <span className="chat-auto-compact-title">自动压缩</span>
+    <Popover
+      name="auto-compact"
+      title="自动压缩"
+      icon={<IconSettings size={13} />}
+      onClose={onClose}
+      meta={enabled ? `已运行 ${autoCompactRunLabel(counters, active)}` : '已关闭'}
+      headerExtra={
         <label
           className="chat-auto-compact-toggle"
           title={enabled ? '关闭自动压缩' : '开启自动压缩'}
@@ -93,19 +95,23 @@ export function AutoCompactPopover({ settings, counters, onSave, onResetCounters
             }}
           />
         </label>
-        <span className="chat-auto-compact-sub">
-          {enabled ? `已运行 ${autoCompactRunLabel(counters, active)}` : '已关闭'}
-        </span>
-        <button
-          type="button"
-          className="chat-auto-compact-close"
-          aria-label="关闭"
-          onClick={onClose}
-        >
-          <IconX size={13} />
-        </button>
-      </div>
-
+      }
+      actions={
+        <>
+          <button type="button" className="chat-auto-compact-reset" onClick={reset}>
+            重置计数
+          </button>
+          <button
+            type="button"
+            className="chat-auto-compact-save"
+            disabled={saving}
+            onClick={submit}
+          >
+            保存
+          </button>
+        </>
+      }
+    >
       <div className="chat-auto-compact-rows">
         <div className="chat-auto-compact-row">
           <span className="chat-auto-compact-kind">快速压缩</span>
@@ -182,15 +188,6 @@ export function AutoCompactPopover({ settings, counters, onSave, onResetCounters
           每完成一次模型请求即检查一次 ctx；超过阈值就自动压缩，不等整个任务结束。
         </p>
       )}
-
-      <div className="chat-auto-compact-actions">
-        <button type="button" className="chat-auto-compact-reset" onClick={reset}>
-          重置计数
-        </button>
-        <button type="button" className="chat-auto-compact-save" disabled={saving} onClick={submit}>
-          保存
-        </button>
-      </div>
-    </div>
+    </Popover>
   )
 }

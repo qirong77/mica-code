@@ -1682,18 +1682,174 @@ body.is-resizing.is-resizing-terminal {
   color: color-mix(in srgb, var(--color-info) 62%, transparent);
 }
 
-.chat-select-palette > button {
-  min-height: 25px;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+/* -------------------------------------------------------- 输入框上方的通用浮层
+
+   模型选择、定时任务、自动压缩三处共用同一个壳（`src/renderer/src/Popover.jsx`）：尺寸与
+   锚点只有一份（输入框上方右侧），切换面板时框体不左右跳。关闭时机同样只有一份——点浮层
+   以外的地方、焦点离开浮层、按 Esc，判定在 `popover-dismiss.js`。
+
+   结构：head（图标 / 标题 / 摘要 / 关闭）与 actions 固定，body 自己滚动。 */
+.chat-popover {
+  position: absolute;
+  z-index: 8;
+  right: 8px;
+  bottom: calc(100% + 5px);
+  display: flex;
+  width: min(360px, calc(100% - 16px));
+  max-height: min(400px, 56vh);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 5px;
+  background: var(--color-panel);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
+  color: rgb(255 255 255 / 62%);
+  font-family: var(--chat-font);
+  font-size: 10.5px;
 }
 
+.chat-popover-head {
+  display: flex;
+  min-height: 26px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+  color: rgb(255 255 255 / 45%);
+  font-size: 9.5px;
+}
+
+/* 图标列给固定宽度：三处的图标尺寸不一样（图标 + emoji），定宽才能让标题落在同一列 */
+.chat-popover-mark {
+  display: grid;
+  width: 14px;
+  flex: none;
+  place-items: center;
+}
+
+.chat-popover-title {
+  flex: none;
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.chat-popover-sub {
+  min-width: 0;
+  overflow: hidden;
+  margin-left: auto;
+  color: rgb(255 255 255 / 25%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-popover-close {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 40%);
+}
+
+.chat-popover-close:hover {
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+}
+
+/* body 单独滚动，head 与 actions 留在原地 */
+.chat-popover-body {
+  min-height: 0;
+  padding: 6px;
+  overflow: auto;
+}
+
+.chat-popover-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  /* 面板窄的时候让主按钮换到下一行，而不是把它挤成竖排文字 */
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px 12px 4px;
+}
+
+.chat-popover-actions button {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 55%);
+  white-space: nowrap;
+}
+
+.chat-popover-actions button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+.chat-popover-actions button:disabled {
+  color: rgb(255 255 255 / 15%);
+}
+
+/* 方形图标按钮（暂停 / 立即执行 / 停止）：不带文字就不给文字按钮的内边距 */
+.chat-popover-actions button.chat-popover-icon {
+  display: grid;
+  width: 20px;
+  padding: 0;
+  place-items: center;
+  color: rgb(255 255 255 / 40%);
+}
+
+.chat-popover-actions button.chat-popover-danger:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+/* 带文字的主按钮：靠右，且不参与收缩（否则「保存修改」会被压成竖排文字） */
+.chat-popover-actions button.chat-loop-create,
+.chat-popover-actions button.chat-auto-compact-save {
+  flex: none;
+  margin-left: auto;
+  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
+  color: #fff;
+}
+
+.chat-popover-actions button.chat-loop-create:hover:not(:disabled),
+.chat-popover-actions button.chat-auto-compact-save:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  color: #fff;
+}
+
+.chat-popover-actions button.chat-loop-create:disabled,
+.chat-popover-actions button.chat-auto-compact-save:disabled {
+  background: rgb(255 255 255 / 6%);
+  color: rgb(255 255 255 / 25%);
+}
+
+/* 模型 / 推理强度 / 角色选择器：同壳，只把行距收密一点 */
 .chat-select-palette {
-  right: 12px;
-  left: auto;
-  width: min(340px, calc(100% - 24px));
   max-height: min(240px, 40vh);
-  border-radius: 5px;
+}
+
+.chat-select-palette .chat-popover-body {
   padding: 3px;
+}
+
+.chat-select-palette .chat-popover-body > button {
+  display: grid;
+  width: 100%;
+  min-height: 25px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  text-align: left;
+}
+
+.chat-select-palette .chat-popover-body > button:hover,
+.chat-select-palette .chat-popover-body > button.chat-command-active {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(255 255 255 / 72%);
 }
 
 /* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[名称][说明] 两列 */
@@ -1736,11 +1892,6 @@ body.is-resizing.is-resizing-terminal {
   .chat-completion-palette .chat-command-palette-title > span {
     display: none;
   }
-}
-
-.chat-select-palette .chat-command-palette-title {
-  min-height: 24px;
-  padding: 0 5px;
 }
 
 .chat-select-check {
@@ -2776,64 +2927,6 @@ body.is-resizing.is-resizing-terminal {
   content: '';
 }
 
-/* 定时任务面板：和模型选择器同一个位置（浮在输入框上方，不改对话区布局），
-   宽度给窄屏留出边距。 */
-.chat-loop-panel {
-  position: absolute;
-  z-index: 8;
-  right: 8px;
-  bottom: calc(100% + 5px);
-  width: min(360px, calc(100vw - 32px));
-  max-height: min(420px, 60vh);
-  overflow: auto;
-  border: 1px solid rgb(255 255 255 / 13%);
-  background: var(--color-panel);
-  box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
-  padding: 6px;
-  color: rgb(255 255 255 / 62%);
-  font-family: var(--chat-font);
-  font-size: 10.5px;
-}
-
-.chat-loop-head {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px;
-  border-bottom: 1px solid rgb(255 255 255 / 7%);
-  color: rgb(255 255 255 / 45%);
-}
-
-.chat-loop-title {
-  color: var(--color-fg);
-  font-weight: 600;
-}
-
-.chat-loop-sub {
-  min-width: 0;
-  overflow: hidden;
-  margin-left: auto;
-  color: rgb(255 255 255 / 25%);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-loop-close {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  place-items: center;
-  border-radius: 3px;
-  color: rgb(255 255 255 / 40%);
-}
-
-.chat-loop-close:hover {
-  background: rgb(255 255 255 / 8%);
-  color: #fff;
-}
-
 .chat-loop-form {
   display: flex;
   flex-wrap: wrap;
@@ -2890,36 +2983,12 @@ body.is-resizing.is-resizing-terminal {
   resize: vertical;
 }
 
-.chat-loop-mark {
-  color: rgb(255 255 255 / 45%);
-}
-
 .chat-loop-hint {
   overflow: hidden;
   padding: 0 6px 2px;
   color: rgb(255 255 255 / 22%);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-loop-create {
-  height: 22px;
-  margin-left: auto;
-  padding: 0 10px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
-  color: #fff;
-  /* 见 .chat-loop-actions button.chat-loop-create：这是带文字的主按钮，不是方形图标按钮 */
-  white-space: nowrap;
-}
-
-.chat-loop-create:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.chat-loop-create:disabled {
-  background: rgb(255 255 255 / 6%);
-  color: rgb(255 255 255 / 25%);
 }
 
 .chat-loop-preview {
@@ -3001,89 +3070,6 @@ body.is-resizing.is-resizing-terminal {
   white-space: nowrap;
 }
 
-.chat-loop-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  /* 面板窄的时候让主按钮换到下一行，而不是把它挤成竖排文字 */
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px 6px 4px;
-}
-
-.chat-loop-actions button {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 3px;
-  color: rgb(255 255 255 / 40%);
-}
-
-/* 主按钮带文字，必须覆盖上面的正方形尺寸：否则「保存修改」会被压成 20px 宽逐字换行。
-   也不参与 flex 收缩，否则动作区一挤还是会把文字换行。 */
-.chat-loop-actions button.chat-loop-create {
-  display: block;
-  width: auto;
-  min-width: 0;
-  flex: none;
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-.chat-loop-actions button:hover:not(:disabled) {
-  background: rgb(255 255 255 / 10%);
-  color: #fff;
-}
-
-.chat-loop-actions button:disabled {
-  color: rgb(255 255 255 / 15%);
-}
-
-.chat-loop-actions button.chat-loop-danger:hover:not(:disabled) {
-  color: var(--color-danger);
-}
-
-/* 自动压缩面板：与定时任务面板同一位置与同款观感（浮在输入框上方，不改对话区布局）。 */
-.chat-auto-compact-panel {
-  position: absolute;
-  z-index: 8;
-  right: 8px;
-  bottom: calc(100% + 5px);
-  width: min(400px, calc(100vw - 32px));
-  max-height: min(420px, 60vh);
-  overflow: auto;
-  border: 1px solid rgb(255 255 255 / 13%);
-  background: var(--color-panel);
-  box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
-  padding: 6px;
-  color: rgb(255 255 255 / 62%);
-  font-family: var(--chat-font);
-  font-size: 10.5px;
-}
-
-.chat-auto-compact-head {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px;
-  border-bottom: 1px solid rgb(255 255 255 / 7%);
-  color: rgb(255 255 255 / 45%);
-}
-
-.chat-auto-compact-mark {
-  display: grid;
-  flex: none;
-  place-items: center;
-  color: rgb(255 255 255 / 45%);
-}
-
-.chat-auto-compact-title {
-  color: var(--color-fg);
-  font-weight: 600;
-}
-
 /* 开关：不用组件库，就是一个去掉外观的 checkbox，靠 ::after 当滑块 */
 .chat-auto-compact-toggle {
   display: flex;
@@ -3123,30 +3109,6 @@ body.is-resizing.is-resizing-terminal {
   left: auto;
   right: 1px;
   background: var(--color-accent-hover);
-}
-
-.chat-auto-compact-sub {
-  min-width: 0;
-  overflow: hidden;
-  margin-left: auto;
-  color: rgb(255 255 255 / 25%);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-auto-compact-close {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  place-items: center;
-  border-radius: 3px;
-  color: rgb(255 255 255 / 40%);
-}
-
-.chat-auto-compact-close:hover {
-  background: rgb(255 255 255 / 8%);
-  color: #fff;
 }
 
 .chat-auto-compact-rows {
@@ -3204,50 +3166,6 @@ body.is-resizing.is-resizing-terminal {
 .chat-auto-compact-error {
   padding: 0 6px 6px;
   color: var(--color-danger);
-}
-
-.chat-auto-compact-actions {
-  display: flex;
-  align-items: center;
-  /* 面板窄的时候让主按钮换到下一行，而不是把它挤成竖排文字 */
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 2px 6px 4px;
-}
-
-/* 两个按钮都带文字，所以不给它们「方形图标按钮」的尺寸——那是定时任务面板里改主按钮
-   覆盖掉的坑（见 .chat-loop-actions button.chat-loop-create）。 */
-.chat-auto-compact-actions button {
-  height: 22px;
-  padding: 0 10px;
-  border-radius: 3px;
-  color: rgb(255 255 255 / 55%);
-  white-space: nowrap;
-}
-
-.chat-auto-compact-actions button:hover:not(:disabled) {
-  background: rgb(255 255 255 / 10%);
-  color: #fff;
-}
-
-.chat-auto-compact-actions button:disabled {
-  color: rgb(255 255 255 / 15%);
-}
-
-.chat-auto-compact-actions button.chat-auto-compact-save {
-  margin-left: auto;
-  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
-  color: #fff;
-}
-
-.chat-auto-compact-actions button.chat-auto-compact-save:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  color: #fff;
-}
-
-.chat-auto-compact-actions button.chat-auto-compact-save:disabled {
-  background: rgb(255 255 255 / 6%);
-  color: rgb(255 255 255 / 25%);
 }
 
 /* 危险色只给「停止生成」；上传按钮与运行态无关，排队按钮走下面的 warn 配色 */
@@ -3367,15 +3285,15 @@ body.is-resizing.is-resizing-terminal {
     height: 32px;
   }
 
-  /* 面板里的操作按钮同理：20px 在触屏上点不准 */
-  .chat-loop-actions button {
-    width: 28px;
-    height: 28px;
-  }
-
-  .chat-auto-compact-actions button {
+  /* 浮层里的操作按钮同理：20px 在触屏上点不准 */
+  .chat-popover-actions button {
     height: 28px;
     padding: 0 12px;
+  }
+
+  .chat-popover-actions button.chat-popover-icon {
+    width: 28px;
+    padding: 0;
   }
 
   /* 终端字号不要写在这里：xterm 的 DOM 渲染器给 `.xterm-rows` 写内联 font-size

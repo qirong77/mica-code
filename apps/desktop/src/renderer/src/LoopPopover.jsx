@@ -4,8 +4,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconSend,
-  IconTrash,
-  IconX
+  IconTrash
 } from '@tabler/icons-react'
 import {
   DEFAULT_LOOP_MINUTES,
@@ -16,6 +15,7 @@ import {
   loopProgressLabel,
   loopStatusLabel
 } from './loop-command'
+import { Popover } from './Popover'
 
 /**
  * 输入框右侧时钟图标的面板：设置（或调整）当前会话的定时循环任务。
@@ -23,8 +23,7 @@ import {
  * 它就是 CLI `/loop <间隔> <任务>` 的可视化入口——提交后走同一条 `loops.start`，
  * 首轮立刻执行。已有循环时同一个面板变成编辑器（改间隔/内容、暂停、立即执行、停止）。
  *
- * 面板浮在输入框上方（与模型选择器同一位置），不改对话区布局；窄屏下宽度收紧、
- * 按钮放大到 28px。
+ * 浮层外壳（尺寸、关闭时机）在 `Popover.jsx`，与模型选择、自动压缩共用同一套。
  */
 export function LoopPopover({
   loop = null,
@@ -77,20 +76,66 @@ export function LoopPopover({
   }
 
   return (
-    <div className="chat-loop-panel" role="dialog" aria-label="定时任务">
-      <div className="chat-loop-head">
-        <IconClockMark />
-        <span className="chat-loop-title">定时任务</span>
-        <span className="chat-loop-sub">
-          {editing
-            ? `${loopStatusLabel(loop)} · ${loopProgressLabel(loop)}`
-            : '在该会话按间隔自动发送'}
-        </span>
-        <button type="button" className="chat-loop-close" aria-label="关闭" onClick={onClose}>
-          <IconX size={13} />
-        </button>
-      </div>
-
+    <Popover
+      name="loop"
+      title="定时任务"
+      icon={<span aria-hidden="true">⏰</span>}
+      onClose={onClose}
+      meta={
+        editing ? `${loopStatusLabel(loop)} · ${loopProgressLabel(loop)}` : '在该会话按间隔自动发送'
+      }
+      actions={
+        <>
+          {editing && (
+            <button
+              type="button"
+              className="chat-popover-icon"
+              title="立即执行一次"
+              aria-label="立即执行一次"
+              onClick={() => onFireNow?.()}
+            >
+              <IconSend size={14} />
+            </button>
+          )}
+          {editing &&
+            (loop.status === 'active' ? (
+              <button
+                type="button"
+                className="chat-popover-icon"
+                title="暂停"
+                aria-label="暂停"
+                onClick={() => onPause?.()}
+              >
+                <IconPlayerPause size={14} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="chat-popover-icon"
+                title="继续"
+                aria-label="继续"
+                onClick={() => onResume?.()}
+              >
+                <IconPlayerPlay size={14} />
+              </button>
+            ))}
+          {editing && (
+            <button
+              type="button"
+              className="chat-popover-icon chat-popover-danger"
+              title="停止定时任务"
+              aria-label="停止定时任务"
+              onClick={() => onStop?.()}
+            >
+              <IconTrash size={14} />
+            </button>
+          )}
+          <button type="button" className="chat-loop-create" disabled={!canSubmit} onClick={submit}>
+            {editing ? '保存修改' : '开始定时循环'}
+          </button>
+        </>
+      }
+    >
       <div className="chat-loop-form">
         <label className="chat-loop-field">
           每隔
@@ -143,43 +188,6 @@ export function LoopPopover({
         </p>
       )}
 
-      <div className="chat-loop-actions">
-        {editing && (
-          <button
-            type="button"
-            title="立即执行一次"
-            aria-label="立即执行一次"
-            onClick={() => onFireNow?.()}
-          >
-            <IconSend size={14} />
-          </button>
-        )}
-        {editing &&
-          (loop.status === 'active' ? (
-            <button type="button" title="暂停" aria-label="暂停" onClick={() => onPause?.()}>
-              <IconPlayerPause size={14} />
-            </button>
-          ) : (
-            <button type="button" title="继续" aria-label="继续" onClick={() => onResume?.()}>
-              <IconPlayerPlay size={14} />
-            </button>
-          ))}
-        {editing && (
-          <button
-            type="button"
-            className="chat-loop-danger"
-            title="停止定时任务"
-            aria-label="停止定时任务"
-            onClick={() => onStop?.()}
-          >
-            <IconTrash size={14} />
-          </button>
-        )}
-        <button type="button" className="chat-loop-create" disabled={!canSubmit} onClick={submit}>
-          {editing ? '保存修改' : '开始定时循环'}
-        </button>
-      </div>
-
       {editing && loop.lastError ? (
         <p className="chat-loop-error">
           <IconAlertCircle size={11} /> 上次：{loop.lastError}
@@ -190,14 +198,6 @@ export function LoopPopover({
           保存后：每 {formatLoopInterval(parsed.intervalMs)} 执行一次
         </p>
       ) : null}
-    </div>
-  )
-}
-
-function IconClockMark() {
-  return (
-    <span className="chat-loop-mark" aria-hidden="true">
-      ⏰
-    </span>
+    </Popover>
   )
 }

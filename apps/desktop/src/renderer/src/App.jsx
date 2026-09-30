@@ -21,13 +21,14 @@ import {
   IconMessage,
   IconPlus,
   IconRocket,
+  IconSearch,
   IconServer,
   IconSettings,
   IconTerminal2,
   IconX
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
-import { ChatView, shortPath } from './ChatView'
+import { ChatView } from './ChatView'
 import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
@@ -44,6 +45,7 @@ const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
   TerminalHost: lazy(() => import('./TerminalHost').then((m) => ({ default: m.TerminalHost })))
 }
 import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
+import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
 import { resolveGroupCwd } from './session-projects'
 import {
   RIGHT_PANEL_SWEEP_MS,
@@ -86,6 +88,8 @@ function recentChatCwd() {
 
 function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   const [value, setValue] = useState(cwd || '')
+  const [query, setQuery] = useState('')
+  const [highlight, setHighlight] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef(null)
   useEffect(() => {
@@ -98,10 +102,24 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
-  const dirs = recent.length > 0 ? recent : [cwd].filter(Boolean)
+  // 没有任何会话记录时至少把当前目录列出来，面板不至于空着
+  const entries = useMemo(() => {
+    if (recent.length > 0) return recent
+    const current = normalizeCwd(cwd)
+    return current ? [{ path: current, usedAtMs: 0, sessionCount: 0 }] : []
+  }, [recent, cwd])
+  const matches = useMemo(() => rankCwdMatches(entries, query), [entries, query])
+  useEffect(() => setHighlight(0), [query])
+  const activeIndex = Math.min(highlight, Math.max(0, matches.length - 1))
+  const activeDir = matches[activeIndex]?.path || ''
+  const currentDir = normalizeCwd(cwd)
   const submit = () => {
     const next = value.trim()
     if (next) onApply(next)
+  }
+  const moveHighlight = (step) => {
+    if (matches.length === 0) return
+    setHighlight((index) => Math.min(Math.max(index + step, 0), matches.length - 1))
   }
   return (
     <div
@@ -138,27 +156,84 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
           <IconFolderOpen size={13} />
           选择文件夹…
         </button>
-        {dirs.length > 0 && (
-          <div className="mb-2.5 max-h-52 overflow-y-auto">
-            <div className="mb-1 text-[10px] text-white/35">最近目录</div>
-            {dirs.map((dir) => (
-              <button
-                key={dir}
-                type="button"
-                title={dir}
-                className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs ${
-                  dir === cwd
-                    ? 'text-white/85'
-                    : 'text-white/45 hover:bg-white/[.05] hover:text-white/80'
-                }`}
-                onClick={() => onApply(dir)}
-              >
-                <span className="w-3 text-center text-[10px] text-green-400/80">
-                  {dir === cwd ? '✓' : ''}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{shortPath(dir, 70)}</span>
-              </button>
-            ))}
+        {entries.length > 0 && (
+          <div className="mb-2.5">
+            {/* 目录可能上百个，光靠滚动找不动：上面这行搜索在列表内过滤 + 重排，
+                ↑↓ 选、Enter 直接应用，不必再点。 */}
+            <label className="mb-1.5 flex h-7 items-center gap-1.5 rounded-sm border border-white/12 bg-white/[.03] px-2 focus-within:border-white/30">
+              <IconSearch size={12} className="shrink-0 text-white/30" />
+              <input
+                value={query}
+                spellCheck={false}
+                aria-label="搜索最近目录"
+                placeholder="搜索目录，支持多段（如 mica desktop）"
+                className="min-w-0 flex-1 bg-transparent text-xs text-white placeholder:text-white/25"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    moveHighlight(1)
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    moveHighlight(-1)
+                  } else if (event.key === 'Enter' && activeDir) {
+                    event.preventDefault()
+                    onApply(activeDir)
+                  }
+                }}
+              />
+              {query ? (
+                <button
+                  type="button"
+                  aria-label="清空搜索"
+                  className="shrink-0 text-white/30 hover:text-white/70"
+                  onClick={() => setQuery('')}
+                >
+                  <IconX size={12} />
+                </button>
+              ) : null}
+            </label>
+            <div className="mb-1 flex items-center gap-2 text-[10px]">
+              <span className="text-white/35">最近目录</span>
+              <span className="text-white/20">
+                {query ? `匹配 ${matches.length} 个` : `共 ${matches.length} 个`}
+              </span>
+            </div>
+            <div className="max-h-[min(300px,45vh)] overflow-y-auto">
+              {matches.map((entry, index) => {
+                // 末段（项目名）永远完整显示，只把前面那截截断——路径的辨识度全在末段。
+                const { head, tail } = splitCwd(entry.path)
+                const active = index === activeIndex
+                return (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    title={entry.path}
+                    className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs ${
+                      active
+                        ? 'bg-white/[.06] text-white/85'
+                        : 'text-white/45 hover:bg-white/[.05] hover:text-white/80'
+                    }`}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => onApply(entry.path)}
+                  >
+                    <span className="w-3 shrink-0 text-center text-[10px] text-green-400/80">
+                      {entry.path === currentDir ? '✓' : ''}
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-baseline">
+                      <span className="min-w-0 truncate text-white/30">{head}</span>
+                      <span className="shrink-0">{tail}</span>
+                    </span>
+                  </button>
+                )
+              })}
+              {matches.length === 0 && (
+                <div className="px-2 py-3 text-center text-[11px] text-white/30">
+                  没有匹配的目录
+                </div>
+              )}
+            </div>
           </div>
         )}
         <div className="flex gap-2">
@@ -1070,19 +1145,8 @@ export default function App() {
     },
     [nodesRef]
   )
-  const recentSessionDirs = useMemo(() => {
-    const map = new Map()
-    for (const session of sessions) {
-      if (session?.cwd) {
-        const usedAt = Number(session.updatedAtMs) || 0
-        map.set(session.cwd, Math.max(map.get(session.cwd) || 0, usedAt))
-      }
-    }
-    return [...map.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([dir]) => dir)
-      .slice(0, 10)
-  }, [sessions])
+  // 「最近目录」= 会话里出现过的所有 cwd（含使用时间与次数），筛选与排序在 `cwd-recents.js`
+  const recentCwds = useMemo(() => collectRecentCwds(sessions), [sessions])
 
   const setSessionId = useCallback(
     (id, sessionId) => {
@@ -2458,7 +2522,7 @@ export default function App() {
         <CwdModal
           cwd={terminalCwd(activeId) || git.cwd || ''}
           invalid={!cwdValid}
-          recent={recentSessionDirs}
+          recent={recentCwds}
           onClose={() => setCwdModalOpen(false)}
           onApply={(dir) => {
             setCwdModalOpen(false)
