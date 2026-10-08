@@ -1,3 +1,5 @@
+import { normalizeCwd } from './cwd-recents'
+
 export function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
@@ -57,6 +59,50 @@ export function createColdStartTerminal(nodes, activeId, now = Date.now()) {
     lastActiveAt: now,
     state: { opened: false, selected: true }
   }
+}
+
+/**
+ * 挑一个可以复用的空草稿页签（没有就返回 null）。
+ *
+ * 「New Session」每点一下都新起一个页签，连点几次、或者反复关掉又重开，工作区里就会攒出
+ * 一摞没绑定真实会话、也没输入过任何内容的空会话。空会话之间没有任何理由共存，所以已经
+ * 有一个空的就直接切过去，不要再造一个。
+ *
+ * 判定条件一个都不能少：
+ * - 没有未发送文本（`drafts` 是运行时的输入框草稿表）：留了半句话的草稿是用户正在写的，
+ *   复用会把他从这里顶走；
+ * - 工作目录一致：显式换目录开新会话（工作目录弹窗）时复用等于在错的目录里开口；
+ * - 归属分组一致：分组里的「在此新建会话」不该把 Recent 里的空草稿认领过来（反之亦然）。
+ *
+ * 正在跑的草稿不算：绑定 sessionId 之后本来就会被第一条排除，`isRunning` 只是兜住
+ * 「turn 已经在跑、会话 id 还没绑上」的那一瞬间。
+ *
+ * `excludedIds` 是留给调用方的保留位（桌面端用它排掉挂着定时循环的草稿）：那不是空位，
+ * 是被循环占着的会话。
+ */
+export function pickReusableDraft(
+  nodes = [],
+  {
+    drafts = {},
+    cwd = null,
+    groupId = null,
+    draftGroups = {},
+    isRunning = null,
+    excludedIds = null
+  } = {}
+) {
+  const targetCwd = normalizeCwd(cwd)
+  const targetGroup = typeof groupId === 'string' && groupId ? groupId : null
+  for (const node of nodes) {
+    if (node?.type !== 'terminal' || node.sessionId) continue
+    if (String(drafts?.[node.id] ?? '').trim()) continue
+    if (typeof isRunning === 'function' && isRunning(node.id)) continue
+    if (excludedIds?.has?.(node.id)) continue
+    if ((draftGroups?.[node.id] || null) !== targetGroup) continue
+    if (normalizeCwd(node.cwd) !== targetCwd) continue
+    return node
+  }
+  return null
 }
 
 export function childMap(nodes) {

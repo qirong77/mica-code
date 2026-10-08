@@ -46,6 +46,7 @@ const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
 }
 import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
+import { loopNodeIds } from './loop-command'
 import { resolveGroupCwd } from './session-projects'
 import {
   RIGHT_PANEL_SWEEP_MS,
@@ -56,6 +57,7 @@ import {
 import {
   createColdStartTerminal,
   normalizeNodes,
+  pickReusableDraft,
   removeNode,
   resolveDefaultCwd,
   uid
@@ -899,6 +901,7 @@ export default function App() {
   // 定时任务活在运行时里（页签关掉也继续跑），页面只是视图：启动时拉一次，之后跟着
   // `schedule:changed` 广播更新——侧栏分区与输入框右侧的图标读的是同一份。
   const [loops, setLoops] = useState([])
+  const loopsRef = useLatest(loops)
   // 新建但还没绑定真实会话的草稿归属：草稿是界面状态里的临时节点，归属等它拿到
   // sessionId 才落盘（见 moveSession），在那之前只记在渲染层。
   const [draftGroups, setDraftGroups] = useState({})
@@ -1317,16 +1320,39 @@ export default function App() {
       const current = nodesRef.current
       const target = '#'
       const id = uid('term')
-      const count = current.filter((node) => node.type === 'terminal').length + 1
       const resumeSessionId =
         typeof options.resumeSessionId === 'string' ? options.resumeSessionId.trim() : ''
+      const cwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
+      const groupId =
+        typeof options.groupId === 'string' && options.groupId ? options.groupId : null
+      // 复用已经存在的空草稿：连点 New Session 会攒出一摞没输入过任何内容的空会话
+      // （判定见 pickReusableDraft），已经有一个空的就切过去，不再造第二个。
+      if (!resumeSessionId) {
+        const reusable = pickReusableDraft(current, {
+          drafts: uiStateKeys().drafts,
+          cwd,
+          groupId,
+          draftGroups: draftGroupsRef.current,
+          isRunning: (nodeId) => !!notificationStatesRef.current?.[nodeId]?.running,
+          // 挂着定时循环的草稿是被循环占着的会话，不是可以随便复用的空位。
+          excludedIds: loopNodeIds(loopsRef.current)
+        })
+        if (reusable) {
+          setSelectedId(reusable.id)
+          setActiveId(reusable.id)
+          setNodes((items) =>
+            items.map((item) =>
+              item.id === reusable.id ? { ...item, lastActiveAt: Date.now() } : item
+            )
+          )
+          return reusable.id
+        }
+      }
+      const count = current.filter((node) => node.type === 'terminal').length + 1
       const text =
         typeof options.text === 'string' && options.text.trim()
           ? options.text.trim()
           : `新对话 ${count}`
-      const cwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
-      const groupId =
-        typeof options.groupId === 'string' && options.groupId ? options.groupId : null
       setNodes((items) => {
         return [
           ...items,
@@ -1356,7 +1382,7 @@ export default function App() {
       setActiveId(id)
       return id
     },
-    [applyMoveResult, nodesRef]
+    [applyMoveResult, draftGroupsRef, loopsRef, nodesRef, notificationStatesRef]
   )
 
   const createRightTerm = useCallback(() => {

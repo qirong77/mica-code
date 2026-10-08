@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'bun:test'
-import { COLD_START_NODE_ID, createColdStartTerminal, normalizeNodes } from './workspace'
+import {
+  COLD_START_NODE_ID,
+  createColdStartTerminal,
+  normalizeNodes,
+  pickReusableDraft
+} from './workspace'
+
+const draft = (id, overrides = {}) => ({
+  id,
+  parent: '#',
+  text: '新对话',
+  type: 'terminal',
+  cwd: '/tmp/a',
+  sessionId: null,
+  command: null,
+  lastActiveAt: 0,
+  state: { opened: false, selected: false },
+  ...overrides
+})
 
 describe('createColdStartTerminal', () => {
   it('does not restore stale session bindings or resume commands', () => {
@@ -46,5 +64,58 @@ describe('createColdStartTerminal', () => {
       command: null,
       lastActiveAt: 456
     })
+  })
+})
+
+describe('pickReusableDraft', () => {
+  it('reuses an empty unbound draft with the same cwd and no group', () => {
+    const nodes = [
+      draft('term-1'),
+      draft('term-2', { cwd: '/tmp/b' }),
+      draft('term-bound', { sessionId: 'session-1' })
+    ]
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a' })?.id).toBe('term-1')
+  })
+
+  it('normalizes trailing slashes when comparing cwd', () => {
+    const nodes = [draft('term-1', { cwd: '/tmp/a' })]
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a/' })?.id).toBe('term-1')
+  })
+
+  it('does not reuse a draft the user is still typing in', () => {
+    const nodes = [draft('term-1')]
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a', drafts: { 'term-1': 'hello' } })).toBe(null)
+    // 只敲了空格不算没发出去的内容，仍然可以复用
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a', drafts: { 'term-1': '  \n' } })?.id).toBe(
+      'term-1'
+    )
+  })
+
+  it('does not reuse a draft belonging to another group', () => {
+    const nodes = [draft('term-1')]
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a', draftGroups: { 'term-1': 'group-1' } })).toBe(
+      null
+    )
+    expect(
+      pickReusableDraft(nodes, {
+        cwd: '/tmp/a',
+        groupId: 'group-1',
+        draftGroups: { 'term-1': 'group-1' }
+      })?.id
+    ).toBe('term-1')
+  })
+
+  it('skips a draft whose turn is already running', () => {
+    const nodes = [draft('term-1'), draft('term-2')]
+    expect(
+      pickReusableDraft(nodes, { cwd: '/tmp/a', isRunning: (id) => id === 'term-1' })?.id
+    ).toBe('term-2')
+  })
+
+  it('skips a draft reserved by a scheduled loop', () => {
+    const nodes = [draft('term-1'), draft('term-2')]
+    expect(pickReusableDraft(nodes, { cwd: '/tmp/a', excludedIds: new Set(['term-1']) })?.id).toBe(
+      'term-2'
+    )
   })
 })
