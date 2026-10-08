@@ -1,12 +1,15 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IconServer } from '@tabler/icons-react'
+import { IconPencil, IconServer } from '@tabler/icons-react'
 import {
   LOCAL_SERVER_URL,
+  MAX_SERVER_NOTE_LENGTH,
+  findServerEntry,
   isLoopbackServer,
   isSameServer,
   readRecentServers,
   rememberServer,
+  setServerNote,
   serverListRows
 } from './servers'
 
@@ -20,7 +23,7 @@ import {
  * 同处展开。
  *
  * 连接过的服务器由页面自己记着（`servers.js` 的 remembered 清单，存在本地），于是点
- * 一下就切回去，不必再抄地址。
+ * 一下就切回去，不必再抄地址；记不住 IP 的话可以给每条起个备注（悬停行尾的铅笔）。
  */
 
 const CARD_WIDTH = 320
@@ -30,16 +33,45 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [recent, setRecent] = useState(() => readRecentServers())
+  // 正在改备注的那条（地址），空串表示没在编辑
+  const [noteTarget, setNoteTarget] = useState('')
+  const [noteDraft, setNoteDraft] = useState('')
   // 已经在回环地址上就说明人就在这台机器上，「本机」这个回程入口没有意义（页面可能跑在
   // 非默认端口上，那时 127.0.0.1:8787 甚至不是当前这台）
   const showLocal = !isLoopbackServer(current)
   const rows = serverListRows(current, recent)
+  const currentEntry = findServerEntry(current, recent)
+
+  const startNoteEdit = (url) => {
+    setNoteTarget(url)
+    setNoteDraft(findServerEntry(url, recent)?.note ?? '')
+  }
+  const saveNote = () => {
+    if (!noteTarget) return
+    setRecent(setServerNote(noteTarget, noteDraft))
+    setNoteTarget('')
+  }
+
+  // 卡片是悬停浮层，鼠标滑出去就整张收起来了：正在敲的备注在卸载时直接落盘，
+  // 免得「滑出去一下就白打」。Esc 取消已经把 noteTarget 清空，这里自然不会写。
+  const pendingNote = useRef(null)
+  useEffect(() => {
+    pendingNote.current = noteTarget ? { url: noteTarget, note: noteDraft } : null
+  }, [noteTarget, noteDraft])
+  useEffect(
+    () => () => {
+      const pending = pendingNote.current
+      if (pending) setServerNote(pending.url, pending.note)
+    },
+    []
+  )
 
   const connect = async (address) => {
     const target = String(address || '').trim()
     if (!target || busy) return
     setError('')
     setBusy(target)
+    setNoteTarget('')
     try {
       const result = await window.mica.app.servers.probe(target)
       if (!result?.ok) {
@@ -62,6 +94,15 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
     }
   }
 
+  const noteInput = (
+    <NoteInput
+      value={noteDraft}
+      onChange={setNoteDraft}
+      onSave={saveNote}
+      onCancel={() => setNoteTarget('')}
+    />
+  )
+
   return (
     <section
       data-server-card
@@ -73,24 +114,46 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
         切换到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（在当前窗口之外打开）。
       </p>
 
-      <div className="mb-2.5 flex items-center gap-2 rounded-sm border border-line bg-white/[.03] px-2.5 py-1.5">
-        <IconServer size={14} className="shrink-0 text-white/45" />
-        <span className="min-w-0 flex-1 truncate text-[11px] text-white/35">{current}</span>
-        <span className="shrink-0 text-[10px] text-green-400/70">当前</span>
+      <div className="mb-2.5 rounded-sm border border-line bg-white/[.03]">
+        <div className="group/server flex items-center gap-2 px-2.5 py-1.5">
+          <IconServer size={14} className="shrink-0 text-white/45" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[11px] text-white/35">{current}</span>
+            {currentEntry?.note && (
+              <span className="block truncate text-[11px] text-white/60">{currentEntry.note}</span>
+            )}
+          </span>
+          <span className="shrink-0 text-[10px] text-green-400/70">当前</span>
+          {currentEntry && <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />}
+        </div>
+        {noteTarget && isSameServer(noteTarget, current) && noteInput}
       </div>
 
-      {rows.map((url) => (
-        <button
-          key={url}
-          type="button"
-          disabled={Boolean(busy)}
-          className="mb-1.5 flex w-full items-center gap-2 rounded-sm border border-line bg-white/[.03] px-2.5 py-1.5 text-left hover:border-white/25 hover:bg-white/[.07] disabled:opacity-60"
-          onClick={() => void connect(url)}
+      {rows.map((entry) => (
+        <div
+          key={entry.url}
+          className="mb-1.5 rounded-sm border border-line bg-white/[.03] hover:border-white/25 hover:bg-white/[.07]"
         >
-          <IconServer size={14} className="shrink-0 text-white/45" />
-          <span className="min-w-0 flex-1 truncate text-[11px] text-white/35">{url}</span>
-          {busy === url && <span className="shrink-0 text-[10px] text-white/40">连接中…</span>}
-        </button>
+          <div className="group/server flex items-center gap-2 px-2.5 py-1.5">
+            <IconServer size={14} className="shrink-0 text-white/45" />
+            <button
+              type="button"
+              disabled={Boolean(busy)}
+              className="min-w-0 flex-1 text-left disabled:opacity-60"
+              onClick={() => void connect(entry.url)}
+            >
+              <span className="block truncate text-[11px] text-white/35">{entry.url}</span>
+              {entry.note && (
+                <span className="block truncate text-[11px] text-white/60">{entry.note}</span>
+              )}
+            </button>
+            {busy === entry.url && (
+              <span className="shrink-0 text-[10px] text-white/40">连接中…</span>
+            )}
+            <NoteEditButton onClick={() => startNoteEdit(entry.url)} />
+          </div>
+          {noteTarget === entry.url && noteInput}
+        </div>
       ))}
 
       {showLocal && (
@@ -140,6 +203,64 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
       </div>
       <p className="mt-2 text-[10px] leading-4 text-white/30">桌面应用内可用 ⇧⌘M 回到本机窗口。</p>
     </section>
+  )
+}
+
+/** 行尾的铅笔：鼠标移到这一行才浮出来（触屏没有悬停，常显） */
+function NoteEditButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      title="备注"
+      aria-label="备注"
+      className="shrink-0 rounded-sm p-0.5 text-white/35 opacity-0 transition-opacity hover:bg-white/10 hover:text-white group-hover/server:opacity-100 max-md:opacity-100"
+      onClick={onClick}
+    >
+      <IconPencil size={12} />
+    </button>
+  )
+}
+
+/**
+ * 备注的就地编辑器：回车或失焦保存、Esc 取消（Esc 不能冒泡出去，否则整张卡片会跟着关掉）。
+ */
+function NoteInput({ value, onChange, onSave, onCancel }) {
+  const cancelled = useRef(false)
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      cancelled.current = true
+      onCancel()
+      return
+    }
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+      event.preventDefault()
+      onSave()
+    }
+  }
+  const onBlur = () => {
+    if (cancelled.current) {
+      cancelled.current = false
+      return
+    }
+    onSave()
+  }
+
+  return (
+    <div className="flex items-center gap-2 border-t border-line px-2.5 py-1.5">
+      <input
+        autoFocus
+        value={value}
+        maxLength={MAX_SERVER_NOTE_LENGTH}
+        spellCheck={false}
+        placeholder="备注，如「办公室的 Mac」"
+        className="h-7 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2 text-[11px] text-white placeholder:text-white/25 focus:border-white/30"
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
+      />
+      <span className="shrink-0 text-[10px] text-white/30">回车保存</span>
+    </div>
   )
 }
 

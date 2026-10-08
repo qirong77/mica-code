@@ -18,6 +18,7 @@ const TOOL_ICONS: Record<string, string> = {
   background_tasks: '📋',
   read_task_output: '📋',
   kill_task: '📋',
+  wait_for: '⏳',
 };
 
 export function toolIcon(toolName: string | null | undefined): string {
@@ -41,6 +42,7 @@ const TOOL_LABELS: Record<string, string> = {
   background_tasks: 'Background tasks',
   read_task_output: 'Task output',
   kill_task: 'Stop task',
+  wait_for: 'Wait for',
 };
 
 /** Human label for a tool name; MCP tools render as `[MCP:server] tool` (hash suffix stripped). */

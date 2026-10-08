@@ -62,12 +62,17 @@ describe('auto compact decision', () => {
     expect(decideAutoCompactStep({ settings, counters, ctxTokens: 200_000 })).toBe('quick');
   });
 
-  it('escalates to the model pass when the quick pass is exhausted or its threshold is not reached', () => {
-    expect(
-      decideAutoCompactStep({ settings, counters: { quickRuns: 3, modelRuns: 0 }, ctxTokens: 250_000 }),
-    ).toBe('model');
-    expect(decideAutoCompactStep({ settings, counters, ctxTokens: 150_000 })).toBe('model');
+  it('runs the quick pass first when only the model threshold is reached', () => {
+    // 默认 model(120k) < quick(200k)：ctx 落在两者之间时同样先本地清理一遍
+    // （不花模型请求），清完仍高于模型阈值才升级为模型压缩。
+    expect(decideAutoCompactStep({ settings, counters, ctxTokens: 150_000 })).toBe('quick');
     expect(decideAutoCompactStep({ settings, counters, ctxTokens: 119_999 })).toBeNull();
+  });
+
+  it('escalates to the model pass once the quick allowance is used up', () => {
+    const usedUp = { quickRuns: 3, modelRuns: 0 };
+    expect(decideAutoCompactStep({ settings, counters: usedUp, ctxTokens: 250_000 })).toBe('model');
+    expect(decideAutoCompactStep({ settings, counters: usedUp, ctxTokens: 150_000 })).toBe('model');
   });
 
   it('stops once both passes used up their allowance or the setting is off', () => {
@@ -148,14 +153,43 @@ describe('AutoCompactController', () => {
     expect(recordSubagentUsage).toHaveBeenCalledTimes(1);
   });
 
-  it('runs the model pass directly when only its threshold is exceeded', async () => {
-    const { agent } = createAgent({ inputTokens: 150_000, summary: SUMMARY });
+  it('runs the quick pass before the model pass when only the model threshold is exceeded', async () => {
+    const { agent, recordSubagentUsage } = createAgent({ inputTokens: 150_000, summary: SUMMARY });
     const controller = new AutoCompactController({ agent });
     controller.setParams({ enabled: true, quickThresholdK: 200, quickLimit: 3, modelThresholdK: 120, modelLimit: 3 });
 
     const rewritten = await controller.rewriteIterationMessages(toolRound(5));
     expect(rewritten).not.toBeNull();
-    expect(controller.getCounters()).toMatchObject({ quickRuns: 0, modelRuns: 1, lastKind: 'model' });
+    // 先本地清理（不花模型请求），清完仍高于 120k 才升级——面板上因此是
+    // 「快速 1 次 + 模型 1 次」，而不是跳过快速压缩直接跑模型。
+    expect(controller.getCounters()).toMatchObject({ quickRuns: 1, modelRuns: 1, lastKind: 'model' });
+    expect(recordSubagentUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after the quick pass when it drops the context below the model threshold', async () => {
+    const { agent, recordSubagentUsage } = createAgent({ inputTokens: 150_000, summary: SUMMARY });
+    const controller = new AutoCompactController({ agent });
+    controller.setParams({ enabled: true, quickThresholdK: 200, quickLimit: 3, modelThresholdK: 120, modelLimit: 3 });
+
+    // 20 万字符的工具结果约 50k token：本地清理后 ctx 落到 120k 以下，不升级。
+    const rewritten = await controller.rewriteIterationMessages([
+      { role: 'user', content: 'read the file' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'run_shell', arguments: '{"command":"cat big.log"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'x'.repeat(200_000) },
+    ]);
+    expect(rewritten).not.toBeNull();
+    expect(controller.getCounters()).toMatchObject({ quickRuns: 1, modelRuns: 0, lastKind: 'quick' });
+    expect(recordSubagentUsage).not.toHaveBeenCalled();
   });
 
   it('respects the run limits', async () => {

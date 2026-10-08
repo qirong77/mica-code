@@ -78,7 +78,9 @@ import {
   isSubagentRunning,
   subagentStatusLabel,
   taskElapsedMs,
-  taskOutputWindowLabel
+  taskOutputWindowLabel,
+  waitTaskKindLabel,
+  waitTaskTooltip
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
 import { uid } from './workspace'
@@ -700,6 +702,30 @@ function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingI
             >
               ✕
             </button>
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+function WaitTasksDock({ tasks, now = Date.now() }) {
+  if (!tasks.length) return null
+  return (
+    <section className="chat-task-dock chat-wait-dock" aria-label="等待中的条件">
+      {tasks.map((task) => {
+        const age = formatLogElapsed(Math.max(0, now - (Date.parse(task.startedAt) || now)))
+        return (
+          <div className="chat-task-row" key={task.id}>
+            <span className="chat-task-summary-row" title={waitTaskTooltip(task)}>
+              <span className="chat-task-kind">⏳ {waitTaskKindLabel(task.kind)}</span>
+              <span className="chat-task-status chat-task-status-waiting">
+                {task.status === 'parked' ? '已登记' : '等待中'}
+              </span>
+              <span className="chat-task-runtime">{age}</span>
+              <span className="chat-task-type">{task.id}</span>
+              <span className="chat-task-description">{compactLine(task.label, 180)}</span>
+            </span>
           </div>
         )
       })}
@@ -2114,6 +2140,8 @@ export function ChatView({
   // 与 CLI TaskStatusBar 一致地展示在输入框上方）。
   const [backgroundTasks, setBackgroundTasks] = useState([])
   const [subagentTasks, setSubagentTasks] = useState([])
+  // 正在阻塞 turn 的 wait_for 等待（来自 app-server 快照通知）。
+  const [waitTasks, setWaitTasks] = useState([])
   const [taskNow, setTaskNow] = useState(() => Date.now())
   // 点开的任务详情弹窗（单槽位）：{ kind: 'subagent' | 'background', task } | null
   const [taskDetail, setTaskDetail] = useState(null)
@@ -2134,8 +2162,9 @@ export function ChatView({
   const phaseStartedAtRef = useRef(0)
   const [phaseElapsed, setPhaseElapsed] = useState(0)
 
-  // 有活跃后台任务 / subagent 时每秒刷新耗时，空闲时停表。
-  const hasLiveTasks = backgroundTasks.length > 0 || subagentTasks.length > 0
+  // 有活跃后台任务 / subagent / wait_for 等待时每秒刷新耗时，空闲时停表。
+  const hasLiveTasks =
+    backgroundTasks.length > 0 || subagentTasks.length > 0 || waitTasks.length > 0
   useEffect(() => {
     if (!hasLiveTasks) return undefined
     const timer = window.setInterval(() => setTaskNow(Date.now()), 1000)
@@ -2831,6 +2860,10 @@ export function ChatView({
         case 'subagent_tasks':
           // Host 快照：整体替换运行中 subagent 列表（含后台 subagent）。
           setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
+          break
+        case 'wait_tasks':
+          // Host 快照：整体替换 wait_for 正在等待的条件（阻塞 turn 期间常驻）。
+          setWaitTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'session_history_replaced': {
           // session_compact 工具在 host 侧替换了持久化历史（主进程已重新
@@ -4628,6 +4661,7 @@ export function ChatView({
             onKill={killBackgroundTask}
             killingId={killingTaskId}
           />
+          <WaitTasksDock tasks={waitTasks} now={taskNow} />
           <QueueDock
             items={queuedDisplayItems}
             onRecall={recallQueued}
@@ -4875,7 +4909,9 @@ export function ChatView({
               >
                 <IconPhoto size={13} />
               </button>
-              <span>{input.length > 4000 ? input.length.toLocaleString() : ''}</span>
+              {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把上传按钮和时钟拉开
+                  两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
+              {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
               <button
                 type="button"
                 className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
@@ -4891,11 +4927,12 @@ export function ChatView({
               >
                 <IconClock size={13} />
               </button>
-              {/* 自动压缩：开启时点亮图标（关闭走中性色），点开齿轮面板调两条规则与计数 */}
+              {/* 自动压缩：它是设置入口而不是状态灯，默认（开启）保持中性色，只有被关掉时
+                  才留一个小点，一眼看出它没在生效。点开齿轮面板调两条规则与计数。 */}
               <button
                 type="button"
                 className={`chat-composer-settings ${
-                  autoCompactSettings.enabled === false ? 'is-paused' : 'is-active'
+                  autoCompactSettings.enabled === false ? 'is-paused' : ''
                 }`}
                 title={autoCompactTooltip({
                   settings: autoCompactSettings,

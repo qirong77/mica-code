@@ -15,6 +15,7 @@ import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
 import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
 import { ToolKillTask } from './ToolKillTask.js';
 import { ToolReadImage } from './ToolReadImage.js';
+import { ToolWaitFor } from './ToolWaitFor.js';
 import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 import { ToolPtySpawn } from './pty/ToolPtySpawn.js';
 import { ToolPtySend } from './pty/ToolPtySend.js';
@@ -51,6 +52,7 @@ const builtinTools: MicaTool[] = [
   new ToolBackgroundTasks(),
   new ToolReadTaskOutput(),
   new ToolKillTask(),
+  new ToolWaitFor(),
   new ToolWebFetch(),
   new ToolWebSearch(),
   new ToolSkill(),

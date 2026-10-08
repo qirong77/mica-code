@@ -34,7 +34,7 @@ const suite = bunAvailable ? describe : describe.skip;
  * before the text arrives (to keep a turn busy long enough to steer into it). */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell',
+    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell' | 'wait',
     errorMessage: '',
     delayBeforeTextMs: 0,
     requests: [] as Array<{
@@ -58,6 +58,10 @@ function createMockProvider() {
     /** `shell` mode: the command the mock asks `run_shell` to start in the
      * background, so the tests can drive `mica/backgroundTasks/*`. */
     shellCommand: 'echo tick-1; echo tick-2; sleep 60',
+    /** `wait` mode: the `wait_for` arguments the mock emits on request #1, so
+     * the tests can drive `mica/waitTasks/updated` (a long wait keeps the turn
+     * blocked while the host streams its snapshot). */
+    waitArguments: { kind: 'duration', seconds: 20, poll_interval_ms: 500 },
     /** Override reply text; compact tests use a long reply so the checkpoint
      * exceeds the recent-token budget and actually summarizes. */
     longText: '',
@@ -256,6 +260,47 @@ function createMockProvider() {
           res.end();
           state.responsesFinished += 1;
         };
+        /** `wait` mode: one `wait_for` call that keeps the turn blocked for
+         * `state.waitArguments.seconds`, so the host has to publish
+         * `mica/waitTasks/updated` while the turn is still running. */
+        const emitWaitCallEvents = () => {
+          const argumentsText = JSON.stringify(state.waitArguments);
+          emit({ type: 'response.created', response: { id: 'resp_4', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_4', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+              id: 'fc_wait',
+              type: 'function_call',
+              status: 'in_progress',
+              call_id: 'call_wait',
+              name: 'wait_for',
+              arguments: '',
+            },
+          });
+          emit({
+            type: 'response.function_call_arguments.done',
+            output_index: 0,
+            item_id: 'fc_wait',
+            arguments: argumentsText,
+          });
+          emit({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'fc_wait',
+              type: 'function_call',
+              status: 'completed',
+              call_id: 'call_wait',
+              name: 'wait_for',
+              arguments: argumentsText,
+            },
+          });
+          emitCompleted();
+          res.end();
+          state.responsesFinished += 1;
+        };
         const emitCompleted = () => {
           emit({
             type: 'response.completed',
@@ -294,6 +339,10 @@ function createMockProvider() {
           }
           if (state.mode === 'shell' && requestIndex === 1) {
             emitShellCallEvents();
+            return;
+          }
+          if (state.mode === 'wait' && requestIndex === 1) {
+            emitWaitCallEvents();
             return;
           }
           emitTextEvents();
@@ -1434,7 +1483,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(missing.result).toMatchObject({ ok: false, input: null });
   });
 
-  itE2E('auto compaction shrinks the running turn\'s next request and reports its counters', async () => {
+  itE2E("auto compaction shrinks the running turn's next request and reports its counters", async () => {
     mock!.state.mode = 'tool';
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
@@ -2091,6 +2140,51 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 5, 'mica/backgroundTasks/output', { taskId: task.id });
     const afterKill = await waitFor(host, (m) => m.id === 5 && m.result !== undefined, 'post-kill output');
     expect((afterKill.result as { task: { status: string } }).task.status).toBe('killed');
+  });
+
+  itE2E('mica/waitTasks/updated publishes blocked waits and releases them on interrupt', async () => {
+    mock!.state.mode = 'wait';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.waitArguments = { kind: 'duration', seconds: 20, poll_interval_ms: 500 };
+
+    const host = spawnHost('wait-tasks');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '等 20 秒' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    // The wait record is created before the tool blocks, so the snapshot that
+    // carries it also proves the tool was really entered with our arguments.
+    const blocked = await waitFor(
+      host,
+      (m) =>
+        m.method === 'mica/waitTasks/updated' &&
+        Array.isArray(m.params?.tasks) &&
+        (m.params.tasks as unknown[]).length > 0,
+      'wait task snapshot',
+    );
+    const wait = (blocked.params!.tasks as Array<{ id: string; kind: string; status: string; label: string }>)[0]!;
+    expect(wait.kind).toBe('duration');
+    expect(wait.status).toBe('waiting');
+    expect(wait.label).toContain('20');
+    expect(wait.id).toMatch(/^[0-9a-f]{8}$/);
+
+    // Interrupting has to end the turn promptly: the tool has to observe the
+    // abort signal instead of blocking until its own timeout.
+    await send(host, 2, 'turn/interrupt', { threadId: '', turnId });
+    const completed = await waitFor(host, turnCompleted(turnId), 'interrupted turn completed', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('interrupted');
+
+    // A wait nobody is blocked on is not published any more.
+    await waitFor(
+      host,
+      (m) => m.method === 'mica/waitTasks/updated' && (m.params?.tasks as unknown[]).length === 0,
+      'empty wait snapshot after interrupt',
+    );
   });
 
   itE2E('mica/subagentTasks/{detail,kill} answer for unknown ids without breaking the host', async () => {

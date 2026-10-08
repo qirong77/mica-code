@@ -35,6 +35,7 @@ import {
   type MicaQueueItem,
   type MicaSubagentTaskDetail,
   type MicaSubagentTaskItem,
+  type MicaWaitTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import {
@@ -42,11 +43,13 @@ import {
   killBackgroundTask as killBackgroundTaskById,
   listBackgroundTasks,
   loadBackgroundTask,
+  listActiveWaits,
   micaTools,
   readBackgroundTaskOutput,
   terminateCurrentBackgroundTasks,
   type BackgroundTaskMeta,
 } from '@packages/mica-tools/index.js';
+import type { WaitRecord } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
@@ -128,6 +131,22 @@ export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentT
         startedAt: activity.startedAt,
       })),
     }));
+}
+
+/** Project the `wait_for` records that are still waiting for the
+ * `mica/waitTasks/updated` snapshot. The records live in mica-tools inside this
+ * process, so the host is the only place that can see them; a long blocking
+ * wait would otherwise look like a frozen tool row in the desktop app. */
+export function projectWaitTasks(waits: WaitRecord[]): MicaWaitTaskItem[] {
+  return waits.map((wait) => ({
+    id: wait.id,
+    kind: wait.kind,
+    label: wait.label,
+    status: wait.status === 'parked' ? 'parked' : 'waiting',
+    startedAt: new Date(wait.createdAt).toISOString(),
+    polls: wait.polls,
+    ...(wait.error ? { detail: wait.error } : wait.detail ? { detail: wait.detail } : {}),
+  }));
 }
 
 /** Cap the projected result so the on-demand detail response stays small. The
@@ -472,6 +491,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     // same task rows above the composer as the CLI shows above its input.
     let lastBackgroundTasksKey = '';
     let lastSubagentTasksKey = '';
+    let lastWaitTasksKey = '';
     pushTaskSnapshots = () => {
       if (!agent || !subagentTasks) return;
       const backgroundTasks = projectBackgroundTasks(listBackgroundTasks({ status: 'all' }));
@@ -490,6 +510,15 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         writeNotification(MICA_TASK_NOTIFICATIONS.subagentTasksUpdated, {
           threadId: sessionId,
           tasks: subagentItems,
+        });
+      }
+      const waitItems = projectWaitTasks(listActiveWaits());
+      const waitKey = JSON.stringify(waitItems);
+      if (waitKey !== lastWaitTasksKey) {
+        lastWaitTasksKey = waitKey;
+        writeNotification(MICA_TASK_NOTIFICATIONS.waitTasksUpdated, {
+          threadId: sessionId,
+          tasks: waitItems,
         });
       }
     };

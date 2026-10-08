@@ -68,6 +68,19 @@ export function toolSummary(tool, max = 0) {
     case 'read_task_output':
     case 'kill_task':
       return compactLine(input.task_id, max)
+    case 'wait_for':
+      // 续等调用只有 wait_id，新调用才有 kind 与条件字段。
+      if (!input.kind) return compactLine(input.wait_id ? `续等 ${input.wait_id}` : '', max)
+      return compactLine(
+        [
+          input.kind,
+          input.task_id || input.file_path || input.command || input.url || input.pid || input.port,
+          input.wait_id ? `续等 ${input.wait_id}` : ''
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        max
+      )
     default:
       return compactLine(Object.values(input).find((value) => typeof value === 'string') || '', max)
   }

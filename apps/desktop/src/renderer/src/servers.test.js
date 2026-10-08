@@ -2,14 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import {
   LOCAL_SERVER_URL,
   MAX_RECENT_SERVERS,
+  MAX_SERVER_NOTE_LENGTH,
   currentServerUrl,
+  findServerEntry,
   isElectronShell,
   isLoopbackServer,
   isSameServer,
+  normalizeServerNote,
   openServerTarget,
   parseRecentServers,
   readRecentServers,
   rememberServer,
+  setServerNote,
   serverListRows,
   serverLabel
 } from './servers'
@@ -118,7 +122,7 @@ describe('remembered servers', () => {
   test('drops junk, deduplicates by host and caps the list', () => {
     expect(parseRecentServers(null)).toEqual([])
     expect(parseRecentServers(['http://a:8787', 'nonsense', 'http://a:8787/api', 42])).toEqual([
-      'http://a:8787'
+      { url: 'http://a:8787', note: '' }
     ])
 
     const many = Array.from(
@@ -126,6 +130,22 @@ describe('remembered servers', () => {
       (_, index) => `http://h${index}:8787`
     )
     expect(parseRecentServers(many)).toHaveLength(MAX_RECENT_SERVERS)
+  })
+
+  test('reads notes and tolerates legacy address-only entries', () => {
+    expect(
+      parseRecentServers([
+        { url: 'http://a:8787', note: '办公室的 Mac' },
+        'http://b:8787',
+        { url: 'http://c:8787', note: '  多   空白\n折成一行  ' },
+        { url: 'nonsense', note: 'x' },
+        { note: '没有地址' }
+      ])
+    ).toEqual([
+      { url: 'http://a:8787', note: '办公室的 Mac' },
+      { url: 'http://b:8787', note: '' },
+      { url: 'http://c:8787', note: '多 空白 折成一行' }
+    ])
   })
 
   test('reads an empty or corrupt store as an empty list', () => {
@@ -136,21 +156,29 @@ describe('remembered servers', () => {
 
   test('remembers the newest first and never repeats a host', () => {
     const storage = fakeStorage()
-    expect(rememberServer('http://a:8787', storage)).toEqual(['http://a:8787'])
-    expect(rememberServer('http://b:8787', storage)).toEqual(['http://b:8787', 'http://a:8787'])
+    expect(rememberServer('http://a:8787', storage)).toEqual([{ url: 'http://a:8787', note: '' }])
+    expect(rememberServer('http://b:8787', storage)).toEqual([
+      { url: 'http://b:8787', note: '' },
+      { url: 'http://a:8787', note: '' }
+    ])
     // 同一个 host 换个写法（路径/大小写）不该变成两条
     expect(rememberServer('http://A:8787/api/health', storage)).toEqual([
-      'http://a:8787',
-      'http://b:8787'
+      { url: 'http://a:8787', note: '' },
+      { url: 'http://b:8787', note: '' }
     ])
-    expect(readRecentServers(storage)).toEqual(['http://a:8787', 'http://b:8787'])
+    expect(readRecentServers(storage)).toEqual([
+      { url: 'http://a:8787', note: '' },
+      { url: 'http://b:8787', note: '' }
+    ])
   })
 
   test('ignores an address that is not a runtime origin', () => {
     const storage = fakeStorage()
     rememberServer('http://a:8787', storage)
-    expect(rememberServer('192.168.1.5:8787', storage)).toEqual(['http://a:8787'])
-    expect(rememberServer('', storage)).toEqual(['http://a:8787'])
+    expect(rememberServer('192.168.1.5:8787', storage)).toEqual([
+      { url: 'http://a:8787', note: '' }
+    ])
+    expect(rememberServer('', storage)).toEqual([{ url: 'http://a:8787', note: '' }])
   })
 
   test('survives a store that cannot be written', () => {
@@ -160,7 +188,51 @@ describe('remembered servers', () => {
         throw new Error('quota')
       }
     }
-    expect(rememberServer('http://a:8787', storage)).toEqual(['http://a:8787'])
+    expect(rememberServer('http://a:8787', storage)).toEqual([{ url: 'http://a:8787', note: '' }])
+  })
+})
+
+describe('server notes', () => {
+  test('keeps a note attached to the machine across reconnects', () => {
+    const storage = fakeStorage()
+    rememberServer('http://a:8787', storage)
+    rememberServer('http://b:8787', storage)
+    setServerNote('http://a:8787', '办公室的 Mac', storage)
+    expect(readRecentServers(storage)).toEqual([
+      { url: 'http://b:8787', note: '' },
+      { url: 'http://a:8787', note: '办公室的 Mac' }
+    ])
+
+    // 再连一次 a 只是把它提到最前，备注跟着走
+    expect(rememberServer('http://a:8787/api/health', storage)).toEqual([
+      { url: 'http://a:8787', note: '办公室的 Mac' },
+      { url: 'http://b:8787', note: '' }
+    ])
+  })
+
+  test('rewrites, clears and caps the note without touching the list', () => {
+    const storage = fakeStorage()
+    rememberServer('http://a:8787', storage)
+    rememberServer('http://b:8787', storage)
+    setServerNote('http://a:8787', 'x'.repeat(MAX_SERVER_NOTE_LENGTH + 20), storage)
+    expect(findServerEntry('http://a:8787', readRecentServers(storage))?.note).toHaveLength(
+      MAX_SERVER_NOTE_LENGTH
+    )
+    expect(setServerNote('http://a:8787', '  ', storage)).toEqual([
+      { url: 'http://b:8787', note: '' },
+      { url: 'http://a:8787', note: '' }
+    ])
+    expect(readRecentServers(storage)[0]).toEqual({ url: 'http://b:8787', note: '' })
+  })
+
+  test('leaves the list alone for an address that was never remembered', () => {
+    const storage = fakeStorage()
+    rememberServer('http://a:8787', storage)
+    const before = readRecentServers(storage)
+    expect(setServerNote('http://zzz:8787', '从没连过', storage)).toEqual(before)
+    expect(readRecentServers(storage)).toEqual(before)
+    expect(findServerEntry('http://zzz:8787', before)).toBeNull()
+    expect(normalizeServerNote(null)).toBe('')
   })
 })
 
@@ -168,12 +240,19 @@ describe('serverListRows', () => {
   const local = LOCAL_SERVER_URL
 
   test('hides the current server and the 本机 shortcut', () => {
-    const recent = ['http://a:8787', local, 'http://b:8787']
+    const recent = [
+      { url: 'http://a:8787', note: '公司' },
+      { url: local, note: '本机备注' },
+      { url: 'http://b:8787', note: '' }
+    ]
 
     // 正在本机上：本机不再作为快捷方式出现，也不该在清单里重复
-    expect(serverListRows(local, recent)).toEqual(['http://a:8787', 'http://b:8787'])
+    expect(serverListRows(local, recent)).toEqual([
+      { url: 'http://a:8787', note: '公司' },
+      { url: 'http://b:8787', note: '' }
+    ])
     // 在 a 上：a 是当前那台（单独一行），本机作为回程入口单独显示
-    expect(serverListRows('http://a:8787', recent)).toEqual(['http://b:8787'])
+    expect(serverListRows('http://a:8787', recent)).toEqual([{ url: 'http://b:8787', note: '' }])
   })
 
   test('returns nothing while there is no history', () => {

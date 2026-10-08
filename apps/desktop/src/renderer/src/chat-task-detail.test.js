@@ -7,7 +7,9 @@ import {
   isSubagentRunning,
   subagentStatusLabel,
   taskElapsedMs,
-  taskOutputWindowLabel
+  taskOutputWindowLabel,
+  waitTaskKindLabel,
+  waitTaskTooltip
 } from './chat-task-detail'
 
 describe('formatBytes', () => {
@@ -113,6 +115,16 @@ describe('taskOutputWindowLabel', () => {
 
 describe('taskElapsedMs', () => {
   const startedAt = new Date(1000).toISOString()
+
+  it('covers the wait_for dock labels', () => {
+    expect(waitTaskKindLabel('file')).toBe('文件')
+    expect(waitTaskKindLabel('task')).toBe('后台任务')
+    expect(waitTaskKindLabel('')).toBe('条件')
+    expect(
+      waitTaskTooltip({ label: '127.0.0.1:3000 可连接', polls: 4, detail: 'connection refused' })
+    ).toBe(['127.0.0.1:3000 可连接', '已轮询 4 次', '最近一次检查：connection refused'].join('\n'))
+    expect(waitTaskTooltip({})).toBe('等待条件')
+  })
 
   it('measures against now while running and against finishedAt once done', () => {
     expect(taskElapsedMs({ startedAt }, 4000)).toBe(3000)

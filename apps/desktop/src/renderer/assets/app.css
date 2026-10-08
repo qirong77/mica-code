@@ -1766,6 +1766,8 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-popover-actions {
+  /* 文字按钮的水平内边距：它同时决定按钮文字比行缩进右偏多少，下面的负外边距跟着它走 */
+  --chat-popover-action-inset-x: 10px;
   display: flex;
   flex: none;
   align-items: center;
@@ -1777,7 +1779,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-popover-actions button {
   height: 22px;
-  padding: 0 10px;
+  padding: 0 var(--chat-popover-action-inset-x);
   border-radius: 3px;
   color: rgb(255 255 255 / 55%);
   white-space: nowrap;
@@ -1824,6 +1826,12 @@ body.is-resizing.is-resizing-terminal {
 .chat-popover-actions button.chat-auto-compact-save:disabled {
   background: rgb(255 255 255 / 6%);
   color: rgb(255 255 255 / 25%);
+}
+
+/* 动作区最左边的纯文字按钮（「重置计数」）要和正文左列对齐：按钮自带水平内边距，
+   把整行的左缩进减掉它，落在左列的是文字而不是按钮盒子（hover 底色仍左右各留一份内边距）。 */
+.chat-popover-actions button.chat-auto-compact-reset {
+  margin-left: calc(-1 * var(--chat-popover-action-inset-x));
 }
 
 /* 模型 / 推理强度 / 角色选择器：同壳，只把行距收密一点 */
@@ -2002,6 +2010,10 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-task-status-running {
   color: var(--color-teal);
+}
+
+.chat-task-status-waiting {
+  color: var(--color-warn);
 }
 
 .chat-task-runtime {
@@ -2850,8 +2862,9 @@ body.is-resizing.is-resizing-terminal {
   height: 30px;
   min-height: 30px;
   align-items: center;
-  gap: 6px;
-  padding: 0 5px 0 0;
+  /* 图标按钮排成一条紧凑的动作条：间距只留一点，让 hover 底色仍能分开 */
+  gap: 2px;
+  padding: 0 4px 0 0;
   color: rgb(255 255 255 / 22%);
   font-size: 9px;
 }
@@ -2902,14 +2915,10 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 40%);
 }
 
-/* 输入框右侧的自动压缩入口：开启时走强调色（它是常开开关，不是「正在跑」的提示色），
-   关闭时走中性色并在右上角留一个小点，一眼能看出被关掉了。 */
+/* 输入框右侧的自动压缩入口：它是设置入口而不是状态灯，所以默认（开启）保持中性色，
+   只有被关掉时才在右上角留一个小点，一眼看出它没在生效。 */
 .chat-composer-settings {
   position: relative;
-}
-
-.chat-composer-settings.is-active {
-  color: var(--color-accent);
 }
 
 .chat-composer-settings.is-paused {
@@ -3152,7 +3161,7 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-auto-compact-note {
-  padding: 2px 6px 4px 18px;
+  padding: 2px 6px 4px;
   color: rgb(255 255 255 / 28%);
   overflow-wrap: anywhere;
 }
@@ -3278,6 +3287,8 @@ body.is-resizing.is-resizing-terminal {
   .chat-composer-actions {
     height: 32px;
     min-height: 32px;
+    /* 触屏没有 hover，按钮又大，桌面的 2px 挨得太近容易点错 */
+    gap: 6px;
   }
 
   .chat-composer-actions button {
@@ -3286,9 +3297,12 @@ body.is-resizing.is-resizing-terminal {
   }
 
   /* 浮层里的操作按钮同理：20px 在触屏上点不准 */
+  .chat-popover-actions {
+    --chat-popover-action-inset-x: 12px;
+  }
+
   .chat-popover-actions button {
     height: 28px;
-    padding: 0 12px;
   }
 
   .chat-popover-actions button.chat-popover-icon {

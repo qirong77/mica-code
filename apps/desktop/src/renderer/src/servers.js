@@ -15,6 +15,8 @@ export const LOCAL_SERVER_URL = `http://127.0.0.1:${DEFAULT_SERVER_PORT}`
 /** 「连接过的服务器」存在页面本地：它只是这台机器上这个页面的回访清单 */
 export const RECENT_SERVERS_KEY = 'mica-servers'
 export const MAX_RECENT_SERVERS = 8
+/** 备注只是给这条记录起个认得出来的名字，限长免得把清单撑变形 */
+export const MAX_SERVER_NOTE_LENGTH = 40
 
 /** 当前页面所在的服务器（页面就是它托管的，所以 origin 即地址） */
 export function currentServerUrl(location) {
@@ -60,6 +62,21 @@ export function isElectronShell(userAgent) {
   return /\bElectron\//i.test(String(userAgent || ''))
 }
 
+/** 备注是单行文本：折叠空白、去首尾、限长 */
+export function normalizeServerNote(value) {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\s+/g, ' ').trim().slice(0, MAX_SERVER_NOTE_LENGTH)
+}
+
+/**
+ * 清单里的一条记录：地址 + 备注（备注可以为空）。地址一律规范成 origin，合法时才建条目。
+ */
+function serverEntry(url, note) {
+  const origin = serverOrigin(url)
+  if (!origin) return null
+  return { url: origin, note: normalizeServerNote(note) }
+}
+
 /** 规范成某个运行时的 origin（`[http://]host[:port]` 一律补全端口、丢掉路径） */
 function serverOrigin(value) {
   const parsed = parseServerUrl(value)
@@ -75,17 +92,21 @@ function browserStorage() {
   }
 }
 
-/** 读出来的清单可能是旧版本或被手改过的：非法项丢掉、同 host 去重、超上限截断 */
+/**
+ * 读出来的清单可能是旧版本或被手改过的：非法项丢掉、同 host 去重、超上限截断。
+ * 旧版本存的是纯地址数组，这里一并读成 `{ url, note: '' }`（下一次写入就是新格式）。
+ */
 export function parseRecentServers(raw) {
   const source = Array.isArray(raw) ? raw : []
-  const urls = []
+  const entries = []
   for (const value of source) {
-    const origin = serverOrigin(value)
-    if (!origin || urls.some((entry) => isSameServer(entry, origin))) continue
-    urls.push(origin)
-    if (urls.length >= MAX_RECENT_SERVERS) break
+    const candidate = typeof value === 'string' ? { url: value } : value
+    const entry = serverEntry(candidate?.url, candidate?.note)
+    if (!entry || entries.some((existing) => isSameServer(existing.url, entry.url))) continue
+    entries.push(entry)
+    if (entries.length >= MAX_RECENT_SERVERS) break
   }
-  return urls
+  return entries
 }
 
 export function readRecentServers(storage = browserStorage()) {
@@ -97,21 +118,45 @@ export function readRecentServers(storage = browserStorage()) {
   }
 }
 
+function writeRecentServers(entries, storage) {
+  try {
+    storage?.setItem(RECENT_SERVERS_KEY, JSON.stringify(entries))
+  } catch {
+    // 存储不可写（隐私模式/配额）时列表降级为本次会话内的内存值
+  }
+  return entries
+}
+
 /** 连接成功后记一笔，最近用的排最前；返回新清单供调用方直接渲染 */
 export function rememberServer(url, storage = browserStorage()) {
   const origin = serverOrigin(url)
   const list = readRecentServers(storage)
   if (!origin) return list
-  const next = [origin, ...list.filter((entry) => !isSameServer(entry, origin))].slice(
-    0,
-    MAX_RECENT_SERVERS
-  )
-  try {
-    storage?.setItem(RECENT_SERVERS_KEY, JSON.stringify(next))
-  } catch {
-    // 存储不可写（隐私模式/配额）时列表降级为本次会话内的内存值
-  }
-  return next
+  // 备注属于这台机器，重开一次不该把它冲掉
+  const note = list.find((entry) => isSameServer(entry.url, origin))?.note ?? ''
+  const next = [
+    { url: origin, note },
+    ...list.filter((entry) => !isSameServer(entry.url, origin))
+  ].slice(0, MAX_RECENT_SERVERS)
+  return writeRecentServers(next, storage)
+}
+
+/**
+ * 改某条记录的备注。清单的成员只由 `rememberServer` 加，所以地址不在清单里时原样返回
+ * （没有这一条就无处安放备注，也不该凭一个备注把没探活过的地址记进来）。
+ */
+export function setServerNote(url, note, storage = browserStorage()) {
+  const list = readRecentServers(storage)
+  const index = list.findIndex((entry) => isSameServer(entry.url, url))
+  if (index < 0) return list
+  const next = [...list]
+  next[index] = { url: list[index].url, note: normalizeServerNote(note) }
+  return writeRecentServers(next, storage)
+}
+
+/** 清单里某个地址的那条记录（没有就返回 null） */
+export function findServerEntry(url, recent) {
+  return parseRecentServers(recent).find((entry) => isSameServer(entry.url, url)) ?? null
 }
 
 /**
@@ -120,9 +165,9 @@ export function rememberServer(url, storage = browserStorage()) {
  */
 export function serverListRows(current, recent) {
   const showLocal = !isLoopbackServer(current)
-  return parseRecentServers(recent).filter((url) => {
-    if (isSameServer(url, current)) return false
-    if (showLocal && isSameServer(url, LOCAL_SERVER_URL)) return false
+  return parseRecentServers(recent).filter((entry) => {
+    if (isSameServer(entry.url, current)) return false
+    if (showLocal && isSameServer(entry.url, LOCAL_SERVER_URL)) return false
     return true
   })
 }

@@ -23,6 +23,7 @@ const DEFAULT_TOOL_ICONS = new Map<string, string>(
     background_tasks: '📋',
     read_task_output: '📋',
     kill_task: '📋',
+    wait_for: '⏳',
   }),
 );
 const toolIconRegistrations = new Map<string, Array<{ icon: string }>>();

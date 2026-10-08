@@ -23,6 +23,7 @@
 - `background_tasks`：列出后台任务。
 - `read_task_output`：读取后台任务输出。
 - `kill_task`：终止后台任务。
+- `wait_for`：阻塞等待外部事件/条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`。
 - `pty_spawn`：在 PTY 中启动交互式终端程序。
 - `pty_send`：向 PTY 会话发送文本或命名按键。
 - `pty_read`：读取 PTY 会话输出。

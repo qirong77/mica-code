@@ -128,6 +128,7 @@ export type MicaQueueItem = {
 export const MICA_TASK_NOTIFICATIONS = {
   backgroundTasksUpdated: 'mica/backgroundTasks/updated',
   subagentTasksUpdated: 'mica/subagentTasks/updated',
+  waitTasksUpdated: 'mica/waitTasks/updated',
 } as const;
 
 /**
@@ -160,10 +161,13 @@ export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
  * spawned once, so the user's panel changes can only reach it per turn) and
  * echoed back — counters only — in `MICA_AUTO_COMPACT_NOTIFICATIONS.updated`.
  *
- * Semantics: 快速压缩 runs when ctx ≥ `quickThresholdK` and it already ran
- * fewer than `quickLimit` times; 模型压缩 runs when the context is still
- * ≥ `modelThresholdK` (which is why the default 120 is BELOW the quick
- * threshold 200) and it already ran fewer than `modelLimit` times.
+ * Semantics: 快速压缩 is the cheap local pass (no model request) and always
+ * goes first — 模型压缩 is only reached after it, or directly once the quick
+ * allowance is used up. So 快速压缩 runs when ctx ≥ `quickThresholdK` (or when
+ * 模型压缩 is due) and it already ran fewer than `quickLimit` times; 模型压缩
+ * runs when the context is *still* ≥ `modelThresholdK` (which is why the
+ * default 120 is BELOW the quick threshold 200) and it already ran fewer than
+ * `modelLimit` times.
  */
 export type MicaAutoCompactParams = {
   enabled?: boolean;
@@ -253,6 +257,27 @@ export type MicaSubagentTaskItem = {
   startedAt: string;
   finishedAt?: string | null;
   activities?: { id: string; summary: string; toolName?: string; startedAt: string }[];
+};
+
+/**
+ * One `wait_for` call that is still waiting (see
+ * `packages/mica-tools/waitFor/registry.ts`). The record lives in the host
+ * process, so this snapshot is the only way the desktop app can show what a
+ * turn is blocked on — a long wait otherwise looks like a frozen tool row.
+ * `status` is `waiting` when a call is currently blocked on it and `parked`
+ * when it was registered with `background: true` and nobody is polling yet.
+ */
+export type MicaWaitTaskItem = {
+  id: string;
+  kind: 'task' | 'process' | 'file' | 'command' | 'http' | 'port' | 'duration';
+  /** Human-readable condition, e.g. `/tmp/out.txt changed`. */
+  label: string;
+  status: 'waiting' | 'parked';
+  startedAt: string;
+  /** Polls made so far; cheap progress signal for a long wait. */
+  polls: number;
+  /** Latest observation (or the latest poll error). */
+  detail?: string;
 };
 
 export type MicaKillBackgroundTaskParams = {

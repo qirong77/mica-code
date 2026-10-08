@@ -268,6 +268,17 @@ export function codexNotificationToEvent(notification) {
         sessionID,
         tasks: Array.isArray(params.tasks) ? params.tasks : []
       }
+    case 'mica/waitTasks/updated':
+      // Host-side snapshot of `wait_for` calls that are still waiting. The
+      // records only exist inside the app-server process, so this is the only
+      // way the dock can show what a blocked turn is waiting on. Replaces the
+      // whole list; a released wait simply disappears from the snapshot.
+      return {
+        type: 'wait_tasks',
+        timestamp,
+        sessionID,
+        tasks: Array.isArray(params.tasks) ? params.tasks : []
+      }
     case 'mica/sessionHistory/replaced':
       // A session_* tool replaced the persisted history mid-host. chat.js
       // attaches the reloaded session rows; the renderer swaps its transcript.

@@ -12,9 +12,12 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
  * - 快速压缩：ctx ≥ quickThresholdK 且已运行次数 < quickLimit，本地把工具结果 /
  *   工具参数正文 / 媒体块换成占位符（不调用模型、不丢轮次）。
  * - 模型压缩：ctx 仍 ≥ modelThresholdK 且已运行次数 < modelLimit，调用模型生成
- *   checkpoint 摘要。默认 modelThresholdK(120) < quickThresholdK(200)，即「快速
- *   压缩之后还高于模型阈值就升级为模型压缩」——快速压缩清不掉的内容才值得花一次
- *   模型请求。
+ *   checkpoint 摘要。
+ *
+ * 次序固定是「先快速、后模型」——快速压缩是模型压缩的前置步骤，只要这次确实要压就
+ * 先跑一遍本地清理：ctx 到了快速阈值就单独跑一次；ctx 只到模型阈值（默认
+ * modelThresholdK(120) < quickThresholdK(200)）时也先跑一次本地清理，清完仍高于
+ * 模型阈值才升级为模型压缩——本地清理清不掉的内容才值得花一次模型请求。
  *
  * 这个模块只负责策略与计数；真正的重写由 provider loop 的
  * `rewriteIterationMessages` 钩子落地（见 packages/mica-agent/core/Agent.ts），因为
@@ -112,7 +115,14 @@ export function normalizeAutoCompactTurnParams(input: unknown): AutoCompactTurnP
 
 export type AutoCompactStep = 'quick' | 'model';
 
-/** 纯决策：给定当前 ctx 与已运行次数，决定这次请求结束后要不要压缩、压哪一种。 */
+/**
+ * 纯决策：给定当前 ctx 与已运行次数，决定这次请求结束后要不要压缩、压哪一种。
+ *
+ * 快速压缩同时是模型压缩的前置步骤，所以「模型压缩到期」本身就足以触发一次快速
+ * 压缩：ctx 落在两个阈值之间时是「快速压缩 →（仍高于模型阈值）模型压缩」两步，
+ * 而不是直接跳到模型压缩。升级判定在调用方（`rewriteIterationMessages`）按压缩后
+ * 的 ctx 做。
+ */
 export function decideAutoCompactStep(input: {
   settings: AutoCompactSettings;
   counters: Pick<AutoCompactCounters, 'quickRuns' | 'modelRuns'>;
@@ -121,8 +131,11 @@ export function decideAutoCompactStep(input: {
   const { settings, counters, ctxTokens } = input;
   if (!settings.enabled) return null;
   if (!Number.isFinite(ctxTokens) || ctxTokens <= 0) return null;
-  if (counters.quickRuns < settings.quickLimit && ctxTokens >= settings.quickThresholdK * 1000) return 'quick';
-  if (counters.modelRuns < settings.modelLimit && ctxTokens >= settings.modelThresholdK * 1000) return 'model';
+  const modelDue = counters.modelRuns < settings.modelLimit && ctxTokens >= settings.modelThresholdK * 1000;
+  if (counters.quickRuns < settings.quickLimit && (ctxTokens >= settings.quickThresholdK * 1000 || modelDue)) {
+    return 'quick';
+  }
+  if (modelDue) return 'model';
   return null;
 }
 
@@ -205,7 +218,9 @@ export class AutoCompactController {
         ctxTokens = Math.max(0, ctxTokens - quick.savedTokens);
       }
       // 快速压缩之后仍然高于模型阈值（默认 120k < 200k，这正是「压缩没压够」的
-      // 情形）才升级为模型压缩；已经压到阈值以下就不再花一次模型请求。
+      // 情形）才升级为模型压缩；已经压到阈值以下就不再花一次模型请求。快速压缩
+      // 失败或没有可清理内容时 ctx 不变，这里同样按原 ctx 判定，不会因为它没生效
+      // 就把这次模型压缩吞掉。
       if (
         ctxTokens >= this.settings.modelThresholdK * 1000 &&
         this.counters.modelRuns < this.settings.modelLimit

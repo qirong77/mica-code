@@ -44,6 +44,7 @@ export const micaTools = {
 
 export { MicaTool } from './MicaTool.js';
 export { ToolRunShell } from './ToolRunShell.js';
+export { ToolWaitFor } from './ToolWaitFor.js';
 export { ToolPtySpawn } from './pty/ToolPtySpawn.js';
 export { ToolPtySend } from './pty/ToolPtySend.js';
 export { ToolPtyRead } from './pty/ToolPtyRead.js';
@@ -71,3 +72,11 @@ export {
   terminateCurrentBackgroundTasks,
 } from './ToolRunShellBackground.js';
 export type { BackgroundTaskMeta, BackgroundTaskStatus } from './ToolRunShellBackground.js';
+export {
+  listActiveWaits,
+  listWaitRecords,
+  clearWaitRecords,
+  isActiveWaitStatus,
+} from './waitFor/registry.js';
+export type { WaitRecord, WaitTaskStatus } from './waitFor/registry.js';
+export type { NormalizedWaitCondition, WaitKind } from './waitFor/types.js';

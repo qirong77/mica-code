@@ -186,6 +186,111 @@ function showWindow(state) {
   state.win.focus()
 }
 
+/**
+ * 页面此刻是什么状态：
+ * - `booted`：脚本跑过、`window.mica` 已装上（正常）
+ * - `error-page`：页面自己渲染的可读失败提示（运行时没起来），别去打扰它
+ * - `blank`：空白 —— 新建窗口首次加载偶发失败时就是这个样子：导航其实「成功」了，
+ *   `did-finish-load` 照常触发、`document.readyState` 也是 complete，但页面停在
+ *   空白状态，窗口只剩自己的底色（`#0e0e0e`），看上去就是一块黑屏
+ *
+ * 这种状态只有问渲染层才知道（`executeJavaScript` 走页面主世界，不需要 preload）。
+ */
+const PAGE_STATE_PROBE = `(() => {
+  if (typeof window.mica === 'object') return 'booted'
+  const root = document.getElementById('root')
+  return root && root.children.length > 0 ? 'error-page' : 'blank'
+})()`
+
+async function pageState(state) {
+  const contents = state.win.webContents
+  if (state.win.isDestroyed() || contents.isDestroyed() || contents.isCrashed()) return 'blank'
+  try {
+    const value = await Promise.race([
+      contents.executeJavaScript(PAGE_STATE_PROBE),
+      new Promise((resolvePromise) => setTimeout(() => resolvePromise('blank'), 1000))
+    ])
+    return typeof value === 'string' ? value : 'blank'
+  } catch {
+    return 'blank'
+  }
+}
+
+/**
+ * 探测节奏。6 秒对「页面正常启动」已经很宽裕（本机不到 1 秒，跨机器的 `/api/env`
+ * 也只有几百毫秒），而失败的样子是「什么都没加载上」，超出即可判定，不必再等。
+ */
+const BOOT_PROBE_TIMEOUT_MS = 6000
+const BOOT_PROBE_INTERVAL_MS = 500
+/** 重载只做一次：慢启动不该被误判成失败，更不能无限重载 */
+const MAX_BOOT_RELOADS = 1
+
+/**
+ * 每次加载结束后确认页面真的起来了，没起来就地重载 —— 实测重载是有效的恢复手段。
+ * 不做的话用户只能自己想到按 ⌘R，而「点远程那行」只会把那块黑屏再端到前面一次。
+ */
+function watchPageBoot(state, url) {
+  let reloads = 0
+  let probing = false
+
+  const reload = (reason) => {
+    if (reloads >= MAX_BOOT_RELOADS) {
+      console.warn(`[mica-code-app] 页面仍然无法启动（${reason}）`, url)
+      // 重载也救不回来，只能如实告诉用户 —— 否则窗口就停在黑屏上，一句话都没有
+      if (!state.win.isDestroyed()) dialog.showErrorBox('页面加载失败', `${url}\n\n${reason}`)
+      return
+    }
+    reloads += 1
+    console.warn(`[mica-code-app] 页面未能启动，重新加载（${reason}）`, url)
+    void loadPage(state, url)
+  }
+
+  const probe = async () => {
+    if (probing || state.win.isDestroyed()) return
+    probing = true
+    try {
+      const deadline = Date.now() + BOOT_PROBE_TIMEOUT_MS
+      while (Date.now() < deadline) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, BOOT_PROBE_INTERVAL_MS))
+        // 已经开了新一轮加载（比如上面刚重载过），交给它自己那一次探测
+        if (state.win.isDestroyed() || state.win.webContents.isLoading()) return
+        if ((await pageState(state)) !== 'blank') return
+      }
+      reload('探测超时')
+    } finally {
+      probing = false
+    }
+  }
+
+  state.win.webContents.on('did-finish-load', () => void probe())
+
+  // 主框架真的加载失败（连不上 / DNS 出错）时走不到上面的探测，这里补一次
+  state.win.webContents.on(
+    'did-fail-load',
+    (_event, code, description, validatedURL, isMainFrame) => {
+      // -3 是 ERR_ABORTED：正常重定向/取消会带上它，不是失败
+      if (!isMainFrame || code === -3) return
+      console.warn(`[mica-code-app] 页面加载失败（${code} ${description}）`, validatedURL)
+      reload(`${code} ${description}`)
+    }
+  )
+}
+
+/**
+ * 把窗口端到前面。复用一台**已经开着**的服务器时不能只 `showWindow`：那个窗口可能停在
+ * 空白状态（首次加载偶发失败留下的），端出来用户看到的还是那块黑屏。
+ */
+async function enterWindow(state) {
+  if (!state || state.win.isDestroyed()) return
+  showWindow(state)
+  if (state.win.webContents.isLoading()) return
+  if ((await pageState(state)) !== 'blank') return
+  const target = state.server || state.win.webContents.getURL()
+  if (!target) return
+  console.warn('[mica-code-app] 窗口里是空白页，重新加载', target)
+  void loadPage(state, target)
+}
+
 /** 已经开着某台服务器时不再开第二个窗口，直接把它端到前面 —— 切回来才不用重新加载 */
 function findServerWindow(origin) {
   if (!origin) return null
@@ -212,7 +317,7 @@ async function navigateToServer(state, target) {
   if (origin && origin === `http://127.0.0.1:${DEFAULT_PORT}` && localPageUrl) {
     const existing = findServerWindow(originOf(localPageUrl))
     if (existing && existing !== state) {
-      showWindow(existing)
+      void enterWindow(existing)
       return
     }
     // 自己就是本机页面（启动失败页上的「返回本机」）时重新加载，别让这一下变成空点
@@ -225,7 +330,7 @@ async function navigateToServer(state, target) {
   }
   const existing = findServerWindow(origin)
   if (existing && existing !== state) {
-    showWindow(existing)
+    void enterWindow(existing)
     return
   }
   if (await probeMicaRuntime(origin)) {
@@ -258,7 +363,7 @@ function syncWindowServer(state, target) {
 function backToLocalPage(state) {
   const local = [...windows].find((item) => item.local && !item.win.isDestroyed())
   if (local) {
-    showWindow(local)
+    void enterWindow(local)
     return
   }
   if (!localPageUrl) return
@@ -480,9 +585,11 @@ function createWindow(url, { primary = false } = {}) {
     backToLocalPage(state)
   })
 
+  // 加载失败由 watchPageBoot 接住（重载一次 + 日志）：这里再弹一个模态框只会在自动
+  // 恢复的同时糊用户一脸，而且那个框关掉之后页面该黑还是黑。
+  watchPageBoot(state, url)
   win.loadURL(url).catch((error) => {
     console.error('[mica-code-app] 页面加载失败', error)
-    dialog.showErrorBox('页面加载失败', `${url}\n\n${error?.message || error}`)
   })
 
   return state
@@ -521,7 +628,7 @@ app.whenReady().then(async () => {
       [...windows].find((item) => !item.win.isDestroyed()) ||
       null
     if (state) {
-      showWindow(state)
+      void enterWindow(state)
       return
     }
     if (localPageUrl) createWindow(localPageUrl, { primary: true })

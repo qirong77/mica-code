@@ -455,6 +455,33 @@ describe('chat CLI arguments', () => {
     })
   })
 
+  it('maps mica wait snapshots to wait_tasks events', () => {
+    const event = codexNotificationToEvent({
+      method: 'mica/waitTasks/updated',
+      emittedAtMs: 91011,
+      params: {
+        threadId: 's1',
+        tasks: [
+          {
+            id: 'w1',
+            kind: 'file',
+            label: '/tmp/out.txt 出现',
+            status: 'waiting',
+            startedAt: 1234,
+            polls: 3,
+            timeoutMs: 60000
+          }
+        ]
+      }
+    })
+    expect(event).toMatchObject({
+      type: 'wait_tasks',
+      timestamp: 91011,
+      sessionID: 's1',
+      tasks: [{ id: 'w1', kind: 'file', status: 'waiting', polls: 3 }]
+    })
+  })
+
   it('maps mica subagent snapshots to subagent_tasks events', () => {
     const event = codexNotificationToEvent({
       method: 'mica/subagentTasks/updated',
@@ -489,7 +516,10 @@ describe('chat CLI arguments', () => {
 
   it('defaults missing task arrays to empty lists', () => {
     expect(
-      codexNotificationToEvent({ method: 'mica/backgroundTasks/updated', params: { threadId: 's1' } })
+      codexNotificationToEvent({
+        method: 'mica/backgroundTasks/updated',
+        params: { threadId: 's1' }
+      })
     ).toMatchObject({ type: 'background_tasks', tasks: [] })
     expect(
       codexNotificationToEvent({ method: 'mica/subagentTasks/updated', params: { threadId: 's1' } })

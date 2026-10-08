@@ -114,6 +114,7 @@ describe('getToolDefinitions', () => {
         'apply_patch',
         'run_shell',
         'kill_task',
+        'wait_for',
         'pty_spawn',
         'pty_send',
         'pty_read',

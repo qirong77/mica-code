@@ -1092,9 +1092,14 @@ function handleHostNotification(id, run, notification) {
     run.hostPending = Array.isArray(params.pending) ? params.pending : []
     pushQueueState(id, run)
     return
-  } else if (method === 'mica/backgroundTasks/updated' || method === 'mica/subagentTasks/updated') {
+  } else if (
+    method === 'mica/backgroundTasks/updated' ||
+    method === 'mica/subagentTasks/updated' ||
+    method === 'mica/waitTasks/updated'
+  ) {
     // Long-lived host state snapshots: background shell tasks / running
-    // subagents survive the parent turn and arrive on their own cadence, so
+    // subagents / pending `wait_for` waits survive the parent turn and arrive
+    // on their own cadence, so
     // they must NOT go through the turn event buffer (appendBufferedEvent would
     // let frequent snapshots evict text/step_finish events and replay stale
     // lists on restore). Deliver directly; the renderer replaces the whole

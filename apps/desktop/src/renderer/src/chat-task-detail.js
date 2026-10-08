@@ -76,3 +76,33 @@ export function taskElapsedMs(task, now) {
   const finishedAt = task?.finishedAt ? Date.parse(task.finishedAt) : NaN
   return Math.max(0, (Number.isFinite(finishedAt) ? finishedAt : now) - startedAt)
 }
+
+const WAIT_KIND_LABELS = {
+  task: '后台任务',
+  process: '进程',
+  file: '文件',
+  command: '命令',
+  http: 'HTTP',
+  port: '端口',
+  duration: '时长'
+}
+
+/** wait_for 等待条件的类别文案（dock 行首）。 */
+export function waitTaskKindLabel(kind) {
+  return WAIT_KIND_LABELS[kind] ?? String(kind || '条件')
+}
+
+/**
+ * wait_for dock 行的悬停提示：条件、精确到毫秒的开始时间与已轮询次数。
+ * 侧栏/状态行都不做每秒 tick，倒计时与耗时只在 tooltip 里给。
+ */
+export function waitTaskTooltip(task) {
+  const lines = [String(task?.label || '').trim() || '等待条件']
+  const elapsed = taskElapsedMs(task, Date.now())
+  if (elapsed != null) lines.push(`已等待 ${Math.round(elapsed / 1000)} 秒`)
+  const polls = Number(task?.polls)
+  if (Number.isFinite(polls) && polls > 0) lines.push(`已轮询 ${polls} 次`)
+  const detail = String(task?.detail || '').trim()
+  if (detail) lines.push(`最近一次检查：${detail}`)
+  return lines.join('\n')
+}
