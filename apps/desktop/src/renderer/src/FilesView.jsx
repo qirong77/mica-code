@@ -1281,7 +1281,7 @@ export const FilesView = forwardRef(function FilesView(
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
   const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
   const changeCount = gitRepository?.files?.length || 0
-  // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个右侧面板
+  // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个文件视图
   const hasEditorContent =
     tabs.length > 0 || (isGitPanel && !!gitSelectedFile) || (!!message && !message.transient)
   // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树

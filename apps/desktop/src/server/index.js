@@ -34,7 +34,6 @@ import {
   setChatNotifyServer
 } from '../host/chat.js'
 import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
-import { registerAutoCompactIpc, setAutoCompactBroadcaster } from '../host/auto-compact.js'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
@@ -421,15 +420,12 @@ export async function startDesktopServer(options = {}) {
   // 定时循环跑在运行时里（页签关掉也继续），发送走 chat host 的同一条链路
   setLoopBroadcaster(broadcast)
   setLoopRunner(runLoopTurn)
-  // 自动压缩的设置与计数同样由运行时持有：页面改一处、所有窗口立刻跟上
-  setAutoCompactBroadcaster(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
   registerTerminalIpc()
   registerChatIpc()
   registerLoopIpc()
-  registerAutoCompactIpc()
   registerUiStateIpc()
   registerFilesIpc()
   registerGitIpc()

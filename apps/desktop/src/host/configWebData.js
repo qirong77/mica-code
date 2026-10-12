@@ -14,6 +14,16 @@ import {
   buildConfigWebConversationItems,
   buildConfigWebContextAnalysis
 } from '@mica-config-ui/session-view'
+// 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
+// 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
+import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
+import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
+import {
+  getAutoCompactSnapshot,
+  resetAutoCompactCounters as resetAutoCompactCountersInStore,
+  saveAutoCompactSettings
+} from './auto-compact.js'
+import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
 
 /**
  * 配置页在桌面运行时的数据层。
@@ -21,6 +31,9 @@ import {
  * 直接读写本机的 `$MICA_HOME`（config.json / role / skills / plugins / sessions），不依赖
  * CLI 的那些运行时包 —— 页面组件来自 packages/mica-config-ui，但它引用的数据操作在这里
  * 用最朴素的文件读写实现，和 CLI 侧（apps/config-web 的 server.ts）各自对着一份数据。
+ *
+ * 唯一的例外是自动压缩：它的设置与计数不在 `$MICA_HOME` 里，而是运行时自己的
+ * `userData/auto-compact.json`（host/auto-compact.js 是唯一持有者，这里有它转发）。
  *
  * 会话视图的「history → 对话项 / 上下文分解」是纯逻辑，直接复用包里的实现。
  */
@@ -146,13 +159,19 @@ function listRoles() {
   const directory = rolesDir()
   const files = existsSync(directory)
     ? readdirSync(directory, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+        .filter(
+          (entry) =>
+            entry.isFile() &&
+            entry.name.toLowerCase().endsWith('.md') &&
+            // 与 CLI 的 roles 扫描一致：用户目录里的 default.md 不能盖掉内置角色
+            basename(entry.name, extname(entry.name)) !== 'default'
+        )
         .map((entry) => entry.name)
         .sort()
     : []
   return [
     // 内置角色只展示、不可编辑（与 CLI 的约定一致）
-    { name: 'default', content: '', builtIn: true, path: null },
+    { name: 'default', content: builtInRolePrompt(), builtIn: true, path: null },
     ...files.map((fileName) => ({
       name: basename(fileName, extname(fileName)),
       content: readFileSync(join(directory, fileName), 'utf-8'),
@@ -163,6 +182,11 @@ function listRoles() {
 }
 
 const readRolesDetails = () => ({ root: rolesDir(), roles: listRoles() })
+
+/** 内置 default 角色的提示词（品牌占位符已展开），与 CLI 的 roles.get('default') 同一份内容。 */
+function builtInRolePrompt() {
+  return applyBrandTemplate(defaultSystemPromptTemplate)
+}
 
 function normalizeRoleName(name) {
   const trimmed = String(name ?? '')
@@ -201,7 +225,7 @@ function deleteRole(name) {
 
 /** 会话视图要用「这个会话当时用的角色提示词」把 history 还原成对话 */
 function rolePromptOf(name) {
-  if (!name || name === 'default') return ''
+  if (!name || name === 'default') return builtInRolePrompt()
   try {
     return readRoleFile(name) ?? ''
   } catch {
@@ -461,6 +485,49 @@ function readSessionContextAnalysis(id) {
   )
 }
 
+/* -------------------------------------------------------------- 自动压缩 */
+
+/**
+ * 计数按 sessionId 记（真正的数据与规则在 host/auto-compact.js，这里只是给页面看的投影）。
+ * 标题从会话文件里现读：计数可以留着已经删掉的会话，那就只显示 id 片段而不是当成错误。
+ */
+function sessionTitleOf(sessionId) {
+  const safeId = String(sessionId ?? '').replace(/[^A-Za-z0-9._-]/g, '')
+  if (!safeId) return undefined
+  const path = sessionPath(safeId)
+  if (!existsSync(path)) return undefined
+  try {
+    return readSessionTitle(path)
+  } catch {
+    return undefined
+  }
+}
+
+/** 最近压过的排前面；没压成功过（没有时间戳）的排最后，顺序稳定。 */
+function autoCompactCounters(counters) {
+  return Object.entries(counters)
+    .map(([sessionId, countersOfSession]) => ({
+      sessionId,
+      title: sessionTitleOf(sessionId),
+      ...countersOfSession
+    }))
+    .sort((left, right) => {
+      const leftAt = Date.parse(left.lastRunAt || '')
+      const rightAt = Date.parse(right.lastRunAt || '')
+      return (Number.isFinite(rightAt) ? rightAt : -1) - (Number.isFinite(leftAt) ? leftAt : -1)
+    })
+}
+
+function readAutoCompactDetails() {
+  const snapshot = getAutoCompactSnapshot()
+  return {
+    path: snapshot.path,
+    settings: snapshot.settings,
+    defaults: { ...DEFAULT_AUTO_COMPACT_SETTINGS },
+    counters: autoCompactCounters(snapshot.counters)
+  }
+}
+
 /* ------------------------------------------------------------------ 动作表 */
 
 function addMcpServer(name, content) {
@@ -526,6 +593,17 @@ export const configWebActions = {
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),
   readSessionContent: (input) => readSessionContent(text(input, 'id')),
+
+  readAutoCompactDetails: () => readAutoCompactDetails(),
+  writeAutoCompactSettings: (input) => {
+    saveAutoCompactSettings(input?.settings)
+    return readAutoCompactDetails()
+  },
+  resetAutoCompactCounters: (input) => {
+    resetAutoCompactCountersInStore(input?.sessionId)
+    return readAutoCompactDetails()
+  },
+
   readSessionConversationPage: (input) =>
     readSessionConversationPage(
       text(input, 'id'),

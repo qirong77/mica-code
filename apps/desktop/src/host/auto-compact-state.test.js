@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   applyAutoCompactStatus,
   AUTO_COMPACT_VERSION,
+  clearAutoCompactCounters,
   DEFAULT_AUTO_COMPACT_SETTINGS,
   emptyAutoCompactState,
   emptyCounters,
@@ -245,5 +246,22 @@ describe('resetAutoCompactCounters', () => {
     expect(resetAutoCompactCounters(state, 'other')).toBe(state)
     expect(resetAutoCompactCounters(state, '')).toBe(state)
     expect(resetAutoCompactCounters(emptyAutoCompactState(), 's1')).toEqual(emptyAutoCompactState())
+  })
+})
+
+describe('clearAutoCompactCounters', () => {
+  it('drops every entry but keeps the settings', () => {
+    const state = applyAutoCompactStatus(
+      applyAutoCompactStatus(emptyAutoCompactState(), 's1', { quickRuns: 1 }),
+      's2',
+      { quickRuns: 2 }
+    )
+    const cleared = clearAutoCompactCounters(state)
+    expect(cleared).not.toBe(state)
+    expect(cleared.counters).toEqual({})
+    expect(cleared.settings).toEqual(state.settings)
+    // 已经空了就原样返回：调用方据此跳过落盘
+    expect(clearAutoCompactCounters(cleared)).toBe(cleared)
+    expect(clearAutoCompactCounters(emptyAutoCompactState())).toEqual(emptyAutoCompactState())
   })
 })

@@ -42,8 +42,8 @@ describe('isInsidePopover', () => {
   })
 
   it('keeps another popover trigger as outside', () => {
-    // 时钟面板开着时点齿轮：齿轮不是它的触发按钮，先关掉时钟再让齿轮打开自己的面板。
-    const other = node({ attrs: { 'data-popover-trigger': 'auto-compact' } })
+    // 时钟面板开着时点模型选择器：它不是时钟的触发按钮，先关掉时钟再让它打开自己的面板。
+    const other = node({ attrs: { 'data-popover-trigger': 'picker' } })
     expect(isInsidePopover(other, { popover: null, trigger: 'loop' })).toBe(false)
     // 不给名字时才按「任意触发按钮」放行（没接 ref 的调用方）
     expect(isInsidePopover(other, { popover: null })).toBe(true)

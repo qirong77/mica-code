@@ -2825,4 +2825,111 @@ textarea {
     max-height: 90dvh;
   }
 }
+
+/* Auto Compact：规则表单 + 按会话记的压缩计数（每跑完一次模型请求检查一次 ctx） */
+.auto-compact-stack {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.auto-compact-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.auto-compact-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auto-compact-switch {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.auto-compact-switch input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.auto-compact-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.auto-compact-footer {
+  display: flex;
+  /* 桌面端的设置页挤在中间一列里（见 AGENT.md），窄到放不下时整块折行而不是把按钮压成竖排 */
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.auto-compact-note {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  line-height: 1.6;
+}
+
+.auto-compact-footer > .ui-button {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.auto-compact-counter-list {
+  display: grid;
+}
+
+.auto-compact-counter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.auto-compact-counter-row:first-child {
+  border-top: 0;
+}
+
+.auto-compact-counter-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.auto-compact-counter-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-compact-counter-meta {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  line-height: 1.5;
+}
 }

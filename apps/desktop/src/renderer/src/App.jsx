@@ -11,12 +11,11 @@ import {
 import {
   IconArrowUp,
   IconChartBar,
+  IconFiles,
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
   IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand,
   IconMenu2,
   IconMessage,
   IconPlus,
@@ -51,7 +50,7 @@ import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd
 import { loopNodeIds } from './loop-command'
 import { resolveGroupCwd } from './session-projects'
 import {
-  RIGHT_PANEL_SWEEP_MS,
+  TERMINAL_PANEL_SWEEP_MS,
   activeRightTermId,
   reclaimableRightTermIds,
   staleRightTermIds
@@ -728,16 +727,17 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
 const DEFAULT_SIDEBAR_WIDTH = 260
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
-const DEFAULT_RIGHT_PANEL_WIDTH = 400
-const MIN_RIGHT_PANEL_WIDTH = 280
+// 底部终端面板（VSCode 风格）：高度可拖，默认给对话留出大半屏，最高不超过视高的 3/4。
+const DEFAULT_TERMINAL_HEIGHT = 320
+const MIN_TERMINAL_HEIGHT = 120
+const MAX_TERMINAL_HEIGHT_RATIO = 0.75
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
-// —— 86px 是 macOS 上让开交通灯后的位置，右侧面板标题栏的 pl-30 按它预留
+// —— 86px 是 macOS 上让开交通灯后的位置。
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
 const SIDEBAR_TOGGLE_GUTTER = 30
-// 侧栏/右面板宽度写在根节点的 CSS 变量上：网格列宽、两侧栏宽度与侧栏切换按钮的定位都引用
-// 它们，于是拖动分隔条时只要改写变量就够了，不必让 React 重渲染整个 App（见下面的拖拽处理）。
+// 侧栏宽度写在根节点的 CSS 变量上：网格列宽、侧栏自身宽度与侧栏切换按钮的定位都引用它，
+// 于是拖动分隔条时只要改写变量就够了，不必让 React 重渲染整个 App（见下面的拖拽处理）。
 const SIDEBAR_WIDTH_VAR = '--mica-sidebar-width'
-const RIGHT_PANEL_WIDTH_VAR = '--mica-right-panel-width'
 
 function setLayoutVar(name, value) {
   document.documentElement.style.setProperty(name, value)
@@ -745,6 +745,7 @@ function setLayoutVar(name, value) {
 
 // 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
 const PAGE_HEADER = {
+  files: { label: 'Files', Icon: IconFiles },
   stats: { label: 'Stats', Icon: IconChartBar },
   settings: { label: 'Settings', Icon: IconSettings }
 }
@@ -765,11 +766,9 @@ function savedSidebarWidth() {
     : DEFAULT_SIDEBAR_WIDTH
 }
 
-function savedRightPanelWidth() {
-  const value = Number(storedLayout().rightPanelWidth)
-  return Number.isFinite(value) && value >= MIN_RIGHT_PANEL_WIDTH
-    ? value
-    : DEFAULT_RIGHT_PANEL_WIDTH
+function savedTerminalHeight() {
+  const value = Number(storedLayout().terminalHeight)
+  return Number.isFinite(value) && value >= MIN_TERMINAL_HEIGHT ? value : DEFAULT_TERMINAL_HEIGHT
 }
 
 /**
@@ -816,17 +815,23 @@ function workspaceSnapshot(nodes, activeId, selectedId) {
   }
 }
 
-// 右侧面板没有固定的最大宽度：拖到哪算哪，只按「窗口宽度 - 可见侧栏」封顶。三个网格列
-// 都是硬宽度时，侧栏 + 面板一旦超过窗口宽，网格就整体溢出、面板右半截跑到屏幕外。
-function rightPanelWidthLimit(viewport, sidebarWidth, sidebarCollapsed) {
+// 终端面板最多占视高的 3/4：拖到哪算哪，但要给上面的对话留一截。
+function terminalHeightLimit(viewport) {
   if (!Number.isFinite(viewport) || viewport <= 0) return Infinity
-  const reserved = sidebarCollapsed ? 0 : sidebarWidth
-  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.round(viewport - reserved))
+  return Math.max(MIN_TERMINAL_HEIGHT, Math.round(viewport * MAX_TERMINAL_HEIGHT_RATIO))
 }
 
 export default function App() {
   const terminalRef = useRef(null)
   const filesRef = useRef(null)
+  // FilesView 是按需挂载的：回调 ref 记下它有没有真的挂到页面上，好把「chunk 还没到位
+  // 就点了文件」的那一次打开补上（见下面的 pendingFileOpenRef）。
+  const [filesReady, setFilesReady] = useState(false)
+  const pendingFileOpenRef = useRef(null)
+  const attachFilesRef = useCallback((node) => {
+    filesRef.current = node
+    setFilesReady((prev) => (node ? true : prev))
+  }, [])
   const branchButtonRef = useRef(null)
   const contentRef = useRef(null)
   // 地址栏里的页面级状态只在首次渲染读一次：`sessionId` 是启动时要落到的会话。
@@ -843,12 +848,12 @@ export default function App() {
   )
   const [nodes, setNodes] = useState(bootstrap.nodes)
   const nodesRef = useLatest(nodes)
-  // 右侧面板终端区域的独立 shell 终端 Tab，按会话（左侧对话节点 id）分组归属：
-  // 切换会话时整组跟着切走，PTY 的 cwd 也跟随所属会话的路径。
+  // 底部终端面板里的 shell 终端按会话（左侧对话节点 id）分组归属：切换会话时整组
+  // 跟着切走，PTY 的 cwd 也跟随所属会话的路径。
   const [rightTermsByChat, setRightTermsByChat] = useState({})
   const rightTermsByChatRef = useLatest(rightTermsByChat)
   const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
-  // 右侧终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
+  // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
   // 白白重渲染整个面板，所以放 ref 里。
   const rightTermActivityRef = useRef(new Map())
   const [activeId, setActiveId] = useState(bootstrap.activeId)
@@ -861,33 +866,46 @@ export default function App() {
   const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
   const [selectedId, setSelectedId] = useState(bootstrap.selectedId)
   const selectedIdRef = useLatest(selectedId)
-  // 中间主区视图：chat | stats | settings（files/terminal 移入右侧 Panel）
+  // 主区视图：chat | files | stats | settings。文件与对话共用主区（顶栏「文件」按钮来回
+  // 切换），终端则是主区底部可收起的下拉面板（见 terminalOpen）。
   const [view, setView] = useState(() =>
-    storedLayout().view === 'stats' || storedLayout().view === 'settings'
+    storedLayout().view === 'stats' ||
+    storedLayout().view === 'settings' ||
+    storedLayout().view === 'files'
       ? storedLayout().view
       : 'chat'
   )
-  // 右侧 Panel：是否展开、当前 Tab（files | terminal）
-  const [rightPanelOpen, setRightPanelOpen] = useState(
-    () => storedLayout().rightPanelOpen !== false
-  )
-  const [rightPanelTab, setRightPanelTab] = useState(() =>
-    storedLayout().rightPanelTab === 'terminal' ? 'terminal' : 'files'
-  )
-  // 右侧 Panel 宽度（可拖拽）
-  const [rightPanelWidth, setRightPanelWidth] = useState(savedRightPanelWidth)
-  // 右侧 Panel 最大化（占满窗口）
-  const [rightPanelMaximized, setRightPanelMaximized] = useState(
-    () => storedLayout().rightPanelMaximized === true
-  )
-  const [resizingRightPanel, setResizingRightPanel] = useState(false)
-  const rightPanelWidthRef = useRef(rightPanelWidth)
-  // 移动端：三栏退化为单栏，侧栏与右面板改为覆盖式抽屉
+  // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
+  // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
+  const [filesMounted, setFilesMounted] = useState(view === 'files')
+  useEffect(() => {
+    if (view === 'files') setFilesMounted(true)
+  }, [view])
+  // FilesView 第一次挂上来（filesReady 变真）时补开刚才排队的那次「打开文件」。
+  useEffect(() => {
+    if (!filesReady || view !== 'files') return
+    const pending = pendingFileOpenRef.current
+    if (!pending) return
+    pendingFileOpenRef.current = null
+    filesRef.current?.openFile(pending.path, pending.position)
+  }, [filesReady, view])
+  // 底部终端面板：展开状态与高度都是界面状态（跨窗口/重启保持）
+  const [terminalOpen, setTerminalOpen] = useState(() => storedLayout().terminalOpen === true)
+  const [terminalHeight, setTerminalHeight] = useState(savedTerminalHeight)
+  const [resizingTerminal, setResizingTerminal] = useState(false)
+  const terminalHeightRef = useRef(terminalHeight)
+  // 拖动面板顶边时直接改这个节点的 style.height（不走 React 状态，见 startTerminalResize）。
+  const terminalPanelRef = useRef(null)
+  // 终端面板同样按需挂载：第一次打开才把 xterm 那一块拉进来，之后保持挂载（收起不重开 shell）。
+  const [terminalMounted, setTerminalMounted] = useState(terminalOpen)
+  useEffect(() => {
+    if (terminalOpen) setTerminalMounted(true)
+  }, [terminalOpen])
+  // 移动端：三栏（这里是两栏）退化为单栏，侧栏改为覆盖式抽屉
   const isMobile = useIsMobile()
-  const isMobileRef = useLatest(isMobile)
   // 软键盘弹起时让根容器跟着可见区缩，否则底部输入条/终端键栏会被键盘盖住
   useVisualViewportHeight()
-  const [mobileDrawer, setMobileDrawer] = useState(null)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => storedLayout().sidebarCollapsed === true
   )
@@ -897,20 +915,14 @@ export default function App() {
   // 分享页面里侧栏是「不存在」而不是「被收起」：不写回 layout（那会把别人的侧栏也收掉），
   // 只在渲染与面板宽度上限里把它当成收起处理（宽度为 0、不可展开、不占列宽）。
   const sidebarHidden = sidebarCollapsed || shareMode
-  const sidebarHiddenRef = useLatest(sidebarHidden)
-  // 分享页里右侧面板同样是「不存在」而不是「被收起」：访客没有 files:*/terminal:* 权限，
-  // 展开只会拿到一串权限错误。与侧栏同一套做法——只在渲染里当成收起处理，不写回 layout
-  // （写进去会把所有者的面板也收掉，也会让这一页的展开状态泄漏给别人）。
-  const rightPanelHidden = shareMode
-  const rightPanelShown = rightPanelOpen && !rightPanelHidden
-  const rightPanelMaximizedShown = rightPanelMaximized && !rightPanelHidden
-  // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一对变量）
+  // 分享页里终端面板与文件视图同样是「不存在」而不是「被收起」：访客没有 files:*/
+  // terminal:* 权限，展开只会拿到一串权限错误。与侧栏同一套做法——只在渲染里当成
+  // 关闭处理，不写回 layout（写进去会把所有者的界面也改掉）。
+  const terminalVisible = terminalOpen && !shareMode
+  // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一变量）
   useLayoutEffect(() => {
     setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
   }, [sidebarHidden, sidebarWidth])
-  useLayoutEffect(() => {
-    setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${rightPanelShown ? rightPanelWidth : 0}px`)
-  }, [rightPanelShown, rightPanelWidth])
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
@@ -926,25 +938,10 @@ export default function App() {
   const serverRowRef = useRef(null)
   const serverCloseTimer = useRef(null)
   const currentServer = currentServerUrl(window.location)
-  // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
-  // 打开终端）都会同步打开抽屉，不必逐个改调用点
-  // 盯的是「面板真的显示出来了」而不是 layout 里的原值：分享页里即使 rightPanelOpen 被
-  // 置真，也不该把移动端抽屉拉出来。
-  const previousRightPanelShown = useRef(rightPanelShown)
   useEffect(() => {
-    const wasShown = previousRightPanelShown.current
-    previousRightPanelShown.current = rightPanelShown
-    if (isMobile && rightPanelShown && !wasShown) setMobileDrawer('right')
-  }, [isMobile, rightPanelShown])
-  useEffect(() => {
-    if (!isMobile) setMobileDrawer(null)
+    if (!isMobile) setSessionsOpen(false)
   }, [isMobile])
-  const closeMobileDrawer = useCallback(() => setMobileDrawer(null), [])
-  const rightPanelVisible = rightPanelHidden
-    ? false
-    : isMobile
-      ? mobileDrawer === 'right'
-      : rightPanelShown
+  const closeMobileDrawer = useCallback(() => setSessionsOpen(false), [])
 
   // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
   // 点一下切换。
@@ -989,8 +986,8 @@ export default function App() {
   }, [serverMenuOpen])
 
   useEffect(() => {
-    if (isMobile && !mobileDrawer) setServerMenuOpen(false)
-  }, [isMobile, mobileDrawer])
+    if (isMobile && !sessionsOpen) setServerMenuOpen(false)
+  }, [isMobile, sessionsOpen])
 
   // 切到另一台运行时 = 打开它的地址：外壳里由主进程弹一个新窗口，浏览器里开新标签页
   const switchServer = useCallback((url) => openServerTarget(url), [])
@@ -1090,32 +1087,6 @@ export default function App() {
     const off = window.mica.loops.onChanged((payload) => applyLoops(payload?.loops))
     return () => off?.()
   }, [applyLoops])
-
-  // 自动压缩（每完成一次模型请求检查 ctx，超过阈值就压缩）：规则活在运行时里，按 sessionId
-  // 记账，页面只是订阅者——ChatView 只读这份 props、写入直接打 `window.mica.autoCompact`，
-  // 与定时循环同一条路（详见 AGENT.md 的「apps/desktop 的架构」）。
-  const [autoCompact, setAutoCompact] = useState(null)
-  const applyAutoCompact = useCallback((payload) => {
-    if (!payload) return
-    // 广播允许只带一部分（例如只更新计数）：缺的字段沿用上一次的值，别把设置打回默认。
-    setAutoCompact((previous) => ({
-      settings: payload.settings ?? previous?.settings ?? null,
-      counters: payload.counters ?? previous?.counters ?? {}
-    }))
-  }, [])
-
-  useEffect(() => {
-    window.mica.autoCompact
-      .get()
-      .then((result) => {
-        if (result && result.ok === false) return
-        applyAutoCompact(result)
-      })
-      .catch((error) => console.error('load auto compact failed', error))
-    // 计数每跑一轮就变，设置改了也要同步——别的窗口改了这里也跟着变。
-    const off = window.mica.autoCompact.onChanged((payload) => applyAutoCompact(payload))
-    return () => off?.()
-  }, [applyAutoCompact])
 
   const refreshPins = useCallback(() => {
     window.mica.stats
@@ -1219,21 +1190,11 @@ export default function App() {
     setUiState('layout', {
       sidebarWidth,
       sidebarCollapsed,
-      rightPanelWidth,
-      rightPanelOpen,
-      rightPanelTab,
-      rightPanelMaximized,
+      terminalOpen,
+      terminalHeight,
       view
     })
-  }, [
-    rightPanelMaximized,
-    rightPanelOpen,
-    rightPanelTab,
-    rightPanelWidth,
-    sidebarCollapsed,
-    sidebarWidth,
-    view
-  ])
+  }, [sidebarCollapsed, sidebarWidth, terminalHeight, terminalOpen, view])
 
   useEffect(() => {
     if (!remoteLayout) return
@@ -1241,16 +1202,11 @@ export default function App() {
     if (Number.isFinite(remoteLayout.sidebarWidth)) setSidebarWidth(remoteLayout.sidebarWidth)
     if (typeof remoteLayout.sidebarCollapsed === 'boolean')
       setSidebarCollapsed(remoteLayout.sidebarCollapsed)
-    if (Number.isFinite(remoteLayout.rightPanelWidth))
-      setRightPanelWidth(remoteLayout.rightPanelWidth)
-    if (typeof remoteLayout.rightPanelOpen === 'boolean')
-      setRightPanelOpen(remoteLayout.rightPanelOpen)
-    if (remoteLayout.rightPanelTab === 'files' || remoteLayout.rightPanelTab === 'terminal')
-      setRightPanelTab(remoteLayout.rightPanelTab)
-    if (typeof remoteLayout.rightPanelMaximized === 'boolean')
-      setRightPanelMaximized(remoteLayout.rightPanelMaximized)
+    if (Number.isFinite(remoteLayout.terminalHeight)) setTerminalHeight(remoteLayout.terminalHeight)
+    if (typeof remoteLayout.terminalOpen === 'boolean') setTerminalOpen(remoteLayout.terminalOpen)
     if (
       remoteLayout.view === 'chat' ||
+      remoteLayout.view === 'files' ||
       remoteLayout.view === 'stats' ||
       remoteLayout.view === 'settings'
     )
@@ -1504,8 +1460,8 @@ export default function App() {
   )
 
   const createRightTerm = useCallback(() => {
-    // 分享页没有右侧面板，别在宿主上给访客拉起一个 PTY（终端能力对访客也是拒绝的）。
-    if (rightPanelHidden) return
+    // 分享页没有终端面板，别在宿主上给访客拉起一个 PTY（终端能力对访客也是拒绝的）。
+    if (shareMode) return
     const chatId = activeRef.current
     if (!chatId) return
     const id = uid('rt')
@@ -1525,8 +1481,8 @@ export default function App() {
       }
     })
     setRightActiveTermByChat((prev) => ({ ...prev, [chatId]: id }))
-    setRightPanelTab('terminal')
-  }, [activeRef, nodesRef, rightPanelHidden, terminalCwd])
+    setTerminalOpen(true)
+  }, [activeRef, nodesRef, shareMode, terminalCwd])
 
   const closeRightTerm = useCallback(
     (id) => {
@@ -1577,24 +1533,27 @@ export default function App() {
   const touchRightTerm = useCallback((id) => {
     rightTermActivityRef.current.set(id, Date.now())
   }, [])
-  const openRightTerminalTab = useCallback(() => {
-    if (rightPanelHidden) return
-    // 切到终端 Tab 时至少要有一个终端，否则用户还得先手动新建第一个。
-    if (rightTerms.length === 0) {
-      createRightTerm()
-      return
-    }
-    setRightPanelTab('terminal')
-  }, [createRightTerm, rightPanelHidden, rightTerms.length])
+  // 打开终端面板时至少要有一个终端，否则用户还得先手动新建第一个。
+  const openTerminalPanel = useCallback(() => {
+    if (shareMode) return
+    if (rightTerms.length === 0) createRightTerm()
+    else setTerminalOpen(true)
+  }, [createRightTerm, rightTerms.length, shareMode])
+  // 顶栏终端图标 / Ctrl+`：来回切换面板的显示与隐藏。
+  const toggleTerminalPanel = useCallback(() => {
+    if (shareMode) return
+    if (terminalOpen) setTerminalOpen(false)
+    else openTerminalPanel()
+  }, [openTerminalPanel, shareMode, terminalOpen])
 
-  // 右侧面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
-  // 否则切过去只能看到一片空白。只在这一区域真正可见时才补，免得用户点过的每个
+  // 终端面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
+  // 否则切过去只能看到一片空白。只在面板真正可见时才补，免得用户点过的每个
   // 会话都被拉起一个 PTY。
   useEffect(() => {
-    if (!activeId || !rightPanelVisible || rightPanelTab !== 'terminal') return
+    if (!activeId || !terminalVisible) return
     if ((rightTermsByChatRef.current[activeId] || []).length > 0) return
     createRightTerm()
-  }, [activeId, createRightTerm, rightPanelTab, rightPanelVisible, rightTermsByChatRef])
+  }, [activeId, createRightTerm, rightTermsByChatRef, terminalVisible])
 
   // 会话路径（底部状态栏切换 cwd、恢复会话）变化后，该会话下空闲的终端重新加载
   // 到新目录；有前台进程在跑的保持不动。
@@ -1669,7 +1628,7 @@ export default function App() {
         }
         return next
       })
-    }, RIGHT_PANEL_SWEEP_MS)
+    }, TERMINAL_PANEL_SWEEP_MS)
     return () => window.clearInterval(timer)
   }, [activeRef, nodesRef, notificationStatesRef, rightTermsByChatRef, sessionsRef])
 
@@ -1960,30 +1919,32 @@ export default function App() {
     }
   }, [activeCwd])
   const repository = gitIsCurrent ? git.repository : null
-  const getSearchRoot = useCallback(
-    () => terminalRef.current?.getCwd(activeRef.current),
-    [activeRef]
-  )
-  const openSearchFile = useCallback(
-    async (path, position) => {
-      setView('chat')
-      setRightPanelOpen(true)
-      setRightPanelTab('files')
-      if (isMobileRef.current) setMobileDrawer('right')
-      await filesRef.current?.openFile(path, position)
+  // Cmd/Ctrl+P 的搜索根：优先用终端 shell 的实时目录；终端面板没开过（terminalRef 还是空）
+  // 或该会话还没有终端时退回会话自己的 cwd —— 不能因为面板没打开就让文件搜索失灵。
+  const getSearchRoot = useCallback(async () => {
+    const id = activeRef.current
+    const fromTerminal = id ? await terminalRef.current?.getCwd(id) : null
+    return fromTerminal || (id ? terminalCwd(id) : null) || gitRef.current?.cwd || null
+  }, [activeRef, gitRef, terminalCwd])
+  // 对话里的路径链接、终端文件链接、Cmd/Ctrl+P 的结果都落到同一个入口：切到主区
+  // 文件视图并打开那个文件。FilesView 能立刻打开就直接开（它隐藏时也能接收 openFile），
+  // 只有按需挂载的 chunk 还没到位时才把这次请求记下来，等 FilesView 挂上来再补开。
+  const openFileInView = useCallback(
+    (path, position) => {
+      if (shareMode) return
+      setFilesMounted(true)
+      setView('files')
+      const files = filesRef.current
+      if (files) {
+        files.openFile(path, position)
+        return
+      }
+      pendingFileOpenRef.current = { path, position }
     },
-    [isMobileRef]
+    [shareMode]
   )
-  const openChatFile = useCallback(
-    async (path, position) => {
-      setView('chat')
-      setRightPanelOpen(true)
-      setRightPanelTab('files')
-      if (isMobileRef.current) setMobileDrawer('right')
-      await filesRef.current?.openFile(path, position)
-    },
-    [isMobileRef]
-  )
+  const openSearchFile = openFileInView
+  const openChatFile = openFileInView
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
   useEffect(() => {
     const handler = (event) => {
@@ -1994,11 +1955,8 @@ export default function App() {
     return () => window.removeEventListener('mica:open-file', handler)
   }, [openChatFile])
   const openChatTerminal = useCallback(() => {
-    setRightPanelOpen(true)
-    openRightTerminalTab()
-    const id = activeRef.current
-    if (id) terminalRef.current?.activate(id).catch(() => {})
-  }, [activeRef, openRightTerminalTab])
+    openTerminalPanel()
+  }, [openTerminalPanel])
   const createChatSession = useCallback(
     (cwd = null) => {
       setView('chat')
@@ -2030,8 +1988,8 @@ export default function App() {
     [activeRef, refreshGit]
   )
   const closeSearchFile = useCallback(
-    () => rightPanelOpen && rightPanelTab === 'files' && !!filesRef.current?.closeActive(),
-    [rightPanelOpen, rightPanelTab]
+    () => view === 'files' && !!filesRef.current?.closeActive(),
+    [view]
   )
   const canChangeBranch = useCallback(
     () =>
@@ -2049,14 +2007,13 @@ export default function App() {
   }
   // 拖分隔条不能每个 pointermove 都 setState：那会把整个 App（长对话的 markdown、打开的文件
   // monaco、会话树）重渲染一遍，一次 move 就要几十毫秒，拖动直接卡住。拖动期间只改写根节点上
-  // 的宽度变量（网格列宽与两侧栏宽度都读它），松手才提交回状态（持久化/别的窗口读到的是最终值）。
+  // 的宽度变量（网格列宽与侧栏宽度都读它），松手才提交回状态（持久化/别的窗口读到的是最终值）。
   const startSidebarResize = useCallback((event) => {
     if (event.button !== 0) return
     event.preventDefault()
     const startX = event.clientX
     const startWidth = sidebarWidthRef.current
     let width = startWidth
-    let panelWidth = rightPanelWidthRef.current
     setResizingSidebar(true)
     document.body.classList.add('is-resizing-sidebar')
 
@@ -2068,12 +2025,6 @@ export default function App() {
         )
       )
       setLayoutVar(SIDEBAR_WIDTH_VAR, `${width}px`)
-      // 侧栏变宽会把右面板挤出窗口：跟着压回上限（与松手后 clamp effect 同一口径）
-      const limit = rightPanelWidthLimit(window.innerWidth, width, sidebarHiddenRef.current)
-      if (panelWidth > limit) {
-        panelWidth = Math.max(MIN_RIGHT_PANEL_WIDTH, limit)
-        setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${panelWidth}px`)
-      }
     }
     const finish = () => {
       window.removeEventListener('pointermove', onMove)
@@ -2082,7 +2033,6 @@ export default function App() {
       document.body.classList.remove('is-resizing-sidebar')
       setResizingSidebar(false)
       setSidebarWidth(width)
-      setRightPanelWidth(panelWidth)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
@@ -2091,118 +2041,72 @@ export default function App() {
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth
   }, [sidebarWidth])
-  // 右侧 Panel 宽度拖拽（同上：拖动期间只改变量，松手才提交）
-  const startRightPanelResize = useCallback((event) => {
+  // 底部终端面板的高度拖拽：拖的是面板顶边，往上拖变高。同样拖动期间只改 DOM 上的高度、
+  // 松手才提交回状态（提交后由写回 layout 的镜像 effect 持久化）。
+  const startTerminalResize = useCallback((event) => {
     if (event.button !== 0) return
     event.preventDefault()
-    const startX = event.clientX
-    const startWidth = rightPanelWidthRef.current
-    let width = startWidth
-    setResizingRightPanel(true)
-    document.body.classList.add('is-resizing-right-panel')
+    const startY = event.clientY
+    const startHeight = terminalHeightRef.current
+    let height = startHeight
+    setResizingTerminal(true)
+    document.body.classList.add('is-resizing-terminal')
 
     const onMove = (moveEvent) => {
-      const limit = rightPanelWidthLimit(
-        window.innerWidth,
-        sidebarWidthRef.current,
-        sidebarHiddenRef.current
+      const limit = terminalHeightLimit(window.innerHeight)
+      height = Math.round(
+        Math.min(limit, Math.max(MIN_TERMINAL_HEIGHT, startHeight + (startY - moveEvent.clientY)))
       )
-      width = Math.round(
-        Math.min(limit, Math.max(MIN_RIGHT_PANEL_WIDTH, startWidth - (moveEvent.clientX - startX)))
-      )
-      setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${width}px`)
+      if (terminalPanelRef.current) terminalPanelRef.current.style.height = `${height}px`
     }
     const finish = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
-      document.body.classList.remove('is-resizing-right-panel')
-      setResizingRightPanel(false)
-      setRightPanelWidth(width)
+      document.body.classList.remove('is-resizing-terminal')
+      setResizingTerminal(false)
+      setTerminalHeight(height)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', finish)
   }, [])
   useEffect(() => {
-    rightPanelWidthRef.current = rightPanelWidth
-  }, [rightPanelWidth])
-  // 窗口变小或侧栏重新展开后，已保存的面板宽度可能超过可用空间：粘住上限，别让网格溢出。
+    terminalHeightRef.current = terminalHeight
+  }, [terminalHeight])
+  // 窗口变小后已保存的面板高度可能超过上限：粘住上限，别让终端把对话全吃掉。
   useEffect(() => {
-    // 移动端面板是覆盖式抽屉、宽度由 CSS 决定，别按窄屏把桌面用的宽度压小。
     const clamp = () => {
-      if (isMobile) return
-      setRightPanelWidth((value) => {
-        const limit = rightPanelWidthLimit(
-          window.innerWidth,
-          sidebarWidthRef.current,
-          sidebarHiddenRef.current
-        )
-        return value > limit ? Math.max(MIN_RIGHT_PANEL_WIDTH, limit) : value
+      setTerminalHeight((value) => {
+        const limit = terminalHeightLimit(window.innerHeight)
+        return value > limit ? Math.max(MIN_TERMINAL_HEIGHT, limit) : value
       })
     }
     clamp()
     window.addEventListener('resize', clamp)
     return () => window.removeEventListener('resize', clamp)
-  }, [isMobile, sidebarHidden, sidebarWidth])
-  const toggleRightPanel = useCallback(() => {
-    if (rightPanelHidden) return
-    if (isMobile) {
-      setRightPanelOpen(true)
-      setMobileDrawer((value) => (value === 'right' ? null : 'right'))
-      return
-    }
-    setRightPanelOpen((open) => !open)
-  }, [isMobile, rightPanelHidden])
-  // Cmd/Ctrl+Shift+I 显示/隐藏右侧 Panel
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.repeat || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey)
-        return
-      if (event.code !== 'KeyI') return
-      event.preventDefault()
-      event.stopPropagation()
-      toggleRightPanel()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggleRightPanel])
-  // Cmd/Ctrl+` 切换右侧 Panel 的文件/终端 Tab
+  }, [])
+  // Ctrl+` 显示/隐藏底部终端面板（顶栏终端图标是同一个入口）。
+  // 只用 Ctrl：macOS 上 Cmd+` 是系统的「切换窗口」快捷键，会被先吞掉。
   useEffect(() => {
     const onKey = (event) => {
       if (event.repeat || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
       if (event.code !== 'Backquote') return
       event.preventDefault()
       event.stopPropagation()
-      if (rightPanelHidden) return
-      setRightPanelOpen(true)
-      if (rightPanelTab === 'terminal') setRightPanelTab('files')
-      else openRightTerminalTab()
+      toggleTerminalPanel()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [openRightTerminalTab, rightPanelHidden, rightPanelTab])
+  }, [toggleTerminalPanel])
 
   return (
     <>
       <div
-        className={
-          isMobile
-            ? 'relative flex size-full flex-col overflow-hidden'
-            : 'grid size-full transition-[grid-template-columns]'
-        }
-        style={
-          isMobile
-            ? undefined
-            : {
-                gridTemplateColumns: rightPanelMaximizedShown
-                  ? '0px 0px 1fr'
-                  : `var(${SIDEBAR_WIDTH_VAR}) 1fr var(${RIGHT_PANEL_WIDTH_VAR})`,
-                transition: rightPanelOpen ? 'none' : 'none'
-              }
-        }
+        className={isMobile ? 'relative flex size-full flex-col overflow-hidden' : 'grid size-full'}
+        style={isMobile ? undefined : { gridTemplateColumns: `var(${SIDEBAR_WIDTH_VAR}) 1fr` }}
       >
-        {isMobile && mobileDrawer && (
+        {isMobile && sessionsOpen && (
           <div
             className="fixed inset-0 z-[9050] bg-black/55"
             aria-hidden="true"
@@ -2213,9 +2117,9 @@ export default function App() {
           className={
             isMobile
               ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
-                  mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
+                  sessionsOpen ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden || rightPanelMaximizedShown ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={
             isMobile
@@ -2378,9 +2282,7 @@ export default function App() {
             onShareSession={shareSession}
           />
         </aside>
-        <main
-          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximizedShown ? 'invisible' : ''}`}
-        >
+        <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
             className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
           >
@@ -2389,11 +2291,9 @@ export default function App() {
                 type="button"
                 title="会话列表"
                 aria-label="会话列表"
-                aria-expanded={mobileDrawer === 'sessions'}
+                aria-expanded={sessionsOpen}
                 className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-white/55 hover:bg-white/[.06] hover:text-white"
-                onClick={() =>
-                  setMobileDrawer((value) => (value === 'sessions' ? null : 'sessions'))
-                }
+                onClick={() => setSessionsOpen((open) => !open)}
               >
                 <IconMenu2 size={16} />
               </button>
@@ -2403,44 +2303,60 @@ export default function App() {
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             ) : PAGE_HEADER[view] ? (
-              <>
-                {(() => {
-                  const { label, Icon } = PAGE_HEADER[view]
-                  return (
-                    <>
-                      <Icon size={13} className="shrink-0 opacity-80" />
-                      <span>{label}</span>
-                    </>
-                  )
-                })()}
+              (() => {
+                const { label, Icon } = PAGE_HEADER[view]
+                return (
+                  <>
+                    <Icon size={13} className="shrink-0 opacity-80" />
+                    <span>{label}</span>
+                  </>
+                )
+              })()
+            ) : null}
+            {/* 顶栏右侧：返回对话（非对话视图）、终端面板开关、文件视图开关。
+                分享页里 files/terminal 能力都拿不到，这两个开关整个不渲染。 */}
+            <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              {view !== 'chat' && PAGE_HEADER[view] && (
                 <button
                   type="button"
                   title="返回对话"
                   aria-label="返回对话"
-                  className="no-drag ml-auto flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+                  className="flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
                   onClick={() => setView('chat')}
                 >
                   <IconMessage size={13} />
                   <span>返回对话</span>
                 </button>
-              </>
-            ) : null}
-            {/* 分享页里右侧面板不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
-            {!rightPanelHidden && (
-              <button
-                type="button"
-                title={rightPanelVisible ? '收起右侧面板 (⇧⌘I)' : '展开右侧面板 (⇧⌘I)'}
-                aria-label={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
-                className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                onClick={toggleRightPanel}
-              >
-                {rightPanelVisible ? (
-                  <IconLayoutSidebarRightCollapse size={15} />
-                ) : (
-                  <IconLayoutSidebarRightExpand size={15} />
-                )}
-              </button>
-            )}
+              )}
+              {!shareMode && (
+                <>
+                  <button
+                    type="button"
+                    title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
+                    aria-label={terminalVisible ? '收起终端' : '展开终端'}
+                    aria-pressed={terminalVisible}
+                    className={`grid size-7 place-items-center rounded-md transition-colors hover:bg-white/[.06] hover:text-white ${
+                      terminalVisible ? 'text-white' : 'text-white/55'
+                    }`}
+                    onClick={toggleTerminalPanel}
+                  >
+                    <IconTerminal2 size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    title={view === 'files' ? '返回对话' : '查看文件'}
+                    aria-label={view === 'files' ? '返回对话' : '查看文件'}
+                    aria-pressed={view === 'files'}
+                    className={`grid size-7 place-items-center rounded-md transition-colors hover:bg-white/[.06] hover:text-white ${
+                      view === 'files' ? 'text-white' : 'text-white/55'
+                    }`}
+                    onClick={() => setView((current) => (current === 'files' ? 'chat' : 'files'))}
+                  >
+                    <IconFiles size={15} />
+                  </button>
+                </>
+              )}
+            </div>
           </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Suspense fallback={null}>
@@ -2449,13 +2365,27 @@ export default function App() {
             <Suspense fallback={null}>
               <SettingsView visible={view === 'settings'} />
             </Suspense>
+            {filesMounted && (
+              <Suspense fallback={null}>
+                <FilesView
+                  ref={attachFilesRef}
+                  root={gitIsCurrent ? git.cwd : null}
+                  visible={view === 'files'}
+                  askText={askText}
+                  gitCwd={gitIsCurrent ? git.cwd : null}
+                  gitRepository={repository}
+                  gitLoading={gitIsCurrent ? git.loading : true}
+                  gitBranch={gitIsCurrent ? git.status?.branch || null : null}
+                  onCornerResizeStart={null}
+                />
+              </Suspense>
+            )}
             <ChatView
               node={terminalNodes.find((node) => node.id === activeId)}
               cwd={terminalCwd(activeId)}
               visible={view === 'chat'}
               isMobile={isMobile}
               loops={loops}
-              autoCompact={autoCompact}
               onSessionBound={setSessionId}
               onOpenFile={openChatFile}
               onNewSession={createChatSession}
@@ -2466,227 +2396,155 @@ export default function App() {
               onShareSession={shareSession}
               shareMode={shareMode}
             />
-          </div>
-          {!activeId && view === 'chat' && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-10 grid place-items-center text-[13px] text-white/25">
-              选择或新建一个会话
-            </div>
-          )}
-          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
-            {gitIsCurrent && git.status?.root ? (
-              <button
-                ref={branchButtonRef}
-                type="button"
-                title="切换或创建 Git 分支"
-                aria-haspopup="dialog"
-                aria-expanded={branchPickerOpen}
-                // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
-                  activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
-                }`}
-                onClick={() => setBranchPickerOpen(true)}
-              >
-                <IconGitBranch size={13} className="shrink-0" />
-                <span className="truncate">{git.status.branch || 'detached'}</span>
-              </button>
-            ) : null}
-            {activeCwd && (
-              <button
-                type="button"
-                title={
-                  cwdValid
-                    ? activeCwd
-                    : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
-                }
-                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
-                  cwdValid
-                    ? 'text-white/35 hover:text-white/75'
-                    : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
-                }`}
-                onClick={() => setCwdModalOpen(true)}
-              >
-                {activeCwd}
-              </button>
+            {!activeId && view === 'chat' && (
+              <div className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-white/25">
+                选择或新建一个会话
+              </div>
             )}
-          </footer>
-        </main>
-        {/* 分享页里右侧面板不存在：它是「这台机器」的视图（文件树/终端），分享令牌拿不到
-            这些能力，渲染出来只会是一串权限错误，所以像侧栏一样整个不渲染。 */}
-        {!rightPanelHidden && (
-          <aside
-            className={
-              isMobile
-                ? `safe-top safe-bottom absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
-                    rightPanelVisible ? 'translate-x-0' : 'translate-x-full'
-                  }`
-                : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelShown ? '' : 'invisible pointer-events-none'}`
-            }
-            style={
-              isMobile
-                ? undefined
-                : { width: rightPanelMaximizedShown ? undefined : `var(${RIGHT_PANEL_WIDTH_VAR})` }
-            }
-            aria-label="右侧面板"
-          >
-            {!isMobile && rightPanelShown && !rightPanelMaximizedShown && (
+          </div>
+          {/* 底部终端面板（VSCode 风格）：顶栏终端图标 / Ctrl+` 控制显隐，拖顶边调高度。
+              收起时留在页面上但不占位（hidden），PTY 与滚动缓冲不会被丢掉。 */}
+          {terminalMounted && (
+            <section
+              ref={terminalPanelRef}
+              aria-label="终端面板"
+              className={`relative flex shrink-0 flex-col overflow-hidden bg-panel ${
+                terminalVisible ? '' : 'hidden'
+              }`}
+              style={{ height: terminalHeight }}
+            >
               <div
                 role="separator"
-                aria-orientation="vertical"
-                aria-label="调整右侧面板宽度"
-                title="拖动调整右侧面板宽度"
-                className={`absolute inset-y-0 left-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingRightPanel ? 'bg-white/30' : ''}`}
-                onPointerDown={startRightPanelResize}
+                aria-orientation="horizontal"
+                aria-label="调整终端高度"
+                title="拖动调整终端高度"
+                data-resizing={resizingTerminal}
+                className="terminal-panel-resizer shrink-0"
+                onPointerDown={startTerminalResize}
               />
-            )}
-            <div
-              className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2"
-              style={{ paddingLeft: !isMobile && rightPanelMaximizedShown ? 74 : undefined }}
-            >
-              <button
-                type="button"
-                title={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
-                aria-label={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
-                aria-pressed={rightPanelMaximized}
-                className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
-                onClick={() => setRightPanelMaximized((value) => !value)}
-              >
-                {rightPanelMaximized ? (
-                  <IconLayoutSidebarRightCollapse size={14} />
-                ) : (
-                  <IconLayoutSidebarRightExpand size={14} />
-                )}
-              </button>
-              <button
-                type="button"
-                aria-pressed={rightPanelTab === 'files'}
-                title="文件"
-                className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
-                  rightPanelTab === 'files'
-                    ? 'bg-white/[.10] text-white'
-                    : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-                }`}
-                onClick={() => setRightPanelTab('files')}
-              >
-                <IconFolderOpen size={13} className="shrink-0 opacity-75" />
-                <span>文件</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={rightPanelTab === 'terminal'}
-                title="终端"
-                className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
-                  rightPanelTab === 'terminal'
-                    ? 'bg-white/[.10] text-white'
-                    : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-                }`}
-                onClick={openRightTerminalTab}
-              >
-                <IconTerminal2 size={13} className="shrink-0 opacity-75" />
-                <span>终端</span>
-              </button>
-              {isMobile && (
+              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
+                <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+                  {rightTerms.map((node) => {
+                    const active = node.id === rightActiveTerm
+                    return (
+                      <div
+                        key={node.id}
+                        className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                          active
+                            ? 'bg-white/[.10] text-white'
+                            : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          title={node.text}
+                          className="flex min-w-0 items-center gap-1.5"
+                          onClick={() =>
+                            setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
+                          }
+                        >
+                          <IconTerminal2 size={12} className="shrink-0 opacity-75" />
+                          <span className="max-w-36 truncate">{node.text}</span>
+                        </button>
+                        <button
+                          type="button"
+                          title="关闭终端"
+                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
+                            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                          onClick={() => closeRightTerm(node.id)}
+                        >
+                          <IconX size={11} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
                 <button
                   type="button"
-                  title="关闭"
-                  aria-label="关闭右侧面板"
+                  title="新建终端"
+                  aria-label="新建终端"
                   className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                  onClick={closeMobileDrawer}
+                  onClick={createRightTerm}
                 >
-                  <IconX size={14} />
+                  <IconPlus size={14} />
+                </button>
+                <button
+                  type="button"
+                  title="收起终端 (Ctrl+`)"
+                  aria-label="收起终端"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                  onClick={() => setTerminalOpen(false)}
+                >
+                  <IconX size={13} />
+                </button>
+              </div>
+              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                <Suspense fallback={null}>
+                  <TerminalHost
+                    ref={terminalRef}
+                    nodes={allRightTerms}
+                    activeId={rightActiveTerm}
+                    visible={terminalVisible}
+                    pane="terminal"
+                    docked={false}
+                    sidebarCollapsed={sidebarHidden}
+                    resolveCwd={rightTermCwd}
+                    commandFor={commandFor}
+                    onRead={(id, reason) => {
+                      touchRightTerm(id)
+                      notifications.markRead(id, reason)
+                    }}
+                    onMicaExit={closeRightTerm}
+                  />
+                </Suspense>
+                {isMobile && rightActiveTerm && <TerminalKeyBar onSend={sendTerminalKey} />}
+              </div>
+            </section>
+          )}
+          {!shareMode && (
+            <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
+              {gitIsCurrent && git.status?.root ? (
+                <button
+                  ref={branchButtonRef}
+                  type="button"
+                  title="切换或创建 Git 分支"
+                  aria-haspopup="dialog"
+                  aria-expanded={branchPickerOpen}
+                  // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                  className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
+                    activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                  }`}
+                  onClick={() => setBranchPickerOpen(true)}
+                >
+                  <IconGitBranch size={13} className="shrink-0" />
+                  <span className="truncate">{git.status.branch || 'detached'}</span>
+                </button>
+              ) : null}
+              {activeCwd && (
+                <button
+                  type="button"
+                  title={
+                    cwdValid
+                      ? activeCwd
+                      : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
+                  }
+                  className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
+                    cwdValid
+                      ? 'text-white/35 hover:text-white/75'
+                      : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
+                  }`}
+                  onClick={() => setCwdModalOpen(true)}
+                >
+                  {activeCwd}
                 </button>
               )}
-            </div>
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-              {rightPanelTab === 'terminal' && (
-                <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
-                  <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-                    {rightTerms.map((node) => {
-                      const active = node.id === rightActiveTerm
-                      return (
-                        <div
-                          key={node.id}
-                          className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
-                            active
-                              ? 'bg-white/[.10] text-white'
-                              : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            title={node.text}
-                            className="flex min-w-0 items-center gap-1.5"
-                            onClick={() =>
-                              setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
-                            }
-                          >
-                            <IconTerminal2 size={12} className="shrink-0 opacity-75" />
-                            <span className="max-w-36 truncate">{node.text}</span>
-                          </button>
-                          <button
-                            type="button"
-                            title="关闭终端"
-                            className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
-                              isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                            }`}
-                            onClick={() => closeRightTerm(node.id)}
-                          >
-                            <IconX size={11} />
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <button
-                    type="button"
-                    title="新建终端"
-                    aria-label="新建终端"
-                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                    onClick={createRightTerm}
-                  >
-                    <IconPlus size={14} />
-                  </button>
-                </div>
-              )}
-              <Suspense fallback={null}>
-                <FilesView
-                  ref={filesRef}
-                  root={gitIsCurrent ? git.cwd : null}
-                  visible={rightPanelTab === 'files'}
-                  askText={askText}
-                  gitCwd={gitIsCurrent ? git.cwd : null}
-                  gitRepository={repository}
-                  gitLoading={gitIsCurrent ? git.loading : true}
-                  gitBranch={gitIsCurrent ? git.status?.branch || null : null}
-                  onCornerResizeStart={null}
-                />
-              </Suspense>
-              <Suspense fallback={null}>
-                <TerminalHost
-                  ref={terminalRef}
-                  nodes={allRightTerms}
-                  activeId={rightActiveTerm}
-                  visible={rightPanelTab === 'terminal'}
-                  pane="terminal"
-                  docked={false}
-                  sidebarCollapsed={sidebarHidden}
-                  resolveCwd={rightTermCwd}
-                  commandFor={commandFor}
-                  onRead={(id, reason) => {
-                    touchRightTerm(id)
-                    notifications.markRead(id, reason)
-                  }}
-                  onMicaExit={closeRightTerm}
-                />
-              </Suspense>
-              {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (
-                <TerminalKeyBar onSend={sendTerminalKey} />
-              )}
-            </div>
-          </aside>
-        )}
+            </footer>
+          )}
+        </main>
       </div>
       {/* 分享页面里侧栏不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
-      {!rightPanelMaximizedShown && !isMobile && !shareMode && (
+      {!isMobile && !shareMode && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -2703,9 +2561,9 @@ export default function App() {
           <IconLayoutSidebarLeftCollapse size={16} />
         </button>
       )}
-      {/* 文件搜索是「打开的编辑器」的入口，和右侧面板同一类：访客没有 files:* 权限，
+      {/* 文件搜索是「打开的编辑器」的入口，和文件视图同一类：访客没有 files:* 权限，
           留着它只会让 Cmd/Ctrl+P 撞出一串权限错误。 */}
-      {!rightPanelMaximizedShown && !shareMode && (
+      {!shareMode && (
         <Suspense fallback={null}>
           <QuickSearch
             getRoot={getSearchRoot}

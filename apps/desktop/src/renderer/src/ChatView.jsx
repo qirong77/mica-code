@@ -24,7 +24,6 @@ import {
   IconMinimize,
   IconPhoto,
   IconSend,
-  IconSettings,
   IconShare,
   IconSquare,
   IconTerminal,
@@ -67,15 +66,9 @@ import {
   rankCompletions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
-import { AutoCompactPopover } from './AutoCompactPopover'
 import { LoopBadge } from './LoopBadge'
 import { LoopPopover } from './LoopPopover'
 import { Popover } from './Popover'
-import {
-  DEFAULT_AUTO_COMPACT_SETTINGS,
-  autoCompactTooltip,
-  countersForSession
-} from './auto-compact'
 import { formatLoopInterval, loopForNode, loopProgressLabel } from './loop-command'
 import {
   backgroundTaskStatusLabel,
@@ -1867,6 +1860,14 @@ function WelcomeHint({ cwd }) {
   )
 }
 
+// 状态行展示用的阶段：`phase` 是一条工具结果回来后仍停在 `working`，而那时实际已经在等
+// 下一次请求了——CLI 的 AgentRuntime 在 onToolResult 里就是当场把状态切回 connecting
+// （显示为 waiting_model）。不换算的话，状态文本会退化成没有对象的 calling_tool，阶段计时
+// 也会因为找不到 running 工具而失去锚点（见 phaseElapsed 的 effect），整段时间从界面消失。
+export function statusLinePhase(phase, toolNames = []) {
+  return phase === 'working' && toolNames.length === 0 ? 'connecting' : phase
+}
+
 function statusLabel(phase, toolNames = []) {
   switch (phase) {
     case 'connecting':
@@ -2117,7 +2118,6 @@ export function ChatView({
   isMobile = false,
   shareMode = false,
   loops = [],
-  autoCompact = null,
   onSessionBound,
   onOpenFile,
   onNewSession,
@@ -2201,8 +2201,6 @@ export function ChatView({
   const [taskDetail, setTaskDetail] = useState(null)
   // 输入框右侧时钟图标点开的定时任务面板
   const [loopOpen, setLoopOpen] = useState(false)
-  // 输入框右侧齿轮图标点开的自动压缩面板
-  const [autoCompactOpen, setAutoCompactOpen] = useState(false)
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
@@ -2212,7 +2210,8 @@ export function ChatView({
   // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
   const [lastRun, setLastRun] = useState(null)
   // 当前阶段/工具的实时耗时（对齐 CLI WorkingStatus：状态文本带 elapsed，
-  // working 阶段从最早 running 工具 startedAt 起算，其余阶段从 phase 切换起算）。
+  // working 阶段从最早 running 工具 startedAt 起算，其余阶段从阶段切换起算）。
+  // 起算点在 statusLinePhase 换算之后的那一段：见下方 displayPhase 的 effect。
   const phaseStartedAtRef = useRef(0)
   const [phaseElapsed, setPhaseElapsed] = useState(0)
 
@@ -2225,11 +2224,6 @@ export function ChatView({
     return () => clearInterval(timer)
   }, [hasLiveTasks])
 
-  useEffect(() => {
-    if (phase === 'idle' || !running) return undefined
-    phaseStartedAtRef.current = Date.now()
-    return undefined
-  }, [phase, running])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [showJump, setShowJump] = useState(false)
   const [meta, setMeta] = useState(null)
@@ -2404,27 +2398,6 @@ export function ChatView({
     },
     [startLoop]
   )
-
-  // 自动压缩的写入路径：设置与计数由 App 订阅广播持有（页面不自己存），这里只负责发命令，
-  // 并把失败原样交回面板的错误行。
-  const saveAutoCompact = useCallback(async (settings) => {
-    const result = await window.mica.autoCompact
-      .set(settings)
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }))
-    if (result && result.ok === false) return { ok: false, error: result.error || '保存失败' }
-    return { ok: true }
-  }, [])
-
-  const resetAutoCompactCounters = useCallback(async () => {
-    const currentSessionId = sessionIdRef.current
-    // 计数是运行时按 sessionId 记的：草稿会话还没开始，没有可重置的东西。
-    if (!currentSessionId) return { ok: false, error: '会话还没开始，暂无计数可重置' }
-    const result = await window.mica.autoCompact
-      .resetCounters(currentSessionId)
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }))
-    if (result && result.ok === false) return { ok: false, error: result.error || '重置计数失败' }
-    return { ok: true }
-  }, [])
 
   // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
@@ -4243,6 +4216,9 @@ export function ChatView({
         .filter(Boolean),
     [turnActivityMessages]
   )
+  // 状态文本与阶段计时都按换算后的 displayPhase（理由见 statusLinePhase）：工具结果回来后
+  // 它是 waiting_model 而不是 calling_tool，计时也从那一刻重新起算。
+  const displayPhase = statusLinePhase(phase, runningToolNames)
   // 当前工具（working）阶段的实时耗时：取最早 running 工具的 startedAt。
   const activeToolStartedAt = useMemo(() => {
     if (phase !== 'working') return null
@@ -4256,12 +4232,19 @@ export function ChatView({
     return starts.length ? Math.min(...starts) : null
   }, [phase, turnActivityMessages])
 
+  // 阶段起点：displayPhase 每次变化都重新计时，同一阶段内连续累计。
+  useEffect(() => {
+    if (displayPhase === 'idle' || !running) return undefined
+    phaseStartedAtRef.current = Date.now()
+    return undefined
+  }, [displayPhase, running])
+
   useEffect(() => {
     if (!running) {
       setPhaseElapsed(0)
       return undefined
     }
-    const startedAt = phase === 'working' ? activeToolStartedAt : phaseStartedAtRef.current
+    const startedAt = displayPhase === 'working' ? activeToolStartedAt : phaseStartedAtRef.current
     if (!startedAt) {
       setPhaseElapsed(0)
       return undefined
@@ -4270,7 +4253,7 @@ export function ChatView({
     update()
     const timer = window.setInterval(update, 250)
     return () => clearInterval(timer)
-  }, [running, phase, activeToolStartedAt])
+  }, [running, displayPhase, activeToolStartedAt])
   const activeStreamText =
     streamRef.current.id && ['thinking', 'streaming'].includes(phase)
       ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
@@ -4496,16 +4479,9 @@ export function ChatView({
   // 挂着定时任务时输入框整体走提示色（与 CLI 的 loop prompt 同款），一眼看出这条会话在
   // 按间隔自动发送；颜色只跟「有没有循环」有关，不随倒计时每秒变化。
   const loopTone = activeLoop ? 'chat-composer-loop' : ''
-  // 这条对话的自动压缩设置与计数（计数按 sessionId 归属，草稿会话读到的是一份零值）。
-  const autoCompactSettings = autoCompact?.settings || DEFAULT_AUTO_COMPACT_SETTINGS
-  const autoCompactCounters = countersForSession(
-    autoCompact?.counters,
-    node?.sessionId || sessionIdRef.current || null
-  )
-  // 切到别的对话时收起面板：它们描述的是上一个会话的循环与计数。
+  // 切到别的对话时收起定时任务面板：它描述的是上一个会话的循环。
   useEffect(() => {
     setLoopOpen(false)
-    setAutoCompactOpen(false)
   }, [nodeId])
 
   const statusLine = (
@@ -4514,7 +4490,7 @@ export function ChatView({
         {running ? (
           <>
             <IconLoader2 size={11} className="animate-spin" />
-            <span>{statusLabel(phase, runningToolNames)}</span>
+            <span>{statusLabel(displayPhase, runningToolNames)}</span>
             {phaseElapsed > 0 && (
               <span className="chat-status-phase-elapsed">{formatLogElapsed(phaseElapsed)}</span>
             )}
@@ -4761,15 +4737,6 @@ export function ChatView({
               onClose={() => setLoopOpen(false)}
             />
           )}
-          {autoCompactOpen && (
-            <AutoCompactPopover
-              settings={autoCompactSettings}
-              counters={autoCompactCounters}
-              onSave={saveAutoCompact}
-              onResetCounters={resetAutoCompactCounters}
-              onClose={() => setAutoCompactOpen(false)}
-            />
-          )}
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
             style={
@@ -4998,24 +4965,6 @@ export function ChatView({
                 onClick={() => setLoopOpen((open) => !open)}
               >
                 <IconClock size={13} />
-              </button>
-              {/* 自动压缩：它是设置入口而不是状态灯，默认（开启）保持中性色，只有被关掉时
-                  才留一个小点，一眼看出它没在生效。点开齿轮面板调两条规则与计数。 */}
-              <button
-                type="button"
-                className={`chat-composer-settings ${
-                  autoCompactSettings.enabled === false ? 'is-paused' : ''
-                }`}
-                title={autoCompactTooltip({
-                  settings: autoCompactSettings,
-                  counters: autoCompactCounters
-                })}
-                aria-label="自动压缩设置"
-                aria-pressed={autoCompactOpen}
-                data-popover-trigger="auto-compact"
-                onClick={() => setAutoCompactOpen((open) => !open)}
-              >
-                <IconSettings size={13} />
               </button>
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}

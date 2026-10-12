@@ -1135,8 +1135,8 @@ function handleHostNotification(id, run, notification) {
     return
   } else if (method === 'mica/autoCompact/updated') {
     // The host ran an auto-compact and reports the session's tally. It is host
-    // state, not a turn delta: the panel reads it back through the
-    // auto-compact:get IPC, so it must not enter the turn event buffer (there
+    // state, not a turn delta: the settings page reads it back from
+    // host/auto-compact.js, so it must not enter the turn event buffer (there
     // would be nothing to render from it) and must not touch running /
     // hostPending — a compaction happens between two requests and does not
     // change the lifecycle of the turn.

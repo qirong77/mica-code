@@ -23,7 +23,7 @@ export function liveSessionRowState({ notificationState, interrupted, remoteRunn
 }
 
 /**
- * 右侧面板终端不在工作区 nodes 里，只能靠创建时记下的 sessionId 归属回会话行
+ * 终端面板里的终端不在工作区 nodes 里，只能靠创建时记下的 sessionId 归属回会话行
  * （notify 状态按 PTY id `<nodeId>:<pane>` 保存，用终端条目自己的 id 取即可）。
  * 只认 processRunning：那是「终端里有长驻前台进程」的信号，Mica turn 已由
  * 行首的呼吸绿点表达，不能混进来。

@@ -23,7 +23,6 @@ const EVENT_CHANNELS = [
   'notify:changed',
   'ui-state:changed',
   'loops:changed',
-  'auto-compact:changed',
   'app:window-state'
 ]
 
@@ -282,16 +281,6 @@ function createWebApi(env) {
       setTask: (nodeId, task) => invoke('loops:set-task', { nodeId, task }),
       fireNow: (nodeId) => invoke('loops:fire-now', { nodeId }),
       onChanged: (callback) => subscribe('loops:changed', callback)
-    },
-
-    // 自动压缩（每完成一次模型请求检查 ctx，超过阈值就压缩）：设置与按 sessionId 记账的
-    // 计数都活在运行时里，页面只是读写视图，变更经 `auto-compact:changed` 广播给所有窗口。
-    // `get()` 不带 sessionId 时返回整张计数表（页面自己按会话取）。
-    autoCompact: {
-      get: (sessionId) => invoke('auto-compact:get', { sessionId }),
-      set: (settings) => invoke('auto-compact:set', { settings }),
-      resetCounters: (sessionId) => invoke('auto-compact:reset-counters', { sessionId }),
-      onChanged: (callback) => subscribe('auto-compact:changed', callback)
     },
 
     app: {

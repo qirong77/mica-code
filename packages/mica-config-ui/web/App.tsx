@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { DialogHost, confirmDialog } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { ConfigPage } from './pages/ConfigPage.js';
+import { AutoCompactPage } from './pages/AutoCompactPage.js';
 import { McpPage } from './pages/McpPage.js';
 import { PluginsPage } from './pages/PluginsPage.js';
 import { RolesPage } from './pages/RolesPage.js';
 import { SessionsPage } from './pages/SessionsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
-import { connectHeartbeat } from './api.js';
+import { connectHeartbeat, supportsAutoCompact } from './api.js';
 
 export function App() {
   const [section, setSection] = useState<ConfigWebAppSection>(readInitialSection);
@@ -47,6 +48,7 @@ export function App() {
         <Sidebar section={section} onChange={(next) => void changeSection(next)} />
         <div className="content-shell">
           {section === 'config' ? <ConfigPage /> : null}
+          {section === 'autoCompact' ? <AutoCompactPage /> : null}
           {section === 'sessions' ? (
             <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
           ) : null}
@@ -63,7 +65,13 @@ export function App() {
 
 function readInitialSection(): ConfigWebAppSection {
   const candidate = new URLSearchParams(window.location.search).get('section');
-  return candidate && ['config', 'sessions', 'roles', 'mcp', 'skills', 'plugins'].includes(candidate)
-    ? (candidate as ConfigWebAppSection)
-    : 'config';
+  return isSectionAvailable(candidate) ? (candidate as ConfigWebAppSection) : 'config';
+}
+
+/** 深链里的 section 必须在当前宿主里真的存在，否则退回 Config（浏览器宿主没有 autoCompact）。 */
+function isSectionAvailable(candidate: string | null): boolean {
+  if (!candidate) return false;
+  const known: ConfigWebAppSection[] = ['config', 'autoCompact', 'sessions', 'roles', 'mcp', 'skills', 'plugins'];
+  if (!known.includes(candidate as ConfigWebAppSection)) return false;
+  return candidate === 'autoCompact' ? supportsAutoCompact() : true;
 }

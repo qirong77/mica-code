@@ -159,6 +159,12 @@ export function resetAutoCompactCounters(state, sessionId) {
   return { ...state, counters }
 }
 
+/** 清掉整张计数表（设置页的「重置全部」）。没有条目时原样返回，调用方据此跳过落盘。 */
+export function clearAutoCompactCounters(state) {
+  if (!state?.counters || Object.keys(state.counters).length === 0) return state
+  return { ...state, counters: {} }
+}
+
 /**
  * 每次 `turn/start` 带上的一份参数：设置 + 该会话已经用掉几次。没有记录的会话（还没压过、
  * 或草稿还没拿到 sessionId）就是全零，host 侧照样能按设置工作。

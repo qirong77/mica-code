@@ -1,5 +1,5 @@
 /**
- * 右侧面板终端按会话归属：切换会话时整组切走，因此「当前显示哪个终端」要从
+ * 终端面板里的终端按会话归属：切换会话时整组切走，因此「当前显示哪个终端」要从
  * 所属会话的列表里推导——用户上次点的那个还在就用它，否则用第一个。
  */
 export function activeRightTermId(terms = [], savedId) {
@@ -8,8 +8,8 @@ export function activeRightTermId(terms = [], savedId) {
 }
 
 /** 右侧终端的保留时长与回收扫描间隔 */
-export const RIGHT_PANEL_RETAIN_MS = 8 * 60 * 60 * 1000
-export const RIGHT_PANEL_SWEEP_MS = 10 * 60 * 1000
+export const TERMINAL_PANEL_RETAIN_MS = 8 * 60 * 60 * 1000
+export const TERMINAL_PANEL_SWEEP_MS = 10 * 60 * 1000
 
 /**
  * 会话路径（底部状态栏切换 cwd / 恢复会话）变化后需要重开的终端 id。
@@ -26,7 +26,7 @@ export function staleRightTermIds(terms = [], cwd, states = {}) {
 }
 
 /**
- * 定时回收右侧面板终端的候选：会话本身 8h 没被用过，或者终端 8h 没有任何活动
+ * 定时回收终端面板终端的候选：会话本身 8h 没被用过，或者终端 8h 没有任何活动
  * （输出、输入、点选都算），对应的 PTY 就该释放——面板按会话分组后，它会随着
  * 点过的会话越积越多。
  *
@@ -38,7 +38,7 @@ export function reclaimableRightTermIds({
   activityAt = {},
   states = {},
   now = Date.now(),
-  retainMs = RIGHT_PANEL_RETAIN_MS
+  retainMs = TERMINAL_PANEL_RETAIN_MS
 }) {
   const idle = (term) => !states?.[term.id]?.running
   // 会话本身已经放着没用了，它名下的终端整组回收

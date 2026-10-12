@@ -301,7 +301,6 @@ describe('scopeAllowsChannel', () => {
       'ui-state:patch',
       'loops:start',
       'loops:list',
-      'auto-compact:set',
       'chat:fork',
       'chat:input-history:read',
       'chat:input-history:append',
