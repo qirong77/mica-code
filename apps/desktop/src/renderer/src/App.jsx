@@ -33,6 +33,8 @@ import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
 import { currentServerUrl, openServerTarget, serverLabel } from './servers'
+import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import { copyText } from './transport'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -86,6 +88,91 @@ function ptyIdForNode(nodeId) {
 function recentChatCwd() {
   const value = uiStateKeys().chatDefaultCwd
   return typeof value === 'string' ? value : ''
+}
+
+/**
+ * 分享链接弹窗：给出这条会话专属的地址（地址与令牌都由运行时签发，见 shareSession）。
+ * 复制按钮走页面自己的剪贴板（局域网 http 访问时 transport 会退到 execCommand）。
+ */
+function ShareDialog({ state, onClose }) {
+  // null | 'copied' | 'failed'：复制失败时如实说出来（局域网 http 下剪贴板 API 可能不存在），
+  // 不要假报成功——用户以为复制了、发出去的却是上一次的内容。
+  const [copyState, setCopyState] = useState(null)
+  const inputRef = useRef(null)
+  const url = state?.status === 'ready' ? state.url : ''
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  useEffect(() => {
+    if (url) inputRef.current?.select()
+  }, [url])
+  const copy = () => {
+    if (!url) return
+    void copyText(url).then((ok) => {
+      setCopyState(ok === false ? 'failed' : 'copied')
+    })
+  }
+  return (
+    <div
+      className="fixed inset-0 z-[11000] grid place-items-center bg-black/45 no-drag"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        className="w-[min(480px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
+      >
+        <h2 className="mb-1.5 text-sm font-semibold text-white/95">分享链接</h2>
+        <p className="mb-2.5 text-[11px] leading-relaxed text-white/45">
+          拿到链接的人可以像你一样对话、操作这个会话，但只能看到它：左侧会话列表整个隐藏、
+          也不能打开，其它会话与宿主的文件 / 终端 / 配置都拿不到。范围由运行时判定，
+          改地址栏或删参数都绕不过去；链接 7 天后自动失效。
+        </p>
+        <div className="mb-2.5 flex items-center gap-2">
+          <input
+            ref={inputRef}
+            readOnly
+            value={url}
+            spellCheck={false}
+            placeholder={state?.status === 'loading' ? '正在生成…' : ''}
+            aria-label="分享链接"
+            className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white/85 focus:border-white/30"
+            onFocus={(event) => event.target.select()}
+          />
+          <button
+            type="button"
+            disabled={!url}
+            className="h-8 shrink-0 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:opacity-40"
+            onClick={copy}
+          >
+            复制
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className={`text-[11px] ${
+              copyState === 'failed' || state?.status === 'error' ? 'text-danger' : 'text-white/35'
+            }`}
+          >
+            {copyState === 'copied' ? '已复制到剪贴板' : ''}
+            {copyState === 'failed' ? '复制失败，请手动选中复制' : ''}
+            {state?.status === 'error' ? state.message : ''}
+          </span>
+          <button
+            type="button"
+            className="h-7 rounded-sm px-3 text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
+            onClick={onClose}
+          >
+            关闭
+          </button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
@@ -742,6 +829,13 @@ export default function App() {
   const filesRef = useRef(null)
   const branchButtonRef = useRef(null)
   const contentRef = useRef(null)
+  // 地址栏里的页面级状态只在首次渲染读一次：`sessionId` 是启动时要落到的会话。
+  // 之后是单向同步（App → 地址栏）。
+  const [urlState] = useState(() => readAppUrl(window.location.search))
+  // 「只看这一个会话」是**服务端**给的访问范围（分享令牌换来的 cookie），不是 URL 里的
+  // 标记：自己往地址栏写 share=1 什么也改变不了，删掉链接里的参数也不会放宽权限。
+  const shareMode = typeof window !== 'undefined' && window.mica?.scope === 'share'
+  const urlSessionRef = useRef(urlState.sessionId)
   // 界面状态在渲染前已经从运行时取回（main.jsx 的 ensureUiState），所以第一帧就是上一次
   // 退出时的样子：直接用取回的工作区播种，不再有「先画空界面再加载」的过程。
   const [bootstrap] = useState(
@@ -800,11 +894,14 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
-  const sidebarCollapsedRef = useRef(sidebarCollapsed)
+  // 分享页面里侧栏是「不存在」而不是「被收起」：不写回 layout（那会把别人的侧栏也收掉），
+  // 只在渲染与面板宽度上限里把它当成收起处理（宽度为 0、不可展开、不占列宽）。
+  const sidebarHidden = sidebarCollapsed || shareMode
+  const sidebarHiddenRef = useLatest(sidebarHidden)
   // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一对变量）
   useLayoutEffect(() => {
-    setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarCollapsed ? 0 : sidebarWidth}px`)
-  }, [sidebarCollapsed, sidebarWidth])
+    setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
+  }, [sidebarHidden, sidebarWidth])
   useLayoutEffect(() => {
     setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${rightPanelOpen ? rightPanelWidth : 0}px`)
   }, [rightPanelOpen, rightPanelWidth])
@@ -812,6 +909,10 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
+  // 「分享链接」弹窗里的那条地址（null = 关闭）
+  // 分享弹窗的三种状态：生成中 / 已就绪（带链接）/ 失败（带原因）。
+  // 申领令牌是一次运行时往返，所以弹窗必须先立起来显示进度。
+  const [shareDialog, setShareDialog] = useState(null)
   // 「切换 Mica 服务器」：切换 = 打开另一台运行时的地址（见 ServerCard）。
   // 桌面上鼠标移到 Server 行就浮出卡片（强阻断的弹窗在这里没有必要），手机上点一下
   // 在抽屉里原地展开。
@@ -893,6 +994,9 @@ export default function App() {
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
   const [sessions, setSessions] = useState([])
+  // 会话清单是否至少加载回来过一次：地址栏里的 session 要等它到位才换成带标题/工作目录的
+  // 标签页（否则只能按 id 开一个无名页签）。列表为空也是「加载过了」。
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const [pins, setPins] = useState({})
   const [sortOrder, setSortOrder] = useState({ pinned: [], sessions: [], recent: [] })
   const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
@@ -954,6 +1058,8 @@ export default function App() {
       .listSessions()
       .then((result) => applySessions(result?.sessions))
       .catch((error) => console.error('load sessions failed', error))
+      // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。
+      .finally(() => setSessionsLoaded(true))
   }, [applySessions])
 
   const applyLoops = useCallback((loops) => {
@@ -1668,6 +1774,33 @@ export default function App() {
     [createTerminal, nodesRef, selectNode]
   )
 
+  /**
+   * 「分享链接」：向运行时申领一枚只看得到这个会话的令牌，拼成地址后在弹窗里复制。
+   *
+   * 地址的 host 由运行时给（网卡上的局域网地址，或配置的公网地址），**不能用
+   * `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1`，发给别人等于让他
+   * 连自己的机器。令牌放片段里，打开的人换到 cookie 后由服务端限成只读范围。
+   */
+  const shareSession = useCallback(async (sessionId) => {
+    if (!sessionId) return
+    // 申领令牌是一次往返，弹窗先立起来显示进度，失败也要看得见原因
+    setShareDialog({ status: 'loading' })
+    try {
+      const created = await window.mica.share.create(sessionId)
+      const url = sessionShareUrl(created?.baseUrl, sessionId, created?.token)
+      if (!url) {
+        setShareDialog({
+          status: 'error',
+          message: '这台机器没有可用于分享的局域网/公网地址，请设置 MICA_DESKTOP_PUBLIC_URL'
+        })
+        return
+      }
+      setShareDialog({ status: 'ready', url })
+    } catch (error) {
+      setShareDialog({ status: 'error', message: `生成分享链接失败：${error?.message || error}` })
+    }
+  }, [])
+
   const closeTab = useCallback(
     (node) => {
       const current = nodesRef.current
@@ -1766,6 +1899,27 @@ export default function App() {
     const node = nodes.find((item) => item.id === activeId)
     return node?.sessionId || null
   }, [activeId, nodes])
+  // 打开的会话写进地址栏：刷新、复制地址、换台设备打开都会回到同一个会话，分享链接
+  // （`?session=<id>` + `share=1`）也靠它把别人送到同一个会话。只 replaceState（不留历史），
+  // 其余参数（`?layout=` 之类）原样保留。
+  useEffect(() => {
+    const next = urlWithState(window.location.href, {
+      sessionId: activeSessionId,
+      share: shareMode
+    })
+    if (next && next !== window.location.href)
+      window.history.replaceState(window.history.state, '', next)
+  }, [activeSessionId, shareMode])
+  // 地址栏里指定的会话在启动时打开/切过去（分享链接的落地点）。等会话清单回来再动手，
+  // 才能拿标题与工作目录开页签；清单里没有这条（已被删）时仍按 id 打开，让会话那侧报错。
+  useEffect(() => {
+    if (!sessionsLoaded) return
+    const target = urlSessionRef.current
+    if (!target) return
+    urlSessionRef.current = null
+    const row = sessions.find((item) => item.id === target)
+    openSession(row ? { id: row.id, title: row.title, cwd: row.cwd } : { id: target })
+  }, [openSession, sessions, sessionsLoaded])
   const commandFor = useCallback(
     (id) => nodesRef.current.find((node) => node.id === id)?.command || 'mica',
     [nodesRef]
@@ -1900,7 +2054,7 @@ export default function App() {
       )
       setLayoutVar(SIDEBAR_WIDTH_VAR, `${width}px`)
       // 侧栏变宽会把右面板挤出窗口：跟着压回上限（与松手后 clamp effect 同一口径）
-      const limit = rightPanelWidthLimit(window.innerWidth, width, sidebarCollapsedRef.current)
+      const limit = rightPanelWidthLimit(window.innerWidth, width, sidebarHiddenRef.current)
       if (panelWidth > limit) {
         panelWidth = Math.max(MIN_RIGHT_PANEL_WIDTH, limit)
         setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${panelWidth}px`)
@@ -1922,9 +2076,6 @@ export default function App() {
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth
   }, [sidebarWidth])
-  useEffect(() => {
-    sidebarCollapsedRef.current = sidebarCollapsed
-  }, [sidebarCollapsed])
   // 右侧 Panel 宽度拖拽（同上：拖动期间只改变量，松手才提交）
   const startRightPanelResize = useCallback((event) => {
     if (event.button !== 0) return
@@ -1939,7 +2090,7 @@ export default function App() {
       const limit = rightPanelWidthLimit(
         window.innerWidth,
         sidebarWidthRef.current,
-        sidebarCollapsedRef.current
+        sidebarHiddenRef.current
       )
       width = Math.round(
         Math.min(limit, Math.max(MIN_RIGHT_PANEL_WIDTH, startWidth - (moveEvent.clientX - startX)))
@@ -1970,7 +2121,7 @@ export default function App() {
         const limit = rightPanelWidthLimit(
           window.innerWidth,
           sidebarWidthRef.current,
-          sidebarCollapsedRef.current
+          sidebarHiddenRef.current
         )
         return value > limit ? Math.max(MIN_RIGHT_PANEL_WIDTH, limit) : value
       })
@@ -1978,7 +2129,7 @@ export default function App() {
     clamp()
     window.addEventListener('resize', clamp)
     return () => window.removeEventListener('resize', clamp)
-  }, [isMobile, sidebarCollapsed, sidebarWidth])
+  }, [isMobile, sidebarHidden, sidebarWidth])
   const toggleRightPanel = useCallback(() => {
     if (isMobile) {
       setRightPanelOpen(true)
@@ -2047,15 +2198,15 @@ export default function App() {
               ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarCollapsed || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={
             isMobile
               ? undefined
-              : { width: sidebarCollapsed ? undefined : `var(${SIDEBAR_WIDTH_VAR})` }
+              : { width: sidebarHidden ? undefined : `var(${SIDEBAR_WIDTH_VAR})` }
           }
         >
-          {!isMobile && !sidebarCollapsed && (
+          {!isMobile && !sidebarHidden && (
             <div
               role="separator"
               aria-orientation="vertical"
@@ -2207,15 +2358,16 @@ export default function App() {
             }
             onDeleteSession={deleteSession}
             onDeleteDraft={deleteDraft}
+            onShareSession={shareSession}
           />
         </aside>
         <main
           className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
         >
           <header
-            className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
           >
-            {isMobile && (
+            {isMobile && !shareMode && (
               <button
                 type="button"
                 title="会话列表"
@@ -2291,6 +2443,8 @@ export default function App() {
               onOpenTerminal={openChatTerminal}
               onOpenSettings={() => setView('settings')}
               onSessionRenamed={refreshSessions}
+              onShareSession={shareSession}
+              shareMode={shareMode}
             />
           </div>
           {!activeId && view === 'chat' && (
@@ -2491,7 +2645,7 @@ export default function App() {
                 visible={rightPanelTab === 'terminal'}
                 pane="terminal"
                 docked={false}
-                sidebarCollapsed={sidebarCollapsed}
+                sidebarCollapsed={sidebarHidden}
                 resolveCwd={rightTermCwd}
                 commandFor={commandFor}
                 onRead={(id, reason) => {
@@ -2507,7 +2661,8 @@ export default function App() {
           </div>
         </aside>
       </div>
-      {!rightPanelMaximized && !isMobile && (
+      {/* 分享页面里侧栏不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
+      {!rightPanelMaximized && !isMobile && !shareMode && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -2544,6 +2699,7 @@ export default function App() {
         />
       )}
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}
+      {shareDialog && <ShareDialog state={shareDialog} onClose={() => setShareDialog(null)} />}
       {cwdModalOpen && (
         <CwdModal
           cwd={terminalCwd(activeId) || git.cwd || ''}

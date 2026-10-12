@@ -1488,6 +1488,20 @@ function runCompactSession(sessionId, mode = 'model') {
   })
 }
 
+/**
+ * 这个 nodeId 正在跑的是哪个会话（没有 run 就返回 null）。
+ *
+ * 分享范围只用它做授权：只带 nodeId 的运行态操作（中断 / 撤回排队 / 后台任务）靠它确认
+ * 节点确实属于被分享的那个会话，而不是相信客户端在 payload 里自称的会话。
+ */
+export function resolveNodeSessionId(nodeId) {
+  if (typeof nodeId !== 'string' || !nodeId) return null
+  const run = runs.get(nodeId)
+  if (!run) return null
+  const sessionId = run.sessionId || run.requestedSessionId
+  return typeof sessionId === 'string' && sessionId ? sessionId : null
+}
+
 export function registerChatIpc() {
   ipcMain.handle('chat:start', (event, payload = {}) => {
     rememberChatSender(event)

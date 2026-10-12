@@ -25,6 +25,7 @@ import {
   IconPhoto,
   IconSend,
   IconSettings,
+  IconShare,
   IconSquare,
   IconTerminal,
   IconTrash
@@ -35,7 +36,12 @@ import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { toolIcon as sharedToolIcon } from '@packages/mica-web-shared'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
-import { parsePathHref, remarkPathLinks } from './chat-paths'
+import {
+  findImageReferences,
+  parsePathHref,
+  remarkPathLinks,
+  splitTextByImages
+} from './chat-paths'
 import { collapsedOutput, toolCallText, toolOutput } from './chat-tool-display'
 
 function formatTokens(value) {
@@ -80,6 +86,7 @@ import {
   taskElapsedMs,
   taskOutputWindowLabel,
   waitTaskKindLabel,
+  waitTaskSummary,
   waitTaskTooltip
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
@@ -215,20 +222,8 @@ function resolveImageSource(source) {
   return expanded
 }
 
-function imageReferences(text) {
-  const result = []
-  const pattern = /!?(?:\[([^\]]*)\])\(([^)\s]+)(?:\s+"[^"]*")?\)/g
-  let match
-  while ((match = pattern.exec(text || ''))) {
-    const source = match[2]
-    if (!result.some((item) => item.source === source))
-      result.push({ alt: match[1] || '图片', source })
-  }
-  return result
-}
-
 function ComposerImageStrip({ text, onPreview }) {
-  const images = imageReferences(text)
+  const images = findImageReferences(text)
   if (!images.length) return null
   return (
     <div className="chat-composer-images" aria-label="输入中的图片">
@@ -243,6 +238,63 @@ function ComposerImageStrip({ text, onPreview }) {
         </button>
       ))}
     </div>
+  )
+}
+
+// `[Image](路径)` / `![alt](路径)` 里没有信息量的 alt：显示时退回路径本身。
+const GENERIC_IMAGE_ALT = new Set(['Image', '图片', 'image', 'img', 'IMG'])
+// 伪协议（`data:`/`blob:`）与被 urlTransform 拦下的写法：没有可点的路径，只留标签。
+const IMAGE_URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const IMAGE_LOCAL_PATH = /^(?:~[\\/]|\/|[a-zA-Z]:[\\/]|\.{1,2}[\\/])/
+
+/**
+ * 对话区不内联渲染图片：图片引用一律降级成可点的链接文本。
+ *
+ * 本地图片交给 PathToken（单击弹预览、⌘ 单击开编辑器，与正文里的图片路径同一套手感），
+ * 远程图片按外链打开发送，`data:` 只留一个可读标签——否则满屏 base64。
+ * 输入框上方的附件缩略图（ComposerImageStrip）不受影响，发送之后才只剩链接文本。
+ */
+function ImageLink({ source, alt }) {
+  const value = String(source || '').trim()
+  if (/^https?:\/\//i.test(value)) {
+    return (
+      <a
+        className="chat-image-link"
+        href={value}
+        onClick={(event) => {
+          event.preventDefault()
+          window.mica.terminal.openExternal(value).catch(() => {})
+        }}
+      >
+        {alt || value}
+      </a>
+    )
+  }
+  if (!value || (IMAGE_URL_SCHEME.test(value) && !IMAGE_LOCAL_PATH.test(value))) {
+    return <span className="chat-image-ref">{alt || '[图片]'}</span>
+  }
+  return <PathToken path={value} text={alt && !GENERIC_IMAGE_ALT.has(alt) ? alt : value} />
+}
+
+/**
+ * 消息正文里的图片引用只保留链接文本（见 ImageLink），其余文本照旧走路径识别。
+ *
+ * 用户上传的图片在会话里就是一段 `[Image](~/.mica/images/xxx.jpg)` 文本，直接原样显示
+ * 会带上多余的 `[Image](...)` 包装，所以按引用切成片段单独渲染。
+ */
+export function MessageText({ text }) {
+  const segments = useMemo(() => splitTextByImages(text), [text])
+  if (!segments.some((segment) => segment.type === 'image')) return <PathText text={text} />
+  return segments.map((segment, index) =>
+    segment.type === 'image' ? (
+      <ImageLink
+        key={`image:${index}:${segment.source}`}
+        source={segment.source}
+        alt={segment.alt}
+      />
+    ) : (
+      <PathText key={`text:${index}`} text={segment.text} />
+    )
   )
 }
 
@@ -510,7 +562,7 @@ function MarkdownLink({ href, children, onOpenFile }) {
 // 插件数组必须是稳定引用，否则每次渲染都会让 react-markdown 重新解析整篇文档
 const CHAT_REMARK_PLUGINS = [remarkGfm, remarkPathLinks]
 
-function MarkdownView({ text, muted = false, onOpenFile, onPreviewImage }) {
+function MarkdownView({ text, muted = false, onOpenFile }) {
   const components = useMemo(
     () => ({
       a: ({ href, children }) => (
@@ -525,18 +577,10 @@ function MarkdownView({ text, muted = false, onOpenFile, onPreviewImage }) {
         </div>
       ),
       input: (props) => <input {...props} disabled />,
-      img: ({ alt, src, ...props }) => (
-        <button
-          type="button"
-          className="chat-markdown-image-button"
-          onClick={() => onPreviewImage?.(src, alt)}
-          title="预览图片"
-        >
-          <img {...props} src={resolveImageSource(src)} alt={alt || ''} loading="lazy" />
-        </button>
-      )
+      // markdown 图片同样不内联渲染：`![alt](src)` 降级成链接文本（见 ImageLink）
+      img: ({ alt, src }) => <ImageLink source={src} alt={alt} />
     }),
-    [onOpenFile, onPreviewImage]
+    [onOpenFile]
   )
 
   return (
@@ -555,7 +599,7 @@ function MarkdownView({ text, muted = false, onOpenFile, onPreviewImage }) {
 
 // react-markdown 每次渲染都会重新解析整篇 markdown，而 ChatView 在运行中每 250ms
 // 就要重渲染一次（状态行计时）。memo 之后只有内容真的变了的消息才会重新解析——
-// 前提是调用方别每次渲染都传新的 onOpenFile/onPreviewImage（见 transcript 那段）。
+// 前提是调用方别每次渲染都传新的 onOpenFile（见 transcript 那段）。
 export const Markdown = memo(MarkdownView)
 
 function compactLine(value, max = 110) {
@@ -722,9 +766,11 @@ function WaitTasksDock({ tasks, now = Date.now() }) {
               <span className="chat-task-status chat-task-status-waiting">
                 {task.status === 'parked' ? '已登记' : '等待中'}
               </span>
-              <span className="chat-task-runtime">{age}</span>
+              <span className="chat-task-runtime">已等 {age}</span>
               <span className="chat-task-type">{task.id}</span>
-              <span className="chat-task-description">{compactLine(task.label, 180)}</span>
+              <span className="chat-task-description">
+                {compactLine(waitTaskSummary(task), 180)}
+              </span>
             </span>
           </div>
         )
@@ -1601,6 +1647,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
       title: commitRunning ? 'commit 任务正在执行' : undefined
     },
     { id: 'fork', label: 'Fork', icon: IconGitFork, disabled: !menu.hasSession || menu.running },
+    {
+      id: 'share',
+      label: '分享链接',
+      title: '复制一条只带这个会话的地址：打开的人看不到左侧会话列表',
+      icon: IconShare,
+      disabled: !menu.hasSession
+    },
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
   ]
@@ -1702,7 +1755,6 @@ export function shortPath(path, max = 46) {
 function MessageRow({
   message,
   onOpenFile,
-  onPreviewImage,
   onCommandAction,
   edit,
   onEditStart,
@@ -1776,8 +1828,9 @@ function MessageRow({
       >
         <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
         <div className="chat-message-body whitespace-pre-wrap break-words">
-          {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的 */}
-          <PathText text={message.text} />
+          {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的；
+              图片引用只保留链接文本，点击弹预览（见 ImageLink） */}
+          <MessageText text={message.text} />
         </div>
         <MessageActions text={message.text} />
       </div>
@@ -1789,11 +1842,7 @@ function MessageRow({
     >
       <div className="chat-message-marker">●</div>
       <div className="chat-message-body">
-        <Markdown
-          text={message.text || ''}
-          onOpenFile={onOpenFile}
-          onPreviewImage={onPreviewImage}
-        />
+        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
         <UsageLine usage={message.usage} />
       </div>
       {message.done && <MessageActions text={message.text} />}
@@ -2066,6 +2115,7 @@ export function ChatView({
   cwd,
   visible,
   isMobile = false,
+  shareMode = false,
   loops = [],
   autoCompact = null,
   onSessionBound,
@@ -2074,10 +2124,13 @@ export function ChatView({
   onResumeSession,
   onOpenTerminal,
   onOpenSettings,
-  onSessionRenamed
+  onSessionRenamed,
+  onShareSession
 }) {
   const nodeId = node?.id || null
   const nodeIdRef = useLatest(nodeId)
+  // 分享视图里这个会话照常可对话、可操作，只是没有分享入口（令牌只能由宿主签发）。
+  const shareModeRef = useLatest(shareMode)
   const cwdRef = useLatest(cwd)
   const onSessionBoundRef = useLatest(onSessionBound)
   const onOpenFileRef = useLatest(onOpenFile)
@@ -2086,6 +2139,7 @@ export function ChatView({
   const onOpenTerminalRef = useLatest(onOpenTerminal)
   const onOpenSettingsRef = useLatest(onOpenSettings)
   const onSessionRenamedRef = useLatest(onSessionRenamed)
+  const onShareSessionRef = useLatest(onShareSession)
   const sessionIdRef = useRef(node?.sessionId || null)
   const streamRef = useRef({ id: null, kind: null, turnId: null })
   const turnRef = useRef(null)
@@ -4344,6 +4398,20 @@ export function ChatView({
         startCommitTask()
         return
       }
+      if (action === 'share') {
+        // 分享范围里没有分享入口：令牌只能由宿主自己签发（否则访客能拿它去换别的会话的令牌）
+        if (shareModeRef.current) {
+          appendNotice('分享链接里不能再生成分享链接', 'warn')
+          return
+        }
+        const sessionId = sessionIdRef.current
+        if (!sessionId) {
+          appendNotice('发送第一条消息后才能分享会话', 'error')
+          return
+        }
+        onShareSessionRef.current?.(sessionId)
+        return
+      }
       if (action !== 'fork') return
       const sessionId = sessionIdRef.current
       if (!sessionId) {
@@ -4361,7 +4429,14 @@ export function ChatView({
         )
       }
     },
-    [appendNotice, onResumeSessionRef, onSessionRenamedRef, runSlashCommand, startCommitTask]
+    [
+      appendNotice,
+      onResumeSessionRef,
+      onSessionRenamedRef,
+      onShareSessionRef,
+      runSlashCommand,
+      startCommitTask
+    ]
   )
 
   const focusComposerFromShell = useCallback((event) => {
@@ -4523,8 +4598,6 @@ export function ChatView({
     (path, position) => onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position),
     []
   )
-  const transcriptPreviewImage = useCallback((source, alt) => setImagePreview({ source, alt }), [])
-
   // 聊天文本、notice、回合日志里的路径统一走这里：cwd 只在 ChatView 里解析一次
   // （cwdRef 是 ref，所以这个对象可以稳定），子组件（PathToken）只负责决定
   // 「单击 / ⌘ 单击 / 图片」分别触发哪个动作。
@@ -4575,7 +4648,6 @@ export function ChatView({
                   key={message.id}
                   message={message}
                   onOpenFile={transcriptOpenFile}
-                  onPreviewImage={transcriptPreviewImage}
                   onCommandAction={(item) => {
                     if (item.action === 'terminal') {
                       void copyText(item.command)

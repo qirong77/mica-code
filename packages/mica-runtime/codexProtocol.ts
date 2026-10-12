@@ -272,6 +272,12 @@ export type MicaWaitTaskItem = {
   kind: 'task' | 'process' | 'file' | 'command' | 'http' | 'port' | 'duration';
   /** Human-readable condition, e.g. `/tmp/out.txt changed`. */
   label: string;
+  /**
+   * Optional one-line reason for the wait (`wait_for`'s `reason`), shown on the
+   * dock row ahead of `label` — a `duration` wait's label is just "等待 50s"
+   * and says nothing about why the turn is waiting.
+   */
+  reason?: string;
   status: 'waiting' | 'parked';
   startedAt: string;
   /** Polls made so far; cheap progress signal for a long wait. */

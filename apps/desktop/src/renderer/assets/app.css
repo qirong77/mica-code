@@ -703,26 +703,24 @@ body.is-resizing.is-resizing-terminal {
   background: var(--chat-border);
 }
 
-.chat-markdown-image-button {
-  display: inline-block;
-  max-width: min(420px, 100%);
-  margin: 4px 0;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 4px;
-  background: transparent;
-  padding: 0;
-  cursor: zoom-in;
+/* 对话区不内联渲染图片：图片引用降级成链接文本。本地路径走 PathToken，
+   远程图片走 .chat-image-link，data: 只留一个可读标签（见 ChatView 的 ImageLink）。 */
+.chat-image-link {
+  color: var(--color-info);
+  cursor: pointer;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 42%, transparent);
+  text-underline-offset: 2px;
 }
 
-.chat-markdown-image-button:hover {
-  border-color: color-mix(in srgb, var(--color-info) 70%, transparent);
+.chat-image-link:hover,
+.chat-image-link:focus-visible {
+  background: color-mix(in srgb, var(--color-info) 20%, transparent);
+  text-decoration: underline;
+  outline: none;
 }
 
-.chat-markdown-image-button img {
-  display: block;
-  max-width: 100%;
-  max-height: 280px;
-  object-fit: contain;
+.chat-image-ref {
+  color: var(--color-fg-muted);
 }
 
 .chat-markdown code {

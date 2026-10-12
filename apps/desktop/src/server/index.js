@@ -6,10 +6,29 @@ import { fileURLToPath } from 'node:url'
 import { networkInterfaces, release as osRelease } from 'node:os'
 import { createGzip } from 'node:zlib'
 import { setBroadcast, invokeChannel, ipcMain } from './electron-shim.js'
+import {
+  ACCESS_COOKIE,
+  SHARE_TTL_MS,
+  buildSetCookie,
+  scopeAllowsChannel,
+  filterSessionsForShare,
+  scopeAllowsSessionEvent
+} from '../host/access-core.js'
+import {
+  authorizeRequest,
+  getAccessToken,
+  registerAccessIpc,
+  remoteAccessRequiresCredential,
+  resolveGrant,
+  setRuntimeAddress,
+  shareAllowsImagePath,
+  verifyRequestOrigin
+} from '../host/access.js'
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import {
   disposeAllChatRuns,
+  resolveNodeSessionId,
   registerChatIpc,
   runLoopTurn,
   setChatNotifyServer
@@ -122,14 +141,8 @@ const sseClients = new Set()
 
 function broadcast(channel, payload) {
   if (sseClients.size === 0) return
-  const frame = `data: ${JSON.stringify({ channel, payload })}\n\n`
-  for (const res of sseClients) {
-    try {
-      res.write(frame)
-    } catch {
-      sseClients.delete(res)
-    }
-  }
+  // 每个订阅者自带访问范围，逐条过滤后写（过滤规则见 handleEvents）
+  for (const client of sseClients) client.writeFrame(channel, payload)
 }
 
 /* ------------------------------------------------------------------ 静态资源 */
@@ -216,7 +229,7 @@ function pipeFile(res, file, transform) {
 
 /* -------------------------------------------------------------------- 路由 */
 
-async function handleInvoke(req, res) {
+async function handleInvoke(req, res, scope) {
   let body
   try {
     body = JSON.parse((await readBody(req)) || '{}')
@@ -229,11 +242,54 @@ async function handleInvoke(req, res) {
     sendJson(res, 400, { ok: false, error: '缺少 channel' })
     return
   }
+  // 授权在服务端。分享范围只有它被分享的那一个会话：即使把 URL 里的参数删掉、
+  // 或直接照抄一份 channel，也只够得到这一条会话（别的会话与宿主能力一律拒绝）。
+  // 只带 nodeId 的运行态操作由 host 侧解析节点归属，不听客户端自称。
+  if (!scopeAllowsChannel(scope, channel, body?.payload, resolveNodeSessionId)) {
+    sendJson(res, 200, { ok: false, error: '无权访问该资源' })
+    return
+  }
   try {
-    sendJson(res, 200, { ok: true, result: await invokeChannel(channel, body.payload) })
+    const result = await invokeChannel(channel, body.payload)
+    // 分享范围读会话清单只能看到被分享的那一行，别把别的会话标题/目录一起给出去。
+    sendJson(res, 200, {
+      ok: true,
+      result:
+        scope.kind === 'share' && channel === 'stats:list-sessions'
+          ? filterSessionsForShare(result, scope.sessionId)
+          : result
+    })
   } catch (error) {
     sendJson(res, 200, { ok: false, error: errorMessage(error) })
   }
+}
+
+/**
+ * 用链接片段里的令牌换一枚 HttpOnly cookie。
+ *
+ * 令牌放在片段里、由页面 POST 过来：片段本身不会被发到服务端，所以它不会出现在访问日志、
+ * Referer 或链接预览里；而 cookie 是 HttpOnly 的，页面脚本（以及任何注入的脚本）读不到它。
+ */
+async function handleExchange(req, res) {
+  const origin = verifyRequestOrigin(req)
+  if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
+  let body
+  try {
+    body = JSON.parse((await readBody(req)) || '{}')
+  } catch {
+    return sendJson(res, 400, { ok: false, error: '请求体不是合法 JSON' })
+  }
+  const grant = resolveGrant(typeof body?.token === 'string' ? body.token : '')
+  if (!grant) return sendJson(res, 401, { ok: false, error: '令牌无效或已失效' })
+  res.setHeader(
+    'set-cookie',
+    buildSetCookie(ACCESS_COOKIE, body.token, { maxAgeSeconds: SHARE_TTL_MS / 1000 })
+  )
+  sendJson(res, 200, {
+    ok: true,
+    result:
+      grant.kind === 'full' ? { scope: 'full' } : { scope: 'share', sessionId: grant.sessionId }
+  })
 }
 
 async function handlePasteImage(req, res) {
@@ -274,7 +330,18 @@ async function handleImage(res, url) {
   pipeFile(res, absolute)
 }
 
-function handleEvents(req, res) {
+function handleEvents(req, res, scope) {
+  const writeFrame = (channel, payload) => {
+    // 分享范围只收它那一个会话的事件：其余会话的流式内容、工具输出、终端输出
+    // 一律不推。默认拒绝，避免新增 channel 时悄悄泄露。
+    if (!scopeAllowsSessionEvent(scope, payload?.sessionId)) return
+    try {
+      res.write(`data: ${JSON.stringify({ channel, payload })}\n\n`)
+    } catch {
+      // 连接已断开，由 close 事件清理
+    }
+  }
+
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
@@ -282,7 +349,9 @@ function handleEvents(req, res) {
     'x-accel-buffering': 'no'
   })
   res.write(': connected\n\n')
-  sseClients.add(res)
+  // 每个客户端带自己的范围，广播时逐个过滤；不能共用一份全局连接集合
+  const client = { res, scope, writeFrame }
+  sseClients.add(client)
 
   const heartbeat = setInterval(() => {
     try {
@@ -295,7 +364,7 @@ function handleEvents(req, res) {
 
   const cleanup = () => {
     clearInterval(heartbeat)
-    sseClients.delete(res)
+    sseClients.delete(client)
   }
   req.on('close', cleanup)
   res.on('error', cleanup)
@@ -368,6 +437,7 @@ export async function startDesktopServer(options = {}) {
   registerSkillsIpc()
   registerServersIpc()
   registerConfigWebIpc()
+  registerAccessIpc()
 
   // renderer 会用「窗口是否聚焦/可见」决定是否把通知标记为已读；网页端没有窗口，
   // 统一返回可见（真实的可读性由浏览器 tab 的 document.visibilityState 参与判断）
@@ -377,36 +447,62 @@ export async function startDesktopServer(options = {}) {
     void (async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
       try {
-        if (req.method === 'POST' && url.pathname === '/api/invoke')
-          return await handleInvoke(req, res)
-        if (req.method === 'POST' && url.pathname === '/api/paste-image') {
-          return await handlePasteImage(req, res)
-        }
-        if (req.method === 'GET' && url.pathname === '/api/events') return handleEvents(req, res)
+        // 探活接口必须保持免凭据：另一台运行时（Node）就是靠它判断「这个端口上是不是
+        // 一台 Mica Code」，而它拿不到本机的令牌。所以这里只回一个不含任何数据的指纹。
         if (req.method === 'GET' && url.pathname === '/api/health') {
-          // Electron 容器 / 探活脚本用它判断「这个端口上跑的是不是 Mica Code 运行时」
           return sendJson(res, 200, {
             ok: true,
             app: 'mica-code-app',
-            port: server.address()?.port
+            requiresCredential: remoteAccessRequiresCredential()
           })
         }
-        if (req.method === 'GET' && url.pathname === '/api/image')
-          return await handleImage(res, url)
-        if (req.method === 'GET' && url.pathname === '/api/env') {
-          return sendJson(res, 200, {
-            platform: process.platform,
-            homeDir: process.env.HOME || '',
-            windowsBuildNumber:
-              process.platform === 'win32'
-                ? Number.parseInt(osRelease().split('.')[2], 10) || null
-                : null,
-            runShellLogConfig: {
-              verboseThresholdMs:
-                Number.parseInt(process.env.MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, 10) || 10000,
-              maxLines: Number.parseInt(process.env.MICA_RUN_SHELL_LOG_MAX_LINES, 10) || 10
+        // 换 cookie 时还没有 cookie，只用 Host/Origin 两道校验 + 请求体里的令牌
+        if (req.method === 'POST' && url.pathname === '/api/access/exchange')
+          return await handleExchange(req, res)
+
+        if (url.pathname.startsWith('/api/')) {
+          // 静态页面本身不设防（它只是一份前端产物，且页面要靠它才能把令牌换成 cookie），
+          // 真正的边界在这条线上：所有 /api 调用都要先拿到范围。
+          const auth = authorizeRequest(req)
+          if (!auth.ok) return sendJson(res, auth.status, { ok: false, error: auth.error })
+          if (req.method === 'POST' && url.pathname === '/api/invoke')
+            return await handleInvoke(req, res, auth.scope)
+          // 粘贴图片会写进宿主机的 ~/.mica/images，属写操作：分享范围只能看，不能落盘
+          if (req.method === 'POST' && url.pathname === '/api/paste-image') {
+            // 分享范围也允许贴图：往里发消息本来就是这个会话的操作，图片只会落到
+            // `$MICA_HOME/images/`（固定目录 + 生成的文件名），不是任意路径写入。
+            return await handlePasteImage(req, res)
+          }
+          if (req.method === 'GET' && url.pathname === '/api/events')
+            return handleEvents(req, res, auth.scope)
+          if (req.method === 'GET' && url.pathname === '/api/image') {
+            // 分享范围只能取这条会话里出现过的图片，否则这个接口就成了宿主机图片枚举器
+            if (
+              auth.scope.kind === 'share' &&
+              !shareAllowsImagePath(auth.scope.sessionId, url.searchParams.get('path'))
+            ) {
+              return sendJson(res, 403, { error: '无权访问该图片' })
             }
-          })
+            return await handleImage(res, url)
+          }
+          if (req.method === 'GET' && url.pathname === '/api/env') {
+            return sendJson(res, 200, {
+              platform: process.platform,
+              homeDir: process.env.HOME || '',
+              // 页面据此知道自己是完整应用还是分享视图（分享视图隐藏会话列表且不可打开）。
+              // 这个值以服务端判定为准，页面自己写进去的 `share=1` 不作数。
+              scope: auth.scope.kind === 'share' ? 'share' : 'full',
+              windowsBuildNumber:
+                process.platform === 'win32'
+                  ? Number.parseInt(osRelease().split('.')[2], 10) || null
+                  : null,
+              runShellLogConfig: {
+                verboseThresholdMs:
+                  Number.parseInt(process.env.MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, 10) || 10000,
+                maxLines: Number.parseInt(process.env.MICA_RUN_SHELL_LOG_MAX_LINES, 10) || 10
+              }
+            })
+          }
         }
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return sendJson(res, 405, { error: 'Method not allowed' })
@@ -421,6 +517,8 @@ export async function startDesktopServer(options = {}) {
 
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT)
+  // 分享链接要拼出「别人能连到」的地址，所以必须在端口确定（可能已回退）之后告知
+  setRuntimeAddress({ port, host })
 
   let closing = false
   const close = async () => {
@@ -466,8 +564,19 @@ async function main() {
     `[mica-desktop] ready ${JSON.stringify({ url: running.url, port: running.port, host: running.host })}`
   )
   console.log(`[mica-desktop] 本机访问: http://127.0.0.1:${running.port}`)
+  // 远程地址必须带令牌：能连上端口就等于拿到宿主 shell 与全部会话，所以远程访问要凭据。
+  // 令牌放在片段里，不会进服务端日志或 Referer。
+  const token = remoteAccessRequiresCredential() ? getAccessToken() : ''
+  const suffix = token ? `/#token=${token}` : ''
   for (const address of lanAddresses(running.port)) {
-    console.log(`[mica-desktop] 局域网访问: ${address}`)
+    console.log(`[mica-desktop] 局域网访问: ${address}${suffix}`)
+  }
+  if (!token) {
+    console.warn(
+      '[mica-desktop] 警告: MICA_DESKTOP_TRUST_REMOTE=1 —— 局域网内任何人都能访问本机终端与文件，请仅在隔离网络使用'
+    )
+  } else if (process.env.MICA_DESKTOP_PUBLIC_URL) {
+    console.log(`[mica-desktop] 公网地址: ${process.env.MICA_DESKTOP_PUBLIC_URL}${suffix}`)
   }
   console.log(`[mica-desktop] renderer 目录: ${running.rendererRoot}`)
 

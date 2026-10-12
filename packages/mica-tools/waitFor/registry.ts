@@ -8,6 +8,12 @@ export type WaitRecord = {
   kind: WaitKind;
   /** 短的、人读的条件标签（工具展示与桌面端 dock 共用）。 */
   label: string;
+  /**
+   * 模型给出的一句话「为什么等」（可选），只用于展示。条件标签对 `duration`
+   * 这类等待说不出动机（「等待 50s」本身不解释为什么要等），所以 dock 行与
+   * tooltip 优先显示它。
+   */
+  reason?: string;
   condition: NormalizedWaitCondition;
   /** 只在进程内存在的轮询基线：`changed`/`stdout_changed`/`body_changed` 第一次观察到的值。 */
   baseline: Record<string, unknown>;
@@ -81,6 +87,7 @@ export function pruneWaitRecords(now = Date.now()): void {
 export function createWaitRecord(params: {
   kind: WaitKind;
   label: string;
+  reason?: string;
   condition: NormalizedWaitCondition;
   pollIntervalMs: number;
   timeoutMs: number;
@@ -92,6 +99,7 @@ export function createWaitRecord(params: {
     id: crypto.randomBytes(4).toString('hex'),
     kind: params.kind,
     label: params.label,
+    ...(params.reason ? { reason: params.reason } : {}),
     condition: params.condition,
     baseline: {},
     createdAt: now,

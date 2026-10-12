@@ -373,4 +373,26 @@ describe('wait_for display text', () => {
     expect(tool.onToolUseDisplayText({ kind: 'file', file_path: '/tmp/a.txt' })).toContain('/tmp/a.txt');
     expect(tool.onToolUseDisplayText({ wait_id: 'abcdef123456' })).toContain('续等');
   });
+
+  it('surfaces the optional reason on the result and the turn log', async () => {
+    const result = await tool.execute({
+      kind: 'duration',
+      seconds: 0.2,
+      reason: '等 dev server 起来',
+      timeout_ms: 2_000,
+      ...FAST,
+    });
+    expect(parseField(result, 'reason')).toBe('等 dev server 起来');
+
+    const parked = await tool.execute({ kind: 'duration', seconds: 5, background: true, reason: '等构建' });
+    expect(parseField(parked, 'reason')).toBe('等构建');
+    const waitId = parseWaitId(parked);
+    // 续等时带上新的 reason 会覆盖旧的，dock 行随之更新。
+    const resumed = await tool.execute({ wait_id: waitId, reason: '等测试跑完', timeout_ms: 0, ...FAST });
+    expect(parseField(resumed, 'reason')).toBe('等测试跑完');
+
+    expect(tool.onToolUseDisplayText({ kind: 'duration', seconds: 50, reason: '等 dev server 起来' })).toContain(
+      '等 dev server 起来',
+    );
+  });
 });

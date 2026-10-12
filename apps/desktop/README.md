@@ -191,6 +191,79 @@ their output is broadcast to everyone, but creating, respawning (`staleRightTerm
 them are single-writer operations that would fight each other from two pages, so sharing that list
 needs an owner rule first.
 
+### URL state and share links
+
+The open session is mirrored into the address bar (`src/renderer/src/app-url.js`, pure logic with
+unit tests): every switch `replaceState`s `?session=<id>` (replace, not push, so the back button
+still leaves the app; unrelated params such as `?layout=` are preserved), and on boot the page opens
+the session named by `?session=` — once the session list has loaded, so the tab gets its title and
+working directory. An id that no longer exists still opens, letting the chat side report the failure
+instead of doing nothing at all.
+
+#### Sharing is an authorization boundary, not a URL flag
+
+The runtime has no accounts, so a share link has to *reduce what a visitor can do* rather than just
+hide part of the page. A client-side `share=1` param would only be a suggestion: anyone can delete it
+and get the full app — the session list, the file tree, a real shell in the panel, and every API key
+in the config page. So the rule lives on the server (`src/host/access-core.js` holds the pure
+judgement with unit tests; `src/host/access.js` owns tokens, the reachable base URL and the IPC;
+`src/server/index.js` enforces it on every `/api/*` call).
+
+**Access is decided per request, from a credential — never from the URL.**
+
+* Loopback requests (the Electron shell, a browser on the machine itself) keep the full app with no
+  token at all; that is what keeps the desktop app and `npm run dev` working unchanged.
+* Anything else must present a token. `GET /` stays public (the static shell ships no data), every
+  other route answers 401 and the page renders a "需要访问令牌" screen instead of the app.
+* The token travels in the URL *fragment* (`#token=…`, never sent to the server or written to a
+  referrer) exactly once; the runtime exchanges it for an HttpOnly, SameSite=Strict cookie and the
+  page then strips the fragment. The access token itself is generated once, stored in
+  `access.json` (mode `0600`, next to the other runtime state) and printed on startup together with
+  the machine's LAN address, so a phone or a colleague can be handed a working URL.
+* A request carrying `Origin` must be same-site, and `Host` must be a name this machine actually
+  answers on — which is what stops an arbitrary web page from quietly talking to
+  `http://127.0.0.1:8787` on the visitor's behalf. Same-site ignores the port, because the dev server
+  serves the page on `localhost:5173` and proxies `/api` to the runtime.
+
+#### A share link
+
+`分享链接` mints a per-session capability: the session row's context menu (`session-menu.js`; drafts
+have no session id yet, so they do not offer it) and the chat area's context menu both open the
+`ShareDialog`, which copies through `copyText` and says so honestly when the clipboard API is
+unavailable instead of claiming success.
+
+The link is `<reachable base>/?session=<id>#token=<share token>`. The base URL comes from the
+*runtime*, never from the page's own `location.origin`: a window on the machine is served from
+`127.0.0.1`, and handing that to someone else points at their own machine. The host picks an
+interface address (or `MICA_DESKTOP_PUBLIC_URL` when the machine is reachable under a public one)
+and returns it with the token.
+
+What that token buys is fixed server-side: that one session, driven like a local one — chat, edit-and-resend, interrupt, queue/recall,
+compact, change cwd, paste images — plus the host state it needs to render (session title, turn
+status, its own images).
+Everything was validated against a running runtime: another session's history, `files:*`,
+`terminal:*`, `git:*`, `config-web:invoke` (API keys), `stats:delete-session` and
+`ui-state:patch` all answer `无权访问该资源`, and `stats:list-sessions` is filtered down to the single
+shared session so the view gets its title without leaking the other 900. Node-only runtime
+operations (abort / recall / background task / subagent) resolve the node's owning session
+host-side instead of trusting the client. **Treat the token as lending someone your agent**: the
+holder can drive it to run tools (shell included) in the session's cwd, which is why links expire
+after 7 days (`SHARE_TTL_MS`).
+
+Images work because the runtime whitelists the image files *that session actually references*
+(`/api/image` is otherwise a host file browser reachable by anyone holding a token); everything else
+answers 403, while `/api/paste-image` stays available (uploads only ever land in
+`$MICA_HOME/images/` under a generated name, never an arbitrary path). Neither `[Image](path)` references in user messages nor
+assistant Markdown images render inline: both degrade to a clickable link (`ImageLink` in
+`ChatView.jsx` — local pictures preview on click, remote ones open externally), so the view stays
+readable and the receiver opens the picture only when they want it.
+
+The share view is interactive: the composer sends normally. `share` mode is never written back to the shared UI state
+(`layout` is global — collapsing there would collapse the owner's sidebar too), the sidebar is not
+rendered and its collapse button and the mobile drawer button are gone (`setCollapsed` is the only
+switch, so no button means it cannot be opened), while the right panel, the keyboard shortcuts and the
+mobile layout keep working exactly as before.
+
 ### Switching Mica servers
 
 A window can point at another machine's Mica runtime: hovering the sidebar's `Server` row floats a card next to it (`ServerCard.jsx`) with the current server, the servers you have connected to, the `本机` way back and an address field — the card is deliberately not a modal, so nothing blocks the rest of the UI. On a touch screen there is no hover, so tapping the row expands the same card in place inside the drawer. A page is served by whichever runtime hosts it, so "which server am I on" is just `location.origin` — nothing is proxied and no cross-origin call is made.

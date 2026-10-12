@@ -8,6 +8,7 @@ describe('sessionMenuItems', () => {
     expect(items.map((item) => (item === 'separator' ? item : item[0]))).toEqual([
       'pin',
       'detail',
+      'share',
       'rename',
       'separator',
       'delete'
@@ -20,6 +21,7 @@ describe('sessionMenuItems', () => {
       'unpin',
       'unassign',
       'detail',
+      'share',
       'rename',
       'separator',
       'delete'
@@ -31,6 +33,11 @@ describe('sessionMenuItems', () => {
   it('offers 查看详情 for the real session', () => {
     const items = sessionMenuItems({ pinned: false, inProject: false })
     expect(items).toContainEqual(['detail', '查看详情'])
+  })
+
+  it('offers 分享链接 for the real session', () => {
+    const items = sessionMenuItems({ pinned: false, inProject: false })
+    expect(items).toContainEqual(['share', '分享链接'])
   })
 })
 

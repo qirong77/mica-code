@@ -142,6 +142,7 @@ export function projectWaitTasks(waits: WaitRecord[]): MicaWaitTaskItem[] {
     id: wait.id,
     kind: wait.kind,
     label: wait.label,
+    ...(wait.reason ? { reason: wait.reason } : {}),
     status: wait.status === 'parked' ? 'parked' : 'waiting',
     startedAt: new Date(wait.createdAt).toISOString(),
     polls: wait.polls,

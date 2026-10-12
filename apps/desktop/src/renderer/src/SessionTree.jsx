@@ -283,6 +283,7 @@ export function SessionTree({
   onRenameDraft,
   onDeleteSession,
   onDeleteDraft,
+  onShareSession,
   onReorderSessions,
   onCreateGroup,
   onRenameGroup,
@@ -533,6 +534,7 @@ export function SessionTree({
     if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
     else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
+    else if (action === 'share') onShareSession?.(menuPayload.session.id)
     else if (action === 'rename') setEditing({ kind: 'session', id: menuPayload.session.id })
     else if (action === 'delete')
       menuPayload.session

@@ -43,6 +43,7 @@ const DESCRIPTION = [
   `超时不算失败：timeout_ms（默认 ${DEFAULT_TIMEOUT_LABEL}，最大 ${MAX_TIMEOUT_LABEL}）内条件没成立就返回 status=timeout 与一个 wait_id，带上同一个 wait_id 再调用一次即可继续等待——观察基线保留、不重新计时。条件何时成立无法预估时可以放心用默认预算 + 续等，而不是一次把 timeout_ms 开到上限。`,
   'background=true 时只登记条件并立刻返回 status=parked 与 wait_id，可先去处理别的事，之后用 wait_id 查询/继续等待。',
   '轮询本身失败（连不上、命令起不来）只记进 last error，不代表条件不成立。',
+  'reason：一句话说明为什么要等（人读），会显示在客户端的「等待中」列表上。可选，但建议每次都写——尤其 duration 这种「等一段时间」的等待，条件标签本身说不清在等什么。',
 ].join('\n');
 
 export class ToolWaitFor extends MicaTool {
@@ -64,6 +65,11 @@ export class ToolWaitFor extends MicaTool {
           },
           poll_interval_ms: { type: 'number', description: '轮询间隔毫秒；默认按 kind 取值，最小 50。' },
           background: { type: 'boolean', description: 'true 时只登记条件、立刻返回 wait_id，不阻塞本轮。' },
+          reason: {
+            type: 'string',
+            description:
+              '为什么等：一句话人读的说明（例如「等 dev server 起来」），客户端「等待中」列表会优先显示它。可选，但建议提供——duration 等待尤其需要，否则用户只看到一串秒数、不知道在等什么。',
+          },
           task_id: { type: 'string', description: 'kind=task：run_shell 后台任务 ID。' },
           pid: { type: 'number', description: 'kind=process：要等待退出的进程 pid。' },
           file_path: { type: 'string', description: 'kind=file：文件路径（相对路径按当前工作目录解析）。' },
@@ -104,6 +110,7 @@ export class ToolWaitFor extends MicaTool {
       const record = parsed.record;
       if (!isResumableWaitStatus(record.status)) return formatResult(record, { settledByEarlierCall: true });
       if (parsed.pollIntervalMs !== undefined) record.pollIntervalMs = parsed.pollIntervalMs;
+      if (parsed.reason !== undefined) record.reason = parsed.reason;
       record.status = 'waiting';
       return this.runWaitLoop(record, callbacks, parsed.timeoutMs);
     }
@@ -111,6 +118,7 @@ export class ToolWaitFor extends MicaTool {
     const record = createWaitRecord({
       kind: parsed.condition.kind,
       label: describeCondition(parsed.condition),
+      reason: parsed.reason,
       condition: parsed.condition,
       pollIntervalMs: parsed.pollIntervalMs,
       timeoutMs: parsed.timeoutMs,
@@ -198,7 +206,7 @@ export class ToolWaitFor extends MicaTool {
       }
       const pollIntervalMs =
         input.poll_interval_ms === undefined ? undefined : normalizePollInterval(input.poll_interval_ms, record.kind);
-      return { ok: true, mode: 'resume', record, timeoutMs, pollIntervalMs };
+      return { ok: true, mode: 'resume', record, timeoutMs, pollIntervalMs, reason: normalizeReason(input.reason) };
     }
 
     if (!kindHint) return { ok: false, message: '需要提供 kind，或提供上次返回的 wait_id 续等' };
@@ -211,6 +219,7 @@ export class ToolWaitFor extends MicaTool {
       timeoutMs,
       pollIntervalMs: normalizePollInterval(input.poll_interval_ms, normalized.condition.kind),
       background: input.background === true,
+      reason: normalizeReason(input.reason),
     };
   }
 
@@ -220,7 +229,9 @@ export class ToolWaitFor extends MicaTool {
     const kind = readString(input.kind)?.toLowerCase() ?? '?';
     const target = readString(input.url) ?? readString(input.file_path) ?? readString(input.command) ?? '';
     const detail = target ? ` ${truncateDisplayText(target, 48)}` : '';
-    return `wait_for ${kind}${detail}`;
+    const reason = normalizeReason(input.reason);
+    const why = reason ? ` — ${truncateDisplayText(reason, 40)}` : '';
+    return `wait_for ${kind}${detail}${why}`;
   }
 }
 
@@ -232,9 +243,19 @@ type ParsedWaitInput =
       timeoutMs: number;
       pollIntervalMs: number;
       background: boolean;
+      reason?: string;
     }
-  | { ok: true; mode: 'resume'; record: WaitRecord; timeoutMs: number; pollIntervalMs?: number }
+  | { ok: true; mode: 'resume'; record: WaitRecord; timeoutMs: number; pollIntervalMs?: number; reason?: string }
   | { ok: false; message: string };
+
+const MAX_REASON_CHARS = 200;
+
+/** `reason` 只用于展示，所以这里只做去空白与长度裁剪。 */
+function normalizeReason(value: unknown): string | undefined {
+  const text = readString(value);
+  if (!text) return undefined;
+  return text.length > MAX_REASON_CHARS ? `${text.slice(0, MAX_REASON_CHARS - 1)}…` : text;
+}
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -417,6 +438,7 @@ function formatResult(record: WaitRecord, options: { hint?: string; settledByEar
     `wait_id: ${record.id}`,
     `kind: ${record.kind}`,
     `condition: ${record.label}`,
+    ...(record.reason ? [`reason: ${record.reason}`] : []),
     `status: ${record.status}`,
     `elapsed: ${formatElapsed(Date.now() - record.createdAt)} · polls: ${record.polls}`,
   ];
@@ -434,6 +456,7 @@ function formatParked(record: WaitRecord): string {
     `wait_id: ${record.id}`,
     `kind: ${record.kind}`,
     `condition: ${record.label}`,
+    ...(record.reason ? [`reason: ${record.reason}`] : []),
     'status: parked',
     `hint: 已登记，未阻塞本轮。用 wait_for({ wait_id: "${record.id}" }) 等待或查询它；到期前没有调用查询就一直保持 parked。`,
   ].join('\n');

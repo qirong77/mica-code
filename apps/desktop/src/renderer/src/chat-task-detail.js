@@ -93,11 +93,25 @@ export function waitTaskKindLabel(kind) {
 }
 
 /**
+ * dock 行上的一句话：优先用模型给的 reason（「为什么等」），否则退回条件
+ * 标签。duration 等待的标签只是「等待 50s」，所以有 reason 时它才是唯一能
+ * 说明在等什么的信息。
+ */
+export function waitTaskSummary(task) {
+  const reason = String(task?.reason || '').trim()
+  if (reason) return reason
+  return String(task?.label || '').trim() || '等待条件'
+}
+
+/**
  * wait_for dock 行的悬停提示：条件、精确到毫秒的开始时间与已轮询次数。
  * 侧栏/状态行都不做每秒 tick，倒计时与耗时只在 tooltip 里给。
  */
 export function waitTaskTooltip(task) {
-  const lines = [String(task?.label || '').trim() || '等待条件']
+  const lines = []
+  const reason = String(task?.reason || '').trim()
+  if (reason) lines.push(reason)
+  lines.push(String(task?.label || '').trim() || '等待条件')
   const elapsed = taskElapsedMs(task, Date.now())
   if (elapsed != null) lines.push(`已等待 ${Math.round(elapsed / 1000)} 秒`)
   const polls = Number(task?.polls)

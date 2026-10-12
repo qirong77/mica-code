@@ -9,6 +9,7 @@ import {
   taskElapsedMs,
   taskOutputWindowLabel,
   waitTaskKindLabel,
+  waitTaskSummary,
   waitTaskTooltip
 } from './chat-task-detail'
 
@@ -124,6 +125,17 @@ describe('taskElapsedMs', () => {
       waitTaskTooltip({ label: '127.0.0.1:3000 可连接', polls: 4, detail: 'connection refused' })
     ).toBe(['127.0.0.1:3000 可连接', '已轮询 4 次', '最近一次检查：connection refused'].join('\n'))
     expect(waitTaskTooltip({})).toBe('等待条件')
+  })
+
+  it('prefers the reason over the condition label', () => {
+    const task = { kind: 'duration', label: '等待 50s', reason: '等 dev server 起来' }
+    expect(waitTaskSummary(task)).toBe('等 dev server 起来')
+    expect(waitTaskTooltip(task)).toBe(['等 dev server 起来', '等待 50s'].join('\n'))
+
+    // 没给 reason 时退回条件标签（非 duration 等待的条件本身就够清楚）。
+    expect(waitTaskSummary({ kind: 'file', label: '/tmp/a.txt exists' })).toBe('/tmp/a.txt exists')
+    expect(waitTaskSummary({ reason: '   ' })).toBe('等待条件')
+    expect(waitTaskSummary({})).toBe('等待条件')
   })
 
   it('measures against now while running and against finishedAt once done', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  findImageReferences,
   findPathCandidates,
   isImagePath,
   looksLikePath,
@@ -7,6 +8,7 @@ import {
   pathHref,
   remarkPathLinks,
   splitLocation,
+  splitTextByImages,
   splitTextByPaths
 } from './chat-paths'
 
@@ -138,5 +140,59 @@ describe('remarkPathLinks', () => {
     expect(tree.children[0].type).toBe('code')
     expect(tree.children[1].children[0].type).toBe('inlineCode')
     expect(tree.children[2].children[0].url).toBe('https://example.com')
+  })
+})
+
+describe('image references', () => {
+  it('finds the markdown form a user attachment is stored as', () => {
+    // 用户上传的图片在会话里就是这段文本，分享出去后接收方靠它看图
+    const text = '识别这个谱 [Image](~/.mica/images/image-2b3b.jpg)'
+    expect(findImageReferences(text)).toEqual([
+      { alt: 'Image', source: '~/.mica/images/image-2b3b.jpg' }
+    ])
+    expect(findImageReferences('![谱](/tmp/a.png)')).toEqual([{ alt: '谱', source: '/tmp/a.png' }])
+  })
+
+  it('keeps one entry per source and ignores plain links', () => {
+    const text = '[Image](a.png) [Image](a.png) [docs](https://example.com)'
+    expect(findImageReferences(text).map((item) => item.source)).toEqual(['a.png'])
+  })
+
+  it('returns nothing for text without references', () => {
+    expect(findImageReferences('')).toEqual([])
+    expect(findImageReferences('看看 /Users/a/b.ts')).toEqual([])
+    expect(findImageReferences(undefined)).toEqual([])
+  })
+
+  it('splits the message body around images, keeping the rest verbatim', () => {
+    const segments = splitTextByImages('before [Image](~/.mica/images/a.png) after')
+    expect(segments).toEqual([
+      { type: 'text', text: 'before ' },
+      { type: 'image', alt: 'Image', source: '~/.mica/images/a.png' },
+      { type: 'text', text: ' after' }
+    ])
+  })
+
+  it('handles images at the edges and repeated references', () => {
+    expect(splitTextByImages('[Image](a.png)')).toEqual([
+      { type: 'image', alt: 'Image', source: 'a.png' }
+    ])
+    const many = splitTextByImages('![x](a.png)![y](b.png)')
+    expect(many.filter((s) => s.type === 'image').map((s) => s.source)).toEqual(['a.png', 'b.png'])
+  })
+
+  it('leaves a message without images as a single text run', () => {
+    // 调用方据此保持原有渲染路径（path 识别等）不变
+    expect(splitTextByImages('纯文本 /Users/a/b.ts')).toEqual([
+      { type: 'text', text: '纯文本 /Users/a/b.ts' }
+    ])
+    expect(splitTextByImages('')).toEqual([])
+  })
+
+  it('is not confused by consecutive calls (shared regex state)', () => {
+    const text = '[Image](a.png) [Image](b.png)'
+    expect(findImageReferences(text)).toHaveLength(2)
+    expect(findImageReferences(text)).toHaveLength(2)
+    expect(splitTextByImages(text).filter((s) => s.type === 'image')).toHaveLength(2)
   })
 })

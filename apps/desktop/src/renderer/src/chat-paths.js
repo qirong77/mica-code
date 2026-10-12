@@ -45,6 +45,68 @@ export function isImagePath(value) {
 }
 
 /**
+ * Markdown 图片引用：`[Image](路径)` / `![alt](路径)`，可选带 title。
+ *
+ * 唯一实现：输入框上方的附件缩略图（还没发出去）与消息里的图片（已经发出去）都读它，
+ * 两处不能各写一份正则——用户上传的图片在会话里就是以这个文本形式存下来的。
+ */
+const IMAGE_REFERENCE = /!?(?:\[([^\]]*)\])\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+
+/**
+ * 这个引用到底是不是图片。
+ *
+ * 正则本身会把「普通 markdown 链接」一起匹配进来（`[docs](https://example.com)`），
+ * 不筛掉就会在消息体里被当成一条图片引用。data: 图片没有扩展名，单独认。
+ */
+function isImageSource(value) {
+  const source = String(value || '')
+  if (/^data:image\//i.test(source)) return true
+  return isImagePath(source)
+}
+
+/**
+ * 取出文本里的图片引用（按出现顺序，同一条路径只留一次），不改文本。
+ * 输入框用它决定在输入框上方挂哪几张缩略图。
+ */
+export function findImageReferences(text) {
+  const result = []
+  const pattern = new RegExp(IMAGE_REFERENCE.source, 'g')
+  let match
+  while ((match = pattern.exec(String(text || '')))) {
+    const source = match[2]
+    if (!isImageSource(source)) continue
+    if (!result.some((item) => item.source === source))
+      result.push({ alt: match[1] || '图片', source })
+  }
+  return result
+}
+
+/**
+ * 把文本切成「图片引用」与「其余文本」，供消息体把图片引用渲染成链接文本。
+ *
+ * 用户上传的图片在会话里就是一段 `[Image](~/.mica/images/xxx.svg)` 文本：对话区不内联
+ * 渲染图片（见 ChatView 的 ImageLink），切成片段才能在去掉 `[Image](...)` 包装后
+ * 只留下可点的路径链接。
+ * 没有图片时返回单个文本片段，调用方据此保持原有渲染路径不变。
+ */
+export function splitTextByImages(text) {
+  const value = String(text || '')
+  const segments = []
+  const pattern = new RegExp(IMAGE_REFERENCE.source, 'g')
+  let lastIndex = 0
+  let match
+  while ((match = pattern.exec(value))) {
+    if (!isImageSource(match[2])) continue
+    if (match.index > lastIndex)
+      segments.push({ type: 'text', text: value.slice(lastIndex, match.index) })
+    segments.push({ type: 'image', alt: match[1] || '图片', source: match[2] })
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < value.length) segments.push({ type: 'text', text: value.slice(lastIndex) })
+  return segments
+}
+
+/**
  * 这个片段像不像一个真实路径。
  * 锚定写法（`/a`、`~/a`、`./a`、`C:\a`）一律采纳；相对写法要求「≥2 层目录」或
  * 「尾段带扩展名」，把 `and/or`、`TCP/IP` 这类斜杠词排除在外。
