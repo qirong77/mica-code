@@ -11,7 +11,7 @@ import {
 import {
   IconArrowUp,
   IconChartBar,
-  IconFiles,
+  IconFile,
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
@@ -745,7 +745,7 @@ function setLayoutVar(name, value) {
 
 // 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
 const PAGE_HEADER = {
-  files: { label: 'Files', Icon: IconFiles },
+  files: { label: 'Files', Icon: IconFile },
   stats: { label: 'Stats', Icon: IconChartBar },
   settings: { label: 'Settings', Icon: IconSettings }
 }
@@ -2138,7 +2138,7 @@ export default function App() {
             />
           )}
           {isMobile ? (
-            <div className="flex h-10 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
+            <div className="flex h-8 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
               <span className="text-xs font-semibold text-white/70">会话</span>
               <button
                 type="button"
@@ -2151,7 +2151,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <div className="h-10 shrink-0 drag-region" aria-hidden="true" />
+            <div className="h-8 shrink-0 drag-region" aria-hidden="true" />
           )}
           <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
             <button
@@ -2284,7 +2284,7 @@ export default function App() {
         </aside>
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
-            className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
           >
             {isMobile && !shareMode && (
               <button
@@ -2335,24 +2335,28 @@ export default function App() {
                     title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
                     aria-label={terminalVisible ? '收起终端' : '展开终端'}
                     aria-pressed={terminalVisible}
-                    className={`grid size-7 place-items-center rounded-md transition-colors hover:bg-white/[.06] hover:text-white ${
-                      terminalVisible ? 'text-white' : 'text-white/55'
+                    className={`grid size-6 place-items-center rounded-md transition-colors ${
+                      terminalVisible
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : 'text-white/55 hover:bg-white/[.06] hover:text-white'
                     }`}
                     onClick={toggleTerminalPanel}
                   >
-                    <IconTerminal2 size={15} />
+                    <IconTerminal2 size={14} />
                   </button>
                   <button
                     type="button"
                     title={view === 'files' ? '返回对话' : '查看文件'}
                     aria-label={view === 'files' ? '返回对话' : '查看文件'}
                     aria-pressed={view === 'files'}
-                    className={`grid size-7 place-items-center rounded-md transition-colors hover:bg-white/[.06] hover:text-white ${
-                      view === 'files' ? 'text-white' : 'text-white/55'
+                    className={`grid size-6 place-items-center rounded-md transition-colors ${
+                      view === 'files'
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : 'text-white/55 hover:bg-white/[.06] hover:text-white'
                     }`}
                     onClick={() => setView((current) => (current === 'files' ? 'chat' : 'files'))}
                   >
-                    <IconFiles size={15} />
+                    <IconFile size={14} />
                   </button>
                 </>
               )}

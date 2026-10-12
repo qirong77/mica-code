@@ -19,8 +19,10 @@ import icon from '../../resources/icon.png?asset'
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
 const DEFAULT_PORT = 8787
 const READY_PREFIX = '[mica-desktop] ready '
-const HEADER_HEIGHT_PX = 34
-const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 12 }
+// 与渲染层的顶栏高度（App.jsx 的 h-8）保持一致：macOS 的系统窗口按钮浮在顶栏上，
+// y 要让它在这一条里居中，setSheetOffset 决定原生提示框挂下来时贴在哪。
+const HEADER_HEIGHT_PX = 32
+const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 8 }
 
 let runtime = null
 let quitting = false

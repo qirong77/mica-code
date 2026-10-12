@@ -270,7 +270,10 @@ body.is-resizing.is-resizing-terminal {
   --chat-muted: rgb(255 255 255 / 42%);
   --chat-subtle: rgb(255 255 255 / 25%);
   --chat-border: var(--color-line);
-  --chat-user: var(--color-panel-hi);
+  /* The user turn is a highlight on the transcript canvas, not a raised chrome
+     surface: --color-panel-hi read louder than the answer it alternates with.
+     Half a step above the canvas keeps it a subtle band. */
+  --chat-user: color-mix(in srgb, var(--color-panel) 50%, var(--color-canvas));
   --chat-accent: var(--color-accent);
   --chat-thinking: var(--color-warn);
   /* Chrome bands: the top bar and the turn log read as separate surfaces
@@ -3212,7 +3215,7 @@ body.is-resizing.is-resizing-terminal {
 /*
  * 页面按 viewport-fit=cover 铺满整屏后，手机圆角、刘海与 home indicator 会压住
  * 贴边的顶栏和底部状态栏：带上 .safe-* 的元素自己让开。content-box 让内边距加在
- * h-10 / h-7 之外（原高度留给内容，不被内边距挤扁），元素自身的背景色会铺满
+ * h-8 / h-7 之外（原高度留给内容，不被内边距挤扁），元素自身的背景色会铺满
  * 内边距，与相邻区域无缝。桌面端（含 Electron）env() 一律为 0，等价于无操作。
  */
 @media (max-width: 767px), (display-mode: standalone), (pointer: coarse) {
