@@ -898,13 +898,19 @@ export default function App() {
   // 只在渲染与面板宽度上限里把它当成收起处理（宽度为 0、不可展开、不占列宽）。
   const sidebarHidden = sidebarCollapsed || shareMode
   const sidebarHiddenRef = useLatest(sidebarHidden)
+  // 分享页里右侧面板同样是「不存在」而不是「被收起」：访客没有 files:*/terminal:* 权限，
+  // 展开只会拿到一串权限错误。与侧栏同一套做法——只在渲染里当成收起处理，不写回 layout
+  // （写进去会把所有者的面板也收掉，也会让这一页的展开状态泄漏给别人）。
+  const rightPanelHidden = shareMode
+  const rightPanelShown = rightPanelOpen && !rightPanelHidden
+  const rightPanelMaximizedShown = rightPanelMaximized && !rightPanelHidden
   // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一对变量）
   useLayoutEffect(() => {
     setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
   }, [sidebarHidden, sidebarWidth])
   useLayoutEffect(() => {
-    setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${rightPanelOpen ? rightPanelWidth : 0}px`)
-  }, [rightPanelOpen, rightPanelWidth])
+    setLayoutVar(RIGHT_PANEL_WIDTH_VAR, `${rightPanelShown ? rightPanelWidth : 0}px`)
+  }, [rightPanelShown, rightPanelWidth])
   const [prompt, setPrompt] = useState(null)
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
@@ -922,17 +928,23 @@ export default function App() {
   const currentServer = currentServerUrl(window.location)
   // 移动端右侧面板以抽屉呈现：任何把面板「展开」的入口（标签点击、打开文件、
   // 打开终端）都会同步打开抽屉，不必逐个改调用点
-  const previousRightPanelOpen = useRef(rightPanelOpen)
+  // 盯的是「面板真的显示出来了」而不是 layout 里的原值：分享页里即使 rightPanelOpen 被
+  // 置真，也不该把移动端抽屉拉出来。
+  const previousRightPanelShown = useRef(rightPanelShown)
   useEffect(() => {
-    const wasOpen = previousRightPanelOpen.current
-    previousRightPanelOpen.current = rightPanelOpen
-    if (isMobile && rightPanelOpen && !wasOpen) setMobileDrawer('right')
-  }, [isMobile, rightPanelOpen])
+    const wasShown = previousRightPanelShown.current
+    previousRightPanelShown.current = rightPanelShown
+    if (isMobile && rightPanelShown && !wasShown) setMobileDrawer('right')
+  }, [isMobile, rightPanelShown])
   useEffect(() => {
     if (!isMobile) setMobileDrawer(null)
   }, [isMobile])
   const closeMobileDrawer = useCallback(() => setMobileDrawer(null), [])
-  const rightPanelVisible = isMobile ? mobileDrawer === 'right' : rightPanelOpen
+  const rightPanelVisible = rightPanelHidden
+    ? false
+    : isMobile
+      ? mobileDrawer === 'right'
+      : rightPanelShown
 
   // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
   // 点一下切换。
@@ -1492,6 +1504,8 @@ export default function App() {
   )
 
   const createRightTerm = useCallback(() => {
+    // 分享页没有右侧面板，别在宿主上给访客拉起一个 PTY（终端能力对访客也是拒绝的）。
+    if (rightPanelHidden) return
     const chatId = activeRef.current
     if (!chatId) return
     const id = uid('rt')
@@ -1512,7 +1526,7 @@ export default function App() {
     })
     setRightActiveTermByChat((prev) => ({ ...prev, [chatId]: id }))
     setRightPanelTab('terminal')
-  }, [activeRef, nodesRef, terminalCwd])
+  }, [activeRef, nodesRef, rightPanelHidden, terminalCwd])
 
   const closeRightTerm = useCallback(
     (id) => {
@@ -1564,13 +1578,14 @@ export default function App() {
     rightTermActivityRef.current.set(id, Date.now())
   }, [])
   const openRightTerminalTab = useCallback(() => {
+    if (rightPanelHidden) return
     // 切到终端 Tab 时至少要有一个终端，否则用户还得先手动新建第一个。
     if (rightTerms.length === 0) {
       createRightTerm()
       return
     }
     setRightPanelTab('terminal')
-  }, [createRightTerm, rightTerms.length])
+  }, [createRightTerm, rightPanelHidden, rightTerms.length])
 
   // 右侧面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
   // 否则切过去只能看到一片空白。只在这一区域真正可见时才补，免得用户点过的每个
@@ -2131,13 +2146,14 @@ export default function App() {
     return () => window.removeEventListener('resize', clamp)
   }, [isMobile, sidebarHidden, sidebarWidth])
   const toggleRightPanel = useCallback(() => {
+    if (rightPanelHidden) return
     if (isMobile) {
       setRightPanelOpen(true)
       setMobileDrawer((value) => (value === 'right' ? null : 'right'))
       return
     }
     setRightPanelOpen((open) => !open)
-  }, [isMobile])
+  }, [isMobile, rightPanelHidden])
   // Cmd/Ctrl+Shift+I 显示/隐藏右侧 Panel
   useEffect(() => {
     const onKey = (event) => {
@@ -2158,13 +2174,14 @@ export default function App() {
       if (event.code !== 'Backquote') return
       event.preventDefault()
       event.stopPropagation()
+      if (rightPanelHidden) return
       setRightPanelOpen(true)
       if (rightPanelTab === 'terminal') setRightPanelTab('files')
       else openRightTerminalTab()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [openRightTerminalTab, rightPanelTab])
+  }, [openRightTerminalTab, rightPanelHidden, rightPanelTab])
 
   return (
     <>
@@ -2178,7 +2195,7 @@ export default function App() {
           isMobile
             ? undefined
             : {
-                gridTemplateColumns: rightPanelMaximized
+                gridTemplateColumns: rightPanelMaximizedShown
                   ? '0px 0px 1fr'
                   : `var(${SIDEBAR_WIDTH_VAR}) 1fr var(${RIGHT_PANEL_WIDTH_VAR})`,
                 transition: rightPanelOpen ? 'none' : 'none'
@@ -2198,7 +2215,7 @@ export default function App() {
               ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
                   mobileDrawer === 'sessions' ? 'translate-x-0' : '-translate-x-full'
                 }`
-              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden || rightPanelMaximized ? 'invisible pointer-events-none border-r-0' : ''}`
+              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden || rightPanelMaximizedShown ? 'invisible pointer-events-none border-r-0' : ''}`
           }
           style={
             isMobile
@@ -2362,7 +2379,7 @@ export default function App() {
           />
         </aside>
         <main
-          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximized ? 'invisible' : ''}`}
+          className={`relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas ${!isMobile && rightPanelMaximizedShown ? 'invisible' : ''}`}
         >
           <header
             className={`safe-top drag-region flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
@@ -2408,19 +2425,22 @@ export default function App() {
                 </button>
               </>
             ) : null}
-            <button
-              type="button"
-              title={rightPanelVisible ? '收起右侧面板 (⇧⌘I)' : '展开右侧面板 (⇧⌘I)'}
-              aria-label={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
-              className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-              onClick={toggleRightPanel}
-            >
-              {rightPanelVisible ? (
-                <IconLayoutSidebarRightCollapse size={15} />
-              ) : (
-                <IconLayoutSidebarRightExpand size={15} />
-              )}
-            </button>
+            {/* 分享页里右侧面板不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
+            {!rightPanelHidden && (
+              <button
+                type="button"
+                title={rightPanelVisible ? '收起右侧面板 (⇧⌘I)' : '展开右侧面板 (⇧⌘I)'}
+                aria-label={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
+                className="no-drag ml-auto grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                onClick={toggleRightPanel}
+              >
+                {rightPanelVisible ? (
+                  <IconLayoutSidebarRightCollapse size={15} />
+                ) : (
+                  <IconLayoutSidebarRightExpand size={15} />
+                )}
+              </button>
+            )}
           </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Suspense fallback={null}>
@@ -2490,179 +2510,183 @@ export default function App() {
             )}
           </footer>
         </main>
-        <aside
-          className={
-            isMobile
-              ? `safe-top safe-bottom absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
-                  mobileDrawer === 'right' ? 'translate-x-0' : 'translate-x-full'
-                }`
-              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelOpen ? '' : 'invisible pointer-events-none'}`
-          }
-          style={
-            isMobile
-              ? undefined
-              : { width: rightPanelMaximized ? undefined : `var(${RIGHT_PANEL_WIDTH_VAR})` }
-          }
-          aria-label="右侧面板"
-        >
-          {!isMobile && rightPanelOpen && !rightPanelMaximized && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="调整右侧面板宽度"
-              title="拖动调整右侧面板宽度"
-              className={`absolute inset-y-0 left-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingRightPanel ? 'bg-white/30' : ''}`}
-              onPointerDown={startRightPanelResize}
-            />
-          )}
-          <div
-            className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2"
-            style={{ paddingLeft: !isMobile && rightPanelMaximized ? 74 : undefined }}
+        {/* 分享页里右侧面板不存在：它是「这台机器」的视图（文件树/终端），分享令牌拿不到
+            这些能力，渲染出来只会是一串权限错误，所以像侧栏一样整个不渲染。 */}
+        {!rightPanelHidden && (
+          <aside
+            className={
+              isMobile
+                ? `safe-top safe-bottom absolute inset-y-0 right-0 z-[9100] flex w-full min-w-0 flex-col overflow-hidden border-l border-line bg-panel shadow-2xl transition-transform duration-200 ${
+                    rightPanelVisible ? 'translate-x-0' : 'translate-x-full'
+                  }`
+                : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-l border-line bg-panel ${rightPanelShown ? '' : 'invisible pointer-events-none'}`
+            }
+            style={
+              isMobile
+                ? undefined
+                : { width: rightPanelMaximizedShown ? undefined : `var(${RIGHT_PANEL_WIDTH_VAR})` }
+            }
+            aria-label="右侧面板"
           >
-            <button
-              type="button"
-              title={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
-              aria-label={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
-              aria-pressed={rightPanelMaximized}
-              className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
-              onClick={() => setRightPanelMaximized((value) => !value)}
+            {!isMobile && rightPanelShown && !rightPanelMaximizedShown && (
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调整右侧面板宽度"
+                title="拖动调整右侧面板宽度"
+                className={`absolute inset-y-0 left-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingRightPanel ? 'bg-white/30' : ''}`}
+                onPointerDown={startRightPanelResize}
+              />
+            )}
+            <div
+              className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2"
+              style={{ paddingLeft: !isMobile && rightPanelMaximizedShown ? 74 : undefined }}
             >
-              {rightPanelMaximized ? (
-                <IconLayoutSidebarRightCollapse size={14} />
-              ) : (
-                <IconLayoutSidebarRightExpand size={14} />
-              )}
-            </button>
-            <button
-              type="button"
-              aria-pressed={rightPanelTab === 'files'}
-              title="文件"
-              className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
-                rightPanelTab === 'files'
-                  ? 'bg-white/[.10] text-white'
-                  : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-              }`}
-              onClick={() => setRightPanelTab('files')}
-            >
-              <IconFolderOpen size={13} className="shrink-0 opacity-75" />
-              <span>文件</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={rightPanelTab === 'terminal'}
-              title="终端"
-              className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
-                rightPanelTab === 'terminal'
-                  ? 'bg-white/[.10] text-white'
-                  : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-              }`}
-              onClick={openRightTerminalTab}
-            >
-              <IconTerminal2 size={13} className="shrink-0 opacity-75" />
-              <span>终端</span>
-            </button>
-            {isMobile && (
               <button
                 type="button"
-                title="关闭"
-                aria-label="关闭右侧面板"
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                onClick={closeMobileDrawer}
+                title={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
+                aria-label={rightPanelMaximized ? '恢复主区' : '最大化右侧面板'}
+                aria-pressed={rightPanelMaximized}
+                className={`h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white ${isMobile ? 'hidden' : 'grid'}`}
+                onClick={() => setRightPanelMaximized((value) => !value)}
               >
-                <IconX size={14} />
+                {rightPanelMaximized ? (
+                  <IconLayoutSidebarRightCollapse size={14} />
+                ) : (
+                  <IconLayoutSidebarRightExpand size={14} />
+                )}
               </button>
-            )}
-          </div>
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            {rightPanelTab === 'terminal' && (
-              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
-                <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-                  {rightTerms.map((node) => {
-                    const active = node.id === rightActiveTerm
-                    return (
-                      <div
-                        key={node.id}
-                        className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
-                          active
-                            ? 'bg-white/[.10] text-white'
-                            : 'text-white/55 hover:bg-white/[.05] hover:text-white'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          title={node.text}
-                          className="flex min-w-0 items-center gap-1.5"
-                          onClick={() =>
-                            setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
-                          }
-                        >
-                          <IconTerminal2 size={12} className="shrink-0 opacity-75" />
-                          <span className="max-w-36 truncate">{node.text}</span>
-                        </button>
-                        <button
-                          type="button"
-                          title="关闭终端"
-                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
-                            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                          }`}
-                          onClick={() => closeRightTerm(node.id)}
-                        >
-                          <IconX size={11} />
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
+              <button
+                type="button"
+                aria-pressed={rightPanelTab === 'files'}
+                title="文件"
+                className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                  rightPanelTab === 'files'
+                    ? 'bg-white/[.10] text-white'
+                    : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                }`}
+                onClick={() => setRightPanelTab('files')}
+              >
+                <IconFolderOpen size={13} className="shrink-0 opacity-75" />
+                <span>文件</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={rightPanelTab === 'terminal'}
+                title="终端"
+                className={`flex h-6 flex-1 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                  rightPanelTab === 'terminal'
+                    ? 'bg-white/[.10] text-white'
+                    : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                }`}
+                onClick={openRightTerminalTab}
+              >
+                <IconTerminal2 size={13} className="shrink-0 opacity-75" />
+                <span>终端</span>
+              </button>
+              {isMobile && (
                 <button
                   type="button"
-                  title="新建终端"
-                  aria-label="新建终端"
+                  title="关闭"
+                  aria-label="关闭右侧面板"
                   className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                  onClick={createRightTerm}
+                  onClick={closeMobileDrawer}
                 >
-                  <IconPlus size={14} />
+                  <IconX size={14} />
                 </button>
-              </div>
-            )}
-            <Suspense fallback={null}>
-              <FilesView
-                ref={filesRef}
-                root={gitIsCurrent ? git.cwd : null}
-                visible={rightPanelTab === 'files'}
-                askText={askText}
-                gitCwd={gitIsCurrent ? git.cwd : null}
-                gitRepository={repository}
-                gitLoading={gitIsCurrent ? git.loading : true}
-                gitBranch={gitIsCurrent ? git.status?.branch || null : null}
-                onCornerResizeStart={null}
-              />
-            </Suspense>
-            <Suspense fallback={null}>
-              <TerminalHost
-                ref={terminalRef}
-                nodes={allRightTerms}
-                activeId={rightActiveTerm}
-                visible={rightPanelTab === 'terminal'}
-                pane="terminal"
-                docked={false}
-                sidebarCollapsed={sidebarHidden}
-                resolveCwd={rightTermCwd}
-                commandFor={commandFor}
-                onRead={(id, reason) => {
-                  touchRightTerm(id)
-                  notifications.markRead(id, reason)
-                }}
-                onMicaExit={closeRightTerm}
-              />
-            </Suspense>
-            {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (
-              <TerminalKeyBar onSend={sendTerminalKey} />
-            )}
-          </div>
-        </aside>
+              )}
+            </div>
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {rightPanelTab === 'terminal' && (
+                <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
+                  <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+                    {rightTerms.map((node) => {
+                      const active = node.id === rightActiveTerm
+                      return (
+                        <div
+                          key={node.id}
+                          className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                            active
+                              ? 'bg-white/[.10] text-white'
+                              : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            title={node.text}
+                            className="flex min-w-0 items-center gap-1.5"
+                            onClick={() =>
+                              setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
+                            }
+                          >
+                            <IconTerminal2 size={12} className="shrink-0 opacity-75" />
+                            <span className="max-w-36 truncate">{node.text}</span>
+                          </button>
+                          <button
+                            type="button"
+                            title="关闭终端"
+                            className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
+                              isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            onClick={() => closeRightTerm(node.id)}
+                          >
+                            <IconX size={11} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    title="新建终端"
+                    aria-label="新建终端"
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                    onClick={createRightTerm}
+                  >
+                    <IconPlus size={14} />
+                  </button>
+                </div>
+              )}
+              <Suspense fallback={null}>
+                <FilesView
+                  ref={filesRef}
+                  root={gitIsCurrent ? git.cwd : null}
+                  visible={rightPanelTab === 'files'}
+                  askText={askText}
+                  gitCwd={gitIsCurrent ? git.cwd : null}
+                  gitRepository={repository}
+                  gitLoading={gitIsCurrent ? git.loading : true}
+                  gitBranch={gitIsCurrent ? git.status?.branch || null : null}
+                  onCornerResizeStart={null}
+                />
+              </Suspense>
+              <Suspense fallback={null}>
+                <TerminalHost
+                  ref={terminalRef}
+                  nodes={allRightTerms}
+                  activeId={rightActiveTerm}
+                  visible={rightPanelTab === 'terminal'}
+                  pane="terminal"
+                  docked={false}
+                  sidebarCollapsed={sidebarHidden}
+                  resolveCwd={rightTermCwd}
+                  commandFor={commandFor}
+                  onRead={(id, reason) => {
+                    touchRightTerm(id)
+                    notifications.markRead(id, reason)
+                  }}
+                  onMicaExit={closeRightTerm}
+                />
+              </Suspense>
+              {isMobile && rightPanelTab === 'terminal' && rightActiveTerm && (
+                <TerminalKeyBar onSend={sendTerminalKey} />
+              )}
+            </div>
+          </aside>
+        )}
       </div>
       {/* 分享页面里侧栏不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
-      {!rightPanelMaximized && !isMobile && !shareMode && (
+      {!rightPanelMaximizedShown && !isMobile && !shareMode && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -2679,7 +2703,9 @@ export default function App() {
           <IconLayoutSidebarLeftCollapse size={16} />
         </button>
       )}
-      {!rightPanelMaximized && (
+      {/* 文件搜索是「打开的编辑器」的入口，和右侧面板同一类：访客没有 files:* 权限，
+          留着它只会让 Cmd/Ctrl+P 撞出一串权限错误。 */}
+      {!rightPanelMaximizedShown && !shareMode && (
         <Suspense fallback={null}>
           <QuickSearch
             getRoot={getSearchRoot}
