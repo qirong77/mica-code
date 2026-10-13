@@ -2353,6 +2353,23 @@ export default function App() {
                 <IconMenu2 size={16} />
               </button>
             )}
+            {/* 返回对话是主区顶栏最左的入口（与 CLI 的 prompt 前导一致）：非对话视图
+                下始终出现在标题之前，不要挪回右侧。分享页没有它（点开就是被分享的对话）。 */}
+            {view !== 'chat' && PAGE_HEADER[view] && (
+              <button
+                type="button"
+                title="返回对话"
+                aria-label="返回对话"
+                className="no-drag flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+                onClick={() => setView('chat')}
+              >
+                <IconMessage size={13} />
+                <span>返回对话</span>
+              </button>
+            )}
+            {view !== 'chat' && PAGE_HEADER[view] && (
+              <span className="h-3.5 w-px shrink-0 bg-line" aria-hidden="true" />
+            )}
             {view === 'chat' ? (
               <span className="min-w-0 truncate text-white/75">
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
@@ -2368,21 +2385,9 @@ export default function App() {
                 )
               })()
             ) : null}
-            {/* 顶栏右侧：返回对话（非对话视图）、终端面板开关、文件视图开关。
+            {/* 顶栏右侧：终端面板开关、文件视图开关。
                 分享页里 files/terminal 能力都拿不到，这两个开关整个不渲染。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
-              {view !== 'chat' && PAGE_HEADER[view] && (
-                <button
-                  type="button"
-                  title="返回对话"
-                  aria-label="返回对话"
-                  className="flex h-6 items-center gap-1 rounded-md px-2 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
-                  onClick={() => setView('chat')}
-                >
-                  <IconMessage size={13} />
-                  <span>返回对话</span>
-                </button>
-              )}
               {!shareMode && (
                 <>
                   <button
@@ -2484,7 +2489,8 @@ export default function App() {
                 className="terminal-panel-resizer shrink-0"
                 onPointerDown={startTerminalResize}
               />
-              <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1 no-drag">
+              {/* pr-3 与顶栏（px-3）同一条右边线：两个 h-8 栏上下相邻，右侧按钮错开一格很明显。 */}
+              <div className="no-drag flex h-8 shrink-0 items-center gap-0.5 border-b border-line pl-1 pr-3">
                 <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
                   {rightTerms.map((node) => {
                     const active = node.id === rightActiveTerm
@@ -2612,7 +2618,8 @@ export default function App() {
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-expanded={!sidebarCollapsed}
-          className="fixed top-2 z-50 grid h-5.5 w-5 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white no-drag"
+          /* top-1 + size-6：中心与顶栏（h-8）里的图标同一水平线，别用 top-2 那种整体偏低的尺寸。 */
+          className="no-drag fixed top-1 z-50 grid size-6 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white"
           style={{
             left: sidebarCollapsed
               ? SIDEBAR_TOGGLE_COLLAPSED_LEFT

@@ -150,7 +150,14 @@
 
 .terminal-pane .xterm {
   height: 100%;
-  /* padding: 6px 8px; */
+  /* 终端内容不贴面板左上角：fit 会从 element 的 padding 里扣掉，网格不会溢出。 */
+  padding: 6px 8px;
+}
+/* viewport 是绝对定位的子元素，按 padding box 铺满（padding 也算进去），
+   会把那一圈涂成 xterm.css 自带的黑色背景：置透明，露出面板的 canvas 底色，
+   与 theme.background（同色）无缝。 */
+.terminal-pane .xterm .xterm-viewport {
+  background-color: transparent;
 }
 .xterm-scrollable-element {
   height: 100%;
