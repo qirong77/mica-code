@@ -6,6 +6,9 @@ export function isRetryableError(error: unknown): boolean {
   const err = error as Record<string, unknown>;
 
   if (err.name === 'AbortError') return false;
+  // 超时错误没有 status/type，靠 name / message 兜底：Bun 下 AbortSignal.timeout()
+  // 抛 TimeoutError("The operation timed out.")，OpenAI SDK 抛 APIConnectionTimeoutError。
+  if (err.name === 'TimeoutError' || err.name === 'APIConnectionTimeoutError') return true;
 
   const status = typeof err.status === 'number' ? err.status : undefined;
   if (status !== undefined) {
@@ -49,6 +52,7 @@ export function isRetryableError(error: unknown): boolean {
       msg.includes('rate_limit') ||
       msg.includes('too many requests') ||
       msg.includes('timeout') ||
+      msg.includes('timed out') ||
       msg.includes('connection') ||
       msg.includes('network') ||
       msg.includes('econnrefused') ||

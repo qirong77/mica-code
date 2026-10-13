@@ -226,6 +226,14 @@ judgement with unit tests; `src/host/access.js` owns tokens, the reachable base 
   answers on — which is what stops an arbitrary web page from quietly talking to
   `http://127.0.0.1:8787` on the visitor's behalf. Same-site ignores the port, because the dev server
   serves the page on `localhost:5173` and proxies `/api` to the runtime.
+* The host allowlist is the loopback names, this machine's hostname and its interface addresses, plus
+  whatever `MICA_DESKTOP_ALLOWED_HOSTS` (comma-separated, names or IPs) adds. That variable is the
+  escape hatch for reaching the runtime under a name it does not own — a reverse tunnel or a proxy,
+  where the browser keeps sending the *public* address as `Host` while the runtime only sees the
+  loopback connection. Without it such a request answers `403 Host 不被允许`: the static shell and
+  `/api/health` still load (health is deliberately credential-free so another runtime can probe it),
+  so the page renders its "无法连接 Mica Code 运行时" screen even though the tunnel is fine. It is read
+  once per process — restart the app after changing it.
 
 #### A share link
 

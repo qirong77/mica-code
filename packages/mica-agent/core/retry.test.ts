@@ -29,6 +29,24 @@ describe('isRetryableError', () => {
     expect(isRetryableError(error)).toBe(false);
   });
 
+  it('treats timeout errors as retryable', () => {
+    // Bun 下 AbortSignal.timeout() 触发的 fetch 超时：name=TimeoutError、
+    // code=23（数字，不匹配 code 白名单）、无 status。
+    expect(
+      isRetryableError(
+        Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError', code: 23 }),
+      ),
+    ).toBe(true);
+    // OpenAI SDK 的连接超时
+    expect(
+      isRetryableError(
+        Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' }),
+      ),
+    ).toBe(true);
+    // 只带文案、没有 name 的层
+    expect(isRetryableError(new Error('The operation timed out.'))).toBe(true);
+  });
+
   it('withRetry honors a shouldRetry override', async () => {
     let calls = 0;
     await withRetry(
