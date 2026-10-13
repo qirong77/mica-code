@@ -34,7 +34,8 @@ export function GitDiffEditor({ cwd, file, onClose }) {
     const request = ++requestRef.current
     ;(async () => {
       try {
-        const content = await window.mica.git.file(cwd, file.path)
+        // base 跟着文件走：GIT TREE 里的文件与 merge-base 比，CHANGES 里的与 HEAD 比。
+        const content = await window.mica.git.file(cwd, file.path, file.base || null)
         if (request !== requestRef.current || !editorRef.current) return
         for (const model of modelsRef.current) model?.dispose()
         modelsRef.current = []

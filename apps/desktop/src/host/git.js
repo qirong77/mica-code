@@ -4,9 +4,19 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { promisify } from 'util'
 import { ipcMain } from 'electron'
+import {
+  baseBranchLabel,
+  compareChangePaths,
+  isBaseBranch,
+  parseNameStatus,
+  parseNumstat,
+  parseStatus
+} from './git-core'
 
 const execFileAsync = promisify(execFile)
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+// 基线分支候选：远端默认分支（origin/HEAD）优先，其次是常见的 master/main。
+const BASE_CANDIDATES = ['origin/master', 'origin/main', 'master', 'main']
 
 async function git(cwd, args, options = {}) {
   const result = await execFileAsync('git', args, {
@@ -26,41 +36,6 @@ async function getRepository(cwd) {
     // A repository without its first commit is compared with Git's empty tree.
   }
   return { root, base }
-}
-
-function parseStatus(value) {
-  const records = value.split('\0')
-  const changes = new Map()
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index]
-    if (!record) continue
-    const code = record.slice(0, 2)
-    const filePath = record.slice(3)
-    if (code.includes('R') || code.includes('C')) index += 1
-    changes.set(
-      filePath,
-      code === '??' || code[0] === 'A' ? 'added' : code.includes('D') ? 'deleted' : 'modified'
-    )
-  }
-  return changes
-}
-
-function parseNumstat(value) {
-  const stats = new Map()
-  for (const line of value.split('\n')) {
-    if (!line) continue
-    const firstTab = line.indexOf('\t')
-    const secondTab = line.indexOf('\t', firstTab + 1)
-    if (firstTab < 0 || secondTab < 0) continue
-    const added = line.slice(0, firstTab)
-    const deleted = line.slice(firstTab + 1, secondTab)
-    stats.set(line.slice(secondTab + 1), {
-      additions: added === '-' ? 0 : Number(added),
-      deletions: deleted === '-' ? 0 : Number(deleted),
-      binary: added === '-' || deleted === '-'
-    })
-  }
-  return stats
 }
 
 function countLines(buffer) {
@@ -105,9 +80,7 @@ async function getSummary(cwd) {
     })
   }
 
-  files.sort((a, b) =>
-    a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' })
-  )
+  files.sort((a, b) => compareChangePaths(a.path, b.path))
   return {
     root,
     files,
@@ -116,15 +89,91 @@ async function getSummary(cwd) {
   }
 }
 
-async function getStatus(cwd) {
-  const { root } = await getRepository(cwd)
-  let branch
+/** 当前分支名（短名）。detached HEAD 或读取失败时返回 null。 */
+async function currentBranchName(root) {
   try {
     const ref = (await git(root, ['symbolic-ref', '--quiet', 'HEAD'])).trim()
-    branch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
+    if (!ref) return null
+    return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
   } catch {
+    return null
+  }
+}
+
+async function refExists(root, ref) {
+  try {
+    await git(root, ['rev-parse', '--verify', '--quiet', ref])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * GIT TREE 面板要比的基线分支：远端默认分支（`origin/HEAD`，例如 origin/master）
+ * 优先，退回到常见的 origin/master、origin/main、master、main。
+ * 当前分支自己就在基线上（例如停在 master）、没有远端也没有主分支、detached HEAD
+ * 时返回 null —— 此时「相对基线的变更」恒为空，调用方要退回工作区语义，
+ * 否则面板会在主分支上永远显示「没有变更」。
+ */
+async function resolveBaseRef(root) {
+  const current = await currentBranchName(root)
+  let remoteHead = null
+  try {
+    remoteHead = (await git(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim()
+  } catch {
+    // 没有远端，或远端没设默认分支：只用本地候选。
+  }
+  for (const ref of [remoteHead, ...BASE_CANDIDATES].filter(Boolean)) {
+    if (isBaseBranch(ref, current)) return null
+    if (await refExists(root, ref)) return ref
+  }
+  return null
+}
+
+async function mergeBaseFor(root, base) {
+  try {
+    return (await git(root, ['merge-base', base, 'HEAD'])).trim() || null
+  } catch {
+    // 没有共同祖先（无关历史）：没有可比的基线。
+    return null
+  }
+}
+
+/**
+ * 当前分支相对基线分支的变更：从 merge-base 一直比到工作区，所以既包含已经提交
+ * 的分支改动，也包含还没提交的工作区改动（含未跟踪文件）。GIT TREE 面板用它，
+ * 「这个分支带来了什么」在提交前后都看得见。
+ */
+async function getBranchSummary(cwd) {
+  const { root } = await getRepository(cwd)
+  const base = await resolveBaseRef(root)
+  const mergeBase = base ? await mergeBaseFor(root, base) : null
+  if (!base || !mergeBase) return { root, base: null, baseLabel: null, files: [] }
+  const [statusOutput, untrackedOutput] = await Promise.all([
+    git(root, ['diff', '--name-status', '-z', '--no-renames', mergeBase]),
+    git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
+  ])
+  const changes = parseNameStatus(statusOutput)
+  for (const filePath of untrackedOutput.split('\0')) {
+    if (filePath) changes.set(filePath, 'added')
+  }
+  const files = [...changes]
+    .map(([filePath, status]) => ({ path: filePath, status }))
+    .sort((left, right) => compareChangePaths(left.path, right.path))
+  return { root, base, baseLabel: baseBranchLabel(base), files }
+}
+
+async function getStatus(cwd) {
+  const { root } = await getRepository(cwd)
+  const branch = await currentBranchName(root)
+  if (!branch) {
     const hash = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim()
-    branch = hash ? `detached@${hash}` : 'detached'
+    return {
+      root,
+      branch: hash ? `detached@${hash}` : 'detached',
+      projectName: path.basename(root)
+    }
   }
   return {
     root,
@@ -243,6 +292,14 @@ export function registerGitIpc() {
     }
   })
 
+  ipcMain.handle('git:branch-summary', async (_event, { cwd } = {}) => {
+    try {
+      return { repository: await getBranchSummary(cwd), error: null }
+    } catch (error) {
+      return { repository: null, error: errorMessage(error) }
+    }
+  })
+
   ipcMain.handle('git:refs', async (_event, { cwd } = {}) => {
     try {
       return { refs: await getRefs(cwd), error: null }
@@ -267,8 +324,16 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:file', async (_event, { cwd, filePath } = {}) => {
-    const { root, base } = await getRepository(cwd)
+  ipcMain.handle('git:file', async (_event, { cwd, filePath, base: mode } = {}) => {
+    const { root, base: head } = await getRepository(cwd)
+    // GIT TREE 里的文件是「相对基线分支」的变更，原始版本要取 merge-base 而不是
+    // HEAD（分支上的改动已经提交过，跟 HEAD 比只会得到空 diff）；没有基线时退回
+    // HEAD，不能因此报错。
+    let base = head
+    if (mode === 'branch') {
+      const baseRef = await resolveBaseRef(root)
+      base = (baseRef && (await mergeBaseFor(root, baseRef))) || head
+    }
     const absolutePath = safeFilePath(root, filePath)
     let original = Buffer.alloc(0)
     let modified = Buffer.alloc(0)

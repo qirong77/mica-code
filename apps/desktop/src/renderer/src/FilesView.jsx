@@ -462,7 +462,17 @@ function FileTreeRows({
 }
 
 export const FilesView = forwardRef(function FilesView(
-  { root, visible, askText, onCornerResizeStart, gitCwd, gitRepository, gitLoading, gitBranch },
+  {
+    root,
+    visible,
+    askText,
+    onCornerResizeStart,
+    gitCwd,
+    gitRepository,
+    gitBranchChanges,
+    gitLoading,
+    gitBranch
+  },
   ref
 ) {
   const viewRef = useRef(null)
@@ -501,6 +511,13 @@ export const FilesView = forwardRef(function FilesView(
   // 目录树上的 Git 装饰：改动文件染成对应状态色并带状态字母，其所有上级文件夹继承最主要的状态
   const gitDecorations = useMemo(() => buildGitDecorations(gitRepository), [gitRepository])
   const gitRoot = gitRepository?.root || null
+  // GIT TREE 面板比的是「当前分支相对基线分支（origin/HEAD → master/main）」的变更，
+  // 提交前后都看得见；没有基线（例如就停在主分支上）时退回工作区语义，
+  // 于是它和 CHANGES 一样只列还没提交的改动。
+  const branchChanges = useMemo(
+    () => (gitBranchChanges?.base ? gitBranchChanges : null),
+    [gitBranchChanges]
+  )
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -519,8 +536,10 @@ export const FilesView = forwardRef(function FilesView(
     }
   }, [])
 
-  const selectGitFile = useCallback((file) => {
-    if (file && file.path) setGitSelectedFile(file)
+  // 选中的文件要记住自己是从哪个面板点开的：GIT TREE 里的文件跟 merge-base 比，
+  // CHANGES 里的跟 HEAD 比（见 GitDiffEditor 的 `base`）。
+  const selectGitFile = useCallback((file, base = 'head') => {
+    if (file && file.path) setGitSelectedFile({ ...file, base })
   }, [])
 
   const closeGitDiff = useCallback(() => setGitSelectedFile(null), [])
@@ -1280,6 +1299,9 @@ export const FilesView = forwardRef(function FilesView(
   const activeTab = tabs.find((tab) => tab.path === activePath)
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
   const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
+  const isGitTree = activePanel === 'git-tree'
+  // 徽标与资源管理器装饰始终是「工作区还没提交的改动」（与 VS Code 一致），
+  // GIT TREE 面板则额外能看到分支上已经提交的改动。
   const changeCount = gitRepository?.files?.length || 0
   // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个文件视图
   const hasEditorContent =
@@ -1348,12 +1370,21 @@ export const FilesView = forwardRef(function FilesView(
         ) : isGitPanel ? (
           <GitPanel
             cwd={gitCwd || null}
-            repository={gitRepository}
+            repository={isGitTree ? branchChanges || gitRepository : gitRepository}
             loading={gitLoading}
             selectedPath={gitSelectedFile?.path}
-            onSelectFile={selectGitFile}
-            heading={activePanel === 'git-tree' ? 'GIT TREE' : 'CHANGES'}
-            rootLabel={activePanel === 'git-tree' ? gitBranch || null : null}
+            onSelectFile={(file) =>
+              selectGitFile(file, isGitTree && branchChanges ? 'branch' : 'head')
+            }
+            heading={isGitTree ? 'GIT TREE' : 'CHANGES'}
+            rootLabel={isGitTree ? gitBranch || null : null}
+            /* 面板名本身看不出在跟谁比：把基线写在标题旁边（提交过的改动也在这里出现）。 */
+            compareLabel={isGitTree ? branchChanges?.baseLabel || null : null}
+            emptyText={
+              isGitTree && branchChanges
+                ? `当前分支相对 ${branchChanges.baseLabel} 没有变更`
+                : '工作区没有文件变化'
+            }
           />
         ) : (
           <>

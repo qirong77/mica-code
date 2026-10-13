@@ -200,7 +200,9 @@ export function GitPanel({
   onSelectFile,
   selectedPath,
   rootLabel = null,
-  heading = 'CHANGES'
+  heading = 'CHANGES',
+  emptyText = '工作区没有文件变化',
+  compareLabel = null
 }) {
   const [collapsed, setCollapsed] = useState(new Set())
   const tree = useMemo(() => makeGitTree(repository?.files || []), [repository])
@@ -221,6 +223,11 @@ export function GitPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center px-3 pt-2">
         <span className="text-[10px] font-semibold tracking-[.08em] text-white/45">{heading}</span>
+        {compareLabel && (
+          <span className="ml-2 truncate text-[10px] text-white/30" title={`相对 ${compareLabel}`}>
+            相对 {compareLabel}
+          </span>
+        )}
         {loading && (
           <span
             className="ml-2 size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
@@ -248,7 +255,7 @@ export function GitPanel({
           </div>
         )}
         {repository && !repository.files.length && (
-          <div className="px-3 py-6 text-center text-[11px] text-white/35">工作区没有文件变化</div>
+          <div className="px-3 py-6 text-center text-[11px] text-white/35">{emptyText}</div>
         )}
         {repository && repository.files.length > 0 && (
           <>

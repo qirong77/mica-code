@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'bun:test'
+import {
+  baseBranchLabel,
+  compareChangePaths,
+  isBaseBranch,
+  parseNameStatus,
+  parseNumstat,
+  parseStatus,
+  statusFromCode
+} from './git-core'
+
+describe('statusFromCode', () => {
+  it('把 porcelain 与 name-status 的状态码归到三态', () => {
+    expect(statusFromCode('??')).toBe('added')
+    expect(statusFromCode('A ')).toBe('added')
+    expect(statusFromCode('AM')).toBe('added')
+    expect(statusFromCode(' M')).toBe('modified')
+    expect(statusFromCode('MM')).toBe('modified')
+    expect(statusFromCode('T ')).toBe('modified')
+    expect(statusFromCode('D ')).toBe('deleted')
+    expect(statusFromCode('MD')).toBe('deleted')
+  })
+})
+
+describe('parseStatus', () => {
+  it('解析 `git status --porcelain=v1 -z`（记录是 `XY <path>`）', () => {
+    const output = ' M src/a.ts\0?? src/b.ts\0A  src/c.ts\0'
+    expect(parseStatus(output)).toEqual(
+      new Map([
+        ['src/a.ts', 'modified'],
+        ['src/b.ts', 'added'],
+        ['src/c.ts', 'added']
+      ])
+    )
+  })
+
+  it('重命名记录丢掉多出来的旧路径（porcelain -z 先给新路径）', () => {
+    expect(parseStatus('R  src/new.ts\0src/old.ts\0')).toEqual(
+      new Map([['src/new.ts', 'modified']])
+    )
+  })
+})
+
+describe('parseNameStatus', () => {
+  it('解析 `git diff --name-status -z`（记录是 `<code>\\0<path>\\0`）', () => {
+    const output = 'M\0src/a.ts\0A\0src/b.ts\0D\0src/c.ts\0'
+    expect(parseNameStatus(output)).toEqual(
+      new Map([
+        ['src/a.ts', 'modified'],
+        ['src/b.ts', 'added'],
+        ['src/c.ts', 'deleted']
+      ])
+    )
+  })
+
+  it('取重命名后的新路径（diff 先给旧路径）', () => {
+    expect(parseNameStatus('R100\0src/old.ts\0src/new.ts\0')).toEqual(
+      new Map([['src/new.ts', 'modified']])
+    )
+  })
+
+  it('空输出得到空表', () => {
+    expect(parseNameStatus('').size).toBe(0)
+  })
+})
+
+describe('parseNumstat', () => {
+  it('解析增删行数与二进制标记', () => {
+    expect(parseNumstat('9\t5\tsrc/a.ts\n-\t-\tlogo.png\n')).toEqual(
+      new Map([
+        ['src/a.ts', { additions: 9, deletions: 5, binary: false }],
+        ['logo.png', { additions: 0, deletions: 0, binary: true }]
+      ])
+    )
+  })
+})
+
+describe('base branch', () => {
+  it('显示名去掉远端前缀', () => {
+    expect(baseBranchLabel('origin/master')).toBe('master')
+    expect(baseBranchLabel('master')).toBe('master')
+    expect(baseBranchLabel('')).toBe('')
+  })
+
+  it('当前分支就是基线时判为「没有可比的基线」', () => {
+    expect(isBaseBranch('origin/master', 'master')).toBe(true)
+    expect(isBaseBranch('master', 'master')).toBe(true)
+    expect(isBaseBranch('origin/main', 'feat/x')).toBe(false)
+    expect(isBaseBranch(null, 'master')).toBe(false)
+    expect(isBaseBranch('origin/master', null)).toBe(false)
+  })
+})
+
+describe('compareChangePaths', () => {
+  it('数字感知、忽略大小写', () => {
+    const paths = ['src/a10.ts', 'src/a2.ts', 'src/B.ts']
+    expect([...paths].sort(compareChangePaths)).toEqual(['src/a2.ts', 'src/a10.ts', 'src/B.ts'])
+  })
+})

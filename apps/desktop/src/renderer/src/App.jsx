@@ -997,6 +997,8 @@ export default function App() {
     terminalId: null,
     cwd: null,
     repository: null,
+    // 当前分支相对基线分支的变更（GIT TREE 面板用），与 repository（工作区）分开。
+    branch: null,
     status: null,
     loading: false
   })
@@ -1266,6 +1268,9 @@ export default function App() {
   // 结束就立刻重开终端，把用户刚跑完的那条命令的输出吞掉。
   const notificationStatesRef = useLatest(notifications.states)
 
+  // 只有真的停在文件视图里时才算「当前分支相对基线分支」的变更（见 refreshGit）。
+  const viewRef = useLatest(view)
+
   useEffect(() => {
     refreshSessions()
     refreshPins()
@@ -1283,23 +1288,44 @@ export default function App() {
       const id = activeRef.current
       const request = ++gitRequest.current
       if (!id) {
-        setGit({ terminalId: null, cwd: null, repository: null, status: null, loading: false })
+        setGit({
+          terminalId: null,
+          cwd: null,
+          repository: null,
+          branch: null,
+          status: null,
+          loading: false
+        })
         return
       }
       if (!quiet) setGit((current) => ({ ...current, loading: true }))
       let cwd = requestedCwd || (await terminalRef.current?.getCwd(id))
       if (request !== gitRequest.current || id !== activeRef.current) return
       if (!cwd) {
-        setGit({ terminalId: null, cwd: null, repository: null, status: null, loading: false })
+        setGit({
+          terminalId: null,
+          cwd: null,
+          repository: null,
+          branch: null,
+          status: null,
+          loading: false
+        })
         return
       }
       setGit((current) =>
         current.terminalId === id && current.cwd === cwd
           ? current
-          : { terminalId: id, cwd, repository: null, status: null, loading: true }
+          : { terminalId: id, cwd, repository: null, branch: null, status: null, loading: true }
       )
       try {
         const summaryPromise = window.mica.git.summary(cwd)
+        // 分支对比要多跑 merge-base + diff + ls-files（在 2700 文件的仓库上约 0.2s CPU），
+        // 只有停在文件视图里才值得 —— 切到文件视图那一下的刷新会把它补上。
+        const loadBranch = (target) =>
+          viewRef.current === 'files'
+            ? window.mica.git.branchSummary(target)
+            : Promise.resolve(null)
+        const branchPromise = loadBranch(cwd)
         let status = await window.mica.git.status(cwd)
         if (request === gitRequest.current && id === activeRef.current && status?.status) {
           setGit((current) =>
@@ -1309,6 +1335,7 @@ export default function App() {
           )
         }
         let summary = await summaryPromise
+        let branch = await branchPromise
         const fallbackRoot = gitRef.current.status?.root
         const cwdMissing = /\bENOENT\b|no such file or directory|cannot chdir/i.test(
           `${summary?.error || ''}\n${status?.error || ''}`
@@ -1324,16 +1351,19 @@ export default function App() {
           cwd = fallbackRoot
           const fallback = await Promise.all([
             window.mica.git.summary(cwd),
+            loadBranch(cwd),
             window.mica.git.status(cwd)
           ])
           summary = fallback[0]
-          status = fallback[1]
+          branch = fallback[1]
+          status = fallback[2]
         }
         if (request === gitRequest.current && id === activeRef.current) {
           setGit({
             terminalId: id,
             cwd,
             repository: summary?.repository || null,
+            branch: branch?.repository || null,
             status: status?.status || null,
             loading: false
           })
@@ -1341,7 +1371,14 @@ export default function App() {
       } catch (gitError) {
         if (request === gitRequest.current) {
           console.error('refresh git failed', gitError)
-          setGit({ terminalId: id, cwd, repository: null, status: null, loading: false })
+          setGit({
+            terminalId: id,
+            cwd,
+            repository: null,
+            branch: null,
+            status: null,
+            loading: false
+          })
         }
       }
     },
@@ -1360,8 +1397,25 @@ export default function App() {
         refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
       }
     }, 10000)
-    return () => clearInterval(timer)
+    // 定时器在后台页签会被浏览器节流，回到前台可能要等很久才轮到下一次；
+    // 窗口重新可见/获得焦点时立刻补一次，否则 Files 里的 Git 区域一进来是旧的。
+    const refreshNow = () => refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refreshNow()
+    }
+    window.addEventListener('focus', refreshNow)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', refreshNow)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [activeRef, refreshGit, terminalCwd])
+  // 切到文件视图时也立刻刷一次：Git 区域是进来就要看的，不能等下一次轮询。
+  useEffect(() => {
+    if (view !== 'files') return
+    refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
+  }, [view, activeRef, refreshGit, terminalCwd])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -1382,6 +1436,7 @@ export default function App() {
         ...current,
         status: status || current.status,
         repository: null,
+        branch: null,
         loading: true
       }))
       await filesRef.current?.reloadAfterGitChange(status?.root || gitRef.current.status?.root)
@@ -2378,6 +2433,7 @@ export default function App() {
                   askText={askText}
                   gitCwd={gitIsCurrent ? git.cwd : null}
                   gitRepository={repository}
+                  gitBranchChanges={gitIsCurrent ? git.branch : null}
                   gitLoading={gitIsCurrent ? git.loading : true}
                   gitBranch={gitIsCurrent ? git.status?.branch || null : null}
                   onCornerResizeStart={null}

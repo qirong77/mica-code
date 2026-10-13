@@ -331,7 +331,10 @@ function createWebApi(env) {
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
       summary: (cwd) => invoke('git:summary', { cwd }),
-      file: (cwd, filePath) => invoke('git:file', { cwd, filePath }),
+      // 当前分支相对基线分支（origin/HEAD → master/main）的变更：GIT TREE 面板用它。
+      branchSummary: (cwd) => invoke('git:branch-summary', { cwd }),
+      // base 为 'branch' 时原始版本取 merge-base（GIT TREE 里的文件），否则与 HEAD 比。
+      file: (cwd, filePath, base = null) => invoke('git:file', { cwd, filePath, base }),
       refs: (cwd) => invoke('git:refs', { cwd }),
       checkout: (cwd, ref) => invoke('git:checkout', { cwd, ref }),
       createBranch: (cwd, name, startRef = null) =>
