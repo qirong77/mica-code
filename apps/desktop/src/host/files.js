@@ -19,6 +19,7 @@ import {
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ignoredEntries } from './git-ignore'
+import { compileQuery, parseGlobList, passesFileFilters } from './search-core'
 
 const IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -227,12 +228,26 @@ async function readUtf8File(filePath, remainingBytes) {
   }
 }
 
-function previewOf(line, matchIndex, queryLength) {
-  if (line.length <= MAX_PREVIEW_LENGTH) return line
-  const contextLength = Math.max(0, Math.floor((MAX_PREVIEW_LENGTH - queryLength) / 2))
+/**
+ * 预览行 + 高亮区间。高亮偏移由 host 算好（而不是让渲染层拿查询串去 preview 里再找一遍）：
+ * 长行会被截断成 `…` 前缀，正则/大小写敏感模式下渲染层也未必能复现同一处命中。
+ */
+function buildPreview(line, matchIndex, matchLength) {
+  if (line.length <= MAX_PREVIEW_LENGTH) {
+    return { preview: line, highlight: [matchIndex, matchIndex + matchLength] }
+  }
+  const contextLength = Math.max(0, Math.floor((MAX_PREVIEW_LENGTH - matchLength) / 2))
   const start = Math.max(0, Math.min(matchIndex - contextLength, line.length - MAX_PREVIEW_LENGTH))
   const end = Math.min(line.length, start + MAX_PREVIEW_LENGTH)
-  return `${start > 0 ? '…' : ''}${line.slice(start, end)}${end < line.length ? '…' : ''}`
+  const prefix = start > 0 ? '…' : ''
+  const suffix = end < line.length ? '…' : ''
+  return {
+    preview: `${prefix}${line.slice(start, end)}${suffix}`,
+    highlight: [
+      prefix.length + (matchIndex - start),
+      prefix.length + Math.min(matchIndex - start + matchLength, end - start)
+    ]
+  }
 }
 
 export function registerFilesIpc() {
@@ -264,14 +279,26 @@ export function registerFilesIpc() {
     const root = normalizeRoot(payload.root)
     if (typeof payload.query !== 'string') throw new Error('query is required')
     if (!payload.query || payload.query.length > MAX_QUERY_LENGTH) {
-      return []
+      return { items: [], truncated: false, error: null }
     }
 
-    const query = payload.query.toLowerCase()
-    const results = []
+    const options = {
+      matchCase: !!payload.matchCase,
+      wholeWord: !!payload.wholeWord,
+      regex: !!payload.regex,
+      include: parseGlobList(payload.include),
+      exclude: parseGlobList(payload.exclude)
+    }
+    const compiled = compileQuery({ query: payload.query, ...options })
+    // 正则还没写完（如 `([`）时把它当成一条提示，而不是整块面板变成错误页
+    if (!compiled.ok) return { items: [], truncated: false, error: compiled.error }
+
+    const items = []
     let scannedBytes = 0
+    let truncated = false
 
     await walkFiles(root, async (file) => {
+      if (!passesFileFilters(file.relativePath, options)) return true
       const loaded = await readUtf8File(file.path, MAX_SEARCH_BYTES - scannedBytes)
       if (!loaded) return scannedBytes < MAX_SEARCH_BYTES
       scannedBytes += loaded.bytesRead
@@ -279,22 +306,27 @@ export function registerFilesIpc() {
       const lines = loaded.content.split('\n')
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index].endsWith('\r') ? lines[index].slice(0, -1) : lines[index]
-        const column = line.toLowerCase().indexOf(query)
-        if (column === -1) continue
+        const found = compiled.match(line)
+        if (!found) continue
 
-        results.push({
+        const { preview, highlight } = buildPreview(line, found.column, found.length)
+        items.push({
           path: file.path,
           relativePath: file.relativePath,
           line: index + 1,
-          column: column + 1,
-          preview: previewOf(line, column, payload.query.length)
+          column: found.column + 1,
+          preview,
+          highlight
         })
-        if (results.length >= MAX_SEARCH_RESULTS) return false
+        if (items.length >= MAX_SEARCH_RESULTS) {
+          truncated = true
+          return false
+        }
       }
       return scannedBytes < MAX_SEARCH_BYTES
     })
 
-    return results
+    return { items, truncated, error: null }
   })
 
   ipcMain.handle('files:list', async (_event, payload = {}) => {

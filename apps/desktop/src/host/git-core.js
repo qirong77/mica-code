@@ -11,10 +11,14 @@ export function statusFromCode(code) {
   return 'modified'
 }
 
-/** `git status --porcelain=v1 -z` 输出 → Map<path, status>。 */
-export function parseStatus(value) {
+/**
+ * `git status --porcelain=v1 -z` 输出 → Map<path, code>（原始两字符 `XY`）。
+ * X 是索引（已暂存）侧，Y 是工作区侧；`??` 表示未跟踪。源代码管理面板要按
+ * 「已暂存的更改 / 更改」分两段，所以这里保留原始码，由调用方各自判读。
+ */
+export function parseStatusCode(value) {
   const records = value.split('\0')
-  const changes = new Map()
+  const codes = new Map()
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index]
     if (!record) continue
@@ -23,8 +27,15 @@ export function parseStatus(value) {
     // 重命名/复制记录带着「旧路径」，多出来的那个字段要跳过（调用方目前用
     // `--no-renames`，这里留着以防哪天去掉）。
     if (code.includes('R') || code.includes('C')) index += 1
-    changes.set(filePath, statusFromCode(code))
+    codes.set(filePath, code)
   }
+  return codes
+}
+
+/** `git status --porcelain=v1 -z` 输出 → Map<path, status>。 */
+export function parseStatus(value) {
+  const changes = new Map()
+  for (const [filePath, code] of parseStatusCode(value)) changes.set(filePath, statusFromCode(code))
   return changes
 }
 

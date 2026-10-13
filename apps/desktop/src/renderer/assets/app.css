@@ -17,13 +17,24 @@
   /* Surfaces — content → chrome. `derived` marks steps that have no
      counterpart in the original theme. */
   --color-canvas: #2b2b2b; /* editor/terminal.background — content areas */
+  --color-tabstrip: #252526; /* derived: 标签条底色，比编辑器还暗（Darcula 未定义，
+                                VS Code 兜底用 editorGroupHeader.tabsBackground） */
   --color-panel: #3c3f41; /* activityBar/sideBar/panel/statusBar/input/menu — chrome */
   --color-panel-hi: #46484a; /* derived: surface nested inside chrome */
   --color-active: #515658; /* tab.activeBackground — selected */
+  /* 列表行的悬浮底色。Darcula 没定义 list.hoverBackground，VS Code 兜底成默认深色的
+     #2a2d2e —— 比面板更暗，而不是更亮（实测 VS Code 资源管理器与源代码管理都是这个值）。 */
+  --color-list-hover: #2a2d2e;
 
   /* Hairlines — every *.border key in the theme is this one value. */
   --color-line: #4b4b4b;
   --color-line-strong: #5a5a5a; /* derived: emphasis edge */
+
+  /* Git 装饰（资源管理器文件名/文件夹、源代码管理的状态字母）。Darcula 未定义
+     gitDecoration.*，VS Code 用默认深色的取值。 */
+  --color-git-modified: #e2c08d;
+  --color-git-added: #73c991;
+  --color-git-deleted: #f14c4c;
 
   /* Foreground ramp — the theme's own neutral steps, brightest first:
        #ffffff activityBar.foreground      #d4d4d4 tokenColors (default text)

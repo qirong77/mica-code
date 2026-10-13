@@ -35,11 +35,20 @@ import { GitPanel, SearchPanel } from './FileSidePanels'
 import { buildGitDecorations, relativeToRoot, statusColor, statusLabel } from './git-decorations'
 import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
+// 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），空编辑器水印直接引用它。
+import brandMark from '../../../resources/icon.svg?url&no-inline'
 
 // diff 视图静态依赖 monaco 本体，拆成独立模块后只在挑选 diff 时才下载。
 const GitDiffEditor = lazy(() =>
   import('./GitDiffEditor').then((module) => ({ default: module.GitDiffEditor }))
 )
+
+// 资源管理器的横向栅格，取自 VS Code 实测值：每层只缩进 8px，行内是
+// 「16px 箭头格 + 16px 图标格 + 5px 间隙」——所以文件名的左边距就是 57 + 8 * depth，
+// 缩进参考线落在父级箭头中心（28 + 8 * depth）。行高同样是 VS Code 的 22px。
+const TREE_INDENT = 8
+const TREE_LABEL_INSET = 57
+const TREE_LABEL_OFFSET = 37
 
 const makeNode = (entry) => ({
   name: entry.name,
@@ -199,6 +208,35 @@ function MenuSeparator() {
   return <div className="mx-1 my-1 h-px bg-white/10" />
 }
 
+// 空编辑器水印：对齐 VS Code 的 editor placeholder（品牌标记 + 常用快捷键）。
+// 没有打开文件时用它填住编辑器分栏，而不是让目录树撑满整个文件视图——这样目录树的
+// 宽度与「有没有打开文件」无关，和 VS Code 一样。
+function EmptyEditorWatermark() {
+  const mac = window.mica.platform === 'darwin'
+  const shortcuts = [
+    ['快速打开文件', mac ? '⌘ P' : 'Ctrl P'],
+    ['在文件中搜索', mac ? '⇧ ⌘ F' : 'Ctrl ⇧ F'],
+    ['关闭当前编辑器', mac ? '⌘ W' : 'Ctrl W'],
+    // 终端开关两端都只认 Ctrl+`（macOS 的 ⌘` 是系统保留键），不要写成 ⌘。
+    ['显示/隐藏终端', 'Ctrl `']
+  ]
+  return (
+    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+      <div className="flex w-60 -translate-y-10 flex-col items-center">
+        <img src={brandMark} alt="" aria-hidden="true" className="w-28 opacity-[.13] grayscale" />
+        <dl className="mt-10 w-full space-y-0.5 text-[12px]">
+          {shortcuts.map(([label, keys]) => (
+            <div key={label} className="flex items-baseline justify-between gap-4">
+              <dt className="truncate text-white/40">{label}</dt>
+              <dd className="shrink-0 font-mono text-[11px] text-white/30">{keys}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  )
+}
+
 function MenuItem({ icon: Icon, label, danger, disabled, onClick }) {
   return (
     <button
@@ -340,11 +378,13 @@ function FileTreeRows({
           aria-expanded={directory ? node.expanded : undefined}
           draggable
           title={ignored ? `${node.path}（已被 .gitignore 忽略）` : node.path}
-          className={`flex h-7 w-full items-center gap-1 rounded-sm pr-2 text-left text-xs hover:bg-white/[.045] ${tone} ${
+          className={`flex h-[22px] w-full items-center rounded pr-1.5 text-left text-[13px] hover:bg-list-hover ${tone} ${
             dragPath === node.path ? 'opacity-40' : ''
           } ${dropPath === node.path ? 'ring-1 ring-inset ring-info/70 bg-info/10' : ''}`}
           style={{
-            paddingLeft: 5 + depth * 13,
+            // 与 VS Code 的资源管理器一致：16px 箭头格 + 16px 图标格 + 5px 间隙，
+            // 每层只缩进 8px（不是 13px），所以深层级不会早早把标题挤出面板。
+            paddingLeft: TREE_LABEL_INSET - TREE_LABEL_OFFSET + depth * TREE_INDENT,
             boxShadow:
               siblingOver === 'before'
                 ? 'inset 0 2px 0 rgba(90,167,232,.9)'
@@ -384,9 +424,9 @@ function FileTreeRows({
           }}
         >
           <span
-            className={`grid size-3.5 shrink-0 place-items-center text-white/35 ${node.expanded ? 'rotate-90' : ''}`}
+            className={`grid size-4 shrink-0 place-items-center text-white/40 ${node.expanded ? 'rotate-90' : ''}`}
           >
-            {directory && <IconChevronRight size={13} />}
+            {directory && <IconChevronRight size={14} />}
           </span>
           <span className="grid size-4 shrink-0 place-items-center text-white/50">
             <FileSystemIcon
@@ -397,7 +437,7 @@ function FileTreeRows({
             />
           </span>
           <span
-            className="min-w-0 flex-1 truncate"
+            className="ml-[5px] min-w-0 flex-1 truncate"
             style={decoration ? { color: statusColor(decoration) } : undefined}
           >
             {node.name}
@@ -405,7 +445,7 @@ function FileTreeRows({
           {node.loading && <span className="text-white/35">…</span>}
           {fileStatus && (
             <span
-              className="shrink-0 font-mono text-[10px] font-semibold"
+              className="ml-1.5 shrink-0 font-mono text-[11px] font-semibold"
               style={{ color: statusColor(fileStatus) }}
             >
               {statusLabel(fileStatus)}
@@ -414,7 +454,7 @@ function FileTreeRows({
           {folderStatus && (
             <span
               aria-hidden="true"
-              className="size-1.5 shrink-0 rounded-full"
+              className="ml-1.5 size-1.5 shrink-0 rounded-full"
               style={{ backgroundColor: statusColor(folderStatus), opacity: 0.75 }}
             />
           )}
@@ -424,42 +464,54 @@ function FileTreeRows({
           (node.error ? (
             <div
               className="py-1 pr-2 text-[11px] text-danger/85"
-              style={{ paddingLeft: 35 + (depth + 1) * 13 }}
+              style={{ paddingLeft: TREE_LABEL_INSET + (depth + 1) * TREE_INDENT }}
             >
               无法读取：{node.error}
             </div>
           ) : node.loaded && !node.children.length ? (
             <div
               className="py-1 pr-2 text-[11px] text-white/30"
-              style={{ paddingLeft: 35 + (depth + 1) * 13 }}
+              style={{ paddingLeft: TREE_LABEL_INSET + (depth + 1) * TREE_INDENT }}
             >
               空文件夹
             </div>
           ) : (
-            <FileTreeRows
-              nodes={applyOrder(node.children, node.path, orderMap)}
-              depth={depth + 1}
-              activePath={activePath}
-              dragPath={dragPath}
-              dropPath={dropPath}
-              siblingDrop={siblingDrop}
-              orderMap={orderMap}
-              gitRoot={gitRoot}
-              gitDecorations={gitDecorations}
-              onToggle={onToggle}
-              onOpen={onOpen}
-              onContextMenu={onContextMenu}
-              onDragStart={onDragStart}
-              onDragEnd={onDragEnd}
-              onDrop={onDrop}
-              onSiblingHover={onSiblingHover}
-              onSiblingDrop={onSiblingDrop}
-            />
+            <div className="relative">
+              {/* 缩进参考线：与 VS Code 一样落在父级箭头的中心线上（只有展开的分支才画）。 */}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 w-px bg-white/[.09]"
+                style={{ left: TREE_LABEL_INSET - TREE_LABEL_OFFSET + 8 + depth * TREE_INDENT }}
+              />
+              <FileTreeRows
+                nodes={applyOrder(node.children, node.path, orderMap)}
+                depth={depth + 1}
+                activePath={activePath}
+                dragPath={dragPath}
+                dropPath={dropPath}
+                siblingDrop={siblingDrop}
+                orderMap={orderMap}
+                gitRoot={gitRoot}
+                gitDecorations={gitDecorations}
+                onToggle={onToggle}
+                onOpen={onOpen}
+                onContextMenu={onContextMenu}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onDrop={onDrop}
+                onSiblingHover={onSiblingHover}
+                onSiblingDrop={onSiblingDrop}
+              />
+            </div>
           ))}
       </div>
     )
   })
 }
+
+/** 标签条底部的 1px 分隔线：VS Code 只在非活动标签下画线，活动标签与编辑器连成一片，
+    所以线画成内阴影而不是容器边框（边框没法被活动标签盖掉）。 */
+const TAB_UNDERLINE = 'shadow-[inset_0_-1px_0_0_var(--color-line)]'
 
 export const FilesView = forwardRef(function FilesView(
   {
@@ -471,7 +523,8 @@ export const FilesView = forwardRef(function FilesView(
     gitRepository,
     gitBranchChanges,
     gitLoading,
-    gitBranch
+    gitBranch,
+    onRefreshGit
   },
   ref
 ) {
@@ -543,6 +596,30 @@ export const FilesView = forwardRef(function FilesView(
   }, [])
 
   const closeGitDiff = useCallback(() => setGitSelectedFile(null), [])
+
+  /**
+   * 源代码管理行内悬浮出来的三个操作（对应 VS Code 的同名按钮）。放弃更改不可逆
+   * ——未跟踪文件会被删掉、已跟踪文件会被恢复——所以先确认。做完统一刷新 Git 数据，
+   * 让「暂存的更改 / 更改」两段立刻跟着变。
+   */
+  const gitFileAction = useCallback(
+    async (kind, file) => {
+      if (!gitCwd || !file?.path) return
+      if (kind === 'discard') {
+        const undo = file.status === 'added' ? '这个文件会被删除' : '这个文件会恢复成已保存的版本'
+        const ok = window.confirm(`确定放弃“${file.path}”的更改吗？\n${undo}，且无法撤销。`)
+        if (!ok) return
+      }
+      const result = await window.mica.git[kind](gitCwd, file.path)
+      if (result?.error) {
+        showMessage(`Git 操作失败：${result.error}`)
+        return
+      }
+      if (kind === 'discard' && gitSelectedFile?.path === file.path) setGitSelectedFile(null)
+      await onRefreshGit?.()
+    },
+    [gitCwd, gitSelectedFile, onRefreshGit, showMessage]
+  )
 
   const switchPanel = useCallback((panel) => {
     setActivePanel((current) => (current === panel ? 'explorer' : panel))
@@ -1303,13 +1380,14 @@ export const FilesView = forwardRef(function FilesView(
   // 徽标与资源管理器装饰始终是「工作区还没提交的改动」（与 VS Code 一致），
   // GIT TREE 面板则额外能看到分支上已经提交的改动。
   const changeCount = gitRepository?.files?.length || 0
-  // 没有打开文件（也没有 Git 差异预览）时不显示编辑器面板，目录树占满整个文件视图
+  // 没有打开文件（也没有 Git 差异预览）时，编辑器分栏里显示空编辑器水印；
+  // 目录树的宽度因此与「有没有打开文件」无关（与 VS Code 一致）。
   const hasEditorContent =
     tabs.length > 0 || (isGitPanel && !!gitSelectedFile) || (!!message && !message.transient)
   // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树
   const isMobile = useIsMobile()
   const [mobileTreeVisible, setMobileTreeVisible] = useState(false)
-  const editorOpen = hasEditorContent && !(isMobile && mobileTreeVisible)
+  const editorOpen = isMobile ? hasEditorContent && !mobileTreeVisible : true
   const tabNameCounts = tabs.reduce((counts, tab) => {
     counts.set(tab.name, (counts.get(tab.name) || 0) + 1)
     return counts
@@ -1323,7 +1401,7 @@ export const FilesView = forwardRef(function FilesView(
       className={`relative min-h-0 flex-1 bg-canvas no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <nav
-        className={`w-11 shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-1.5 ${
+        className={`w-12 shrink-0 flex-col items-center border-r border-line bg-panel py-1 ${
           isMobile && editorOpen ? 'hidden' : 'flex'
         }`}
         aria-label="活动栏"
@@ -1332,6 +1410,8 @@ export const FilesView = forwardRef(function FilesView(
           ['explorer', IconFiles, '资源管理器'],
           ['search', IconSearch, '搜索'],
           ['git', IconGitBranch, '源代码管理'],
+          // 与 VS Code 的活动栏一致：变更树用一棵松树（圣诞树）标记，
+          // 和上面的「源代码管理」分支图标区分开。
           ['git-tree', IconChristmasTree, 'Git 变更树']
         ].map(([id, Icon, label]) => {
           const active = activePanel === id
@@ -1342,14 +1422,23 @@ export const FilesView = forwardRef(function FilesView(
               title={label}
               aria-label={badges?.[id] ? `${label}，${changeCount} 处改动` : label}
               aria-pressed={active}
-              className={`relative grid size-9 place-items-center rounded-md transition-colors ${active ? 'bg-white/[.09] text-white' : 'text-white/45 hover:bg-white/[.05] hover:text-white'}`}
+              className="group relative grid size-12 shrink-0 place-items-center"
               onClick={() => switchPanel(id)}
             >
-              <Icon size={22} className="shrink-0" />
+              {/* VS Code 的活动栏是 48px 的项目里放 32px 的圆角高亮块 + 24px 图标 */}
+              <span
+                className={`grid size-8 place-items-center rounded-md transition-colors ${
+                  active
+                    ? 'bg-white/[.09] text-white'
+                    : 'text-white/45 group-hover:bg-white/[.06] group-hover:text-white'
+                }`}
+              >
+                <Icon size={24} className="shrink-0" />
+              </span>
               {badges[id] && (
                 <span
                   aria-hidden="true"
-                  className="absolute -right-0.5 -bottom-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white"
+                  className="absolute right-1 bottom-2 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white"
                 >
                   {badges[id]}
                 </span>
@@ -1372,25 +1461,40 @@ export const FilesView = forwardRef(function FilesView(
             cwd={gitCwd || null}
             repository={isGitTree ? branchChanges || gitRepository : gitRepository}
             loading={gitLoading}
+            onRefresh={onRefreshGit}
             selectedPath={gitSelectedFile?.path}
             onSelectFile={(file) =>
               selectGitFile(file, isGitTree && branchChanges ? 'branch' : 'head')
             }
-            heading={isGitTree ? 'GIT TREE' : 'CHANGES'}
-            rootLabel={isGitTree ? gitBranch || null : null}
-            /* 面板名本身看不出在跟谁比：把基线写在标题旁边（提交过的改动也在这里出现）。 */
+            variant={isGitTree ? 'tree' : 'list'}
+            title={isGitTree ? 'Git 变更树' : '源代码管理'}
+            sectionLabel={isGitTree ? gitBranch || '更改' : '更改'}
+            /* 面板名本身看不出在跟谁比：把基线写进 tooltip（提交过的改动也在这里出现）。 */
             compareLabel={isGitTree ? branchChanges?.baseLabel || null : null}
             emptyText={
               isGitTree && branchChanges
                 ? `当前分支相对 ${branchChanges.baseLabel} 没有变更`
                 : '工作区没有文件变化'
             }
+            /* 行内悬浮操作只在「工作区改动」列表里有意义：GIT TREE 里的文件是相对
+               基线的差异（含已提交的部分），暂存/放弃都无从谈起。 */
+            onOpenFile={
+              isGitTree
+                ? undefined
+                : (file) =>
+                    openFile(
+                      `${String(gitRepository?.root || '').replace(/\/+$/, '')}/${file.path}`
+                    )
+            }
+            onStage={isGitTree ? undefined : (file) => gitFileAction('stage', file)}
+            onUnstage={isGitTree ? undefined : (file) => gitFileAction('unstage', file)}
+            onDiscard={isGitTree ? undefined : (file) => gitFileAction('discard', file)}
           />
         ) : (
           <>
-            <header className="flex h-9 shrink-0 items-center gap-0.5 px-2">
+            <header className="flex h-[35px] shrink-0 items-center gap-0.5 pl-4 pr-2">
               <div
-                className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/70"
+                className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80"
                 title={tree.root || ''}
               >
                 {tree.root ? fileName(tree.root) : '资源管理器'}
@@ -1400,7 +1504,7 @@ export const FilesView = forwardRef(function FilesView(
                 disabled={!tree.root}
                 title="新建文件"
                 aria-label="新建文件"
-                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
                 onClick={() =>
                   runFileAction('new-file', {
                     path: tree.root,
@@ -1409,14 +1513,14 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <IconFilePlus size={15} />
+                <IconFilePlus size={16} />
               </button>
               <button
                 type="button"
                 disabled={!tree.root}
                 title="新建文件夹"
                 aria-label="新建文件夹"
-                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
                 onClick={() =>
                   runFileAction('new-directory', {
                     path: tree.root,
@@ -1425,17 +1529,27 @@ export const FilesView = forwardRef(function FilesView(
                   })
                 }
               >
-                <IconFolderPlus size={15} />
+                <IconFolderPlus size={16} />
+              </button>
+              <button
+                type="button"
+                disabled={!tree.root}
+                title="刷新"
+                aria-label="刷新"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                onClick={refresh}
+              >
+                <IconRefresh size={16} />
               </button>
               <button
                 type="button"
                 disabled={!tree.root}
                 title="折叠所有文件夹"
                 aria-label="折叠所有文件夹"
-                className="grid size-6.5 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
                 onClick={collapseAll}
               >
-                <IconSquareMinus size={15} />
+                <IconSquareMinus size={16} />
               </button>
               <button
                 type="button"
@@ -1444,20 +1558,16 @@ export const FilesView = forwardRef(function FilesView(
                 aria-haspopup="menu"
                 data-menu-anchor="explorer"
                 aria-expanded={explorerMenu ? 'true' : 'false'}
-                className={`grid size-6.5 shrink-0 place-items-center rounded-sm hover:bg-white/[.06] hover:text-white ${
+                className={`grid size-6 shrink-0 place-items-center rounded-sm hover:bg-white/[.06] hover:text-white ${
                   explorerMenu ? 'bg-white/[.06] text-white' : 'text-white/45'
                 }`}
                 onClick={openExplorerMenu}
               >
-                <IconDots size={15} />
+                <IconDots size={16} />
               </button>
             </header>
             <div className="relative min-h-0 flex-1">
-              <div
-                className="h-full overflow-auto px-1.5 py-1 select-none"
-                role="tree"
-                aria-label="文件目录"
-              >
+              <div className="h-full overflow-auto select-none" role="tree" aria-label="文件目录">
                 <FileTreeRows
                   nodes={applyOrder(tree.children, tree.root, orderMap)}
                   activePath={activePath}
@@ -1546,7 +1656,9 @@ export const FilesView = forwardRef(function FilesView(
           <>
             <div
               ref={tabListRef}
-              className={`h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b border-line bg-panel ${tabs.length ? 'flex' : 'hidden'}`}
+              // 标签条底色比编辑器还暗（VS Code 的 editorGroupHeader.tabsBackground），
+              // 活动标签用 canvas 才显得「亮出来」；Darcula 没有顶部高亮线，不加。
+              className={`h-8 shrink-0 overflow-x-auto overflow-y-hidden bg-tabstrip ${tabs.length ? 'flex' : 'hidden'}`}
               role="tablist"
               aria-label="打开的文件"
             >
@@ -1555,7 +1667,7 @@ export const FilesView = forwardRef(function FilesView(
                   type="button"
                   title="返回文件列表"
                   aria-label="返回文件列表"
-                  className="sticky left-0 z-10 grid h-[35px] w-9 shrink-0 place-items-center border-r border-line bg-panel text-white/60"
+                  className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 ${TAB_UNDERLINE}`}
                   onClick={() => setMobileTreeVisible(true)}
                 >
                   <IconArrowLeft size={15} />
@@ -1566,12 +1678,13 @@ export const FilesView = forwardRef(function FilesView(
                   key={tab.path}
                   data-path={tab.path}
                   title={tab.path}
-                  className={`group relative flex h-[35px] min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[11px] ${tab.path === activePath ? 'bg-canvas text-white' : 'text-white/50 hover:bg-white/[.035] hover:text-white/75'}`}
+                  className={`group relative flex h-8 min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[13px] ${
+                    tab.path === activePath
+                      ? 'bg-canvas text-white'
+                      : `text-white/50 hover:bg-white/[.035] hover:text-white/75 ${TAB_UNDERLINE}`
+                  }`}
                   onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
                 >
-                  {tab.path === activePath && (
-                    <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-info" />
-                  )}
                   <button
                     type="button"
                     role="tab"
@@ -1630,14 +1743,20 @@ export const FilesView = forwardRef(function FilesView(
                   </span>
                 </div>
               ))}
+              {/* 铺满剩余宽度的填充块，只为把底部那条线延伸到标签右侧的空白区 */}
+              <div aria-hidden="true" className={`min-w-px flex-1 ${TAB_UNDERLINE}`} />
             </div>
             {activeTab && (
-              <div className="flex h-7.5 shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[10px] text-white/40">
+              <div className="flex h-[22px] shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[11px] text-white/40">
                 {breadcrumbs.map((part, index) => (
                   <span key={`${part}-${index}`} className="contents">
-                    {index > 0 && <span className="shrink-0 text-sm text-white/25">›</span>}
+                    {index > 0 && <span className="shrink-0 text-xs text-white/25">›</span>}
+                    {/* 与 VS Code 一样，文件名前面带一个文件图标；中间的目录只有文字 */}
+                    {index === breadcrumbs.length - 1 && (
+                      <FileIcon name={activeTab.name} className="mr-0.5 size-3.5 shrink-0" />
+                    )}
                     <span
-                      className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/60' : ''}`}
+                      className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/70' : ''}`}
                     >
                       {part}
                     </span>
@@ -1650,6 +1769,7 @@ export const FilesView = forwardRef(function FilesView(
             )}
             <div className="relative min-h-0 flex-1">
               <div ref={editorHostRef} className="size-full" />
+              {!tabs.length && !(message && !message.transient) && <EmptyEditorWatermark />}
               {message && !message.transient && (
                 <div
                   role="status"

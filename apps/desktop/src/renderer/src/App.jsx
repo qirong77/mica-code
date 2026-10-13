@@ -2436,6 +2436,8 @@ export default function App() {
                   gitBranchChanges={gitIsCurrent ? git.branch : null}
                   gitLoading={gitIsCurrent ? git.loading : true}
                   gitBranch={gitIsCurrent ? git.status?.branch || null : null}
+                  /* 面板上的刷新按钮：不带 cwd，让 refreshGit 重新问一次终端，拿到最新目录 */
+                  onRefreshGit={() => refreshGit()}
                   onCornerResizeStart={null}
                 />
               </Suspense>

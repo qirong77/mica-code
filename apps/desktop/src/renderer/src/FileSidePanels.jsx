@@ -1,41 +1,110 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { IconChevronRight, IconGitBranch, IconSearch } from '@tabler/icons-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  IconArrowBackUp,
+  IconArrowUpRight,
+  IconChevronRight,
+  IconGitBranch,
+  IconMinus,
+  IconPlus,
+  IconRefresh,
+  IconX
+} from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
-import { statusColor, statusLabel } from './git-decorations'
-import { languageFor } from './monaco'
+import {
+  codeColor,
+  codeLabel,
+  stagedCode,
+  statusColor,
+  statusLabel,
+  worktreeCode
+} from './git-decorations'
 
-const MAX_RESULTS = 200
+// 面板外壳的尺寸取自 VS Code 实测值：栏头 35px（标题 13px 半粗，左侧 16px 内边距），
+// 行高 22px、圆角 2px，行内是「16px 图标格 + 5px 间隙」。
+const PANEL_HEADER = 'flex h-[35px] shrink-0 items-center gap-1 pl-4 pr-2'
+const PANEL_TITLE = 'min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80'
+const PANEL_ACTION =
+  'grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white'
+// 列表行：22px 高、4px 圆角（VS Code 的列表行悬浮块），悬浮底色比面板更暗。
+const ROW_BASE = 'flex h-[22px] w-full items-center rounded text-left'
+const FIELD_BASE =
+  'h-[26px] w-full rounded-[2px] border bg-white/[.02] px-2 text-[12px] text-white/85 placeholder:text-white/30 focus:outline-none'
 
-function Highlight({ text, query }) {
-  const value = String(text || '')
-  const needle = String(query || '').toLowerCase()
-  if (!needle) return value
-  const index = value.toLowerCase().indexOf(needle)
-  if (index < 0) return value
+function Spinner() {
+  return (
+    <span
+      className="size-3 shrink-0 animate-spin rounded-full border border-white/25 border-t-white/75"
+      aria-hidden="true"
+    />
+  )
+}
+
+/** VS Code 的搜索开关：Aa（区分大小写）/ ab（全字匹配）/ .*（正则）。 */
+function Toggle({ active, label, title, onClick }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      className={`grid h-5 min-w-5 shrink-0 place-items-center rounded-[3px] px-0.5 font-mono text-[11px] leading-none ${
+        active ? 'bg-white/20 text-white' : 'text-white/45 hover:bg-white/[.08] hover:text-white/85'
+      }`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** 命中高亮：偏移由 host 算好（长行截断与正则模式下渲染层自己找不准）。 */
+function Highlight({ text, range }) {
+  const value = String(text ?? '')
+  if (!range) return value
+  const [start, end] = range
+  if (!(start >= 0) || end <= start) return value
   return (
     <>
-      {value.slice(0, index)}
-      <mark className="rounded-xs bg-warn/20 font-semibold text-warn-soft">
-        {value.slice(index, index + needle.length)}
+      {value.slice(0, start)}
+      <mark className="rounded-[2px] bg-warn/25 font-semibold text-warn-soft">
+        {value.slice(start, end)}
       </mark>
-      {value.slice(index + needle.length)}
+      {value.slice(end)}
     </>
   )
 }
 
+function groupResults(items) {
+  const groups = new Map()
+  for (const item of items) {
+    const parts = String(item.relativePath || item.path).split('/')
+    const name = parts.at(-1)
+    const directory = parts.slice(0, -1).join('/')
+    if (!groups.has(item.path))
+      groups.set(item.path, { path: item.path, name, directory, matches: [] })
+    groups.get(item.path).matches.push(item)
+  }
+  return [...groups.values()]
+}
+
 export function SearchPanel({ root, onOpenFile, activePath }) {
-  const inputRef = useRef(null)
-  const requestRef = useRef(0)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [message, setMessage] = useState('搜索当前工作区中的文件内容')
+  const [matchCase, setMatchCase] = useState(false)
+  const [wholeWord, setWholeWord] = useState(false)
+  const [regex, setRegex] = useState(false)
+  const [include, setInclude] = useState('')
+  const [exclude, setExclude] = useState('')
+  const [result, setResult] = useState({ items: [], truncated: false, error: null })
   const [busy, setBusy] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => new Set())
+  // 「刷新」按钮靠它重新跑一次同样的查询（查询串本身没变，没法当依赖用）
+  const [nonce, setNonce] = useState(0)
+  const requestRef = useRef(0)
 
   useEffect(() => {
-    if (!query.trim()) {
+    if (!root || !query.trim()) {
       requestRef.current += 1
-      setResults([])
-      setMessage('搜索当前工作区中的文件内容')
+      setResult({ items: [], truncated: false, error: null })
       setBusy(false)
       return undefined
     }
@@ -43,14 +112,18 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
     const timer = window.setTimeout(async () => {
       try {
         setBusy(true)
-        const items = await window.mica.files.search(root, query)
+        const response = await window.mica.files.search(root, query, {
+          matchCase,
+          wholeWord,
+          regex,
+          include,
+          exclude
+        })
         if (request !== requestRef.current) return
-        setResults(items?.slice(0, MAX_RESULTS) || [])
-        setMessage(items?.length ? `${items.length} 个结果` : '没有匹配的结果')
+        setResult(response || { items: [], truncated: false, error: null })
       } catch (error) {
         if (request !== requestRef.current) return
-        setResults([])
-        setMessage(`搜索失败：${error?.message || error}`)
+        setResult({ items: [], truncated: false, error: `搜索失败：${error?.message || error}` })
       } finally {
         if (request === requestRef.current) setBusy(false)
       }
@@ -59,62 +132,169 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
       clearTimeout(timer)
       requestRef.current += 1
     }
-  }, [query, root])
+  }, [query, root, matchCase, wholeWord, regex, include, exclude, nonce])
 
   useEffect(() => {
     if (!root) {
       setQuery('')
-      setResults([])
-      setMessage('选择一个终端会话以搜索文件')
+      setResult({ items: [], truncated: false, error: null })
     }
   }, [root])
 
+  const groups = useMemo(() => groupResults(result.items), [result.items])
+  const fileCount = groups.length
+  const matchCount = result.items.length
+
+  const toggleGroup = useCallback((path) => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  const status = !root
+    ? '选择一个终端会话以搜索文件'
+    : result.error
+      ? result.error
+      : query.trim() && !busy && matchCount === 0
+        ? '没有匹配的结果'
+        : ''
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 px-3 py-2">
-        <div className="flex h-6 flex-1 items-center gap-1.5 rounded-sm border border-white/[.07] bg-white/[.03] px-2">
-          <IconSearch size={12} className="shrink-0 text-white/40" />
+      <header className={PANEL_HEADER}>
+        <span className={PANEL_TITLE}>搜索</span>
+        <button
+          type="button"
+          title="刷新"
+          aria-label="刷新"
+          className={PANEL_ACTION}
+          onClick={() => setNonce((value) => value + 1)}
+        >
+          <IconRefresh size={15} />
+        </button>
+        <button
+          type="button"
+          title="清除搜索"
+          aria-label="清除搜索"
+          className={PANEL_ACTION}
+          onClick={() => {
+            setQuery('')
+            setInclude('')
+            setExclude('')
+          }}
+        >
+          <IconX size={15} />
+        </button>
+      </header>
+      <div className="shrink-0 space-y-1 px-2 pb-1">
+        <div className="flex h-[26px] items-center gap-1 rounded-[2px] border border-white/[.12] bg-white/[.03] px-2 focus-within:border-accent/70">
           <input
-            ref={inputRef}
             type="text"
             value={query}
-            placeholder="搜索文件内容"
+            placeholder="搜索"
             aria-label="搜索文件内容"
-            className="h-full min-w-0 flex-1 bg-transparent text-[11px] text-white/85 placeholder:text-white/30 focus:outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-white/90 placeholder:text-white/30 focus:outline-none"
             onChange={(event) => setQuery(event.target.value)}
           />
-          {busy && (
-            <span
-              className="size-2.5 shrink-0 animate-spin rounded-full border border-white/25 border-t-white/75"
-              aria-hidden="true"
-            />
-          )}
+          {busy && <Spinner />}
+          <Toggle
+            active={matchCase}
+            label="Aa"
+            title="区分大小写"
+            onClick={() => setMatchCase((v) => !v)}
+          />
+          <Toggle
+            active={wholeWord}
+            label="ab"
+            title="全字匹配"
+            onClick={() => setWholeWord((v) => !v)}
+          />
+          <Toggle
+            active={regex}
+            label=".*"
+            title="使用正则表达式"
+            onClick={() => setRegex((v) => !v)}
+          />
         </div>
+        <input
+          type="text"
+          value={include}
+          placeholder="包含的文件"
+          aria-label="包含的文件"
+          title="逗号分隔的文件名或路径通配（*.ts、src/**）"
+          className={`${FIELD_BASE} border-white/[.08]`}
+          onChange={(event) => setInclude(event.target.value)}
+        />
+        <input
+          type="text"
+          value={exclude}
+          placeholder="排除的文件"
+          aria-label="排除的文件"
+          title="逗号分隔的文件名或路径通配（*.test.ts、dist/**）"
+          className={`${FIELD_BASE} border-white/[.08]`}
+          onChange={(event) => setExclude(event.target.value)}
+        />
       </div>
-      <div className="flex shrink-0 items-center justify-between border-b border-white/[.06] px-3 pb-1.5 text-[10px] text-white/35">
-        <span className="truncate" title={root || ''}>
-          {root}
-        </span>
-        <span className="ml-2 shrink-0 tabular-nums">{message}</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto py-1">
-        {results.map((result, index) => (
-          <button
-            key={`${result.path}-${result.line}-${index}`}
-            type="button"
-            title={result.path}
-            className={`block w-full px-3 py-1 text-left transition-colors hover:bg-white/[.045] ${activePath === result.path ? 'bg-white/[.075]' : ''}`}
-            onClick={() => onOpenFile(result.path, result.line)}
-          >
-            <div className="flex items-center gap-1 font-mono text-[10px] text-white/45">
-              <span className="min-w-0 flex-1 truncate">{result.relativePath || result.path}</span>
-              <span className="shrink-0 tabular-nums text-white/30">:{result.line}</span>
+      {matchCount > 0 && (
+        <div className="shrink-0 truncate px-4 pb-1 text-[12px] text-white/45">
+          {fileCount} 个文件中有 {matchCount} 个结果
+          {result.truncated ? '（已达上限）' : ''}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
+        {status && (
+          <div className="px-3 py-4 text-[13px] leading-relaxed text-white/40">{status}</div>
+        )}
+        {groups.map((group) => {
+          const closed = collapsed.has(group.path)
+          return (
+            <div key={group.path}>
+              <button
+                type="button"
+                title={group.path}
+                aria-expanded={!closed}
+                className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[13px] text-white/75 hover:bg-list-hover hover:text-white`}
+                onClick={() => toggleGroup(group.path)}
+              >
+                <span
+                  className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
+                >
+                  <IconChevronRight size={14} />
+                </span>
+                <span className="grid size-4 shrink-0 place-items-center text-white/50">
+                  <FileSystemIcon name={group.name} className="size-4" />
+                </span>
+                <span className="ml-[5px] min-w-0 shrink-0 truncate">{group.name}</span>
+                <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-white/35">
+                  {group.directory}
+                </span>
+                <span className="ml-1.5 grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-white/10 px-1 text-[11px] leading-none text-white/70 tabular-nums">
+                  {group.matches.length}
+                </span>
+              </button>
+              {!closed &&
+                group.matches.map((match, index) => (
+                  <button
+                    key={`${match.line}-${index}`}
+                    type="button"
+                    title={`${match.path}:${match.line}`}
+                    className={`${ROW_BASE} pr-1.5 font-mono text-[12px] hover:bg-list-hover ${
+                      activePath === match.path ? 'text-white' : 'text-white/60 hover:text-white/85'
+                    }`}
+                    style={{ paddingLeft: 22 }}
+                    onClick={() => onOpenFile(match.path, match.line)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      <Highlight text={match.preview} range={match.highlight} />
+                    </span>
+                  </button>
+                ))}
             </div>
-            <div className="mt-0.5 truncate text-[11px] text-white/65">
-              <Highlight text={result.preview} query={query} />
-            </div>
-          </button>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -134,6 +314,119 @@ function makeGitTree(files) {
   return root
 }
 
+/**
+ * 文件行：与 VS Code 的源代码管理一致——文件图标 + 名字（普通前景色）、目录路径
+ * 暗色跟在后面且空间不够时先被截断、状态字母贴右缘；鼠标悬浮时在字母左边浮出
+ * 操作按钮（打开文件 / 放弃更改 / 暂存或取消暂存），路径同时被挤得更短。
+ */
+function GitFileRow({
+  file,
+  depth = 0,
+  selected,
+  section,
+  onSelect,
+  onOpen,
+  onStage,
+  onUnstage,
+  onDiscard,
+  showDirectory
+}) {
+  const parts = String(file.path).split('/')
+  const name = file.name || parts.at(-1)
+  const directory = parts.slice(0, -1).join('/')
+  // 分段各自的状态字符：已暂存的段看索引侧，工作区段看工作区侧。GIT TREE 拿到的
+  // 是「相对基线分支」的差异（`git diff --name-status`），没有 porcelain 的 XY，
+  // 这时退回三态状态。
+  const code = section === 'staged' ? stagedCode(file.code) : worktreeCode(file.code)
+  const letter = code ? codeLabel(code) : statusLabel(file.status)
+  const color = code ? codeColor(code) : statusColor(file.status)
+  const actions = []
+  if (onOpen) {
+    actions.push({
+      key: 'open',
+      label: '打开文件',
+      Icon: IconArrowUpRight,
+      run: () => onOpen(file)
+    })
+  }
+  if (section === 'staged') {
+    if (onUnstage) {
+      actions.push({
+        key: 'unstage',
+        label: '取消暂存',
+        Icon: IconMinus,
+        run: () => onUnstage(file)
+      })
+    }
+  } else {
+    if (onDiscard) {
+      actions.push({
+        key: 'discard',
+        label: '放弃更改',
+        Icon: IconArrowBackUp,
+        run: () => onDiscard(file)
+      })
+    }
+    if (onStage) {
+      actions.push({ key: 'stage', label: '暂存更改', Icon: IconPlus, run: () => onStage(file) })
+    }
+  }
+  return (
+    <div
+      className={`group flex h-[22px] w-full items-center rounded-sm pr-1.5 ${
+        selected ? 'bg-white/[.075]' : 'hover:bg-list-hover'
+      }`}
+      style={{ paddingLeft: 5 + depth * 8 }}
+    >
+      <button
+        type="button"
+        title={file.path}
+        onClick={() => onSelect(file)}
+        className="flex min-w-0 flex-1 items-center text-left"
+      >
+        <span className="grid size-4 shrink-0 place-items-center">
+          <FileSystemIcon name={name} className="size-4" />
+        </span>
+        <span
+          className={`ml-[5px] min-w-0 shrink truncate text-[13px] ${
+            selected ? 'text-white' : 'text-white/75 group-hover:text-white'
+          }`}
+        >
+          {name}
+        </span>
+        {showDirectory && directory && (
+          <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-white/[.58]">
+            {directory}
+          </span>
+        )}
+      </button>
+      {/* 悬浮/聚焦才出现，键盘用户 tab 进来也能拿到（与 VS Code 一致） */}
+      {actions.length > 0 && (
+        <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
+          {actions.map(({ key, label, Icon, run }) => (
+            <button
+              key={key}
+              type="button"
+              title={label}
+              aria-label={label}
+              className="grid size-5 shrink-0 place-items-center rounded-sm text-white/55 hover:bg-white/[.08] hover:text-white"
+              onClick={(event) => {
+                event.stopPropagation()
+                run()
+              }}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </span>
+      )}
+      <span className="ml-1.5 shrink-0 font-mono text-[11px] font-semibold" style={{ color }}>
+        {letter}
+      </span>
+    </div>
+  )
+}
+
 function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath, onSelect }) {
   return (
     <>
@@ -144,16 +437,24 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
           <div key={key}>
             <button
               type="button"
-              className="grid h-6.5 w-full grid-cols-[14px_16px_minmax(0,1fr)] items-center gap-1 rounded-sm pr-1.5 text-left text-xs text-white/65 hover:bg-white/[.045] hover:text-white"
-              style={{ paddingLeft: 5 + depth * 13 }}
+              className={`${ROW_BASE} gap-1 pr-1.5 text-[13px] text-white/65 hover:bg-list-hover hover:text-white`}
+              style={{ paddingLeft: 5 + depth * 8 }}
               onClick={() => onToggle(key)}
             >
-              <IconChevronRight
-                size={13}
-                className={`text-white/35 ${closed ? '' : 'rotate-90'}`}
-              />
-              <FileSystemIcon name={name} type="directory" expanded={!closed} className="size-4" />
-              <span className="truncate">{name}</span>
+              <span
+                className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
+              >
+                <IconChevronRight size={14} />
+              </span>
+              <span className="grid size-4 shrink-0 place-items-center">
+                <FileSystemIcon
+                  name={name}
+                  type="directory"
+                  expanded={!closed}
+                  className="size-4"
+                />
+              </span>
+              <span className="ml-[5px] truncate">{name}</span>
             </button>
             {!closed && (
               <GitRows
@@ -170,24 +471,14 @@ function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath
         )
       })}
       {node.files.map((file) => (
-        <button
+        <GitFileRow
           key={file.path}
-          type="button"
-          title={file.path}
-          className={`grid h-6.5 w-full grid-cols-[14px_16px_minmax(0,1fr)_18px] items-center gap-1 rounded-sm pr-1.5 text-left text-xs hover:bg-white/[.045] hover:text-white ${selectedPath === file.path ? 'bg-white/[.075] text-white' : 'text-white/65'}`}
-          style={{ paddingLeft: 5 + depth * 13 }}
-          onClick={() => onSelect(file)}
-        >
-          <span />
-          <FileSystemIcon name={file.name} className="size-4" />
-          <span className="truncate">{file.name}</span>
-          <span
-            className="justify-self-end font-mono text-[10px] font-semibold"
-            style={{ color: statusColor(file.status) }}
-          >
-            {statusLabel(file.status)}
-          </span>
-        </button>
+          file={file}
+          depth={depth}
+          section="tree"
+          selected={selectedPath === file.path}
+          onSelect={onSelect}
+        />
       ))}
     </>
   )
@@ -197,18 +488,48 @@ export function GitPanel({
   cwd,
   repository,
   loading,
+  onRefresh,
   onSelectFile,
   selectedPath,
-  rootLabel = null,
-  heading = 'CHANGES',
+  variant = 'list',
+  title = '源代码管理',
+  sectionLabel = '更改',
   emptyText = '工作区没有文件变化',
-  compareLabel = null
+  compareLabel = null,
+  onOpenFile,
+  onStage,
+  onUnstage,
+  onDiscard
 }) {
-  const [collapsed, setCollapsed] = useState(new Set())
+  const [collapsed, setCollapsed] = useState(() => new Set())
   const tree = useMemo(() => makeGitTree(repository?.files || []), [repository])
 
   const root = repository?.root || cwd
-  const rootClosed = collapsed.has('__root__')
+  const files = useMemo(() => repository?.files || [], [repository])
+  const isTree = variant === 'tree'
+
+  /**
+   * 与 VS Code 一样分两段：索引里有改动的进「暂存的更改」，工作区还有改动的进
+   * 「更改」（未跟踪只算工作区侧）。同一个文件两边都有（`MM`）时两段各出现一次。
+   * 区块顺序也跟 VS Code 一致：按创建顺序排，暂存的更改在更改之前。
+   */
+  const sections = useMemo(() => {
+    if (isTree) return [{ key: '__section__', label: sectionLabel, files, alwaysVisible: true }]
+    return [
+      {
+        key: 'staged',
+        label: '暂存的更改',
+        files: files.filter((file) => stagedCode(file.code)),
+        hideWhenEmpty: true
+      },
+      {
+        key: 'changes',
+        label: sectionLabel,
+        files: files.filter((file) => worktreeCode(file.code)),
+        alwaysVisible: true
+      }
+    ]
+  }, [files, isTree, sectionLabel])
 
   const toggle = useCallback((key) => {
     setCollapsed((current) => {
@@ -219,77 +540,100 @@ export function GitPanel({
     })
   }, [])
 
+  const repoTitle = compareLabel ? `${root}（相对 ${compareLabel}）` : root || ''
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center px-3 pt-2">
-        <span className="text-[10px] font-semibold tracking-[.08em] text-white/45">{heading}</span>
-        {compareLabel && (
-          <span className="ml-2 truncate text-[10px] text-white/30" title={`相对 ${compareLabel}`}>
-            相对 {compareLabel}
-          </span>
+      <header className={PANEL_HEADER}>
+        <span className={PANEL_TITLE} title={repoTitle}>
+          {title}
+        </span>
+        {loading && <Spinner />}
+        {onRefresh && (
+          <button
+            type="button"
+            title="刷新"
+            aria-label="刷新"
+            className={PANEL_ACTION}
+            onClick={() => onRefresh()}
+          >
+            <IconRefresh size={15} />
+          </button>
         )}
-        {loading && (
-          <span
-            className="ml-2 size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
-            aria-hidden="true"
-          />
-        )}
-      </div>
-      <div className="truncate px-3 py-1 font-mono text-[10px] text-white/30" title={root || ''}>
-        {root}
-      </div>
+      </header>
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
-        {!cwd && (
-          <div className="px-3 py-6 text-center text-[11px] text-white/35">
-            选择一个终端会话以查看 Git 变化
-          </div>
+        {/* 加载态优先：刷新时 cwd 会先变 null，先显示「正在读取」而不是「请选终端」。 */}
+        {loading && !repository && (
+          <div className="px-3 py-4 text-[13px] text-white/40">正在读取 Git 工作区…</div>
         )}
-        {cwd && loading && !repository && (
-          <div className="px-3 py-6 text-center text-[11px] text-white/35">
-            正在读取 Git 工作区…
-          </div>
+        {!loading && !cwd && (
+          <div className="px-3 py-4 text-[13px] text-white/40">选择一个终端会话以查看 Git 变化</div>
         )}
-        {cwd && !loading && !repository && (
-          <div className="px-3 py-6 text-center text-[11px] text-white/35">
-            当前目录不在 Git 仓库中
-          </div>
+        {!loading && cwd && !repository && (
+          <div className="px-3 py-4 text-[13px] text-white/40">当前目录不在 Git 仓库中</div>
         )}
-        {repository && !repository.files.length && (
-          <div className="px-3 py-6 text-center text-[11px] text-white/35">{emptyText}</div>
+        {repository && !files.length && (
+          <div className="px-3 py-4 text-[13px] text-white/40">{emptyText}</div>
         )}
-        {repository && repository.files.length > 0 && (
-          <>
-            {rootLabel && (
-              <button
-                type="button"
-                title={rootLabel}
-                className="grid h-6.5 w-full grid-cols-[14px_16px_minmax(0,1fr)] items-center gap-1 rounded-sm pr-1.5 text-left text-xs text-info hover:bg-white/[.045]"
-                style={{ paddingLeft: 5 }}
-                onClick={() => toggle('__root__')}
-              >
-                <IconChevronRight
-                  size={13}
-                  className={`text-white/35 ${rootClosed ? '' : 'rotate-90'}`}
-                />
-                <IconGitBranch size={14} className="shrink-0" />
-                <span className="truncate">{rootLabel}</span>
-              </button>
-            )}
-            {!rootClosed && (
-              <GitRows
-                node={tree}
-                depth={rootLabel ? 1 : 0}
-                collapsed={collapsed}
-                selectedPath={selectedPath}
-                onToggle={toggle}
-                onSelect={onSelectFile}
-              />
-            )}
-          </>
-        )}
+        {repository &&
+          files.length > 0 &&
+          sections
+            .filter((section) => section.alwaysVisible || section.files.length > 0)
+            .map((section) => {
+              const closed = collapsed.has(section.key)
+              return (
+                <Fragment key={section.key}>
+                  {/* 与 VS Code 一样：区块头是「⌄ 标题 + 计数徽标」，路径与基线走 tooltip */}
+                  <button
+                    type="button"
+                    title={compareLabel ? `${root}\n相对 ${compareLabel}` : root}
+                    aria-expanded={!closed}
+                    className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70 hover:bg-list-hover hover:text-white`}
+                    onClick={() => toggle(section.key)}
+                  >
+                    <span
+                      className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
+                    >
+                      <IconChevronRight size={14} />
+                    </span>
+                    {isTree ? (
+                      <IconGitBranch size={14} className="ml-1 shrink-0 text-info" />
+                    ) : null}
+                    <span className="ml-0.5 min-w-0 flex-1 truncate">{section.label}</span>
+                    <span className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-white/10 px-1 text-[11px] font-normal leading-none text-white/70 tabular-nums">
+                      {section.files.length}
+                    </span>
+                  </button>
+                  {!closed &&
+                    (isTree ? (
+                      <GitRows
+                        node={tree}
+                        depth={0}
+                        collapsed={collapsed}
+                        selectedPath={selectedPath}
+                        onToggle={toggle}
+                        onSelect={onSelectFile}
+                      />
+                    ) : (
+                      section.files.map((file) => (
+                        <GitFileRow
+                          key={`${section.key}:${file.path}`}
+                          file={file}
+                          section={section.key}
+                          selected={selectedPath === file.path}
+                          onSelect={onSelectFile}
+                          onOpen={onOpenFile}
+                          onStage={onStage}
+                          onUnstage={onUnstage}
+                          onDiscard={onDiscard}
+                          showDirectory
+                        />
+                      ))
+                    ))}
+                </Fragment>
+              )
+            })}
       </div>
     </div>
   )
 }
-
-export { languageFor }

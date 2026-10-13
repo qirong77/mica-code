@@ -1,8 +1,6 @@
-import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import { readFile } from 'fs/promises'
 import path from 'path'
-import { promisify } from 'util'
 import { ipcMain } from 'electron'
 import {
   baseBranchLabel,
@@ -10,33 +8,13 @@ import {
   isBaseBranch,
   parseNameStatus,
   parseNumstat,
-  parseStatus
+  parseStatusCode,
+  statusFromCode
 } from './git-core'
+import { discardFile, getRepository, git, stageFile, unstageFile } from './git-ops'
 
-const execFileAsync = promisify(execFile)
-const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 // 基线分支候选：远端默认分支（origin/HEAD）优先，其次是常见的 master/main。
 const BASE_CANDIDATES = ['origin/master', 'origin/main', 'master', 'main']
-
-async function git(cwd, args, options = {}) {
-  const result = await execFileAsync('git', args, {
-    cwd,
-    encoding: options.encoding ?? 'utf8',
-    maxBuffer: 20 * 1024 * 1024
-  })
-  return result.stdout
-}
-
-async function getRepository(cwd) {
-  const root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
-  let base = EMPTY_TREE
-  try {
-    base = (await git(root, ['rev-parse', '--verify', 'HEAD'])).trim()
-  } catch {
-    // A repository without its first commit is compared with Git's empty tree.
-  }
-  return { root, base }
-}
 
 function countLines(buffer) {
   if (!buffer.length) return 0
@@ -51,11 +29,12 @@ async function getSummary(cwd) {
     git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
     git(root, ['diff', base, '--numstat', '--no-renames', '--'])
   ])
-  const changes = parseStatus(statusOutput)
+  const codes = parseStatusCode(statusOutput)
   const numstats = parseNumstat(numstatOutput)
   const files = []
 
-  for (const [filePath, status] of changes) {
+  for (const [filePath, code] of codes) {
+    const status = statusFromCode(code)
     let stat = numstats.get(filePath)
     if (!stat && status === 'added') {
       let content
@@ -74,6 +53,9 @@ async function getSummary(cwd) {
     files.push({
       path: filePath,
       status,
+      // 原始两字符 `XY`：索引侧 + 工作区侧。源代码管理面板按它分
+      // 「暂存的更改 / 更改」两段（未跟踪是 `??`，只算工作区侧）。
+      code,
       additions: stat?.additions || 0,
       deletions: stat?.deletions || 0,
       binary: stat?.binary || false
@@ -348,6 +330,36 @@ export function registerGitIpc() {
       original: binary ? '' : original.toString('utf8'),
       modified: binary ? '' : modified.toString('utf8'),
       binary
+    }
+  })
+
+  // 以下三个是写操作（对应 VS Code 源代码管理里行内悬浮出来的按钮）。
+  // 路径一律经 `safeFilePath` 校验，越出仓库直接报错。
+  ipcMain.handle('git:stage', async (_event, { cwd, filePath } = {}) => {
+    try {
+      await stageFile(cwd, filePath)
+      return { error: null }
+    } catch (error) {
+      return { error: errorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:unstage', async (_event, { cwd, filePath } = {}) => {
+    try {
+      await unstageFile(cwd, filePath)
+      return { error: null }
+    } catch (error) {
+      return { error: errorMessage(error) }
+    }
+  })
+
+  // 不可逆：调用方（渲染层）必须先确认。
+  ipcMain.handle('git:discard', async (_event, { cwd, filePath } = {}) => {
+    try {
+      await discardFile(cwd, filePath)
+      return { error: null }
+    } catch (error) {
+      return { error: errorMessage(error) }
     }
   })
 }

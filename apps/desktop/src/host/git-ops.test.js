@@ -1,0 +1,130 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { execFile } from 'child_process'
+import { existsSync } from 'fs'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import path from 'path'
+import { promisify } from 'util'
+import { discardFile, git, safeFilePath, stageFile, unstageFile } from './git-ops'
+
+const execFileAsync = promisify(execFile)
+
+/** 提交时显式带上身份，免得受宿主机全局 git 配置（签名、模板）影响。 */
+function commit(dir, message, extra = []) {
+  return execFileAsync(
+    'git',
+    ['-c', 'user.email=t@e.com', '-c', 'user.name=T', 'commit', '-q', ...extra, '-m', message],
+    { cwd: dir }
+  )
+}
+
+async function setup() {
+  const dir = await mkdtemp(path.join(tmpdir(), 'mica-git-ops-'))
+  await execFileAsync('git', ['init', '-q'], { cwd: dir })
+  await commit(dir, 'init', ['--allow-empty'])
+  return dir
+}
+
+const status = (dir) => git(dir, ['status', '--porcelain=v1', '--untracked-files=all'])
+
+describe('stageFile / unstageFile', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+    await writeFile(path.join(dir, 'a.txt'), 'one\n')
+    await git(dir, ['add', '--', 'a.txt'])
+    await commit(dir, 'add')
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('暂存把工作区改动放进索引', async () => {
+    await writeFile(path.join(dir, 'a.txt'), 'two\n')
+    expect(await status(dir)).toBe(' M a.txt\n')
+    await stageFile(dir, 'a.txt')
+    expect(await status(dir)).toBe('M  a.txt\n')
+  })
+
+  it('取消暂存把索引里的改动退回工作区', async () => {
+    await writeFile(path.join(dir, 'a.txt'), 'two\n')
+    await stageFile(dir, 'a.txt')
+    await unstageFile(dir, 'a.txt')
+    expect(await status(dir)).toBe(' M a.txt\n')
+    // 内容还在，取消暂存不该动工作区。
+    expect(await readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('two\n')
+  })
+
+  it('新增文件暂存后再取消暂存，回到未跟踪且文件保留', async () => {
+    await writeFile(path.join(dir, 'b.txt'), 'new\n')
+    expect(await status(dir)).toBe('?? b.txt\n')
+    await stageFile(dir, 'b.txt')
+    expect(await status(dir)).toBe('A  b.txt\n')
+    await unstageFile(dir, 'b.txt')
+    expect(await status(dir)).toBe('?? b.txt\n')
+    expect(existsSync(path.join(dir, 'b.txt'))).toBe(true)
+  })
+
+  it('仓库还没有第一个提交时也能取消暂存', async () => {
+    const fresh = await mkdtemp(path.join(tmpdir(), 'mica-git-ops-fresh-'))
+    try {
+      await execFileAsync('git', ['init', '-q'], { cwd: fresh })
+      await writeFile(path.join(fresh, 'c.txt'), 'c\n')
+      await stageFile(fresh, 'c.txt')
+      expect(await status(fresh)).toBe('A  c.txt\n')
+      await unstageFile(fresh, 'c.txt')
+      expect(await status(fresh)).toBe('?? c.txt\n')
+      expect(existsSync(path.join(fresh, 'c.txt'))).toBe(true)
+    } finally {
+      await rm(fresh, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('discardFile', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+    await writeFile(path.join(dir, 'a.txt'), 'one\n')
+    await git(dir, ['add', '--', 'a.txt'])
+    await commit(dir, 'add')
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('已跟踪文件恢复成索引里的版本', async () => {
+    await writeFile(path.join(dir, 'a.txt'), 'changed\n')
+    await discardFile(dir, 'a.txt')
+    expect(await readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('one\n')
+    expect(await status(dir)).toBe('')
+  })
+
+  it('删除的已跟踪文件被恢复', async () => {
+    await rm(path.join(dir, 'a.txt'))
+    expect(await status(dir)).toBe(' D a.txt\n')
+    await discardFile(dir, 'a.txt')
+    expect(await status(dir)).toBe('')
+  })
+
+  it('未跟踪文件被删掉', async () => {
+    await writeFile(path.join(dir, 'b.txt'), 'new\n')
+    await discardFile(dir, 'b.txt')
+    expect(existsSync(path.join(dir, 'b.txt'))).toBe(false)
+    expect(await status(dir)).toBe('')
+  })
+})
+
+describe('safeFilePath', () => {
+  it('拒绝越出仓库的路径', () => {
+    expect(() => safeFilePath('/repo', '../etc/passwd')).toThrow('Invalid repository path')
+    expect(() => safeFilePath('/repo', '/etc/passwd')).toThrow('Invalid repository path')
+    expect(safeFilePath('/repo', 'src/a.ts')).toBe('/repo/src/a.ts')
+  })
+
+  it('写操作也会挡住越界路径', async () => {
+    const dir = await setup()
+    try {
+      await expect(stageFile(dir, '../outside.txt')).rejects.toThrow('Invalid repository path')
+      await expect(discardFile(dir, '../outside.txt')).rejects.toThrow('Invalid repository path')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

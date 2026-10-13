@@ -6,6 +6,7 @@ import {
   parseNameStatus,
   parseNumstat,
   parseStatus,
+  parseStatusCode,
   statusFromCode
 } from './git-core'
 
@@ -38,6 +39,24 @@ describe('parseStatus', () => {
     expect(parseStatus('R  src/new.ts\0src/old.ts\0')).toEqual(
       new Map([['src/new.ts', 'modified']])
     )
+  })
+})
+
+describe('parseStatusCode', () => {
+  it('保留原始 XY（源代码管理面板要按索引/工作区分段）', () => {
+    const output = ' M src/a.ts\0?? src/b.ts\0A  src/c.ts\0MM src/d.ts\0'
+    expect(parseStatusCode(output)).toEqual(
+      new Map([
+        ['src/a.ts', ' M'],
+        ['src/b.ts', '??'],
+        ['src/c.ts', 'A '],
+        ['src/d.ts', 'MM']
+      ])
+    )
+  })
+
+  it('空输出得到空表', () => {
+    expect(parseStatusCode('').size).toBe(0)
   })
 })
 

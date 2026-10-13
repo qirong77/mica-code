@@ -300,7 +300,8 @@ function createWebApi(env) {
         invoke('files:write', { path, content, expectedVersion }),
       // `@` 补全候选：与 CLI 的 file-mention 插件共用 mica-file-mentions
       mention: (root, query) => invoke('files:mention', { root, query }),
-      search: (root, query) => invoke('files:search', { root, query }),
+      // options：{ matchCase, wholeWord, regex, include, exclude }，对应搜索面板上的开关
+      search: (root, query, options = {}) => invoke('files:search', { root, query, ...options }),
       create: (directory, name, type) => invoke('files:create', { directory, name, type }),
       rename: (path, name) => invoke('files:rename', { path, name }),
       move: (path, directory) => invoke('files:move', { path, directory }),
@@ -338,7 +339,11 @@ function createWebApi(env) {
       refs: (cwd) => invoke('git:refs', { cwd }),
       checkout: (cwd, ref) => invoke('git:checkout', { cwd, ref }),
       createBranch: (cwd, name, startRef = null) =>
-        invoke('git:create-branch', { cwd, name, startRef })
+        invoke('git:create-branch', { cwd, name, startRef }),
+      // 源代码管理面板行内悬浮出来的三个操作；discard 不可逆，调用方要先确认。
+      stage: (cwd, filePath) => invoke('git:stage', { cwd, filePath }),
+      unstage: (cwd, filePath) => invoke('git:unstage', { cwd, filePath }),
+      discard: (cwd, filePath) => invoke('git:discard', { cwd, filePath })
     },
 
     stats: {
