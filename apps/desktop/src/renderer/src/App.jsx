@@ -743,13 +743,6 @@ function setLayoutVar(name, value) {
   document.documentElement.style.setProperty(name, value)
 }
 
-// 非对话视图（从左侧导航进入时）在右侧显示的标题栏信息
-const PAGE_HEADER = {
-  files: { label: 'Files', Icon: IconFile },
-  stats: { label: 'Stats', Icon: IconChartBar },
-  settings: { label: 'Settings', Icon: IconSettings }
-}
-
 /**
  * 界面状态（面板布局、上次的工作目录）只有一份，放在运行时里：第二个窗口读到的是同一份，
  * 重启后也还在。这些读函数只在首次渲染取一次初值，之后的同步见下面的 layout 镜像 effect。
@@ -2354,8 +2347,10 @@ export default function App() {
               </button>
             )}
             {/* 返回对话是主区顶栏最左的入口（与 CLI 的 prompt 前导一致）：非对话视图
-                下始终出现在标题之前，不要挪回右侧。分享页没有它（点开就是被分享的对话）。 */}
-            {view !== 'chat' && PAGE_HEADER[view] && (
+                下始终出现在最前，不要挪回右侧。分享页没有它（点开就是被分享的对话）。
+                视图名（Files / Stats / Settings）不再重复展示——各自页面自带标识，
+                这一栏只留返回入口。 */}
+            {view !== 'chat' && (
               <button
                 type="button"
                 title="返回对话"
@@ -2367,24 +2362,11 @@ export default function App() {
                 <span>返回对话</span>
               </button>
             )}
-            {view !== 'chat' && PAGE_HEADER[view] && (
-              <span className="h-3.5 w-px shrink-0 bg-line" aria-hidden="true" />
-            )}
-            {view === 'chat' ? (
+            {view === 'chat' && (
               <span className="min-w-0 truncate text-white/75">
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
-            ) : PAGE_HEADER[view] ? (
-              (() => {
-                const { label, Icon } = PAGE_HEADER[view]
-                return (
-                  <>
-                    <Icon size={13} className="shrink-0 opacity-80" />
-                    <span>{label}</span>
-                  </>
-                )
-              })()
-            ) : null}
+            )}
             {/* 顶栏右侧：终端面板开关、文件视图开关。
                 分享页里 files/terminal 能力都拿不到，这两个开关整个不渲染。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
