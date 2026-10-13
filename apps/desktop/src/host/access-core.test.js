@@ -18,6 +18,7 @@ import {
   pickShareBaseUrl,
   revokeShareRecord,
   sameSiteOriginAllowed,
+  sanitizeScopedPayload,
   scanImagePaths,
   scopeAllowsChannel,
   scopeAllowsSessionEvent,
@@ -266,6 +267,7 @@ describe('scopeAllowsChannel', () => {
       'chat:edit-message',
       'chat:compact',
       'chat:update-cwd',
+      'chat:check-cwd',
       'stats:session-detail',
       'stats:session-title',
       'stats:rename-session'
@@ -355,6 +357,54 @@ describe('scopeAllowsChannel', () => {
     expect(scopeAllowsChannel(scope, 'chat:history', { sessionId: 's2' })).toBe(false)
     expect(scopeAllowsChannel(scope, 'chat:history', {})).toBe(false)
     expect(scopeAllowsChannel(scope, 'chat:history', undefined)).toBe(false)
+  })
+})
+
+describe('sanitizeScopedPayload', () => {
+  const share = { kind: 'share', sessionId: 's1' }
+
+  it('strips the session-persisted role / model / effort from a share request', () => {
+    // 这三个都会写进分享者的会话快照：role 走 applyRoleOverride，model/effort 走
+    // configureForRun(override, true)（它把 model 写进 client 快照，随后 running
+    // checkpoint 落盘）。宿主侧对「没带这些参数」一律原样保留，所以剥掉等于
+    // 「不许改」，而不是重置成默认值。
+    const payload = {
+      sessionId: 's1',
+      prompt: 'hi',
+      role: 'reviewer',
+      model: 'k/gpt-5',
+      effort: 'high'
+    }
+    for (const channel of ['chat:start', 'chat:edit-message']) {
+      expect(sanitizeScopedPayload(share, channel, payload)).toEqual({
+        sessionId: 's1',
+        prompt: 'hi'
+      })
+    }
+  })
+
+  it('keeps a single locked param from leaking through when only it is present', () => {
+    expect(
+      sanitizeScopedPayload(share, 'chat:start', { sessionId: 's1', model: 'k/gpt-5' })
+    ).toEqual({
+      sessionId: 's1'
+    })
+    expect(sanitizeScopedPayload(share, 'chat:start', { sessionId: 's1', effort: 'high' })).toEqual(
+      {
+        sessionId: 's1'
+      }
+    )
+  })
+
+  it('leaves every other channel, and the full scope, untouched', () => {
+    const payload = { sessionId: 's1', role: 'reviewer' }
+    expect(sanitizeScopedPayload(share, 'chat:history', payload)).toBe(payload)
+    expect(sanitizeScopedPayload({ kind: 'full' }, 'chat:start', payload)).toBe(payload)
+    expect(sanitizeScopedPayload(null, 'chat:start', payload)).toBe(payload)
+    // 没带这个 key 时不复制 payload（保持引用相等，别让每次调用都产生新对象）
+    const withoutRole = { sessionId: 's1' }
+    expect(sanitizeScopedPayload(share, 'chat:start', withoutRole)).toBe(withoutRole)
+    expect(sanitizeScopedPayload(share, 'chat:start', undefined)).toBeUndefined()
   })
 })
 

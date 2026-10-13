@@ -166,6 +166,9 @@ export const SHARE_SESSION_CHANNELS = new Set([
   'chat:edit-message',
   'chat:compact',
   'chat:update-cwd',
+  // 改工作目录的连带查询：`chat:update-cwd` 既然放行，判断这个目录存不存在就没多给
+  // 任何东西（只是 `fs.exists`），但不放行的话页面上「目录不存在」的提示一直是哑的。
+  'chat:check-cwd',
   'stats:session-detail',
   'stats:session-title',
   'stats:rename-session'
@@ -187,6 +190,46 @@ export const SHARE_SESSIONLESS_CHANNELS = new Set([
   'chat:models',
   'chat:roles'
 ])
+
+/**
+ * 分享范围要**剥掉**的请求入参：这些参数会写进宿主里那份会话快照（也就是分享者的会话），
+ * 而它们不属于「驱动这个会话」——访客能发消息，但不能把分享者的会话改成自己的配置。
+ *
+ * 三个参数都是「会话级、随会话持久化」的（`turn/start` 的 Mica 扩展，见
+ * apps/cli/src/cli/runAppServer.ts）：`role` 走 applyRoleOverride，`model`/`effort` 走
+ * configureForRun(override, true) —— 后者会把新的 model 写进
+ * client 快照，而 turn 的 running checkpoint 随后把它落盘。也就是说访客点一下模型选择器，
+ * 改的是**分享者磁盘上的那个会话**，下次分享者自己打开就变味了。
+ *
+ * 宿主侧对「没带这些参数」一律是原样保留（applyRoleOverride 保留原 role；
+ * `if (model || effort)` 不成立时根本不调 configureForRun），所以剥掉即是「不许改」，
+ * 而不是「重置成默认值」。
+ */
+export const SHARE_LOCKED_PARAMS = Object.freeze({
+  'chat:start': ['role', 'model', 'effort'],
+  'chat:edit-message': ['role', 'model', 'effort']
+})
+
+/**
+ * 按范围收敛请求入参，返回可直接交给 host 的 payload。
+ *
+ * 与 `scopeAllowsChannel` 是同一件事的两半：那个决定「能不能调这个 channel」，
+ * 这个决定「调用时允许带哪些参数」。两者都在服务端执行——渲染层把按钮藏起来只是
+ * 不让用户误点，**不是**授权，照抄一份请求照样会被这里拦住。
+ * `full` 范围（本机窗口）原样返回，不改任何东西。
+ */
+export function sanitizeScopedPayload(scope, channel, payload) {
+  if (!scope || scope.kind === 'full') return payload
+  const locked = SHARE_LOCKED_PARAMS[channel]
+  if (!locked || !payload || typeof payload !== 'object') return payload
+  let next = payload
+  for (const key of locked) {
+    if (!(key in next)) continue
+    if (next === payload) next = { ...payload }
+    delete next[key]
+  }
+  return next
+}
 
 export function shareAllowsChannel(channel, payload, sessionId, resolveNodeSession) {
   if (SHARE_SESSIONLESS_CHANNELS.has(channel)) return true

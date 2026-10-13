@@ -14,6 +14,18 @@ describe('composer Tab / Shift+Tab action', () => {
     expect(resolveComposerTabAction({ shiftKey: true, queueReady: false })).toBe('cycle-role')
   })
 
+  it('never cycles the role in a share link, even when idle', () => {
+    expect(
+      resolveComposerTabAction({ shiftKey: true, queueReady: false, shareMode: true })
+    ).toBeNull()
+  })
+
+  it('still queues while running in a share link', () => {
+    expect(resolveComposerTabAction({ shiftKey: true, queueReady: true, shareMode: true })).toBe(
+      'queue'
+    )
+  })
+
   it('lets a plain idle Tab fall through to the browser default', () => {
     expect(resolveComposerTabAction({ shiftKey: false, queueReady: false })).toBeNull()
   })

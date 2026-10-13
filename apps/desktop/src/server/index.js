@@ -11,6 +11,7 @@ import {
   SHARE_TTL_MS,
   buildSetCookie,
   scopeAllowsChannel,
+  sanitizeScopedPayload,
   filterSessionsForShare,
   scopeAllowsSessionEvent
 } from '../host/access-core.js'
@@ -249,7 +250,8 @@ async function handleInvoke(req, res, scope) {
     return
   }
   try {
-    const result = await invokeChannel(channel, body.payload)
+    // 授权之后再收敛入参：分享范围不能改属于分享者的会话配置（role 会写进快照）。
+    const result = await invokeChannel(channel, sanitizeScopedPayload(scope, channel, body.payload))
     // 分享范围读会话清单只能看到被分享的那一行，别把别的会话标题/目录一起给出去。
     sendJson(res, 200, {
       ok: true,

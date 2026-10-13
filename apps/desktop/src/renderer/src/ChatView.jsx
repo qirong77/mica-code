@@ -56,7 +56,7 @@ function completionEmptyText(kind, loading, failed) {
   if (loading) return '正在搜索文件…'
   return failed ? '文件搜索失败' : '没有找到匹配文件'
 }
-import { CHAT_COMMANDS, findChatCommand } from './chat-commands'
+import { CHAT_COMMANDS, commandBlockedInShare, findChatCommand } from './chat-commands'
 import {
   FILE_COMPLETION_DEBOUNCE_MS,
   activeCompletion,
@@ -338,7 +338,7 @@ function isLocalPath(value) {
   return /^(?:~\/|\/|[a-zA-Z]:[\\/])/.test(String(value || '')) && !String(value).startsWith('//')
 }
 
-function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
+function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile, filesLocked = false }) {
   useEffect(() => {
     const onKeyDown = (event) => event.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKeyDown)
@@ -362,12 +362,17 @@ function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
               <span className="chat-image-preview-path" title={source}>
                 {source}
               </span>
-              <button type="button" onClick={() => onOpenFile?.(source)}>
-                在编辑器中打开
-              </button>
-              <button type="button" onClick={() => void onReveal?.(source)}>
-                在 Finder 中显示
-              </button>
+              {/* 访客没有 files:*：这两个按钮点了只会撞权限错误，直接不渲染 */}
+              {!filesLocked && (
+                <>
+                  <button type="button" onClick={() => onOpenFile?.(source)}>
+                    在编辑器中打开
+                  </button>
+                  <button type="button" onClick={() => void onReveal?.(source)}>
+                    在 Finder 中显示
+                  </button>
+                </>
+              )}
             </>
           )}
           <button type="button" onClick={() => void copyText(source)}>
@@ -1591,7 +1596,7 @@ function TurnLogDock({ messages, now = Date.now() }) {
   )
 }
 
-function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
+function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, shareMode = false }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
@@ -1616,7 +1621,11 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
     setPos({ x: px, y: py })
   }, [menu.x, menu.y])
-  const items = [
+  // 分享范围里没有这些能力（`chat:commit` / `chat:fork` / `share:create` / 新建会话都不在
+  // 白名单），菜单里就不要出现——留一个点了报错的入口比没有入口更糟。判定见
+  // `chat-commands.js` 的 SHARE_BLOCKED_COMMANDS 与 host 的 access-core.js。
+  const shareBlockedIds = ['commit', 'fork', 'share', 'clear']
+  const allItems = [
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
@@ -1650,6 +1659,10 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
   ]
+  // 两次过滤：先按范围去掉不可用条目，再去掉因此落到首尾的多余分隔线
+  const items = allItems
+    .filter((item) => !(shareMode && shareBlockedIds.includes(item.id)))
+    .filter((item, index, all) => !item.separator || (index > 0 && index < all.length - 1))
   return (
     <div
       ref={ref}
@@ -2065,9 +2078,11 @@ export function lastUserPromptText(messages = []) {
 //   在下一个工具调用迭代边界注入当前 turn；与忙时 Enter 同一条路径）；
 // - 空闲时 Shift+Tab：打开角色选择器，与 CLI 的 Shift+Tab 角色循环对齐；
 // - 空闲 Tab：不拦截，交给浏览器默认行为。
-export function resolveComposerTabAction({ shiftKey, queueReady }) {
+// 分享范围（shareMode）里角色是分享者的会话配置、且已由服务端锁死，所以不给出切换入口：
+// 排队照旧，切角色退化成不拦截。
+export function resolveComposerTabAction({ shiftKey, queueReady, shareMode = false }) {
   if (queueReady) return 'queue'
-  if (shiftKey) return 'cycle-role'
+  if (shiftKey) return shareMode ? null : 'cycle-role'
   return null
 }
 
@@ -3335,14 +3350,18 @@ export function ChatView({
 
   // 挂载时加载与 CLI 共享的输入历史（~/.mica/storage.json）；失败静默，
   // 历史为空时上下键导航保持原样（无操作）。
+  // 访客不给：这份历史活在分享者的机器上（和 CLI 同一份 storage.json），
+  // 读了会看到分享者敲过的提示词，写进去等于往别人机器上塞数据。
   useEffect(() => {
+    if (shareModeRef.current) return
     window.mica.chat.inputHistory
       .read()
       .then((history) => {
         if (Array.isArray(history) && history.length) inputHistoryRef.current = history
       })
       .catch(() => {})
-  }, [])
+    // shareModeRef 来自 useLatest，身份稳定，进 deps 不会让这个 effect 重跑
+  }, [shareModeRef])
 
   const resizeTextarea = useCallback(() => {
     const element = textareaRef.current
@@ -3391,12 +3410,13 @@ export function ChatView({
       const history = inputHistoryRef.current
       inputHistoryRef.current = [...history.filter((item) => item !== text), text].slice(-200)
       // 与 CLI 的 storage.json inputHistory 共享；失败静默，不影响发送路径。
-      window.mica.chat.inputHistory.append(text).catch(() => {})
+      // 访客不落盘（理由同上面的 read）。
+      if (!shareModeRef.current) window.mica.chat.inputHistory.append(text).catch(() => {})
       historyCursorRef.current = -1
       draftsRef.current.set(nodeId, '')
       setInput('')
     },
-    [nodeId]
+    [nodeId, shareModeRef]
   )
 
   const applyOverride = useCallback(
@@ -3575,15 +3595,33 @@ export function ChatView({
         )
         return
       }
+      if (shareModeRef.current && commandBlockedInShare(command.name)) {
+        appendCommandResult(
+          parsed.raw,
+          `/${command.name} 在分享链接里不可用`,
+          '分享链接只授予「驱动这一个会话」的权限；新建会话、打开其它会话、改配置与切换角色都要回到本机。',
+          { variant: 'error' }
+        )
+        return
+      }
 
       if (parsed.name === 'help') {
-        const chat = CHAT_COMMANDS.filter((item) => item.availability === 'chat')
+        // 分享范围里连列表都不列不可用的命令：列出来只会让人点了才发现不行
+        const chat = CHAT_COMMANDS.filter(
+          (item) =>
+            item.availability === 'chat' &&
+            !(shareModeRef.current && commandBlockedInShare(item.name))
+        )
           .map(
             (item) =>
               `/${item.name}${item.argument ? ` ${item.argument}` : ''}  ${item.description}`
           )
           .join('\n')
-        const terminal = CHAT_COMMANDS.filter((item) => item.availability === 'terminal')
+        const terminal = CHAT_COMMANDS.filter(
+          (item) =>
+            item.availability === 'terminal' &&
+            !(shareModeRef.current && commandBlockedInShare(item.name))
+        )
           .map((item) => `/${item.name}`)
           .join('  ')
         appendCommandResult(parsed.raw, 'Mica commands', `${chat}\n\nTerminal：${terminal}`)
@@ -3907,6 +3945,7 @@ export function ChatView({
       refreshMetaSoon,
       rememberInput,
       running,
+      shareModeRef,
       todoHidden,
       updateNotice,
       updateMessages
@@ -4484,6 +4523,21 @@ export function ChatView({
     setLoopOpen(false)
   }, [nodeId])
 
+  // 输入框行首标记（与 CLI 的 prompt 同款）：非默认角色时在标记前显示角色名。
+  // 内容与 tooltip 在「可点 / 只读」两种形态之间共用，只有外层元素不同——分享范围里
+  // 角色是分享者的会话配置（服务端也锁着），所以只留展示、不给切换入口。
+  const promptMarkText = `当前角色：${activeRole}${
+    activeLoop ? ` · 定时任务：每 ${formatLoopInterval(activeLoop.intervalMs)}` : ''
+  }`
+  const promptMarkContent = (
+    <>
+      {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
+      <span className="chat-prompt-caret" aria-hidden="true">
+        {queueReady ? '↳' : activeLoop ? '⏰' : '›'}
+      </span>
+    </>
+  )
+
   const statusLine = (
     <div className="chat-status-line">
       <div className="chat-status-primary">
@@ -4516,23 +4570,31 @@ export function ChatView({
         {activeModel && (
           <span className="chat-status-model-group">
             <span
-              className="chat-status-model"
-              role="button"
-              tabIndex={0}
-              title="切换模型"
-              data-popover-trigger="picker"
-              onClick={() => openPicker('model')}
+              className={`chat-status-model${shareMode ? ' is-static' : ''}`}
+              {...(shareMode
+                ? { title: '模型由分享者设置' }
+                : {
+                    role: 'button',
+                    tabIndex: 0,
+                    title: '切换模型',
+                    'data-popover-trigger': 'picker',
+                    onClick: () => openPicker('model')
+                  })}
             >
               {activeModel}
             </span>
             <span className="chat-status-sep">_</span>
             <span
-              className="chat-status-model"
-              role="button"
-              tabIndex={0}
-              title="切换推理强度"
-              data-popover-trigger="picker"
-              onClick={() => openPicker('variant')}
+              className={`chat-status-model${shareMode ? ' is-static' : ''}`}
+              {...(shareMode
+                ? { title: '推理强度由分享者设置' }
+                : {
+                    role: 'button',
+                    tabIndex: 0,
+                    title: '切换推理强度',
+                    'data-popover-trigger': 'picker',
+                    onClick: () => openPicker('variant')
+                  })}
             >
               {activeEffort}
             </span>
@@ -4588,9 +4650,10 @@ export function ChatView({
           source: resolveChatPath(path, cwdRef.current),
           alt: String(path).split(/[\\/]/).filter(Boolean).pop() || text || '图片'
         }),
-      reveal: (path) => revealPathInFinder(resolveChatPath(path, cwdRef.current))
+      reveal: (path) => revealPathInFinder(resolveChatPath(path, cwdRef.current)),
+      filesLocked: shareModeRef.current
     }),
-    [revealPathInFinder, transcriptOpenFile]
+    [revealPathInFinder, shareModeRef, transcriptOpenFile]
   )
 
   return (
@@ -4766,22 +4829,27 @@ export function ChatView({
                 Enter/Tab 在下一个工具调用迭代后发送
               </span>
             ) : null}
-            {/* 与 CLI 的 prompt 同款：非默认角色时在标记前显示角色名，点这里直接切换角色 */}
-            <button
-              type="button"
-              className={`chat-prompt-mark ${activeLoop ? 'is-loop' : ''}`}
-              title={`当前角色：${activeRole}（点击切换）${
-                activeLoop ? ` · 定时任务：每 ${formatLoopInterval(activeLoop.intervalMs)}` : ''
-              }`}
-              aria-label="切换角色"
-              data-popover-trigger="picker"
-              onClick={() => openPicker('role')}
-            >
-              {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
-              <span className="chat-prompt-caret" aria-hidden="true">
-                {queueReady ? '↳' : activeLoop ? '⏰' : '›'}
+            {/* 本机窗口里点这里切换角色；分享范围里角色属于分享者（服务端也拒绝改），
+                所以退化成只读标记，不提供点击入口。 */}
+            {shareMode ? (
+              <span
+                className={`chat-prompt-mark ${activeLoop ? 'is-loop' : ''}`}
+                title={promptMarkText}
+              >
+                {promptMarkContent}
               </span>
-            </button>
+            ) : (
+              <button
+                type="button"
+                className={`chat-prompt-mark ${activeLoop ? 'is-loop' : ''}`}
+                title={`${promptMarkText}（点击切换）`}
+                aria-label="切换角色"
+                data-popover-trigger="picker"
+                onClick={() => openPicker('role')}
+              >
+                {promptMarkContent}
+              </button>
+            )}
             {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
               CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
             <input
@@ -4917,7 +4985,8 @@ export function ChatView({
                 if (event.key === 'Tab' && !event.nativeEvent.isComposing) {
                   const tabAction = resolveComposerTabAction({
                     shiftKey: event.shiftKey,
-                    queueReady
+                    queueReady,
+                    shareMode
                   })
                   if (tabAction === 'queue') {
                     event.preventDefault()
@@ -4951,21 +5020,25 @@ export function ChatView({
               {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把上传按钮和时钟拉开
                   两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
               {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
-              <button
-                type="button"
-                className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
-                title={
-                  activeLoop
-                    ? `定时任务：${loopProgressLabel(activeLoop)}（点击调整）`
-                    : '设置定时任务（按间隔自动发送输入框里的内容）'
-                }
-                aria-label="定时任务"
-                aria-pressed={loopOpen}
-                data-popover-trigger="loop"
-                onClick={() => setLoopOpen((open) => !open)}
-              >
-                <IconClock size={13} />
-              </button>
+              {/* 定时任务活在宿主里、归属分享者，`loops:*` 也不在分享白名单里（拿不到循环
+                  清单，连徽标都无从渲染），所以分享范围里整个不出现这个入口。 */}
+              {!shareMode && (
+                <button
+                  type="button"
+                  className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
+                  title={
+                    activeLoop
+                      ? `定时任务：${loopProgressLabel(activeLoop)}（点击调整）`
+                      : '设置定时任务（按间隔自动发送输入框里的内容）'
+                  }
+                  aria-label="定时任务"
+                  aria-pressed={loopOpen}
+                  data-popover-trigger="loop"
+                  onClick={() => setLoopOpen((open) => !open)}
+                >
+                  <IconClock size={13} />
+                </button>
+              )}
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}
               {running ? (
@@ -5015,6 +5088,7 @@ export function ChatView({
               onClose={() => setImagePreview(null)}
               onReveal={pathActions.reveal}
               onOpenFile={(path) => pathActions.openFile(path, {})}
+              filesLocked={shareMode}
             />
           )}
           {statusLine}
@@ -5048,6 +5122,7 @@ export function ChatView({
             onAction={runContextMenuAction}
             onClose={closeContextMenu}
             commitRunning={commitRunning}
+            shareMode={shareMode}
           />
         )}
       </div>

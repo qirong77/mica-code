@@ -252,6 +252,25 @@ host-side instead of trusting the client. **Treat the token as lending someone y
 holder can drive it to run tools (shell included) in the session's cwd, which is why links expire
 after 7 days (`SHARE_TTL_MS`).
 
+"Cannot call it" is only half of it — some requests stay allowed but must not carry every
+parameter. `SHARE_LOCKED_PARAMS` / `sanitizeScopedPayload` (`src/host/access-core.js`, applied next
+to `scopeAllowsChannel` in `src/server/index.js`) strip arguments that would be written into the
+*owner's* session snapshot: `role`, `model` and `effort` on `chat:start` / `chat:edit-message`.
+The host keeps whatever the session already has when these are absent — `applyRoleOverride` keeps
+the current role, and `configureForRun` is not even called unless `model`/`effort` are present —
+so dropping them means "cannot change", not "reset to default". Hiding the button in the
+renderer only stops a mis-click; authorization stays on the server.
+
+**A share page must not offer an entry point that can only fail.** The closure list lives in one
+place each: the chat transcript context menu drops `commit` / `fork` / `share` / `clear`
+(`ChatContextMenu` filters by `shareMode`), chat commands drop `new` / `clear` / `resume` /
+`config` / `role` (`src/renderer/src/chat-commands.js`'s `SHARE_BLOCKED_COMMANDS` +
+`commandBlockedInShare`, read by `commandSuggestions`, `/help` and `runSlashCommand`), and the
+status line's model and reasoning-effort selectors render as static text
+(`.chat-status-model.is-static`). The test for "should this be hidden" is whether the channel it
+needs is on the share whitelist — when you add an entry point, check it against that, don't hide
+half of it.
+
 Images work because the runtime whitelists the image files *that session actually references*
 (`/api/image` is otherwise a host file browser reachable by anyone holding a token); everything else
 answers 403, while `/api/paste-image` stays available (uploads only ever land in
@@ -265,7 +284,12 @@ The share view is interactive: the composer sends normally. `share` mode is neve
 rendered and its collapse button and the mobile drawer button are gone (`setCollapsed` is the only
 switch, so no button means it cannot be opened). The top-right terminal and file toggles are not
 rendered either — a share token carries no `files:*` / `terminal:*` scope, so the panel and the
-shortcut that opens it are disabled — while the mobile layout keeps working exactly as before.
+shortcut that opens it are disabled. The two composer affordances that belong to the *owner* are
+gone as well: the schedule (clock) button, since loops live in the runtime and `loops:*` is out of
+scope (a visitor cannot even list the runtime's loops, so no badge or tint shows either), and the role
+mark, which degrades from a clickable button to a plain `<span>` with `Shift+Tab`'s `cycle-role`
+disabled (`resolveComposerTabAction`'s `shareMode`). The mobile layout keeps working exactly as
+before. Anything that would only fail is not offered at all, and the list of those has a single source of truth: the chat context menu drops `Commit` / `Fork` / `分享链接` / `Clear` (`ChatContextMenu` filters by `shareMode`), `chat-commands.js`'s `SHARE_BLOCKED_COMMANDS` (+ `commandBlockedInShare`) hides `new` / `clear` / `resume` / `config` / `role` from `commandSuggestions`, `/help` and `runSlashCommand`, and the model / reasoning-effort selectors in the status line become non-interactive text (`.chat-status-model.is-static`). The rule is "does the channel it needs exist in the share scope": paths in messages follow the same rule (`PathToken` reads `ChatPathContext.filesLocked`, so non-image paths degrade to plain text rather than a link that errors — images stay clickable for preview via the session's image allow-list, but cmd-click / middle-click "open in editor" is gone, and `ImagePreviewModal` drops its open/reveal buttons), the prompt history is skipped both ways because it is the `~/.mica/storage.json` shared with the CLI (a visitor would read the owner's prompts and write into their machine), and `chat:check-cwd` *is* allowed since it is only an `fs.exists` for an action (`chat:update-cwd`) that is already in scope.
 
 ### Switching Mica servers
 

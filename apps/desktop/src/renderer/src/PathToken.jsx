@@ -5,7 +5,11 @@ import { isImagePath, splitTextByPaths } from './chat-paths'
  * 聊天文本、回合日志里的路径动作。由 ChatView 在最外层提供（那里才知道会话 cwd 与
  * 打开面板/弹窗的方式），PathToken 只负责「怎么点」。
  *
- * 值：{ resolvePath(raw) -> 绝对路径, openFile(path, position), reveal(path), preview(path, text) }
+ * 值：{ resolvePath(raw) -> 绝对路径, openFile(path, position), reveal(path), preview(path, text),
+ *       filesLocked }
+ *
+ * filesLocked：访客（分享链接）没有 `files:*` 权限，不能打开 / 在 Finder 里定位本地文件。
+ * 非图片路径因此不渲染成可点元素（降级成纯文本）；图片保留单击预览——走的是会话图片白名单。
  */
 export const ChatPathContext = createContext(null)
 
@@ -31,9 +35,14 @@ export function PathToken({ path, text, line = null, column = null }) {
   if (!actions) return text
 
   const image = isImagePath(path)
+  const filesLocked = actions.filesLocked === true
+  if (filesLocked && !image) return text
+
   const resolved = actions.resolvePath ? actions.resolvePath(path) : path
   const hint = image ? '点击预览图片' : '点击在 Finder 中打开'
-  const title = `${hint}：${resolved}\n⌘ / Ctrl 点击在编辑器中打开`
+  const title = filesLocked
+    ? `${hint}：${resolved}`
+    : `${hint}：${resolved}\n⌘ / Ctrl 点击在编辑器中打开`
 
   const openInEditor = (event) =>
     runAction(() => actions.openFile(resolved, { line, column }), event)
@@ -46,8 +55,9 @@ export function PathToken({ path, text, line = null, column = null }) {
     }, event)
 
   const activate = (event) => {
-    if (event.metaKey || event.ctrlKey) return openInEditor(event)
+    if (!filesLocked && (event.metaKey || event.ctrlKey)) return openInEditor(event)
     if (image) return previewImage(event)
+    if (filesLocked) return
     return revealInFinder(event)
   }
 
@@ -61,6 +71,7 @@ export function PathToken({ path, text, line = null, column = null }) {
       onAuxClick={(event) => {
         // 中键 = 编辑器，与浏览器里中键开标签页的手感一致
         if (event.button !== 1) return
+        if (filesLocked) return
         openInEditor(event)
       }}
       onKeyDown={(event) => {

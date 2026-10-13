@@ -1,3 +1,21 @@
+/**
+ * 分享链接（share 范围）里不可用的 chat 命令。
+ *
+ * 判定依据是「服务端 share 白名单里有没有它需要的那条 channel」，不是「看着像不该有」：
+ * - `new` / `clear`：新建的会话不属于这个令牌，`chat:start` 会被拒（分享只授一个会话）
+ * - `resume`：同理，只能打开被分享的那一个会话，等于撤销输入
+ * - `config`：设置页走 `config-web:invoke`（含 API key），不在白名单
+ * - `role`：角色是会话级持久化的，改它等于改分享者的会话快照
+ *
+ * 这里只是「不给入口」；真正的授权在 `host/access-core.js` 的 channel 白名单与
+ * `SHARE_LOCKED_PARAMS`。两边要一起维护，别只改这里。
+ */
+export const SHARE_BLOCKED_COMMANDS = ['new', 'clear', 'resume', 'config', 'role']
+
+export function commandBlockedInShare(name) {
+  return SHARE_BLOCKED_COMMANDS.includes(String(name || '').toLowerCase())
+}
+
 export const CHAT_COMMANDS = [
   {
     name: 'help',
@@ -108,7 +126,7 @@ export function parseSlashCommand(value) {
   }
 }
 
-export function commandSuggestions(value, commands = CHAT_COMMANDS) {
+export function commandSuggestions(value, commands = CHAT_COMMANDS, { shareMode = false } = {}) {
   const text = String(value || '')
   if (!text.startsWith('/') || /\s/.test(text)) return []
   const query = text.slice(1).toLowerCase()
@@ -120,6 +138,7 @@ export function commandSuggestions(value, commands = CHAT_COMMANDS) {
     return 3
   }
   return commands
+    .filter((command) => !(shareMode && commandBlockedInShare(command.name)))
     .map((command) => ({ command, rank: rank(command) }))
     .filter((entry) => entry.rank < 3)
     .sort((a, b) => a.rank - b.rank || a.command.name.localeCompare(b.command.name))

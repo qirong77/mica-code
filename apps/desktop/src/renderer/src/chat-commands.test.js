@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  SHARE_BLOCKED_COMMANDS,
+  commandBlockedInShare,
   commandInputValue,
   commandSuggestions,
   findChatCommand,
@@ -35,5 +37,28 @@ describe('chat slash commands', () => {
     expect(names[0]).toBe('rename')
     const role = commandSuggestions('/rol').map((command) => command.name)
     expect(role).toContain('role')
+  })
+
+  it('hides share-blocked commands from the palette only in share mode', () => {
+    // 分享范围里 new/clear/resume/config/role 都会打到不被授权的 channel（或被服务端剥掉），
+    // 连提示都不该出现；本机窗口保持原样。
+    for (const name of SHARE_BLOCKED_COMMANDS) {
+      expect(commandBlockedInShare(name)).toBe(true)
+      const full = commandSuggestions(`/${name}`).map((command) => command.name)
+      const share = commandSuggestions(`/${name}`, undefined, { shareMode: true }).map(
+        (command) => command.name
+      )
+      expect(full).toContain(name)
+      expect(share).not.toContain(name)
+    }
+  })
+
+  it('keeps the commands a share link can actually drive', () => {
+    for (const name of ['compact', 'rename', 'status', 'context', 'todo', 'help']) {
+      expect(commandBlockedInShare(name)).toBe(false)
+      expect(
+        commandSuggestions(`/${name}`, undefined, { shareMode: true }).map((c) => c.name)
+      ).toContain(name)
+    }
   })
 })
