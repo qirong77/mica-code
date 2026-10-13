@@ -16,6 +16,7 @@ const SETTINGS = {
   quickLimit: 3,
   modelThresholdK: 120,
   modelLimit: 3,
+  minIntervalMs: 20 * 60 * 1000,
 };
 
 function counter(overrides: Partial<ConfigWebAutoCompactCounter> = {}): ConfigWebAutoCompactCounter {
@@ -39,6 +40,7 @@ describe('auto compact draft', () => {
       quickLimit: '3',
       modelThresholdK: '120',
       modelLimit: '3',
+      minIntervalMinutes: '20',
     });
     // 缺值、负数、垃圾值都收敛成可编辑的数字，不让表单拿到 NaN
     expect(autoCompactDraftFromSettings({ ...SETTINGS, quickLimit: null as unknown as number })).toMatchObject({
@@ -48,6 +50,13 @@ describe('auto compact draft', () => {
     expect(autoCompactDraftFromSettings({ ...SETTINGS, quickThresholdK: '180' as unknown as number })).toMatchObject({
       quickThresholdK: '180',
     });
+    // 存储里是毫秒，表单按分钟编辑
+    expect(autoCompactDraftFromSettings({ ...SETTINGS, minIntervalMs: 5 * 60 * 1000 })).toMatchObject({
+      minIntervalMinutes: '5',
+    });
+    expect(
+      autoCompactDraftFromSettings({ ...SETTINGS, minIntervalMs: undefined as unknown as number }),
+    ).toMatchObject({ minIntervalMinutes: '20' });
   });
 
   it('round-trips a valid draft', () => {
@@ -64,15 +73,29 @@ describe('auto compact draft', () => {
     for (const value of ['', '  ', 'abc', '-1', '200.5', '0']) {
       expect(autoCompactSettingsFromDraft({ ...base, quickThresholdK: value }).ok).toBe(false);
     }
+    // 阈值的安全下限：低于它压缩没意义，表单直接拒绝
+    expect(autoCompactSettingsFromDraft({ ...base, quickThresholdK: '149' }).ok).toBe(false);
     expect(autoCompactSettingsFromDraft({ ...base, quickThresholdK: '10001' }).ok).toBe(false);
     expect(autoCompactSettingsFromDraft({ ...base, quickLimit: '' }).ok).toBe(false);
     expect(autoCompactSettingsFromDraft({ ...base, quickLimit: '1000' }).ok).toBe(false);
     expect(autoCompactSettingsFromDraft({ ...base, modelThresholdK: '0' }).ok).toBe(false);
+    expect(autoCompactSettingsFromDraft({ ...base, modelThresholdK: '99' }).ok).toBe(false);
     expect(autoCompactSettingsFromDraft({ ...base, modelLimit: '1000' }).ok).toBe(false);
+    expect(autoCompactSettingsFromDraft({ ...base, minIntervalMinutes: '' }).ok).toBe(false);
+    expect(autoCompactSettingsFromDraft({ ...base, minIntervalMinutes: '1441' }).ok).toBe(false);
     // 上限 0 是合法值（表示不做这类压缩），别被当成「没填」
     expect(autoCompactSettingsFromDraft({ ...base, quickLimit: '0' })).toEqual({
       ok: true,
       settings: { ...SETTINGS, quickLimit: 0 },
+    });
+    // 间隔 0 同样合法：表示不限制两次压缩的间隔
+    expect(autoCompactSettingsFromDraft({ ...base, minIntervalMinutes: '0' })).toEqual({
+      ok: true,
+      settings: { ...SETTINGS, minIntervalMs: 0 },
+    });
+    expect(autoCompactSettingsFromDraft({ ...base, minIntervalMinutes: '5' })).toEqual({
+      ok: true,
+      settings: { ...SETTINGS, minIntervalMs: 5 * 60 * 1000 },
     });
   });
 });

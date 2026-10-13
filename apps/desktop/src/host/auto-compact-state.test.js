@@ -42,20 +42,34 @@ describe('normalizeAutoCompactSettings', () => {
         quickThresholdK: 0,
         quickLimit: -5,
         modelThresholdK: 1_000_000,
-        modelLimit: 10_000
+        modelLimit: 10_000,
+        minIntervalMs: -1
       })
     ).toEqual({
       enabled: false,
-      quickThresholdK: 1,
+      quickThresholdK: 150,
       quickLimit: 0,
       modelThresholdK: 10_000,
-      modelLimit: 999
+      modelLimit: 999,
+      minIntervalMs: 0
     })
+  })
+
+  it('keeps the thresholds above their safe floor (below it a pass is pointless)', () => {
+    expect(normalizeAutoCompactSettings({ quickThresholdK: 120, modelThresholdK: 90 })).toMatchObject({
+      quickThresholdK: 150,
+      modelThresholdK: 100
+    })
+    // 间隔上限一天：再大就等于把自动压缩关掉
+    expect(normalizeAutoCompactSettings({ minIntervalMs: 7 * 24 * 60 * 60 * 1000 }).minIntervalMs).toBe(
+      24 * 60 * 60 * 1000
+    )
   })
 
   it('accepts numeric strings and rounds fractions', () => {
     expect(normalizeAutoCompactSettings({ quickThresholdK: '180' }).quickThresholdK).toBe(180)
     expect(normalizeAutoCompactSettings({ quickLimit: 2.4 }).quickLimit).toBe(2)
+    expect(normalizeAutoCompactSettings({ minIntervalMs: 90_000 }).minIntervalMs).toBe(90_000)
   })
 })
 
@@ -122,23 +136,26 @@ describe('readAutoCompactTurnParams', () => {
         ...emptyAutoCompactState(),
         settings: {
           enabled: false,
-          quickThresholdK: 100,
+          quickThresholdK: 160,
           quickLimit: 1,
-          modelThresholdK: 80,
-          modelLimit: 2
+          modelThresholdK: 110,
+          modelLimit: 2,
+          minIntervalMs: 5 * 60 * 1000
         }
       },
       's1',
-      { quickRuns: 3, modelRuns: 2 }
+      { quickRuns: 3, modelRuns: 2, lastRunAt: at(1_000) }
     )
     expect(readAutoCompactTurnParams(state, 's1')).toEqual({
       enabled: false,
-      quickThresholdK: 100,
+      quickThresholdK: 160,
       quickLimit: 1,
       quickRuns: 3,
-      modelThresholdK: 80,
+      modelThresholdK: 110,
       modelLimit: 2,
-      modelRuns: 2
+      modelRuns: 2,
+      minIntervalMs: 5 * 60 * 1000,
+      lastRunAt: at(1_000)
     })
   })
 
@@ -147,7 +164,8 @@ describe('readAutoCompactTurnParams', () => {
       quickRuns: 3,
       modelRuns: 2
     })
-    const zeros = { quickRuns: 0, modelRuns: 0 }
+    // lastRunAt 也一起归零：别的会话的压缩时间不能拿来当这个会话的节流基线
+    const zeros = { quickRuns: 0, modelRuns: 0, lastRunAt: null }
     expect(readAutoCompactTurnParams(state, 'other')).toEqual({
       ...DEFAULT_AUTO_COMPACT_SETTINGS,
       ...zeros
@@ -166,7 +184,8 @@ describe('readAutoCompactTurnParams', () => {
     expect(readAutoCompactTurnParams(null, 's1')).toEqual({
       ...DEFAULT_AUTO_COMPACT_SETTINGS,
       quickRuns: 0,
-      modelRuns: 0
+      modelRuns: 0,
+      lastRunAt: null
     })
   })
 })

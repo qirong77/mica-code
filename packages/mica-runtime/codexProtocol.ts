@@ -168,6 +168,11 @@ export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
  * runs when the context is *still* ≥ `modelThresholdK` (which is why the
  * default 120 is BELOW the quick threshold 200) and it already ran fewer than
  * `modelLimit` times.
+ *
+ * `minIntervalMs` throttles the two passes: a compaction needs to be at least
+ * that far from the previous one (`lastRunAt`, carried along with the counters)
+ * unless the context already reached the model threshold — that pass's quick →
+ * model chain is one trigger, not two.
  */
 export type MicaAutoCompactParams = {
   enabled?: boolean;
@@ -177,6 +182,8 @@ export type MicaAutoCompactParams = {
   modelThresholdK?: number;
   modelLimit?: number;
   modelRuns?: number;
+  minIntervalMs?: number;
+  lastRunAt?: string | null;
 };
 
 /** `MICA_AUTO_COMPACT_NOTIFICATIONS.updated` payload. */

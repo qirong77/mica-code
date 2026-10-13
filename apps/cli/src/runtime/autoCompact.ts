@@ -8,11 +8,14 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
  * 跑完——长任务里 turn 可能还要跑几十次请求，等到结束再压缩等于整段都在为膨胀的
  * 上下文付费。
  *
- * 两条规则（阈值与次数都由调用方下发，默认值在 AUTO_COMPACT_DEFAULTS）：
+ * 三条规则（阈值、次数与间隔都由调用方下发，默认值在 AUTO_COMPACT_DEFAULTS）：
  * - 快速压缩：ctx ≥ quickThresholdK 且已运行次数 < quickLimit，本地把工具结果 /
  *   工具参数正文 / 媒体块换成占位符（不调用模型、不丢轮次）。
  * - 模型压缩：ctx 仍 ≥ modelThresholdK 且已运行次数 < modelLimit，调用模型生成
  *   checkpoint 摘要。
+ * - 节流：两次压缩之间至少间隔 minIntervalMs（默认 20 分钟），免得快速压缩在同一段
+ *   上下文上被反复触发。唯一的例外是同一次触发里「快速 →（清不掉）模型」的升级：
+ *   它在同一次调用里发生，本来就不经过第二次节流检查，算一次压缩。
  *
  * 次序固定是「先快速、后模型」——快速压缩是模型压缩的前置步骤，只要这次确实要压就
  * 先跑一遍本地清理：ctx 到了快速阈值就单独跑一次；ctx 只到模型阈值（默认
@@ -41,6 +44,8 @@ export type AutoCompactSettings = {
   quickLimit: number;
   modelThresholdK: number;
   modelLimit: number;
+  /** 两次压缩之间的最小间隔（毫秒）；0 表示不限制。 */
+  minIntervalMs: number;
 };
 
 export type AutoCompactCounters = {
@@ -56,6 +61,8 @@ export type AutoCompactCounters = {
 export type AutoCompactTurnParams = AutoCompactSettings & {
   quickRuns: number;
   modelRuns: number;
+  /** 本会话上一次压缩成功的时间：节流的基线，由宿主随计数一起回传。 */
+  lastRunAt: string | null;
 };
 
 export const AUTO_COMPACT_DEFAULTS: AutoCompactSettings = {
@@ -64,10 +71,18 @@ export const AUTO_COMPACT_DEFAULTS: AutoCompactSettings = {
   quickLimit: 3,
   modelThresholdK: 120,
   modelLimit: 3,
+  minIntervalMs: 20 * 60 * 1000,
 };
 
 export const AUTO_COMPACT_MAX_THRESHOLD_K = 10_000;
 export const AUTO_COMPACT_MAX_LIMIT = 999;
+/**
+ * 阈值的安全下限：低于它压缩就没有意义了（快速压缩 150k 以下基本清不出东西，
+ * 模型压缩 100k 以下等于每次请求都换一份摘要），所以不把边界留给用户填。
+ */
+export const AUTO_COMPACT_MIN_QUICK_THRESHOLD_K = 150;
+export const AUTO_COMPACT_MIN_MODEL_THRESHOLD_K = 100;
+export const AUTO_COMPACT_MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MAX_RUNS = 1_000_000;
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
@@ -89,18 +104,24 @@ export function normalizeAutoCompactSettings(input: unknown): AutoCompactSetting
       typeof source.enabled === 'boolean' ? source.enabled : AUTO_COMPACT_DEFAULTS.enabled,
     quickThresholdK: clampInteger(
       source.quickThresholdK,
-      1,
+      AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
       AUTO_COMPACT_MAX_THRESHOLD_K,
       AUTO_COMPACT_DEFAULTS.quickThresholdK,
     ),
     quickLimit: clampInteger(source.quickLimit, 0, AUTO_COMPACT_MAX_LIMIT, AUTO_COMPACT_DEFAULTS.quickLimit),
     modelThresholdK: clampInteger(
       source.modelThresholdK,
-      1,
+      AUTO_COMPACT_MIN_MODEL_THRESHOLD_K,
       AUTO_COMPACT_MAX_THRESHOLD_K,
       AUTO_COMPACT_DEFAULTS.modelThresholdK,
     ),
     modelLimit: clampInteger(source.modelLimit, 0, AUTO_COMPACT_MAX_LIMIT, AUTO_COMPACT_DEFAULTS.modelLimit),
+    minIntervalMs: clampInteger(
+      source.minIntervalMs,
+      0,
+      AUTO_COMPACT_MAX_INTERVAL_MS,
+      AUTO_COMPACT_DEFAULTS.minIntervalMs,
+    ),
   };
 }
 
@@ -110,10 +131,29 @@ export function normalizeAutoCompactTurnParams(input: unknown): AutoCompactTurnP
     ...normalizeAutoCompactSettings(source),
     quickRuns: clampInteger(source.quickRuns, 0, MAX_RUNS, 0),
     modelRuns: clampInteger(source.modelRuns, 0, MAX_RUNS, 0),
+    lastRunAt: typeof source.lastRunAt === 'string' && source.lastRunAt ? source.lastRunAt : null,
   };
 }
 
 export type AutoCompactStep = 'quick' | 'model';
+
+/**
+ * 距上一次压缩成功还不满 minIntervalMs？时钟回拨（elapsed < 0）不算在间隔内：否则会
+ * 一直等到时间追上来，等于把压缩永久关掉。
+ */
+function withinMinInterval(
+  settings: AutoCompactSettings,
+  counters: { lastRunAt?: string | null },
+  nowMs: number | undefined,
+): boolean {
+  const interval = settings.minIntervalMs;
+  if (!Number.isFinite(interval) || interval <= 0) return false;
+  const lastRunAtMs = Date.parse(typeof counters.lastRunAt === 'string' ? counters.lastRunAt : '');
+  if (!Number.isFinite(lastRunAtMs)) return false;
+  const now = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+  const elapsed = now - lastRunAtMs;
+  return elapsed >= 0 && elapsed < interval;
+}
 
 /**
  * 纯决策：给定当前 ctx 与已运行次数，决定这次请求结束后要不要压缩、压哪一种。
@@ -122,15 +162,22 @@ export type AutoCompactStep = 'quick' | 'model';
  * 压缩：ctx 落在两个阈值之间时是「快速压缩 →（仍高于模型阈值）模型压缩」两步，
  * 而不是直接跳到模型压缩。升级判定在调用方（`rewriteIterationMessages`）按压缩后
  * 的 ctx 做。
+ *
+ * 间隔（minIntervalMs）挡的是「触发」本身，不看这一压是哪一类：距上一次压缩成功不到
+ * 间隔就整个跳过（连快速压缩的前置步骤也不跑）。唯一的例外是同一次触发里的升级——快速
+ * 压缩完仍高于模型阈值时紧接着的模型压缩，同一次调用里完成，不经过第二次间隔检查。
  */
 export function decideAutoCompactStep(input: {
   settings: AutoCompactSettings;
-  counters: Pick<AutoCompactCounters, 'quickRuns' | 'modelRuns'>;
+  counters: Pick<AutoCompactCounters, 'quickRuns' | 'modelRuns'> & { lastRunAt?: string | null };
   ctxTokens: number;
+  /** 当前时间（测试可注入），默认 Date.now()。 */
+  nowMs?: number;
 }): AutoCompactStep | null {
   const { settings, counters, ctxTokens } = input;
   if (!settings.enabled) return null;
   if (!Number.isFinite(ctxTokens) || ctxTokens <= 0) return null;
+  if (withinMinInterval(settings, counters, input.nowMs)) return null;
   const modelDue = counters.modelRuns < settings.modelLimit && ctxTokens >= settings.modelThresholdK * 1000;
   if (counters.quickRuns < settings.quickLimit && (ctxTokens >= settings.quickThresholdK * 1000 || modelDue)) {
     return 'quick';
@@ -179,8 +226,15 @@ export class AutoCompactController {
       quickLimit: params.quickLimit,
       modelThresholdK: params.modelThresholdK,
       modelLimit: params.modelLimit,
+      minIntervalMs: params.minIntervalMs,
     };
-    this.counters = { ...this.counters, quickRuns: params.quickRuns, modelRuns: params.modelRuns };
+    // lastRunAt 以宿主的账本为准：它跨进程/跨窗口都是同一份，间隔判定才不会各算各的。
+    this.counters = {
+      ...this.counters,
+      quickRuns: params.quickRuns,
+      modelRuns: params.modelRuns,
+      lastRunAt: params.lastRunAt,
+    };
     // 新一轮的第一个请求也是一次新的请求，必须重新判断（计数、ctx 都可能变了）。
     this.lastUsageKey = null;
     return params;

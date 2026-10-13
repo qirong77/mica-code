@@ -109,6 +109,8 @@ export type ConfigWebAutoCompactSettings = {
   quickLimit: number;
   modelThresholdK: number;
   modelLimit: number;
+  /** 两次压缩之间的最小间隔（毫秒）；页面上按分钟编辑，0 表示不限制。 */
+  minIntervalMs: number;
 };
 
 /** 一个会话的自动压缩账本（计数只是展示用的，丢了不影响压缩本身）。 */

@@ -19,12 +19,20 @@ export const DEFAULT_AUTO_COMPACT_SETTINGS = {
   quickThresholdK: 200,
   quickLimit: 3,
   modelThresholdK: 120,
-  modelLimit: 3
+  modelLimit: 3,
+  minIntervalMs: 20 * 60 * 1000
 }
 
-/** 阈值按 K 计、次数上限按次计（0 次表示不做这一类压缩）。 */
-const THRESHOLD_RANGE = { min: 1, max: 10_000 }
+/**
+ * 阈值按 K 计、次数上限按次计（0 次表示不做这一类压缩）、间隔按毫秒计。
+ *
+ * 阈值有安全下限：快速压缩 150k 以下基本清不出东西，模型压缩 100k 以下等于每次请求
+ * 都换一份 LLM 摘要，所以边界不给用户填；间隔 0 表示不限制（上限一天，再大就是关掉它）。
+ */
+const QUICK_THRESHOLD_RANGE = { min: 150, max: 10_000 }
+const MODEL_THRESHOLD_RANGE = { min: 100, max: 10_000 }
 const COUNT_RANGE = { min: 0, max: 999 }
+const INTERVAL_RANGE = { min: 0, max: 24 * 60 * 60 * 1000 }
 
 const DEFAULTS = DEFAULT_AUTO_COMPACT_SETTINGS
 
@@ -60,10 +68,11 @@ export function normalizeAutoCompactSettings(input) {
   const raw = input && typeof input === 'object' ? input : {}
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-    quickThresholdK: clampInteger(raw.quickThresholdK, DEFAULTS.quickThresholdK, THRESHOLD_RANGE),
+    quickThresholdK: clampInteger(raw.quickThresholdK, DEFAULTS.quickThresholdK, QUICK_THRESHOLD_RANGE),
     quickLimit: clampInteger(raw.quickLimit, DEFAULTS.quickLimit, COUNT_RANGE),
-    modelThresholdK: clampInteger(raw.modelThresholdK, DEFAULTS.modelThresholdK, THRESHOLD_RANGE),
-    modelLimit: clampInteger(raw.modelLimit, DEFAULTS.modelLimit, COUNT_RANGE)
+    modelThresholdK: clampInteger(raw.modelThresholdK, DEFAULTS.modelThresholdK, MODEL_THRESHOLD_RANGE),
+    modelLimit: clampInteger(raw.modelLimit, DEFAULTS.modelLimit, COUNT_RANGE),
+    minIntervalMs: clampInteger(raw.minIntervalMs, DEFAULTS.minIntervalMs, INTERVAL_RANGE)
   }
 }
 
@@ -168,6 +177,9 @@ export function clearAutoCompactCounters(state) {
 /**
  * 每次 `turn/start` 带上的一份参数：设置 + 该会话已经用掉几次。没有记录的会话（还没压过、
  * 或草稿还没拿到 sessionId）就是全零，host 侧照样能按设置工作。
+ *
+ * `lastRunAt` 一起下发：host 那次压缩到现在够不够 minIntervalMs，只有拿宿主的账本才算得出来
+ * （它在别的窗口/别的进程里跑过也算数）。
  */
 export function readAutoCompactTurnParams(state, sessionId) {
   const settings = state?.settings || normalizeAutoCompactSettings(null)
@@ -179,6 +191,8 @@ export function readAutoCompactTurnParams(state, sessionId) {
     quickRuns: counters.quickRuns,
     modelThresholdK: settings.modelThresholdK,
     modelLimit: settings.modelLimit,
-    modelRuns: counters.modelRuns
+    modelRuns: counters.modelRuns,
+    minIntervalMs: settings.minIntervalMs,
+    lastRunAt: counters.lastRunAt
   }
 }

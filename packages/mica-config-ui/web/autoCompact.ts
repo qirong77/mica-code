@@ -12,10 +12,17 @@ import type {
  * `dialogState.ts` 同一条边界：能测的判断都抽出来，组件里只留接线。
  */
 
-export const AUTO_COMPACT_THRESHOLD_MIN_K = 1;
 export const AUTO_COMPACT_THRESHOLD_MAX_K = 10_000;
+/** 阈值的安全下限：低于它压缩没有意义，所以页面直接不让填（与运行时同一组边界）。 */
+export const AUTO_COMPACT_QUICK_THRESHOLD_MIN_K = 150;
+export const AUTO_COMPACT_MODEL_THRESHOLD_MIN_K = 100;
 export const AUTO_COMPACT_LIMIT_MIN = 0;
 export const AUTO_COMPACT_LIMIT_MAX = 999;
+export const AUTO_COMPACT_INTERVAL_MINUTES_MIN = 0;
+export const AUTO_COMPACT_INTERVAL_MINUTES_MAX = 24 * 60;
+export const AUTO_COMPACT_INTERVAL_MINUTES_DEFAULT = 20;
+
+const MS_PER_MINUTE = 60_000;
 
 export type AutoCompactDraft = {
   enabled: boolean;
@@ -23,6 +30,8 @@ export type AutoCompactDraft = {
   quickLimit: string;
   modelThresholdK: string;
   modelLimit: string;
+  /** 两次压缩之间的最小间隔，页面上按分钟编辑（存储里是毫秒）。 */
+  minIntervalMinutes: string;
 };
 
 export type AutoCompactParseResult =
@@ -50,6 +59,14 @@ export function autoCompactDraftFromSettings(settings: ConfigWebAutoCompactSetti
     quickLimit: String(nonNegativeInt(settings.quickLimit, 0)),
     modelThresholdK: String(nonNegativeInt(settings.modelThresholdK, 0)),
     modelLimit: String(nonNegativeInt(settings.modelLimit, 0)),
+    minIntervalMinutes: String(
+      Math.max(
+        0,
+        Math.round(
+          numberOr(settings.minIntervalMs, AUTO_COMPACT_INTERVAL_MINUTES_DEFAULT * MS_PER_MINUTE) / MS_PER_MINUTE,
+        ),
+      ),
+    ),
   };
 }
 
@@ -77,7 +94,7 @@ function parseIntegerField(
  */
 export function autoCompactSettingsFromDraft(draft: AutoCompactDraft): AutoCompactParseResult {
   const quickThreshold = parseIntegerField(draft?.quickThresholdK, {
-    min: AUTO_COMPACT_THRESHOLD_MIN_K,
+    min: AUTO_COMPACT_QUICK_THRESHOLD_MIN_K,
     max: AUTO_COMPACT_THRESHOLD_MAX_K,
     label: '快速压缩阈值',
     unit: '（单位 k）',
@@ -91,7 +108,7 @@ export function autoCompactSettingsFromDraft(draft: AutoCompactDraft): AutoCompa
   });
   if (!quickLimit.ok) return quickLimit;
   const modelThreshold = parseIntegerField(draft?.modelThresholdK, {
-    min: AUTO_COMPACT_THRESHOLD_MIN_K,
+    min: AUTO_COMPACT_MODEL_THRESHOLD_MIN_K,
     max: AUTO_COMPACT_THRESHOLD_MAX_K,
     label: '模型压缩阈值',
     unit: '（单位 k）',
@@ -104,6 +121,13 @@ export function autoCompactSettingsFromDraft(draft: AutoCompactDraft): AutoCompa
     unit: '（次）',
   });
   if (!modelLimit.ok) return modelLimit;
+  const minIntervalMinutes = parseIntegerField(draft?.minIntervalMinutes, {
+    min: AUTO_COMPACT_INTERVAL_MINUTES_MIN,
+    max: AUTO_COMPACT_INTERVAL_MINUTES_MAX,
+    label: '压缩间隔',
+    unit: '（分钟）',
+  });
+  if (!minIntervalMinutes.ok) return minIntervalMinutes;
   return {
     ok: true,
     settings: {
@@ -112,6 +136,7 @@ export function autoCompactSettingsFromDraft(draft: AutoCompactDraft): AutoCompa
       quickLimit: quickLimit.value,
       modelThresholdK: modelThreshold.value,
       modelLimit: modelLimit.value,
+      minIntervalMs: minIntervalMinutes.value * MS_PER_MINUTE,
     },
   };
 }

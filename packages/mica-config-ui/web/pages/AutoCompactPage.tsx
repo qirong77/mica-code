@@ -186,12 +186,23 @@ export function AutoCompactPage() {
                     onChange={(event) => setField('modelLimit', digitsOnly(event.target.value))}
                   />
                 </label>
+                <label className="form-field">
+                  <span>压缩间隔（分钟）</span>
+                  <input
+                    className="text-input"
+                    inputMode="numeric"
+                    value={draft.minIntervalMinutes}
+                    onChange={(event) => setField('minIntervalMinutes', digitsOnly(event.target.value))}
+                  />
+                </label>
               </div>
 
               <div className="auto-compact-footer">
                 <p className="auto-compact-note">
                   快速压缩是本地清理（不调用模型），且总是先跑：超过它的阈值时单独清一次；只超过模型阈值时
                   也先清一次，清完仍高于模型阈值才升级为模型压缩（LLM 摘要）。次数用尽后不再压缩，0 表示不做这一类。
+                  两次压缩之间至少间隔「压缩间隔」的分钟数（快速压缩后仍高于模型阈值而升级的那一次算同一次压缩），
+                  免得同一段上下文被反复清，0 表示不限制；阈值另有安全下限（快速 150k、模型 100k）。
                 </p>
                 <Button
                   onClick={() => setDraft(autoCompactDraftFromSettings(details.defaults))}

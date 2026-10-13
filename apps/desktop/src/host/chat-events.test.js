@@ -211,7 +211,9 @@ describe('chat CLI arguments', () => {
       quickRuns: 2,
       modelThresholdK: 120,
       modelLimit: 3,
-      modelRuns: 1
+      modelRuns: 1,
+      minIntervalMs: 20 * 60 * 1000,
+      lastRunAt: '2026-09-01T00:00:00.000Z'
     }
     const params = buildTurnStartParams({ threadId: 's1', prompt: 'hi', autoCompact })
     expect(params.autoCompact).toEqual(autoCompact)

@@ -25,6 +25,7 @@ describe('auto compact settings', () => {
       quickLimit: 3,
       modelThresholdK: 120,
       modelLimit: 3,
+      minIntervalMs: 20 * 60 * 1000,
     });
   });
 
@@ -32,16 +33,32 @@ describe('auto compact settings', () => {
     expect(
       normalizeAutoCompactSettings({
         enabled: false,
-        quickThresholdK: 50,
+        quickThresholdK: 160,
         quickLimit: 0,
-        modelThresholdK: 80,
+        modelThresholdK: 110,
         modelLimit: 10,
+        minIntervalMs: 5 * 60 * 1000,
       }),
-    ).toEqual({ enabled: false, quickThresholdK: 50, quickLimit: 0, modelThresholdK: 80, modelLimit: 10 });
+    ).toEqual({
+      enabled: false,
+      quickThresholdK: 160,
+      quickLimit: 0,
+      modelThresholdK: 110,
+      modelLimit: 10,
+      minIntervalMs: 5 * 60 * 1000,
+    });
     // 越界值不静默改写成一个「差不多」的阈值，而是回到默认值，避免把 0 当成 1。
-    expect(normalizeAutoCompactSettings({ quickThresholdK: 0, quickLimit: -3 })).toMatchObject({
+    expect(
+      normalizeAutoCompactSettings({ quickThresholdK: 0, quickLimit: -3, minIntervalMs: 48 * 60 * 60 * 1000 }),
+    ).toMatchObject({
       quickThresholdK: 200,
       quickLimit: 3,
+      minIntervalMs: 20 * 60 * 1000,
+    });
+    // 阈值的安全下限：低于它压缩没有意义，一样回落默认值。
+    expect(normalizeAutoCompactSettings({ quickThresholdK: 149, modelThresholdK: 99 })).toMatchObject({
+      quickThresholdK: 200,
+      modelThresholdK: 120,
     });
   });
 
@@ -49,8 +66,13 @@ describe('auto compact settings', () => {
     expect(normalizeAutoCompactTurnParams({ enabled: true, quickRuns: 2, modelRuns: -1 })).toMatchObject({
       quickRuns: 2,
       modelRuns: 0,
+      lastRunAt: null,
     });
     expect(normalizeAutoCompactTurnParams(null)).toMatchObject({ quickRuns: 0, modelRuns: 0 });
+    expect(normalizeAutoCompactTurnParams({ lastRunAt: '2026-09-01T00:00:00.000Z' }).lastRunAt).toBe(
+      '2026-09-01T00:00:00.000Z',
+    );
+    expect(normalizeAutoCompactTurnParams({ lastRunAt: 42 }).lastRunAt).toBeNull();
   });
 });
 
@@ -87,6 +109,41 @@ describe('auto compact decision', () => {
       }),
     ).toBeNull();
     expect(decideAutoCompactStep({ settings, counters, ctxTokens: 0 })).toBeNull();
+  });
+
+  it('throttles repeated triggers within the minimum interval', () => {
+    const now = Date.parse('2026-09-01T12:00:00.000Z');
+    const justRan = { quickRuns: 1, modelRuns: 0, lastRunAt: new Date(now - 60_000).toISOString() };
+    // 距上次压缩才 1 分钟：这一轮整个跳过，哪怕 ctx 早就过了模型阈值。
+    expect(decideAutoCompactStep({ settings, counters: justRan, ctxTokens: 900_000, nowMs: now })).toBeNull();
+
+    // 过了间隔就恢复；从没压过、间隔设为 0 时都不受限。
+    expect(
+      decideAutoCompactStep({
+        settings,
+        counters: { ...justRan, lastRunAt: new Date(now - 21 * 60_000).toISOString() },
+        ctxTokens: 250_000,
+        nowMs: now,
+      }),
+    ).toBe('quick');
+    expect(decideAutoCompactStep({ settings, counters, ctxTokens: 250_000, nowMs: now })).toBe('quick');
+    expect(
+      decideAutoCompactStep({
+        settings: { ...settings, minIntervalMs: 0 },
+        counters: justRan,
+        ctxTokens: 250_000,
+        nowMs: now,
+      }),
+    ).toBe('quick');
+    // 时钟回拨（账本比现在还晚）不该把压缩永久挡在门外。
+    expect(
+      decideAutoCompactStep({
+        settings,
+        counters: { ...justRan, lastRunAt: new Date(now + 60_000).toISOString() },
+        ctxTokens: 250_000,
+        nowMs: now,
+      }),
+    ).toBe('quick');
   });
 });
 
@@ -228,6 +285,30 @@ describe('AutoCompactController', () => {
     controller.setParams({ quickLimit: 3, modelLimit: 0, quickRuns: 1 });
     const messages = toolRound();
     expect(await controller.rewriteIterationMessages(messages)).not.toBeNull();
+    expect(controller.getCounters().quickRuns).toBe(2);
+  });
+
+  it('records the run time and skips the next trigger until the interval has passed', async () => {
+    const { agent } = createAgent({ inputTokens: 250_000 });
+    const controller = new AutoCompactController({ agent });
+    const params = { enabled: true, quickThresholdK: 200, quickLimit: 3, modelLimit: 0 };
+    controller.setParams(params);
+    expect(await controller.rewriteIterationMessages(toolRound())).not.toBeNull();
+    const lastRunAt = controller.getCounters().lastRunAt;
+    expect(typeof lastRunAt).toBe('string');
+
+    // 宿主下一轮把刚压出来的账本下发回来：距上一次不到 20 分钟，整个跳过。
+    controller.setParams({ ...params, quickRuns: 1, lastRunAt });
+    expect(await controller.rewriteIterationMessages(toolRound())).toBeNull();
+    expect(controller.getCounters().quickRuns).toBe(1);
+
+    // 账本里的那次压缩够久远了，重新可以压。
+    controller.setParams({
+      ...params,
+      quickRuns: 1,
+      lastRunAt: new Date(Date.now() - 21 * 60 * 1000).toISOString(),
+    });
+    expect(await controller.rewriteIterationMessages(toolRound())).not.toBeNull();
     expect(controller.getCounters().quickRuns).toBe(2);
   });
 });
