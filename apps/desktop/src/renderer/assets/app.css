@@ -295,10 +295,12 @@ body.is-resizing.is-resizing-terminal {
   --chat-muted: rgb(255 255 255 / 42%);
   --chat-subtle: rgb(255 255 255 / 25%);
   --chat-border: var(--color-line);
-  /* The user turn is a highlight on the transcript canvas, not a raised chrome
-     surface: --color-panel-hi read louder than the answer it alternates with.
-     Half a step above the canvas keeps it a subtle band. */
-  --chat-user: color-mix(in srgb, var(--color-panel) 50%, var(--color-canvas));
+  /* The band that marks a user turn. It used to be half a step above the canvas
+     (~9 levels up) — invisible in practice, which left both sides of the
+     conversation as the same plain text at the same left edge. Use the raised
+     surface instead: 27 levels up, clearly a block, and one rung above the
+     --color-panel that .chat-notice-compact already claims for its own band. */
+  --chat-user: var(--color-panel-hi);
   --chat-accent: var(--color-accent);
   --chat-thinking: var(--color-warn);
   /* Chrome bands: the top bar and the turn log read as separate surfaces
@@ -394,8 +396,17 @@ body.is-resizing.is-resizing-terminal {
   min-width: 0;
 }
 
+.chat-message-assistant {
+  /* Tighter than the base row gap so an answer reads as belonging to the prompt
+     above it (the 20px before a prompt is what separates one turn from the next). */
+  margin-top: 11px;
+}
+
 .chat-message-user {
-  margin-top: 10px;
+  /* Airier than the answer that follows it: a turn is "your prompt + the reply",
+     so the gap *before* a prompt separates turns while the gap before a reply
+     keeps them together. Both sides used to sit within 5px of each other. */
+  margin-top: 20px;
   /* Same block padding as .chat-notice, otherwise the text hugs the top and
      bottom edges of the highlight while the notice has breathing room. */
   padding-block: 5px;
@@ -403,7 +414,9 @@ body.is-resizing.is-resizing-terminal {
   box-shadow:
     4px 0 0 var(--chat-user),
     -4px 0 0 var(--chat-user);
-  color: var(--color-fg);
+  /* Brightest rung of the foreground ladder: your own words are the anchor the
+     eye jumps back to, while the model's answer keeps the reading color. */
+  color: var(--color-fg-max);
   font-size: var(--chat-text-size);
   line-height: 1.28;
 }
@@ -2947,43 +2960,82 @@ body.is-resizing.is-resizing-terminal {
 /* -------------------------------------------------------- 旁路提问（btw）面板
 
    外壳仍旧是 `.chat-popover`（尺寸、锚点、关闭时机只有一份），这里只写线程与输入条。
+   三条排版约束，都是为了「一眼看清谁问的、模型答的」：
+
+   1. **一条左列**。线程里的问题、回答、思考中/出错提示、空态说明，以及下面的输入条，
+      全部落在同一个左边距上（`--chat-btw-pad`）。面板窄，第二列缩进换不来可读性，只会
+      让问题与它的回答各起一行、看起来像两件不相干的事。head 例外（它是带图标的标题行，
+      图标列天然把标题推右）。
+   2. **面板自己的字号**。这里的正文继承 `.chat-popover` 的 10.5px，**不**用对话区的
+      `--chat-text-size`（13px，那是阅读面的档位）：同一个浮层里标题 9.5px、正文 13px、
+      输入框 10.5px 会散成三档。回答是 markdown，渲染器会给它 `.chat-markdown`，所以要在
+      下面把那一档收回来。
+   3. **问题与回答只用明度区分**（`--color-fg-max` + 600 vs `--color-fg` 常规）。终端风格
+      的面板不加底色块、不加边框，一列里靠明度分层最干净。
+
    滚动只有一处：外壳的 `.chat-popover-body`（面板 max-height 由它兜着），线程不再自己
-   套一层 max-height —— 两层滚动时自动「滚到底」滚的是内层，会被外层裁掉看不见。
-   回答是 markdown（复用对话区的渲染），所以正文用同一套阅读面色与字号。 */
+   套一层 max-height —— 两层滚动时自动「滚到底」滚的是内层，会被外层裁掉看不见。 */
+.chat-btw {
+  --chat-btw-pad: 10px;
+}
+
+.chat-btw .chat-popover-head {
+  padding: 0 var(--chat-btw-pad);
+}
+
+.chat-btw .chat-popover-body {
+  padding: 8px var(--chat-btw-pad);
+}
+
+.chat-btw .chat-popover-actions {
+  padding: 4px var(--chat-btw-pad) 8px;
+}
+
+/* 标题行右侧的「新话题」：与 head 同档的浅灰文字按钮，形状对齐关闭按钮 */
+.chat-btw-reset {
+  height: 18px;
+  flex: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 38%);
+  white-space: nowrap;
+}
+
+.chat-btw-reset:hover:not(:disabled) {
+  background: rgb(255 255 255 / 8%);
+  color: var(--color-fg);
+}
+
+.chat-btw-reset:disabled {
+  color: rgb(255 255 255 / 15%);
+}
+
 .chat-btw-thread {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  /* 线程是正文而不是面板元信息：与对话区共用同一档阅读字号，不在局部硬编码 */
-  font-size: var(--chat-text-size);
+  gap: 12px;
+  line-height: 1.45;
 }
 
 .chat-btw-entry {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .chat-btw-question {
-  display: flex;
-  gap: 6px;
-  color: var(--color-fg);
-}
-
-.chat-btw-question-mark {
-  flex: none;
-  color: rgb(255 255 255 / 30%);
-  font-size: 9px;
-  line-height: 1.6;
-}
-
-.chat-btw-question-text {
+  color: var(--color-fg-max);
+  font-weight: 600;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-/* 回答直接复用对话区的 markdown 渲染（颜色与字号由 .chat-markdown 给），
-   这里不需要第二套样式——它本来就是一段真正的模型回答。 */
+/* 回答复用对话区的 markdown 渲染：形状（段落间距、代码块、列表）照旧，只把字号
+   收回面板这一档，并把阅读面色换成线程正文色。 */
+.chat-btw-answer .chat-markdown {
+  font-size: inherit;
+  line-height: inherit;
+}
 
 .chat-btw-thinking,
 .chat-btw-error {
@@ -2993,7 +3045,7 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-btw-thinking {
-  color: rgb(255 255 255 / 40%);
+  color: var(--color-fg-faint);
 }
 
 .chat-btw-error {
@@ -3001,12 +3053,11 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-btw-empty {
-  padding: 2px 0;
-  color: rgb(255 255 255 / 32%);
-  line-height: 1.6;
+  color: var(--color-fg-faint);
+  line-height: 1.55;
 }
 
-/* 输入条：与动作区同一行（左：新话题，中：问题，右：发送） */
+/* 输入条：与线程同一条左列（左：问题输入，右：发送） */
 .chat-btw .chat-popover-actions {
   align-items: flex-end;
 }
@@ -3016,19 +3067,30 @@ body.is-resizing.is-resizing-terminal {
   min-height: 22px;
   max-height: 88px;
   flex: 1;
-  padding: 4px 6px;
+  padding: 3px 6px;
   border: 1px solid var(--color-line);
   background: var(--color-canvas);
   color: var(--color-fg);
   font-family: var(--chat-font);
-  font-size: var(--chat-text-size);
+  font-size: inherit;
   line-height: 1.4;
   resize: none;
 }
 
-/* 发送按钮不参与「图标按钮压扁主按钮」那套：它本身就是图标按钮，但要有底色区分 */
-.chat-btw-send {
-  color: rgb(255 255 255 / 55%);
+.chat-btw-input::placeholder {
+  color: var(--color-fg-ghost);
+}
+
+/* 图标按钮默认 20px/无底色；发送是这一行唯一的主操作，给它底色
+   （选择器要带上外壳，否则被 `.chat-popover-actions button.chat-popover-icon`
+   那条同属性、更高特异性的规则盖掉） */
+.chat-popover-actions button.chat-btw-send:not(:disabled) {
+  color: color-mix(in srgb, var(--color-accent) 82%, transparent);
+}
+
+.chat-btw-send:hover:not(:disabled) {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-hover);
 }
 
 .chat-loop-form {

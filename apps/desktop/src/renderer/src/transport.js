@@ -212,11 +212,14 @@ function createWebApi(env) {
       killSubagent: (id, taskId) => invoke('chat:kill-subagent', { id, taskId }),
       // 旁路提问（CLI 的 `/btw`，扩展 mica/btw/ask）：只收下问题，回答随后作为
       // `btw_thread` 快照事件到达（mica/btw/updated）。所以它可以在 turn 运行中调用。
+      // sessionId/cwd 让 host 在没有常驻进程时按需起一个（resume 这条会话）。
       btwAsk: (id, question, options = {}) =>
         invoke('chat:btw-ask', {
           id,
           question: question || '',
-          newThread: options.newThread === true
+          newThread: options.newThread === true,
+          sessionId: options.sessionId || null,
+          cwd: options.cwd || null
         }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       inputHistory: {

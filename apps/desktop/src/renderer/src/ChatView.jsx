@@ -2454,7 +2454,12 @@ export function ChatView({
       setBtwSending(true)
       try {
         // 草稿在发送成功后才清：失败时留在输入框里，用户不用重打。
-        const res = await window.mica.chat.btwAsk(targetNodeId, text)
+        // sessionId/cwd 让 host 在没有常驻进程时按需起一个——「刚打开一条会话、
+        // 还没发消息就想问一句」正是 btw 最该成立的场景。
+        const res = await window.mica.chat.btwAsk(targetNodeId, text, {
+          sessionId: sessionIdRef.current || '',
+          cwd: cwdRef.current || ''
+        })
         if (nodeIdRef.current !== targetNodeId) return
         if (!res?.ok) {
           appendNotice(`旁路提问失败：${res?.error || '未知错误'}`, 'error')
@@ -2476,14 +2481,19 @@ export function ChatView({
         setBtwSending(false)
       }
     },
-    [appendNotice, btwSending, changeBtwDraft, nodeIdRef]
+    // useLatest 返回的是稳定的 ref 盒子，列进来只为消掉 exhaustive-deps 的误报。
+    [appendNotice, btwSending, changeBtwDraft, cwdRef, nodeIdRef]
   )
 
   /** 「新话题」：让 host 换一条线程（下一次提问重取主流程记录作背景）。 */
   const resetBtwThread = useCallback(async () => {
     const targetNodeId = nodeIdRef.current
     try {
-      const res = await window.mica.chat.btwAsk(targetNodeId, '', { newThread: true })
+      const res = await window.mica.chat.btwAsk(targetNodeId, '', {
+        newThread: true,
+        sessionId: sessionIdRef.current || '',
+        cwd: cwdRef.current || ''
+      })
       if (nodeIdRef.current !== targetNodeId) return
       if (!res?.ok) appendNotice(`新话题失败：${res?.error || '未知错误'}`, 'error')
       else if (res.result?.ok === false)
@@ -2496,7 +2506,7 @@ export function ChatView({
         )
       }
     }
-  }, [appendNotice, nodeIdRef])
+  }, [appendNotice, cwdRef, nodeIdRef])
 
   // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。

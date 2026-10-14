@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  IconAlertCircle,
-  IconLoader2,
-  IconMessageChatbot,
-  IconPlus,
-  IconSend
-} from '@tabler/icons-react'
+import { IconAlertCircle, IconLoader2, IconMessageChatbot, IconSend } from '@tabler/icons-react'
 import { Popover } from './Popover'
 
 /**
@@ -77,18 +71,23 @@ export function BtwPopover({
       onClose={onClose}
       className="chat-btw"
       bodyRef={bodyRef}
-      actions={
-        <>
+      // 「新话题」是这条线程上的动作（不是「新建」），所以放在标题行右侧而不是输入条里——
+      // 紧挨着输入框的 + 会被读成「添加附件」之类，而它其实是「换一条线程重新开始」。
+      headerExtra={
+        entries.length > 0 ? (
           <button
             type="button"
-            className="chat-popover-icon"
-            title="新话题（重新取当前对话记录作背景）"
-            aria-label="新话题"
-            disabled={entries.length === 0 && !running}
+            className="chat-btw-reset"
+            title="换一条新线程（下次提问重新取当前对话记录作背景）"
+            disabled={running}
             onClick={() => onNewThread?.()}
           >
-            <IconPlus size={14} />
+            新话题
           </button>
+        ) : null
+      }
+      actions={
+        <>
           <textarea
             ref={inputRef}
             className="chat-btw-input"
@@ -121,7 +120,9 @@ export function BtwPopover({
         </>
       }
     >
-      <div className="chat-btw-thread" ref={bodyRef}>
+      {/* 滚动容器是外壳的 `.chat-popover-body`（bodyRef 已经给它了）：这里不要再接
+          同一个 ref，否则「滚到底」会打到这个不滚动的内层 div 上。 */}
+      <div className="chat-btw-thread">
         {entries.length === 0 ? (
           <p className="chat-btw-empty">
             用一个隔离子代理回答问题：可以用只读工具查代码、搜索、联网，回答不写回主流程，
@@ -130,12 +131,7 @@ export function BtwPopover({
         ) : (
           entries.map((entry) => (
             <div key={entry.id} className="chat-btw-entry">
-              <div className="chat-btw-question">
-                <span className="chat-btw-question-mark" aria-hidden="true">
-                  ❯
-                </span>
-                <span className="chat-btw-question-text">{entry.question}</span>
-              </div>
+              <p className="chat-btw-question">{entry.question}</p>
               {entry.status === 'running' ? (
                 <p className="chat-btw-thinking">
                   <IconLoader2 size={11} className="animate-spin" /> 正在思考…
