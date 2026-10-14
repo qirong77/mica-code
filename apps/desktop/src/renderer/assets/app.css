@@ -201,20 +201,27 @@ body.is-resizing-sidebar {
   cursor: col-resize;
   user-select: none;
 }
-/* 底部终端面板顶边的拖拽手柄：自身就是那条分界线，hover/拖动时变成高亮色。 */
+/* 底部终端面板顶边的拖拽手柄：自身就是那条分界线，hover/拖动时变成高亮色。
+   它绝对定位覆盖在标签栏顶部而不占布局高度——手柄的底色和面板一样，留在文档流里
+   会被看成「工具栏」的一部分，于是标签栏的图标看上去比这一栏的中心低 3px（= 手柄
+   高度的一半）。改成覆盖层后，标签栏本身就是面板顶部的 h-8 一行，里面的图标与顶栏
+   共用同一条 16px 中心线。背景必须透明，否则会盖掉下面标签的圆角。 */
 .terminal-panel-resizer {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
   height: 6px;
   cursor: ns-resize;
   touch-action: none;
   border-top: 1px solid var(--color-line);
-  background: var(--color-panel);
+  background: transparent;
 }
 .terminal-panel-resizer:hover,
 .terminal-panel-resizer:focus-visible,
 .terminal-panel-resizer[data-resizing='true'] {
   border-color: var(--color-info);
-  background: var(--color-panel);
 }
 body.is-resizing-terminal {
   cursor: ns-resize;

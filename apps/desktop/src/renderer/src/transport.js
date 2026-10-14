@@ -162,6 +162,9 @@ function createWebApi(env) {
 
   return {
     isWeb: true,
+    // 页面是在分享端口（默认 8890）上打开的：不画左侧会话列表，根路径是分享链接列表
+    // （见 main.jsx 与 App.jsx 的 shareView 分支）。这只是呈现，不是权限。
+    shareView: env.share === true,
     platform: env.platform,
     homeDir: env.homeDir,
     runShellLogConfig: env.runShellLogConfig,
@@ -368,8 +371,15 @@ function createWebApi(env) {
     },
 
     access: {
-      // 访问令牌 + 本机可达地址：前者用于「把这台机器交给自己的手机」，后者用来拼分享链接
+      // 本机可达地址（分享端口上的那个 origin），用来拼分享链接
       info: () => invoke('access:info')
+    },
+
+    share: {
+      // 分享链接列表：运行时记着「哪些会话被分享过」，分享端口上的根页面展示它
+      list: () => invoke('share:list'),
+      add: (sessionId) => invoke('share:add', { sessionId }),
+      remove: (sessionId) => invoke('share:remove', { sessionId })
     }
   }
 }

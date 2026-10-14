@@ -91,7 +91,8 @@ function recentChatCwd() {
 }
 
 /**
- * 分享链接弹窗：给出这条会话的地址（地址由运行时按网卡/公网配置算，见 shareSession）。
+ * 分享链接弹窗：给出这条会话在**分享端口**（默认 8890）上的地址（由运行时按网卡/公网配置
+ * 算，见 shareSession），并把这条会话登记进分享列表。
  * 复制按钮走页面自己的剪贴板（局域网 http 访问时 transport 会退到 execCommand）。
  */
 function ShareDialog({ state, onClose }) {
@@ -128,9 +129,9 @@ function ShareDialog({ state, onClose }) {
       >
         <h2 className="mb-1.5 text-sm font-semibold text-white/95">分享链接</h2>
         <p className="mb-2.5 text-[11px] leading-relaxed text-white/45">
-          链接里只有这条会话的 id。拿到的人连的是这台运行时，看到的是同一个界面
-          （会话列表、文件、终端都在），并从这条会话开始——和你在本机打开它没有区别。
-          这台运行时没有账号体系，请只发给你信任的人。
+          链接走分享端口，打开的人落在**这条对话**上（没有左侧会话列表），可以继续对话、
+          看文件与终端。同一条会话只会在分享列表里出现一次；其他人打开分享端口的根地址
+          就能看到这张列表。这台运行时没有账号体系，请只发给你信任的人。
         </p>
         <div className="mb-2.5 flex items-center gap-2">
           <input
@@ -820,6 +821,10 @@ function terminalHeightLimit(viewport) {
 }
 
 export default function App() {
+  // 页面在分享端口（默认 8890）上打开：只展示被分享的那条会话，**不画左侧会话列表**
+  // （列与「开/收侧栏」的开关一起消失），根路径那页由 main.jsx 渲染成分享链接列表。
+  // 这是呈现层的裁剪，不是权限——运行时无账号体系，别把它当访问控制。
+  const shareView = window.mica?.shareView === true
   const terminalRef = useRef(null)
   const filesRef = useRef(null)
   // FilesView 是按需挂载的：回调 ref 记下它有没有真的挂到页面上，好把「chunk 还没到位
@@ -864,13 +869,15 @@ export default function App() {
   const selectedIdRef = useLatest(selectedId)
   // 主区视图：chat | files | stats | settings。文件与对话共用主区（顶栏「文件」按钮来回
   // 切换），终端则是主区底部可收起的下拉面板（见 terminalOpen）。
-  const [view, setView] = useState(() =>
-    storedLayout().view === 'stats' ||
-    storedLayout().view === 'settings' ||
-    storedLayout().view === 'files'
+  const [view, setView] = useState(() => {
+    // 分享页只从对话开始（布局是跨页面共享的，别把分享者那边的视图带过来）
+    if (shareView) return 'chat'
+    return storedLayout().view === 'stats' ||
+      storedLayout().view === 'settings' ||
+      storedLayout().view === 'files'
       ? storedLayout().view
       : 'chat'
-  )
+  })
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -1827,9 +1834,12 @@ export default function App() {
   /**
    * 「分享链接」：拼一条指向这个会话的地址（会话 id 本身就是凭据），在弹窗里复制。
    *
-   * 地址的 host 由运行时给（网卡上的局域网地址，或配置的公网地址），**不能用
-   * `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1`，发给别人等于让他
-   * 连自己的机器。打开的人进到这条会话的分享视图，由服务端限定范围。
+   * 地址的 host 与端口都由运行时给（网卡上的局域网地址 + 分享端口，或配置的公网地址），
+   * **不能用 `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1:8787`，发给别人
+   * 等于让他连自己的机器。打开的人落在分享端口上，看到的是这条会话（不画左侧会话列表）。
+   *
+   * 顺手把这条会话登记进「分享链接列表」（分享端口根路径那页），否则别人打开分享端口
+   * 只会看到一张空列表。登记失败不影响链接本身（它已经能打开了），只记一条日志。
    */
   const shareSession = useCallback(async (sessionId) => {
     if (!sessionId) return
@@ -1841,10 +1851,14 @@ export default function App() {
       if (!url) {
         setShareDialog({
           status: 'error',
-          message: '这台机器没有可用于分享的局域网/公网地址，请设置 MICA_DESKTOP_PUBLIC_URL'
+          message:
+            '没有可用的分享地址：请确认分享端口（默认 8890）已开启，或设置 MICA_DESKTOP_PUBLIC_URL'
         })
         return
       }
+      await window.mica.share.add(sessionId).catch((error) => {
+        console.error('登记分享链接失败', error)
+      })
       setShareDialog({ status: 'ready', url })
     } catch (error) {
       setShareDialog({ status: 'error', message: `生成分享链接失败：${error?.message || error}` })
@@ -2178,189 +2192,196 @@ export default function App() {
     <>
       <div
         className={isMobile ? 'relative flex size-full flex-col overflow-hidden' : 'grid size-full'}
-        style={isMobile ? undefined : { gridTemplateColumns: `var(${SIDEBAR_WIDTH_VAR}) 1fr` }}
+        style={
+          isMobile
+            ? undefined
+            : // 分享页没有侧栏那一列（不是把它折叠起来：它整个不渲染）
+              { gridTemplateColumns: shareView ? '1fr' : `var(${SIDEBAR_WIDTH_VAR}) 1fr` }
+        }
       >
-        {isMobile && sessionsOpen && (
+        {isMobile && sessionsOpen && !shareView && (
           <div
             className="fixed inset-0 z-[9050] bg-black/55"
             aria-hidden="true"
             onClick={closeMobileDrawer}
           />
         )}
-        <aside
-          className={
-            isMobile
-              ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
-                  sessionsOpen ? 'translate-x-0' : '-translate-x-full'
-                }`
-              : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden ? 'invisible pointer-events-none border-r-0' : ''}`
-          }
-          style={
-            isMobile
-              ? undefined
-              : { width: sidebarHidden ? undefined : `var(${SIDEBAR_WIDTH_VAR})` }
-          }
-        >
-          {!isMobile && !sidebarHidden && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="调整侧栏宽度"
-              title="拖动调整侧栏宽度"
-              className={`absolute inset-y-0 right-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingSidebar ? 'bg-white/30' : ''}`}
-              onPointerDown={startSidebarResize}
-            />
-          )}
-          {isMobile ? (
-            <div className="flex h-8 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
-              <span className="text-xs font-semibold text-white/70">会话</span>
-              <button
-                type="button"
-                title="关闭"
-                aria-label="关闭会话列表"
-                className="grid size-7 place-items-center rounded-md text-white/55 hover:bg-white/[.08] hover:text-white"
-                onClick={closeMobileDrawer}
-              >
-                <IconX size={15} />
-              </button>
-            </div>
-          ) : (
-            <div className="h-8 shrink-0 drag-region" aria-hidden="true" />
-          )}
-          <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
-            <button
-              type="button"
-              title="New Session"
-              className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
-              onClick={() => {
-                closeMobileDrawer()
-                createSession()
-              }}
-            >
-              <IconRocket size={14} className="shrink-0 opacity-60" />
-              <span>New Session</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === 'stats'}
-              title="查看使用统计"
-              className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
-                view === 'stats'
-                  ? 'bg-white/[.10] text-white'
-                  : 'text-white/60 hover:bg-white/[.05] hover:text-white'
-              }`}
-              onClick={() => {
-                closeMobileDrawer()
-                setView('stats')
-              }}
-            >
-              <IconChartBar size={14} className="shrink-0 opacity-75" />
-              <span>Stats</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === 'settings'}
-              title="打开 Mica 配置页面"
-              className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
-                view === 'settings'
-                  ? 'bg-white/[.10] text-white'
-                  : 'text-white/60 hover:bg-white/[.05] hover:text-white'
-              }`}
-              onClick={() => {
-                closeMobileDrawer()
-                setView('settings')
-              }}
-            >
-              <IconSettings size={14} className="shrink-0 opacity-75" />
-              <span>Settings</span>
-            </button>
-            <div
-              ref={serverRowRef}
-              className="relative"
-              onMouseEnter={hoverServerRow ? openServerMenu : undefined}
-              onMouseLeave={hoverServerRow ? scheduleServerMenuClose : undefined}
-            >
-              <button
-                type="button"
-                aria-expanded={serverMenuOpen}
-                title="切换 Mica 服务器（连接另一台机器上的 Mica）"
-                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-white/[.05] hover:text-white ${
-                  serverMenuOpen ? 'bg-white/[.05] text-white' : 'text-white/60'
-                }`}
-                onClick={toggleServerMenu}
-              >
-                <IconServer size={14} className="shrink-0 opacity-60" />
-                <span className="shrink-0">Server</span>
-                <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
-                  {serverLabel(currentServer)}
-                </span>
-              </button>
-            </div>
-          </nav>
-          {serverMenuOpen && isMobile && (
-            <div className="no-drag shrink-0 px-2 pb-2">
-              <ServerCard
-                current={currentServer}
-                onSwitch={switchServer}
-                onDismiss={() => setServerMenuOpen(false)}
-              />
-            </div>
-          )}
-          <SessionTree
-            sessions={sessions}
-            pins={pins}
-            sortOrder={sortOrder}
-            projects={projects}
-            draftGroups={draftGroups}
-            draftTabs={draftTabs}
-            openBySession={openBySession}
-            activeSessionId={activeSessionId}
-            selectedId={selectedId}
-            unread={notifications.states}
-            terminalSessions={sessionsWithRunningTerminal}
-            draftNodes={draftNodes}
-            loops={loops}
-            onOpenSession={(sessionId) => {
-              closeMobileDrawer()
-              openSession(sessionId)
-            }}
-            onSelectDraft={(node) => {
-              closeMobileDrawer()
-              selectNode(node)
-            }}
-            onTogglePin={togglePin}
-            onMoveSession={moveSession}
-            onMoveDraft={moveDraft}
-            onReorderSessions={reorderSessions}
-            onCreateGroup={createGroup}
-            onRenameGroup={renameGroup}
-            onMoveGroup={moveGroup}
-            onDeleteGroup={deleteGroup}
-            onCreateSessionInGroup={createSessionInGroup}
-            onRenameSession={(sessionId, title) => {
-              const text = (title || '').trim()
-              if (text) {
-                window.mica.stats
-                  .renameSession(sessionId, title)
-                  .then(() => refreshSessions())
-                  .catch((error) => console.error('rename session failed', error))
-              }
-            }}
-            onRenameDraft={(nodeId, text) =>
-              setNodes((items) =>
-                items.map((node) => (node.id === nodeId ? { ...node, text } : node))
-              )
+        {!shareView && (
+          <aside
+            className={
+              isMobile
+                ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
+                    sessionsOpen ? 'translate-x-0' : '-translate-x-full'
+                  }`
+                : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden ? 'invisible pointer-events-none border-r-0' : ''}`
             }
-            onDeleteSession={deleteSession}
-            onDeleteDraft={deleteDraft}
-            onShareSession={shareSession}
-          />
-        </aside>
+            style={
+              isMobile
+                ? undefined
+                : { width: sidebarHidden ? undefined : `var(${SIDEBAR_WIDTH_VAR})` }
+            }
+          >
+            {!isMobile && !sidebarHidden && (
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调整侧栏宽度"
+                title="拖动调整侧栏宽度"
+                className={`absolute inset-y-0 right-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingSidebar ? 'bg-white/30' : ''}`}
+                onPointerDown={startSidebarResize}
+              />
+            )}
+            {isMobile ? (
+              <div className="flex h-8 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
+                <span className="text-xs font-semibold text-white/70">会话</span>
+                <button
+                  type="button"
+                  title="关闭"
+                  aria-label="关闭会话列表"
+                  className="grid size-7 place-items-center rounded-md text-white/55 hover:bg-white/[.08] hover:text-white"
+                  onClick={closeMobileDrawer}
+                >
+                  <IconX size={15} />
+                </button>
+              </div>
+            ) : (
+              <div className="h-8 shrink-0 drag-region" aria-hidden="true" />
+            )}
+            <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
+              <button
+                type="button"
+                title="New Session"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+                onClick={() => {
+                  closeMobileDrawer()
+                  createSession()
+                }}
+              >
+                <IconRocket size={14} className="shrink-0 opacity-60" />
+                <span>New Session</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'stats'}
+                title="查看使用统计"
+                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
+                  view === 'stats'
+                    ? 'bg-white/[.10] text-white'
+                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+                }`}
+                onClick={() => {
+                  closeMobileDrawer()
+                  setView('stats')
+                }}
+              >
+                <IconChartBar size={14} className="shrink-0 opacity-75" />
+                <span>Stats</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'settings'}
+                title="打开 Mica 配置页面"
+                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
+                  view === 'settings'
+                    ? 'bg-white/[.10] text-white'
+                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+                }`}
+                onClick={() => {
+                  closeMobileDrawer()
+                  setView('settings')
+                }}
+              >
+                <IconSettings size={14} className="shrink-0 opacity-75" />
+                <span>Settings</span>
+              </button>
+              <div
+                ref={serverRowRef}
+                className="relative"
+                onMouseEnter={hoverServerRow ? openServerMenu : undefined}
+                onMouseLeave={hoverServerRow ? scheduleServerMenuClose : undefined}
+              >
+                <button
+                  type="button"
+                  aria-expanded={serverMenuOpen}
+                  title="切换 Mica 服务器（连接另一台机器上的 Mica）"
+                  className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-white/[.05] hover:text-white ${
+                    serverMenuOpen ? 'bg-white/[.05] text-white' : 'text-white/60'
+                  }`}
+                  onClick={toggleServerMenu}
+                >
+                  <IconServer size={14} className="shrink-0 opacity-60" />
+                  <span className="shrink-0">Server</span>
+                  <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
+                    {serverLabel(currentServer)}
+                  </span>
+                </button>
+              </div>
+            </nav>
+            {serverMenuOpen && isMobile && (
+              <div className="no-drag shrink-0 px-2 pb-2">
+                <ServerCard
+                  current={currentServer}
+                  onSwitch={switchServer}
+                  onDismiss={() => setServerMenuOpen(false)}
+                />
+              </div>
+            )}
+            <SessionTree
+              sessions={sessions}
+              pins={pins}
+              sortOrder={sortOrder}
+              projects={projects}
+              draftGroups={draftGroups}
+              draftTabs={draftTabs}
+              openBySession={openBySession}
+              activeSessionId={activeSessionId}
+              selectedId={selectedId}
+              unread={notifications.states}
+              terminalSessions={sessionsWithRunningTerminal}
+              draftNodes={draftNodes}
+              loops={loops}
+              onOpenSession={(sessionId) => {
+                closeMobileDrawer()
+                openSession(sessionId)
+              }}
+              onSelectDraft={(node) => {
+                closeMobileDrawer()
+                selectNode(node)
+              }}
+              onTogglePin={togglePin}
+              onMoveSession={moveSession}
+              onMoveDraft={moveDraft}
+              onReorderSessions={reorderSessions}
+              onCreateGroup={createGroup}
+              onRenameGroup={renameGroup}
+              onMoveGroup={moveGroup}
+              onDeleteGroup={deleteGroup}
+              onCreateSessionInGroup={createSessionInGroup}
+              onRenameSession={(sessionId, title) => {
+                const text = (title || '').trim()
+                if (text) {
+                  window.mica.stats
+                    .renameSession(sessionId, title)
+                    .then(() => refreshSessions())
+                    .catch((error) => console.error('rename session failed', error))
+                }
+              }}
+              onRenameDraft={(nodeId, text) =>
+                setNodes((items) =>
+                  items.map((node) => (node.id === nodeId ? { ...node, text } : node))
+                )
+              }
+              onDeleteSession={deleteSession}
+              onDeleteDraft={deleteDraft}
+              onShareSession={shareSession}
+            />
+          </aside>
+        )}
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
-            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && !shareView && sidebarCollapsed ? 'pl-30' : ''}`}
           >
-            {isMobile && (
+            {isMobile && !shareView && (
               <button
                 type="button"
                 title="会话列表"
@@ -2373,7 +2394,8 @@ export default function App() {
               </button>
             )}
             {/* 返回对话是主区顶栏最左的入口（与 CLI 的 prompt 前导一致）：非对话视图
-                下始终出现在最前，不要挪回右侧。分享页没有它（点开就是被分享的对话）。
+                下始终出现在最前，不要挪回右侧（分享页也留着它：那页只是没有左侧会话
+                列表，文件/终端都还在，需要回到对话）。
                 视图名（Files / Stats / Settings）不再重复展示——各自页面自带标识，
                 这一栏只留返回入口。 */}
             {view !== 'chat' && (
@@ -2491,7 +2513,9 @@ export default function App() {
                 className="terminal-panel-resizer shrink-0"
                 onPointerDown={startTerminalResize}
               />
-              {/* pr-3 与顶栏（px-3）同一条右边线：两个 h-8 栏上下相邻，右侧按钮错开一格很明显。 */}
+              {/* 这一行就是面板顶部的第一行（拖拽手柄是覆盖在它顶边的绝对定位层，见
+                  `.terminal-panel-resizer`），所以里面的图标和顶栏一样居中在这条 h-8 上；
+                  pr-3 与顶栏（px-3）同一条右边线：两个 h-8 栏上下相邻，右侧按钮错开一格很明显。 */}
               <div className="no-drag flex h-8 shrink-0 items-center gap-0.5 border-b border-line pl-1 pr-3">
                 <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
                   {rightTerms.map((node) => {
@@ -2611,7 +2635,7 @@ export default function App() {
           </footer>
         </main>
       </div>
-      {!isMobile && (
+      {!isMobile && !shareView && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}

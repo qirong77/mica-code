@@ -23,6 +23,7 @@ import { registerSkillsIpc } from '../host/skills.js'
 import { registerServersIpc } from '../host/servers.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
 import { flushUiState, registerUiStateIpc, setUiStateSender } from '../host/ui-state.js'
+import { registerSharedSessionIpc } from '../host/shared-sessions.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
@@ -32,12 +33,26 @@ import { saveImageDataUrl } from '../host/chat-images.js'
  * 会话、文件/Git/统计/配置）以 `POST /api/invoke` + SSE 推送的形式暴露给页面，
  * 同一个 renderer 产物直接由它托管。Electron 只是它的一个容器（见 src/main/index.js）。
  *
- * 用法：node out/server/index.mjs [--host 0.0.0.0] [--port 8787] [--renderer <dir>]
+ * 它同时监听**两个端口**，服务的是同一批 host 能力、同一个 renderer 产物：
+ *
+ * - 主端口（默认 8787）：完整的应用，左侧会话列表、文件、终端、设置都在；
+ * - 分享端口（默认 8890）：分享出去的界面——`/?session=<id>` 打开某一条会话（不带
+ *   左侧会话列表），`/` 是分享链接的列表。见 renderer 的 shareView 分支。
+ *
+ * 两个端口是同一台运行时、同一份状态（无账号体系，能连上就等于能操作）。分享端口上
+ * 少画一个侧栏只是**呈现**，不是权限边界——别把它当访问控制用。
+ *
+ * 用法：node out/server/index.mjs [--host 0.0.0.0] [--port 8787] [--share-port 8890]
+ *                                [--renderer <dir>]
  */
 
 const MODULE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)))
 const PACKAGE_ROOT = resolve(MODULE_DIR, '..', '..')
 const DEFAULT_PORT = 8787
+const DEFAULT_SHARE_PORT = 8890
+// 分享端口被占用时向上顺序探测的档数：分享链接发出去之后就固定了，随机回退会让
+// 「上次发出去的链接」在重启后指到一个没人监听的端口，所以这里要的是**可复现**。
+const SHARE_PORT_SCAN_LIMIT = 20
 const MAX_BODY_BYTES = 64 * 1024 * 1024
 const HEARTBEAT_MS = 15000
 
@@ -62,10 +77,22 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 }
 
+/** 分享端口：0/off 表示不起第二个监听（分享链接随之不可用）。 */
+function parseSharePort(value) {
+  const text = String(value ?? '')
+    .trim()
+    .toLowerCase()
+  if (!text) return DEFAULT_SHARE_PORT
+  if (text === '0' || text === 'off' || text === 'false') return 0
+  const port = Number.parseInt(text, 10)
+  return Number.isFinite(port) && port > 0 && port < 65536 ? port : DEFAULT_SHARE_PORT
+}
+
 function parseArgs(argv) {
   const options = {
     host: process.env.MICA_DESKTOP_HOST || '0.0.0.0',
     port: Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || DEFAULT_PORT,
+    sharePort: parseSharePort(process.env.MICA_DESKTOP_SHARE_PORT),
     renderer: process.env.MICA_DESKTOP_RENDERER || join(PACKAGE_ROOT, 'out', 'renderer'),
     // dev 模式下页面由 Vite dev server 提供，服务端只承载 API
     requireRenderer: process.env.MICA_DESKTOP_ALLOW_MISSING_RENDERER !== '1'
@@ -75,6 +102,8 @@ function parseArgs(argv) {
     if (arg === '--host' && argv[index + 1]) options.host = argv[(index += 1)]
     else if (arg === '--port' && argv[index + 1])
       options.port = Number.parseInt(argv[(index += 1)], 10)
+    else if (arg === '--share-port' && argv[index + 1])
+      options.sharePort = parseSharePort(argv[(index += 1)])
     else if (arg === '--renderer' && argv[index + 1]) options.renderer = resolve(argv[(index += 1)])
     else if (arg === '--allow-missing-renderer') options.requireRenderer = false
   }
@@ -306,8 +335,17 @@ function handleEvents(req, res) {
 
 /* -------------------------------------------------------------------- 启动 */
 
-/** 端口被占用时回退到随机端口：Electron 容器据此拿到实际地址，不必预选空闲端口 */
-async function listenWithFallback(server, host, port) {
+/**
+ * 端口被占用时的回退策略，两种端口各取所需：
+ *
+ * - 分享端口（`scan > 0`）**向上顺序探测**（8890 → 8909），拿到的是可复现的端口。分享链接
+ *   一旦发出去就收不回来，随机回退会让它在下次启动后指到一个没人监听的端口；顺序探测则
+ *   「谁先占着就往后挪一格」，重启后大概率还是同一个。
+ * - 主端口（`scan = 0`）仍旧回退随机端口：Electron 容器从 `ready` 行读实际地址，不需要复现。
+ *
+ * 都试不出来（`scan` 档全被占）时才落到随机端口——总比起不来好。
+ */
+async function listenWithFallback(server, host, port, { label = '端口', scan = 0 } = {}) {
   const bind = (value) =>
     new Promise((resolvePromise, reject) => {
       const onError = (error) => {
@@ -328,10 +366,23 @@ async function listenWithFallback(server, host, port) {
     return port
   } catch (error) {
     if (error?.code !== 'EADDRINUSE' || !port) throw error
-    console.warn(`[mica-desktop] 端口 ${port} 已被占用，改用随机端口`)
-    await bind(0)
-    return server.address().port
   }
+
+  for (let offset = 1; offset <= scan; offset += 1) {
+    const candidate = port + offset
+    if (candidate > 65535) break
+    try {
+      await bind(candidate)
+      console.warn(`[mica-desktop] ${label} ${port} 已被占用，改用 ${candidate}`)
+      return candidate
+    } catch (error) {
+      if (error?.code !== 'EADDRINUSE') throw error
+    }
+  }
+
+  console.warn(`[mica-desktop] ${label} ${port} 起被占满，改用随机端口`)
+  await bind(0)
+  return server.address().port
 }
 
 export async function startDesktopServer(options = {}) {
@@ -369,12 +420,80 @@ export async function startDesktopServer(options = {}) {
   registerServersIpc()
   registerConfigWebIpc()
   registerAccessIpc()
+  registerSharedSessionIpc()
 
   // renderer 会用「窗口是否聚焦/可见」决定是否把通知标记为已读；网页端没有窗口，
   // 统一返回可见（真实的可读性由浏览器 tab 的 document.visibilityState 参与判断）
   ipcMain.handle('app:get-window-state', () => ({ focused: true, visible: true }))
 
-  const server = createServer((req, res) => {
+  const server = createServer(createRequestHandler({ rendererRoot, share: false }))
+  const host = options.host || '0.0.0.0'
+  const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT, {
+    label: '端口'
+  })
+
+  // 分享端口：同一批 host 能力、同一个 renderer 产物，只是页面那头按「分享视图」渲染
+  // （不带左侧会话列表）。被占用时向上顺序探测（见 listenWithFallback），分享链接跟着
+  // 用实际端口——所以链接要现取现用，别把上一次的 8890 当常量。
+  let shareServer = null
+  let sharePort = 0
+  if (options.sharePort) {
+    shareServer = createServer(createRequestHandler({ rendererRoot, share: true }))
+    sharePort = await listenWithFallback(shareServer, host, options.sharePort, {
+      label: '分享端口',
+      scan: SHARE_PORT_SCAN_LIMIT
+    })
+  }
+
+  // 分享链接要拼出「别人能连到」的地址，所以必须在端口确定（可能已回退）之后告知
+  setRuntimeAddress({ port, host, sharePort })
+
+  let closing = false
+  const close = async () => {
+    if (closing) return
+    closing = true
+    for (const res of sseClients) {
+      try {
+        res.end()
+      } catch {
+        // ignore
+      }
+    }
+    sseClients.clear()
+    disposeAllTerminals()
+    disposeAllChatRuns()
+    disposeLoops()
+    stopNotifyBridge()
+    // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
+    flushUiState()
+    await notifyServer.close()
+    await Promise.all([
+      new Promise((resolvePromise) => server.close(() => resolvePromise())),
+      shareServer
+        ? new Promise((resolvePromise) => shareServer.close(() => resolvePromise()))
+        : Promise.resolve()
+    ])
+  }
+
+  return {
+    server,
+    port,
+    host,
+    url: `http://127.0.0.1:${port}`,
+    shareServer,
+    sharePort,
+    shareUrl: sharePort ? `http://127.0.0.1:${sharePort}` : null,
+    rendererRoot,
+    close
+  }
+}
+
+/**
+ * 两个端口共用同一套请求处理：`share` 只影响 `/api/env` 回给页面的那个标记
+ * （分享端口上的页面不画左侧会话列表、根路径是分享链接列表）。
+ */
+function createRequestHandler({ rendererRoot, share }) {
+  return (req, res) => {
     void (async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
       try {
@@ -403,6 +522,9 @@ export async function startDesktopServer(options = {}) {
             return sendJson(res, 200, {
               platform: process.platform,
               homeDir: process.env.HOME || '',
+              // 这个请求来自分享端口还是主端口：renderer 据此决定要不要画左侧会话列表
+              // （`/` 在分享端口上另有一张分享链接列表，见 main.jsx）。
+              share: share === true,
               windowsBuildNumber:
                 process.platform === 'win32'
                   ? Number.parseInt(osRelease().split('.')[2], 10) || null
@@ -424,36 +546,7 @@ export async function startDesktopServer(options = {}) {
         else res.end()
       }
     })()
-  })
-
-  const host = options.host || '0.0.0.0'
-  const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT)
-  // 分享链接要拼出「别人能连到」的地址，所以必须在端口确定（可能已回退）之后告知
-  setRuntimeAddress({ port, host })
-
-  let closing = false
-  const close = async () => {
-    if (closing) return
-    closing = true
-    for (const res of sseClients) {
-      try {
-        res.end()
-      } catch {
-        // ignore
-      }
-    }
-    sseClients.clear()
-    disposeAllTerminals()
-    disposeAllChatRuns()
-    disposeLoops()
-    stopNotifyBridge()
-    // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
-    flushUiState()
-    await notifyServer.close()
-    await new Promise((resolvePromise) => server.close(() => resolvePromise()))
   }
-
-  return { server, port, host, url: `http://127.0.0.1:${port}`, rendererRoot, close }
 }
 
 function lanAddresses(port) {
@@ -479,6 +572,16 @@ async function main() {
   // 配置页里有 API key）。这些地址是给别人连的，打印出来是为了让人知道它开在哪张网上。
   for (const address of lanAddresses(running.port)) {
     console.log(`[mica-desktop] 局域网访问: ${address}`)
+  }
+  // 分享端口上是「分享出去的界面」：`/?session=<id>` 打开一条会话（不画左侧会话列表），
+  // `/` 是分享链接列表。同一台运行时、同一份状态，只是少画一个侧栏——不是权限边界。
+  if (running.sharePort) {
+    console.log(`[mica-desktop] 分享页面: http://127.0.0.1:${running.sharePort}`)
+    for (const address of lanAddresses(running.sharePort)) {
+      console.log(`[mica-desktop] 分享链接: ${address}`)
+    }
+  } else {
+    console.log('[mica-desktop] 分享端口已关闭，分享链接不可用')
   }
   if (process.env.MICA_DESKTOP_PUBLIC_URL)
     console.log(`[mica-desktop] 公网地址: ${process.env.MICA_DESKTOP_PUBLIC_URL}`)

@@ -122,11 +122,14 @@ function formatHost(address) {
  * 3. 网卡地址里挑一个：私有网段 IPv4 > 其它 IPv4 > IPv6（链路本地 `fe80::` 排除，
  *    那个地址跨机器不可达）。
  *
+ * 端口一律用**分享端口**（`sharePort`：运行时另起的那个监听，默认 8890），不是主端口——
+ * 分享出去的那一份界面就住在分享端口上（只带一条会话、没有左侧会话列表）。
+ *
  * 没有可用地址（只有环回）时返回 null，此时页面回落成「不提供分享」。
  */
 export function pickShareBaseUrl({
   publicUrl = '',
-  port,
+  sharePort,
   addresses = [],
   preferredOrigin = '',
   allowedHostnames = null
@@ -134,14 +137,18 @@ export function pickShareBaseUrl({
   const pinned = normalizeBaseUrl(publicUrl)
   if (pinned) return pinned
 
-  const listenPort = Number(port)
+  const listenPort = Number(sharePort)
   if (!listenPort) return null
 
   const preferred = normalizeBaseUrl(preferredOrigin)
   if (preferred) {
-    const host = hostnameOf(new URL(preferred).host)
+    const url = new URL(preferred)
+    const host = hostnameOf(url.host)
     const known = allowedHostnames instanceof Set ? allowedHostnames.has(host) : false
-    if (known && !LOOPBACK_NAMES.has(host) && !isLoopbackAddress(host)) return preferred
+    // 端口换成分享端口：preferredOrigin 只用来认「分享者走的是哪张网」，
+    // 它自己的端口是主端口，原样带过去会拼出一条落在完整应用上的分享链接。
+    if (known && !LOOPBACK_NAMES.has(host) && !isLoopbackAddress(host))
+      return `${url.protocol}//${url.hostname}:${listenPort}`
   }
 
   const candidates = []

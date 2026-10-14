@@ -142,14 +142,33 @@ $ npm run start:web      # node out/server/index.mjs
 $ npm run serve:web      # = build && start:web
 
 # options
-$ node out/server/index.mjs --host 0.0.0.0 --port 8787 --renderer out/renderer [--allow-missing-renderer]
+$ node out/server/index.mjs --host 0.0.0.0 --port 8787 --share-port 8890 --renderer out/renderer \
+    [--allow-missing-renderer]
 ```
 
 Environment variables with the same meaning: `MICA_DESKTOP_HOST`, `MICA_DESKTOP_PORT`,
-`MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs on startup, plus a
-machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron container parses.
-If the port is taken it falls back to a free one; `GET /api/health` answers whether a port is
-already serving Mica Code.
+`MICA_DESKTOP_SHARE_PORT`, `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
+on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron
+container parses. `GET /api/health` answers whether a port is already serving Mica Code.
+
+The fallback when a port is taken is deliberately different per port. The **share port scans upward**
+(`8890`, `8891`, … up to `SHARE_PORT_SCAN_LIMIT`), because a link that has already been handed out
+must keep working across restarts — a random port would silently point it at nothing. The main port
+keeps the random fallback, since the Electron container reads the real address off the `ready` line.
+So the share *base URL* always has to be read from `access:info` (which reports the port actually
+bound); never hard-code `8890`.
+
+It listens on **two** ports, serving the same host capabilities and the same renderer bundle:
+
+* the main port (`8787`) is the whole app — session list, files, terminals, settings;
+* the share port (`8890`) is the surface a share link points at: `/?session=<id>` opens that one
+  conversation **without the left session list**, and `/` is the list of links that have been shared
+  (`分享链接`). `MICA_DESKTOP_SHARE_PORT=0` (or `--share-port 0`) turns the second listener off, which
+  leaves share links unavailable.
+
+Both ports are the same runtime with the same state. Drawing one less panel on the share port is
+**presentation, not access control** — a client there can still invoke every channel (see "There is no
+authorization boundary").
 
 ### How it is wired
 
@@ -245,12 +264,24 @@ opening it is the same as clicking that session in the list. The base URL comes 
 never from the page's own `location.origin`: a window on the machine is served from `127.0.0.1`, and
 handing that to someone else points at their own machine. `pickShareBaseUrl` prefers
 `MICA_DESKTOP_PUBLIC_URL`, then the address the sharer is already using, then the machine's interface
-addresses (private LAN first).
+addresses (private LAN first) — and always pins the **share port** (default 8890, `MICA_DESKTOP_SHARE_PORT`;
+read from `access:info`, since the port scans upward when it is taken),
+because the share surface lives on that listener, not on the main one. `pickShareBaseUrl` needs
+`sharePort`; if the second listener is off the dialog reports that sharing is unavailable.
 
-Whatever the link gives is the whole app, so **treat it as lending someone this machine**: the holder
+Copying a link also records the session in the share list (`src/host/shared-sessions.js` +
+`shared-sessions-core.js`, persisted to `userData/shared-sessions.json`), so the share port's index page
+(`/?` — the `ShareIndex` component, rendered by `main.jsx` when `/api/env` says `share: true` and no
+`?session=` is present) can list what has been handed out: title, working directory, when it was
+shared, a copy button, an open button and a remove button. That page is the only way to navigate there,
+since the share surface has no session list; a session that no longer exists stays in the list marked
+`会话已不存在` until it is removed.
+
+What the link hides is only the session list: **treat it as lending someone this machine** — the holder
 can chat, interrupt, queue, compact, change the working directory, browse files, open a shell in the
-terminal panel and read the config page. It never expires and there is no revocation list — taking it
-back means stopping the runtime or moving to another port.
+terminal panel and read the config page (and can reach the same channels by hand regardless of what the
+page draws). It never expires and there is no revocation list — taking it back means stopping the
+runtime or moving to another port.
 
 #### One session, one tab, one set of terminals
 

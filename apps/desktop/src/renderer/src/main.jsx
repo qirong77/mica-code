@@ -1,9 +1,11 @@
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import ShareIndex from './ShareIndex'
 import '../assets/app.css'
 import { ensureMicaApi } from './transport'
 import { ensureUiState } from './ui-state'
 import { LOCAL_SERVER_URL, currentServerUrl, isLoopbackServer } from './servers'
+import { readAppUrl } from './app-url'
 
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。
@@ -15,6 +17,13 @@ ensureMicaApi()
   })
   .then((api) => {
     if (!api) return
+    // 分享端口（默认 8890）的根路径是「分享链接列表」：这一页不需要工作区/草稿那些界面
+    // 状态，也不该按「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。
+    // 带 `?session=<id>` 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
+    if (api.shareView && !readAppUrl(window.location.search).sessionId) {
+      createRoot(document.getElementById('root')).render(<ShareIndex />)
+      return
+    }
     // 界面状态（草稿/工作区/面板布局）来自运行时：先取回来再渲染，第一帧就是上一次
     // 留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
     // 比整页停在一个错误提示上可用。
