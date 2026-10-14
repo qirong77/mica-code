@@ -280,7 +280,7 @@ export function codexNotificationToEvent(notification) {
         tasks: Array.isArray(params.tasks) ? params.tasks : []
       }
     case 'mica/btw/updated':
-      // Host-side snapshot of the 旁路提问（btw）thread — the desktop twin of the
+      // Host-side snapshot of the By The Way（btw）thread — the desktop twin of the
       // CLI's `/btw`. The subagent and the Q&A both live in the app-server
       // process, so this push is the only way the panel learns the answer; it
       // is a snapshot (replace the whole thread), not a delta. `id` changes

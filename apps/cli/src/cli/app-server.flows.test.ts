@@ -845,6 +845,59 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(reset.params?.id).not.toBe(answered.params?.id);
   });
 
+  itE2E('mica/btw/ask answers while the main turn is still running', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    // 让主流程这一轮卡在「等模型第一个字」上：提问必须落在 turn 还没结束的窗口里，
+    // 否则测的又只是「空闲时能问」。
+    mock!.state.delayBeforeTextMs = 3_000;
+
+    const host = spawnHost('btw-running');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '先做点长活' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    const entries = (m: HostMessage) => m.params?.entries as Array<Record<string, unknown>> | undefined;
+
+    // 主流程仍在跑：请求必须被当下收下（答案稍后经快照推回），而不是等这一轮结束。
+    await send(host, 2, 'mica/btw/ask', { question: '主流程跑着的时候能问吗' });
+    const ack = await waitFor(host, (m) => m.id === 2, 'btw ack');
+    expect(ack.result).toMatchObject({ ok: true });
+    expect(host.lines.some((m) => m.method === 'turn/completed')).toBe(false);
+
+    const running = await waitFor(
+      host,
+      (m) => m.method === 'mica/btw/updated' && entries(m)?.[0]?.status === 'running',
+      'btw running snapshot mid-turn',
+    );
+    // 快照里的线程 id 与主流程会话无关，但条目确实带着这一问。
+    expect(entries(running)?.[0]).toMatchObject({ question: '主流程跑着的时候能问吗' });
+
+    const answered = await waitFor(
+      host,
+      (m) => m.method === 'mica/btw/updated' && entries(m)?.[0]?.status === 'completed',
+      'btw answer mid-turn',
+    );
+    expect(entries(answered)?.[0]).toMatchObject({ answer: '你好，我是 mock 模型的回复' });
+
+    // 主流程照常跑完，且这一问没有落进会话历史。
+    await waitFor(host, turnCompleted(turnId), 'turn/completed');
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      turnState?: string;
+      snapshot?: { conversationMessages?: Array<{ role?: string; content?: unknown }> };
+    };
+    expect(session.turnState).toBe('completed');
+    const userTexts = (session.snapshot?.conversationMessages ?? [])
+      .filter((message) => message.role === 'user')
+      .map((message) => contentTextOf(message.content));
+    expect(userTexts).toEqual(['先做点长活']);
+  });
+
   itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

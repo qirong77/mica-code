@@ -13,7 +13,7 @@ function makeHarness(options: FakeOptions = {}) {
   const usageHistory: unknown[] = [];
   const query = vi.fn(async () => {
     usageHistory.push({ usageId: usageHistory.length + 1 });
-    return options.reply ? await options.reply() : '旁路答案';
+    return options.reply ? await options.reply() : 'By The Way 答案';
   });
   const recordSubagentUsage = vi.fn();
   const createSubAgent = vi.fn((_options?: { systemPrompt?: string }) => ({ query, usageHistory }));
@@ -54,7 +54,7 @@ describe('BtwThreadController', () => {
     expect(harness.controller.snapshot().entries).toMatchObject([{ question: '这个方案可行吗', status: 'running' }]);
     await settle();
     expect(harness.controller.snapshot().entries).toMatchObject([
-      { question: '这个方案可行吗', status: 'completed', answer: '旁路答案' },
+      { question: '这个方案可行吗', status: 'completed', answer: 'By The Way 答案' },
     ]);
     expect(harness.updates).toHaveLength(2);
     expect(harness.updates[0].entries[0].status).toBe('running');

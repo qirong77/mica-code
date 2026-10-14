@@ -6,7 +6,7 @@ import { recordHelperSubagentUsage } from '@packages/mica-builtin-commands/subag
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
 
 /**
- * 常驻 host（`mica app-server`）里的旁路提问（btw）线程。
+ * 常驻 host（`mica app-server`）里的 By The Way（btw）线程。
  *
  * 为什么需要它：桌面端的面板就是 CLI 的 `/btw`（面板里追问 = `/btw -continue`），
  * 而 btw 的会话状态是「一个可复用的隔离子代理」+「已经问过的问答」，两者都只能活在
@@ -67,7 +67,7 @@ export class BtwThreadController {
   ask(question: string, options: { newThread?: boolean } = {}): { ok: true } | { ok: false; message: string } {
     const text = question.trim();
     if (!text) return { ok: false, message: '问题不能为空' };
-    if (this.inFlight) return { ok: false, message: '上一个旁路问题还在回答中，请稍候' };
+    if (this.inFlight) return { ok: false, message: '上一个 By The Way 问题还在回答中，请稍候' };
     if (options.newThread) {
       this.threadId = this.newId();
       this.entries = [];

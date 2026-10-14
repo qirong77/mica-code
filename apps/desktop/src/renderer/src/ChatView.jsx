@@ -2223,7 +2223,7 @@ export function ChatView({
   const [taskDetail, setTaskDetail] = useState(null)
   // 输入框右侧时钟图标点开的定时任务面板
   const [loopOpen, setLoopOpen] = useState(false)
-  // 旁路提问（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
+  // By The Way（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
   const [btwThread, setBtwThread] = useState({ id: '', entries: [] })
   const [btwOpen, setBtwOpen] = useState(false)
   const [btwDraft, setBtwDraft] = useState('')
@@ -2231,7 +2231,7 @@ export function ChatView({
   // 上一次渲染的线程快照（在 applyBtwThread 里比较「刚回答完的那一条」），
   // 面板关着时补一条提示用；同时兼作「回答到达」的去重依据。
   const btwThreadRef = useRef({ id: '', entries: [] })
-  // 还没发出去的旁路问题：按节点存，切走再回来仍在（与主输入框的 drafts 同款）。
+  // 还没发出去的 By The Way 问题：按节点存，切走再回来仍在（与主输入框的 drafts 同款）。
   const btwDraftsRef = useRef(new Map())
   const btwOpenRef = useRef(false)
   btwOpenRef.current = btwOpen
@@ -2442,7 +2442,7 @@ export function ChatView({
   )
 
   /**
-   * 旁路提问（CLI 的 `/btw`）。**不占队列、不改 run 状态**：host 收下问题立刻回，
+   * By The Way（CLI 的 `/btw`）。**不占队列、不改 run 状态**：host 收下问题立刻回，
    * 回答随后作为 `btw_thread` 快照到达——所以主流程正在跑也能问，问完也不用等它。
    * 失败（host 不在、已有问题在回答）时保留草稿，用户可以直接重试。
    */
@@ -2462,18 +2462,18 @@ export function ChatView({
         })
         if (nodeIdRef.current !== targetNodeId) return
         if (!res?.ok) {
-          appendNotice(`旁路提问失败：${res?.error || '未知错误'}`, 'error')
+          appendNotice(`By The Way 失败：${res?.error || '未知错误'}`, 'error')
           return
         }
         if (res.result?.ok === false) {
-          appendNotice(`旁路提问失败：${res.result.message || '未知错误'}`, 'warn')
+          appendNotice(`By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
           return
         }
         changeBtwDraft('')
       } catch (error) {
         if (nodeIdRef.current === targetNodeId) {
           appendNotice(
-            `旁路提问失败：${error instanceof Error ? error.message : String(error)}`,
+            `By The Way 失败：${error instanceof Error ? error.message : String(error)}`,
             'error'
           )
         }
@@ -2845,10 +2845,13 @@ export function ChatView({
       if (btwOpenRef.current) return
       for (const entry of newlyAnsweredBtwEntries(previous, next)) {
         if (entry.status === 'error') {
-          appendNotice(`旁路提问失败：${compactLine(entry.error || entry.question, 120)}`, 'error')
+          appendNotice(
+            `By The Way 失败：${compactLine(entry.error || entry.question, 120)}`,
+            'error'
+          )
         } else {
           appendNotice(
-            `旁路提问已回答：${compactLine(entry.question, 80)}（输入条上打开「旁路提问」查看）`,
+            `By The Way 已回答：${compactLine(entry.question, 80)}（输入条上打开「By The Way」查看）`,
             'info'
           )
         }
@@ -3034,7 +3037,7 @@ export function ChatView({
           setWaitTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'btw_thread':
-          // Host 快照：整体替换旁路提问线程（跨 turn 常驻，与对话流无关）。
+          // Host 快照：整体替换 By The Way 线程（跨 turn 常驻，与对话流无关）。
           applyBtwThread(event.thread)
           break
         case 'session_history_replaced': {
@@ -4624,7 +4627,7 @@ export function ChatView({
   // 挂着定时任务时输入框整体走提示色（与 CLI 的 loop prompt 同款），一眼看出这条会话在
   // 按间隔自动发送；颜色只跟「有没有循环」有关，不随倒计时每秒变化。
   const loopTone = activeLoop ? 'chat-composer-loop' : ''
-  // 旁路提问（btw）：入口在输入条动作区，线程状态是 host 的快照投影。
+  // By The Way（btw）：入口在输入条动作区，线程状态是 host 的快照投影。
   // 有会话才有 host、才有「主流程记录」可作背景（草稿会话还没有 sessionId）。
   const hasSession = Boolean(node?.sessionId || sessionIdRef.current)
   const btwRunning = btwThread.entries.some((entry) => entry.status === 'running')
@@ -5128,7 +5131,7 @@ export function ChatView({
               {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把上传按钮和时钟拉开
                   两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
               {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
-              {/* 旁路提问（CLI 的 /btw）：主流程运行中也照常可点——它正是为
+              {/* By The Way（CLI 的 /btw）：主流程运行中也照常可点——它正是为
                   「顺手问一句、不影响当前任务」而存在的。没有会话时没有 host，
                   也就没有主流程记录可当背景，所以那时禁用。 */}
               <button
@@ -5136,14 +5139,14 @@ export function ChatView({
                 className={`chat-composer-btw ${btwRunning ? 'is-active' : ''}`}
                 title={
                   !hasSession
-                    ? '旁路提问需要先有一条会话'
+                    ? 'By The Way 需要先有一条会话'
                     : remoteRunning
                       ? '该会话正在另一个进程里运行'
                       : btwRunning
-                        ? '旁路提问：正在回答…（点击查看）'
-                        : '旁路提问：不打扰主流程地问一句（回答不进入本会话上下文）'
+                        ? 'By The Way：正在回答…（点击查看）'
+                        : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文）'
                 }
-                aria-label="旁路提问"
+                aria-label="By The Way"
                 aria-pressed={btwOpen}
                 data-popover-trigger="btw"
                 disabled={!hasSession || remoteRunning}

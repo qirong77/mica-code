@@ -338,7 +338,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
 
-    // 旁路提问（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个面板。
+    // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个面板。
     // 线程状态（可复用的子代理 + 问答）只能活在 host 里，回答经通知推回。
     btwController = new BtwThreadController({
       agent,
@@ -656,7 +656,7 @@ type HostContext = {
   executor: HeadlessTurnExecutor;
   /** Automatic context compaction state machine (settings + run counters). */
   autoCompact: AutoCompactController;
-  /** 旁路提问（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
+  /** By The Way（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
   btw: BtwThreadController | null;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
@@ -1274,7 +1274,7 @@ async function handleCodexRequest(
       return;
     }
     case MICA_METHODS.btwAsk: {
-      // 旁路提问（CLI 的 `/btw`）：收下问题立刻返回，回答经
+      // By The Way（CLI 的 `/btw`）：收下问题立刻返回，回答经
       // `mica/btw/updated` 推回。**不能在这里 await**——请求循环是逐行 await 的，
       // 一次 btw 要发一次模型请求（可能几十秒），阻塞会把 turn/interrupt、
       // turn/steer、mica/queue/recall 全部堵在后面，而那正是主流程运行中要用的。

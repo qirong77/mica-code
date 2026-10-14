@@ -4,7 +4,7 @@ import { recordHelperSubagentUsage } from '../subagentUsage.js';
 import { createBtwThread, formatBtwNotice, parseBtwArgs, type BtwThread } from './btwThread.js';
 
 /**
- * `/btw <question>` — 旁路提问（CLI 的显示侧）。
+ * `/btw <question>` — By The Way（CLI 的显示侧）。
  *
  * 它在一个隔离子代理里执行，不阻塞也不影响主流程：
  * - 子代理拿到「主流程用户/助手文字对话记录 + btw 模式约束」作为上下文；
@@ -37,7 +37,7 @@ const btwThreads = new WeakMap<object, BtwThread>();
 export function createBtwCommand(agent: CommandAgent, services: CommandRuntimeServices) {
   return {
     name: 'btw',
-    description: '旁路提问：用一个隔离子代理回答，不打扰主流程（用法：/btw 问题，/btw -continue 追问）',
+    description: 'By The Way：用一个隔离子代理回答，不打扰主流程（用法：/btw 问题，/btw -continue 追问）',
     action: (args?: string) => {
       void runBtw(agent, services, args?.trim() ?? '');
     },

@@ -2,7 +2,7 @@ import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from '../services.js';
 
 /**
- * btw（旁路提问）里与「谁显示回答」无关的部分：背景记录的取法、系统提示词、
+ * btw（By The Way）里与「谁显示回答」无关的部分：背景记录的取法、系统提示词、
  * 隔离子代理，以及线程（可复用的子代理 + 已记账请求数）。
  *
  * 单独成文件是因为有两类消费者，而它们的依赖必须分开：

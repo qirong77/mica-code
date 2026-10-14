@@ -9,7 +9,7 @@ import { PtyDriver } from '@packages/mica-pty/index.js';
 /**
  * PTY end-to-end test for the `/btw` command. Drives the real `dist/mica` TUI
  * against a local mock OpenAI responses provider. After a normal turn, it fires
- * `/btw 这个方案可行吗` and asserts the旁路 notice appears (with the question and
+ * `/btw 这个方案可行吗` and asserts the By The Way notice appears (with the question and
  * the answer, and a `/btw -continue` affordance) without breaking the main flow.
  *
  *   bun run build
@@ -111,7 +111,7 @@ function createMockProvider(script: ScriptStep[]) {
 }
 
 suite('/btw PTY end-to-end (mock provider)', () => {
-  it('shows a旁路 notice with the answer and a -continue affordance after /btw <q>', async () => {
+  it('shows a By The Way notice with the answer and a -continue affordance after /btw <q>', async () => {
     const mock = createMockProvider([
       { kind: 'text', text: '收到。' },
       { kind: 'text', text: '可行，但需注意边界。' },
@@ -167,11 +167,11 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       const t1 = await driver.waitTurnCompleted(0, { timeoutMs: 90_000 });
       if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}`);
 
-      // /btw：一条旁路问题，主流程不等待
+      // /btw：一条 By The Way 问题，主流程不等待
       await driver.typeText('/btw 这个方案可行吗', 15);
       driver.enter();
 
-      // 等待旁路 notice 出现
+      // 等待 By The Way notice 出现
       const gotBtw = await driver.waitFor(/这个方案可行吗/, { timeoutMs: 90_000 });
       if (!gotBtw) fail('未看到 btw 问题');
       const gotAnswer = await driver.waitFor(/可行，但需注意边界/, { timeoutMs: 90_000 });

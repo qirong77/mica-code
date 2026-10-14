@@ -156,7 +156,7 @@ export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
 } as const;
 
 /**
- * Mica extension notification: 旁路提问（btw）线程的快照。
+ * Mica extension notification: By The Way（btw）线程的快照。
  *
  * CLI 里 btw 是 `/btw <问题>` 命令——一个隔离子代理，拿主流程的对话记录当背景回答
  * 问题，不写回主流程、不进主请求上下文，主流程运行中也能问；`/btw -continue` 复用
@@ -260,7 +260,7 @@ export type MicaAutoCompactStatus = {
  *   (prompt, streamed timeline, result, usage) live in the host's
  *   `SubagentTaskManager` and are never persisted, so the desktop's detail modal
  *   reads them from the host.
- * - `mica/btw/ask`: 旁路提问（CLI 的 `/btw`）。收下问题立刻返回，答案走
+ * - `mica/btw/ask`: By The Way（CLI 的 `/btw`）。收下问题立刻返回，答案走
  *   `MICA_BTW_NOTIFICATIONS.updated`——见那里的说明（同步等会把 interrupt/steer
  *   一起堵住）。
  *

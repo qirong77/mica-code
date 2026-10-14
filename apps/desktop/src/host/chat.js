@@ -1099,7 +1099,7 @@ function handleHostNotification(id, run, notification) {
     method === 'mica/btw/updated'
   ) {
     // Long-lived host state snapshots: background shell tasks / running
-    // subagents / pending `wait_for` waits / the 旁路提问（btw）thread survive
+    // subagents / pending `wait_for` waits / the By The Way（btw）thread survive
     // the parent turn and arrive on their own cadence, so
     // they must NOT go through the turn event buffer (appendBufferedEvent would
     // let frequent snapshots evict text/step_finish events and replay stale
@@ -1557,7 +1557,7 @@ export function registerChatIpc() {
     return hostTaskRequest(run, 'mica/subagentTasks/kill', { taskId })
   })
 
-  // 旁路提问（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
+  // By The Way（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
   // host 立刻回 `{ ok: true }`，答案随后经 `mica/btw/updated` 快照到达。所以这个
   // 请求不会被 turn 在跑挡掉，也不改 run.running/hostPending。
   ipcMain.handle('chat:btw-ask', (event, { id, question, newThread, sessionId, cwd } = {}) => {
@@ -1570,11 +1570,12 @@ export function registerChatIpc() {
       // 这个节点还没有常驻 host：页面刚打开一条会话（还没发过消息）、host 被回收、
       // 或进程已经退出。**必须按需起一个**——btw 的意义恰恰是「不往会话里发消息也能问」
       // （刚打开一条历史会话想知道它在做什么，就是典型用法），要求用户先随便发一条
-      // 消息才能用旁路提问，等于把最该成立的场景挡在门外。
+      // 消息才能用 By The Way，等于把最该成立的场景挡在门外。
       // 起法与发消息同源：按 sessionId resume（没有 sessionId 的草稿没有主流程记录
       // 可作背景，也没有地方记这次开销，直接如实拒绝）。
       const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
-      if (!targetSessionId) return { ok: false, error: '先发一条消息，有了会话才能旁路提问' }
+      if (!targetSessionId)
+        return { ok: false, error: '先发一条消息，有了会话才能用 By The Way 提问' }
       // 别的进程（终端里的 TUI / 另一个运行时）正持有该会话的 turn lease 时不能起：
       // host 启动会 resume 同一个会话文件，btw 结束时还要把用量写回去。
       const unavailable = sessionBusyElsewhere(targetSessionId)

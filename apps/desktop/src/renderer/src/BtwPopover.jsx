@@ -3,7 +3,7 @@ import { IconAlertCircle, IconLoader2, IconMessageChatbot, IconSend } from '@tab
 import { Popover } from './Popover'
 
 /**
- * 输入条动作区的「旁路提问」（btw）面板 —— CLI `/btw` 的桌面等价物。
+ * 输入条动作区的「By The Way」（btw）面板 —— CLI `/btw` 的桌面等价物。
  *
  * 为什么是一个**面板**而不是一条消息：btw 的语义是「不进入本会话上下文」——回答既
  * 不写进会话文件，也不参与主请求。放进对话流会让人分不清哪些内容进了上下文，所以它
@@ -65,7 +65,7 @@ export function BtwPopover({
     // 图标与输入条上那个触发按钮同一个：面板和它的入口要一眼对得上。
     <Popover
       name="btw"
-      title="旁路提问"
+      title="By The Way"
       icon={<IconMessageChatbot size={13} />}
       meta={running ? '正在回答…' : '不进入本会话上下文'}
       onClose={onClose}
@@ -93,7 +93,7 @@ export function BtwPopover({
             className="chat-btw-input"
             rows={1}
             value={draft}
-            aria-label="旁路问题"
+            aria-label="By The Way 问题"
             placeholder={
               running ? '正在回答上一个问题…' : '问点什么，Enter 发送 · Shift+Enter 换行'
             }
@@ -111,7 +111,7 @@ export function BtwPopover({
             type="button"
             className="chat-popover-icon chat-btw-send"
             title="发送（不影响主流程）"
-            aria-label="发送旁路问题"
+            aria-label="发送 By The Way 问题"
             disabled={!String(draft || '').trim() || running || sending}
             onClick={submit}
           >

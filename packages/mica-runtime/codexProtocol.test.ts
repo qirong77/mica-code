@@ -36,7 +36,7 @@ describe('codex protocol framing', () => {
     expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({ updated: 'mica/autoCompact/updated' });
   });
 
-  // Same reason: the desktop host matches this literal string to route a 旁路提问
+  // Same reason: the desktop host matches this literal string to route a By The Way
   // (btw) answer into the panel; renaming one side silently drops every answer.
   it('pins the Mica btw notification name', () => {
     expect(MICA_BTW_NOTIFICATIONS).toEqual({ updated: 'mica/btw/updated' });
