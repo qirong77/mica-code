@@ -210,6 +210,14 @@ function createWebApi(env) {
       // 读取 / 停止一个 subagent 任务（Codex 协议扩展 mica/subagentTasks/*）
       subagentDetail: (id, taskId) => invoke('chat:subagent-detail', { id, taskId }),
       killSubagent: (id, taskId) => invoke('chat:kill-subagent', { id, taskId }),
+      // 旁路提问（CLI 的 `/btw`，扩展 mica/btw/ask）：只收下问题，回答随后作为
+      // `btw_thread` 快照事件到达（mica/btw/updated）。所以它可以在 turn 运行中调用。
+      btwAsk: (id, question, options = {}) =>
+        invoke('chat:btw-ask', {
+          id,
+          question: question || '',
+          newThread: options.newThread === true
+        }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),

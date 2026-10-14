@@ -769,6 +769,82 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(rerunInput).not.toContain('第二条');
   });
 
+  itE2E('mica/btw/ask answers out-of-band without touching the main conversation', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('btw');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 先跑一轮：btw 拿主流程的对话记录当背景，桌面端也只在会话存在时才让问。
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '你好' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'turn/completed');
+
+    const requestsBeforeBtw = mock!.state.requests.length;
+    const entries = (m: HostMessage) => m.params?.entries as Array<Record<string, unknown>> | undefined;
+
+    // 请求立刻返回（同步等一次模型回答会把中断/排队/撤回堵在它后面），
+    // 答案经 mica/btw/updated 推回。
+    await send(host, 2, 'mica/btw/ask', { question: '这个方案可行吗' });
+    const ack = await waitFor(host, (m) => m.id === 2, 'btw ack');
+    expect(ack.result).toMatchObject({ ok: true });
+    const running = await waitFor(
+      host,
+      (m) => m.method === 'mica/btw/updated' && entries(m)?.[0]?.status === 'running',
+      'btw running snapshot',
+    );
+    const answered = await waitFor(
+      host,
+      (m) => m.method === 'mica/btw/updated' && entries(m)?.[0]?.status === 'completed',
+      'btw answer',
+    );
+    // 同一线程：追问复用同一个子代理，只有「新话题」才换线程。
+    expect(running.params?.id).toBe(answered.params?.id);
+    expect(entries(answered)?.[0]).toMatchObject({
+      question: '这个方案可行吗',
+      answer: '你好，我是 mock 模型的回复',
+    });
+
+    // 子代理的提示词带上了主流程的对话记录（btw 模式说明 + 背景记录）。
+    expect(mock!.state.requests.length).toBe(requestsBeforeBtw + 1);
+    const btwRequest = mock!.state.requests.at(-1)!;
+    expect(btwRequest.instructions).toContain('btw');
+    expect(btwRequest.instructions).toContain('你好');
+
+    // 主流程完全不受影响：会话里没有 btw 的问答，turn 仍是正常完成，用量单独记账。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      turnState?: string;
+      snapshot?: {
+        conversationMessages?: Array<{ role?: string; content?: unknown }>;
+        subagentUsageHistory?: Array<{ subagentType?: string; status?: string }>;
+      };
+    };
+    expect(session.turnState).toBe('completed');
+    const userTexts = (session.snapshot?.conversationMessages ?? [])
+      .filter((message) => message.role === 'user')
+      .map((message) => contentTextOf(message.content));
+    expect(userTexts).toEqual(['你好']);
+    expect(session.snapshot?.subagentUsageHistory).toMatchObject([
+      { subagentType: 'btw', status: 'completed' },
+    ]);
+
+    // 「新话题」只重置线程，不提问。
+    await send(host, 3, 'mica/btw/ask', { newThread: true });
+    const reset = await waitFor(
+      host,
+      (m) => m.method === 'mica/btw/updated' && entries(m)?.length === 0,
+      'btw thread reset',
+    );
+    expect(reset.params?.id).not.toBe(answered.params?.id);
+  });
+
   itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

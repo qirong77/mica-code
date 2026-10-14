@@ -2939,6 +2939,98 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 40%);
 }
 
+/* 旁路提问（btw）入口：正在回答时点亮（旋转图标自带反馈，这里只给颜色）。 */
+.chat-composer-btw.is-active {
+  color: var(--color-warn);
+}
+
+/* -------------------------------------------------------- 旁路提问（btw）面板
+
+   外壳仍旧是 `.chat-popover`（尺寸、锚点、关闭时机只有一份），这里只写线程与输入条。
+   滚动只有一处：外壳的 `.chat-popover-body`（面板 max-height 由它兜着），线程不再自己
+   套一层 max-height —— 两层滚动时自动「滚到底」滚的是内层，会被外层裁掉看不见。
+   回答是 markdown（复用对话区的渲染），所以正文用同一套阅读面色与字号。 */
+.chat-btw-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 线程是正文而不是面板元信息：与对话区共用同一档阅读字号，不在局部硬编码 */
+  font-size: var(--chat-text-size);
+}
+
+.chat-btw-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-btw-question {
+  display: flex;
+  gap: 6px;
+  color: var(--color-fg);
+}
+
+.chat-btw-question-mark {
+  flex: none;
+  color: rgb(255 255 255 / 30%);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.chat-btw-question-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* 回答直接复用对话区的 markdown 渲染（颜色与字号由 .chat-markdown 给），
+   这里不需要第二套样式——它本来就是一段真正的模型回答。 */
+
+.chat-btw-thinking,
+.chat-btw-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-btw-thinking {
+  color: rgb(255 255 255 / 40%);
+}
+
+.chat-btw-error {
+  color: var(--color-danger);
+}
+
+.chat-btw-empty {
+  padding: 2px 0;
+  color: rgb(255 255 255 / 32%);
+  line-height: 1.6;
+}
+
+/* 输入条：与动作区同一行（左：新话题，中：问题，右：发送） */
+.chat-btw .chat-popover-actions {
+  align-items: flex-end;
+}
+
+.chat-btw-input {
+  min-width: 0;
+  min-height: 22px;
+  max-height: 88px;
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--color-line);
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  font-size: var(--chat-text-size);
+  line-height: 1.4;
+  resize: none;
+}
+
+/* 发送按钮不参与「图标按钮压扁主按钮」那套：它本身就是图标按钮，但要有底色区分 */
+.chat-btw-send {
+  color: rgb(255 255 255 / 55%);
+}
+
 .chat-loop-form {
   display: flex;
   flex-wrap: wrap;

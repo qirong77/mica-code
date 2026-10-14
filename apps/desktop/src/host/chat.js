@@ -1095,11 +1095,12 @@ function handleHostNotification(id, run, notification) {
   } else if (
     method === 'mica/backgroundTasks/updated' ||
     method === 'mica/subagentTasks/updated' ||
-    method === 'mica/waitTasks/updated'
+    method === 'mica/waitTasks/updated' ||
+    method === 'mica/btw/updated'
   ) {
     // Long-lived host state snapshots: background shell tasks / running
-    // subagents / pending `wait_for` waits survive the parent turn and arrive
-    // on their own cadence, so
+    // subagents / pending `wait_for` waits / the 旁路提问（btw）thread survive
+    // the parent turn and arrive on their own cadence, so
     // they must NOT go through the turn event buffer (appendBufferedEvent would
     // let frequent snapshots evict text/step_finish events and replay stale
     // lists on restore). Deliver directly; the renderer replaces the whole
@@ -1554,6 +1555,22 @@ export function registerChatIpc() {
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
     return hostTaskRequest(run, 'mica/subagentTasks/kill', { taskId })
+  })
+
+  // 旁路提问（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
+  // host 立刻回 `{ ok: true }`，答案随后经 `mica/btw/updated` 快照到达。所以这个
+  // 请求不会被 turn 在跑挡掉，也不改 run.running/hostPending。
+  ipcMain.handle('chat:btw-ask', (event, { id, question, newThread } = {}) => {
+    const text = typeof question === 'string' ? question.trim() : ''
+    const reset = newThread === true
+    // 空问题只在「新话题」（重置线程）时合法：下一次提问会重取背景记录。
+    if (!id || (!text && !reset)) return { ok: false, error: '问题不能为空' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/btw/ask', {
+      question: text,
+      ...(reset ? { newThread: true } : {})
+    })
   })
 
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {

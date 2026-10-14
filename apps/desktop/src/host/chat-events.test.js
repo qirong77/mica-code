@@ -528,6 +528,30 @@ describe('chat CLI arguments', () => {
     ).toMatchObject({ type: 'subagent_tasks', tasks: [] })
   })
 
+  it('maps mica btw thread snapshots to btw_thread events', () => {
+    expect(
+      codexNotificationToEvent({
+        method: 'mica/btw/updated',
+        params: {
+          threadId: 's1',
+          id: 'thread-1',
+          entries: [{ id: 'e1', question: '这个方案可行吗', status: 'completed', answer: '可以' }]
+        }
+      })
+    ).toMatchObject({
+      type: 'btw_thread',
+      sessionID: 's1',
+      thread: {
+        id: 'thread-1',
+        entries: [{ id: 'e1', status: 'completed', answer: '可以' }]
+      }
+    })
+    // 没有 entries 的推送当空线程处理，渲染层照常画空态。
+    expect(
+      codexNotificationToEvent({ method: 'mica/btw/updated', params: { threadId: 's1' } })
+    ).toMatchObject({ type: 'btw_thread', thread: { id: '', entries: [] } })
+  })
+
   it('maps replaced session history to a session_history_replaced event', () => {
     expect(
       codexNotificationToEvent({

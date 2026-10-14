@@ -156,6 +156,52 @@ export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
 } as const;
 
 /**
+ * Mica extension notification: 旁路提问（btw）线程的快照。
+ *
+ * CLI 里 btw 是 `/btw <问题>` 命令——一个隔离子代理，拿主流程的对话记录当背景回答
+ * 问题，不写回主流程、不进主请求上下文，主流程运行中也能问；`/btw -continue` 复用
+ * 同一个子代理追问。桌面端的等价物是输入条上的一个面板：面板里连续追问就是
+ * `-continue`，所以「一条线程」在两边是同一个东西（那唯一的子代理活在 host 进程里）。
+ *
+ * 回答要发一次模型请求，可能几十秒，而 host 的请求处理是逐行 await 的：同步等一个
+ * btw 会把 `turn/interrupt`、`turn/steer`、`mica/queue/recall` 堵在它后面——主流程
+ * 运行中恰恰最需要它们。所以 `mica/btw/ask` 只收下问题就返回，答案经这里推回：
+ *
+ * - 与任务快照同样是「整份快照」推送（客户端整体替换），不是增量；
+ * - 与任务快照一样**不进 turn 事件缓冲**：btw 不属于任何 turn，回答可能要好几个
+ *   turn 之后才到，走事件缓冲只会把 text/step_finish 这类真事件挤掉。
+ */
+export const MICA_BTW_NOTIFICATIONS = {
+  updated: 'mica/btw/updated',
+} as const;
+
+export type MicaBtwEntry = {
+  id: string;
+  question: string;
+  status: 'running' | 'completed' | 'error';
+  /** 回答正文（`status === 'completed'` 时才有）。 */
+  answer?: string;
+  /** 失败原因（`status === 'error'` 时才有）。 */
+  error?: string;
+  startedAt: string;
+  finishedAt?: string | null;
+};
+
+/** 一整条 btw 线程（问答 + 线程 id）。 */
+export type MicaBtwThread = {
+  /** 线程 id。`newThread` 重置后换一个，客户端据此丢弃上一串问答。 */
+  id: string;
+  /** 有界：只保留最近若干条（host 侧裁剪），顺序即时间顺序。 */
+  entries: MicaBtwEntry[];
+};
+
+/** `MICA_BTW_NOTIFICATIONS.updated` 的 payload。 */
+export type MicaBtwThreadUpdated = MicaBtwThread & {
+  /** 会话 id（其余 Mica 通知同款字段），客户端据此把线程归到对应会话。 */
+  threadId?: string;
+};
+
+/**
  * Settings + per-session run counters for automatic compaction. Sent by the
  * client on `turn/start` / `mica/turn/editMessage` (the resident host is
  * spawned once, so the user's panel changes can only reach it per turn) and
@@ -214,6 +260,9 @@ export type MicaAutoCompactStatus = {
  *   (prompt, streamed timeline, result, usage) live in the host's
  *   `SubagentTaskManager` and are never persisted, so the desktop's detail modal
  *   reads them from the host.
+ * - `mica/btw/ask`: 旁路提问（CLI 的 `/btw`）。收下问题立刻返回，答案走
+ *   `MICA_BTW_NOTIFICATIONS.updated`——见那里的说明（同步等会把 interrupt/steer
+ *   一起堵住）。
  *
  * Codex clients never send them; the host answers unknown methods with
  * method-not-found, so a Codex driver is unaffected.
@@ -227,7 +276,18 @@ export const MICA_METHODS = {
   backgroundTaskOutput: 'mica/backgroundTasks/output',
   subagentTaskDetail: 'mica/subagentTasks/detail',
   killSubagentTask: 'mica/subagentTasks/kill',
+  btwAsk: 'mica/btw/ask',
 } as const;
+
+export type MicaBtwAskParams = {
+  /**
+   * 问题。留空（或只有空白）且 `newThread` 为真时表示「只重置线程」——面板上的
+   * 「新话题」按钮，下一次提问会重新取一份主流程对话记录当背景。
+   */
+  question?: string;
+  /** 另起一条线程，而不是续问上一条（等价 CLI 里不带 `-continue` 的那次提问）。 */
+  newThread?: boolean;
+};
 
 export type MicaEditMessageParams = {
   /** Original text of the message being edited (matched against user messages). */

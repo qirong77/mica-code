@@ -51,6 +51,10 @@ export { createRenameCommand } from './commands/rename.js';
 export { createResumeCommand, formatResumeSessionTitle } from './commands/resume.js';
 export { createRewindCommand, rewindCheckpointCells } from './commands/rewind.js';
 export { createBtwCommand, parseBtwArgs, formatBtwNotice, buildBtwSystemPrompt, messagesToTranscript } from './commands/btw.js';
+// btw 的纯逻辑单独成文件：headless 的 btw 面板（app-server）不能拉 Ink 进来，
+// 只能从 './commands/btwThread.js' 直接取，见那里的说明。
+export { createBtwThread } from './commands/btwThread.js';
+export type { BtwThread, BtwSubagent } from './commands/btwThread.js';
 
 export type {
   ClearIdleAgentsResult,

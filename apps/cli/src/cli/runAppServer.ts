@@ -18,6 +18,7 @@ import {
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
   MICA_AUTO_COMPACT_NOTIFICATIONS,
+  MICA_BTW_NOTIFICATIONS,
   MICA_METHODS,
   MICA_QUEUE_NOTIFICATIONS,
   MICA_SESSION_NOTIFICATIONS,
@@ -62,6 +63,7 @@ import {
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { AutoCompactController } from '../runtime/autoCompact.js';
+import { BtwThreadController } from '../runtime/btwThread.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
@@ -246,6 +248,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
   let autoCompact: AutoCompactController | null = null;
+  let btwController: BtwThreadController | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
   let mcpInitPromise: Promise<unknown> | null = null;
@@ -334,6 +337,20 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     });
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
+
+    // 旁路提问（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个面板。
+    // 线程状态（可复用的子代理 + 问答）只能活在 host 里，回答经通知推回。
+    btwController = new BtwThreadController({
+      agent,
+      sessionController,
+      onUpdate: (thread) => {
+        try {
+          writeNotification(MICA_BTW_NOTIFICATIONS.updated, { threadId: sessionId, ...thread });
+        } catch {
+          // stdout 在退出流程里可能已经关闭；回答推不出去不该影响 host。
+        }
+      },
+    });
 
     if (options.sessionId) {
       let resumed: { ok: true } | { ok: false; message?: string };
@@ -605,6 +622,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         runtimeOverride,
         executor: executor!,
         autoCompact: autoCompact!,
+        btw: btwController,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
         setSessionId: (nextSessionId) => {
@@ -638,6 +656,8 @@ type HostContext = {
   executor: HeadlessTurnExecutor;
   /** Automatic context compaction state machine (settings + run counters). */
   autoCompact: AutoCompactController;
+  /** 旁路提问（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
+  btw: BtwThreadController | null;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
   sessionId: string;
@@ -1251,6 +1271,43 @@ async function handleCodexRequest(
       ctx.subagentTasks.kill(taskId, ctx.agent);
       ctx.refreshTaskSnapshots();
       ctx.writeResponse({ ok: true, message: `已请求停止 subagent ${taskId}。` });
+      return;
+    }
+    case MICA_METHODS.btwAsk: {
+      // 旁路提问（CLI 的 `/btw`）：收下问题立刻返回，回答经
+      // `mica/btw/updated` 推回。**不能在这里 await**——请求循环是逐行 await 的，
+      // 一次 btw 要发一次模型请求（可能几十秒），阻塞会把 turn/interrupt、
+      // turn/steer、mica/queue/recall 全部堵在后面，而那正是主流程运行中要用的。
+      // 与 turn 无关：不占队列、不改 run 生命周期，turn 正在跑也可以问。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      if (!ctx.sessionId) {
+        // 没有会话就没有「主流程对话记录」可作背景，也没有地方记这次开销。
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'btw 需要先有一条会话');
+        return;
+      }
+      const question = (paramString(params, 'question') ?? '').trim();
+      const newThread = params.newThread === true;
+      if (!question) {
+        // 面板的「新话题」：只重置线程，不提问（下一次提问重新取一份主流程记录）。
+        if (newThread) {
+          ctx.btw.reset();
+          ctx.writeResponse({ ok: true, threadId: ctx.btw.snapshot().id });
+          return;
+        }
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'question must not be empty');
+        return;
+      }
+      const result = ctx.btw.ask(question, { newThread });
+      if (!result.ok) {
+        // 业务性拒绝（空问题 / 上一个还在回答）走响应，让面板原样显示原因；
+        // 协议层错误才用 writeError。
+        ctx.writeResponse({ ok: false, message: result.message });
+        return;
+      }
+      ctx.writeResponse({ ok: true, threadId: ctx.btw.snapshot().id });
       return;
     }
     default:

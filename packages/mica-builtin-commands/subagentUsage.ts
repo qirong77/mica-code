@@ -12,10 +12,14 @@ import type { CommandAgent, CommandRuntimeServices } from './services.js';
  *
  * 这些请求不属于任何 turn，没有别的保存时机，只留在内存里就等于没记（它们同样是
  * 本会话真实产生的开销）。turn 内的主请求不走这里，它们由 provider 的 `usageHistory` 记。
+ *
+ * 第二个参数只需要「能拿到会话控制器」：命令侧直接传 `CommandRuntimeServices`，
+ * 而常驻 host（`mica app-server` 的 btw）没有整套 services，只包一层
+ * `{ getCurrentSessionController: () => sessionController }` 即可，落盘规则仍只有一份。
  */
 export function recordHelperSubagentUsage(
   agent: CommandAgent,
-  services: CommandRuntimeServices,
+  services: Pick<CommandRuntimeServices, 'getCurrentSessionController'>,
   requests: AgentUsageRecord[],
   meta: SubagentUsageTaskMeta,
 ): SubagentUsageRecord | null {

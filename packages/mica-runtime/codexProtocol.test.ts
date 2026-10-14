@@ -3,6 +3,7 @@ import {
   CODEX_METHODS,
   CODEX_ERROR_METHOD_NOT_FOUND,
   MICA_AUTO_COMPACT_NOTIFICATIONS,
+  MICA_BTW_NOTIFICATIONS,
   MICA_METHODS,
   encodeCodexError,
   encodeCodexNotification,
@@ -25,6 +26,7 @@ describe('codex protocol framing', () => {
       backgroundTaskOutput: 'mica/backgroundTasks/output',
       subagentTaskDetail: 'mica/subagentTasks/detail',
       killSubagentTask: 'mica/subagentTasks/kill',
+      btwAsk: 'mica/btw/ask',
     });
   });
 
@@ -32,6 +34,12 @@ describe('codex protocol framing', () => {
   // so renaming one side silently drops every automatic-compaction counter.
   it('pins the Mica automatic compaction notification name', () => {
     expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({ updated: 'mica/autoCompact/updated' });
+  });
+
+  // Same reason: the desktop host matches this literal string to route a 旁路提问
+  // (btw) answer into the panel; renaming one side silently drops every answer.
+  it('pins the Mica btw notification name', () => {
+    expect(MICA_BTW_NOTIFICATIONS).toEqual({ updated: 'mica/btw/updated' });
   });
 
   it('parses a JSON-RPC request with id/method/params', () => {

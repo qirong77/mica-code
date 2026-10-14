@@ -21,6 +21,7 @@ import {
   IconGitCommit,
   IconGitFork,
   IconLoader2,
+  IconMessageChatbot,
   IconMinimize,
   IconPhoto,
   IconSend,
@@ -66,6 +67,7 @@ import {
   rankCompletions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
+import { BtwPopover } from './BtwPopover'
 import { LoopBadge } from './LoopBadge'
 import { LoopPopover } from './LoopPopover'
 import { Popover } from './Popover'
@@ -600,6 +602,25 @@ function compactLine(value, max = 110) {
     .replace(/\s+/g, ' ')
     .trim()
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
+/**
+ * 找出「上一份 btw 快照里还在回答、这一份已经有结果」的条目。
+ *
+ * 这是「什么时候该补一条提示」的全部判定：面板关着时回答抵达要提示（btw 是后台发生的，
+ * 不说一声用户只会以为没反应），但快照在恢复重放时也会来一次，那时上一份快照是空的、
+ * 不会命中——否则每打开一次会话都会把历史回答再提示一遍。
+ */
+export function newlyAnsweredBtwEntries(previous, next) {
+  const before = new Map(
+    (Array.isArray(previous?.entries) ? previous.entries : []).map((entry) => [
+      entry.id,
+      entry.status
+    ])
+  )
+  return (Array.isArray(next?.entries) ? next.entries : []).filter(
+    (entry) => entry.status !== 'running' && before.get(entry.id) === 'running'
+  )
 }
 
 // 后台 subagent / 后台任务与 CLI TaskStatusBar 对齐：状态来自 app-server 的
@@ -2202,6 +2223,18 @@ export function ChatView({
   const [taskDetail, setTaskDetail] = useState(null)
   // 输入框右侧时钟图标点开的定时任务面板
   const [loopOpen, setLoopOpen] = useState(false)
+  // 旁路提问（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
+  const [btwThread, setBtwThread] = useState({ id: '', entries: [] })
+  const [btwOpen, setBtwOpen] = useState(false)
+  const [btwDraft, setBtwDraft] = useState('')
+  const [btwSending, setBtwSending] = useState(false)
+  // 上一次渲染的线程快照（在 applyBtwThread 里比较「刚回答完的那一条」），
+  // 面板关着时补一条提示用；同时兼作「回答到达」的去重依据。
+  const btwThreadRef = useRef({ id: '', entries: [] })
+  // 还没发出去的旁路问题：按节点存，切走再回来仍在（与主输入框的 drafts 同款）。
+  const btwDraftsRef = useRef(new Map())
+  const btwOpenRef = useRef(false)
+  btwOpenRef.current = btwOpen
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
@@ -2399,6 +2432,71 @@ export function ChatView({
     },
     [startLoop]
   )
+
+  const changeBtwDraft = useCallback(
+    (value) => {
+      btwDraftsRef.current.set(nodeIdRef.current, value)
+      setBtwDraft(value)
+    },
+    [nodeIdRef]
+  )
+
+  /**
+   * 旁路提问（CLI 的 `/btw`）。**不占队列、不改 run 状态**：host 收下问题立刻回，
+   * 回答随后作为 `btw_thread` 快照到达——所以主流程正在跑也能问，问完也不用等它。
+   * 失败（host 不在、已有问题在回答）时保留草稿，用户可以直接重试。
+   */
+  const askBtw = useCallback(
+    async (question) => {
+      const text = String(question || '').trim()
+      const targetNodeId = nodeIdRef.current
+      if (!text || btwSending) return
+      setBtwSending(true)
+      try {
+        // 草稿在发送成功后才清：失败时留在输入框里，用户不用重打。
+        const res = await window.mica.chat.btwAsk(targetNodeId, text)
+        if (nodeIdRef.current !== targetNodeId) return
+        if (!res?.ok) {
+          appendNotice(`旁路提问失败：${res?.error || '未知错误'}`, 'error')
+          return
+        }
+        if (res.result?.ok === false) {
+          appendNotice(`旁路提问失败：${res.result.message || '未知错误'}`, 'warn')
+          return
+        }
+        changeBtwDraft('')
+      } catch (error) {
+        if (nodeIdRef.current === targetNodeId) {
+          appendNotice(
+            `旁路提问失败：${error instanceof Error ? error.message : String(error)}`,
+            'error'
+          )
+        }
+      } finally {
+        setBtwSending(false)
+      }
+    },
+    [appendNotice, btwSending, changeBtwDraft, nodeIdRef]
+  )
+
+  /** 「新话题」：让 host 换一条线程（下一次提问重取主流程记录作背景）。 */
+  const resetBtwThread = useCallback(async () => {
+    const targetNodeId = nodeIdRef.current
+    try {
+      const res = await window.mica.chat.btwAsk(targetNodeId, '', { newThread: true })
+      if (nodeIdRef.current !== targetNodeId) return
+      if (!res?.ok) appendNotice(`新话题失败：${res?.error || '未知错误'}`, 'error')
+      else if (res.result?.ok === false)
+        appendNotice(`新话题失败：${res.result.message || '未知错误'}`, 'warn')
+    } catch (error) {
+      if (nodeIdRef.current === targetNodeId) {
+        appendNotice(
+          `新话题失败：${error instanceof Error ? error.message : String(error)}`,
+          'error'
+        )
+      }
+    }
+  }, [appendNotice, nodeIdRef])
 
   // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
@@ -2717,6 +2815,38 @@ export function ChatView({
     })
   }, [])
 
+  /**
+   * 收下 host 推来的 btw 线程快照（整体替换，`mica/btw/updated`）。
+   *
+   * 面板关着时回答到达要补一条提示：btw 是后台发生的（可以在主流程运行中提问、
+   * 也可以关了面板再回来），没有提示的话用户只会在某次打开面板时才发现答案早就
+   * 到了。判定放在这里而不是「有事件就提」，是因为快照在恢复重放时也会来一次，
+   * 那时不该再提示——比较的基准是上一份快照里那条 entry 是否还在 running。
+   */
+  const applyBtwThread = useCallback(
+    (thread) => {
+      const next = {
+        id: typeof thread?.id === 'string' ? thread.id : '',
+        entries: Array.isArray(thread?.entries) ? thread.entries : []
+      }
+      const previous = btwThreadRef.current
+      btwThreadRef.current = next
+      setBtwThread(next)
+      if (btwOpenRef.current) return
+      for (const entry of newlyAnsweredBtwEntries(previous, next)) {
+        if (entry.status === 'error') {
+          appendNotice(`旁路提问失败：${compactLine(entry.error || entry.question, 120)}`, 'error')
+        } else {
+          appendNotice(
+            `旁路提问已回答：${compactLine(entry.question, 80)}（输入条上打开「旁路提问」查看）`,
+            'info'
+          )
+        }
+      }
+    },
+    [appendNotice]
+  )
+
   const applyCompactMeta = useCallback((result) => {
     const totalTokens = Number(result?.afterTokenEstimate) || 0
     if (totalTokens <= 0 && !result?.contextWindowSize) return
@@ -2893,6 +3023,10 @@ export function ChatView({
           // Host 快照：整体替换 wait_for 正在等待的条件（阻塞 turn 期间常驻）。
           setWaitTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
+        case 'btw_thread':
+          // Host 快照：整体替换旁路提问线程（跨 turn 常驻，与对话流无关）。
+          applyBtwThread(event.thread)
+          break
         case 'session_history_replaced': {
           // session_compact 工具在 host 侧替换了持久化历史（主进程已重新
           // 读取会话文件）：立即用新历史替换消息列表，而不是保留旧记录直到
@@ -2925,7 +3059,8 @@ export function ChatView({
       refreshMetaSoon,
       updateMessages,
       setBackgroundTasks,
-      setSubagentTasks
+      setSubagentTasks,
+      applyBtwThread
     ]
   )
   const applyEventRef = useLatest(applyEvent)
@@ -3084,6 +3219,11 @@ export function ChatView({
     setRecallingQueueId(null)
     setBackgroundTasks([])
     setSubagentTasks([])
+    // btw 线程属于「这个会话的 host」，切节点必须换一份；半句话的草稿按节点存下来
+    // （切走再回来不丢），与主输入框的 drafts 同一套心智。
+    btwThreadRef.current = { id: '', entries: [] }
+    setBtwThread(btwThreadRef.current)
+    setBtwDraft(btwDraftsRef.current.get(nodeId) || '')
     setStopping(false)
     setPhase('idle')
     setRunStartedAt(0)
@@ -4474,9 +4614,14 @@ export function ChatView({
   // 挂着定时任务时输入框整体走提示色（与 CLI 的 loop prompt 同款），一眼看出这条会话在
   // 按间隔自动发送；颜色只跟「有没有循环」有关，不随倒计时每秒变化。
   const loopTone = activeLoop ? 'chat-composer-loop' : ''
-  // 切到别的对话时收起定时任务面板：它描述的是上一个会话的循环。
+  // 旁路提问（btw）：入口在输入条动作区，线程状态是 host 的快照投影。
+  // 有会话才有 host、才有「主流程记录」可作背景（草稿会话还没有 sessionId）。
+  const hasSession = Boolean(node?.sessionId || sessionIdRef.current)
+  const btwRunning = btwThread.entries.some((entry) => entry.status === 'running')
+  // 切到别的对话时收起定时任务与 btw 面板：两者描述的都是上一个会话。
   useEffect(() => {
     setLoopOpen(false)
+    setBtwOpen(false)
   }, [nodeId])
 
   // 输入框行首标记（与 CLI 的 prompt 同款）：非默认角色时在标记前显示角色名。
@@ -4601,6 +4746,12 @@ export function ChatView({
       reveal: (path) => revealPathInFinder(resolveChatPath(path, cwdRef.current))
     }),
     [revealPathInFinder, transcriptOpenFile]
+  )
+  // btw 的回答同样过 Markdown（代码块、路径可点）：由 ChatView 传下去，面板自己不去
+  // import ChatView（那会形成循环依赖），引用保持稳定以免废掉 Markdown 的 memo。
+  const renderBtwAnswer = useCallback(
+    (text) => <Markdown text={text || ''} onOpenFile={transcriptOpenFile} />,
+    [transcriptOpenFile]
   )
 
   return (
@@ -4745,6 +4896,18 @@ export function ChatView({
               onFireNow={() => window.mica.loops.fireNow(nodeId).catch(() => {})}
               onStop={() => window.mica.loops.stop(nodeId).catch(() => {})}
               onClose={() => setLoopOpen(false)}
+            />
+          )}
+          {btwOpen && (
+            <BtwPopover
+              thread={btwThread}
+              draft={btwDraft}
+              sending={btwSending}
+              onDraftChange={changeBtwDraft}
+              onAsk={askBtw}
+              onNewThread={resetBtwThread}
+              renderAnswer={renderBtwAnswer}
+              onClose={() => setBtwOpen(false)}
             />
           )}
           <div
@@ -4955,6 +5118,33 @@ export function ChatView({
               {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把上传按钮和时钟拉开
                   两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
               {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
+              {/* 旁路提问（CLI 的 /btw）：主流程运行中也照常可点——它正是为
+                  「顺手问一句、不影响当前任务」而存在的。没有会话时没有 host，
+                  也就没有主流程记录可当背景，所以那时禁用。 */}
+              <button
+                type="button"
+                className={`chat-composer-btw ${btwRunning ? 'is-active' : ''}`}
+                title={
+                  !hasSession
+                    ? '旁路提问需要先有一条会话'
+                    : remoteRunning
+                      ? '该会话正在另一个进程里运行'
+                      : btwRunning
+                        ? '旁路提问：正在回答…（点击查看）'
+                        : '旁路提问：不打扰主流程地问一句（回答不进入本会话上下文）'
+                }
+                aria-label="旁路提问"
+                aria-pressed={btwOpen}
+                data-popover-trigger="btw"
+                disabled={!hasSession || remoteRunning}
+                onClick={() => setBtwOpen((open) => !open)}
+              >
+                {btwRunning ? (
+                  <IconLoader2 size={13} className="animate-spin" />
+                ) : (
+                  <IconMessageChatbot size={13} />
+                )}
+              </button>
               <button
                 type="button"
                 className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
