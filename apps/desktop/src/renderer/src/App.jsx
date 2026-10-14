@@ -57,6 +57,7 @@ import {
 } from './right-terms'
 import {
   createColdStartTerminal,
+  dedupeSessionNodes,
   normalizeNodes,
   pickReusableDraft,
   removeNode,
@@ -90,7 +91,7 @@ function recentChatCwd() {
 }
 
 /**
- * 分享链接弹窗：给出这条会话专属的地址（地址与令牌都由运行时签发，见 shareSession）。
+ * 分享链接弹窗：给出这条会话的地址（地址由运行时按网卡/公网配置算，见 shareSession）。
  * 复制按钮走页面自己的剪贴板（局域网 http 访问时 transport 会退到 execCommand）。
  */
 function ShareDialog({ state, onClose }) {
@@ -127,9 +128,9 @@ function ShareDialog({ state, onClose }) {
       >
         <h2 className="mb-1.5 text-sm font-semibold text-white/95">分享链接</h2>
         <p className="mb-2.5 text-[11px] leading-relaxed text-white/45">
-          拿到链接的人可以像你一样对话、操作这个会话，但只能看到它：左侧会话列表整个隐藏、
-          也不能打开，其它会话与宿主的文件 / 终端 / 配置都拿不到。范围由运行时判定，
-          改地址栏或删参数都绕不过去；链接 7 天后自动失效。
+          链接里只有这条会话的 id。拿到的人连的是这台运行时，看到的是同一个界面
+          （会话列表、文件、终端都在），并从这条会话开始——和你在本机打开它没有区别。
+          这台运行时没有账号体系，请只发给你信任的人。
         </p>
         <div className="mb-2.5 flex items-center gap-2">
           <input
@@ -770,12 +771,16 @@ function savedTerminalHeight() {
  * 没有页签时返回 null，由调用方决定「开一个干净草稿」还是「什么都不做」。
  */
 function resolveWorkspace(stored) {
-  const nodes = stored ? normalizeNodes(stored.nodes) : []
-  if (nodes.length === 0) return null
-  const activeId = nodes.some((node) => node.id === stored.activeId) ? stored.activeId : nodes[0].id
-  const selectedId = nodes.some((node) => node.id === stored.selectedId)
-    ? stored.selectedId
-    : activeId
+  const raw = stored ? normalizeNodes(stored.nodes) : []
+  if (raw.length === 0) return null
+  // 同一条会话只留一个页签（判定与理由见 workspace.js 的 dedupeSessionNodes）：`prefer`
+  // 迟到一步也没关系，页面会再按 notify 里的运行态收敛一次（见下面的工作区同步 effect）。
+  const { nodes, remap } = dedupeSessionNodes(raw)
+  const move = (id) => (typeof id === 'string' ? remap.get(id) || id : id)
+  const wantedActive = move(stored.activeId)
+  const activeId = nodes.some((node) => node.id === wantedActive) ? wantedActive : nodes[0].id
+  const wantedSelected = move(stored.selectedId)
+  const selectedId = nodes.some((node) => node.id === wantedSelected) ? wantedSelected : activeId
   return { nodes, activeId, selectedId }
 }
 
@@ -830,9 +835,6 @@ export default function App() {
   // 地址栏里的页面级状态只在首次渲染读一次：`sessionId` 是启动时要落到的会话。
   // 之后是单向同步（App → 地址栏）。
   const [urlState] = useState(() => readAppUrl(window.location.search))
-  // 「只看这一个会话」是**服务端**给的访问范围（分享令牌换来的 cookie），不是 URL 里的
-  // 标记：自己往地址栏写 share=1 什么也改变不了，删掉链接里的参数也不会放宽权限。
-  const shareMode = typeof window !== 'undefined' && window.mica?.scope === 'share'
   const urlSessionRef = useRef(urlState.sessionId)
   // 界面状态在渲染前已经从运行时取回（main.jsx 的 ensureUiState），所以第一帧就是上一次
   // 退出时的样子：直接用取回的工作区播种，不再有「先画空界面再加载」的过程。
@@ -846,6 +848,7 @@ export default function App() {
   const [rightTermsByChat, setRightTermsByChat] = useState({})
   const rightTermsByChatRef = useLatest(rightTermsByChat)
   const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
+  const rightActiveTermByChatRef = useLatest(rightActiveTermByChat)
   // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
   // 白白重渲染整个面板，所以放 ref 里。
   const rightTermActivityRef = useRef(new Map())
@@ -905,13 +908,8 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
-  // 分享页面里侧栏是「不存在」而不是「被收起」：不写回 layout（那会把别人的侧栏也收掉），
-  // 只在渲染与面板宽度上限里把它当成收起处理（宽度为 0、不可展开、不占列宽）。
-  const sidebarHidden = sidebarCollapsed || shareMode
-  // 分享页里终端面板与文件视图同样是「不存在」而不是「被收起」：访客没有 files:*/
-  // terminal:* 权限，展开只会拿到一串权限错误。与侧栏同一套做法——只在渲染里当成
-  // 关闭处理，不写回 layout（写进去会把所有者的界面也改掉）。
-  const terminalVisible = terminalOpen && !shareMode
+  const sidebarHidden = sidebarCollapsed
+  const terminalVisible = terminalOpen
   // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一变量）
   useLayoutEffect(() => {
     setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
@@ -1181,6 +1179,27 @@ export default function App() {
     setSelectedId(next.selectedId)
   }, [remoteWorkspace])
 
+  // 终端面板（哪个会话开了哪些终端、当前选中哪个）同样是运行时的界面状态：PTY 本身就活在
+  // 运行时里、输出经 SSE 广播给所有客户端，把这份清单也共享出去，第二个窗口打开时才会
+  // 看到同一批终端并接着敲——PTY id 由页签 id 推导（见 TerminalHost.ptyIdFor），两边一致。
+  const remoteRightTerms = useUiStateValue('rightTerms', null)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setUiState('rightTerms', {
+        byChat: rightTermsByChatRef.current,
+        active: rightActiveTermByChatRef.current
+      })
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [rightTermsByChat, rightActiveTermByChat, rightTermsByChatRef, rightActiveTermByChatRef])
+
+  useEffect(() => {
+    if (!remoteRightTerms || claimUiStateEcho('rightTerms', remoteRightTerms)) return
+    if (remoteRightTerms.byChat) setRightTermsByChat(remoteRightTerms.byChat)
+    if (remoteRightTerms.active) setRightActiveTermByChat(remoteRightTerms.active)
+  }, [remoteRightTerms])
+
   useEffect(() => {
     setUiState('layout', {
       sidebarWidth,
@@ -1260,6 +1279,19 @@ export default function App() {
   // 终端是否空闲只用于「重开之前先看一眼」，走 ref 读取：进 deps 会让前台进程一
   // 结束就立刻重开终端，把用户刚跑完的那条命令的输出吞掉。
   const notificationStatesRef = useLatest(notifications.states)
+
+  // 运行态（notify）通常比工作区晚到，所以「同一条会话挂了两个页签」要在拿到运行态之后
+  // 再收敛一次：留下正在跑的那个（turn 的事件按 node id 分发，只有它收得到），把另一个
+  // 页签并过去，而不是让用户对着一个「会话正在别处运行」的死页签。
+  useEffect(() => {
+    const { nodes: next, remap } = dedupeSessionNodes(nodesRef.current, {
+      prefer: (nodeId) => !!notificationStatesRef.current?.[nodeId]?.running
+    })
+    if (remap.size === 0) return
+    setNodes(next)
+    if (remap.has(activeRef.current)) setActiveId(remap.get(activeRef.current))
+    if (remap.has(selectedIdRef.current)) setSelectedId(remap.get(selectedIdRef.current))
+  }, [notifications.states, nodesRef, activeRef, selectedIdRef])
 
   // 只有真的停在文件视图里时才算「当前分支相对基线分支」的变更（见 refreshGit）。
   const viewRef = useLatest(view)
@@ -1508,8 +1540,6 @@ export default function App() {
   )
 
   const createRightTerm = useCallback(() => {
-    // 分享页没有终端面板，别在宿主上给访客拉起一个 PTY（终端能力对访客也是拒绝的）。
-    if (shareMode) return
     const chatId = activeRef.current
     if (!chatId) return
     const id = uid('rt')
@@ -1530,7 +1560,7 @@ export default function App() {
     })
     setRightActiveTermByChat((prev) => ({ ...prev, [chatId]: id }))
     setTerminalOpen(true)
-  }, [activeRef, nodesRef, shareMode, terminalCwd])
+  }, [activeRef, nodesRef, terminalCwd])
 
   const closeRightTerm = useCallback(
     (id) => {
@@ -1583,16 +1613,14 @@ export default function App() {
   }, [])
   // 打开终端面板时至少要有一个终端，否则用户还得先手动新建第一个。
   const openTerminalPanel = useCallback(() => {
-    if (shareMode) return
     if (rightTerms.length === 0) createRightTerm()
     else setTerminalOpen(true)
-  }, [createRightTerm, rightTerms.length, shareMode])
+  }, [createRightTerm, rightTerms.length])
   // 顶栏终端图标 / Ctrl+`：来回切换面板的显示与隐藏。
   const toggleTerminalPanel = useCallback(() => {
-    if (shareMode) return
     if (terminalOpen) setTerminalOpen(false)
     else openTerminalPanel()
-  }, [openTerminalPanel, shareMode, terminalOpen])
+  }, [openTerminalPanel, terminalOpen])
 
   // 终端面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
   // 否则切过去只能看到一片空白。只在面板真正可见时才补，免得用户点过的每个
@@ -1797,19 +1825,19 @@ export default function App() {
   )
 
   /**
-   * 「分享链接」：向运行时申领一枚只看得到这个会话的令牌，拼成地址后在弹窗里复制。
+   * 「分享链接」：拼一条指向这个会话的地址（会话 id 本身就是凭据），在弹窗里复制。
    *
    * 地址的 host 由运行时给（网卡上的局域网地址，或配置的公网地址），**不能用
    * `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1`，发给别人等于让他
-   * 连自己的机器。令牌放片段里，打开的人换到 cookie 后由服务端限成只读范围。
+   * 连自己的机器。打开的人进到这条会话的分享视图，由服务端限定范围。
    */
   const shareSession = useCallback(async (sessionId) => {
     if (!sessionId) return
-    // 申领令牌是一次往返，弹窗先立起来显示进度，失败也要看得见原因
+    // 取可达地址是一次往返，弹窗先立起来显示进度，失败也要看得见原因
     setShareDialog({ status: 'loading' })
     try {
-      const created = await window.mica.share.create(sessionId)
-      const url = sessionShareUrl(created?.baseUrl, sessionId, created?.token)
+      const info = await window.mica.access.info()
+      const url = sessionShareUrl(info?.shareBaseUrl, sessionId)
       if (!url) {
         setShareDialog({
           status: 'error',
@@ -1922,16 +1950,18 @@ export default function App() {
     return node?.sessionId || null
   }, [activeId, nodes])
   // 打开的会话写进地址栏：刷新、复制地址、换台设备打开都会回到同一个会话，分享链接
-  // （`?session=<id>` + `share=1`）也靠它把别人送到同一个会话。只 replaceState（不留历史），
-  // 其余参数（`?layout=` 之类）原样保留。
+  // （`?session=<id>`）也靠它把别人送到同一个会话。只 replaceState（不留历史），其余
+  // 参数（`?layout=` 之类）原样保留。
+  //
+  // 别抢在会话打开之前把它抹掉：这个参数既是「要打开哪个会话」，也是远程访问的凭据
+  // （会话 id 即凭据），开头那一帧 activeSessionId 还是空，写一次就等于把整页的凭据删了
+  // ——远程页面的请求会全部 401、对话区一片空白。
   useEffect(() => {
-    const next = urlWithState(window.location.href, {
-      sessionId: activeSessionId,
-      share: shareMode
-    })
+    if (!activeSessionId && urlSessionRef.current) return
+    const next = urlWithState(window.location.href, { sessionId: activeSessionId })
     if (next && next !== window.location.href)
       window.history.replaceState(window.history.state, '', next)
-  }, [activeSessionId, shareMode])
+  }, [activeSessionId])
   // 地址栏里指定的会话在启动时打开/切过去（分享链接的落地点）。等会话清单回来再动手，
   // 才能拿标题与工作目录开页签；清单里没有这条（已被删）时仍按 id 打开，让会话那侧报错。
   useEffect(() => {
@@ -1977,20 +2007,16 @@ export default function App() {
   // 对话里的路径链接、终端文件链接、Cmd/Ctrl+P 的结果都落到同一个入口：切到主区
   // 文件视图并打开那个文件。FilesView 能立刻打开就直接开（它隐藏时也能接收 openFile），
   // 只有按需挂载的 chunk 还没到位时才把这次请求记下来，等 FilesView 挂上来再补开。
-  const openFileInView = useCallback(
-    (path, position) => {
-      if (shareMode) return
-      setFilesMounted(true)
-      setView('files')
-      const files = filesRef.current
-      if (files) {
-        files.openFile(path, position)
-        return
-      }
-      pendingFileOpenRef.current = { path, position }
-    },
-    [shareMode]
-  )
+  const openFileInView = useCallback((path, position) => {
+    setFilesMounted(true)
+    setView('files')
+    const files = filesRef.current
+    if (files) {
+      files.openFile(path, position)
+      return
+    }
+    pendingFileOpenRef.current = { path, position }
+  }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
@@ -2332,9 +2358,9 @@ export default function App() {
         </aside>
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
-            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed && !shareMode ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && sidebarCollapsed ? 'pl-30' : ''}`}
           >
-            {isMobile && !shareMode && (
+            {isMobile && (
               <button
                 type="button"
                 title="会话列表"
@@ -2367,41 +2393,36 @@ export default function App() {
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             )}
-            {/* 顶栏右侧：终端面板开关、文件视图开关。
-                分享页里 files/terminal 能力都拿不到，这两个开关整个不渲染。 */}
+            {/* 顶栏右侧：终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
-              {!shareMode && (
-                <>
-                  <button
-                    type="button"
-                    title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
-                    aria-label={terminalVisible ? '收起终端' : '展开终端'}
-                    aria-pressed={terminalVisible}
-                    className={`grid size-6 place-items-center rounded-md transition-colors ${
-                      terminalVisible
-                        ? 'bg-white/10 text-white hover:bg-white/15'
-                        : 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                    }`}
-                    onClick={toggleTerminalPanel}
-                  >
-                    <IconTerminal2 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    title={view === 'files' ? '返回对话' : '查看文件'}
-                    aria-label={view === 'files' ? '返回对话' : '查看文件'}
-                    aria-pressed={view === 'files'}
-                    className={`grid size-6 place-items-center rounded-md transition-colors ${
-                      view === 'files'
-                        ? 'bg-white/10 text-white hover:bg-white/15'
-                        : 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                    }`}
-                    onClick={() => setView((current) => (current === 'files' ? 'chat' : 'files'))}
-                  >
-                    <IconFile size={14} />
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
+                aria-label={terminalVisible ? '收起终端' : '展开终端'}
+                aria-pressed={terminalVisible}
+                className={`grid size-6 place-items-center rounded-md transition-colors ${
+                  terminalVisible
+                    ? 'bg-white/10 text-white hover:bg-white/15'
+                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                }`}
+                onClick={toggleTerminalPanel}
+              >
+                <IconTerminal2 size={14} />
+              </button>
+              <button
+                type="button"
+                title={view === 'files' ? '返回对话' : '查看文件'}
+                aria-label={view === 'files' ? '返回对话' : '查看文件'}
+                aria-pressed={view === 'files'}
+                className={`grid size-6 place-items-center rounded-md transition-colors ${
+                  view === 'files'
+                    ? 'bg-white/10 text-white hover:bg-white/15'
+                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                }`}
+                onClick={() => setView((current) => (current === 'files' ? 'chat' : 'files'))}
+              >
+                <IconFile size={14} />
+              </button>
             </div>
           </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -2443,7 +2464,6 @@ export default function App() {
               onOpenSettings={() => setView('settings')}
               onSessionRenamed={refreshSessions}
               onShareSession={shareSession}
-              shareMode={shareMode}
             />
             {!activeId && view === 'chat' && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-white/25">
@@ -2552,49 +2572,46 @@ export default function App() {
               </div>
             </section>
           )}
-          {!shareMode && (
-            <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
-              {gitIsCurrent && git.status?.root ? (
-                <button
-                  ref={branchButtonRef}
-                  type="button"
-                  title="切换或创建 Git 分支"
-                  aria-haspopup="dialog"
-                  aria-expanded={branchPickerOpen}
-                  // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                  className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
-                    activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
-                  }`}
-                  onClick={() => setBranchPickerOpen(true)}
-                >
-                  <IconGitBranch size={13} className="shrink-0" />
-                  <span className="truncate">{git.status.branch || 'detached'}</span>
-                </button>
-              ) : null}
-              {activeCwd && (
-                <button
-                  type="button"
-                  title={
-                    cwdValid
-                      ? activeCwd
-                      : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
-                  }
-                  className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
-                    cwdValid
-                      ? 'text-white/35 hover:text-white/75'
-                      : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
-                  }`}
-                  onClick={() => setCwdModalOpen(true)}
-                >
-                  {activeCwd}
-                </button>
-              )}
-            </footer>
-          )}
+          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
+            {gitIsCurrent && git.status?.root ? (
+              <button
+                ref={branchButtonRef}
+                type="button"
+                title="切换或创建 Git 分支"
+                aria-haspopup="dialog"
+                aria-expanded={branchPickerOpen}
+                // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
+                  activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                }`}
+                onClick={() => setBranchPickerOpen(true)}
+              >
+                <IconGitBranch size={13} className="shrink-0" />
+                <span className="truncate">{git.status.branch || 'detached'}</span>
+              </button>
+            ) : null}
+            {activeCwd && (
+              <button
+                type="button"
+                title={
+                  cwdValid
+                    ? activeCwd
+                    : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
+                }
+                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
+                  cwdValid
+                    ? 'text-white/35 hover:text-white/75'
+                    : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
+                }`}
+                onClick={() => setCwdModalOpen(true)}
+              >
+                {activeCwd}
+              </button>
+            )}
+          </footer>
         </main>
       </div>
-      {/* 分享页面里侧栏不存在，连展开它的入口也不给——这条按钮是唯一的开关。 */}
-      {!isMobile && !shareMode && (
+      {!isMobile && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -2612,18 +2629,14 @@ export default function App() {
           <IconLayoutSidebarLeftCollapse size={16} />
         </button>
       )}
-      {/* 文件搜索是「打开的编辑器」的入口，和文件视图同一类：访客没有 files:* 权限，
-          留着它只会让 Cmd/Ctrl+P 撞出一串权限错误。 */}
-      {!shareMode && (
-        <Suspense fallback={null}>
-          <QuickSearch
-            getRoot={getSearchRoot}
-            openFile={openSearchFile}
-            closeActiveFile={closeSearchFile}
-            disabled={branchPickerOpen || !!prompt}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <QuickSearch
+          getRoot={getSearchRoot}
+          openFile={openSearchFile}
+          closeActiveFile={closeSearchFile}
+          disabled={branchPickerOpen || !!prompt}
+        />
+      </Suspense>
       {branchPickerOpen && git.cwd && (
         <BranchPicker
           cwd={git.cwd}

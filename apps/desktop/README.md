@@ -206,103 +206,69 @@ the session named by `?session=` — once the session list has loaded, so the ta
 working directory. An id that no longer exists still opens, letting the chat side report the failure
 instead of doing nothing at all.
 
-#### Sharing is an authorization boundary, not a URL flag
+The write-back waits until a session is actually open (`urlSessionRef.current`), so the first frame cannot
+clobber the param with an empty session and leave the page showing nothing.
 
-The runtime has no accounts, so a share link has to *reduce what a visitor can do* rather than just
-hide part of the page. A client-side `share=1` param would only be a suggestion: anyone can delete it
-and get the full app — the session list, the file tree, a real shell in the panel, and every API key
-in the config page. So the rule lives on the server (`src/host/access-core.js` holds the pure
-judgement with unit tests; `src/host/access.js` owns tokens, the reachable base URL and the IPC;
-`src/server/index.js` enforces it on every `/api/*` call).
+#### There is no authorization boundary
 
-**Access is decided per request, from a credential — never from the URL.**
+The runtime has no accounts and no access control beyond two things that do not restrict normal use:
 
-* Loopback requests (the Electron shell, a browser on the machine itself) keep the full app with no
-  token at all; that is what keeps the desktop app and `npm run dev` working unchanged.
-* Anything else must present a token. `GET /` stays public (the static shell ships no data), every
-  other route answers 401 and the page renders a "需要访问令牌" screen instead of the app.
-* The token travels in the URL *fragment* (`#token=…`, never sent to the server or written to a
-  referrer) exactly once; the runtime exchanges it for an HttpOnly, SameSite=Strict cookie and the
-  page then strips the fragment. The access token itself is generated once, stored in
-  `access.json` (mode `0600`, next to the other runtime state) and printed on startup together with
-  the machine's LAN address, so a phone or a colleague can be handed a working URL.
-* A request carrying `Origin` must be same-site, and `Host` must be a name this machine actually
-  answers on — which is what stops an arbitrary web page from quietly talking to
-  `http://127.0.0.1:8787` on the visitor's behalf. Same-site ignores the port, because the dev server
-  serves the page on `localhost:5173` and proxies `/api` to the runtime.
+* A request carrying `Origin` must be same-site, and `Host` must be a name this machine actually answers
+  on — which is what stops an arbitrary web page from quietly talking to `http://127.0.0.1:8787` on the
+  visitor's behalf. Same-site ignores the port, because the dev server serves the page on
+  `localhost:5173` and proxies `/api` to the runtime.
 * The host allowlist is the loopback names, this machine's hostname and its interface addresses, plus
   whatever `MICA_DESKTOP_ALLOWED_HOSTS` (comma-separated, names or IPs) adds. That variable is the
   escape hatch for reaching the runtime under a name it does not own — a reverse tunnel or a proxy,
   where the browser keeps sending the *public* address as `Host` while the runtime only sees the
   loopback connection. Without it such a request answers `403 Host 不被允许`: the static shell and
-  `/api/health` still load (health is deliberately credential-free so another runtime can probe it),
-  so the page renders its "无法连接 Mica Code 运行时" screen even though the tunnel is fine. It is read
-  once per process — restart the app after changing it.
+  `/api/health` still load (health is deliberately credential-free), so the page renders its "无法连接
+  Mica Code 运行时" screen even though the tunnel is fine. It is read once per process — restart the app
+  after changing it.
+
+`src/host/access-core.js` holds these two judgements as pure logic with unit tests;
+`src/host/access.js` wires them up and computes the reachable base URL; `src/server/index.js` runs them
+on every request. There is no token, no cookie and no per-session visitor scope: **every client is a
+full client.** Connecting to the port is equivalent to having a shell on the host — the terminal is a
+real shell, files are read/write, and the config page holds your API keys. The default `0.0.0.0` bind is
+a product decision (a phone on the LAN can drive the agent), so keep the warning in this file honest.
 
 #### A share link
 
-`分享链接` mints a per-session capability: the session row's context menu (`session-menu.js`; drafts
+`分享链接` builds the address of one session: the session row's context menu (`session-menu.js`; drafts
 have no session id yet, so they do not offer it) and the chat area's context menu both open the
 `ShareDialog`, which copies through `copyText` and says so honestly when the clipboard API is
 unavailable instead of claiming success.
 
-The link is `<reachable base>/?session=<id>#token=<share token>`. The base URL comes from the
-*runtime*, never from the page's own `location.origin`: a window on the machine is served from
-`127.0.0.1`, and handing that to someone else points at their own machine. The host picks an
-interface address (or `MICA_DESKTOP_PUBLIC_URL` when the machine is reachable under a public one)
-and returns it with the token.
+The link is `<reachable base>/?session=<id>` (`app-url.js`'s `sessionShareUrl`) — no token, no fragment;
+opening it is the same as clicking that session in the list. The base URL comes from the *runtime*,
+never from the page's own `location.origin`: a window on the machine is served from `127.0.0.1`, and
+handing that to someone else points at their own machine. `pickShareBaseUrl` prefers
+`MICA_DESKTOP_PUBLIC_URL`, then the address the sharer is already using, then the machine's interface
+addresses (private LAN first).
 
-What that token buys is fixed server-side: that one session, driven like a local one — chat, edit-and-resend, interrupt, queue/recall,
-compact, change cwd, paste images — plus the host state it needs to render (session title, turn
-status, its own images).
-Everything was validated against a running runtime: another session's history, `files:*`,
-`terminal:*`, `git:*`, `config-web:invoke` (API keys), `stats:delete-session` and
-`ui-state:patch` all answer `无权访问该资源`, and `stats:list-sessions` is filtered down to the single
-shared session so the view gets its title without leaking the other 900. Node-only runtime
-operations (abort / recall / background task / subagent) resolve the node's owning session
-host-side instead of trusting the client. **Treat the token as lending someone your agent**: the
-holder can drive it to run tools (shell included) in the session's cwd, which is why links expire
-after 7 days (`SHARE_TTL_MS`).
+Whatever the link gives is the whole app, so **treat it as lending someone this machine**: the holder
+can chat, interrupt, queue, compact, change the working directory, browse files, open a shell in the
+terminal panel and read the config page. It never expires and there is no revocation list — taking it
+back means stopping the runtime or moving to another port.
 
-"Cannot call it" is only half of it — some requests stay allowed but must not carry every
-parameter. `SHARE_LOCKED_PARAMS` / `sanitizeScopedPayload` (`src/host/access-core.js`, applied next
-to `scopeAllowsChannel` in `src/server/index.js`) strip arguments that would be written into the
-*owner's* session snapshot: `role`, `model` and `effort` on `chat:start` / `chat:edit-message`.
-The host keeps whatever the session already has when these are absent — `applyRoleOverride` keeps
-the current role, and `configureForRun` is not even called unless `model`/`effort` are present —
-so dropping them means "cannot change", not "reset to default". Hiding the button in the
-renderer only stops a mis-click; authorization stays on the server.
+#### One session, one tab, one set of terminals
 
-**A share page must not offer an entry point that can only fail.** The closure list lives in one
-place each: the chat transcript context menu drops `commit` / `fork` / `share` / `clear`
-(`ChatContextMenu` filters by `shareMode`), chat commands drop `new` / `clear` / `resume` /
-`config` / `role` (`src/renderer/src/chat-commands.js`'s `SHARE_BLOCKED_COMMANDS` +
-`commandBlockedInShare`, read by `commandSuggestions`, `/help` and `runSlashCommand`), and the
-status line's model and reasoning-effort selectors render as static text
-(`.chat-status-model.is-static`). The test for "should this be hidden" is whether the channel it
-needs is on the share whitelist — when you add an entry point, check it against that, don't hide
-half of it.
+The workspace lives in the runtime and is shared by every page, so the second window is another viewport
+of the same UI rather than a separate place: events are broadcast to all clients, both render the same
+live turn, and both can queue, recall or interrupt it. Two tabs for one session would fight each other,
+so `workspace.js`'s `dedupeSessionNodes` (pure function with unit tests) merges duplicates by
+`sessionId` when the workspace is read, and `App.jsx` converges once more against the notify state
+(`prefer: isRunning`, keeping the tab whose turn is actually running — turn events are dispatched by
+node id, so only that one receives them). Without it the later tab gets `isChatSessionRunning` and is
+told "正在另一个进程里运行"; `chat:is-running`'s `remoteRunning` therefore only ever means a **turn
+lease** held by another process (a TUI in a terminal, `mica exec`, a second runtime instance).
 
-Images work because the runtime whitelists the image files *that session actually references*
-(`/api/image` is otherwise a host file browser reachable by anyone holding a token); everything else
-answers 403, while `/api/paste-image` stays available (uploads only ever land in
-`$MICA_HOME/images/` under a generated name, never an arbitrary path). Neither `[Image](path)` references in user messages nor
-assistant Markdown images render inline: both degrade to a clickable link (`ImageLink` in
-`ChatView.jsx` — local pictures preview on click, remote ones open externally), so the view stays
-readable and the receiver opens the picture only when they want it.
-
-The share view is interactive: the composer sends normally. `share` mode is never written back to the shared UI state
-(`layout` is global — collapsing there would collapse the owner's sidebar too), the sidebar is not
-rendered and its collapse button and the mobile drawer button are gone (`setCollapsed` is the only
-switch, so no button means it cannot be opened). The top-right terminal and file toggles are not
-rendered either — a share token carries no `files:*` / `terminal:*` scope, so the panel and the
-shortcut that opens it are disabled. The two composer affordances that belong to the *owner* are
-gone as well: the schedule (clock) button, since loops live in the runtime and `loops:*` is out of
-scope (a visitor cannot even list the runtime's loops, so no badge or tint shows either), and the role
-mark, which degrades from a clickable button to a plain `<span>` with `Shift+Tab`'s `cycle-role`
-disabled (`resolveComposerTabAction`'s `shareMode`). The mobile layout keeps working exactly as
-before. Anything that would only fail is not offered at all, and the list of those has a single source of truth: the chat context menu drops `Commit` / `Fork` / `分享链接` / `Clear` (`ChatContextMenu` filters by `shareMode`), `chat-commands.js`'s `SHARE_BLOCKED_COMMANDS` (+ `commandBlockedInShare`) hides `new` / `clear` / `resume` / `config` / `role` from `commandSuggestions`, `/help` and `runSlashCommand`, and the model / reasoning-effort selectors in the status line become non-interactive text (`.chat-status-model.is-static`). The rule is "does the channel it needs exist in the share scope": paths in messages follow the same rule (`PathToken` reads `ChatPathContext.filesLocked`, so non-image paths degrade to plain text rather than a link that errors — images stay clickable for preview via the session's image allow-list, but cmd-click / middle-click "open in editor" is gone, and `ImagePreviewModal` drops its open/reveal buttons), the prompt history is skipped both ways because it is the `~/.mica/storage.json` shared with the CLI (a visitor would read the owner's prompts and write into their machine), and `chat:check-cwd` *is* allowed since it is only an `fs.exists` for an action (`chat:update-cwd`) that is already in scope.
-
+Terminals are shared the same way. The PTY lives in the runtime and its output is broadcast over SSE,
+and the panel inventory (which terminals exist per session, which one is active) is part of the shared
+UI state (`rightTerms`). PTY ids are derived from the tab id (`TerminalHost.ptyIdFor`), so both pages
+compute the same id; a page attaching to an existing terminal gets `{ reused: true }` plus a `replay`
+of the host-side output tail, which it writes into its xterm so the panel is not blank.
 ### Switching Mica servers
 
 A window can point at another machine's Mica runtime: hovering the sidebar's `Server` row floats a card next to it (`ServerCard.jsx`) with the current server, the servers you have connected to, the `本机` way back and an address field — the card is deliberately not a modal, so nothing blocks the rest of the UI. On a touch screen there is no hover, so tapping the row expands the same card in place inside the drawer. A page is served by whichever runtime hosts it, so "which server am I on" is just `location.origin` — nothing is proxied and no cross-origin call is made.

@@ -156,6 +156,38 @@ export function terminalIdsUnder(nodes, folderId) {
   return ids
 }
 
+/**
+ * 同一个会话只留一个页签。
+ *
+ * 工作区是运行时的共享状态：本页的改动要经一次广播才回到自己这里，所以「按会话找已有
+ * 页签」可能落空——最典型的是打开分享链接的那一帧，于是又造出一个指向同一会话的新页签。
+ * 两个页签指着同一条会话会互相挡住：一个在跑 turn，另一个发起时就被判成「会话正在别处
+ * 运行」，而它自己又收不到那个 turn 的事件（事件按 node id 分发）。
+ *
+ * `prefer(id)` 用来挑留下的那个：正在跑的页签必须留下（turn 的事件挂在它身上），
+ * 其余情况按原顺序保留第一个。返回被丢弃的页签 id → 留下的页签 id，调用方据此把
+ * activeId/selectedId 挪过去。
+ */
+export function dedupeSessionNodes(nodes, { prefer } = {}) {
+  const list = nodes || []
+  const groups = new Map()
+  for (const node of list) {
+    const sessionId = node?.type === 'terminal' ? node.sessionId : null
+    if (!sessionId) continue
+    const ids = groups.get(sessionId)
+    if (ids) ids.push(node.id)
+    else groups.set(sessionId, [node.id])
+  }
+  const remap = new Map()
+  for (const ids of groups.values()) {
+    if (ids.length < 2) continue
+    const kept = ids.find((id) => typeof prefer === 'function' && prefer(id)) || ids[0]
+    for (const id of ids) if (id !== kept) remap.set(id, kept)
+  }
+  if (remap.size === 0) return { nodes: list, remap }
+  return { nodes: list.filter((node) => !remap.has(node.id)), remap }
+}
+
 export function removeNode(nodes, id) {
   const children = childMap(nodes)
   const removed = new Set()

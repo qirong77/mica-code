@@ -279,6 +279,24 @@ function resolveCwd(cwd) {
   return home
 }
 
+/** 复用同一个 PTY 时回放给新页面多少尾部输出（一个窗口的高度远用不到这么多）。 */
+const REPLAY_LIMIT_BYTES = 64 * 1024
+
+/**
+ * 记住 PTY 最近的输出，供第二个页面接上同一个终端时回放。
+ *
+ * 终端是所有页面共享的（PTY 活在运行时里、输出广播给所有客户端），但 xterm 只能靠收到的
+ * 数据画出屏幕——后打开的页面如果什么都不回放，看到的就是一块空白，而不是「同一个终端」。
+ * 从换行处截断，免得回放从半条转义序列开始。
+ */
+function appendReplayTail(tail, data) {
+  const next = `${tail || ''}${data}`
+  if (next.length <= REPLAY_LIMIT_BYTES) return next
+  const sliced = next.slice(next.length - REPLAY_LIMIT_BYTES)
+  const newline = sliced.indexOf('\n')
+  return newline >= 0 ? sliced.slice(newline + 1) : sliced
+}
+
 function createPty(id, sender, options = {}) {
   const shell = options.shell || getDefaultShell()
   const shellArgs = getShellArgs(shell)
@@ -315,6 +333,7 @@ function createPty(id, sender, options = {}) {
 
   term.onData((data) => {
     updateSessionCwdFromOutput(session, data)
+    session.tail = appendReplayTail(session.tail, data)
     if (!sender.isDestroyed()) {
       sender.send('terminal:data', { id, data })
     }
@@ -348,7 +367,9 @@ export function registerTerminalIpc() {
     const id = payload.id
     if (!id) throw new Error('terminal id is required')
     if (sessions.has(id)) {
-      return { id, reused: true }
+      // 同一个终端被第二个页面「创建」时只是接上：把最近的输出回放给它，屏幕才对得上
+      const session = sessions.get(id)
+      return { id, reused: true, replay: session?.tail || '' }
     }
     return createPty(id, event.sender, payload)
   })

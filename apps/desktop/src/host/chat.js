@@ -1488,20 +1488,6 @@ function runCompactSession(sessionId, mode = 'model') {
   })
 }
 
-/**
- * 这个 nodeId 正在跑的是哪个会话（没有 run 就返回 null）。
- *
- * 分享范围只用它做授权：只带 nodeId 的运行态操作（中断 / 撤回排队 / 后台任务）靠它确认
- * 节点确实属于被分享的那个会话，而不是相信客户端在 payload 里自称的会话。
- */
-export function resolveNodeSessionId(nodeId) {
-  if (typeof nodeId !== 'string' || !nodeId) return null
-  const run = runs.get(nodeId)
-  if (!run) return null
-  const sessionId = run.sessionId || run.requestedSessionId
-  return typeof sessionId === 'string' && sessionId ? sessionId : null
-}
-
 export function registerChatIpc() {
   ipcMain.handle('chat:start', (event, payload = {}) => {
     rememberChatSender(event)
@@ -1606,13 +1592,12 @@ export function registerChatIpc() {
     // as soon as the user switches away and back.
     const items = run ? allQueuedItems(id, run) : queuedItems(id)
     const queuedState = { queuedCount: items.length, queuedItems: items }
-    // 本节点没在跑，但同一份工作区里没有别的节点会跑这个会话（工作区在运行时只有一份，
-    // 所有页面共享同一批 node id），所以这里命中的只可能是**另一个进程**（终端里的 TUI /
-    // mica exec / 另一个运行时实例）持着 turn lease。客户端据此把发送挡在本地。
+    // 「在别处运行」只认 turn lease（另一个进程：终端里的 TUI / mica exec / 另一个运行时
+    // 实例）。**不能**把本进程里另一个节点正在跑同一会话也算进来——那是工作区里同一条会话
+    // 挂了两个页签（`dedupeSessionNodes` 正在收敛的瞬态），报「另一个进程」会让用户对着一个
+    // 马上就消失的死页签，以为是别处占了。另一个窗口里的发送走同一个 node，天然是协同的。
     const remoteRunning =
-      !run?.running &&
-      Boolean(leaseSessionId) &&
-      (isChatSessionRunning(leaseSessionId) || hasLiveTurnLease(leaseSessionId))
+      !run?.running && Boolean(leaseSessionId) && hasLiveTurnLease(leaseSessionId)
     if (!run) {
       const completed = completedRuns.get(id)
       return completed

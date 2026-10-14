@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   COLD_START_NODE_ID,
   createColdStartTerminal,
+  dedupeSessionNodes,
   normalizeNodes,
   pickReusableDraft
 } from './workspace'
@@ -117,5 +118,37 @@ describe('pickReusableDraft', () => {
     expect(pickReusableDraft(nodes, { cwd: '/tmp/a', excludedIds: new Set(['term-1']) })?.id).toBe(
       'term-2'
     )
+  })
+})
+
+describe('dedupeSessionNodes', () => {
+  const chat = (id, sessionId) => draft(id, { sessionId, text: sessionId })
+
+  it('leaves a workspace with one tab per session alone', () => {
+    const nodes = [chat('a', 's1'), chat('b', 's2'), draft('c')]
+    const { nodes: next, remap } = dedupeSessionNodes(nodes)
+    expect(next).toEqual(nodes)
+    expect(remap.size).toBe(0)
+  })
+
+  it('collapses two tabs for the same session and reports where they went', () => {
+    const nodes = [chat('a', 's1'), chat('b', 's2'), chat('c', 's1')]
+    const { nodes: next, remap } = dedupeSessionNodes(nodes)
+    expect(next.map((node) => node.id)).toEqual(['a', 'b'])
+    expect(remap.get('c')).toBe('a')
+  })
+
+  it('keeps the tab that is actually running the turn', () => {
+    const nodes = [chat('a', 's1'), chat('c', 's1')]
+    const { nodes: next, remap } = dedupeSessionNodes(nodes, {
+      prefer: (nodeId) => nodeId === 'c'
+    })
+    expect(next.map((node) => node.id)).toEqual(['c'])
+    expect(remap.get('a')).toBe('c')
+  })
+
+  it('never merges drafts, which have no session yet', () => {
+    const nodes = [draft('a'), draft('b')]
+    expect(dedupeSessionNodes(nodes).nodes.map((node) => node.id)).toEqual(['a', 'b'])
   })
 })

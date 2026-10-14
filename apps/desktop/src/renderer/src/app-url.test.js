@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { readAppUrl, readFragmentToken, sessionShareUrl, urlWithState } from './app-url'
+import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 
 describe('readAppUrl', () => {
   it('reads the open session', () => {
@@ -14,24 +14,8 @@ describe('readAppUrl', () => {
   })
 
   it('ignores anything a visitor might add by hand', () => {
-    // 客户端写进来的标记不具备任何授权含义，服务端才是判定方
-    expect(readAppUrl('?session=abc&share=1&scope=full')).toEqual({ sessionId: 'abc' })
-  })
-})
-
-describe('readFragmentToken', () => {
-  it('reads #token=…', () => {
-    expect(readFragmentToken('#token=abc')).toBe('abc')
-    expect(readFragmentToken('token=abc')).toBe('abc')
-    expect(readFragmentToken('#a=1&token=abc')).toBe('abc')
-  })
-
-  it('returns null when absent or blank', () => {
-    expect(readFragmentToken('')).toBeNull()
-    expect(readFragmentToken('#')).toBeNull()
-    expect(readFragmentToken('#token=')).toBeNull()
-    expect(readFragmentToken('#layout=mobile')).toBeNull()
-    expect(readFragmentToken(undefined)).toBeNull()
+    // 页面自己带进来的参数不具备任何含义，服务端才是判定方
+    expect(readAppUrl('?session=abc&share=1')).toEqual({ sessionId: 'abc' })
   })
 })
 
@@ -60,34 +44,31 @@ describe('urlWithState', () => {
 })
 
 describe('sessionShareUrl', () => {
-  it('puts the session in the query and the token in the fragment', () => {
-    expect(sessionShareUrl('http://192.168.1.23:8787', 'abc', 'tok')).toBe(
-      'http://192.168.1.23:8787/?session=abc#token=tok'
+  it('carries the session and nothing else', () => {
+    // 链接只是「打开这条会话」的地址：没有令牌，也没有片段
+    expect(sessionShareUrl('http://192.168.1.23:8787', 'abc')).toBe(
+      'http://192.168.1.23:8787/?session=abc'
     )
   })
 
   it('uses the address given by the runtime, not the page origin', () => {
     // 本机窗口的 origin 是 127.0.0.1，发给别人等于让他连自己的机器，所以基地址来自运行时
-    expect(sessionShareUrl('http://10.0.0.5:9000', 'abc', 'tok')).toStartWith(
-      'http://10.0.0.5:9000/'
-    )
+    expect(sessionShareUrl('http://10.0.0.5:9000', 'abc')).toStartWith('http://10.0.0.5:9000/')
   })
 
   it('keeps an https public address intact', () => {
-    expect(sessionShareUrl('https://mica.example.com', 'abc', 'tok')).toBe(
-      'https://mica.example.com/?session=abc#token=tok'
+    expect(sessionShareUrl('https://mica.example.com', 'abc')).toBe(
+      'https://mica.example.com/?session=abc'
     )
   })
 
   it('drops the base url query and hash', () => {
-    expect(sessionShareUrl('http://h:1/?layout=mobile#x', 'abc', 'tok')).toBe(
-      'http://h:1/?session=abc#token=tok'
-    )
+    expect(sessionShareUrl('http://h:1/?layout=mobile#x', 'abc')).toBe('http://h:1/?session=abc')
   })
 
-  it('returns null without a session or a token', () => {
-    expect(sessionShareUrl('http://h:1', null, 'tok')).toBeNull()
-    expect(sessionShareUrl('http://h:1', 'abc', null)).toBeNull()
-    expect(sessionShareUrl(null, 'abc', 'tok')).toBeNull()
+  it('returns null without a session or a usable base url', () => {
+    expect(sessionShareUrl('http://h:1', null)).toBeNull()
+    expect(sessionShareUrl(null, 'abc')).toBeNull()
+    expect(sessionShareUrl('not a url', 'abc')).toBeNull()
   })
 })

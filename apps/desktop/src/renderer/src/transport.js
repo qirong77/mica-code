@@ -9,8 +9,6 @@
  * - 系统文件夹选择器换成应用内目录选择器（见 App.jsx 的 CwdModal）
  */
 
-import { readFragmentToken } from './app-url'
-
 const EVENT_CHANNELS = [
   'terminal:data',
   'terminal:exit',
@@ -26,7 +24,7 @@ const EVENT_CHANNELS = [
   'app:window-state'
 ]
 
-/** 访问被拒（需要令牌 / 令牌失效 / 分享范围以外）。main.jsx 据此渲染可操作的提示页。 */
+/** 请求被服务端拒掉（Host/Origin 校验不过）。main.jsx 据此渲染可读的提示页。 */
 export class AccessDeniedError extends Error {
   constructor(message, { status = 0 } = {}) {
     super(message)
@@ -66,16 +64,13 @@ async function invoke(channel, payload) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ channel, payload })
   })
-  if (response.status === 401)
-    throw new AccessDeniedError('访问令牌缺失或已失效，请重新用带令牌的地址打开', { status: 401 })
+  if (response.status === 401) throw new AccessDeniedError('服务端拒绝了这次请求', { status: 401 })
   if (response.status === 403)
-    throw new AccessDeniedError('当前访问范围不允许该操作', { status: 403 })
+    throw new AccessDeniedError('跨源请求被拒绝（请用运行时打印的地址打开页面）', { status: 403 })
   if (!response.ok) throw new Error(`请求失败 (HTTP ${response.status})`)
   const body = await response.json()
-  // 范围内的越权（例如分享视图调别的 channel）由服务端判为 ok:false，同样是访问被拒
   if (!body || body.ok !== true) {
     const message = body?.error || `调用 ${channel} 失败`
-    if (message.includes('无权访问')) throw new AccessDeniedError(message, { status: 403 })
     throw new Error(message)
   }
   return body.result
@@ -167,9 +162,6 @@ function createWebApi(env) {
 
   return {
     isWeb: true,
-    // 服务端判定的访问范围（见 server/index.js 的 /api/env）。页面据此隐藏会话列表，
-    // 而不是相信自己 URL 里的 share=1——那个参数删掉也改变不了服务端的授权结果。
-    scope: env.scope === 'share' ? 'share' : 'full',
     platform: env.platform,
     homeDir: env.homeDir,
     runShellLogConfig: env.runShellLogConfig,
@@ -375,73 +367,24 @@ function createWebApi(env) {
       invoke: (action, input) => invoke('config-web:invoke', { action, input })
     },
 
-    share: {
-      // 分享链接由运行时签发：只有它知道这块机器的可达地址（网卡/公网配置），
-      // 页面用 location.origin 拼出来的会是 127.0.0.1，对方打开连的是他自己的机器。
-      create: (sessionId) =>
-        invoke('share:create', { sessionId, preferredOrigin: window.location.origin }),
-      list: (sessionId) => invoke('share:list', { sessionId }),
-      revoke: (id) => invoke('share:revoke', { id })
-    },
-
     access: {
-      // 令牌 + 本机可达地址，用于「把这台机器交给自己的手机」这类场景
+      // 访问令牌 + 本机可达地址：前者用于「把这台机器交给自己的手机」，后者用来拼分享链接
       info: () => invoke('access:info')
     }
   }
 }
 
 /**
- * 地址片段里的令牌（`#token=xxx`）换成 HttpOnly cookie。
- *
- * 令牌放片段里是有意的：片段不会被发给服务端，所以它不会落进访问日志、Referer 或
- * 链接预览；而 cookie 是 HttpOnly，页面脚本（以及任何被注入的脚本）读不到。
- */
-async function exchangeFragmentToken() {
-  const token = readFragmentToken(window.location.hash)
-  if (!token) return
-  const result = await submitAccessToken(token)
-  if (result) clearFragmentToken()
-}
-
-/** 用一枚令牌换 cookie；失败返回 false（令牌无效/过期/被撤销）。 */
-export async function submitAccessToken(token) {
-  let response
-  try {
-    response = await fetch('/api/access/exchange', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: String(token || '') })
-    })
-  } catch {
-    return false
-  }
-  if (!response.ok) return false
-  const body = await response.json().catch(() => null)
-  return body?.ok === true
-}
-
-/** 拿到 cookie 后把片段抹掉：令牌没必要继续留在地址栏里被人复制走。 */
-function clearFragmentToken() {
-  if (typeof window === 'undefined' || !window.location.hash) return
-  const url = new URL(window.location.href)
-  url.hash = ''
-  window.history.replaceState(window.history.state, '', url.toString())
-}
-
-/**
- * 确保 `window.mica` 可用：先换令牌、再取回运行时环境信息（platform / homeDir / scope）后安装。
+ * 确保 `window.mica` 可用：取回运行时环境信息（platform / homeDir）后安装。
  * 取不到（运行时没起来）时抛出，由 main.jsx 渲染可读的失败提示。
  */
 export async function ensureMicaApi() {
   if (typeof window === 'undefined') return null
   if (window.mica) return window.mica
 
-  await exchangeFragmentToken()
-
   const response = await fetch('/api/env', { cache: 'no-store' })
-  if (response.status === 401)
-    throw new AccessDeniedError('需要访问令牌：请使用运行时启动时打印的地址打开', { status: 401 })
+  if (response.status === 403)
+    throw new AccessDeniedError('跨源请求被拒绝（请用运行时打印的地址打开页面）', { status: 403 })
   if (!response.ok) throw new Error('无法连接 Mica Code 服务端')
   const env = await response.json()
 

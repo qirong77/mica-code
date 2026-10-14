@@ -297,6 +297,8 @@ export const TerminalHost = forwardRef(function TerminalHost(
           entry.ready = true
           entry.lastPtySize =
             !result?.reused && dimensions ? `${dimensions.cols}x${dimensions.rows}` : null
+          // 接上别人已经开着的终端：把服务端记住的尾部输出回放出来，屏幕才对得上
+          if (result?.reused && result.replay) entry.term.write(result.replay)
         } finally {
           entry.creating = null
         }
