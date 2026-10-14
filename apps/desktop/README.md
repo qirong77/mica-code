@@ -256,9 +256,10 @@ a product decision (a phone on the LAN can drive the agent), so keep the warning
 #### A share link
 
 `分享链接` builds the address of one session: the session row's context menu (`session-menu.js`; drafts
-have no session id yet, so they do not offer it) and the chat area's context menu both open the
-`ShareDialog`, which copies through `copyText` and says so honestly when the clipboard API is
-unavailable instead of claiming success.
+have no session id yet, so they do not offer it) and the chat area's context menu both copy it
+straight to the clipboard and report the result in a one-line toast at the bottom of the window — no
+dialog to click through. Copying goes through `copyText`, which says so honestly when the clipboard
+API is unavailable (plain http on the LAN is not a secure context) instead of claiming success.
 
 The link is `<reachable base>/?session=<id>` (`app-url.js`'s `sessionShareUrl`) — no token, no fragment;
 opening it is the same as clicking that session in the list. The base URL comes from the *runtime*,

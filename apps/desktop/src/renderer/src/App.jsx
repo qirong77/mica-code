@@ -90,92 +90,6 @@ function recentChatCwd() {
   return typeof value === 'string' ? value : ''
 }
 
-/**
- * 分享链接弹窗：给出这条会话在**分享端口**（默认 8890）上的地址（由运行时按网卡/公网配置
- * 算，见 shareSession），并把这条会话登记进分享列表。
- * 复制按钮走页面自己的剪贴板（局域网 http 访问时 transport 会退到 execCommand）。
- */
-function ShareDialog({ state, onClose }) {
-  // null | 'copied' | 'failed'：复制失败时如实说出来（局域网 http 下剪贴板 API 可能不存在），
-  // 不要假报成功——用户以为复制了、发出去的却是上一次的内容。
-  const [copyState, setCopyState] = useState(null)
-  const inputRef = useRef(null)
-  const url = state?.status === 'ready' ? state.url : ''
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  useEffect(() => {
-    if (url) inputRef.current?.select()
-  }, [url])
-  const copy = () => {
-    if (!url) return
-    void copyText(url).then((ok) => {
-      setCopyState(ok === false ? 'failed' : 'copied')
-    })
-  }
-  return (
-    <div
-      className="fixed inset-0 z-[11000] grid place-items-center bg-black/45 no-drag"
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        className="w-[min(480px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
-      >
-        <h2 className="mb-1.5 text-sm font-semibold text-white/95">分享链接</h2>
-        <p className="mb-2.5 text-[11px] leading-relaxed text-white/45">
-          链接走分享端口，打开的人落在**这条对话**上（没有左侧会话列表），可以继续对话、
-          看文件与终端。同一条会话只会在分享列表里出现一次；其他人打开分享端口的根地址
-          就能看到这张列表。这台运行时没有账号体系，请只发给你信任的人。
-        </p>
-        <div className="mb-2.5 flex items-center gap-2">
-          <input
-            ref={inputRef}
-            readOnly
-            value={url}
-            spellCheck={false}
-            placeholder={state?.status === 'loading' ? '正在生成…' : ''}
-            aria-label="分享链接"
-            className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white/85 focus:border-white/30"
-            onFocus={(event) => event.target.select()}
-          />
-          <button
-            type="button"
-            disabled={!url}
-            className="h-8 shrink-0 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:opacity-40"
-            onClick={copy}
-          >
-            复制
-          </button>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <span
-            className={`text-[11px] ${
-              copyState === 'failed' || state?.status === 'error' ? 'text-danger' : 'text-white/35'
-            }`}
-          >
-            {copyState === 'copied' ? '已复制到剪贴板' : ''}
-            {copyState === 'failed' ? '复制失败，请手动选中复制' : ''}
-            {state?.status === 'error' ? state.message : ''}
-          </span>
-          <button
-            type="button"
-            className="h-7 rounded-sm px-3 text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
-            onClick={onClose}
-          >
-            关闭
-          </button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   const [value, setValue] = useState(cwd || '')
   const [query, setQuery] = useState('')
@@ -925,10 +839,10 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
-  // 「分享链接」弹窗里的那条地址（null = 关闭）
-  // 分享弹窗的三种状态：生成中 / 已就绪（带链接）/ 失败（带原因）。
-  // 申领令牌是一次运行时往返，所以弹窗必须先立起来显示进度。
-  const [shareDialog, setShareDialog] = useState(null)
+  // 轻提示：侧栏 / 对话菜单这类没有对话流的地方（分享链接已在剪贴板、复制失败…）
+  // 用底部居中一行提示，不弹窗、不挡内容（见 showToast）。
+  const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
   // 「切换 Mica 服务器」：切换 = 打开另一台运行时的地址（见 ServerCard）。
   // 桌面上鼠标移到 Server 行就浮出卡片（强阻断的弹窗在这里没有必要），手机上点一下
   // 在抽屉里原地展开。
@@ -940,6 +854,14 @@ export default function App() {
     if (!isMobile) setSessionsOpen(false)
   }, [isMobile])
   const closeMobileDrawer = useCallback(() => setSessionsOpen(false), [])
+
+  /** 底部居中的一行轻提示，自动消失；错误留久一点。 */
+  const showToast = useCallback((text, error = false) => {
+    if (!text) return
+    clearTimeout(toastTimer.current)
+    setToast({ text, error })
+    toastTimer.current = setTimeout(() => setToast(null), error ? 4000 : 1800)
+  }, [])
 
   // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
   // 点一下切换。
@@ -1832,7 +1754,8 @@ export default function App() {
   )
 
   /**
-   * 「分享链接」：拼一条指向这个会话的地址（会话 id 本身就是凭据），在弹窗里复制。
+   * 「分享链接」：拼一条指向这个会话的地址（会话 id 本身就是凭据）**直接复制到剪贴板**，
+   * 只用底部一行提示告诉用户结果——不再弹窗（弹窗里还得再点一次「复制」，多一步）。
    *
    * 地址的 host 与端口都由运行时给（网卡上的局域网地址 + 分享端口，或配置的公网地址），
    * **不能用 `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1:8787`，发给别人
@@ -1840,30 +1763,36 @@ export default function App() {
    *
    * 顺手把这条会话登记进「分享链接列表」（分享端口根路径那页），否则别人打开分享端口
    * 只会看到一张空列表。登记失败不影响链接本身（它已经能打开了），只记一条日志。
+   *
+   * 复制失败要如实说（局域网 http 下剪贴板 API 可能不存在），不要假报成功——用户以为
+   * 复制了、发出去的却是上一次的内容。
    */
-  const shareSession = useCallback(async (sessionId) => {
-    if (!sessionId) return
-    // 取可达地址是一次往返，弹窗先立起来显示进度，失败也要看得见原因
-    setShareDialog({ status: 'loading' })
-    try {
-      const info = await window.mica.access.info()
-      const url = sessionShareUrl(info?.shareBaseUrl, sessionId)
-      if (!url) {
-        setShareDialog({
-          status: 'error',
-          message:
-            '没有可用的分享地址：请确认分享端口（默认 8890）已开启，或设置 MICA_DESKTOP_PUBLIC_URL'
+  const shareSession = useCallback(
+    async (sessionId) => {
+      if (!sessionId) return
+      showToast('正在生成分享链接…')
+      try {
+        const info = await window.mica.access.info()
+        const url = sessionShareUrl(info?.shareBaseUrl, sessionId)
+        if (!url) {
+          showToast(
+            '没有可用的分享地址：请确认分享端口（默认 8890）已开启，或设置 MICA_DESKTOP_PUBLIC_URL',
+            true
+          )
+          return
+        }
+        await window.mica.share.add(sessionId).catch((error) => {
+          console.error('登记分享链接失败', error)
         })
-        return
+        const ok = await copyText(url)
+        if (ok === false) showToast(`复制失败，请手动复制：${url}`, true)
+        else showToast('分享链接已复制到剪贴板')
+      } catch (error) {
+        showToast(`生成分享链接失败：${error?.message || error}`, true)
       }
-      await window.mica.share.add(sessionId).catch((error) => {
-        console.error('登记分享链接失败', error)
-      })
-      setShareDialog({ status: 'ready', url })
-    } catch (error) {
-      setShareDialog({ status: 'error', message: `生成分享链接失败：${error?.message || error}` })
-    }
-  }, [])
+    },
+    [showToast]
+  )
 
   const closeTab = useCallback(
     (node) => {
@@ -2671,7 +2600,6 @@ export default function App() {
         />
       )}
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}
-      {shareDialog && <ShareDialog state={shareDialog} onClose={() => setShareDialog(null)} />}
       {cwdModalOpen && (
         <CwdModal
           cwd={terminalCwd(activeId) || git.cwd || ''}
@@ -2693,6 +2621,18 @@ export default function App() {
           onSwitch={switchServer}
           onDismiss={() => setServerMenuOpen(false)}
         />
+      )}
+      {toast && (
+        <div
+          role="status"
+          className={`no-drag pointer-events-none fixed bottom-12 left-1/2 z-[12000] max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 truncate rounded-sm border px-3 py-1.5 text-xs shadow-2xl ${
+            toast.error
+              ? 'border-danger/40 bg-panel text-danger'
+              : 'border-line bg-panel text-white/85'
+          }`}
+        >
+          {toast.text}
+        </div>
       )}
     </>
   )
