@@ -6,9 +6,20 @@ export type GitCommandOptions = {
   maxBuffer?: number;
 };
 
+/**
+ * 读命令（status / diff / rev-parse …）不要顺手抓 `.git/index.lock`：`git status`
+ * 默认会把刷新后的索引写回磁盘，而 agent 每改一次文件都要跑它，正好会和用户在
+ * 桌面端点的「暂存 / 放弃更改」抢锁——后者是必需的锁，抢不到就直接失败。这个变量
+ * 只关掉可选锁，写操作（`git add` / `git commit`）必需的锁照旧需要。
+ */
+function gitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+}
+
 export function gitBuffer(args: string[], options: GitCommandOptions = {}): Buffer {
   return execFileSync('git', args, {
     cwd: options.cwd,
+    env: gitEnv(),
     encoding: 'buffer',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: options.timeout,
@@ -36,6 +47,7 @@ function execFileAsync(
   return new Promise((resolve, reject) => {
     execFile(file, args, {
       cwd: options.cwd,
+      env: gitEnv(),
       encoding: 'buffer' as const,
       timeout: options.timeout,
       maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024,

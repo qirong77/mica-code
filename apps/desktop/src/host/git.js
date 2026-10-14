@@ -11,7 +11,7 @@ import {
   parseStatusCode,
   statusFromCode
 } from './git-core'
-import { discardFile, getRepository, git, stageFile, unstageFile } from './git-ops'
+import { discardFile, getRepository, git, gitErrorMessage, stageFile, unstageFile } from './git-ops'
 
 // 基线分支候选：远端默认分支（origin/HEAD）优先，其次是常见的 master/main。
 const BASE_CANDIDATES = ['origin/master', 'origin/main', 'master', 'main']
@@ -172,10 +172,6 @@ function safeFilePath(root, relativePath) {
   return absolutePath
 }
 
-function errorMessage(error) {
-  return error?.stderr?.trim() || error?.message || String(error)
-}
-
 function parseRefs(output, kind) {
   return output
     .split('\n')
@@ -262,7 +258,7 @@ export function registerGitIpc() {
     try {
       return { status: await getStatus(cwd), error: null }
     } catch (error) {
-      return { status: null, error: errorMessage(error) }
+      return { status: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -270,7 +266,7 @@ export function registerGitIpc() {
     try {
       return { repository: await getSummary(cwd), error: null }
     } catch (error) {
-      return { repository: null, error: errorMessage(error) }
+      return { repository: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -278,7 +274,7 @@ export function registerGitIpc() {
     try {
       return { repository: await getBranchSummary(cwd), error: null }
     } catch (error) {
-      return { repository: null, error: errorMessage(error) }
+      return { repository: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -286,7 +282,7 @@ export function registerGitIpc() {
     try {
       return { refs: await getRefs(cwd), error: null }
     } catch (error) {
-      return { refs: null, error: errorMessage(error) }
+      return { refs: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -294,7 +290,7 @@ export function registerGitIpc() {
     try {
       return { status: await checkoutBranch(cwd, ref), error: null }
     } catch (error) {
-      return { status: null, error: errorMessage(error) }
+      return { status: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -302,7 +298,7 @@ export function registerGitIpc() {
     try {
       return { status: await createBranch(cwd, name, startRef), error: null }
     } catch (error) {
-      return { status: null, error: errorMessage(error) }
+      return { status: null, error: gitErrorMessage(error) }
     }
   })
 
@@ -340,7 +336,7 @@ export function registerGitIpc() {
       await stageFile(cwd, filePath)
       return { error: null }
     } catch (error) {
-      return { error: errorMessage(error) }
+      return { error: gitErrorMessage(error) }
     }
   })
 
@@ -349,7 +345,7 @@ export function registerGitIpc() {
       await unstageFile(cwd, filePath)
       return { error: null }
     } catch (error) {
-      return { error: errorMessage(error) }
+      return { error: gitErrorMessage(error) }
     }
   })
 
@@ -359,7 +355,7 @@ export function registerGitIpc() {
       await discardFile(cwd, filePath)
       return { error: null }
     } catch (error) {
-      return { error: errorMessage(error) }
+      return { error: gitErrorMessage(error) }
     }
   })
 }

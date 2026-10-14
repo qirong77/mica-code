@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
-import { discardFile, git, safeFilePath, stageFile, unstageFile } from './git-ops'
+import { discardFile, git, gitErrorMessage, safeFilePath, stageFile, unstageFile } from './git-ops'
 
 const execFileAsync = promisify(execFile)
 
@@ -126,5 +126,69 @@ describe('safeFilePath', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('索引锁', () => {
+  let dir
+  const indexFile = () => path.join(dir, '.git', 'index')
+  const lockFile = () => path.join(dir, '.git', 'index.lock')
+  const indexSnapshot = async () => (await readFile(indexFile())).toString('base64')
+
+  beforeEach(async () => {
+    dir = await setup()
+    await writeFile(path.join(dir, 'a.txt'), 'one\n')
+    await git(dir, ['add', '--', 'a.txt'])
+    await commit(dir, 'add')
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('读命令不写回索引，因此不会占用 .git/index.lock', async () => {
+    // 对照：不带 GIT_OPTIONAL_LOCKS=0 的 status 会刷新索引并写回磁盘（占一次锁），
+    // 这正是桌面端每 10s 轮询与用户点击抢锁的来源。
+    await writeFile(path.join(dir, 'a.txt'), 'two\n')
+    const before = await indexSnapshot()
+    await execFileAsync('git', ['status', '--porcelain'], { cwd: dir })
+    expect(await indexSnapshot()).not.toBe(before)
+
+    // 轮询走的读命令一律带 GIT_OPTIONAL_LOCKS=0：索引原封不动。
+    await writeFile(path.join(dir, 'a.txt'), 'three\n')
+    const stale = await indexSnapshot()
+    await git(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'])
+    await git(dir, ['diff', 'HEAD', '--numstat', '--no-renames', '--'])
+    expect(await indexSnapshot()).toBe(stale)
+  })
+
+  it('锁被短暂占着时写操作会重试成功', async () => {
+    await writeFile(path.join(dir, 'a.txt'), 'two\n')
+    await writeFile(lockFile(), '')
+    const timer = setTimeout(() => rm(lockFile(), { force: true }), 150)
+    try {
+      await discardFile(dir, 'a.txt')
+    } finally {
+      clearTimeout(timer)
+      await rm(lockFile(), { force: true })
+    }
+    expect(await readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('one\n')
+  })
+
+  it('锁一直不放时报出可操作的中文提示', async () => {
+    await writeFile(path.join(dir, 'a.txt'), 'two\n')
+    await writeFile(lockFile(), '')
+    try {
+      const error = await discardFile(dir, 'a.txt').catch((failure) => failure)
+      expect(String(error)).toContain('index.lock')
+      const message = gitErrorMessage(error)
+      expect(message).toContain('另一个 git 进程')
+      expect(message).toContain('.git/index.lock')
+    } finally {
+      await rm(lockFile(), { force: true })
+    }
+  })
+
+  it('其它错误原样透出', () => {
+    expect(gitErrorMessage({ stderr: 'fatal: not a git repository\n' })).toBe(
+      'fatal: not a git repository'
+    )
   })
 })

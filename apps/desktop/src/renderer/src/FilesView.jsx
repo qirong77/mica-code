@@ -612,7 +612,9 @@ export const FilesView = forwardRef(function FilesView(
       }
       const result = await window.mica.git[kind](gitCwd, file.path)
       if (result?.error) {
-        showMessage(`Git 操作失败：${result.error}`)
+        // 走短暂提示（跟其它操作失败一致）：非 transient 的消息会整块盖住编辑器分栏
+        // 且一直留着，看起来像「文件页面不能用了」。
+        showMessage(`Git 操作失败：${result.error}`, true, true)
         return
       }
       if (kind === 'discard' && gitSelectedFile?.path === file.path) setGitSelectedFile(null)
