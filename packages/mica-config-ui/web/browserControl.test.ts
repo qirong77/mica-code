@@ -6,7 +6,6 @@ import {
   groupEndpoints,
   methodOf,
   pathWithSampleParams,
-  skillMarkdownOf,
   unavailableBrowserControlDetails,
 } from './browserControl.js';
 import type { ConfigWebBrowserControlEndpoint } from '../src/shared/types.js';
@@ -29,23 +28,6 @@ describe('browser control labels', () => {
       'x-mica-owner: $MICA_BROWSER_OWNER',
     );
     expect(browserEnvHint(null)).toContain('$MICA_BROWSER_URL');
-  });
-});
-
-describe('browser control skill document', () => {
-  // 页面要把技能文档**全文**显示出来（它是应用生成的，不是读用户目录里的副本），
-  // 所以这里保证：有内容就原样给出、缺失时不显示成一段空白。
-  it('returns the generated skill markdown as-is', () => {
-    const markdown = '# Mica Browser Control\n\n- 打开一个窗口\n';
-    expect(skillMarkdownOf({ skillMarkdown: markdown } as never)).toBe(markdown.trim());
-  });
-
-  it('returns an empty string when the service has no skill document', () => {
-    expect(skillMarkdownOf(null)).toBe('');
-    expect(skillMarkdownOf(undefined)).toBe('');
-    expect(skillMarkdownOf({ skillMarkdown: '' } as never)).toBe('');
-    expect(skillMarkdownOf({ skillMarkdown: '   ' } as never)).toBe('');
-    expect(skillMarkdownOf(unavailableBrowserControlDetails())).toBe('');
   });
 });
 

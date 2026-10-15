@@ -39,7 +39,6 @@ export function unavailableBrowserControlDetails(
     browsers: [],
     endpoints: [],
     markdown: '',
-    skillMarkdown: '',
     envVars: {
       url: BROWSER_URL_ENV_FALLBACK.slice(1),
       owner: BROWSER_OWNER_ENV_FALLBACK.slice(1),
@@ -51,16 +50,8 @@ export function unavailableBrowserControlDetails(
 export const BROWSER_CONTROL_DISABLED_STEPS = [
   '受控浏览器是「给 AI 用的」浏览器：窗口开在 Mica Code 应用里，agent 用一套本机接口开页面、点击、读内容、截图、读 cookie。',
   '它由桌面应用的主进程提供，只有从应用里打开的设置页才连得上；纯浏览器宿主（CLI 的 mica --config-web、npm run start:web）读不到它。',
-  '打开 Mica Code 桌面应用，再从这里进入「Browser Control」：会显示服务状态、写给 agent 的技能文档与完整接口文档。',
+  '打开 Mica Code 桌面应用，再从这里进入「Browser Control」：会显示服务状态与完整接口文档。',
 ];
-
-/**
- * 技能文档这一节要说明的「谁是源头」：页面显示的是应用**生成**的那一份，用户目录里的
- * `SKILL.md` 只是它落到磁盘的副本。要改文档就改应用里的源头（`browser-docs.js`），
- * 改副本会被下次启动覆盖 —— 否则同一份文档会分叉成两份。
- */
-export const SKILL_SOURCE_NOTE =
-  '下面这份文档由应用生成，启动时同步写入上面的技能文件。要改它请改应用里的源头（apps/desktop/src/main/browser/browser-docs.js），改用户目录里的副本会被下次启动覆盖。';
 
 /** 方法分组的固定顺序：常见的读/写在前，其余按字母排。 */
 export const BROWSER_METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -68,17 +59,6 @@ export const BROWSER_METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export function methodOf(endpoint: ConfigWebBrowserControlEndpoint | null | undefined): string {
   const method = typeof endpoint?.method === 'string' ? endpoint.method.trim().toUpperCase() : '';
   return method || 'GET';
-}
-
-/**
- * 技能文档全文（页面要能完整看到它，而不是只看到一个路径）。
- *
- * 读磁盘上的副本没有意义：那份是应用写出去的，`details.skillMarkdown` 已经是生成结果。
- * 缺失（服务没起来）时给空串，由页面显示「未开启」而不是显示一段空白。
- */
-export function skillMarkdownOf(details: ConfigWebBrowserControlDetails | null | undefined): string {
-  const markdown = details?.skillMarkdown;
-  return typeof markdown === 'string' ? markdown.trim() : '';
 }
 
 export function endpointSummaryLine(endpoint: ConfigWebBrowserControlEndpoint | null | undefined): string {

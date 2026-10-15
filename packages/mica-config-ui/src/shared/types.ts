@@ -275,7 +275,6 @@ export type ConfigWebBrowserControlDetails = {
   /** 完整人读文档（markdown 源文）。 */
   markdown: string;
   /** 写给 agent 的技能文档源文。 */
-  skillMarkdown: string;
   /** 环境变量名：agent 用 `url` 拿地址、用 `owner` 认领归属。 */
   envVars: { url: string; owner: string };
 };

@@ -77,7 +77,7 @@ describe('skill file', () => {
 describe('detailsFrom', () => {
   it('assembles the settings page payload', () => {
     const details = detailsFrom({
-      docs: { version: 3, endpoints: [{ id: 'health' }], markdown: 'md', skillMarkdown: 'skill' },
+      docs: { version: 3, endpoints: [{ id: 'health' }], markdown: 'md' },
       browsers: [{ id: 'brw-1', owner: 'sess-1' }],
       serviceUrl: 'http://127.0.0.1:18767',
       skillPath: '/home/u/.mica/skills/mica-browser/SKILL.md'

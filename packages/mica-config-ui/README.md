@@ -41,10 +41,10 @@ render(<ConfigWebApp />)
 `web/App.tsx` 的 section 白名单与 `web/layout/Sidebar.tsx` 的条目按宿主能力区分，浏览器宿主（`apps/config-web`）没有桌面运行时那两份数据：
 
 - **Auto Compact**（`supportsAutoCompact()`）：设置与按会话记账的计数活在运行时的 `userData/auto-compact.json`。**能力不存在时连侧栏入口都不显示**，带 `?section=autoCompact` 的深链退回 Config。
-- **Browser Control**（入口**各处都在**，不受能力门控）：受控浏览器窗口活在 Electron 主进程，运行时是纯 Node，两边靠本机 socket / 运行时端口上的 `/remote/control` 通信（`apps/desktop/src/host/browser-control.js`）。页面只讲三件事：服务状态（含**技能文档全文**）、技能文档与接口文档；纯逻辑（技能文档取值、接口分组、curl 示例）在 `web/browserControl.ts`。
+- **Browser Control**（入口**各处都在**，不受能力门控）：受控浏览器窗口活在 Electron 主进程，运行时是纯 Node，两边靠本机 socket / 运行时端口上的 `/remote/control` 通信（`apps/desktop/src/host/browser-control.js`）。页面只讲两件事：服务状态（地址/版本/可用性/技能文件路径）与接口文档（分组、curl 示例、两个环境变量）；纯逻辑（接口分组、curl 示例）在 `web/browserControl.ts`。
   - 入口刻意不藏：它是「Mica 里有一套能真正打开的浏览器」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。拿不到服务时 `readBrowserControlDetails()` 交回一份显式不可用的详情（`unavailableBrowserControlDetails`，reason 说清「只有从 Mica Code 应用里打开的配置页才连得上」并给出怎么开），页面照常渲染并提示未开启，`?section=browserControl` 也因此永远有效。
   - **这一页不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的地球图标完成，页面列出来只会让人以为得手动建。客户端只有 `readBrowserControlDetails` 一个方法，**不要**再加回 create/close/show/hide（`ConfigWebClient` 上没有它们）。
-  - **技能文档显示的是应用生成的那一份**（`details.skillMarkdown`），不是去读用户目录里的副本：那份副本由应用在启动时写出，改它会被下次启动覆盖。要改文档就改源头 `apps/desktop/src/main/browser/browser-docs.js`（页面上有这条说明，见 `SKILL_SOURCE_NOTE`）。
+  - **页面不显示技能文档正文**：那份 `SKILL.md` 由应用在启动时写到 `$MICA_HOME/skills/mica-browser/`，内容只有一行服务地址（端点清单会随接口演进，抄进技能就是两处分叉）；页面只显示它的路径，正文要看就去读那个文件。文档源头只有一处：`apps/desktop/src/main/browser/browser-docs.js`。
 
 ## 约定
 

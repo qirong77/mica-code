@@ -5,8 +5,6 @@
  * 「文档写了但路由没实现」或反过来的漂移。
  */
 
-import { BROWSER_PARTITION } from './browser-core.js'
-
 export const BROWSER_SERVICE_APP = 'mica-code-browser'
 export const BROWSER_SERVICE_VERSION = 1
 
@@ -332,6 +330,8 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     '',
     `服务地址：\`${serviceUrl}\``,
     '',
+    '请求头带 `x-mica-owner: $MICA_BROWSER_OWNER` 会把新建窗口归属到当前会话（不带则显示为「未归属」）。',
+    '',
     '## 端点',
     ''
   ]
@@ -360,56 +360,16 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
 }
 
 /**
- * 写进 `$MICA_HOME/skills/mica-browser/SKILL.md` 的技能：agent 靠它知道「这台机器上有一套
- * 能真正打开的浏览器」，以及怎么把窗口挂到当前会话上。
+ * 写进 `$MICA_HOME/skills/mica-browser/SKILL.md` 的技能。
+ *
+ * 刻意只有一行地址：接口清单会随服务演进，抄一份到技能里就会两处分叉（用户目录里那份
+ * 还会被下次启动覆盖）。agent 拿到地址后 GET `${url}/browser/docs` 自己取最新文档。
  */
 export function buildSkillMarkdown() {
-  const rows = BROWSER_ENDPOINTS.map(
-    (endpoint) => `| \`${endpoint.method} ${endpoint.path}\` | ${endpoint.summary} |`
-  )
   return `---
 name: mica-browser
-description: 驱动 Mica 桌面端内置的受控浏览器（真实 Chromium 窗口）。当任务需要打开网页、登录后抓取内容、点击/输入、截图、读 cookie（含 HttpOnly）、观察控制台与网络请求时使用。
 ---
 
-# 受控浏览器
-
-Mica 桌面应用内置了一批**真实 Chromium 窗口**，由本机的一个 HTTP 服务控制，供 agent 驱动。
-它和你自己起 Chromium/Playwright 的区别是：窗口就活在用户的 Mica 里，用户能在顶栏看到它、
-点开它、也能自己操作，所以**需要人看见或接手的浏览都该用它**。
-
-## 接入
-
-- 服务地址：\`$MICA_BROWSER_URL\`（由 Mica 注入到本进程环境变量，没设置说明当前不在桌面端里运行，不要用）
-- 归属：请求头 \`x-mica-owner: $MICA_BROWSER_OWNER\`。带上它，窗口会挂到当前会话的图标行上，
-  用户一眼知道是谁开的；不带也能用，只是显示成「未归属」。
-- 认证：无。服务只监听 127.0.0.1，非 GET 请求要求 JSON 请求体。
-- 浏览器数据走独立的持久分区（\`${BROWSER_PARTITION}\`），与 Mica 应用本身互不干扰，登录状态跨重启保留。
-
-## 固定流程
-
-1. 开窗口（可顺手设 label，用户靠它区分多个窗口）：
-   \`curl -s -X POST "$MICA_BROWSER_URL/browser/browsers" -H 'content-type: application/json' -H "x-mica-owner: $MICA_BROWSER_OWNER" -d '{"url":"https://example.com","label":"订单页"}'\`
-2. 拿到 \`browser.tabs[0].id\`（下称 \`$TAB\`），之后所有页面操作都用它。
-3. 读内容：\`curl -s "$MICA_BROWSER_URL/browser/tabs/$TAB/content"\`（大页面用 \`maxChars\` 收窄）
-4. 需要交互就 \`click\` / \`type\` / \`keys\` / \`scroll\`，等条件成立用 \`wait\`，别用 sleep 硬等。
-5. 需要视觉确认时 \`screenshot\`（窗口隐藏着也能截），需要喂给别的工具就用返回的 dataUrl。
-6. 用完 \`POST /browser/tabs/$TAB/close\`，或整个 \`POST /browser/browsers/$ID/close\`。
-   只是暂时不看它就用 \`hide\`，页面状态会保留。
-
-## 端点一览
-
-| 端点 | 说明 |
-| --- | --- |
-${rows.join('\n')}
-
-## 要注意的
-
-- 窗口**默认隐藏着建**（不打断用户）。**不要主动 show**：用户点应用顶栏的地球图标即可显示/隐藏；只有用户明确说「打开给我看看」时才调 \`show\`。
-- 用户点窗口的关闭按钮等于 \`hide\`，不是销毁 —— 下次 \`show\` 页面还在原来那一步。
-- \`content\` 给的是渲染后的 innerText，动态页面请先 \`wait\` 再读。
-- cookie 用 \`?format=header\` 直接拿可发送的 Cookie 头；HttpOnly 也在里面。
-  这些是真实凭据，别写进日志、别提交到仓库、别发到外部服务。
-- 地址栏不可编辑是设计：导航由你和页面内的链接决定，不要试图让用户手输地址。
+$MICA_BROWSER_URL
 `
 }

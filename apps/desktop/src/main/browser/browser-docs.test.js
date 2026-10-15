@@ -64,18 +64,17 @@ describe('buildSkillMarkdown', () => {
   it('is a valid skill document with front matter', () => {
     expect(markdown.startsWith('---\n')).toBe(true)
     expect(markdown).toContain('name: mica-browser')
-    expect(markdown).toContain('description:')
   })
 
-  it('tells the agent how to reach the service and claim ownership', () => {
-    expect(markdown).toContain('$MICA_BROWSER_URL')
-    expect(markdown).toContain('$MICA_BROWSER_OWNER')
-    expect(markdown).toContain('x-mica-owner')
+  // 技能刻意只有一行地址：端点清单会随接口增删漂移，写进技能就是两处分叉。
+  it('carries nothing but the service address', () => {
+    const body = markdown.split('---\n')[2]
+    expect(body.trim()).toBe('$MICA_BROWSER_URL')
   })
 
-  it('lists the endpoints so the agent can pick one without guessing', () => {
+  it('leaves the endpoint list to /browser/docs', () => {
     for (const endpoint of BROWSER_ENDPOINTS) {
-      expect(markdown).toContain(endpoint.path)
+      expect(markdown).not.toContain(endpoint.path)
     }
   })
 })

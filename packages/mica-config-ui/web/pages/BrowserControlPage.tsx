@@ -5,12 +5,10 @@ import { appIcons } from '../icons.js';
 import {
   BROWSER_CONTROL_DISABLED_STEPS,
   BROWSER_URL_ENV_FALLBACK,
-  SKILL_SOURCE_NOTE,
   browserEnvHint,
   curlExample,
   endpointSummaryLine,
   groupEndpoints,
-  skillMarkdownOf,
 } from '../browserControl.js';
 import { readBrowserControlDetails } from '../api.js';
 import type { ConfigWebBrowserControlDetails } from '../../src/shared/types.js';
@@ -24,8 +22,8 @@ import type { ConfigWebBrowserControlDetails } from '../../src/shared/types.js';
  * `unavailableBrowserControlDetails`），藏起入口反而让人以为 Mica 没有这个能力。
  *
  * 这一页**不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的图标完成，列在这里
- * 只会让人以为得手动建。它只讲两件事：服务状态（含写给 agent 的技能文档全文）与接口文档。
- * 展示口径全在 `browserControl.ts`。
+ * 只会让人以为得手动建。它只讲服务状态与接口文档，展示口径全在 `browserControl.ts`。
+ * 写给 agent 的技能文档不在这里展开——它由应用生成并同步到技能文件，正文只指向接口文档。
  */
 export function BrowserControlPage() {
   const [details, setDetails] = useState<ConfigWebBrowserControlDetails | null>(null);
@@ -83,7 +81,6 @@ export function BrowserControlPage() {
   }
 
   const groups = useMemo(() => groupEndpoints(details?.endpoints), [details]);
-  const skillMarkdown = useMemo(() => skillMarkdownOf(details), [details]);
   const exampleBase = details?.envVars?.url ? `$${details.envVars.url}` : BROWSER_URL_ENV_FALLBACK;
 
   return (
@@ -124,7 +121,7 @@ export function BrowserControlPage() {
               {details.skillPath ? (
                 <p className="browser-control-note">
                   技能文件是写给 agent 的 <code>SKILL.md</code>：告诉它这台机器上有一套能真正打开的浏览器、
-                  以及怎么把窗口挂到当前会话上。全文见下方「技能文档」。
+                  并指向下面的接口文档。
                 </p>
               ) : null}
 
@@ -137,26 +134,6 @@ export function BrowserControlPage() {
               ) : null}
 
               <p className="browser-control-note">{browserEnvHint(details.envVars)}</p>
-            </section>
-
-            <section className="simple-card browser-control-card">
-              <div className="browser-control-card-head">
-                <div className="table-panel-title">
-                  <strong>技能文档</strong>
-                  <span>就是上面那个技能文件的内容：agent 靠它学会怎么开窗口、点页面、截图。</span>
-                </div>
-                <Button disabled={!skillMarkdown} onClick={() => void copy(skillMarkdown)}>
-                  复制
-                </Button>
-              </div>
-
-              <p className="browser-control-note">{SKILL_SOURCE_NOTE}</p>
-
-              {skillMarkdown ? (
-                <pre className="skill-preview">{skillMarkdown}</pre>
-              ) : (
-                <Empty description="暂无技能文档（需要受控浏览器服务在线）" />
-              )}
             </section>
 
             <section className="simple-card browser-control-card">

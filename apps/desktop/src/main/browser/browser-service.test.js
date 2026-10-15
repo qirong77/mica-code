@@ -148,7 +148,9 @@ describe('service surface', () => {
     expect(docs.body.endpoints).toHaveLength(BROWSER_ENDPOINTS.length)
     expect(docs.body.serviceUrl).toBe('http://127.0.0.1:18767')
     expect(docs.body.markdown).toContain('http://127.0.0.1:18767')
-    expect(docs.body.skillMarkdown).toContain('x-mica-owner')
+    expect(docs.body.markdown).toContain('x-mica-owner')
+    // 技能文档由服务原样给出占位符，运行时写盘前才换成真实地址（browser-control.js）。
+    expect(docs.body.skillMarkdown).toContain('$MICA_BROWSER_URL')
   })
 
   it('rejects unknown endpoints and unsafe methods', async () => {

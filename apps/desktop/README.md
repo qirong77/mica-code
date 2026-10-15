@@ -240,7 +240,9 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   Browsers whose owner is unknown are shown dimmed rather than hidden, so a window opened by hand
   with `curl` is still manageable. The settings page has a *Browser Control* section (its sidebar
   entry is always there; the data only exists inside the desktop runtime) that shows the service
-  status, the full skill document we generate for the agent, and the whole endpoint catalog. It
+  status, the path of the skill file we generate for the agent, and the whole endpoint catalog. The
+  skill body itself is not shown — it is a single line (the service address), and copying the
+  endpoint list into it would just drift; the agent fetches `/browser/docs` from the address. It
   deliberately does **not** manage windows — opening, showing, hiding and destroying a window is the
   agent's job (or the globe icon in the chat header); windows are created hidden so they never steal
   focus from what you are doing.

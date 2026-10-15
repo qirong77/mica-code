@@ -27,6 +27,22 @@ export function emptyBrowserSnapshot(error = null) {
 }
 
 /**
+ * 技能文档里的 `$MICA_BROWSER_URL` 是进程环境变量名（agent 进程里确实有它），但这份文档
+ * 同时要写进磁盘给人看，所以运行时知道真实地址时把它换成地址本身。
+ *
+ * 没拿到地址就原样返回：宁可留一个仍能用的变量名（agent 有那个环境变量），也不要写进
+ * 一个可能不对的地址。
+ */
+export function resolveSkillTemplate(markdown, { serviceUrl = '' } = {}) {
+  if (typeof markdown !== 'string') return ''
+  const url = String(serviceUrl || '')
+    .trim()
+    .replace(/\/+$/, '')
+  if (!url) return markdown
+  return markdown.split(`$${BROWSER_URL_ENV}`).join(url)
+}
+
+/**
  * 归一化服务端返回的窗口列表：只保留界面真正会用的字段。服务端多给字段不会让界面出问题，
  * 少给字段则一律有默认值 —— 界面不该因为一次字段改名整块空掉。
  */
@@ -79,7 +95,6 @@ export function detailsFrom({ docs, browsers, serviceUrl, skillPath, error = nul
     browsers: normalizeBrowserSummaries(browsers),
     endpoints: Array.isArray(docs?.endpoints) ? docs.endpoints : [],
     markdown: typeof docs?.markdown === 'string' ? docs.markdown : '',
-    skillMarkdown: typeof docs?.skillMarkdown === 'string' ? docs.skillMarkdown : '',
     envVars: { url: BROWSER_URL_ENV, owner: BROWSER_OWNER_ENV }
   }
 }

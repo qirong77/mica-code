@@ -11,6 +11,7 @@ import {
   emptyBrowserSnapshot,
   normalizeBrowserSummaries,
   parseSseData,
+  resolveSkillTemplate,
   sameBrowsers,
   skillFilePath,
   skillNeedsWrite
@@ -168,7 +169,7 @@ async function loadDocs() {
       version: payload.version,
       endpoints: payload.endpoints,
       markdown: payload.markdown,
-      skillMarkdown: payload.skillMarkdown
+      skillMarkdown: resolveSkillTemplate(payload.skillMarkdown, { serviceUrl: serviceUrl() })
     }
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error)
