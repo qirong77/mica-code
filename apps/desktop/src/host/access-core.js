@@ -11,6 +11,8 @@
  * 读写状态在 access.js，接线在 server/index.js。
  */
 
+import { SHARE_BASE_PATH } from '@packages/mica-web-shared'
+
 const LOOPBACK_NAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
 /** 私有网段（RFC1918）。分享链接优先落在这些地址上：它们才是同事能连到的那张网。 */
@@ -110,6 +112,20 @@ function formatHost(address) {
   return String(address).includes(':') ? `[${address}]` : String(address)
 }
 
+/** 给一个基地址补上服务路径：原地址没有路径（`/`）时用 `pathname`，否则原样保留。 */
+function withBasePath(baseUrl, pathname) {
+  if (!pathname) return baseUrl
+  try {
+    const url = new URL(baseUrl)
+    if (!url.pathname || url.pathname === '/') url.pathname = pathname
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/+$/, '')
+  } catch {
+    return baseUrl
+  }
+}
+
 /**
  * 分享链接该用哪个地址。
  *
@@ -122,33 +138,39 @@ function formatHost(address) {
  * 3. 网卡地址里挑一个：私有网段 IPv4 > 其它 IPv4 > IPv6（链路本地 `fe80::` 排除，
  *    那个地址跨机器不可达）。
  *
- * 端口一律用**分享端口**（`sharePort`：运行时另起的那个监听，默认 8890），不是主端口——
- * 分享出去的那一份界面就住在分享端口上（只带一条会话、没有左侧会话列表）。
+ * 端口一律用**运行时自己的端口**（`port`），路径带上分享视图的基路径（`basePath`，
+ * 默认 `/share`）——分享出去的那一份界面就是同一个端口上的 `/share`（只带一条会话、
+ * 没有左侧会话列表），不是另一个监听。
  *
  * 没有可用地址（只有环回）时返回 null，此时页面回落成「不提供分享」。
  */
 export function pickShareBaseUrl({
   publicUrl = '',
-  sharePort,
+  port,
+  basePath = SHARE_BASE_PATH,
   addresses = [],
   preferredOrigin = '',
   allowedHostnames = null
 } = {}) {
   const pinned = normalizeBaseUrl(publicUrl)
-  if (pinned) return pinned
+  // 公网地址通常只写到域名（`https://mica.example.com`），分享视图的路径要补上，
+  // 否则分享出去的链接落在完整应用上（带左侧会话列表）；已经自带路径的按原样用，
+  // 反向代理挂在子路径下的部署由使用者自己写清。
+  if (pinned) return withBasePath(pinned, normalizeBasePath(basePath))
 
-  const listenPort = Number(sharePort)
+  const listenPort = Number(port)
   if (!listenPort) return null
+  const pathname = normalizeBasePath(basePath)
 
   const preferred = normalizeBaseUrl(preferredOrigin)
   if (preferred) {
     const url = new URL(preferred)
     const host = hostnameOf(url.host)
     const known = allowedHostnames instanceof Set ? allowedHostnames.has(host) : false
-    // 端口换成分享端口：preferredOrigin 只用来认「分享者走的是哪张网」，
-    // 它自己的端口是主端口，原样带过去会拼出一条落在完整应用上的分享链接。
+    // 端口换成运行时自己的端口、路径换成分享基路径：preferredOrigin 只用来认「分享者
+    // 走的是哪张网」，它自己的端口/路径（dev 下甚至是 Vite 的 5173）不能原样带过去。
     if (known && !LOOPBACK_NAMES.has(host) && !isLoopbackAddress(host))
-      return `${url.protocol}//${url.hostname}:${listenPort}`
+      return `${url.protocol}//${url.hostname}:${listenPort}${pathname}`
   }
 
   const candidates = []
@@ -163,5 +185,13 @@ export function pickShareBaseUrl({
   }
   if (candidates.length === 0) return null
   candidates.sort((a, b) => a.rank - b.rank)
-  return `http://${formatHost(candidates[0].address)}:${listenPort}`
+  return `http://${formatHost(candidates[0].address)}:${listenPort}${pathname}`
+}
+
+/** 分享视图的基路径：去尾斜杠、补前导斜杠，空值回落成共享常量里的 `/share`。 */
+function normalizeBasePath(value) {
+  const text = String(value ?? '').trim()
+  if (!text || text === '/') return ''
+  const withLeading = text.startsWith('/') ? text : `/${text}`
+  return withLeading.replace(/\/+$/, '')
 }

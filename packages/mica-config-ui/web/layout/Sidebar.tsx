@@ -6,17 +6,22 @@ import markUrl from '../../../../apps/desktop/resources/icon.svg?url&no-inline';
 
 export type ConfigWebAppSection = ConfigWebSection;
 
-// `desktopOnly` 的条目由宿主能力决定是否出现：自动压缩的设置与计数活在运行时的
-// userData 里，浏览器宿主（apps/config-web）拿不到，所以那一边连入口都不显示。
+// 带 `available` 的条目由宿主能力决定是否出现：自动压缩的设置与计数只活在桌面运行时里，
+// 浏览器宿主（apps/config-web）拿不到，所以那一边连入口都不显示。
+//
+// Browser Control **刻意不带这个门控**：它是「Mica 里有一套能真正打开的浏览器」这件事的
+// 唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开时页面自己说清楚（见
+// pages/BrowserControlPage.tsx 与 browserControl.ts 的 unavailableBrowserControlDetails）。
 const items = [
   { key: 'config', label: 'Config' },
-  { key: 'autoCompact', label: 'Auto Compact', desktopOnly: true },
+  { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
+  { key: 'browserControl', label: 'Browser Control' },
   { key: 'sessions', label: 'Sessions' },
   { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
   { key: 'plugins', label: 'Plugins' },
-] satisfies Array<{ key: ConfigWebAppSection; label: string; desktopOnly?: boolean }>;
+] satisfies Array<{ key: ConfigWebAppSection; label: string; available?: () => boolean }>;
 
 type SidebarProps = {
   section: ConfigWebAppSection;
@@ -24,7 +29,7 @@ type SidebarProps = {
 };
 
 export function Sidebar({ section, onChange }: SidebarProps) {
-  const visibleItems = items.filter((item) => !item.desktopOnly || supportsAutoCompact());
+  const visibleItems = items.filter((item) => !item.available || item.available());
   return (
     <aside className="sidebar">
       <div className="brand-block">

@@ -17,9 +17,9 @@ ensureMicaApi()
   })
   .then((api) => {
     if (!api) return
-    // 分享端口（默认 8890）的根路径是「分享链接列表」：这一页不需要工作区/草稿那些界面
-    // 状态，也不该按「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。
-    // 带 `?session=<id>` 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
+    // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
+    // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
+    // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
     if (api.shareView && !readAppUrl(window.location.search).sessionId) {
       createRoot(document.getElementById('root')).render(<ShareIndex />)
       return

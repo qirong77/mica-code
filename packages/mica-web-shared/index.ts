@@ -3,6 +3,15 @@
 // the runtime bundle can both consume it.
 
 export { relativeTimeShort } from './time.js';
+export {
+  APP_BASE_PATH,
+  SHARE_BASE_PATH,
+  isAppPath,
+  isSharePath,
+  isUnderBasePath,
+  normalizePathname,
+  toAssetPath,
+} from './app-paths.js';
 export { formatTokens } from './format.js';
 export { toolIcon, toolLabel } from './tools.js';
 export {

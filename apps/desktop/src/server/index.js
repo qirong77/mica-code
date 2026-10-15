@@ -16,6 +16,19 @@ import {
   setChatNotifyServer
 } from '../host/chat.js'
 import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
+import {
+  registerBrowserControlIpc,
+  setBrowserControlBroadcaster,
+  startBrowserControl,
+  stopBrowserControl
+} from '../host/browser-control.js'
+import {
+  BROWSER_CONTROL_PREFIX,
+  BROWSER_SOCKET_ENV,
+  BROWSER_URL_ENV
+} from '../host/browser-control-core.js'
+import { createBrowserControlProxy, isBrowserControlPath } from '../host/browser-control-proxy.js'
+import { SHARE_BASE_PATH, isSharePath, toAssetPath } from '@packages/mica-web-shared'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
@@ -33,26 +46,26 @@ import { saveImageDataUrl } from '../host/chat-images.js'
  * 会话、文件/Git/统计/配置）以 `POST /api/invoke` + SSE 推送的形式暴露给页面，
  * 同一个 renderer 产物直接由它托管。Electron 只是它的一个容器（见 src/main/index.js）。
  *
- * 它同时监听**两个端口**，服务的是同一批 host 能力、同一个 renderer 产物：
+ * 它只监听**一个端口**（默认 8787），所有能力靠路径区分，谁也不额外占端口（地址约定见
+ * `@packages/mica-web-shared` 的 app-paths）：
  *
- * - 主端口（默认 8787）：完整的应用，左侧会话列表、文件、终端、设置都在；
- * - 分享端口（默认 8890）：分享出去的界面——`/?session=<id>` 打开某一条会话（不带
- *   左侧会话列表），`/` 是分享链接的列表。见 renderer 的 shareView 分支。
+ * - `/`、`/mica-web`：完整的应用（左侧会话列表、文件、终端、设置都在）
+ * - `/share`：分享出去的界面——`/share?session=<id>` 打开某一条会话，`/share` 本身是
+ *   分享链接列表。见 renderer 的 shareView 分支
+ * - `/remote/control`：受控浏览器（窗口服务在 Electron 主进程里、只监听 Unix socket，
+ *   由这里转发，见 ../host/browser-control-proxy.js）
+ * - `/api/*`：运行时能力
  *
- * 两个端口是同一台运行时、同一份状态（无账号体系，能连上就等于能操作）。分享端口上
+ * 所有这些是同一台运行时、同一份状态（无账号体系，能连上就等于能操作）。分享视图上
  * 少画一个侧栏只是**呈现**，不是权限边界——别把它当访问控制用。
  *
- * 用法：node out/server/index.mjs [--host 0.0.0.0] [--port 8787] [--share-port 8890]
+ * 用法：node out/server/index.mjs [--host 0.0.0.0] [--port 8787] [--no-share]
  *                                [--renderer <dir>]
  */
 
 const MODULE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)))
 const PACKAGE_ROOT = resolve(MODULE_DIR, '..', '..')
 const DEFAULT_PORT = 8787
-const DEFAULT_SHARE_PORT = 8890
-// 分享端口被占用时向上顺序探测的档数：分享链接发出去之后就固定了，随机回退会让
-// 「上次发出去的链接」在重启后指到一个没人监听的端口，所以这里要的是**可复现**。
-const SHARE_PORT_SCAN_LIMIT = 20
 const MAX_BODY_BYTES = 64 * 1024 * 1024
 const HEARTBEAT_MS = 15000
 
@@ -77,22 +90,24 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 }
 
-/** 分享端口：0/off 表示不起第二个监听（分享链接随之不可用）。 */
-function parseSharePort(value) {
+/**
+ * 分享视图开关。历史上有过独立的分享端口（`--share-port 8890`、`0`/`off` 关掉），现在
+ * 它只是自己端口上的 `/share`，所以这里只认「开/关」：`0`/`off`/`false` 关掉 `/share`
+ * 路由，其余值（含历史上传过的端口号）一律表示开启，端口号本身不再有意义。
+ */
+function parseSharing(value) {
   const text = String(value ?? '')
     .trim()
     .toLowerCase()
-  if (!text) return DEFAULT_SHARE_PORT
-  if (text === '0' || text === 'off' || text === 'false') return 0
-  const port = Number.parseInt(text, 10)
-  return Number.isFinite(port) && port > 0 && port < 65536 ? port : DEFAULT_SHARE_PORT
+  if (text === '0' || text === 'off' || text === 'false' || text === 'no') return false
+  return true
 }
 
 function parseArgs(argv) {
   const options = {
     host: process.env.MICA_DESKTOP_HOST || '0.0.0.0',
     port: Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || DEFAULT_PORT,
-    sharePort: parseSharePort(process.env.MICA_DESKTOP_SHARE_PORT),
+    sharing: parseSharing(process.env.MICA_DESKTOP_SHARE_PORT ?? process.env.MICA_DESKTOP_SHARING),
     renderer: process.env.MICA_DESKTOP_RENDERER || join(PACKAGE_ROOT, 'out', 'renderer'),
     // dev 模式下页面由 Vite dev server 提供，服务端只承载 API
     requireRenderer: process.env.MICA_DESKTOP_ALLOW_MISSING_RENDERER !== '1'
@@ -102,8 +117,11 @@ function parseArgs(argv) {
     if (arg === '--host' && argv[index + 1]) options.host = argv[(index += 1)]
     else if (arg === '--port' && argv[index + 1])
       options.port = Number.parseInt(argv[(index += 1)], 10)
+    // 兼容历史上的 `--share-port 8890`（只认开关，端口号已无意义）与新的 `--no-share`
     else if (arg === '--share-port' && argv[index + 1])
-      options.sharePort = parseSharePort(argv[(index += 1)])
+      options.sharing = parseSharing(argv[(index += 1)])
+    else if (arg === '--no-share') options.sharing = false
+    else if (arg === '--share') options.sharing = true
     else if (arg === '--renderer' && argv[index + 1]) options.renderer = resolve(argv[(index += 1)])
     else if (arg === '--allow-missing-renderer') options.requireRenderer = false
   }
@@ -336,16 +354,14 @@ function handleEvents(req, res) {
 /* -------------------------------------------------------------------- 启动 */
 
 /**
- * 端口被占用时的回退策略，两种端口各取所需：
+ * 端口被占用时回退随机端口。
  *
- * - 分享端口（`scan > 0`）**向上顺序探测**（8890 → 8909），拿到的是可复现的端口。分享链接
- *   一旦发出去就收不回来，随机回退会让它在下次启动后指到一个没人监听的端口；顺序探测则
- *   「谁先占着就往后挪一格」，重启后大概率还是同一个。
- * - 主端口（`scan = 0`）仍旧回退随机端口：Electron 容器从 `ready` 行读实际地址，不需要复现。
- *
- * 都试不出来（`scan` 档全被占）时才落到随机端口——总比起不来好。
+ * 这里只监听一个端口，默认 8787，但**不能**把它钉死：8787 上可能已经跑着另一台运行时
+ * （打包版 + dev 一起开着，或上一个实例没退干净），Electron 容器本来就会先探活再复用，
+ * 探不到时才让新实例起来，所以随机回退是「起得来」的兜底——外壳与页面都从 `ready` 行拿
+ * 实际端口，不需要复现。分享链接因此必须**现取现用**（`access:info` 用实际绑定端口拼）。
  */
-async function listenWithFallback(server, host, port, { label = '端口', scan = 0 } = {}) {
+async function listenWithFallback(server, host, port, { label = '端口' } = {}) {
   const bind = (value) =>
     new Promise((resolvePromise, reject) => {
       const onError = (error) => {
@@ -368,19 +384,7 @@ async function listenWithFallback(server, host, port, { label = '端口', scan =
     if (error?.code !== 'EADDRINUSE' || !port) throw error
   }
 
-  for (let offset = 1; offset <= scan; offset += 1) {
-    const candidate = port + offset
-    if (candidate > 65535) break
-    try {
-      await bind(candidate)
-      console.warn(`[mica-desktop] ${label} ${port} 已被占用，改用 ${candidate}`)
-      return candidate
-    } catch (error) {
-      if (error?.code !== 'EADDRINUSE') throw error
-    }
-  }
-
-  console.warn(`[mica-desktop] ${label} ${port} 起被占满，改用随机端口`)
+  console.warn(`[mica-desktop] ${label} ${port} 已被占用，改用随机端口`)
   await bind(0)
   return server.address().port
 }
@@ -406,12 +410,16 @@ export async function startDesktopServer(options = {}) {
   // 定时循环跑在运行时里（页签关掉也继续），发送走 chat host 的同一条链路
   setLoopBroadcaster(broadcast)
   setLoopRunner(runLoopTurn)
+  // 受控浏览器窗口活在 Electron 主进程里（只有主进程能开窗口），运行时经 HTTP 访问它；
+  // 浏览器状态变化要实时推给所有页面，图标才知道该不该亮
+  setBrowserControlBroadcaster(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
   registerTerminalIpc()
   registerChatIpc()
   registerLoopIpc()
+  registerBrowserControlIpc()
   registerUiStateIpc()
   registerFilesIpc()
   registerGitIpc()
@@ -426,27 +434,29 @@ export async function startDesktopServer(options = {}) {
   // 统一返回可见（真实的可读性由浏览器 tab 的 document.visibilityState 参与判断）
   ipcMain.handle('app:get-window-state', () => ({ focused: true, visible: true }))
 
-  const server = createServer(createRequestHandler({ rendererRoot, share: false }))
+  // 受控浏览器的窗口服务只监听 Unix socket（Electron 外壳给的 `MICA_BROWSER_SOCKET`），
+  // 这里把它代理成自己端口上的 /remote/control——agent 因此只需要一个已有的端口。
+  const browserProxy = createBrowserControlProxy({ socketPath: process.env[BROWSER_SOCKET_ENV] })
+
+  const sharing = options.sharing !== false
+  const server = createServer(createRequestHandler({ rendererRoot, sharing, browserProxy }))
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT, {
     label: '端口'
   })
 
-  // 分享端口：同一批 host 能力、同一个 renderer 产物，只是页面那头按「分享视图」渲染
-  // （不带左侧会话列表）。被占用时向上顺序探测（见 listenWithFallback），分享链接跟着
-  // 用实际端口——所以链接要现取现用，别把上一次的 8890 当常量。
-  let shareServer = null
-  let sharePort = 0
-  if (options.sharePort) {
-    shareServer = createServer(createRequestHandler({ rendererRoot, share: true }))
-    sharePort = await listenWithFallback(shareServer, host, options.sharePort, {
-      label: '分享端口',
-      scan: SHARE_PORT_SCAN_LIMIT
-    })
-  }
+  // 分享链接要拼出「别人能连到」的地址（自己这个端口 + /share），所以必须在端口确定
+  // （可能已回退）之后告知
+  setRuntimeAddress({ port, host, sharing })
 
-  // 分享链接要拼出「别人能连到」的地址，所以必须在端口确定（可能已回退）之后告知
-  setRuntimeAddress({ port, host, sharePort })
+  // agent 用的浏览器地址：**运行时自己的端口** + /remote/control（端口可能已从默认值回退，
+  // 所以必须等到这里才定）。会话进程靠继承这个变量拿到它，技能文档里也写它。
+  if (process.env[BROWSER_SOCKET_ENV]) {
+    process.env[BROWSER_URL_ENV] = `http://127.0.0.1:${port}${BROWSER_CONTROL_PREFIX}`
+  }
+  // 挂上浏览器服务：取一次窗口列表 + 文档（顺带把技能文件写给 agent），再订阅它的 SSE。
+  // 纯浏览器宿主（`npm run start:web`）没有 socket，什么都不做。
+  void startBrowserControl()
 
   let closing = false
   const close = async () => {
@@ -463,16 +473,12 @@ export async function startDesktopServer(options = {}) {
     disposeAllTerminals()
     disposeAllChatRuns()
     disposeLoops()
+    stopBrowserControl()
     stopNotifyBridge()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
     await notifyServer.close()
-    await Promise.all([
-      new Promise((resolvePromise) => server.close(() => resolvePromise())),
-      shareServer
-        ? new Promise((resolvePromise) => shareServer.close(() => resolvePromise()))
-        : Promise.resolve()
-    ])
+    await new Promise((resolvePromise) => server.close(() => resolvePromise()))
   }
 
   return {
@@ -480,23 +486,37 @@ export async function startDesktopServer(options = {}) {
     port,
     host,
     url: `http://127.0.0.1:${port}`,
-    shareServer,
-    sharePort,
-    shareUrl: sharePort ? `http://127.0.0.1:${sharePort}` : null,
+    sharing,
+    shareUrl: sharing ? `http://127.0.0.1:${port}${SHARE_BASE_PATH}` : null,
     rendererRoot,
     close
   }
 }
 
 /**
- * 两个端口共用同一套请求处理：`share` 只影响 `/api/env` 回给页面的那个标记
- * （分享端口上的页面不画左侧会话列表、根路径是分享链接列表）。
+ * 一个端口上的请求处理：先按路径分派服务（/api/*、/remote/control/*、/share、页面产物），
+ * 再交给静态服务。`/share` 与 `/mica-web` 都是页面产物的别名，页面自己按 location.pathname
+ * 判断「是不是分享视图」——判断只有一份，在 @packages/mica-web-shared 的 app-paths 里。
  */
-function createRequestHandler({ rendererRoot, share }) {
+function createRequestHandler({ rendererRoot, sharing = true, browserProxy = null }) {
   return (req, res) => {
     void (async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
       try {
+        // 分享视图（/share 与其子路径）：关掉分享时直接 404，免得以为还能分享。
+        if (isSharePath(url.pathname) && !sharing) {
+          return sendJson(res, 404, { ok: false, error: '分享视图已关闭' })
+        }
+
+        // 受控浏览器：窗口服务住在 Electron 主进程里（只有它开得了窗口），只监听 Unix
+        // socket，这里原样转发，agent 于是只用到运行时这一个端口。校验与 /api 同款
+        // （curl 没有 Origin、Host 是本机，正常放行；网页发来的跨站请求被挡住）。
+        if (browserProxy && isBrowserControlPath(url.pathname)) {
+          const origin = verifyRequestOrigin(req)
+          if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
+          if (browserProxy(req, res, url)) return
+        }
+
         // 探活接口：另一台运行时（Node）靠它判断「这个端口上是不是一台 Mica Code」，
         // 所以只回一个不含任何数据的指纹。
         if (req.method === 'GET' && url.pathname === '/api/health') {
@@ -522,9 +542,10 @@ function createRequestHandler({ rendererRoot, share }) {
             return sendJson(res, 200, {
               platform: process.platform,
               homeDir: process.env.HOME || '',
-              // 这个请求来自分享端口还是主端口：renderer 据此决定要不要画左侧会话列表
-              // （`/` 在分享端口上另有一张分享链接列表，见 main.jsx）。
-              share: share === true,
+              // 当前绑定端口与分享视图的地址：页面用它拼分享链接（`shareBaseUrl` 在
+              // access:info 里另有一份「别人能连到」的地址）。
+              sharePath: SHARE_BASE_PATH,
+              shareEnabled: sharing,
               windowsBuildNumber:
                 process.platform === 'win32'
                   ? Number.parseInt(osRelease().split('.')[2], 10) || null
@@ -537,10 +558,16 @@ function createRequestHandler({ rendererRoot, share }) {
             })
           }
         }
+        // 受控浏览器：主进程的窗口服务只监听 Unix socket，这里把它代理成运行时端口上的
+        // /remote/control/*。校验与 /api 同款（curl 没有 Origin、Host 是本机，正常放行；
+        // 网页发来的跨站请求被挡住）。
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return sendJson(res, 405, { error: 'Method not allowed' })
         }
-        return await serveStatic(req, res, rendererRoot, url.pathname)
+        // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
+        // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会
+        // 解析成 `/mica-web/assets/x.js` 这种形态，所以这里剥前缀是必需的，不是顺手为之。
+        return await serveStatic(req, res, rendererRoot, toAssetPath(url.pathname))
       } catch (error) {
         if (!res.headersSent) sendJson(res, 500, { error: errorMessage(error) })
         else res.end()
@@ -573,15 +600,16 @@ async function main() {
   for (const address of lanAddresses(running.port)) {
     console.log(`[mica-desktop] 局域网访问: ${address}`)
   }
-  // 分享端口上是「分享出去的界面」：`/?session=<id>` 打开一条会话（不画左侧会话列表），
-  // `/` 是分享链接列表。同一台运行时、同一份状态，只是少画一个侧栏——不是权限边界。
-  if (running.sharePort) {
-    console.log(`[mica-desktop] 分享页面: http://127.0.0.1:${running.sharePort}`)
-    for (const address of lanAddresses(running.sharePort)) {
-      console.log(`[mica-desktop] 分享链接: ${address}`)
+  // 分享页面与主页面在同一个端口上，只差一个路径：`/share?session=<id>` 打开一条会话
+  // （不画左侧会话列表），`/share` 是分享链接列表。同一台运行时、同一份状态，只是少画
+  // 一个侧栏——不是权限边界。
+  if (running.sharing) {
+    console.log(`[mica-desktop] 分享页面: http://127.0.0.1:${running.port}${SHARE_BASE_PATH}`)
+    for (const address of lanAddresses(running.port)) {
+      console.log(`[mica-desktop] 分享链接: ${address}${SHARE_BASE_PATH}`)
     }
   } else {
-    console.log('[mica-desktop] 分享端口已关闭，分享链接不可用')
+    console.log('[mica-desktop] 分享视图已关闭，分享链接不可用')
   }
   if (process.env.MICA_DESKTOP_PUBLIC_URL)
     console.log(`[mica-desktop] 公网地址: ${process.env.MICA_DESKTOP_PUBLIC_URL}`)

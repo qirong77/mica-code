@@ -1,0 +1,262 @@
+/**
+ * 受控浏览器的纯逻辑：状态投影、owner 解析、cookie 归一化、路由编译、按键映射。
+ *
+ * 这里刻意不 import electron —— 主进程的窗口/视图部分在 browser-manager.js，这里只放
+ * 「不需要 Electron 就能算出来」的部分，好让 bun test 直接覆盖（含路由与请求契约）。
+ */
+
+export const BROWSER_PARTITION = 'persist:mica-browser'
+
+/** 请求级错误：HTTP 层据此决定状态码（400 参数/状态问题、404 找不到、504 超时） */
+export class BrowserRequestError extends Error {
+  constructor(message, status = 400) {
+    super(message)
+    this.name = 'BrowserRequestError'
+    this.status = status
+  }
+}
+
+export function notFoundError(message) {
+  return new BrowserRequestError(message, 404)
+}
+
+export function timeoutError(message) {
+  return new BrowserRequestError(message, 504)
+}
+/** chrome 条（标签 + 只读地址）的高度，视图从它下面开始 */
+export const CHROME_HEIGHT = 38
+export const DEFAULT_BROWSER_SIZE = { width: 1180, height: 800 }
+/** 会话归属随请求头传，取会话 id 或工作区页签 id；长度只是为了不让脏数据进状态 */
+export const OWNER_HEADER = 'x-mica-owner'
+const OWNER_MAX = 120
+const TITLE_MAX = 200
+const URL_MAX = 2048
+
+/** 命中 template（`/browser/tabs/:id/navigate`）时返回参数，不命中返回 null */
+export function matchPath(template, pathname) {
+  const expected = template.split('/')
+  const actual = String(pathname || '').split('/')
+  if (expected.length !== actual.length) return null
+  const params = {}
+  for (let index = 0; index < expected.length; index += 1) {
+    const segment = expected[index]
+    if (!segment.startsWith(':')) {
+      if (segment !== actual[index]) return null
+      continue
+    }
+    if (!actual[index]) return null
+    params[segment.slice(1)] = decodeURIComponent(actual[index])
+  }
+  return params
+}
+
+/**
+ * 端点目录 → 路由表。路由与 `/browser/capabilities`、设置页文档同源，改文档就是改路由，
+ * 不存在「文档写了但没实现」的漂移。
+ */
+export function compileRoutes(endpoints) {
+  const routes = []
+  for (const endpoint of endpoints) {
+    if (endpoint.method === 'SSE') {
+      routes.push({ endpoint, method: 'GET', template: endpoint.path, stream: true })
+      continue
+    }
+    routes.push({ endpoint, method: endpoint.method, template: endpoint.path, stream: false })
+  }
+  return routes
+}
+
+export function resolveRoute(routes, method, pathname) {
+  for (const route of routes) {
+    if (route.method !== method) continue
+    const params = matchPath(route.template, pathname)
+    if (params) return { endpoint: route.endpoint, params, stream: route.stream }
+  }
+  return null
+}
+
+function text(value, max) {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  return trimmed.length > max ? trimmed.slice(0, max) : trimmed
+}
+
+export function normalizeOwner(value) {
+  const owner = text(value, OWNER_MAX)
+  return owner || null
+}
+
+/**
+ * 归属解析：请求头优先（agent 调用时最省事），其次 body，最后 query。取不到就是 null ——
+ * 未归属的窗口在界面里照样能看见、能操作，只是不挂到某个会话的图标行上。
+ */
+export function resolveOwner({ headers, body, query } = {}) {
+  const header = headers?.[OWNER_HEADER] ?? headers?.[OWNER_HEADER.toUpperCase()]
+  const fromHeader = normalizeOwner(Array.isArray(header) ? header[0] : header)
+  if (fromHeader) return fromHeader
+  const fromBody = normalizeOwner(body?.owner)
+  if (fromBody) return fromBody
+  return normalizeOwner(query?.owner)
+}
+
+/** 没有协议时按 https 补全：agent 更常直接给 `example.com/path` */
+export function normalizeUrl(value) {
+  const raw = text(value, URL_MAX)
+  if (!raw) return ''
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return raw
+  if (raw.startsWith('//')) return `https:${raw}`
+  return `https://${raw}`
+}
+
+export function normalizeLabel(value, fallback = '受控浏览器') {
+  return text(value, 60) || fallback
+}
+
+export function parseBoolean(value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value !== 'string') return undefined
+  const lowered = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(lowered)) return true
+  if (['0', 'false', 'no', 'off'].includes(lowered)) return false
+  return undefined
+}
+
+export function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+/** 目录里只需要「这个窗口是谁的、叫什么、现在在哪」，明细留给 getBrowser */
+export function browserSummary(record) {
+  if (!record) return null
+  const active = tabSummary(activeTab(record))
+  return {
+    id: record.id,
+    owner: record.owner || null,
+    label: record.label,
+    visible: Boolean(record.visible),
+    createdAt: record.createdAt || null,
+    title: text(active?.title || record.title || '', TITLE_MAX) || '新标签页',
+    url: active?.url || '',
+    loading: Boolean(active?.loading),
+    activeTabId: record.activeTabId || null,
+    tabs: (record.tabs || []).map((tab) => tabSummary(tab))
+  }
+}
+
+export function tabSummary(tab) {
+  if (!tab) return null
+  return {
+    id: tab.id,
+    browserId: tab.browserId || null,
+    url: tab.url || '',
+    title: text(tab.title || '', TITLE_MAX) || tab.url || '新标签页',
+    loading: Boolean(tab.loading),
+    active: Boolean(tab.active)
+  }
+}
+
+export function activeTab(record) {
+  if (!record) return null
+  return (
+    (record.tabs || []).find((tab) => tab.id === record.activeTabId) ||
+    (record.tabs || [])[0] ||
+    null
+  )
+}
+
+/**
+ * Cookie 头按浏览器自己的顺序拼：path 长的在前，这样同名 cookie 不会取到宽 path 那一个
+ * （与 Chromium 的发送顺序一致）。`session` 项的过期时间缺省，按创建时间兜底排序。
+ */
+export function sortCookiesForHeader(cookies) {
+  return [...(cookies || [])].sort((left, right) => {
+    const pathDelta = String(right.path || '/').length - String(left.path || '/').length
+    if (pathDelta !== 0) return pathDelta
+    return (left.creationDate || 0) - (right.creationDate || 0)
+  })
+}
+
+export function formatCookieHeader(cookies) {
+  return sortCookiesForHeader(cookies)
+    .map((cookie) => `${cookie.name}=${cookie.value ?? ''}`)
+    .join('; ')
+}
+
+export function publicCookie(cookie) {
+  return {
+    name: cookie.name,
+    value: cookie.value ?? '',
+    domain: cookie.domain || '',
+    path: cookie.path || '/',
+    httpOnly: Boolean(cookie.httpOnly),
+    secure: Boolean(cookie.secure),
+    session: Boolean(cookie.session),
+    sameSite: cookie.sameSite || 'unspecified',
+    hostOnly: Boolean(cookie.hostOnly),
+    expirationDate: cookie.expirationDate ?? null
+  }
+}
+
+/**
+ * 一次 evaluate 的返回值：对象照原样 JSON 化（agent 常常直接读 DOM 数据），
+ * 函数/undefined 统一成 null，避免 JSON.stringify 把整个响应变成 undefined。
+ */
+export function serializeEvaluation(value) {
+  if (value === undefined) return null
+  try {
+    JSON.stringify(value)
+    return value
+  } catch {
+    return String(value)
+  }
+}
+
+/** 等待条件：selector / text / url 三个里至少给一个，否则无从判定 */
+export function normalizeWaitCondition(input = {}) {
+  const selector = text(input.selector, 500)
+  const expected = text(input.text, 500)
+  const url = text(input.url, URL_MAX)
+  if (!selector && !expected && !url) throw new Error('wait 需要 selector、text 或 url 之一')
+  return { selector, text: expected, url }
+}
+
+const NAMED_KEYS = {
+  enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
+  tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  esc: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  space: { key: ' ', code: 'Space', keyCode: 32 },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+  home: { key: 'Home', code: 'Home', keyCode: 36 },
+  end: { key: 'End', code: 'End', keyCode: 35 }
+}
+
+/** 键盘映射只覆盖「agent 真的会按」的那些键，其余一律报错而不是猜 */
+export function keyDescriptors(input) {
+  const list = Array.isArray(input) ? input : typeof input === 'string' ? [input] : []
+  if (list.length === 0) throw new Error('keys 需要一个非空数组')
+  return list.map((raw) => {
+    const name = String(raw || '')
+    const named = NAMED_KEYS[name.toLowerCase()]
+    if (named) return named
+    if (name.length === 1) {
+      const code = name.toUpperCase()
+      return { key: name, code: /[A-Za-z]/.test(name) ? `Key${code}` : '', text: name }
+    }
+    throw new Error(`不支持的按键：${name}`)
+  })
+}
+
+export function truncateOutput(value, max = 200000) {
+  const content = typeof value === 'string' ? value : ''
+  if (content.length <= max) return { content, truncated: false }
+  return { content: content.slice(0, max), truncated: true }
+}

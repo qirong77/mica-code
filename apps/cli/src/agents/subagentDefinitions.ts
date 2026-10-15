@@ -54,13 +54,24 @@ const READ_ONLY_TOOLS = [
 
 const INHERITED_SKILL_TOOL = 'Skill';
 const MCP_TOOL_PREFIX = 'mcp__';
+
+/**
+ * 子代理默认的迭代上限。
+ *
+ * 它只是「跑不完就别再烧钱」的护栏，不是目标值——正常任务会在远低于它的轮次里收尾，
+ * 定低了则会让长任务（多文件重构、需要反复验证的实现）在中途被 `AgentMaxTurnsError`
+ * 掐断，父代理只能拿到半成品再重开一个子代理、把已完成的工作重做一遍。所以这里给得
+ * 比「一般够用」更宽：真正限制成本的是任务本身的形状，而不是这条上限。
+ */
+export const DEFAULT_SUBAGENT_MAX_TURNS = 100;
+
 export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   {
     name: 'general-purpose',
     description:
       'General-purpose subagent for multi-step research, code investigation, and focused implementation help.',
     disallowedTools: ['Agent'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
     writeMode: 'unrestricted',
@@ -77,7 +88,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'Read-only code exploration subagent for searching, reading, and summarizing relevant project context.',
     allowedTools: READ_ONLY_TOOLS,
     disallowedTools: ['Agent'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
     writeMode: 'none',
@@ -94,7 +105,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description:
       'Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.',
     disallowedTools: ['Agent'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',
     writeMode: 'owned_paths',
@@ -112,7 +123,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description: 'Read-only code review subagent for diffs, risks, and missing tests.',
     allowedTools: READ_ONLY_TOOLS,
     disallowedTools: ['Agent'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',
     writeMode: 'none',
@@ -128,7 +139,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description: 'Verification subagent that can run tests/typecheck within owned_paths and report outcomes.',
     allowedTools: [...READ_ONLY_TOOLS, 'run_shell', 'background_tasks', 'read_task_output', 'kill_task'],
     disallowedTools: ['Agent', 'write_file', 'apply_patch'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
     writeMode: 'owned_paths',
@@ -145,7 +156,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description: 'Planning subagent that returns a task graph and ownership plan without modifying files.',
     allowedTools: READ_ONLY_TOOLS,
     disallowedTools: ['Agent'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'recent',
     writeMode: 'none',
@@ -162,7 +173,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.',
     allowedTools: READ_ONLY_TOOLS,
     disallowedTools: ['Agent', 'write_file', 'apply_patch', 'run_shell', 'kill_task'],
-    maxTurns: 50,
+    maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',
     writeMode: 'proposal',

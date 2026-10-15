@@ -24,10 +24,12 @@ import {
   IconServer,
   IconSettings,
   IconTerminal2,
+  IconWorld,
   IconX
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
+import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
@@ -45,7 +47,7 @@ const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
   StatsView: lazy(() => import('./stats/StatsView').then((m) => ({ default: m.StatsView }))),
   TerminalHost: lazy(() => import('./TerminalHost').then((m) => ({ default: m.TerminalHost })))
 }
-import { useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
+import { longPressHandlers, useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
 import { loopNodeIds } from './loop-command'
 import { resolveGroupCwd } from './session-projects'
@@ -65,6 +67,7 @@ import {
   uid
 } from './workspace'
 import { draftMarkers, runningTerminalSessions } from './session-state'
+import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
 import {
   claimUiStateEcho,
   setUiState,
@@ -738,7 +741,7 @@ function terminalHeightLimit(viewport) {
 }
 
 export default function App() {
-  // 页面在分享端口（默认 8890）上打开：只展示被分享的那条会话，**不画左侧会话列表**
+  // 页面在 `/share` 下打开（分享视图）：只展示被分享的那条会话，**不画左侧会话列表**
   // （列与「开/收侧栏」的开关一起消失），根路径那页由 main.jsx 渲染成分享链接列表。
   // 这是呈现层的裁剪，不是权限——运行时无账号体系，别把它当访问控制。
   const shareView = window.mica?.shareView === true
@@ -769,6 +772,9 @@ export default function App() {
   // 跟着切走，PTY 的 cwd 也跟随所属会话的路径。
   const [rightTermsByChat, setRightTermsByChat] = useState({})
   const rightTermsByChatRef = useLatest(rightTermsByChat)
+  // 受控浏览器（AI 打开的网页窗口）活在 Electron 主进程里，运行时经 HTTP 把它们抄成
+  // 一份列表推过来（`browser:changed`）。纯浏览器宿主没有这套服务，列表恒为空。
+  const [browsers, setBrowsers] = useState([])
   const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
   const rightActiveTermByChatRef = useLatest(rightActiveTermByChat)
   // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
@@ -776,6 +782,8 @@ export default function App() {
   const rightTermActivityRef = useRef(new Map())
   const [activeId, setActiveId] = useState(bootstrap.activeId)
   const activeRef = useLatest(activeId)
+  // 右侧主区挂着哪几个会话（最近用过的最多 5 个）：切走的只隐藏、不卸载，见 chat-cache.js
+  const [chatCache, setChatCache] = useState(() => (bootstrap.activeId ? [bootstrap.activeId] : []))
   // 面板里可见的是活跃会话那一组；TerminalHost 拿到的是全量列表，别的会话的
   // PTY 只是被隐藏，切回来时不会重开 shell。
   const rightTerms = useMemo(() => rightTermsByChat[activeId] || [], [activeId, rightTermsByChat])
@@ -1016,6 +1024,54 @@ export default function App() {
     const off = window.mica.loops.onChanged((payload) => applyLoops(payload?.loops))
     return () => off?.()
   }, [applyLoops])
+
+  const applyBrowsers = useCallback((list) => {
+    setBrowsers(Array.isArray(list) ? list : [])
+  }, [])
+
+  const refreshBrowsers = useCallback(() => {
+    window.mica.browserControl
+      .list()
+      .then((result) => applyBrowsers(result?.browsers))
+      .catch((error) => console.error('load browsers failed', error))
+  }, [applyBrowsers])
+
+  useEffect(() => {
+    refreshBrowsers()
+    // 窗口的开关/新建/关闭都由主进程侧发起，页面只跟着这份广播走（第二个窗口也一样）
+    const off = window.mica.browserControl.onChanged((payload) => applyBrowsers(payload?.browsers))
+    return () => off?.()
+  }, [applyBrowsers, refreshBrowsers])
+
+  /**
+   * 点图标＝显示/隐藏那个窗口：**关闭语义是隐藏**（窗口本身不销毁，AI 那边的会话还在，
+   * 再点一下就回来）。真正的销毁走右键（二次确认），因为这个窗口里可能是 AI 刚登录好的
+   * 站点，误关要重来一遍。
+   */
+  const toggleBrowser = useCallback(
+    (browser) => {
+      const call = browser.visible
+        ? window.mica.browserControl.hide(browser.id)
+        : window.mica.browserControl.show(browser.id, true)
+      call
+        .then((result) => applyBrowsers(result?.browsers))
+        .catch((error) => console.error('toggle browser failed', error))
+    },
+    [applyBrowsers]
+  )
+
+  const closeBrowser = useCallback(
+    (browser) => {
+      const label = browser.label || '受控浏览器'
+      if (!window.confirm(`关闭「${label}」？窗口里的登录状态页会一起关掉，AI 需要时会重新打开。`))
+        return
+      window.mica.browserControl
+        .close(browser.id)
+        .then((result) => applyBrowsers(result?.browsers))
+        .catch((error) => console.error('close browser failed', error))
+    },
+    [applyBrowsers]
+  )
 
   const refreshPins = useCallback(() => {
     window.mica.stats
@@ -1804,11 +1860,11 @@ export default function App() {
    * 「分享链接」：拼一条指向这个会话的地址（会话 id 本身就是凭据）**直接复制到剪贴板**，
    * 只用底部一行提示告诉用户结果——不再弹窗（弹窗里还得再点一次「复制」，多一步）。
    *
-   * 地址的 host 与端口都由运行时给（网卡上的局域网地址 + 分享端口，或配置的公网地址），
+   * 地址由运行时给（网卡上的局域网地址 + 运行时端口 + /share，或配置的公网地址），
    * **不能用 `window.location.origin`**：本机窗口的 origin 是 `127.0.0.1:8787`，发给别人
-   * 等于让他连自己的机器。打开的人落在分享端口上，看到的是这条会话（不画左侧会话列表）。
+   * 等于让他连自己的机器。打开的人落在 /share 上，看到的是这条会话（不画左侧会话列表）。
    *
-   * 顺手把这条会话登记进「分享链接列表」（分享端口根路径那页），否则别人打开分享端口
+   * 顺手把这条会话登记进「分享链接列表」（/share 那页），否则别人打开分享页面
    * 只会看到一张空列表。登记失败不影响链接本身（它已经能打开了），只记一条日志。
    *
    * 复制失败要如实说（局域网 http 下剪贴板 API 可能不存在），不要假报成功——用户以为
@@ -1823,7 +1879,7 @@ export default function App() {
         const url = sessionShareUrl(info?.shareBaseUrl, sessionId)
         if (!url) {
           showToast(
-            '没有可用的分享地址：请确认分享端口（默认 8890）已开启，或设置 MICA_DESKTOP_PUBLIC_URL',
+            '没有可用的分享地址：请确认运行时已开启分享（--no-share 会关掉它），或设置 MICA_DESKTOP_PUBLIC_URL',
             true
           )
           return
@@ -1923,6 +1979,33 @@ export default function App() {
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
+  // 侧栏切会话时把目标记成「最近用过」，同时把已关掉的页签剔掉（缓存顺序即渲染顺序）。
+  // 两件事必须在**同一次更新**里做：分成两个 effect 时，「剔掉已关节点」那一步可能拿着
+  // 上一轮的节点列表跑，把刚切过去的 activeId 一起剔掉，于是缓存里只剩一个会话、
+  // 切走再切回又变成卸载重建（状态照样丢）。
+  useEffect(() => {
+    setChatCache((previous) =>
+      nextChatCache(
+        pruneChatCache(
+          previous,
+          terminalNodes.map((node) => node.id)
+        ),
+        activeId
+      )
+    )
+  }, [activeId, terminalNodes])
+
+  const cachedChats = useMemo(
+    () => cachedChatNodes(chatCache, terminalNodes),
+    [chatCache, terminalNodes]
+  )
+  const activeNode = useMemo(
+    () => terminalNodes.find((node) => node.id === activeId) || null,
+    [terminalNodes, activeId]
+  )
+  // 顶栏图标按「当前这条会话」归属：AI 在当前会话里开的窗口只挂在这一条上，
+  // 没有归属的窗口（终端里手跑的 curl、设置页新建的）也要给到入口，否则开着却看不见。
+  const activeBrowsers = useMemo(() => nodeBrowsers(browsers, activeNode), [browsers, activeNode])
   const openBySession = useMemo(() => {
     const map = {}
     for (const node of terminalNodes) if (node.sessionId) map[node.sessionId] = node.id
@@ -2391,8 +2474,45 @@ export default function App() {
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             )}
-            {/* 顶栏右侧：终端面板开关、文件视图开关。 */}
+            {/* 顶栏右侧：受控浏览器窗口图标（每个 AI 打开的窗口一个）、终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              {activeBrowsers.map((browser) => {
+                const owned = isOwnedByNode(browser, activeNode)
+                const badge = browserIconBadge(activeBrowsers, browser)
+                const title = browserIconTitle(browser, activeNode)
+                return (
+                  <button
+                    key={browser.id}
+                    type="button"
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={browser.visible}
+                    {...longPressHandlers(() => closeBrowser(browser))}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      closeBrowser(browser)
+                    }}
+                    onClick={() => toggleBrowser(browser)}
+                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                      browser.visible
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : owned
+                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                    }`}
+                  >
+                    <IconWorld
+                      size={14}
+                      className={browser.loading ? 'animate-pulse' : undefined}
+                    />
+                    {badge && (
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
               <button
                 type="button"
                 title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
@@ -2455,21 +2575,26 @@ export default function App() {
                 />
               </Suspense>
             )}
-            <ChatView
-              node={terminalNodes.find((node) => node.id === activeId)}
-              cwd={terminalCwd(activeId)}
-              visible={view === 'chat'}
-              isMobile={isMobile}
-              loops={loops}
-              onSessionBound={setSessionId}
-              onOpenFile={openChatFile}
-              onNewSession={createChatSession}
-              onResumeSession={openSession}
-              onOpenTerminal={openChatTerminal}
-              onOpenSettings={() => setView('settings')}
-              onSessionRenamed={refreshSessions}
-              onShareSession={shareSession}
-            />
+            {/* 最近用过的会话各挂一个实例，只有当前这个可见：切走再切回来不重新加载，
+                思考内容 / 回合日志 / TODO 这些只活在事件流里的状态因此不会丢（见 chat-cache.js）。 */}
+            {cachedChats.map((node) => (
+              <ChatView
+                key={node.id}
+                node={node}
+                cwd={terminalCwd(node.id)}
+                visible={view === 'chat' && node.id === activeId}
+                isMobile={isMobile}
+                loops={loops}
+                onSessionBound={setSessionId}
+                onOpenFile={openChatFile}
+                onNewSession={createChatSession}
+                onResumeSession={openSession}
+                onOpenTerminal={openChatTerminal}
+                onOpenSettings={() => setView('settings')}
+                onSessionRenamed={refreshSessions}
+                onShareSession={shareSession}
+              />
+            ))}
             {!activeId && view === 'chat' && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-white/25">
                 选择或新建一个会话

@@ -290,6 +290,8 @@ export const TerminalHost = forwardRef(function TerminalHost(
           id: ptyId,
           ...(pane === PANE_MICA ? { command: commandForRef.current(sessionId) || 'mica' } : {}),
           ...(resolveCwdRef.current(sessionId) ? { cwd: resolveCwdRef.current(sessionId) } : {}),
+          // 归属会话：终端里手跑的 mica / curl 开出来的受控浏览器要挂到这条会话的图标上
+          ...(sessionId ? { sessionId } : {}),
           ...(dimensions?.cols && dimensions?.rows ? dimensions : {})
         })
         try {

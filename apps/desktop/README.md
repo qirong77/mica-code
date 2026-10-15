@@ -143,33 +143,40 @@ $ npm run start:web      # node out/server/index.mjs
 $ npm run serve:web      # = build && start:web
 
 # options
-$ node out/server/index.mjs --host 0.0.0.0 --port 8787 --share-port 8890 --renderer out/renderer \
-    [--allow-missing-renderer]
+$ node out/server/index.mjs --host 0.0.0.0 --port 8787 --renderer out/renderer \
+    [--no-share] [--allow-missing-renderer]
 ```
 
 Environment variables with the same meaning: `MICA_DESKTOP_HOST`, `MICA_DESKTOP_PORT`,
-`MICA_DESKTOP_SHARE_PORT`, `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
+`MICA_DESKTOP_SHARE_PORT` (on/off only, see below), `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
 on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron
 container parses. `GET /api/health` answers whether a port is already serving Mica Code.
 
-The fallback when a port is taken is deliberately different per port. The **share port scans upward**
-(`8890`, `8891`, … up to `SHARE_PORT_SCAN_LIMIT`), because a link that has already been handed out
-must keep working across restarts — a random port would silently point it at nothing. The main port
-keeps the random fallback, since the Electron container reads the real address off the `ready` line.
-So the share *base URL* always has to be read from `access:info` (which reports the port actually
-bound); never hard-code `8890`.
+It listens on **one** port and distinguishes its services by path (the conventions live in
+`packages/mica-web-shared/app-paths.ts`, shared with the renderer):
 
-It listens on **two** ports, serving the same host capabilities and the same renderer bundle:
+* `/` and `/mica-web` — the whole app (session list, files, terminals, settings);
+* `/share` — the surface a share link points at: `/share?session=<id>` opens that one conversation
+  **without the left session list**, and `/share` itself is the list of links that have been shared
+  (`分享链接`);
+* `/remote/control/*` — the controlled browser, forwarded to the main process (below);
+* `/api/*` — the runtime capabilities.
 
-* the main port (`8787`) is the whole app — session list, files, terminals, settings;
-* the share port (`8890`) is the surface a share link points at: `/?session=<id>` opens that one
-  conversation **without the left session list**, and `/` is the list of links that have been shared
-  (`分享链接`). `MICA_DESKTOP_SHARE_PORT=0` (or `--share-port 0`) turns the second listener off, which
-  leaves share links unavailable.
+That replaces the old second listener (share port `8890`, which used to scan upward to 8909): a share
+link is now `<reachable host>:<the runtime's own port>/share?session=<id>`. It also means the fallback
+policy is uniform — the port falls back to a random one when 8787 is taken (another runtime, or a dev
+server), so the share *base URL* must always be read from `access:info` and never hard-coded. Sharing is
+switched with `--no-share` / `MICA_DESKTOP_SHARE_PORT=0`, which only disables the `/share` route
+(`--share-port <n>` is still accepted but treated as on/off, the number no longer means anything).
 
-Both ports are the same runtime with the same state. Drawing one less panel on the share port is
-**presentation, not access control** — a client there can still invoke every channel (see "There is no
-authorization boundary").
+Everything on the port is the same runtime with the same state. Drawing one less panel in the share
+view is **presentation, not access control** — a client there can still invoke every channel (see "There
+is no authorization boundary"). The renderer decides it is in share view from `location.pathname`
+(`isSharePath`) using the same pure helpers the router uses, not from an `/api/env` flag.
+
+Static assets are referenced relatively (`./assets/x.js`) in the built `index.html`, so under
+`/mica-web/` and `/share/` they resolve to prefixed URLs — the runtime strips the service prefix with
+`toAssetPath()` before serving, which is why all three entry paths render the same bundle.
 
 ### How it is wired
 
@@ -181,6 +188,8 @@ authorization boundary").
   `notify:changed`,
   `ui-state:changed`, `loops:changed`).
   Events are broadcast to every connected client, so a phone and a desktop tab share one state.
+  The controlled-browser host adds `browser:changed` to the same stream (see *Controlled browser
+  windows* below).
 - `GET /api/env` returns `platform` / `homeDir` / `runShellLogConfig`; the renderer fetches it
   before mounting and installs `window.mica` (see `src/renderer/src/transport.js`).
 - `GET /api/image?path=...` serves pasted and attached images, replacing the `file://` URLs that
@@ -189,6 +198,48 @@ authorization boundary").
   resolve to the same `mica-code-app` directory, so `ui-state.json`, `file-order.json` and
   `session-pins.json`, `session-projects.json`, `session-sort.json` and `loops.json` are
   shared between the desktop app and a standalone runtime.
+
+### Controlled browser windows
+
+The container can hand the agent a real browser. It is the one capability that cannot live in
+`src/host/`: only the Electron main process can create windows, so `src/main/browser/` owns a
+tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridges it for the page.
+
+- `src/main/browser/browser-host.js` is what `src/main/index.js` starts (`startBrowserHost()`): it
+  builds the manager, brings up the API server and hands the URL to the runtime through
+  `MICA_BROWSER_URL` (the runtime then passes that variable on to every `mica` child it spawns).
+  The port is `MICA_BROWSER_PORT` or `18767`, falling back to a random one when taken.
+- `browser-manager.js` holds the windows. Each browser is a `BrowserWindow` whose own webContents
+  renders a display-only chrome bar (`browser-chrome.js`: tab strip, read-only URL, owner) with the
+  page in a `WebContentsView` below it — tabs, navigation and input are the API's job, there is no
+  address bar to type into. Closing the window hides it (`close` is intercepted) so the agent keeps
+  its session; `POST /browser/browsers/:id/close` is the only way to really destroy it. Pages live
+  in the isolated `persist:mica-browser` partition, `window.open` is redirected into a new tab
+  instead of a popup, and permissions are denied outright.
+- `browser-service.js` is the API (`/browser/capabilities`, `/browser/browsers`, `/browser/tabs`,
+  `navigate|evaluate|content|click|type|keys|scroll|screenshot|wait|cookies|console|network`,
+  `/browser/events`). Requests are JSON in/out, `x-mica-owner` (or `owner` in the body/query) says
+  which mica session a window belongs to, and the server refuses anything that is not a local
+  request (`Origin`/`Host` guard) so a random web page cannot drive it. `browser-docs.js` is the one
+  place the endpoint catalog lives: the routes, `/browser/docs` and the generated skill all read it,
+  and `browser-service.js` refuses to start if a documented endpoint has no handler.
+- Screenshots go through CDP (`Page.captureScreenshot`) rather than `capturePage()` because a hidden
+  window has no display surface. Input is the trade-off: native CDP events only reach a *visible*
+  window, so `click`/`type`/`keys` fall back to in-page synthetic events while the window is hidden
+  and report which path they used (`via`). `evaluate`, `content`, `wait`, `cookies`, `console`,
+  `network` and `screenshot` work either way.
+- `src/host/browser-control.js` is the runtime side: it reads `MICA_BROWSER_URL`, keeps the window
+  list fresh from `/browser/events`, broadcasts `browser:changed`, exposes the `browser-control:*`
+  IPC channels (used by the top bar and by the settings page) and writes the generated skill to
+  `$MICA_HOME/skills/mica-browser/SKILL.md` so the agent learns how to call it. Without that
+  environment variable — a standalone `npm run start:web` — everything degrades to "no browser
+  service" and the icons simply never appear.
+- The page (`App.jsx`) renders one icon per window of the active chat, immediately left of the
+  terminal toggle: click toggles the native window, right-click (or a touch long press) destroys it
+  after a confirmation, and the count badge distinguishes several windows of the same session.
+  Browsers whose owner is unknown are shown dimmed rather than hidden, so a window opened by hand
+  with `curl` is still manageable. The settings page has a *Browser Control* section (desktop-only,
+  gated by `supportsBrowserControl`) that lists the live windows and the whole endpoint catalog.
 
 ### Single-instance state
 
@@ -261,15 +312,15 @@ straight to the clipboard and report the result in a one-line toast at the botto
 dialog to click through. Copying goes through `copyText`, which says so honestly when the clipboard
 API is unavailable (plain http on the LAN is not a secure context) instead of claiming success.
 
-The link is `<reachable base>/?session=<id>` (`app-url.js`'s `sessionShareUrl`) — no token, no fragment;
-opening it is the same as clicking that session in the list. The base URL comes from the *runtime*,
-never from the page's own `location.origin`: a window on the machine is served from `127.0.0.1`, and
-handing that to someone else points at their own machine. `pickShareBaseUrl` prefers
-`MICA_DESKTOP_PUBLIC_URL`, then the address the sharer is already using, then the machine's interface
-addresses (private LAN first) — and always pins the **share port** (default 8890, `MICA_DESKTOP_SHARE_PORT`;
-read from `access:info`, since the port scans upward when it is taken),
-because the share surface lives on that listener, not on the main one. `pickShareBaseUrl` needs
-`sharePort`; if the second listener is off the dialog reports that sharing is unavailable.
+The link is `<reachable base>/share?session=<id>` (`app-url.js`'s `sessionShareUrl`) — no token, no
+fragment; opening it is the same as clicking that session in the list. The base URL comes from the
+*runtime*, never from the page's own `location.origin`: a window on the machine is served from
+`127.0.0.1`, and handing that to someone else points at their own machine. `pickShareBaseUrl` prefers
+`MICA_DESKTOP_PUBLIC_URL` (a bare domain gets `/share` appended), then the address the sharer is
+already using, then the machine's interface addresses (private LAN first) — and always pins the
+**runtime's own port** plus the `/share` path (read from `access:info`; the port falls back to a random
+one when 8787 is taken), because the share surface is a path on the one listener, not a second one.
+When sharing is off (`--no-share`) the dialog reports that sharing is unavailable.
 
 Copying a link also records the session in the share list (`src/host/shared-sessions.js` +
 `shared-sessions-core.js`, persisted to `userData/shared-sessions.json`), so the share port's index page

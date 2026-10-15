@@ -1,6 +1,9 @@
 import type {
   ConfigWebAutoCompactDetails,
   ConfigWebAutoCompactSettings,
+  ConfigWebBrowserControlDetails,
+  ConfigWebBrowserControlWindowInput,
+  ConfigWebBrowserControlWindowTarget,
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
   ConfigWebConversationPage,
@@ -12,6 +15,7 @@ import type {
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../src/shared/types.js';
+import { unavailableBrowserControlDetails } from './browserControl.js';
 
 /**
  * 配置页用到的全部数据操作。
@@ -49,6 +53,17 @@ export type ConfigWebClient = {
   readAutoCompactDetails?(): Promise<ConfigWebAutoCompactDetails>;
   writeAutoCompactSettings?(settings: ConfigWebAutoCompactSettings): Promise<ConfigWebAutoCompactDetails>;
   resetAutoCompactCounters?(sessionId?: string): Promise<ConfigWebAutoCompactDetails>;
+
+  /**
+   * 受控浏览器（Mica 里那套能真正打开的浏览器）只在桌面运行时里：窗口活在 Electron 主进程，
+   * 运行时通过本机 HTTP 服务读写。浏览器宿主（apps/config-web）拿不到这份数据，所以这些方法
+   * 是可选的，缺了就不显示这一节。
+   */
+  readBrowserControlDetails?(): Promise<ConfigWebBrowserControlDetails>;
+  createBrowserControlWindow?(input: ConfigWebBrowserControlWindowInput): Promise<ConfigWebBrowserControlDetails>;
+  closeBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
+  showBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
+  hideBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
 
   readSessionsDetails(): Promise<ConfigWebSessionsDetails>;
   readSessionDetails(id: string): Promise<ConfigWebSessionDetails>;
@@ -146,6 +161,67 @@ function requireAutoCompact(): AutoCompactClient {
   const current = requireClient();
   if (!supportsAutoCompact()) throw new Error('当前宿主不支持自动压缩设置');
   return current as AutoCompactClient;
+}
+
+/**
+ * 这个宿主能不能读到受控浏览器的数据（桌面运行时能，浏览器宿主不能）。
+ *
+ * 注意它**不再决定侧栏条目是否出现**：这一节的入口默认就在（见 layout/Sidebar.tsx），
+ * 拿不到数据时由 `readBrowserControlDetails()` 交回显式「未开启」的详情，页面照常说明白。
+ */
+export function supportsBrowserControl(): boolean {
+  return typeof client?.readBrowserControlDetails === 'function';
+}
+
+type BrowserControlClient = ConfigWebClient &
+  Required<
+    Pick<
+      ConfigWebClient,
+      | 'readBrowserControlDetails'
+      | 'createBrowserControlWindow'
+      | 'closeBrowserControlWindow'
+      | 'showBrowserControlWindow'
+      | 'hideBrowserControlWindow'
+    >
+  >;
+
+/**
+ * 读详情。宿主没有这个能力时**不抛错**，而是交回一份显式「未开启」的详情 —— 侧栏条目
+ * 默认可见，页面必须能在没有服务的情况下正常渲染并提示未开启。
+ */
+export function readBrowserControlDetails(): Promise<ConfigWebBrowserControlDetails> {
+  if (!supportsBrowserControl()) return Promise.resolve(unavailableBrowserControlDetails());
+  return requireBrowserControl().readBrowserControlDetails();
+}
+
+export function createBrowserControlWindow(
+  input: ConfigWebBrowserControlWindowInput,
+): Promise<ConfigWebBrowserControlDetails> {
+  return requireBrowserControl().createBrowserControlWindow(input);
+}
+
+export function closeBrowserControlWindow(
+  input: ConfigWebBrowserControlWindowTarget,
+): Promise<ConfigWebBrowserControlDetails> {
+  return requireBrowserControl().closeBrowserControlWindow(input);
+}
+
+export function showBrowserControlWindow(
+  input: ConfigWebBrowserControlWindowTarget,
+): Promise<ConfigWebBrowserControlDetails> {
+  return requireBrowserControl().showBrowserControlWindow(input);
+}
+
+export function hideBrowserControlWindow(
+  input: ConfigWebBrowserControlWindowTarget,
+): Promise<ConfigWebBrowserControlDetails> {
+  return requireBrowserControl().hideBrowserControlWindow(input);
+}
+
+function requireBrowserControl(): BrowserControlClient {
+  const current = requireClient();
+  if (!supportsBrowserControl()) throw new Error('当前宿主不支持受控浏览器');
+  return current as BrowserControlClient;
 }
 
 export function readSessionsDetails(): Promise<ConfigWebSessionsDetails> {

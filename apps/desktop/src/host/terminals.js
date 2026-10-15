@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url'
 import pty from 'node-pty'
 import { normalizeMicaCommand } from './mica-cli'
 import { resolveDefaultShell } from './shell-path'
+import { browserOwnerEnv } from './browser-control'
 
 const sessions = new Map()
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
@@ -323,6 +324,8 @@ function createPty(id, sender, options = {}) {
       COLORTERM: 'truecolor',
       TERM_PROGRAM: 'Mica Code',
       TERM_PROGRAM_VERSION: app.getVersion(),
+      // 终端里手跑 mica / curl 时也能把受控浏览器挂到这条会话的图标上
+      ...browserOwnerEnv(options.sessionId),
       ...(notifyServer ? notifyServer.getTerminalEnv(id) : {})
     }
   })

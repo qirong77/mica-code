@@ -2043,6 +2043,7 @@ export function isPersistedRunComplete(meta, startedAt) {
 }
 
 function persistedTranscript(messages) {
+  if (!Array.isArray(messages)) return []
   const result = []
   for (const message of messages) {
     if (message.kind !== 'message' && message.kind !== 'notice') continue
@@ -2059,6 +2060,61 @@ export function canReuseVisualTranscript(cached, persisted) {
   return (
     JSON.stringify(persistedTranscript(cached)) === JSON.stringify(persistedTranscript(persisted))
   )
+}
+
+/**
+ * 会话的**渲染结果**缓存（模块级，按节点 id，有界 LRU）。
+ *
+ * 磁盘上的会话历史只有 role/text：思考、工具调用、TODO 都只存在于事件流里。所以离开一个
+ * 会话再回来时，如果只能从磁盘重建，那些内容就没了（而 host 的事件缓冲本身有上限，长 turn
+ * 里早期的思考与 TODO 也早被挤掉）。把上一次的渲染结果留着，切回来先用它渲染，再用事件流
+ * 补差量，界面就不会「状态在跑但思考是空的、TODO 卡住」。
+ *
+ * 放在模块级而不是组件内的 ref：组件被淘汰（切过的会话超过保留上限）后重建时也还能命中。
+ */
+const TRANSCRIPT_CACHE_LIMIT = 8
+const transcriptCache = new Map()
+
+/**
+ * 重放时会往消息列表上「追加」的事件类型：重放它们必须从磁盘历史重建，否则会与本轮
+ * 已渲染的内容重复。其余事件（用量、后台任务/subagent/等待/btw 快照）是整体替换语义，
+ * 可以安全地叠加在已有的 transcript 之上。
+ */
+const ACCUMULATING_EVENT_TYPES = new Set([
+  'step_start',
+  'reasoning',
+  'text',
+  'tool_use',
+  'error',
+  'notice',
+  'step_finish',
+  'session_history_replaced'
+])
+
+function readCachedTranscript(nodeId) {
+  if (!nodeId) return null
+  const cached = transcriptCache.get(nodeId)
+  if (cached === undefined) return null
+  // 命中即刷新到 LRU 末尾
+  transcriptCache.delete(nodeId)
+  transcriptCache.set(nodeId, cached)
+  return cached
+}
+
+function writeCachedTranscript(nodeId, messages) {
+  if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
+  transcriptCache.delete(nodeId)
+  transcriptCache.set(nodeId, messages)
+  while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
+    const oldest = transcriptCache.keys().next().value
+    if (oldest === undefined) break
+    transcriptCache.delete(oldest)
+  }
+}
+
+/** 只给测试用：清掉跨实例的缓存。 */
+export function resetTranscriptCache() {
+  transcriptCache.clear()
 }
 
 export function activateQueuedMessage(messages, queuedMessageId) {
@@ -2174,7 +2230,6 @@ export function ChatView({
   const pendingEventsRef = useRef([])
   const pendingExitRef = useRef(null)
   const loadedNodeRef = useRef(null)
-  const transcriptCacheRef = useRef(new Map())
   // 未发送的草稿与运行时同源（ui-state 的 `drafts` 键）：切走、刷新、换个窗口打开都在，
   // 别的窗口改了同一个会话的草稿这里也跟着变。ref 形态只是为了不改动读写它的那些调用点
   // （switchChatDraft / navigateChatHistory 按 Map 的形状用它）。
@@ -3174,6 +3229,15 @@ export function ChatView({
     }
   }, [appendNotice, applyEventRef, nodeId, nodeIdRef, processExitRef, updateMessages])
 
+  // 组件卸载（切过的会话超过保留上限、或页签被关掉）时，把最后的渲染结果留给下次进入
+  // 这个会话时复用：磁盘历史里没有思考与 TODO，而 host 的事件缓冲本身也有上限。
+  useEffect(() => {
+    if (!nodeId) return undefined
+    return () => {
+      writeCachedTranscript(nodeId, messagesRef.current)
+    }
+  }, [nodeId])
+
   // 输入框内容变了就写进共享草稿表（本地立刻生效，别的窗口稍后收到广播）。发送、清空、
   // 撤回排队消息这些路径都经由 setInput，所以在这里统一同步，不必逐个调用点去改。
   //
@@ -3208,12 +3272,13 @@ export function ChatView({
     if (!nodeId) return undefined
     const previousNodeId = loadedNodeRef.current
     if (previousNodeId && previousNodeId !== nodeId && messagesRef.current.length > 0) {
-      transcriptCacheRef.current.set(previousNodeId, messagesRef.current)
+      // 这一份渲染结果（含只存在于事件流里的思考/工具/TODO）留给下次回到这个会话时用
+      writeCachedTranscript(previousNodeId, messagesRef.current)
     }
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
-    const cachedTranscript = transcriptCacheRef.current.get(nodeId)
+    const cachedTranscript = readCachedTranscript(nodeId)
     const generation = ++restoreGenerationRef.current
     restoringRef.current = true
     pendingEventsRef.current = []
@@ -3377,7 +3442,13 @@ export function ChatView({
           sessionIdRef.current = state.sessionId
           onSessionBoundRef.current?.(nodeId, state.sessionId)
         }
-        updateMessages(trimActiveTurn(restored))
+        // 事件缓冲里只有「整体替换」语义的快照事件时，重放不会与本轮已渲染的内容
+        // 冲突，可以直接接在上次留下的 transcript 上——它含磁盘历史没有的思考与
+        // TODO，比从 conversationMessages 重建完整。有累积型事件（文本/工具）时
+        // 必须从磁盘重建，否则那段内容会被追加第二遍。
+        const needsRebuild = replayEvents.some((event) => ACCUMULATING_EVENT_TYPES.has(event?.type))
+        const reusable = !needsRebuild && canReuseVisualTranscript(cachedTranscript, restored)
+        updateMessages(reusable ? cachedTranscript : trimActiveTurn(restored))
         // 裁剪后本轮用户消息仍在列表里；只有匹配不到边界（例如带图片的输入
         // 文本与会话展示文本不一致）时才补一条，避免重复渲染同一条用户消息。
         if (state.prompt) {

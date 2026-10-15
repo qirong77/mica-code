@@ -10,8 +10,9 @@
  * 分叉，而分享出去的链接本来就该是「把 agent 借给对方」。留下的是两件不花钱又必须做的事：
  *
  * - `Host` / `Origin` 校验：挡住 DNS rebinding 与「任意网页替访客静默请求本机」；
- * - 分享链接的基地址：必须是对方能到达的地址，不能是 `127.0.0.1`；端口用分享端口
- *   （运行时另起的一个监听，默认 8890，见 server/index.js），不是页面自己那个端口。
+ * - 分享链接的基地址：必须是对方能到达的地址，不能是 `127.0.0.1`；主机可以取自分享者
+ *   正在用的那个地址，端口一律是本运行时实际绑定的端口（分享视图就是同一个端口上的
+ *   `/share`，见 @packages/mica-web-shared 的 app-paths）。
  *
  * 风险与边界写在 apps/desktop/README.md（「访问」一节），改这里时一并同步。
  */
@@ -24,10 +25,11 @@ import {
   pickShareBaseUrl,
   sameSiteOriginAllowed
 } from './access-core.js'
+import { SHARE_BASE_PATH } from '@packages/mica-web-shared'
 
 /** 缓存的主机名白名单；网卡变化很罕见，进程内复用即可。 */
 let allowedHostnamesCache = null
-/** 运行时实际监听在哪（主端口 + 分享端口），由 server 启动后告知——分享链接要拼出别人能连的地址。 */
+/** 运行时实际监听在哪，由 server 启动（含端口回退）后告知——分享链接要拼出别人能连的地址。 */
 let runtimeAddress = null
 
 /** 本机确实拥有的主机名/IP，用于 `Host` 校验（挡 DNS rebinding）。 */
@@ -59,12 +61,12 @@ export function resetAccessForTests() {
 }
 
 /** server 启动（含端口回退）后调用；`host` 仅用于日志，端口才参与地址拼接。 */
-export function setRuntimeAddress({ port, host, sharePort } = {}) {
+export function setRuntimeAddress({ port, host, sharing = true } = {}) {
   runtimeAddress = {
     port: Number(port) || 0,
     host: host || '',
-    // 分享端口关闭（0）或没起来时为 0，此时拿不到分享地址，页面回落成「不提供分享」
-    sharePort: Number(sharePort) || 0
+    // 分享视图关掉（`--no-share`）时拿不到分享地址，页面回落成「不提供分享」
+    sharing: sharing !== false
   }
 }
 
@@ -83,9 +85,11 @@ function networkAddresses() {
  * 拿不到可用地址时返回 null，页面据此不提供分享（见 access-core 的 pickShareBaseUrl）。
  */
 export function shareBaseUrl({ preferredOrigin = '' } = {}) {
+  if (!runtimeAddress?.sharing) return null
   return pickShareBaseUrl({
     publicUrl: process.env.MICA_DESKTOP_PUBLIC_URL || '',
-    sharePort: runtimeAddress?.sharePort,
+    port: runtimeAddress?.port,
+    basePath: SHARE_BASE_PATH,
     addresses: networkAddresses(),
     preferredOrigin,
     allowedHostnames: allowedHostnames()
@@ -118,17 +122,21 @@ export function verifyRequestOrigin(req) {
 export function registerAccessIpc() {
   ipcMain.handle('access:info', (_event, payload) => {
     // renderer 传自己的 `location.origin`：分享者从哪张网打开页面，那张网他最清楚
-    // （docker0 之类的网卡常常是别的机器连不到的）。端口不跟着走——链接落在分享端口上。
+    // （docker0 之类的网卡常常是别的机器连不到的）。端口不跟着走：一律换成运行时自己的
+    // 端口，路径换成 /share。
     const preferredOrigin = typeof payload?.origin === 'string' ? payload.origin : ''
+    const port = runtimeAddress?.port || 0
+    const sharing = runtimeAddress?.sharing !== false
     return {
       shareBaseUrl: shareBaseUrl({ preferredOrigin }),
-      sharePort: runtimeAddress?.sharePort || 0,
+      sharePath: SHARE_BASE_PATH,
+      shareEnabled: sharing,
       lanUrls: networkAddresses()
         .filter(
           (entry) =>
             !entry.internal && !isLoopbackAddress(entry.address) && !entry.address.includes(':')
         )
-        .map((entry) => `http://${entry.address}:${runtimeAddress?.sharePort || 0}`)
+        .map((entry) => `http://${entry.address}:${port}${SHARE_BASE_PATH}`)
     }
   })
 }

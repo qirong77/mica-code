@@ -113,12 +113,18 @@ describe('pickShareBaseUrl', () => {
   const lan = [{ address: '192.168.1.23', internal: false }]
 
   it('prefers the pinned public url and keeps its scheme', () => {
+    // 分享视图住在 /share 下：公网地址只写到域名时要把路径补上，否则分享出去的
+    // 链接落在完整应用上（带左侧会话列表）
     expect(
-      pickShareBaseUrl({ publicUrl: 'https://mica.example.com/', sharePort: 8788, addresses: lan })
-    ).toBe('https://mica.example.com')
+      pickShareBaseUrl({ publicUrl: 'https://mica.example.com/', port: 8788, addresses: lan })
+    ).toBe('https://mica.example.com/share')
+    // 自带路径的部署（反向代理挂在子路径下）按原样用
+    expect(
+      pickShareBaseUrl({ publicUrl: 'https://mica.example.com/mica', port: 8788, addresses: lan })
+    ).toBe('https://mica.example.com/mica')
     // 认不出来的 public url 退回网卡地址，而不是给出一条坏链接
-    expect(pickShareBaseUrl({ publicUrl: 'not a url', sharePort: 8788, addresses: lan })).toBe(
-      'http://192.168.1.23:8788'
+    expect(pickShareBaseUrl({ publicUrl: 'not a url', port: 8788, addresses: lan })).toBe(
+      'http://192.168.1.23:8788/share'
     )
   })
 
@@ -126,60 +132,60 @@ describe('pickShareBaseUrl', () => {
     const allowed = new Set(['192.168.1.23'])
     expect(
       pickShareBaseUrl({
-        sharePort: 8788,
+        port: 8788,
         addresses: [{ address: '172.17.0.1' }],
-        // 分享者自己是从主端口（8787）打开页面的，但链接必须落在分享端口上
+        // 分享者自己是从某个局域网地址打开页面的：那一张网最可靠，端口换成运行时自己的
         preferredOrigin: 'http://192.168.1.23:8787',
         allowedHostnames: allowed
       })
-    ).toBe('http://192.168.1.23:8788')
+    ).toBe('http://192.168.1.23:8788/share')
     // docker0 那种别的机器连不到的网卡不会被优先选中
     expect(
       pickShareBaseUrl({
-        sharePort: 8788,
+        port: 8788,
         addresses: lan,
         preferredOrigin: 'http://172.17.0.1:8787',
         allowedHostnames: allowed
       })
-    ).toBe('http://192.168.1.23:8788')
+    ).toBe('http://192.168.1.23:8788/share')
     // 不在白名单里的地址（对方发来的链接之类）也不认
     expect(
       pickShareBaseUrl({
-        sharePort: 8788,
+        port: 8788,
         addresses: lan,
         preferredOrigin: 'http://10.0.0.9:8787',
         allowedHostnames: allowed
       })
-    ).toBe('http://192.168.1.23:8788')
+    ).toBe('http://192.168.1.23:8788/share')
   })
 
   it('ranks private lan over public ipv4 over ipv6, and drops link-local', () => {
     expect(
       pickShareBaseUrl({
-        sharePort: 8788,
+        port: 8788,
         addresses: [{ address: '8.8.8.8' }, { address: 'fe80::1' }, { address: '192.168.1.23' }]
       })
-    ).toBe('http://192.168.1.23:8788')
-    expect(pickShareBaseUrl({ sharePort: 8788, addresses: [{ address: '8.8.8.8' }] })).toBe(
-      'http://8.8.8.8:8788'
+    ).toBe('http://192.168.1.23:8788/share')
+    expect(pickShareBaseUrl({ port: 8788, addresses: [{ address: '8.8.8.8' }] })).toBe(
+      'http://8.8.8.8:8788/share'
     )
     // IPv6 要带方括号，否则拼出来的地址解析不了
-    expect(pickShareBaseUrl({ sharePort: 8788, addresses: [{ address: 'fd00::2' }] })).toBe(
-      'http://[fd00::2]:8788'
+    expect(pickShareBaseUrl({ port: 8788, addresses: [{ address: 'fd00::2' }] })).toBe(
+      'http://[fd00::2]:8788/share'
     )
   })
 
-  it('returns null when only loopback is available, or the share port is off', () => {
-    expect(pickShareBaseUrl({ sharePort: 8788, addresses: [{ address: '127.0.0.1' }] })).toBeNull()
+  it('returns null when only loopback is available, or sharing is off', () => {
+    expect(pickShareBaseUrl({ port: 8788, addresses: [{ address: '127.0.0.1' }] })).toBeNull()
     expect(
       pickShareBaseUrl({
-        sharePort: 8788,
+        port: 8788,
         addresses: [{ address: '192.168.1.23', internal: true }]
       })
     ).toBeNull()
     expect(pickShareBaseUrl({ addresses: lan })).toBeNull()
     expect(pickShareBaseUrl()).toBeNull()
-    // 分享端口被关掉（0）时没有分享地址，而不是退回主端口
-    expect(pickShareBaseUrl({ sharePort: 0, addresses: lan })).toBeNull()
+    // 没有端口时不给分享地址（分享关掉时 access.js 直接返回 null，不会调到这里）
+    expect(pickShareBaseUrl({ port: 0, addresses: lan })).toBeNull()
   })
 })

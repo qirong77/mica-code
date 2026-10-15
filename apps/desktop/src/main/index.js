@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-host.js'
 
 /**
  * Electron 外壳。
@@ -26,6 +27,13 @@ const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 8 }
 
 let runtime = null
 let quitting = false
+/**
+ * 受控浏览器宿主（窗口 + Unix socket 上的 HTTP 服务）。它必须由外壳启动：只有主进程能
+ * 创建 Chromium 窗口，而运行时是纯 Node（ELECTRON_RUN_AS_NODE）。它**不占端口**：
+ * socket 路径经 `MICA_BROWSER_SOCKET` 交给运行时，由运行时代理成自己端口上的
+ * `/remote/control/*`，再把那个地址注入每个会话进程给 agent 用。
+ */
+let browserHost = null
 /** 「本机」页面地址（dev 下是 Vite dev server），⇧⌘M 与默认端口上的回环目标都回到它 */
 let localPageUrl = ''
 /**
@@ -72,7 +80,10 @@ function spawnRuntime(port, { pageFromDevServer }) {
       ELECTRON_RUN_AS_NODE: '1',
       // 与打包版共享同一份本地状态（workspace / file-order / session-pins）
       MICA_DESKTOP_USER_DATA: app.getPath('userData'),
-      MICA_DESKTOP_EXIT_ON_STDIN_CLOSE: '1'
+      MICA_DESKTOP_EXIT_ON_STDIN_CLOSE: '1',
+      // 受控浏览器的 socket：运行时据此在**自己已有的端口**上代理出 /remote/control，
+      // 再把它注入给每个 agent 进程（MICA_BROWSER_URL），所以这里不再传端口或地址。
+      MICA_BROWSER_SOCKET: browserHost?.socketPath || ''
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -610,12 +621,28 @@ app.whenReady().then(async () => {
   const devPageUrl =
     is.dev && process.env.ELECTRON_RENDERER_URL ? process.env.ELECTRON_RENDERER_URL : null
 
+  // 受控浏览器先起：运行时启动时要拿到它的 socket（会话进程的 agent 靠它驱动窗口）
+  try {
+    browserHost = await startBrowserHost({
+      socketPath: resolveBrowserSocketPath(app.getPath('userData')),
+      isQuitting: () => quitting
+    })
+    console.log(`[mica-browser] 受控浏览器服务: unix:${browserHost.socketPath}`)
+  } catch (error) {
+    // 起不来只影响「AI 驱动的浏览器」，不该拦住整个应用
+    console.error('[mica-code-app] 受控浏览器服务启动失败', error)
+  }
+
   try {
     runtime = await resolveRuntime({ pageFromDevServer: Boolean(devPageUrl) })
   } catch (error) {
     dialog.showErrorBox('无法启动 Mica Code 运行时', String(error?.message || error))
     app.quit()
     return
+  }
+  if (runtime.owned === false && browserHost) {
+    // dev 下复用了已在跑的运行时：它的 MICA_BROWSER_URL 是上一次注入的，可能已经失效
+    console.warn('[mica-code-app] 复用了已在运行的运行时，受控浏览器可能不可用（重启运行时即可）')
   }
 
   localPageUrl = devPageUrl || runtime.url
@@ -646,6 +673,9 @@ app.on('before-quit', () => {
   app.setBadgeCount(0)
   if (process.platform === 'darwin' && app.dock) app.dock.setBadge('')
   for (const state of windows) stopUnreadWatcher(state)
+  // 受控浏览器窗口是「关闭即隐藏」的，退出时必须显式销毁，否则 app 退不掉
+  if (browserHost) void browserHost.close().catch(() => {})
+  browserHost = null
   // 只结束自己拉起的运行时；复用的那个（dev 下已在跑）留给它的属主
   if (runtime?.owned && runtime.child) {
     try {

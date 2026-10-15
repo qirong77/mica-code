@@ -27,6 +27,7 @@ import { isValidSessionId } from './session-delete'
 import { createTurnLeaseProbe } from './session-lease'
 import { bindLoopSessionId } from './loops'
 import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
+import { browserOwnerEnv } from './browser-control'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -61,10 +62,13 @@ function mergeShellEnv(env) {
   return shellEnv ? { ...env, ...shellEnv } : { ...env }
 }
 
-function buildSpawnEnv(env = process.env) {
+function buildSpawnEnv(env = process.env, owner = null) {
   return {
     ...mergeShellEnv(env),
-    MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS)
+    MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS),
+    // 受控浏览器按 owner 归属：agent 用它开出来的窗口会挂到对应会话的图标上。
+    // 地址（MICA_BROWSER_URL）由运行时的环境继承，这里只补「这一轮是谁」。
+    ...browserOwnerEnv(owner)
   }
 }
 
@@ -416,7 +420,7 @@ function startCommitRun(sender, commitId, payload) {
       ['commit', '--format', 'json', '--dir', cwd, ...(sessionId ? ['--session', sessionId] : [])],
       {
         cwd,
-        env: buildSpawnEnv(process.env),
+        env: buildSpawnEnv(process.env, sessionId),
         stdio: ['ignore', 'pipe', 'pipe']
       }
     )
@@ -815,7 +819,9 @@ function spawnChatHost(id, sender, payload) {
   try {
     child = spawn(mica, args, {
       cwd: cwd || process.cwd(),
-      env: buildSpawnEnv(process.env),
+      // 还没绑定会话的草稿用页签 id 当 owner：agent 那一轮开出来的浏览器窗口照样
+      // 能落到当前这个页签的图标上（node id 全程稳定）。
+      env: buildSpawnEnv(process.env, sessionId || id),
       stdio: ['pipe', 'pipe', 'pipe']
     })
   } catch (error) {

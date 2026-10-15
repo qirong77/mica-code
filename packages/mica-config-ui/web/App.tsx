@@ -3,6 +3,7 @@ import { DialogHost, confirmDialog } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { AutoCompactPage } from './pages/AutoCompactPage.js';
+import { BrowserControlPage } from './pages/BrowserControlPage.js';
 import { McpPage } from './pages/McpPage.js';
 import { PluginsPage } from './pages/PluginsPage.js';
 import { RolesPage } from './pages/RolesPage.js';
@@ -49,6 +50,7 @@ export function App() {
         <div className="content-shell">
           {section === 'config' ? <ConfigPage /> : null}
           {section === 'autoCompact' ? <AutoCompactPage /> : null}
+          {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'sessions' ? (
             <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
           ) : null}
@@ -68,10 +70,23 @@ function readInitialSection(): ConfigWebAppSection {
   return isSectionAvailable(candidate) ? (candidate as ConfigWebAppSection) : 'config';
 }
 
-/** 深链里的 section 必须在当前宿主里真的存在，否则退回 Config（浏览器宿主没有 autoCompact）。 */
+/**
+ * 深链里的 section 必须在当前宿主里真的存在，否则退回 Config（浏览器宿主没有 Auto Compact
+ * 的数据；Browser Control 的入口各处都在，拿不到服务时页面自己说明未开启）。
+ */
 function isSectionAvailable(candidate: string | null): boolean {
   if (!candidate) return false;
-  const known: ConfigWebAppSection[] = ['config', 'autoCompact', 'sessions', 'roles', 'mcp', 'skills', 'plugins'];
+  const known: ConfigWebAppSection[] = [
+    'config',
+    'autoCompact',
+    'browserControl',
+    'sessions',
+    'roles',
+    'mcp',
+    'skills',
+    'plugins',
+  ];
   if (!known.includes(candidate as ConfigWebAppSection)) return false;
-  return candidate === 'autoCompact' ? supportsAutoCompact() : true;
+  if (candidate === 'autoCompact') return supportsAutoCompact();
+  return true;
 }

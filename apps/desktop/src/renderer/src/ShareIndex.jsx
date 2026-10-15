@@ -4,7 +4,7 @@ import { copyText } from './transport'
 import { buildShareRows, shareRowTime } from './share-index'
 
 /**
- * 分享端口（默认 8890）根路径上的页面：这台机器分享出去的链接。
+ * `/share` 这个路径上的页面：这台机器分享出去的链接。
  *
  * 分享出去的会话界面不画左侧会话列表（见 App.jsx 的 shareView 分支），所以「哪条会话被
  * 分享过」需要有自己的入口——就是这里。数据一半来自运行时的分享登记（哪些会话被分享过），

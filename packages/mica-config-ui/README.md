@@ -36,6 +36,14 @@ render(<ConfigWebApp />)
 - 浏览器宿主用 `apps/config-web/web/src/http-client.ts`（`fetch('/api/*')`）+ CDN 版 monaco（`monaco-editor.tsx`）。
 - 桌面宿主用 `apps/desktop/src/renderer/src/config-web.js`（`config-web:invoke`）+ 应用自带的本地 monaco（`config-web-editor.jsx`）。
 
+## 只在桌面宿主出现的章节
+
+`web/App.tsx` 的 section 白名单与 `web/layout/Sidebar.tsx` 的条目按宿主能力区分，浏览器宿主（`apps/config-web`）没有桌面运行时那两份数据：
+
+- **Auto Compact**（`supportsAutoCompact()`）：设置与按会话记账的计数活在运行时的 `userData/auto-compact.json`。**能力不存在时连侧栏入口都不显示**，带 `?section=autoCompact` 的深链退回 Config。
+- **Browser Control**（入口**各处都在**，不受能力门控）：受控浏览器窗口活在 Electron 主进程，运行时是纯 Node，两边靠本机 socket / 运行时端口上的 `/remote/control` 通信（`apps/desktop/src/host/browser-control.js`）。页面读该服务的状态、窗口列表与接口文档，可显示 / 隐藏 / 关闭窗口、新建窗口；纯逻辑（分组、状态/归属文案、curl 示例）在 `web/browserControl.ts`。
+  - 入口刻意不藏：它是「Mica 里有一套能真正打开的浏览器」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。拿不到服务时 `readBrowserControlDetails()` 交回一份显式不可用的详情（`unavailableBrowserControlDetails`，reason 说清「只有从 Mica Code 应用里打开的配置页才连得上」并给出怎么开），页面照常渲染并提示未开启，`?section=browserControl` 也因此永远有效。
+
 ## 约定
 
 - **样式必须限定在 `.mica-config-ui` 容器内**：`web/styles.css` 把全部规则放进 `@scope (.mica-config-ui) { … }`，自定义属性也定义在容器上而不是 `:root`。桌面端把它当普通视图内嵌渲染，规则不能泄漏到应用其余部分，也不能被应用的同名变量覆盖（应用用 `--color-*`，这里用 `--bg/--panel/--text`）。新增样式沿用这个作用域，不要写裸标签选择器到作用域之外。

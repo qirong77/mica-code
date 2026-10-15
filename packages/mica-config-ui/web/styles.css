@@ -2937,4 +2937,255 @@ textarea {
   font-size: var(--text-aux);
   line-height: 1.5;
 }
+
+/* Browser Control：受控浏览器服务 · 窗口列表 · 接口文档（窗口活在应用里，agent 经 HTTP 操控） */
+.browser-control-stack {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.browser-control-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.browser-control-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.browser-control-note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.browser-control-note code {
+  color: var(--text-soft);
+}
+
+/* 未开启时的说明：这是什么、谁提供、怎么打开（条目文案在 browserControl.ts） */
+.browser-control-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  line-height: 1.6;
+}
+
+.browser-control-status-value {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-create {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-control-create .text-input {
+  width: 240px;
+  height: 32px;
+}
+
+.browser-control-window-list {
+  display: grid;
+}
+
+.browser-control-window {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.browser-control-window:first-child {
+  border-top: 0;
+}
+
+.browser-control-window-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.browser-control-window-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.browser-control-window-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-control-window-url {
+  min-width: 0;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-window-meta {
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-window-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.browser-control-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.browser-control-group {
+  display: grid;
+  gap: 10px;
+}
+
+.browser-control-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-control-endpoint-list {
+  display: grid;
+  gap: 8px;
+}
+
+.browser-control-endpoint {
+  overflow: hidden;
+}
+
+.browser-control-endpoint-summary {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.browser-control-endpoint-summary::-webkit-details-marker {
+  display: none;
+}
+
+.browser-control-endpoint-line {
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.browser-control-endpoint-desc {
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-endpoint-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.browser-control-params {
+  display: grid;
+  gap: 6px;
+}
+
+.browser-control-param {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.browser-control-param code {
+  color: var(--text);
+  font-size: var(--text-aux);
+}
+
+.browser-control-param-meta {
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  white-space: nowrap;
+}
+
+.browser-control-param-desc {
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-returns {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  overflow-wrap: anywhere;
+}
+
+.browser-control-example {
+  display: grid;
+  gap: 6px;
+}
+
+.browser-control-example-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .browser-control-create {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .browser-control-create .text-input {
+    width: 100%;
+  }
+
+  .browser-control-window {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .browser-control-param {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 }

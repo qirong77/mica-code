@@ -1,4 +1,12 @@
-export type ConfigWebSection = 'config' | 'sessions' | 'roles' | 'mcp' | 'skills' | 'plugins' | 'autoCompact';
+export type ConfigWebSection =
+  | 'config'
+  | 'sessions'
+  | 'roles'
+  | 'mcp'
+  | 'skills'
+  | 'plugins'
+  | 'autoCompact'
+  | 'browserControl';
 
 export type ConfigWebFilePayload = {
   path: string;
@@ -224,4 +232,62 @@ export type ConfigWebRole = {
 export type ConfigWebRolesDetails = {
   root: string;
   roles: ConfigWebRole[];
+};
+
+export type ConfigWebBrowserControlEndpointParam = {
+  name: string;
+  in: string;
+  required: boolean;
+  description: string;
+};
+
+export type ConfigWebBrowserControlEndpoint = {
+  id: string;
+  method: string;
+  path: string;
+  summary: string;
+  params: ConfigWebBrowserControlEndpointParam[];
+  returns?: string;
+  example?: string;
+};
+
+export type ConfigWebBrowserControlBrowser = {
+  id: string;
+  owner: string | null;
+  label: string;
+  title: string;
+  url: string;
+  visible: boolean;
+  loading: boolean;
+  activeTabId: string | null;
+  tabs: Array<{ id: string; title: string; url: string; active: boolean }>;
+};
+
+/** 受控浏览器服务的完整视图：能力文档 + 当前窗口列表。只有桌面运行时提供。 */
+export type ConfigWebBrowserControlDetails = {
+  available: boolean;
+  serviceUrl: string | null;
+  version: number;
+  skillPath: string | null;
+  error: string | null;
+  browsers: ConfigWebBrowserControlBrowser[];
+  endpoints: ConfigWebBrowserControlEndpoint[];
+  /** 完整人读文档（markdown 源文）。 */
+  markdown: string;
+  /** 写给 agent 的技能文档源文。 */
+  skillMarkdown: string;
+  /** 环境变量名：agent 用 `url` 拿地址、用 `owner` 认领归属。 */
+  envVars: { url: string; owner: string };
+};
+
+export type ConfigWebBrowserControlWindowInput = {
+  url?: string;
+  label?: string;
+  owner?: string;
+  show?: boolean;
+};
+
+export type ConfigWebBrowserControlWindowTarget = {
+  id: string;
+  focus?: boolean;
 };

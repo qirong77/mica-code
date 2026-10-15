@@ -24,6 +24,13 @@ import {
   saveAutoCompactSettings
 } from './auto-compact.js'
 import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
+import {
+  closeBrowserControlWindow as closeBrowserWindow,
+  createBrowserControlWindow as createBrowserWindow,
+  hideBrowserControlWindow as hideBrowserWindow,
+  readBrowserControlDetails as readBrowserControlDetailsFromHost,
+  showBrowserControlWindow as showBrowserWindow
+} from './browser-control.js'
 
 /**
  * 配置页在桌面运行时的数据层。
@@ -34,6 +41,9 @@ import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
  *
  * 唯一的例外是自动压缩：它的设置与计数不在 `$MICA_HOME` 里，而是运行时自己的
  * `userData/auto-compact.json`（host/auto-compact.js 是唯一持有者，这里有它转发）。
+ *
+ * 受控浏览器同理：窗口活在 Electron 主进程（host/browser-control.js），运行时是纯 Node，
+ * 两边只能靠本机 HTTP 服务通信 —— 这里转发读取，并在创建/显示/隐藏/关闭时直接打那套服务。
  *
  * 会话视图的「history → 对话项 / 上下文分解」是纯逻辑，直接复用包里的实现。
  */
@@ -528,6 +538,41 @@ function readAutoCompactDetails() {
   }
 }
 
+/* ------------------------------------------------------------ 受控浏览器 */
+
+/**
+ * 配置页只看这台机器上的运行时：窗口命令与「读详情」都直接委托给 host/browser-control.js，
+ * 那是这条能力的唯一实现（它自己走主进程的 Unix socket，并在没有服务时交回
+ * `available: false` 的详情而不是抛错）。这里刻意不再自己拼一遍请求——两个入口各写一份
+ * 容错口径，迟早会在超时或错误文案上分叉。
+ */
+async function runBrowserCommand(command, input) {
+  try {
+    await command(input)
+  } catch (error) {
+    // 配置页的语义是「看当前状态」而不是「执行成功」：命令失败也要把页面刷成最新的
+    // 详情（含 error 字段），让用户看到为什么没成，而不是收到一个抛错的弹窗。
+    console.error('[mica-desktop] 受控浏览器命令失败:', error)
+  }
+  return readBrowserControlDetailsFromHost()
+}
+
+async function createBrowserControlWindow(input = {}) {
+  return runBrowserCommand(createBrowserWindow, input)
+}
+
+async function closeBrowserControlWindow(input = {}) {
+  return runBrowserCommand(closeBrowserWindow, input)
+}
+
+async function showBrowserControlWindow(input = {}) {
+  return runBrowserCommand(showBrowserWindow, input)
+}
+
+async function hideBrowserControlWindow(input = {}) {
+  return runBrowserCommand(hideBrowserWindow, input)
+}
+
 /* ------------------------------------------------------------------ 动作表 */
 
 function addMcpServer(name, content) {
@@ -603,6 +648,12 @@ export const configWebActions = {
     resetAutoCompactCountersInStore(input?.sessionId)
     return readAutoCompactDetails()
   },
+
+  readBrowserControlDetails: () => readBrowserControlDetailsFromHost(),
+  createBrowserControlWindow: (input) => createBrowserControlWindow(input),
+  closeBrowserControlWindow: (input) => closeBrowserControlWindow(input),
+  showBrowserControlWindow: (input) => showBrowserControlWindow(input),
+  hideBrowserControlWindow: (input) => hideBrowserControlWindow(input),
 
   readSessionConversationPage: (input) =>
     readSessionConversationPage(

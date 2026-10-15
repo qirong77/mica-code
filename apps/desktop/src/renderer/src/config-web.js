@@ -30,6 +30,12 @@ export function createDesktopConfigWebClient() {
     writeAutoCompactSettings: (settings) => invoke('writeAutoCompactSettings', { settings }),
     resetAutoCompactCounters: (sessionId) => invoke('resetAutoCompactCounters', { sessionId }),
 
+    readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
+    createBrowserControlWindow: (input) => invoke('createBrowserControlWindow', input),
+    closeBrowserControlWindow: (input) => invoke('closeBrowserControlWindow', input),
+    showBrowserControlWindow: (input) => invoke('showBrowserControlWindow', input),
+    hideBrowserControlWindow: (input) => invoke('hideBrowserControlWindow', input),
+
     readSessionsDetails: () => invoke('readSessionsDetails'),
     readSessionDetails: (id) => invoke('readSessionDetails', { id }),
     readSessionContent: (id) => invoke('readSessionContent', { id }),

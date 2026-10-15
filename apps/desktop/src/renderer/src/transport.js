@@ -9,6 +9,8 @@
  * - 系统文件夹选择器换成应用内目录选择器（见 App.jsx 的 CwdModal）
  */
 
+import { isSharePath } from '@packages/mica-web-shared'
+
 const EVENT_CHANNELS = [
   'terminal:data',
   'terminal:exit',
@@ -21,6 +23,7 @@ const EVENT_CHANNELS = [
   'notify:changed',
   'ui-state:changed',
   'loops:changed',
+  'browser:changed',
   'app:window-state'
 ]
 
@@ -162,9 +165,12 @@ function createWebApi(env) {
 
   return {
     isWeb: true,
-    // 页面是在分享端口（默认 8890）上打开的：不画左侧会话列表，根路径是分享链接列表
-    // （见 main.jsx 与 App.jsx 的 shareView 分支）。这只是呈现，不是权限。
-    shareView: env.share === true,
+    // 页面是在 `/share` 下打开的：不画左侧会话列表，根路径是分享链接列表（见 main.jsx
+    // 与 App.jsx 的 shareView 分支）。这只是呈现，不是权限。判断只有一份——路径约定在
+    // @packages/mica-web-shared 的 app-paths 里，与运行时路由同源。
+    shareView: isSharePath(window.location.pathname),
+    sharePath: env.sharePath,
+    shareEnabled: env.shareEnabled !== false,
     platform: env.platform,
     homeDir: env.homeDir,
     runShellLogConfig: env.runShellLogConfig,
@@ -385,13 +391,24 @@ function createWebApi(env) {
       invoke: (action, input) => invoke('config-web:invoke', { action, input })
     },
 
+    browserControl: {
+      // 受控浏览器（Electron 主进程里的窗口）在页面上的把手：够图标渲染与开关窗口用，
+      // 真正的操作面是给 agent 用的 HTTP 接口，见 src/main/browser/browser-docs.js
+      list: () => invoke('browser-control:list'),
+      show: (id, focus = true) => invoke('browser-control:show', { id, focus }),
+      hide: (id) => invoke('browser-control:hide', { id }),
+      close: (id) => invoke('browser-control:close', { id }),
+      create: (input = {}) => invoke('browser-control:create', input),
+      onChanged: (callback) => subscribe('browser:changed', callback)
+    },
+
     access: {
-      // 本机可达地址（分享端口上的那个 origin），用来拼分享链接
+      // 本机可达地址（分享链接就落在同一个 origin 的 /share 下），用来拼分享链接
       info: () => invoke('access:info')
     },
 
     share: {
-      // 分享链接列表：运行时记着「哪些会话被分享过」，分享端口上的根页面展示它
+      // 分享链接列表：运行时记着「哪些会话被分享过」，/share 那个页面展示它
       list: () => invoke('share:list'),
       add: (sessionId) => invoke('share:add', { sessionId }),
       remove: (sessionId) => invoke('share:remove', { sessionId })
