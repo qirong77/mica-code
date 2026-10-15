@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import {
   BrowserRequestError,
+  cookieCachePaths,
   compileRoutes,
   parseBoolean,
   resolveOwner,
@@ -64,7 +66,11 @@ export function verifyLocalRequest(req) {
   return { ok: true }
 }
 
-export function createBrowserService({ getManager, address = () => ({ port: 0, url: '' }) }) {
+export function createBrowserService({
+  getManager,
+  address = () => ({ port: 0, url: '' }),
+  cacheDir = ''
+}) {
   const routes = compileRoutes(BROWSER_ENDPOINTS)
   const clients = new Set()
 
@@ -83,7 +89,7 @@ export function createBrowserService({ getManager, address = () => ({ port: 0, u
     }
   }
 
-  const handlers = buildHandlers({ getManager, address })
+  const handlers = buildHandlers({ getManager, address, cacheDir })
 
   // 端点目录与实现必须一一对应：少一个 handler 就在启动时报出来，而不是等调用时 404
   // （SSE 端点由 handleEvents 直接处理，不走 handler 表）
@@ -255,7 +261,7 @@ export function createBrowserService({ getManager, address = () => ({ port: 0, u
   }
 }
 
-function buildHandlers({ getManager, address }) {
+function buildHandlers({ getManager, address, cacheDir = '' }) {
   const manager = () => getManager()
 
   return {
@@ -387,6 +393,21 @@ function buildHandlers({ getManager, address }) {
     cookies: (ctx) =>
       manager().cookies(ctx.params.id, { format: ctx.query.format, url: ctx.query.url }),
 
+    cookiesForScope: async (ctx) => {
+      const url = ctx.query.url
+      if (!url) throw new BrowserRequestError('缺少 url 参数')
+      // 明细总是取一份：缓存文件要用它，format 只决定回给调用方的形态
+      const full = await manager().cookiesForScope({ url, format: 'json' })
+      const result =
+        String(ctx.query.format || 'json').toLowerCase() === 'header'
+          ? { url: full.url, count: full.count, cookieHeader: full.cookieHeader }
+          : full
+      // 默认落盘：别的进程（本地 dev server、curl、另一个会话）直接读这份缓存，不用重新登录
+      if (parseBoolean(ctx.query.save) === false || !cacheDir) return result
+      const saved = await saveCookieCache(cacheDir, full)
+      return { ...result, saved }
+    },
+
     console: (ctx) => ({
       entries: manager().consoleEntries(ctx.params.id, {
         clear: parseBoolean(ctx.query.clear) === true
@@ -398,6 +419,31 @@ function buildHandlers({ getManager, address }) {
         clear: parseBoolean(ctx.query.clear) === true
       })
     })
+  }
+}
+
+/**
+ * 把一次 cookie 读取落成固定文件（`<cacheDir>/<host>.txt` + `.json`）：别的进程按域名直接
+ * 读 `.txt` 当 `Cookie:` 头用，不必自己驱动浏览器、也不用重新登录。
+ *
+ * 缓存只是方便，不是事实来源（真相在浏览器的持久分区里），所以写失败只回报不抛错。
+ * 权限 0600：里面是登录凭据。
+ */
+async function saveCookieCache(cacheDir, result) {
+  const { headerPath, jsonPath } = cookieCachePaths(cacheDir, result.url)
+  try {
+    await mkdir(dirname(headerPath), { recursive: true })
+    await writeFile(headerPath, `${result.cookieHeader || ''}\n`, { mode: 0o600 })
+    const detail = {
+      url: result.url,
+      count: result.count || 0,
+      cookieHeader: result.cookieHeader || '',
+      cookies: result.cookies || []
+    }
+    await writeFile(jsonPath, `${JSON.stringify(detail, null, 2)}\n`, { mode: 0o600 })
+    return { headerPath, jsonPath }
+  } catch (error) {
+    return { headerPath, jsonPath, error: String(error?.message || error) }
   }
 }
 

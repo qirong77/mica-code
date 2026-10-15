@@ -625,6 +625,7 @@ app.whenReady().then(async () => {
   try {
     browserHost = await startBrowserHost({
       socketPath: resolveBrowserSocketPath(app.getPath('userData')),
+      cacheDir: join(app.getPath('userData'), 'browser-cookies'),
       isQuitting: () => quitting
     })
     console.log(`[mica-browser] 受控浏览器服务: unix:${browserHost.socketPath}`)

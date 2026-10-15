@@ -165,6 +165,31 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     throw notFoundError(`标签页不存在：${tabId}`)
   }
 
+  /** cookie 作用域 → 统一形状；页面不是 http(s) 时给空结果而不是报错（未登录也是合法状态） */
+  async function readCookies(scope, format) {
+    if (!/^https?:/i.test(scope)) {
+      return {
+        url: scope,
+        count: 0,
+        cookieHeader: '',
+        cookies: [],
+        note: '当前页不是 http(s)，没有 cookie 作用域'
+      }
+    }
+    const list = await partition().cookies.get({ url: scope })
+    const mode = String(format || 'json').toLowerCase()
+    if (mode === 'header') {
+      return { url: scope, count: list.length, cookieHeader: formatCookieHeader(list) }
+    }
+    if (mode !== 'json') throw new BrowserRequestError(`不支持的 format：${format}`)
+    return {
+      url: scope,
+      count: list.length,
+      cookieHeader: formatCookieHeader(list),
+      cookies: list.map(publicCookie)
+    }
+  }
+
   /* --------------------------------------------------------------- 窗口装配 */
 
   /** 一个分区只装一次权限策略：这些窗口是给 agent 用的，不该悄悄拿到摄像头/定位/通知 */
@@ -994,27 +1019,15 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     async cookies(tabId, { format = 'json', url = '' } = {}) {
       const { tab } = requireTab(tabId)
       const scope = normalizeUrl(url) || tab.contents.getURL() || ''
-      if (!/^https?:/i.test(scope)) {
-        return {
-          url: scope,
-          count: 0,
-          cookieHeader: '',
-          cookies: [],
-          note: '当前页不是 http(s)，没有 cookie 作用域'
-        }
-      }
-      const list = await partition().cookies.get({ url: scope })
-      const mode = String(format || 'json').toLowerCase()
-      if (mode === 'header') {
-        return { url: scope, count: list.length, cookieHeader: formatCookieHeader(list) }
-      }
-      if (mode !== 'json') throw new BrowserRequestError(`不支持的 format：${format}`)
-      return {
-        url: scope,
-        count: list.length,
-        cookieHeader: formatCookieHeader(list),
-        cookies: list.map(publicCookie)
-      }
+      return readCookies(scope, format)
+    },
+
+    /**
+     * 不需要标签页的 cookie 读取：按作用域直接从分区里取。给「别的进程想复用登录态」
+     * 用 —— 不必为了读 cookie 先开一个停在目标站点的窗口。
+     */
+    async cookiesForScope({ url = '', format = 'json' } = {}) {
+      return readCookies(normalizeUrl(url), format)
     },
 
     consoleEntries,

@@ -30,11 +30,15 @@ export function resolveBrowserSocketPath(userDataDir) {
   return join(tmpdir(), `mica-browser-${tag}.sock`)
 }
 
-export async function startBrowserHost({ socketPath, isQuitting = () => false } = {}) {
+export async function startBrowserHost({
+  socketPath,
+  cacheDir = '',
+  isQuitting = () => false
+} = {}) {
   if (!socketPath) throw new Error('startBrowserHost 需要 socketPath')
   let manager = null
 
-  const service = createBrowserService({ getManager: () => manager })
+  const service = createBrowserService({ getManager: () => manager, cacheDir })
 
   manager = createBrowserManager({
     onChange: () => service.broadcast(),

@@ -5,7 +5,33 @@
  * 「不需要 Electron 就能算出来」的部分，好让 bun test 直接覆盖（含路由与请求契约）。
  */
 
+import { join } from 'node:path'
+
 export const BROWSER_PARTITION = 'persist:mica-browser'
+
+/**
+ * Cookie 缓存文件名：按作用域域名派生（`:` → `_`），好让别的进程直接 `cat`。
+ * 同一台机器上多个后端（osim000 / osim108 / pre…）各写各的文件，不会互相覆盖。
+ */
+export function cookieCacheKey(url) {
+  let host = ''
+  try {
+    host = new URL(normalizeUrl(url)).host
+  } catch {
+    host = ''
+  }
+  return host.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'
+}
+
+/** 缓存写成一对文件：`.txt` 是可直接塞进请求头的 Cookie 头，`.json` 留明细（含过期时间）。 */
+export function cookieCachePaths(cacheDir, url) {
+  const key = cookieCacheKey(url)
+  return {
+    key,
+    headerPath: join(cacheDir, `${key}.txt`),
+    jsonPath: join(cacheDir, `${key}.json`)
+  }
+}
 
 /** 请求级错误：HTTP 层据此决定状态码（400 参数/状态问题、404 找不到、504 超时） */
 export class BrowserRequestError extends Error {

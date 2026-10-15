@@ -277,6 +277,30 @@ export const BROWSER_ENDPOINTS = [
     example: 'curl -s "$MICA_BROWSER_URL/browser/tabs/$TAB/cookies?format=header"'
   },
   {
+    id: 'cookiesForScope',
+    method: 'GET',
+    path: '/browser/cookies',
+    summary: '按 url 直接读 cookie（不需要标签页），并把结果缓存成固定文件供别的进程复用',
+    params: [
+      {
+        name: 'url',
+        in: 'query',
+        required: true,
+        description: '作用域地址，例如 https://osim108.zuche-saas.osim.intra.xiaojukeji.com/'
+      },
+      { name: 'format', in: 'query', required: false, description: 'json（默认）/ header' },
+      {
+        name: 'save',
+        in: 'query',
+        required: false,
+        description: '1（默认）时把 Cookie 头与明细写到 $MICA_HOME/browser-cookies/，0 时只读不写'
+      }
+    ],
+    returns: '{ ok, url, count, cookieHeader, cookies, saved: { headerPath, jsonPath } }',
+    example:
+      'curl -s "$MICA_BROWSER_URL/browser/cookies?format=header&url=https%3A%2F%2Fexample.com%2F"'
+  },
+  {
     id: 'console',
     method: 'GET',
     path: '/browser/tabs/:id/console',

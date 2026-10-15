@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { notFoundError } from './browser-core.js'
 import { BROWSER_ENDPOINTS } from './browser-docs.js'
 import { createBrowserService, verifyLocalRequest } from './browser-service.js'
@@ -92,6 +95,15 @@ function createFakeManager() {
     screenshot: async () => ({ dataUrl: 'data:image/png;base64,QUJD', bytes: 3 }),
     waitFor: () => ({ matched: true, elapsedMs: 12 }),
     cookies: () => ({ url: 'https://example.com', count: 1, cookieHeader: 'a=1', cookies: [] }),
+    cookiesForScope: ({ url }) => ({
+      url,
+      count: 2,
+      cookieHeader: 'a=1; b=2',
+      cookies: [
+        { name: 'a', value: '1' },
+        { name: 'b', value: '2' }
+      ]
+    }),
     consoleEntries: (_id, { clear } = {}) => [{ level: 'info', message: clear ? 'cleared' : 'hi' }],
     networkEntries: () => [{ method: 'GET', url: 'https://example.com', status: 200 }],
     calls: { type: 0 },
@@ -102,12 +114,15 @@ function createFakeManager() {
 let manager = createFakeManager()
 let service = null
 let base = ''
+let cookieCacheDir = ''
 
 beforeAll(async () => {
   manager = createFakeManager()
+  cookieCacheDir = await mkdtemp(join(tmpdir(), 'mica-browser-cookies-'))
   service = createBrowserService({
     getManager: () => manager,
-    address: () => ({ port: 18767, url: `http://127.0.0.1:18767` })
+    address: () => ({ port: 18767, url: `http://127.0.0.1:18767` }),
+    cacheDir: cookieCacheDir
   })
   const port = await service.listen(0)
   base = `http://127.0.0.1:${port}`
@@ -115,6 +130,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await service.close()
+  await rm(cookieCacheDir, { recursive: true, force: true })
 })
 
 async function call(path, { method = 'GET', body, headers = {}, raw = false } = {}) {
@@ -242,6 +258,24 @@ describe('browser and tab operations', () => {
 
     const cleared = await call(`/browser/tabs/${tabId}/console?clear=1`)
     expect(cleared.body.entries[0].message).toBe('cleared')
+  })
+
+  it('reads cookies by url scope and caches them to a fixed file', async () => {
+    const missing = await call('/browser/cookies')
+    expect(missing.status).toBe(400)
+    expect(missing.body.error).toContain('url')
+
+    const scope = 'https://osim108.zuche-saas.osim.intra.xiaojukeji.com/'
+    const read = await call(`/browser/cookies?format=header&url=${encodeURIComponent(scope)}`)
+    expect(read.body.cookieHeader).toBe('a=1; b=2')
+    expect(read.body.saved.headerPath).toBe(
+      join(cookieCacheDir, 'osim108.zuche-saas.osim.intra.xiaojukeji.com.txt')
+    )
+
+    const cached = await readFile(read.body.saved.headerPath, 'utf8')
+    expect(cached.trim()).toBe('a=1; b=2')
+    const detail = JSON.parse(await readFile(read.body.saved.jsonPath, 'utf8'))
+    expect(detail.cookies).toHaveLength(2)
   })
 
   it('returns the png bytes directly when raw=1 is asked for', async () => {
