@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   BrowserRequestError,
+  BROWSER_UNTHROTTLE_SWITCH,
+  applyBrowserRenderSwitch,
+  browserUnthrottleEnabled,
   browserSummary,
   compileRoutes,
   formatCookieHeader,
@@ -210,5 +213,37 @@ describe('BrowserRequestError', () => {
   it('carries a status code for the HTTP layer', () => {
     expect(new BrowserRequestError('nope', 404).status).toBe(404)
     expect(new BrowserRequestError('nope').status).toBe(400)
+  })
+})
+
+describe('applyBrowserRenderSwitch', () => {
+  // 隐藏窗口里 rAF 不跑、visibilityState 停在 hidden，截图只能拿到冻结的那一帧；
+  // 这个开关是唯一有效的解，所以「默认挂上」必须被锁住。
+  function fakeCommandLine() {
+    const switches = []
+    return { switches, appendSwitch: (name) => switches.push(name) }
+  }
+
+  it('is on by default (no env at all)', () => {
+    const commandLine = fakeCommandLine()
+    expect(browserUnthrottleEnabled({})).toBe(true)
+    expect(applyBrowserRenderSwitch(commandLine, {})).toBe(true)
+    expect(commandLine.switches).toEqual([BROWSER_UNTHROTTLE_SWITCH])
+  })
+
+  it('stays on for values that are not an explicit no', () => {
+    const commandLine = fakeCommandLine()
+    expect(applyBrowserRenderSwitch(commandLine, { MICA_BROWSER_UNTHROTTLE: 'maybe' })).toBe(true)
+    expect(applyBrowserRenderSwitch(commandLine, { MICA_BROWSER_UNTHROTTLE: '1' })).toBe(true)
+    expect(commandLine.switches).toEqual([BROWSER_UNTHROTTLE_SWITCH, BROWSER_UNTHROTTLE_SWITCH])
+  })
+
+  it('can be turned off explicitly, without appending anything', () => {
+    for (const value of ['0', 'false', 'no', 'off', 'OFF']) {
+      const commandLine = fakeCommandLine()
+      expect(browserUnthrottleEnabled({ MICA_BROWSER_UNTHROTTLE: value })).toBe(false)
+      expect(applyBrowserRenderSwitch(commandLine, { MICA_BROWSER_UNTHROTTLE: value })).toBe(false)
+      expect(commandLine.switches).toEqual([])
+    }
   })
 })

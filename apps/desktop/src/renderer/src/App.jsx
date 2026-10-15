@@ -1977,7 +1977,8 @@ export default function App() {
   )
 
   const terminalNodes = useMemo(() => nodes.filter((node) => node.type === 'terminal'), [nodes])
-  // 侧栏切会话时把目标记成「最近用过」，同时把已关掉的页签剔掉（缓存顺序即渲染顺序）。
+  // 侧栏切会话时把目标记成「最近用过」，同时把已关掉的页签剔掉（缓存顺序只用于淘汰，
+  // 渲染顺序另取工作区节点顺序，见 chat-cache.js 的 cachedChatNodes）。
   // 两件事必须在**同一次更新**里做：分成两个 effect 时，「剔掉已关节点」那一步可能拿着
   // 上一轮的节点列表跑，把刚切过去的 activeId 一起剔掉，于是缓存里只剩一个会话、
   // 切走再切回又变成卸载重建（状态照样丢）。

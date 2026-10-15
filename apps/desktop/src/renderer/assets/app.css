@@ -163,6 +163,9 @@
 }
 .chat-scroll::-webkit-scrollbar,
 .chat-turn-log-scroll::-webkit-scrollbar {
+  /* 必须显式 display: block —— 上面 `*::-webkit-scrollbar` 设的是 display: none，
+     只写 width/background 覆盖不回可见性，滚动条会一直是隐藏的。 */
+  display: block;
   width: 10px;
 }
 .chat-scroll::-webkit-scrollbar-track,

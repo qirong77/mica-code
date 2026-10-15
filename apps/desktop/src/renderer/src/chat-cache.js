@@ -39,15 +39,16 @@ export function pruneChatCache(previous, aliveIds) {
 }
 
 /**
- * 要渲染哪些会话组件：缓存顺序即渲染顺序，滤掉已经关掉的节点。
- * 返回 `{ id, node }` 列表，调用方只负责接线。
+ * 要渲染哪些会话组件，滤掉已经关掉的节点。调用方只负责接线。
+ *
+ * 顺序取**工作区里的节点顺序**，而不是缓存里的「最近用过」顺序：缓存会把刚用过的会话挪到
+ * 末尾，照它渲染的话每切一次会话 React 就要把 `.chat-view` 节点在父容器里挪一次位置，
+ * 而节点被移动会重建它的布局盒、把滚动容器的 `scrollTop` 清成 0（实测切回来时刚恢复好的
+ * 位置会在 10ms 后被清掉）。按工作区顺序渲染时切会话只改 className，DOM 不动，滚动位置
+ * 自己就守住了（见 chat-scroll.js）。缓存顺序仍然只用于淘汰。
  */
 export function cachedChatNodes(cache, nodes) {
-  const byId = new Map((nodes || []).map((node) => [node.id, node]))
-  const result = []
-  for (const id of cache || []) {
-    const node = byId.get(id)
-    if (node) result.push(node)
-  }
-  return result
+  const wanted = new Set(cache || [])
+  if (!wanted.size) return []
+  return (nodes || []).filter((node) => wanted.has(node.id))
 }

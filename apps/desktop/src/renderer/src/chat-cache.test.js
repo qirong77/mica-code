@@ -47,19 +47,22 @@ describe('pruneChatCache', () => {
 })
 
 describe('cachedChatNodes', () => {
-  it('maps the cache to live nodes, keeping the cache order', () => {
+  it('returns cached nodes in workspace order, not cache (MRU) order', () => {
     const nodes = [
       { id: 'a', type: 'terminal' },
       { id: 'b', type: 'terminal' },
       { id: 'c', type: 'terminal' }
     ]
-    expect(cachedChatNodes(['b', 'a'], nodes).map((node) => node.id)).toEqual(['b', 'a'])
+    // 缓存把最近用过的 b 排在了后面；渲染顺序仍按 nodes，切会话才不用移动 DOM 节点
+    expect(cachedChatNodes(['b', 'a'], nodes).map((node) => node.id)).toEqual(['a', 'b'])
+    expect(cachedChatNodes(['a'], nodes).map((node) => node.id)).toEqual(['a'])
   })
 
-  it('skips ids that are not in the workspace any more', () => {
+  it('skips ids that are not in the cache', () => {
     const nodes = [{ id: 'a', type: 'terminal' }]
     expect(cachedChatNodes(['gone', 'a'], nodes).map((node) => node.id)).toEqual(['a'])
     expect(cachedChatNodes(null, nodes)).toEqual([])
     expect(cachedChatNodes(['a'], null)).toEqual([])
+    expect(cachedChatNodes([], nodes)).toEqual([])
   })
 })

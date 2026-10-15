@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-host.js'
+import { applyBrowserRenderSwitch } from './browser/browser-core.js'
 
 /**
  * Electron 外壳。
@@ -24,6 +25,11 @@ const READY_PREFIX = '[mica-desktop] ready '
 // y 要让它在这一条里居中，setSheetOffset 决定原生提示框挂下来时贴在哪。
 const HEADER_HEIGHT_PX = 32
 const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 8 }
+
+// 必须在 app ready 之前：受控浏览器的窗口默认是隐藏的，而 Chromium 把隐藏/被遮挡的窗口
+// 当后台窗口 —— 页面里 requestAnimationFrame 完全不触发、visibilityState 停在 hidden，
+// 于是截图只能拿到画面冻结前的那一帧。开关的取舍见 browser-core.js 的注释。
+applyBrowserRenderSwitch(app.commandLine, process.env)
 
 let runtime = null
 let quitting = false

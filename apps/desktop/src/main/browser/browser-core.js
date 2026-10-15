@@ -10,6 +10,20 @@ import { join } from 'node:path'
 export const BROWSER_PARTITION = 'persist:mica-browser'
 
 /**
+ * 让「被遮挡」的窗口照常出帧的启动开关。
+ *
+ * 受控浏览器的窗口默认是隐藏的，而 Chromium 把隐藏/被遮挡的窗口当后台窗口：页面里
+ * `requestAnimationFrame` 完全不触发（实测 4 秒 0 次）、`document.visibilityState`
+ * 停在 `hidden`。于是靠 rAF 推进的页面（图表、canvas、部分虚拟列表）整页冻结，按可见性
+ * 自暂停的 SPA 也主动停下 —— 截图只能拿到冻结前的那一帧。
+ *
+ * 只有这个开关能解（视图级 `backgroundThrottling: false` 只解定时器节流，rAF 依旧 0；
+ * `Page.startScreencast` / `Emulation.setVirtualTimePolicy` / `disable-renderer-backgrounding`
+ * / `CalculateNativeWinOcclusion` 都无效）。代价是隐藏窗口持续渲染，见 `browserUnthrottleEnabled`。
+ */
+export const BROWSER_UNTHROTTLE_SWITCH = 'disable-backgrounding-occluded-windows'
+
+/**
  * Cookie 缓存文件名：按作用域域名派生（`:` → `_`），好让别的进程直接 `cat`。
  * 同一台机器上多个后端（osim000 / osim108 / pre…）各写各的文件，不会互相覆盖。
  */
@@ -145,6 +159,26 @@ export function parseBoolean(value) {
   if (['1', 'true', 'yes', 'on'].includes(lowered)) return true
   if (['0', 'false', 'no', 'off'].includes(lowered)) return false
   return undefined
+}
+
+/**
+ * 是否让隐藏窗口照常渲染。默认开：受控浏览器的全部意义就是让 agent 看到真实页面，
+ * 截到冻结的旧帧等于功能失效。`MICA_BROWSER_UNTHROTTLE=0`（或 false/no/off）关掉，
+ * 省下隐藏窗口持续渲染的 CPU —— 代价是上面那段注释里的旧帧问题会回来。
+ */
+export function browserUnthrottleEnabled(env = {}) {
+  return parseBoolean(env.MICA_BROWSER_UNTHROTTLE) !== false
+}
+
+/**
+ * 把开关挂到 Electron 的 commandLine 上（必须在 app ready 之前调用，晚一点就不生效）。
+ * 收成一个函数是为了能单测「默认挂、显式关时不挂」，而不是散在 index.js 里。
+ * 返回是否真的挂上了。
+ */
+export function applyBrowserRenderSwitch(commandLine, env = {}) {
+  if (!browserUnthrottleEnabled(env)) return false
+  commandLine.appendSwitch(BROWSER_UNTHROTTLE_SWITCH)
+  return true
 }
 
 export function parsePositiveInt(value, fallback) {

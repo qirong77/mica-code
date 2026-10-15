@@ -88,6 +88,7 @@ import {
   waitTaskTooltip
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
+import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
 import { uid } from './workspace'
 import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
 import {
@@ -2153,6 +2154,13 @@ const TRANSCRIPT_CACHE_LIMIT = 8
 const transcriptCache = new Map()
 
 /**
+ * 滚动位置按节点记。缓存实例切走时只是被加上 `hidden`（display:none），而 display:none 会把
+ * 滚动容器的 `scrollTop` 清成 0，再显示回来也不会自己恢复；显示回来那一下 React 还可能重建
+ * 这段 DOM。所以位置只能自己记、自己放回去。判定见 chat-scroll.js。
+ */
+const scrollCache = new Map()
+
+/**
  * 重放时会往消息列表上「追加」的事件类型：重放它们必须从磁盘历史重建，否则会与本轮
  * 已渲染的内容重复。其余事件（用量、后台任务/subagent/等待/btw 快照）是整体替换语义，
  * 可以安全地叠加在已有的 transcript 之上。
@@ -2328,6 +2336,12 @@ export function ChatView({
   const historyCursorRef = useRef(-1)
   const stickToBottomRef = useRef(true)
   const shellPointerRef = useRef(null)
+  // 上一节点「最后一次滚动到哪」；切走时用它写进 scrollCache（那时旧节点已被隐藏，
+  // 从 DOM 读 scrollTop 只会得到 0）。
+  const scrollStateRef = useRef({ top: 0, stick: true })
+  // 本节点待恢复的偏移；等 historyLoaded 之后再落到 DOM 上，早落会被夹到当时还很矮的内容里。
+  const pendingScrollRestoreRef = useRef(null)
+  const previousVisibleRef = useRef(visible)
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -3396,6 +3410,10 @@ export function ChatView({
       // 这一份渲染结果（含只存在于事件流里的思考/工具/TODO）留给下次回到这个会话时用
       writeCachedTranscript(previousNodeId, messagesRef.current)
     }
+    if (previousNodeId && previousNodeId !== nodeId) {
+      // 旧节点此刻已经隐藏，scrollTop 读出来是 0，只能用滚动时记下的那份
+      writeScrollEntry(scrollCache, previousNodeId, scrollStateRef.current)
+    }
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
@@ -3404,8 +3422,13 @@ export function ChatView({
     restoringRef.current = true
     pendingEventsRef.current = []
     pendingExitRef.current = null
-    stickToBottomRef.current = true
-    setShowJump(false)
+    const scrollRestore = resolveScrollRestore(readScrollEntry(scrollCache, nodeId))
+    stickToBottomRef.current = scrollRestore.stick
+    scrollStateRef.current = { top: scrollRestore.top, stick: scrollRestore.stick }
+    pendingScrollRestoreRef.current = scrollRestore.stick
+      ? null
+      : { nodeId, top: scrollRestore.top }
+    setShowJump(!scrollRestore.stick)
     updateMessages([])
     setInput(nextInput)
     setTodoHidden(todoHiddenRef.current.get(nodeId) === true)
@@ -3653,11 +3676,45 @@ export function ChatView({
   }, [remoteRunning, nodeIdRef, refreshMetaSoon, updateMessages])
 
   useLayoutEffect(() => {
-    if (!stickToBottomRef.current) return undefined
     const list = listRef.current
-    if (list) list.scrollTop = list.scrollHeight
+    if (!list) return undefined
+    if (stickToBottomRef.current) {
+      list.scrollTop = list.scrollHeight
+      return undefined
+    }
+    // 恢复上次的偏移：必须等这一轮历史真的到位，否则会被夹到当时还很矮的内容里
+    const pending = pendingScrollRestoreRef.current
+    if (!pending || pending.nodeId !== nodeId || !historyLoaded) return undefined
+    list.scrollTop = pending.top
+    pendingScrollRestoreRef.current = null
     return undefined
-  }, [messages, running, historyLoaded])
+  }, [messages, running, historyLoaded, nodeId])
+
+  /**
+   * 切走/切回时的滚动位置。
+   *
+   * 缓存住的实例切走时只是被加上 `hidden`（display:none），而 display:none 会把
+   * `scrollTop` 清成 0，再显示回来也不会自己恢复。所以位置得自己记、自己放回去；同时
+   * 切走还会让浏览器派发一次 clientHeight 为 0 的滚动事件，onScroll 里已经把它滤掉了。
+   */
+  useLayoutEffect(() => {
+    const list = listRef.current
+    const wasVisible = previousVisibleRef.current
+    previousVisibleRef.current = visible
+    if (!list || visible === wasVisible) return undefined
+    if (!visible) {
+      writeScrollEntry(scrollCache, nodeId, scrollStateRef.current)
+      return undefined
+    }
+    const restore = resolveScrollRestore(readScrollEntry(scrollCache, nodeId))
+    stickToBottomRef.current = restore.stick
+    scrollStateRef.current = { top: restore.top, stick: restore.stick }
+    // 重新显示时内容已经在 DOM 里（缓存实例不重放历史），直接落位置即可
+    pendingScrollRestoreRef.current = null
+    list.scrollTop = restore.stick ? list.scrollHeight : restore.top
+    setShowJump(!restore.stick)
+    return undefined
+  }, [visible, nodeId])
 
   useEffect(() => {
     const transcript = transcriptRef.current
@@ -4977,7 +5034,11 @@ export function ChatView({
             const atBottom =
               element.scrollHeight - element.scrollTop - element.clientHeight <
               SCROLL_BOTTOM_THRESHOLD
+            // 隐藏时浏览器会把 scrollTop 清成 0 并派发一次滚动事件（clientHeight 也是 0），
+            // 那不是用户滚的，别拿它覆盖记下来的位置。
+            if (element.clientHeight === 0) return
             stickToBottomRef.current = atBottom
+            scrollStateRef.current = { top: element.scrollTop, stick: atBottom }
             setShowJump(!atBottom)
           }}
         >
