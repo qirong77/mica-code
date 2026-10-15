@@ -3,7 +3,6 @@ import {
   IconArrowBackUp,
   IconArrowUpRight,
   IconChevronRight,
-  IconGitBranch,
   IconMinus,
   IconPlus,
   IconRefresh,
@@ -300,18 +299,58 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
   )
 }
 
-function makeGitTree(files) {
-  const root = { folders: new Map(), files: [] }
-  for (const file of files) {
-    const parts = file.path.split('/')
-    let node = root
-    for (const part of parts.slice(0, -1)) {
-      if (!node.folders.has(part)) node.folders.set(part, { folders: new Map(), files: [] })
-      node = node.folders.get(part)
-    }
-    node.files.push({ ...file, name: parts.at(-1) })
-  }
-  return root
+/* ---------------------------------------------------------------- 变更列表 / 变更树 */
+
+/**
+ * 行尾的 `+N -M`（对应 VS Code 的 `showDiffStats`）。二进制文件或纯重命名两侧都是 0
+ * 时不占位——空白的 `+0 -0` 只会让行变吵。
+ */
+function GitDiffStat({ additions, deletions }) {
+  if (!additions && !deletions) return null
+  return (
+    <span className="ml-2 shrink-0 font-mono text-[11px] tabular-nums">
+      {additions ? <span style={{ color: 'var(--color-git-added)' }}>+{additions}</span> : null}
+      {additions && deletions ? ' ' : null}
+      {deletions ? <span style={{ color: 'var(--color-git-deleted)' }}>-{deletions}</span> : null}
+    </span>
+  )
+}
+
+/**
+ * 工作区里还有没提交的改动。变更树比的是「工作区相对比较基线」，所以一个文件可能既有
+ * 已提交的部分、又有还没提交的部分，小圆点就是这个提醒（悬浮提示里说明是哪一种）。
+ */
+function UncommittedDot({ title = '工作区里还有没提交的改动' }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className="ml-1.5 size-1.5 shrink-0 rounded-full"
+      style={{ backgroundColor: 'var(--color-warn)', opacity: 0.85 }}
+    />
+  )
+}
+
+/** 行尾状态字母：CHANGES 列表用 porcelain 的单侧状态码，变更树只有三态。 */
+function StatusLetter({ status, code }) {
+  const letter = code ? codeLabel(code) : statusLabel(status)
+  const color = code ? codeColor(code) : statusColor(status)
+  return (
+    <span className="ml-2 shrink-0 font-mono text-[11px] font-semibold" style={{ color }}>
+      {letter}
+    </span>
+  )
+}
+
+/** 文件/目录行尾的「状态 + 统计 + 未提交点」，三段顺序两个变体共用。 */
+function RowTrailing({ status, code, additions, deletions, uncommitted, uncommittedTitle }) {
+  return (
+    <>
+      <GitDiffStat additions={additions} deletions={deletions} />
+      {uncommitted && <UncommittedDot title={uncommittedTitle} />}
+      <StatusLetter status={status} code={code} />
+    </>
+  )
 }
 
 /**
@@ -329,17 +368,15 @@ function GitFileRow({
   onStage,
   onUnstage,
   onDiscard,
-  showDirectory
+  showDirectory,
+  onContextMenu
 }) {
   const parts = String(file.path).split('/')
   const name = file.name || parts.at(-1)
   const directory = parts.slice(0, -1).join('/')
-  // 分段各自的状态字符：已暂存的段看索引侧，工作区段看工作区侧。GIT TREE 拿到的
-  // 是「相对基线分支」的差异（`git diff --name-status`），没有 porcelain 的 XY，
-  // 这时退回三态状态。
+  // 分段各自的状态字符：已暂存的段看索引侧，工作区段看工作区侧。GIT 变更树拿到的是
+  // 「相对比较基线」的差异（`git diff --name-status`），没有 porcelain 的 XY，这时退回三态。
   const code = section === 'staged' ? stagedCode(file.code) : worktreeCode(file.code)
-  const letter = code ? codeLabel(code) : statusLabel(file.status)
-  const color = code ? codeColor(code) : statusColor(file.status)
   const actions = []
   if (onOpen) {
     actions.push({
@@ -377,11 +414,12 @@ function GitFileRow({
         selected ? 'bg-white/[.075]' : 'hover:bg-list-hover'
       }`}
       style={{ paddingLeft: 5 + depth * 8 }}
+      onContextMenu={(event) => onContextMenu?.(event, file)}
     >
       <button
         type="button"
         title={file.path}
-        onClick={() => onSelect(file)}
+        onClick={() => onSelect(file, section)}
         className="flex min-w-0 flex-1 items-center text-left"
       >
         <span className="grid size-4 shrink-0 place-items-center">
@@ -420,70 +458,23 @@ function GitFileRow({
           ))}
         </span>
       )}
-      <span className="ml-1.5 shrink-0 font-mono text-[11px] font-semibold" style={{ color }}>
-        {letter}
-      </span>
+      <RowTrailing
+        status={file.status}
+        code={code}
+        additions={file.additions}
+        deletions={file.deletions}
+        uncommitted={!code && file.uncommitted}
+        uncommittedTitle={
+          file.status === 'added'
+            ? '这个文件还没有提交过'
+            : '工作区里还有没提交的改动，diff 里也含这部分'
+        }
+      />
     </div>
   )
 }
 
-function GitRows({ node, path = '', depth = 0, collapsed, onToggle, selectedPath, onSelect }) {
-  return (
-    <>
-      {[...node.folders].map(([name, folder]) => {
-        const key = path ? `${path}/${name}` : name
-        const closed = collapsed.has(key)
-        return (
-          <div key={key}>
-            <button
-              type="button"
-              className={`${ROW_BASE} gap-1 pr-1.5 text-[13px] text-white/65 hover:bg-list-hover hover:text-white`}
-              style={{ paddingLeft: 5 + depth * 8 }}
-              onClick={() => onToggle(key)}
-            >
-              <span
-                className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
-              >
-                <IconChevronRight size={14} />
-              </span>
-              <span className="grid size-4 shrink-0 place-items-center">
-                <FileSystemIcon
-                  name={name}
-                  type="directory"
-                  expanded={!closed}
-                  className="size-4"
-                />
-              </span>
-              <span className="ml-[5px] truncate">{name}</span>
-            </button>
-            {!closed && (
-              <GitRows
-                node={folder}
-                path={key}
-                depth={depth + 1}
-                collapsed={collapsed}
-                onToggle={onToggle}
-                selectedPath={selectedPath}
-                onSelect={onSelect}
-              />
-            )}
-          </div>
-        )
-      })}
-      {node.files.map((file) => (
-        <GitFileRow
-          key={file.path}
-          file={file}
-          depth={depth}
-          section="tree"
-          selected={selectedPath === file.path}
-          onSelect={onSelect}
-        />
-      ))}
-    </>
-  )
-}
-
+/** Source control owns index/worktree actions; branch comparison has its own panel. */
 export function GitPanel({
   cwd,
   repository,
@@ -491,148 +482,89 @@ export function GitPanel({
   onRefresh,
   onSelectFile,
   selectedPath,
-  variant = 'list',
-  title = '源代码管理',
-  sectionLabel = '更改',
-  emptyText = '工作区没有文件变化',
-  compareLabel = null,
   onOpenFile,
   onStage,
   onUnstage,
   onDiscard
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set())
-  const tree = useMemo(() => makeGitTree(repository?.files || []), [repository])
-
-  const root = repository?.root || cwd
-  const files = useMemo(() => repository?.files || [], [repository])
-  const isTree = variant === 'tree'
-
-  /**
-   * 与 VS Code 一样分两段：索引里有改动的进「暂存的更改」，工作区还有改动的进
-   * 「更改」（未跟踪只算工作区侧）。同一个文件两边都有（`MM`）时两段各出现一次。
-   * 区块顺序也跟 VS Code 一致：按创建顺序排，暂存的更改在更改之前。
-   */
-  const sections = useMemo(() => {
-    if (isTree) return [{ key: '__section__', label: sectionLabel, files, alwaysVisible: true }]
-    return [
-      {
-        key: 'staged',
-        label: '暂存的更改',
-        files: files.filter((file) => stagedCode(file.code)),
-        hideWhenEmpty: true
-      },
-      {
-        key: 'changes',
-        label: sectionLabel,
-        files: files.filter((file) => worktreeCode(file.code)),
-        alwaysVisible: true
-      }
-    ]
-  }, [files, isTree, sectionLabel])
-
-  const toggle = useCallback((key) => {
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
-
-  const repoTitle = compareLabel ? `${root}（相对 ${compareLabel}）` : root || ''
-
+  const files = repository?.files || []
+  const sections = [
+    { key: 'staged', label: '暂存的更改', files: files.filter((file) => stagedCode(file.code)) },
+    { key: 'changes', label: '更改', files: files.filter((file) => worktreeCode(file.code)) }
+  ]
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className={PANEL_HEADER}>
-        <span className={PANEL_TITLE} title={repoTitle}>
-          {title}
-        </span>
+        <span className={PANEL_TITLE}>源代码管理</span>
         {loading && <Spinner />}
-        {onRefresh && (
-          <button
-            type="button"
-            title="刷新"
-            aria-label="刷新"
-            className={PANEL_ACTION}
-            onClick={() => onRefresh()}
-          >
-            <IconRefresh size={15} />
-          </button>
-        )}
+        <button
+          type="button"
+          title="刷新"
+          aria-label="刷新"
+          className={PANEL_ACTION}
+          onClick={() => onRefresh?.()}
+        >
+          <IconRefresh size={15} />
+        </button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
-        {/* 加载态优先：刷新时 cwd 会先变 null，先显示「正在读取」而不是「请选终端」。 */}
-        {loading && !repository && (
-          <div className="px-3 py-4 text-[13px] text-white/40">正在读取 Git 工作区…</div>
-        )}
-        {!loading && !cwd && (
-          <div className="px-3 py-4 text-[13px] text-white/40">选择一个终端会话以查看 Git 变化</div>
-        )}
-        {!loading && cwd && !repository && (
-          <div className="px-3 py-4 text-[13px] text-white/40">当前目录不在 Git 仓库中</div>
-        )}
-        {repository && !files.length && (
-          <div className="px-3 py-4 text-[13px] text-white/40">{emptyText}</div>
+        {!repository && (
+          <div className="px-3 py-4 text-[13px] text-white/40">
+            {loading
+              ? '正在读取 Git 工作区…'
+              : !cwd
+                ? '选择一个会话以查看 Git 变化'
+                : '当前目录不在 Git 仓库中'}
+          </div>
         )}
         {repository &&
-          files.length > 0 &&
           sections
-            .filter((section) => section.alwaysVisible || section.files.length > 0)
-            .map((section) => {
-              const closed = collapsed.has(section.key)
-              return (
-                <Fragment key={section.key}>
-                  {/* 与 VS Code 一样：区块头是「⌄ 标题 + 计数徽标」，路径与基线走 tooltip */}
-                  <button
-                    type="button"
-                    title={compareLabel ? `${root}\n相对 ${compareLabel}` : root}
-                    aria-expanded={!closed}
-                    className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70 hover:bg-list-hover hover:text-white`}
-                    onClick={() => toggle(section.key)}
-                  >
-                    <span
-                      className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
-                    >
-                      <IconChevronRight size={14} />
-                    </span>
-                    {isTree ? (
-                      <IconGitBranch size={14} className="ml-1 shrink-0 text-info" />
-                    ) : null}
-                    <span className="ml-0.5 min-w-0 flex-1 truncate">{section.label}</span>
-                    <span className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-white/10 px-1 text-[11px] font-normal leading-none text-white/70 tabular-nums">
-                      {section.files.length}
-                    </span>
-                  </button>
-                  {!closed &&
-                    (isTree ? (
-                      <GitRows
-                        node={tree}
-                        depth={0}
-                        collapsed={collapsed}
-                        selectedPath={selectedPath}
-                        onToggle={toggle}
-                        onSelect={onSelectFile}
-                      />
-                    ) : (
-                      section.files.map((file) => (
-                        <GitFileRow
-                          key={`${section.key}:${file.path}`}
-                          file={file}
-                          section={section.key}
-                          selected={selectedPath === file.path}
-                          onSelect={onSelectFile}
-                          onOpen={onOpenFile}
-                          onStage={onStage}
-                          onUnstage={onUnstage}
-                          onDiscard={onDiscard}
-                          showDirectory
-                        />
-                      ))
-                    ))}
-                </Fragment>
-              )
-            })}
+            .filter((section) => section.key === 'changes' || section.files.length)
+            .map((section) => (
+              <Fragment key={section.key}>
+                <button
+                  type="button"
+                  aria-expanded={!collapsed.has(section.key)}
+                  className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70 hover:bg-list-hover`}
+                  onClick={() =>
+                    setCollapsed((current) => {
+                      const next = new Set(current)
+                      if (next.has(section.key)) next.delete(section.key)
+                      else next.add(section.key)
+                      return next
+                    })
+                  }
+                >
+                  <IconChevronRight
+                    size={14}
+                    className={collapsed.has(section.key) ? '' : 'rotate-90'}
+                  />
+                  <span className="min-w-0 flex-1">{section.label}</span>
+                  <span className="text-[11px] tabular-nums">{section.files.length}</span>
+                </button>
+                {!collapsed.has(section.key) &&
+                  section.files.map((file) => (
+                    <GitFileRow
+                      key={`${section.key}:${file.path}`}
+                      file={file}
+                      section={section.key}
+                      selected={selectedPath === `${section.key}:${file.path}`}
+                      onSelect={onSelectFile}
+                      onOpen={onOpenFile}
+                      onStage={onStage}
+                      onUnstage={onUnstage}
+                      onDiscard={onDiscard}
+                      showDirectory
+                    />
+                  ))}
+                {!collapsed.has(section.key) &&
+                  section.key === 'changes' &&
+                  !section.files.length && (
+                    <div className="px-5 py-2 text-[12px] text-white/40">工作区没有文件变化</div>
+                  )}
+              </Fragment>
+            ))}
       </div>
     </div>
   )

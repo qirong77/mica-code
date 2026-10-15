@@ -56,7 +56,10 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
       const response = await window.mica.git.refs(cwd)
       if (request !== requestRef.current) return
       if (response?.error) throw new Error(response.error)
-      setRefs(response?.refs || { branches: [], tags: [] })
+      setRefs({
+        branches: (response?.refs?.branches || []).filter((item) => item.kind !== 'remote'),
+        tags: response?.refs?.tags || []
+      })
     } catch (loadError) {
       if (request === requestRef.current) setError(loadError?.message || String(loadError))
     } finally {

@@ -7,6 +7,7 @@ import {
   parseNumstat,
   parseStatus,
   parseStatusCode,
+  shortRefName,
   statusFromCode
 } from './git-core'
 
@@ -99,6 +100,15 @@ describe('base branch', () => {
     expect(baseBranchLabel('origin/master')).toBe('master')
     expect(baseBranchLabel('master')).toBe('master')
     expect(baseBranchLabel('')).toBe('')
+  })
+
+  it('完整 ref 名取短名（for-each-ref 给的是 refs/heads/...）', () => {
+    expect(shortRefName('refs/heads/main')).toBe('main')
+    expect(shortRefName('refs/remotes/origin/main')).toBe('origin/main')
+    expect(shortRefName('refs/tags/v1.2.0')).toBe('v1.2.0')
+    expect(shortRefName('origin/master')).toBe('origin/master')
+    expect(shortRefName('HEAD')).toBe('HEAD')
+    expect(shortRefName('')).toBe('')
   })
 
   it('当前分支就是基线时判为「没有可比的基线」', () => {

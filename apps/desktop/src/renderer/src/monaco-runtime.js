@@ -48,11 +48,12 @@ monaco.editor.defineTheme('mica-dark', {
     'editorLineNumber.foreground': '#606366',
     'editorLineNumber.activeForeground': '#999999',
     // JetBrains Darcula selection blue.
-    'editor.selectionBackground': '#214283',
-    'diffEditor.insertedTextBackground': '#2944364f',
-    'diffEditor.removedTextBackground': '#4b2d2d4f',
-    'diffEditor.insertedLineBackground': '#2944364d',
-    'diffEditor.removedLineBackground': '#4b2d2d4d'
+    'editor.selectionBackground': '#214283'
+    // 这里刻意没有差分配色（diffEditor.*）：Darcula 的 #294436 / #4b2d2d 本身就压得
+    // 很暗，再叠一层 30% 透明度（曾经的取值）落在 #2b2b2b 上几乎看不出左右两侧的区别，
+    // 而 vs-dark 的默认值（行背景 rgba(155,185,85,.2) / rgba(255,0,0,.2)，字符背景
+    // #9ccc2c33 / #ff000033）跟你用 VS Code 默认主题看到的一致，且行背景与字符背景各叠
+    // 一次，「整行变了」和「行内某几个字变了」还能分出强弱，就不要在这里另配一套了。
   }
 })
 

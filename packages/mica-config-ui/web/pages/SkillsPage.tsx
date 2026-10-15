@@ -179,7 +179,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
                   onClick={() => void selectSkill(skill.name)}
                 >
                   <span>{skill.name}</span>
-                  <Tag>{skill.editable ? 'editable' : 'read-only'}</Tag>
+                  {skill.editable ? null : <Tag>只读</Tag>}
                 </button>
               ))}
             </div>

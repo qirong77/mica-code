@@ -5,7 +5,6 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -14,7 +13,6 @@ import {
   IconArrowLeft,
   IconArrowUp,
   IconChevronRight,
-  IconChristmasTree,
   IconClipboard,
   IconCopy,
   IconDots,
@@ -23,6 +21,7 @@ import {
   IconFolderOpen,
   IconFolderPlus,
   IconGitBranch,
+  IconGitCompare,
   IconPencil,
   IconRefresh,
   IconSearch,
@@ -32,7 +31,19 @@ import {
 } from '@tabler/icons-react'
 import { FileIcon, FileSystemIcon } from './FileIcon'
 import { GitPanel, SearchPanel } from './FileSidePanels'
-import { buildGitDecorations, relativeToRoot, statusColor, statusLabel } from './git-decorations'
+import { GitComparePanel } from './GitComparePanel'
+import { GitCompareWelcome, GitReviewTabs } from './GitReviewTabs'
+import { isFileReviewed } from './git-review'
+import { useGitReview } from './useGitReview'
+import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
+import {
+  buildGitDecorations,
+  relativeToRoot,
+  stagedCode,
+  statusColor,
+  statusLabel,
+  worktreeCode
+} from './git-decorations'
 import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），空编辑器水印直接引用它。
@@ -162,52 +173,6 @@ function applyOrder(children, directory, orderMap) {
   return [...known, ...rest]
 }
 
-function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children }) {
-  const ref = useRef(null)
-  const [pos, setPos] = useState({ x, y })
-  useEffect(() => {
-    // 常驻按钮自己负责开合：按压事件不关菜单，否则按下即关、点开又被重新打开，无法收起
-    const close = (event) => {
-      if (ignoreSelector && event.target?.closest?.(ignoreSelector)) return
-      onClose()
-    }
-    const keydown = (event) => event.key === 'Escape' && onClose()
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('blur', close)
-    window.addEventListener('keydown', keydown)
-    return () => {
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('blur', close)
-      window.removeEventListener('keydown', keydown)
-    }
-  }, [ignoreSelector, onClose])
-  useLayoutEffect(() => {
-    if (!ref.current) return
-    const w = ref.current.offsetWidth
-    const h = ref.current.offsetHeight
-    let px = x
-    let py = y
-    if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
-    if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
-    setPos({ x: px, y: py })
-  }, [x, y])
-  return (
-    <div
-      ref={ref}
-      className="fixed z-[10000] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
-      style={{ left: pos.x, top: pos.y, minWidth }}
-      role="menu"
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      {children}
-    </div>
-  )
-}
-
-function MenuSeparator() {
-  return <div className="mx-1 my-1 h-px bg-white/10" />
-}
-
 // 空编辑器水印：对齐 VS Code 的 editor placeholder（品牌标记 + 常用快捷键）。
 // 没有打开文件时用它填住编辑器分栏，而不是让目录树撑满整个文件视图——这样目录树的
 // 宽度与「有没有打开文件」无关，和 VS Code 一样。
@@ -234,25 +199,6 @@ function EmptyEditorWatermark() {
         </dl>
       </div>
     </div>
-  )
-}
-
-function MenuItem({ icon: Icon, label, danger, disabled, onClick }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] disabled:opacity-40 disabled:hover:bg-transparent ${
-        danger ? 'text-danger-soft' : 'text-white/90 hover:text-white'
-      }`}
-      onClick={onClick}
-    >
-      <span className="grid w-4 shrink-0 place-items-center">
-        <Icon size={14} className="shrink-0 opacity-75" />
-      </span>
-      <span className="flex-1">{label}</span>
-    </button>
   )
 }
 
@@ -522,6 +468,9 @@ export const FilesView = forwardRef(function FilesView(
     gitCwd,
     gitRepository,
     gitBranchChanges,
+    gitCompareError,
+    gitCompareBase,
+    onGitCompareBaseChange,
     gitLoading,
     gitBranch,
     onRefreshGit
@@ -560,17 +509,16 @@ export const FilesView = forwardRef(function FilesView(
   const [message, setMessage] = useState(null)
   const [activePanel, setActivePanel] = useState('explorer')
   const [gitSelectedFile, setGitSelectedFile] = useState(null)
+  const [gitPreview, setGitPreview] = useState(true)
 
   // 目录树上的 Git 装饰：改动文件染成对应状态色并带状态字母，其所有上级文件夹继承最主要的状态
   const gitDecorations = useMemo(() => buildGitDecorations(gitRepository), [gitRepository])
   const gitRoot = gitRepository?.root || null
-  // GIT TREE 面板比的是「当前分支相对基线分支（origin/HEAD → master/main）」的变更，
-  // 提交前后都看得见；没有基线（例如就停在主分支上）时退回工作区语义，
-  // 于是它和 CHANGES 一样只列还没提交的改动。
-  const branchChanges = useMemo(
-    () => (gitBranchChanges?.base ? gitBranchChanges : null),
-    [gitBranchChanges]
-  )
+  const review = useGitReview({
+    cwd: gitRepository?.root || gitCwd,
+    repository: gitBranchChanges,
+    compareBase: gitCompareBase
+  })
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -589,11 +537,19 @@ export const FilesView = forwardRef(function FilesView(
     }
   }, [])
 
-  // 选中的文件要记住自己是从哪个面板点开的：GIT TREE 里的文件跟 merge-base 比，
-  // CHANGES 里的跟 HEAD 比（见 GitDiffEditor 的 `base`）。
-  const selectGitFile = useCallback((file, base = 'head') => {
-    if (file && file.path) setGitSelectedFile({ ...file, base })
-  }, [])
+  const selectGitFile = useCallback(
+    (file, section = 'changes') => {
+      if (!file?.path) return
+      setGitSelectedFile({
+        ...file,
+        cwd: gitCwd,
+        section,
+        base: { mode: section === 'staged' ? 'staged' : 'worktree' }
+      })
+      setGitPreview(true)
+    },
+    [gitCwd]
+  )
 
   const closeGitDiff = useCallback(() => setGitSelectedFile(null), [])
 
@@ -625,6 +581,7 @@ export const FilesView = forwardRef(function FilesView(
 
   const switchPanel = useCallback((panel) => {
     setActivePanel((current) => (current === panel ? 'explorer' : panel))
+    setGitPreview(true)
   }, [])
 
   useEffect(() => {
@@ -712,6 +669,8 @@ export const FilesView = forwardRef(function FilesView(
   const openFile = useCallback(
     async (path, position = null) => {
       if (!path) return
+      setGitPreview(false)
+      setMobileTreeVisible(false)
       const existing = tabsRef.current.find((tab) => tab.path === path)
       if (existing) {
         activateFile(path)
@@ -813,6 +772,7 @@ export const FilesView = forwardRef(function FilesView(
       tab.dirty = tab.model.getAlternativeVersionId() !== savedVersion
       setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
       showMessage(tab.dirty ? '已保存，文件仍有新的更改' : '已保存', true)
+      void onRefreshGit?.()
     } catch (error) {
       showMessage(`保存失败：${error?.message || error}`, true, true)
       throw error
@@ -820,7 +780,7 @@ export const FilesView = forwardRef(function FilesView(
       tab.saving = false
       setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
     }
-  }, [setTabs, showMessage])
+  }, [onRefreshGit, setTabs, showMessage])
   saveActionRef.current = () =>
     saveActive().catch((error) => console.error('save file failed', error))
 
@@ -1063,6 +1023,55 @@ export const FilesView = forwardRef(function FilesView(
     })
   }, [])
 
+  /** 变更列表/变更树里的文件 → 资源管理器那套动作（打开、在系统里显示、复制路径）。 */
+  const gitFileNode = useCallback(
+    (file) => {
+      const root = String(gitRepository?.root || gitCwd || '').replace(/\/+$/, '')
+      return {
+        path: `${root}/${file.path}`,
+        name: String(file.path).split('/').at(-1),
+        type: 'file'
+      }
+    },
+    [gitCwd, gitRepository]
+  )
+
+  const openGitFile = useCallback(
+    (file) => {
+      setGitPreview(false)
+      setMobileTreeVisible(false)
+      return openFile(gitFileNode(file).path)
+    },
+    [gitFileNode, openFile]
+  )
+
+  const revealGitFile = useCallback(
+    async (file) => {
+      try {
+        await window.mica.files.reveal(gitFileNode(file).path)
+      } catch (error) {
+        showMessage(`操作失败：${error?.message || error}`, true, true)
+      }
+    },
+    [gitFileNode, showMessage]
+  )
+
+  // 相对路径的基准是仓库根，不是资源管理器当前打开的目录，所以这里不走 runFileAction。
+  const copyGitPath = useCallback(
+    async (file, relative = false) => {
+      const node = gitFileNode(file)
+      try {
+        if (relative)
+          await window.mica.files.copyRelativePath(gitRepository?.root || gitCwd, node.path)
+        else await window.mica.files.copyPath(node.path)
+        showMessage(relative ? '相对路径已复制' : '路径已复制', true)
+      } catch (error) {
+        showMessage(`操作失败：${error?.message || error}`, true, true)
+      }
+    },
+    [gitCwd, gitFileNode, gitRepository, showMessage]
+  )
+
   const openExplorerMenu = useCallback(
     (event) => {
       if (explorerMenu) {
@@ -1259,26 +1268,6 @@ export const FilesView = forwardRef(function FilesView(
     [loadRoot, setActivePath, setTabs, showMessage]
   )
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      openFile,
-      closeActive() {
-        if (!activeRef.current) return false
-        closeFile(activeRef.current)
-        return true
-      },
-      hasDirty() {
-        return tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)
-      },
-      reloadAfterGitChange,
-      layout() {
-        editorRef.current?.layout()
-      }
-    }),
-    [closeFile, openFile, reloadAfterGitChange]
-  )
-
   const toggleDirectory = useCallback(async (node) => {
     if (node.loading) return
     if (node.expanded || node.loaded) {
@@ -1379,13 +1368,26 @@ export const FilesView = forwardRef(function FilesView(
   const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
   const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
   const isGitTree = activePanel === 'git-tree'
+  const sourceControlDiff = useMemo(() => {
+    if (gitSelectedFile?.cwd !== gitCwd || !gitSelectedFile) return null
+    const latest = gitRepository?.files?.find((file) => file.path === gitSelectedFile.path)
+    if (
+      latest &&
+      !(gitSelectedFile.section === 'staged' ? stagedCode(latest.code) : worktreeCode(latest.code))
+    )
+      return null
+    return latest ? { ...gitSelectedFile, ...latest } : null
+  }, [gitSelectedFile, gitCwd, gitRepository])
+  const selectedDiff = isGitTree ? review.current : sourceControlDiff
+  const showDiff = isGitPanel && gitPreview && !!selectedDiff
   // 徽标与资源管理器装饰始终是「工作区还没提交的改动」（与 VS Code 一致），
   // GIT TREE 面板则额外能看到分支上已经提交的改动。
   const changeCount = gitRepository?.files?.length || 0
   // 没有打开文件（也没有 Git 差异预览）时，编辑器分栏里显示空编辑器水印；
   // 目录树的宽度因此与「有没有打开文件」无关（与 VS Code 一致）。
   const hasEditorContent =
-    tabs.length > 0 || (isGitPanel && !!gitSelectedFile) || (!!message && !message.transient)
+    (isGitTree && gitPreview ? showDiff : tabs.length > 0 || showDiff) ||
+    (!!message && !message.transient)
   // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树
   const isMobile = useIsMobile()
   const [mobileTreeVisible, setMobileTreeVisible] = useState(false)
@@ -1396,6 +1398,40 @@ export const FilesView = forwardRef(function FilesView(
   }, new Map())
   // 活动栏徽标：有 Git 改动时在图标右下角显示改动条数（与 VS Code 源代码管理一致）
   const badges = changeCount ? { git: changeCount > 99 ? '99+' : String(changeCount) } : {}
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openFile,
+      closeActive() {
+        if (showDiff) {
+          if (isGitTree) review.close(selectedDiff.path)
+          else closeGitDiff()
+          return true
+        }
+        if (!activeRef.current) return false
+        closeFile(activeRef.current)
+        return true
+      },
+      hasDirty() {
+        return tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)
+      },
+      reloadAfterGitChange,
+      layout() {
+        editorRef.current?.layout()
+      }
+    }),
+    [
+      closeFile,
+      openFile,
+      reloadAfterGitChange,
+      showDiff,
+      isGitTree,
+      review,
+      selectedDiff,
+      closeGitDiff
+    ]
+  )
 
   return (
     <section
@@ -1412,9 +1448,7 @@ export const FilesView = forwardRef(function FilesView(
           ['explorer', IconFiles, '资源管理器'],
           ['search', IconSearch, '搜索'],
           ['git', IconGitBranch, '源代码管理'],
-          // 与 VS Code 的活动栏一致：变更树用一棵松树（圣诞树）标记，
-          // 和上面的「源代码管理」分支图标区分开。
-          ['git-tree', IconChristmasTree, 'Git 变更树']
+          ['git-tree', IconGitCompare, 'Git 比较']
         ].map(([id, Icon, label]) => {
           const active = activePanel === id
           return (
@@ -1458,39 +1492,48 @@ export const FilesView = forwardRef(function FilesView(
       >
         {activePanel === 'search' ? (
           <SearchPanel root={root} onOpenFile={openFile} activePath={activePath} />
-        ) : isGitPanel ? (
+        ) : isGitTree ? (
+          <GitComparePanel
+            cwd={gitCwd}
+            repository={gitBranchChanges}
+            loading={gitLoading}
+            error={gitCompareError}
+            branch={gitBranch}
+            compareBase={gitCompareBase}
+            onCompareBaseChange={onGitCompareBaseChange}
+            onRefresh={onRefreshGit}
+            selectedPath={review.current?.path}
+            onSelectFile={(file, pin = false) => {
+              review.open(file, pin)
+              setGitPreview(true)
+              setMobileTreeVisible(false)
+            }}
+            onOpenAll={(files) => {
+              review.open(files)
+              setGitPreview(true)
+              setMobileTreeVisible(false)
+            }}
+            reviewed={review.reviewed}
+            onToggleReviewed={review.toggleReviewed}
+            onOpenFile={openGitFile}
+            onRevealFile={revealGitFile}
+            onCopyPath={copyGitPath}
+          />
+        ) : activePanel === 'git' ? (
           <GitPanel
             cwd={gitCwd || null}
-            repository={isGitTree ? branchChanges || gitRepository : gitRepository}
+            repository={gitRepository}
             loading={gitLoading}
             onRefresh={onRefreshGit}
-            selectedPath={gitSelectedFile?.path}
-            onSelectFile={(file) =>
-              selectGitFile(file, isGitTree && branchChanges ? 'branch' : 'head')
-            }
-            variant={isGitTree ? 'tree' : 'list'}
-            title={isGitTree ? 'Git 变更树' : '源代码管理'}
-            sectionLabel={isGitTree ? gitBranch || '更改' : '更改'}
-            /* 面板名本身看不出在跟谁比：把基线写进 tooltip（提交过的改动也在这里出现）。 */
-            compareLabel={isGitTree ? branchChanges?.baseLabel || null : null}
-            emptyText={
-              isGitTree && branchChanges
-                ? `当前分支相对 ${branchChanges.baseLabel} 没有变更`
-                : '工作区没有文件变化'
-            }
-            /* 行内悬浮操作只在「工作区改动」列表里有意义：GIT TREE 里的文件是相对
-               基线的差异（含已提交的部分），暂存/放弃都无从谈起。 */
-            onOpenFile={
-              isGitTree
-                ? undefined
-                : (file) =>
-                    openFile(
-                      `${String(gitRepository?.root || '').replace(/\/+$/, '')}/${file.path}`
-                    )
-            }
-            onStage={isGitTree ? undefined : (file) => gitFileAction('stage', file)}
-            onUnstage={isGitTree ? undefined : (file) => gitFileAction('unstage', file)}
-            onDiscard={isGitTree ? undefined : (file) => gitFileAction('discard', file)}
+            selectedPath={gitSelectedFile && `${gitSelectedFile.section}:${gitSelectedFile.path}`}
+            onSelectFile={(file, section) => {
+              selectGitFile(file, section)
+              setMobileTreeVisible(false)
+            }}
+            onOpenFile={openGitFile}
+            onStage={(file) => gitFileAction('stage', file)}
+            onUnstage={(file) => gitFileAction('unstage', file)}
+            onDiscard={(file) => gitFileAction('discard', file)}
           />
         ) : (
           <>
@@ -1650,139 +1693,213 @@ export const FilesView = forwardRef(function FilesView(
         className={`min-w-0 min-h-0 flex-1 flex-col ${editorOpen ? 'flex' : 'hidden'}`}
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
-        {isGitPanel && gitSelectedFile ? (
-          <Suspense fallback={null}>
-            <GitDiffEditor cwd={gitCwd || null} file={gitSelectedFile} onClose={closeGitDiff} />
-          </Suspense>
-        ) : (
+        {showDiff && (
           <>
-            <div
-              ref={tabListRef}
-              // 标签条底色比编辑器还暗（VS Code 的 editorGroupHeader.tabsBackground），
-              // 活动标签用 canvas 才显得「亮出来」；Darcula 没有顶部高亮线，不加。
-              className={`h-8 shrink-0 overflow-x-auto overflow-y-hidden bg-tabstrip ${tabs.length ? 'flex' : 'hidden'}`}
-              role="tablist"
-              aria-label="打开的文件"
-            >
-              {isMobile && (
-                <button
-                  type="button"
-                  title="返回文件列表"
-                  aria-label="返回文件列表"
-                  className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 ${TAB_UNDERLINE}`}
-                  onClick={() => setMobileTreeVisible(true)}
-                >
-                  <IconArrowLeft size={15} />
-                </button>
-              )}
-              {tabs.map((tab) => (
-                <div
-                  key={tab.path}
-                  data-path={tab.path}
-                  title={tab.path}
-                  className={`group relative flex h-8 min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[13px] ${
-                    tab.path === activePath
-                      ? 'bg-canvas text-white'
-                      : `text-white/50 hover:bg-white/[.035] hover:text-white/75 ${TAB_UNDERLINE}`
-                  }`}
-                  onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    tabIndex={tab.path === activePath ? 0 : -1}
-                    aria-selected={tab.path === activePath}
-                    aria-controls="file-editor-panel"
-                    aria-label={`${tab.name}${tabNameCounts.get(tab.name) > 1 ? `，${parentName(tab.path)} 文件夹` : ''}${tab.dirty ? '，未保存' : ''}${tab.loading ? '，正在打开' : ''}${tab.saving ? '，正在保存' : ''}`}
-                    className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-hidden text-left"
-                    onClick={() => activateFile(tab.path)}
-                    onKeyDown={(event) => handleTabKeyDown(event, tab.path)}
-                  >
-                    <FileIcon name={tab.name} className="size-4" />
-                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-                      <span className="min-w-0 truncate">{tab.name}</span>
-                      {tabNameCounts.get(tab.name) > 1 && (
-                        <span className="shrink truncate text-[9px] text-white/30">
-                          {parentName(tab.path)}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                  <span className="relative grid size-5 shrink-0 place-items-center">
-                    {(tab.loading || tab.saving) && (
-                      <span
-                        className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {tab.dirty && !tab.loading && !tab.saving && (
-                      <span
-                        className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {!tab.loading && !tab.saving && (
-                      <button
-                        type="button"
-                        tabIndex={tab.path === activePath ? 0 : -1}
-                        title={`关闭 ${tab.name}`}
-                        aria-label={`关闭 ${tab.name}`}
-                        className={`${
-                          tab.dirty || tab.path !== activePath
-                            ? isMobile
-                              ? 'opacity-70'
-                              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
-                            : ''
-                        } absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          closeFile(tab.path)
-                        }}
-                      >
-                        <IconX size={12} />
-                      </button>
-                    )}
-                  </span>
-                </div>
-              ))}
-              {/* 铺满剩余宽度的填充块，只为把底部那条线延伸到标签右侧的空白区 */}
-              <div aria-hidden="true" className={`min-w-px flex-1 ${TAB_UNDERLINE}`} />
-            </div>
-            {activeTab && (
-              <div className="flex h-[22px] shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[11px] text-white/40">
-                {breadcrumbs.map((part, index) => (
-                  <span key={`${part}-${index}`} className="contents">
-                    {index > 0 && <span className="shrink-0 text-xs text-white/25">›</span>}
-                    {/* 与 VS Code 一样，文件名前面带一个文件图标；中间的目录只有文字 */}
-                    {index === breadcrumbs.length - 1 && (
-                      <FileIcon name={activeTab.name} className="mr-0.5 size-3.5 shrink-0" />
-                    )}
-                    <span
-                      className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/70' : ''}`}
-                    >
-                      {part}
-                    </span>
-                  </span>
-                ))}
-                <span className="ml-auto shrink-0">
-                  {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
-                </span>
-              </div>
+            {isGitTree && (
+              <GitReviewTabs
+                tabs={review.tabs}
+                activePath={review.current?.path}
+                reviewed={review.reviewed}
+                onActivate={review.activate}
+                onPin={(path) =>
+                  review.open(
+                    review.tabs.find((tab) => tab.path === path),
+                    true
+                  )
+                }
+                onClose={review.close}
+                mobile={isMobile}
+                onBack={() => setMobileTreeVisible(true)}
+              />
             )}
-            <div className="relative min-h-0 flex-1">
-              <div ref={editorHostRef} className="size-full" />
-              {!tabs.length && !(message && !message.transient) && <EmptyEditorWatermark />}
-              {message && !message.transient && (
-                <div
-                  role="status"
-                  className="absolute inset-0 grid place-items-center bg-canvas p-6 text-center text-xs text-white/35"
-                >
-                  {message.text}
+            {!isGitTree && isMobile && (
+              <button
+                type="button"
+                className="h-8 shrink-0 text-fg-soft"
+                onClick={() => setMobileTreeVisible(true)}
+              >
+                返回更改列表
+              </button>
+            )}
+            <Suspense
+              fallback={
+                <div className="grid flex-1 place-items-center text-[12px] text-fg-muted">
+                  正在加载差异编辑器…
                 </div>
-              )}
-            </div>
+              }
+            >
+              <GitDiffEditor
+                cwd={gitCwd || null}
+                file={selectedDiff}
+                comparisonLabel={
+                  isGitTree
+                    ? `${gitBranch || 'HEAD'} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
+                    : selectedDiff.section === 'staged'
+                      ? '暂存的更改'
+                      : '工作区更改'
+                }
+                onClose={isGitTree ? () => review.close(selectedDiff.path) : closeGitDiff}
+                onOpenFile={() => openGitFile(selectedDiff)}
+                hasPreviousFile={isGitTree && !!review.previous}
+                hasNextFile={isGitTree && !!review.next}
+                onPreviousFile={() => review.previous && review.open(review.previous)}
+                onNextFile={() => review.next && review.open(review.next)}
+                reviewed={isGitTree && isFileReviewed(selectedDiff, review.reviewed)}
+                onToggleReviewed={
+                  isGitTree
+                    ? () =>
+                        review.toggleReviewed(
+                          [selectedDiff],
+                          !isFileReviewed(selectedDiff, review.reviewed)
+                        )
+                    : undefined
+                }
+              />
+            </Suspense>
           </>
         )}
+        {isGitTree && gitPreview && !selectedDiff && (
+          <GitCompareWelcome
+            repository={gitBranchChanges}
+            branch={gitBranch}
+            reviewed={review.reviewed}
+            loading={gitLoading}
+            onOpen={(file) => {
+              review.open(file)
+              setMobileTreeVisible(false)
+            }}
+          />
+        )}
+        {/* Keep the regular editor host mounted while a comparison is visible. */}
+        <div
+          className={`min-h-0 flex-1 flex-col ${showDiff || (isGitTree && gitPreview) ? 'hidden' : 'flex'}`}
+        >
+          <div
+            ref={tabListRef}
+            // 标签条底色比编辑器还暗（VS Code 的 editorGroupHeader.tabsBackground），
+            // 活动标签用 canvas 才显得「亮出来」；Darcula 没有顶部高亮线，不加。
+            className={`h-8 shrink-0 overflow-x-auto overflow-y-hidden bg-tabstrip ${tabs.length ? 'flex' : 'hidden'}`}
+            role="tablist"
+            aria-label="打开的文件"
+          >
+            {isMobile && (
+              <button
+                type="button"
+                title="返回文件列表"
+                aria-label="返回文件列表"
+                className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 ${TAB_UNDERLINE}`}
+                onClick={() => setMobileTreeVisible(true)}
+              >
+                <IconArrowLeft size={15} />
+              </button>
+            )}
+            {tabs.map((tab) => (
+              <div
+                key={tab.path}
+                data-path={tab.path}
+                title={tab.path}
+                className={`group relative flex h-8 min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[13px] ${
+                  tab.path === activePath
+                    ? 'bg-canvas text-white'
+                    : `text-white/50 hover:bg-white/[.035] hover:text-white/75 ${TAB_UNDERLINE}`
+                }`}
+                onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  tabIndex={tab.path === activePath ? 0 : -1}
+                  aria-selected={tab.path === activePath}
+                  aria-controls="file-editor-panel"
+                  aria-label={`${tab.name}${tabNameCounts.get(tab.name) > 1 ? `，${parentName(tab.path)} 文件夹` : ''}${tab.dirty ? '，未保存' : ''}${tab.loading ? '，正在打开' : ''}${tab.saving ? '，正在保存' : ''}`}
+                  className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-hidden text-left"
+                  onClick={() => activateFile(tab.path)}
+                  onKeyDown={(event) => handleTabKeyDown(event, tab.path)}
+                >
+                  <FileIcon name={tab.name} className="size-4" />
+                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+                    <span className="min-w-0 truncate">{tab.name}</span>
+                    {tabNameCounts.get(tab.name) > 1 && (
+                      <span className="shrink truncate text-[9px] text-white/30">
+                        {parentName(tab.path)}
+                      </span>
+                    )}
+                  </span>
+                </button>
+                <span className="relative grid size-5 shrink-0 place-items-center">
+                  {(tab.loading || tab.saving) && (
+                    <span
+                      className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {tab.dirty && !tab.loading && !tab.saving && (
+                    <span
+                      className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {!tab.loading && !tab.saving && (
+                    <button
+                      type="button"
+                      tabIndex={tab.path === activePath ? 0 : -1}
+                      title={`关闭 ${tab.name}`}
+                      aria-label={`关闭 ${tab.name}`}
+                      className={`${
+                        tab.dirty || tab.path !== activePath
+                          ? isMobile
+                            ? 'opacity-70'
+                            : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+                          : ''
+                      } absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        closeFile(tab.path)
+                      }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))}
+            {/* 铺满剩余宽度的填充块，只为把底部那条线延伸到标签右侧的空白区 */}
+            <div aria-hidden="true" className={`min-w-px flex-1 ${TAB_UNDERLINE}`} />
+          </div>
+          {activeTab && (
+            <div className="flex h-[22px] shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[11px] text-white/40">
+              {breadcrumbs.map((part, index) => (
+                <span key={`${part}-${index}`} className="contents">
+                  {index > 0 && <span className="shrink-0 text-xs text-white/25">›</span>}
+                  {/* 与 VS Code 一样，文件名前面带一个文件图标；中间的目录只有文字 */}
+                  {index === breadcrumbs.length - 1 && (
+                    <FileIcon name={activeTab.name} className="mr-0.5 size-3.5 shrink-0" />
+                  )}
+                  <span
+                    className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/70' : ''}`}
+                  >
+                    {part}
+                  </span>
+                </span>
+              ))}
+              <span className="ml-auto shrink-0">
+                {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
+              </span>
+            </div>
+          )}
+          <div className="relative min-h-0 flex-1">
+            <div ref={editorHostRef} className="size-full" />
+            {!tabs.length && !(message && !message.transient) && <EmptyEditorWatermark />}
+            {message && !message.transient && (
+              <div
+                role="status"
+                className="absolute inset-0 grid place-items-center bg-canvas p-6 text-center text-xs text-white/35"
+              >
+                {message.text}
+              </div>
+            )}
+          </div>
+        </div>
       </section>
       {message?.transient && (
         <div

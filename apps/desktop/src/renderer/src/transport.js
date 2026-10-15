@@ -338,11 +338,15 @@ function createWebApi(env) {
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
       summary: (cwd) => invoke('git:summary', { cwd }),
-      // 当前分支相对基线分支（origin/HEAD → master/main）的变更：GIT TREE 面板用它。
-      branchSummary: (cwd) => invoke('git:branch-summary', { cwd }),
-      // base 为 'branch' 时原始版本取 merge-base（GIT TREE 里的文件），否则与 HEAD 比。
+      // 当前工作区相对比较基线的变更：GIT TREE 面板用它。不传 base 时自动挑基线
+      // （origin/HEAD → master/main），`direct` 表示与基线直接比（默认取 merge-base）。
+      branchSummary: (cwd, options = null) =>
+        invoke('git:branch-summary', { cwd, ...(options || {}) }),
+      // snapshot + summary.compareRef pins the original commit; staged is HEAD → index,
+      // worktree is index → disk. Legacy head/branch/ref modes are also supported.
       file: (cwd, filePath, base = null) => invoke('git:file', { cwd, filePath, base }),
       refs: (cwd) => invoke('git:refs', { cwd }),
+      resolveRef: (cwd, ref) => invoke('git:resolve-ref', { cwd, ref }),
       checkout: (cwd, ref) => invoke('git:checkout', { cwd, ref }),
       createBranch: (cwd, name, startRef = null) =>
         invoke('git:create-branch', { cwd, name, startRef }),

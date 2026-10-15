@@ -83,6 +83,18 @@ export function baseBranchLabel(ref) {
 }
 
 /**
+ * 完整 ref 名 → 短名：`for-each-ref` 给的是 `refs/heads/main` 这种全名，直接显示在
+ * 比较基线上会很难看（而 `origin/master` 这种短名照原样用）。
+ */
+export function shortRefName(ref) {
+  const value = String(ref || '')
+  for (const prefix of ['refs/heads/', 'refs/remotes/', 'refs/tags/']) {
+    if (value.startsWith(prefix)) return value.slice(prefix.length)
+  }
+  return value
+}
+
+/**
  * 当前分支自己就是基线分支（例如就停在 master 上）时返回 true：此时「相对基线的
  * 变更」恒为空，调用方要退回工作区语义，否则面板会永远是空的。
  */

@@ -643,6 +643,9 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
 const DEFAULT_SIDEBAR_WIDTH = 260
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
+
+/** useUiStateValue 的 fallback 必须是稳定的引用（见 compareBases 处的说明）。 */
+const EMPTY_COMPARE_BASES = {}
 // 底部终端面板（VSCode 风格）：高度可拖，默认给对话留出大半屏，最高不超过视高的 3/4。
 const DEFAULT_TERMINAL_HEIGHT = 320
 const MIN_TERMINAL_HEIGHT = 120
@@ -924,6 +927,10 @@ export default function App() {
   })
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
+  const gitPollBusy = useRef(false)
+  // GIT 变更树的比较基线，按工作目录各记一份（界面状态键 gitCompareBase）：空对象必须是
+  // 模块级常量，否则每次渲染都换引用，依赖它的 refreshGit 会跟着重建、无限重拉 Git。
+  const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
   const [sessions, setSessions] = useState([])
   // 会话清单是否至少加载回来过一次：地址栏里的 session 要等它到位才换成带标题/工作目录的
   // 标签页（否则只能按 id 开一个无名页签）。列表为空也是「加载过了」。
@@ -1253,7 +1260,7 @@ export default function App() {
         return
       }
       if (!quiet) setGit((current) => ({ ...current, loading: true }))
-      let cwd = requestedCwd || (await terminalRef.current?.getCwd(id))
+      let cwd = requestedCwd || terminalCwd(id) || (await terminalRef.current?.getCwd(id))
       if (request !== gitRequest.current || id !== activeRef.current) return
       if (!cwd) {
         setGit({
@@ -1275,11 +1282,18 @@ export default function App() {
         const summaryPromise = window.mica.git.summary(cwd)
         // 分支对比要多跑 merge-base + diff + ls-files（在 2700 文件的仓库上约 0.2s CPU），
         // 只有停在文件视图里才值得 —— 切到文件视图那一下的刷新会把它补上。
-        const loadBranch = (target) =>
-          viewRef.current === 'files'
-            ? window.mica.git.branchSummary(target)
-            : Promise.resolve(null)
-        const branchPromise = loadBranch(cwd)
+        const loadBranch = (target, resolvedRoot = null) => {
+          if (viewRef.current !== 'files') return Promise.resolve(null)
+          const knownRoot = gitRef.current.cwd === target ? gitRef.current.repository?.root : null
+          const chosen = compareBases[resolvedRoot || knownRoot] || compareBases[target]
+          return window.mica.git.branchSummary(
+            target,
+            chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
+          )
+        }
+        const branchPromise = summaryPromise.then((summary) =>
+          loadBranch(cwd, summary?.repository?.root)
+        )
         let status = await window.mica.git.status(cwd)
         if (request === gitRequest.current && id === activeRef.current && status?.status) {
           setGit((current) =>
@@ -1318,6 +1332,7 @@ export default function App() {
             cwd,
             repository: summary?.repository || null,
             branch: branch?.repository || null,
+            compareError: branch?.error || null,
             status: status?.status || null,
             loading: false
           })
@@ -1336,7 +1351,31 @@ export default function App() {
         }
       }
     },
-    [activeRef, gitRef]
+    [activeRef, compareBases, gitRef, terminalCwd, viewRef]
+  )
+
+  /**
+   * GIT 变更树的比较基线（每个工作目录一份）。写进界面状态：第二个窗口、刷新、重启
+   * 之后都还在，切别的仓库各自记各自的。
+   */
+  const setGitCompareBase = useCallback(
+    (value) => {
+      const cwd =
+        gitRef.current.repository?.root || gitRef.current.cwd || terminalCwd(activeRef.current)
+      if (!cwd) return
+      setUiStateEntries('gitCompareBase', {
+        [cwd]: value
+          ? {
+              kind: value.kind,
+              ref: value.ref || null,
+              name: value.name || '',
+              direct: !!value.direct
+            }
+          : null
+      })
+      setGit((current) => ({ ...current, branch: null, compareError: null, loading: true }))
+    },
+    [activeRef, gitRef, terminalCwd]
   )
 
   useEffect(() => setBranchPickerOpen(false), [activeId])
@@ -1344,13 +1383,21 @@ export default function App() {
     refreshGit({ cwd: terminalCwd(activeId) })
   }, [activeId, refreshGit, terminalCwd])
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) {
-        // 用节点自身的 cwd 刷新，而不是 PTY 里 shell 的 cwd：底部路径与分支
-        // 必须始终描述同一个目录，否则 shell cd 之后两边会各说各话。
-        refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
-      }
-    }, 10000)
+    const timer = window.setInterval(
+      async () => {
+        if (document.visibilityState === 'visible' && document.hasFocus() && !gitPollBusy.current) {
+          // 用节点自身的 cwd 刷新，而不是 PTY 里 shell 的 cwd：底部路径与分支
+          // 必须始终描述同一个目录，否则 shell cd 之后两边会各说各话。
+          gitPollBusy.current = true
+          try {
+            await refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
+          } finally {
+            gitPollBusy.current = false
+          }
+        }
+      },
+      view === 'files' ? 3000 : 10000
+    )
     // 定时器在后台页签会被浏览器节流，回到前台可能要等很久才轮到下一次；
     // 窗口重新可见/获得焦点时立刻补一次，否则 Files 里的 Git 区域一进来是旧的。
     const refreshNow = () => refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
@@ -1364,7 +1411,7 @@ export default function App() {
       window.removeEventListener('focus', refreshNow)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [activeRef, refreshGit, terminalCwd])
+  }, [activeRef, refreshGit, terminalCwd, view])
   // 切到文件视图时也立刻刷一次：Git 区域是进来就要看的，不能等下一次轮询。
   useEffect(() => {
     if (view !== 'files') return
@@ -2395,8 +2442,15 @@ export default function App() {
                   gitBranchChanges={gitIsCurrent ? git.branch : null}
                   gitLoading={gitIsCurrent ? git.loading : true}
                   gitBranch={gitIsCurrent ? git.status?.branch || null : null}
-                  /* 面板上的刷新按钮：不带 cwd，让 refreshGit 重新问一次终端，拿到最新目录 */
-                  onRefreshGit={() => refreshGit()}
+                  gitCompareBase={
+                    gitIsCurrent
+                      ? compareBases[git.repository?.root] || compareBases[git.cwd] || null
+                      : null
+                  }
+                  gitCompareError={gitIsCurrent ? git.compareError || null : null}
+                  onGitCompareBaseChange={setGitCompareBase}
+                  /* 面板刷新使用活跃会话路径，未挂载终端时也能刷新。 */
+                  onRefreshGit={() => refreshGit({ cwd: terminalCwd(activeRef.current) })}
                   onCornerResizeStart={null}
                 />
               </Suspense>

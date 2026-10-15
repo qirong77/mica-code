@@ -1,27 +1,16 @@
-import { existsSync } from 'fs'
 import { readFile } from 'fs/promises'
 import path from 'path'
 import { ipcMain } from 'electron'
+import { compareChangePaths, parseNumstat, parseStatusCode, statusFromCode } from './git-core'
 import {
-  baseBranchLabel,
-  compareChangePaths,
-  isBaseBranch,
-  parseNameStatus,
-  parseNumstat,
-  parseStatusCode,
-  statusFromCode
-} from './git-core'
+  countLines,
+  currentBranchName,
+  getBranchSummary,
+  getFile,
+  getRefs,
+  resolveRef as resolveCompareRef
+} from './git-compare'
 import { discardFile, getRepository, git, gitErrorMessage, stageFile, unstageFile } from './git-ops'
-
-// 基线分支候选：远端默认分支（origin/HEAD）优先，其次是常见的 master/main。
-const BASE_CANDIDATES = ['origin/master', 'origin/main', 'master', 'main']
-
-function countLines(buffer) {
-  if (!buffer.length) return 0
-  let count = 0
-  for (const byte of buffer) if (byte === 10) count += 1
-  return count + (buffer.at(-1) === 10 ? 0 : 1)
-}
 
 async function getSummary(cwd) {
   const { root, base } = await getRepository(cwd)
@@ -71,81 +60,6 @@ async function getSummary(cwd) {
   }
 }
 
-/** 当前分支名（短名）。detached HEAD 或读取失败时返回 null。 */
-async function currentBranchName(root) {
-  try {
-    const ref = (await git(root, ['symbolic-ref', '--quiet', 'HEAD'])).trim()
-    if (!ref) return null
-    return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
-  } catch {
-    return null
-  }
-}
-
-async function refExists(root, ref) {
-  try {
-    await git(root, ['rev-parse', '--verify', '--quiet', ref])
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * GIT TREE 面板要比的基线分支：远端默认分支（`origin/HEAD`，例如 origin/master）
- * 优先，退回到常见的 origin/master、origin/main、master、main。
- * 当前分支自己就在基线上（例如停在 master）、没有远端也没有主分支、detached HEAD
- * 时返回 null —— 此时「相对基线的变更」恒为空，调用方要退回工作区语义，
- * 否则面板会在主分支上永远显示「没有变更」。
- */
-async function resolveBaseRef(root) {
-  const current = await currentBranchName(root)
-  let remoteHead = null
-  try {
-    remoteHead = (await git(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim()
-  } catch {
-    // 没有远端，或远端没设默认分支：只用本地候选。
-  }
-  for (const ref of [remoteHead, ...BASE_CANDIDATES].filter(Boolean)) {
-    if (isBaseBranch(ref, current)) return null
-    if (await refExists(root, ref)) return ref
-  }
-  return null
-}
-
-async function mergeBaseFor(root, base) {
-  try {
-    return (await git(root, ['merge-base', base, 'HEAD'])).trim() || null
-  } catch {
-    // 没有共同祖先（无关历史）：没有可比的基线。
-    return null
-  }
-}
-
-/**
- * 当前分支相对基线分支的变更：从 merge-base 一直比到工作区，所以既包含已经提交
- * 的分支改动，也包含还没提交的工作区改动（含未跟踪文件）。GIT TREE 面板用它，
- * 「这个分支带来了什么」在提交前后都看得见。
- */
-async function getBranchSummary(cwd) {
-  const { root } = await getRepository(cwd)
-  const base = await resolveBaseRef(root)
-  const mergeBase = base ? await mergeBaseFor(root, base) : null
-  if (!base || !mergeBase) return { root, base: null, baseLabel: null, files: [] }
-  const [statusOutput, untrackedOutput] = await Promise.all([
-    git(root, ['diff', '--name-status', '-z', '--no-renames', mergeBase]),
-    git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
-  ])
-  const changes = parseNameStatus(statusOutput)
-  for (const filePath of untrackedOutput.split('\0')) {
-    if (filePath) changes.set(filePath, 'added')
-  }
-  const files = [...changes]
-    .map(([filePath, status]) => ({ path: filePath, status }))
-    .sort((left, right) => compareChangePaths(left.path, right.path))
-  return { root, base, baseLabel: baseBranchLabel(base), files }
-}
-
 async function getStatus(cwd) {
   const { root } = await getRepository(cwd)
   const branch = await currentBranchName(root)
@@ -162,68 +76,6 @@ async function getStatus(cwd) {
     branch,
     projectName: path.basename(root)
   }
-}
-
-function safeFilePath(root, relativePath) {
-  const absolutePath = path.resolve(root, relativePath)
-  const relative = path.relative(root, absolutePath)
-  if (relative.startsWith('..') || path.isAbsolute(relative))
-    throw new Error('Invalid repository path')
-  return absolutePath
-}
-
-function parseRefs(output, kind) {
-  return output
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [ref, hash, date, author, subject, current, upstream, tracking] = line.split('\0')
-      const prefix = kind === 'branch' ? 'refs/heads/' : 'refs/tags/'
-      return {
-        name: ref.startsWith(prefix) ? ref.slice(prefix.length) : ref,
-        ref,
-        kind,
-        hash,
-        date,
-        author,
-        subject,
-        current: current === '*',
-        upstream: upstream || null,
-        tracking: tracking || null
-      }
-    })
-}
-
-async function getRefs(cwd) {
-  const { root } = await getRepository(cwd)
-  const format = [
-    '%(refname)',
-    '%(objectname:short)',
-    '%(committerdate:relative)',
-    '%(authorname)',
-    '%(subject)',
-    '%(HEAD)',
-    '%(upstream:short)',
-    '%(upstream:track)'
-  ].join('%00')
-  const tagFormat = [
-    '%(refname)',
-    '%(objectname:short)',
-    '%(creatordate:relative)',
-    '%(authorname)',
-    '%(subject)',
-    '',
-    '',
-    ''
-  ].join('%00')
-  const [branchesOutput, tagsOutput] = await Promise.all([
-    git(root, ['for-each-ref', '--sort=-committerdate', `--format=${format}`, 'refs/heads']),
-    git(root, ['for-each-ref', '--sort=-creatordate', `--format=${tagFormat}`, 'refs/tags'])
-  ])
-  const branches = parseRefs(branchesOutput, 'branch').sort(
-    (left, right) => Number(right.current) - Number(left.current)
-  )
-  return { root, branches, tags: parseRefs(tagsOutput, 'tag') }
 }
 
 async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
@@ -270,9 +122,9 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:branch-summary', async (_event, { cwd } = {}) => {
+  ipcMain.handle('git:branch-summary', async (_event, { cwd, base, direct } = {}) => {
     try {
-      return { repository: await getBranchSummary(cwd), error: null }
+      return { repository: await getBranchSummary(cwd, { base, direct }), error: null }
     } catch (error) {
       return { repository: null, error: gitErrorMessage(error) }
     }
@@ -302,32 +154,11 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:file', async (_event, { cwd, filePath, base: mode } = {}) => {
-    const { root, base: head } = await getRepository(cwd)
-    // GIT TREE 里的文件是「相对基线分支」的变更，原始版本要取 merge-base 而不是
-    // HEAD（分支上的改动已经提交过，跟 HEAD 比只会得到空 diff）；没有基线时退回
-    // HEAD，不能因此报错。
-    let base = head
-    if (mode === 'branch') {
-      const baseRef = await resolveBaseRef(root)
-      base = (baseRef && (await mergeBaseFor(root, baseRef))) || head
-    }
-    const absolutePath = safeFilePath(root, filePath)
-    let original = Buffer.alloc(0)
-    let modified = Buffer.alloc(0)
-    try {
-      original = await git(root, ['show', `${base}:${filePath}`], { encoding: 'buffer' })
-    } catch {
-      // New files have no original content.
-    }
-    if (existsSync(absolutePath)) modified = await readFile(absolutePath)
-    const binary = original.includes(0) || modified.includes(0)
-    return {
-      original: binary ? '' : original.toString('utf8'),
-      modified: binary ? '' : modified.toString('utf8'),
-      binary
-    }
-  })
+  ipcMain.handle('git:resolve-ref', (_event, { cwd, ref } = {}) => resolveCompareRef(cwd, ref))
+
+  ipcMain.handle('git:file', (_event, { cwd, filePath, base, options } = {}) =>
+    getFile(cwd, filePath, options || base)
+  )
 
   // 以下三个是写操作（对应 VS Code 源代码管理里行内悬浮出来的按钮）。
   // 路径一律经 `safeFilePath` 校验，越出仓库直接报错。
