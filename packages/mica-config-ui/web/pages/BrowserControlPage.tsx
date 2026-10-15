@@ -1,28 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
-import { confirmDialog } from '../components/DialogHost.js';
 import { appIcons } from '../icons.js';
 import {
   BROWSER_CONTROL_DISABLED_STEPS,
   BROWSER_URL_ENV_FALLBACK,
+  SKILL_SOURCE_NOTE,
   browserEnvHint,
-  browserStatusLabel,
-  browserStatusTone,
   curlExample,
   endpointSummaryLine,
   groupEndpoints,
-  ownerLabel,
-  tabSummary,
+  skillMarkdownOf,
 } from '../browserControl.js';
-import {
-  closeBrowserControlWindow,
-  createBrowserControlWindow,
-  hideBrowserControlWindow,
-  readBrowserControlDetails,
-  showBrowserControlWindow,
-} from '../api.js';
-import type { ConfigWebBrowserControlBrowser, ConfigWebBrowserControlDetails } from '../../src/shared/types.js';
+import { readBrowserControlDetails } from '../api.js';
+import type { ConfigWebBrowserControlDetails } from '../../src/shared/types.js';
 
 /**
  * Browser Control：Mica 里那套**给 AI 用的**受控浏览器。
@@ -31,18 +22,17 @@ import type { ConfigWebBrowserControlBrowser, ConfigWebBrowserControlDetails } f
  * `apps/desktop/src/host/browser-control.js`）。这一节的入口**各处都在**：拿不到服务时
  * 页面自己说清楚「未开启、为什么、怎么开」（见 `browserControl.ts` 的
  * `unavailableBrowserControlDetails`），藏起入口反而让人以为 Mica 没有这个能力。
- * 页面是只读视图：能显示 / 隐藏 / 关闭窗口，但改不了窗口地址 —— 那由 agent 调用接口完成。
+ *
+ * 这一页**不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的图标完成，列在这里
+ * 只会让人以为得手动建。它只讲两件事：服务状态（含写给 agent 的技能文档全文）与接口文档。
  * 展示口径全在 `browserControl.ts`。
  */
 export function BrowserControlPage() {
   const [details, setDetails] = useState<ConfigWebBrowserControlDetails | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [urlDraft, setUrlDraft] = useState('');
   const RefreshIcon = appIcons.refresh;
-  const AddIcon = appIcons.add;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,60 +50,24 @@ export function BrowserControlPage() {
     void load();
   }, [load]);
 
-  // 窗口是 agent 在别处开的，这一页停在原地就要能看见它们出现/消失，否则「窗口数」会一直是
-  // 打开页面那一刻的快照。只在这一节被渲染时轮询，页面不可见时跳过（后台标签页不打扰运行时）。
+  // 窗口是 agent 在别处开的，这一页停在原地时「可用 / 窗口数」会停在打开那一刻的快照。
+  // 只在这一节被渲染时轮询，页面不可见时跳过（后台标签页不打扰运行时）。
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.hidden || busy) return;
+      if (document.hidden) return;
       void readBrowserControlDetails()
         .then(setDetails)
         .catch(() => {
           // 轮询失败不改界面状态：上一次的结果仍然是有意义的（错误由主动刷新显示）
         });
-    }, 3000);
+    }, 5000);
     return () => window.clearInterval(timer);
-  }, [busy]);
+  }, []);
 
   const flash = useCallback((message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice((current) => (current === message ? null : current)), 1800);
   }, []);
-
-  async function runWindowAction(id: string, action: () => Promise<ConfigWebBrowserControlDetails>) {
-    setBusy(id);
-    setError(null);
-    try {
-      setDetails(await action());
-    } catch (actionError) {
-      setError(formatError(actionError));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function createWindow() {
-    setBusy('create');
-    setError(null);
-    try {
-      setDetails(await createBrowserControlWindow({ url: urlDraft.trim() }));
-      setUrlDraft('');
-    } catch (createError) {
-      setError(formatError(createError));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function closeWindow(browser: ConfigWebBrowserControlBrowser) {
-    const confirmed = await confirmDialog({
-      title: `关闭窗口「${browser.label || browser.id}」`,
-      message: '这个窗口会被关闭，它上面的标签页一并消失。此操作不可撤销。',
-      confirmText: '关闭窗口',
-      danger: true,
-    });
-    if (!confirmed) return;
-    await runWindowAction(browser.id, () => closeBrowserControlWindow({ id: browser.id }));
-  }
 
   async function copy(text: string) {
     if (!navigator.clipboard?.writeText) {
@@ -129,6 +83,7 @@ export function BrowserControlPage() {
   }
 
   const groups = useMemo(() => groupEndpoints(details?.endpoints), [details]);
+  const skillMarkdown = useMemo(() => skillMarkdownOf(details), [details]);
   const exampleBase = details?.envVars?.url ? `$${details.envVars.url}` : BROWSER_URL_ENV_FALLBACK;
 
   return (
@@ -169,7 +124,7 @@ export function BrowserControlPage() {
               {details.skillPath ? (
                 <p className="browser-control-note">
                   技能文件是写给 agent 的 <code>SKILL.md</code>：告诉它这台机器上有一套能真正打开的浏览器、
-                  以及怎么把窗口挂到当前会话上。
+                  以及怎么把窗口挂到当前会话上。全文见下方「技能文档」。
                 </p>
               ) : null}
 
@@ -187,53 +142,20 @@ export function BrowserControlPage() {
             <section className="simple-card browser-control-card">
               <div className="browser-control-card-head">
                 <div className="table-panel-title">
-                  <strong>窗口</strong>
-                  <span>这是给 AI 用的浏览器；这里只能显示 / 隐藏 / 关闭，地址由 agent 通过接口设置。</span>
+                  <strong>技能文档</strong>
+                  <span>就是上面那个技能文件的内容：agent 靠它学会怎么开窗口、点页面、截图。</span>
                 </div>
-                <div className="browser-control-create">
-                  <input
-                    className="text-input"
-                    value={urlDraft}
-                    placeholder="起始 URL（可留空）"
-                    disabled={!details.available || busy === 'create'}
-                    onChange={(event) => setUrlDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' || !details.available) return;
-                      event.preventDefault();
-                      void createWindow();
-                    }}
-                  />
-                  <Button
-                    icon={<AddIcon size={15} />}
-                    onClick={() => void createWindow()}
-                    loading={busy === 'create'}
-                    disabled={!details.available}
-                  >
-                    新建窗口
-                  </Button>
-                </div>
+                <Button disabled={!skillMarkdown} onClick={() => void copy(skillMarkdown)}>
+                  复制
+                </Button>
               </div>
 
-              {details.browsers.length === 0 ? (
-                <Empty description="还没有受控浏览器窗口" />
+              <p className="browser-control-note">{SKILL_SOURCE_NOTE}</p>
+
+              {skillMarkdown ? (
+                <pre className="skill-preview">{skillMarkdown}</pre>
               ) : (
-                <div className="browser-control-window-list">
-                  {details.browsers.map((browser) => (
-                    <WindowRow
-                      key={browser.id}
-                      browser={browser}
-                      busy={busy === browser.id}
-                      disabled={busy !== null}
-                      onShow={() =>
-                        void runWindowAction(browser.id, () => showBrowserControlWindow({ id: browser.id }))
-                      }
-                      onHide={() =>
-                        void runWindowAction(browser.id, () => hideBrowserControlWindow({ id: browser.id }))
-                      }
-                      onClose={() => void closeWindow(browser)}
-                    />
-                  ))}
-                </div>
+                <Empty description="暂无技能文档（需要受控浏览器服务在线）" />
               )}
             </section>
 
@@ -320,64 +242,6 @@ function StatusItem({ label, value, mono = false }: { label: string; value: stri
       <span className={`browser-control-status-value${mono ? ' status-code' : ''}`} title={value}>
         {value}
       </span>
-    </div>
-  );
-}
-
-function WindowRow({
-  browser,
-  busy,
-  disabled,
-  onShow,
-  onHide,
-  onClose,
-}: {
-  browser: ConfigWebBrowserControlBrowser;
-  busy: boolean;
-  disabled: boolean;
-  onShow(): void;
-  onHide(): void;
-  onClose(): void;
-}) {
-  const ShowIcon = appIcons.show;
-  const HideIcon = appIcons.hide;
-  const CloseIcon = appIcons.close;
-  return (
-    <div className="browser-control-window">
-      <div className="browser-control-window-copy">
-        <div className="browser-control-window-title">
-          <strong title={browser.id}>{browser.label || browser.id}</strong>
-          <Tag tone={browserStatusTone(browser)}>{browserStatusLabel(browser)}</Tag>
-          <Tag>{ownerLabel(browser.owner)}</Tag>
-        </div>
-        <span className="browser-control-window-url" title={browser.url}>
-          {browser.url || 'about:blank'}
-        </span>
-        {browser.title ? <span className="browser-control-window-meta">{browser.title}</span> : null}
-        <span className="browser-control-window-meta">{tabSummary(browser)}</span>
-      </div>
-      <div className="browser-control-window-actions">
-        <Button
-          icon={<ShowIcon size={15} />}
-          title="显示窗口"
-          disabled={disabled || browser.visible}
-          loading={busy}
-          onClick={onShow}
-        />
-        <Button
-          icon={<HideIcon size={15} />}
-          title="隐藏窗口"
-          disabled={disabled || !browser.visible}
-          onClick={onHide}
-        />
-        <Button
-          variant="danger"
-          icon={<CloseIcon size={15} />}
-          title="关闭窗口"
-          disabled={disabled}
-          onClick={onClose}
-        />
-      </div>
     </div>
   );
 }

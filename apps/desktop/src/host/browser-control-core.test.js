@@ -123,9 +123,10 @@ describe('emptyBrowserSnapshot / sameBrowsers / parseSseData', () => {
   })
 
   it('parses our own SSE frames only', () => {
-    expect(
-      parseSseData('data: {"channel":"browser:changed","payload":{"browsers":[]}}')
-    ).toEqual({ channel: 'browser:changed', payload: { browsers: [] } })
+    expect(parseSseData('data: {"channel":"browser:changed","payload":{"browsers":[]}}')).toEqual({
+      channel: 'browser:changed',
+      payload: { browsers: [] }
+    })
     expect(parseSseData(': ping')).toBeNull()
     expect(parseSseData('data: not-json')).toBeNull()
     expect(parseSseData('data: {"payload":{}}')).toBeNull()

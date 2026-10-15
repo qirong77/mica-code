@@ -71,6 +71,10 @@ function rememberOutbound(key, value) {
  * 这条广播是本页自己那次写入的回声吗？是就丢掉——回声可能落后于本页最新值（打字、拖动
  * 会连着写好几次），直接应用会把界面往回拽。按「键 + 值」计数而不是只记最后一次写入，
  * 这样多次写入的多个回声（到达顺序也不保证）都能各自认领。
+ *
+ * **只由 `applyRemote` 调用**：同一个键可能有多个消费者（每个挂载中的 ChatView 都读
+ * `drafts`），认领一旦散到各个组件里就会变成「谁先跑到谁吃掉」，晚到的那个把滞后的广播
+ * 值当外部改动应用回去——正在打字的输入框于是被回写成上一个字符的值。
  */
 export function claimUiStateEcho(key, value) {
   const counts = outbound.get(key)
@@ -81,6 +85,24 @@ export function claimUiStateEcho(key, value) {
   if (count === 1) counts.delete(json)
   else counts.set(json, count - 1)
   return true
+}
+
+/**
+ * 广播（或初始快照）进来了：先逐键认领本页自己写出去的回声，**只把真正来自别处的键**
+ * 合并到本地。
+ *
+ * 认领必须只在这里发生，而且只做这一次：同一个键会被多个组件同时读取（`drafts` 对应
+ * 每个挂载中的 ChatView），谁先认领谁就把计数吃掉，后面那些消费者只看到「不是我的回声」，
+ * 于是把运行时的滞后值应用回去。
+ */
+function applyRemote(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return
+  const external = {}
+  for (const [key, value] of Object.entries(patch)) {
+    if (claimUiStateEcho(key, value)) continue
+    external[key] = value
+  }
+  applyLocal(external)
 }
 
 function sendPending() {
@@ -137,7 +159,7 @@ export async function ensureUiState() {
     const initial = await window.mica.uiState.get()
     applyLocal(initial || {})
     // 先取回快照再订阅：反过来的话，订阅与取回之间发生的变更会被更旧的回包覆盖掉。
-    window.mica.uiState.onChanged((payload) => applyLocal(payload?.keys || {}))
+    window.mica.uiState.onChanged((payload) => applyRemote(payload?.keys || {}))
   })()
   return booted
 }
@@ -153,8 +175,7 @@ export function useSharedState(key, initial) {
 
   useEffect(() => {
     if (remote === undefined) return
-    // 先认领回声：认领必须无条件发生，否则计数会漏，之后真的远端改动会被吞掉。
-    if (claimUiStateEcho(key, remote)) return
+    // 回声已经在广播入口（applyRemote）统一认领过，这里拿到的都是真正的外部改动。
     if (uiStateValuesEqual(remote, valueRef.current)) return
     valueRef.current = remote
     setValue(remote)

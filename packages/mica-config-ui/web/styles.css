@@ -661,8 +661,10 @@ textarea {
 }
 
 .skill-preview {
+  max-height: 460px;
   margin: 0;
   padding: 12px;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel-muted);
@@ -2938,7 +2940,7 @@ textarea {
   line-height: 1.5;
 }
 
-/* Browser Control：受控浏览器服务 · 窗口列表 · 接口文档（窗口活在应用里，agent 经 HTTP 操控） */
+/* Browser Control：受控浏览器服务 · 技能文档 · 接口文档（窗口活在应用里，agent 经 HTTP 操控） */
 .browser-control-stack {
   display: grid;
   align-content: start;
@@ -2987,81 +2989,6 @@ textarea {
   color: var(--text);
   font-size: var(--text-aux);
   overflow-wrap: anywhere;
-}
-
-.browser-control-create {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-
-.browser-control-create .text-input {
-  width: 240px;
-  height: 32px;
-}
-
-.browser-control-window-list {
-  display: grid;
-}
-
-.browser-control-window {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line-soft);
-}
-
-.browser-control-window:first-child {
-  border-top: 0;
-}
-
-.browser-control-window-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.browser-control-window-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.browser-control-window-title strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--text-body);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.browser-control-window-url {
-  min-width: 0;
-  color: var(--text-soft);
-  font-family: var(--font-mono);
-  font-size: var(--text-aux);
-  overflow-wrap: anywhere;
-}
-
-.browser-control-window-meta {
-  min-width: 0;
-  color: var(--text-faint);
-  font-size: var(--text-aux);
-  overflow-wrap: anywhere;
-}
-
-.browser-control-window-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
 }
 
 .browser-control-groups {
@@ -3169,21 +3096,6 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  .browser-control-create {
-    width: 100%;
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .browser-control-create .text-input {
-    width: 100%;
-  }
-
-  .browser-control-window {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-  }
-
   .browser-control-param {
     grid-template-columns: minmax(0, 1fr);
   }

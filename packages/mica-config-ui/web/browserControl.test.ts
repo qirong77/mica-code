@@ -1,71 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserEnvHint,
-  browserStatusLabel,
-  browserStatusTone,
   curlExample,
   endpointSummaryLine,
   groupEndpoints,
   methodOf,
-  ownerLabel,
   pathWithSampleParams,
-  tabSummary,
+  skillMarkdownOf,
   unavailableBrowserControlDetails,
 } from './browserControl.js';
-import type { ConfigWebBrowserControlBrowser, ConfigWebBrowserControlEndpoint } from '../src/shared/types.js';
-
-function browser(overrides: Partial<ConfigWebBrowserControlBrowser> = {}): ConfigWebBrowserControlBrowser {
-  return {
-    id: 'b1',
-    owner: 'session-1',
-    label: 'Docs',
-    title: 'Example',
-    url: 'https://example.com',
-    visible: true,
-    loading: false,
-    activeTabId: 't1',
-    tabs: [{ id: 't1', title: 'Example', url: 'https://example.com', active: true }],
-    ...overrides,
-  };
-}
+import type { ConfigWebBrowserControlEndpoint } from '../src/shared/types.js';
 
 function endpoint(overrides: Partial<ConfigWebBrowserControlEndpoint> = {}): ConfigWebBrowserControlEndpoint {
   return { id: 'e1', method: 'GET', path: '/browser/browsers', summary: '', params: [], ...overrides };
 }
 
 describe('browser control labels', () => {
-  it('says unowned instead of blank', () => {
-    expect(ownerLabel('session-1')).toBe('session-1');
-    expect(ownerLabel('  ')).toBe('未归属');
-    expect(ownerLabel(null)).toBe('未归属');
-    expect(ownerLabel(undefined)).toBe('未归属');
-  });
-
-  it('reports the three window states', () => {
-    expect(browserStatusLabel(browser({ loading: true, visible: true }))).toBe('加载中');
-    expect(browserStatusLabel(browser({ visible: true }))).toBe('可见');
-    expect(browserStatusLabel(browser({ visible: false }))).toBe('隐藏');
-    expect(browserStatusLabel(null)).toBe('隐藏');
-    expect(browserStatusTone(browser({ loading: true }))).toBe('blue');
-    expect(browserStatusTone(browser({ visible: true }))).toBe('green');
-    expect(browserStatusTone(browser({ visible: false }))).toBe('default');
-  });
-
-  it('summarises the tabs of a window', () => {
-    expect(tabSummary(browser())).toBe('1 个标签页 · Example');
-    expect(
-      tabSummary(
-        browser({
-          tabs: [
-            { id: 'a', title: '', url: 'https://a.test', active: false },
-            { id: 'b', title: 'Second', url: 'https://b.test', active: true },
-          ],
-        }),
-      ),
-    ).toBe('2 个标签页 · Second');
-    expect(tabSummary(browser({ tabs: [] }))).toBe('无标签页');
-  });
-
   it('normalises the method and one-line summary', () => {
     expect(methodOf(endpoint({ method: 'post' }))).toBe('POST');
     expect(methodOf(endpoint({ method: '' }))).toBe('GET');
@@ -79,6 +29,23 @@ describe('browser control labels', () => {
       'x-mica-owner: $MICA_BROWSER_OWNER',
     );
     expect(browserEnvHint(null)).toContain('$MICA_BROWSER_URL');
+  });
+});
+
+describe('browser control skill document', () => {
+  // 页面要把技能文档**全文**显示出来（它是应用生成的，不是读用户目录里的副本），
+  // 所以这里保证：有内容就原样给出、缺失时不显示成一段空白。
+  it('returns the generated skill markdown as-is', () => {
+    const markdown = '# Mica Browser Control\n\n- 打开一个窗口\n';
+    expect(skillMarkdownOf({ skillMarkdown: markdown } as never)).toBe(markdown.trim());
+  });
+
+  it('returns an empty string when the service has no skill document', () => {
+    expect(skillMarkdownOf(null)).toBe('');
+    expect(skillMarkdownOf(undefined)).toBe('');
+    expect(skillMarkdownOf({ skillMarkdown: '' } as never)).toBe('');
+    expect(skillMarkdownOf({ skillMarkdown: '   ' } as never)).toBe('');
+    expect(skillMarkdownOf(unavailableBrowserControlDetails())).toBe('');
   });
 });
 

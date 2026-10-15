@@ -69,7 +69,7 @@ export function quoteFence(body: string): string {
 function quoteBodyText(text: string): string {
   return String(text ?? '')
     .replace(/\r\n?/g, '\n')
-    .replace(IMAGE_REFERENCE, (match, alt: string, source: string) =>
+    .replace(IMAGE_REFERENCE, (match, alt: string, _source: string) =>
       match.startsWith('!') || alt === 'Image' ? '[图片]' : match
     )
     .replace(/[ \t]+$/gm, '')

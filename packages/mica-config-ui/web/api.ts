@@ -2,8 +2,6 @@ import type {
   ConfigWebAutoCompactDetails,
   ConfigWebAutoCompactSettings,
   ConfigWebBrowserControlDetails,
-  ConfigWebBrowserControlWindowInput,
-  ConfigWebBrowserControlWindowTarget,
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
   ConfigWebConversationPage,
@@ -58,12 +56,11 @@ export type ConfigWebClient = {
    * 受控浏览器（Mica 里那套能真正打开的浏览器）只在桌面运行时里：窗口活在 Electron 主进程，
    * 运行时通过本机 HTTP 服务读写。浏览器宿主（apps/config-web）拿不到这份数据，所以这些方法
    * 是可选的，缺了就不显示这一节。
+   *
+   * 只有「读详情」一个方法：窗口的开 / 显示 / 隐藏 / 关闭是 agent 经接口与主区顶栏图标做的，
+   * 配置页不提供入口（见 `pages/BrowserControlPage.tsx`）。
    */
   readBrowserControlDetails?(): Promise<ConfigWebBrowserControlDetails>;
-  createBrowserControlWindow?(input: ConfigWebBrowserControlWindowInput): Promise<ConfigWebBrowserControlDetails>;
-  closeBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
-  showBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
-  hideBrowserControlWindow?(input: ConfigWebBrowserControlWindowTarget): Promise<ConfigWebBrowserControlDetails>;
 
   readSessionsDetails(): Promise<ConfigWebSessionsDetails>;
   readSessionDetails(id: string): Promise<ConfigWebSessionDetails>;
@@ -173,17 +170,7 @@ export function supportsBrowserControl(): boolean {
   return typeof client?.readBrowserControlDetails === 'function';
 }
 
-type BrowserControlClient = ConfigWebClient &
-  Required<
-    Pick<
-      ConfigWebClient,
-      | 'readBrowserControlDetails'
-      | 'createBrowserControlWindow'
-      | 'closeBrowserControlWindow'
-      | 'showBrowserControlWindow'
-      | 'hideBrowserControlWindow'
-    >
-  >;
+type BrowserControlClient = ConfigWebClient & Required<Pick<ConfigWebClient, 'readBrowserControlDetails'>>;
 
 /**
  * 读详情。宿主没有这个能力时**不抛错**，而是交回一份显式「未开启」的详情 —— 侧栏条目
@@ -192,30 +179,6 @@ type BrowserControlClient = ConfigWebClient &
 export function readBrowserControlDetails(): Promise<ConfigWebBrowserControlDetails> {
   if (!supportsBrowserControl()) return Promise.resolve(unavailableBrowserControlDetails());
   return requireBrowserControl().readBrowserControlDetails();
-}
-
-export function createBrowserControlWindow(
-  input: ConfigWebBrowserControlWindowInput,
-): Promise<ConfigWebBrowserControlDetails> {
-  return requireBrowserControl().createBrowserControlWindow(input);
-}
-
-export function closeBrowserControlWindow(
-  input: ConfigWebBrowserControlWindowTarget,
-): Promise<ConfigWebBrowserControlDetails> {
-  return requireBrowserControl().closeBrowserControlWindow(input);
-}
-
-export function showBrowserControlWindow(
-  input: ConfigWebBrowserControlWindowTarget,
-): Promise<ConfigWebBrowserControlDetails> {
-  return requireBrowserControl().showBrowserControlWindow(input);
-}
-
-export function hideBrowserControlWindow(
-  input: ConfigWebBrowserControlWindowTarget,
-): Promise<ConfigWebBrowserControlDetails> {
-  return requireBrowserControl().hideBrowserControlWindow(input);
 }
 
 function requireBrowserControl(): BrowserControlClient {
@@ -273,8 +236,6 @@ export function deleteRole(name: string): Promise<ConfigWebRolesDetails> {
   return requireClient().deleteRole(name);
 }
 
-export function connectHeartbeat(
-  onEvent?: (event: { type?: string }) => void,
-): { close(): void } | null {
+export function connectHeartbeat(onEvent?: (event: { type?: string }) => void): { close(): void } | null {
   return client?.connectHeartbeat?.(onEvent) ?? null;
 }

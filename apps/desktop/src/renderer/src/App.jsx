@@ -69,7 +69,6 @@ import {
 import { draftMarkers, runningTerminalSessions } from './session-state'
 import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
 import {
-  claimUiStateEcho,
   setUiState,
   setUiStateEntries,
   subscribeUiState,
@@ -1161,8 +1160,8 @@ export default function App() {
   }, [activeId, activeRef, nodes, nodesRef, selectedId, selectedIdRef])
 
   useEffect(() => {
-    // 自己写出去的回声（可能已经落后于本页最新操作）不能应用，否则会把刚做的改动拽回去。
-    if (claimUiStateEcho('workspace', remoteWorkspace)) return
+    // 自己写出去的回声（可能已经落后于本页最新操作）由 ui-state 的广播入口统一丢掉，
+    // 走到这里的一定是别处的改动。
     const next = resolveWorkspace(remoteWorkspace)
     // 工作区被清空（没有任何页签）时保持现状：另一个窗口开了新页签马上会再推一次。
     if (!next) return
@@ -1187,7 +1186,7 @@ export default function App() {
   }, [rightTermsByChat, rightActiveTermByChat, rightTermsByChatRef, rightActiveTermByChatRef])
 
   useEffect(() => {
-    if (!remoteRightTerms || claimUiStateEcho('rightTerms', remoteRightTerms)) return
+    if (!remoteRightTerms) return
     if (remoteRightTerms.byChat) setRightTermsByChat(remoteRightTerms.byChat)
     if (remoteRightTerms.active) setRightActiveTermByChat(remoteRightTerms.active)
   }, [remoteRightTerms])
@@ -1204,7 +1203,6 @@ export default function App() {
 
   useEffect(() => {
     if (!remoteLayout) return
-    if (claimUiStateEcho('layout', remoteLayout)) return
     if (Number.isFinite(remoteLayout.sidebarWidth)) setSidebarWidth(remoteLayout.sidebarWidth)
     if (typeof remoteLayout.sidebarCollapsed === 'boolean')
       setSidebarCollapsed(remoteLayout.sidebarCollapsed)

@@ -238,8 +238,12 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   terminal toggle: click toggles the native window, right-click (or a touch long press) destroys it
   after a confirmation, and the count badge distinguishes several windows of the same session.
   Browsers whose owner is unknown are shown dimmed rather than hidden, so a window opened by hand
-  with `curl` is still manageable. The settings page has a *Browser Control* section (desktop-only,
-  gated by `supportsBrowserControl`) that lists the live windows and the whole endpoint catalog.
+  with `curl` is still manageable. The settings page has a *Browser Control* section (its sidebar
+  entry is always there; the data only exists inside the desktop runtime) that shows the service
+  status, the full skill document we generate for the agent, and the whole endpoint catalog. It
+  deliberately does **not** manage windows — opening, showing, hiding and destroying a window is the
+  agent's job (or the globe icon in the chat header); windows are created hidden so they never steal
+  focus from what you are doing.
 
 ### Single-instance state
 

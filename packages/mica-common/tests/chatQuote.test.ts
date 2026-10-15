@@ -81,7 +81,7 @@ describe('insertQuoteBlock', () => {
   });
 
   it('separates the block from text the caret sits inside', () => {
-    const result = insertQuoteBlock('已有问题', 4, block);
+    const result = insertQuoteBlock('已有问题', 2, block);
     expect(result.text).toBe(`已有\n\n${block}\n\n问题`);
     // 光标落在块后的空行上，不落在「问题」里面
     expect(result.text.slice(result.caret)).toBe('问题');
@@ -96,8 +96,8 @@ describe('insertQuoteBlock', () => {
   it('reuses the existing blank line after the block', () => {
     const result = insertQuoteBlock(`${block}\n\n问题`, block.length, block);
     expect(result.text).toBe(`${block}\n\n${block}\n\n问题`);
-    // 光标停在块后的空行行首（下一段文字之前还剩那个空行）
-    expect(result.text.slice(result.caret)).toBe('\n问题');
+    // 复用了 tail 自带的空行，光标同样跳过两个换行、正好停在已有文字之前
+    expect(result.text.slice(result.caret)).toBe('问题');
   });
 });
 

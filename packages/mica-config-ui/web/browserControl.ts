@@ -1,16 +1,16 @@
 import type {
-  ConfigWebBrowserControlBrowser,
   ConfigWebBrowserControlDetails,
   ConfigWebBrowserControlEndpoint,
   ConfigWebBrowserControlEndpointParam,
 } from '../src/shared/types.js';
 
 /**
- * 配置页「Browser Control」一节的纯逻辑：窗口状态文案、归属文案、接口分组与 curl 示例。
+ * 配置页「Browser Control」一节的纯逻辑：技能文档、接口分组与 curl 示例。
  *
  * 受控浏览器活在桌面运行时里（窗口在 Electron 主进程、运行时经本机 HTTP 服务读写，见
- * `apps/desktop/src/host/browser-control.js`），页面只是把详情读出来展示。这里不碰数据源，
- * 只把详情翻译成界面文案 —— 与 `autoCompact.ts` 同一条边界：能测的判断都抽出来，组件里只接线。
+ * `apps/desktop/src/host/browser-control.js`），页面只是把详情读出来展示（**不管窗口**：
+ * 开、显示、隐藏、关闭都由 agent 调接口或顶栏图标完成）。这里不碰数据源，只把详情翻译成
+ * 界面文案 —— 与 `autoCompact.ts` 同一条边界：能测的判断都抽出来，组件里只接线。
  */
 
 /** 没有服务地址时，示例里用环境变量占位，agent 拿到手就是可移植的一份。 */
@@ -18,8 +18,7 @@ export const BROWSER_URL_ENV_FALLBACK = '$MICA_BROWSER_URL';
 export const BROWSER_OWNER_ENV_FALLBACK = '$MICA_BROWSER_OWNER';
 
 /** 宿主拿不到受控浏览器数据时的说明（既可能是非桌面宿主，也可能是应用里的服务没起来）。 */
-export const BROWSER_CONTROL_DISABLED_REASON =
-  '当前页面读不到受控浏览器服务：它由 Mica Code 桌面应用的主进程提供。';
+export const BROWSER_CONTROL_DISABLED_REASON = '当前页面读不到受控浏览器服务：它由 Mica Code 桌面应用的主进程提供。';
 
 /**
  * 「这一节永远在侧栏里，但没有服务」时的详情。
@@ -52,8 +51,16 @@ export function unavailableBrowserControlDetails(
 export const BROWSER_CONTROL_DISABLED_STEPS = [
   '受控浏览器是「给 AI 用的」浏览器：窗口开在 Mica Code 应用里，agent 用一套本机接口开页面、点击、读内容、截图、读 cookie。',
   '它由桌面应用的主进程提供，只有从应用里打开的设置页才连得上；纯浏览器宿主（CLI 的 mica --config-web、npm run start:web）读不到它。',
-  '打开 Mica Code 桌面应用，再从这里进入「Browser Control」：会显示服务状态、窗口列表与完整接口文档。',
+  '打开 Mica Code 桌面应用，再从这里进入「Browser Control」：会显示服务状态、写给 agent 的技能文档与完整接口文档。',
 ];
+
+/**
+ * 技能文档这一节要说明的「谁是源头」：页面显示的是应用**生成**的那一份，用户目录里的
+ * `SKILL.md` 只是它落到磁盘的副本。要改文档就改应用里的源头（`browser-docs.js`），
+ * 改副本会被下次启动覆盖 —— 否则同一份文档会分叉成两份。
+ */
+export const SKILL_SOURCE_NOTE =
+  '下面这份文档由应用生成，启动时同步写入上面的技能文件。要改它请改应用里的源头（apps/desktop/src/main/browser/browser-docs.js），改用户目录里的副本会被下次启动覆盖。';
 
 /** 方法分组的固定顺序：常见的读/写在前，其余按字母排。 */
 export const BROWSER_METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -63,34 +70,15 @@ export function methodOf(endpoint: ConfigWebBrowserControlEndpoint | null | unde
   return method || 'GET';
 }
 
-/** 归属为空时不说「无」，而是明确「未归属」——这类窗口正是 agent 待认领的对象。 */
-export function ownerLabel(owner: string | null | undefined): string {
-  const value = typeof owner === 'string' ? owner.trim() : '';
-  return value || '未归属';
-}
-
-/** 窗口状态三态：加载中 > 可见 > 隐藏。 */
-export function browserStatusLabel(browser: ConfigWebBrowserControlBrowser | null | undefined): string {
-  if (browser?.loading) return '加载中';
-  if (browser?.visible) return '可见';
-  return '隐藏';
-}
-
-export function browserStatusTone(
-  browser: ConfigWebBrowserControlBrowser | null | undefined,
-): 'default' | 'green' | 'blue' {
-  if (browser?.loading) return 'blue';
-  if (browser?.visible) return 'green';
-  return 'default';
-}
-
-/** 标签页摘要：数量 + 当前标签标题（没有标签时如实说明）。 */
-export function tabSummary(browser: ConfigWebBrowserControlBrowser | null | undefined): string {
-  const tabs = Array.isArray(browser?.tabs) ? browser.tabs : [];
-  if (tabs.length === 0) return '无标签页';
-  const active = tabs.find((tab) => tab.active) ?? tabs[0];
-  const title = active?.title || active?.url || active?.id || '';
-  return title ? `${tabs.length} 个标签页 · ${title}` : `${tabs.length} 个标签页`;
+/**
+ * 技能文档全文（页面要能完整看到它，而不是只看到一个路径）。
+ *
+ * 读磁盘上的副本没有意义：那份是应用写出去的，`details.skillMarkdown` 已经是生成结果。
+ * 缺失（服务没起来）时给空串，由页面显示「未开启」而不是显示一段空白。
+ */
+export function skillMarkdownOf(details: ConfigWebBrowserControlDetails | null | undefined): string {
+  const markdown = details?.skillMarkdown;
+  return typeof markdown === 'string' ? markdown.trim() : '';
 }
 
 export function endpointSummaryLine(endpoint: ConfigWebBrowserControlEndpoint | null | undefined): string {

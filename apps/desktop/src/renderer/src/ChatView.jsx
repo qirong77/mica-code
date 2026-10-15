@@ -6,7 +6,8 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from 'react'
 import {
   IconArrowDown,
@@ -24,11 +25,13 @@ import {
   IconMessageChatbot,
   IconMinimize,
   IconPhoto,
+  IconQuote,
   IconSend,
   IconShare,
   IconSquare,
   IconTerminal,
-  IconTrash
+  IconTrash,
+  IconX
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -86,13 +89,13 @@ import {
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
 import { uid } from './workspace'
+import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
 import {
-  claimUiStateEcho,
-  setUiStateEntries,
-  uiStateKeys,
-  useUiStateValue,
-  useSharedState
-} from './ui-state'
+  findQuoteBlocks,
+  quoteIntoDraft,
+  removeQuoteBlock,
+  splitQuoteSegments
+} from './quote-message'
 import TerminalComposer from './TerminalComposer'
 
 const MAX_INPUT_ROWS = 10
@@ -236,6 +239,47 @@ function ComposerImageStrip({ text, onPreview }) {
   )
 }
 
+/** 引用条上那行摘要：首行、折叠空白、限长。 */
+function quoteSummary(text) {
+  const first = String(text ?? '')
+    .split('\n')
+    .find((line) => line.trim().length > 0)
+  const line = (first ?? '').replace(/\s+/g, ' ').trim()
+  return line.length > 42 ? `${line.slice(0, 42)}…` : line
+}
+
+/**
+ * 输入框上方的引用条：草稿里有几个引用块就列几条，✕ 只删那一个块。
+ *
+ * 和 ComposerImageStrip 同源——都是从草稿文本反推出来的视图，不另存状态，所以它
+ * 天然跟着草稿一起持久化、一起在窗口之间同步；用户删引用也不必自己划选 20 行代码。
+ */
+function ComposerQuoteStrip({ text, onRemove }) {
+  const blocks = findQuoteBlocks(text)
+  if (!blocks.length) return null
+  return (
+    <div className="chat-composer-quotes" aria-label="输入中的引用">
+      {blocks.map((block) => (
+        <div className="chat-composer-quote" key={`${block.start}:${block.end}`}>
+          <IconQuote size={11} aria-hidden="true" />
+          <span className="chat-composer-quote-label">{block.label}</span>
+          <span className="chat-composer-quote-text">{quoteSummary(block.text)}</span>
+          <span className="chat-composer-quote-size">{`${block.text.split('\n').length} 行`}</span>
+          <button
+            type="button"
+            className="chat-composer-quote-remove"
+            title="移除引用"
+            aria-label="移除引用"
+            onClick={() => onRemove(block)}
+          >
+            <IconX size={11} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // `[Image](路径)` / `![alt](路径)` 里没有信息量的 alt：显示时退回路径本身。
 const GENERIC_IMAGE_ALT = new Set(['Image', '图片', 'image', 'img', 'IMG'])
 // 伪协议（`data:`/`blob:`）与被 urlTransform 拦下的写法：没有可点的路径，只留标签。
@@ -289,6 +333,27 @@ export function MessageText({ text }) {
       />
     ) : (
       <PathText key={`text:${index}`} text={segment.text} />
+    )
+  )
+}
+
+/**
+ * 用户消息正文：点「引用」插进来的引用块渲染成引用区，其余照旧。
+ *
+ * 只改渲染，**原文一个字都不改**——编辑重发按文本定位（comparableText +
+ * promptOccurrenceFromEnd），改动文本会让定位落到别的消息上。
+ */
+function UserMessageText({ text }) {
+  const segments = useMemo(() => splitQuoteSegments(text), [text])
+  if (segments.length <= 1) return <MessageText text={text} />
+  return segments.map((segment, index) =>
+    segment.type === 'quote' ? (
+      <div className="chat-quote" key={`quote:${index}`}>
+        <span className="chat-quote-label">{segment.label}</span>
+        <div className="chat-quote-text">{segment.text}</div>
+      </div>
+    ) : (
+      <MessageText key={`text:${index}`} text={segment.text.replace(/^\n+|\n+$/g, '')} />
     )
   )
 }
@@ -1176,18 +1241,29 @@ function UsageLine({ usage }) {
   return <div className="chat-usage">{parts.join(' · ')}</div>
 }
 
-function MessageActions({ text }) {
+function MessageActions({ text, role, onQuote }) {
   const [copied, copy] = useCopied()
   return (
-    <button
-      type="button"
-      className="chat-message-copy"
-      aria-label="复制消息"
-      title={copied ? '已复制' : '复制'}
-      onClick={() => copy(text)}
-    >
-      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
-    </button>
+    <>
+      <button
+        type="button"
+        className="chat-message-quote"
+        aria-label="引用这条消息"
+        title="引用到输入框"
+        onClick={() => onQuote?.({ role, text })}
+      >
+        <IconQuote size={12} />
+      </button>
+      <button
+        type="button"
+        className="chat-message-copy"
+        aria-label="复制消息"
+        title={copied ? '已复制' : '复制'}
+        onClick={() => copy(text)}
+      >
+        {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+      </button>
+    </>
   )
 }
 
@@ -1774,6 +1850,7 @@ function MessageRow({
   message,
   onOpenFile,
   onCommandAction,
+  onQuote,
   edit,
   onEditStart,
   onEditChange,
@@ -1848,9 +1925,9 @@ function MessageRow({
         <div className="chat-message-body whitespace-pre-wrap break-words">
           {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的；
               图片引用只保留链接文本，点击弹预览（见 ImageLink） */}
-          <MessageText text={message.text} />
+          <UserMessageText text={message.text} />
         </div>
-        <MessageActions text={message.text} />
+        <MessageActions text={message.text} role="user" onQuote={onQuote} />
       </div>
     )
   }
@@ -1863,7 +1940,7 @@ function MessageRow({
         <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
         <UsageLine usage={message.usage} />
       </div>
-      {message.done && <MessageActions text={message.text} />}
+      {message.done && <MessageActions text={message.text} role="assistant" onQuote={onQuote} />}
     </div>
   )
 }
@@ -2645,6 +2722,41 @@ export function ChatView({
     [inputRef, nodeId]
   )
 
+  // 把一条消息引用进草稿（对话流里消息右侧的「引用」按钮）。和 insertComposerText
+  // 同源：以 textarea 当前的值为准，插完把光标落在引用块后面的空行上；同一条消息
+  // 重复点不重复插入（quoteIntoDraft 负责），只把光标送回已有的那个块。
+  const quoteMessage = useCallback(
+    ({ role, text }) => {
+      const element = textareaRef.current
+      const current = element?.value ?? inputRef.current ?? ''
+      const caret = element ? element.selectionStart : current.length
+      const next = quoteIntoDraft(current, caret, { role, text })
+      draftsRef.current.set(nodeId, next.text)
+      setInput(next.text)
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(next.caret, next.caret)
+      })
+    },
+    [inputRef, nodeId]
+  )
+
+  // 引用条上的 ✕：只删那一个引用块，用户自己写的正文不动。
+  const removeQuoteFromComposer = useCallback(
+    (block) => {
+      const element = textareaRef.current
+      const current = element?.value ?? inputRef.current ?? ''
+      const next = removeQuoteBlock(current, block)
+      if (next === current) return
+      draftsRef.current.set(nodeId, next)
+      setInput(next)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [inputRef, nodeId]
+  )
+
   // 补全触发器：`/` 只在行首且还没输入空白时算，`@` 要求词首；输入变化时重算一次，
   // 只在 kind/start/query 真的变了才换对象，避免每次按键都重渲染候选列表。
   useEffect(() => {
@@ -3253,20 +3365,29 @@ export function ChatView({
     draftsRef.current.set(nodeId, text)
   }, [input, nodeId])
 
-  // 别的窗口改了本会话的草稿：跟它走（单一实例下两边是同一个界面）。自己的回声要丢掉——
-  // 广播回来的值可能落后于刚敲进去的内容，应用它会吞掉刚输入的字。
-  const sharedDrafts = useUiStateValue('drafts', null)
+  // 别的窗口改了本会话的草稿：跟它走（单一实例下两边是同一个界面）。自己的回声由 ui-state
+  // 的广播入口统一认领（见 applyRemote），不会走到这里。
+  //
+  // 只订阅**本节点**那一条草稿，而不是整张表：整表每次按键都会换新对象，按表订阅会让同时
+  // 挂着的每个 ChatView（最多 5 个）跟着重渲染各自整段消息列表。getSnapshot 返回字符串，
+  // 值没变时 React 直接跳过重渲染。
+  const remoteDraft = useSyncExternalStore(
+    subscribeUiState,
+    () => {
+      const drafts = uiStateKeys().drafts
+      const text = drafts && typeof drafts === 'object' ? drafts[nodeId] : undefined
+      return typeof text === 'string' ? text : ''
+    },
+    () => ''
+  )
   useEffect(() => {
-    if (!nodeId || !sharedDrafts) return
-    if (claimUiStateEcho('drafts', sharedDrafts)) return
-    const remote = sharedDrafts[nodeId]
-    if (remote === undefined || remote === null) return
-    if (remote === (inputRef.current || '')) return
+    if (!nodeId) return
+    if (remoteDraft === (inputRef.current || '')) return
     // 正在翻输入历史时输入框里的内容不是草稿，别覆盖它。
     if (historyCursorRef.current >= 0) return
-    draftReportRef.current = { nodeId, text: remote }
-    setInput(remote)
-  }, [nodeId, sharedDrafts])
+    draftReportRef.current = { nodeId, text: remoteDraft }
+    setInput(remoteDraft)
+  }, [nodeId, remoteDraft])
 
   useEffect(() => {
     if (!nodeId) return undefined
@@ -4888,6 +5009,7 @@ export function ChatView({
                   onEditChange={changeMessageEdit}
                   onEditCancel={cancelMessageEdit}
                   onEditSubmit={submitMessageEdit}
+                  onQuote={quoteMessage}
                 />
               )
             })}
@@ -4964,6 +5086,7 @@ export function ChatView({
             text={input}
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
+          <ComposerQuoteStrip text={input} onRemove={removeQuoteFromComposer} />
           {loopOpen && (
             <LoopPopover
               loop={activeLoop}
