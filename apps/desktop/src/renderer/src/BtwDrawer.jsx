@@ -6,6 +6,9 @@ import {
   IconSend,
   IconX
 } from '@tabler/icons-react'
+import { formatLogElapsed } from './chat-tool-display'
+import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import { btwEntryElapsedMs, btwPhaseText, btwRunningEntry } from './btw-thread'
 import { useLatest } from './hooks'
 
 /**
@@ -22,11 +25,16 @@ import { useLatest } from './hooks'
  *
  * 抽屉就是一条**线程**：连续追问复用同一个子代理（等同 CLI 的 `/btw -continue`），
  * 「新话题」重置线程、下一次提问重新取一份主流程对话记录当背景。整个线程活在
- * app-server 进程里，所以这里只是个投影（快照来自 `mica/btw/updated`）：
+ * app-server 进程里，所以这里只是个投影（快照来自 `mica/btw/updated`）。
  *
- * - 主流程正在跑也能问（输入条不禁用），回答到了再渲染，不需要等 turn 结束；
- * - 关掉抽屉、切走、换一个窗口打开同一会话，线程都还在（同一份 host 状态）；
- * - 回答到达时若抽屉关着，ChatView 会补一条提示（否则看起来没反应）。
+ * btw 是**一个 mica 运行实例**，所以这里按主对话那套实时渲染：思考、工具调用（同一批
+ * `chat-tool-views.jsx` 的组件，与回合日志长得一模一样）、逐字流出的正文。快照是
+ * 「整条线程」的高频替换，所以组件只管把最新一份画出来；阶段判定全在 `btw-thread.js`。
+ *
+ * 与主对话的两点差异是刻意的：思考与工具行**只属于正在跑的那一条**（host 在新问题开始
+ * 时会清掉上一条的，见 `apps/cli/src/runtime/btwThread.ts`）；回答不落盘，所以关掉抽屉、
+ * 切走、换一个窗口打开同一会话时看到的是 host 里那份线程。回答到达时若抽屉关着，
+ * ChatView 会补一条提示（否则看起来没反应）。
  */
 export function BtwDrawer({
   thread,
@@ -41,8 +49,12 @@ export function BtwDrawer({
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
   const entries = Array.isArray(thread?.entries) ? thread.entries : []
-  const running = entries.some((entry) => entry.status === 'running')
+  const runningEntry = btwRunningEntry(entries)
+  const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
+  const [now, setNow] = useState(() => Date.now())
+  // 读者是否还贴着底部。上翻看已经读过的答案时不该被流式的正文拽回来（与对话区同一手感）。
+  const stickToBottomRef = useRef(true)
 
   // 打开抽屉就把光标放进输入框：这个抽屉存在的意义就是「问一句」，而点开的动作落在
   // 触发按钮上（`focusComposerFromShell` 不抢按钮的焦点），不主动聚焦就没处可打字。
@@ -57,13 +69,18 @@ export function BtwDrawer({
     inputRef.current?.focus()
   }, [thread?.id, threadId])
 
-  // 回答逐条追加，最新的那条要落在视野里（与对话区同一套「贴着底部」的手感）。
-  const lastEntry = entries[entries.length - 1]
+  // 只在回答期间走表：阶段文案与耗时每秒都要动，但不该让抽屉常驻一个定时器。
+  useEffect(() => {
+    if (!running) return undefined
+    const timer = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(timer)
+  }, [running])
+
+  // 流式正文每来一个合并窗口就追加一截，贴着底部时才跟着滚。
   useEffect(() => {
     const body = bodyRef.current
-    if (!body) return
-    body.scrollTop = body.scrollHeight
-  }, [entries.length, lastEntry?.status, lastEntry?.answer])
+    if (body && stickToBottomRef.current) body.scrollTop = body.scrollHeight
+  }, [entries, now])
 
   // 输入框跟着内容长高（到上限才自己滚）：抽屉比浮层宽，没必要让人在一行里横着读。
   useEffect(() => {
@@ -90,6 +107,12 @@ export function BtwDrawer({
     onAsk?.(text)
   }
 
+  // 标题行右侧：回答中就报阶段与耗时（「正在调用 grep_search… 12.4s」），否则说明这条
+  // 线程的边界（回答不进本会话上下文）。
+  const statusText = runningEntry
+    ? `${btwPhaseText(runningEntry)} ${formatLogElapsed(btwEntryElapsedMs(runningEntry, now))}`
+    : '不进入本会话上下文'
+
   return (
     // data-no-chat-focus：点抽屉里的空白处不该把焦点抢到主输入条（那会打断选中答案文本）。
     <aside className="chat-btw no-drag" data-no-chat-focus aria-label="By The Way">
@@ -112,7 +135,10 @@ export function BtwDrawer({
             新话题
           </button>
         ) : null}
-        <span className="chat-btw-sub">{running ? '正在回答…' : '不进入本会话上下文'}</span>
+        <span className="chat-btw-sub" title={statusText}>
+          {runningEntry ? <span className="chat-btw-live" aria-hidden="true" /> : null}
+          {statusText}
+        </span>
         <button
           type="button"
           className="chat-btw-close"
@@ -124,7 +150,15 @@ export function BtwDrawer({
         </button>
       </header>
       {/* 整个抽屉里唯一滚动的地方，所以「滚到底」打在这个元素上 */}
-      <div className="chat-btw-body" ref={bodyRef}>
+      <div
+        className="chat-btw-body"
+        ref={bodyRef}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          stickToBottomRef.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight < 24
+        }}
+      >
         {entries.length === 0 ? (
           <p className="chat-btw-empty">
             用一个隔离子代理回答问题：可以用只读工具查代码、搜索、联网，回答不写回主流程，
@@ -151,19 +185,39 @@ export function BtwDrawer({
                     ●
                   </div>
                   <div className="chat-message-body">
-                    {entry.status === 'running' ? (
+                    {/* 思考与工具行：与主对话的回合日志同一套组件与样式（btw 也是个运行实例） */}
+                    {entry.thinking || entry.tools?.length ? (
+                      <div className="chat-btw-activity">
+                        <ReasoningRow text={entry.thinking} />
+                        {(entry.tools || []).map((tool) => (
+                          <ToolActivityRow key={tool.id} tool={tool} now={now} />
+                        ))}
+                      </div>
+                    ) : null}
+                    {/* 还没吐出任何正文时的等待行；已经有思考/工具在动就不重复说明了 */}
+                    {entry.status === 'running' &&
+                    !entry.answer &&
+                    !entry.thinking &&
+                    !entry.tools?.length ? (
                       <p className="chat-btw-thinking">
-                        <IconLoader2 size={11} className="animate-spin" /> 正在思考…
+                        <IconLoader2 size={11} className="animate-spin" /> {btwPhaseText(entry)}
                       </p>
-                    ) : entry.status === 'error' ? (
+                    ) : null}
+                    {entry.status === 'error' ? (
                       <p className="chat-btw-error">
                         <IconAlertCircle size={11} /> {entry.error || 'btw 出错'}
                       </p>
-                    ) : (
-                      <div className="chat-btw-answer">
-                        {renderAnswer ? renderAnswer(entry.answer || '') : entry.answer}
+                    ) : null}
+                    {entry.answer ? (
+                      // `is-streaming` 让光标挂在**最后一段文字**的末尾（见 app.css）：直接写成
+                      // 标记的兄弟节点会被 markdown 的块级元素顶到下一行、看着像多了一个空段。
+                      <div
+                        className={`chat-btw-answer${entry.status === 'running' ? ' is-streaming' : ''}`}
+                      >
+                        {renderAnswer ? renderAnswer(entry.answer) : entry.answer}
+                        <span className="chat-btw-caret" aria-hidden="true" />
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>

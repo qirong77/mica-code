@@ -37,7 +37,6 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
-import { toolIcon as sharedToolIcon } from '@packages/mica-web-shared'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
 import {
@@ -46,7 +45,9 @@ import {
   remarkPathLinks,
   splitTextByImages
 } from './chat-paths'
-import { collapsedOutput, toolCallText, toolOutput } from './chat-tool-display'
+import { formatLogElapsed } from './chat-tool-display'
+import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import { newlyAnsweredBtwEntries } from './btw-thread'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -142,10 +143,6 @@ const EFFORT_OPTIONS = [
   { value: 'high', detail: '深度推理' },
   { value: 'xhigh', detail: '最强推理' }
 ]
-
-function getToolIcon(toolName) {
-  return sharedToolIcon(toolName)
-}
 
 function copyText(text) {
   if (!text) return Promise.resolve()
@@ -699,25 +696,6 @@ function compactLine(value, max = 110) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-/**
- * 找出「上一份 btw 快照里还在回答、这一份已经有结果」的条目。
- *
- * 这是「什么时候该补一条提示」的全部判定：面板关着时回答抵达要提示（btw 是后台发生的，
- * 不说一声用户只会以为没反应），但快照在恢复重放时也会来一次，那时上一份快照是空的、
- * 不会命中——否则每打开一次会话都会把历史回答再提示一遍。
- */
-export function newlyAnsweredBtwEntries(previous, next) {
-  const before = new Map(
-    (Array.isArray(previous?.entries) ? previous.entries : []).map((entry) => [
-      entry.id,
-      entry.status
-    ])
-  )
-  return (Array.isArray(next?.entries) ? next.entries : []).filter(
-    (entry) => entry.status !== 'running' && before.get(entry.id) === 'running'
-  )
-}
-
 // 后台 subagent / 后台任务与 CLI TaskStatusBar 对齐：状态来自 app-server 的
 // mica/*Tasks/updated 快照通知（跨 turn 常驻，不依赖当前 running 状态）。
 function buildTaskForest(tasks) {
@@ -1195,18 +1173,6 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
   )
 }
 
-function formatDuration(ms) {
-  if (!Number.isFinite(ms) || ms < 1000) return ''
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
-}
-
-function formatLogElapsed(ms) {
-  if (!Number.isFinite(ms) || ms < 0) return '0ms'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return formatDuration(ms)
-}
-
 function estimateTokens(text) {
   let ascii = 0
   let cjk = 0
@@ -1541,93 +1507,9 @@ export function currentTurnActivityMessages(messages, turnId) {
   return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
 }
 
-// 折叠状态下展示的输出行数取自 CLI 的 MICA_RUN_SHELL_LOG_MAX_LINES，但网页不再像
-// 终端那样「只有跑得够久才显示输出」——终端省的是屏幕高度，网页上折叠起来的尾行
-// 几乎不占地方，而「刚才那条命令到底输出什么」恰恰是最常被回看的信息。
-function collapsedOutputLines() {
-  const config = typeof window !== 'undefined' ? window.mica?.runShellLogConfig : undefined
-  return config?.maxLines ?? 10
-}
-
-function ToolOutputBlock({ output, maxLines }) {
-  const [expanded, setExpanded] = useState(false)
-  if (!output) return null
-  const collapsed = collapsedOutput(output, maxLines)
-  const expandedNow = expanded && collapsed.hidden > 0
-  const lines = expandedNow ? output.lines : collapsed.lines
-  const hidden = expandedNow ? 0 : collapsed.hidden
-  return (
-    <div className="chat-turn-log-output-block">
-      {hidden > 0 && (
-        <button
-          type="button"
-          className="chat-turn-log-more"
-          onClick={() => setExpanded(true)}
-          title="展开这条工具调用的完整输出"
-        >
-          … 上方还有 {hidden} 行（共 {output.lines.length} 行），点击展开
-        </button>
-      )}
-      {lines.map((line, index) => (
-        <div className="chat-turn-log-output" key={`${index}:${line}`}>
-          <span> │ </span>
-          <PathText text={line} />
-        </div>
-      ))}
-      {expandedNow && (
-        <button type="button" className="chat-turn-log-more" onClick={() => setExpanded(false)}>
-          收起输出
-        </button>
-      )}
-      {output.capped && (
-        <div className="chat-turn-log-output chat-turn-log-output-capped">
-          输出过长，此处只展示前 {output.lines.length} 行
-        </div>
-      )}
-    </div>
-  )
-}
-
 function TurnLogItemView({ message, now }) {
-  if (message.kind === 'reasoning') {
-    return <div className="chat-turn-log-thinking">{message.text}</div>
-  }
-
-  const tool = message.tool
-  if (!tool) return null
-  const running = ['pending', 'running'].includes(tool.status)
-  const failed = tool.status === 'error'
-  const statusClass = running
-    ? 'chat-turn-log-running'
-    : failed
-      ? 'chat-turn-log-error'
-      : 'chat-turn-log-complete'
-  const durationMs = Math.max(
-    0,
-    (running ? now : tool.finishedAt || tool.updatedAt || now) -
-      (tool.startedAt || tool.updatedAt || now)
-  )
-  const duration = formatLogElapsed(durationMs)
-
-  return (
-    <div className={`chat-turn-log-tool ${statusClass}`}>
-      <div className="chat-turn-log-tool-row">
-        {running && (
-          <span className="chat-turn-log-spinner" aria-hidden="true">
-            <IconLoader2 size={10} className="animate-spin" />
-          </span>
-        )}
-        <span className="chat-turn-log-icon">{getToolIcon(tool.tool)}</span>
-        <span className="chat-turn-log-display">
-          <PathText text={toolCallText(tool)} />
-        </span>
-        {duration && (
-          <span className="chat-turn-log-duration">{running ? duration : `(${duration})`}</span>
-        )}
-      </div>
-      <ToolOutputBlock output={toolOutput(tool)} maxLines={collapsedOutputLines()} />
-    </div>
-  )
+  if (message.kind === 'reasoning') return <ReasoningRow text={message.text} />
+  return <ToolActivityRow tool={message.tool} now={now} />
 }
 
 // 回合日志每 250ms 随 chat-status-line 一起重渲染，已完成的行没必要跟着 `now` 重算

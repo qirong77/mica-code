@@ -130,3 +130,17 @@ export function collapsedOutput(toolOutputValue, maxLines = TOOL_OUTPUT_COLLAPSE
   if (lines.length <= maxLines && !capped) return { lines, hidden: 0, capped }
   return { lines: lines.slice(-maxLines), hidden: Math.max(0, lines.length - maxLines), capped }
 }
+
+/** 超过一分钟换成「m s」：工具行与状态行都用它显示耗时。 */
+export function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 1000) return ''
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
+}
+
+/** 回合日志/状态行里一行的耗时（不到一秒显示毫秒）。 */
+export function formatLogElapsed(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '0ms'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return formatDuration(ms)
+}

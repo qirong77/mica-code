@@ -16,6 +16,17 @@ import type { CommandAgent } from '../services.js';
 export type BtwSubagent = {
   query(input: string): Promise<string>;
   readonly usageHistory?: AgentUsageRecord[];
+  /**
+   * 流式回调（可选设置）：思考 / 工具调用 / 正文的 delta。
+   *
+   * 只有桌面端的 By The Way 抽屉会挂上它们（把一次回答按主对话那套实时渲染出来）；
+   * CLI 的 `/btw` **刻意不挂**：终端里只有一条 notice，实时刷思考/工具行没有表达空间，
+   * 挂了只会多推一堆没人看的数据。所以不挂时这条路径的行为与从前完全一致。
+   */
+  onText?: (text: string) => void;
+  onThinking?: (thinking: string) => void;
+  onToolCall?: (name: string, args: string, id?: string) => void;
+  onToolResult?: (name: string, result: string, id?: string) => void;
 };
 
 /** 一条 btw 线程：可复用（`-continue` / 面板里追问）的隔离子代理 + 已记账的请求数。 */

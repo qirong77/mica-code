@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { newlyAnsweredBtwEntries } from './ChatView.jsx'
+import { newlyAnsweredBtwEntries } from './btw-thread.js'
 
 const thread = (entries) => ({ id: 't1', entries })
 

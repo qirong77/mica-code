@@ -42,6 +42,16 @@ export type CommandAgent = {
     query(input: string): Promise<string>;
     /** 该子代理已发出的模型请求；命令据此把 helper 子代理的开销记进会话。 */
     readonly usageHistory?: AgentUsageRecord[];
+    /**
+     * 流式回调（与 `IAgent` 同款，可选设置）。桌面端的 By The Way 抽屉靠它们把
+     * 思考 / 工具调用 / 正文实时推给界面——btw 就是一个 mica 运行实例，跑起来该和
+     * 主对话一样是流式的。不设置时子代理照常只返回最终文本（CLI 的 `/btw`、
+     * commit 消息、compact 摘要都不设置）。
+     */
+    onText?: (text: string) => void;
+    onThinking?: (thinking: string) => void;
+    onToolCall?: (name: string, args: string, id?: string) => void;
+    onToolResult?: (name: string, result: string, id?: string) => void;
   };
   /**
    * 把 helper 子代理（commit / btw / compact 摘要）的用量写进当前会话的

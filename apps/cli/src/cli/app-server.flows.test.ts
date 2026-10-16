@@ -774,6 +774,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
+    // 让模型先流出一段思考：它必须和正文一起到达客户端（btw 是运行实例，不是黑盒）。
+    mock!.state.includeReasoning = true;
 
     const host = spawnHost('btw');
     hosts.push(host);
@@ -808,6 +810,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(entries(answered)?.[0]).toMatchObject({
       question: '这个方案可行吗',
       answer: '你好，我是 mock 模型的回复',
+      // 流式期间推回的那段思考留在条目上（与主对话的回合日志同一语义）
+      thinking: 'thinking...',
     });
 
     // 子代理的提示词带上了主流程的对话记录（btw 模式说明 + 背景记录）。

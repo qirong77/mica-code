@@ -1,22 +1,52 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BtwThreadController } from './btwThread.js';
+import {
+  BtwThreadController,
+  capBtwHead,
+  capBtwTail,
+  parseBtwToolArgs,
+  resolveBtwToolIndex,
+  MAX_BTW_THINKING_CHARS,
+  MAX_BTW_TOOL_OUTPUT_CHARS,
+} from './btwThread.js';
 import type { MicaBtwThread } from '@packages/mica-runtime/codexProtocol.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
 
 type FakeOptions = {
   reply?: () => Promise<string>;
   messages?: unknown[];
+  /** 让 `query` 挂住不返回，测试自己控制回答结束的时刻（流式用例用）。 */
+  pendingReply?: boolean;
+  flushIntervalMs?: number;
 };
 
 function makeHarness(options: FakeOptions = {}) {
   const usageHistory: unknown[] = [];
+  let finishReply: ((value: string) => void) | null = null;
+  let failReply: ((error: unknown) => void) | null = null;
   const query = vi.fn(async () => {
     usageHistory.push({ usageId: usageHistory.length + 1 });
-    return options.reply ? await options.reply() : 'By The Way 答案';
+    if (options.reply) return await options.reply();
+    if (options.pendingReply) {
+      return await new Promise<string>((resolve, reject) => {
+        finishReply = resolve;
+        failReply = reject;
+      });
+    }
+    return 'By The Way 答案';
   });
   const recordSubagentUsage = vi.fn();
-  const createSubAgent = vi.fn((_options?: { systemPrompt?: string }) => ({ query, usageHistory }));
+  // 子代理的流式回调由 controller 赋值（真实实现里是 IAgent 的可写回调），
+  // 所以这里必须是一个普通对象，测试可以直接触发它们。
+  const subagent: {
+    query: typeof query;
+    usageHistory: unknown[];
+    onText?: (text: string) => void;
+    onThinking?: (thinking: string) => void;
+    onToolCall?: (name: string, args: string, id?: string) => void;
+    onToolResult?: (name: string, result: string, id?: string) => void;
+  } = { query, usageHistory };
+  const createSubAgent = vi.fn((_options?: { systemPrompt?: string }) => subagent);
   const saveCurrent = vi.fn();
   const agent = {
     config: { provider: { id: 'test' }, model: 'gpt-test', effort: 'medium' },
@@ -41,8 +71,21 @@ function makeHarness(options: FakeOptions = {}) {
     agent,
     sessionController,
     onUpdate: (snapshot) => updates.push(snapshot),
+    flushIntervalMs: options.flushIntervalMs ?? 0,
   });
-  return { agent, controller, updates, query, createSubAgent, recordSubagentUsage, saveCurrent, usageHistory };
+  return {
+    agent,
+    controller,
+    updates,
+    query,
+    subagent,
+    createSubAgent,
+    recordSubagentUsage,
+    saveCurrent,
+    usageHistory,
+    finishReply: (text: string) => finishReply?.(text),
+    failReply: (error: unknown) => failReply?.(error),
+  };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -142,5 +185,111 @@ describe('BtwThreadController', () => {
     const entries = harness.controller.snapshot().entries;
     expect(entries).toHaveLength(20);
     expect(entries.at(-1)?.question).toBe('问题 39');
+  });
+
+  it('streams thinking, tool calls and partial text into the running entry', async () => {
+    const harness = makeHarness({ pendingReply: true });
+    harness.controller.ask('这个方案可行吗');
+
+    harness.subagent.onThinking?.('先看看代码');
+    harness.subagent.onToolCall?.('read_file', '{"file_path":"src/a.ts"}', 'call-1');
+    harness.subagent.onText?.('可以先');
+
+    let entry = harness.controller.snapshot().entries.at(0);
+    expect(entry).toMatchObject({ status: 'running', thinking: '先看看代码', answer: '可以先' });
+    expect(entry?.tools).toMatchObject([
+      { id: 'call-1', tool: 'read_file', status: 'running', input: { file_path: 'src/a.ts' } },
+    ]);
+
+    harness.subagent.onToolResult?.('read_file', 'export const a = 1', 'call-1');
+    entry = harness.controller.snapshot().entries.at(0);
+    expect(entry?.tools?.[0]).toMatchObject({ status: 'completed', output: 'export const a = 1' });
+
+    // 完成时正文以 query 的返回值为准，流式期间攒下的思考与工具行留着给用户看
+    harness.subagent.onText?.('以先');
+    harness.finishReply('可以先做 A，再做 B');
+    await settle();
+    entry = harness.controller.snapshot().entries.at(0);
+    expect(entry).toMatchObject({ status: 'completed', answer: '可以先做 A，再做 B' });
+    expect(entry?.thinking).toBe('先看看代码');
+    expect(entry?.tools).toHaveLength(1);
+  });
+
+  it('keeps the partial answer when the request fails', async () => {
+    const harness = makeHarness({ pendingReply: true });
+    harness.controller.ask('问题');
+    harness.subagent.onText?.('写了一半');
+    harness.subagent.onThinking?.('想着想着');
+    harness.failReply(new Error('模型挂了'));
+    await settle();
+    // 失败时流出来的正文与思考是唯一的记录（完成时才用 query 的返回值覆盖），必须留着
+    expect(harness.controller.snapshot().entries.at(0)).toMatchObject({
+      status: 'error',
+      error: '模型挂了',
+      answer: '写了一半',
+      thinking: '想着想着',
+    });
+  });
+
+  it('drops the previous turn activity log when the next question starts', async () => {
+    const harness = makeHarness();
+    harness.controller.ask('第一个问题');
+    harness.subagent.onThinking?.('思考一');
+    harness.subagent.onToolCall?.('grep_search', '{"pattern":"x"}', 'c1');
+    await settle();
+    expect(harness.controller.snapshot().entries.at(0)?.tools).toHaveLength(1);
+
+    harness.controller.ask('第二个问题');
+    const entries = harness.controller.snapshot().entries;
+    expect(entries).toHaveLength(2);
+    // 日志只描述正在发生的那一轮；回答本身留着
+    expect(entries[0].thinking).toBeUndefined();
+    expect(entries[0].tools).toBeUndefined();
+    expect(entries[0].answer).toBe('By The Way 答案');
+  });
+
+  it('coalesces deltas inside the flush window', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = makeHarness({ flushIntervalMs: 50, pendingReply: true });
+      harness.controller.ask('问题');
+      const before = harness.updates.length;
+      harness.subagent.onText?.('A');
+      harness.subagent.onText?.('B');
+      harness.subagent.onText?.('C');
+      // 窗口内的 delta 先攒着，一次都没推
+      expect(harness.updates).toHaveLength(before);
+      expect(harness.controller.snapshot().entries.at(0)?.answer).toBeUndefined();
+      vi.advanceTimersByTime(60);
+      expect(harness.updates).toHaveLength(before + 1);
+      expect(harness.controller.snapshot().entries.at(0)?.answer).toBe('ABC');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds thinking, tool output and matches tool results defensively', () => {
+    expect(capBtwHead('abcdef', 3)).toBe('abc…');
+    expect(capBtwHead('abc', 3)).toBe('abc');
+    expect(capBtwTail('abcdef', 3)).toBe('…def');
+    expect(capBtwTail('abc', 3)).toBe('abc');
+    expect(parseBtwToolArgs('{"a":1}')).toEqual({ a: 1 });
+    expect(parseBtwToolArgs('not json')).toEqual({ value: 'not json' });
+    expect(parseBtwToolArgs('')).toEqual({});
+
+    const tools = [
+      { id: 'a', tool: 'read_file', status: 'completed' as const, startedAt: '' },
+      { id: 'b', tool: 'read_file', status: 'running' as const, startedAt: '' },
+      { id: 'c', tool: 'grep_search', status: 'running' as const, startedAt: '' },
+    ];
+    expect(resolveBtwToolIndex(tools, 'read_file', 'a')).toBe(0);
+    // 没有 id（或 id 对不上）时退回到「最后一个同名且还在跑」的调用，
+    // 不能记到已经结束的那条上
+    expect(resolveBtwToolIndex(tools, 'read_file')).toBe(1);
+    expect(resolveBtwToolIndex(tools, 'read_file', 'missing')).toBe(1);
+    expect(resolveBtwToolIndex(tools, 'unknown')).toBe(-1);
+
+    expect(MAX_BTW_THINKING_CHARS).toBeGreaterThan(0);
+    expect(MAX_BTW_TOOL_OUTPUT_CHARS).toBeGreaterThan(0);
   });
 });

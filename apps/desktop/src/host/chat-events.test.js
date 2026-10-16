@@ -546,6 +546,39 @@ describe('chat CLI arguments', () => {
         entries: [{ id: 'e1', status: 'completed', answer: '可以' }]
       }
     })
+    // btw 是一个 mica 运行实例：正在跑的那一条会带着流式的思考/工具行/部分正文
+    // 高频推来，这些字段必须原样透给渲染层（抽屉就是靠它们实时渲染的）。
+    expect(
+      codexNotificationToEvent({
+        method: 'mica/btw/updated',
+        params: {
+          threadId: 's1',
+          id: 'thread-1',
+          entries: [
+            {
+              id: 'e1',
+              question: '这个方案可行吗',
+              status: 'running',
+              answer: '可以先',
+              thinking: '先看看代码',
+              tools: [{ id: 'call-1', tool: 'read_file', status: 'running', startedAt: 'now' }]
+            }
+          ]
+        }
+      })
+    ).toMatchObject({
+      type: 'btw_thread',
+      thread: {
+        entries: [
+          {
+            status: 'running',
+            answer: '可以先',
+            thinking: '先看看代码',
+            tools: [{ id: 'call-1', tool: 'read_file', status: 'running' }]
+          }
+        ]
+      }
+    })
     // 没有 entries 的推送当空线程处理，渲染层照常画空态。
     expect(
       codexNotificationToEvent({ method: 'mica/btw/updated', params: { threadId: 's1' } })

@@ -150,6 +150,23 @@ describe('createBtwCommand / runBtw', () => {
       { command: '/btw', status: 'error' },
     );
   });
+
+  it('never installs streaming callbacks: the TUI path stays a plain notice', async () => {
+    // 桌面端的 By The Way 抽屉是流式的（它就是一个 mica 运行实例），但 CLI 的表达能力
+    // 有限——终端里只有一条 notice，实时刷思考/工具行没有意义还会挤掉主流程输出。
+    // 所以 CLI 这一侧刻意不挂回调，锁住它免得以后顺手接上。
+    const query = vi.fn(async () => '答案');
+    const agent = makeAgent(query);
+    const services = makeServices();
+
+    await runBtw(agent, services, '这个方案可行吗');
+
+    const subagent = vi.mocked(agent.createSubAgent).mock.results[0]?.value as Record<string, unknown>;
+    expect(subagent.onText).toBeUndefined();
+    expect(subagent.onThinking).toBeUndefined();
+    expect(subagent.onToolCall).toBeUndefined();
+    expect(subagent.onToolResult).toBeUndefined();
+  });
 });
 
 function makeAgent(

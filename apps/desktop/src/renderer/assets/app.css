@@ -3286,6 +3286,74 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-danger);
 }
 
+/* 这个回答正在跑（标题行右侧的呼吸点，与侧栏「运行中」同一个 keyframes） */
+.chat-btw-live {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  animation: chat-dot-breathe 1.6s ease-in-out infinite;
+}
+
+/* 思考与工具行：直接复用回合日志那套（`chat-tool-views.jsx`），这里只负责把它
+   从「一整块日志」变成回答正文上方的一小块——左侧一条细线标出「这是过程，不是回答」，
+   并且限高自己滚动，免得一次长回答的工具日志把正文挤出视野。 */
+.chat-btw-activity {
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 0 7px;
+  padding: 2px 0 1px 8px;
+  border-left: 1px solid rgb(255 255 255 / 9%);
+  color: var(--color-fg-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* 日志里的思考块自己有一层底色，嵌进这条细线里会显得双层描边 */
+.chat-btw-activity .chat-turn-log-thinking {
+  margin-top: 0;
+}
+
+/* 正在流式输出的正文末尾那颗光标：它不是输入框，只是「还在写」的信号。
+
+   必须落在**最后一段文字的末尾**：回答过 Markdown，把光标记成块级兄弟节点会被顶到
+   下一行、看着像多出一个空段。所以有 `.chat-markdown` 时用伪元素挂在最后一个块的
+   行内末尾，`span.chat-btw-caret` 只服务纯文本那条路径（`renderAnswer` 缺失时它本来
+   就是行内兄弟）——两条路都指同一个 `--color-fg-dim` 方块，改尺寸/颜色时一起改。 */
+.chat-btw-answer.is-streaming .chat-markdown > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  translate: 0 2px;
+  background: var(--color-fg-dim);
+  animation: chat-dot-breathe 1.2s ease-in-out infinite;
+}
+
+.chat-btw-answer.is-streaming > .chat-btw-caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  translate: 0 2px;
+  background: var(--color-fg-dim);
+  animation: chat-dot-breathe 1.2s ease-in-out infinite;
+}
+
+/* 走伪元素那条路时把 span 收掉（它会被顶到下一行），非流式时也收掉 */
+.chat-btw-answer > .chat-markdown + .chat-btw-caret {
+  display: none;
+}
+
+.chat-btw-answer > .chat-btw-caret {
+  display: none;
+}
+
 .chat-btw-empty {
   color: var(--color-fg-faint);
   line-height: 1.55;

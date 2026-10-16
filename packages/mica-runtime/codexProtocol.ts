@@ -167,6 +167,15 @@ export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
  * btw 会把 `turn/interrupt`、`turn/steer`、`mica/queue/recall` 堵在它后面——主流程
  * 运行中恰恰最需要它们。所以 `mica/btw/ask` 只收下问题就返回，答案经这里推回：
  *
+ * btw 就是一个 mica 运行实例（隔离子代理跑同一套 agent 循环），所以它不是「问完再出
+ * 结果」：思考、工具调用、正文都按 delta **流式**推回（host 侧按 ~80ms 合并一次），
+ * 抽屉里看到的就是主对话那套实时渲染。也就是说这条通知是高频的，而且**每次推的仍是
+ * 整份快照**（客户端整体替换，不做增量合并）。
+ *
+ * 与主对话的回合日志同款：思考与工具行**只描述正在发生的那一轮**——新问题开始时
+ * 上一条的 `thinking`/`tools` 会被清掉（回答留在 `answer` 里），所以快照不会随轮次
+ * 线性变大；每条字段还有各自的上限（host 侧截断）。
+ *
  * - 与任务快照同样是「整份快照」推送（客户端整体替换），不是增量；
  * - 与任务快照一样**不进 turn 事件缓冲**：btw 不属于任何 turn，回答可能要好几个
  *   turn 之后才到，走事件缓冲只会把 text/step_finish 这类真事件挤掉。
@@ -179,10 +188,44 @@ export type MicaBtwEntry = {
   id: string;
   question: string;
   status: 'running' | 'completed' | 'error';
-  /** 回答正文（`status === 'completed'` 时才有）。 */
+  /**
+   * 回答正文。`status === 'completed'` 时是最终答案；还在跑时是**已经流出的那一部分**
+   * （面板据此像主对话一样逐字渲染，而不是干等一次请求结束）。
+   */
   answer?: string;
+  /**
+   * 思考过程（`running` 或刚完成的那一条才有，见下面的「日志只描述当前一轮」）。
+   *
+   * 与主对话的回合日志同款：它是**流式**的，也是**有界的**（host 侧按字符数截断尾部）。
+   */
+  thinking?: string;
+  /** 这一轮回答里已经发生的工具调用（同上有界、只属于当前一轮）。 */
+  tools?: MicaBtwToolCall[];
   /** 失败原因（`status === 'error'` 时才有）。 */
   error?: string;
+  startedAt: string;
+  finishedAt?: string | null;
+};
+
+/**
+ * By The Way 里的一次工具调用。
+ *
+ * 字段与桌面端回合日志里那份工具行（`chat-tool-display.js` 的 `toolCallText`/`toolOutput`）
+ * 一一对应，所以抽屉可以直接用同一套组件渲染——btw 是一个 mica 运行实例，它跑工具的样子
+ * 就该和主对话里一模一样。
+ */
+export type MicaBtwToolCall = {
+  /** 工具调用 id（host 侧用来把「开始」与「结果」两个回调对上）。 */
+  id: string;
+  /** 工具名（`read_file` 等）。 */
+  tool: string;
+  /** 已经解析好的入参；解析失败时是 `{ value: 原始文本 }`。 */
+  input?: unknown;
+  /** app-server 给的展示文案（带工具语义），缺失时渲染层回退到「工具名 + 摘要」。 */
+  displayText?: string | null;
+  status: 'running' | 'completed';
+  /** 工具结果（host 侧按字符数截断）。 */
+  output?: string;
   startedAt: string;
   finishedAt?: string | null;
 };
