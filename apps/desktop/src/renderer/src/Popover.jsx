@@ -64,7 +64,6 @@ export function Popover({
   actions = null,
   role = 'dialog',
   className = '',
-  bodyRef = null,
   children
 }) {
   const panelRef = useRef(null)
@@ -92,11 +91,8 @@ export function Popover({
           </button>
         ) : null}
       </header>
-      {/* body 是整个面板唯一滚动的地方（head / actions 不动），所以想自己控制
-          「滚到底」的面板（btw 的回答逐条追加）需要拿到这个元素。 */}
-      <div className="chat-popover-body" ref={bodyRef}>
-        {children}
-      </div>
+      {/* body 是整个面板唯一滚动的地方（head / actions 不动）。 */}
+      <div className="chat-popover-body">{children}</div>
       {actions ? <div className="chat-popover-actions">{actions}</div> : null}
     </section>
   )

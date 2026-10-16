@@ -11,6 +11,7 @@ import {
 } from 'react'
 import {
   IconArrowDown,
+  IconArrowUp,
   IconBolt,
   IconCheck,
   IconClock,
@@ -70,7 +71,7 @@ import {
   rankCompletions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
-import { BtwPopover } from './BtwPopover'
+import { BtwDrawer } from './BtwDrawer'
 import { LoopBadge } from './LoopBadge'
 import { LoopPopover } from './LoopPopover'
 import { Popover } from './Popover'
@@ -88,6 +89,7 @@ import {
   waitTaskTooltip
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
+import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
 import { uid } from './workspace'
 import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
@@ -157,6 +159,33 @@ function copyText(text) {
   document.execCommand('copy')
   textarea.remove()
   return Promise.resolve()
+}
+
+/**
+ * 各条用户消息（一轮对话的起点）在滚动坐标系里的位置。`offsetTop` 的起点依赖最近的定位
+ * 祖先，这里统一用「相对滚动容器视口的差值 + scrollTop」算，结果与 `scrollTop` 同口径。
+ */
+function conversationTops(list) {
+  const rows = list.querySelectorAll('[data-chat-user-message]')
+  if (!rows.length) return []
+  const base = list.getBoundingClientRect().top - list.scrollTop
+  const tops = []
+  for (const row of rows) tops.push(row.getBoundingClientRect().top - base)
+  return tops
+}
+
+/**
+ * 上方还有没有对话。滚动时每次都要判一次，所以只量前两条：锚点大于 0 等价于第二条已经滚到
+ * 视野顶部（判定本身在 chat-conversation-nav.js，这里只负责量位置）。
+ */
+function hasPreviousConversation(list) {
+  const rows = list.querySelectorAll('[data-chat-user-message]')
+  if (rows.length < 2) return false
+  const base = list.getBoundingClientRect().top - list.scrollTop
+  return canGoToPreviousConversation(
+    [rows[0].getBoundingClientRect().top - base, rows[1].getBoundingClientRect().top - base],
+    list.scrollTop
+  )
 }
 
 function useCopied(resetMs = 1400) {
@@ -1901,7 +1930,10 @@ function MessageRow({
   if (message.role === 'user') {
     if (edit) {
       return (
-        <div className="chat-message chat-message-user chat-message-editing">
+        <div
+          className="chat-message chat-message-user chat-message-editing"
+          data-chat-user-message=""
+        >
           <div className="chat-message-marker">▌</div>
           <UserMessageEditor
             text={edit.text}
@@ -1917,6 +1949,7 @@ function MessageRow({
     return (
       <div
         className={`chat-message chat-message-user ${message.queued ? 'chat-message-queued' : ''}`}
+        data-chat-user-message=""
         onDoubleClick={(event) => {
           if (event.target.closest('button')) return
           onEditStart?.(message)
@@ -2406,6 +2439,9 @@ export function ChatView({
 
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [showJump, setShowJump] = useState(false)
+  // 「上一个对话」只有上方真的有对话时才可点，判定见 hasPreviousConversation
+  const [canPrevConversation, setCanPrevConversation] = useState(false)
+  const canPrevConversationRef = useRef(false)
   const [meta, setMeta] = useState(null)
   const [todoHidden, setTodoHidden] = useState(false)
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
@@ -4551,6 +4587,19 @@ export function ChatView({
     }
     return items
   }, [messages, queuedItems])
+
+  // 恢复滚动位置（切回会话、历史到位后补位）不走 onScroll，这里按消息条数补量一次，
+  // 免得「上一个对话」停在不该灰的时候。
+  useEffect(() => {
+    if (!showJump) return
+    const list = listRef.current
+    if (!list) return
+    const canPrev = hasPreviousConversation(list)
+    if (canPrev === canPrevConversationRef.current) return
+    canPrevConversationRef.current = canPrev
+    setCanPrevConversation(canPrev)
+  }, [transcriptMessages.length, showJump, nodeId])
+
   const recallQueued = useCallback(
     async (requestedId) => {
       if (!nodeId || recallingQueueRef.current) return
@@ -5016,10 +5065,31 @@ export function ChatView({
     [transcriptOpenFile]
   )
 
+  // 悬浮 tip 的两个按钮：在相邻的两轮对话（用户消息）之间跳转，下方没有对话时回落到最新消息。
+  const jumpConversation = useCallback((direction) => {
+    const list = listRef.current
+    if (!list) return
+    const target = conversationNavTarget(conversationTops(list), list.scrollTop, direction)
+    if (target.kind === 'none') return
+    if (target.kind === 'bottom') {
+      stickToBottomRef.current = true
+      setShowJump(false)
+      scrollStateRef.current = { top: list.scrollHeight, stick: true }
+      list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+      return
+    }
+    // 回头看旧消息时不能再贴着底部，否则流式回答一到就把视野拽回末尾
+    stickToBottomRef.current = false
+    scrollStateRef.current = { top: target.top, stick: false }
+    list.scrollTo({ top: target.top, behavior: 'smooth' })
+  }, [])
+
   return (
     <ChatPathContext.Provider value={pathActions}>
       <div
-        className={`chat-view no-drag ${visible ? 'flex' : 'hidden'}`}
+        // 抽屉打开时让自己让出右侧那一条（内边距会把对话区与输入条一起收窄），
+        // 所以它是「并排」而不是「盖住」——主流程照常看得见、发得出。
+        className={`chat-view no-drag ${visible ? 'flex' : 'hidden'} ${btwOpen ? 'chat-btw-open' : ''}`}
         onPointerDownCapture={focusComposerFromShell}
         onPointerMoveCapture={trackShellPointerMove}
         onMouseUp={focusComposerFromShell}
@@ -5040,6 +5110,13 @@ export function ChatView({
             stickToBottomRef.current = atBottom
             scrollStateRef.current = { top: element.scrollTop, stick: atBottom }
             setShowJump(!atBottom)
+            // 同一个值再设一次会让这个巨型组件重渲染一轮（React 的 bailout 之前要先渲染），
+            // 所以先比对上一次的结果再决定要不要落到 state。
+            const canPrev = atBottom ? false : hasPreviousConversation(element)
+            if (canPrev !== canPrevConversationRef.current) {
+              canPrevConversationRef.current = canPrev
+              setCanPrevConversation(canPrev)
+            }
           }}
         >
           <div ref={transcriptRef} className="chat-transcript">
@@ -5080,18 +5157,25 @@ export function ChatView({
 
         <div ref={composerDockRef} className="chat-composer-dock">
           {showJump && (
-            <button
-              type="button"
-              className="chat-jump"
-              onClick={() => {
-                stickToBottomRef.current = true
-                setShowJump(false)
-                const list = listRef.current
-                if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
-              }}
-            >
-              <IconArrowDown size={13} /> 最新消息
-            </button>
+            <div className="chat-jump">
+              <button
+                type="button"
+                onClick={() => jumpConversation('previous')}
+                disabled={!canPrevConversation}
+                title="跳到上一轮对话"
+                aria-label="上一个对话"
+              >
+                <IconArrowUp size={13} /> 上一个对话
+              </button>
+              <button
+                type="button"
+                onClick={() => jumpConversation('next')}
+                title="跳到下一轮对话，已经在最后一轮时回到最新消息"
+                aria-label="下一个对话"
+              >
+                <IconArrowDown size={13} /> 下一个对话
+              </button>
+            </div>
           )}
           {picker && (
             <SelectPalette
@@ -5164,18 +5248,6 @@ export function ChatView({
               onFireNow={() => window.mica.loops.fireNow(nodeId).catch(() => {})}
               onStop={() => window.mica.loops.stop(nodeId).catch(() => {})}
               onClose={() => setLoopOpen(false)}
-            />
-          )}
-          {btwOpen && (
-            <BtwPopover
-              thread={btwThread}
-              draft={btwDraft}
-              sending={btwSending}
-              onDraftChange={changeBtwDraft}
-              onAsk={askBtw}
-              onNewThread={resetBtwThread}
-              renderAnswer={renderBtwAnswer}
-              onClose={() => setBtwOpen(false)}
             />
           )}
           <div
@@ -5402,8 +5474,9 @@ export function ChatView({
                         : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文）'
                 }
                 aria-label="By The Way"
-                aria-pressed={btwOpen}
-                data-popover-trigger="btw"
+                // 抽屉不是浮层：没有「点外面就关」需要它自己认领这次点击，所以不带
+                // data-popover-trigger，改用 aria-expanded 描述它控制着一个可展开区域。
+                aria-expanded={btwOpen}
                 disabled={!hasSession || remoteRunning}
                 onClick={() => setBtwOpen((open) => !open)}
               >
@@ -5510,6 +5583,20 @@ export function ChatView({
             onAction={runContextMenuAction}
             onClose={closeContextMenu}
             commitRunning={commitRunning}
+          />
+        )}
+        {/* By The Way 的抽屉：挂在 `.chat-view` 直属子节点上（不是输入条里），这样它
+            能占满对话区的高度，而不是像浮层那样被输入条那一条盒子限住。 */}
+        {btwOpen && (
+          <BtwDrawer
+            thread={btwThread}
+            draft={btwDraft}
+            sending={btwSending}
+            onDraftChange={changeBtwDraft}
+            onAsk={askBtw}
+            onNewThread={resetBtwThread}
+            renderAnswer={renderBtwAnswer}
+            onClose={() => setBtwOpen(false)}
           />
         )}
       </div>
