@@ -3,6 +3,7 @@ import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import {
   findUserMessageCutIndex,
   truncateHistoryBeforeUserMessage,
+  uncommittedResponseText,
   userMessageIndexes,
 } from './conversationHistory.js';
 
@@ -119,5 +120,13 @@ describe('conversationHistory', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.snapshot.messages).toHaveLength(0);
+  });
+
+  it('keeps only the not-yet-committed tail of an aborted turn response', () => {
+    expect(uncommittedResponseText('first partsecond part', 'first part')).toBe('second part');
+    // A restarted retry attempt can no longer match the committed prefix.
+    expect(uncommittedResponseText('different text', 'first part')).toBe('different text');
+    expect(uncommittedResponseText('everything', '')).toBe('everything');
+    expect(uncommittedResponseText('same', 'same')).toBe('');
   });
 });

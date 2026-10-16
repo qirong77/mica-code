@@ -8,6 +8,7 @@ import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
+import { uncommittedResponseText } from './conversationHistory.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
@@ -104,6 +105,13 @@ export class HeadlessTurnExecutor {
   private readonly parseImageRefs: (text: string) => Promise<AgentQueryContent>;
   private running = false;
   private responseBuffer = '';
+  /**
+   * The part of `responseBuffer` already committed to the provider history at
+   * the last iteration boundary. An aborted turn must only append the remainder
+   * (`uncommittedResponseText`); passing the whole buffer duplicates the text
+   * that a completed tool iteration already persisted.
+   */
+  private committedResponseBuffer = '';
   private lease: SessionTurnLease | null = null;
 
   constructor(options: HeadlessTurnExecutorOptions) {
@@ -292,6 +300,7 @@ export class HeadlessTurnExecutor {
     const { agent, onEvent } = this.options;
     const startedAt = Date.now();
     this.responseBuffer = '';
+    this.committedResponseBuffer = '';
     let content: AgentQueryContent;
     try {
       content =
@@ -347,6 +356,7 @@ export class HeadlessTurnExecutor {
             // Restore client state to before the turn, clearing partial output.
             if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
             this.responseBuffer = '';
+            this.committedResponseBuffer = '';
             this.saveCurrent({ allowEmpty: true, turnState: 'running' }, pendingUserMessage);
             await waitForRetryDelay(agent, retryDelayMs);
           }
@@ -359,6 +369,10 @@ export class HeadlessTurnExecutor {
                 : undefined,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+                // The iteration that just completed pushed its text (and tool
+                // results) into the provider history: everything streamed so far
+                // is committed, so an abort from here on only owes the remainder.
+                this.committedResponseBuffer = this.responseBuffer;
                 const replayed = replayInputs.shift();
                 if (replayed !== undefined) {
                   attemptInputs.push(replayed);
@@ -413,7 +427,10 @@ export class HeadlessTurnExecutor {
         if (this.options.hooks) {
           await this.options.hooks.emit('turn:abort', { runtime: this.options.host, input, content, error });
         }
-        agent.preserveAbortedTurn(runContentOr(input), this.responseBuffer || undefined);
+        agent.preserveAbortedTurn(
+          runContentOr(input),
+          uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
+        );
         this.saveCurrent({ turnState: 'aborted' });
         if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
@@ -428,7 +445,10 @@ export class HeadlessTurnExecutor {
 
   private async failTurn(input: RuntimeInput, startedAt: number, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
-    this.options.agent.preserveAbortedTurn(runContentOr(input), this.responseBuffer || undefined);
+    this.options.agent.preserveAbortedTurn(
+      runContentOr(input),
+      uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
+    );
     this.saveCurrent({ turnState: 'error' });
     if (this.options.hooks) await this.emitTurnAfter(input, 'error', Date.now() - startedAt, true);
     this.options.onEvent({

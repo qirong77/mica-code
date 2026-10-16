@@ -16,6 +16,12 @@ class MockAgent {
   restoreCalls = 0;
   /** 0-indexed run index after which a non-readonly toolCall is emitted. */
   emitToolCallAfterRunIndex = -1;
+  /** Provider history the aborted turn was asked to record, in order. */
+  abortedTurnCalls: Array<{ content: unknown; partialAnswer: string | undefined }> = [];
+  /** Text streamed before the first iteration boundary (committed to history). */
+  committedText = '';
+  /** Text streamed after the last iteration boundary (still uncommitted). */
+  uncommittedText = '';
 
   reserveRunId(): number {
     return ++this.runId;
@@ -42,7 +48,8 @@ class MockAgent {
     this.restoreCalls++;
   }
 
-  preserveAbortedTurn(): boolean {
+  preserveAbortedTurn(_content: unknown, partialAnswer?: string): boolean {
+    this.abortedTurnCalls.push({ content: _content, partialAnswer });
     return true;
   }
 
@@ -59,11 +66,15 @@ class MockAgent {
   ): Promise<{ runId: number; text: string }> {
     this.runCalls.push({ content, options });
     await new Promise((resolve) => setTimeout(resolve, 5));
+    // Text streamed before an iteration boundary is committed to the provider
+    // history by that boundary; whatever streams after the last one is not.
+    if (this.committedText) this.events.emit('text', this.committedText);
     // Two iteration boundaries: the first starts the wait, the second proves a
     // full iteration ran (mirrors MessageQueueService.dequeueAfterCompletedIteration).
     const first = options.onIterationComplete ? await options.onIterationComplete() : null;
     const second = options.onIterationComplete ? await options.onIterationComplete() : null;
     this.iterationBoundaryResults = [first, second];
+    if (this.uncommittedText) this.events.emit('text', this.uncommittedText);
     if (this.aborted) throw new AgentAbortError(this.runId);
     if (this.runCalls.length - 1 === this.emitToolCallAfterRunIndex) {
       this.events.emit('toolCall', { name: 'run_shell', args: 'echo hi' });
@@ -208,6 +219,31 @@ describe('HeadlessTurnExecutor', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const finish = events.find((event) => event.type === 'turn:finish');
     expect(finish).toMatchObject({ status: 'aborted' });
+  });
+
+  it('records only the text an iteration did not already commit for an aborted turn', async () => {
+    const { agent, executor } = createHarness();
+    agent.committedText = 'committed half';
+    agent.uncommittedText = 'tail half';
+    await executor.start(input('hello'));
+    executor.abort();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(agent.abortedTurnCalls).toHaveLength(1);
+    // Passing the whole streaming buffer re-appends the committed half to the
+    // provider history, which is how the same assistant message is persisted twice.
+    expect(agent.abortedTurnCalls[0]?.partialAnswer).toBe('tail half');
+  });
+
+  it('records no partial answer when the aborted turn had committed all of its text', async () => {
+    const { agent, executor } = createHarness();
+    agent.committedText = 'whole answer';
+    await executor.start(input('hello'));
+    executor.abort();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(agent.abortedTurnCalls).toHaveLength(1);
+    expect(agent.abortedTurnCalls[0]?.partialAnswer).toBeUndefined();
   });
 
   it('recalls a pending input by client message id', async () => {

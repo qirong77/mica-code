@@ -32,6 +32,7 @@ import {
   type TerminalAgentTurnOutcome,
 } from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
+import { uncommittedResponseText } from '../../runtime/conversationHistory.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['status', 'task', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
@@ -1105,14 +1106,6 @@ function appendAssistantResponseForDisplay(
   const text = responseText.trim();
   if (!text) return messages;
   return [...messages, createAssistantTextMessage(responseText)];
-}
-
-function uncommittedResponseText(responseText: string, committedResponseText: string): string {
-  if (!committedResponseText) return responseText;
-  if (responseText.startsWith(committedResponseText)) {
-    return responseText.slice(committedResponseText.length);
-  }
-  return responseText;
 }
 
 function appendBoundedText(previous: string, chunk: string, maxChars: number, marker: string): string {

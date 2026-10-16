@@ -51,6 +51,14 @@ export class ChatCompletionsClient extends BaseAgent<
   usageHistory: ChatCompletionsUsageRecord[] = [];
   lastUsage: ChatCompletionsUsageRecord | undefined;
   private turnId = 0;
+  /**
+   * Whether the running turn has already been synced into `this.messages` by a
+   * completed iteration (`commitCompleteIteration`). It is the only reliable
+   * "is this turn already in history" signal for `preserveAbortedTurn`: once a
+   * tool iteration committed, the tail of the history is a tool result, not the
+   * user message, so inspecting the last message appends the whole turn again.
+   */
+  private turnCommitted = false;
   model!: string;
   apiKey: string | undefined;
   baseURL: string | undefined;
@@ -83,10 +91,12 @@ export class ChatCompletionsClient extends BaseAgent<
     this.usageHistory = [];
     this.lastUsage = undefined;
     this.turnId = 0;
+    this.turnCommitted = false;
   }
   loadSnapshot(
     snapshot: AgentSnapshot<OpenAI.Chat.Completions.ChatCompletionMessageParam, ChatCompletionsUsageRecord>,
   ) {
+    this.turnCommitted = false;
     this.turnId = this.loadSnapshotState(
       { ...snapshot, messages: prepareHistoricalChatMessages(snapshot.messages) },
       (message) => message.role !== 'system',
@@ -103,8 +113,14 @@ export class ChatCompletionsClient extends BaseAgent<
 
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean {
     this.messages = prepareHistoricalChatMessages(this.messages);
+    // Two ways the turn can already be in history: a completed iteration
+    // committed it (`turnCommitted`, tail is then whatever the iteration ended
+    // with), or the previous turn left an unanswered question with the same
+    // text at the tail. Appending in either case duplicates the turn.
     const lastMessage = this.messages.at(-1);
-    const hasCurrentTurn = lastMessage?.role === 'user' && isSameOpenAIUserContent(lastMessage.content, question);
+    const hasCurrentTurn =
+      this.turnCommitted ||
+      (lastMessage?.role === 'user' && isSameOpenAIUserContent(lastMessage.content, question));
     const answer = partialAnswer?.trim();
     if (hasCurrentTurn) {
       if (answer) this.messages.push({ role: 'assistant', content: answer });
@@ -129,6 +145,7 @@ export class ChatCompletionsClient extends BaseAgent<
   }
   async query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string> {
     const turnId = ++this.turnId;
+    this.turnCommitted = false;
     let requestIndex = 0;
     const systemMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
       role: 'system',
@@ -151,6 +168,9 @@ export class ChatCompletionsClient extends BaseAgent<
         : sessionMessages;
       messages = nextMessages === sessionMessages ? messages : [systemMessage, ...nextMessages];
       this.messages = takeNextInput ? nextMessages : prepareHistoricalChatMessages(nextMessages);
+      // From here on the turn (its question, tool calls and text) lives in
+      // `this.messages`; an abort must not append it a second time.
+      this.turnCommitted = true;
       if (!takeNextInput) return;
       const nextInput = await options?.onIterationComplete?.();
       if (nextInput !== null && nextInput !== undefined) {

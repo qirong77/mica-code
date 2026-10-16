@@ -6,6 +6,11 @@
  * - `mica app-server` 的 `mica/turn/editMessage`（desktop 双击编辑重发）：定位被
  *   编辑的用户消息，截掉它及其之后的内容，再用新文本重跑。
  *
+ * 另有一个共用的判断是「turn 里哪些流式文本还没进历史」
+ * （`uncommittedResponseText`）：中止一个 turn 时要把没提交的那段回答补进
+ * provider history，两个 runtime（`LocalRuntimeController` 与
+ * `HeadlessTurnExecutor`）必须用同一套口径，否则有一边会把已经落盘的文本再写一遍。
+ *
  * 持久化的会话文件没有逐条消息 id，历史里的用户消息与 UI 展示文本也不完全同源，
  * 所以定位只能按「空白折叠后的文本相等」来做——两处调用方必须用同一个归一化，
  * 否则 desktop 里的第 N 条同文本消息会在 CLI 端错位。
@@ -54,6 +59,21 @@ export function comparableText(text: unknown): string {
 
 export function comparableMessageText(message: unknown): string {
   return comparableText(messageText(message));
+}
+
+/**
+ * 本 turn 里**还没进 provider history** 的那段流式文本。
+ *
+ * 运行中的文本缓冲（`onText` 累积）包含已经在工具迭代边界提交过的部分；中止时
+ * 只应把余下的增量补进历史，整段补会与已提交的内容重复（history 里同一条回答出现两次）。
+ * 前缀不匹配时退回整段（保守：宁可多写也不丢），committed 为空时同理。
+ */
+export function uncommittedResponseText(responseText: string, committedResponseText: string): string {
+  if (!committedResponseText) return responseText;
+  if (responseText.startsWith(committedResponseText)) {
+    return responseText.slice(committedResponseText.length);
+  }
+  return responseText;
 }
 
 /**
