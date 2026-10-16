@@ -1,6 +1,6 @@
 import * as nodeFs from 'node:fs'
 import { join } from 'node:path'
-import { dedupeStatsSessions, parseStatsSession } from './stats-core'
+import { dedupeStatsSessions, parseSessionText, parseStatsSession } from './stats-core'
 
 function timestampPart(stat, name) {
   const nanoseconds = stat[`${name}Ns`]
@@ -63,6 +63,7 @@ export function createStatsScanner({
   directory,
   fileSystem = nodeFs,
   parseStats = parseStatsSession,
+  parseText = parseSessionText,
   dedupeStats = dedupeStatsSessions
 }) {
   if (typeof directory !== 'function') throw new TypeError('directory must be a function')
@@ -88,7 +89,9 @@ export function createStatsScanner({
       metaLoaded: false,
       meta: null,
       statsLoaded: false,
-      stats: null
+      stats: null,
+      textLoaded: false,
+      text: null
     }
     entries.set(file, entry)
     // A new or replaced file can affect either projection.
@@ -99,13 +102,15 @@ export function createStatsScanner({
 
   function readProjection(file, signature, kind) {
     const entry = entryFor(file, signature)
-    const loadedKey = kind === 'meta' ? 'metaLoaded' : 'statsLoaded'
+    const loadedKey = `${kind}Loaded`
     if (entry[loadedKey]) return { stable: true, value: entry[kind] }
 
     let value = null
     try {
       const raw = JSON.parse(fileSystem.readFileSync(file, 'utf8'))
-      value = kind === 'meta' ? parseSessionMeta(raw) : parseStats(raw)
+      if (kind === 'meta') value = parseSessionMeta(raw)
+      else if (kind === 'stats') value = parseStats(raw)
+      else value = parseText(raw)
     } catch {
       // A stable read/parse failure is cached as null for this projection.
     }
@@ -124,7 +129,7 @@ export function createStatsScanner({
     entry[loadedKey] = true
     entry[kind] = value
     if (kind === 'meta') metaRevision += 1
-    else statsRevision += 1
+    else if (kind === 'stats') statsRevision += 1
     return { stable: true, value }
   }
 
@@ -144,7 +149,7 @@ export function createStatsScanner({
       }
       // Preserve the last stable projection on transient EMFILE/EACCES/I/O
       // failures. Mark it unstable so callers do not replace their cache.
-      const loadedKey = kind === 'meta' ? 'metaLoaded' : 'statsLoaded'
+      const loadedKey = `${kind}Loaded`
       return {
         rows: [...entries.values()]
           .filter((entry) => entry[loadedKey])
@@ -192,6 +197,23 @@ export function createStatsScanner({
       const value = dedupeStats(rows)
       if (stable) cachedStats = { revision: statsRevision, value }
       return value
+    },
+
+    /**
+     * 单个会话的正文投影（内容搜索用）。按文件签名增量缓存：同一份文件只在第一次搜索时
+     * 解析一遍，之后每个查询都只在内存的字符串上匹配。文件在读取期间被改写时返回 null
+     * （本次跳过，下一次搜索会重新读），不返回半份数据。
+     */
+    readText(file) {
+      let signature
+      try {
+        signature = fileSignature(fileSystem, file)
+      } catch {
+        invalidate(file)
+        return null
+      }
+      const result = readProjection(file, signature, 'text')
+      return result.stable ? result.value : null
     }
   }
 }

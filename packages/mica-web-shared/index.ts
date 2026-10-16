@@ -15,6 +15,19 @@ export {
 export { formatTokens } from './format.js';
 export { toolIcon, toolLabel } from './tools.js';
 export {
+  DEFAULT_SESSION_SEARCH_RANGE,
+  SEARCH_TIERS,
+  SESSION_SEARCH_RANGES,
+  extractSnippet,
+  foldSearchText,
+  matchAllTokens,
+  matchRanges,
+  scoreSessionSearch,
+  sessionSearchRange,
+  sessionSearchSinceMs,
+  tokenizeSearchQuery,
+} from './session-search.js';
+export {
   applyUiStatePatch,
   isUiStateKey,
   sanitizeUiStateKeys,

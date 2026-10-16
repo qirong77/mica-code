@@ -366,6 +366,9 @@ function createWebApi(env) {
       read: () => invoke('stats:read'),
       sessionDetail: (sessionId) => invoke('stats:session-detail', { sessionId }),
       listSessions: () => invoke('stats:list-sessions'),
+      // 会话内容搜索：只在渲染层已经拿到的元数据之外的部分（对话正文）走这一趟，
+      // 时间范围把要读的会话限制在最近若干天（见 host/stats.js 的 searchSessions）。
+      searchSessions: (query, sinceMs = 0) => invoke('stats:search-sessions', { query, sinceMs }),
       sessionTitle: (sessionId) => invoke('stats:session-title', { sessionId }),
       renameSession: (sessionId, title) => invoke('stats:rename-session', { sessionId, title }),
       deleteSession: (sessionId) => invoke('stats:delete-session', { sessionId }),

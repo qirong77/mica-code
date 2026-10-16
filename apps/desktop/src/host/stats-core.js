@@ -704,3 +704,64 @@ export function dedupeStatsSessions(sessions) {
   })
   return deduped.sort((a, b) => a.createdAtMs - b.createdAtMs)
 }
+
+/** 内容搜索的正文上限（每个会话）：够长到能查到上下文，又不至于把几百个会话全留在内存里。 */
+export const SESSION_SEARCH_TEXT_LIMIT = 20000
+
+/** compact 元数据消息的前缀（packages/mica-context 的 COMPACT_BOUNDARY_PREFIX）。 */
+const COMPACT_BOUNDARY_PREFIX = '[Mica compact boundary]'
+
+/** compact 摘要消息的前缀（packages/mica-context 的 COMPACT_SUMMARY_PREFIX）。 */
+const COMPACT_SUMMARY_PREFIX = '[Mica compact checkpoint]'
+
+/** 超长会话中间被丢掉时留下的标记。 */
+const OMITTED_MARKER = '\n…\n'
+
+/**
+ * 内容搜索用的正文投影。
+ *
+ * 只取 user / assistant 的文本，notice（错误、压缩、配置提示）与工具结果都不算——那些
+ * 是噪声，搜出来的「命中」多半不是用户在找的东西。插件注入的消息（定时任务等）正文放在
+ * `displayContent` 里，与 `content` 不同时一并收录，否则按任务内容搜不到它。
+ *
+ * compact 的 boundary 消息整段是内部状态 JSON（含历史提示词清单），既不是用户说的话又很
+ * 长，一律跳过——不跳的话它会挤掉正文的预算，命中结果也全是它（`checkpoint` 摘要消息是
+ * 压缩后的对话本身，照常收录）。
+ *
+ * 超长会话取「开头 + 结尾」两段（开头是任务本身、结尾是最后在做的事）并标记 `truncated`；
+ * 没有正文的会话返回 null，扫描器会把「这个文件没有可搜正文」缓存下来，不必反复解析。
+ */
+export function parseSessionText(raw, { maxChars = SESSION_SEARCH_TEXT_LIMIT } = {}) {
+  if (!raw || typeof raw !== 'object') return null
+  if (typeof raw.id !== 'string' || !raw.id.trim()) return null
+  const messages = raw.snapshot?.conversationMessages
+  if (!Array.isArray(messages)) return null
+  const limit = Number.isFinite(maxChars) && maxChars > 0 ? maxChars : SESSION_SEARCH_TEXT_LIMIT
+
+  const parts = []
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    const content = projectContent(message.content, Number.MAX_SAFE_INTEGER)
+    if (message.role === 'user' && content.startsWith(COMPACT_BOUNDARY_PREFIX)) continue
+    // 摘要消息保留正文（它是压缩后的对话本身），只去掉标记行，免得「checkpoint」成了搜索热词。
+    const body = content.startsWith(COMPACT_SUMMARY_PREFIX)
+      ? content.slice(COMPACT_SUMMARY_PREFIX.length).trimStart()
+      : content
+    if (body) parts.push(body)
+    const display = projectContent(message.displayContent, Number.MAX_SAFE_INTEGER)
+    if (display && display !== content) parts.push(display)
+  }
+  if (!parts.length) return null
+  const text = parts.join('\n')
+  if (text.length <= limit) return { id: raw.id, text, truncated: false }
+  // 中间那段丢掉，长度算上省略标记也仍在上限内（界面按这个上限说明能搜到多少）。
+  const budget = Math.max(0, limit - OMITTED_MARKER.length)
+  const head = Math.round(budget * 0.6)
+  const tail = budget - head
+  return {
+    id: raw.id,
+    text: `${text.slice(0, head)}${OMITTED_MARKER}${text.slice(text.length - tail)}`,
+    truncated: true
+  }
+}

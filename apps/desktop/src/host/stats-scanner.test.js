@@ -327,4 +327,77 @@ describe('incremental session scanner', () => {
 
     expect(dedupes).toBe(1)
   })
+
+  test('readText parses a session body once per file signature', () => {
+    const harness = createHarness()
+    harness.write('one', fixture('one'))
+    let parses = 0
+    const scanner = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: { readdirSync, statSync, readFileSync },
+      parseStats: (raw) => ({ id: raw.id }),
+      parseText(raw) {
+        parses += 1
+        return { id: raw.id, text: '正文', truncated: false }
+      },
+      dedupeStats: (rows) => rows
+    })
+    const file = join(harness.dir, 'one.json')
+
+    expect(scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
+    expect(scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
+    expect(parses).toBe(1)
+
+    // 文件被改写后签名变化，下次读取重新解析。
+    harness.write('one', fixture('one', { value: 2 }))
+    scanner.readText(file)
+    expect(parses).toBe(2)
+  })
+
+  test('readText tolerates a missing file and caches an unsearchable body', () => {
+    const harness = createHarness()
+    let parses = 0
+    const scanner = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: { readdirSync, statSync, readFileSync },
+      parseStats: (raw) => ({ id: raw.id }),
+      parseText() {
+        parses += 1
+        return null
+      },
+      dedupeStats: (rows) => rows
+    })
+
+    expect(scanner.readText(join(harness.dir, 'missing.json'))).toBeNull()
+    expect(parses).toBe(0)
+
+    harness.write('empty', fixture('empty'))
+    const file = join(harness.dir, 'empty.json')
+    expect(scanner.readText(file)).toBeNull()
+    expect(scanner.readText(file)).toBeNull()
+    // 没有正文的会话只解析一次，不会每个查询都重读。
+    expect(parses).toBe(1)
+  })
+
+  test('readText keeps the statistics cache intact', () => {
+    const harness = createHarness()
+    harness.write('one', fixture('one'))
+    let dedupes = 0
+    const scanner = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: { readdirSync, statSync, readFileSync },
+      parseStats: (raw) => ({ id: raw.id }),
+      parseText: (raw) => ({ id: raw.id, text: '正文', truncated: false }),
+      dedupeStats(rows) {
+        dedupes += 1
+        return rows
+      }
+    })
+
+    scanner.scanStats()
+    scanner.readText(join(harness.dir, 'one.json'))
+    scanner.scanStats()
+
+    expect(dedupes).toBe(1)
+  })
 })

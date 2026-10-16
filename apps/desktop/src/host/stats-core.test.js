@@ -6,6 +6,7 @@ import {
   filterOwnedUsage,
   normalizeUsageEvent,
   ownedUsageIdentities,
+  parseSessionText,
   parseStatsSession,
   projectContent,
   projectMessages,
@@ -604,5 +605,79 @@ describe('Stats usage aggregation', () => {
       expect.objectContaining({ usageId: 'sub-1', inputTokens: 5, outputTokens: 1 })
     ])
     expect(records[0].summary).toEqual({ records: 1 })
+  })
+})
+
+describe('parseSessionText', () => {
+  const session = (conversationMessages) => ({
+    version: 1,
+    id: 's-1',
+    title: 't',
+    snapshot: { conversationMessages }
+  })
+
+  test('collects user and assistant text, skipping notices and tool payloads', () => {
+    const parsed = parseSessionText(
+      session([
+        { role: 'user', content: '帮我优化会话搜索' },
+        { role: 'notice', content: '命令执行失败：boom' },
+        { role: 'assistant', content: [{ type: 'text', text: '好的，先看实现' }] },
+        { role: 'assistant', content: [{ type: 'image', source: {} }] }
+      ])
+    )
+    expect(parsed.text).toContain('帮我优化会话搜索')
+    expect(parsed.text).toContain('好的，先看实现')
+    expect(parsed.text).toContain('[image]')
+    expect(parsed.text).not.toContain('boom')
+    expect(parsed.truncated).toBe(false)
+  })
+
+  test('includes displayContent so plugin-injected messages stay searchable', () => {
+    const parsed = parseSessionText(
+      session([{ role: 'user', content: '现在是几点', displayContent: '定时任务：检查构建状态' }])
+    )
+    expect(parsed.text).toContain('定时任务：检查构建状态')
+    expect(parsed.text).toContain('现在是几点')
+  })
+
+  test('does not duplicate content that matches displayContent', () => {
+    const parsed = parseSessionText(
+      session([{ role: 'user', content: '同样的一句话', displayContent: '同样的一句话' }])
+    )
+    expect(parsed.text).toBe('同样的一句话')
+  })
+
+  test('caps the body, keeps both ends, and reports truncation', () => {
+    const parsed = parseSessionText(
+      session([
+        { role: 'user', content: '开头标记' },
+        { role: 'assistant', content: 'x'.repeat(200) },
+        { role: 'assistant', content: '结尾标记' }
+      ]),
+      { maxChars: 100 }
+    )
+    expect(parsed.text.length).toBeLessThanOrEqual(100)
+    expect(parsed.text.startsWith('开头标记')).toBe(true)
+    expect(parsed.text.endsWith('结尾标记')).toBe(true)
+    expect(parsed.truncated).toBe(true)
+  })
+
+  test('skips compact boundary metadata but keeps the checkpoint summary', () => {
+    const parsed = parseSessionText(
+      session([
+        { role: 'user', content: '[Mica compact boundary]\n\n{"prompts":["搜索会话"]}' },
+        { role: 'user', content: '[Mica compact checkpoint]\n\n摘要：搜索会话的优化' },
+        { role: 'assistant', content: '好的' }
+      ])
+    )
+    expect(parsed.text).toContain('摘要：搜索会话的优化')
+    expect(parsed.text).not.toContain('compact boundary')
+  })
+
+  test('returns null when there is nothing to search', () => {
+    expect(parseSessionText(session([]))).toBeNull()
+    expect(parseSessionText(session([{ role: 'notice', content: 'only a notice' }]))).toBeNull()
+    expect(parseSessionText({ id: 's', snapshot: {} })).toBeNull()
+    expect(parseSessionText(null)).toBeNull()
   })
 })

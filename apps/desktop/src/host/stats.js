@@ -22,6 +22,7 @@ import {
   resolveStaleRequestInput,
   summarizeContext
 } from './stats-core'
+import { extractSnippet, tokenizeSearchQuery } from '@packages/mica-web-shared/session-search.js'
 import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
@@ -298,7 +299,53 @@ function scan() {
   return statsScanner.scanStats()
 }
 
+/** 内容搜索一次最多读取的会话数（按最近更新排），以及最多返回的命中数。 */
+const SEARCH_MAX_CANDIDATES = 600
+const SEARCH_MAX_RESULTS = 100
+
+/**
+ * 会话内容搜索：在 title/cwd 之外的对话正文里找词（见 stats-core 的 parseSessionText）。
+ *
+ * 只在 `sinceMs` 范围内的会话上做——这是这个功能能成立的前提：正文投影要解析整个会话
+ * 文件，把全部历史会话都读一遍既慢又白占内存，而用户找的多半是最近聊过的东西。范围、
+ * 匹配、片段切片全部与渲染层共用 `@packages/mica-web-shared/session-search`，两侧不会
+ * 出现「同一句话一边命中一边不命中」。
+ *
+ * 返回的 `truncated` 表示候选被上限截断（说明只搜了最近的一部分），界面据此告知用户。
+ */
+function searchSessions({ query, sinceMs, limit } = {}) {
+  const tokens = tokenizeSearchQuery(query)
+  if (!tokens.length) return { results: [], scanned: 0, truncated: false }
+  const since = Number(sinceMs) > 0 ? Number(sinceMs) : 0
+  const max =
+    Number.isFinite(limit) && limit > 0 ? Math.min(limit, SEARCH_MAX_RESULTS) : SEARCH_MAX_RESULTS
+  const candidates = scanMeta().filter((row) => !since || row.updatedAtMs >= since)
+
+  const results = []
+  let scanned = 0
+  let truncated = false
+  for (const row of candidates) {
+    if (results.length >= max) {
+      truncated = true
+      break
+    }
+    if (scanned >= SEARCH_MAX_CANDIDATES) {
+      truncated = true
+      break
+    }
+    const file = sessionFile(row.id)
+    if (!file) continue
+    const text = statsScanner.readText(file)
+    if (!text) continue
+    scanned += 1
+    const snippet = extractSnippet(text.text, tokens)
+    if (snippet) results.push({ id: row.id, snippet, textTruncated: !!text.truncated })
+  }
+  return { results, scanned, truncated }
+}
+
 export function registerStatsIpc() {
+  ipcMain.handle('stats:search-sessions', (_event, payload = {}) => searchSessions(payload))
   ipcMain.handle('stats:read', () => ({
     sessions: scan(),
     scannedAt: Date.now()

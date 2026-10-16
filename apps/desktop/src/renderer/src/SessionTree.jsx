@@ -37,14 +37,31 @@ import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
 import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
+import {
+  DEFAULT_SESSION_SEARCH_RANGE,
+  SESSION_SEARCH_RANGES,
+  SESSION_SEARCH_RESULT_LIMIT,
+  buildDraftSearchResults,
+  buildSessionSearchResults,
+  contentMatchMap,
+  rankSearchItems,
+  sessionSearchSinceMs,
+  tokenizeSearchQuery
+} from './session-search'
 
 // 会话详情弹窗复用 Stats 页的组件，按需加载——stats 目录的代码不进启动路径。
 const SessionDetailModal = lazy(() =>
   import('./stats/SessionDetailModal').then((m) => ({ default: m.SessionDetailModal }))
 )
 
-const rowClass =
-  'group relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
+const rowClassBase =
+  'group relative flex min-h-6 cursor-pointer gap-2 rounded-md pr-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
+
+const rowClass = `${rowClassBase} items-center`
+
+// 搜索结果里的会话多一行正文片段（内容命中的证据）。两行不能靠后写的 items-start 覆盖
+// items-center：Tailwind 工具类的胜负由生成顺序决定，不认源码顺序，所以另起一个常量。
+const rowClassTall = `${rowClassBase} items-start py-1`
 
 const groupRowClass =
   'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white'
@@ -54,6 +71,9 @@ const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
+
+/** 正文搜索的防抖：每次按键都往运行时发一趟请求太吵，慢响应还会互相覆盖。 */
+const SESSION_SEARCH_DEBOUNCE_MS = 220
 
 // 侧栏的列栅格：每一行（分区标题 / 分组 / 会话）都是同样的
 // `[操作列 w-4][图标列 w-4][名称]`，行内左右各 8px、列间距 8px（gap-2），
@@ -78,6 +98,29 @@ const rowIndent = (depth) => ROW_PAD + depth * TREE_STEP
 /** 固定宽度的列位：没有内容时也占位，保证各行的名称都在同一列。 */
 function Slot({ children }) {
   return <span className="relative grid w-4 shrink-0 place-items-center">{children}</span>
+}
+
+/**
+ * 把命中片段渲染成高亮。区间由共享的匹配逻辑给出（已排序、已合并、互不重叠），
+ * 组件只负责切分——自己去 indexOf 会与运行时的匹配规则分叉。
+ */
+function Highlighted({ text, ranges }) {
+  if (!ranges?.length) return text
+  const parts = []
+  let at = 0
+  ranges.forEach(([start, end], index) => {
+    if (start > at) parts.push(text.slice(at, start))
+    if (end > start) {
+      parts.push(
+        <mark key={`hit-${index}`} className="rounded-[2px] bg-warn/25 text-white/95">
+          {text.slice(start, end)}
+        </mark>
+      )
+    }
+    at = Math.max(at, end)
+  })
+  if (at < text.length) parts.push(text.slice(at))
+  return parts
 }
 
 /** 取路径最后一段作为文件夹名 */
@@ -295,6 +338,16 @@ export function SessionTree({
   const [detailSessionId, setDetailSessionId] = useState(null)
   const [editing, setEditing] = useState(null) // { kind: 'session'|'draft'|'group', id }
   const [query, setQuery] = useState('')
+  // 搜索的时间范围：默认只搜最近 3 天。正文搜索要解析会话文件，全部历史都读一遍既慢又
+  // 白占内存，而用户找的多半是最近聊过的东西；范围可调，选择随组件存活（与输入框里的
+  // 查询串同一档：都是「这次搜索」的临时状态，不进界面状态）。
+  const [rangeId, setRangeId] = useState(DEFAULT_SESSION_SEARCH_RANGE)
+  const [contentMatches, setContentMatches] = useState(() => new Map())
+  const [searchingContent, setSearchingContent] = useState(false)
+  const [contentTruncated, setContentTruncated] = useState(false)
+  const [searchFocus, setSearchFocus] = useState(0)
+  const searchInputRef = useRef(null)
+  const searchListRef = useRef(null)
   const [collapsedSections, setCollapsedSections] = useState({
     pinned: false,
     recent: false,
@@ -305,7 +358,9 @@ export function SessionTree({
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
   const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
-  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const tokens = useMemo(() => tokenizeSearchQuery(query), [query])
+  const searching = tokens.length > 0
+  const searchSinceMs = useMemo(() => sessionSearchSinceMs(rangeId, Date.now()), [rangeId])
   // 跑着定时循环的会话自动归到「定时任务」，除非用户已经手动置顶/放进分组（见 sessionSectionOf）。
   const loopSessions = useMemo(() => loopSessionIds(loops), [loops])
   const loopNodes = useMemo(() => loopNodeIds(loops), [loops])
@@ -321,45 +376,30 @@ export function SessionTree({
     [pins, projects, loopSessions]
   )
 
-  const searchable = useMemo(
-    () =>
-      sessions.filter(
-        (session) =>
-          !normalizedQuery ||
-          (session.title || '').toLocaleLowerCase().includes(normalizedQuery) ||
-          (session.cwd || '').toLocaleLowerCase().includes(normalizedQuery)
-      ),
-    [sessions, normalizedQuery]
-  )
   const pinned = useMemo(
     () =>
       orderSessions(
-        searchable.filter((session) => sectionOf(session.id).section === 'pinned'),
+        sessions.filter((session) => sectionOf(session.id).section === 'pinned'),
         sortOrder.pinned || [],
         (a, b) => (pins[b.id] || 0) - (pins[a.id] || 0)
       ),
-    [searchable, sectionOf, pins, sortOrder.pinned]
+    [sessions, sectionOf, pins, sortOrder.pinned]
   )
   const recentCandidates = useMemo(
     () =>
-      searchable
-        .filter((session) => sectionOf(session.id).section === 'recent')
-        .sort(byUpdatedDesc),
-    [searchable, sectionOf]
+      sessions.filter((session) => sectionOf(session.id).section === 'recent').sort(byUpdatedDesc),
+    [sessions, sectionOf]
   )
   const recentList = useMemo(
-    () => (normalizedQuery ? recentCandidates : recentCandidates.slice(0, recentLimit)),
-    [normalizedQuery, recentCandidates, recentLimit]
+    () => recentCandidates.slice(0, recentLimit),
+    [recentCandidates, recentLimit]
   )
   const recentOverflow = Math.max(0, recentCandidates.length - recentList.length)
   const recentPageSize = Math.min(RECENT_PAGE_SIZE, recentOverflow)
-  useEffect(() => {
-    if (normalizedQuery) setRecentLimit(RECENT_PREVIEW_LIMIT)
-  }, [normalizedQuery])
 
   const sessionById = useMemo(
-    () => new Map(searchable.map((session) => [session.id, session])),
-    [searchable]
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions]
   )
   // groupId -> 直接归属该分组的会话（已按分组自己的手动顺序排好）。置顶的会话即便还留着
   // 归属也只在 Pinned 出现，保证同一个会话在侧栏里只有一处。
@@ -394,31 +434,17 @@ export function SessionTree({
     return { rootDrafts: root, draftsByGroup: byGroup }
   }, [draftGroups, draftTabs, groupIds])
 
-  /** 搜索时只保留命中会话所在的分组（含其祖先分组）。 */
-  const visibleGroups = useMemo(() => {
-    if (!normalizedQuery) return null
-    const visible = new Set()
-    const walk = (group) => {
-      let hit = (groupSessions.get(group.id)?.length || 0) > 0
-      for (const child of childGroups(projects, group.id)) if (walk(child)) hit = true
-      if (hit) visible.add(group.id)
-      return hit
-    }
-    for (const group of childGroups(projects, null)) walk(group)
-    return visible
-  }, [projects, groupSessions, normalizedQuery])
-
-  const sectionOpen = (name) => normalizedQuery || !collapsedSections[name]
+  const sectionOpen = (name) => !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
 
   // 定时任务分区：跑着循环的会话 + 还没拿到 sessionId 的草稿节点。
-  // 会话按最近更新排，循环自己的间隔/次数显示在行尾；标题与任务内容都参与搜索。
+  // 会话按最近更新排，循环自己的间隔/次数显示在行尾。
   const scheduledSessions = useMemo(
     () =>
-      searchable
+      sessions
         .filter((session) => sectionOf(session.id).section === 'scheduled')
         .sort(byUpdatedDesc),
-    [searchable, sectionOf]
+    [sessions, sectionOf]
   )
   const scheduledDrafts = useMemo(
     () => rootDrafts.filter((node) => loopNodes.has(node.id)),
@@ -465,8 +491,8 @@ export function SessionTree({
    * 代显，分组折叠由分组图标代显，Recent 的分页由「Show N more」那一行代显。
    */
   const hiddenStates = useMemo(() => {
-    const hidden = (name) => !normalizedQuery && !!collapsedSections[name]
-    const overflow = normalizedQuery ? [] : recentCandidates.slice(recentList.length)
+    const hidden = (name) => !!collapsedSections[name]
+    const overflow = recentCandidates.slice(recentList.length)
     return {
       pinned: hidden('pinned') ? mergeRowStates(pinned.map(rowStateOfSession)) : null,
       project: hidden('project')
@@ -486,7 +512,6 @@ export function SessionTree({
   }, [
     collapsedSections,
     hiddenGroupStates,
-    normalizedQuery,
     pinned,
     projects,
     recentCandidates,
@@ -499,20 +524,155 @@ export function SessionTree({
   /** 折叠的定时任务分区：只有「循环正在跑」值得代显（这个分区没有未读概念）。 */
   const hiddenScheduledState = useMemo(
     () =>
-      !normalizedQuery &&
       collapsedSections.scheduled &&
       (scheduledSessions.length > 0 || scheduledDrafts.length > 0) &&
       loops.some((loop) => loop.status === 'active')
         ? 'running'
         : null,
-    [
-      collapsedSections.scheduled,
-      normalizedQuery,
-      scheduledSessions.length,
-      scheduledDrafts.length,
-      loops
-    ]
+    [collapsedSections.scheduled, scheduledSessions.length, scheduledDrafts.length, loops]
   )
+
+  // 会话 → 所在分组名。搜索结果行的行尾用它说明「这条原来在哪儿」，用户不必回去翻分区。
+  const groupNamesBySession = useMemo(() => {
+    const names = new Map()
+    const byId = new Map((projects?.groups || []).map((group) => [group.id, group.name]))
+    for (const [groupId, ids] of sessionsByGroup(projects)) {
+      const name = byId.get(groupId)
+      if (!name) continue
+      for (const id of ids) names.set(id, name)
+    }
+    return names
+  }, [projects])
+
+  const resultLabelOf = useCallback(
+    (sessionId, group) => {
+      const section = sectionOf(sessionId).section
+      if (section === 'pinned') return '置顶'
+      if (section === 'scheduled') return '定时任务'
+      if (section === 'project') return group || '项目'
+      return ''
+    },
+    [sectionOf]
+  )
+
+  /**
+   * 对话正文只有运行时知道（见 host/stats.js 的 searchSessions），标题/目录/分组名这些
+   * 渲染层本来就有，先在本地匹配、再把命中并进来——打字时的即时反馈来自本地那一半。
+   */
+  useEffect(() => {
+    if (!tokens.length) {
+      setContentMatches((prev) => (prev.size ? new Map() : prev))
+      setSearchingContent(false)
+      setContentTruncated(false)
+      return
+    }
+    const term = tokens.join(' ')
+    let cancelled = false
+    setSearchingContent(true)
+    const timer = setTimeout(() => {
+      window.mica.stats
+        .searchSessions(term, searchSinceMs)
+        .then((result) => {
+          if (cancelled) return
+          setContentMatches(contentMatchMap(result?.results))
+          setContentTruncated(!!result?.truncated)
+        })
+        .catch((error) => {
+          if (cancelled) return
+          console.error('search sessions failed', error)
+          setContentMatches(new Map())
+        })
+        .finally(() => {
+          if (!cancelled) setSearchingContent(false)
+        })
+    }, SESSION_SEARCH_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [tokens, searchSinceMs])
+
+  // 搜索态是**一张按相关度排的平铺列表**，不再钻回四个分区里去找：命中的会话可能原本在
+  // 置顶、某个分组、定时任务或 Recent，按分区渲染就等于让最相关的那条排在第 5 屏。
+  // 它原来属于哪里，由行尾的标签说明。
+  const searchResults = useMemo(() => {
+    if (!tokens.length) return { items: [], overflow: 0 }
+    return rankSearchItems([
+      ...buildSessionSearchResults({
+        sessions,
+        tokens,
+        sinceMs: searchSinceMs,
+        contentMatches,
+        loopOf: (id) => loopBySession.get(id) || null,
+        groupOf: (id) => groupNamesBySession.get(id) || null,
+        sectionLabelOf: resultLabelOf
+      }),
+      ...buildDraftSearchResults({ drafts: draftTabs, tokens })
+    ])
+  }, [
+    contentMatches,
+    draftTabs,
+    groupNamesBySession,
+    loopBySession,
+    resultLabelOf,
+    searchSinceMs,
+    sessions,
+    tokens
+  ])
+  const searchItems = searchResults.items
+  // 计数放在搜索框那一行：结果多的时候列表底部一行早就滚出屏幕了，那里说什么都看不见。
+  const searchCountLabel = searchingContent ? '搜索中…' : `${searchItems.length} 个`
+  const searchCountTitle = searchingContent
+    ? '正在搜索会话内容…'
+    : [
+        `找到 ${searchItems.length} 个会话`,
+        searchResults.overflow > 0 ? `只显示前 ${SESSION_SEARCH_RESULT_LIMIT} 条` : '',
+        contentTruncated ? '内容搜索只覆盖了最近的会话' : ''
+      ]
+        .filter(Boolean)
+        .join('；')
+
+  useEffect(() => {
+    setSearchFocus(0)
+  }, [tokens])
+
+  // 键盘移动时把高亮那一行滚进视野；鼠标悬浮的那一行与它共用同一格。
+  useEffect(() => {
+    const node = searchListRef.current?.querySelector(`[data-search-index="${searchFocus}"]`)
+    node?.scrollIntoView({ block: 'nearest' })
+  }, [searchFocus, searchItems])
+
+  const openSearchItem = useCallback(
+    (item) => {
+      if (!item) return
+      if (item.kind === 'draft') {
+        if (item.draft) onSelectDraft?.(item.draft)
+        return
+      }
+      if (item.session) onOpenSession?.(item.session)
+    },
+    [onOpenSession, onSelectDraft]
+  )
+
+  // ⌘/Ctrl+K 聚焦搜索框。终端与输入框里 Cmd+K 有自己的含义（清屏 / 删到行尾），不抢。
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.repeat || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (String(event.key || '').toLowerCase() !== 'k') return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'TEXTAREA' || target.closest('.xterm'))
+      )
+        return
+      event.preventDefault()
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   const openMenu = (event, payload) => {
     event.preventDefault()
@@ -822,14 +982,104 @@ export function SessionTree({
     )
   }
 
+  /**
+   * 搜索结果行：`[状态位][名称 / 命中片段][来源标签 + 时间]`。
+   *
+   * 与分区里的会话行共用同一套列栅格（Slot + rowIndent + NAME_OFFSET），所以搜索态和
+   * 浏览态的缩进、状态位位置完全一致。差别有两点，都是刻意的：
+   * - 不参与拖拽：搜索态没渲染任何分区标题，拖过去也无处可放；
+   * - 名称下面多一行「为什么命中」——正文片段（内容命中）或高亮的目录（目录命中）。
+   */
+  const renderSearchRow = (item, index) => {
+    const session = item.session
+    const tabId = session ? openBySession[session.id] : item.id
+    const active = session ? !!tabId && activeSessionId === session.id : item.id === activeSessionId
+    const state = session ? rowStateOfSession(session) : rowStateOfDraft(item.draft)
+    const loop = session ? loopBySession.get(session.id) || null : null
+    const snippet = item.snippet
+    const cwdLine = !snippet && item.cwdRanges.length ? item.cwd : null
+    const label = loop ? loopProgressLabel(loop) : item.label || baseName(item.cwd)
+    const openMenuHere = (event) =>
+      session
+        ? openMenu(event, { session, items: menuItemsFor(session) })
+        : openMenu(event, { draft: item.draft, items: draftMenuItems() })
+    return (
+      <li key={item.id}>
+        <div
+          data-search-index={index}
+          className={`${snippet || cwdLine ? rowClassTall : rowClass} ${
+            active
+              ? 'bg-white/[.1] text-white'
+              : searchFocus === index
+                ? 'bg-white/[.06] text-white'
+                : 'text-white/70'
+          }`}
+          style={{ paddingLeft: rowIndent(0) }}
+          title={[
+            item.title,
+            snippet?.text,
+            item.cwd,
+            loop ? loopTooltip(loop, Date.now(), state === 'running') : null
+          ]
+            .filter(Boolean)
+            .join('\n')}
+          onMouseEnter={() => setSearchFocus(index)}
+          onClick={() => openSearchItem(item)}
+          onContextMenu={openMenuHere}
+          {...longPressHandlers(openMenuHere)}
+        >
+          <Slot />
+          <RowLeading
+            state={state}
+            unreadKey={unread[tabId]?.lastEventAt ?? 'running'}
+            terminal={!!session?.id && !!terminalSessions?.has(session.id)}
+            draft={!!tabId && !!draftNodes?.has(tabId)}
+          />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-1.5">
+              {loop && (
+                <span className="shrink-0 text-warn">
+                  <IconClock size={12} stroke={2} />
+                </span>
+              )}
+              <span className="min-w-0 truncate">
+                <Highlighted text={item.title} ranges={item.titleRanges} />
+              </span>
+            </span>
+            {snippet && (
+              <span className="min-w-0 truncate text-[11px] leading-4 text-white/40">
+                <Highlighted text={snippet.text} ranges={snippet.ranges} />
+              </span>
+            )}
+            {cwdLine && (
+              <span className="min-w-0 truncate text-[11px] leading-4 text-white/40">
+                <Highlighted text={cwdLine} ranges={item.cwdRanges} />
+              </span>
+            )}
+          </span>
+          <RowTail
+            label={label}
+            labelTitle={loop ? loop.task : session?.cwd || ''}
+            relativeTime={
+              loop
+                ? loopStatusLabel(loop, state === 'running')
+                : session
+                  ? relativeTimeShort(session.updatedAtMs)
+                  : ''
+            }
+          />
+        </div>
+      </li>
+    )
+  }
+
   const renderGroup = (group, depth = 0) => {
-    if (visibleGroups && !visibleGroups.has(group.id)) return null
     const nesting = childGroups(projects, group.id)
     const groupId = group.id
     const sessionsHere = groupSessions.get(groupId) || []
     const draftsHere = draftsByGroup.get(groupId) || []
     const collapsed = !!collapsedGroups[groupId]
-    const open = normalizedQuery ? true : !collapsed
+    const open = !collapsed
     const editingThis = editing?.kind === 'group' && editing.id === groupId
     const isOver = over?.section === 'project' && over?.groupId === groupId && over?.onGroup
     // 只有子分组右移一层；分组里的会话/草稿与分组名同列（和 Recent 的会话对齐）。
@@ -1009,126 +1259,215 @@ export function SessionTree({
   return (
     <>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
-        <div className="mb-1.5 flex h-7 items-center gap-1.5 rounded-md bg-white/[.05] px-2 transition-colors focus-within:bg-white/[.08]">
-          <IconSearch size={13} className="shrink-0 text-white/35" />
-          <input
-            type="search"
-            value={query}
-            placeholder="搜索会话..."
-            aria-label="搜索会话"
-            className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-white/35 focus:outline-none"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {query && (
-            <button
-              type="button"
-              title="清除搜索"
-              aria-label="清除搜索"
-              className="grid size-5 shrink-0 place-items-center rounded text-white/40 hover:bg-white/[.1] hover:text-white"
-              onClick={() => setQuery('')}
+        {/* 搜索框钉在滚动容器顶部：会话一多就要往下滚，搜索框跟着滚出去的话，想搜索
+            还得先滚回顶部。`-mx-2 px-2` 让底色铺满整条，滚过去的内容不会从两侧透出来。 */}
+        <div className="sticky top-0 z-10 -mx-2 mb-1.5 bg-panel px-2 pt-0.5 pb-1.5">
+          <div className="flex h-7 items-center gap-1.5 rounded-md bg-white/[.05] px-2 transition-colors focus-within:bg-white/[.08]">
+            <IconSearch size={13} className="shrink-0 text-white/35" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={query}
+              placeholder="搜索会话（⌘K）"
+              aria-label="搜索会话"
+              spellCheck={false}
+              className="h-full min-w-0 flex-1 appearance-none bg-transparent text-[13px] text-white placeholder:text-white/35 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setSearchFocus((index) =>
+                    Math.min(index + 1, Math.max(0, searchItems.length - 1))
+                  )
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setSearchFocus((index) => Math.max(0, index - 1))
+                } else if (event.key === 'Enter') {
+                  if (!searchItems.length) return
+                  event.preventDefault()
+                  openSearchItem(searchItems[Math.min(searchFocus, searchItems.length - 1)])
+                } else if (event.key === 'Escape' && query) {
+                  event.preventDefault()
+                  setQuery('')
+                }
+              }}
+            />
+            {query && (
+              <button
+                type="button"
+                title="清除搜索"
+                aria-label="清除搜索"
+                className="grid size-5 shrink-0 place-items-center rounded text-white/40 hover:bg-white/[.1] hover:text-white"
+                onClick={() => setQuery('')}
+              >
+                <IconX size={14} />
+              </button>
+            )}
+          </div>
+          {searching && (
+            <div
+              role="group"
+              aria-label="搜索时间范围"
+              className="mt-1 flex items-center gap-1 text-[11px]"
             >
-              <IconX size={14} />
-            </button>
+              <span className="shrink-0 text-white/30">时间</span>
+              {SESSION_SEARCH_RANGES.map((range) => (
+                <button
+                  key={range.id}
+                  type="button"
+                  aria-pressed={rangeId === range.id}
+                  title={
+                    range.days > 0 ? `搜索最近 ${range.label}内更新的会话` : '搜索全部历史会话'
+                  }
+                  className={`rounded px-1.5 py-0.5 transition-colors ${
+                    rangeId === range.id
+                      ? 'bg-white/10 text-white/85'
+                      : 'text-white/40 hover:bg-white/[.06] hover:text-white/70'
+                  }`}
+                  onClick={() => setRangeId(range.id)}
+                >
+                  {range.label}
+                </button>
+              ))}
+              <span className="ml-auto shrink-0 pl-1 text-white/30" title={searchCountTitle}>
+                {searchCountLabel}
+              </span>
+            </div>
           )}
         </div>
 
-        <div className="flex flex-col gap-px">
-          <section>
-            {renderSectionHeader('pinned', 'Pinned', IconPin, {
-              dropSection: 'pinned',
-              hiddenState: hiddenStates.pinned
-            })}
-            {sectionOpen('pinned') &&
-              (pinned.length ? (
-                <ul className="flex flex-col gap-px">
-                  {pinned.map((session) => renderSessionRow(session, 0, 'pinned'))}
-                </ul>
-              ) : (
-                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
-                  暂无置顶会话。
-                </p>
-              ))}
-          </section>
-
-          <section>
-            {renderSectionHeader('project', 'Projects', IconFolder, {
-              onAdd: () => onCreateGroup(null),
-              addTitle: '新建分组',
-              // 会话没有「Projects 根」这一级（取消归属是拖到 Recent），这里只接分组
-              dropSection: 'project',
-              accepts: (source) => source.kind === 'group',
-              hiddenState: hiddenStates.project
-            })}
-            {sectionOpen('project') &&
-              (projects?.groups?.length ? (
-                <ul role="tree" className="flex flex-col gap-px">
-                  {childGroups(projects, null).map((group) => renderGroup(group))}
-                </ul>
-              ) : (
-                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
-                  暂无项目分组，先新建一个分组。
-                </p>
-              ))}
-          </section>
-
-          <section>
-            {renderSectionHeader('scheduled', '定时任务', IconClock, {
-              // 这个分区没有「新增」入口：定时任务一律在会话输入框右下角的时钟面板里建
-              // （它同时是创建、改间隔、暂停/继续与停止的唯一入口）。
-              hiddenState: hiddenScheduledState
-            })}
-            {sectionOpen('scheduled') &&
-              (scheduledSessions.length || scheduledDrafts.length ? (
-                <ul role="tree" className="flex flex-col gap-px">
-                  {scheduledDrafts.map((node) =>
-                    renderDraftRow(node, 0, null, loopForNode(loops, node.id))
-                  )}
-                  {scheduledSessions.map((session) => renderSessionRow(session, 0, 'scheduled'))}
-                </ul>
-              ) : (
-                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
-                  暂无定时任务，点会话输入框右下角的时钟图标即可创建。
-                </p>
-              ))}
-          </section>
-
-          <section>
-            {renderSectionHeader('recent', 'Recent', IconListTree, {
-              dropSection: 'recent',
-              hiddenState: hiddenStates.recent
-            })}
-            {sectionOpen('recent') &&
-              (recentList.length || recentDrafts.length ? (
-                <>
-                  <ul role="tree" className="flex flex-col gap-px">
-                    {recentDrafts.map((node) => renderDraftRow(node))}
-                    {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
+        {searching ? (
+          <div ref={searchListRef} className="flex flex-col gap-px">
+            {searchItems.length ? (
+              <ul role="tree" className="flex flex-col gap-px">
+                {searchItems.map((item, index) => renderSearchRow(item, index))}
+              </ul>
+            ) : (
+              <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
+                {searchingContent ? '正在搜索会话内容…' : '没有匹配的会话。'}
+                {!searchingContent && rangeId !== 'all' && (
+                  <button
+                    type="button"
+                    className="ml-1 text-white/55 underline-offset-2 hover:text-white hover:underline"
+                    onClick={() => setRangeId('all')}
+                  >
+                    搜索全部时间
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-px">
+            <section>
+              {renderSectionHeader('pinned', 'Pinned', IconPin, {
+                dropSection: 'pinned',
+                hiddenState: hiddenStates.pinned
+              })}
+              {sectionOpen('pinned') &&
+                (pinned.length ? (
+                  <ul className="flex flex-col gap-px">
+                    {pinned.map((session) => renderSessionRow(session, 0, 'pinned'))}
                   </ul>
-                  {recentOverflow > 0 && !normalizedQuery && (
-                    <button
-                      type="button"
-                      className={`${rowClass} w-full text-white/45 hover:text-white/75`}
-                      style={{ paddingLeft: rowIndent(0) }}
-                      onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
-                    >
-                      <Slot />
-                      <Slot>
-                        <IconDots size={14} />
-                        <RowBadge state={hiddenStates.recentOverflow} scope="Recent" />
-                      </Slot>
-                      <span className="min-w-0 flex-1 truncate text-left text-[13px]">
-                        Show {recentPageSize} more
-                      </span>
-                    </button>
-                  )}
-                </>
-              ) : (
-                <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
-                  暂无最近会话。
-                </p>
-              ))}
-          </section>
-        </div>
+                ) : (
+                  <p
+                    className="py-1 pr-2 text-xs text-white/35"
+                    style={{ paddingLeft: NAME_OFFSET }}
+                  >
+                    暂无置顶会话。
+                  </p>
+                ))}
+            </section>
+
+            <section>
+              {renderSectionHeader('project', 'Projects', IconFolder, {
+                onAdd: () => onCreateGroup(null),
+                addTitle: '新建分组',
+                // 会话没有「Projects 根」这一级（取消归属是拖到 Recent），这里只接分组
+                dropSection: 'project',
+                accepts: (source) => source.kind === 'group',
+                hiddenState: hiddenStates.project
+              })}
+              {sectionOpen('project') &&
+                (projects?.groups?.length ? (
+                  <ul role="tree" className="flex flex-col gap-px">
+                    {childGroups(projects, null).map((group) => renderGroup(group))}
+                  </ul>
+                ) : (
+                  <p
+                    className="py-1 pr-2 text-xs text-white/35"
+                    style={{ paddingLeft: NAME_OFFSET }}
+                  >
+                    暂无项目分组，先新建一个分组。
+                  </p>
+                ))}
+            </section>
+
+            <section>
+              {renderSectionHeader('scheduled', '定时任务', IconClock, {
+                // 这个分区没有「新增」入口：定时任务一律在会话输入框右下角的时钟面板里建
+                // （它同时是创建、改间隔、暂停/继续与停止的唯一入口）。
+                hiddenState: hiddenScheduledState
+              })}
+              {sectionOpen('scheduled') &&
+                (scheduledSessions.length || scheduledDrafts.length ? (
+                  <ul role="tree" className="flex flex-col gap-px">
+                    {scheduledDrafts.map((node) =>
+                      renderDraftRow(node, 0, null, loopForNode(loops, node.id))
+                    )}
+                    {scheduledSessions.map((session) => renderSessionRow(session, 0, 'scheduled'))}
+                  </ul>
+                ) : (
+                  <p
+                    className="py-1 pr-2 text-xs text-white/35"
+                    style={{ paddingLeft: NAME_OFFSET }}
+                  >
+                    暂无定时任务，点会话输入框右下角的时钟图标即可创建。
+                  </p>
+                ))}
+            </section>
+
+            <section>
+              {renderSectionHeader('recent', 'Recent', IconListTree, {
+                dropSection: 'recent',
+                hiddenState: hiddenStates.recent
+              })}
+              {sectionOpen('recent') &&
+                (recentList.length || recentDrafts.length ? (
+                  <>
+                    <ul role="tree" className="flex flex-col gap-px">
+                      {recentDrafts.map((node) => renderDraftRow(node))}
+                      {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
+                    </ul>
+                    {recentOverflow > 0 && (
+                      <button
+                        type="button"
+                        className={`${rowClass} w-full text-white/45 hover:text-white/75`}
+                        style={{ paddingLeft: rowIndent(0) }}
+                        onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
+                      >
+                        <Slot />
+                        <Slot>
+                          <IconDots size={14} />
+                          <RowBadge state={hiddenStates.recentOverflow} scope="Recent" />
+                        </Slot>
+                        <span className="min-w-0 flex-1 truncate text-left text-[13px]">
+                          Show {recentPageSize} more
+                        </span>
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <p
+                    className="py-1 pr-2 text-xs text-white/35"
+                    style={{ paddingLeft: NAME_OFFSET }}
+                  >
+                    暂无最近会话。
+                  </p>
+                ))}
+            </section>
+          </div>
+        )}
       </div>
       {menuNode && (
         <ContextMenu menu={menuNode} onClose={() => setMenu(null)} onAction={runAction} />
