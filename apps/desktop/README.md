@@ -122,6 +122,13 @@ $ npm run build:linux
   bundle and exposes `src/host` over `/api`. `vite.server.config.mjs` aliases `electron` to
   `src/server/electron-shim.js`, which implements the exact surface those modules use
   (`ipcMain.handle`, a shared `event.sender`, `app.getPath`, `shell`, `clipboard`, `dialog`).
+  _Dependency-free is load-bearing_: the bundle ships inside `app.asar`, which has no
+  `node_modules`, so any dependency left external is a `Cannot find package …` at launch. Vite's SSR
+  build externalises `package.json` dependencies by default, so the config pins
+  `ssr.noExternal: true` and keeps only Node builtins plus `node-pty` external;
+  `src/host/server-bundle.test.js` asserts it (skipping when the bundle has not been built). A slip
+  here stays green in dev — which resolves packages from the repo's `node_modules` — and only breaks
+  the packaged app.
 - `src/main/index.js` — the Electron container. It spawns the runtime
   (`ELECTRON_RUN_AS_NODE`), loads the window at the runtime URL, mirrors unread notifications onto
   the dock badge (and flashes the taskbar on Windows), and stops the runtime on quit. It registers

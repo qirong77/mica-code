@@ -62,6 +62,29 @@ describe('mica CLI resolution', () => {
       })
     ).toBeNull()
   })
+
+  // Windows has no executable bit (every file reports 0o100666), and the real binary
+  // sits in ~/.local/lib/mica behind a mica.cmd shim in ~/.local/bin.
+  it('accepts an un-chmodded .exe on Windows', () => {
+    const home = makeHome()
+    const exe = makeMica(home, '.local/lib/mica/mica.exe', false)
+
+    expect(resolveMicaExecutable({ env: {}, homeDirectory: home, platform: 'win32' })).toBe(exe)
+  })
+
+  it('prefers mica.exe over the mica.cmd shim on Windows', () => {
+    const home = makeHome()
+    makeMica(home, '.local/bin/mica.cmd', false)
+    const exe = makeMica(home, '.local/lib/mica/mica.exe', false)
+
+    expect(resolveMicaExecutable({ env: {}, homeDirectory: home, platform: 'win32' })).toBe(exe)
+  })
+
+  it('still returns null on Windows when nothing is installed', () => {
+    const home = makeHome()
+
+    expect(resolveMicaExecutable({ env: {}, homeDirectory: home, platform: 'win32' })).toBeNull()
+  })
 })
 
 describe('mica CLI terminal command', () => {

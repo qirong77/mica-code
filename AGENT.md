@@ -166,6 +166,11 @@ bun run format
 
 - `src/host/`：业务核心（terminals / chat / files / git / stats / ui-state / configWeb / notifyServer / shared-sessions / browser-control / chat-\* / scheduled-\* 等），只跑在运行时进程里。
 - `src/server/index.js`：运行时本体。零依赖 Node HTTP 服务，托管 renderer 产物、把 host 能力暴露为 `POST /api/invoke`，推送走 `GET /api/events`（SSE），并**广播给所有客户端**（手机与桌面窗口共享同一状态）。`vite.server.config.mjs` 把 `electron` 别名到 `src/server/electron-shim.js`（`ipcMain.handle` → channel 注册表、进程内单例 `event.sender`、`app.getPath`/`shell`/`clipboard`/`dialog` 的纯 Node 实现）。
+
+  **这个产物必须自包含**（「零依赖」是硬约束，不是描述）：产物进 app.asar，而 app.asar 里没有 node_modules，任何被外部化的依赖都是用户启动时的 `Cannot find package …`。Vite 的 SSR 构建默认恰好把 dependencies 全部外部化，所以 `vite.server.config.mjs` 用 `ssr.noExternal: true` 强制内联，只留 `rollupOptions.external` 里的 node 内置模块与 `node-pty`。这类缺陷**本地全绿、dev 也正常**（dev 能从仓库根 node_modules 解析），只在发布产物上炸——曾有依赖被引用却不在依赖树里，导致打包版直接起不来，因此有 `src/host/server-bundle.test.js` 断言「产物除内置模块与 node-pty 外没有裸导入」（未构建时跳过）。新增运行时依赖后跑一次 `npm run build:server && npm test`，别只靠 dev 窗口。
+
+  `src/host/mica-cli.js` 的 `resolveMicaExecutable()` 决定桌面端用哪个 `mica` 起 chat/commit/models 子进程（找不到就整个能力不可用），**它必须保持平台感知**：Windows 没有可执行位（`.exe`/`.cmd` 的 `mode` 都是 `0o100666`），照搬 POSIX 的 `mode & 0o111` 会恒返回 null；同时 `.cmd` 需要 shell 才能 spawn（Node 20.12+ 拒绝），所以 `.exe` 要排在 `.cmd` 前。
+
 - `src/main/index.js`：Electron 外壳。**唯一例外是 `src/main/browser/` 的受控浏览器宿主**（见下文「受控浏览器」一条：只有主进程能开窗口，所以它必须住在这里，靠 localhost HTTP API 与运行时解耦），除此之外只做四件事——拉起运行时（`spawn(process.execPath, [out/server/index.mjs], { ELECTRON_RUN_AS_NODE: '1' })`，用 stdin 管道保证父进程退出时运行时跟着退）、把窗口 `loadURL` 到运行时地址、订阅 SSE 把未读数映射成 dock 徽标 / 任务栏闪烁、以及「切换 Mica 服务器」的导航放行与一窗口一台服务器的窗口状态（见下文该条）。**不要在外壳里注册业务 IPC，也不要加回 preload**：页面里的 `window.mica` 始终由 renderer 的 transport 经 HTTP + SSE 建立，加回 preload 会让页面走 IPC 而运行时里没有对应 handler。
 - `src/renderer/`：页面。`transport.js` 是 `window.mica` 的实现（`main.jsx` 挂载前经 `ensureMicaApi()` 安装），`window.mica.isWeb` 用来分支那些只有本机窗口才成立的行为；**不要在业务组件里直接判断运行环境**，平台差异收敛在 transport 层。连不上运行时时 `main.jsx` 渲染可读提示而不是白屏。
 

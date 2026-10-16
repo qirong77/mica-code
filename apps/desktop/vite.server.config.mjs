@@ -12,6 +12,13 @@ import { defineConfig } from 'vite'
 const external = [...builtinModules, ...builtinModules.map((name) => `node:${name}`), 'node-pty']
 
 export default defineConfig({
+  // SSR 构建默认把 package.json 的 dependencies 全部外部化，产物因此仍会 `import` 裸包名，
+  // 而打包版 app.asar 里并没有它们（`nanostores` 就是被它引用、又不在依赖树里的一个，
+  // 打包版启动即 `Cannot find package 'nanostores'`；dev 模式从仓库根 node_modules 解析，
+  // 所以只在发布产物上炸）。这个运行时按设计是零依赖的，这里把纯 JS 依赖全部内联，
+  // 只留 rollupOptions.external 里的 node 内置模块与 node-pty —— 将来多一个依赖没能内联，
+  // 也是构建期报错而不是留到用户启动时才崩。
+  ssr: { noExternal: true },
   resolve: {
     alias: [
       { find: /^electron$/, replacement: resolve('src/server/electron-shim.js') },
