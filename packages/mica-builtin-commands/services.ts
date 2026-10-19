@@ -1,4 +1,5 @@
 import type {
+  AgentQueryContent,
   AgentUsageRecord,
   AgentUsageSummary,
   SubagentUsageRecord,
@@ -39,7 +40,11 @@ export type CommandAgent = {
   setRole(roleName: string): void;
   buildSystemPrompt(): string;
   createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
-    query(input: string): Promise<string>;
+    /**
+     * 问题可以是纯文本，也可以是文本 + 图片的多模态内容块（桌面端 By The Way 的粘贴
+     * 图片走后者：`[Image](路径)` 由调用方解析成 content block 再传进来）。
+     */
+    query(input: AgentQueryContent): Promise<string>;
     /** 该子代理已发出的模型请求；命令据此把 helper 子代理的开销记进会话。 */
     readonly usageHistory?: AgentUsageRecord[];
     /**

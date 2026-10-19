@@ -33,6 +33,7 @@ import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
+import { registerClipboardIpc } from '../host/clipboard.js'
 import { registerServersIpc } from '../host/servers.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
 import { flushUiState, registerUiStateIpc, setUiStateSender } from '../host/ui-state.js'
@@ -425,6 +426,7 @@ export async function startDesktopServer(options = {}) {
   registerGitIpc()
   registerStatsIpc()
   registerSkillsIpc()
+  registerClipboardIpc()
   registerServersIpc()
   registerConfigWebIpc()
   registerAccessIpc()

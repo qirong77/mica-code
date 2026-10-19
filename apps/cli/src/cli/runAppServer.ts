@@ -1310,6 +1310,26 @@ async function handleCodexRequest(
       ctx.writeResponse({ ok: true, threadId: ctx.btw.snapshot().id });
       return;
     }
+    case MICA_METHODS.renameSession: {
+      // Mica extension: rename the session. The resident host owns the session
+      // file and writes it from its in-memory snapshot on every save, so a
+      // client-side read-modify-write would be overwritten by the next turn
+      // (and is refused outright while one runs). `renameCurrent` keeps the
+      // manual title in memory, which is what later saves persist — the same
+      // path the CLI's `/rename` takes.
+      const title = (paramString(params, 'title') ?? '').trim();
+      if (!title) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'title must not be empty');
+        return;
+      }
+      if (!ctx.sessionId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'rename requires a session');
+        return;
+      }
+      ctx.sessionController.renameCurrent(title);
+      ctx.writeResponse({ ok: true, title: ctx.sessionController.getCurrentTitle() ?? title });
+      return;
+    }
     default:
       ctx.writeError(CODEX_ERROR_METHOD_NOT_FOUND, `Method not found: ${method}`);
       return;

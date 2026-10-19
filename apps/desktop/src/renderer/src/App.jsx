@@ -648,6 +648,7 @@ const MAX_SIDEBAR_WIDTH = 640
 
 /** useUiStateValue 的 fallback 必须是稳定的引用（见 compareBases 处的说明）。 */
 const EMPTY_COMPARE_BASES = {}
+const EMPTY_TERMINAL_OPEN = {}
 // 底部终端面板（VSCode 风格）：高度可拖，默认给对话留出大半屏，最高不超过视高的 3/4。
 const DEFAULT_TERMINAL_HEIGHT = 320
 const MIN_TERMINAL_HEIGHT = 120
@@ -816,8 +817,19 @@ export default function App() {
     pendingFileOpenRef.current = null
     filesRef.current?.openFile(pending.path, pending.position)
   }, [filesReady, view])
-  // 底部终端面板：展开状态与高度都是界面状态（跨窗口/重启保持）
-  const [terminalOpen, setTerminalOpen] = useState(() => storedLayout().terminalOpen === true)
+  // 底部终端面板：展开状态跟着会话走——按对话节点 id 记在界面状态里（默认收起），切到
+  // 另一个会话时看到的是那个会话自己的样子，而不是上一个会话展开着的那一屏；高度是全局的
+  // 一个值（跨窗口/重启保持）。
+  const terminalOpenByChat = useUiStateValue('terminalOpenByChat', EMPTY_TERMINAL_OPEN)
+  const terminalOpen = terminalOpenByChat[activeId] === true
+  const setTerminalOpen = useCallback(
+    (open) => {
+      const chatId = activeRef.current
+      if (!chatId) return
+      setUiStateEntries('terminalOpenByChat', { [chatId]: open ? true : null })
+    },
+    [activeRef]
+  )
   const [terminalHeight, setTerminalHeight] = useState(savedTerminalHeight)
   const [resizingTerminal, setResizingTerminal] = useState(false)
   const terminalHeightRef = useRef(terminalHeight)
@@ -1195,11 +1207,10 @@ export default function App() {
     setUiState('layout', {
       sidebarWidth,
       sidebarCollapsed,
-      terminalOpen,
       terminalHeight,
       view
     })
-  }, [sidebarCollapsed, sidebarWidth, terminalHeight, terminalOpen, view])
+  }, [sidebarCollapsed, sidebarWidth, terminalHeight, view])
 
   useEffect(() => {
     if (!remoteLayout) return
@@ -1207,7 +1218,6 @@ export default function App() {
     if (typeof remoteLayout.sidebarCollapsed === 'boolean')
       setSidebarCollapsed(remoteLayout.sidebarCollapsed)
     if (Number.isFinite(remoteLayout.terminalHeight)) setTerminalHeight(remoteLayout.terminalHeight)
-    if (typeof remoteLayout.terminalOpen === 'boolean') setTerminalOpen(remoteLayout.terminalOpen)
     if (
       remoteLayout.view === 'chat' ||
       remoteLayout.view === 'files' ||
@@ -1590,7 +1600,7 @@ export default function App() {
     })
     setRightActiveTermByChat((prev) => ({ ...prev, [chatId]: id }))
     setTerminalOpen(true)
-  }, [activeRef, nodesRef, terminalCwd])
+  }, [activeRef, nodesRef, setTerminalOpen, terminalCwd])
 
   const closeRightTerm = useCallback(
     (id) => {
@@ -1645,12 +1655,12 @@ export default function App() {
   const openTerminalPanel = useCallback(() => {
     if (rightTerms.length === 0) createRightTerm()
     else setTerminalOpen(true)
-  }, [createRightTerm, rightTerms.length])
+  }, [createRightTerm, rightTerms.length, setTerminalOpen])
   // 顶栏终端图标 / Ctrl+`：来回切换面板的显示与隐藏。
   const toggleTerminalPanel = useCallback(() => {
     if (terminalOpen) setTerminalOpen(false)
     else openTerminalPanel()
-  }, [openTerminalPanel, terminalOpen])
+  }, [openTerminalPanel, setTerminalOpen, terminalOpen])
 
   // 终端面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
   // 否则切过去只能看到一片空白。只在面板真正可见时才补，免得用户点过的每个
@@ -1691,6 +1701,18 @@ export default function App() {
         .catch((error) => console.error('dispose right term failed', error))
     }
   }, [nodes, rightTermsByChatRef])
+
+  // 会话关掉后它那条「终端面板是否展开」也要删掉：键是对话节点 id，不清理的话这张表
+  // 会随用随攒。只清「这一页见过、现在没了」的 id——另一个窗口刚建出来的页签还要靠它
+  // 记住状态，按当前 nodes 全量比对会把那边刚写的条目误删。
+  const liveNodeIdsRef = useRef(new Set())
+  useEffect(() => {
+    const alive = new Set(nodes.map((node) => node.id))
+    const gone = [...liveNodeIdsRef.current].filter((id) => !alive.has(id))
+    liveNodeIdsRef.current = alive
+    if (gone.length === 0) return
+    setUiStateEntries('terminalOpenByChat', Object.fromEntries(gone.map((id) => [id, null])))
+  }, [nodes])
 
   // 右侧终端是每个会话一组真 PTY，应用开着不放会越积越多，所以定时回收：8h 没被
   // 碰过的会话、以及 8h 没有任何活动的终端都释放，下次切过去再按需重开。当前正在
@@ -2418,10 +2440,16 @@ export default function App() {
               onRenameSession={(sessionId, title) => {
                 const text = (title || '').trim()
                 if (text) {
-                  window.mica.stats
-                    .renameSession(sessionId, title)
-                    .then(() => refreshSessions())
-                    .catch((error) => console.error('rename session failed', error))
+                  window.mica.chat
+                    .renameSession(sessionId, text)
+                    .then((result) => {
+                      if (result?.ok === false) {
+                        showToast(result.error || '重命名失败', true)
+                        return
+                      }
+                      refreshSessions()
+                    })
+                    .catch((error) => showToast(`重命名失败：${error?.message || error}`, true))
                 }
               }}
               onRenameDraft={(nodeId, text) =>

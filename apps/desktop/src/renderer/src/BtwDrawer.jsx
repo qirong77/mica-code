@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   IconAlertCircle,
   IconLoader2,
   IconMessageChatbot,
+  IconPhoto,
   IconSend,
   IconX
 } from '@tabler/icons-react'
+import { ComposerImageStrip } from './composer-images'
+import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { btwEntryElapsedMs, btwPhaseText, btwRunningEntry } from './btw-thread'
 import { useLatest } from './hooks'
+import TerminalComposer from './TerminalComposer'
 
 /**
  * 输入条动作区的「By The Way」（btw）—— CLI `/btw` 的桌面等价物，**右侧抽屉**。
@@ -44,10 +48,15 @@ export function BtwDrawer({
   onAsk,
   onNewThread,
   renderAnswer,
+  renderQuestion,
+  onPreviewImage,
+  onNotice,
   onClose
 }) {
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
+  const imageInputRef = useRef(null)
+  const draftRef = useLatest(draft)
   const entries = Array.isArray(thread?.entries) ? thread.entries : []
   const runningEntry = btwRunningEntry(entries)
   const running = Boolean(runningEntry)
@@ -82,13 +91,61 @@ export function BtwDrawer({
     if (body && stickToBottomRef.current) body.scrollTop = body.scrollHeight
   }, [entries, now])
 
-  // 输入框跟着内容长高（到上限才自己滚）：抽屉比浮层宽，没必要让人在一行里横着读。
-  useEffect(() => {
-    const input = inputRef.current
-    if (!input) return
-    input.style.height = 'auto'
-    input.style.height = `${Math.min(input.scrollHeight, 132)}px`
-  }, [draft])
+  /**
+   * 把一段文本插到光标处（粘贴图片、上传图片共用）。以 textarea 当前的值为准——选照片
+   * 与读剪贴板都是异步的，回调执行时闭包里的 draft 可能已经过期。
+   *
+   * 与主输入条的 `insertComposerText` 同一套语义：插完把光标落在插入内容之后、焦点交还
+   * 输入框，用户接着就能打字。
+   */
+  const insertText = useCallback(
+    (text) => {
+      if (!text) return
+      const element = inputRef.current
+      const current = element?.value ?? draftRef.current ?? ''
+      const start = element?.selectionStart ?? current.length
+      const end = element?.selectionEnd ?? current.length
+      const next = current.slice(0, start) + text + current.slice(end)
+      onDraftChange?.(next)
+      requestAnimationFrame(() => {
+        const node = inputRef.current
+        if (!node) return
+        node.setSelectionRange(start + text.length, start + text.length)
+        node.focus()
+      })
+    },
+    [draftRef, onDraftChange]
+  )
+
+  // 粘贴与主输入条**同一份实现**：图片转 `[Image](路径)`，文件（文件夹 / Excel…）转成
+  // 绝对路径。抽屉是另一条对话，粘贴的行为不该长出第二种。
+  const handlePaste = useCallback(
+    (event) => {
+      void pasteIntoComposer(event, { insertText, notify: onNotice })
+    },
+    [insertText, onNotice]
+  )
+
+  // 相册/拍照：手机上粘贴不可用，只能靠文件选择器（与主输入条同一个 accept）
+  const attachImages = useCallback(
+    async (files) => {
+      const list = Array.from(files || [])
+      if (!list.length) return
+      const refs = []
+      for (const file of list) {
+        try {
+          const result = await window.mica.chat.savePastedImage({ file })
+          if (result?.ok && result.ref) refs.push(result.ref)
+          else onNotice?.(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
+        } catch (error) {
+          // 失败就不插引用（草稿里不该出现一个打不开的路径），但要说明为什么没反应
+          onNotice?.(`上传 ${file.name || '图片'} 失败：${error?.message || error}`, 'error')
+        }
+      }
+      if (refs.length) insertText(refs.map((ref) => `[Image](${ref})`).join(' '))
+    },
+    [insertText, onNotice]
+  )
 
   // Esc 关闭。抽屉刻意**不**照搬浮层的「点外面就关」：边看主对话边滚动是常态，误关一次
   // 就把半句话和正在读的答案一起收走了；文档级监听保证焦点在别的输入框里也生效。
@@ -175,7 +232,10 @@ export function BtwDrawer({
                     ▌
                   </div>
                   <div className="chat-message-body">
-                    <p className="chat-btw-question">{entry.question}</p>
+                    {/* 与对话区「你说的话」同一套渲染：图片引用降级成可点链接、路径可点 */}
+                    <p className="chat-btw-question">
+                      {renderQuestion ? renderQuestion(entry.question) : entry.question}
+                    </p>
                   </div>
                 </div>
                 <div
@@ -226,36 +286,69 @@ export function BtwDrawer({
         )}
       </div>
       <div className="chat-btw-foot">
-        {/* 提示语要能在一行里放下：手机上输入框是 16px（见 app.css 的移动端块），
-            「问点什么，Enter 发送 · Shift+Enter 换行」会折成两行，而 placeholder 不参与
-            scrollHeight —— 上面那个自动长高量不到它，第二行会被裁掉。 */}
-        <textarea
-          ref={inputRef}
-          className="chat-btw-input"
-          rows={1}
-          value={draft}
-          aria-label="By The Way 问题"
-          title="Enter 发送 · Shift+Enter 换行（回答不进入本会话上下文）"
-          placeholder={running ? '正在回答上一个问题…' : '问点什么，Enter 发送'}
-          onChange={(event) => onDraftChange?.(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="chat-btw-send"
-          title="发送（不影响主流程）"
-          aria-label="发送 By The Way 问题"
-          disabled={!String(draft || '').trim() || running || sending}
-          onClick={submit}
-        >
-          {sending ? <IconLoader2 size={13} className="animate-spin" /> : <IconSend size={13} />}
-        </button>
+        {/* 输入条与主对话**同一套实现**：`TerminalComposer` 负责自绘光标、选区高亮与
+            中英文组合，动作区是 `.chat-composer-actions`。抽屉是另一条对话，输入框不该
+            长出第二种样子（裸 textarea 既没有终端光标，也不显示选区）。 */}
+        <ComposerImageStrip text={draft} onPreview={onPreviewImage} />
+        <div className="chat-composer chat-btw-composer">
+          {/* 行首标记：与主输入条同一个位置和字号（只是这里不可点，没有角色可切） */}
+          <span className="chat-prompt-mark" aria-hidden="true">
+            <span className="chat-prompt-caret">›</span>
+          </span>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="sr-only"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(event) => {
+              const files = Array.from(event.target.files || [])
+              // 先取走 FileList 再清空，否则同一个文件不会二次触发 change
+              event.target.value = ''
+              void attachImages(files)
+            }}
+          />
+          <TerminalComposer
+            value={draft}
+            textareaRef={inputRef}
+            placeholder={running ? '正在回答上一个问题…' : '问点什么，Enter 发送'}
+            onChange={(value) => onDraftChange?.(value)}
+            onPaste={handlePaste}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                submit()
+              }
+            }}
+          />
+          <div className="chat-composer-actions">
+            <button
+              type="button"
+              title="上传图片"
+              aria-label="上传图片"
+              onClick={() => imageInputRef.current?.click()}
+            >
+              <IconPhoto size={13} />
+            </button>
+            <button
+              type="button"
+              className="chat-btw-send"
+              title="发送（不影响主流程）"
+              aria-label="发送 By The Way 问题"
+              disabled={!String(draft || '').trim() || running || sending}
+              onClick={submit}
+            >
+              {sending ? (
+                <IconLoader2 size={13} className="animate-spin" />
+              ) : (
+                <IconSend size={13} />
+              )}
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
   )

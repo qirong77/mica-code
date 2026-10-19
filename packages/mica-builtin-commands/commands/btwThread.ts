@@ -1,4 +1,4 @@
-import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
+import type { AgentQueryContent, AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type { CommandAgent } from '../services.js';
 
 /**
@@ -14,7 +14,8 @@ import type { CommandAgent } from '../services.js';
  */
 
 export type BtwSubagent = {
-  query(input: string): Promise<string>;
+  /** 纯文本，或文本 + 图片的多模态内容块（桌面端 By The Way 的粘贴图片）。 */
+  query(input: AgentQueryContent): Promise<string>;
   readonly usageHistory?: AgentUsageRecord[];
   /**
    * 流式回调（可选设置）：思考 / 工具调用 / 正文的 delta。

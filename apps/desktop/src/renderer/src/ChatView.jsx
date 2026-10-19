@@ -37,14 +37,12 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
+import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
-import {
-  findImageReferences,
-  parsePathHref,
-  remarkPathLinks,
-  splitTextByImages
-} from './chat-paths'
+import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
+import { ComposerImageStrip, resolveImageSource } from './composer-images'
+import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { newlyAnsweredBtwEntries } from './btw-thread'
@@ -228,42 +226,6 @@ function CodeBlock({ children }) {
 
 function isExternalHref(href) {
   return /^(https?:|mailto:)/i.test(href || '')
-}
-
-function resolveImageSource(source) {
-  const value = String(source || '').trim()
-  if (!value) return ''
-  if (/^(https?:|data:|blob:|file:)/i.test(value)) return value
-  const homeDir = typeof window !== 'undefined' ? window.mica?.homeDir || '' : ''
-  const expanded = value.startsWith('~/') && homeDir ? `${homeDir}${value.slice(1)}` : value
-  if (/^(?:\/|[a-zA-Z]:[\\/])/.test(expanded)) {
-    const normalized = expanded.replace(/\\/g, '/')
-    // 浏览器无法加载 file://，HTTP 部署时改由服务端按路径回吐图片
-    if (typeof window !== 'undefined' && window.mica?.isWeb) {
-      return `/api/image?path=${encodeURIComponent(normalized)}`
-    }
-    return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`
-  }
-  return expanded
-}
-
-function ComposerImageStrip({ text, onPreview }) {
-  const images = findImageReferences(text)
-  if (!images.length) return null
-  return (
-    <div className="chat-composer-images" aria-label="输入中的图片">
-      {images.map((image) => (
-        <button
-          key={image.source}
-          type="button"
-          title="预览图片"
-          onClick={() => onPreview(image.source, image.alt)}
-        >
-          <img src={resolveImageSource(image.source)} alt={image.alt} loading="lazy" />
-        </button>
-      ))}
-    </div>
-  )
 }
 
 /** 引用条上那行摘要：首行、折叠空白、限长。 */
@@ -1270,28 +1232,21 @@ export function canSubmitMessageEdit({ running, text }) {
   return !running && String(text ?? '').trim().length > 0
 }
 
-/** 与 app-server 的 `comparableText` 同款的定位归一化：折叠空白，并把 UI 侧的
- *  图片占位符统一成 CLI 的写法（host 的 readHistory 产出「[图片]」，provider
- *  历史里的图片块产出「[Image]」）。两边不一致定位就会错位。 */
-function messageEditKey(text) {
-  return String(text ?? '')
-    .replace(/\[图片\]/g, '[Image]')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 /** 同文本的用户消息在会话里出现多次时，被编辑的是从末尾数第几条（1 起）。
- *  持久化历史没有逐条消息 id，app-server 只能按文本定位，必须用同一套计数。 */
+ *  持久化历史没有逐条消息 id，app-server 只能按文本定位，必须用同一套计数。
+ *  归一化就是 app-server 侧那份（`@packages/mica-common/promptText`）：把图片
+ *  占位符整体剥掉再折叠空白——界面侧的「[图片]」、provider 侧的「[Image]」与
+ *  输入原文的「[Image](路径)」写法各不相同，只做替换仍然对不上。 */
 export function promptOccurrenceFromEnd(messages = [], messageId) {
   const index = messages.findIndex((message) => message.id === messageId)
   if (index < 0) return 1
-  const key = messageEditKey(messages[index]?.text)
+  const key = comparableText(messages[index]?.text)
   if (!key) return 1
   let occurrence = 1
   for (let cursor = index + 1; cursor < messages.length; cursor++) {
     const message = messages[cursor]
     if (message?.role !== 'user' || message.queued) continue
-    if (messageEditKey(message.text) === key) occurrence += 1
+    if (comparableText(message.text) === key) occurrence += 1
   }
   return occurrence
 }
@@ -1969,12 +1924,11 @@ function historyMessages(rows, key) {
   }))
 }
 
-// 会话里的用户文本把图片块渲染成 [图片] 占位符，输入框原文是 [Image](路径)；
-// 比对用户消息边界时忽略占位符与首尾空白，否则带图片的输入永远匹配不到。
+// 会话里的用户文本把图片块渲染成 [图片] 占位符，输入框原文是 [Image](路径)，
+// provider 历史里还有第三种写法；比对用户消息边界时统一剥掉这些占位符再折叠
+// 空白，否则带图片的输入永远匹配不到（会补出重复的用户行）。
 function promptKey(text) {
-  return String(text || '')
-    .replace(/\[图片\]/g, '')
-    .trim()
+  return comparableText(text)
 }
 
 export function hasPersistedTurn(messages, prompt) {
@@ -3992,12 +3946,6 @@ export function ChatView({
       }
 
       if (parsed.name === 'rename') {
-        if (running) {
-          appendCommandResult(parsed.raw, '当前 turn 仍在运行，请完成或停止后再重命名', '', {
-            variant: 'error'
-          })
-          return
-        }
         if (!parsed.args) {
           appendCommandResult(parsed.raw, 'Usage: /rename <title>', '', { variant: 'error' })
           return
@@ -4009,20 +3957,14 @@ export function ChatView({
           return
         }
         const targetSessionId = sessionIdRef.current
-        try {
-          const title = await window.mica.stats.renameSession(targetSessionId, parsed.args)
-          if (!isCurrentNode()) return
-          appendCommandResult(parsed.raw, `会话已重命名为 ${title}`)
-          onSessionRenamedRef.current?.()
-        } catch (error) {
-          if (!isCurrentNode()) return
-          appendCommandResult(
-            parsed.raw,
-            '重命名失败',
-            error instanceof Error ? error.message : String(error),
-            { variant: 'error' }
-          )
+        const result = await window.mica.chat.renameSession(targetSessionId, parsed.args)
+        if (!isCurrentNode()) return
+        if (!result?.ok) {
+          appendCommandResult(parsed.raw, '重命名失败', result?.error || '', { variant: 'error' })
+          return
         }
+        appendCommandResult(parsed.raw, `会话已重命名为 ${result.title}`)
+        onSessionRenamedRef.current?.()
         return
       }
 
@@ -4946,6 +4888,9 @@ export function ChatView({
     (text) => <Markdown text={text || ''} onOpenFile={transcriptOpenFile} />,
     [transcriptOpenFile]
   )
+  // btw 的问题按对话区「你说的话」渲染（同一个 MessageText：图片引用降级成链接、路径
+  // 可点）——抽屉里原样显示 `[Image](~/.mica/images/x.png)` 会和主对话分叉。
+  const renderBtwQuestion = useCallback((text) => <MessageText text={text || ''} />, [])
 
   // 悬浮 tip 的两个按钮：在相邻的两轮对话（用户消息）之间跳转，下方没有对话时回落到最新消息。
   const jumpConversation = useCallback((direction) => {
@@ -5200,20 +5145,11 @@ export function ChatView({
                 setInput(nextValue)
               }}
               onPaste={(event) => {
-                const imageItem = Array.from(event.clipboardData?.items ?? []).find((item) =>
-                  item.type.startsWith('image/')
-                )
-                if (!imageItem) return
-                event.preventDefault()
-                // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
-                const file = imageItem.getAsFile?.() || null
-                const fallback = event.clipboardData?.getData('text/plain') ?? ''
-                window.mica.chat
-                  .savePastedImage(window.mica.isWeb ? { file } : undefined)
-                  .then((result) =>
-                    insertComposerText(result?.ok ? `[Image](${result.ref})` : fallback)
-                  )
-                  .catch(() => {})
+                // 图片转 `[Image](路径)`，文件（文件夹 / Excel…）转成它的绝对路径
+                void pasteIntoComposer(event, {
+                  insertText: insertComposerText,
+                  notify: appendNotice
+                })
               }}
               onKeyDown={(event) => {
                 // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
@@ -5478,6 +5414,9 @@ export function ChatView({
             onAsk={askBtw}
             onNewThread={resetBtwThread}
             renderAnswer={renderBtwAnswer}
+            renderQuestion={renderBtwQuestion}
+            onPreviewImage={pathActions.preview}
+            onNotice={appendNotice}
             onClose={() => setBtwOpen(false)}
           />
         )}

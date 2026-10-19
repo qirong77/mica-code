@@ -306,6 +306,10 @@ export type MicaAutoCompactStatus = {
  * - `mica/btw/ask`: By The Way（CLI 的 `/btw`）。收下问题立刻返回，答案走
  *   `MICA_BTW_NOTIFICATIONS.updated`——见那里的说明（同步等会把 interrupt/steer
  *   一起堵住）。
+ * - `mica/session/rename`: the resident host owns the session file and writes it
+ *   from its in-memory snapshot, so renaming while a turn runs (or while the host
+ *   is merely idle but still alive) has to go through it — a client-side
+ *   read-modify-write would be overwritten by the host's next save.
  *
  * Codex clients never send them; the host answers unknown methods with
  * method-not-found, so a Codex driver is unaffected.
@@ -320,6 +324,7 @@ export const MICA_METHODS = {
   subagentTaskDetail: 'mica/subagentTasks/detail',
   killSubagentTask: 'mica/subagentTasks/kill',
   btwAsk: 'mica/btw/ask',
+  renameSession: 'mica/session/rename',
 } as const;
 
 export type MicaBtwAskParams = {

@@ -16,9 +16,12 @@
  * 否则 desktop 里的第 N 条同文本消息会在 CLI 端错位。
  */
 import { micaContext } from '@packages/mica-context/index.js';
+import { comparableContentText, comparableMessageText, comparableText } from '@packages/mica-common/promptText.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 
 export type ConversationMessage = Record<string, unknown>;
+
+export { comparableContentText, comparableMessageText, comparableText };
 
 export function contentText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -43,22 +46,6 @@ export function messageText(message: unknown): string {
 export function displayMessageText(message: unknown): string {
   if (!message || typeof message !== 'object' || !('displayContent' in message)) return '';
   return contentText(message.displayContent);
-}
-
-/**
- * 定位用的归一化文本：折叠空白，避免换行/缩进差异导致匹配失败。图片占位符也
- * 统一成 provider 侧的写法——desktop 的历史投影产出「[图片]」，这里是「[Image]」，
- * 不统一就会让「编辑一条带图消息」永远定位失败。
- */
-export function comparableText(text: unknown): string {
-  return String(text ?? '')
-    .replace(/\[图片\]/g, '[Image]')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function comparableMessageText(message: unknown): string {
-  return comparableText(messageText(message));
 }
 
 /**
@@ -109,25 +96,25 @@ export function usageBeforeMessage(
 
 /**
  * 从末尾数第 `occurrenceFromEnd` 条文本匹配的用户消息下标；找不到返回 -1。
+ *
+ * `occurrenceFromEnd` 由客户端数出来（桌面端在整个 transcript 上数），而这里只在
+ * provider history 里数，两边可能差一条（turn 启动时写进 conversationMessages、
+ * 却没进 provider history 的那条用户消息）。所以只有一条匹配时把它当作目标——
+ * 那一定是它，不存在改错人的风险；多条匹配时仍严格按计数，避免截错轮次。
  */
-export function findUserMessageCutIndex(
-  messages: unknown[],
-  prompt: string,
-  occurrenceFromEnd = 1,
-): number {
+export function findUserMessageCutIndex(messages: unknown[], prompt: string, occurrenceFromEnd = 1): number {
   const target = comparableText(prompt);
   if (!target) return -1;
-  const occurrence =
-    Number.isInteger(occurrenceFromEnd) && occurrenceFromEnd > 0 ? occurrenceFromEnd : 1;
+  const occurrence = Number.isInteger(occurrenceFromEnd) && occurrenceFromEnd > 0 ? occurrenceFromEnd : 1;
   const indexes = userMessageIndexes(messages);
-  let seen = 0;
+  const matches: number[] = [];
   for (let cursor = indexes.length - 1; cursor >= 0; cursor--) {
     const index = indexes[cursor]!;
     if (comparableMessageText(messages[index]) !== target) continue;
-    seen += 1;
-    if (seen === occurrence) return index;
+    matches.push(index);
+    if (matches.length === occurrence) return index;
   }
-  return -1;
+  return matches.length === 1 ? matches[0]! : -1;
 }
 
 export type TruncatedHistory = {
@@ -152,7 +139,7 @@ export function truncateHistoryBeforeUserMessage(
 ): TruncateHistoryResult {
   const cutIndex = findUserMessageCutIndex(snapshot.messages, options.prompt, options.occurrenceFromEnd);
   if (cutIndex < 0) {
-    return { ok: false, message: '找不到要编辑的消息，历史可能已经变化' };
+    return { ok: false, message: describeLocateFailure(snapshot.messages, options.prompt) };
   }
   const usageHistory = usageBeforeMessage(snapshot.protocol, snapshot.usageHistory, cutIndex);
   return {
@@ -164,4 +151,19 @@ export function truncateHistoryBeforeUserMessage(
       lastUsage: usageHistory.at(-1),
     },
   };
+}
+
+/**
+ * 定位失败时按「用户能据此做什么」分档：纯媒体消息没有可比文本、同文本消息存在
+ * 但条数对不上（历史被压缩或另一个窗口改写过）、以及彻底找不到。不要一律回
+ * 「历史可能已经变化」——那让用户无法判断该刷新还是该改写。
+ */
+function describeLocateFailure(messages: unknown[], prompt: string): string {
+  if (!comparableText(prompt)) {
+    return '这条消息只有图片、没有可定位的文本，无法编辑重发';
+  }
+  if (findUserMessageCutIndex(messages, prompt) >= 0) {
+    return '这条消息在会话里的位置已变化（可能被压缩或由另一个窗口改写），请重新打开会话后重试';
+  }
+  return '找不到要编辑的消息，历史可能已经变化';
 }

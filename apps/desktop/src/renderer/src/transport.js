@@ -259,7 +259,10 @@ function createWebApi(env) {
       // host 主动发起的一轮（定时任务等）的起始信息：渲染层据此补上用户气泡
       onRunStarted: (callback) => subscribe('chat:run-started', callback),
       commit: (payload) => invoke('chat:commit', payload),
-      onCommitExit: (callback) => subscribe('chat:commit-exit', callback)
+      onCommitExit: (callback) => subscribe('chat:commit-exit', callback),
+      // Rename goes through the chat host so a running turn's own save keeps the
+      // title (it persists the host's in-memory title, not the file we read).
+      renameSession: (sessionId, title) => invoke('chat:rename-session', { sessionId, title })
     },
 
     workspace: {
@@ -303,6 +306,12 @@ function createWebApi(env) {
       servers: {
         probe: (url) => invoke('app:servers:probe', { url })
       }
+    },
+
+    // 粘贴文件时把系统剪贴板里的路径交回页面：页面只有文件名（Chromium 不暴露路径），
+    // 路径由运行时读同一台机器的剪贴板（见 host/clipboard-files.js）
+    clipboard: {
+      filePaths: (names) => invoke('clipboard:file-paths', { names })
     },
 
     files: {
@@ -370,7 +379,6 @@ function createWebApi(env) {
       // 时间范围把要读的会话限制在最近若干天（见 host/stats.js 的 searchSessions）。
       searchSessions: (query, sinceMs = 0) => invoke('stats:search-sessions', { query, sinceMs }),
       sessionTitle: (sessionId) => invoke('stats:session-title', { sessionId }),
-      renameSession: (sessionId, title) => invoke('stats:rename-session', { sessionId, title }),
       deleteSession: (sessionId) => invoke('stats:delete-session', { sessionId }),
       listPins: () => invoke('stats:list-pins'),
       listSort: () => invoke('stats:list-sort'),

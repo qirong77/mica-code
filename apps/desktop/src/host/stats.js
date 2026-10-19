@@ -1,6 +1,6 @@
 import { app, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { isChatSessionRunning } from './chat'
 import {
@@ -57,36 +57,6 @@ function sessionTitle(sessionId) {
   } catch {
     return null
   }
-}
-
-function renameSession(sessionId, title) {
-  if (isChatSessionRunning(sessionId)) {
-    throw new Error('Cannot rename a session while its Chat turn is running')
-  }
-  const file = sessionFile(sessionId)
-  const nextTitle = typeof title === 'string' ? title.trim() : ''
-  if (!file || !nextTitle) throw new Error('Invalid session title')
-
-  let session
-  try {
-    session = JSON.parse(readFileSync(file, 'utf8'))
-  } catch {
-    throw new Error('Session not found')
-  }
-  if (!session || typeof session !== 'object' || session.id !== sessionId)
-    throw new Error('Invalid session')
-
-  const updated = {
-    ...session,
-    title: nextTitle,
-    titleSource: 'manual',
-    revision: (Number.isInteger(session.revision) ? session.revision : 0) + 1,
-    updatedAt: new Date().toISOString()
-  }
-  const temporary = `${file}.${process.pid}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(updated, null, 2)}\n`, 'utf8')
-  renameSync(temporary, file)
-  return updated.title
 }
 
 /** 置顶会话存储：userData/session-pins.json，{ [sessionId]: pinnedAtMs } */
@@ -405,9 +375,6 @@ export function registerStatsIpc() {
   })
   ipcMain.handle('stats:list-sessions', () => ({ sessions: scanMeta() }))
   ipcMain.handle('stats:session-title', (_event, { sessionId } = {}) => sessionTitle(sessionId))
-  ipcMain.handle('stats:rename-session', (_event, { sessionId, title } = {}) =>
-    renameSession(sessionId, title)
-  )
   ipcMain.handle('stats:delete-session', (_event, { sessionId } = {}) => deleteSession(sessionId))
   ipcMain.handle('stats:list-pins', () => readPins())
   ipcMain.handle('stats:move-session', (_event, payload = {}) => moveSession(payload))

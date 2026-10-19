@@ -19,6 +19,7 @@ import {
   safeGitText,
   safeGitTextAsync,
 } from './git.js';
+import { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 
 export const micaCommon = {
   DisposableStore,
@@ -39,6 +40,10 @@ export const micaCommon = {
   safeGitTextAsync,
   formatExecError,
   formatTokenCount,
+  comparableContentText,
+  comparableMessageText,
+  comparableText,
+  stripMediaPlaceholders,
 };
 
 export type { Disposable } from './disposable.js';
@@ -59,3 +64,4 @@ export {
 export type { LoopArgsParseResult } from './loopArgs.js';
 export { prepareImageForApi } from './image.js';
 export type { ProcessedImage, SupportedImageMediaType } from './image.js';
+export { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';

@@ -24,6 +24,7 @@ import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-q
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { isValidSessionId } from './session-delete'
+import { renameSessionFile } from './session-rename'
 import { createTurnLeaseProbe } from './session-lease'
 import { bindLoopSessionId } from './loops'
 import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
@@ -1605,6 +1606,35 @@ export function registerChatIpc() {
     rememberChatSender(_event)
     if (!sessionId) return []
     return readHistory(sessionId)
+  })
+
+  // Mica extension (`mica/session/rename`): renaming has to go through whichever
+  // process owns the session file. The resident host rewrites it from its
+  // in-memory snapshot on every save, so a direct disk write from here is
+  // silently reverted by that host's next turn — and is refused outright while
+  // one runs. With no host around (idle session, or a host that was disposed)
+  // nothing else writes the file and the direct path is exact.
+  ipcMain.handle('chat:rename-session', async (event, { sessionId, title } = {}) => {
+    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+    const nextTitle = typeof title === 'string' ? title.trim() : ''
+    if (!isValidSessionId(target) || !nextTitle) return { ok: false, error: '会话标题无效' }
+    for (const run of runs.values()) {
+      if (run.sessionId !== target && run.requestedSessionId !== target) continue
+      if (!run.child?.stdin?.writable) continue
+      run.sender = event.sender
+      const result = await hostTaskRequest(run, 'mica/session/rename', { title: nextTitle })
+      if (result?.ok === false) return { ok: false, error: result.error || '重命名失败' }
+      return { ok: true, title: typeof result?.title === 'string' ? result.title : nextTitle }
+    }
+    // 另一个进程（终端里的 TUI / 另一个运行时实例）持着 turn lease：它随后会用
+    // 自己的快照落盘，标题必然被覆盖，所以如实拒绝而不是写一个马上消失的标题。
+    if (hasLiveTurnLease(target))
+      return { ok: false, error: '该会话正在另一个终端或窗口里运行，请等待这一轮结束后再重命名' }
+    try {
+      return { ok: true, title: renameSessionFile(sessionsDir(), target, nextTitle) }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   })
 
   ipcMain.handle('chat:input-history:read', () => readInputHistory())

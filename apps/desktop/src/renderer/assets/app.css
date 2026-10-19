@@ -3359,57 +3359,48 @@ body.is-resizing.is-resizing-terminal {
   line-height: 1.55;
 }
 
-/* 输入条：左输入右发送，与主输入条同一套「内容面 + 发丝边」的上层结构 */
+/* 输入条：**主对话那套 `TerminalComposer` + `.chat-composer-actions`**（自绘光标、选区
+   高亮、图片粘贴全在主输入条里实现，抽屉不该长出第二种输入框）。所以这里只做两件事：
+   一是把抽屉的 foot 收成边框，二是让 `.chat-composer` 在抽屉里是一块有边框的输入框
+   ——主输入条是整屏宽的一条，抽屉里如果也铺满整宽就没有「这里可以打字」的边界。 */
 .chat-btw-foot {
   display: flex;
   flex: none;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 6px;
   padding: 8px 10px 10px;
   border-top: 1px solid var(--color-line);
 }
 
-.chat-btw-input {
-  min-width: 0;
-  min-height: 28px;
-  flex: 1;
-  padding: 4px 8px;
+.chat-btw-composer {
   border: 1px solid var(--color-line);
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--color-canvas);
-  color: var(--color-fg-max);
-  font-family: var(--chat-font);
-  font-size: inherit;
-  line-height: 1.4;
-  resize: none;
 }
 
-.chat-btw-input:focus {
+.chat-btw-composer:focus-within {
   border-color: var(--color-line-strong);
-  outline: none;
 }
 
-.chat-btw-input::placeholder {
-  color: var(--color-fg-ghost);
+/* 抽屉里的图片缩略条自己带左右内边距（主输入条里它是独立的 dock 行） */
+.chat-btw-foot .chat-composer-images {
+  padding: 0;
 }
 
-/* 发送是这一行唯一的主操作，给它强调色（其余图标按钮都是灰的） */
-.chat-btw-send {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  flex: none;
-  place-items: center;
-  border-radius: 3px;
+/* 发送是这一行唯一的主操作，给它强调色（其余图标按钮都是灰的）。
+   选择器带上 `.chat-composer-actions`：那条动作区规则（class + 元素）的优先级比单个
+   类高，只写 `.chat-btw-send` 会被它压成灰的。 */
+.chat-composer-actions button.chat-btw-send {
   color: color-mix(in srgb, var(--color-accent) 82%, transparent);
 }
 
-.chat-btw-send:hover:not(:disabled) {
+.chat-composer-actions button.chat-btw-send:hover:not(:disabled) {
   background: var(--color-accent-subtle);
   color: var(--color-accent-hover);
 }
 
-.chat-btw-send:disabled {
+.chat-composer-actions button.chat-btw-send:disabled {
+  background: transparent;
   color: rgb(255 255 255 / 15%);
 }
 
@@ -3698,12 +3689,6 @@ body.is-resizing.is-resizing-terminal {
   .chat-btw {
     width: 100%;
     border-left: 0;
-  }
-
-  /* 触屏没有 hover，28px 的发送按钮点不准 */
-  .chat-btw-send {
-    width: 32px;
-    height: 32px;
   }
 
   /* 终端字号不要写在这里：xterm 的 DOM 渲染器给 `.xterm-rows` 写内联 font-size

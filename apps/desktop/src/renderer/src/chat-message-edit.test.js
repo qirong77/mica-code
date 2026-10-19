@@ -43,6 +43,20 @@ describe('edit resend target', () => {
     expect(promptOccurrenceFromEnd(rows, 'u1')).toBe(2)
   })
 
+  it('counts an unsent image reference the same as the persisted placeholder', () => {
+    // 刚发出的乐观行是输入原文（[Image](路径)），历史行是投影（[图片]）；
+    // 不剥掉占位符就数不成同一个 key，编辑会落到另一条消息上或直接找不到。
+    const rows = [
+      { id: 'u1', kind: 'message', role: 'user', text: '看这个[Image](~/.mica/images/a.png)' },
+      { id: 'a1', kind: 'message', role: 'assistant', text: '好' },
+      { id: 'u2', kind: 'message', role: 'user', text: '看这个[图片]' }
+    ]
+
+    // u2 是最新的一条；u1 是更早的同 key 消息，从末尾数是第 2 条。
+    expect(promptOccurrenceFromEnd(rows, 'u2')).toBe(1)
+    expect(promptOccurrenceFromEnd(rows, 'u1')).toBe(2)
+  })
+
   it('skips queued messages and unknown ids', () => {
     const rows = [
       { id: 'u1', kind: 'message', role: 'user', text: 'same prompt' },

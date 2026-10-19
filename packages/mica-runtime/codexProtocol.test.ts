@@ -27,6 +27,7 @@ describe('codex protocol framing', () => {
       subagentTaskDetail: 'mica/subagentTasks/detail',
       killSubagentTask: 'mica/subagentTasks/kill',
       btwAsk: 'mica/btw/ask',
+      renameSession: 'mica/session/rename',
     });
   });
 

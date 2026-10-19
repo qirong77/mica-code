@@ -4,6 +4,10 @@ import type { MicaBtwEntry, MicaBtwThread, MicaBtwToolCall } from '@packages/mic
 import { createBtwThread, type BtwThread } from '@packages/mica-builtin-commands/commands/btwThread.js';
 import { recordHelperSubagentUsage } from '@packages/mica-builtin-commands/subagentUsage.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
+import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+// 与 headless 的对话输入同一条链路：草稿里的 `[Image](路径)` 要变成多模态内容块，
+// 模型才真的看得到图（桌面端 By The Way 的粘贴图片就走这里）。
+import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 
 /**
  * 常驻 host（`mica app-server`）里的 By The Way（btw）线程。
@@ -243,7 +247,15 @@ export class BtwThreadController {
     let failed = false;
     let finishedAt = '';
     try {
-      const reply = await thread.subagent.query(entry.question);
+      // 问题里的 `[Image](路径)` 先解析成多模态内容块：不解析的话粘贴进来的图片对模型
+      // 只是一段路径文本。解析失败（文件不在了、格式不支持）由 parseImageRefs 自己降级成
+      // `[image omitted: …]` 文本，不会把整条问题弄丢。
+      //
+      // 只在真的带图片引用时才解析：`await` 一个普通字符串也会让请求推迟一个 microtask，
+      // 纯文本问题（CLI、以及绝大多数 btw 提问）没必要为它改变「收下问题就发」的时序。
+      let input: AgentQueryContent = entry.question;
+      if (input.includes('[Image](')) input = await parseImageRefs(input);
+      const reply = await thread.subagent.query(input);
       finishedAt = this.timestamp();
       // 最终正文以 query 的返回值为准（它是完整的多轮迭代结果，含迭代之间的分隔），
       // 流式那份只是过程中看到的。

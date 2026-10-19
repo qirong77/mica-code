@@ -24,7 +24,7 @@ function makeHarness(options: FakeOptions = {}) {
   const usageHistory: unknown[] = [];
   let finishReply: ((value: string) => void) | null = null;
   let failReply: ((error: unknown) => void) | null = null;
-  const query = vi.fn(async () => {
+  const query = vi.fn(async (_input?: unknown) => {
     usageHistory.push({ usageId: usageHistory.length + 1 });
     if (options.reply) return await options.reply();
     if (options.pendingReply) {
@@ -266,6 +266,22 @@ describe('BtwThreadController', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('turns pasted image references into multimodal content', async () => {
+    const harness = makeHarness();
+    // 文件不存在也没关系：这里只验证「带 [Image] 引用的问题被当成多模态内容交给子代理」，
+    // 解析失败时 parseImageRefs 会把它降级成 `[image omitted: …]` 文本块而不是丢掉问题。
+    harness.controller.ask('看看这张图 [Image](/tmp/mica-missing-shot.png) 是什么');
+    await settle();
+    const input = harness.query.mock.calls[0]?.[0] as unknown;
+    expect(Array.isArray(input)).toBe(true);
+    expect(JSON.stringify(input)).toContain('mica-missing-shot.png');
+
+    // 纯文本问题保持原样（也保持「收下问题就发」的同步时序）
+    harness.controller.ask('第二个问题');
+    await settle();
+    expect(harness.query.mock.calls[1]?.[0]).toBe('第二个问题');
   });
 
   it('bounds thinking, tool output and matches tool results defensively', () => {

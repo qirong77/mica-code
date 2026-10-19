@@ -902,6 +902,47 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(userTexts).toEqual(['先做点长活']);
   });
 
+  itE2E('mica/session/rename renames the session while its turn is running', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    // 让这一轮停在「等模型第一个字」上：改名请求必须落在 turn 还没结束的窗口里。
+    mock!.state.delayBeforeTextMs = 3_000;
+
+    const host = spawnHost('rename-running');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '随便写点东西' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    // 常驻 host 持有会话文件（每一轮都按内存快照落盘），所以运行中改名只能经它；
+    // 它当场返回，不等这一轮结束。
+    await send(host, 2, 'mica/session/rename', { title: '运行中改名' });
+    const renamed = await waitFor(host, (m) => m.id === 2, 'rename response', 5_000);
+    expect(renamed.error).toBeUndefined();
+    expect(renamed.result).toMatchObject({ ok: true, title: '运行中改名' });
+    expect(host.lines.some((m) => m.method === 'turn/completed')).toBe(false);
+
+    await waitFor(host, turnCompleted(turnId), 'turn/completed');
+
+    // 这一轮自己的保存不能把标题覆盖回派生标题。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      title?: string;
+      titleSource?: string;
+      turnState?: string;
+    };
+    expect(session).toMatchObject({ title: '运行中改名', titleSource: 'manual', turnState: 'completed' });
+
+    // 空标题是协议层错误，不是「静默成功」。
+    await send(host, 3, 'mica/session/rename', { title: '   ' });
+    const invalid = await waitFor(host, (m) => m.id === 3 && m.error !== undefined, 'empty title');
+    expect(invalid.error).toMatchObject({ code: -32602, message: 'title must not be empty' });
+  });
+
   itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
