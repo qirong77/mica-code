@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  BtwThreads,
   BtwThreadController,
   capBtwHead,
   capBtwTail,
   parseBtwToolArgs,
+  persistableBtwMessages,
   resolveBtwToolIndex,
   MAX_BTW_THINKING_CHARS,
   MAX_BTW_TOOL_OUTPUT_CHARS,
@@ -17,6 +19,8 @@ type FakeOptions = {
   messages?: unknown[];
   /** 让 `query` 挂住不返回，测试自己控制回答结束的时刻（流式用例用）。 */
   pendingReply?: boolean;
+  /** 让挂住的 `query` 在 signal abort 时按真实实现的形状抛出 AbortError。 */
+  honorAbort?: boolean;
   flushIntervalMs?: number;
 };
 
@@ -24,13 +28,20 @@ function makeHarness(options: FakeOptions = {}) {
   const usageHistory: unknown[] = [];
   let finishReply: ((value: string) => void) | null = null;
   let failReply: ((error: unknown) => void) | null = null;
-  const query = vi.fn(async (_input?: unknown) => {
+  const query = vi.fn(async (_input?: unknown, queryOptions?: { signal?: AbortSignal }) => {
     usageHistory.push({ usageId: usageHistory.length + 1 });
     if (options.reply) return await options.reply();
     if (options.pendingReply) {
       return await new Promise<string>((resolve, reject) => {
         finishReply = resolve;
         failReply = reject;
+        if (options.honorAbort) {
+          queryOptions?.signal?.addEventListener('abort', () => {
+            const error = new Error('The operation was aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }
       });
     }
     return 'By The Way 答案';
@@ -41,11 +52,22 @@ function makeHarness(options: FakeOptions = {}) {
   const subagent: {
     query: typeof query;
     usageHistory: unknown[];
+    messages: unknown[];
+    getSnapshot: () => { messages: unknown[] };
+    loadSnapshot: (snapshot: { messages: unknown[] }) => void;
     onText?: (text: string) => void;
     onThinking?: (thinking: string) => void;
     onToolCall?: (name: string, args: string, id?: string) => void;
     onToolResult?: (name: string, result: string, id?: string) => void;
-  } = { query, usageHistory };
+  } = {
+    query,
+    usageHistory,
+    messages: [],
+    getSnapshot: () => ({ messages: subagent.messages }),
+    loadSnapshot: (snapshot) => {
+      subagent.messages = snapshot.messages as unknown[];
+    },
+  };
   const createSubAgent = vi.fn((_options?: { systemPrompt?: string }) => subagent);
   const saveCurrent = vi.fn();
   const agent = {
@@ -116,10 +138,105 @@ describe('BtwThreadController', () => {
     expect(harness.query).toHaveBeenCalledTimes(1);
   });
 
+  // 回答期间提交 = 排队（单槽位）。面板的 Enter/Tab 走这条路径，答完自动接上，
+  // 不会并发开第二次提问（btw 复用同一个子代理，消息数组不是并发安全的）。
+  it('queues a question while answering and runs it after', async () => {
+    const harness = makeHarness({ pendingReply: true });
+    harness.controller.ask('第一个问题');
+    const queued = harness.controller.ask('第二个问题', { queue: true });
+    expect(queued).toEqual({ ok: true });
+    expect(harness.controller.snapshot().pendingQuestion).toBe('第二个问题');
+    // 只留一个槽位：再排一条如实拒绝，而不是悄悄丢掉前一条
+    expect(harness.controller.ask('第三个问题', { queue: true }).ok).toBe(false);
+
+    harness.finishReply('第一个答案');
+    await settle();
+    await settle();
+    expect(harness.query).toHaveBeenCalledTimes(2);
+    expect(harness.controller.snapshot().entries).toMatchObject([
+      { question: '第一个问题', status: 'completed' },
+      { question: '第二个问题', status: 'running' },
+    ]);
+    expect(harness.controller.snapshot().pendingQuestion).toBeUndefined();
+  });
+
+  it('recalls a queued question without running it', async () => {
+    const harness = makeHarness({ pendingReply: true });
+    harness.controller.ask('第一个问题');
+    harness.controller.ask('第二个问题', { queue: true });
+    expect(harness.controller.recall()).toEqual({ ok: true, question: '第二个问题' });
+    expect(harness.controller.snapshot().pendingQuestion).toBeUndefined();
+    // 没有排队中的问题时如实返回，不假装成功
+    expect(harness.controller.recall().ok).toBe(false);
+
+    harness.finishReply('第一个答案');
+    await settle();
+    expect(harness.query).toHaveBeenCalledTimes(1);
+  });
+
+  // 停止按钮：中断不是失败，已经流出的那半段仍是这一问的答案，历史要补回去，
+  // 否则下一次追问时模型看不到刚才问过什么。
+  it('interrupt marks the entry aborted and keeps the streamed answer', async () => {
+    const harness = makeHarness({ pendingReply: true, honorAbort: true });
+    harness.controller.ask('这个方案可行吗');
+    await settle();
+    // 已经流出来的那半段就是这一问的答案（与主对话 abort 同一条语义）
+    harness.subagent.onText?.('半段回答');
+    expect(harness.controller.interrupt()).toEqual({ ok: true });
+    await settle();
+    const [entry] = harness.controller.snapshot().entries;
+    expect(entry.status).toBe('aborted');
+    expect(entry.answer).toContain('半段回答');
+    expect(harness.controller.running).toBe(false);
+    // 没有在跑时再点停止是业务性失败，不抛
+    expect(harness.controller.interrupt().ok).toBe(false);
+  });
+
   it('rejects empty questions', () => {
     const harness = makeHarness();
     expect(harness.controller.ask('   ').ok).toBe(false);
     expect(harness.controller.snapshot().entries).toHaveLength(0);
+  });
+
+  it('compacts only its own thread history, never the main conversation', async () => {
+    const harness = makeHarness();
+    harness.controller.ask('这个方案可行吗');
+    await settle();
+    // 工具结果与图片是这条线程里唯一能占到大头的部分
+    harness.subagent.messages = [
+      { role: 'user', content: '这个方案可行吗' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'function_call',
+            call_id: 'c1',
+            name: 'read_file',
+            arguments: '{"path":"src/a.ts"}',
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [{ type: 'text', text: 'x'.repeat(4000) }],
+        tool_call_id: 'c1',
+      },
+      { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
+      { role: 'assistant', content: '看完了' },
+    ];
+
+    const result = await harness.controller.compact();
+    expect(result.ok).toBe(true);
+    // 对话文本一律保留，只把工具结果与媒体块换掉
+    expect(JSON.stringify(harness.subagent.messages)).toContain('看完了');
+    expect(JSON.stringify(harness.subagent.messages)).not.toContain('xxxx');
+    expect(JSON.stringify(harness.subagent.messages)).not.toContain('base64');
+    // 压缩后界面读这份估算（lastUsage 描述的是压缩前那次请求）
+    expect(harness.controller.snapshot().context?.estimated).toBe(true);
+
+    const again = await harness.controller.compact();
+    expect(again.ok).toBe(false);
+    expect(again.ok === false && again.message).toContain('暂不需要压缩');
   });
 
   it('reuses one subagent across follow-ups and re-reads the transcript on a new topic', async () => {
@@ -284,6 +401,48 @@ describe('BtwThreadController', () => {
     expect(harness.query.mock.calls[1]?.[0]).toBe('第二个问题');
   });
 
+  it('compacts its own history locally and reports the estimate until the next request', async () => {
+    const harness = makeHarness({
+      messages: [
+        { role: 'user', content: '主流程问题' },
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: `巨大的工具输出 ${'x'.repeat(4000)}`,
+        },
+      ],
+    });
+    // 假子代理要能被 loadSnapshot 改写：与真实 IAgent 同一形状（getSnapshot/loadSnapshot）。
+    let snapshot = {
+      messages: harness.agent.getSnapshot().messages,
+      usageHistory: [] as unknown[],
+    };
+    Object.assign(harness.subagent, {
+      getSnapshot: () => snapshot,
+      loadSnapshot: (next: typeof snapshot) => {
+        snapshot = next;
+      },
+    });
+    harness.controller.ask('问题');
+    await settle();
+
+    const result = await harness.controller.compact();
+    expect(result.ok).toBe(true);
+    // 工具结果被换成占位符：本地压缩真的改写了这条线程自己的历史
+    expect(JSON.stringify(snapshot.messages).length).toBeLessThan(2000);
+    const context = harness.controller.snapshot().context;
+    // 压缩后到下一次请求之前，占用读估算值（否则界面一直停在压缩前那个数字）
+    expect(context?.estimated).toBe(true);
+    expect(context?.tokens).toBeGreaterThan(0);
+
+    // 没有线程 / 正忙时都是业务性拒绝，不抛错
+    const empty = makeHarness();
+    expect((await empty.controller.compact()).ok).toBe(false);
+    const busy = makeHarness({ pendingReply: true });
+    busy.controller.ask('问题');
+    expect(await busy.controller.compact()).toMatchObject({ ok: false });
+  });
+
   it('bounds thinking, tool output and matches tool results defensively', () => {
     expect(capBtwHead('abcdef', 3)).toBe('abc…');
     expect(capBtwHead('abc', 3)).toBe('abc');
@@ -307,5 +466,122 @@ describe('BtwThreadController', () => {
 
     expect(MAX_BTW_THINKING_CHARS).toBeGreaterThan(0);
     expect(MAX_BTW_TOOL_OUTPUT_CHARS).toBeGreaterThan(0);
+  });
+
+  it('drops media blocks before persisting, keeping the rest of the history', () => {
+    const messages = [
+      { role: 'user', content: '看看这张图' },
+      { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
+      { role: 'assistant', content: '是只猫' },
+      { role: 'user', content: [{ type: 'input_text', text: '谢谢' }] },
+    ];
+    const kept = persistableBtwMessages(messages);
+    // base64 图片能让落盘文件涨到几十 MB，重启后模型也不再需要它；
+    // 但同一批里的纯文本消息一条都不能少（那是「还能接着追问」的上下文）。
+    expect(kept).toHaveLength(3);
+    expect(JSON.stringify(kept)).not.toContain('input_image');
+    expect(JSON.stringify(kept)).toContain('谢谢');
+  });
+});
+
+describe('BtwThreads', () => {
+  function makeThreads(options: { persist?: boolean } = {}) {
+    const harness = makeHarness();
+    const updates: string[] = [];
+    const persisted: unknown[][] = [];
+    const threads = new BtwThreads({
+      agent: harness.agent,
+      sessionController: harness.saveCurrent
+        ? ({ saveCurrent: harness.saveCurrent } as unknown as CommandSessionController)
+        : ({} as CommandSessionController),
+      onUpdate: (thread) => updates.push(thread.id),
+      ...(options.persist ? { onPersist: (state) => persisted.push(state) } : {}),
+      flushIntervalMs: 0,
+    });
+    return { harness, threads, updates, persisted };
+  }
+
+  it('keeps tabs independent and names the thread that took each question', async () => {
+    const { threads } = makeThreads();
+    const first = threads.ask(null, '第一个问题');
+    expect(first.ok).toBe(true);
+    const firstId = (first as { threadId: string }).threadId;
+    const second = threads.ask(null, '第二个问题');
+    const secondId = (second as { threadId: string }).threadId;
+    // 不传 id = 新 tab：两条线程有自己的快照
+    expect(firstId).not.toBe(secondId);
+    await settle();
+    expect(threads.list()).toHaveLength(2);
+
+    // 带上 id 就是在那个 tab 里追问
+    const again = threads.ask(firstId, '接着问');
+    expect(again).toMatchObject({ ok: true, threadId: firstId });
+    await settle();
+    const list = threads.list();
+    expect(list.find((item) => item.id === firstId)?.entries).toHaveLength(2);
+    expect(list.find((item) => item.id === secondId)?.entries).toHaveLength(1);
+  });
+
+  it('rebuilds a thread id it does not know instead of losing the question', async () => {
+    const { threads } = makeThreads();
+    // host 重启过 / 被淘汰：客户端手里的 id 还在，但 host 里没有。
+    const result = threads.ask('stale-thread-id', '还在吗');
+    expect(result).toMatchObject({ ok: true, threadId: 'stale-thread-id' });
+    await settle();
+    expect(threads.list().map((item) => item.id)).toContain('stale-thread-id');
+  });
+
+  it('refuses to close a thread that is still answering', async () => {
+    // pendingReply：提问之后答案一直没回来，线程就处在「回答中」。
+    const harness = makeHarness({ pendingReply: true });
+    const threads = new BtwThreads({
+      agent: harness.agent,
+      sessionController: { saveCurrent: vi.fn() } as unknown as CommandSessionController,
+      onUpdate: () => {},
+      flushIntervalMs: 0,
+    });
+    const created = threads.ask(null, '挂住的问题') as { threadId: string };
+    // 回答中的 tab 不能关：问题已经发出去了，关掉答案就再也没人收
+    expect(threads.close(created.threadId)).toMatchObject({ ok: false });
+    expect(threads.list().map((item) => item.id)).toContain(created.threadId);
+  });
+
+  it('restores persisted entries and messages, then flushes them back', async () => {
+    const harness = makeHarness();
+    let loaded: { messages?: unknown[] } | null = null;
+    let snapshot = { messages: [] as unknown[], usageHistory: [] as unknown[] };
+    Object.assign(harness.subagent, {
+      getSnapshot: () => snapshot,
+      loadSnapshot: (next: typeof snapshot) => {
+        loaded = next;
+        snapshot = next;
+      },
+    });
+    const persisted: unknown[][] = [];
+    const threads = new BtwThreads({
+      agent: harness.agent,
+      sessionController: { saveCurrent: vi.fn() } as unknown as CommandSessionController,
+      onUpdate: () => {},
+      onPersist: (state) => persisted.push(state),
+      flushIntervalMs: 0,
+    });
+
+    threads.restore([
+      {
+        id: 'restored',
+        entries: [{ id: 'e1', question: '上次问的', status: 'completed', startedAt: '' }],
+        messages: [{ role: 'user', content: '上次问的' }],
+      },
+    ]);
+    // 问答随线程一起恢复（这就是「关掉 app 再打开还在」）
+    expect(threads.list().find((item) => item.id === 'restored')?.entries).toHaveLength(1);
+
+    // 恢复出来的上下文要灌回新子代理：不然重启后模型看不到自己上一轮读过什么
+    threads.ensure('restored').ask('接着上次说');
+    await settle();
+    expect(JSON.stringify(loaded)).toContain('上次问的');
+
+    threads.flush();
+    expect(JSON.stringify(persisted.at(-1))).toContain('上次问的');
   });
 });

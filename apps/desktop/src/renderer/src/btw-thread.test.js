@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  btwContextMenuItems,
+  btwContextLabel,
+  btwContextTitle,
   btwEntryElapsedMs,
   btwEntryPhase,
   btwPhaseText,
@@ -13,6 +16,39 @@ const entry = (extra) => ({
   status: 'running',
   startedAt: '2026-10-16T10:00:00.000Z',
   ...extra
+})
+
+describe('btwContextLabel', () => {
+  it('reads model + last request context with the window share', () => {
+    expect(btwContextLabel({ model: 'gpt-5', tokens: 12_400, contextWindowSize: 200_000 })).toBe(
+      'gpt-5 · 12.4k / 200k (6%)'
+    )
+  })
+
+  it('marks a post-compaction estimate and hides the share without a window', () => {
+    expect(btwContextLabel({ model: 'gpt-5', tokens: 1200, estimated: true })).toBe('gpt-5 · ≈1.2k')
+    // 还没请求过：不显示一个 0 的假数字
+    expect(btwContextLabel({ model: 'gpt-5' })).toBe('gpt-5')
+    expect(btwContextLabel(undefined)).toBe('')
+  })
+})
+
+describe('btwContextTitle', () => {
+  it('explains the estimate and reports cumulative usage', () => {
+    const title = btwContextTitle({
+      tokens: 1200,
+      estimated: true,
+      cachedTokens: 800,
+      totalInputTokens: 30_000,
+      totalOutputTokens: 4000,
+      requests: 3
+    })
+    expect(title).toContain('估算值')
+    expect(title).toContain('累计 30k in / 4k out')
+    expect(title).toContain('命中缓存 800')
+    expect(title).toContain('共 3 次请求')
+    expect(btwContextTitle(undefined)).toBe('')
+  })
 })
 
 describe('btwRunningEntry', () => {
@@ -90,5 +126,63 @@ describe('btwEntryElapsedMs', () => {
   it('returns 0 without a usable start time', () => {
     expect(btwEntryElapsedMs(undefined, Date.now())).toBe(0)
     expect(btwEntryElapsedMs({ startedAt: 'not a date' }, Date.now())).toBe(0)
+  })
+})
+
+describe('btwContextMenuItems', () => {
+  const byId = (items, id) => items.find((item) => item.id === id)
+  const answer = { id: 'e1', question: '问一句', answer: '答一句', status: 'completed' }
+
+  it('offers clipboard actions for the entry under the cursor', () => {
+    const items = btwContextMenuItems({ entry: answer, hasEntries: true })
+    expect(byId(items, 'copy')).toMatchObject({ label: '复制回答', disabled: false })
+    expect(byId(items, 'quote')).toMatchObject({ disabled: false })
+  })
+
+  it('copies the question while the answer is still streaming', () => {
+    const items = btwContextMenuItems({
+      entry: { id: 'e2', question: '问一句', status: 'running' },
+      running: true,
+      hasEntries: true
+    })
+    expect(byId(items, 'copy').label).toBe('复制问题')
+  })
+
+  it('prefers the selection, and disables the copy block when there is no text', () => {
+    const withSelection = btwContextMenuItems({
+      entry: answer,
+      hasEntries: true,
+      hasSelection: true
+    })
+    expect(byId(withSelection, 'copy').label).toBe('复制选中内容')
+    const empty = btwContextMenuItems({ hasEntries: true })
+    expect(byId(empty, 'copy').disabled).toBe(true)
+    expect(byId(empty, 'quote').disabled).toBe(true)
+  })
+
+  it('never exposes main-conversation actions', () => {
+    // 在 btw 的正文上点「Clear」会把主会话清掉，所以那份会话菜单一项都不能进来
+    const ids = btwContextMenuItems({ entry: answer, hasEntries: true })
+      .filter((item) => !item.separator)
+      .map((item) => item.id)
+    expect(ids).toEqual(['copy', 'quote', 'new-thread', 'compact', 'close-thread'])
+  })
+
+  it('disables destructive actions while an answer is streaming', () => {
+    const items = btwContextMenuItems({
+      entry: answer,
+      running: true,
+      hasEntries: true,
+      canClose: true
+    })
+    expect(byId(items, 'compact').disabled).toBe(true)
+    expect(byId(items, 'close-thread')).toMatchObject({ disabled: true, danger: true })
+  })
+
+  it('needs a thread with content before compacting, and a target before quoting', () => {
+    const empty = btwContextMenuItems({ hasEntries: false, canQuote: false, canClose: false })
+    expect(byId(empty, 'compact').disabled).toBe(true)
+    expect(byId(empty, 'quote').disabled).toBe(true)
+    expect(byId(empty, 'close-thread').disabled).toBe(true)
   })
 })

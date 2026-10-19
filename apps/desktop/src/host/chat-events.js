@@ -283,15 +283,25 @@ export function codexNotificationToEvent(notification) {
       // Host-side snapshot of the By The Way（btw）thread — the desktop twin of the
       // CLI's `/btw`. The subagent and the Q&A both live in the app-server
       // process, so this push is the only way the panel learns the answer; it
-      // is a snapshot (replace the whole thread), not a delta. `id` changes
-      // when the user starts a new topic.
+      // is a snapshot (replace the whole thread), not a delta. `id` is the
+      // thread (drawer tab) id — the client keeps one snapshot per tab, so it
+      // must survive untouched. `context` carries that tab's own model and
+      // context usage (each thread is an independent run).
       return {
         type: 'btw_thread',
         timestamp,
         sessionID,
         thread: {
           id: typeof params.id === 'string' ? params.id : '',
-          entries: Array.isArray(params.entries) ? params.entries : []
+          entries: Array.isArray(params.entries) ? params.entries : [],
+          ...(params.context && typeof params.context === 'object'
+            ? { context: params.context }
+            : {}),
+          // 排队中的那一问（回答期间按 Enter 提交）：丢了这个字段，面板就看不到
+          // 「已排队」，也撤回不了——它只在这条快照里存在。
+          ...(typeof params.pendingQuestion === 'string' && params.pendingQuestion
+            ? { pendingQuestion: params.pendingQuestion }
+            : {})
         }
       }
     case 'mica/sessionHistory/replaced':

@@ -1,5 +1,6 @@
 import { clipboard, ipcMain } from 'electron'
 import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
+import { readBtwState } from '@packages/mica-common/btwState.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
@@ -397,6 +398,32 @@ function postNotify(terminalId, type, extra = {}) {
       // Fire-and-forget; chat keeps working even if the notify side is busy.
     })
     .finally(() => clearTimeout(timer))
+}
+
+/**
+ * By The Way 线程在回答时点亮侧栏那颗呼吸绿点。
+ *
+ * btw 是一个隔离子代理，没有 `turn/started` 事件，所以它自己的运行态必须
+ * 单独往 notify 里写一份（`setBtwRunning`）；否则抽屉里字在流、侧栏却是静的。
+ * 只认最后一条 entry：完成/失败都会把它转成 completed/error，灯随之熄灭。
+ */
+function applyBtwRunning(nodeId, snapshotEvent) {
+  if (!notifyServer || !snapshotEvent) return
+  const run = runs.get(nodeId)
+  if (!run) return
+  const entries = Array.isArray(snapshotEvent.thread?.entries) ? snapshotEvent.thread.entries : []
+  const threadKey = snapshotEvent.thread?.id || ''
+  // 多个 tab 各自在跑：任一条在回答就点亮。所以按线程 id 记一份，全部熄灭才灭灯
+  // （只看「最后一条 entry」，另一个 tab 在跑时一刷新就会把灯关掉）。
+  const answered = entries.some((entry) => entry.status === 'running')
+  const busy = new Set(run.btwBusyThreads || [])
+  if (answered) {
+    if (threadKey) busy.add(threadKey)
+  } else if (threadKey) {
+    busy.delete(threadKey)
+  }
+  run.btwBusyThreads = busy
+  notifyServer.setBtwRunning(`${nodeId}:mica`, busy.size > 0 || (!threadKey && answered))
 }
 
 function startCommitRun(sender, commitId, payload) {
@@ -863,7 +890,9 @@ function spawnChatHost(id, sender, payload) {
     ownerTransferredAt: 0,
     viewers: new Map(),
     // 最近一次后台任务 / subagent 快照（随 is-running 回给中途附着的客户端）
-    lastSnapshots: {}
+    lastSnapshots: {},
+    // 正在回答的 By The Way 线程 id（抽屉的多个 tab 各自在跑，任一条在跑就点亮侧栏）
+    btwBusyThreads: new Set()
   }
   run.sender = sender
   run.eventPacer = createChatEventPacer(({ sequence, event }) => {
@@ -1113,6 +1142,7 @@ function handleHostNotification(id, run, notification) {
     // lists on restore). Deliver directly; the renderer replaces the whole
     // list each time, so the latest snapshot always wins.
     const snapshotEvent = codexNotificationToEvent(notification)
+    if (method === 'mica/btw/updated') applyBtwRunning(id, snapshotEvent)
     if (snapshotEvent && run.sender && !run.sender.isDestroyed()) {
       run.lastSnapshots = { ...(run.lastSnapshots || {}), [snapshotEvent.type]: snapshotEvent }
       run.sender.send('chat:event', {
@@ -1209,6 +1239,9 @@ function replayQueuedTurn(id, run) {
 
 function sendChatExit(id, run, payload) {
   if (run.exitSent) return
+  // 同一盏 btw 呼吸灯：host 退出时线程不再有人回答，必须熄灭。
+  run.btwBusyThreads?.clear()
+  notifyServer?.setBtwRunning(`${id}:mica`, false)
   run.eventPacer.flush()
   run.exitSent = true
   completedRuns.delete(id)
@@ -1240,6 +1273,9 @@ function disposeHost(id) {
   if (!run) return
   runs.delete(id)
   queuedRuns.clear(id)
+  // host 一走 btw 就没有执行者了：不熄灭这盏灯，侧栏会永远显示「在跑」。
+  run.btwBusyThreads?.clear()
+  notifyServer?.setBtwRunning(`${id}:mica`, false)
   try {
     writeHostRequest(run, { method: 'shutdown' })
   } catch {
@@ -1567,38 +1603,108 @@ export function registerChatIpc() {
   // By The Way（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
   // host 立刻回 `{ ok: true }`，答案随后经 `mica/btw/updated` 快照到达。所以这个
   // 请求不会被 turn 在跑挡掉，也不改 run.running/hostPending。
-  ipcMain.handle('chat:btw-ask', (event, { id, question, newThread, sessionId, cwd } = {}) => {
-    const text = typeof question === 'string' ? question.trim() : ''
-    const reset = newThread === true
-    // 空问题只在「新话题」（重置线程）时合法：下一次提问会重取背景记录。
-    if (!id || (!text && !reset)) return { ok: false, error: '问题不能为空' }
+  //
+  // `threadId` 决定落哪条线程（抽屉的一个 tab）：带上就是在那个 tab 里追问
+  // （= `/btw -continue`），不带就是新开一个 tab。空问题 = 只建 tab 不提问。
+  /**
+   * 拿到（必要时按需起）这个节点的常驻 host。
+   *
+   * By The Way 的意义是「不往会话里发消息也能问」——刚打开一条历史会话就想问它是
+   * 最典型的用法，要求用户先随便发一条消息才能用等于把最该成立的场景挡在门外。
+   * 起法与发消息同源：按 sessionId resume（没有 sessionId 的草稿没有主流程记录可作
+   * 背景，也没有地方记这次开销，直接如实拒绝）。
+   */
+  function ensureBtwRun(id, event, { sessionId, cwd } = {}) {
     let run = runs.get(id)
-    if (!run?.child?.stdin?.writable) {
-      // 这个节点还没有常驻 host：页面刚打开一条会话（还没发过消息）、host 被回收、
-      // 或进程已经退出。**必须按需起一个**——btw 的意义恰恰是「不往会话里发消息也能问」
-      // （刚打开一条历史会话想知道它在做什么，就是典型用法），要求用户先随便发一条
-      // 消息才能用 By The Way，等于把最该成立的场景挡在门外。
-      // 起法与发消息同源：按 sessionId resume（没有 sessionId 的草稿没有主流程记录
-      // 可作背景，也没有地方记这次开销，直接如实拒绝）。
-      const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
-      if (!targetSessionId)
-        return { ok: false, error: '先发一条消息，有了会话才能用 By The Way 提问' }
-      // 别的进程（终端里的 TUI / 另一个运行时）正持有该会话的 turn lease 时不能起：
-      // host 启动会 resume 同一个会话文件，btw 结束时还要把用量写回去。
-      const unavailable = sessionBusyElsewhere(targetSessionId)
-      if (unavailable) return { ok: false, error: unavailable }
-      const spawned = spawnChatHost(id, event.sender, {
-        sessionId: targetSessionId,
-        cwd: typeof cwd === 'string' ? cwd : ''
-      })
-      if (!spawned.ok) return spawned
-      run = runs.get(id)
-    } else {
+    if (run?.child?.stdin?.writable) {
       run.sender = event.sender
+      return { run }
     }
-    return hostTaskRequest(run, 'mica/btw/ask', {
+    const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (!targetSessionId) return { error: '先发一条消息，有了会话才能用 By The Way 提问' }
+    // 别的进程（终端里的 TUI / 另一个运行时）正持有该会话的 turn lease 时不能起：
+    // host 启动会 resume 同一个会话文件，btw 结束时还要把用量写回去。
+    const unavailable = sessionBusyElsewhere(targetSessionId)
+    if (unavailable) return { error: unavailable }
+    const spawned = spawnChatHost(id, event.sender, {
+      sessionId: targetSessionId,
+      cwd: typeof cwd === 'string' ? cwd : ''
+    })
+    if (!spawned.ok) return { error: spawned.error }
+    run = runs.get(id)
+    if (!run) return { error: 'chat host 启动失败' }
+    return { run }
+  }
+
+  ipcMain.handle('chat:btw-ask', (event, { id, question, threadId, queue, sessionId, cwd } = {}) => {
+    const text = typeof question === 'string' ? question.trim() : ''
+    const thread = typeof threadId === 'string' ? threadId.trim() : ''
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return hostTaskRequest(ensured.run, 'mica/btw/ask', {
       question: text,
-      ...(reset ? { newThread: true } : {})
+      ...(thread ? { threadId: thread } : {}),
+      ...(queue ? { queue: true } : {})
+    })
+  })
+
+  // 抽屉的 tab 条：线程活在 host 里，客户端只知道自己的 id，所以「重开页面/重开 app
+  // 之后还有哪些 tab、各自聊了什么」只能问 host。
+  ipcMain.handle('chat:btw-threads', (event, { id, sessionId } = {}) => {
+    const run = runs.get(id)
+    if (run?.child) {
+      run.sender = event.sender
+      return hostTaskRequest(run, 'mica/btw/threads', {})
+    }
+    // 还没有常驻 host（页面刚打开一条历史会话、或者 app 刚重启）：直接读会话的落盘
+    // 快照。host 每次变更都会写、退出前还会 flush，所以它就是「关掉 app 之前的样子」；
+    // 为了一次列表去 spawn 一整个 host 进程不值当。
+    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (!target) return { ok: true, threads: [] }
+    const stored = readBtwState(target)
+    return {
+      ok: true,
+      threads: stored.map((thread) => ({ id: thread.id, entries: thread.entries }))
+    }
+  })
+
+  ipcMain.handle('chat:btw-close', (event, { id, threadId } = {}) => {
+    const run = runs.get(id)
+    if (!run?.child) return { ok: true }
+    run.sender = event.sender
+    return hostTaskRequest(run, 'mica/btw/close', {
+      threadId: typeof threadId === 'string' ? threadId : ''
+    })
+  })
+
+  // By The Way 的「快速压缩」：与主对话的本地压缩同源（`toolResultsOnly`），
+  // 只动发给模型的历史——不调用模型、不丢轮次，所以可以反复执行、也不受
+  // 「线程正在回答」限制之外的任何忙守卫影响。
+  ipcMain.handle('chat:btw-compact', async (event, { id, threadId, sessionId, cwd } = {}) => {
+    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return hostTaskRequest(ensured.run, 'mica/btw/compact', {
+      threadId: typeof threadId === 'string' ? threadId : ''
+    })
+  })
+
+  // 停止正在回答的那一问：纯命令，不启动任何东西，所以不碰 run 生命周期
+  // （turn 正在跑也要能停 btw）。
+  ipcMain.handle('chat:btw-interrupt', async (event, { id, threadId, sessionId, cwd } = {}) => {
+    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return hostTaskRequest(ensured.run, 'mica/btw/interrupt', {
+      threadId: typeof threadId === 'string' ? threadId : ''
+    })
+  })
+
+  // 撤回排队中的问题（排队条的 ✕），同样不启动任何东西。
+  ipcMain.handle('chat:btw-recall', async (event, { id, threadId, sessionId, cwd } = {}) => {
+    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return hostTaskRequest(ensured.run, 'mica/btw/recall', {
+      threadId: typeof threadId === 'string' ? threadId : ''
     })
   })
 

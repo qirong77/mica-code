@@ -50,12 +50,13 @@ export function MenuSeparator() {
   return <div className="mx-1 my-1 h-px bg-white/10" />
 }
 
-export function MenuItem({ icon: Icon, label, hint, danger, disabled, onClick }) {
+export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onClick }) {
   return (
     <button
       type="button"
       role="menuitem"
       disabled={disabled}
+      title={title}
       className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? 'text-danger-soft' : 'text-white/90 hover:text-white'
       }`}

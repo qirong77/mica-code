@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
+import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortOption,
@@ -198,6 +199,8 @@ export class SessionStore implements SessionStoreLike {
       } catch {
         // best-effort; a leftover lock is reconciled on acquire if it persists.
       }
+      // 会话文件已经没了，但它的 btw 线程可能还在（另一进程删的会话）。
+      deleteBtwState(safeId);
       return false;
     }
     rmSync(path, { force: true });
@@ -213,6 +216,9 @@ export class SessionStore implements SessionStoreLike {
     } catch {
       // best-effort; a leftover lock is reconciled on acquire if it persists.
     }
+    // By The Way threads belong to the session too（$MICA_HOME/btw/<id>.json）；
+    // 不清掉的话，删了会话以后它的问答还会留着，且没有任何入口能再打开它。
+    deleteBtwState(safeId);
     return true;
   }
   /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */

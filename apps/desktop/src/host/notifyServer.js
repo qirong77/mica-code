@@ -63,6 +63,9 @@ export async function createNotifyServer() {
     setProcessRunning(terminalId, running) {
       return setProcessRunning(states, bus, terminalId, running)
     },
+    setBtwRunning(terminalId, running) {
+      return setBtwRunning(states, bus, terminalId, running)
+    },
     clear(terminalId) {
       if (!states.has(terminalId)) return false
       states.delete(terminalId)
@@ -119,12 +122,13 @@ async function handleRequest(req, res, ctx) {
       unread: isSessionEvent ? !!previous?.unread : !isRunningEvent,
       agentRunning: isSessionEvent ? !!previous?.agentRunning : isRunningEvent,
       processRunning: !!previous?.processRunning,
+      btwRunning: !!previous?.btwRunning,
       lastType: type,
       lastEventAt: Number(body?.ts) > 0 ? Number(body.ts) : Date.now(),
       summary: typeof body?.summary === 'string' ? body.summary.slice(0, 200) : undefined,
       sessionId: normalizeSessionId(body?.sessionId)
     }
-    state.running = state.agentRunning || state.processRunning
+    state.running = state.agentRunning || state.processRunning || state.btwRunning
     ctx.states.set(terminalId, state)
     ctx.bus.emit('change', {
       type: 'event',
@@ -160,7 +164,8 @@ function setProcessRunning(states, bus, terminalId, running) {
     unread: !!previous?.unread,
     agentRunning: !!previous?.agentRunning,
     processRunning: running,
-    running: !!previous?.agentRunning || running,
+    btwRunning: !!previous?.btwRunning,
+    running: !!previous?.agentRunning || running || !!previous?.btwRunning,
     lastType: completed ? 'terminal.completed' : 'terminal.started',
     lastEventAt: now,
     summary: previous?.summary,
@@ -170,6 +175,41 @@ function setProcessRunning(states, bus, terminalId, running) {
   states.set(terminalId, state)
   bus.emit('change', {
     type: 'process',
+    terminalId,
+    state,
+    states: serializeStates(states)
+  })
+  return state
+}
+
+/**
+ * By The Way 线程正在回答（一个隔离子代理，不是这个会话的一轮 turn）。
+ *
+ * 它只驱动侧栏那颗呼吸绿点：不置 unread（没读过的东西由主 turn 负责）、
+ * 不动 lastType（红点是 `turn.error` 的判定依据，btw 失败不该把会话标红）、
+ * 也没有 terminalId 之外的身份——所以单独一个布尔，不能塞进 agentRunning，
+ * 否则 btw 结束会把正在跑的主 turn 一起关掉。
+ */
+function setBtwRunning(states, bus, terminalId, running) {
+  const previous = states.get(terminalId)
+  if (!!previous?.btwRunning === running) return previous ?? null
+  const now = Date.now()
+  const state = {
+    terminalId,
+    unread: !!previous?.unread,
+    agentRunning: !!previous?.agentRunning,
+    processRunning: !!previous?.processRunning,
+    btwRunning: running,
+    running: !!previous?.agentRunning || !!previous?.processRunning || running,
+    lastType: previous?.lastType ?? null,
+    lastEventAt: now,
+    summary: previous?.summary,
+    sessionId: previous?.sessionId,
+    readAt: previous?.readAt ?? null
+  }
+  states.set(terminalId, state)
+  bus.emit('change', {
+    type: 'btw',
     terminalId,
     state,
     states: serializeStates(states)
@@ -233,6 +273,7 @@ function serializeStates(states) {
     // running 是二者的合并值，无法区分是 Mica turn 还是终端前台进程。
     agentRunning: !!item.agentRunning,
     processRunning: !!item.processRunning,
+    btwRunning: !!item.btwRunning,
     lastType: item.lastType ?? null,
     lastEventAt: item.lastEventAt ?? null,
     summary: item.summary,

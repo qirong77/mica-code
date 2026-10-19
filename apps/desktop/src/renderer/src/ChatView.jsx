@@ -51,6 +51,16 @@ function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
 }
 
+/**
+ * By The Way 草稿的键：`节点:线程`。
+ *
+ * 一个节点可以有多个 tab，每个 tab 都是另一条对话，所以半句话必须按 tab 分开存
+ * （只按节点存的话，切个 tab 就把没发出去的问题带到别人嘴里去了）。
+ */
+function btwDraftKey(nodeId, threadId) {
+  return `${nodeId || ''}:${threadId || ''}`
+}
+
 /** 补全浮层的空态文案：加载中 / 失败 / 没有匹配（文件侧与 CLI 的措辞一致）。 */
 function completionEmptyText(kind, loading, failed) {
   if (kind === 'skill') {
@@ -2239,17 +2249,74 @@ export function ChatView({
   // 输入框右侧时钟图标点开的定时任务面板
   const [loopOpen, setLoopOpen] = useState(false)
   // By The Way（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
-  const [btwThread, setBtwThread] = useState({ id: '', entries: [] })
+  // 一个会话可以有多个 tab（= 多条线程），按线程 id 存各自的快照；`btwActiveId` 是当前
+  // 显示的那一个。快照整份替换，所以这里只需要一张 id → thread 的表。
+  const [btwThreads, setBtwThreads] = useState({})
+  const [btwActiveId, setBtwActiveId] = useState('')
+  const btwThread = btwThreads[btwActiveId] || { id: btwActiveId, entries: [] }
   const [btwOpen, setBtwOpen] = useState(false)
   const [btwDraft, setBtwDraft] = useState('')
   const [btwSending, setBtwSending] = useState(false)
+  const [btwCompacting, setBtwCompacting] = useState(false)
   // 上一次渲染的线程快照（在 applyBtwThread 里比较「刚回答完的那一条」），
   // 面板关着时补一条提示用；同时兼作「回答到达」的去重依据。
-  const btwThreadRef = useRef({ id: '', entries: [] })
-  // 还没发出去的 By The Way 问题：按节点存，切走再回来仍在（与主输入框的 drafts 同款）。
+  const btwThreadsRef = useRef({})
+  const btwActiveIdRef = useRef('')
+  btwActiveIdRef.current = btwActiveId
+  // 还没发出去的 By The Way 问题：按 `节点:线程` 存，切走再回来仍在（与主输入框的
+  // drafts 同款，但多一维——每个 tab 有自己半句话）。
   const btwDraftsRef = useRef(new Map())
   const btwOpenRef = useRef(false)
   btwOpenRef.current = btwOpen
+
+  /**
+   * 打开抽屉时向 host 要一次 tab 清单。
+   *
+   * 线程活在 host 里（并落盘到 `$MICA_HOME/btw/<sessionId>.json`），所以页面刷新、
+   * 换个窗口打开、甚至关掉 app 再打开，抽屉里该有哪些 tab 都只能问 host。这里只在
+   * 「打开抽屉」时问一次：没打开时不需要为它起 host，也不需要维护一份可能过期的表。
+   */
+  useEffect(() => {
+    if (!btwOpen || !nodeIdRef.current) return undefined
+    let cancelled = false
+    const targetNodeId = nodeIdRef.current
+    void (async () => {
+      try {
+        const res = await window.mica.chat.btwThreads(targetNodeId, sessionIdRef.current || '')
+        if (cancelled || nodeIdRef.current !== targetNodeId) return
+        const list = Array.isArray(res?.threads) ? res.threads : []
+        if (list.length === 0) return
+        const table = {}
+        for (const thread of list) {
+          if (!thread?.id) continue
+          table[thread.id] = {
+            id: thread.id,
+            entries: Array.isArray(thread.entries) ? thread.entries : [],
+            ...(thread.context ? { context: thread.context } : {})
+          }
+        }
+        if (Object.keys(table).length === 0) return
+        // host 是权威的：整表替换（未回答完的 tab 在重开后会以 running 条目出现，
+        // 后续快照照常覆盖），但保留客户端认识的 tab 顺序感——这里以 host 顺序为准。
+        btwThreadsRef.current = table
+        setBtwThreads(table)
+        if (!btwActiveIdRef.current || !table[btwActiveIdRef.current]) {
+          const fallback = list[list.length - 1]?.id || ''
+          btwActiveIdRef.current = fallback
+          setBtwActiveId(fallback)
+          setBtwDraft(btwDraftsRef.current.get(btwDraftKey(targetNodeId, fallback)) || '')
+        }
+      } catch {
+        // 拿不到就当没有 tab（下一次提问会新建一条），不打扰用户
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // 依赖里带上 sessionId：从草稿发出第一条消息时节点会换成真会话，host 与落盘的
+    // 线程都挂在 sessionId 上，换到它之后要再问一次。
+  }, [btwOpen, node?.sessionId, nodeIdRef])
+
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
@@ -2453,7 +2520,7 @@ export function ChatView({
 
   const changeBtwDraft = useCallback(
     (value) => {
-      btwDraftsRef.current.set(nodeIdRef.current, value)
+      btwDraftsRef.current.set(btwDraftKey(nodeIdRef.current, btwActiveIdRef.current), value)
       setBtwDraft(value)
     },
     [nodeIdRef]
@@ -2465,9 +2532,15 @@ export function ChatView({
    * 失败（host 不在、已有问题在回答）时保留草稿，用户可以直接重试。
    */
   const askBtw = useCallback(
-    async (question) => {
+    async (question, options = {}) => {
       const text = String(question || '').trim()
       const targetNodeId = nodeIdRef.current
+      // 提问落在当前 tab 上；没有 tab（第一次打开抽屉）时让 host 新建一条，
+      // 之后按它返回的 id 归位——所以这里不预先造 id。
+      const targetThreadId = btwActiveIdRef.current
+      // 回答期间提交是**排队**（单槽位），不是第二次并发提问：btw 复用同一个子代理，
+      // 它的消息数组不是并发安全的。
+      const queue = options.queue === true
       if (!text || btwSending) return
       setBtwSending(true)
       try {
@@ -2475,6 +2548,8 @@ export function ChatView({
         // sessionId/cwd 让 host 在没有常驻进程时按需起一个——「刚打开一条会话、
         // 还没发消息就想问一句」正是 btw 最该成立的场景。
         const res = await window.mica.chat.btwAsk(targetNodeId, text, {
+          threadId: targetThreadId,
+          queue,
           sessionId: sessionIdRef.current || '',
           cwd: cwdRef.current || ''
         })
@@ -2487,7 +2562,15 @@ export function ChatView({
           appendNotice(`By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
           return
         }
-        changeBtwDraft('')
+        // host 可能新开了一条线程（原先没有 tab），按它给的 id 切过去；
+        // 草稿也记在新 tab 名下（老的 key 上没有内容，留着也无害）。
+        const resolvedThreadId = res.result?.threadId || targetThreadId
+        if (resolvedThreadId && resolvedThreadId !== btwActiveIdRef.current) {
+          btwActiveIdRef.current = resolvedThreadId
+          setBtwActiveId(resolvedThreadId)
+        }
+        btwDraftsRef.current.set(btwDraftKey(targetNodeId, resolvedThreadId), '')
+        setBtwDraft('')
       } catch (error) {
         if (nodeIdRef.current === targetNodeId) {
           appendNotice(
@@ -2500,31 +2583,202 @@ export function ChatView({
       }
     },
     // useLatest 返回的是稳定的 ref 盒子，列进来只为消掉 exhaustive-deps 的误报。
-    [appendNotice, btwSending, changeBtwDraft, cwdRef, nodeIdRef]
+    [appendNotice, btwSending, cwdRef, nodeIdRef]
   )
 
-  /** 「新话题」：让 host 换一条线程（下一次提问重取主流程记录作背景）。 */
-  const resetBtwThread = useCallback(async () => {
+  /**
+   * 开一个新 tab（= host 侧一条新线程）。
+   *
+   * 上下文要等第一次提问才取：空 tab 不该被算成一次问答，也不该白占一份子代理。
+   * 所以这里只让 host 把 id 建出来，然后切过去。
+   */
+  const addBtwThread = useCallback(async () => {
     const targetNodeId = nodeIdRef.current
     try {
       const res = await window.mica.chat.btwAsk(targetNodeId, '', {
-        newThread: true,
         sessionId: sessionIdRef.current || '',
         cwd: cwdRef.current || ''
       })
       if (nodeIdRef.current !== targetNodeId) return
-      if (!res?.ok) appendNotice(`新话题失败：${res?.error || '未知错误'}`, 'error')
-      else if (res.result?.ok === false)
-        appendNotice(`新话题失败：${res.result.message || '未知错误'}`, 'warn')
+      if (!res?.ok) {
+        appendNotice(`新建 By The Way 失败：${res?.error || '未知错误'}`, 'error')
+        return
+      }
+      const createdId = res.result?.threadId
+      if (!createdId) return
+      setBtwThreads((current) => ({
+        ...current,
+        [createdId]: current[createdId] || { id: createdId, entries: [] }
+      }))
+      btwActiveIdRef.current = createdId
+      setBtwActiveId(createdId)
+      btwDraftsRef.current.set(btwDraftKey(targetNodeId, createdId), '')
+      setBtwDraft('')
     } catch (error) {
       if (nodeIdRef.current === targetNodeId) {
         appendNotice(
-          `新话题失败：${error instanceof Error ? error.message : String(error)}`,
+          `新建 By The Way 失败：${error instanceof Error ? error.message : String(error)}`,
           'error'
         )
       }
     }
   }, [appendNotice, cwdRef, nodeIdRef])
+
+  /** 切 tab：把当前 tab 的半句话存下、把目标 tab 的草稿取回来。 */
+  const selectBtwThread = useCallback(
+    (threadId) => {
+      const target = String(threadId || '')
+      if (!target || target === btwActiveIdRef.current) return
+      btwDraftsRef.current.set(btwDraftKey(nodeIdRef.current, btwActiveIdRef.current), btwDraft)
+      btwActiveIdRef.current = target
+      setBtwActiveId(target)
+      setBtwDraft(btwDraftsRef.current.get(btwDraftKey(nodeIdRef.current, target)) || '')
+    },
+    [btwDraft, nodeIdRef]
+  )
+
+  /** 关 tab：host 侧线程也要删（正在回答的那条会被拒绝，原因如实提示）。 */
+  const closeBtwThread = useCallback(
+    async (threadId) => {
+      const targetNodeId = nodeIdRef.current
+      const target = String(threadId || '')
+      if (!target) return
+      try {
+        const res = await window.mica.chat.btwClose(targetNodeId, target)
+        if (nodeIdRef.current !== targetNodeId) return
+        if (res?.result?.ok === false) {
+          appendNotice(`关闭失败：${res.result.message || '未知错误'}`, 'warn')
+          return
+        }
+        if (!res?.ok) {
+          appendNotice(`关闭失败：${res?.error || 'chat host 不可用'}`, 'error')
+          return
+        }
+        btwDraftsRef.current.delete(btwDraftKey(targetNodeId, target))
+        setBtwThreads((current) => {
+          const next = { ...current }
+          delete next[target]
+          return next
+        })
+        if (btwActiveIdRef.current === target) {
+          // 关掉当前 tab 就落在剩下最后一个上（没有就回到空态，下一次提问新建）
+          const remaining = Object.values(btwThreadsRef.current).filter(
+            (thread) => thread.id !== target
+          )
+          const fallback = remaining[remaining.length - 1]?.id || ''
+          btwActiveIdRef.current = fallback
+          setBtwActiveId(fallback)
+          setBtwDraft(btwDraftsRef.current.get(btwDraftKey(targetNodeId, fallback)) || '')
+        }
+      } catch (error) {
+        if (nodeIdRef.current === targetNodeId) {
+          appendNotice(
+            `关闭失败：${error instanceof Error ? error.message : String(error)}`,
+            'error'
+          )
+        }
+      }
+    },
+    [appendNotice, nodeIdRef]
+  )
+
+  /**
+   * By The Way 的「快速压缩」：与主对话的本地压缩同源（`toolResultsOnly`），只清理
+   * 这条线程发给模型的历史——不调用模型、不丢轮次，所以可以反复点。
+   */
+  const compactBtw = useCallback(async () => {
+    const targetNodeId = nodeIdRef.current
+    const targetThreadId = btwActiveIdRef.current
+    if (!targetThreadId) return
+    if (btwCompacting) return
+    setBtwCompacting(true)
+    try {
+      const res = await window.mica.chat.btwCompact(targetNodeId, targetThreadId, {
+        sessionId: sessionIdRef.current || '',
+        cwd: cwdRef.current || ''
+      })
+      if (nodeIdRef.current !== targetNodeId) return
+      if (!res?.ok) {
+        appendNotice(`压缩失败：${res?.error || 'chat host 不可用'}`, 'error')
+        return
+      }
+      if (res.result?.ok === false) {
+        appendNotice(`压缩失败：${res.result.message || '未知错误'}`, 'warn')
+        return
+      }
+      const saved = Number(res.result?.savedTokens) || 0
+      appendNotice(
+        saved > 0
+          ? `已压缩 By The Way 上下文，释放约 ${formatTokens(saved)} token`
+          : '已压缩 By The Way 上下文',
+        'info'
+      )
+    } catch (error) {
+      if (nodeIdRef.current === targetNodeId) {
+        appendNotice(`压缩失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+    } finally {
+      setBtwCompacting(false)
+    }
+  }, [appendNotice, btwCompacting, nodeIdRef])
+
+  /** 停止正在回答的那一问（抽屉输入条的停止按钮）。只发中断、不 await 结果。 */
+  const stopBtw = useCallback(async () => {
+    const targetNodeId = nodeIdRef.current
+    const targetThreadId = btwActiveIdRef.current
+    if (!targetThreadId) return
+    try {
+      const res = await window.mica.chat.btwInterrupt(targetNodeId, targetThreadId, {
+        sessionId: sessionIdRef.current || '',
+        cwd: cwdRef.current || ''
+      })
+      if (nodeIdRef.current !== targetNodeId) return
+      // 收尾（aborted 状态）由 host 经 `mica/btw/updated` 推回，这里只报业务性失败。
+      if (!res?.ok) appendNotice(`停止失败：${res?.error || 'chat host 不可用'}`, 'error')
+      else if (res.result?.ok === false) appendNotice(res.result.message || '停止失败', 'warn')
+    } catch (error) {
+      if (nodeIdRef.current === targetNodeId) {
+        appendNotice(`停止失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+    }
+  }, [appendNotice, nodeIdRef])
+
+  /**
+   * 撤回排队中的问题：把问题取回输入框（等价主对话的 shift+←），不丢字。
+   *
+   * 撤回后草稿里已有内容时**追加**而不是覆盖——用户可能已经写了下一句。
+   */
+  const recallBtw = useCallback(async () => {
+    const targetNodeId = nodeIdRef.current
+    const targetThreadId = btwActiveIdRef.current
+    if (!targetThreadId) return
+    try {
+      const res = await window.mica.chat.btwRecall(targetNodeId, targetThreadId, {
+        sessionId: sessionIdRef.current || '',
+        cwd: cwdRef.current || ''
+      })
+      if (nodeIdRef.current !== targetNodeId) return
+      if (!res?.ok) {
+        appendNotice(`取回失败：${res?.error || 'chat host 不可用'}`, 'error')
+        return
+      }
+      if (res.result?.ok === false) {
+        appendNotice(res.result.message || '没有排队中的问题', 'warn')
+        return
+      }
+      const recalled = String(res.result?.question || '')
+      if (!recalled) return
+      const key = btwDraftKey(targetNodeId, targetThreadId)
+      const current = btwDraftsRef.current.get(key) || ''
+      const next = current ? `${current}${current.endsWith('\n') ? '' : '\n'}${recalled}` : recalled
+      btwDraftsRef.current.set(key, next)
+      setBtwDraft(next)
+    } catch (error) {
+      if (nodeIdRef.current === targetNodeId) {
+        appendNotice(`取回失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+      }
+    }
+  }, [appendNotice, nodeIdRef])
 
   // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
@@ -2612,11 +2866,11 @@ export function ChatView({
   // 同源：以 textarea 当前的值为准，插完把光标落在引用块后面的空行上；同一条消息
   // 重复点不重复插入（quoteIntoDraft 负责），只把光标送回已有的那个块。
   const quoteMessage = useCallback(
-    ({ role, text }) => {
+    ({ role, text, label }) => {
       const element = textareaRef.current
       const current = element?.value ?? inputRef.current ?? ''
       const caret = element ? element.selectionStart : current.length
-      const next = quoteIntoDraft(current, caret, { role, text })
+      const next = quoteIntoDraft(current, caret, { role, text, label })
       draftsRef.current.set(nodeId, next.text)
       setInput(next.text)
       requestAnimationFrame(() => {
@@ -2890,11 +3144,20 @@ export function ChatView({
     (thread) => {
       const next = {
         id: typeof thread?.id === 'string' ? thread.id : '',
-        entries: Array.isArray(thread?.entries) ? thread.entries : []
+        entries: Array.isArray(thread?.entries) ? thread.entries : [],
+        ...(thread?.context ? { context: thread.context } : {}),
+        // 排队那一问只活在这份快照里（不进会话文件），照抄即可。
+        ...(thread?.pendingQuestion ? { pendingQuestion: thread.pendingQuestion } : {})
       }
-      const previous = btwThreadRef.current
-      btwThreadRef.current = next
-      setBtwThread(next)
+      const previous = next.id ? btwThreadsRef.current[next.id] : null
+      if (next.id) btwThreadsRef.current = { ...btwThreadsRef.current, [next.id]: next }
+      // 没有 id 的快照（理论上不该出现）不落表：tab 是按 id 组织的。
+      if (next.id) setBtwThreads((current) => ({ ...current, [next.id]: next }))
+      // 第一条线程到达时自动切过去：打开抽屉还没选过 tab 的场景（第一次提问）
+      if (next.id && !btwActiveIdRef.current) {
+        btwActiveIdRef.current = next.id
+        setBtwActiveId(next.id)
+      }
       if (btwOpenRef.current) return
       for (const entry of newlyAnsweredBtwEntries(previous, next)) {
         if (entry.status === 'error') {
@@ -3313,11 +3576,15 @@ export function ChatView({
     setRecallingQueueId(null)
     setBackgroundTasks([])
     setSubagentTasks([])
-    // btw 线程属于「这个会话的 host」，切节点必须换一份；半句话的草稿按节点存下来
-    // （切走再回来不丢），与主输入框的 drafts 同一套心智。
-    btwThreadRef.current = { id: '', entries: [] }
-    setBtwThread(btwThreadRef.current)
-    setBtwDraft(btwDraftsRef.current.get(nodeId) || '')
+    // btw 线程属于「这个会话的 host」，切节点必须换一份；半句话的草稿按
+    // `节点:线程` 存下来（切走再回来不丢），与主输入框的 drafts 同一套心智。
+    // 这里只清表并等 host 推回（恢复走 `chat:btw-threads` 的重放，见下面的 effect）：
+    // 立刻按旧节点残留的 id 去猜会打到别的会话的线程上。
+    btwThreadsRef.current = {}
+    setBtwThreads({})
+    btwActiveIdRef.current = ''
+    setBtwActiveId('')
+    setBtwDraft(btwDraftsRef.current.get(btwDraftKey(nodeId, '')) || '')
     setStopping(false)
     setPhase('idle')
     setRunStartedAt(0)
@@ -4752,7 +5019,13 @@ export function ChatView({
   // By The Way（btw）：入口在输入条动作区，线程状态是 host 的快照投影。
   // 有会话才有 host、才有「主流程记录」可作背景（草稿会话还没有 sessionId）。
   const hasSession = Boolean(node?.sessionId || sessionIdRef.current)
-  const btwRunning = btwThread.entries.some((entry) => entry.status === 'running')
+  // 任一 tab 在回答都算「在跑」：入口按钮的呼吸态说的是「这个抽屉里有活」，不是某个 tab。
+  const btwTabList = Object.values(btwThreads).filter((item) => item?.id)
+  const btwRunning = btwTabList.some((item) =>
+    (item.entries || []).some((entry) => entry.status === 'running')
+  )
+  // 抽屉宽度是界面状态（所有窗口一致、重启还在）；拖动期间只改 DOM，松手才写回。
+  const [btwWidth, setBtwWidth] = useSharedState('btwWidth', null)
   // 切到别的对话时收起定时任务与 btw 面板：两者描述的都是上一个会话。
   useEffect(() => {
     setLoopOpen(false)
@@ -4917,6 +5190,19 @@ export function ChatView({
         // 抽屉打开时让自己让出右侧那一条（内边距会把对话区与输入条一起收窄），
         // 所以它是「并排」而不是「盖住」——主流程照常看得见、发得出。
         className={`chat-view no-drag ${visible ? 'flex' : 'hidden'} ${btwOpen ? 'chat-btw-open' : ''}`}
+        // 宽度是共享界面状态（拖动后写回，所有窗口一致）。变量挂在根上，抽屉与它让出的
+        // 右侧内边距读的是同一个值——两边不会对不上。
+        style={
+          btwOpen && btwWidth
+            ? {
+                // 拖过的宽度也要被视口夹住：把窗口拖窄后不能让它盖住整块对话区
+                '--chat-btw-width': `${Math.min(
+                  Math.max(btwWidth, 240),
+                  Math.round((typeof window === 'undefined' ? 1200 : window.innerWidth) * 0.85)
+                )}px`
+              }
+            : undefined
+        }
         onPointerDownCapture={focusComposerFromShell}
         onPointerMoveCapture={trackShellPointerMove}
         onMouseUp={focusComposerFromShell}
@@ -5408,11 +5694,23 @@ export function ChatView({
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}
+            tabs={btwTabList}
+            width={btwWidth}
+            onResizeWidth={setBtwWidth}
             draft={btwDraft}
             sending={btwSending}
+            compacting={btwCompacting}
             onDraftChange={changeBtwDraft}
             onAsk={askBtw}
-            onNewThread={resetBtwThread}
+            onStop={stopBtw}
+            onRecall={recallBtw}
+            onNewThread={addBtwThread}
+            onSelectThread={selectBtwThread}
+            onCloseThread={closeBtwThread}
+            onCompact={compactBtw}
+            // 把 btw 的这段字引用进主输入框（署名「By The Way」：它不在主对话历史里，
+            // 标成「模型」会让人以为是从对话里引的）。发不发由用户决定。
+            onQuoteToMain={(text) => quoteMessage({ role: 'assistant', text, label: 'By The Way' })}
             renderAnswer={renderBtwAnswer}
             renderQuestion={renderBtwQuestion}
             onPreviewImage={pathActions.preview}

@@ -63,7 +63,7 @@ import {
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
 import { AutoCompactController } from '../runtime/autoCompact.js';
-import { BtwThreadController } from '../runtime/btwThread.js';
+import { BtwThreads, readStoredBtwThreads, writeStoredBtwThreads } from '../runtime/btwThread.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { ToolAgent } from '../tools/ToolAgent.js';
@@ -248,7 +248,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
   let autoCompact: AutoCompactController | null = null;
-  let btwController: BtwThreadController | null = null;
+  let btwController: BtwThreads | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
   let mcpInitPromise: Promise<unknown> | null = null;
@@ -267,6 +267,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     }
     executor?.abort();
     projector?.dispose();
+    // 落盘去抖是 500ms：不在这里刷一次，最后那半秒的回答会随进程一起丢
+    // （btw 的问答本来就是唯一副本，没有第二个地方能补回来）。
+    btwController?.flush();
     await Promise.all([
       cleanupTask('stop subagents', () => subagentTasks?.stop()),
       cleanupTask('stop background tools', () =>
@@ -338,9 +341,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     subagentTasks = new SubagentTaskManager();
     micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
 
-    // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个面板。
+    // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个抽屉，每个 tab 一条线程。
     // 线程状态（可复用的子代理 + 问答）只能活在 host 里，回答经通知推回。
-    btwController = new BtwThreadController({
+    // 持久化到 `$MICA_HOME/btw/<sessionId>.json`，所以关掉 app 再打开，问答与上下文都还在。
+    btwController = new BtwThreads({
       agent,
       sessionController,
       onUpdate: (thread) => {
@@ -349,6 +353,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         } catch {
           // stdout 在退出流程里可能已经关闭；回答推不出去不该影响 host。
         }
+      },
+      onPersist: (threads) => {
+        if (sessionId) writeStoredBtwThreads(sessionId, threads);
       },
     });
 
@@ -405,6 +412,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     if (options.role) agent.setRole(options.role);
 
     sessionId = sessionController.getCurrentSessionId();
+    // 恢复这个会话上次留下的 By The Way 线程（问答 + 子代理消息），
+    // 所以关掉 app 再打开，抽屉里的 tab 与上下文都还在。
+    if (sessionId && btwController) btwController.restore(readStoredBtwThreads(sessionId));
 
     // MCP 初始化与 host ready 解耦：交互模式是 UI 先渲染、MCP 插件在
     // runtime:start 后台连接，app-server 之前却把 `await micaMcp.init()` 放在
@@ -657,7 +667,7 @@ type HostContext = {
   /** Automatic context compaction state machine (settings + run counters). */
   autoCompact: AutoCompactController;
   /** By The Way（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
-  btw: BtwThreadController | null;
+  btw: BtwThreads | null;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
   sessionId: string;
@@ -1288,26 +1298,109 @@ async function handleCodexRequest(
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'btw 需要先有一条会话');
         return;
       }
+      // 走哪个 tab：带了 threadId 就在那条线程上追问（`/btw -continue`），没带就是
+      // 新开一条（抽屉上的 `+`）。host 里找不到这个 id（重启过、被淘汰）时按同一个
+      // id 重建，客户端不必自己处理「线程丢了」。
+      const threadIdParam = paramString(params, 'threadId') ?? '';
       const question = (paramString(params, 'question') ?? '').trim();
-      const newThread = params.newThread === true;
       if (!question) {
-        // 面板的「新话题」：只重置线程，不提问（下一次提问重新取一份主流程记录）。
-        if (newThread) {
-          ctx.btw.reset();
-          ctx.writeResponse({ ok: true, threadId: ctx.btw.snapshot().id });
+        // 空问题 = 只把这条线程建出来（点 `+` 时要先把 id 拿到手才能渲染 tab）。
+        if (threadIdParam) {
+          ctx.writeResponse({ ok: true, threadId: ctx.btw.ensure(threadIdParam).id });
           return;
         }
-        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'question must not be empty');
+        const created = ctx.btw.ensure(null);
+        ctx.writeResponse({ ok: true, threadId: created.id });
         return;
       }
-      const result = ctx.btw.ask(question, { newThread });
-      if (!result.ok) {
-        // 业务性拒绝（空问题 / 上一个还在回答）走响应，让面板原样显示原因；
+      // 回答期间再提交 = 排队等这一条答完（面板的 Enter/Tab），不是并发的第二次提问。
+      const asked = ctx.btw.ask(threadIdParam || null, question, {
+        queue: params?.queue === true,
+      });
+      if (!asked.ok) {
+        // 业务性拒绝（上一个还在回答）走响应，让面板原样显示原因；
         // 协议层错误才用 writeError。
+        ctx.writeResponse({ ok: false, message: asked.message });
+        return;
+      }
+      ctx.writeResponse({ ok: true, threadId: asked.threadId });
+      return;
+    }
+    case MICA_METHODS.btwCompact: {
+      // By The Way 的本地快速压缩：线程是一个复用子代理，它的历史只活在这个进程里，
+      // 所以只能由 host 压。与 `/compact` 的 toolResultsOnly 同一条路径——不调用模型、
+      // 不丢轮次、可重复执行；压完把上下文占用（估算值）随快照推回去。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      const result = await ctx.btw.compact(paramString(params, 'threadId'));
+      if (!result.ok) {
+        // 「没有可清理内容」「正在回答中」都是业务性结论，让面板原样显示原因。
         ctx.writeResponse({ ok: false, message: result.message });
         return;
       }
-      ctx.writeResponse({ ok: true, threadId: ctx.btw.snapshot().id });
+      ctx.writeResponse({
+        ok: true,
+        savedTokens: result.savedTokens,
+        tokens: result.tokens,
+        requests: result.requests,
+      });
+      return;
+    }
+    case MICA_METHODS.btwThreads: {
+      // 抽屉的 tab 条与「重开 app 后恢复」都读这里：线程活在 host 里，
+      // 客户端只知道自己的 id，不知道还有哪些、各自有什么内容。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      ctx.writeResponse({ ok: true, threads: ctx.btw.list() });
+      return;
+    }
+    case MICA_METHODS.btwInterrupt: {
+      // 停止正在回答的那一问：只发中断信号、立刻响应。收尾（写 aborted 状态、记账、
+      // 补历史）在控制器那边做，答案状态仍经 `mica/btw/updated` 推回。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      const result = ctx.btw.interrupt(paramString(params, 'threadId'));
+      if (!result.ok) {
+        ctx.writeResponse({ ok: false, message: result.message });
+        return;
+      }
+      ctx.writeResponse({ ok: true });
+      return;
+    }
+    case MICA_METHODS.btwRecall: {
+      // 把排队中的问题取回来（面板排队条的 ✕）。只清槽、不启动任何东西：
+      // 那一问还没进模型，撤回是安全的。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      const result = ctx.btw.recall(paramString(params, 'threadId'));
+      if (!result.ok) {
+        ctx.writeResponse({ ok: false, message: result.message });
+        return;
+      }
+      ctx.writeResponse({ ok: true, question: result.question });
+      return;
+    }
+    case MICA_METHODS.btwClose: {
+      // 关掉一个 tab。正在回答的那条拒绝：否则答案会连同宿主一起消失
+      // （提问已经发出去了，客户端却拿不到结果）。
+      if (!ctx.btw) {
+        ctx.writeError(CODEX_ERROR_INTERNAL, 'btw 不可用：host 尚未就绪');
+        return;
+      }
+      const closed = ctx.btw.close(paramString(params, 'threadId'));
+      if (!closed.ok) {
+        ctx.writeResponse({ ok: false, message: closed.message });
+        return;
+      }
+      ctx.writeResponse({ ok: true });
       return;
     }
     case MICA_METHODS.renameSession: {

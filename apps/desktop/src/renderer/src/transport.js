@@ -223,10 +223,23 @@ function createWebApi(env) {
         invoke('chat:btw-ask', {
           id,
           question: question || '',
-          newThread: options.newThread === true,
+          threadId: options.threadId || null,
+          queue: options.queue === true,
           sessionId: options.sessionId || null,
           cwd: options.cwd || null
         }),
+      // 抽屉的 tab 条 / 重开页面后的恢复：线程活在 host 里，只有它知道有哪些。
+      btwThreads: (id, sessionId) =>
+        invoke('chat:btw-threads', { id, sessionId: sessionId || null }),
+      btwClose: (id, threadId) => invoke('chat:btw-close', { id, threadId }),
+      // 停止正在回答的那一问 / 撤回排队中的问题：纯命令，不启动 turn。
+      btwInterrupt: (id, threadId, { sessionId, cwd } = {}) =>
+        invoke('chat:btw-interrupt', { id, threadId, sessionId, cwd }),
+      btwRecall: (id, threadId, { sessionId, cwd } = {}) =>
+        invoke('chat:btw-recall', { id, threadId, sessionId, cwd }),
+      // By The Way 的本地快速压缩（与主对话的「快速压缩」同源）。
+      btwCompact: (id, threadId, { sessionId, cwd } = {}) =>
+        invoke('chat:btw-compact', { id, threadId, sessionId, cwd }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),

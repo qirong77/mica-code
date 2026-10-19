@@ -187,7 +187,13 @@ export const MICA_BTW_NOTIFICATIONS = {
 export type MicaBtwEntry = {
   id: string;
   question: string;
-  status: 'running' | 'completed' | 'error';
+  /**
+   * `aborted`：用户主动停止（面板的停止按钮）。
+   *
+   * 与 `error` 分开是有意义的：中断不是失败，界面上不该显示成一次报错；
+   * 已经流出来的那段正文仍然是这一问的答案（见下面的 `answer`）。
+   */
+  status: 'running' | 'completed' | 'error' | 'aborted';
   /**
    * 回答正文。`status === 'completed'` 时是最终答案；还在跑时是**已经流出的那一部分**
    * （面板据此像主对话一样逐字渲染，而不是干等一次请求结束）。
@@ -236,6 +242,46 @@ export type MicaBtwThread = {
   id: string;
   /** 有界：只保留最近若干条（host 侧裁剪），顺序即时间顺序。 */
   entries: MicaBtwEntry[];
+  /**
+   * 这条线程自己的模型与上下文占用（子代理是独立的一次运行，与主对话的
+   * `meta`/`tokenUsage` 没有关系，所以必须单独带一份）。
+   *
+   * 没有线程（还没问过）时缺省。
+   */
+  context?: MicaBtwContext;
+  /**
+   * 排队等这一条答完的问题（见 `MicaBtwAskParams.queue`）。
+   *
+   * 只有一格：面板据此显示「排队中」，答完自动接上、撤回后字段消失。
+   */
+  pendingQuestion?: string;
+};
+
+/**
+ * By The Way 线程的上下文占用。
+ *
+ * 口径与主对话状态栏一致：`tokens` 是**最近一次请求的上下文占用**
+ * （`lastUsage.inputTokens`），而不是累计值——累计值会随轮次线性上涨，看不出
+ * 「这一条线程还有多少余量」。压缩之后到下一次请求之前，`tokens` 换成压缩的估算值
+ * 并置 `estimated: true`（否则界面会一直停在压缩前那个数字）。
+ */
+export type MicaBtwContext = {
+  model?: string;
+  effort?: string;
+  providerId?: string;
+  /** 最近一次请求的上下文占用（压缩后未再请求时是估算值）。 */
+  tokens?: number;
+  /** `tokens` 是不是压缩后的估算（还没被真实请求刷新）。 */
+  estimated?: boolean;
+  /** 最近一次请求里命中的缓存前缀 token 数。 */
+  cachedTokens?: number;
+  /** 模型的上下文窗口。 */
+  contextWindowSize?: number;
+  /** 本线程累计请求数。 */
+  requests: number;
+  /** 本线程累计 input/output token（用于提示「这条线程一共花了多少」）。 */
+  totalInputTokens: number;
+  totalOutputTokens: number;
 };
 
 /** `MICA_BTW_NOTIFICATIONS.updated` 的 payload。 */
@@ -310,6 +356,12 @@ export type MicaAutoCompactStatus = {
  *   from its in-memory snapshot, so renaming while a turn runs (or while the host
  *   is merely idle but still alive) has to go through it — a client-side
  *   read-modify-write would be overwritten by the host's next save.
+ * - `mica/btw/compact`: the By The Way thread is a reusable subagent living in the
+ *   host, so its own history can only be shrunk there. Local only (`toolResultsOnly`
+ *   semantics): no model request, no round dropped, repeatable.
+ * - `mica/btw/threads` / `mica/btw/close`: the drawer's tabs are host-side threads
+ *   (each with its own subagent), so listing them after a reload and closing one can
+ *   only go through the host.
  *
  * Codex clients never send them; the host answers unknown methods with
  * method-not-found, so a Codex driver is unaffected.
@@ -324,17 +376,42 @@ export const MICA_METHODS = {
   subagentTaskDetail: 'mica/subagentTasks/detail',
   killSubagentTask: 'mica/subagentTasks/kill',
   btwAsk: 'mica/btw/ask',
+  btwCompact: 'mica/btw/compact',
+  /**
+   * 停止正在回答的那一问（面板输入条的停止按钮）。
+   *
+   * 与 `btwAsk` 一样是**能打断的请求**：主流程在跑也要能调，所以 handler 不能等回答结束。
+   */
+  btwInterrupt: 'mica/btw/interrupt',
+  /** Take the queued question back out of the slot (the drawer's queue ✕). */
+  btwRecall: 'mica/btw/recall',
+  /** List the session's By The Way threads (one per drawer tab) with their transcripts. */
+  btwThreads: 'mica/btw/threads',
+  /** Close one By The Way thread (the drawer's tab ✕). Refused while it is answering. */
+  btwClose: 'mica/btw/close',
   renameSession: 'mica/session/rename',
 } as const;
 
 export type MicaBtwAskParams = {
   /**
-   * 问题。留空（或只有空白）且 `newThread` 为真时表示「只重置线程」——面板上的
-   * 「新话题」按钮，下一次提问会重新取一份主流程对话记录当背景。
+   * 问题。留空表示「只建这条线程」——面板点 `+` 开一个新 tab 时会把 id 先拿到手，
+   * 上下文要等第一次提问才取（这样空 tab 不会被算成一次问答）。
    */
   question?: string;
-  /** 另起一条线程，而不是续问上一条（等价 CLI 里不带 `-continue` 的那次提问）。 */
-  newThread?: boolean;
+  /**
+   * 要续问的线程（同一个 tab 里追问 = CLI 的 `/btw -continue`）。
+   *
+   * 不传就是**新开一条线程**（面板上的 `+`）。带了但 host 里没有这条（重启过、
+   * 或者已经被淘汰）时按同一个 id 重建，客户端不必自己处理「线程丢了」。
+   */
+  threadId?: string;
+  /**
+   * 这条线程还在回答时排队等它答完（面板回答期间按 Enter/Tab）。
+   *
+   * 不带它就是「在跑就拒绝」：btw 复用同一个子代理，消息数组不是并发安全的，
+   * 所以只有单槽位排队这一条路，不会并发开两次提问。
+   */
+  queue?: boolean;
 };
 
 export type MicaEditMessageParams = {

@@ -839,14 +839,78 @@ suite('mica app-server real-user flows (mock provider)', () => {
       { subagentType: 'btw', status: 'completed' },
     ]);
 
-    // 「新话题」只重置线程，不提问。
-    await send(host, 3, 'mica/btw/ask', { newThread: true });
-    const reset = await waitFor(
-      host,
-      (m) => m.method === 'mica/btw/updated' && entries(m)?.length === 0,
-      'btw thread reset',
+    // 新开一条线程（抽屉的 `+`）：空问题只把 tab 建出来，不提问、不占用任何子代理。
+    await send(host, 3, 'mica/btw/ask', { question: '' });
+    const created = await waitFor(host, (m) => m.id === 3, 'btw thread created');
+    const createdId = (created.result as { threadId?: string })?.threadId;
+    expect(createdId).toBeTruthy();
+    expect(createdId).not.toBe(answered.params?.id);
+
+    // tab 清单（重开页面/重开 app 后恢复用）里两条线程都在，且各自带着自己的问答。
+    await send(host, 4, 'mica/btw/threads', {});
+    const listed = await waitFor(host, (m) => m.id === 4, 'btw threads listed');
+    const list = ((listed.result as { threads?: Array<{ id: string; entries: unknown[] }> }).threads ||
+      []) as Array<{ id: string; entries: unknown[] }>;
+    expect(list.map((item) => item.id)).toEqual(expect.arrayContaining([createdId!]));
+    expect(list.find((item) => item.id === createdId)?.entries).toHaveLength(0);
+
+    // 关掉一个 tab：host 侧线程随之消失。
+    await send(host, 5, 'mica/btw/close', { threadId: createdId });
+    expect((await waitFor(host, (m) => m.id === 5, 'btw close')).result).toMatchObject({ ok: true });
+    await send(host, 6, 'mica/btw/threads', {});
+    const afterClose = await waitFor(host, (m) => m.id === 6, 'btw threads after close');
+    const remaining =
+      (afterClose.result as { threads?: Array<{ id: string }> }).threads || [];
+    expect(remaining.map((item) => item.id)).not.toContain(createdId);
+    expect(remaining.map((item) => item.id)).toContain(answered.params?.id as string);
+  });
+
+  itE2E('By The Way threads survive a host restart (persisted per session)', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+
+    const hostA = spawnHost('btw-persist-a');
+    // 不 push 进 hosts：hostB 会用同一个 home（resume 同一个会话），
+    // afterEach 会并行 rm 两个同路径的目录而抛 ENOTEMPTY。hostA 由我们自己关掉。
+    await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
+    await send(hostA, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '起个会话' }] });
+    const started = await waitFor(hostA, (m) => m.method === 'turn/started', 'turn/started');
+    await waitFor(hostA, turnCompleted((started.params?.turn as { id?: string }).id!), 'turn/completed');
+    const sessionFileA = readdirSync(join(hostA.home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFileA).toBeTruthy();
+    const sessionId = sessionFileA!.replace(/\.json$/, '');
+
+    await send(hostA, 2, 'mica/btw/ask', { question: '记住这个问题' });
+    const ack = await waitFor(hostA, (m) => m.id === 2, 'btw ack');
+    const threadId = (ack.result as { threadId?: string })?.threadId!;
+    await waitFor(
+      hostA,
+      (m) =>
+        m.method === 'mica/btw/updated' &&
+        (m.params?.entries as Array<{ status?: string }> | undefined)?.[0]?.status === 'completed',
+      'btw answered',
     );
-    expect(reset.params?.id).not.toBe(answered.params?.id);
+
+    // 关掉 host（模拟退出 app），再用同一个 MICA_HOME resume 同一个会话。
+    hostA.child.stdin?.end();
+    await hostA.closePromise;
+    expect(existsSync(join(hostA.home, 'btw', `${sessionId}.json`))).toBe(true);
+
+    const hostB = spawnHost('btw-persist-b', ['--session', sessionId], hostA.home);
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'host B ready or error', 30_000);
+
+    await send(hostB, 1, 'mica/btw/threads', {});
+    const listed = await waitFor(hostB, (m) => m.id === 1, 'btw threads after restart');
+    const threads =
+      (listed.result as { threads?: Array<{ id: string; entries: Array<{ question?: string }> }> })
+        .threads || [];
+    // 抽屉里的 tab 与问答都还在：这正是「关掉 app 再打开」应该看到的
+    expect(threads.map((item) => item.id)).toContain(threadId);
+    expect(threads.find((item) => item.id === threadId)?.entries[0]).toMatchObject({
+      question: '记住这个问题',
+    });
   });
 
   itE2E('mica/btw/ask answers while the main turn is still running', async () => {
@@ -887,6 +951,18 @@ suite('mica app-server real-user flows (mock provider)', () => {
       'btw answer mid-turn',
     );
     expect(entries(answered)?.[0]).toMatchObject({ answer: '你好，我是 mock 模型的回复' });
+
+    // 快照同时带这条线程自己的上下文占用（桌面抽屉底部的「模型 · ctx」就读它）：
+    // 它是最近一次请求的 input，而不是主会话那份 tokenUsage。
+    const context = answered.params?.context as Record<string, unknown> | undefined;
+    expect(context).toMatchObject({ model: expect.any(String), requests: 1 });
+    expect(Number(context?.tokens)).toBeGreaterThan(0);
+
+    // 这条线程的历史里没有工具结果/图片 → 本地快速压缩如实回报「暂不需要」，
+    // 而不是假装成功（面板据此提示原因）。
+    await send(host, 3, 'mica/btw/compact', {});
+    const compacted = await waitFor(host, (m) => m.id === 3, 'btw compact response');
+    expect(compacted.result).toMatchObject({ ok: false });
 
     // 主流程照常跑完，且这一问没有落进会话历史。
     await waitFor(host, turnCompleted(turnId), 'turn/completed');

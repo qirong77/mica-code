@@ -69,4 +69,16 @@ describe('引用对话', () => {
     expect(blocks).toHaveLength(1)
     expect(removeQuoteBlock(withQuestion, blocks[0])).toBe('我的问题')
   })
+
+  // By The Way 的回答不在主对话历史里，署名必须区分开：写成「模型」会让人
+  // 以为它是这条会话里的某条消息。
+  it('可以覆盖署名（By The Way 的引用）', () => {
+    const { text } = quoteIntoDraft('', 0, { role: 'assistant', text: '结论', label: 'By The Way' })
+    expect(text).toBe('引用对话（By The Way）：\n```\n结论\n```\n\n')
+    const segments = splitQuoteSegments(`${text}继续`).filter((item) => item.type === 'quote')
+    expect(segments[0].label).toBe('By The Way')
+    // 认不出署名的块 role 为 null，正文与移除逻辑照旧
+    expect(segments[0].role).toBeNull()
+    expect(removeQuoteBlock(text, findQuoteBlocks(text)[0])).toBe('')
+  })
 })

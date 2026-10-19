@@ -1,19 +1,90 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   IconAlertCircle,
+  IconBolt,
+  IconCopy,
   IconLoader2,
   IconMessageChatbot,
+  IconMessagePlus,
   IconPhoto,
+  IconPlus,
+  IconQuote,
   IconSend,
+  IconSquare,
+  IconTrash,
   IconX
 } from '@tabler/icons-react'
 import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
-import { btwEntryElapsedMs, btwPhaseText, btwRunningEntry } from './btw-thread'
-import { useLatest } from './hooks'
+import {
+  btwContextMenuItems,
+  btwContextLabel,
+  btwContextTitle,
+  btwEntryElapsedMs,
+  btwPhaseText,
+  btwRunningEntry
+} from './btw-thread'
+import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
+import { longPressHandlers, useLatest } from './hooks'
+import { copyText } from './transport'
 import TerminalComposer from './TerminalComposer'
+
+/** 抽屉宽度的上下限：太窄塞不下一行代码，太宽会把主对话挤成一条缝。 */
+export const BTW_MIN_WIDTH = 320
+export const BTW_MAX_WIDTH = 900
+
+/** 菜单项 id → 图标。判定（哪些项、什么时候禁用）全在 `btwContextMenuItems`。 */
+const BTW_MENU_ICONS = {
+  copy: IconCopy,
+  quote: IconQuote,
+  'new-thread': IconMessagePlus,
+  compact: IconBolt,
+  'close-thread': IconTrash
+}
+
+function BtwContextMenu({
+  menu,
+  entry,
+  running,
+  compacting,
+  hasEntries,
+  canQuote,
+  canClose,
+  onAction,
+  onClose
+}) {
+  const items = btwContextMenuItems({
+    entry,
+    running,
+    compacting,
+    hasEntries,
+    hasSelection: Boolean(menu.selection),
+    canQuote,
+    canClose
+  }).filter((item, index, all) => !item.separator || (index > 0 && index < all.length - 1))
+  return (
+    <FloatingMenu x={menu.x} y={menu.y} minWidth={220} onClose={onClose}>
+      {items.map((item, index) =>
+        item.separator ? (
+          <MenuSeparator key={`separator-${index}`} />
+        ) : (
+          <MenuItem
+            key={item.id}
+            icon={BTW_MENU_ICONS[item.id] || IconMessageChatbot}
+            label={item.label}
+            title={item.title}
+            danger={item.danger}
+            disabled={item.disabled}
+            onClick={() => onAction(item.id)}
+          />
+        )
+      )}
+    </FloatingMenu>
+  )
+}
 
 /**
  * 输入条动作区的「By The Way」（btw）—— CLI `/btw` 的桌面等价物，**右侧抽屉**。
@@ -42,11 +113,21 @@ import TerminalComposer from './TerminalComposer'
  */
 export function BtwDrawer({
   thread,
+  tabs = [],
+  width = null,
+  onResizeWidth,
   draft = '',
   sending = false,
+  compacting = false,
   onDraftChange,
   onAsk,
+  onStop,
+  onRecall,
   onNewThread,
+  onSelectThread,
+  onCloseThread,
+  onCompact,
+  onQuoteToMain,
   renderAnswer,
   renderQuestion,
   onPreviewImage,
@@ -56,14 +137,104 @@ export function BtwDrawer({
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const asideRef = useRef(null)
   const draftRef = useLatest(draft)
   const entries = Array.isArray(thread?.entries) ? thread.entries : []
+  /** tab 标题：这条线程第一个问题（没有就「新线程」），与侧栏会话行的取法一致。 */
+  const tabTitle = (item) => {
+    const first = Array.isArray(item?.entries) ? item.entries[0]?.question : ''
+    const text = String(first || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return text ? (text.length > 14 ? `${text.slice(0, 14)}…` : text) : '新线程'
+  }
   const runningEntry = btwRunningEntry(entries)
   const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
   const [now, setNow] = useState(() => Date.now())
+
+  /**
+   * 拖动左边缘改宽度。
+   *
+   * 拖动期间只改 CSS 变量（不 setState）：每移动一像素都重渲染整条线程会让正文和
+   * 输入框一起卡住，而宽度只是布局。松手才提交一次（写进共享界面状态，所有窗口一致）。
+   */
+  const startResize = (event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = asideRef.current?.offsetWidth || 400
+    let next = startWidth
+    const aside = asideRef.current
+    // 宽度变量写在**两者**上：抽屉自己读它取宽，父级 `.chat-view` 读它让出右侧内边距
+    // （CSS 变量会继承，拖完之后只由父级上一份即可，但拖动期间要立即生效就都得写）。
+    const host = aside?.parentElement
+    const applyWidth = (value) => {
+      const css = `${value}px`
+      aside?.style.setProperty('--chat-btw-width', css)
+      host?.style.setProperty('--chat-btw-width', css)
+    }
+    const onMove = (moveEvent) => {
+      // 向右拖是变窄（抽屉贴在右侧，左边是它的边）
+      // 上限还受视口约束：拖到 900px 后把窗口缩窄，抽屉会盖住整块对话区。
+      const limit = Math.min(BTW_MAX_WIDTH, Math.round((window.innerWidth || 1200) * 0.85))
+      next = Math.round(
+        Math.min(limit, Math.max(BTW_MIN_WIDTH, startWidth + (startX - moveEvent.clientX)))
+      )
+      applyWidth(next)
+      document.body.classList.add('is-resizing-btw')
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      document.body.classList.remove('is-resizing-btw')
+      if (next !== startWidth) onResizeWidth?.(next)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }
   // 读者是否还贴着底部。上翻看已经读过的答案时不该被流式的正文拽回来（与对话区同一手感）。
   const stickToBottomRef = useRef(true)
+
+  /**
+   * 右键菜单。
+   *
+   * 抽屉**不**沿用主对话那份会话菜单（压缩会话/Commit/Fork/分享/Clear）：btw 是一次
+   * 独立运行，在它的正文上点「Clear」会把主会话清掉。这里只做这条线程自己的事，
+   * 而且都是「拿起这段字」的动作——旁问一句、把结论带回主流程正是它的用途。
+   *
+   * 选区在**打开菜单那一刻**取：点菜单项时焦点已经离开正文，`getSelection()` 会是空的。
+   */
+  const [menu, setMenu] = useState(null)
+  const openMenu = (event, entry) => {
+    // 必须停在这里：`.chat-view` 上挂着主对话的会话菜单（preventDefault + 弹窗），
+    // 冒泡上去就会在抽屉里弹出「Clear 会话」。
+    event.preventDefault()
+    event.stopPropagation()
+    const selection = String(window.getSelection?.()?.toString?.() || '').trim()
+    setMenu({ x: event.clientX, y: event.clientY, entryId: entry?.id || '', selection })
+  }
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const runMenuAction = (id) => {
+    const entry = entries.find((item) => item.id === menu?.entryId) || null
+    const text = String(entry?.answer || entry?.question || '').trim()
+    setMenu(null)
+    if (id === 'copy') {
+      void copyText(menu?.selection || text).then((ok) => {
+        if (!ok) onNotice?.('复制失败：浏览器拒绝了剪贴板写入', 'error')
+      })
+      return
+    }
+    if (id === 'quote') {
+      onQuoteToMain?.(text)
+      return
+    }
+    if (id === 'new-thread') onNewThread?.()
+    if (id === 'compact') onCompact?.()
+    if (id === 'close-thread') onCloseThread?.(thread?.id)
+  }
 
   // 打开抽屉就把光标放进输入框：这个抽屉存在的意义就是「问一句」，而点开的动作落在
   // 触发按钮上（`focusComposerFromShell` 不抢按钮的焦点），不主动聚焦就没处可打字。
@@ -160,8 +331,10 @@ export function BtwDrawer({
 
   const submit = () => {
     const text = String(draft || '').trim()
-    if (!text || running || sending) return
-    onAsk?.(text)
+    if (!text || sending) return
+    // 回答期间提交 = 排队（单槽位，答完自动接上），与主对话的 after_iteration 同一心智：
+    // 用户不必盯着等它说完再问下一句。
+    onAsk?.(text, { queue: running })
   }
 
   // 标题行右侧：回答中就报阶段与耗时（「正在调用 grep_search… 12.4s」），否则说明这条
@@ -169,29 +342,35 @@ export function BtwDrawer({
   const statusText = runningEntry
     ? `${btwPhaseText(runningEntry)} ${formatLogElapsed(btwEntryElapsedMs(runningEntry, now))}`
     : '不进入本会话上下文'
+  const contextLabel = btwContextLabel(thread?.context)
+  const contextTitle = btwContextTitle(thread?.context)
 
   return (
     // data-no-chat-focus：点抽屉里的空白处不该把焦点抢到主输入条（那会打断选中答案文本）。
-    <aside className="chat-btw no-drag" data-no-chat-focus aria-label="By The Way">
+    <aside
+      className="chat-btw no-drag"
+      data-no-chat-focus
+      aria-label="By The Way"
+      ref={asideRef}
+      style={width ? { '--chat-btw-width': `${width}px` } : undefined}
+      // 空白处右键也要在这里收住（否则冒到 `.chat-view` 上弹的是会话菜单）。
+      onContextMenu={(event) => openMenu(event, null)}
+      {...longPressHandlers((event) => openMenu(event, null))}
+    >
+      {/* 左边缘的宽度手柄：与终端面板 / 输入框那两个手柄同一套（绝对定位，不占布局）。 */}
+      <button
+        type="button"
+        className="chat-btw-resizer"
+        aria-label="拖动调整 By The Way 宽度"
+        title="拖动调整宽度"
+        onPointerDown={startResize}
+      />
       <header className="chat-btw-head">
         {/* 图标与输入条上那个触发按钮同一个：抽屉和它的入口要一眼对得上 */}
         <span className="chat-btw-mark" aria-hidden="true">
           <IconMessageChatbot size={13} />
         </span>
         <span className="chat-btw-title">By The Way</span>
-        {/* 「新话题」是这条线程上的动作（不是「新建」），所以放在标题行而不是输入条里——
-            紧挨着输入框的 + 会被读成「添加附件」之类，而它其实是「换一条线程重新开始」。 */}
-        {entries.length > 0 ? (
-          <button
-            type="button"
-            className="chat-btw-reset"
-            title="换一条新线程（下次提问重新取当前对话记录作背景）"
-            disabled={running}
-            onClick={() => onNewThread?.()}
-          >
-            新话题
-          </button>
-        ) : null}
         <span className="chat-btw-sub" title={statusText}>
           {runningEntry ? <span className="chat-btw-live" aria-hidden="true" /> : null}
           {statusText}
@@ -206,6 +385,50 @@ export function BtwDrawer({
           <IconX size={13} />
         </button>
       </header>
+      {/* tab 条：一个 tab 就是 host 里的一条独立线程（自己的子代理与上下文）。
+          可以并排问几件不相干的事，这也是「新话题」在桌面端的样子。 */}
+      <div className="chat-btw-tabs" role="tablist" aria-label="By The Way 线程">
+        {(Array.isArray(tabs) ? tabs : []).map((tab) => {
+          const tabRunning = btwRunningEntry(tab.entries)
+          return (
+            <div
+              key={tab.id}
+              className={`chat-btw-tab${tab.id === thread?.id ? ' is-active' : ''}`}
+              role="tab"
+              aria-selected={tab.id === thread?.id}
+            >
+              <button
+                type="button"
+                className="chat-btw-tab-label"
+                title={tabTitle(tab)}
+                onClick={() => onSelectThread?.(tab.id)}
+              >
+                {tabRunning ? <span className="chat-btw-live" aria-hidden="true" /> : null}
+                {tabTitle(tab)}
+              </button>
+              <button
+                type="button"
+                className="chat-btw-tab-close"
+                aria-label="关闭这个线程"
+                title={tabRunning ? '正在回答中，答完才能关' : '关闭这个线程'}
+                disabled={Boolean(tabRunning)}
+                onClick={() => onCloseThread?.(tab.id)}
+              >
+                <IconX size={10} />
+              </button>
+            </div>
+          )
+        })}
+        <button
+          type="button"
+          className="chat-btw-tab-add"
+          aria-label="新建线程"
+          title="新建一条线程（另一个话题，上下文互不影响）"
+          onClick={() => onNewThread?.()}
+        >
+          <IconPlus size={11} />
+        </button>
+      </div>
       {/* 整个抽屉里唯一滚动的地方，所以「滚到底」打在这个元素上 */}
       <div
         className="chat-btw-body"
@@ -231,7 +454,11 @@ export function BtwDrawer({
                   <div className="chat-message-marker" aria-hidden="true">
                     ▌
                   </div>
-                  <div className="chat-message-body">
+                  <div
+                    className="chat-message-body"
+                    onContextMenu={(event) => openMenu(event, entry)}
+                    {...longPressHandlers((event) => openMenu(event, entry))}
+                  >
                     {/* 与对话区「你说的话」同一套渲染：图片引用降级成可点链接、路径可点 */}
                     <p className="chat-btw-question">
                       {renderQuestion ? renderQuestion(entry.question) : entry.question}
@@ -244,7 +471,11 @@ export function BtwDrawer({
                   <div className="chat-message-marker" aria-hidden="true">
                     ●
                   </div>
-                  <div className="chat-message-body">
+                  <div
+                    className="chat-message-body"
+                    onContextMenu={(event) => openMenu(event, entry)}
+                    {...longPressHandlers((event) => openMenu(event, entry))}
+                  >
                     {/* 思考与工具行：与主对话的回合日志同一套组件与样式（btw 也是个运行实例） */}
                     {entry.thinking || entry.tools?.length ? (
                       <div className="chat-btw-activity">
@@ -285,11 +516,49 @@ export function BtwDrawer({
           </div>
         )}
       </div>
+      {/* 这条线程自己的模型与上下文占用（+ 本地快速压缩）：btw 是一次独立运行，
+          主状态栏那份与它无关。放在输入条上方——和主对话「状态行贴着输入条」同一位置。 */}
+      <div className="chat-btw-status">
+        <span className="chat-btw-context" title={contextTitle}>
+          {contextLabel || '上下文计入这条线程，不占用主对话'}
+        </span>
+        {onCompact ? (
+          <button
+            type="button"
+            className="chat-btw-compact"
+            title="快速压缩这条线程的上下文（本地，不调用模型、不丢轮次）"
+            disabled={running || compacting || entries.length === 0}
+            onClick={() => onCompact()}
+          >
+            {compacting ? <IconLoader2 size={10} className="animate-spin" /> : null}
+            快速压缩
+          </button>
+        ) : null}
+      </div>
       <div className="chat-btw-foot">
         {/* 输入条与主对话**同一套实现**：`TerminalComposer` 负责自绘光标、选区高亮与
             中英文组合，动作区是 `.chat-composer-actions`。抽屉是另一条对话，输入框不该
             长出第二种样子（裸 textarea 既没有终端光标，也不显示选区）。 */}
         <ComposerImageStrip text={draft} onPreview={onPreviewImage} />
+        {/* 排队中的那一问：单槽位（与主对话的 message-queue 同款），答完自动接上；
+            这里的 ✕ 就是撤回，撤回后问题回到输入框，不丢字。 */}
+        {thread?.pendingQuestion ? (
+          <div className="chat-btw-queued" title="这一条会在当前回答结束后自动发出">
+            <span className="chat-btw-queued-mark" aria-hidden="true">
+              ⏳
+            </span>
+            <span className="chat-btw-queued-text">{thread.pendingQuestion}</span>
+            <button
+              type="button"
+              className="chat-btw-queued-recall"
+              title="撤回这条排队的问题"
+              aria-label="撤回排队的问题"
+              onClick={() => onRecall?.()}
+            >
+              <IconX size={11} />
+            </button>
+          </div>
+        ) : null}
         <div className="chat-composer chat-btw-composer">
           {/* 行首标记：与主输入条同一个位置和字号（只是这里不可点，没有角色可切） */}
           <span className="chat-prompt-mark" aria-hidden="true">
@@ -313,7 +582,9 @@ export function BtwDrawer({
           <TerminalComposer
             value={draft}
             textareaRef={inputRef}
-            placeholder={running ? '正在回答上一个问题…' : '问点什么，Enter 发送'}
+            placeholder={
+              running ? '正在回答，Enter 排队下一个问题 · 可点右侧停止' : '问点什么，Enter 发送'
+            }
             onChange={(value) => onDraftChange?.(value)}
             onPaste={handlePaste}
             onKeyDown={(event) => {
@@ -335,13 +606,15 @@ export function BtwDrawer({
             </button>
             <button
               type="button"
-              className="chat-btw-send"
-              title="发送（不影响主流程）"
-              aria-label="发送 By The Way 问题"
-              disabled={!String(draft || '').trim() || running || sending}
-              onClick={submit}
+              className={`chat-btw-send${running ? ' is-stop' : ''}`}
+              title={running ? '停止回答' : '发送（不影响主流程）'}
+              aria-label={running ? '停止 By The Way 回答' : '发送 By The Way 问题'}
+              onClick={running ? () => onStop?.() : submit}
+              disabled={running ? false : !String(draft || '').trim() || sending}
             >
-              {sending ? (
+              {running ? (
+                <IconSquare size={12} />
+              ) : sending ? (
                 <IconLoader2 size={13} className="animate-spin" />
               ) : (
                 <IconSend size={13} />
@@ -350,6 +623,24 @@ export function BtwDrawer({
           </div>
         </div>
       </div>
+      {/* 菜单挂到 body 上：抽屉自己是 `overflow: hidden` + 入场动画（transform），
+          留在里面既可能被裁掉、也可能跟着 transform 偏移。坐标是视口的，所以 portal 最稳。 */}
+      {menu
+        ? createPortal(
+            <BtwContextMenu
+              menu={menu}
+              entry={entries.find((item) => item.id === menu.entryId) || null}
+              running={running}
+              compacting={compacting}
+              hasEntries={entries.length > 0}
+              canQuote={Boolean(onQuoteToMain)}
+              canClose={Boolean(onCloseThread) && Boolean(thread?.id)}
+              onAction={runMenuAction}
+              onClose={closeMenu}
+            />,
+            document.body
+          )
+        : null}
     </aside>
   )
 }

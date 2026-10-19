@@ -3120,6 +3120,8 @@ body.is-resizing.is-resizing-terminal {
 
    滚动只有一处：`.chat-btw-body`。输入条与标题行固定，所以「滚到底」打在 body 上。 */
 .chat-view.chat-btw-open {
+  /* 未拖动过时按比例给一个默认宽度；拖动过一次就换成界面状态里的像素值。
+     `--chat-btw-width` 是唯一来源：内边距与抽屉自身都读它，所以永远等宽、不留缝。 */
   --chat-btw-width: min(400px, 45%);
   padding-right: var(--chat-btw-width);
 }
@@ -3154,6 +3156,102 @@ body.is-resizing.is-resizing-terminal {
     transform: translateX(0);
     opacity: 1;
   }
+}
+
+/* 宽度手柄：绝对定位压在左边缘上，不占布局（与终端面板/输入框那两个同一套做法）。
+   命中区比那条发丝线宽，鼠标才容易抓住。 */
+.chat-btw-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.chat-btw-resizer:hover,
+body.is-resizing-btw .chat-btw-resizer {
+  background: var(--color-line-strong);
+}
+
+body.is-resizing-btw {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* tab 条：一个 tab 一条线程。与标题行同为外框面（panel），靠底部发丝线与内容面分开。 */
+.chat-btw-tabs {
+  display: flex;
+  min-height: 26px;
+  flex: none;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
+
+.chat-btw-tab {
+  display: flex;
+  min-width: 0;
+  max-width: 150px;
+  flex: 0 1 auto;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: var(--color-fg-ghost);
+}
+
+.chat-btw-tab.is-active {
+  border-bottom-color: var(--color-fg-dim);
+  color: var(--color-fg);
+}
+
+.chat-btw-tab-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 0 4px;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-btw-tab-close {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 28%);
+}
+
+.chat-btw-tab-close:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  color: var(--color-fg);
+}
+
+.chat-btw-tab-close:disabled {
+  color: rgb(255 255 255 / 12%);
+}
+
+.chat-btw-tab-add {
+  display: grid;
+  width: 20px;
+  flex: none;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 38%);
+}
+
+.chat-btw-tab-add:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--color-fg);
 }
 
 .chat-btw-head {
@@ -3207,23 +3305,49 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg);
 }
 
-/* 标题行里的「新话题」：与关闭按钮同档的浅灰文字按钮 */
-.chat-btw-reset {
-  height: 18px;
+/* 输入条上方那行：模型 · 上下文占用 + 快速压缩。
+   与主对话状态行同一个位置（贴着输入条），读法也一样——它描述的正是「接着聊还剩多少余量」。 */
+.chat-btw-status {
+  display: flex;
   flex: none;
-  padding: 0 5px;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  padding: 0 12px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  color: var(--color-fg-ghost);
+  font-size: 10.5px;
+}
+
+.chat-btw-context {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 与标题行「新话题」同档的浅灰文字按钮（同一抽屉里同一层级的动作不该有两种样子） */
+.chat-btw-compact {
+  display: inline-flex;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
   border-radius: 3px;
   color: rgb(255 255 255 / 38%);
   font-size: 10.5px;
   white-space: nowrap;
 }
 
-.chat-btw-reset:hover:not(:disabled) {
+.chat-btw-compact:hover:not(:disabled) {
   background: rgb(255 255 255 / 8%);
   color: var(--color-fg);
 }
 
-.chat-btw-reset:disabled {
+.chat-btw-compact:disabled {
   color: rgb(255 255 255 / 15%);
 }
 
@@ -3402,6 +3526,52 @@ body.is-resizing.is-resizing-terminal {
 .chat-composer-actions button.chat-btw-send:disabled {
   background: transparent;
   color: rgb(255 255 255 / 15%);
+}
+
+/* 回答中同一个位置变成「停止」：红色与主输入条的停止按钮同源，一眼分得出
+   「这是在停」而不是「发不出去」。 */
+.chat-composer-actions button.chat-btw-send.is-stop {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+}
+
+.chat-composer-actions button.chat-btw-send.is-stop:hover {
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+  color: var(--color-danger);
+}
+
+/* 排队中的那一问：贴在被喂给输入条上方的一条窄带，等这一轮答完自动发出。 */
+.chat-btw-queued {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--color-warn);
+  font-size: 11px;
+  border-top: 1px solid var(--color-line);
+}
+
+.chat-btw-queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-warn) 82%, transparent);
+}
+
+.chat-btw-queued-recall {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  color: inherit;
+}
+
+.chat-btw-queued-recall:hover {
+  background: color-mix(in srgb, var(--color-warn) 18%, transparent);
 }
 
 .chat-loop-form {
@@ -3689,6 +3859,12 @@ body.is-resizing.is-resizing-terminal {
   .chat-btw {
     width: 100%;
     border-left: 0;
+  }
+
+  /* 手机上一拖动就把整屏抽屉压成一条缝，所以宽度手柄只在桌面出现
+     （铺满整屏时它也没有可拖的方向）。 */
+  .chat-btw-resizer {
+    display: none;
   }
 
   /* 终端字号不要写在这里：xterm 的 DOM 渲染器给 `.xterm-rows` 写内联 font-size

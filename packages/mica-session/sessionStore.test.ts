@@ -138,9 +138,15 @@ describe('session turn lease', () => {
       const lockPath = resolve(SESSION_DIR, '.turn-locks', 'to-delete.lock');
       mkdirSync(resolve(SESSION_DIR, '.turn-locks'), { recursive: true });
       writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: 'x' }), 'utf-8');
+      const btwPath = resolve(micaHome, 'btw', 'to-delete.json');
+      mkdirSync(resolve(micaHome, 'btw'), { recursive: true });
+      writeFileSync(btwPath, JSON.stringify({ version: 1, threads: [] }), 'utf-8');
+      expect(existsSync(btwPath)).toBe(true);
 
       expect(store.delete('to-delete')).toBe(true);
       expect(existsSync(lockPath)).toBe(false);
+      // By The Way 的线程按会话落盘，删会话必须一起删掉（否则重开同名 id 会捡到幽灵线程）。
+      expect(existsSync(btwPath)).toBe(false);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }

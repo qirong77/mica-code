@@ -15,8 +15,24 @@ import type { CommandAgent } from '../services.js';
 
 export type BtwSubagent = {
   /** 纯文本，或文本 + 图片的多模态内容块（桌面端 By The Way 的粘贴图片）。 */
-  query(input: AgentQueryContent): Promise<string>;
+  query(input: AgentQueryContent, options?: { signal?: AbortSignal }): Promise<string>;
+  /**
+   * 中断后把「问题 + 已经流出的部分回答」补回子代理历史。
+   *
+   * 被 abort 的那一轮可能一次迭代都没提交，消息数组里没有这次的用户消息；
+   * 不补的话，下一次追问时模型看不到上一次问过什么（主对话走的是同一条路径）。
+   */
+  preserveAbortedTurn?(question: AgentQueryContent, partialAnswer?: string): boolean;
   readonly usageHistory?: AgentUsageRecord[];
+  /** 最近一次请求的用量：抽屉用它显示这条线程的上下文占用（与主对话同一口径）。 */
+  readonly lastUsage?: AgentUsageRecord;
+  /**
+   * 子代理自己的消息数组（真实对象是 `IAgent`，`CommandAgent.createSubAgent` 的
+   * 声明类型没有收进来）。`mica/btw/compact` 的本地压缩要读改写它——btw 线程的
+   * 历史只活在这个子代理里，没有别的地方可以压。
+   */
+  getSnapshot?(): { messages: unknown[] };
+  loadSnapshot?(snapshot: unknown): void;
   /**
    * 流式回调（可选设置）：思考 / 工具调用 / 正文的 delta。
    *
@@ -95,10 +111,12 @@ export function formatBtwNotice(question: string, answer: string, isFallback = f
 }
 
 function createBtwSubagent(agent: CommandAgent, transcript: string): BtwSubagent {
+  // 运行时返回的是 `IAgent`（带 getSnapshot/loadSnapshot/lastUsage），而
+  // `CommandAgent.createSubAgent` 的声明只承诺 query + 用量 + 流式回调。
   return agent.createSubAgent({
     systemPrompt: buildBtwSystemPrompt(transcript),
     tools: true,
-  });
+  }) as unknown as BtwSubagent;
 }
 
 /**
