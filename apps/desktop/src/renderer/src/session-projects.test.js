@@ -40,29 +40,15 @@ describe('sessionSectionOf', () => {
     expect(sessionSectionOf('s2', { pins: {}, projects: stale }).section).toBe('recent')
   })
 
-  it('archives an unclassified session that runs a loop into the scheduled section', () => {
-    const loopSessionIds = new Set(['s9'])
-    expect(sessionSectionOf('s9', { pins: {}, projects, loopSessionIds })).toEqual({
-      section: 'scheduled',
-      groupId: null
-    })
-  })
-
-  it('keeps manual placement ahead of the automatic loop archive', () => {
-    const loopSessionIds = new Set(['s1', 's2'])
-    expect(sessionSectionOf('s1', { pins: { s1: 1 }, projects, loopSessionIds }).section).toBe(
-      'pinned'
-    )
-    expect(sessionSectionOf('s2', { pins: {}, projects, loopSessionIds })).toEqual({
+  // 侧栏没有「定时任务」分区：挂着循环的会话留在原分区，只由行首时钟图标标识，
+  // 所以归属只认手动放置（pins / projects）。
+  it('leaves a session running a loop in its manual section', () => {
+    expect(sessionSectionOf('s1', { pins: { s1: 1 }, projects }).section).toBe('pinned')
+    expect(sessionSectionOf('s2', { pins: {}, projects })).toEqual({
       section: 'project',
       groupId: 'child'
     })
-  })
-
-  it('leaves sessions without a loop in recent', () => {
-    expect(sessionSectionOf('s9', { pins: {}, projects, loopSessionIds: new Set() }).section).toBe(
-      'recent'
-    )
+    expect(sessionSectionOf('s9', { pins: {}, projects }).section).toBe('recent')
   })
 })
 

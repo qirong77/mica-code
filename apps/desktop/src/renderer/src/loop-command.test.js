@@ -8,7 +8,6 @@ import {
   loopIntervalFromDraft,
   loopNodeIds,
   loopProgressLabel,
-  loopSessionIds,
   loopStatusLabel,
   loopTooltip,
   sortLoopsForList
@@ -49,8 +48,7 @@ describe('indexing loops', () => {
     expect(loopForNode(null, 'node-1')).toBeNull()
   })
 
-  it('collects session and node ids, skipping drafts in the session index', () => {
-    expect([...loopSessionIds(loops)]).toEqual(['sess-1'])
+  it('collects node ids, skipping entries without a node', () => {
     expect([...loopNodeIds(loops)]).toEqual(['node-1', 'node-2'])
   })
 })

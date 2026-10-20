@@ -1,7 +1,7 @@
 /**
  * 侧栏分区的取数规则。归属（assignments）是唯一事实来源：
- * 一个会话要么在 Pinned、要么在某个分组、要么在「定时任务」、要么落在 Recent，
- * 绝不重复出现。纯函数，方便单测；渲染只负责把它画出来。
+ * 一个会话要么在 Pinned、要么在某个分组、要么落在 Recent，绝不重复出现。
+ * 挂了定时循环不影响归属（只由行首的时钟图标标识），纯函数，方便单测；渲染只负责把它画出来。
  */
 
 function knownGroupIds(projects) {
@@ -39,17 +39,15 @@ export function groupSubtreeIds(projects, groupId) {
 }
 
 /**
- * 会话落在哪个分区：手动归属优先（Pinned > 分组），其次「跑着定时循环」自动归档到
- * 定时任务，最后 Recent。
+ * 会话落在哪个分区：手动归属（Pinned > 分组），否则 Recent。
  *
- * 定时任务排在手动归属之后：用户明确置顶或放进分组的会话，不该因为挂了循环就被搬走。
- * `loopSessionIds` 是 `Set<sessionId>`（见 loop-command.js 的 loopSessionIds）。
+ * 定时循环**不参与归档**：侧栏没有「定时任务」分区，挂着循环的会话留在它原本的位置，
+ * 靠行首的时钟图标与行尾进度区分，所以这里不能按 loop 再分一支。
  */
-export function sessionSectionOf(sessionId, { pins, projects, loopSessionIds } = {}) {
+export function sessionSectionOf(sessionId, { pins, projects } = {}) {
   if (pins?.[sessionId]) return { section: 'pinned', groupId: null }
   const groupId = projects?.assignments?.[sessionId]
   if (groupId && knownGroupIds(projects).has(groupId)) return { section: 'project', groupId }
-  if (loopSessionIds?.has?.(sessionId)) return { section: 'scheduled', groupId: null }
   return { section: 'recent', groupId: null }
 }
 

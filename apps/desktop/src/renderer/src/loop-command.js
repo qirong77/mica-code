@@ -1,6 +1,6 @@
 /**
- * 定时循环任务在渲染层的纯逻辑（状态文案、倒计时、徽标、表单换算），供侧栏分区、输入框
- * 时钟图标（唯一的创建/管理入口）与输入框边框徽标共用。
+ * 定时循环任务在渲染层的纯逻辑（状态文案、倒计时、徽标、表单换算），供侧栏会话行（行首时钟与
+ * 行尾进度）、输入框时钟图标（唯一的创建/管理入口）与输入框边框徽标共用。
  *
  * 循环本身活在运行时里（`src/host/loops.js`），这里只把它的状态翻译成界面要显示的东西，
  * 以及把用户在表单里填的间隔换算成毫秒。
@@ -37,16 +37,7 @@ export function loopForNode(loops, nodeId) {
   return (Array.isArray(loops) ? loops : []).find((loop) => loop?.nodeId === id) || null
 }
 
-/** 循环按会话 id 建索引：侧栏需要从会话行反查它是不是定时任务。 */
-export function loopSessionIds(loops) {
-  const ids = new Set()
-  for (const loop of Array.isArray(loops) ? loops : []) {
-    if (typeof loop?.sessionId === 'string' && loop.sessionId) ids.add(loop.sessionId)
-  }
-  return ids
-}
-
-/** 循环按 nodeId 建索引：草稿行（还没有 sessionId）用它判断归属。 */
+/** 循环按 nodeId 建索引：草稿行（还没有 sessionId）靠它认出自己挂着循环。 */
 export function loopNodeIds(loops) {
   const ids = new Set()
   for (const loop of Array.isArray(loops) ? loops : []) {

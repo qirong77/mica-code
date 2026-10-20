@@ -24,14 +24,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { relativeTimeShort } from './relative-time'
-import {
-  loopForNode,
-  loopNodeIds,
-  loopProgressLabel,
-  loopSessionIds,
-  loopStatusLabel,
-  loopTooltip
-} from './loop-command'
+import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
@@ -351,8 +344,7 @@ export function SessionTree({
   const [collapsedSections, setCollapsedSections] = useState({
     pinned: false,
     recent: false,
-    project: false,
-    scheduled: false
+    project: false
   })
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
@@ -361,9 +353,6 @@ export function SessionTree({
   const tokens = useMemo(() => tokenizeSearchQuery(query), [query])
   const searching = tokens.length > 0
   const searchSinceMs = useMemo(() => sessionSearchSinceMs(rangeId, Date.now()), [rangeId])
-  // 跑着定时循环的会话自动归到「定时任务」，除非用户已经手动置顶/放进分组（见 sessionSectionOf）。
-  const loopSessions = useMemo(() => loopSessionIds(loops), [loops])
-  const loopNodes = useMemo(() => loopNodeIds(loops), [loops])
   const loopBySession = useMemo(() => {
     const map = new Map()
     for (const loop of Array.isArray(loops) ? loops : []) {
@@ -372,8 +361,8 @@ export function SessionTree({
     return map
   }, [loops])
   const sectionOf = useCallback(
-    (sessionId) => sessionSectionOf(sessionId, { pins, projects, loopSessionIds: loopSessions }),
-    [pins, projects, loopSessions]
+    (sessionId) => sessionSectionOf(sessionId, { pins, projects }),
+    [pins, projects]
   )
 
   const pinned = useMemo(
@@ -436,25 +425,6 @@ export function SessionTree({
 
   const sectionOpen = (name) => !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
-
-  // 定时任务分区：跑着循环的会话 + 还没拿到 sessionId 的草稿节点。
-  // 会话按最近更新排，循环自己的间隔/次数显示在行尾。
-  const scheduledSessions = useMemo(
-    () =>
-      sessions
-        .filter((session) => sectionOf(session.id).section === 'scheduled')
-        .sort(byUpdatedDesc),
-    [sessions, sectionOf]
-  )
-  const scheduledDrafts = useMemo(
-    () => rootDrafts.filter((node) => loopNodes.has(node.id)),
-    [rootDrafts, loopNodes]
-  )
-  // 挂了循环的草稿只在定时任务分区出现，Recent 里不再重复列一次。
-  const recentDrafts = useMemo(
-    () => rootDrafts.filter((node) => !loopNodes.has(node.id)),
-    [rootDrafts, loopNodes]
-  )
 
   // 侧栏看不见的会话——分组折叠、分区折叠、Recent 的 Show more 分页——由第一个可见的
   // 祖先代为显示状态。行的状态判定与 renderSessionRow/renderDraftRow 共用同一份回调，
@@ -521,17 +491,6 @@ export function SessionTree({
     rowStateOfSession
   ])
 
-  /** 折叠的定时任务分区：只有「循环正在跑」值得代显（这个分区没有未读概念）。 */
-  const hiddenScheduledState = useMemo(
-    () =>
-      collapsedSections.scheduled &&
-      (scheduledSessions.length > 0 || scheduledDrafts.length > 0) &&
-      loops.some((loop) => loop.status === 'active')
-        ? 'running'
-        : null,
-    [collapsedSections.scheduled, scheduledSessions.length, scheduledDrafts.length, loops]
-  )
-
   // 会话 → 所在分组名。搜索结果行的行尾用它说明「这条原来在哪儿」，用户不必回去翻分区。
   const groupNamesBySession = useMemo(() => {
     const names = new Map()
@@ -548,7 +507,6 @@ export function SessionTree({
     (sessionId, group) => {
       const section = sectionOf(sessionId).section
       if (section === 'pinned') return '置顶'
-      if (section === 'scheduled') return '定时任务'
       if (section === 'project') return group || '项目'
       return ''
     },
@@ -829,9 +787,9 @@ export function SessionTree({
     const relativeTime = section === 'recent' ? relativeTimeShort(session.updatedAtMs) : ''
     // Recent 行尾显示工作目录名，方便区分同名会话。
     const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
-    // 定时循环按会话认领，行**在任何分区**都要带时钟标记：手动置顶或放进分组的会话不会因为
-    // 挂着循环被搬进「定时任务」分区，那就更不能因此丢掉「它挂着定时任务」这个信息。
-    // `running` 只用来区分「这一轮正在跑」与「在等下一次触发」，两种状态都点亮图标。
+    // 定时循环按会话认领，侧栏没有单独的「定时任务」分区，所以行**在任何分区**都带时钟标记
+    // 与行尾进度——这是「它挂着定时任务」的唯一提示。`running` 只用来区分「这一轮正在跑」
+    // 与「在等下一次触发」，两种状态都点亮图标。
     const loop = loopBySession.get(session.id) || null
     const loopRunning = state === 'running'
     return (
@@ -914,7 +872,7 @@ export function SessionTree({
 
   /**
    * 草稿行。`loop` 传入时表示这条草稿已经挂着定时循环：标题前加时钟、行尾换成循环进度与
-   * 状态（与已绑定会话的定时任务行一致）。循环本身只在输入框的时钟面板里改。
+   * 状态（与挂着循环的会话行一致）。循环本身只在输入框的时钟面板里改。
    */
   const renderDraftRow = (node, indent = 0, groupId = null, loop = null) => {
     const active = node.id === activeSessionId || node.id === selectedId
@@ -1404,39 +1362,19 @@ export function SessionTree({
             </section>
 
             <section>
-              {renderSectionHeader('scheduled', '定时任务', IconClock, {
-                // 这个分区没有「新增」入口：定时任务一律在会话输入框右下角的时钟面板里建
-                // （它同时是创建、改间隔、暂停/继续与停止的唯一入口）。
-                hiddenState: hiddenScheduledState
-              })}
-              {sectionOpen('scheduled') &&
-                (scheduledSessions.length || scheduledDrafts.length ? (
-                  <ul role="tree" className="flex flex-col gap-px">
-                    {scheduledDrafts.map((node) =>
-                      renderDraftRow(node, 0, null, loopForNode(loops, node.id))
-                    )}
-                    {scheduledSessions.map((session) => renderSessionRow(session, 0, 'scheduled'))}
-                  </ul>
-                ) : (
-                  <p
-                    className="py-1 pr-2 text-xs text-white/35"
-                    style={{ paddingLeft: NAME_OFFSET }}
-                  >
-                    暂无定时任务，点会话输入框右下角的时钟图标即可创建。
-                  </p>
-                ))}
-            </section>
-
-            <section>
               {renderSectionHeader('recent', 'Recent', IconListTree, {
                 dropSection: 'recent',
                 hiddenState: hiddenStates.recent
               })}
               {sectionOpen('recent') &&
-                (recentList.length || recentDrafts.length ? (
+                (recentList.length || rootDrafts.length ? (
                   <>
                     <ul role="tree" className="flex flex-col gap-px">
-                      {recentDrafts.map((node) => renderDraftRow(node))}
+                      {/* 挂着循环的草稿也留在 Recent：侧栏不再单独归档定时任务，
+                          只靠行首时钟与行尾进度区分。 */}
+                      {rootDrafts.map((node) =>
+                        renderDraftRow(node, 0, null, loopForNode(loops, node.id))
+                      )}
                       {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
                     </ul>
                     {recentOverflow > 0 && (
