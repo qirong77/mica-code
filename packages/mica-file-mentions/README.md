@@ -5,8 +5,8 @@
 ## 能力
 
 - **触发判定**：`activeFileMention(text, caret)`——`@` 必须在词首（文本开头、空白、开括号/引号，或一个非 ASCII 字符之后），到光标之间没有空白和第二个 `@`。`mail@x.com` 不触发，`参考@src/a.ts` 触发。
-- **候选生成**：`findFileMentions(root, query)`（Node）——优先把查询推给 `fd`（存在时），否则用 `git ls-files --cached --others` 列工作区文件并回退到目录遍历；结果按 root 缓存 45s，`prewarmFileMentions(root)` 可以在用户敲 `@` 之前先热一遍。
-- **评分排序**：`rankWorkspaceFiles(files, query)`——精确文件名 > 文件名前缀 > 文件名子串 > 路径子串，目录额外 +10 同分时排在文件前；命中查询才出现（不做乱序字母模糊匹配）。只取前 `MAX_FILE_MENTION_RESULTS`（20）条。
+- **候选生成**：`findFileMentions(root, query, limit = 20)`（Node）——优先把查询推给 `fd`（存在时），否则用 `git ls-files --cached --others` 列工作区文件并回退到目录遍历；结果按 root 缓存 45s，`prewarmFileMentions(root)` 可以在用户敲 `@` 之前先热一遍。`limit` 只给桌面的「快速打开」用（100 条），`@` 补全保持默认的 20。
+- **评分排序**：`rankWorkspaceFiles(files, query)`——精确文件名 > 文件名前缀 > 文件名子串 > 路径子串，目录额外 +10 同分时排在文件前；命中查询才出现（不做乱序字母模糊匹配）。`matchWorkspaceFiles` 默认只取前 `MAX_FILE_MENTION_RESULTS`（20）条。
 - **展示与插入**：`label` 是文件名（目录带尾 `/`），`description` 是工作区相对路径，`labelHighlights` 是 `label` 里命中查询的字符下标；`mentionText(path)` 生成插入文本 `@path `，路径含空白或引号时整条 JSON 化（`@"a b/c.ts" `）。
 
 ## 目录

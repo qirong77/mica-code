@@ -3871,7 +3871,7 @@ export function ChatView({
 
   useEffect(() => {
     if (!visible || !nodeId || !historyLoaded) return
-    const timer = window.setTimeout(() => textareaRef.current?.focus(), 40)
+    const timer = window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 40)
     return () => clearTimeout(timer)
   }, [historyLoaded, nodeId, visible])
 
@@ -4980,7 +4980,7 @@ export function ChatView({
         inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript'))
       }
       if (shellPointerRef.current.inTranscript) return
-      textareaRef.current?.focus()
+      textareaRef.current?.focus({ preventScroll: true })
       return
     }
 
@@ -4990,14 +4990,14 @@ export function ChatView({
       requestAnimationFrame(() => {
         const selection = window.getSelection?.()
         if (pointer.moved || (selection && !selection.isCollapsed)) return
-        textareaRef.current?.focus()
+        textareaRef.current?.focus({ preventScroll: true })
       })
       return
     }
 
     const selection = window.getSelection?.()
     if (selection && !selection.isCollapsed) return
-    textareaRef.current?.focus()
+    textareaRef.current?.focus({ preventScroll: true })
   }, [])
 
   const trackShellPointerMove = useCallback((event) => {

@@ -20,7 +20,6 @@ import {
   IconMessage,
   IconPlus,
   IconRocket,
-  IconSearch,
   IconServer,
   IconSettings,
   IconTerminal2,
@@ -127,128 +126,102 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
     if (matches.length === 0) return
     setHighlight((index) => Math.min(Math.max(index + step, 0), matches.length - 1))
   }
+  const chooseFolder = () => {
+    // 浏览器里没有原生目录选择器，改用应用内浏览（浏览的是服务端目录）
+    if (window.mica?.isWeb) {
+      setPickerOpen(true)
+      return
+    }
+    void window.mica.workspace
+      .selectDirectory({ title: '选择工作目录', defaultPath: cwd })
+      .then((result) => {
+        if (result && !result.canceled && result.path) onApply(result.path)
+      })
+  }
+  // 与分支切换同一套 VS Code quick pick 外观：顶部窄面板、紧凑行、整行高亮
+  // （样式在 app.css 的「快速选择（quick pick）」一节）。
   return (
     <div
-      className="fixed inset-0 z-[11000] grid place-items-center bg-black/45 no-drag"
+      className="quick-pick-overlay z-[11000]"
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
       <section
         role="dialog"
         aria-modal="true"
-        className="w-[min(440px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
+        aria-label="切换项目目录"
+        className="quick-pick-panel"
       >
-        <h2 className="mb-2.5 text-sm font-semibold text-white/95">工作目录</h2>
-        {invalid && (
-          <div className="mb-2.5 rounded-sm border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs leading-relaxed text-red-300">
-            当前目录不存在或已被移动，请选择正确的项目目录后再压缩。
-          </div>
-        )}
-        <button
-          type="button"
-          className="mb-2.5 flex h-8 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-white/15 bg-white/[.02] text-xs text-white/60 hover:border-white/35 hover:text-white"
-          onClick={() => {
-            // 浏览器里没有原生目录选择器，改用应用内浏览（浏览的是服务端目录）
-            if (window.mica?.isWeb) {
-              setPickerOpen(true)
-              return
-            }
-            void window.mica.workspace
-              .selectDirectory({ title: '选择工作目录', defaultPath: cwd })
-              .then((result) => {
-                if (result && !result.canceled && result.path) onApply(result.path)
-              })
-          }}
-        >
-          <IconFolderOpen size={13} />
-          选择文件夹…
-        </button>
-        {entries.length > 0 && (
-          <div className="mb-2.5">
-            {/* 目录可能上百个，光靠滚动找不动：上面这行搜索在列表内过滤 + 重排，
-                ↑↓ 选、Enter 直接应用，不必再点。 */}
-            <label className="mb-1.5 flex h-7 items-center gap-1.5 rounded-sm border border-white/12 bg-white/[.03] px-2 focus-within:border-white/30">
-              <IconSearch size={12} className="shrink-0 text-white/30" />
-              <input
-                value={query}
-                spellCheck={false}
-                aria-label="搜索最近目录"
-                placeholder="搜索目录，支持多段（如 mica desktop）"
-                className="min-w-0 flex-1 bg-transparent text-xs text-white placeholder:text-white/25"
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) return
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault()
-                    moveHighlight(1)
-                  } else if (event.key === 'ArrowUp') {
-                    event.preventDefault()
-                    moveHighlight(-1)
-                  } else if (event.key === 'Enter' && activeDir) {
-                    event.preventDefault()
-                    onApply(activeDir)
-                  }
-                }}
-              />
-              {query ? (
-                <button
-                  type="button"
-                  aria-label="清空搜索"
-                  className="shrink-0 text-white/30 hover:text-white/70"
-                  onClick={() => setQuery('')}
-                >
-                  <IconX size={12} />
-                </button>
-              ) : null}
-            </label>
-            <div className="mb-1 flex items-center gap-2 text-[10px]">
-              <span className="text-white/35">最近目录</span>
-              <span className="text-white/20">
-                {query ? `匹配 ${matches.length} 个` : `共 ${matches.length} 个`}
-              </span>
-            </div>
-            <div className="max-h-[min(300px,45vh)] overflow-y-auto">
-              {matches.map((entry, index) => {
-                // 末段（项目名）永远完整显示，只把前面那截截断——路径的辨识度全在末段。
-                const { head, tail } = splitCwd(entry.path)
-                const active = index === activeIndex
-                return (
-                  <button
-                    key={entry.path}
-                    type="button"
-                    title={entry.path}
-                    className={`flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs ${
-                      active
-                        ? 'bg-white/[.06] text-white/85'
-                        : 'text-white/45 hover:bg-white/[.05] hover:text-white/80'
-                    }`}
-                    onMouseEnter={() => setHighlight(index)}
-                    onClick={() => onApply(entry.path)}
-                  >
-                    <span className="w-3 shrink-0 text-center text-[10px] text-green-400/80">
-                      {entry.path === currentDir ? '✓' : ''}
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-baseline">
-                      <span className="min-w-0 truncate text-white/30">{head}</span>
-                      <span className="shrink-0">{tail}</span>
-                    </span>
-                  </button>
-                )
-              })}
-              {matches.length === 0 && (
-                <div className="px-2 py-3 text-center text-[11px] text-white/30">
-                  没有匹配的目录
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="flex gap-2">
+        <div className="quick-pick-head">
+          {/* 目录可能上百个，光靠滚动找不动：这行搜索在列表内过滤 + 重排，
+              ↑↓ 选、Enter 直接应用，不必再点。 */}
           <input
             ref={inputRef}
+            value={query}
+            spellCheck={false}
+            aria-label="搜索项目目录"
+            placeholder="选择项目目录（输入以筛选）"
+            className="quick-pick-input"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                moveHighlight(1)
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                moveHighlight(-1)
+              } else if (event.key === 'Enter' && activeDir) {
+                event.preventDefault()
+                onApply(activeDir)
+              }
+            }}
+          />
+        </div>
+        {invalid && (
+          <div className="quick-pick-notice">当前目录不存在或已被移动，请选择正确的项目目录。</div>
+        )}
+        <div role="listbox" aria-label="最近目录" className="quick-pick-list">
+          <button type="button" className="quick-pick-row" onClick={chooseFolder}>
+            <IconFolderOpen size={15} className="quick-pick-row-icon" />
+            <span className="quick-pick-row-title">选择文件夹…</span>
+          </button>
+          {entries.length > 0 && <div className="quick-pick-separator" />}
+          {matches.map((entry, index) => {
+            // 末段（项目名）永远完整显示，只把前面那截截断——路径的辨识度全在末段。
+            const { head, tail } = splitCwd(entry.path)
+            // 根目录没有末段，直接把它当名字显示；否则路径列会只剩一个 "/"
+            const name = tail || head || '/'
+            const active = index === activeIndex
+            const isCurrent = normalizeCwd(entry.path) === currentDir
+            return (
+              <button
+                key={entry.path}
+                type="button"
+                title={entry.path}
+                className={`quick-pick-row${active ? ' is-selected' : ''}`}
+                onMouseEnter={() => setHighlight(index)}
+                onClick={() => onApply(entry.path)}
+              >
+                <IconFolder size={15} className="quick-pick-row-icon" />
+                <span className="quick-pick-row-main">
+                  <span className="quick-pick-row-title">{name}</span>
+                  <span className="quick-pick-row-path">{tail ? head : ''}</span>
+                </span>
+                <span className="quick-pick-row-tail">
+                  {isCurrent ? '当前' : entry.sessionCount ? `${entry.sessionCount} 个会话` : ''}
+                </span>
+              </button>
+            )
+          })}
+          {matches.length === 0 && <p className="quick-pick-empty">没有匹配的目录</p>}
+        </div>
+        <footer className="quick-pick-foot">
+          <input
             value={value}
             spellCheck={false}
+            aria-label="工作目录完整路径"
             placeholder="输入完整路径，如 /Users/name/project"
-            className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
+            className="quick-pick-input"
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -260,12 +233,12 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
           <button
             type="button"
             disabled={!value.trim()}
-            className="h-8 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:text-white/25"
+            className="shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-white/75 hover:bg-white/10 hover:text-white disabled:text-white/25"
             onClick={submit}
           >
             应用
           </button>
-        </div>
+        </footer>
       </section>
       {pickerOpen && (
         <DirectoryPicker

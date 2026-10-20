@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconCheck, IconGitBranch, IconGitFork, IconPlus, IconTag } from '@tabler/icons-react'
+import { formatTracking, relativeDateZh } from './git-refs'
 
 const actions = [
   { id: 'create', label: '创建新分支…', icon: IconPlus },
@@ -9,27 +10,24 @@ const actions = [
 const searchable = (item) =>
   [item.name, item.subject, item.author, item.hash, item.upstream].filter(Boolean).join(' ')
 
-function RefRow({ item }) {
-  const Icon = item.kind === 'tag' ? IconTag : IconGitBranch
+const detailOf = (item) =>
+  [item.author, item.hash, item.subject].filter(Boolean).join(' · ') || item.ref
+
+function RefRowBody({ item }) {
   return (
     <>
-      <Icon size={15} className="mt-0.5 shrink-0 text-white/55" />
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-2">
-          <strong className="truncate text-[13px] font-medium text-white/90">{item.name}</strong>
-          {item.current && <IconCheck size={13} className="shrink-0 text-info-soft" />}
-          {item.tracking && (
-            <span className="shrink-0 text-[11px] text-white/40">{item.tracking}</span>
-          )}
-          {item.date && <span className="shrink-0 text-[11px] text-white/35">{item.date}</span>}
-        </span>
-        <span className="mt-0.5 block truncate text-[11px] text-white/38">
-          {[item.author, item.hash, item.subject].filter(Boolean).join(' · ') || item.ref}
-        </span>
+      <span className="quick-pick-row-main">
+        <span className="quick-pick-row-title">{item.name}</span>
+        {item.current && <IconCheck size={13} className="shrink-0 text-info-soft" />}
+        {item.tracking && (
+          <span className="quick-pick-row-meta">{formatTracking(item.tracking)}</span>
+        )}
+        {item.date && <span className="quick-pick-row-meta">{relativeDateZh(item.date)}</span>}
       </span>
-      <span className="shrink-0 text-[11px] text-white/30">
+      <span className="quick-pick-row-tail">
         {item.current ? '当前' : item.kind === 'tag' ? '标签' : '分支'}
       </span>
+      <span className="quick-pick-row-detail">{detailOf(item)}</span>
     </>
   )
 }
@@ -167,20 +165,16 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
     [busy, create, cwd, loading, mode, onClose, operate]
   )
 
-  const title = mode === 'from' ? '选择新分支的起点' : '选择要签出的分支'
+  const title = mode === 'from' ? '选择新分支的起点' : '选择要签出的分支或标记'
+  const hint = mode === 'from' ? 'Esc 返回' : 'Esc 关闭'
 
   return (
     <div
-      className="fixed inset-0 z-[10000] flex items-start justify-center bg-black/35 px-4 pt-[76px] backdrop-blur-[2px] no-drag"
+      className="quick-pick-overlay z-[10000]"
       onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}
     >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="flex max-h-[calc(100vh-92px)] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden rounded-md border border-white/15 bg-panel/98 shadow-[0_18px_70px_rgba(0,0,0,.55)]"
-      >
-        <div className="border-b border-white/10 p-2.5">
+      <section role="dialog" aria-modal="true" aria-label={title} className="quick-pick-panel">
+        <div className="quick-pick-head">
           <input
             ref={inputRef}
             value={query}
@@ -188,7 +182,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
             aria-label={title}
             placeholder={title}
             spellCheck={false}
-            className="h-9 w-full rounded-sm border border-info-deep bg-white/[.06] px-3 text-[13px] text-white outline-none placeholder:text-white/35 focus:border-info focus:ring-1 focus:ring-info/30"
+            className="quick-pick-input"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
@@ -221,61 +215,69 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
               }
             }}
           />
-          <div className="mt-2 flex items-center justify-between gap-3 px-1 text-[11px] text-white/35">
-            <span className="truncate">{refs.root || cwd}</span>
-            <span className="shrink-0">↑↓ 选择 · Enter 确认 · Esc 返回</span>
-          </div>
         </div>
 
-        {error && (
-          <div className="border-b border-danger-soft/25 bg-danger-soft/10 px-3 py-2 text-xs leading-5 text-danger-soft">
-            {error}
-          </div>
-        )}
+        {error && <div className="quick-pick-notice">{error}</div>}
 
-        <div role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {loading && (
-            <p className="px-2.5 py-5 text-center text-xs text-white/35">正在读取 Git 分支…</p>
-          )}
-          {!loading && !items.length && (
-            <p className="px-2.5 py-5 text-center text-xs text-white/35">没有匹配的分支或标签</p>
-          )}
+        <div role="listbox" aria-label={title} className="quick-pick-list">
+          {loading && <p className="quick-pick-empty">正在读取 Git 分支…</p>}
+          {!loading && !items.length && <p className="quick-pick-empty">没有匹配的分支或标签</p>}
           {!loading &&
             items.map((item, index) => {
-              const Icon = item.icon
+              const Icon = item.icon || (item.kind === 'tag' ? IconTag : IconGitBranch)
+              const active = index === selected
+              // 动作项与 ref 列表之间画一条分隔线（VS Code quick pick 的分组线）
+              const separator =
+                item.type === 'ref' && index > 0 && items[index - 1].type === 'action'
+              if (item.type === 'action') {
+                return (
+                  <Fragment key={item.id}>
+                    {separator && <div className="quick-pick-separator" />}
+                    <button
+                      ref={active ? selectedRef : null}
+                      type="button"
+                      tabIndex={-1}
+                      role="option"
+                      aria-selected={active}
+                      disabled={busy}
+                      className={`quick-pick-row${active ? ' is-selected' : ''}`}
+                      onMouseEnter={() => setSelected(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => choose(item)}
+                    >
+                      <Icon size={15} className="quick-pick-row-icon" />
+                      <span className="quick-pick-row-title">{item.label}</span>
+                    </button>
+                  </Fragment>
+                )
+              }
               return (
-                <button
-                  ref={index === selected ? selectedRef : null}
-                  key={item.type === 'action' ? item.id : item.ref}
-                  type="button"
-                  tabIndex={-1}
-                  role="option"
-                  aria-selected={index === selected}
-                  disabled={busy}
-                  className={`flex w-full gap-2.5 rounded-sm px-2.5 text-left transition-colors ${
-                    item.type === 'action' ? 'min-h-9 items-center' : 'min-h-12 items-start py-1.5'
-                  } ${index === selected ? 'bg-info-deep text-white' : 'text-white/75 hover:bg-white/[.06]'}`}
-                  onMouseEnter={() => setSelected(index)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => choose(item)}
-                >
-                  {item.type === 'action' ? (
-                    <>
-                      <Icon size={16} className="shrink-0" />
-                      <span className="min-w-0 truncate text-[13px] font-medium">{item.label}</span>
-                    </>
-                  ) : (
-                    <RefRow item={item} />
-                  )}
-                </button>
+                <Fragment key={item.ref}>
+                  {separator && <div className="quick-pick-separator" />}
+                  <button
+                    ref={active ? selectedRef : null}
+                    type="button"
+                    tabIndex={-1}
+                    role="option"
+                    aria-selected={active}
+                    disabled={busy}
+                    className={`quick-pick-row is-multiline${active ? ' is-selected' : ''}`}
+                    onMouseEnter={() => setSelected(index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
+                  >
+                    <Icon size={15} className="quick-pick-row-icon" />
+                    <RefRowBody item={item} />
+                  </button>
+                </Fragment>
               )
             })}
         </div>
-        {busy && (
-          <div className="border-t border-white/10 px-3 py-2 text-xs text-white/45">
-            正在执行 Git 操作…
-          </div>
-        )}
+
+        <footer className="quick-pick-status">
+          <span title={refs.root || cwd}>{refs.root || cwd}</span>
+          <span>{busy ? '正在执行 Git 操作…' : `↑↓ 选择 · Enter 确认 · ${hint}`}</span>
+        </footer>
       </section>
     </div>
   )

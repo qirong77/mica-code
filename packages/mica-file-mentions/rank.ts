@@ -196,9 +196,13 @@ export function compareRankedMentions(left: RankedFileMention, right: RankedFile
 }
 
 /** `rankWorkspaceFiles` 的前 20 条，作为端上候选。 */
-export function matchWorkspaceFiles(files: string[], query: string): FileMentionItem[] {
+export function matchWorkspaceFiles(
+  files: string[],
+  query: string,
+  limit: number = MAX_FILE_MENTION_RESULTS,
+): FileMentionItem[] {
   return rankWorkspaceFiles(files, query)
-    .slice(0, MAX_FILE_MENTION_RESULTS)
+    .slice(0, limit)
     .map(({ path, label, description, labelHighlights }) => ({
       path,
       label,

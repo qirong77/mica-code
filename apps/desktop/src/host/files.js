@@ -38,6 +38,8 @@ const MAX_SEARCH_FILE_SIZE = 2 * 1024 * 1024
 const MAX_SEARCH_BYTES = 128 * 1024 * 1024
 const MAX_QUERY_LENGTH = 1_000
 const MAX_PREVIEW_LENGTH = 300
+// 「快速打开」一次给的行数：比 `@` 补全的 20 条多，但它复用同一份扫描与缓存。
+const MAX_QUICK_OPEN_RESULTS = 100
 
 function normalizeDirectory(value) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('directory is required')
@@ -273,6 +275,24 @@ export function registerFilesIpc() {
     }
     if ((payload.query || '').length > MAX_QUERY_LENGTH) throw new Error('query is too long')
     return findFileMentions(root, payload.query || '')
+  })
+
+  // 「快速打开」（Ctrl+P）：按名称找工作区文件。与 `@` 补全共用
+  // mica-file-mentions 的扫描与 45s 缓存，所以两端看到的候选与延迟一致；
+  // 目录在这里滤掉——快速打开的动作是打开文件，目录在文件树里进。
+  ipcMain.handle('files:find', async (_event, payload = {}) => {
+    const root = normalizeRoot(payload.root)
+    if (payload.query != null && typeof payload.query !== 'string') {
+      throw new Error('query must be a string')
+    }
+    const query = (payload.query || '').trim()
+    if (!query) return { items: [], truncated: false }
+    if (query.length > MAX_QUERY_LENGTH) throw new Error('query is too long')
+    const found = await findFileMentions(root, query, MAX_QUICK_OPEN_RESULTS)
+    const items = found
+      .filter((item) => !item.path.endsWith('/'))
+      .map((item) => ({ path: item.path, label: item.label, relativePath: item.description }))
+    return { items, truncated: found.length >= MAX_QUICK_OPEN_RESULTS }
   })
 
   ipcMain.handle('files:search', async (_event, payload = {}) => {

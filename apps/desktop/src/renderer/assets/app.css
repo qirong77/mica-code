@@ -3752,6 +3752,220 @@ body.is-resizing-btw {
   }
 }
 
+/* ------------------------------------------------------ 快速选择（quick pick）
+   分支切换（左下角）、项目目录切换与「快速打开」共用这一套 VS Code 外观：
+   顶部居中的窄面板、方角、单行 22px 的紧凑行、选中行整行高亮。三个面板都
+   用这里的类名，改尺寸只改一处，不要在各组件里各写一套。 */
+.quick-pick-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(28px, 7vh, 84px) 16px 24px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.quick-pick-panel {
+  display: flex;
+  width: min(640px, calc(100vw - 32px));
+  /* VS Code 的 quick pick 只占屏幕中间一截：再长就只在列表里滚，不要顶满整屏 */
+  max-height: min(520px, 100%);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+  box-shadow: 0 12px 44px rgb(0 0 0 / 55%);
+}
+
+.quick-pick-head {
+  flex: none;
+  padding: 4px;
+}
+
+.quick-pick-input {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--color-info);
+  background: var(--color-canvas);
+  padding: 0 8px;
+  color: var(--color-fg-max);
+  font-size: 13px;
+}
+
+.quick-pick-input::placeholder {
+  color: var(--color-fg-faint);
+}
+
+.quick-pick-notice {
+  flex: none;
+  border-top: 1px solid var(--color-line);
+  padding: 4px 8px;
+  color: var(--color-danger-soft);
+  font-size: 11px;
+}
+
+.quick-pick-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.quick-pick-separator {
+  height: 1px;
+  flex: none;
+  margin: 3px 0;
+  background: var(--color-line);
+}
+
+.quick-pick-row {
+  display: grid;
+  width: 100%;
+  min-height: 22px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'icon main tail';
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 6px;
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  text-align: left;
+}
+
+.quick-pick-row.is-multiline {
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    'icon main tail'
+    'icon detail detail';
+  align-items: center;
+  padding-block: 4px;
+}
+
+.quick-pick-row.is-selected {
+  background: var(--color-info-deep);
+  color: var(--color-fg-max);
+}
+
+.quick-pick-row-icon {
+  grid-area: icon;
+  flex: none;
+}
+
+.quick-pick-row.is-multiline > .quick-pick-row-icon {
+  align-self: start;
+  margin-top: 3px;
+}
+
+.quick-pick-row-main {
+  display: flex;
+  min-width: 0;
+  grid-area: main;
+  align-items: center;
+  gap: 6px;
+}
+
+.quick-pick-row-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-pick-row.is-selected .quick-pick-row-title {
+  color: var(--color-fg-max);
+}
+
+/* 路径前缀：暗一档，被压缩时先截它（路径的辨识度全在末段） */
+.quick-pick-row-path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-pick-row-tail,
+.quick-pick-row-meta {
+  grid-area: tail;
+  flex: none;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.quick-pick-row-detail {
+  grid-area: detail;
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-pick-row.is-selected .quick-pick-row-tail,
+.quick-pick-row.is-selected .quick-pick-row-meta,
+.quick-pick-row.is-selected .quick-pick-row-path,
+.quick-pick-row.is-selected .quick-pick-row-detail {
+  color: rgb(255 255 255 / 78%);
+}
+
+.quick-pick-row mark {
+  background: color-mix(in srgb, var(--color-warn) 22%, transparent);
+  color: var(--color-warn-soft);
+}
+
+.quick-pick-row.is-selected mark {
+  background: rgb(255 255 255 / 22%);
+  color: var(--color-fg-max);
+}
+
+.quick-pick-empty {
+  padding: 14px 10px;
+  color: var(--color-fg-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.quick-pick-foot,
+.quick-pick-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--color-line);
+  padding: 3px 8px;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+}
+
+.quick-pick-foot .quick-pick-input {
+  height: 24px;
+  border-color: var(--color-line);
+  font-size: 12px;
+}
+
+.quick-pick-foot .quick-pick-input:focus {
+  border-color: var(--color-info);
+}
+
+.quick-pick-status > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-pick-status > :last-child {
+  flex: none;
+  margin-left: auto;
+}
+
 /* ---------------------------------------------------------------- 移动端 */
 
 @media (max-width: 767px) {

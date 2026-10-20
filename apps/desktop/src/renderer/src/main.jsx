@@ -7,6 +7,12 @@ import { ensureUiState } from './ui-state'
 import { LOCAL_SERVER_URL, currentServerUrl, isLoopbackServer } from './servers'
 import { readAppUrl } from './app-url'
 
+if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
+  void import('./viewport-diagnostics')
+    .then(({ startViewportDiagnostics }) => startViewportDiagnostics(window, document))
+    .catch((error) => console.warn('无法启动视口诊断', error))
+}
+
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。
 ensureMicaApi()

@@ -334,6 +334,8 @@ function createWebApi(env) {
         invoke('files:write', { path, content, expectedVersion }),
       // `@` 补全候选：与 CLI 的 file-mention 插件共用 mica-file-mentions
       mention: (root, query) => invoke('files:mention', { root, query }),
+      // 「快速打开」（Ctrl+P）：同一份扫描，按名称找工作区文件
+      find: (root, query) => invoke('files:find', { root, query }),
       // options：{ matchCase, wholeWord, regex, include, exclude }，对应搜索面板上的开关
       search: (root, query, options = {}) => invoke('files:search', { root, query, ...options }),
       create: (directory, name, type) => invoke('files:create', { directory, name, type }),

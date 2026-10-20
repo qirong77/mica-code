@@ -35,14 +35,21 @@ const execFileAsync = promisify(execFile);
 type CacheEntry = { expiresAt: number; files: Promise<string[]> };
 const cache = new Map<string, CacheEntry>();
 
-/** 补全候选：按查询排序后的前 20 条。 */
-export async function findFileMentions(root: string, query: string): Promise<FileMentionItem[]> {
+/**
+ * 候选：按查询排序后的前 `limit` 条（默认 `@` 补全的 20 条）。
+ * 桌面的「快速打开」传更大的上限，用它同一份扫描与缓存。
+ */
+export async function findFileMentions(
+  root: string,
+  query: string,
+  limit: number = MAX_FILE_MENTION_RESULTS,
+): Promise<FileMentionItem[]> {
   const needle = normalizePathQuery(query);
   if (needle) {
     const fdPath = await getFdExecutable();
     if (fdPath) {
       try {
-        return await findFileMentionsWithFd(root, fdPath, query);
+        return await findFileMentionsWithFd(root, fdPath, query, limit);
       } catch {
         // fd failed (e.g. binary race, permission) — fall back to a full
         // workspace scan so `@` still resolves.
@@ -50,7 +57,7 @@ export async function findFileMentions(root: string, query: string): Promise<Fil
     }
   }
   const files = await getWorkspaceFiles(root);
-  return matchWorkspaceFiles(files, needle);
+  return matchWorkspaceFiles(files, needle, limit);
 }
 
 /**
@@ -88,6 +95,7 @@ async function findFileMentionsWithFd(
   root: string,
   fdPath: string,
   query: string,
+  limit: number,
 ): Promise<FileMentionItem[]> {
   // `--full-path` keeps mica's path-level match semantics (e.g. `@node` must
   // surface `src/mynode/helper.ts`), which basename-only fd matching would drop.
@@ -140,7 +148,7 @@ async function findFileMentionsWithFd(
   }
   ranked.sort(compareRankedMentions);
   return ranked
-    .slice(0, MAX_FILE_MENTION_RESULTS)
+    .slice(0, limit)
     .map(({ path, label, description, labelHighlights }) => ({
       path,
       label,

@@ -16,7 +16,9 @@
  * （`visualViewport.offsetTop`），必须补偿，否则应用会偏出屏幕上方、底部空出一块。
  *
  * 但只该在**高度确实把键盘算了进去**（应用已经比布局视口矮了一截）时才补偿：那时应用
- * 正好铺满可见区，那次上移只会把应用推出屏幕。反过来，高度没算进键盘时（上面那条回归
+ * 正好铺满可见区，那次上移只会把应用推出屏幕。判断这件事要参考较大的布局高度及聚焦前
+ * 的高度，不能复用选高度时的最小值：最小值可能已经跟键盘缩小，导致补偿被错误关闭。
+ * 反过来，高度没算进键盘时（上面那条回归
  * 路径也没救回来），那次上移正是把底部输入条露出来的那一步，抵消掉等于亲手把输入条推到
  * 键盘底下 —— 此时宁可让应用按 iOS 自己的节奏上移。拿不到布局视口信息时按老规矩补偿。
  *
@@ -25,7 +27,7 @@
 const UNZOOMED_EPSILON = 0.02
 
 /** 布局视口比可见区至少矮这么多，才算「这一截是键盘」。 */
-const KEYBOARD_MIN_INSET = 80
+export const KEYBOARD_MIN_INSET = 80
 
 export function viewportMetrics(viewport, layout = {}) {
   if (!viewport) return null
@@ -41,7 +43,8 @@ export function viewportMetrics(viewport, layout = {}) {
 
   const height =
     layoutHeight > 0 && visual - layoutHeight >= KEYBOARD_MIN_INSET ? layoutHeight : visual
-  const keyboardAccounted = layoutHeight > 0 ? layoutHeight - height >= KEYBOARD_MIN_INSET : true
+  const fullHeight = Math.max(...layoutHeights, layout.unfocusedHeight || 0)
+  const keyboardAccounted = fullHeight > 0 ? fullHeight - height >= KEYBOARD_MIN_INSET : true
   const shift =
     Math.abs(scale - 1) < UNZOOMED_EPSILON ? Math.max(0, Math.round(viewport.offsetTop || 0)) : 0
 

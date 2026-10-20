@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FileIcon } from './FileIcon'
 
 const modes = {
-  files: { label: '快速打开', placeholder: '搜索当前工作区中的文件', method: 'find', limit: 100 },
-  text: { label: '全文搜索', placeholder: '在当前工作区中搜索文本', method: 'search', limit: 200 }
+  files: { label: '快速打开', placeholder: '按名称搜索工作区文件', method: 'find', limit: 100 },
+  text: { label: '全文搜索', placeholder: '在工作区中搜索文本', method: 'search', limit: 200 }
 }
 
 const isAbsolute = (value) => /^(?:[A-Za-z]:[\\/]|[\\/]{1,2})/.test(value)
@@ -38,6 +39,14 @@ const flattenTextItems = (items) =>
       ? item.matches.map((match) => ({ ...item, ...match, matches: undefined }))
       : [item]
   )
+
+/** 结果行按 VS Code 的样子拆成「文件名 + 目录」两段：名字常亮，目录暗一档。 */
+const splitPath = (value) => {
+  const path = String(value || '')
+  const index = path.lastIndexOf('/')
+  if (index < 0) return { name: path, directory: '' }
+  return { name: path.slice(index + 1), directory: path.slice(0, index) }
+}
 
 function matchIndexes(text, query, fuzzy) {
   const source = String(text).toLocaleLowerCase()
@@ -76,15 +85,7 @@ function Highlight({ text, query, fuzzy = false }) {
     const next = index < value.length && indexes.has(index)
     if (index < value.length && next === marked) continue
     const textChunk = value.slice(start, index)
-    chunks.push(
-      marked ? (
-        <mark key={start} className="rounded-xs bg-warn/20 font-semibold text-warn-soft">
-          {textChunk}
-        </mark>
-      ) : (
-        textChunk
-      )
-    )
+    chunks.push(marked ? <mark key={start}>{textChunk}</mark> : textChunk)
     start = index
     marked = next
   }
@@ -143,7 +144,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
     setQuery('')
     setResults([])
     setSelected(-1)
-    setMessage(nextMode === 'text' ? '输入文本以搜索当前工作区' : '正在加载文件…')
+    setMessage(nextMode === 'text' ? '输入文本以搜索当前工作区' : '输入文件名以搜索工作区文件')
     setSummary('')
     setOpen(true)
     requestAnimationFrame(() => {
@@ -182,11 +183,11 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
 
   useEffect(() => {
     if (!open) return undefined
-    if (mode === 'text' && !query.trim()) {
+    if (!query.trim()) {
       requestRef.current += 1
       setResults([])
       setSelected(-1)
-      setMessage('输入文本以搜索当前工作区')
+      setMessage(mode === 'text' ? '输入文本以搜索当前工作区' : '输入文件名以搜索工作区文件')
       setSummary('')
       setBusy(false)
       return undefined
@@ -232,7 +233,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
           setMessage(visible.length ? '' : '没有找到匹配结果')
           setSummary(
             total > visible.length || visible.length === config.limit
-              ? `显示 ${visible.length} 项，共 ${total} 项`
+              ? `${visible.length} 项，共 ${total} 项`
               : `${visible.length} 个结果`
           )
         } catch (error) {
@@ -269,23 +270,17 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
   if (!open) return null
   return (
     <div
-      className="fixed inset-0 z-[12000] flex justify-center bg-black/20 px-4 pb-6 pt-[clamp(42px,10vh,100px)] no-drag"
+      className="quick-pick-overlay z-[12000]"
       onClick={(event) => event.target === event.currentTarget && hide()}
     >
       <section
         role="dialog"
         aria-modal="true"
-        aria-labelledby="quick-search-mode"
+        aria-label={config.label}
         aria-busy={busy}
-        className="flex max-h-[min(620px,calc(90vh-42px))] w-[min(720px,calc(100vw-32px))] flex-col self-start overflow-hidden rounded-md border border-white/20 bg-panel shadow-[0_16px_48px_rgb(0_0_0/.58)]"
+        className="quick-pick-panel"
       >
-        <div className="flex min-h-12 shrink-0 items-center gap-2.5 border-b border-white/10 px-2.5 py-1.5">
-          <span
-            id="quick-search-mode"
-            className="shrink-0 rounded-sm border border-white/10 bg-white/[.045] px-1.5 py-1 text-[10px] font-semibold tracking-wide text-white/45"
-          >
-            {config.label}
-          </span>
+        <div className="quick-pick-head">
           <input
             ref={inputRef}
             value={query}
@@ -296,9 +291,10 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
             aria-activedescendant={selected >= 0 ? `quick-result-${selected}` : ''}
             autoComplete="off"
             spellCheck={false}
-            className="h-8 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm text-white placeholder:text-white/25"
+            className="quick-pick-input"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
               if (event.key === 'Escape') {
                 event.preventDefault()
                 event.stopPropagation()
@@ -313,7 +309,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
                       : (value + (event.key === 'ArrowDown' ? 1 : -1) + results.length) %
                         results.length
                   )
-              } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              } else if (event.key === 'Enter') {
                 event.preventDefault()
                 event.stopPropagation()
                 openSelected()
@@ -321,15 +317,16 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
             }}
           />
         </div>
-        <div className="relative min-h-13.5 overflow-hidden">
-          {!!results.length && (
-            <div
-              id="quick-search-results"
-              role="listbox"
-              aria-label="搜索结果"
-              className="max-h-[min(510px,calc(90vh-142px))] overflow-y-auto p-1.25"
-            >
-              {results.map((result, index) => (
+        <div
+          role="listbox"
+          aria-label="搜索结果"
+          id="quick-search-results"
+          className="quick-pick-list"
+        >
+          {!!results.length &&
+            results.map((result, index) => {
+              const { name, directory } = splitPath(result.relativePath || result.path)
+              return (
                 <button
                   id={`quick-result-${index}`}
                   key={`${result.path}-${result.line || ''}-${index}`}
@@ -337,60 +334,50 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
                   role="option"
                   aria-selected={selected === index}
                   tabIndex={-1}
-                  className={`grid min-h-9.25 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 rounded-sm px-2 py-1.25 text-left hover:bg-white/[.075] hover:text-white ${selected === index ? 'bg-white/[.075] text-white' : 'text-white/65'}`}
+                  className={`quick-pick-row${mode === 'text' ? ' is-multiline' : ''}${
+                    selected === index ? ' is-selected' : ''
+                  }`}
                   onMouseEnter={() => setSelected(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setSelected(index)
-                    const item = results[index]
-                    Promise.resolve(
+                    const opening =
                       mode === 'text'
-                        ? openFile(item.path, { line: item.line, column: item.column })
-                        : openFile(item.path)
-                    ).catch(console.error)
+                        ? openFile(result.path, { line: result.line, column: result.column })
+                        : openFile(result.path)
+                    Promise.resolve(opening).catch(console.error)
                     hide()
                   }}
                 >
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate font-mono text-xs">
-                      <Highlight
-                        text={result.relativePath}
-                        query={query}
-                        fuzzy={mode === 'files'}
-                      />
+                  <FileIcon name={name} className="quick-pick-row-icon" width={15} height={15} />
+                  <span className="quick-pick-row-main">
+                    <span className="quick-pick-row-title">
+                      <Highlight text={name} query={query} fuzzy={mode === 'files'} />
                     </span>
-                    {mode === 'text' && (
-                      <span className="truncate font-mono text-[11px] text-white/40">
-                        <Highlight text={result.preview} query={query} />
+                    {directory && (
+                      <span className="quick-pick-row-path">
+                        <Highlight text={directory} query={query} fuzzy={mode === 'files'} />
                       </span>
                     )}
                   </span>
                   {mode === 'text' && (
-                    <span className="font-mono text-[10px] text-white/30">
+                    <span className="quick-pick-row-meta">
                       {result.line}:{result.column}
                     </span>
                   )}
+                  {mode === 'text' && (
+                    <span className="quick-pick-row-detail">
+                      <Highlight text={result.preview} query={query} />
+                    </span>
+                  )}
                 </button>
-              ))}
-            </div>
-          )}
-          {message && (
-            <div
-              role="status"
-              className="grid min-h-13.5 place-items-center px-4 py-3 text-center text-xs text-white/35"
-            >
-              {message}
-            </div>
-          )}
+              )
+            })}
+          {message && <p className="quick-pick-empty">{message}</p>}
         </div>
-        <footer className="flex min-h-7.25 shrink-0 items-center justify-between gap-3 border-t border-white/[.07] px-2.5 py-1 text-[10px] text-white/30">
-          <span className="truncate">{summary}</span>
-          <span className="shrink-0">
-            <kbd className="rounded-xs border border-white/10 bg-white/[.04] px-1">↑</kbd>{' '}
-            <kbd className="rounded-xs border border-white/10 bg-white/[.04] px-1">↓</kbd> 选择{' '}
-            <kbd className="rounded-xs border border-white/10 bg-white/[.04] px-1">Enter</kbd> 打开{' '}
-            <kbd className="rounded-xs border border-white/10 bg-white/[.04] px-1">Esc</kbd> 关闭
-          </span>
+        <footer className="quick-pick-status">
+          <span>{summary || config.label}</span>
+          <span>↑↓ 选择 · Enter 打开 · Esc 关闭</span>
         </footer>
       </section>
     </div>

@@ -329,7 +329,13 @@ export default function TerminalComposer({
   const cursorHidden = !focused || !windowFocused || hasSelection || !blinkOn
 
   return (
-    <div className="chat-composer-input" onClick={() => textareaRef.current?.focus()}>
+    <div
+      className="chat-composer-input"
+      onClick={() => {
+        const textarea = textareaRef.current
+        if (textarea && document.activeElement !== textarea) textarea.focus({ preventScroll: true })
+      }}
+    >
       {/* 渲染层：显示文本 + 选区高亮 */}
       <div ref={preRef} className="chat-composer-markdown-layer" aria-hidden="true">
         {value ? (

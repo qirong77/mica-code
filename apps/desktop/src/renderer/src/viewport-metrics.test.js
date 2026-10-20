@@ -74,6 +74,36 @@ describe('viewportMetrics', () => {
     ).toBe(352)
   })
 
+  it('keeps compensating when one layout height signal has already shrunk', () => {
+    for (const layout of [
+      { innerHeight: 420, clientHeight: 852 },
+      { innerHeight: 852, clientHeight: 420 }
+    ]) {
+      expect(viewportMetrics({ height: 420, scale: 1, offsetTop: 352 }, layout)).toEqual({
+        height: 420,
+        top: 352
+      })
+    }
+  })
+
+  it('compensates stale visual geometry when the layout fallback accounts for the keyboard', () => {
+    expect(
+      viewportMetrics(
+        { height: 852, scale: 1, offsetTop: 352 },
+        { innerHeight: 420, clientHeight: 852 }
+      )
+    ).toEqual({ height: 420, top: 352 })
+  })
+
+  it('uses the unfocused height for compensation when both layout signals shrink', () => {
+    expect(
+      viewportMetrics(
+        { height: 420, scale: 1, offsetTop: 352 },
+        { innerHeight: 420, clientHeight: 420, unfocusedHeight: 852 }
+      )
+    ).toEqual({ height: 420, top: 352 })
+  })
+
   it('has nothing to compute without a visual viewport', () => {
     expect(viewportMetrics(null)).toBeNull()
     expect(viewportMetrics(undefined)).toBeNull()
