@@ -5,6 +5,7 @@
  */
 
 import {
+  localSkillDocument,
   resolveSkillTemplate as resolveTemplate,
   skillFilePathFor,
   skillNeedsWrite
@@ -43,6 +44,11 @@ export function emptyBrowserSnapshot(error = null) {
  */
 export function resolveSkillTemplate(markdown, { serviceUrl = '' } = {}) {
   return resolveTemplate(markdown, { serviceUrl, envName: BROWSER_URL_ENV })
+}
+
+/** 服务端文档拿不到时的技能正文：地址直接来自注入给会话进程的那个变量 */
+export function browserSkillDocument(serviceUrl) {
+  return localSkillDocument('mica-browser', serviceUrl)
 }
 
 /**

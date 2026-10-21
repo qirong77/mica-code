@@ -363,9 +363,11 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - CLI / desktop 共用 `mica-file-mentions`，候选最多 20；desktop 不二次排序截断。host 预热 cwd，查询防抖 100ms，空查询立即。
 - `@` 和 desktop `/` skill 补全仅在词首触发；斜杠后再次出现 `/` 按路径处理。选中只插文本，不执行。
+- skill 候选不截断（host 上限 200），名称与说明都参与匹配与高亮；浮层只让候选列表滚动，标题行固定。
 - desktop composer 不分派斜杠命令，`/loop` 等原样发给模型；需 UI 的能力通过面板操作。
 - 输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻，普通方向键移动光标。
 - `TerminalComposer` 容器与 textarea 的 min/max height 共用变量，markdown layer 与自绘光标镜像同一 scrollTop。
+- 主对话区查找按 Cmd/Ctrl+F（`ChatFind.jsx`，交互照 VS Code 的 find widget）：命中只用 CSS Custom Highlight API 上色，不往 React 管的 DOM 里包节点；匹配规则（大小写/全字/正则、上限与 `n/总数`）在 `chat-find.js`，流式变化由 MutationObserver 防抖补扫。
 - 输入法组合期用 `resolveComposerSelection` 取 selectionEnd 并收起选区；blur 清组合态，不在组合期从外部 setInput。
 - 粘贴共用 `composer-paste.js`：图片字节转 `[Image](路径)`，文件插绝对路径；系统路径由 `clipboard:file-paths` 按 basename/顺序对齐，失败提示，不插错误文件路径。
 - 角色入口在输入条箭头，非 default 显示角色名，随下一次发送/编辑的 role 参数持久化。
@@ -429,6 +431,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - 第二个主进程业务例外在 `src/main/terminal/`：`node-pty` 打开真实 pty 与登录 shell，`@xterm/headless` 只做屏幕镜像供 AI 读屏，**不是模拟终端**。`terminal-docs.js` 是端点唯一目录。
 - 主进程只监听 Unix socket（`MICA_TERMINAL_SOCKET`），运行时把它代理成 `/remote/terminal/*`，剥掉整个前缀后端点就是 `/sessions`、`/events` 等；`MICA_TERMINAL_URL` 即该服务根，agent 拼 `/sessions`。socket 变量不进 chat 子进程，避免绕过代理。
+- 两个主进程服务统一用 `shared/endpoint-http.js` 的 `listenLocalSocket` 绑定：先探活，有人监听就报「已被另一个实例占用」而不删文件（同一个 userData 起第二个实例时，删掉等于让第一个实例变成「进程在、文件没了」）；只有无人在监听的残留文件才清掉重绑。服务与技术站关闭放在 `will-quit`，`before-quit` 只做可逆清理。
 - 一个会话一个后台窗口，按需创建：`show` 为假时不建渲染进程，agent 专用终端不占内存；关窗只 hide，销毁走 `close` API。窗口加载运行时托管的 `/terminal-control?session=<id>`，页面与 AI 都通过 HTTP + SSE 操作同一条 PTY，不需要 preload。
 - 页面用 xterm DOM 渲染（不用 canvas）；PTY 尺寸是唯一事实来源，AI resize 后页面跟随，用户调整窗口才反向 fit 并回报。页面隐藏时只记 `hiddenDirty` 不逐帧解析，重新可见后按快照整屏重建，后台窗口不再空转渲染。
 - 读屏前必须等 headless 解析完已排队输出（`pendingWrites` 计数），并且该等待必须有硬预算（读屏 2s、`wait` 用剩余超时），否则高吞吐输出时读屏与 `wait` 会卡死；读屏终点按最后一行非空内容算，光标不在底部时不能截断下方内容。`wait` 的 `text`/`regex` 默认调用 `maskEchoedInput`（`skipEcho: false` 关闭）：按最近输入逐行拆成片段，遮掉每段**最靠下且带提示符**的回显行，以及该行上方等于输入原文的碎片行；回显下方等于原文的行视为真实输出保留。`expectExitCode` 不匹配时立刻返回实际退出码，idle 至少等满设定时长。
@@ -526,5 +529,17 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 浏览器主进程能力还须用 Electron 临时脚本 + 本地 stub 页面验证 create/evaluate/click/type/screenshot/cookies/console/network/隐藏行为，单测不能替代真窗口检查。
 - 终端控制同样要真窗口验证：真实 pty 起 zsh、窗口加载 `/terminal-control`、AI 输入命令后读屏与页面 DOM 一致、hide/show、close 销毁窗口；`@xterm/headless` 与 `node-pty` 都是原生/大依赖，不能只靠单测。**bun 下 node-pty 能加载但不送数据**，会话级测试因此用 `createTerminalSessions({ spawnPty })` 注入假 pty，真 pty 只在 Electron/Node 里跑。
 - 运行时桥可用 stub 浏览器服务 + `node out/server/index.mjs` + `/api/invoke` 验证；spawn 保持 stdin 打开，`--port 0` 被视为未设置。
+
+### 调试与临时验证
+
+- **同一时刻只起一个 Electron 实例**。每个实例都会建窗口与 PTY，并行起两个就能把机器拖到无响应；需要对比新旧行为时串行做，验证完先退出再起下一个。
+- 起测试实例必须同时给 `MICA_HOME`、`MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT` 和一个独立 `--user-data-dir`：只给其中一个，socket 会落到真实 userData 上，把用户正在用的服务顶掉。
+- `npm run dev` 会复用默认端口上已有的运行时，窗口因此可能连到旧代码；验证 host/主进程改动时换端口（如 `MICA_DESKTOP_PORT=8899`），并从 ready 日志取实际地址。
+- 长时间运行的进程放后台任务，用 `wait_for`（http/port/文件）等就绪，不要用大数字 `sleep` 或 shell 超时硬等——超时会把进程留在半死状态，后续判断全部失真。
+- 临时探针脚本（CDP、截图、curl 序列）命名成 `.probe-*.mjs` 之类并放在仓库内，用完立即删除；交付前用 `git status --short` 确认没有残留文件与临时目录。
+- 端到端验证只在真正需要时做；能靠单测覆盖的行为不要动真窗口。真窗口验证后确认进程已退出（`pgrep`）且端口已释放（`lsof -nP -iTCP:<port>`）。
+- 只格式化自己改过的文件，禁止对整个目录跑 Prettier：会把无关文件一起改掉，混进本次 diff。
+- 判断「服务不可用」先看证据再下结论：`curl` 端点、`lsof` 端口与 socket 文件、日志里的 ready 行三者对齐后再动手，避免把旧构建产物、复用实例或残留 socket 误判成代码缺陷。
+- 见到整页空白/黑屏先查渲染期异常（未初始化的 `const`、抛错的组件），不要先怀疑数据；`ErrorBoundary` 的兜底页会带出真实错误与堆栈。
 
 交付前按实际影响复查：依赖方向、busy guard、队列 owner、retry/abort 去重、lease、snapshot/UI 恢复、用量归属、工具 readOnly、MCP 清理、desktop 三层边界、构建产物与文档同步。

@@ -219,13 +219,40 @@ export function serializeEvaluation(value) {
   }
 }
 
-/** 等待条件：selector / text / url 三个里至少给一个，否则无从判定 */
+const NETWORK_HEADER_DENY =
+  /^(cookie|set-cookie|authorization|proxy-authorization|content-length)$/i
+const NETWORK_HEADER_MAX = 200
+
+/**
+ * 网络记录里保留的请求头：只去掉 Cookie / Authorization 这类又长又敏感的头。
+ *
+ * 排查「请求到底打给哪个后端」靠的就是 `nuwa-wings: env=osim149-v` 这类自定义头；之前
+ * `network` 只留 method/url/status，agent 只能靠「改一个变量再打一次」反推请求头带没带上。
+ */
+export function pickNetworkHeaders(headers) {
+  const picked = {}
+  if (!headers || typeof headers !== 'object') return picked
+  for (const [rawName, rawValue] of Object.entries(headers)) {
+    const name = String(rawName || '')
+    if (!name || NETWORK_HEADER_DENY.test(name)) continue
+    const value = rawValue == null ? '' : String(rawValue)
+    picked[name] =
+      value.length > NETWORK_HEADER_MAX ? `${value.slice(0, NETWORK_HEADER_MAX)}…` : value
+  }
+  return picked
+}
+
+/**
+ * 等待条件：selector / text / url 任一即可；三个都不给表示「等页面加载完成」。
+ *
+ * 最后这种空条件是有意支持的：agent 想等一次导航结束时，之前只能自己挑一个近似选择器，
+ * 挑不到就只能 `sleep` 硬等（既慢又不可靠）。
+ */
 export function normalizeWaitCondition(input = {}) {
   const selector = text(input.selector, 500)
   const expected = text(input.text, 500)
   const url = text(input.url, URL_MAX)
-  if (!selector && !expected && !url) throw new Error('wait 需要 selector、text 或 url 之一')
-  return { selector, text: expected, url }
+  return { selector, text: expected, url, ready: !selector && !expected && !url }
 }
 
 const NAMED_KEYS = {

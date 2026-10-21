@@ -15,7 +15,9 @@ import {
   mentionText
 } from '@packages/mica-file-mentions/rank.js'
 
-export const SKILL_COMPLETION_LIMIT = 8
+// skill 的数量天然有限（host 侧最多扫 200 条），列表自己会滚，所以这里不截断成十来个：
+// 用户按 `/` 是想浏览或按关键字挑一个，藏掉大半候选就只能靠记名字了。
+export const SKILL_COMPLETION_LIMIT = 200
 export const FILE_COMPLETION_LIMIT = MAX_FILE_MENTION_RESULTS
 // 与 CLI 一致：有查询时挡 100ms 的连续击键，空查询立即给出工作区文件（扫描结果在
 // host 侧按工作区缓存，所以这一下不会重新遍历目录）。
@@ -69,7 +71,26 @@ export function fileCompletionOptions(items, limit = FILE_COMPLETION_LIMIT) {
   })
 }
 
-/** skill 候选排序：完全匹配 > 前缀 > 子串，其余按原顺序。 */
+/** 某个查询在一段文本里出现的全部字符下标（大小写不敏感，用于高亮）。 */
+export function matchIndexes(text, query) {
+  const source = String(text ?? '').toLocaleLowerCase()
+  const needle = String(query ?? '').toLocaleLowerCase()
+  const indexes = []
+  if (!needle) return indexes
+  let from = source.indexOf(needle)
+  while (from >= 0) {
+    for (let offset = 0; offset < needle.length; offset += 1) indexes.push(from + offset)
+    from = source.indexOf(needle, from + needle.length)
+  }
+  return indexes
+}
+
+/**
+ * skill 候选排序：名称完全匹配 > 名称前缀 > 名称子串 > 只在说明里命中，同档按原顺序。
+ *
+ * 说明也参与匹配：skill 的名字往往很短（`/am`、`/am-cfg`），用户记住的多半是「这个 skill
+ * 干什么」，只按名字过滤等于把搜索废掉。
+ */
 export function rankCompletions(items, query, limit = SKILL_COMPLETION_LIMIT) {
   const list = Array.isArray(items) ? items : []
   const q = String(query ?? '').toLowerCase()
@@ -78,14 +99,35 @@ export function rankCompletions(items, query, limit = SKILL_COMPLETION_LIMIT) {
   const scored = []
   list.forEach((item, index) => {
     const target = String(item?.name ?? '').toLowerCase()
+    const description = String(item?.description ?? '').toLowerCase()
     let rank = -1
     if (target === q) rank = 0
     else if (target.startsWith(q)) rank = 1
     else if (target.includes(q)) rank = 2
+    else if (description.includes(q)) rank = 3
     if (rank >= 0) scored.push({ item, rank, index })
   })
   scored.sort((a, b) => a.rank - b.rank || a.index - b.index)
   return scored.slice(0, limit).map((entry) => entry.item)
+}
+
+/** host 的 skill 候选 → 浮层选项：名称带 `/` 前缀，名称与说明里命中查询的字符都标出来。 */
+export function skillCompletionOptions(items, query, limit = SKILL_COMPLETION_LIMIT) {
+  const skills = Array.isArray(items) ? items : []
+  return rankCompletions(skills, query, limit).map((skill) => {
+    const name = String(skill?.name ?? '')
+    const description = String(skill?.description ?? '')
+    return {
+      key: `skill:${name}`,
+      kind: 'skill',
+      name,
+      label: `/${name}`,
+      description,
+      // label 前面多了一个 `/`，名称里的下标整体右移一位
+      highlights: matchIndexes(name, query).map((index) => index + 1),
+      descriptionHighlights: matchIndexes(description, query)
+    }
+  })
 }
 
 /** 把光标前那段 `@query` / `/query` 整体替换成候选的插入文本。 */

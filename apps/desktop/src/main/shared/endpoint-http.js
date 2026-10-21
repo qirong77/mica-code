@@ -8,6 +8,9 @@
  * 刻意不 import electron：这一层只做纯计算，bun test 可以直接覆盖。
  */
 
+import { rm } from 'node:fs/promises'
+import { connect } from 'node:net'
+
 export const OWNER_HEADER = 'x-mica-owner'
 const OWNER_MAX = 120
 
@@ -117,4 +120,47 @@ export function verifyLocalRequest(req) {
     return { ok: false, status: 403, error: '拒绝来自网页的跨站请求' }
   }
   return { ok: true }
+}
+
+/** socket 上是否已经有人在监听（ENOENT / ECONNREFUSED 都算没有）。 */
+export function probeLocalSocket(socketPath) {
+  return new Promise((resolve) => {
+    const socket = connect(socketPath)
+    const settle = (live) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(live)
+    }
+    socket.once('connect', () => settle(true))
+    socket.once('error', () => settle(false))
+  })
+}
+
+/**
+ * 绑定本机 socket。
+ *
+ * 不能「先 rm 再 listen」：上一次被取消的退出会留下死文件，那确实该清；但同一个 userData
+ * 起了第二个实例时，那个文件对应的是**还活着的**第一个实例，删掉它等于把第一个实例的
+ * 服务变成「进程还在、文件没了」，之后所有人都是 ENOENT。所以先探活：有人监听就抛错让
+ * 调用方自己决定（外壳只记录并继续），没人才清掉残留文件重新绑定。
+ */
+export async function listenLocalSocket(server, socketPath) {
+  if (await probeLocalSocket(socketPath)) {
+    throw new Error(`socket 已被另一个实例占用：${socketPath}（先退出那个实例，或换一个 userData）`)
+  }
+  await rm(socketPath, { force: true }).catch(() => {})
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.removeListener('listening', onListening)
+      reject(error)
+    }
+    const onListening = () => {
+      server.removeListener('error', onError)
+      resolve()
+    }
+    server.once('error', onError)
+    server.once('listening', onListening)
+    server.listen(socketPath)
+  })
+  return socketPath
 }

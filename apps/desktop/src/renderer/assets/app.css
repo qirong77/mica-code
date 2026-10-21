@@ -1388,6 +1388,134 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 26%);
 }
 
+/* ------------------------------------------------------------ 主对话区查找条
+
+   Cmd/Ctrl+F 唤起的 find widget（照 VS Code）：浮在对话区右上角，不参与布局。命中上色
+   走 CSS Custom Highlight API——下面两条 `::highlight()` 与 ChatFind.jsx 里的名字对应。
+   之所以不往 DOM 里包 `<mark>`：对话区是 React 管的，流式回答每 80ms 换一次文本，包进去
+   的节点下一次 diff 就会被当脏数据删掉。 */
+.chat-find {
+  position: absolute;
+  z-index: 6;
+  top: 6px;
+  right: 22px;
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px 0 6px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  background: var(--color-panel-hi);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 42%);
+  color: var(--color-fg-dim);
+  font-size: 11.5px;
+}
+
+/* 抽屉打开时对话区让出了右侧那一条，查找条跟着让，别钻到抽屉底下。 */
+.chat-view.chat-btw-open .chat-find {
+  right: calc(var(--chat-btw-width) + 22px);
+}
+
+.chat-find-field {
+  display: flex;
+  min-width: 240px;
+  height: 22px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 7px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 28%);
+}
+
+.chat-find-field:focus-within {
+  border-color: var(--color-accent);
+}
+
+.chat-find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-strong);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+}
+
+.chat-find-input::placeholder {
+  color: rgb(255 255 255 / 34%);
+}
+
+/* 三个开关（Aa / ab / .*）用固定方块而不是文字宽度：打开时靠底色与描边表示状态，
+   和 VS Code 一样不改变输入框的宽度。 */
+.chat-find-toggle {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 42%);
+  font-family: var(--chat-font);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.chat-find-toggle:hover {
+  background: rgb(255 255 255 / 10%);
+  color: var(--color-fg-max);
+}
+
+.chat-find-toggle.is-on {
+  background: var(--color-accent-subtle);
+  box-shadow: inset 0 0 0 1px var(--color-accent-region);
+  color: var(--color-accent-hover);
+}
+
+.chat-find-count {
+  min-width: 44px;
+  padding: 0 2px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.chat-find-count.is-empty {
+  color: var(--color-warn);
+}
+
+.chat-find-count.is-error {
+  color: var(--color-danger);
+}
+
+.chat-find-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 3px;
+  color: rgb(255 255 255 / 58%);
+}
+
+.chat-find-icon:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  color: var(--color-fg-max);
+}
+
+.chat-find-icon:disabled {
+  color: rgb(255 255 255 / 22%);
+}
+
+/* 命中高亮。highlight 伪元素只吃 color / background-color / text-decoration / text-shadow，
+   所以这里不写圆角与内边距——写了也不生效。当前这一条压成实心，一眼能找到。 */
+::highlight(chat-find-match) {
+  background-color: rgb(214 191 85 / 26%);
+}
+
+::highlight(chat-find-current) {
+  background-color: rgb(245 223 128 / 82%);
+  color: #241f10;
+}
+
 .chat-command-result {
   display: grid;
   grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) auto;
@@ -1799,8 +1927,12 @@ body.is-resizing.is-resizing-terminal {
   right: 8px;
   bottom: calc(100% + 5px);
   left: 8px;
+  /* 外层不滚：滚动只发生在 `.chat-command-palette-body`，标题行因此永远钉在顶部。
+     以前整块 overflow:auto，往上翻两行标题就跑没了。 */
+  display: flex;
+  flex-direction: column;
   max-height: min(390px, 52vh);
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid rgb(255 255 255 / 13%);
   background: var(--color-panel);
   box-shadow: 0 10px 32px rgb(0 0 0 / 52%);
@@ -1812,6 +1944,7 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-command-palette-title {
   display: flex;
+  flex: 0 0 auto;
   min-height: 26px;
   align-items: center;
   gap: 6px;
@@ -1821,12 +1954,24 @@ body.is-resizing.is-resizing-terminal {
   font-size: 9.5px;
 }
 
-.chat-command-palette-title > span {
+.chat-command-palette-title > span:last-child {
   margin-left: auto;
   color: rgb(255 255 255 / 20%);
 }
 
-.chat-command-palette > button {
+.chat-command-palette-count {
+  color: rgb(255 255 255 / 26%);
+}
+
+.chat-command-palette-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-command-palette-body > button {
   display: grid;
   width: 100%;
   min-height: 29px;
@@ -1837,8 +1982,8 @@ body.is-resizing.is-resizing-terminal {
   text-align: left;
 }
 
-.chat-command-palette > button:hover,
-.chat-command-palette > button.chat-command-active {
+.chat-command-palette-body > button:hover,
+.chat-command-palette-body > button.chat-command-active {
   background: rgb(255 255 255 / 7%);
   color: rgb(255 255 255 / 72%);
 }
@@ -2042,14 +2187,15 @@ body.is-resizing.is-resizing-terminal {
 
 /* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[名称][说明] 两列 */
 .chat-completion-palette {
-  max-height: min(240px, 40vh);
+  /* skill 可能上百条：给到能看见八九行的高度，剩下的靠列表自己滚 */
+  max-height: min(330px, 46vh);
   border-radius: 5px;
   padding: 3px;
   /* 浮层跟着输入框宽度走，窄的时候要能按自己的宽度降级（见下面的容器查询） */
   container-type: inline-size;
 }
 
-.chat-completion-palette > button {
+.chat-completion-palette .chat-command-palette-body > button {
   /* 名称按内容取宽但不被压缩（min 0 允许它在极窄时自己截断），说明吃剩余宽度 */
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   gap: 10px;
@@ -4048,6 +4194,22 @@ body.is-resizing-btw {
   .chat-composer-actions button {
     width: 32px;
     height: 32px;
+  }
+
+  /* 查找条在窄屏铺满一行：右上角那 240px 的输入框会把方向键与关闭键挤出屏幕。
+     输入框走的是上面 #root input 的 16px 下限，所以条与输入框都要抬高一点才装得下。 */
+  .chat-view .chat-find,
+  .chat-view.chat-btw-open .chat-find {
+    top: 4px;
+    right: 8px;
+    left: 8px;
+    height: 34px;
+  }
+
+  .chat-find-field {
+    min-width: 0;
+    height: 26px;
+    flex: 1 1 auto;
   }
 
   /* 浮层里的操作按钮同理：20px 在触屏上点不准 */

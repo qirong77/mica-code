@@ -40,6 +40,7 @@ import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
+import { ChatFind } from './ChatFind'
 import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
 import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
@@ -78,7 +79,7 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
-  rankCompletions
+  skillCompletionOptions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
@@ -2379,6 +2380,39 @@ export function ChatView({
   const textareaRef = useRef(null)
   const imageInputRef = useRef(null)
 
+  // 主对话区的查找条（Cmd/Ctrl+F）。`findFocusSignal` 只为「已经开着时再按一次」服务：
+  // 变化一次就重新聚焦并全选查询，和 VS Code 的 find widget 一样。
+  const [findOpen, setFindOpen] = useState(false)
+  const [findFocusSignal, setFindFocusSignal] = useState(0)
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    textareaRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  // 切走时收起查找条：命中高亮是整页共用的（`CSS.highlights`），留着会在别的页签里
+  // 覆盖或残留下不属于当前对话的高亮。
+  useEffect(() => {
+    if (!visible) setFindOpen(false)
+  }, [visible])
+
+  // Cmd/Ctrl+F 只在焦点落在这块对话区（或干脆没焦点）时接管：在终端、编辑器里按下时
+  // 不属于「查找对话」，别把键抢走。
+  useEffect(() => {
+    if (!visible) return undefined
+    const onKeyDown = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      if (event.key.toLocaleLowerCase() !== 'f') return
+      const active = document.activeElement
+      if (active && active !== document.body && !active.closest?.('.chat-view')) return
+      event.preventDefault()
+      event.stopPropagation()
+      setFindOpen(true)
+      setFindFocusSignal((value) => value + 1)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [visible])
+
   const updateMessages = useCallback((update) => {
     const next = typeof update === 'function' ? update(messagesRef.current) : update
     messagesRef.current = next
@@ -2951,20 +2985,7 @@ export function ChatView({
       setCompletionLoading(true)
       window.mica.skills
         .list(cwd || null)
-        .then((result) =>
-          settle(
-            rankCompletions(
-              (Array.isArray(result) ? result : []).map((skill) => ({
-                key: `skill:${skill.name}`,
-                kind: 'skill',
-                name: skill.name,
-                label: `/${skill.name}`,
-                description: skill.description
-              })),
-              completion.query
-            )
-          )
-        )
+        .then((result) => settle(skillCompletionOptions(result, completion.query)))
         .catch(fail)
       return () => {
         cancelled = true
@@ -5268,6 +5289,13 @@ export function ChatView({
             <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
           </div>
         </div>
+
+        <ChatFind
+          open={findOpen}
+          focusSignal={findFocusSignal}
+          targetRef={transcriptRef}
+          onClose={closeFind}
+        />
 
         <div ref={composerDockRef} className="chat-composer-dock">
           {showJump && (

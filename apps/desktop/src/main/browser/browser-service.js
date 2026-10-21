@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { verifyLocalRequest } from '../shared/endpoint-http.js'
+import { listenLocalSocket, verifyLocalRequest } from '../shared/endpoint-http.js'
 import {
   BrowserRequestError,
   cookieCachePaths,
@@ -211,21 +211,7 @@ export function createBrowserService({
      * userData 目录独占）。
      */
     async listenSocket(socketPath) {
-      await rm(socketPath, { force: true }).catch(() => {})
-      await new Promise((resolve, reject) => {
-        const onError = (error) => {
-          server.removeListener('listening', onListening)
-          reject(error)
-        }
-        const onListening = () => {
-          server.removeListener('error', onError)
-          resolve()
-        }
-        server.once('error', onError)
-        server.once('listening', onListening)
-        server.listen(socketPath)
-      })
-      return socketPath
+      return listenLocalSocket(server, socketPath)
     },
     close() {
       for (const client of clients) {
@@ -360,7 +346,8 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
 
     screenshot: async (ctx) => {
       const shot = await manager().screenshot(ctx.params.id, {
-        fullPage: parseBoolean(ctx.query.fullPage) === true
+        fullPage: parseBoolean(ctx.query.fullPage) === true,
+        timeoutMs: Number(ctx.query.timeoutMs) || undefined
       })
       if (parseBoolean(ctx.query.raw) === true) {
         return { raw: { base64: shot.dataUrl.replace(/^data:image\/png;base64,/, '') } }

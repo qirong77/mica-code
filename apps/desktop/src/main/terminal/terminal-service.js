@@ -8,9 +8,9 @@
  */
 
 import { createServer } from 'node:http'
-import { rm } from 'node:fs/promises'
 import {
   compileRoutes,
+  listenLocalSocket,
   parseBoolean,
   resolveOwner,
   resolveRoute,
@@ -255,21 +255,7 @@ export function createTerminalService({ sessions, windows, address = () => ({ ur
     },
     /** 监听 Unix socket；先清掉上一次进程留下的同名文件，否则 listen 会 EADDRINUSE */
     async listenSocket(socketPath) {
-      await rm(socketPath, { force: true }).catch(() => {})
-      await new Promise((resolve, reject) => {
-        const onError = (error) => {
-          server.removeListener('listening', onListening)
-          reject(error)
-        }
-        const onListening = () => {
-          server.removeListener('error', onError)
-          resolve()
-        }
-        server.once('error', onError)
-        server.once('listening', onListening)
-        server.listen(socketPath)
-      })
-      return socketPath
+      return listenLocalSocket(server, socketPath)
     },
     close() {
       for (const client of clients) {

@@ -7,6 +7,7 @@ import {
   BROWSER_OWNER_ENV,
   BROWSER_SOCKET_ENV,
   BROWSER_URL_ENV,
+  browserSkillDocument,
   detailsFrom,
   emptyBrowserSnapshot,
   normalizeBrowserSummaries,
@@ -138,7 +139,8 @@ async function loadDocs() {
  * ——不因为写不了文件就让整个能力不可用。
  */
 async function ensureSkillFile(docs) {
-  const markdown = docs?.skillMarkdown
+  // 服务不可达时也要写：地址来自环境变量，与 `/docs` 是否成功无关
+  const markdown = docs?.skillMarkdown || browserSkillDocument(serviceUrl())
   if (typeof markdown !== 'string' || !markdown.trim()) return
   const path = skillFilePath(resolveMicaHome(), process.platform === 'win32' ? '\\' : '/')
   try {

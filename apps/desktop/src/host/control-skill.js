@@ -22,6 +22,20 @@ export function skillNeedsWrite(existing, next) {
   return existing !== next
 }
 
+/**
+ * 服务端文档拿不到时用的技能正文（技能里只有地址，见文件头的说明）。
+ *
+ * 这一层不能只依赖 `/docs`：socket 已经失效时 `/docs` 必然失败，若此时不写技能，用户
+ * 目录里那份会一直停在旧端口上，agent 于是对着一个不存在的地址报「服务不可用」。
+ */
+export function localSkillDocument(name, serviceUrl) {
+  const url = String(serviceUrl || '')
+    .trim()
+    .replace(/\/+$/, '')
+  if (!name || !url) return ''
+  return `---\nname: ${name}\n---\n\n${url}\n`
+}
+
 export function skillFilePathFor(homeDir, dirName, separator = '/') {
   return [homeDir, 'skills', dirName, 'SKILL.md'].join(separator)
 }

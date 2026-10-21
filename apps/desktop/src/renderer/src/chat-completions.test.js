@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  SKILL_COMPLETION_LIMIT,
   activeCompletion,
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
-  rankCompletions
+  matchIndexes,
+  rankCompletions,
+  skillCompletionOptions
 } from './chat-completions'
 
 describe('composer completions', () => {
@@ -80,6 +83,72 @@ describe('composer completions', () => {
       'compact',
       'local-compact'
     ])
+  })
+
+  it('matches the description too and ranks it after name matches', () => {
+    const items = [
+      { name: 'am-doctor', description: 'AgentMatrix 诊断请求' },
+      { name: 'am-alarm-scan', description: 'AgentMatrix 上线后的告警扫描' },
+      { name: 'am', description: '标准研发流程入口' }
+    ]
+
+    expect(rankCompletions(items, '告警').map((item) => item.name)).toEqual(['am-alarm-scan'])
+    expect(rankCompletions(items, 'am').map((item) => item.name)).toEqual([
+      'am',
+      'am-doctor',
+      'am-alarm-scan'
+    ])
+    expect(rankCompletions(items, 'agentmatrix').map((item) => item.name)).toEqual([
+      'am-doctor',
+      'am-alarm-scan'
+    ])
+  })
+
+  it('keeps every skill instead of cutting the list down to a handful', () => {
+    const skills = Array.from({ length: 120 }, (_, index) => ({ name: `skill-${index}` }))
+
+    expect(SKILL_COMPLETION_LIMIT).toBeGreaterThanOrEqual(skills.length)
+    expect(rankCompletions(skills, '').length).toBe(skills.length)
+    expect(rankCompletions(skills, 'skill-1').length).toBe(
+      skills.filter((skill) => skill.name.includes('skill-1')).length
+    )
+  })
+
+  it('builds palette options with the slash prefix and highlighted matches', () => {
+    const [option] = skillCompletionOptions(
+      [{ name: 'am-alarm-scan', description: '上线后的 AM 告警扫描' }],
+      'alarm'
+    )
+
+    expect(option).toMatchObject({
+      key: 'skill:am-alarm-scan',
+      kind: 'skill',
+      name: 'am-alarm-scan',
+      label: '/am-alarm-scan',
+      description: '上线后的 AM 告警扫描'
+    })
+    // 名称里的下标整体右移一位（label 前面多了 `/`）
+    expect(option.highlights).toEqual([4, 5, 6, 7, 8])
+    expect(option.descriptionHighlights).toEqual([])
+  })
+
+  it('highlights the description when only it matches', () => {
+    const [option] = skillCompletionOptions(
+      [{ name: 'am-doctor', description: '诊断采集上报模块' }],
+      '诊断'
+    )
+
+    expect(option.highlights).toEqual([])
+    expect(option.descriptionHighlights).toEqual([0, 1])
+  })
+
+  it('accepts a missing skill list', () => {
+    expect(skillCompletionOptions(null, 'x')).toEqual([])
+  })
+
+  it('matchIndexes finds every occurrence, ignoring case', () => {
+    expect(matchIndexes('Aa-aa-AA', 'aa')).toEqual([0, 1, 3, 4, 6, 7])
+    expect(matchIndexes('abc', '')).toEqual([])
   })
 
   it('replaces the trigger token with the completion text', () => {

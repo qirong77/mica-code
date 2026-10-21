@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   BROWSER_OWNER_ENV,
   BROWSER_URL_ENV,
+  browserSkillDocument,
   detailsFrom,
   emptyBrowserSnapshot,
   normalizeBrowserSummaries,
@@ -71,6 +72,17 @@ describe('skill file', () => {
     // 空内容不写：宁可不写，也不要把用户的技能文件清成空的
     expect(skillNeedsWrite('# doc', '')).toBe(false)
     expect(skillNeedsWrite('# doc', undefined)).toBe(false)
+  })
+
+  // socket 失效时 `/docs` 必然失败，技能文件不能因此停在旧地址上
+  it('falls back to a local document when the service is unreachable', () => {
+    expect(browserSkillDocument('http://127.0.0.1:8787/remote/control')).toBe(
+      '---\nname: mica-browser\n---\n\nhttp://127.0.0.1:8787/remote/control\n'
+    )
+    expect(browserSkillDocument('  http://127.0.0.1:8787/remote/control/  ')).toBe(
+      '---\nname: mica-browser\n---\n\nhttp://127.0.0.1:8787/remote/control\n'
+    )
+    expect(browserSkillDocument('')).toBe('')
   })
 })
 

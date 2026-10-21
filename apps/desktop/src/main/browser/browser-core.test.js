@@ -14,6 +14,7 @@ import {
   normalizeWaitCondition,
   parseBoolean,
   parsePositiveInt,
+  pickNetworkHeaders,
   publicCookie,
   resolveOwner,
   resolveRoute,
@@ -185,13 +186,39 @@ describe('serializeEvaluation / normalizeWaitCondition', () => {
     expect(typeof serializeEvaluation(cyclic)).toBe('string')
   })
 
-  it('requires at least one wait condition', () => {
+  it('treats an empty condition as「等页面加载完成」', () => {
     expect(normalizeWaitCondition({ selector: '#a' })).toEqual({
       selector: '#a',
       text: '',
-      url: ''
+      url: '',
+      ready: false
     })
-    expect(() => normalizeWaitCondition({})).toThrow('wait 需要 selector、text 或 url 之一')
+    expect(normalizeWaitCondition({})).toEqual({ selector: '', text: '', url: '', ready: true })
+  })
+})
+
+describe('pickNetworkHeaders', () => {
+  it('keeps custom headers and drops credentials', () => {
+    const headers = pickNetworkHeaders({
+      'nuwa-wings': 'env=osim149-v',
+      'x-mica-owner': 'demo',
+      cookie: 'ZUCHETOKEN=secret',
+      Authorization: 'Bearer secret',
+      accept: '*/*'
+    })
+    expect(headers['nuwa-wings']).toBe('env=osim149-v')
+    expect(headers['x-mica-owner']).toBe('demo')
+    expect(headers.accept).toBe('*/*')
+    expect(headers.cookie).toBeUndefined()
+    expect(headers.Authorization).toBeUndefined()
+  })
+
+  it('tolerates missing headers and truncates long values', () => {
+    expect(pickNetworkHeaders(undefined)).toEqual({})
+    expect(pickNetworkHeaders(null)).toEqual({})
+    const long = pickNetworkHeaders({ 'x-long': 'a'.repeat(500) })['x-long']
+    expect(long.endsWith('…')).toBe(true)
+    expect(long.length).toBe(201)
   })
 })
 

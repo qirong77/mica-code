@@ -12,6 +12,7 @@ import {
   normalizeUrl,
   normalizeWaitCondition,
   notFoundError,
+  pickNetworkHeaders,
   publicCookie,
   serializeEvaluation,
   tabSummary,
@@ -38,6 +39,8 @@ const WAIT_POLL_MS = 150
 const MAX_SCREENSHOT_HEIGHT = 16000
 const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
+const MAX_NETWORK_BODY = 4000
+const SCREENSHOT_TIMEOUT_MS = 20000
 
 /**
  * 隐藏窗口里的原生输入会被丢掉：Chromium 的鼠标/键盘事件挂在有显示面的 widget 上，
@@ -508,11 +511,16 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       tab.debuggerAttached = true
       tab.contents.debugger.on('message', (_event, method, params) => {
         if (method === 'Network.requestWillBeSent') {
+          // 请求体（表单/JSON 参数）是排查「参数对不对」的第一手材料：缺了它 agent 只能往
+          // 页面里插 fetch/XHR hook，而 hook 本身会干扰真实请求（实测有把请求打坏的案例）。
+          const body = typeof params.request?.postData === 'string' ? params.request.postData : ''
           tab.network.set(params.requestId, {
             method: params.request?.method || 'GET',
             url: params.request?.url || '',
             resourceType: params.type || '',
             status: null,
+            headers: pickNetworkHeaders(params.request?.headers),
+            body: body.length > MAX_NETWORK_BODY ? `${body.slice(0, MAX_NETWORK_BODY)}…` : body,
             at: Date.now()
           })
           if (tab.network.size > MAX_NETWORK_ENTRIES)
@@ -566,6 +574,23 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       timer.unref?.()
     })
     return Promise.race([running, timeout]).finally(() => clearTimeout(timer))
+  }
+
+  /**
+   * 给一句 CDP 命令兜个超时。`Page.captureScreenshot` 在页面忙（长任务、合成器排队）时
+   * 会长时间不返回，之前没有超时就表现为「截图端点直接卡住」，agent 只能干等或放弃截图。
+   */
+  function withTimeout(promise, timeoutMs, message) {
+    if (!timeoutMs) return promise
+    let timer = null
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(timeoutError(message || `命令超过 ${timeoutMs}ms 未返回`)),
+        timeoutMs
+      )
+      timer.unref?.()
+    })
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
   }
 
   async function elementCenter(tab, selector) {
@@ -959,12 +984,13 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       return { scrollY }
     },
 
-    async screenshot(tabId, { fullPage = false } = {}) {
+    async screenshot(tabId, { fullPage = false, timeoutMs = 0 } = {}) {
       const { record, tab } = requireTab(tabId)
       // 非当前标签页的视图不在窗口上（没有显示面），截图前临时挂上再切回去
       const previous = activeTab(record)
       const switched = !previous || previous.id !== tab.id
       if (switched) activateTabIn(record, tab.id)
+      const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : SCREENSHOT_TIMEOUT_MS
       try {
         const params = { format: 'png' }
         if (fullPage) {
@@ -979,7 +1005,11 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
             scale: 1
           }
         }
-        const result = await sendCommand(tab, 'Page.captureScreenshot', params)
+        const result = await withTimeout(
+          sendCommand(tab, 'Page.captureScreenshot', params),
+          budget,
+          `页面截图超过 ${budget}ms 未返回（页面可能在忙）；可重试或改用 evaluate 读 DOM`
+        )
         const data = result?.data || ''
         return {
           dataUrl: `data:image/png;base64,${data}`,
@@ -997,11 +1027,13 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       const condition = normalizeWaitCondition(input)
       const timeoutMs = Number(input.timeoutMs) > 0 ? Number(input.timeoutMs) : 10000
       const started = Date.now()
-      const probe = condition.selector
-        ? `Boolean(document.querySelector(${JSON.stringify(condition.selector)}))`
-        : condition.text
-          ? `document.body ? document.body.innerText.includes(${JSON.stringify(condition.text)}) : false`
-          : `location.href.includes(${JSON.stringify(condition.url)})`
+      const probe = condition.ready
+        ? `document.readyState === 'complete'`
+        : condition.selector
+          ? `Boolean(document.querySelector(${JSON.stringify(condition.selector)}))`
+          : condition.text
+            ? `document.body ? document.body.innerText.includes(${JSON.stringify(condition.text)}) : false`
+            : `location.href.includes(${JSON.stringify(condition.url)})`
       for (;;) {
         let matched = false
         try {

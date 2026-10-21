@@ -242,6 +242,12 @@ export const BROWSER_ENDPOINTS = [
         in: 'query',
         required: false,
         description: 'true 时直接返回 image/png 字节，否则返回 dataUrl'
+      },
+      {
+        name: 'timeoutMs',
+        in: 'query',
+        required: false,
+        description: '默认 20000；页面忙时超时返回错误而不是一直挂着'
       }
     ],
     returns: '{ ok, dataUrl, bytes }'
@@ -250,9 +256,15 @@ export const BROWSER_ENDPOINTS = [
     id: 'waitFor',
     method: 'POST',
     path: '/browser/tabs/:id/wait',
-    summary: '等待条件成立：元素出现 / 文本出现 / 地址匹配',
+    summary:
+      '等待条件成立：元素出现 / 文本出现 / 地址匹配；三个条件都不给时等页面加载完成（document.readyState=complete）',
     params: [
-      { name: 'selector', in: 'body', required: false, description: '等待元素出现' },
+      {
+        name: 'selector',
+        in: 'body',
+        required: false,
+        description: '等待元素出现（与 text / url / 空条件四选一）'
+      },
       { name: 'text', in: 'body', required: false, description: '等待正文包含该文本' },
       { name: 'url', in: 'body', required: false, description: '等待地址包含该片段' },
       { name: 'timeoutMs', in: 'body', required: false, description: '默认 10000' }
@@ -293,7 +305,8 @@ export const BROWSER_ENDPOINTS = [
         name: 'save',
         in: 'query',
         required: false,
-        description: '1（默认）时把 Cookie 头与明细写到 $MICA_HOME/browser-cookies/，0 时只读不写'
+        description:
+          '1（默认）时把 Cookie 头与明细写到应用 userData 下的 browser-cookies/（macOS: ~/Library/Application Support/mica-code-app/browser-cookies/），0 时只读不写'
       }
     ],
     returns: '{ ok, url, count, cookieHeader, cookies, saved: { headerPath, jsonPath } }',
@@ -312,9 +325,11 @@ export const BROWSER_ENDPOINTS = [
     id: 'network',
     method: 'GET',
     path: '/browser/tabs/:id/network',
-    summary: '网络请求记录（CDP 采集，含 4xx/5xx），clear=1 读完清空',
+    summary:
+      '网络请求记录（CDP 采集，含 4xx/5xx、请求头 headers、请求体 body、状态码），clear=1 读完清空',
     params: [{ name: 'clear', in: 'query', required: false, description: '1 时清空' }],
-    returns: '{ ok, entries: [{ method, url, status, resourceType, at }] }'
+    returns:
+      '{ ok, entries: [{ method, url, status, resourceType, headers, body, at }] }（headers 是所有非敏感请求头，可用来确认 `nuwa-wings` 这类环境头；body 是 POST 请求体，两者超长都会截断）'
   },
   {
     id: 'events',
@@ -355,6 +370,20 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '请求头带 `x-mica-owner: $MICA_BROWSER_OWNER` 会把新建窗口归属到当前会话（不带则显示为「未归属」）。',
+    '',
+    '## 使用提示（踩过的坑）',
+    '',
+    '- 先 `GET /browser/health` 探活。返回 503 且 error 提到 socket 不存在/未响应，说明 Mica Code',
+    '  应用（主进程）没在提供这个服务，重启应用可恢复；纯 `npm run start:web` 的宿主没有这个能力。',
+    '- 复杂脚本不要塞进 shell 的 `curl -d`：把 `{"expression":"…"}` 写成 JSON 文件，再 `curl -d @文件`。',
+    '  在命令里手写转义是最常见的失败来源（引号、反斜杠、换行各错一次就白跑一轮）。',
+    '  页面逻辑建议放 `(async () => { … })()`，`evaluate` 会等待 Promise。',
+    '- 等页面别 `sleep`：用 `POST /browser/tabs/:id/wait`（不给条件 = 等加载完成，也可等元素/文本/地址）。',
+    '- 要核对请求参数就看 `GET /browser/tabs/:id/network` 的 `body`，不要在页面里 hook `fetch`/`XMLHttpRequest`',
+    '  —— hook 会干扰真实请求，已经出现过把页面请求打坏、必须回滚的情况。',
+    '- 想确认「请求到底打给哪个后端 / 环境头有没有带上」，看同一条记录的 `headers`（如 `nuwa-wings`），',
+    '  不用自己再发一遍请求做对照实验。',
+    '- 截图超时（页面忙、长任务）先重试；仍失败就改用 `evaluate` 读 DOM / `content` 校验收敛。',
     '',
     '## 端点',
     ''

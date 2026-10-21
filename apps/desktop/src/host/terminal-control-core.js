@@ -4,7 +4,12 @@
  * 不 import electron、不发请求 —— 请求与 IPC 在 terminal-control.js，这里只放能直接测的部分。
  */
 
-import { resolveSkillTemplate, skillFilePathFor, skillNeedsWrite } from './control-skill.js'
+import {
+  localSkillDocument,
+  resolveSkillTemplate,
+  skillFilePathFor,
+  skillNeedsWrite
+} from './control-skill.js'
 import { TERMINAL_CONTROL_PREFIX } from '@packages/mica-web-shared/index.js'
 
 /**
@@ -36,6 +41,11 @@ export function emptyTerminalSnapshot(error = null) {
  */
 export function resolveTerminalSkillTemplate(markdown, { serviceUrl = '' } = {}) {
   return resolveSkillTemplate(markdown, { serviceUrl, envName: TERMINAL_URL_ENV })
+}
+
+/** 服务端文档拿不到时的技能正文：地址直接来自注入给会话进程的那个变量 */
+export function terminalSkillDocument(serviceUrl) {
+  return localSkillDocument('mica-terminal', serviceUrl)
 }
 
 /** 归一化服务端返回的终端列表：界面只用这些字段，缺的给默认值 */
