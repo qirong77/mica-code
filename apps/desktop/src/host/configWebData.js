@@ -25,6 +25,7 @@ import {
 } from './auto-compact.js'
 import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
+import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 
 /**
  * 配置页在桌面运行时的数据层。
@@ -612,6 +613,7 @@ export const configWebActions = {
   },
 
   readBrowserControlDetails: () => readBrowserControlDetailsFromHost(),
+  readTerminalControlDetails: () => readTerminalControlDetailsFromHost(),
 
   readSessionConversationPage: (input) =>
     readSessionConversationPage(

@@ -31,6 +31,7 @@ export function createDesktopConfigWebClient() {
     resetAutoCompactCounters: (sessionId) => invoke('resetAutoCompactCounters', { sessionId }),
 
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
+    readTerminalControlDetails: () => invoke('readTerminalControlDetails'),
 
     readSessionsDetails: () => invoke('readSessionsDetails'),
     readSessionDetails: (id) => invoke('readSessionDetails', { id }),

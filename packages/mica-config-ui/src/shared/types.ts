@@ -6,7 +6,8 @@ export type ConfigWebSection =
   | 'skills'
   | 'plugins'
   | 'autoCompact'
-  | 'browserControl';
+  | 'browserControl'
+  | 'terminalControl';
 
 export type ConfigWebFilePayload = {
   path: string;
@@ -289,4 +290,42 @@ export type ConfigWebBrowserControlWindowInput = {
 export type ConfigWebBrowserControlWindowTarget = {
   id: string;
   focus?: boolean;
+};
+
+/**
+ * 终端控制里的一个会话：真实 PTY + 登录 shell，窗口按需挂在应用后台。
+ * 字段与 `apps/desktop/src/host/terminal-control-core.js` 的归一化结果一一对应。
+ */
+export type ConfigWebTerminalControlSession = {
+  id: string;
+  owner: string | null;
+  label: string;
+  cwd: string;
+  shell: string;
+  cols: number;
+  rows: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+  running: boolean;
+  exitCode: number | null;
+  signal: string | null;
+  windowVisible: boolean;
+  outputSeq: number;
+  truncated: boolean;
+};
+
+/** 终端控制服务的完整视图：能力文档 + 当前会话列表。只有桌面运行时提供。 */
+export type ConfigWebTerminalControlDetails = {
+  available: boolean;
+  serviceUrl: string | null;
+  version: number;
+  skillPath: string | null;
+  error: string | null;
+  sessions: ConfigWebTerminalControlSession[];
+  /** 与受控浏览器共用同一份端点描述形状（两份服务从各自的端点目录生成文档）。 */
+  endpoints: ConfigWebBrowserControlEndpoint[];
+  /** 完整人读文档（markdown 源文）。 */
+  markdown: string;
+  /** 环境变量名：agent 用 `url` 拿地址、用 `owner` 认领归属。 */
+  envVars: { url: string; owner: string };
 };

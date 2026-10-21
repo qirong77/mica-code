@@ -435,6 +435,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - SSE 的 `terminal:output` 只发给订阅该会话的页面，`terminal:changed` 只发给该会话的页面与不限会话的列表订阅者，不做全量广播。
 - 写入类操作（`input`、`keys`、`resize`、`close`）校验 `x-mica-owner`：带 owner 且与会话 owner 不一致即 403；不带 owner 视为本人在页面操作，放行。读屏与 `wait` 不拦。这是防串台护栏，不是权限边界。
 - 生成的 `$MICA_HOME/skills/mica-terminal/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `terminal-docs.js`。
+- 设置页 Terminal Control 与 Browser Control 同构：入口常驻（`layout/Sidebar.tsx`），只有桌面运行时能读数据，拿不到时用 `unavailableTerminalControlDetails` 说清未开启；页面只展示服务状态、会话列表与端点文档，不建会话、不管窗口。端点分组/curl/环境变量说明与浏览器页共用 `web/controlEndpoints.ts`，样式共用 `.control-*`。
 - 通用路由、owner、本机 Origin/Host 校验在 `src/main/shared/endpoint-http.js`，浏览器与终端共用，不各写一份。
 
 ## 14. Desktop 文件、终端与侧栏
@@ -481,7 +482,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 配置页与主题
 
 - `mica-config-ui` 为唯一配置页实现：config-web 用 HTTP 托管，desktop SettingsView 直接嵌入组件，数据经运行时，不改回 iframe/子进程。
-- 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control 始终显示说明。
+- 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
 - 样式限定 `.mica-config-ui`，页面级 html/body/#root 高度链由整页宿主定义，不能覆盖 desktop 窄屏根高度。
 - 配置页新建/删除/放弃操作用 `DialogHost` 的 confirmDialog / promptDialog，不依赖原生 prompt/confirm。
 - 改配置页后运行 `bun run build:config-web`，提交生成的 `generatedStaticAssets.ts`；system prompt 与内置角色直接复用 CLI 模板，跳过用户 default.md。

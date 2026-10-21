@@ -99,9 +99,9 @@ export function BrowserControlPage() {
         {loading && !details ? (
           <div className="page-loading">正在加载受控浏览器…</div>
         ) : !details ? null : (
-          <div className="browser-control-stack">
-            <section className="simple-card browser-control-card">
-              <div className="browser-control-card-head">
+          <div className="control-stack">
+            <section className="simple-card control-card">
+              <div className="control-card-head">
                 <div className="table-panel-title">
                   <strong>服务状态</strong>
                   <span>Mica 受控浏览器：窗口挂在应用里，agent 用一套本机 HTTP 接口来开、读与操控。</span>
@@ -119,25 +119,25 @@ export function BrowserControlPage() {
               </div>
 
               {details.skillPath ? (
-                <p className="browser-control-note">
+                <p className="control-note">
                   技能文件是写给 agent 的 <code>SKILL.md</code>：告诉它这台机器上有一套能真正打开的浏览器、
                   并指向下面的接口文档。
                 </p>
               ) : null}
 
               {!details.available ? (
-                <ul className="browser-control-steps">
+                <ul className="control-steps">
                   {BROWSER_CONTROL_DISABLED_STEPS.map((step) => (
                     <li key={step}>{step}</li>
                   ))}
                 </ul>
               ) : null}
 
-              <p className="browser-control-note">{browserEnvHint(details.envVars)}</p>
+              <p className="control-note">{browserEnvHint(details.envVars)}</p>
             </section>
 
-            <section className="simple-card browser-control-card">
-              <div className="browser-control-card-head">
+            <section className="simple-card control-card">
+              <div className="control-card-head">
                 <div className="table-panel-title">
                   <strong>接口文档</strong>
                   <span>agent 直接调用这些接口；窗口本身不会改地址，下文的 curl 示例可以直接复制。</span>
@@ -147,44 +147,44 @@ export function BrowserControlPage() {
               {groups.length === 0 ? (
                 <Empty description="暂无接口文档（需要受控浏览器服务在线）" />
               ) : (
-                <div className="browser-control-groups">
+                <div className="control-groups">
                   {groups.map((group) => (
-                    <div className="browser-control-group" key={group.method}>
-                      <div className="browser-control-group-head">
+                    <div className="control-group" key={group.method}>
+                      <div className="control-group-head">
                         <Tag tone="blue">{group.label}</Tag>
                         <span className="muted-text">{group.endpoints.length} 个接口</span>
                       </div>
-                      <div className="browser-control-endpoint-list">
+                      <div className="control-endpoint-list">
                         {group.endpoints.map((endpoint) => (
-                          <details className="simple-card browser-control-endpoint" key={endpoint.id}>
-                            <summary className="browser-control-endpoint-summary">
-                              <code className="browser-control-endpoint-line">{endpointSummaryLine(endpoint)}</code>
-                              <span className="browser-control-endpoint-desc">{endpoint.summary}</span>
+                          <details className="simple-card control-endpoint" key={endpoint.id}>
+                            <summary className="control-endpoint-summary">
+                              <code className="control-endpoint-line">{endpointSummaryLine(endpoint)}</code>
+                              <span className="control-endpoint-desc">{endpoint.summary}</span>
                             </summary>
-                            <div className="browser-control-endpoint-body">
+                            <div className="control-endpoint-body">
                               {endpoint.params.length === 0 ? (
                                 <p className="muted-text">无参数</p>
                               ) : (
-                                <div className="browser-control-params">
+                                <div className="control-params">
                                   {endpoint.params.map((param) => (
-                                    <div className="browser-control-param" key={`${param.in}:${param.name}`}>
+                                    <div className="control-param" key={`${param.in}:${param.name}`}>
                                       <code>{param.name}</code>
-                                      <span className="browser-control-param-meta">
+                                      <span className="control-param-meta">
                                         {param.in}
                                         {param.required ? ' · 必填' : ''}
                                       </span>
-                                      <span className="browser-control-param-desc">{param.description}</span>
+                                      <span className="control-param-desc">{param.description}</span>
                                     </div>
                                   ))}
                                 </div>
                               )}
                               {endpoint.returns ? (
-                                <p className="browser-control-returns">
+                                <p className="control-returns">
                                   <span className="muted-text">返回</span> {endpoint.returns}
                                 </p>
                               ) : null}
-                              <div className="browser-control-example">
-                                <div className="browser-control-example-head">
+                              <div className="control-example">
+                                <div className="control-example-head">
                                   <span className="muted-text">示例</span>
                                   <Button
                                     onClick={() => void copy(endpoint.example || curlExample(endpoint, exampleBase))}
@@ -216,7 +216,7 @@ function StatusItem({ label, value, mono = false }: { label: string; value: stri
   return (
     <div className="status-item">
       <span className="status-label">{label}</span>
-      <span className={`browser-control-status-value${mono ? ' status-code' : ''}`} title={value}>
+      <span className={`control-status-value${mono ? ' status-code' : ''}`} title={value}>
         {value}
       </span>
     </div>

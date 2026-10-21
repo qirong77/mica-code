@@ -12,8 +12,10 @@ import type {
   ConfigWebSessionDetails,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
+  ConfigWebTerminalControlDetails,
 } from '../src/shared/types.js';
 import { unavailableBrowserControlDetails } from './browserControl.js';
+import { unavailableTerminalControlDetails } from './terminalControl.js';
 
 /**
  * 配置页用到的全部数据操作。
@@ -61,6 +63,15 @@ export type ConfigWebClient = {
    * 配置页不提供入口（见 `pages/BrowserControlPage.tsx`）。
    */
   readBrowserControlDetails?(): Promise<ConfigWebBrowserControlDetails>;
+
+  /**
+   * 终端控制（真实 PTY + 后台窗口）同样只在桌面运行时里：服务由 Electron 主进程提供，
+   * 运行时在已有端口上代理 `/remote/terminal/*`。浏览器宿主读不到这份数据，所以方法是
+   * 可选的 —— 缺了就由页面给出显式「未开启」，而不是把侧栏条目藏掉。
+   *
+   * 与受控浏览器一样只有「读详情」：会话由 agent 经接口创建，配置页不提供入口。
+   */
+  readTerminalControlDetails?(): Promise<ConfigWebTerminalControlDetails>;
 
   readSessionsDetails(): Promise<ConfigWebSessionsDetails>;
   readSessionDetails(id: string): Promise<ConfigWebSessionDetails>;
@@ -185,6 +196,28 @@ function requireBrowserControl(): BrowserControlClient {
   const current = requireClient();
   if (!supportsBrowserControl()) throw new Error('当前宿主不支持受控浏览器');
   return current as BrowserControlClient;
+}
+
+/**
+ * 这个宿主能不能读到终端控制的数据（桌面运行时能，浏览器宿主不能）。
+ * 与 `supportsBrowserControl()` 同理：它不影响侧栏条目，只决定数据从哪来。
+ */
+export function supportsTerminalControl(): boolean {
+  return typeof client?.readTerminalControlDetails === 'function';
+}
+
+type TerminalControlClient = ConfigWebClient & Required<Pick<ConfigWebClient, 'readTerminalControlDetails'>>;
+
+/** 读详情。宿主没有这个能力时交回一份显式「未开启」的详情，页面照常渲染。 */
+export function readTerminalControlDetails(): Promise<ConfigWebTerminalControlDetails> {
+  if (!supportsTerminalControl()) return Promise.resolve(unavailableTerminalControlDetails());
+  return requireTerminalControl().readTerminalControlDetails();
+}
+
+function requireTerminalControl(): TerminalControlClient {
+  const current = requireClient();
+  if (!supportsTerminalControl()) throw new Error('当前宿主不支持终端控制');
+  return current as TerminalControlClient;
 }
 
 export function readSessionsDetails(): Promise<ConfigWebSessionsDetails> {

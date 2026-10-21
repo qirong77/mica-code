@@ -335,6 +335,12 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
   `terminal-control:*` IPC and writes
   `$MICA_HOME/skills/mica-terminal/SKILL.md`. A standalone `npm run start:web` has no main process,
   so `/remote/terminal/*` answers 503 instead of falling back to the SPA.
+- The settings page has a _Terminal Control_ section next to _Browser Control_ (the sidebar entry is
+  always there; only the desktop runtime can read the data). It shows the service address and
+  version, the generated skill file, every live session (title, cwd, size, running/exited, window in
+  the foreground or not) and the full endpoint catalog with copyable `curl` examples. Like the
+  browser section it does **not** create or close sessions: that is the agent's job (or the terminal
+  icon in the chat header), and listing buttons would suggest you have to build them by hand.
 
 ### Single-instance state
 

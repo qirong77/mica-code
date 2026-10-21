@@ -21,6 +21,7 @@ import {
   Search,
   Send,
   Sparkles,
+  SquareTerminal,
   Trash2,
   X,
 } from 'lucide-react';
@@ -34,6 +35,7 @@ export const appIcons = {
   plugins: Blocks,
   autoCompact: Gauge,
   browserControl: Globe,
+  terminalControl: SquareTerminal,
   check: Check,
   chevronDown: ChevronDown,
   chevronRight: ChevronRight,

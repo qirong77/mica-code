@@ -12,10 +12,13 @@ export type ConfigWebAppSection = ConfigWebSection;
 // Browser Control **刻意不带这个门控**：它是「Mica 里有一套能真正打开的浏览器」这件事的
 // 唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开时页面自己说清楚（见
 // pages/BrowserControlPage.tsx 与 browserControl.ts 的 unavailableBrowserControlDetails）。
+//
+// Terminal Control 同理：它是「Mica 里有一个真实的、AI 能操作的终端」的唯一说明处。
 const items = [
   { key: 'config', label: 'Config' },
   { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
   { key: 'browserControl', label: 'Browser Control' },
+  { key: 'terminalControl', label: 'Terminal Control' },
   { key: 'sessions', label: 'Sessions' },
   { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },

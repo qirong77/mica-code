@@ -45,6 +45,9 @@ render(<ConfigWebApp />)
   - 入口刻意不藏：它是「Mica 里有一套能真正打开的浏览器」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。拿不到服务时 `readBrowserControlDetails()` 交回一份显式不可用的详情（`unavailableBrowserControlDetails`，reason 说清「只有从 Mica Code 应用里打开的配置页才连得上」并给出怎么开），页面照常渲染并提示未开启，`?section=browserControl` 也因此永远有效。
   - **这一页不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的地球图标完成，页面列出来只会让人以为得手动建。客户端只有 `readBrowserControlDetails` 一个方法，**不要**再加回 create/close/show/hide（`ConfigWebClient` 上没有它们）。
   - **页面不显示技能文档正文**：那份 `SKILL.md` 由应用在启动时写到 `$MICA_HOME/skills/mica-browser/`，内容只有一行服务地址（端点清单会随接口演进，抄进技能就是两处分叉）；页面只显示它的路径，正文要看就去读那个文件。文档源头只有一处：`apps/desktop/src/main/browser/browser-docs.js`。
+- **Terminal Control**（与 Browser Control 同一套做法，入口各处都在）：每个会话都是真实 PTY + 登录 shell，服务由 Electron 主进程提供，运行时在已有端口上代理 `/remote/terminal/*`（`apps/desktop/src/host/terminal-control.js`）。页面讲三件事：服务状态（地址/版本/可用性/技能文件路径）、当前会话（标题/cwd/尺寸/运行状态/窗口前后台）、接口文档（分组、curl 示例、两个环境变量）。纯逻辑在 `web/terminalControl.ts`，与浏览器页共用的端点分组/curl 在 `web/controlEndpoints.ts`。
+  - 与 Browser Control 一样**页面不管窗口**：会话由 agent 调 `POST /sessions` 创建，窗口的开 / 隐藏 / 关闭由 agent 与主区顶栏的终端图标完成；客户端只有 `readTerminalControlDetails` 一个方法。
+  - 文档源头只有一处：`apps/desktop/src/main/terminal/terminal-docs.js`（路由与文档同源），技能文件写到 `$MICA_HOME/skills/mica-terminal/SKILL.md`。
 
 ## 约定
 
