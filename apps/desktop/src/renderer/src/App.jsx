@@ -68,7 +68,12 @@ import {
 } from './workspace'
 import { draftMarkers, runningTerminalSessions } from './session-state'
 import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
-import { isTerminalOwnedByNode, nodeTerminals, terminalIconTitle } from './terminal-control'
+import {
+  isTerminalOwnedByNode,
+  nodeTerminals,
+  terminalIconBadge,
+  terminalIconTitle
+} from './terminal-control'
 import {
   setUiState,
   setUiStateEntries,
@@ -2027,26 +2032,14 @@ export default function App() {
     () => nodeTerminals(terminals, activeNode),
     [terminals, activeNode]
   )
-  const primaryTerminal = activeTerminals[0] || null
 
   /**
-   * 顶栏图标：当前页签还没有终端就新开一条（归属当前会话），已有则显示/隐藏它的窗口。
-   * 关闭语义同样是隐藏；真正的销毁走右键确认。
+   * 顶栏图标只对应已经在跑的终端（和受控浏览器一样，没有会话就不出现）：
+   * 点击显示/隐藏它的窗口，关闭语义是隐藏，真正的销毁走右键确认。
    */
   const toggleTerminalControl = useCallback(
     (terminal) => {
-      if (!terminal) {
-        window.mica.terminalControl
-          .create({
-            cwd: activeNode?.cwd || '',
-            label: '终端控制',
-            owner: activeNode?.sessionId || activeNode?.id || '',
-            show: true
-          })
-          .then((result) => applyTerminals(result?.sessions))
-          .catch((error) => showToast(error?.message || '打开终端失败', true))
-        return
-      }
+      if (!terminal) return
       const call = terminal.windowVisible
         ? window.mica.terminalControl.hide(terminal.id)
         : window.mica.terminalControl.show(terminal.id, true)
@@ -2054,7 +2047,7 @@ export default function App() {
         .then((result) => applyTerminals(result?.sessions))
         .catch((error) => showToast(error?.message || '切换终端窗口失败', true))
     },
-    [activeNode, applyTerminals, showToast]
+    [applyTerminals, showToast]
   )
 
   const closeTerminalControl = useCallback(
@@ -2544,38 +2537,42 @@ export default function App() {
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             )}
-            {/* 顶栏右侧：受控浏览器窗口图标（每个 AI 打开的窗口一个）、终端面板开关、文件视图开关。 */}
+            {/* 顶栏右侧：受控浏览器与终端控制的窗口图标（各按窗口/会话一个，没有就不出现）、终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
-              <button
-                type="button"
-                title={
-                  primaryTerminal
-                    ? terminalIconTitle(primaryTerminal, activeNode)
-                    : '打开终端控制（真实 PTY，后台窗口）'
-                }
-                aria-label={primaryTerminal ? '切换终端控制窗口' : '打开终端控制'}
-                aria-pressed={Boolean(primaryTerminal?.windowVisible)}
-                {...longPressHandlers(() => closeTerminalControl(primaryTerminal))}
-                onContextMenu={(event) => {
-                  event.preventDefault()
-                  closeTerminalControl(primaryTerminal)
-                }}
-                onClick={() => toggleTerminalControl(primaryTerminal)}
-                className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
-                  primaryTerminal?.windowVisible
-                    ? 'bg-white/10 text-white hover:bg-white/15'
-                    : primaryTerminal && isTerminalOwnedByNode(primaryTerminal, activeNode)
-                      ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                      : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
-                }`}
-              >
-                <IconTerminal size={14} />
-                {activeTerminals.length > 1 && (
-                  <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
-                    {activeTerminals.length}
-                  </span>
-                )}
-              </button>
+              {activeTerminals.map((terminal) => {
+                const owned = isTerminalOwnedByNode(terminal, activeNode)
+                const badge = terminalIconBadge(activeTerminals, terminal)
+                const title = terminalIconTitle(terminal, activeNode)
+                return (
+                  <button
+                    key={terminal.id}
+                    type="button"
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={terminal.windowVisible}
+                    {...longPressHandlers(() => closeTerminalControl(terminal))}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      closeTerminalControl(terminal)
+                    }}
+                    onClick={() => toggleTerminalControl(terminal)}
+                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                      terminal.windowVisible
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : owned
+                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                    }`}
+                  >
+                    <IconTerminal size={14} />
+                    {badge && (
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
               {activeBrowsers.map((browser) => {
                 const owned = isOwnedByNode(browser, activeNode)
                 const badge = browserIconBadge(activeBrowsers, browser)

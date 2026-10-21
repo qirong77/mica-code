@@ -328,8 +328,10 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
   (only the first hit per input, so identical output still matches; `skipEcho: false` disables it),
   and `expectExitCode` is the reliable way to tell whether a command succeeded. Writes carry
   `x-mica-owner`: an agent cannot type into or close another chat's terminal, while the human page
-  (no owner header) can still take over any of them. The top-bar terminal icon in `App.jsx` opens
-  one for the current chat or toggles its window; right-click closes it after a confirmation.
+  (no owner header) can still take over any of them. The top-bar shows one icon **per live terminal
+  of the current chat** (numbered when there are several) and nothing at all when the chat has none;
+  icons toggle the window, right-click closes it after a confirmation. Creating a session is the
+  agent's job (`POST /sessions`), the same split as the browser icons.
 - `src/host/terminal-control.js` mirrors the browser bridge: it subscribes to `/terminal/events`,
   forwards `terminal:changed` only to pages watching that session (plus list subscribers), exposes
   `terminal-control:*` IPC and writes
@@ -339,8 +341,8 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
   always there; only the desktop runtime can read the data). It shows the service address and
   version, the generated skill file, every live session (title, cwd, size, running/exited, window in
   the foreground or not) and the full endpoint catalog with copyable `curl` examples. Like the
-  browser section it does **not** create or close sessions: that is the agent's job (or the terminal
-  icon in the chat header), and listing buttons would suggest you have to build them by hand.
+  browser section it does **not** create or close sessions: that is the agent's job, and buttons
+  would suggest you have to build them by hand.
 
 ### Single-instance state
 

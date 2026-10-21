@@ -436,6 +436,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 写入类操作（`input`、`keys`、`resize`、`close`）校验 `x-mica-owner`：带 owner 且与会话 owner 不一致即 403；不带 owner 视为本人在页面操作，放行。读屏与 `wait` 不拦。这是防串台护栏，不是权限边界。
 - 生成的 `$MICA_HOME/skills/mica-terminal/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `terminal-docs.js`。
 - 设置页 Terminal Control 与 Browser Control 同构：入口常驻（`layout/Sidebar.tsx`），只有桌面运行时能读数据，拿不到时用 `unavailableTerminalControlDetails` 说清未开启；页面只展示服务状态、会话列表与端点文档，不建会话、不管窗口。端点分组/curl/环境变量说明与浏览器页共用 `web/controlEndpoints.ts`，样式共用 `.control-*`。
+- 顶栏图标与受控浏览器同一套显示逻辑：一条会话一个图标（多开按序标号），当前会话没有终端就**不出现**，顶栏也不再承担新建入口；会话由 agent 经 `POST /sessions` 创建。点击显示/隐藏窗口，右键确认后关闭。
 - 通用路由、owner、本机 Origin/Host 校验在 `src/main/shared/endpoint-http.js`，浏览器与终端共用，不各写一份。
 
 ## 14. Desktop 文件、终端与侧栏

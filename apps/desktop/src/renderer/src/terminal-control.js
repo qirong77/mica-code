@@ -47,3 +47,11 @@ export function terminalIconTitle(terminal, node) {
   parts.push('右键关闭')
   return parts.filter(Boolean).join(' · ')
 }
+
+/** 多个终端时每个图标标个序号，和浏览器图标一致 */
+export function terminalIconBadge(terminals, terminal) {
+  const list = Array.isArray(terminals) ? terminals : []
+  if (list.length < 2) return ''
+  const index = list.findIndex((item) => item?.id === terminal?.id)
+  return index >= 0 ? String(index + 1) : ''
+}

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   isTerminalOwnedByNode,
   nodeTerminals,
+  terminalIconBadge,
   terminalIconTitle,
   terminalStatusLabel
 } from './terminal-control'
@@ -65,5 +66,15 @@ describe('terminal labels', () => {
     expect(title).toContain('已退出')
     expect(title).toContain('点击隐藏')
     expect(title).toContain('归属')
+  })
+})
+
+describe('terminalIconBadge', () => {
+  test('numbers icons only when there is more than one terminal', () => {
+    const list = [terminal({ id: 'a' }), terminal({ id: 'b' })]
+    expect(terminalIconBadge(list, list[0])).toBe('1')
+    expect(terminalIconBadge(list, list[1])).toBe('2')
+    expect(terminalIconBadge([terminal({ id: 'a' })], { id: 'a' })).toBe('')
+    expect(terminalIconBadge(list, { id: 'missing' })).toBe('')
   })
 })
