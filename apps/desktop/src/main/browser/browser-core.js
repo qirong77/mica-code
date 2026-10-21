@@ -6,6 +6,26 @@
  */
 
 import { join } from 'node:path'
+import {
+  OWNER_HEADER,
+  compileRoutes,
+  matchPath,
+  normalizeOwner,
+  parseBoolean,
+  resolveOwner,
+  resolveRoute
+} from '../shared/endpoint-http.js'
+
+// 路由、归属头与布尔解析与终端控制共用一份实现（见 shared/endpoint-http.js）
+export {
+  OWNER_HEADER,
+  compileRoutes,
+  matchPath,
+  normalizeOwner,
+  parseBoolean,
+  resolveOwner,
+  resolveRoute
+}
 
 export const BROWSER_PARTITION = 'persist:mica-browser'
 
@@ -66,77 +86,13 @@ export function timeoutError(message) {
 /** chrome 条（标签 + 只读地址）的高度，视图从它下面开始 */
 export const CHROME_HEIGHT = 38
 export const DEFAULT_BROWSER_SIZE = { width: 1180, height: 800 }
-/** 会话归属随请求头传，取会话 id 或工作区页签 id；长度只是为了不让脏数据进状态 */
-export const OWNER_HEADER = 'x-mica-owner'
-const OWNER_MAX = 120
 const TITLE_MAX = 200
 const URL_MAX = 2048
-
-/** 命中 template（`/browser/tabs/:id/navigate`）时返回参数，不命中返回 null */
-export function matchPath(template, pathname) {
-  const expected = template.split('/')
-  const actual = String(pathname || '').split('/')
-  if (expected.length !== actual.length) return null
-  const params = {}
-  for (let index = 0; index < expected.length; index += 1) {
-    const segment = expected[index]
-    if (!segment.startsWith(':')) {
-      if (segment !== actual[index]) return null
-      continue
-    }
-    if (!actual[index]) return null
-    params[segment.slice(1)] = decodeURIComponent(actual[index])
-  }
-  return params
-}
-
-/**
- * 端点目录 → 路由表。路由与 `/browser/capabilities`、设置页文档同源，改文档就是改路由，
- * 不存在「文档写了但没实现」的漂移。
- */
-export function compileRoutes(endpoints) {
-  const routes = []
-  for (const endpoint of endpoints) {
-    if (endpoint.method === 'SSE') {
-      routes.push({ endpoint, method: 'GET', template: endpoint.path, stream: true })
-      continue
-    }
-    routes.push({ endpoint, method: endpoint.method, template: endpoint.path, stream: false })
-  }
-  return routes
-}
-
-export function resolveRoute(routes, method, pathname) {
-  for (const route of routes) {
-    if (route.method !== method) continue
-    const params = matchPath(route.template, pathname)
-    if (params) return { endpoint: route.endpoint, params, stream: route.stream }
-  }
-  return null
-}
 
 function text(value, max) {
   if (typeof value !== 'string') return ''
   const trimmed = value.trim()
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed
-}
-
-export function normalizeOwner(value) {
-  const owner = text(value, OWNER_MAX)
-  return owner || null
-}
-
-/**
- * 归属解析：请求头优先（agent 调用时最省事），其次 body，最后 query。取不到就是 null ——
- * 未归属的窗口在界面里照样能看见、能操作，只是不挂到某个会话的图标行上。
- */
-export function resolveOwner({ headers, body, query } = {}) {
-  const header = headers?.[OWNER_HEADER] ?? headers?.[OWNER_HEADER.toUpperCase()]
-  const fromHeader = normalizeOwner(Array.isArray(header) ? header[0] : header)
-  if (fromHeader) return fromHeader
-  const fromBody = normalizeOwner(body?.owner)
-  if (fromBody) return fromBody
-  return normalizeOwner(query?.owner)
 }
 
 /** 没有协议时按 https 补全：agent 更常直接给 `example.com/path` */
@@ -150,15 +106,6 @@ export function normalizeUrl(value) {
 
 export function normalizeLabel(value, fallback = '受控浏览器') {
   return text(value, 60) || fallback
-}
-
-export function parseBoolean(value) {
-  if (typeof value === 'boolean') return value
-  if (typeof value !== 'string') return undefined
-  const lowered = value.trim().toLowerCase()
-  if (['1', 'true', 'yes', 'on'].includes(lowered)) return true
-  if (['0', 'false', 'no', 'off'].includes(lowered)) return false
-  return undefined
 }
 
 /**

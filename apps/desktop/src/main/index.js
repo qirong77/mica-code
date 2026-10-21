@@ -5,6 +5,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-host.js'
 import { applyBrowserRenderSwitch } from './browser/browser-core.js'
+import { resolveTerminalSocketPath, startTerminalHost } from './terminal/terminal-host.js'
+import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
 
 /**
  * Electron 外壳。
@@ -40,6 +42,12 @@ let quitting = false
  * `/remote/control/*`，再把那个地址注入每个会话进程给 agent 用。
  */
 let browserHost = null
+/**
+ * 终端控制宿主（真实 PTY + 后台窗口 + Unix socket 服务）。和受控浏览器同一个理由住在
+ * 主进程：只有这里开得了窗口，node-pty 也在这里加载。socket 路径经 `MICA_TERMINAL_SOCKET`
+ * 交给运行时，运行时代理成自己端口上的 `/remote/terminal/*`。
+ */
+let terminalHost = null
 /** 「本机」页面地址（dev 下是 Vite dev server），⇧⌘M 与默认端口上的回环目标都回到它 */
 let localPageUrl = ''
 /**
@@ -89,7 +97,8 @@ function spawnRuntime(port, { pageFromDevServer }) {
       MICA_DESKTOP_EXIT_ON_STDIN_CLOSE: '1',
       // 受控浏览器的 socket：运行时据此在**自己已有的端口**上代理出 /remote/control，
       // 再把它注入给每个 agent 进程（MICA_BROWSER_URL），所以这里不再传端口或地址。
-      MICA_BROWSER_SOCKET: browserHost?.socketPath || ''
+      MICA_BROWSER_SOCKET: browserHost?.socketPath || '',
+      MICA_TERMINAL_SOCKET: terminalHost?.socketPath || ''
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -640,6 +649,25 @@ app.whenReady().then(async () => {
     console.error('[mica-code-app] 受控浏览器服务启动失败', error)
   }
 
+  // 终端控制同样先起：窗口页面加载运行时地址，回调在运行时就绪后才真正用到
+  try {
+    terminalHost = await startTerminalHost({
+      socketPath: resolveTerminalSocketPath(app.getPath('userData')),
+      // dev 下页面由 Vite 提供（/terminal.html，改代码即时生效）；生产由运行时托管
+      // /terminal-control。两者都通过同源 /remote/terminal 访问终端服务。
+      getPageUrl: (sessionId) => {
+        const base = String(devPageUrl || runtime?.url || '').replace(/\/+$/, '')
+        if (!base) return ''
+        const page = devPageUrl ? '/terminal.html' : TERMINAL_PAGE_PATH
+        return `${base}${page}?session=${encodeURIComponent(sessionId)}`
+      },
+      isQuitting: () => quitting
+    })
+    console.log(`[mica-terminal] 终端控制服务: unix:${terminalHost.socketPath}`)
+  } catch (error) {
+    console.error('[mica-code-app] 终端控制服务启动失败', error)
+  }
+
   try {
     runtime = await resolveRuntime({ pageFromDevServer: Boolean(devPageUrl) })
   } catch (error) {
@@ -650,6 +678,10 @@ app.whenReady().then(async () => {
   if (runtime.owned === false && browserHost) {
     // dev 下复用了已在跑的运行时：它的 MICA_BROWSER_URL 是上一次注入的，可能已经失效
     console.warn('[mica-code-app] 复用了已在运行的运行时，受控浏览器可能不可用（重启运行时即可）')
+  }
+  if (runtime.owned === false && terminalHost) {
+    // 同理：复用的运行时没有这次的 MICA_TERMINAL_SOCKET
+    console.warn('[mica-code-app] 复用了已在运行的运行时，终端控制可能不可用（重启运行时即可）')
   }
 
   localPageUrl = devPageUrl || runtime.url
@@ -683,6 +715,8 @@ app.on('before-quit', () => {
   // 受控浏览器窗口是「关闭即隐藏」的，退出时必须显式销毁，否则 app 退不掉
   if (browserHost) void browserHost.close().catch(() => {})
   browserHost = null
+  if (terminalHost) void terminalHost.close().catch(() => {})
+  terminalHost = null
   // 只结束自己拉起的运行时；复用的那个（dev 下已在跑）留给它的属主
   if (runtime?.owned && runtime.child) {
     try {

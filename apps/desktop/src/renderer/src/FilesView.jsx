@@ -670,6 +670,7 @@ export const FilesView = forwardRef(function FilesView(
     async (path, position = null) => {
       if (!path) return
       setGitPreview(false)
+      // eslint-disable-next-line no-use-before-define -- 回调打开文件时才执行，setter 早已定义
       setMobileTreeVisible(false)
       const existing = tabsRef.current.find((tab) => tab.path === path)
       if (existing) {
@@ -1039,6 +1040,7 @@ export const FilesView = forwardRef(function FilesView(
   const openGitFile = useCallback(
     (file) => {
       setGitPreview(false)
+      // eslint-disable-next-line no-use-before-define -- 同上：调用时 setter 已在作用域内
       setMobileTreeVisible(false)
       return openFile(gitFileNode(file).path)
     },

@@ -22,6 +22,7 @@ import {
   IconRocket,
   IconServer,
   IconSettings,
+  IconTerminal,
   IconTerminal2,
   IconWorld,
   IconX
@@ -67,6 +68,7 @@ import {
 } from './workspace'
 import { draftMarkers, runningTerminalSessions } from './session-state'
 import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
+import { isTerminalOwnedByNode, nodeTerminals, terminalIconTitle } from './terminal-control'
 import {
   setUiState,
   setUiStateEntries,
@@ -748,6 +750,8 @@ export default function App() {
   // 受控浏览器（AI 打开的网页窗口）活在 Electron 主进程里，运行时经 HTTP 把它们抄成
   // 一份列表推过来（`browser:changed`）。纯浏览器宿主没有这套服务，列表恒为空。
   const [browsers, setBrowsers] = useState([])
+  // 终端控制：主进程里的真实 PTY + 后台窗口，列表同样由运行时抄送（`terminal:changed`）。
+  const [terminals, setTerminals] = useState([])
   const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
   const rightActiveTermByChatRef = useLatest(rightActiveTermByChat)
   // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
@@ -1056,6 +1060,25 @@ export default function App() {
     },
     [applyBrowsers]
   )
+
+  const applyTerminals = useCallback((list) => {
+    setTerminals(Array.isArray(list) ? list : [])
+  }, [])
+
+  const refreshTerminals = useCallback(() => {
+    window.mica.terminalControl
+      .list()
+      .then((result) => applyTerminals(result?.sessions))
+      .catch((error) => console.error('load terminals failed', error))
+  }, [applyTerminals])
+
+  useEffect(() => {
+    refreshTerminals()
+    const off = window.mica.terminalControl.onChanged((payload) =>
+      applyTerminals(payload?.sessions)
+    )
+    return () => off?.()
+  }, [applyTerminals, refreshTerminals])
 
   const refreshPins = useCallback(() => {
     window.mica.stats
@@ -2000,6 +2023,53 @@ export default function App() {
   // 顶栏图标按「当前这条会话」归属：AI 在当前会话里开的窗口只挂在这一条上，
   // 没有归属的窗口（终端里手跑的 curl、设置页新建的）也要给到入口，否则开着却看不见。
   const activeBrowsers = useMemo(() => nodeBrowsers(browsers, activeNode), [browsers, activeNode])
+  const activeTerminals = useMemo(
+    () => nodeTerminals(terminals, activeNode),
+    [terminals, activeNode]
+  )
+  const primaryTerminal = activeTerminals[0] || null
+
+  /**
+   * 顶栏图标：当前页签还没有终端就新开一条（归属当前会话），已有则显示/隐藏它的窗口。
+   * 关闭语义同样是隐藏；真正的销毁走右键确认。
+   */
+  const toggleTerminalControl = useCallback(
+    (terminal) => {
+      if (!terminal) {
+        window.mica.terminalControl
+          .create({
+            cwd: activeNode?.cwd || '',
+            label: '终端控制',
+            owner: activeNode?.sessionId || activeNode?.id || '',
+            show: true
+          })
+          .then((result) => applyTerminals(result?.sessions))
+          .catch((error) => showToast(error?.message || '打开终端失败', true))
+        return
+      }
+      const call = terminal.windowVisible
+        ? window.mica.terminalControl.hide(terminal.id)
+        : window.mica.terminalControl.show(terminal.id, true)
+      call
+        .then((result) => applyTerminals(result?.sessions))
+        .catch((error) => showToast(error?.message || '切换终端窗口失败', true))
+    },
+    [activeNode, applyTerminals, showToast]
+  )
+
+  const closeTerminalControl = useCallback(
+    (terminal) => {
+      if (!terminal) return
+      const label = terminal.label || '终端控制'
+      if (!window.confirm(`关闭「${label}」？终端里正在运行的命令会被结束，无法恢复。`)) return
+      window.mica.terminalControl
+        .close(terminal.id)
+        .then((result) => applyTerminals(result?.sessions))
+        .catch((error) => console.error('close terminal failed', error))
+    },
+    [applyTerminals]
+  )
+
   const openBySession = useMemo(() => {
     const map = {}
     for (const node of terminalNodes) if (node.sessionId) map[node.sessionId] = node.id
@@ -2476,6 +2546,36 @@ export default function App() {
             )}
             {/* 顶栏右侧：受控浏览器窗口图标（每个 AI 打开的窗口一个）、终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                title={
+                  primaryTerminal
+                    ? terminalIconTitle(primaryTerminal, activeNode)
+                    : '打开终端控制（真实 PTY，后台窗口）'
+                }
+                aria-label={primaryTerminal ? '切换终端控制窗口' : '打开终端控制'}
+                aria-pressed={Boolean(primaryTerminal?.windowVisible)}
+                {...longPressHandlers(() => closeTerminalControl(primaryTerminal))}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  closeTerminalControl(primaryTerminal)
+                }}
+                onClick={() => toggleTerminalControl(primaryTerminal)}
+                className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                  primaryTerminal?.windowVisible
+                    ? 'bg-white/10 text-white hover:bg-white/15'
+                    : primaryTerminal && isTerminalOwnedByNode(primaryTerminal, activeNode)
+                      ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                      : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                }`}
+              >
+                <IconTerminal size={14} />
+                {activeTerminals.length > 1 && (
+                  <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                    {activeTerminals.length}
+                  </span>
+                )}
+              </button>
               {activeBrowsers.map((browser) => {
                 const owned = isOwnedByNode(browser, activeNode)
                 const badge = browserIconBadge(activeBrowsers, browser)
@@ -2682,7 +2782,14 @@ export default function App() {
                 </button>
               </div>
               <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-                <Suspense fallback={null}>
+                {/* 分块还没到就先给个说明：空白面板和「终端坏了」在屏幕上是一样的。 */}
+                <Suspense
+                  fallback={
+                    <div className="grid flex-1 place-items-center text-xs text-white/40">
+                      正在加载终端…
+                    </div>
+                  }
+                >
                   <TerminalHost
                     ref={terminalRef}
                     nodes={allRightTerms}

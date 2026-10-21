@@ -299,16 +299,17 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### 三层边界
 
-| 层                    | 职责                                                                              |
-| --------------------- | --------------------------------------------------------------------------------- |
-| `src/host/`           | chat、terminal、files、git、stats、配置、loop、共享状态等业务                     |
-| `src/server/index.js` | 自包含 Node HTTP 运行时，托管 renderer，`POST /api/invoke` + SSE `/api/events`    |
-| `src/main/index.js`   | Electron 容器：启动运行时、窗口导航、未读徽标、窗口状态；受控浏览器为唯一业务例外 |
-| `src/renderer/`       | 页面；`transport.js` 统一实现 `window.mica` 与平台差异                            |
+| 层                    | 职责                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `src/host/`           | chat、terminal、files、git、stats、配置、loop、共享状态等业务                           |
+| `src/server/index.js` | 自包含 Node HTTP 运行时，托管 renderer，`POST /api/invoke` + SSE `/api/events`          |
+| `src/main/index.js`   | Electron 容器：启动运行时、窗口导航、未读徽标、窗口状态；受控浏览器与终端控制是业务例外 |
+| `src/renderer/`       | 页面；`transport.js` 统一实现 `window.mica` 与平台差异                                  |
 
-- 外壳不注册业务 IPC，不加 preload；页面始终通过 HTTP + SSE 访问运行时。
+- 外壳不注册通用业务 IPC，不加 preload；页面始终通过 HTTP + SSE 访问运行时。主进程只保留两个受控能力（`src/main/browser/`、`src/main/terminal/`），窗口页面同样走运行时端口。
 - `electron-shim.js` 将 host 所需 Electron 接口映射为 Node 实现；平台差异收敛在 transport/shim，不散落业务组件。
 - 运行时构建保持 `ssr.noExternal: true`，只 external Node 内置模块与 node-pty；asar 没有 node_modules。新增依赖后跑 `npm run build:server && npm test` 检查裸导入。
+- 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`：React 遇到 render 抛错会卸掉整棵树，表现为整页黑屏（只剩窗口按钮）。渲染期引用未初始化的 `const` 是常见来源，由 renderer 的 `no-use-before-define` 拦住；确有延后引用时按处豁免并写明原因。
 - 外壳通过 stdin 管道管理子进程；运行时启动即 `stripContainerEnv()`，在任何 spawn 前移除 `ELECTRON_RUN_AS_NODE`。
 - `resolveMicaExecutable()` 保持平台感知：Windows 不检查 POSIX 可执行位，`.exe` 优先于需 shell 的 `.cmd`。
 - `desktop-process-env.js` 追加工具目录到 PATH；`shell-env.js` 采集并缓存 profile env，超时静默降级。
@@ -326,7 +327,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 路由、分享与访问
 
 - 默认 `0.0.0.0:8787`，**运行时无认证，所有客户端拥有完整宿主能力**；README 必须保留风险说明。
-- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/api/*` 为能力，`/remote/control/*` 为浏览器代理。地址约定只用 `mica-web-shared/app-paths.ts`。
+- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/terminal-control` 为终端窗口页面，`/api/*` 为能力，`/remote/control/*` 为浏览器代理，`/remote/terminal/*` 为终端代理。地址约定只用 `mica-web-shared/app-paths.ts`。
 - `shareView` 仅影响呈现，不是权限边界；不新增访客授权。资源路由先 `toAssetPath()` 去前缀。
 - `--share-port` 只保留兼容开关语义；`--no-share` / `MICA_DESKTOP_SHARE_PORT=0` 只关闭 `/share`。端口占用可随机回退，从 ready JSON 获取实际地址。
 - `access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding；同站忽略端口以支持 Vite 代理，允许代理域名通过 `MICA_DESKTOP_ALLOWED_HOSTS` 配置。
@@ -423,7 +424,22 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 顶栏图标显示/隐藏窗口，销毁二次确认；未归属窗口变暗显示。Browser Control 设置页永远可打开，无能力时给说明，仅展示文档入口，不管理窗口。
 - 生成的 `$MICA_HOME/skills/mica-browser/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `browser-docs.js`。
 
+### 终端控制
+
+- 第二个主进程业务例外在 `src/main/terminal/`：`node-pty` 打开真实 pty 与登录 shell，`@xterm/headless` 只做屏幕镜像供 AI 读屏，**不是模拟终端**。`terminal-docs.js` 是端点唯一目录。
+- 主进程只监听 Unix socket（`MICA_TERMINAL_SOCKET`），运行时把它代理成 `/remote/terminal/*`，剥掉整个前缀后端点就是 `/sessions`、`/events` 等；`MICA_TERMINAL_URL` 即该服务根，agent 拼 `/sessions`。socket 变量不进 chat 子进程，避免绕过代理。
+- 一个会话一个后台窗口，按需创建：`show` 为假时不建渲染进程，agent 专用终端不占内存；关窗只 hide，销毁走 `close` API。窗口加载运行时托管的 `/terminal-control?session=<id>`，页面与 AI 都通过 HTTP + SSE 操作同一条 PTY，不需要 preload。
+- 页面用 xterm DOM 渲染（不用 canvas）；PTY 尺寸是唯一事实来源，AI resize 后页面跟随，用户调整窗口才反向 fit 并回报。页面隐藏时只记 `hiddenDirty` 不逐帧解析，重新可见后按快照整屏重建，后台窗口不再空转渲染。
+- 读屏前必须等 headless 解析完已排队输出（`pendingWrites` 计数），并且该等待必须有硬预算（读屏 2s、`wait` 用剩余超时），否则高吞吐输出时读屏与 `wait` 会卡死；读屏终点按最后一行非空内容算，光标不在底部时不能截断下方内容。`wait` 的 `text`/`regex` 默认调用 `maskEchoedInput`（`skipEcho: false` 关闭）：按最近输入逐行拆成片段，遮掉每段**最靠下且带提示符**的回显行，以及该行上方等于输入原文的碎片行；回显下方等于原文的行视为真实输出保留。`expectExitCode` 不匹配时立刻返回实际退出码，idle 至少等满设定时长。
+- 终端会话存在进程内，最多 12 条**活着的** shell（已退出不占额度）。`sweep()` 只回收「已退出且 10 分钟没有窗口查看」的会话，**从不自动关闭活着的 shell**（里面有用户的 cwd 与后台进程）；`windowVisible` 的一律保留。`closed` 事件统一销毁窗口，端点关闭与回收关闭走同一条路径。`close` 用 `destroy` 结束进程，退出后仍可读最后屏幕。纯 Web 宿主没有主进程，`/remote/terminal/*` 明确回 503。
+- SSE 的 `terminal:output` 只发给订阅该会话的页面，`terminal:changed` 只发给该会话的页面与不限会话的列表订阅者，不做全量广播。
+- 写入类操作（`input`、`keys`、`resize`、`close`）校验 `x-mica-owner`：带 owner 且与会话 owner 不一致即 403；不带 owner 视为本人在页面操作，放行。读屏与 `wait` 不拦。这是防串台护栏，不是权限边界。
+- 生成的 `$MICA_HOME/skills/mica-terminal/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `terminal-docs.js`。
+- 通用路由、owner、本机 Origin/Host 校验在 `src/main/shared/endpoint-http.js`，浏览器与终端共用，不各写一份。
+
 ## 14. Desktop 文件、终端与侧栏
+
+这里的终端是运行时里的用户终端面板；第 13 节的终端控制是主进程 PTY + 后台窗口，两套互不复用会话。
 
 ### 文件与 Git
 
@@ -505,6 +521,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - PTY 常规回归覆盖 driver、manager、serverSource；真实 provider 冒烟须显式开启 `MICA_PTY_SMOKE=1`，并传 `MICA_PTY_SOURCE_HOME`，避免 Vitest 重定向 HOME 后读错配置。
 - desktop 改动至少 `npx eslint src/` + `npm test`；新增运行时依赖另构建 server 验证自包含。
 - 浏览器主进程能力还须用 Electron 临时脚本 + 本地 stub 页面验证 create/evaluate/click/type/screenshot/cookies/console/network/隐藏行为，单测不能替代真窗口检查。
+- 终端控制同样要真窗口验证：真实 pty 起 zsh、窗口加载 `/terminal-control`、AI 输入命令后读屏与页面 DOM 一致、hide/show、close 销毁窗口；`@xterm/headless` 与 `node-pty` 都是原生/大依赖，不能只靠单测。**bun 下 node-pty 能加载但不送数据**，会话级测试因此用 `createTerminalSessions({ spawnPty })` 注入假 pty，真 pty 只在 Electron/Node 里跑。
 - 运行时桥可用 stub 浏览器服务 + `node out/server/index.mjs` + `/api/invoke` 验证；spawn 保持 stdin 打开，`--port 0` 被视为未设置。
 
 交付前按实际影响复查：依赖方向、busy guard、队列 owner、retry/abort 去重、lease、snapshot/UI 恢复、用量归属、工具 readOnly、MCP 清理、desktop 三层边界、构建产物与文档同步。

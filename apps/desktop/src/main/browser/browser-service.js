@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { verifyLocalRequest } from '../shared/endpoint-http.js'
 import {
   BrowserRequestError,
   cookieCachePaths,
@@ -38,33 +39,8 @@ import {
 const MAX_BODY_BYTES = 1024 * 1024
 const HEARTBEAT_MS = 15000
 
-const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
-
-function hostnameOf(value) {
-  try {
-    return new URL(value).hostname
-  } catch {
-    return ''
-  }
-}
-
-function isLocalHostHeader(host) {
-  const raw = String(host || '').trim()
-  if (!raw) return true
-  const name = raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]
-  return LOCAL_HOSTNAMES.has(name.toLowerCase())
-}
-
-export function verifyLocalRequest(req) {
-  if (!isLocalHostHeader(req.headers?.host)) {
-    return { ok: false, status: 403, error: '只接受本机请求' }
-  }
-  const origin = req.headers?.origin
-  if (origin && !LOCAL_HOSTNAMES.has(hostnameOf(origin).toLowerCase())) {
-    return { ok: false, status: 403, error: '拒绝来自网页的跨站请求' }
-  }
-  return { ok: true }
-}
+// 本机请求校验与终端控制共用一份实现；这里继续导出，服务契约测试仍从本模块取
+export { verifyLocalRequest }
 
 export function createBrowserService({
   getManager,

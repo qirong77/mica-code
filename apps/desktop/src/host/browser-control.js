@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { request as httpRequest } from 'node:http'
 import { join } from 'node:path'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
+import { openSocketRequest, readAllText } from './control-client.js'
 import {
   BROWSER_OWNER_ENV,
   BROWSER_SOCKET_ENV,
@@ -32,6 +32,7 @@ import {
  */
 
 const REQUEST_TIMEOUT_MS = 4000
+const CONTROL_LABEL = '受控浏览器服务'
 const RECONNECT_DELAY_MS = 2000
 
 let broadcaster = () => {}
@@ -74,68 +75,22 @@ export function getBrowserControlSnapshot() {
   }
 }
 
-/**
- * 走 Unix socket 发一个请求，返回响应流。`fetch` 不支持 socket，而这里刻意不给浏览器
- * 服务开 TCP 端口（见文件头），所以直接用 `node:http` 的 request + `socketPath`。
- */
-function openSocketRequest(path, { method = 'GET', body, headers, signal, timeoutMs } = {}) {
-  const target = socketPath()
-  if (!target)
-    return Promise.reject(new Error('当前没有受控浏览器服务（不在 Mica Code 应用里运行）'))
-  const payload = body === undefined ? null : JSON.stringify(body)
-
-  return new Promise((resolve, reject) => {
-    const request = httpRequest(
-      {
-        socketPath: target,
-        path,
-        method,
-        headers: {
-          ...(payload
-            ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
-            : {}),
-          ...headers
-        }
-      },
-      resolve
-    )
-    request.on('error', reject)
-    if (timeoutMs) {
-      request.setTimeout(timeoutMs, () => request.destroy(new Error('浏览器服务请求超时')))
-    }
-    if (signal) {
-      if (signal.aborted) {
-        request.destroy(new Error('已取消'))
-        return
-      }
-      signal.addEventListener('abort', () => request.destroy(new Error('已取消')), { once: true })
-    }
-    if (payload) request.write(payload)
-    request.end()
-  })
-}
-
-async function readAllText(stream) {
-  const chunks = []
-  for await (const chunk of stream) chunks.push(chunk)
-  return Buffer.concat(chunks).toString('utf8')
-}
-
 async function request(path, { method = 'GET', body } = {}) {
-  const response = await openSocketRequest(path, {
+  const response = await openSocketRequest(socketPath(), path, {
     method,
     body,
-    timeoutMs: REQUEST_TIMEOUT_MS
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    label: CONTROL_LABEL
   })
   const text = await readAllText(response)
   let payload = null
   try {
     payload = text ? JSON.parse(text) : null
   } catch {
-    throw new Error(`浏览器服务返回了非 JSON 响应（HTTP ${response.statusCode}）`)
+    throw new Error(`${CONTROL_LABEL}返回了非 JSON 响应（HTTP ${response.statusCode}）`)
   }
   if (response.statusCode >= 400 || payload?.ok === false) {
-    throw new Error(payload?.error || `浏览器服务返回 HTTP ${response.statusCode}`)
+    throw new Error(payload?.error || `${CONTROL_LABEL}返回 HTTP ${response.statusCode}`)
   }
   return payload
 }
@@ -210,9 +165,10 @@ async function ensureSkillFile(docs) {
 
 async function runStream(controller) {
   if (!hasService()) return
-  const response = await openSocketRequest('/browser/events', {
+  const response = await openSocketRequest(socketPath(), '/browser/events', {
     headers: { accept: 'text/event-stream' },
-    signal: controller.signal
+    signal: controller.signal,
+    label: CONTROL_LABEL
   })
   if (response.statusCode >= 400) throw new Error(`events HTTP ${response.statusCode}`)
   const decoder = new TextDecoder()

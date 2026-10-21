@@ -1,0 +1,167 @@
+/*
+ * 终端控制窗口的样式。
+ *
+ * 与主应用共用 Darcula：内容面 #2b2b2b、外框 #3c3f41、分界 #4b4b4b。
+ * xterm 自己按 options.theme 画，这里的色值只负责外壳。
+ */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #2b2b2b;
+  color: #cccccc;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  overflow: hidden;
+}
+
+.terminal-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.terminal-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid #4b4b4b;
+  background: #3c3f41;
+  font-size: 12px;
+  color: #a1a1a1;
+  user-select: none;
+}
+
+.terminal-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #707070;
+}
+
+.terminal-dot.is-online {
+  background: #a8c023;
+}
+
+.terminal-title {
+  font-weight: 600;
+  color: #cccccc;
+}
+
+.terminal-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.terminal-spacer {
+  flex: 1 1 auto;
+}
+
+.terminal-size,
+.terminal-state {
+  flex: 0 0 auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.terminal-state.is-exited {
+  color: #d6bf55;
+}
+
+.terminal-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+/* xterm 默认给视口与滚动条自己上色，会和主应用的「无滚动条 + 同底色」不一致 */
+.terminal-host .xterm .xterm-viewport {
+  background-color: transparent;
+}
+
+.terminal-host .xterm-scrollable-element > .scrollbar {
+  visibility: hidden;
+}
+
+.terminal-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-top: 1px solid #4b4b4b;
+  background: #3c3f41;
+  font-size: 11px;
+  color: #888888;
+  user-select: none;
+}
+
+/* 窄窗口下把说明文字收起来，只留会话与 shell，别把状态行挤出去 */
+@media (max-width: 560px) {
+  .terminal-footer > span:last-child {
+    display: none;
+  }
+
+  .terminal-meta {
+    display: none;
+  }
+}
+
+/* 刘海屏 / home indicator：窗口可被拖成任意尺寸，贴边内容要避开安全区 */
+@media (display-mode: standalone) {
+  .terminal-header {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .terminal-footer {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.terminal-overlay {
+  position: absolute;
+  inset: 32px 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(43 43 43 / 82%);
+  font-size: 13px;
+  color: #a1a1a1;
+}
+
+.terminal-error {
+  position: absolute;
+  right: 12px;
+  bottom: 34px;
+  left: 12px;
+  padding: 8px 10px;
+  border: 1px solid #4b2d2d;
+  border-radius: 4px;
+  background: rgb(75 45 45 / 92%);
+  font-size: 12px;
+  color: #ff8785;
+}

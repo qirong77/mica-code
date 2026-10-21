@@ -5,6 +5,8 @@
  *
  * - `/` 与 `/mica-web` —— 完整应用（页面产物）；`/mica-web` 是显式名字，两处内容完全相同
  * - `/share` —— 分享视图：`/share?session=<id>` 打开某条会话，`/share` 本身是分享链接列表
+ * - `/terminal-control` —— 终端控制窗口的页面（独立入口 `terminal.html`，窗口由 Electron
+ *   主进程创建，页面通过同源 `/remote/terminal/*` 读写真实终端）
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
  *   见 apps/desktop/src/host/browser-control-proxy.js）
  * - `/api/*` —— 运行时能力（invoke / events / env / image）
@@ -18,6 +20,23 @@ export const APP_BASE_PATH = '/mica-web';
 
 /** 分享视图的基路径。它只是「少画一个侧栏」的呈现差别，不是权限边界。 */
 export const SHARE_BASE_PATH = '/share';
+
+/** 终端控制窗口的页面路径：主进程窗口加载运行时上的这个地址。 */
+export const TERMINAL_PAGE_PATH = '/terminal-control';
+
+/**
+ * 终端服务的代理前缀：主进程的终端服务挂在 Unix socket 上，运行时在 `/remote/terminal`
+ * 下转发。端点路径相对这个前缀（`/sessions`、`/events`…），所以 `MICA_TERMINAL_URL`
+ * 就等于「运行时地址 + 这个前缀」，页面与 agent 拼出来是同一个地址。
+ */
+export const TERMINAL_CONTROL_PREFIX = '/remote/terminal';
+
+/** 终端服务的端点地址（`session` 存在时带上订阅参数）。 */
+export function terminalControlPath(path = ''): string {
+  const suffix = String(path ?? '').trim();
+  if (!suffix) return TERMINAL_CONTROL_PREFIX;
+  return `${TERMINAL_CONTROL_PREFIX}${suffix.startsWith('/') ? '' : '/'}${suffix}`;
+}
 
 /** 折叠重复斜杠、补上前导斜杠、去掉尾部斜杠（根路径除外）。 */
 export function normalizePathname(pathname: unknown): string {
@@ -39,6 +58,11 @@ export function isUnderBasePath(pathname: unknown, basePath: string): boolean {
 /** 是不是分享视图的地址（`/share` 或它下面的子路径）。 */
 export function isSharePath(pathname: unknown): boolean {
   return isUnderBasePath(pathname, SHARE_BASE_PATH);
+}
+
+/** 是不是终端控制窗口的页面。 */
+export function isTerminalPagePath(pathname: unknown): boolean {
+  return normalizePathname(pathname) === TERMINAL_PAGE_PATH;
 }
 
 /** 是不是应用页面（根路径或它下面的子路径，以及 `/mica-web` 这个显式名字）。 */

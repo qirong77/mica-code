@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   APP_BASE_PATH,
   SHARE_BASE_PATH,
+  TERMINAL_PAGE_PATH,
   isAppPath,
   isSharePath,
+  isTerminalPagePath,
   isUnderBasePath,
   normalizePathname,
   toAssetPath,
@@ -54,6 +56,21 @@ describe('isAppPath', () => {
     expect(isAppPath('/share')).toBe(false);
     expect(isAppPath('/assets/app.js')).toBe(false);
     expect(isAppPath('/mica-web-x')).toBe(false);
+  });
+});
+
+describe('isTerminalPagePath', () => {
+  it('matches only the terminal window page', () => {
+    expect(isTerminalPagePath('/terminal-control')).toBe(true);
+    expect(isTerminalPagePath('/terminal-control/')).toBe(true);
+    expect(isTerminalPagePath(TERMINAL_PAGE_PATH)).toBe(true);
+  });
+
+  it('does not match the app, assets or a lookalike path', () => {
+    expect(isTerminalPagePath('/')).toBe(false);
+    expect(isTerminalPagePath('/mica-web')).toBe(false);
+    expect(isTerminalPagePath('/terminal-controls')).toBe(false);
+    expect(isTerminalPagePath('/assets/terminal.js')).toBe(false);
   });
 });
 

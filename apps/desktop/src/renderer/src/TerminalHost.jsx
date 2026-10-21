@@ -191,6 +191,9 @@ export const TerminalHost = forwardRef(function TerminalHost(
     if (activeId) map.set(activeId, new Set([PANE_MICA]))
     return map
   })
+  // 建 PTY 失败时面板会一直空着，用户只看到一块黑。把失败原因留在对应那一格，并给一次重试，
+  // 否则只有控制台知道 shell 为什么没起来。
+  const [failures, setFailures] = useState({})
   const activeRef = useLatest(activeId)
   const visibleRef = useLatest(visible)
   const paneRef = useLatest(pane)
@@ -207,6 +210,20 @@ export const TerminalHost = forwardRef(function TerminalHost(
     () => (paneRef.current === PANE_TERMINAL ? PANE_TERMINAL : PANE_MICA),
     [paneRef]
   )
+
+  const reportFailure = useCallback((ptyId, error) => {
+    const message = error instanceof Error ? error.message : String(error || '未知错误')
+    setFailures((prev) => (prev[ptyId] === message ? prev : { ...prev, [ptyId]: message }))
+  }, [])
+
+  const clearFailure = useCallback((ptyId) => {
+    setFailures((prev) => {
+      if (!(ptyId in prev)) return prev
+      const next = { ...prev }
+      delete next[ptyId]
+      return next
+    })
+  }, [])
 
   const measurable = useCallback(
     (entry, id) => {
@@ -297,6 +314,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         try {
           const result = await entry.creating
           entry.ready = true
+          clearFailure(ptyId)
           entry.lastPtySize =
             !result?.reused && dimensions ? `${dimensions.cols}x${dimensions.rows}` : null
           // 接上别人已经开着的终端：把服务端记住的尾部输出回放出来，屏幕才对得上
@@ -309,7 +327,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         scheduleFit({ focus })
       }
     },
-    [activePane, activeRef, commandForRef, measurable, resolveCwdRef, scheduleFit]
+    [activePane, activeRef, clearFailure, commandForRef, measurable, resolveCwdRef, scheduleFit]
   )
 
   const register = useCallback(
@@ -318,13 +336,26 @@ export const TerminalHost = forwardRef(function TerminalHost(
         entries.current.set(ptyId, entry)
         const { sessionId, pane: entryPane } = parsePtyId(ptyId)
         if (activeRef.current === sessionId && activePane() === entryPane) {
-          activate(sessionId, entryPane).catch((error) =>
+          activate(sessionId, entryPane).catch((error) => {
             console.error('create terminal failed', error)
-          )
+            reportFailure(ptyId, error)
+          })
         }
       } else entries.current.delete(ptyId)
     },
-    [activate, activePane, activeRef]
+    [activate, activePane, activeRef, reportFailure]
+  )
+
+  const retry = useCallback(
+    (ptyId) => {
+      const { sessionId, pane: entryPane } = parsePtyId(ptyId)
+      clearFailure(ptyId)
+      activate(sessionId, entryPane, true).catch((error) => {
+        console.error('retry terminal failed', error)
+        reportFailure(ptyId, error)
+      })
+    },
+    [activate, clearFailure, reportFailure]
   )
 
   useImperativeHandle(
@@ -377,11 +408,12 @@ export const TerminalHost = forwardRef(function TerminalHost(
         next.set(activeId, new Set([PANE_MICA]))
         return next
       })
-      activate(activeId, activePane()).catch((error) =>
+      activate(activeId, activePane()).catch((error) => {
         console.error('activate terminal failed', error)
-      )
+        reportFailure(ptyIdFor(activeId, activePane()), error)
+      })
     }
-  }, [activate, activeId, activePane])
+  }, [activate, activeId, activePane, reportFailure])
 
   useEffect(() => {
     if (!activeId) return undefined
@@ -393,9 +425,12 @@ export const TerminalHost = forwardRef(function TerminalHost(
       next.set(activeId, panes ? new Set([...panes, current]) : new Set([current]))
       return next
     })
-    activate(activeId, current).catch((error) => console.error('activate pane failed', error))
+    activate(activeId, current).catch((error) => {
+      console.error('activate pane failed', error)
+      reportFailure(ptyIdFor(activeId, current), error)
+    })
     return undefined
-  }, [activate, activeId, pane])
+  }, [activate, activeId, pane, reportFailure])
 
   useEffect(() => {
     const valid = new Set(nodes.map((node) => node.id))
@@ -459,6 +494,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
     if (hostRef.current) observer.observe(hostRef.current)
     let query
     const onRatio = () => {
+      // eslint-disable-next-line no-use-before-define -- 只在 dppx 变化时回调，那时 bindRatio 早已定义
       bindRatio()
       scheduleFit()
     }
@@ -507,6 +543,30 @@ export const TerminalHost = forwardRef(function TerminalHost(
                 onRead={(id, reason) => id === activeRef.current && onReadRef.current(id, reason)}
               />
             )}
+            {[PANE_MICA, PANE_TERMINAL].map((entryPane) => {
+              const ptyId = ptyIdFor(sessionId, entryPane)
+              const failure = panes.has(entryPane) ? failures[ptyId] : null
+              if (!failure) return null
+              const shown = isActiveSession && pane === entryPane
+              return (
+                <div
+                  key={`${ptyId}-failure`}
+                  className={`absolute inset-0 grid place-items-center bg-canvas px-6 text-center ${shown ? '' : 'hidden'}`}
+                >
+                  <div className="max-w-md space-y-2 text-xs text-white/70">
+                    <div className="text-white/90">终端未能启动</div>
+                    <div className="break-words text-white/50">{failure}</div>
+                    <button
+                      type="button"
+                      className="rounded-md border border-line px-2 py-1 text-white/80 transition-colors hover:bg-white/[.06]"
+                      onClick={() => retry(ptyId)}
+                    >
+                      重试
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )
       })}

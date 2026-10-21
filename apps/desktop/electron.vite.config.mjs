@@ -17,7 +17,14 @@ const runtimePort = Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || 
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    resolve: {
+      alias: {
+        // 终端窗口要加载的页面路径与运行时路由同源：直接用共享包里的常量，
+        // 不再在主进程里抄一份 '/terminal-control'
+        '@mica-app-paths': resolve('../../packages/mica-web-shared/app-paths.ts')
+      }
+    }
   },
   renderer: {
     plugins: [react(), tailwindcss()],
@@ -32,10 +39,21 @@ export default defineConfig({
     },
     server: {
       proxy: {
-        '/api': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false }
+        '/api': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false },
+        // dev 下的终端窗口页面（/terminal.html）也从 Vite 加载，它访问的
+        // /remote/terminal/* 必须落到运行时，再由运行时代理到主进程
+        '/remote': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false }
       }
     },
     build: {
+      // 两个页面入口：主应用与终端控制窗口（后者由 Electron 主进程加载，
+      // 通过运行时的 /terminal-control 路由提供）。
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          terminal: resolve('src/renderer/terminal.html')
+        }
+      },
       // electron-vite 的 renderer 默认 build.minify = false（它只对 main/preload
       // 有合理理由），不覆盖会让页面装载一份十几 MB 未压缩的 bundle。
       minify: true,

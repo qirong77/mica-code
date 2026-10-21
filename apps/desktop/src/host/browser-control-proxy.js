@@ -31,22 +31,36 @@ export function isBrowserControlPath(pathname, prefix = BROWSER_CONTROL_PREFIX) 
   return value === prefix || value.startsWith(`${prefix}/`)
 }
 
-/** 去掉代理前缀后的目标路径（含 query）；不是代理请求则返回 null。 */
-export function browserControlTargetPath(pathname, search = '', prefix = BROWSER_CONTROL_PREFIX) {
+/**
+ * 去掉代理前缀后的目标路径（含 query）；不是代理请求则返回 null。
+ *
+ * `stripPrefix` 默认等于匹配前缀；终端控制会传 `/remote`，因为它的服务路由是
+ * `/terminal/*`（`/remote/terminal/sessions` → `/terminal/sessions`）。
+ */
+export function browserControlTargetPath(
+  pathname,
+  search = '',
+  prefix = BROWSER_CONTROL_PREFIX,
+  stripPrefix = prefix
+) {
   if (!isBrowserControlPath(pathname, prefix)) return null
-  const rest = String(pathname).slice(prefix.length)
+  const rest = String(pathname).slice(stripPrefix.length)
   return `${rest || '/'}${search || ''}`
 }
 
 /**
- * 构造转给浏览器服务的请求头。`Host` 一律写成 `127.0.0.1`：服务那侧只接受本机请求，
+ * 构造转给主进程服务的请求头。`Host` 一律写成 `127.0.0.1`：服务那侧只接受本机请求，
  * 而运行时的 `Host` 可能是一个局域网地址（局域网客户端也会走这条代理）。
+ *
+ * `Origin` 直接丢掉：运行时入口已经按 access 规则校验过来源，代理之后这条请求就是
+ * 「本机运行时替客户端发给主进程」；把局域网页面的 Origin 透传下去，会让主进程把它
+ * 误判成跨站请求（终端窗口页面正是从运行时地址发起的同源请求）。
  */
 export function proxyRequestHeaders(headers = {}) {
   const next = {}
   for (const [key, value] of Object.entries(headers)) {
     const name = String(key).toLowerCase()
-    if (HOP_BY_HOP.has(name) || name === 'host') continue
+    if (HOP_BY_HOP.has(name) || name === 'host' || name === 'origin') continue
     next[key] = value
   }
   next.host = '127.0.0.1'
@@ -68,11 +82,16 @@ export function proxyResponseHeaders(headers = {}) {
  * 造一个代理处理函数。没有 socket 路径（纯 `npm run start:web`）时返回 null，调用方据此
  * 直接把这条路径当普通请求处理掉。
  */
-export function createBrowserControlProxy({ socketPath, prefix = BROWSER_CONTROL_PREFIX } = {}) {
+export function createBrowserControlProxy({
+  socketPath,
+  prefix = BROWSER_CONTROL_PREFIX,
+  stripPrefix = prefix,
+  label = '受控浏览器服务'
+} = {}) {
   if (!socketPath) return null
 
   return function proxyBrowserControl(req, res, url) {
-    const target = browserControlTargetPath(url?.pathname, url?.search, prefix)
+    const target = browserControlTargetPath(url?.pathname, url?.search, prefix, stripPrefix)
     if (target === null) return false
 
     const upstream = httpRequest(
@@ -98,9 +117,15 @@ export function createBrowserControlProxy({ socketPath, prefix = BROWSER_CONTROL
       res.end(
         JSON.stringify({
           ok: false,
-          error: `受控浏览器服务不可用：${error?.message || error}（只有在 Mica Code 应用里才有）`
+          error: `${label}不可用：${error?.message || error}（只有在 Mica Code 应用里才有）`
         })
       )
+    })
+
+    // 下游断开（页面刷新、窗口销毁、SSE 客户端取消）时必须掐掉上游：否则 Unix socket
+    // 一直开着，主进程那侧的订阅者永远收不到 close，越积越多
+    res.on('close', () => {
+      if (!upstream.destroyed) upstream.destroy()
     })
 
     // 请求体原样流过去；GET/HEAD 没有体，直接结束

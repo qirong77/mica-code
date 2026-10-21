@@ -28,7 +28,27 @@ import {
   BROWSER_URL_ENV
 } from '../host/browser-control-core.js'
 import { createBrowserControlProxy, isBrowserControlPath } from '../host/browser-control-proxy.js'
-import { SHARE_BASE_PATH, isSharePath, toAssetPath } from '@packages/mica-web-shared'
+import {
+  registerTerminalControlIpc,
+  setTerminalControlBroadcaster,
+  startTerminalControl,
+  stopTerminalControl
+} from '../host/terminal-control.js'
+import {
+  TERMINAL_CONTROL_PREFIX,
+  TERMINAL_SOCKET_ENV,
+  TERMINAL_URL_ENV
+} from '../host/terminal-control-core.js'
+import {
+  createTerminalControlProxy,
+  isTerminalControlPath
+} from '../host/terminal-control-proxy.js'
+import {
+  SHARE_BASE_PATH,
+  isSharePath,
+  isTerminalPagePath,
+  toAssetPath
+} from '@packages/mica-web-shared'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
@@ -414,6 +434,8 @@ export async function startDesktopServer(options = {}) {
   // 受控浏览器窗口活在 Electron 主进程里（只有主进程能开窗口），运行时经 HTTP 访问它；
   // 浏览器状态变化要实时推给所有页面，图标才知道该不该亮
   setBrowserControlBroadcaster(broadcast)
+  // 终端控制同理：会话状态变化推给页面，顶栏图标与设置页据此显示
+  setTerminalControlBroadcaster(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
@@ -421,6 +443,7 @@ export async function startDesktopServer(options = {}) {
   registerChatIpc()
   registerLoopIpc()
   registerBrowserControlIpc()
+  registerTerminalControlIpc()
   registerUiStateIpc()
   registerFilesIpc()
   registerGitIpc()
@@ -439,9 +462,15 @@ export async function startDesktopServer(options = {}) {
   // 受控浏览器的窗口服务只监听 Unix socket（Electron 外壳给的 `MICA_BROWSER_SOCKET`），
   // 这里把它代理成自己端口上的 /remote/control——agent 因此只需要一个已有的端口。
   const browserProxy = createBrowserControlProxy({ socketPath: process.env[BROWSER_SOCKET_ENV] })
+  // 终端控制服务同样只监听主进程的 Unix socket，这里代理成 /remote/terminal
+  const terminalProxy = createTerminalControlProxy({
+    socketPath: process.env[TERMINAL_SOCKET_ENV]
+  })
 
   const sharing = options.sharing !== false
-  const server = createServer(createRequestHandler({ rendererRoot, sharing, browserProxy }))
+  const server = createServer(
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy })
+  )
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT, {
     label: '端口'
@@ -460,6 +489,13 @@ export async function startDesktopServer(options = {}) {
   // 纯浏览器宿主（`npm run start:web`）没有 socket，什么都不做。
   void startBrowserControl()
 
+  // 终端控制：端点路径相对服务根（`/sessions`…），所以给的就是服务根，
+  // agent 拼出来是 `$MICA_TERMINAL_URL/sessions` = `/remote/terminal/sessions`
+  if (process.env[TERMINAL_SOCKET_ENV]) {
+    process.env[TERMINAL_URL_ENV] = `http://127.0.0.1:${port}${TERMINAL_CONTROL_PREFIX}`
+  }
+  void startTerminalControl()
+
   let closing = false
   const close = async () => {
     if (closing) return
@@ -476,6 +512,7 @@ export async function startDesktopServer(options = {}) {
     disposeAllChatRuns()
     disposeLoops()
     stopBrowserControl()
+    stopTerminalControl()
     stopNotifyBridge()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
@@ -500,7 +537,12 @@ export async function startDesktopServer(options = {}) {
  * 再交给静态服务。`/share` 与 `/mica-web` 都是页面产物的别名，页面自己按 location.pathname
  * 判断「是不是分享视图」——判断只有一份，在 @packages/mica-web-shared 的 app-paths 里。
  */
-function createRequestHandler({ rendererRoot, sharing = true, browserProxy = null }) {
+function createRequestHandler({
+  rendererRoot,
+  sharing = true,
+  browserProxy = null,
+  terminalProxy = null
+}) {
   return (req, res) => {
     void (async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
@@ -517,6 +559,19 @@ function createRequestHandler({ rendererRoot, sharing = true, browserProxy = nul
           const origin = verifyRequestOrigin(req)
           if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
           if (browserProxy(req, res, url)) return
+        }
+
+        // 终端控制：真实 PTY 与窗口在 Electron 主进程里，同样只监听 Unix socket，
+        // 这里代理成 /remote/terminal/*（AI 与终端页面都用这一个地址）。
+        if (isTerminalControlPath(url.pathname)) {
+          const origin = verifyRequestOrigin(req)
+          if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
+          if (terminalProxy && terminalProxy(req, res, url)) return
+          // 纯浏览器宿主没有主进程：明确回 503，别让 SPA 回退把首页当成接口响应
+          return sendJson(res, 503, {
+            ok: false,
+            error: '终端控制服务不可用（只有在 Mica Code 桌面应用里才有）'
+          })
         }
 
         // 探活接口：另一台运行时（Node）靠它判断「这个端口上是不是一台 Mica Code」，
@@ -565,6 +620,11 @@ function createRequestHandler({ rendererRoot, sharing = true, browserProxy = nul
         // 网页发来的跨站请求被挡住）。
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return sendJson(res, 405, { error: 'Method not allowed' })
+        }
+        // 终端控制窗口的页面：独立入口（terminal.html），与主应用共享同一份产物目录。
+        // 页面通过同源 /remote/terminal/* 读写终端，所以窗口只需要运行时地址。
+        if (isTerminalPagePath(url.pathname)) {
+          return await serveStatic(req, res, rendererRoot, '/terminal.html')
         }
         // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
         // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会

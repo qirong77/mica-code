@@ -4,6 +4,14 @@
  * 不 import electron、不发请求 —— 请求与 IPC 在 browser-control.js，这里只放能直接测的部分。
  */
 
+import {
+  resolveSkillTemplate as resolveTemplate,
+  skillFilePathFor,
+  skillNeedsWrite
+} from './control-skill.js'
+
+export { skillNeedsWrite }
+
 /**
  * 地址、归属与 socket 三个变量名：一起写进技能文档与设置页，别在两处各写一份。
  *
@@ -34,12 +42,7 @@ export function emptyBrowserSnapshot(error = null) {
  * 一个可能不对的地址。
  */
 export function resolveSkillTemplate(markdown, { serviceUrl = '' } = {}) {
-  if (typeof markdown !== 'string') return ''
-  const url = String(serviceUrl || '')
-    .trim()
-    .replace(/\/+$/, '')
-  if (!url) return markdown
-  return markdown.split(`$${BROWSER_URL_ENV}`).join(url)
+  return resolveTemplate(markdown, { serviceUrl, envName: BROWSER_URL_ENV })
 }
 
 /**
@@ -74,14 +77,8 @@ export function normalizeBrowserSummaries(value) {
     .filter((item) => item && item.id)
 }
 
-/** 只有内容真的变了才写技能文件：每次启动都重写会把用户的文件时间戳刷得没有意义 */
-export function skillNeedsWrite(existing, next) {
-  if (typeof next !== 'string' || !next.trim()) return false
-  return existing !== next
-}
-
 export function skillFilePath(homeDir, separator = '/') {
-  return [homeDir, 'skills', SKILL_DIR_NAME, SKILL_FILE_NAME].join(separator)
+  return skillFilePathFor(homeDir, SKILL_DIR_NAME, separator)
 }
 
 export function detailsFrom({ docs, browsers, serviceUrl, skillPath, error = null }) {

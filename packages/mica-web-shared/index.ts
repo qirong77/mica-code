@@ -6,10 +6,14 @@ export { relativeTimeShort } from './time.js';
 export {
   APP_BASE_PATH,
   SHARE_BASE_PATH,
+  TERMINAL_CONTROL_PREFIX,
+  TERMINAL_PAGE_PATH,
   isAppPath,
   isSharePath,
+  isTerminalPagePath,
   isUnderBasePath,
   normalizePathname,
+  terminalControlPath,
   toAssetPath,
 } from './app-paths.js';
 export { formatTokens } from './format.js';

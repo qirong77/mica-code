@@ -9,6 +9,7 @@ import pty from 'node-pty'
 import { normalizeMicaCommand } from './mica-cli'
 import { resolveDefaultShell } from './shell-path'
 import { browserOwnerEnv } from './browser-control'
+import { terminalOwnerEnv } from './terminal-control'
 
 const sessions = new Map()
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
@@ -326,6 +327,8 @@ function createPty(id, sender, options = {}) {
       TERM_PROGRAM_VERSION: app.getVersion(),
       // 终端里手跑 mica / curl 时也能把受控浏览器挂到这条会话的图标上
       ...browserOwnerEnv(options.sessionId),
+      // 同理：在这条终端里跑的 agent 可以把自己开的终端挂回这条会话
+      ...terminalOwnerEnv(options.sessionId),
       ...(notifyServer ? notifyServer.getTerminalEnv(id) : {})
     }
   })

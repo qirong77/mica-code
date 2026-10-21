@@ -24,6 +24,7 @@ const EVENT_CHANNELS = [
   'ui-state:changed',
   'loops:changed',
   'browser:changed',
+  'terminal:changed',
   'app:window-state'
 ]
 
@@ -426,6 +427,17 @@ function createWebApi(env) {
       close: (id) => invoke('browser-control:close', { id }),
       create: (input = {}) => invoke('browser-control:create', input),
       onChanged: (callback) => subscribe('browser:changed', callback)
+    },
+
+    terminalControl: {
+      // 终端控制同理：主进程里是真的 PTY + 后台窗口，页面只负责开关窗口。
+      // agent 的操作面是运行时上的 /remote/terminal，见 src/main/terminal/terminal-docs.js
+      list: () => invoke('terminal-control:list'),
+      show: (id, focus = true) => invoke('terminal-control:show', { id, focus }),
+      hide: (id) => invoke('terminal-control:hide', { id }),
+      close: (id) => invoke('terminal-control:close', { id }),
+      create: (input = {}) => invoke('terminal-control:create', input),
+      onChanged: (callback) => subscribe('terminal:changed', callback)
     },
 
     access: {

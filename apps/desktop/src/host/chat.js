@@ -18,6 +18,7 @@ import {
   tokensFromCodexUsage
 } from './chat-events'
 import { savePastedImage } from './chat-images'
+import { stripControlSockets } from './control-env'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
@@ -30,6 +31,7 @@ import { createTurnLeaseProbe } from './session-lease'
 import { bindLoopSessionId } from './loops'
 import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
 import { browserOwnerEnv } from './browser-control'
+import { terminalOwnerEnv } from './terminal-control'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -65,12 +67,16 @@ function mergeShellEnv(env) {
 }
 
 function buildSpawnEnv(env = process.env, owner = null) {
+  // socket 只属于运行时自己：留着等于给 agent 一条绕过 Host/Origin 校验的旁路
+  const reachable = stripControlSockets(mergeShellEnv(env))
   return {
-    ...mergeShellEnv(env),
+    ...reachable,
     MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS),
     // 受控浏览器按 owner 归属：agent 用它开出来的窗口会挂到对应会话的图标上。
     // 地址（MICA_BROWSER_URL）由运行时的环境继承，这里只补「这一轮是谁」。
-    ...browserOwnerEnv(owner)
+    ...browserOwnerEnv(owner),
+    // 终端控制同理：agent 开的终端挂到这一轮所属的会话上
+    ...terminalOwnerEnv(owner)
   }
 }
 
@@ -1636,18 +1642,21 @@ export function registerChatIpc() {
     return { run }
   }
 
-  ipcMain.handle('chat:btw-ask', (event, { id, question, threadId, queue, sessionId, cwd } = {}) => {
-    const text = typeof question === 'string' ? question.trim() : ''
-    const thread = typeof threadId === 'string' ? threadId.trim() : ''
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return hostTaskRequest(ensured.run, 'mica/btw/ask', {
-      question: text,
-      ...(thread ? { threadId: thread } : {}),
-      ...(queue ? { queue: true } : {})
-    })
-  })
+  ipcMain.handle(
+    'chat:btw-ask',
+    (event, { id, question, threadId, queue, sessionId, cwd } = {}) => {
+      const text = typeof question === 'string' ? question.trim() : ''
+      const thread = typeof threadId === 'string' ? threadId.trim() : ''
+      if (!id) return { ok: false, error: 'chat id 缺失' }
+      const ensured = ensureBtwRun(id, event, { sessionId, cwd })
+      if (!ensured.run) return { ok: false, error: ensured.error }
+      return hostTaskRequest(ensured.run, 'mica/btw/ask', {
+        question: text,
+        ...(thread ? { threadId: thread } : {}),
+        ...(queue ? { queue: true } : {})
+      })
+    }
+  )
 
   // 抽屉的 tab 条：线程活在 host 里，客户端只知道自己的 id，所以「重开页面/重开 app
   // 之后还有哪些 tab、各自聊了什么」只能问 host。
