@@ -6,7 +6,9 @@ import { marked } from 'marked';
 import { LRUCache } from 'lru-cache';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
+import { splitAutolinkPunctuation } from '@packages/mica-common/autolink.js';
 
+import type { AutolinkPunctuationSplit } from '@packages/mica-common/autolink.js';
 import type { Token, Tokens } from 'marked';
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -133,6 +135,16 @@ function linkifyIssueReferences(text: string): string {
 
 // ─── formatToken ─────────────────────────────────────────────────────────────
 
+/**
+ * CLI 侧的链接截断：marked 的 autolink 只把 ASCII 标点当尾部，全角标点连同其后的
+ * 中文会被整段吞进 href（`看 https://x/a，然后` 的目标变成 `https://x/a，然后`）。
+ * 截断位置与桌面端共用 `@packages/mica-common/autolink`，导出让测试能直接断言目标
+ * 地址（屏幕上两种写法长得一样，只看得到文字就测不出来）。
+ */
+export function splitTerminalLink(href: string, plainText: string): AutolinkPunctuationSplit | null {
+  return splitAutolinkPunctuation(href, plainText || href);
+}
+
 function formatToken(
   token: Token,
   listDepth = 0,
@@ -198,6 +210,13 @@ function formatToken(
       }
       const linkText = (token.tokens ?? []).map((t) => formatToken(t, 0, null, token, highlight)).join('');
       const plainLinkText = stripAnsi(linkText);
+      // 截断见 splitTerminalLink：剩下的全角标点及其后中文按普通文本跟在链接后面。
+      const split = splitTerminalLink(token.href, plainLinkText);
+      if (split) {
+        const text = linkText.endsWith(split.trailing) ? linkText.slice(0, -split.trailing.length) : split.text;
+        const link = text && text !== split.url ? createHyperlink(split.url, text) : createHyperlink(split.url);
+        return link + split.trailing;
+      }
       if (plainLinkText && plainLinkText !== token.href) {
         return createHyperlink(token.href, linkText);
       }

@@ -20,6 +20,7 @@ import {
   safeGitTextAsync,
 } from './git.js';
 import { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
+import { splitAutolinkPunctuation } from './autolink.js';
 import {
   BTW_STATE_VERSION,
   btwStatePath,
@@ -51,6 +52,7 @@ export const micaCommon = {
   comparableMessageText,
   comparableText,
   stripMediaPlaceholders,
+  splitAutolinkPunctuation,
   BTW_STATE_VERSION,
   btwStatePath,
   deleteBtwState,
@@ -77,5 +79,7 @@ export type { LoopArgsParseResult } from './loopArgs.js';
 export { prepareImageForApi } from './image.js';
 export type { ProcessedImage, SupportedImageMediaType } from './image.js';
 export { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
+export { splitAutolinkPunctuation } from './autolink.js';
+export type { AutolinkPunctuationSplit } from './autolink.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';

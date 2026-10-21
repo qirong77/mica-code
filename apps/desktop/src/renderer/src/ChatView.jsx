@@ -41,6 +41,7 @@ import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
 import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
+import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
@@ -619,7 +620,7 @@ function MarkdownLink({ href, children, onOpenFile }) {
 }
 
 // 插件数组必须是稳定引用，否则每次渲染都会让 react-markdown 重新解析整篇文档
-const CHAT_REMARK_PLUGINS = [remarkGfm, remarkPathLinks]
+const CHAT_REMARK_PLUGINS = [remarkAutolinkPunctuation, remarkGfm, remarkPathLinks]
 
 function MarkdownView({ text, muted = false, onOpenFile }) {
   const components = useMemo(

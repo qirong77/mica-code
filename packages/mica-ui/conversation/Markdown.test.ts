@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { TerminalSizeContext } from '@packages/@anthropic/ink/src/components/TerminalSizeContext.js';
 import { renderToScreen } from '@packages/@anthropic/ink/src/core/render-to-screen.js';
 import { charInCellAt, type Screen } from '@packages/@anthropic/ink/src/core/screen.js';
-import { Markdown } from './Markdown.js';
+import { Markdown, splitTerminalLink } from './Markdown.js';
 
 const TABLE = [
   '| Priority | Command | Recommendation | Reason |',
@@ -45,5 +45,41 @@ describe('Markdown tables', () => {
     expect(narrowBorder).toBeGreaterThan(0);
     expect(wideBorder).toBeGreaterThan(narrowBorder);
     expect(wideBorder).toBeLessThanOrEqual(140);
+  });
+});
+
+function renderLine(text: string): string {
+  const tree = React.createElement(
+    TerminalSizeContext.Provider,
+    { value: { columns: 120, rows: 10 } },
+    React.createElement(Markdown, null, text),
+  );
+  return screenLines(renderToScreen(tree, 120).screen)[0] ?? '';
+}
+
+describe('Markdown autolinks', () => {
+  it('cuts the full-width punctuation out of the link target', () => {
+    expect(splitTerminalLink('http://10.190.46.109:9200。', 'http://10.190.46.109:9200。')).toEqual({
+      url: 'http://10.190.46.109:9200',
+      text: 'http://10.190.46.109:9200',
+      trailing: '。',
+    });
+  });
+
+  it('cuts the Chinese sentence marked swallowed after the URL', () => {
+    expect(splitTerminalLink('https://example.com/a，然后继续', 'https://example.com/a，然后继续')).toEqual({
+      url: 'https://example.com/a',
+      text: 'https://example.com/a',
+      trailing: '，然后继续',
+    });
+  });
+
+  it('keeps an explicit link target with a punctuated label', () => {
+    expect(splitTerminalLink('https://example.com/a。', '看这里')).toBeNull();
+  });
+
+  it('renders the sentence with a single full stop', () => {
+    expect(renderLine('已部署到 http://10.190.46.109:9200。')).toBe('已部署到 http://10.190.46.109:9200。');
+    expect(renderLine('见 https://example.com/a，然后继续')).toBe('见 https://example.com/a，然后继续');
   });
 });

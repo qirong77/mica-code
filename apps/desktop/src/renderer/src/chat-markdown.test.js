@@ -63,6 +63,25 @@ describe('chat Markdown', () => {
     expect(html).not.toContain('href="javascript:')
     expect(chatUrlTransform('javascript:alert(1)')).toBe('')
   })
+
+  it('keeps full-width sentence punctuation outside autolinks', () => {
+    const html = renderToStaticMarkup(
+      createElement(Markdown, { text: '已部署到 http://10.190.46.109:9200。' })
+    )
+
+    expect(html).toContain('href="http://10.190.46.109:9200"')
+    expect(html).not.toContain('9200。')
+    expect(html).toContain('</a>。')
+  })
+
+  it('leaves an explicit link alone when its text has no trailing punctuation', () => {
+    const html = renderToStaticMarkup(
+      createElement(Markdown, { text: '[看这里](http://10.190.46.109:9200。)' })
+    )
+
+    // 显式链接的目标就是用户写的那一串，不能悄悄裁掉它的句号。
+    expect(html).toContain('href="http://10.190.46.109:9200%E3%80%82"')
+  })
 })
 
 describe('fileTarget', () => {
