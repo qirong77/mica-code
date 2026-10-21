@@ -1567,6 +1567,32 @@ function TurnLogDock({ messages, now = Date.now() }) {
   )
 }
 
+// 对话区里选中的文字（右键菜单的「引用」用它）：只认主对话列表与回合日志里的选区，
+// 输入框、浮层里的选择不参与。选区跨了消息边界时不给署名——半句我、半句模型，
+// 标成任何一方都是错的，交给默认的「对话」。
+function readTranscriptSelection() {
+  const selection = window.getSelection?.()
+  if (!selection || selection.isCollapsed) return null
+  const text = selection.toString().trim()
+  if (!text) return null
+  const containerOf = (node) => {
+    const element = node instanceof Element ? node : node?.parentElement
+    return element?.closest('.chat-scroll, .chat-turn-log') ? element : null
+  }
+  const start = containerOf(selection.anchorNode)
+  const end = containerOf(selection.focusNode)
+  if (!start || !end) return null
+  const ownerOf = (element) => element.closest('.chat-message-user, .chat-message-assistant')
+  const startOwner = ownerOf(start)
+  const sameOwner = startOwner && startOwner === ownerOf(end)
+  const role = sameOwner
+    ? startOwner.classList.contains('chat-message-user')
+      ? 'user'
+      : 'assistant'
+    : null
+  return { text, role }
+}
+
 function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
@@ -1593,6 +1619,14 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     setPos({ x: px, y: py })
   }, [menu.x, menu.y])
   const allItems = [
+    menu.selection
+      ? {
+          id: 'quote',
+          label: '引用',
+          title: '把选中的文字引用进输入框',
+          icon: IconQuote
+        }
+      : null,
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
@@ -1625,7 +1659,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     },
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
-  ]
+  ].filter(Boolean)
   // 去掉落到首尾的多余分隔线
   const items = allItems.filter(
     (item, index, all) => !item.separator || (index > 0 && index < all.length - 1)
@@ -4870,7 +4904,9 @@ export function ChatView({
         x: event.clientX,
         y: event.clientY,
         hasSession: Boolean(sessionIdRef.current),
-        running
+        running,
+        // 右键不会折叠选区（点在选区内时），所以这里读到的就是用户刚选中的那段字
+        selection: readTranscriptSelection()
       })
     },
     [running]
@@ -4926,6 +4962,11 @@ export function ChatView({
   const runContextMenuAction = useCallback(
     async (action) => {
       setContextMenu(null)
+      if (action === 'quote') {
+        const selection = contextMenu?.selection
+        if (selection) quoteMessage(selection)
+        return
+      }
       if (action === 'compact-local' || action === 'compact-model' || action === 'clear') {
         await runSlashCommand({
           name: action === 'clear' ? 'clear' : 'compact',
@@ -4973,9 +5014,11 @@ export function ChatView({
     },
     [
       appendNotice,
+      contextMenu,
       onResumeSessionRef,
       onSessionRenamedRef,
       onShareSessionRef,
+      quoteMessage,
       runSlashCommand,
       startCommitTask
     ]
