@@ -128,6 +128,28 @@ export function applyBrowserRenderSwitch(commandLine, env = {}) {
   return true
 }
 
+/**
+ * 操作前是否需要临时把窗口显示出来，返回要恢复的现场（`null` = 窗口本来就在显示面上）。
+ *
+ * 隐藏窗口没有显示面：`hide()` 之后合成器不再稳定产帧，原生输入事件也会被丢掉。截图轻则
+ * 拿到冻结的旧帧，整页截图甚至会一直不返回（实测 20s 超时）；点击/输入只能退回页面内合成。
+ * 所以依赖显示面的操作期间先 `showInactive` 露出窗口，做完按这里记下的现场复原 ——
+ * 判定与恢复都收成纯函数，好被单测锁住。
+ */
+export function windowRevealPlan(state = {}) {
+  const visible = Boolean(state.visible)
+  const minimized = Boolean(state.minimized)
+  if (visible && !minimized) return null
+  return { visible, minimized }
+}
+
+/** 按现场恢复：最小化的还原成最小化，原本隐藏的 hide；原本就可见则什么都不用做 */
+export function windowRestoreAction(plan) {
+  if (!plan) return null
+  if (plan.minimized) return 'minimize'
+  return plan.visible ? null : 'hide'
+}
+
 export function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback

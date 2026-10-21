@@ -192,7 +192,8 @@ export const BROWSER_ENDPOINTS = [
     id: 'click',
     method: 'POST',
     path: '/browser/tabs/:id/click',
-    summary: '点击：给 selector 按元素中心点，或直接给坐标（隐藏窗口自动退化成页面内合成事件）',
+    summary:
+      '点击：给 selector 按元素中心点，或直接给坐标（窗口隐藏时临时显示出来按原生输入点，点完恢复隐藏）',
     params: [
       { name: 'selector', in: 'body', required: false, description: 'CSS 选择器（与坐标二选一）' },
       { name: 'x', in: 'body', required: false, description: '视口坐标' },
@@ -205,7 +206,7 @@ export const BROWSER_ENDPOINTS = [
     method: 'POST',
     path: '/browser/tabs/:id/type',
     summary:
-      '输入文本：可先聚焦 selector，可清空，可回车提交；隐藏窗口用页面内合成事件（受控组件也认）',
+      '输入文本：可先聚焦 selector，可清空，可回车提交；窗口隐藏时临时显示出来走原生输入，输完恢复隐藏',
     params: [
       { name: 'selector', in: 'body', required: false, description: '先聚焦的元素' },
       { name: 'text', in: 'body', required: true, description: '要输入的内容' },
@@ -234,7 +235,7 @@ export const BROWSER_ENDPOINTS = [
     id: 'screenshot',
     method: 'GET',
     path: '/browser/tabs/:id/screenshot',
-    summary: '截图（窗口隐藏着也拿得到；整页截图传 fullPage=true）',
+    summary: '截图（窗口隐藏时会先显示出来再截，截完恢复隐藏；整页截图传 fullPage=true）',
     params: [
       { name: 'fullPage', in: 'query', required: false, description: 'true 时截整页' },
       {

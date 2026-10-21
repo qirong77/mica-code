@@ -351,6 +351,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - chat run 按 nodeId 存于 `host/chat.js`。请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。
 - 队列唯一投影为 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地显式 after_turn 在后；所有查询、撤回、单槽判定使用同一投影。
+- `turn/steer` 被接受即回 `queued`（并记进 hostPending），排队行一律可撤回：确认通知没回来的乐观行（`pending`）也走同一入口。撤回前先发 `mica/queue/hold` 冻结该条（迭代边界不再注入，用户正在重新编辑的文本不会被发出），失败则解冻；结果由 `chat-recall.js.resolveQueueRecall` 判定为「回输入框 / 已开始发送 / 保留」。`hostPending` 只由 `mica/queue/*` 改写，不在 turn 结束时清空。
 - `commandExecution.command` 按第一个空格切成 name + JSON，不能压缩 JSON 内的空白。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - host 主动启动的轮次发 `chat:run-started` 补用户行；按 clientMessageId 和末尾未回答的同文行去重，不能全局按文本去重。
@@ -421,7 +422,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 主进程通过 Unix socket 提供服务，`MICA_BROWSER_SOCKET` 交运行时桥；agent 访问本运行时 `/remote/control`，不另开 TCP 服务。
 - `browserOwnerEnv()` 注入 `MICA_BROWSER_OWNER` / `MICA_BROWSER_URL`，owner 唯一决定会话归属；纯 Web 宿主无服务时正常降级。
 - 窗口默认隐藏，关窗只 hide，销毁须专用 close API；同一 `persist:mica-browser` 分区共享持久 Cookie，权限拒绝，window.open 转同窗新标签。
-- 截图用 CDP `Page.captureScreenshot`；可见窗口用原生输入，隐藏窗口用合成事件并报告 via。
+- 截图用 CDP `Page.captureScreenshot`。依赖显示面的操作（截图、click、type、keys、scroll）统一走 `withShownWindow`：先 `showInactive` 露出窗口、必要时挂上目标标签页并等首帧，做完按原状态 hide/minimize 复原（不抢焦点、不改 `visible` 状态）。隐藏窗口原生输入会被丢弃、合成器不出帧，因此合成事件路径只作为恢复不了显示面时的兜底，via 报告实际走的那条。
 - `app.whenReady()` 前设置 `disable-backgrounding-occluded-windows` 保持隐藏窗口 rAF/可见性；进程级开关 `MICA_BROWSER_UNTHROTTLE=0` 可关闭。
 - 服务保持 Origin/Host 守卫，无 CORS，非 GET 要求 JSON；Cookie 导出文件 0600，写失败只报告。
 - 顶栏图标显示/隐藏窗口，销毁二次确认；未归属窗口变暗显示。Browser Control 设置页永远可打开，无能力时给说明，仅展示文档入口，不管理窗口。

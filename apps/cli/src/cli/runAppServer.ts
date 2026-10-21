@@ -1194,6 +1194,20 @@ async function handleCodexRequest(
       });
       return;
     }
+    case MICA_METHODS.queueHold: {
+      // Mica extension: freeze the queued input for the recall round-trip. The
+      // client holds before pulling the entry back into the composer, so an
+      // iteration boundary cannot inject the text the user is about to re-edit.
+      const clientMessageId = paramString(params, 'clientMessageId');
+      const held = params.held !== false;
+      const frozen = ctx.executor.holdQueued(clientMessageId, held);
+      ctx.writeResponse({
+        ok: frozen,
+        held: held && frozen,
+        pending: ctx.executor.pendingInputs.map(inputToQueueItem),
+      });
+      return;
+    }
     case MICA_METHODS.killBackgroundTask: {
       // Mica extension: background shell tasks are owned by the host process, so
       // the desktop can only stop one through it (mirrors the CLI kill_task tool).

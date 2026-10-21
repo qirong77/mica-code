@@ -22,6 +22,7 @@ describe('codex protocol framing', () => {
     expect(MICA_METHODS).toEqual({
       editMessage: 'mica/turn/editMessage',
       queueRecall: 'mica/queue/recall',
+      queueHold: 'mica/queue/hold',
       killBackgroundTask: 'mica/backgroundTasks/kill',
       backgroundTaskOutput: 'mica/backgroundTasks/output',
       subagentTaskDetail: 'mica/subagentTasks/detail',

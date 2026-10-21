@@ -17,7 +17,9 @@ import {
   serializeEvaluation,
   tabSummary,
   timeoutError,
-  truncateOutput
+  truncateOutput,
+  windowRestoreAction,
+  windowRevealPlan
 } from './browser-core.js'
 import { chromeDataUrl, parseChromeMessage } from './browser-chrome.js'
 
@@ -36,6 +38,7 @@ import { chromeDataUrl, parseChromeMessage } from './browser-chrome.js'
 
 const CLICK_SETTLE_MS = 120
 const WAIT_POLL_MS = 150
+const FRAME_SETTLE_MS = 80
 const MAX_SCREENSHOT_HEIGHT = 16000
 const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
@@ -593,6 +596,66 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
   }
 
+  /**
+   * 操作前临时把窗口露出来。隐藏/最小化的窗口没有显示面，合成器不产帧、原生输入也会被丢掉；
+   * 用 showInactive 是为了不抢走用户正在打字的焦点。返回的现场交给 restoreWindow 复原。
+   */
+  function revealWindow(record) {
+    if (record.win.isDestroyed()) return null
+    const plan = windowRevealPlan({
+      visible: record.win.isVisible(),
+      minimized: record.win.isMinimized()
+    })
+    if (!plan) return null
+    if (plan.minimized) record.win.restore()
+    else record.win.showInactive()
+    return plan
+  }
+
+  function restoreWindow(record, plan) {
+    const action = windowRestoreAction(plan)
+    if (!action || record.win.isDestroyed()) return
+    if (action === 'minimize') record.win.minimize()
+    else record.win.hide()
+  }
+
+  /** 窗口从隐藏变可见后渲染器要恢复出帧；不等这一帧就截，拿到的可能是空白或冻结的旧帧 */
+  async function settleFirstFrame(tab) {
+    try {
+      await evaluateInPage(
+        tab,
+        'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))',
+        2000
+      )
+    } catch {
+      // 页面在忙或正在导航：退回固定等待，别让等待本身变成新的超时来源
+      await delay(FRAME_SETTLE_MS)
+    }
+  }
+
+  /**
+   * 在「窗口真的显示着」的前提下跑一次操作，结束后恢复原状态。
+   *
+   * 受影响的操作都是同一类：没有显示面时原生输入被丢掉（只能退回页面内合成事件）、
+   * 合成器不出帧（截图拿到旧帧甚至不返回）、rAF 驱动的页面整页冻结。所以这些操作
+   * 一律先 showInactive 露出来、必要时把目标标签页挂上窗口，做完再 hide/还原。
+   * `run(via)` 拿到这次该走哪条路：能显示就是 'native'，恢复不了才退回 'in-page'。
+   */
+  async function withShownWindow(record, tab, run) {
+    const previous = activeTab(record)
+    const switched = !previous || previous.id !== tab.id
+    const plan = revealWindow(record)
+    const native = Boolean(plan) || switched || inputMode(record) === 'native'
+    try {
+      if (switched) activateTabIn(record, tab.id)
+      if (native && (plan || switched)) await settleFirstFrame(tab)
+      return await run(native ? 'native' : 'in-page')
+    } finally {
+      if (switched && previous && record.tabs.includes(previous)) activateTabIn(record, previous.id)
+      restoreWindow(record, plan)
+    }
+  }
+
   async function elementCenter(tab, selector) {
     const script = `(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
@@ -617,7 +680,12 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     })
   }
 
-  /** 可见窗口走原生输入，隐藏窗口走页面内合成事件（原因见 SYNTHETIC_INPUT 的说明） */
+  /**
+   * 可见窗口走原生输入，隐藏窗口走页面内合成事件（原因见 SYNTHETIC_INPUT 的说明）。
+   *
+   * 现在它只作为兜底：依赖显示面的操作会先经 withShownWindow 把窗口露出来，走原生路径；
+   * 只有窗口已销毁、恢复不了显示面时才会落到 'in-page'。
+   */
   function inputMode(record) {
     return record.visible && !record.win.isDestroyed() ? 'native' : 'in-page'
   }
@@ -853,107 +921,113 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
         throw new BrowserRequestError('click 需要 selector 或 x/y 坐标')
       }
-      if (inputMode(record) === 'in-page') {
-        const result = await synthetic(tab, { action: 'click', selector, x: point.x, y: point.y })
+      return withShownWindow(record, tab, async (via) => {
+        if (via === 'in-page') {
+          const result = await synthetic(tab, { action: 'click', selector, x: point.x, y: point.y })
+          await delay(CLICK_SETTLE_MS)
+          refreshTabState(tab)
+          emit('clicked')
+          return {
+            target: target || { x: result.x ?? point.x, y: result.y ?? point.y },
+            via: result.via,
+            url: tab.contents.getURL()
+          }
+        }
+        await dispatchMouse(tab, { ...point, type: 'mouseMoved', clickCount: 0 })
+        await dispatchMouse(tab, { ...point, type: 'mousePressed' })
+        await dispatchMouse(tab, { ...point, type: 'mouseReleased' })
         await delay(CLICK_SETTLE_MS)
         refreshTabState(tab)
         emit('clicked')
         return {
-          target: target || { x: result.x ?? point.x, y: result.y ?? point.y },
-          via: result.via,
+          target: target || { x: point.x, y: point.y },
+          via: 'native',
           url: tab.contents.getURL()
         }
-      }
-      await dispatchMouse(tab, { ...point, type: 'mouseMoved', clickCount: 0 })
-      await dispatchMouse(tab, { ...point, type: 'mousePressed' })
-      await dispatchMouse(tab, { ...point, type: 'mouseReleased' })
-      await delay(CLICK_SETTLE_MS)
-      refreshTabState(tab)
-      emit('clicked')
-      return {
-        target: target || { x: point.x, y: point.y },
-        via: 'native',
-        url: tab.contents.getURL()
-      }
+      })
     },
 
     async type(tabId, { selector = '', text = '', clear = false, submit = false } = {}) {
       const { record, tab } = requireTab(tabId)
-      if (inputMode(record) === 'in-page') {
+      return withShownWindow(record, tab, async (via) => {
+        if (via === 'in-page') {
+          if (selector) {
+            const found = await evaluateInPage(
+              tab,
+              `Boolean(document.querySelector(${JSON.stringify(selector)}))`,
+              5000
+            )
+            if (!found) throw new BrowserRequestError(`没有找到元素：${selector}`)
+          }
+          if (!selector) {
+            // 合成路径要往「当前聚焦的元素」里写，没聚焦就明确报错（原生路径这里是隐式的）
+            const focused = await evaluateInPage(
+              tab,
+              'Boolean(document.activeElement && document.activeElement !== document.body)',
+              5000
+            )
+            if (!focused) throw new BrowserRequestError('没有聚焦任何元素，type 需要 selector')
+          }
+          const result = await synthetic(tab, {
+            action: 'type',
+            selector,
+            text: String(text || ''),
+            clear,
+            submit
+          })
+          refreshTabState(tab)
+          emit('typed')
+          return { ok: true, via: result.via, value: result.value, submitted: result.submitted }
+        }
         if (selector) {
-          const found = await evaluateInPage(
-            tab,
-            `Boolean(document.querySelector(${JSON.stringify(selector)}))`,
-            5000
-          )
+          const script = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); return true })()`
+          const found = await evaluateInPage(tab, script, 15000)
           if (!found) throw new BrowserRequestError(`没有找到元素：${selector}`)
         }
-        if (!selector) {
-          // 合成路径要往「当前聚焦的元素」里写，没聚焦就明确报错（原生路径这里是隐式的）
-          const focused = await evaluateInPage(
+        if (clear) {
+          await evaluateInPage(
             tab,
-            'Boolean(document.activeElement && document.activeElement !== document.body)',
+            `(() => {
+              const el = document.activeElement;
+              if (!el) return false;
+              if (typeof el.select === 'function') el.select();
+              else if (el.isContentEditable) document.execCommand('selectAll');
+              return true;
+            })()`,
             5000
           )
-          if (!focused) throw new BrowserRequestError('没有聚焦任何元素，type 需要 selector')
+          await sendCommand(tab, 'Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'Backspace',
+            code: 'Backspace',
+            windowsVirtualKeyCode: 8
+          })
+          await sendCommand(tab, 'Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'Backspace',
+            code: 'Backspace'
+          })
         }
-        const result = await synthetic(tab, {
-          action: 'type',
-          selector,
-          text: String(text || ''),
-          clear,
-          submit
-        })
+        if (text) await sendCommand(tab, 'Input.insertText', { text: String(text) })
+        if (submit) await pressKeys(tab, [{ key: 'Enter', code: 'Enter', keyCode: 13 }])
         refreshTabState(tab)
         emit('typed')
-        return { ok: true, via: result.via, value: result.value, submitted: result.submitted }
-      }
-      if (selector) {
-        const script = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); return true })()`
-        const found = await evaluateInPage(tab, script, 15000)
-        if (!found) throw new BrowserRequestError(`没有找到元素：${selector}`)
-      }
-      if (clear) {
-        await evaluateInPage(
-          tab,
-          `(() => {
-            const el = document.activeElement;
-            if (!el) return false;
-            if (typeof el.select === 'function') el.select();
-            else if (el.isContentEditable) document.execCommand('selectAll');
-            return true;
-          })()`,
-          5000
-        )
-        await sendCommand(tab, 'Input.dispatchKeyEvent', {
-          type: 'keyDown',
-          key: 'Backspace',
-          code: 'Backspace',
-          windowsVirtualKeyCode: 8
-        })
-        await sendCommand(tab, 'Input.dispatchKeyEvent', {
-          type: 'keyUp',
-          key: 'Backspace',
-          code: 'Backspace'
-        })
-      }
-      if (text) await sendCommand(tab, 'Input.insertText', { text: String(text) })
-      if (submit) await pressKeys(tab, [{ key: 'Enter', code: 'Enter', keyCode: 13 }])
-      refreshTabState(tab)
-      emit('typed')
-      return { ok: true, via: 'native' }
+        return { ok: true, via: 'native' }
+      })
     },
 
     async keys(tabId, input) {
       const { record, tab } = requireTab(tabId)
       const descriptors = keyDescriptors(input)
-      if (inputMode(record) === 'in-page') {
-        const result = await synthetic(tab, { action: 'keys', descriptors })
-        refreshTabState(tab)
-        return { ok: true, via: result.via, fired: result.fired }
-      }
-      await pressKeys(tab, descriptors)
-      return { ok: true, via: 'native' }
+      return withShownWindow(record, tab, async (via) => {
+        if (via === 'in-page') {
+          const result = await synthetic(tab, { action: 'keys', descriptors })
+          refreshTabState(tab)
+          return { ok: true, via: result.via, fired: result.fired }
+        }
+        await pressKeys(tab, descriptors)
+        return { ok: true, via: 'native' }
+      })
     },
 
     async scroll(tabId, { deltaY = 0 } = {}) {
@@ -962,39 +1036,42 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       if (!Number.isFinite(amount) || amount === 0) {
         throw new BrowserRequestError('scroll 需要非零的 deltaY')
       }
-      if (inputMode(record) === 'in-page') {
-        const result = await synthetic(tab, { action: 'scroll', deltaY: amount })
+      return withShownWindow(record, tab, async (via) => {
+        if (via === 'in-page') {
+          const result = await synthetic(tab, { action: 'scroll', deltaY: amount })
+          await delay(CLICK_SETTLE_MS)
+          return { scrollY: result.scrollY }
+        }
+        const size = await evaluateInPage(
+          tab,
+          '({ x: Math.floor(window.innerWidth / 2), y: Math.floor(window.innerHeight / 2) })',
+          5000
+        )
+        await sendCommand(tab, 'Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: size.x,
+          y: size.y,
+          deltaX: 0,
+          deltaY: amount
+        })
         await delay(CLICK_SETTLE_MS)
-        return { scrollY: result.scrollY }
-      }
-      const size = await evaluateInPage(
-        tab,
-        '({ x: Math.floor(window.innerWidth / 2), y: Math.floor(window.innerHeight / 2) })',
-        5000
-      )
-      await sendCommand(tab, 'Input.dispatchMouseEvent', {
-        type: 'mouseWheel',
-        x: size.x,
-        y: size.y,
-        deltaX: 0,
-        deltaY: amount
+        const scrollY = await evaluateInPage(tab, 'window.scrollY', 5000)
+        return { scrollY }
       })
-      await delay(CLICK_SETTLE_MS)
-      const scrollY = await evaluateInPage(tab, 'window.scrollY', 5000)
-      return { scrollY }
     },
 
     async screenshot(tabId, { fullPage = false, timeoutMs = 0 } = {}) {
       const { record, tab } = requireTab(tabId)
-      // 非当前标签页的视图不在窗口上（没有显示面），截图前临时挂上再切回去
-      const previous = activeTab(record)
-      const switched = !previous || previous.id !== tab.id
-      if (switched) activateTabIn(record, tab.id)
-      const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : SCREENSHOT_TIMEOUT_MS
-      try {
+      // 隐藏窗口不产帧：截图期间一定把窗口显示出来，截完恢复原状态（见 withShownWindow）
+      return withShownWindow(record, tab, async () => {
+        const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : SCREENSHOT_TIMEOUT_MS
         const params = { format: 'png' }
         if (fullPage) {
-          const metrics = await sendCommand(tab, 'Page.getLayoutMetrics')
+          const metrics = await withTimeout(
+            sendCommand(tab, 'Page.getLayoutMetrics'),
+            budget,
+            `页面尺寸读取超过 ${budget}ms 未返回（页面可能在忙）`
+          )
           const size = metrics?.cssContentSize || metrics?.contentSize || { width: 0, height: 0 }
           params.captureBeyondViewport = true
           params.clip = {
@@ -1016,10 +1093,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
           bytes: Math.floor((data.length * 3) / 4),
           url: tab.contents.getURL()
         }
-      } finally {
-        if (switched && previous && record.tabs.includes(previous))
-          activateTabIn(record, previous.id)
-      }
+      })
     },
 
     async waitFor(tabId, input = {}) {

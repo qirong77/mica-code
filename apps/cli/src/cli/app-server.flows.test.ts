@@ -835,9 +835,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
       .filter((message) => message.role === 'user')
       .map((message) => contentTextOf(message.content));
     expect(userTexts).toEqual(['你好']);
-    expect(session.snapshot?.subagentUsageHistory).toMatchObject([
-      { subagentType: 'btw', status: 'completed' },
-    ]);
+    expect(session.snapshot?.subagentUsageHistory).toMatchObject([{ subagentType: 'btw', status: 'completed' }]);
 
     // 新开一条线程（抽屉的 `+`）：空问题只把 tab 建出来，不提问、不占用任何子代理。
     await send(host, 3, 'mica/btw/ask', { question: '' });
@@ -849,8 +847,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // tab 清单（重开页面/重开 app 后恢复用）里两条线程都在，且各自带着自己的问答。
     await send(host, 4, 'mica/btw/threads', {});
     const listed = await waitFor(host, (m) => m.id === 4, 'btw threads listed');
-    const list = ((listed.result as { threads?: Array<{ id: string; entries: unknown[] }> }).threads ||
-      []) as Array<{ id: string; entries: unknown[] }>;
+    const list = ((listed.result as { threads?: Array<{ id: string; entries: unknown[] }> }).threads || []) as Array<{
+      id: string;
+      entries: unknown[];
+    }>;
     expect(list.map((item) => item.id)).toEqual(expect.arrayContaining([createdId!]));
     expect(list.find((item) => item.id === createdId)?.entries).toHaveLength(0);
 
@@ -859,8 +859,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect((await waitFor(host, (m) => m.id === 5, 'btw close')).result).toMatchObject({ ok: true });
     await send(host, 6, 'mica/btw/threads', {});
     const afterClose = await waitFor(host, (m) => m.id === 6, 'btw threads after close');
-    const remaining =
-      (afterClose.result as { threads?: Array<{ id: string }> }).threads || [];
+    const remaining = (afterClose.result as { threads?: Array<{ id: string }> }).threads || [];
     expect(remaining.map((item) => item.id)).not.toContain(createdId);
     expect(remaining.map((item) => item.id)).toContain(answered.params?.id as string);
   });
@@ -904,8 +903,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(hostB, 1, 'mica/btw/threads', {});
     const listed = await waitFor(hostB, (m) => m.id === 1, 'btw threads after restart');
     const threads =
-      (listed.result as { threads?: Array<{ id: string; entries: Array<{ question?: string }> }> })
-        .threads || [];
+      (listed.result as { threads?: Array<{ id: string; entries: Array<{ question?: string }> }> }).threads || [];
     // 抽屉里的 tab 与问答都还在：这正是「关掉 app 再打开」应该看到的
     expect(threads.map((item) => item.id)).toContain(threadId);
     expect(threads.find((item) => item.id === threadId)?.entries[0]).toMatchObject({
@@ -1731,6 +1729,57 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 4, 'mica/queue/recall', { clientMessageId: 'optimistic-recall' });
     const missing = await waitFor(host, (m) => m.id === 4, 'queue recall (empty) response', 10_000);
     expect(missing.result).toMatchObject({ ok: false, input: null });
+  });
+
+  // 用户点「重新编辑」时先 hold 再 recall：hold 期间的迭代边界不能把用户正在改的
+  // 文本注入进去。host 的 stdin 是顺序的，所以 hold 一定先于那两个边界生效。
+  itE2E('mica/queue/hold freezes the queued steer until the recall takes it back', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 1200;
+
+    const host = spawnHost('queue-hold');
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'hold-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '请创建文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (hold)');
+    const turn1 = (started.params?.turn as { id?: string }).id!;
+
+    await sleep(400);
+    await send(host, 2, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: turn1,
+      input: [{ type: 'text', text: '冻结我：编辑期间不该被注入' }],
+      clientMessageId: 'optimistic-hold',
+    });
+    await waitFor(host, (m) => m.method === 'mica/queue/queued', 'mica/queue/queued (hold)');
+
+    await send(host, 3, 'mica/queue/hold', { clientMessageId: 'optimistic-hold', held: true });
+    const held = await waitFor(host, (m) => m.id === 3, 'queue hold response', 10_000);
+    expect(held.error).toBeFalsy();
+    expect(held.result).toMatchObject({ ok: true, held: true });
+
+    // 冻结之后再撤回（用户把文本拿回输入框）：中途没有 mica/queue/dequeue。
+    await send(host, 4, 'mica/queue/recall', { clientMessageId: 'optimistic-hold' });
+    const recalled = await waitFor(host, (m) => m.id === 4, 'queue recall (held) response', 10_000);
+    expect(recalled.result).toMatchObject({
+      ok: true,
+      input: { id: 'optimistic-hold', text: '冻结我：编辑期间不该被注入' },
+    });
+    expect(host.lines.some((m) => m.method === 'mica/queue/dequeue')).toBe(false);
+
+    const completed = await waitFor(host, turnCompleted(turn1), 'turn/completed (hold)', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('completed');
+    expect(JSON.stringify(mock!.state.requests.map((request) => request.input ?? []))).not.toContain(
+      '冻结我：编辑期间不该被注入',
+    );
   });
 
   itE2E("auto compaction shrinks the running turn's next request and reports its counters", async () => {

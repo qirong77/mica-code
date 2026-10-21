@@ -371,6 +371,13 @@ export const MICA_METHODS = {
   /** Pull a queued (after_iteration) input back out of the host's single slot
    * so the client can restore it to its composer — the CLI's shift + ←. */
   queueRecall: 'mica/queue/recall',
+  /**
+   * Freeze the queued input so an iteration boundary cannot inject it while the
+   * client moves it back into the composer. Without it, clicking "re-edit" on a
+   * queued message races the boundary and sends the text the user is editing.
+   * `held: false` releases the hold (`params: { clientMessageId, held }`).
+   */
+  queueHold: 'mica/queue/hold',
   killBackgroundTask: 'mica/backgroundTasks/kill',
   backgroundTaskOutput: 'mica/backgroundTasks/output',
   subagentTaskDetail: 'mica/subagentTasks/detail',

@@ -102,6 +102,7 @@ import {
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
+import { resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
 import {
@@ -374,19 +375,26 @@ function QueueDock({ items, onRecall, recallingId }) {
     <section className="chat-queue-dock" aria-label="等待发送的消息">
       <div className="chat-queue-dock-header">
         <span aria-hidden="true">↳</span>
-        <span>{`${headerText} · shift + ← to re-edit`}</span>
+        <span>{`${headerText} · shift + ← or double click to re-edit`}</span>
         <span>{items.length}</span>
       </div>
       <div className="chat-queue-dock-items">
         {items.map((item, index) => (
-          <div key={item.id || `${index}:${item.text}`} className="chat-queue-dock-item">
+          <div
+            key={item.id || `${index}:${item.text}`}
+            className="chat-queue-dock-item"
+            title="双击撤回并重新编辑"
+            onDoubleClick={() => onRecall(item.id)}
+          >
             <span>▌</span>
             <span>{item.text}</span>
             <button
               type="button"
-              title={item.pending ? '正在加入队列' : '撤回到输入框（shift + ←）'}
+              // pending 只是「确认通知还没回来」的乐观行，同样要能撤回：否则
+              // 确认一旦丢失，这一行就永远停在排队态（既发不出去也撤不回）。
+              title="撤回到输入框（shift + ←）"
               aria-label={`撤回排队消息 ${index + 1}`}
-              disabled={item.pending || Boolean(recallingId)}
+              disabled={Boolean(recallingId)}
               onClick={() => onRecall(item.id)}
             >
               {recallingId === item.id ? (
@@ -3501,6 +3509,11 @@ export function ChatView({
       // 扩展通知）也会把对应乐观消息标记为排队，dequeue 后恢复，与本地
       // after_turn 排队展示一致。
       const queuedIds = new Set(items.map((item) => item?.id))
+      // 排队 id 列表只保留 host 现在真正持有的条目：消息投递（dequeue）之后
+      // 残留的 id 会误判「已有一条排队消息」，把下一次 Enter 挡在本地。
+      queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((queuedId) =>
+        queuedIds.has(queuedId)
+      )
       updateMessages((previous) => {
         let changed = false
         const next = previous.map((message) => {
@@ -4753,21 +4766,13 @@ export function ChatView({
       const item = requestedId
         ? queuedDisplayItems.find((candidate) => candidate.id === requestedId)
         : queuedDisplayItems[queuedDisplayItems.length - 1]
-      if (!item || item.pending) return
+      if (!item) return
       const targetNodeId = nodeId
       recallingQueueRef.current = item.id
       setRecallingQueueId(item.id)
-      try {
-        const result = await window.mica.chat.recallQueued(runKey, item.id)
-        if (nodeIdRef.current !== targetNodeId) return
-        setQueuedItems(Array.isArray(result?.queuedItems) ? result.queuedItems : [])
-        if (!result?.ok) {
-          appendNotice(result?.error || '排队消息撤回失败', 'error')
-          return
-        }
-        queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((id) => id !== item.id)
-        updateMessages((previous) => previous.filter((message) => message.id !== item.id))
-        const recalledText = result.text || item.text || ''
+      const restoreDraft = (text) => {
+        const recalledText = String(text || '')
+        if (!recalledText) return
         setInput((current) => {
           const next = current.trim() ? `${current}\n\n${recalledText}` : recalledText
           draftsRef.current.set(nodeId, next)
@@ -4780,6 +4785,51 @@ export function ChatView({
           element.focus()
           element.setSelectionRange(element.value.length, element.value.length)
         })
+      }
+      try {
+        // 先冻结这条排队消息，再把它撤回输入框：host 的 after_iteration 注入
+        // 就在迭代边界上，不冻结的话用户点开「重新编辑」的同一瞬间文本可能已经
+        // 发给模型了——这正是「编辑到一半被发出去」。hold 与 recall 都走 host 的
+        // stdin，顺序有保证，所以冻结一定先于撤回生效。
+        await window.mica.chat.holdQueued(runKey, item.id).catch(() => null)
+        const result = await window.mica.chat.recallQueued(runKey, item.id)
+        if (nodeIdRef.current !== targetNodeId) return
+        const queuedItems = Array.isArray(result?.queuedItems) ? result.queuedItems : []
+        const outcome = resolveQueueRecall({
+          id: item.id,
+          pending: item.pending === true,
+          ok: Boolean(result?.ok),
+          queuedItems: Array.isArray(result?.queuedItems) ? result.queuedItems : null,
+          runActive: !finishedRef.current
+        })
+        // 撤回没成功（消息已经在跑）时必须解冻，否则它会在队列里一直等着。
+        if (outcome !== 'restore') {
+          await window.mica.chat.holdQueued(runKey, item.id, false).catch(() => null)
+        }
+        queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((id) => id !== item.id)
+        if (outcome === 'keep') {
+          setQueuedItems(queuedItems)
+          appendNotice(result?.error || '排队消息撤回失败', 'error')
+          return
+        }
+        setQueuedItems(
+          outcome === 'restore'
+            ? queuedItems.filter((candidate) => candidate.id !== item.id)
+            : queuedItems
+        )
+        if (outcome === 'sent') {
+          // 这条消息已经开始发送了：行留在对话里，只是不再排队，不能停在一个
+          // 既排着队、又撤不回来的状态。
+          updateMessages((previous) =>
+            previous.map((message) =>
+              message.id === item.id ? { ...message, queued: false } : message
+            )
+          )
+          appendNotice(result?.error || '该消息已开始发送，无法撤回', 'warn')
+          return
+        }
+        updateMessages((previous) => previous.filter((message) => message.id !== item.id))
+        restoreDraft(result?.text || item.text)
       } catch (error) {
         if (nodeIdRef.current === targetNodeId) {
           appendNotice(

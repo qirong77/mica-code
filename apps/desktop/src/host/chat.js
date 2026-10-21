@@ -574,7 +574,29 @@ function startRun(sender, id, payload) {
           disposeHost(id)
           return { ok: false, error: 'chat host 不可用，请重试' }
         }
-        return { ok: true }
+        // steer 只是把输入写进 host 的 after_iteration 单槽，消息此刻还在排队、
+        // 没被模型看到。必须如实回成 `queued`：否则渲染层按「已发送」处理乐观行
+        // （解除 queued 标记、把 id 从排队 id 列表里删掉），撤回和 step_start
+        // 的激活都失去依据，界面上就留下一条发不出去也撤不回的占位。
+        // 真实通知（mica/queue/queued）到达后用同一个 id 覆盖，内容一致。
+        if (payload.clientMessageId) {
+          existing.hostPending = [
+            {
+              id: payload.clientMessageId,
+              text: prompt,
+              queueMode: 'after_iteration'
+            }
+          ]
+        }
+        const queuedItemsNow = allQueuedItems(id, existing)
+        pushQueueState(id, existing)
+        return {
+          ok: true,
+          queued: true,
+          queueMode: 'after_iteration',
+          position: 1,
+          queuedItems: queuedItemsNow
+        }
       }
       const enqueued = queuedRuns.enqueue(id, { sender, payload: { ...payload, prompt } })
       if (!enqueued.ok) {
@@ -1067,7 +1089,9 @@ function handleHostNotification(id, run, notification) {
   } else if (method === 'turn/completed') {
     run.running = false
     run.currentTurnId = null
-    run.hostPending = []
+    // hostPending 只由 host 的 mica/queue/* 通知改写。turn 结束时清掉它会让
+    // 还在 executor 队列里的输入在界面上凭空消失（只剩一条发不出去的占位），
+    // 而 executor 每轮收尾都会推一次 queue:changed，那里才是队列的真实状态。
     const reason = event?.part?.reason || 'completed'
     const currentSessionId = run.sessionId || run.requestedSessionId
     const extra = currentSessionId ? { sessionId: currentSessionId } : {}
@@ -1560,6 +1584,22 @@ export function registerChatIpc() {
   ipcMain.handle('chat:recall-queued', async (event, { id, clientMessageId } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失', queuedCount: 0, queuedItems: [] }
     return recallQueuedRun(event.sender, id, clientMessageId)
+  })
+
+  // Freeze a queued message for the recall round-trip: the renderer holds it
+  // before pulling the text back into the composer, so an iteration boundary
+  // cannot send the text the user is re-editing. `held: false` releases it.
+  ipcMain.handle('chat:hold-queued', async (event, { id, clientMessageId, held } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    const local = queuedRuns.values(id)
+    if (local.some((item) => item.payload?.clientMessageId === clientMessageId)) return { ok: true }
+    const response = await hostTaskRequest(run, 'mica/queue/hold', {
+      clientMessageId,
+      held: held !== false
+    })
+    return { ok: Boolean(response?.ok), ...(response?.error ? { error: response.error } : {}) }
   })
 
   ipcMain.handle('chat:edit-message', (event, payload = {}) => {

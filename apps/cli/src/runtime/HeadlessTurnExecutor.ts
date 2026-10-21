@@ -218,6 +218,17 @@ export class HeadlessTurnExecutor {
     return removed;
   }
 
+  /**
+   * Freeze the queued input for `hold` (or unfreeze it for `release`). The
+   * desktop app holds a queued message while it pulls it back into the composer,
+   * so an iteration boundary cannot inject the text the user is re-editing.
+   * Returns false when the slot no longer holds that id — already injected or
+   * recalled, i.e. the client was too late.
+   */
+  holdQueued(clientMessageId: string | undefined, held: boolean): boolean {
+    return held ? this.queue.holdQueued(clientMessageId) : this.queue.releaseQueued(clientMessageId);
+  }
+
   private async loop(firstInput: RuntimeInput): Promise<void> {
     let input: RuntimeInput | null = firstInput;
     let first = true;

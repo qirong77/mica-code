@@ -207,6 +207,9 @@ function createWebApi(env) {
       start: (payload) => invoke('chat:start', payload),
       abort: (id) => invoke('chat:abort', { id }),
       recallQueued: (id, clientMessageId) => invoke('chat:recall-queued', { id, clientMessageId }),
+      // 冻结排队消息（撤回往返窗口内不让迭代边界注入），`held: false` 释放
+      holdQueued: (id, clientMessageId, held = true) =>
+        invoke('chat:hold-queued', { id, clientMessageId, held }),
       // 改写一条已发送的用户消息并重跑（Codex 协议扩展 mica/turn/editMessage）
       editMessage: (payload) => invoke('chat:edit-message', payload),
       // 终止一个后台 shell 任务 / 读取它的输出（Codex 协议扩展 mica/backgroundTasks/*）
