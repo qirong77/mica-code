@@ -197,7 +197,9 @@ It listens on **one** port and distinguishes its services by path (the conventio
   **without the left session list**, and `/share` itself is the list of links that have been shared
   (`分享链接`);
 - `/terminal-control` — the terminal window page (`?session=<id>`), a separate Vite entry;
-- `/remote/control/*` — the controlled browser, forwarded to the main process (below);
+- `/remote/control/*` — the controlled browser, forwarded to the main process (below). `/remote/control`
+  itself answers with the entry points (`/browser/docs`, `/browser/health`), so opening it in a browser
+  tells you whether the service is up instead of a bare 404;
 - `/remote/terminal/*` — the agent-facing terminal API, forwarded to the main process (below);
 - `/api/*` — the runtime capabilities.
 
@@ -309,10 +311,11 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
 - `terminal-sessions.js` owns the PTYs (max 12 live shells; exited ones do not take a slot). Output
   is buffered (256k chars, with a `seq` for reconnect/replay) and parsed by a headless xterm; reading
   the screen waits for queued writes to finish, otherwise a command that just ran looks like it
-  printed nothing. A periodic `sweep()` reclaims exited sessions after 10 minutes without a visible
-  window; a live shell is never closed automatically (it may hold the user's cwd and background
-  processes — agents should close what they no longer need). Closing a session, from the endpoint or
-  from `sweep()`, destroys its window through the same `closed` event.
+  printed nothing. A periodic `sweep()` cleans up after agents: an exited session goes 10 minutes
+  after its last look, a live one only once it has been hidden and completely idle (no output, input
+  or resize) for 6 hours, so a shell that is still doing something is never killed. Sessions with a
+  visible window are always kept. Closing a session, from the endpoint or from `sweep()`, destroys
+  its window through the same `closed` event.
 - `terminal-window.js` creates a `BrowserWindow` on demand: a session created without `show` has no
   renderer at all, which keeps agent-only terminals cheap. Closing the window only hides — the PTY
   keeps running — and the explicit `close` endpoint kills the process. The window loads the

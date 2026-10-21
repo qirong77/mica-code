@@ -107,6 +107,16 @@ export function createTerminalService({ sessions, windows, address = () => ({ ur
 
     const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`)
     const method = req.method === 'HEAD' ? 'GET' : req.method
+    // 服务根没有端点：直接用浏览器打开这个地址时给一份入口，别让 404 看起来像「服务没起来」
+    if (url.pathname === '/') {
+      return sendJson(res, 200, {
+        ok: true,
+        service: '终端控制',
+        docs: '/remote/terminal/docs',
+        sessions: '/remote/terminal/sessions',
+        events: '/remote/terminal/events'
+      })
+    }
     const matched = resolveRoute(routes, method, url.pathname)
     if (!matched) {
       return sendJson(res, 404, { ok: false, error: `未知端点：${method} ${url.pathname}` })

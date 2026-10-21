@@ -712,6 +712,12 @@ app.on('before-quit', () => {
   app.setBadgeCount(0)
   if (process.platform === 'darwin' && app.dock) app.dock.setBadge('')
   for (const state of windows) stopUnreadWatcher(state)
+})
+
+// 服务（浏览器、终端）只在确定退出时拆。放在 `before-quit` 里的话，一旦这次退出被取消
+// （系统打断、别处 preventDefault），socket 已经被 unlink，进程却还活着——运行时之后
+// 每条 `/remote/*` 都只能 503，只有重启应用能恢复。
+app.on('will-quit', () => {
   // 受控浏览器窗口是「关闭即隐藏」的，退出时必须显式销毁，否则 app 退不掉
   if (browserHost) void browserHost.close().catch(() => {})
   browserHost = null

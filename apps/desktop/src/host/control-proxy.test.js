@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   browserControlTargetPath,
+  describeSocketError,
   isBrowserControlPath,
   proxyRequestHeaders,
   proxyResponseHeaders
@@ -8,6 +9,26 @@ import {
 import { isTerminalControlPath, terminalControlTargetPath } from './terminal-control-proxy'
 
 describe('control proxy routing', () => {
+  test('explains a missing socket instead of blaming the wrong host', () => {
+    const missing = describeSocketError(
+      Object.assign(new Error('connect ENOENT /tmp/x.sock'), { code: 'ENOENT' }),
+      '受控浏览器服务',
+      '/tmp/x.sock'
+    )
+    expect(missing).toContain('/tmp/x.sock 不存在')
+    expect(missing).toContain('重启')
+
+    const stale = describeSocketError(
+      Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      '终端控制服务',
+      '/tmp/y.sock'
+    )
+    expect(stale).toContain('没人监听')
+
+    const other = describeSocketError(new Error('boom'), '受控浏览器服务', '/tmp/z.sock')
+    expect(other).toBe('受控浏览器服务不可用：boom')
+  })
+
   test('matches the prefix itself and everything under it', () => {
     expect(isBrowserControlPath('/remote/control')).toBe(true)
     expect(isBrowserControlPath('/remote/control/browser/tabs')).toBe(true)

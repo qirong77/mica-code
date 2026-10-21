@@ -153,6 +153,16 @@ async function call(path, { method = 'GET', body, headers = {}, raw = false } = 
 }
 
 describe('service surface', () => {
+  it('answers the service root with entry points instead of 404', async () => {
+    const root = await call('/')
+    expect(root.status).toBe(200)
+    expect(root.body).toMatchObject({
+      ok: true,
+      docs: '/remote/control/browser/docs',
+      health: '/remote/control/browser/health'
+    })
+  })
+
   it('answers health, capabilities and docs from the same endpoint catalog', async () => {
     const health = await call('/browser/health')
     expect(health.body).toMatchObject({ ok: true, app: 'mica-code-browser' })

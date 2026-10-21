@@ -82,6 +82,18 @@ export function proxyResponseHeaders(headers = {}) {
  * 造一个代理处理函数。没有 socket 路径（纯 `npm run start:web`）时返回 null，调用方据此
  * 直接把这条路径当普通请求处理掉。
  */
+export function describeSocketError(error, label, socketPath) {
+  const code = error?.code || ''
+  if (code === 'ENOENT') {
+    // 分两种：从来没这个服务（纯 Web 宿主），或应用之前退出/被打断后 socket 已 unlink。
+    return `${label}未就绪：${socketPath} 不存在。只有 Mica Code 应用会提供这个服务；如果应用正在运行，重启它可恢复。`
+  }
+  if (code === 'ECONNREFUSED') {
+    return `${label}未响应：${socketPath} 存在但没人监听。重启 Mica Code 应用可恢复。`
+  }
+  return `${label}不可用：${error?.message || error}`
+}
+
 export function createBrowserControlProxy({
   socketPath,
   prefix = BROWSER_CONTROL_PREFIX,
@@ -117,7 +129,7 @@ export function createBrowserControlProxy({
       res.end(
         JSON.stringify({
           ok: false,
-          error: `${label}不可用：${error?.message || error}（只有在 Mica Code 应用里才有）`
+          error: describeSocketError(error, label, socketPath)
         })
       )
     })

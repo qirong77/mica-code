@@ -43,6 +43,11 @@ const MAX_INPUT_CHARS = 64 * 1024
 const MAX_SESSIONS = 12
 /** 进程自己退出的会话：没有窗口在看时，留一段时间供 AI 读最后屏幕，然后回收 */
 const EXITED_TTL_MS = 10 * 60 * 1000
+/**
+ * 活着但没人管的会话：agent 建完就忘了的话，shell 会一直占着 fd 与内存。
+ * 隐藏状态下连续这么久没有任何活动（输出、输入、改尺寸）就回收。
+ */
+const IDLE_TTL_MS = 6 * 60 * 60 * 1000
 const SWEEP_INTERVAL_MS = 60 * 1000
 /** 只留最近几次输入用于回显判断，不用记整段历史 */
 const RECENT_INPUT_LIMIT = 8
@@ -92,7 +97,9 @@ export function createTerminalSessions({
   // 注入点只给测试用：bun 下 node-pty 的原生绑定不会送数据
   spawnPty = (file, args, options) => pty.spawn(file, args, options),
   // 0 关掉自动回收（测试里用 sweep() 手动触发）
-  sweepIntervalMs = SWEEP_INTERVAL_MS
+  sweepIntervalMs = SWEEP_INTERVAL_MS,
+  exitedTtlMs = EXITED_TTL_MS,
+  idleTtlMs = IDLE_TTL_MS
 } = {}) {
   const sessions = new Map()
   let sequence = 0
@@ -107,6 +114,7 @@ export function createTerminalSessions({
 
   function touch(session) {
     session.updatedAt = nowIso()
+    session.lastActivityAt = Date.now()
   }
 
   function flush(session) {
@@ -232,6 +240,7 @@ export function createTerminalSessions({
       idleResolvers: [],
       flushTimer: null,
       lastOutputAt: Date.now(),
+      lastActivityAt: Date.now(),
       recentInputs: [],
       output: { seq: 0, data: '', truncated: false },
       windowVisible: false
@@ -451,18 +460,23 @@ export function createTerminalSessions({
   }
 
   /**
-   * 回收已经退出的会话，避免 headless 镜像一直占内存。
+   * 自动回收没人管的会话，避免 agent 建了不关的终端越积越多。
    *
-   * 只回收「进程已经退出」的：活着的 shell 里可能有用户的 cwd、环境与后台进程，
-   * 到点杀掉是数据损失，宁可让 agent 自己 close，也不替它做这个决定。
-   * 有窗口正在显示的一律不动（用户可能还要看最后的输出）。
+   * 两条线都以「窗口没在显示」为前提：正在看的终端一律不动。
+   * - 进程已退出：留十分钟供 AI 读最后屏幕，然后回收。
+   * - 进程还活着：隐藏且连续 6 小时没有任何活动才回收；只要还有输出、输入或
+   *   改尺寸就重新计时，正在跑东西的 shell 不会被误杀。
    */
+  function shouldRecycle(session, now) {
+    if (session.windowVisible) return false
+    if (session.exited) return now - (session.exitedAt || now) >= exitedTtlMs
+    return now - (session.lastActivityAt || now) >= idleTtlMs
+  }
+
   function sweep(now = Date.now()) {
     const removed = []
     for (const session of [...sessions.values()]) {
-      if (session.windowVisible) continue
-      if (!session.exited) continue
-      if (now - (session.exitedAt || now) < EXITED_TTL_MS) continue
+      if (!shouldRecycle(session, now)) continue
       try {
         close(session.id)
         removed.push(session.id)

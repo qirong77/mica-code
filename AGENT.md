@@ -311,6 +311,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 运行时构建保持 `ssr.noExternal: true`，只 external Node 内置模块与 node-pty；asar 没有 node_modules。新增依赖后跑 `npm run build:server && npm test` 检查裸导入。
 - 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`：React 遇到 render 抛错会卸掉整棵树，表现为整页黑屏（只剩窗口按钮）。渲染期引用未初始化的 `const` 是常见来源，由 renderer 的 `no-use-before-define` 拦住；确有延后引用时按处豁免并写明原因。
 - 外壳通过 stdin 管道管理子进程；运行时启动即 `stripContainerEnv()`，在任何 spawn 前移除 `ELECTRON_RUN_AS_NODE`。
+- 受控浏览器与终端控制的 socket 只在 `will-quit` 关闭：`before-quit` 里做不可逆清理时，一旦退出被取消，进程还在但 socket 已 unlink，`/remote/*` 会永久 503。
 - `resolveMicaExecutable()` 保持平台感知：Windows 不检查 POSIX 可执行位，`.exe` 优先于需 shell 的 `.cmd`。
 - `desktop-process-env.js` 追加工具目录到 PATH；`shell-env.js` 采集并缓存 profile env，超时静默降级。
 - `MICA_DESKTOP_USER_DATA` 与 shim 默认值解析到同一 `mica-code-app` 目录。
@@ -431,7 +432,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 一个会话一个后台窗口，按需创建：`show` 为假时不建渲染进程，agent 专用终端不占内存；关窗只 hide，销毁走 `close` API。窗口加载运行时托管的 `/terminal-control?session=<id>`，页面与 AI 都通过 HTTP + SSE 操作同一条 PTY，不需要 preload。
 - 页面用 xterm DOM 渲染（不用 canvas）；PTY 尺寸是唯一事实来源，AI resize 后页面跟随，用户调整窗口才反向 fit 并回报。页面隐藏时只记 `hiddenDirty` 不逐帧解析，重新可见后按快照整屏重建，后台窗口不再空转渲染。
 - 读屏前必须等 headless 解析完已排队输出（`pendingWrites` 计数），并且该等待必须有硬预算（读屏 2s、`wait` 用剩余超时），否则高吞吐输出时读屏与 `wait` 会卡死；读屏终点按最后一行非空内容算，光标不在底部时不能截断下方内容。`wait` 的 `text`/`regex` 默认调用 `maskEchoedInput`（`skipEcho: false` 关闭）：按最近输入逐行拆成片段，遮掉每段**最靠下且带提示符**的回显行，以及该行上方等于输入原文的碎片行；回显下方等于原文的行视为真实输出保留。`expectExitCode` 不匹配时立刻返回实际退出码，idle 至少等满设定时长。
-- 终端会话存在进程内，最多 12 条**活着的** shell（已退出不占额度）。`sweep()` 只回收「已退出且 10 分钟没有窗口查看」的会话，**从不自动关闭活着的 shell**（里面有用户的 cwd 与后台进程）；`windowVisible` 的一律保留。`closed` 事件统一销毁窗口，端点关闭与回收关闭走同一条路径。`close` 用 `destroy` 结束进程，退出后仍可读最后屏幕。纯 Web 宿主没有主进程，`/remote/terminal/*` 明确回 503。
+- 终端会话存在进程内，最多 12 条**活着的** shell（已退出不占额度）。`sweep()` 每分钟自动回收没人管的会话，两条线都以「窗口没在显示」为前提：已退出的留 10 分钟供读屏后回收；活着的要连续 6 小时无活动（输出、输入、改尺寸）才回收，正在跑东西的 shell 不会被误杀。`windowVisible` 的一律保留。`closed` 事件统一销毁窗口，端点关闭与回收关闭走同一条路径。`close` 用 `destroy` 结束进程，退出后仍可读最后屏幕。纯 Web 宿主没有主进程，`/remote/terminal/*` 明确回 503。
 - SSE 的 `terminal:output` 只发给订阅该会话的页面，`terminal:changed` 只发给该会话的页面与不限会话的列表订阅者，不做全量广播。
 - 写入类操作（`input`、`keys`、`resize`、`close`）校验 `x-mica-owner`：带 owner 且与会话 owner 不一致即 403；不带 owner 视为本人在页面操作，放行。读屏与 `wait` 不拦。这是防串台护栏，不是权限边界。
 - 生成的 `$MICA_HOME/skills/mica-terminal/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `terminal-docs.js`。

@@ -237,8 +237,7 @@ describe('terminal session reclamation', () => {
     sessions.shutdown()
   })
 
-  test('never reclaims a live shell, however long it has been idle', async () => {
-    // 活着的 shell 里可能有用户的 cwd 与后台进程：到点杀掉是数据损失
+  test('reclaims a hidden live shell only after the idle TTL', async () => {
     const ptys = []
     const sessions = createTerminalSessions({
       onChange: () => {},
@@ -251,10 +250,43 @@ describe('terminal session reclamation', () => {
     })
     const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
 
+    // 5 小时还在 TTL 内：这是 agent 建了暂时没用的终端，不能提前杀掉
+    expect(sessions.sweep(Date.now() + 5 * 60 * 60 * 1000)).toEqual([])
+    expect(sessions.list()).toHaveLength(1)
+
+    expect(sessions.sweep(Date.now() + 7 * 60 * 60 * 1000)).toEqual([session.id])
+    expect(sessions.list()).toHaveLength(0)
+    expect(ptys[0].destroyed).toBe(1)
+    sessions.shutdown()
+  })
+
+  test('activity pushes the idle TTL forward', async () => {
+    const sessions = createTerminalSessions({
+      onChange: () => {},
+      sweepIntervalMs: 0,
+      idleTtlMs: 10_000,
+      spawnPty: () => createFakePty()
+    })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+
+    sessions.write(session.id, { text: 'ls', submit: true })
+
+    expect(sessions.sweep(Date.now() + 9_000)).toEqual([])
+    expect(sessions.sweep(Date.now() + 11_000)).toEqual([session.id])
+    sessions.shutdown()
+  })
+
+  test('keeps a live shell whose window is showing', async () => {
+    const sessions = createTerminalSessions({
+      onChange: () => {},
+      sweepIntervalMs: 0,
+      spawnPty: () => createFakePty()
+    })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    sessions.setWindowVisible(session.id, true)
+
     expect(sessions.sweep(Date.now() + 24 * 60 * 60 * 1000)).toEqual([])
     expect(sessions.list()).toHaveLength(1)
-    expect(ptys[0].destroyed).toBe(0)
-    expect(session.id).toBe('term-1')
     sessions.shutdown()
   })
 })

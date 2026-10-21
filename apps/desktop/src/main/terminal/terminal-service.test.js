@@ -156,6 +156,16 @@ async function call(path, { method = 'GET', body, headers = {} } = {}) {
 }
 
 describe('service surface', () => {
+  it('answers the service root with entry points instead of 404', async () => {
+    const root = await call('/')
+    expect(root.status).toBe(200)
+    expect(root.body).toMatchObject({
+      ok: true,
+      docs: '/remote/terminal/docs',
+      sessions: '/remote/terminal/sessions'
+    })
+  })
+
   it('answers health, capabilities and docs from the same endpoint catalog', async () => {
     expect((await call('/health')).body).toMatchObject({
       ok: true,
