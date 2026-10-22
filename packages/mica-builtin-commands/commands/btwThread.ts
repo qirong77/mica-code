@@ -1,4 +1,11 @@
-import type { AgentQueryContent, AgentUsageRecord } from '@packages/mica-agent/index.js';
+import {
+  formatSkillsIndex,
+  micaAgent,
+  type AgentQueryContent,
+  type AgentUsageRecord,
+} from '@packages/mica-agent/index.js';
+import { micaTools } from '@packages/mica-tools/index.js';
+import type { Skill } from '@packages/mica-skills/index.js';
 import type { CommandAgent } from '../services.js';
 
 /**
@@ -51,6 +58,16 @@ export type BtwThread = { subagent: BtwSubagent; recordedRequests: number };
 
 export type BtwArgsParse = { question: string; isContinue: boolean } | null;
 
+/** 主流程当前角色的提示词：名字 + `$MICA_HOME/role/*.md` 原文（default 是内置模板）。 */
+export type BtwRoleContext = { name: string; prompt: string };
+
+export type BtwPromptContext = {
+  /** 主流程当前角色；btw 的 system prompt 会把它整段嵌进去。 */
+  role?: BtwRoleContext;
+  /** skills 索引的输入；不传等价于「当前已加载的 skills」（与主流程一致）。 */
+  skills?: Skill[];
+};
+
 export function parseBtwArgs(rawArgs: string): BtwArgsParse {
   const trimmed = rawArgs.trim();
   if (!trimmed) return null;
@@ -92,16 +109,57 @@ function extractMessageText(content: unknown): string {
   return parts.join('\n').trim();
 }
 
-export function buildBtwSystemPrompt(transcript: string): string {
+/**
+ * btw 的系统提示词。
+ *
+ * 它**替换**主流程的 system prompt（`createSubAgent` 的 `systemPrompt` 是整体覆盖，
+ * 不叠加），所以主流程具备、而回答又真的需要的东西必须在这里显式补回来：
+ * - 当前角色及其完整提示词（模型要知道自己以谁的规则在回答）；
+ * - skills 索引（否则 `Skill` 工具在，但模型不知道有哪些 skill）；
+ * - 主流程对话记录（只读背景，不进主上下文）。
+ */
+export function buildBtwSystemPrompt(transcript: string, context: BtwPromptContext = {}): string {
   const summary = transcript
-    ? `\n\n以下是用户在主流程中的对话记录（仅作背景参考，不要据此展开或帮忙实现主流程的任务）：\n\n${transcript}`
+    ? `以下是用户在主流程中的对话记录（仅作背景参考，不要据此展开或帮忙实现主流程的任务）：\n\n${transcript}`
     : '';
   return [
-    '当前是 btw（by the way）模式。',
-    '用户可能在主流程中正编写代码或执行任务，但本对话只处理 btw 的问题。',
-    '你不需要考虑或帮助主流程的实现，不要调用主流程的状态，也不要写回主流程对话。',
-    '围绕用户提出的 btw 问题给出清晰、直接的回答即可；可以用只读工具（读文件 / 搜索 / 联网）来支撑回答。',
+    [
+      '当前是 btw（by the way）模式。',
+      '用户可能在主流程中正编写代码或执行任务，但本对话只处理 btw 的问题。',
+      '你不需要考虑或帮助主流程的实现，不要调用主流程的状态，也不要写回主流程对话。',
+      '围绕用户提出的 btw 问题给出清晰、直接的回答即可；可以用工具（读文件 / 搜索 / 联网 / 执行命令）来支撑回答，但不要改动主流程的会话状态。',
+    ].join('\n'),
+    describeRole(context.role),
+    describeSkills(context.skills),
     summary,
+  ]
+    .filter((section) => section.length > 0)
+    .join('\n\n');
+}
+
+function describeRole(role?: BtwRoleContext): string {
+  const name = role?.name?.trim();
+  if (!name) return '';
+  const head = `主流程当前使用的角色是 \`${name}\`。`;
+  const prompt = role?.prompt?.trim();
+  if (!prompt) return head;
+  return [
+    head,
+    '以下是该角色的完整提示词。它描述主流程的行为规则，在这里只作为背景；与上面的 btw 模式规则冲突时，以 btw 模式规则为准。',
+    `<role name="${name}">`,
+    prompt,
+    '</role>',
+  ].join('\n');
+}
+
+function describeSkills(skills?: Skill[]): string {
+  const listing = formatSkillsIndex(skills);
+  if (!listing) return '';
+  return [
+    '以下是主流程可用的 skills（索引与主流程一致）；需要时用 Skill 工具读取完整说明。',
+    '<skills>',
+    listing,
+    '</skills>',
   ].join('\n');
 }
 
@@ -110,13 +168,39 @@ export function formatBtwNotice(question: string, answer: string, isFallback = f
   return [`> ${question}`, ...fallback, '', answer, '', '── `/btw -continue` 继续与该 btw 对话 ──'].join('\n');
 }
 
+/**
+ * btw 的工具边界：主会话专属工具（`session_*`、loop 等 `primaryAgentOnly`）不进 btw。
+ *
+ * btw 是主流程旁边的旁问线程，它在应用上下文里拿到的 `toolContext` 与主流程相同、
+ * 没有 `taskId`，所以「session 工具只能由主 agent 调用」那道运行期护栏对它不生效。
+ * 唯一可靠的做法是在**工具集**这一层就把它们排除掉——与 `Agent` 工具的子代理同一条
+ * 边界（见 `apps/cli/src/agents/subagentDefinitions.ts` 的 `buildSubagentToolFilter`）。
+ * 其余工具（含 `Skill` 与 MCP）照旧可用：btw 的回答本来就要靠读文件 / 搜索 / 联网。
+ */
+export function btwToolFilter(toolName: string): boolean {
+  return !micaTools.isPrimaryAgentOnly(toolName);
+}
+
 function createBtwSubagent(agent: CommandAgent, transcript: string): BtwSubagent {
   // 运行时返回的是 `IAgent`（带 getSnapshot/loadSnapshot/lastUsage），而
   // `CommandAgent.createSubAgent` 的声明只承诺 query + 用量 + 流式回调。
   return agent.createSubAgent({
-    systemPrompt: buildBtwSystemPrompt(transcript),
+    systemPrompt: buildBtwSystemPrompt(transcript, { role: btwRoleContext(agent) }),
     tools: true,
+    toolFilter: btwToolFilter,
   }) as unknown as BtwSubagent;
+}
+
+/**
+ * 主流程当前角色 + 它的完整提示词（`$MICA_HOME/role/<name>.md`，default 为内置模板）。
+ *
+ * 读不到（role 文件在会话中途被删）时只带名字：少一段背景总好过整条 btw 建不起来。
+ * 其它命令（`/role`）也是同一个入口，两边不会各自解析一份。
+ */
+export function btwRoleContext(agent: CommandAgent): BtwRoleContext | undefined {
+  const name = typeof agent.role === 'string' ? agent.role.trim() : '';
+  if (!name) return undefined;
+  return { name, prompt: micaAgent.roles.get(name)?.prompt ?? '' };
 }
 
 /**

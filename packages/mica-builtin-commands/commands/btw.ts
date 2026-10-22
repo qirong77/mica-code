@@ -21,12 +21,14 @@ import { createBtwThread, formatBtwNotice, parseBtwArgs, type BtwThread } from '
 
 export {
   buildBtwSystemPrompt,
+  btwRoleContext,
+  btwToolFilter,
   createBtwThread,
   formatBtwNotice,
   messagesToTranscript,
   parseBtwArgs,
 } from './btwThread.js';
-export type { BtwArgsParse, BtwSubagent, BtwThread } from './btwThread.js';
+export type { BtwArgsParse, BtwPromptContext, BtwRoleContext, BtwSubagent, BtwThread } from './btwThread.js';
 
 /**
  * 每个 btw 线程的可复用子代理，按 agent（会话）维度保存，用于 `-continue` 延续。

@@ -35,19 +35,9 @@ class SystemPromptBuilder {
       this.append('project-instructions', projectInstructions);
     }
 
-    const skills = [...(options.skills ?? micaSkills.getLoaded())].sort((a, b) => a.name.localeCompare(b.name));
+    const skills = options.skills ?? micaSkills.getLoaded();
     if (skills.length > 0) {
-      const listing = skills
-        .map((skill) =>
-          [
-            `- ${skill.name}: ${skill.description}`,
-            skill.whenToUse ? `  when_to_use: ${skill.whenToUse}` : '',
-            skill.argumentHint ? `  argument_hint: ${skill.argumentHint}` : '',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        )
-        .join('\n');
+      const listing = formatSkillsIndex(skills);
       this.append(
         'skills',
         `可用 skills 索引如下。这里只是索引；需要使用时通过 Skill 工具读取完整说明。\n\n${listing}`,
@@ -71,6 +61,27 @@ class SystemPromptBuilder {
 
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
   return new SystemPromptBuilder(options).value;
+}
+
+/**
+ * skills 索引正文（不含 `<skills>` 包裹）。
+ *
+ * By The Way 的隔离子代理要拿到与主流程一致的 skills 索引（它替换了系统提示词，
+ * 否则模型不知道有哪些 skill 可用），所以这段必须只有一份实现。
+ */
+export function formatSkillsIndex(skills: Skill[] = micaSkills.getLoaded()): string {
+  return [...skills]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((skill) =>
+      [
+        `- ${skill.name}: ${skill.description}`,
+        skill.whenToUse ? `  when_to_use: ${skill.whenToUse}` : '',
+        skill.argumentHint ? `  argument_hint: ${skill.argumentHint}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    .join('\n');
 }
 
 function wrapSection(section: PromptSection, content: string): string {

@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildBtwSystemPrompt,
+  btwToolFilter,
   createBtwCommand,
   formatBtwNotice,
   messagesToTranscript,
   parseBtwArgs,
   runBtw,
 } from '../commands/btw.js';
+import { MicaTool, micaTools } from '@packages/mica-tools/index.js';
 import type { CommandAgent, CommandRuntimeServices } from '../services.js';
 
 describe('parseBtwArgs', () => {
@@ -46,6 +48,69 @@ describe('buildBtwSystemPrompt', () => {
     expect(prompt).toContain('用户：你好');
     expect(prompt).toContain('你不需要考虑或帮助主流程的实现');
   });
+
+  it('embeds the main session role name and its full prompt', () => {
+    const prompt = buildBtwSystemPrompt('', {
+      role: { name: 'reviewer', prompt: '你只做代码审查，按风险排序。' },
+    });
+    expect(prompt).toContain('主流程当前使用的角色是 `reviewer`');
+    expect(prompt).toContain('<role name="reviewer">');
+    expect(prompt).toContain('你只做代码审查，按风险排序。');
+    expect(prompt).toContain('</role>');
+  });
+
+  it('keeps the role name when the role prompt could not be read', () => {
+    const prompt = buildBtwSystemPrompt('', { role: { name: 'gone', prompt: '' } });
+    expect(prompt).toContain('主流程当前使用的角色是 `gone`');
+    expect(prompt).not.toContain('<role name="gone">');
+  });
+
+  it('lists the same skills index the main session gets', () => {
+    const prompt = buildBtwSystemPrompt('', {
+      skills: [
+        { name: 'commit', description: '生成提交信息', content: '', baseDir: '/tmp/commit' },
+        {
+          name: 'review-pr',
+          description: '审查 PR',
+          whenToUse: '当用户要求 review 时',
+          content: '',
+          baseDir: '/tmp/review-pr',
+        },
+      ],
+    });
+    expect(prompt).toContain('<skills>');
+    expect(prompt).toContain('- commit: 生成提交信息');
+    expect(prompt).toContain('when_to_use: 当用户要求 review 时');
+    expect(prompt).toContain('</skills>');
+  });
+});
+
+describe('btwToolFilter', () => {
+  it('drops primary-agent-only tools and keeps ordinary ones', () => {
+    class OwnerOnlyTool extends MicaTool {
+      constructor() {
+        super('btw_test_owner_only', 'test', { type: 'object', properties: {} }, { readOnly: true });
+      }
+
+      async execute() {
+        return 'ok';
+      }
+
+      onToolUseDisplayText() {
+        return 'owner only';
+      }
+    }
+
+    const tool = new OwnerOnlyTool();
+    micaTools.registerRuntime(tool, { primaryAgentOnly: true });
+    try {
+      expect(btwToolFilter(tool.name)).toBe(false);
+      expect(btwToolFilter('read_file')).toBe(true);
+      expect(btwToolFilter('mcp__demo__search')).toBe(true);
+    } finally {
+      micaTools.unregisterRuntime(tool);
+    }
+  });
 });
 
 describe('formatBtwNotice', () => {
@@ -74,22 +139,20 @@ describe('createBtwCommand / runBtw', () => {
       status: 'running',
       surface: 'command_panel',
     });
-    expect(services.showNotice).toHaveBeenLastCalledWith(
-      expect.stringContaining('> 这个方案可行吗'),
-      undefined,
-      { command: '/btw', status: 'success' },
-    );
+    expect(services.showNotice).toHaveBeenLastCalledWith(expect.stringContaining('> 这个方案可行吗'), undefined, {
+      command: '/btw',
+      status: 'success',
+    });
 
     await runBtw(agent, services, '-continue 那具体怎么落地');
 
     // the same subagent is reused, so query is called a second time on it
     expect(query).toHaveBeenCalledTimes(2);
     expect(query).toHaveBeenLastCalledWith('那具体怎么落地');
-    expect(services.showNotice).toHaveBeenLastCalledWith(
-      expect.stringContaining('> 那具体怎么落地'),
-      undefined,
-      { command: '/btw', status: 'success' },
-    );
+    expect(services.showNotice).toHaveBeenLastCalledWith(expect.stringContaining('> 那具体怎么落地'), undefined, {
+      command: '/btw',
+      status: 'success',
+    });
   });
 
   it('records every btw request as session usage exactly once', async () => {
@@ -110,7 +173,12 @@ describe('createBtwCommand / runBtw', () => {
     await runBtw(agent, services, '-continue 那具体怎么落地');
 
     expect(recordSubagentUsage).toHaveBeenCalledTimes(2);
-    const first = recordSubagentUsage.mock.calls[0]?.[0] as { subagentType: string; description: string; requests: Array<{ usageId: string }>; summary: { records: number } };
+    const first = recordSubagentUsage.mock.calls[0]?.[0] as {
+      subagentType: string;
+      description: string;
+      requests: Array<{ usageId: string }>;
+      summary: { records: number };
+    };
     expect(first.subagentType).toBe('btw');
     expect(first.description).toBe('这个方案可行吗');
     expect(first.requests.map((request) => request.usageId)).toEqual(['btw-1']);
@@ -144,11 +212,10 @@ describe('createBtwCommand / runBtw', () => {
 
     await runBtw(agent, services, '问题');
 
-    expect(services.showNotice).toHaveBeenLastCalledWith(
-      expect.stringContaining('btw 出错：boom'),
-      undefined,
-      { command: '/btw', status: 'error' },
-    );
+    expect(services.showNotice).toHaveBeenLastCalledWith(expect.stringContaining('btw 出错：boom'), undefined, {
+      command: '/btw',
+      status: 'error',
+    });
   });
 
   it('never installs streaming callbacks: the TUI path stays a plain notice', async () => {
@@ -167,6 +234,20 @@ describe('createBtwCommand / runBtw', () => {
     expect(subagent.onToolCall).toBeUndefined();
     expect(subagent.onToolResult).toBeUndefined();
   });
+
+  it('gives the subagent the main session role and the shared tool filter', async () => {
+    const query = vi.fn(async () => '答案');
+    const agent = makeAgent(query);
+
+    await runBtw(agent, makeServices(), '这个方案可行吗');
+
+    const options = vi.mocked(agent.createSubAgent).mock.calls[0]?.[0] as {
+      systemPrompt: string;
+      toolFilter?: (name: string) => boolean;
+    };
+    expect(options.systemPrompt).toContain('<role name="default">');
+    expect(options.toolFilter).toBe(btwToolFilter);
+  });
 });
 
 function makeAgent(
@@ -176,6 +257,7 @@ function makeAgent(
   return {
     config: { model: 'm', effort: 'none', provider: { id: 'test' } },
     isRunning: false,
+    role: 'default',
     recordSubagentUsage: options.recordSubagentUsage,
     getSnapshot: vi.fn(() => ({ providerId: 'test', model: 'm', effort: 'none', messages: [] })),
     createSubAgent: vi.fn(() => ({ query, usageHistory: options.usageHistory })),

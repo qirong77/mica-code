@@ -68,11 +68,14 @@ function makeHarness(options: FakeOptions = {}) {
       subagent.messages = snapshot.messages as unknown[];
     },
   };
-  const createSubAgent = vi.fn((_options?: { systemPrompt?: string }) => subagent);
+  const createSubAgent = vi.fn(
+    (_options?: { systemPrompt?: string; toolFilter?: (name: string) => boolean }) => subagent,
+  );
   const saveCurrent = vi.fn();
   const agent = {
     config: { provider: { id: 'test' }, model: 'gpt-test', effort: 'medium' },
     isRunning: false,
+    role: 'default',
     recordSubagentUsage,
     getSnapshot: () => ({
       providerId: 'test',
@@ -260,6 +263,11 @@ describe('BtwThreadController', () => {
     expect(harness.createSubAgent).toHaveBeenCalledTimes(2);
     const systemPrompt = harness.createSubAgent.mock.calls[1]?.[0]?.systemPrompt ?? '';
     expect(systemPrompt).toContain('主流程问题');
+    expect(systemPrompt).toContain('<role name="default">');
+    // 工具边界与主会话一致：主会话专属工具不进 btw。
+    const toolFilter = harness.createSubAgent.mock.calls[1]?.[0]?.toolFilter;
+    expect(typeof toolFilter).toBe('function');
+    expect(toolFilter?.('read_file')).toBe(true);
   });
 
   it('reset clears the thread and notifies listeners', () => {

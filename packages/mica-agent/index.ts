@@ -1,5 +1,11 @@
 import { createModelClient, createSubAgent, registerModelClient } from './providers/createModelClient.js';
-import { buildSystemPrompt, getAgentRole, getRolesDirectory, listAgentRoles } from './prompt/index.js';
+import {
+  buildSystemPrompt,
+  formatSkillsIndex,
+  getAgentRole,
+  getRolesDirectory,
+  listAgentRoles,
+} from './prompt/index.js';
 import { isRetryableError } from './core/retry.js';
 
 export const micaAgent = {
@@ -12,6 +18,8 @@ export const micaAgent = {
   createSubAgent,
   /** 构建运行时系统提示词，包含工具、项目说明和环境上下文。 */
   buildSystemPrompt,
+  /** skills 索引正文；构建系统提示词与 By The Way 的隔离子代理共用。 */
+  formatSkillsIndex,
   roles: {
     /** 列出内置 default role 与用户 role 文件。 */
     list: listAgentRoles,
@@ -57,7 +65,7 @@ export type {
   ConversationUnknownItem,
   ConversationContentPartMapper,
 } from './core/Conversation.js';
-export { DEFAULT_ROLE_NAME } from './prompt/index.js';
+export { DEFAULT_ROLE_NAME, formatSkillsIndex } from './prompt/index.js';
 export type { AgentRole, BuildSystemPromptOptions } from './prompt/index.js';
 export { createModelClient, createSubAgent, registerModelClient } from './providers/createModelClient.js';
 export type { ModelClientFactory } from './providers/createModelClient.js';

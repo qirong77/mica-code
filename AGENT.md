@@ -412,6 +412,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### By The Way
 
 - 共用纯逻辑 `mica-builtin-commands/commands/btwThread.ts`；headless 不导入 builtin commands 总出口，避免经 `btw.ts` 引入 Ink/React。CLI `/btw` 不挂流式回调。
+- 子代理的 system prompt 是整体替换，所以必须显式带上：btw 模式规则、主会话当前角色名 + role prompt 全文、skills 索引（`micaAgent.formatSkillsIndex`，与主流程同源）、一次性主流程对话记录。工具集用 `btwToolFilter` 排除 `primaryAgentOnly`（session/loop 工具，运行期 taskId 护栏对 btw 不生效），其余含 Skill/MCP 照旧可用。
 - desktop `BtwThreadController` 接受请求立即 ack，结果通过 `mica/btw/updated` 流式快照推送，不堵塞 interrupt / steer / recall。
 - 同线程单子代理串行回答，允许一条排队与撤回；不同线程可并行。停止仅中止当前问答，保留部分回答与后续队列，用量单独记账。
 - 线程落盘 `$MICA_HOME/btw/<sessionId>.json`，共享路径在 `mica-common/btwState.ts`；存 entries + 子代理 messages，去媒体，context 重开后重新计算。

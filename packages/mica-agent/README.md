@@ -11,6 +11,7 @@
 - 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分）。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
+- 单独取 skills 索引正文：`formatSkillsIndex`（By The Way 的隔离子代理替换了系统提示词，索引必须与主流程同源）。
 - 同一条消息内的工具调用按并行安全分组执行：只读工具与 `Agent` 调用并发，写/执行类工具串行，结果按原始顺序回填。
 - 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载 `.md` 用户 role，以文件名（不含扩展名）作为 role 名，并保留不可覆盖的内置 `default`。
 
