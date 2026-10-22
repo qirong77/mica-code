@@ -19,6 +19,8 @@ const items = [
   { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
   { key: 'browserControl', label: 'Browser Control' },
   { key: 'terminalControl', label: 'Terminal Control' },
+  // Performance 与上两者同一条边界：入口始终在，拿不到数据由页面说明未开启。
+  { key: 'performance', label: 'Performance' },
   { key: 'sessions', label: 'Sessions' },
   { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },

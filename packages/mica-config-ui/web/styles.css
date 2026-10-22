@@ -3142,4 +3142,230 @@
       grid-template-columns: minmax(0, 1fr);
     }
   }
+
+  /* Performance：本机性能与诊断面板（数据来自运行时的本地 JSONL） */
+  .perf-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+
+  .perf-stat {
+    display: grid;
+    gap: 2px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-muted);
+  }
+
+  .perf-stat-value {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+  }
+
+  .perf-stat-label {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .perf-stat-warn .perf-stat-value {
+    color: var(--amber);
+  }
+
+  .perf-stat-danger .perf-stat-value {
+    color: var(--red);
+  }
+
+  .perf-section {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 26px;
+  }
+
+  .perf-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .perf-section-head h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-subhead);
+    font-weight: 600;
+  }
+
+  .perf-hint {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+  }
+
+  .perf-toolbar {
+    display: flex;
+    gap: 6px;
+  }
+
+  .perf-chip {
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: var(--text-micro);
+    cursor: pointer;
+  }
+
+  .perf-chip:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  .perf-chip-active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #1e1f22;
+  }
+
+  /* 时间线：柱高 = 主线程被占用的毫秒数，超过 100ms 变黄、500ms 变红 */
+  .perf-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 96px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #2b2b2b;
+  }
+
+  .perf-bar {
+    flex: 1 1 0;
+    min-width: 1px;
+    border-radius: 1px 1px 0 0;
+  }
+
+  .perf-bar-ok {
+    background: var(--green);
+    opacity: 0.5;
+  }
+
+  .perf-bar-warn {
+    background: var(--amber);
+  }
+
+  .perf-bar-bad {
+    background: var(--red);
+  }
+
+  .perf-legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  .perf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-aux);
+  }
+
+  .perf-table th {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .perf-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+  }
+
+  .perf-cell-name {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+
+  .perf-scope {
+    color: var(--blue);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  .perf-event {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--text-aux);
+    word-break: break-all;
+  }
+
+  .perf-slow {
+    color: var(--amber);
+  }
+
+  .perf-events,
+  .perf-files {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .perf-event-row {
+    display: grid;
+    grid-template-columns: 64px auto minmax(60px, 90px) minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 8px;
+    align-items: baseline;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .perf-time {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  .perf-event-meta {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    word-break: break-all;
+  }
+
+  .perf-files li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  @media (max-width: 720px) {
+    .perf-event-row {
+      grid-template-columns: 56px auto minmax(0, 1fr);
+    }
+
+    .perf-event-row .perf-event-meta {
+      grid-column: 1 / -1;
+    }
+  }
 }

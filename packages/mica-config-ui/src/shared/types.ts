@@ -7,7 +7,71 @@ export type ConfigWebSection =
   | 'plugins'
   | 'autoCompact'
   | 'browserControl'
-  | 'terminalControl';
+  | 'terminalControl'
+  | 'performance';
+
+/**
+ * 一条性能/日志记录。字段按需存在：`event` + `scope` 一定有，
+ * 其余（ms、lag、long、error…）取决于这条记录来自哪个探针。
+ */
+export type ConfigWebPerfEvent = {
+  at: number;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  scope: string;
+  event: string;
+  ms?: number;
+  lag?: number;
+  long?: number;
+  longN?: number;
+  dom?: number;
+  rows?: number;
+  heapMB?: number;
+  vis?: number;
+  count?: number;
+  error?: string;
+};
+
+/** 按「功能点（scope:event）」聚合的耗时统计，用来回答「哪个功能慢」。 */
+export type ConfigWebPerfBucket = {
+  scope: string;
+  event: string;
+  count: number;
+  slow: number;
+  fails: number;
+  avgMs: number;
+  maxMs: number;
+};
+
+/** 渲染层每秒一个采样点，按时间聚合后的视图。 */
+export type ConfigWebPerfTimelinePoint = {
+  at: number;
+  lag: number;
+  long: number;
+  longN: number;
+  dom: number;
+  heapMB?: number;
+};
+
+export type ConfigWebPerformanceDetails = {
+  available: boolean;
+  /** 日志目录（系统 temp，开机自动清空）。 */
+  dir: string;
+  files: Array<{ name: string; bytes: number; modifiedAt: number }>;
+  totals: {
+    events: number;
+    errors: number;
+    warns: number;
+    slowCalls: number;
+    /** 采样点数与观测时长。 */
+    samples: number;
+    spanMs: number;
+  };
+  /** 当前进程内还没落盘的条数。 */
+  pending: number;
+  buckets: ConfigWebPerfBucket[];
+  timeline: ConfigWebPerfTimelinePoint[];
+  events: ConfigWebPerfEvent[];
+};
 
 export type ConfigWebFilePayload = {
   path: string;

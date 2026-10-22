@@ -15,6 +15,46 @@ import { resolve } from 'path'
  */
 const runtimePort = Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || 8787
 
+/**
+ * 把 `import { IconX, IconY } from '@tabler/icons-react'` 改写成逐个深路径导入。
+ *
+ * 上游包的 barrel（dist/esm/tabler-icons-react.mjs）除了 re-export 全部 6197 个图标模块，
+ * 还会 `import * as index from './icons/index.mjs'`。tree-shaking 后产物里只剩实际用到的
+ * 几十个图标，体积没差别，但构建期仍要解析这 6000 多个模块：实测 renderer 段 10870 →
+ * 4749 个模块、快 1.5~2s。用 transform 改写而不是维护一份图标清单，源码写法保持不变，
+ * 新增图标时也不需要同步任何东西。
+ *
+ * 只对 build 生效：dev 下改写会让每个图标各成一个 optimizeDeps 预构建产物（实测 100 个
+ * deps 文件），冷启动反而更慢；dev 交给 Vite 把整个 barrel 预构建成一份即可。
+ */
+function tablerIconDeepImports() {
+  const specifier = '@tabler/icons-react'
+  const deep = `${specifier}/dist/esm/icons`
+  return {
+    name: 'mica:tabler-icon-deep-imports',
+    apply: 'build',
+    enforce: 'pre',
+    transform(code, id) {
+      if (id.includes('/node_modules/') || !code.includes(specifier)) return null
+      const namedImport = /import\s*\{([^}]*)\}\s*from\s*(['"])@tabler\/icons-react\2\s*;?/g
+      if (!namedImport.test(code)) return null
+      return code.replace(namedImport, (_match, names) => {
+        const lines = names
+          .split(',')
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .map((entry) => {
+            // 图标模块 default 导出组件，所以 `IconX as Alias` 直接变成 `import Alias from ...`
+            const [exported, local] = entry.split(/\s+as\s+/).map((value) => value.trim())
+            return `import ${local || exported} from '${deep}/${exported}.mjs'`
+          })
+        // 正则里的 `\s*` 会把结尾换行一起吃掉，补回来避免和下一条语句粘连
+        return `${lines.join('\n')}\n`
+      })
+    }
+  }
+}
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
@@ -29,8 +69,13 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [react(), tailwindcss()],
+    plugins: [tablerIconDeepImports(), react(), tailwindcss()],
     resolve: {
+      // packages/mica-config-ui 的源码从仓库根 node_modules 解析 react，页面脚本则从
+      // apps/desktop/node_modules 解析，两份物理路径不同的 react 会被当成两个实例打进包：
+      // 配置页里调用 hooks 时拿到的命名空间是 null（Cannot read properties of null
+      // (reading 'useState')）。dedupe 强制收敛到同一份。
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@renderer': resolve('src/renderer/src'),
         '@packages': resolve('../../packages'),
@@ -60,7 +105,9 @@ export default defineConfig({
       // electron-vite 的 renderer 默认 build.minify = false（它只对 main/preload
       // 有合理理由），不覆盖会让页面装载一份十几 MB 未压缩的 bundle。
       minify: true,
-      reportCompressedSize: true,
+      // 每次构建都要为每个 chunk 跑一遍 gzip 才算体积，monaco 单块 3.6MB，
+      // 这部分纯统计开销在本地反复构建时很显眼，体积告警由 chunkSizeWarningLimit 兜底。
+      reportCompressedSize: false,
       // 拆包后单个 chunk 会明显变大（monaco 独立成块），阈值跟着放宽，
       // 否则每次构建都刷一条误导性的告警。
       chunkSizeWarningLimit: 2048

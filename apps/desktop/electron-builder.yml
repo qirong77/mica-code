@@ -8,6 +8,9 @@ files:
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+# 注意：app.asar 里只会出现 package.json 的 dependencies。renderer 的依赖全部归在
+# devDependencies（已由 Vite 打进 out/renderer），谁把前端包挪回 dependencies，asar 就会
+# 从 15MB 涨到 200MB 以上，并连带拖慢 asar 写入与 zip/dmg 压缩。
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**

@@ -7,6 +7,7 @@ import type {
   ConfigWebConversationPage,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
+  ConfigWebPerformanceDetails,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
@@ -72,6 +73,18 @@ export type ConfigWebClient = {
    * 与受控浏览器一样只有「读详情」：会话由 agent 经接口创建，配置页不提供入口。
    */
   readTerminalControlDetails?(): Promise<ConfigWebTerminalControlDetails>;
+
+  /**
+   * 性能与诊断只活在桌面运行时里（数据是运行时写的本地 JSONL），浏览器宿主没有，
+   * 所以方法可选：缺了就显示「未开启」，而不是把侧栏条目藏掉。
+   */
+  readPerformanceDetails?(options?: {
+    limit?: number;
+    buckets?: number;
+    timeline?: number;
+    maxBytes?: number;
+  }): Promise<ConfigWebPerformanceDetails>;
+  clearPerformanceLogs?(): Promise<{ removed: number }>;
 
   readSessionsDetails(): Promise<ConfigWebSessionsDetails>;
   readSessionDetails(id: string): Promise<ConfigWebSessionDetails>;
@@ -218,6 +231,49 @@ function requireTerminalControl(): TerminalControlClient {
   const current = requireClient();
   if (!supportsTerminalControl()) throw new Error('当前宿主不支持终端控制');
   return current as TerminalControlClient;
+}
+
+/** 这个宿主能不能读到性能数据（桌面运行时能，浏览器宿主不能）。 */
+export function supportsPerformance(): boolean {
+  return typeof client?.readPerformanceDetails === 'function';
+}
+
+type PerformanceClient = ConfigWebClient &
+  Required<Pick<ConfigWebClient, 'readPerformanceDetails' | 'clearPerformanceLogs'>>;
+
+/** 宿主没有这个能力时交回一份显式「不可用」的详情，页面照常渲染。 */
+export function readPerformanceDetails(options?: {
+  limit?: number;
+  buckets?: number;
+  timeline?: number;
+  maxBytes?: number;
+}): Promise<ConfigWebPerformanceDetails> {
+  if (!supportsPerformance()) return Promise.resolve(unavailablePerformanceDetails());
+  return requirePerformance().readPerformanceDetails!(options);
+}
+
+export function clearPerformanceLogs(): Promise<{ removed: number }> {
+  if (!supportsPerformance()) return Promise.resolve({ removed: 0 });
+  return requirePerformance().clearPerformanceLogs();
+}
+
+function requirePerformance(): PerformanceClient {
+  const current = requireClient();
+  if (!supportsPerformance()) throw new Error('当前宿主不支持性能诊断');
+  return current as PerformanceClient;
+}
+
+function unavailablePerformanceDetails(): ConfigWebPerformanceDetails {
+  return {
+    available: false,
+    dir: '',
+    files: [],
+    totals: { events: 0, errors: 0, warns: 0, slowCalls: 0, samples: 0, spanMs: 0 },
+    pending: 0,
+    buckets: [],
+    timeline: [],
+    events: [],
+  };
 }
 
 export function readSessionsDetails(): Promise<ConfigWebSessionsDetails> {

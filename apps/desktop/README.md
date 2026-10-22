@@ -115,6 +115,36 @@ the `~/.local/bin/mica` launcher are rebuilt before the shell is bundled. The ap
 through `resolveMicaExecutable()`, so skipping this step leaves the window talking to a stale binary.
 Run `npm run build:server` alone when only the runtime changed and the CLI is already current.
 
+Use `npm run build:unpack` for local verification: it runs the same build but packages with
+`electron-builder --dir`, skipping the DMG/ZIP compression that dominates a release build.
+
+Build cost is split roughly as: CLI + shell + runtime in parallel (~6s), electron-builder
+packaging (~11s), zip + dmg compression (~14s). The last part compresses a 255 MB Electron
+Framework and does not shrink; that is why `--dir` exists for local checks.
+
+Build speed comes from three things, all of which are load-bearing:
+
+- Vite 8 (Rolldown) via `electron-vite` 6. The renderer segment went from 26–29s to 4–5s.
+  `electron-vite` 5 peers on vite ≤7, so the two versions must move together.
+- `scripts/run-parallel.mjs` runs the CLI build, `electron-vite build` and the runtime build
+  concurrently. They write to disjoint directories, so serializing them only wastes wall time.
+- `tablerIconDeepImports()` in `electron.vite.config.mjs` rewrites `@tabler/icons-react` named
+  imports to per-icon deep imports at build time. The upstream barrel re-exports 6197 icon
+  modules, which the renderer used to parse in full; the rewrite drops 10870 modules to 4744.
+
+Package size is decided by dependency classification, not by a file-exclusion list. electron-builder
+packs every entry of `dependencies` into `app.asar`, so renderer packages live in `devDependencies`
+(they are already bundled into `out/renderer` by Vite) and only `@electron-toolkit/utils`,
+`@xterm/headless` and `node-pty` stay in `dependencies`. Shipping the renderer set as well used to
+push `app.asar` past 200 MB (`@tabler/icons-react` alone is 91 MB of icon modules) and slowed both
+asar writing and archive compression; it is now ~15 MB. Add a new package to `dependencies` only if
+`src/main` requires it directly.
+
+`renderer.resolve.dedupe` pins `react` / `react-dom` to a single copy for the same structural reason:
+the config UI sources in `packages/mica-config-ui` resolve React from the repo root while the page
+resolves it from `apps/desktop`, and a second instance makes hooks in the settings page read from a
+null namespace (`Cannot read properties of null (reading 'useState')`).
+
 The renderer bundle is minified and split into on-demand chunks:
 
 - `electron.vite.config.mjs` sets `build.minify: true` explicitly — electron-vite leaves `minify`

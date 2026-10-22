@@ -40,6 +40,7 @@ npm run dev               # 构建运行时后启动 Electron + Vite
 npm test                  # 此项目使用 bun test，覆盖 host / renderer / main
 npx eslint src/
 npm run build             # 先构建仓库根 CLI（bun run build），再 Electron 外壳 + Web 运行时
+npm run build:unpack      # 同上但 electron-builder --dir，不压 DMG/ZIP，本地验证用
 npm run start:web         # 运行已构建的 Web 运行时
 npm run serve:web         # 构建后运行 Web 运行时
 ```
@@ -312,6 +313,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 外壳不注册通用业务 IPC，不加 preload；页面始终通过 HTTP + SSE 访问运行时。主进程只保留两个受控能力（`src/main/browser/`、`src/main/terminal/`），窗口页面同样走运行时端口。
 - `electron-shim.js` 将 host 所需 Electron 接口映射为 Node 实现；平台差异收敛在 transport/shim，不散落业务组件。
 - 运行时构建保持 `ssr.noExternal: true`，只 external Node 内置模块与 node-pty；asar 没有 node_modules。新增依赖后跑 `npm run build:server && npm test` 检查裸导入。
+- `package.json` 的 `dependencies` 只放主进程 / 运行时真正 require 的包（目前 `@electron-toolkit/utils`、`@xterm/headless`、`node-pty`）。renderer 的依赖全部归 `devDependencies`：它们已被 Vite 打进 `out/renderer`，留在 `dependencies` 会让 electron-builder 整份装进 `app.asar`（实测 15MB → 208MB），并拖慢 asar 写入与 zip/dmg 压缩。
+- `electron.vite.config.mjs` 的 `resolve.dedupe: ['react', 'react-dom']` 不能删：`packages/mica-config-ui` 从仓库根 node_modules 解析 react、页面脚本从 `apps/desktop/node_modules` 解析，两份路径不同会被当成两个实例，配置页 hooks 直接拿到 null。
+- `tablerIconDeepImports()` 插件把 `@tabler/icons-react` 的具名导入改写成深路径（仅 build）：上游 barrel re-export 6197 个图标模块，renderer 段会因此多解析 6000 个模块。新增图标无需同步任何清单，dev 不受影响。
 - 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`：React 遇到 render 抛错会卸掉整棵树，表现为整页黑屏（只剩窗口按钮）。渲染期引用未初始化的 `const` 是常见来源，由 renderer 的 `no-use-before-define` 拦住；确有延后引用时按处豁免并写明原因。
 - 外壳通过 stdin 管道管理子进程；运行时启动即 `stripContainerEnv()`，在任何 spawn 前移除 `ELECTRON_RUN_AS_NODE`。
 - 受控浏览器与终端控制的 socket 只在 `will-quit` 关闭：`before-quit` 里做不可逆清理时，一旦退出被取消，进程还在但 socket 已 unlink，`/remote/*` 会永久 503。
@@ -450,6 +454,15 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 顶栏图标与受控浏览器同一套显示逻辑：一条会话一个图标（多开按序标号），当前会话没有终端就**不出现**，顶栏也不再承担新建入口；会话由 agent 经 `POST /sessions` 创建。点击显示/隐藏窗口，右键确认后关闭。
 - 通用路由、owner、本机 Origin/Host 校验在 `src/main/shared/endpoint-http.js`，浏览器与终端共用，不各写一份。
 
+### 日志与性能诊断
+
+- `host/log.js` 是 desktop 运行时唯一的日志写入器：JSONL 落在 `os.tmpdir()/mica-logs/`（macOS 开机由 launchd 清空，因此**不要**再自己写保留策略之外的清理），内存排队 + 2s 批量 flush，同时留 1000 条环形缓冲供 `diagnostics:snapshot` 取现场。
+- 所有功能面都从 `POST /api/invoke` 进入，所以通道耗时只在 `handleInvoke` 里用 `logger('invoke').timed()` 量一次；超过 `SLOW_MS`（默认 300ms，`MICA_LOG_SLOW_MS` 可调）记 warn，并按 `scope:event` 聚合到 `slowReport()`。**新增功能不要自己再包一层计时。**
+- 渲染层分成两个探针：`perf-probe.js` 只管每秒采样（lag / longtask / dom / heap，每 15s 批量推 `perf:report`），`log-probe.js` 只管错误（console.error/warn 与未捕获异常、10s 去重、推 `log:report`，scope=renderer）。两者都把数据交给同一个写入器，**不要另起一套落盘**。
+- 采样一律全量记录，不做「异常才写」的筛选：阈值漏掉的卡顿恰恰是用户能感觉到的那部分。成本靠 tmpdir 与批量写控住。
+- 配置页的 Performance 面板（`packages/mica-config-ui/web/pages/PerformancePage.tsx`）读 `readPerformanceDetails`，聚合在 host 侧做完（`readPerformanceSummary`），页面只渲染。新增指标时同时改 `ConfigWebPerformanceDetails` 类型与 host 的聚合。
+- `error` 级别的日志字段用 `{ error }` 传异常对象，写入器会展开成 message/code/stack；不要自己 `String(error)`。
+
 ## 14. Desktop 文件、终端与侧栏
 
 这里的终端是运行时里的用户终端面板；第 13 节的终端控制是主进程 PTY + 后台窗口，两套互不复用会话。
@@ -523,6 +536,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - models.dev 种子用 `bun scripts/update-models-dev-seed.mjs` 刷新；release CI 刷新失败 warning，使用固定副本继续构建。
 - 品牌 SVG 唯一源为 `apps/desktop/resources/icon.svg`，其他端引用，网页保留 `?url&no-inline`。位图由 `npm run icons:generate` 生成，macOS 留白在生成器外扩 viewBox，不改 SVG。
 - renderer 显式 `build.minify: true`；重依赖本地 lazy 加载，不用 CDN。Monaco 仅由 monaco-runtime 和 lazy 编辑器加载，保留 JSON contribution 与 json worker 分派。
+- desktop 用 Vite 8（Rolldown）+ electron-vite 6：同一份 4744 模块的 renderer 从 Vite 7 的 26–29s 降到 4–5s。`electron-vite` 的 peer 只到 vite 7，升级 vite 必须同步升 electron-vite（6.x 才支持 vite 8）。
+- `build:app` / `build` 经 `scripts/run-parallel.mjs` 并行跑 CLI、外壳（electron-vite）与运行时三份构建，三者输出目录互不重叠；不要再改回串行 `&&`。
+- 出安装包约 30–40s，其中 electron-builder 打包 ~11s、zip + dmg 压缩 ~14s，压缩对象是 255MB 的 Electron Framework，这部分没有下降空间。只验证功能时用 `npm run build:unpack`（`--dir`，约 11s）。
 - 文件图标用 `?url&no-inline`，避免全部内嵌主包；静态文本 gzip，hash 资源 immutable 缓存。
 - 官网架构图只改 `apps/website/architecture/*.architecture.json` 再由 Archify 生成 HTML；交付前 showcase validate 零错误/警告，visual-check 四档无溢出（1440×900、1600×1000、1920×1080、2048×1320），清除生成的检查 sidecar。
 - GitHub Pages 显式传 configure-pages 的 base path output，Astro 内部链接经 `import.meta.env.BASE_URL` 拼接。

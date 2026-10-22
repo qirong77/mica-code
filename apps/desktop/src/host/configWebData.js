@@ -26,6 +26,7 @@ import {
 import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
+import { clearLogs, readPerformanceSummary } from './log.js'
 
 /**
  * 配置页在桌面运行时的数据层。
@@ -614,6 +615,10 @@ export const configWebActions = {
 
   readBrowserControlDetails: () => readBrowserControlDetailsFromHost(),
   readTerminalControlDetails: () => readTerminalControlDetailsFromHost(),
+
+  // 性能与诊断：读的是 host/log.js 写在系统 temp 下的 JSONL，聚合在 host 侧做完。
+  readPerformanceDetails: (input) => readPerformanceSummary(input ?? {}),
+  clearPerformanceLogs: () => clearLogs(),
 
   readSessionConversationPage: (input) =>
     readSessionConversationPage(

@@ -14,12 +14,20 @@ if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
     .catch((error) => console.warn('无法启动视口诊断', error))
 }
 
-// 性能埋点默认关闭：只在 `?perf=1` 的页面采样，落盘到 userData/perf/*.jsonl。
-if (new URLSearchParams(window.location.search).get('perf') === '1') {
+// 性能埋点默认开启：每秒采样、每 15 秒整批落到系统 temp（开机自动清空）。
+// `?perf=0` 只在需要排除探针干扰时关闭。
+const perfParam = new URLSearchParams(window.location.search).get('perf')
+if (perfParam !== '0') {
   void import('./perf-probe')
     .then(({ startPerfProbe }) => startPerfProbe(window, document))
     .catch((error) => console.warn('无法启动性能探针', error))
 }
+
+// 渲染层错误采集：console.error/warn 与未捕获异常进同一套日志（scope=renderer）。
+// 白屏和渲染抛错往往没有别的痕迹，这一条是唯一的现场。
+void import('./log-probe')
+  .then(({ startLogProbe }) => startLogProbe(window))
+  .catch((error) => console.warn('无法启动日志采集', error))
 
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。

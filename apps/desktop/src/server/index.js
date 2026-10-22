@@ -55,6 +55,7 @@ import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
 import { registerPerfIpc } from '../host/perf.js'
+import { logger, flushLogs, registerDiagnosticsIpc } from '../host/log.js'
 import { registerClipboardIpc } from '../host/clipboard.js'
 import { registerServersIpc } from '../host/servers.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
@@ -63,6 +64,10 @@ import { registerSharedSessionIpc } from '../host/shared-sessions.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
+
+// host 通道统一计时：一次调用超过阈值就记 slow，并累计到 slowReport。
+const invokeLog = logger('invoke')
+const runtimeLog = logger('runtime')
 
 /**
  * Mica Code 桌面端的运行时本体：`src/host` 下的能力（PTY 终端、mica app-server
@@ -292,8 +297,10 @@ async function handleInvoke(req, res) {
     sendJson(res, 400, { ok: false, error: '缺少 channel' })
     return
   }
+  // 所有功能都从这一个入口进入，所以只在这里计时就能覆盖 chat/files/git/stats/config…
   try {
-    sendJson(res, 200, { ok: true, result: await invokeChannel(channel, body.payload) })
+    const result = await invokeLog.timed(channel, () => invokeChannel(channel, body.payload))
+    sendJson(res, 200, { ok: true, result })
   } catch (error) {
     sendJson(res, 200, { ok: false, error: errorMessage(error) })
   }
@@ -452,6 +459,7 @@ export async function startDesktopServer(options = {}) {
   registerStatsIpc()
   registerSkillsIpc()
   registerPerfIpc()
+  registerDiagnosticsIpc(ipcMain)
   registerClipboardIpc()
   registerServersIpc()
   registerConfigWebIpc()
@@ -655,6 +663,12 @@ function lanAddresses(port) {
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   const running = await startDesktopServer(options)
+  runtimeLog.info('ready', {
+    port: running.port,
+    version: process.env.MICA_DESKTOP_CLI_VERSION || undefined,
+    node: process.version,
+    pid: process.pid
+  })
   // 机器可读的就绪行：Electron 容器（src/main/index.js）据此拿到实际端口
   console.log(
     `[mica-desktop] ready ${JSON.stringify({ url: running.url, port: running.port, host: running.host })}`
@@ -685,11 +699,22 @@ async function main() {
     if (closing) return
     closing = true
     console.log(`\n[mica-desktop] 收到 ${signal}，正在关闭…`)
+    runtimeLog.info('shutdown', { signal })
+    flushLogs()
     await running.close()
     process.exit(0)
   }
   process.on('SIGINT', () => void shutdown('SIGINT'))
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
+  // 未捕获异常记下来再走默认流程：进程被杀后这些是唯一线索。
+  process.on('uncaughtException', (error) => {
+    runtimeLog.error('uncaughtException', { error })
+    flushLogs()
+  })
+  process.on('unhandledRejection', (reason) => {
+    runtimeLog.error('unhandledRejection', { error: reason })
+    flushLogs()
+  })
 
   // 被 Electron 容器以 `stdio: ['pipe', ...]` 拉起时，父进程消失会关闭 stdin 管道，
   // 这里跟着退出，避免留下孤儿运行时（占着端口与 PTY）。

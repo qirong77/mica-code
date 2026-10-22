@@ -10,6 +10,7 @@ import { RolesPage } from './pages/RolesPage.js';
 import { SessionsPage } from './pages/SessionsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
 import { TerminalControlPage } from './pages/TerminalControlPage.js';
+import { PerformancePage } from './pages/PerformancePage.js';
 import { connectHeartbeat, supportsAutoCompact } from './api.js';
 
 export function App() {
@@ -53,6 +54,7 @@ export function App() {
           {section === 'autoCompact' ? <AutoCompactPage /> : null}
           {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'terminalControl' ? <TerminalControlPage /> : null}
+          {section === 'performance' ? <PerformancePage /> : null}
           {section === 'sessions' ? (
             <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
           ) : null}
@@ -83,6 +85,7 @@ function isSectionAvailable(candidate: string | null): boolean {
     'autoCompact',
     'browserControl',
     'terminalControl',
+    'performance',
     'sessions',
     'roles',
     'mcp',

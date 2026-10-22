@@ -33,6 +33,9 @@ export function createDesktopConfigWebClient() {
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
     readTerminalControlDetails: () => invoke('readTerminalControlDetails'),
 
+    readPerformanceDetails: (options) => invoke('readPerformanceDetails', options),
+    clearPerformanceLogs: () => invoke('clearPerformanceLogs'),
+
     readSessionsDetails: () => invoke('readSessionsDetails'),
     readSessionDetails: (id) => invoke('readSessionDetails', { id }),
     readSessionContent: (id) => invoke('readSessionContent', { id }),

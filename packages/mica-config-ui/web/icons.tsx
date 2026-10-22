@@ -22,6 +22,7 @@ import {
   Send,
   Sparkles,
   SquareTerminal,
+  Timer,
   Trash2,
   X,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ export const appIcons = {
   autoCompact: Gauge,
   browserControl: Globe,
   terminalControl: SquareTerminal,
+  performance: Timer,
   check: Check,
   chevronDown: ChevronDown,
   chevronRight: ChevronRight,
