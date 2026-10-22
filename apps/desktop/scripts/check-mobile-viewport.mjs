@@ -19,7 +19,7 @@ app.whenReady().then(async () => {
   try {
     const renderer = join(project, 'out/renderer')
     const html = readFileSync(join(renderer, 'index.html'), 'utf8')
-    const cssFile = html.match(/href="\.\/([^\"]+\.css)"/)?.[1]
+    const cssFile = html.match(/href="\.\/([^"]+\.css)"/)?.[1]
     assert.ok(cssFile, '先运行 npm run build:app 生成页面样式')
     const css = readFileSync(join(renderer, cssFile), 'utf8')
     const bundle = await build({

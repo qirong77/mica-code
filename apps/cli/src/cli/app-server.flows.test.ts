@@ -2403,11 +2403,12 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(task.command).toContain('tick-1');
 
     // Output: the host reads the task's own output file and reports the window
-    // it returned, so the desktop can show what it is not seeing. The task starts
-    // as soon as the snapshot is pushed, so poll a few times: a loaded runner can
-    // read the file before the shell writes its first line.
+    // it returned, so the desktop can show what it is not seeing. The file already
+    // holds mica's task header when the snapshot is pushed, so poll until the child
+    // writes its own line: a loaded runner can serve the request before that.
     let output: { ok: boolean; content: string; size: number; task: { status: string } | null } | undefined;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    const deadline = Date.now() + 15_000;
+    for (let attempt = 0; ; attempt += 1) {
       // Fresh ids per attempt: waitFor replays earlier matching lines.
       const requestId = 200 + attempt;
       await send(host, requestId, 'mica/backgroundTasks/output', { taskId: task.id, tailBytes: 4096 });
@@ -2417,10 +2418,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
         'output response',
       );
       output = outputResponse.result as typeof output;
-      if (output?.content) break;
+      if (output?.content.includes('tick-1') || Date.now() > deadline) break;
       await sleep(100);
     }
     if (!output) throw new Error('no background task output response');
+    if (!output.content.includes('tick-1')) {
+      // Name what the host actually returned: a missing file (size 0) and a file
+      // that only holds mica's header are different failures.
+      throw new Error(
+        `background task output is missing tick-1 (size=${output.size}, status=${
+          output.task?.status
+        }, content=${JSON.stringify(output.content.slice(0, 160))})`,
+      );
+    }
     expect(output.ok).toBe(true);
     expect(output.content).toContain('tick-1');
     expect(output.size).toBeGreaterThan(0);
