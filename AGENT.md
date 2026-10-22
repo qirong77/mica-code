@@ -534,6 +534,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `bun run build` 产出 `dist/mica`，默认安装到 `~/.local/lib/mica`，`~/.local/bin/mica` 为薄 launcher；行为不符先核对实际入口。
 - `mica.build.env` 定义 runtime/version/app/config-dir 品牌键，同名环境变量优先，经 build --define 和 `mica-config/brand.ts` 暴露；改键同步构建文件与本手册。
 - models.dev 种子用 `bun scripts/update-models-dev-seed.mjs` 刷新；release CI 刷新失败 warning，使用固定副本继续构建。
+- 发布链路 `build-binaries.yml`：`checks` / `desktop-checks` 任一失败，`build` 与 `publish` 整段跳过，GitHub Releases 就不会更新；排查「release 没更新」先看 CI 是否红。
+- 打包按平台取 node-pty 原生产物（`scripts/stage-node-pty.mjs`）：darwin 用 `prebuilds/`，linux 用 `build/Release/pty.node`。`spawn-helper` 是 node-pty 的 macOS 专属 target，linux 不应要求它存在。
+- Release 说明固定取 `.github/release-notes.md`；`latest` 为滚动 tag，每次重建，因此不用 `--generate-notes`。
 - 品牌 SVG 唯一源为 `apps/desktop/resources/icon.svg`，其他端引用，网页保留 `?url&no-inline`。位图由 `npm run icons:generate` 生成，macOS 留白在生成器外扩 viewBox，不改 SVG。
 - renderer 显式 `build.minify: true`；重依赖本地 lazy 加载，不用 CDN。Monaco 仅由 monaco-runtime 和 lazy 编辑器加载，保留 JSON contribution 与 json worker 分派。
 - desktop 用 Vite 8（Rolldown）+ electron-vite 6：同一份 4744 模块的 renderer 从 Vite 7 的 26–29s 降到 4–5s。`electron-vite` 的 peer 只到 vite 7，升级 vite 必须同步升 electron-vite（6.x 才支持 vite 8）。

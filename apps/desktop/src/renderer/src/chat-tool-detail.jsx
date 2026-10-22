@@ -1,8 +1,9 @@
 import { IconCopy } from '@tabler/icons-react'
 import { toolIcon } from '@packages/mica-web-shared'
 import { copyText } from './transport'
-import { PathText } from './PathToken'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
+import { CodeView } from './CodeView'
+import { guessLanguage } from './code-highlight'
 import {
   formatLogElapsed,
   toolDisplayName,
@@ -38,9 +39,19 @@ function statusClass(status) {
   return 'is-done'
 }
 
+/**
+ * 输出块的着色语言：`run_shell` 的 stdout 是 `[stdout]` + `key: value` 的结构化日志，
+ * 其余工具优先认 JSON / diff（MCP、patch 类工具很常见），认不出就原样输出。
+ */
+function outputLanguage(tool, text) {
+  if (tool?.tool === 'run_shell') return 'log'
+  return guessLanguage(text)
+}
+
 export function ToolDetailDialog({ tool, onClose }) {
   if (!tool) return null
   const output = toolOutput(tool)
+  const outputText = output ? output.lines.join('\n') : ''
   const input = tool.input && typeof tool.input === 'object' ? tool.input : {}
   const inputText = Object.keys(input).length ? JSON.stringify(input, null, 2) : ''
   const summary = toolSummary(tool)
@@ -76,9 +87,12 @@ export function ToolDetailDialog({ tool, onClose }) {
         }
       >
         {inputText ? (
-          <pre className="chat-modal-pre chat-modal-pre-params">
-            <PathText text={inputText} />
-          </pre>
+          <CodeView
+            className="chat-modal-pre chat-modal-pre-params"
+            text={inputText}
+            language="json"
+            wrap
+          />
         ) : (
           <div className="chat-modal-note">（无参数）</div>
         )}
@@ -89,7 +103,7 @@ export function ToolDetailDialog({ tool, onClose }) {
           output ? (
             <button
               type="button"
-              onClick={() => void copyText(output.lines.join('\n'))}
+              onClick={() => void copyText(outputText)}
               title="复制输出"
             >
               <IconCopy size={12} /> 复制
@@ -98,9 +112,12 @@ export function ToolDetailDialog({ tool, onClose }) {
         }
       >
         {output ? (
-          <pre className="chat-modal-pre">
-            <PathText text={output.lines.join('\n')} />
-          </pre>
+          <CodeView
+            className="chat-modal-pre"
+            text={outputText}
+            language={outputLanguage(tool, outputText)}
+            wrap
+          />
         ) : (
           <div className="chat-modal-note">
             {tool.status === 'running' || tool.status === 'pending' ? '还在运行…' : '（没有输出）'}

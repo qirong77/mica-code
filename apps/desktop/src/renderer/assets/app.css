@@ -2901,6 +2901,88 @@ body.is-resizing.is-resizing-terminal {
   overflow: auto;
 }
 
+/*
+ * 代码块着色（`CodeView` + `code-highlight.js`）：聊天里的 markdown 代码块与详情弹窗的
+ * 参数/输出共用一套 token 色，全部走主题变量，不另建调色板。
+ *
+ * 这一段必须排在 `.chat-modal-pre` 之后：两边都会设 color / white-space，靠顺序决定谁能赢。
+ * 默认不折行（横向滚动，和编辑器里看到的一致）；日志类输出传 `wrap` 才换成折行。
+ */
+.code-view {
+  min-width: 0;
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.code-view.is-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-tok-key {
+  color: var(--color-purple);
+}
+
+.code-tok-string {
+  color: var(--color-success-soft);
+}
+
+.code-tok-number {
+  color: var(--color-info-soft);
+}
+
+.code-tok-literal {
+  color: var(--color-accent);
+}
+
+.code-tok-comment {
+  color: var(--color-fg-faint);
+  font-style: italic;
+}
+
+.code-tok-command {
+  color: var(--color-fg-strong);
+}
+
+.code-tok-flag {
+  color: var(--color-warn-soft);
+}
+
+.code-tok-variable {
+  color: var(--color-purple);
+}
+
+.code-tok-operator {
+  color: var(--color-accent);
+}
+
+.code-tok-punct {
+  color: var(--color-fg-muted);
+}
+
+.code-tok-header {
+  color: var(--color-info-soft);
+}
+
+.code-tok-warn {
+  color: var(--color-warn);
+}
+
+.code-tok-error {
+  color: var(--color-danger);
+}
+
+.code-tok-inserted {
+  color: var(--color-git-added);
+}
+
+.code-tok-deleted {
+  color: var(--color-git-deleted);
+}
+
 .chat-modal-prose {
   color: var(--color-fg-soft);
   white-space: pre-wrap;

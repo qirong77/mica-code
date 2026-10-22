@@ -173,7 +173,7 @@ jobs:
           gh release create "$TAG_NAME" \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TITLE" \
-            --generate-notes \
+            --notes-file .github/release-notes.md \
             install.sh \
             dist/packages/*.tar.gz \
             dist/packages/sha256sums.txt

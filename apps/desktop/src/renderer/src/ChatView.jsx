@@ -49,6 +49,7 @@ import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
+import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 
 function formatTokens(value) {
@@ -234,7 +235,7 @@ function CodeBlock({ children }) {
           <span>{copied ? '已复制' : '复制'}</span>
         </button>
       </div>
-      <pre>{children}</pre>
+      <CodeView text={code} language={language} />
     </div>
   )
 }
