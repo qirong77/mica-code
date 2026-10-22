@@ -33,8 +33,8 @@ import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
-import { currentServerUrl, openServerTarget, serverLabel } from './servers'
-import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import { currentServerUrl, isElectronShell, openServerTarget, serverLabel } from './servers'
+import { normalizeAppView, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { copyText } from './transport'
 import { useQuickPickAnchor } from './quick-pick-anchor'
 
@@ -637,6 +637,9 @@ const EMPTY_TERMINAL_OPEN = {}
 const DEFAULT_TERMINAL_HEIGHT = 320
 const MIN_TERMINAL_HEIGHT = 120
 const MAX_TERMINAL_HEIGHT_RATIO = 0.75
+// 文件窗口的 `window.open` 目标名：同名窗口由浏览器/外壳复用，重复点同一个按钮不会攒出
+// 一堆一模一样的窗口（外壳侧见 main/index.js 的 openAppPageWindow）。
+const FILES_WINDOW_NAME = 'mica-files'
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
 // —— 86px 是 macOS 上让开交通灯后的位置。
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
@@ -656,6 +659,11 @@ function setLayoutVar(name, value) {
 function storedLayout() {
   const value = uiStateKeys().layout
   return value && typeof value === 'object' ? value : {}
+}
+
+/** 存下来的主区视图（`layout.view`），认不出来的一律当成对话。 */
+function savedView() {
+  return normalizeAppView(storedLayout().view) || 'chat'
 }
 
 function savedSidebarWidth() {
@@ -746,6 +754,9 @@ export default function App() {
   // 之后是单向同步（App → 地址栏）。
   const [urlState] = useState(() => readAppUrl(window.location.search))
   const urlSessionRef = useRef(urlState.sessionId)
+  // 地址里指定了视图的窗口（顶栏文件夹开出来的那个）视图只属于这一屏：不写回共享布局，
+  // 也不跟着别的窗口切。否则文件窗口一打开就会把主窗口也推到文件视图上，等于白开。
+  const pinnedView = urlState.view
   // 界面状态在渲染前已经从运行时取回（main.jsx 的 ensureUiState），所以第一帧就是上一次
   // 退出时的样子：直接用取回的工作区播种，不再有「先画空界面再加载」的过程。
   const [bootstrap] = useState(
@@ -779,17 +790,17 @@ export default function App() {
   const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
   const [selectedId, setSelectedId] = useState(bootstrap.selectedId)
   const selectedIdRef = useLatest(selectedId)
-  // 主区视图：chat | files | stats | settings。文件与对话共用主区（顶栏「文件」按钮来回
-  // 切换），终端则是主区底部可收起的下拉面板（见 terminalOpen）。
+  // 主区视图：chat | files | stats | settings。对话里的路径链接仍然就地打开文件视图；
+  // 顶栏的文件夹按钮则把文件视图开成独立窗口（见 openFilesWindow），主窗口留在对话里。
+  // 终端是主区底部可收起的下拉面板（见 terminalOpen），不占这一层视图。
   const [view, setView] = useState(() => {
+    if (pinnedView) return pinnedView
     // 分享页只从对话开始（布局是跨页面共享的，别把分享者那边的视图带过来）
     if (shareView) return 'chat'
-    return storedLayout().view === 'stats' ||
-      storedLayout().view === 'settings' ||
-      storedLayout().view === 'files'
-      ? storedLayout().view
-      : 'chat'
+    return savedView()
   })
+  // 独立窗口写回布局时带上的那个 view：它只是替共享布局守住原值，不代表这一屏在看什么。
+  const sharedViewRef = useRef(pinnedView ? savedView() : null)
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -1214,9 +1225,10 @@ export default function App() {
       sidebarWidth,
       sidebarCollapsed,
       terminalHeight,
-      view
+      // 独立窗口不覆盖别人的视图：把自己那一屏的 files 写回共享布局，主窗口会跟着切走。
+      view: pinnedView ? sharedViewRef.current : view
     })
-  }, [sidebarCollapsed, sidebarWidth, terminalHeight, view])
+  }, [pinnedView, sidebarCollapsed, sidebarWidth, terminalHeight, view])
 
   useEffect(() => {
     if (!remoteLayout) return
@@ -1224,14 +1236,11 @@ export default function App() {
     if (typeof remoteLayout.sidebarCollapsed === 'boolean')
       setSidebarCollapsed(remoteLayout.sidebarCollapsed)
     if (Number.isFinite(remoteLayout.terminalHeight)) setTerminalHeight(remoteLayout.terminalHeight)
-    if (
-      remoteLayout.view === 'chat' ||
-      remoteLayout.view === 'files' ||
-      remoteLayout.view === 'stats' ||
-      remoteLayout.view === 'settings'
-    )
-      setView(remoteLayout.view)
-  }, [remoteLayout])
+    const next = normalizeAppView(remoteLayout.view)
+    if (!next) return
+    if (pinnedView) sharedViewRef.current = next
+    else setView(next)
+  }, [pinnedView, remoteLayout])
 
   const terminalCwd = useCallback(
     (id) => {
@@ -2097,6 +2106,13 @@ export default function App() {
     if (next && next !== window.location.href)
       window.history.replaceState(window.history.state, '', next)
   }, [activeSessionId])
+  // 独立窗口的视图也写进地址栏：刷新还停在同一屏，地址传出去打开的是同一个窗口。
+  useEffect(() => {
+    if (!pinnedView) return
+    const next = urlWithState(window.location.href, { view })
+    if (next && next !== window.location.href)
+      window.history.replaceState(window.history.state, '', next)
+  }, [pinnedView, view])
   // 地址栏里指定的会话在启动时打开/切过去（分享链接的落地点）。等会话清单回来再动手，
   // 才能拿标题与工作目录开页签；清单里没有这条（已被删）时仍按 id 打开，让会话那侧报错。
   useEffect(() => {
@@ -2154,6 +2170,27 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
+  // 顶栏的文件夹按钮：把这台运行时上的同一个应用页面以 `?view=files` 开成独立窗口，
+  // 主区因此留在对话里（与内嵌的文件视图相比，文件树和对话可以并排看）。
+  // 外壳把同源应用页面开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
+  // 就是一个新窗口；`FILES_WINDOW_NAME` 让它复用同一个窗口，重复点只是把它端到前面。
+  const openFilesWindow = useCallback(() => {
+    const url = urlWithState(window.location.href, { view: 'files' })
+    if (!url) return
+    const opened = window.open(url, FILES_WINDOW_NAME, 'popup=yes,width=1200,height=860')
+    if (opened) {
+      try {
+        opened.opener = null
+      } catch {
+        // 某些浏览器不让写，忽略
+      }
+      return
+    }
+    // 外壳里 window.open 恒返回 null（窗口由主进程开），只有浏览器才谈得上被拦截
+    if (isElectronShell()) return
+    setView('files')
+    showToast('新窗口被浏览器拦截，已在当前窗口打开文件', true)
+  }, [showToast])
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
   useEffect(() => {
     const handler = (event) => {
@@ -2631,15 +2668,10 @@ export default function App() {
               </button>
               <button
                 type="button"
-                title={view === 'files' ? '返回对话' : '查看文件'}
-                aria-label={view === 'files' ? '返回对话' : '查看文件'}
-                aria-pressed={view === 'files'}
-                className={`grid size-6 place-items-center rounded-md transition-colors ${
-                  view === 'files'
-                    ? 'bg-white/10 text-white hover:bg-white/15'
-                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                }`}
-                onClick={() => setView((current) => (current === 'files' ? 'chat' : 'files'))}
+                title="在新窗口中打开文件"
+                aria-label="在新窗口中打开文件"
+                className="grid size-6 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                onClick={openFilesWindow}
               >
                 <IconFile size={14} />
               </button>

@@ -7,6 +7,7 @@ import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-ho
 import { applyBrowserRenderSwitch } from './browser/browser-core.js'
 import { resolveTerminalSocketPath, startTerminalHost } from './terminal/terminal-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
+import { appPageKey, isAppPageTarget } from './app-page-target.js'
 
 /**
  * Electron 外壳。
@@ -333,6 +334,33 @@ function findServerWindow(origin) {
 }
 
 /**
+ * 页面自己开窗口（`window.open`）：目标落在同一台运行时的应用页面上时，由外壳开一个
+ * 应用窗口——顶栏的文件夹就是这么把文件视图开成独立窗口的（`?view=files`），主窗口因此
+ * 能留在对话里。同名窗口已经开着就把那个窗口端到前面并换到新地址，重复点按钮不会攒出
+ * 一堆窗口。返回 `false` 表示不是这种目标，调用方仍按外链处理。
+ */
+function openAppPageWindow(state, target, frameName = '') {
+  if (!state || state.win.isDestroyed()) return false
+  const origins = [state.server, originOf(localPageUrl)]
+  const page = state.win.webContents.getURL()
+  if (!isAppPageTarget(target, { origins, page })) return false
+  const name = String(frameName || '').trim()
+  const key = appPageKey(target)
+  const existing = [...windows].find((item) => {
+    if (item.win.isDestroyed()) return false
+    if (name) return item.frameName === name
+    return appPageKey(item.win.webContents.getURL()) === key
+  })
+  if (!existing) {
+    createWindow(target, { frameName: name })
+    return true
+  }
+  showWindow(existing)
+  if (appPageKey(existing.win.webContents.getURL()) !== key) void loadPage(existing, target)
+  return true
+}
+
+/**
  * 页面请求切到另一个地址：已经开着的服务器把窗口端到前面，没开过的在**新窗口**里打开，
  * 其余交回系统浏览器。
  */
@@ -510,7 +538,7 @@ function applyBadge(count) {
  * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
  * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
  */
-function createWindow(url, { primary = false } = {}) {
+function createWindow(url, { primary = false, frameName = '' } = {}) {
   const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1280,
@@ -538,6 +566,9 @@ function createWindow(url, { primary = false } = {}) {
   const state = {
     win,
     primary,
+    // 页面自己开的窗口（`window.open(url, 'mica-files')`）记下它的名字：同名再开一次时
+    // 复用同一个窗口，重复点按钮不会攒出一堆窗口。
+    frameName,
     server: originOf(url),
     local: false,
     apiUrl: '',
@@ -579,6 +610,9 @@ function createWindow(url, { primary = false } = {}) {
   })
 
   win.webContents.setWindowOpenHandler((details) => {
+    // 页面要的是一台运行时上的应用页面（顶栏文件夹的 `?view=files`）时就真开一个窗口，
+    // 其余 http(s) 目标照旧交给系统浏览器。
+    if (openAppPageWindow(state, details.url, details.frameName)) return { action: 'deny' }
     if (/^https?:/i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })

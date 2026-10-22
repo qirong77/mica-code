@@ -326,6 +326,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 回声按键和值在 store 的 `applyRemote` 入口认领一次；组件不得各自 `claimUiStateEcho`。卸载时 flush。
 - 草稿按 nodeId 订阅字符串；App 用引用稳定的 `draftMarkers`，不把整张 drafts 表读入组件渲染。
 - 同一 session 在所有页面是同一 node、run、终端。`dedupeSessionNodes` 合并重复页签并优先保留运行节点；不增加跨页签认领、观察者心跳或所有权转移机制。
+- 主区视图 `layout.view` 跨窗口共享；由 `?view=` 打开的独立窗口（顶栏文件夹走 `window.open(url, 'mica-files')`，外壳在 `main/app-page-target.js` 判定后开应用窗口）视图只属于自己：不写回 `layout`、不跟随其它窗口，并镜像到地址栏。
 - 仅另一个进程由 turn lease 拦截；`remoteRunning` 显示只读提示并每 3s 复查，解锁后重拉历史。
 
 ### 路由、分享与访问

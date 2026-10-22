@@ -12,11 +12,27 @@
 
 export const SESSION_PARAM = 'session'
 
+/**
+ * 主区视图。它平时是「这一屏自己的」界面状态，但独立窗口要靠地址说清自己开的是哪一屏：
+ * 顶栏的文件夹按钮把同一个应用页面以 `?view=files` 开成新窗口（`main/index.js` 把同源
+ * 页面开成应用窗口），那个窗口刷新后还得停在文件视图。
+ */
+export const VIEW_PARAM = 'view'
+
+/** 合法的主区视图，与 App.jsx 里 `view` 的取值保持一致。 */
+export const APP_VIEWS = ['chat', 'files', 'stats', 'settings']
+
+/** 地址里的 `view` 认得出就返回视图名，认不出返回 null（手写进去的内容不参与渲染）。 */
+export function normalizeAppView(value) {
+  const text = String(value ?? '').trim()
+  return APP_VIEWS.includes(text) ? text : null
+}
+
 /** 从 `window.location.search` 读出页面级状态；参数缺失或非法一律回落默认值。 */
 export function readAppUrl(search) {
   const params = new URLSearchParams(String(search || ''))
   const sessionId = (params.get(SESSION_PARAM) || '').trim()
-  return { sessionId: sessionId || null }
+  return { sessionId: sessionId || null, view: normalizeAppView(params.get(VIEW_PARAM)) }
 }
 
 function parseUrl(href) {
@@ -28,15 +44,21 @@ function parseUrl(href) {
 }
 
 /**
- * 当前地址 + 新状态：只动 session 参数，其余（`?layout=` 之类）原样保留——
+ * 当前地址 + 新状态：只动传进来的那两个参数，其余（`?layout=` 之类）原样保留——
  * 那些是页面自己的调试开关，不该因为切换会话被顺手抹掉。
- * `sessionId` 为空表示「没有打开的会话」，把这个参数删掉。
+ * 传 `null` 表示「没有这个状态」，把参数删掉；不传（`undefined`）表示这次不改它。
  */
-export function urlWithState(href, { sessionId = null } = {}) {
+export function urlWithState(href, { sessionId, view } = {}) {
   const url = parseUrl(href)
   if (!url) return null
-  if (sessionId) url.searchParams.set(SESSION_PARAM, sessionId)
-  else url.searchParams.delete(SESSION_PARAM)
+  if (sessionId !== undefined) {
+    if (sessionId) url.searchParams.set(SESSION_PARAM, sessionId)
+    else url.searchParams.delete(SESSION_PARAM)
+  }
+  if (view !== undefined) {
+    if (view) url.searchParams.set(VIEW_PARAM, view)
+    else url.searchParams.delete(VIEW_PARAM)
+  }
   return url.toString()
 }
 

@@ -3,19 +3,30 @@ import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 
 describe('readAppUrl', () => {
   it('reads the open session', () => {
-    expect(readAppUrl('?session=abc')).toEqual({ sessionId: 'abc' })
+    expect(readAppUrl('?session=abc')).toEqual({ sessionId: 'abc', view: null })
   })
 
   it('falls back when the param is missing or blank', () => {
-    expect(readAppUrl('')).toEqual({ sessionId: null })
-    expect(readAppUrl(undefined)).toEqual({ sessionId: null })
-    expect(readAppUrl('?session=')).toEqual({ sessionId: null })
-    expect(readAppUrl('?session=%20')).toEqual({ sessionId: null })
+    expect(readAppUrl('')).toEqual({ sessionId: null, view: null })
+    expect(readAppUrl(undefined)).toEqual({ sessionId: null, view: null })
+    expect(readAppUrl('?session=')).toEqual({ sessionId: null, view: null })
+    expect(readAppUrl('?session=%20')).toEqual({ sessionId: null, view: null })
   })
 
   it('ignores anything a visitor might add by hand', () => {
     // 页面自己带进来的参数不具备任何含义，服务端才是判定方
-    expect(readAppUrl('?session=abc&share=1')).toEqual({ sessionId: 'abc' })
+    expect(readAppUrl('?session=abc&share=1')).toEqual({ sessionId: 'abc', view: null })
+  })
+
+  it('reads the view pinned by a detached window', () => {
+    // 顶栏文件夹开出来的那个窗口：地址里带着 `?view=files`
+    expect(readAppUrl('?session=abc&view=files')).toEqual({ sessionId: 'abc', view: 'files' })
+  })
+
+  it('drops a view it does not know', () => {
+    expect(readAppUrl('?view=nope').view).toBeNull()
+    expect(readAppUrl('?view=').view).toBeNull()
+    expect(readAppUrl('?view=Files').view).toBeNull()
   })
 })
 
@@ -36,6 +47,23 @@ describe('urlWithState', () => {
     expect(urlWithState('http://h:1/?session=old&layout=desktop', { sessionId: null })).toBe(
       'http://h:1/?layout=desktop'
     )
+  })
+
+  it('writes and drops the view', () => {
+    expect(urlWithState('http://h:1/?session=a', { view: 'files' })).toBe(
+      'http://h:1/?session=a&view=files'
+    )
+    expect(urlWithState('http://h:1/?session=a&view=files', { view: null })).toBe(
+      'http://h:1/?session=a'
+    )
+  })
+
+  it('leaves the params it was not asked about alone', () => {
+    // 切会话不该抹掉 `?view=`，反过来说文件窗口刷新视图也不该丢掉会话
+    expect(urlWithState('http://h:1/?view=files', { sessionId: 'a' })).toBe(
+      'http://h:1/?view=files&session=a'
+    )
+    expect(urlWithState('http://h:1/?session=a', {})).toBe('http://h:1/?session=a')
   })
 
   it('returns null for an unparsable href', () => {

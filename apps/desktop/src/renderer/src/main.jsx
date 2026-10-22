@@ -14,6 +14,13 @@ if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
     .catch((error) => console.warn('无法启动视口诊断', error))
 }
 
+// 性能埋点默认关闭：只在 `?perf=1` 的页面采样，落盘到 userData/perf/*.jsonl。
+if (new URLSearchParams(window.location.search).get('perf') === '1') {
+  void import('./perf-probe')
+    .then(({ startPerfProbe }) => startPerfProbe(window, document))
+    .catch((error) => console.warn('无法启动性能探针', error))
+}
+
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。
 ensureMicaApi()

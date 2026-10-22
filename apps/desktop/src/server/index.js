@@ -53,6 +53,7 @@ import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
+import { registerPerfIpc } from '../host/perf.js'
 import { registerClipboardIpc } from '../host/clipboard.js'
 import { registerServersIpc } from '../host/servers.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
@@ -449,6 +450,7 @@ export async function startDesktopServer(options = {}) {
   registerGitIpc()
   registerStatsIpc()
   registerSkillsIpc()
+  registerPerfIpc()
   registerClipboardIpc()
   registerServersIpc()
   registerConfigWebIpc()

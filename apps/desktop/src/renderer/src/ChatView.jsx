@@ -1775,7 +1775,44 @@ export function shortPath(path, max = 46) {
   return `${head}…/${tail}`.slice(0, max)
 }
 
-function MessageRow({
+function PhaseElapsedLabel({ startedAt }) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!startedAt) {
+      setElapsed(0)
+      return undefined
+    }
+    const update = () => setElapsed(Math.max(0, Date.now() - startedAt))
+    update()
+    const timer = window.setInterval(update, 250)
+    return () => clearInterval(timer)
+  }, [startedAt])
+  if (elapsed <= 0) return null
+  return <span className="chat-status-phase-elapsed">{formatLogElapsed(elapsed)}</span>
+}
+
+// 运行耗时单独成一个组件：它每 250ms 刷新一次，留在 ChatView 里会让整个会话面板
+// （含全部消息行）每秒重渲染 4 次。这里只重渲染这一个 span。
+function RunElapsedLabel({ runStartedAt }) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!runStartedAt) {
+      setElapsed(0)
+      return undefined
+    }
+    const update = () => setElapsed(Math.max(0, Date.now() - runStartedAt))
+    update()
+    const timer = window.setInterval(update, 250)
+    return () => clearInterval(timer)
+  }, [runStartedAt])
+  return (
+    <span className="chat-status-elapsed" title="本次任务总运行时间">
+      {formatLogElapsed(elapsed)}
+    </span>
+  )
+}
+
+function MessageRowView({
   message,
   onOpenFile,
   onCommandAction,
@@ -1878,6 +1915,24 @@ function MessageRow({
   )
 }
 
+// 长会话里 ChatView 会因为输入、耗时计时、任务 tick 等高频重渲染，若每一行都跟着重算，
+// 整篇对话（可能上千条、每条一个 Markdown）每帧都要重新 reconcile 一遍。流式追加只换掉
+// 当前那一条消息对象（见 appendStreamText 的 map），其余保持引用，所以按引用比较就够：
+// 只有正在流式输出的那一行会重渲染。回调都由 useCallback/ref 提供，引用稳定。
+const MessageRow = memo(MessageRowView, (previous, next) => {
+  return (
+    previous.message === next.message &&
+    previous.edit === next.edit &&
+    previous.onOpenFile === next.onOpenFile &&
+    previous.onCommandAction === next.onCommandAction &&
+    previous.onQuote === next.onQuote &&
+    previous.onEditStart === next.onEditStart &&
+    previous.onEditChange === next.onEditChange &&
+    previous.onEditCancel === next.onEditCancel &&
+    previous.onEditSubmit === next.onEditSubmit
+  )
+})
+
 function WelcomeHint({ cwd }) {
   return (
     <div className="chat-welcome">
@@ -1898,7 +1953,7 @@ function WelcomeHint({ cwd }) {
 // 状态行展示用的阶段：`phase` 是一条工具结果回来后仍停在 `working`，而那时实际已经在等
 // 下一次请求了——CLI 的 AgentRuntime 在 onToolResult 里就是当场把状态切回 connecting
 // （显示为 waiting_model）。不换算的话，状态文本会退化成没有对象的 calling_tool，阶段计时
-// 也会因为找不到 running 工具而失去锚点（见 phaseElapsed 的 effect），整段时间从界面消失。
+// 也会因为找不到 running 工具而失去锚点（见 PhaseElapsedLabel 的 startedAt），整段时间从界面消失。
 export function statusLinePhase(phase, toolNames = []) {
   return phase === 'working' && toolNames.length === 0 ? 'connecting' : phase
 }
@@ -2375,7 +2430,6 @@ export function ChatView({
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [runStartedAt, setRunStartedAt] = useState(0)
-  const [elapsed, setElapsed] = useState(0)
   // 最近一次 turn 的结束结果：{ state: 'completed' | 'error', durationMs }。
   // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
   const [lastRun, setLastRun] = useState(null)
@@ -2383,8 +2437,6 @@ export function ChatView({
   // working 阶段从最早 running 工具 startedAt 起算，其余阶段从阶段切换起算）。
   // 起算点在 statusLinePhase 换算之后的那一段：见下方 displayPhase 的 effect。
   const phaseStartedAtRef = useRef(0)
-  const [phaseElapsed, setPhaseElapsed] = useState(0)
-
   // 有活跃后台任务 / subagent / wait_for 等待时每秒刷新耗时，空闲时停表。
   const hasLiveTasks =
     backgroundTasks.length > 0 || subagentTasks.length > 0 || waitTasks.length > 0
@@ -3862,17 +3914,6 @@ export function ChatView({
     updateMessages
   ])
 
-  useEffect(() => {
-    if (!running || !runStartedAt) {
-      setElapsed(0)
-      return undefined
-    }
-    const update = () => setElapsed(Math.max(0, Date.now() - runStartedAt))
-    update()
-    const timer = window.setInterval(update, 250)
-    return () => clearInterval(timer)
-  }, [runStartedAt, running])
-
   // 同一运行时的另一个页面跑着这个会话时，事件流本来就广播到所有页面，本页照常实时渲染；
   // 只有「另一个进程（终端里的 TUI / mica exec / 另一个运行时实例）持着 turn lease」这一种
   // 情况本页完全没有事件流，只能隔几秒问一次，等它跑完再把会话文件读回来。
@@ -4904,21 +4945,13 @@ export function ChatView({
     return undefined
   }, [displayPhase, running])
 
-  useEffect(() => {
-    if (!running) {
-      setPhaseElapsed(0)
-      return undefined
-    }
-    const startedAt = displayPhase === 'working' ? activeToolStartedAt : phaseStartedAtRef.current
-    if (!startedAt) {
-      setPhaseElapsed(0)
-      return undefined
-    }
-    const update = () => setPhaseElapsed(Math.max(0, Date.now() - startedAt))
-    update()
-    const timer = window.setInterval(update, 250)
-    return () => clearInterval(timer)
-  }, [running, displayPhase, activeToolStartedAt])
+  // 阶段耗时交给 PhaseElapsedLabel 自己计时：它每 250ms 变一次，留在 ChatView 里
+  // 会让整个会话面板每秒多出 4 次全树重渲染。
+  const phaseElapsedStartedAt = running
+    ? displayPhase === 'working'
+      ? activeToolStartedAt
+      : phaseStartedAtRef.current
+    : 0
   const activeStreamText =
     streamRef.current.id && ['thinking', 'streaming'].includes(phase)
       ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
@@ -5186,9 +5219,7 @@ export function ChatView({
           <>
             <IconLoader2 size={11} className="animate-spin" />
             <span>{statusLabel(displayPhase, runningToolNames)}</span>
-            {phaseElapsed > 0 && (
-              <span className="chat-status-phase-elapsed">{formatLogElapsed(phaseElapsed)}</span>
-            )}
+            <PhaseElapsedLabel startedAt={phaseElapsedStartedAt} />
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
@@ -5254,9 +5285,7 @@ export function ChatView({
           </span>
         )}
         {running && (
-          <span className="chat-status-elapsed" title="本次任务总运行时间">
-            {formatLogElapsed(elapsed)}
-          </span>
+          <RunElapsedLabel runStartedAt={runStartedAt} />
         )}
       </div>
     </div>
@@ -5269,6 +5298,12 @@ export function ChatView({
     (path, position) => onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position),
     []
   )
+  // 必须稳定：内联箭头每次渲染都换新引用，会让 MessageRow 的 memo 全部失效。
+  const handleCommandAction = useCallback((item) => {
+    if (item.action !== 'terminal') return
+    void copyText(item.command)
+    onOpenTerminalRef.current?.()
+  }, [])
   // 聊天文本、notice、回合日志里的路径统一走这里：cwd 只在 ChatView 里解析一次
   // （cwdRef 是 ref，所以这个对象可以稳定），子组件（PathToken）只负责决定
   // 「单击 / ⌘ 单击 / 图片」分别触发哪个动作。
@@ -5373,12 +5408,7 @@ export function ChatView({
                   key={message.id}
                   message={message}
                   onOpenFile={transcriptOpenFile}
-                  onCommandAction={(item) => {
-                    if (item.action === 'terminal') {
-                      void copyText(item.command)
-                      onOpenTerminalRef.current?.()
-                    }
-                  }}
+                  onCommandAction={handleCommandAction}
                   edit={
                     messageEdit?.id === message.id
                       ? {
