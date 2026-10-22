@@ -56,8 +56,11 @@ function createMockProvider() {
     /** Second tool call content (kept separate so the two calls are distinct). */
     toolFileContent2: 'hello from mock (second call)',
     /** `shell` mode: the command the mock asks `run_shell` to start in the
-     * background, so the tests can drive `mica/backgroundTasks/*`. */
-    shellCommand: 'echo tick-1; echo tick-2; sleep 60',
+     * background, so the tests can drive `mica/backgroundTasks/*`.
+     * `/bin/echo` instead of the shell builtin: bash block-buffers builtin output
+     * when stdout is a file, so on Linux the first lines only land once `sleep`
+     * returns — the external binary writes to the fd immediately. */
+    shellCommand: '/bin/echo tick-1; /bin/echo tick-2; sleep 60',
     /** `wait` mode: the `wait_for` arguments the mock emits on request #1, so
      * the tests can drive `mica/waitTasks/updated` (a long wait keeps the turn
      * blocked while the host streams its snapshot). */
@@ -657,7 +660,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
     mock!.state.toolFilePath = '';
-    mock!.state.shellCommand = 'echo tick-1; echo tick-2; sleep 60';
+    mock!.state.shellCommand = '/bin/echo tick-1; /bin/echo tick-2; sleep 60';
     mock!.state.longText = '';
     mock!.state.includeReasoning = false;
     mock!.state.inputTokens = 10;
