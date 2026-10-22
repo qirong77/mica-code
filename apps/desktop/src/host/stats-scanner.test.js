@@ -40,13 +40,13 @@ function fixture(id, overrides = {}) {
   }
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'mica-stats-scanner-'))
   temporaryDirectories.push(dir)
   const reads = []
   const parses = []
   const fileSystem = {
-    readdirSync,
+    readdirSync: options.readdirSync ?? readdirSync,
     statSync,
     readFileSync(file, encoding) {
       reads.push(file)
@@ -178,6 +178,22 @@ describe('incremental session scanner', () => {
     ])
     expect(harness.reads).toHaveLength(2)
     expect(harness.reads.at(-1)).toBe(join(harness.dir, 'two.json'))
+  })
+
+  // readdir order is filesystem-specific (APFS is close to lexicographic, ext4 is
+  // hash order), so scanStats must not depend on it: no second sort is applied to
+  // the stats projection.
+  test('keeps a stable row order regardless of the directory listing order', () => {
+    const harness = createHarness({
+      readdirSync: (dir) => [...readdirSync(dir)].reverse()
+    })
+    harness.write('one', fixture('one'))
+    harness.write('two', fixture('two'))
+
+    expect(harness.scanner.scanStats()).toEqual([
+      { id: 'one', value: 1 },
+      { id: 'two', value: 1 }
+    ])
   })
 
   test('deleting a file removes its cached row without reading another file', () => {

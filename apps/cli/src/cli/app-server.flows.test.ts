@@ -2403,15 +2403,24 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(task.command).toContain('tick-1');
 
     // Output: the host reads the task's own output file and reports the window
-    // it returned, so the desktop can show what it is not seeing.
-    await send(host, 2, 'mica/backgroundTasks/output', { taskId: task.id, tailBytes: 4096 });
-    const outputResponse = await waitFor(host, (m) => m.id === 2 && m.result !== undefined, 'output response');
-    const output = outputResponse.result as {
-      ok: boolean;
-      content: string;
-      size: number;
-      task: { status: string } | null;
-    };
+    // it returned, so the desktop can show what it is not seeing. The task starts
+    // as soon as the snapshot is pushed, so poll a few times: a loaded runner can
+    // read the file before the shell writes its first line.
+    let output: { ok: boolean; content: string; size: number; task: { status: string } | null } | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      // Fresh ids per attempt: waitFor replays earlier matching lines.
+      const requestId = 200 + attempt;
+      await send(host, requestId, 'mica/backgroundTasks/output', { taskId: task.id, tailBytes: 4096 });
+      const outputResponse = await waitFor(
+        host,
+        (m) => m.id === requestId && m.result !== undefined,
+        'output response',
+      );
+      output = outputResponse.result as typeof output;
+      if (output?.content) break;
+      await sleep(100);
+    }
+    if (!output) throw new Error('no background task output response');
     expect(output.ok).toBe(true);
     expect(output.content).toContain('tick-1');
     expect(output.size).toBeGreaterThan(0);

@@ -77,11 +77,14 @@ describe('PtyDriver spawn & I/O', () => {
     const payload = 'echo ' + 'x'.repeat(80);
     await driver.typeText(payload, 5);
     driver.enter();
-    expect(await driver.waitFor(/x{80}/, { timeoutMs: 10_000 })).toBe(true);
-    // The whole payload must have been submitted as one line, not split.
+    // The whole payload must have been submitted as one line, not split. Assert on
+    // the command's own output line: the echoed input is preceded by a shell-specific
+    // prompt and wraps at the terminal width, so it is not portable to look at.
+    expect(await driver.waitFor(/(^|\n)x{80}\r?(\n|$)/, { timeoutMs: 10_000 })).toBe(true);
     const text = driver.text();
-    const line = text.split('\n').find((l) => l.includes('echo x'));
-    expect(line?.trim().endsWith(`echo ${'x'.repeat(80)}`)).toBe(true);
+    const outputLine = text.split('\n').find((l) => l.trim() === 'x'.repeat(80));
+    expect(outputLine?.trim()).toBe('x'.repeat(80));
+    expect(text).not.toMatch(/not found/);
   }, 20_000);
 
   it('resizes the window', async () => {

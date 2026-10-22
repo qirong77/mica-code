@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/qirong77/mica-code/actions/workflows/build-binaries.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/qirong77/mica-code/build-binaries.yml?label=build"></a>
+  <a href="https://github.com/qirong77/mica-code/actions/workflows/build-binaries.yml"><img alt="Build" src="https://github.com/qirong77/mica-code/actions/workflows/build-binaries.yml/badge.svg"></a>
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522-3c873a">
   <img alt="Shell" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555">
 </p>

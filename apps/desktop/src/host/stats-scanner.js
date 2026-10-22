@@ -137,7 +137,12 @@ export function createStatsScanner({
     const dir = directory()
     let names
     try {
-      names = fileSystem.readdirSync(dir).filter((name) => name.endsWith('.json'))
+      // readdir 顺序由文件系统决定（APFS 近似字典序，ext4 是哈希序）。这里排一次序，
+      // 让没有二次排序的投影（scanStats）在任何平台上都稳定。
+      names = fileSystem
+        .readdirSync(dir)
+        .filter((name) => name.endsWith('.json'))
+        .sort()
     } catch (error) {
       if (error?.code === 'ENOENT') {
         if (entries.size > 0) {

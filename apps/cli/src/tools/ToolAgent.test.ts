@@ -6,6 +6,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
+import { DEFAULT_SUBAGENT_MAX_TURNS } from '../agents/subagentDefinitions.js';
 import { ToolAgent } from './ToolAgent.js';
 
 describe('ToolAgent', () => {
@@ -27,7 +28,7 @@ describe('ToolAgent', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('Find the config loader.'),
       expect.objectContaining({
-        maxTurns: 50,
+        maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
         signal: expect.any(AbortSignal),
         onIterationComplete: expect.any(Function),
       }),
@@ -217,7 +218,7 @@ describe('ToolAgent', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('Find the config loader.'),
       expect.objectContaining({
-        maxTurns: 50,
+        maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
         signal: expect.any(AbortSignal),
         onIterationComplete: expect.any(Function),
       }),
