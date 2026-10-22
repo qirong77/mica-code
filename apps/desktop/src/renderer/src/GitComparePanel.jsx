@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  IconArrowBackUp,
   IconArrowUpRight,
   IconCheck,
   IconChevronRight,
@@ -75,6 +76,7 @@ function CompareRow({
   onContextMenu,
   onToggleReviewed,
   onOpenFile,
+  onDiscard,
   elementRef
 }) {
   const directory = row.type === 'directory'
@@ -139,21 +141,43 @@ function CompareRow({
         </span>
       )}
       <span className="min-w-0 flex-1" />
-      {!directory && onOpenFile && row.status !== 'deleted' && (
-        <button
-          type="button"
-          tabIndex={-1}
-          title="打开文件"
-          aria-label={`打开文件：${row.path}`}
-          className="ml-1 hidden size-[18px] shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/10 hover:text-white group-focus-within:grid group-hover:grid"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenFile(row.files[0])
-          }}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <IconArrowUpRight size={13} />
-        </button>
+      {/* 悬浮/聚焦才出现的行内操作（与 VS Code 的源代码管理一致）：先撤回再打开。
+          撤回只对「工作区里还有未提交改动」的文件给出，撤的是工作区那份改动。 */}
+      {!directory && (onDiscard || onOpenFile) && (
+        <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
+          {onDiscard && row.uncommitted && (
+            <button
+              type="button"
+              tabIndex={-1}
+              title="放弃更改"
+              aria-label={`放弃更改：${row.path}`}
+              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/10 hover:text-white"
+              onClick={(event) => {
+                event.stopPropagation()
+                onDiscard(row.files)
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <IconArrowBackUp size={13} />
+            </button>
+          )}
+          {onOpenFile && row.status !== 'deleted' && (
+            <button
+              type="button"
+              tabIndex={-1}
+              title="打开文件"
+              aria-label={`打开文件：${row.path}`}
+              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/10 hover:text-white"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenFile(row.files[0])
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <IconArrowUpRight size={13} />
+            </button>
+          )}
+        </span>
       )}
       {preferences.showStats && !row.binary && Boolean(row.additions || row.deletions) && (
         <span
@@ -201,6 +225,7 @@ export function GitComparePanel({
   selectedPath,
   onSelectFile,
   onOpenFile,
+  onDiscard,
   onRevealFile,
   onCopyPath,
   onOpenAll,
@@ -411,6 +436,8 @@ export function GitComparePanel({
   const context = menu?.row
   const menuFiles = context?.files || visibleFiles
   const menuProgress = context || visibleProgress
+  // 撤回只对「工作区里还有未提交改动」的文件有意义：比基线多出来的已提交改动撤不掉。
+  const discardable = menuFiles.filter((file) => file.uncommitted)
 
   return (
     <section
@@ -696,6 +723,7 @@ export function GitComparePanel({
                   onContextMenu={(event) => openMenu(event, row)}
                   onToggleReviewed={onToggleReviewed}
                   onOpenFile={onOpenFile}
+                  onDiscard={onDiscard}
                 />
               ))}
             </div>
@@ -777,6 +805,24 @@ export function GitComparePanel({
                   />
                 )}
                 <MenuItem
+                  icon={IconArrowBackUp}
+                  label={
+                    context.type === 'file'
+                      ? '放弃更改'
+                      : `放弃目录中的更改 (${discardable.length})`
+                  }
+                  hint={context.type === 'file' && !context.uncommitted ? '无未提交改动' : ''}
+                  disabled={
+                    !onDiscard ||
+                    (context.type === 'file' ? !context.uncommitted : !discardable.length)
+                  }
+                  onClick={() =>
+                    menuAction(() =>
+                      onDiscard?.(context.type === 'file' ? context.files : discardable)
+                    )
+                  }
+                />
+                <MenuItem
                   icon={IconCheck}
                   label={menuProgress.checked ? '标记为未审阅' : '标记为已审阅'}
                   disabled={!onToggleReviewed}
@@ -825,6 +871,12 @@ export function GitComparePanel({
                   label={`打开全部更改 (${visibleFiles.length})`}
                   disabled={!visibleFiles.length || !onOpenAll}
                   onClick={() => menuAction(() => onOpenAll?.(visibleFiles))}
+                />
+                <MenuItem
+                  icon={IconArrowBackUp}
+                  label={`放弃全部未提交的更改 (${discardable.length})`}
+                  disabled={!onDiscard || !discardable.length}
+                  onClick={() => menuAction(() => onDiscard?.(discardable))}
                 />
                 <MenuSeparator />
                 <MenuItem

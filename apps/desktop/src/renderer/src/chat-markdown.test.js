@@ -40,7 +40,10 @@ describe('chat Markdown', () => {
     expect(html).toContain('type="checkbox"')
     expect(html).toContain('nested')
     expect(html).toContain('chat-code-block')
-    expect(html).toContain('const ready = true')
+    // 代码块按 token 拆成了 span，文本本身仍要一字不差
+    expect(html).toContain('data-language="ts"')
+    expect(html).toContain('code-tok-literal')
+    expect(html.replace(/<[^>]+>/g, '')).toContain('const ready = true')
   })
 
   it('does not render raw HTML from model output', () => {

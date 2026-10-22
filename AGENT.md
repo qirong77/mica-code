@@ -391,6 +391,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
 - 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；思考照旧整段折行，不是日志行。`TurnLogItem` memo，计时更新仅影响运行行。
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
+- 代码块（聊天 markdown 与详情弹窗的参数/输出）统一由 `CodeView` + `code-highlight.js` 渲染：只做只读着色，认得的语言是 json/shell/diff/js/log，其余原样输出；token 色走 `app.css` 的 `--color-*`，不引入编辑器运行时，路径点击仍由 `PathToken` 提供。`displayText` 在显示前对 json 做缩进重排（数字与转义按原文保留，解析失败原样输出），复制带的是屏幕上那段文本。
+- 要读全文就到编辑器里看：详情弹窗的「在编辑器中打开」经 `FilesView.openDocument` 把内容作为**只读虚拟文档**（`mica-document://` 页签）塞进应用里唯一的 monaco 实例，不另建 editor。页签规则在 `files-document.js`（同 `callID:input/output` 复用同一个 model，同名标题自动加序号），只读状态在 `activateFile` 里按页签切换，打开后关掉弹窗。
 - 模型/loop 面板统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。
 - 电脑隐藏发送/排队按钮，移动端保留；停止只用 danger、排队只用 warn，上传保持中性。loop 徽标自带 tick，不在 ChatView 或侧栏全树计时。
 - 后台任务/子代理 dock 仅列运行项，详情通过 host 查询，结束后保留最终结果；查询/终止不改变 turn 生命周期，终止后台任务须确认。
@@ -474,7 +476,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - shell 由 `shell-path.js.resolveDefaultShell` 按平台和存在性解析；不能假定 SHELL 有值或 Linux 有 `/bin/zsh`。
 - PTY 共享输出与 replay，rightTerms 清单共享；空闲 cwd 变化可重建，有前台进程不打断。每 10min 回收闲置 8h 的终端，跳过活跃会话、运行进程和缺活动记录项。
 - 文件树尺寸沿用 VS Code：活动栏 48px、树行 22px、缩进 8px；桌面编辑器分栏始终存在，未打开文件显示 watermark。
-- Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认。
+- Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认；Git 比较树复用同一套行内操作，撤回只给工作区还有未提交改动的文件。
 - 所有 Git 命令带 `GIT_OPTIONAL_LOCKS=0`；必需写锁冲突短重试，最终错误短暂提示，不能覆盖整个编辑器。
 - 工作区 summary 与 branch compare 独立；比较 IO 在无 Electron 依赖的 `git-compare.js`，真实临时仓库验证。
 - 比较固定为 compareRef commit hash；fingerprint 表示内容，引用失效自动回退并显示 warning。NUL 解析路径，读取并发上限 8。

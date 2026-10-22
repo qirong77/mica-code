@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { guessLanguage, highlightCode, normalizeLanguage } from './code-highlight'
+import { formatForDisplay, guessLanguage, highlightCode, normalizeLanguage } from './code-highlight'
 
 function join(tokens) {
   return tokens.map((token) => token.text).join('')
@@ -55,15 +55,16 @@ describe('highlightCode', () => {
 
   it('marks the command, flags and operators of a shell line', () => {
     const tokens = highlightCode('cd /tmp && bunx prettier --check a.md 2>&1 | tail -3', 'shell')
-    expect(textOfType(tokens, 'command')).toBe('cdbunxbunxprettiertaintail')
+    // 每条子命令的第一个词才是命令：`prettier` 是 bunx 的参数
+    expect(textOfType(tokens, 'command')).toBe('cdbunxtail')
     expect(textOfType(tokens, 'flag')).toBe('--check')
     expect(textOfType(tokens, 'operator')).toBe('&&2>&1|')
-    expect(textOfType(tokens, 'string')).toBe('')
   })
 
   it('colours shell strings, comments and variables', () => {
     const tokens = highlightCode(`echo "hi $USER" 'raw' # bye`, 'shell')
-    expect(textOfType(tokens, 'string')).toBe('"hi $USER"\'raw\'')
+    // 单引号是字面量，双引号按 `$VAR` 切开
+    expect(textOfType(tokens, 'string')).toBe('"hi "\'raw\'')
     expect(textOfType(tokens, 'comment')).toBe('# bye')
     expect(textOfType(tokens, 'variable')).toBe('$USER')
   })
@@ -81,8 +82,8 @@ describe('highlightCode', () => {
     const tokens = highlightCode(text, 'log')
     expect(textOfType(tokens, 'header')).toBe('[stdout]')
     expect(textOfType(tokens, 'warn')).toBe('[warn]')
-    expect(textOfType(tokens, 'key')).toBe('exit_codewarncommand'.replace('warn', ''))
-    expect(textOfType(tokens, 'punct')).toBe(':::')
+    expect(textOfType(tokens, 'key')).toBe('exit_codecommand')
+    expect(textOfType(tokens, 'punct')).toBe('::')
   })
 
   it('leaves unknown languages untouched', () => {
@@ -101,5 +102,39 @@ describe('guessLanguage', () => {
   it('falls back to plain text', () => {
     expect(guessLanguage('total 8\ndrwxr-xr-x 2 me staff 64')).toBe('text')
     expect(guessLanguage('')).toBe('text')
+  })
+})
+
+describe('formatForDisplay', () => {
+  it('re-indents single-line json', () => {
+    expect(formatForDisplay('{"a":1,"b":[true,null]}', 'json')).toBe(
+      ['{', '  "a": 1,', '  "b": [', '    true,', '    null', '  ]', '}'].join('\n')
+    )
+  })
+
+  it('keeps empty containers on one line', () => {
+    expect(formatForDisplay('{"a":{},"b":[]}', 'json')).toBe(
+      ['{', '  "a": {},', '  "b": []', '}'].join('\n')
+    )
+  })
+
+  it('leaves numbers and escapes exactly as they were written', () => {
+    const text = '{"id":14680088999999999999,"name":"caf\\u00e9","n":1e3}'
+    const display = formatForDisplay(text, 'json')
+    // JSON.parse + stringify 会把这些改掉，展示要保留原始字面量
+    expect(display).toContain('14680088999999999999')
+    expect(display).toContain('"caf\\u00e9"')
+    expect(display).toContain('1e3')
+    expect(JSON.parse(display)).toEqual({ id: 14680089000000000000, name: 'café', n: 1000 })
+  })
+
+  it('passes through invalid or truncated json', () => {
+    expect(formatForDisplay('{"a": 1,', 'json')).toBe('{"a": 1,')
+    expect(formatForDisplay('{a: 1}', 'json')).toBe('{a: 1}')
+  })
+
+  it('only touches json', () => {
+    expect(formatForDisplay('{"a":1}', 'shell')).toBe('{"a":1}')
+    expect(formatForDisplay('', 'json')).toBe('')
   })
 })

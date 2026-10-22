@@ -17,8 +17,11 @@ const JSON_LITERALS = new Set(['true', 'false', 'null'])
 const JSON_NUMBER = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y
 const JS_NUMBER = /0[xXbBoO][\da-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y
 const WORD = /[A-Za-z_$][\w$]*/y
+const SHELL_OPERATOR = /\d?>>?&?\d?|&&|\|\||[|<>;&]/y
+const SHELL_VARIABLE = /\$(?:\{[^}]*\}|[A-Za-z_]\w*|\d|[?#@$!*-])/y
 
-const SHELL_OPERATORS = ['2>&1', '&&', '||', '>>', '>&', '|', '>', '<', ';', '&']
+// 词法单位之外的字符：出现在这里就说明一个 shell 单词结束了。
+const SHELL_BREAK = /[\s'"$#]/
 
 const JS_KEYWORDS = new Set(
   `as async await break case catch class const continue debugger declare default delete do else
@@ -64,6 +67,85 @@ export function guessLanguage(text) {
   if (/^(diff --git|@@ -|--- a\/|\+\+\+ b\/)/m.test(sample)) return 'diff'
   if (/^[[{]/.test(sample) && /[\]}]\s*$/.test(sample)) return 'json'
   return 'text'
+}
+
+/**
+ * 只做排版的 JSON 美化：不重新序列化，所以数字字面量、转义写法都原样保留
+ * （`JSON.parse` + `JSON.stringify` 会把 `14680088999999999999` 掉精度、
+ * 把 `\u00e9` 变成 `é`，展示「工具实际返回了什么」时这些差异很致命）。
+ */
+function prettyJson(source, indent = '  ') {
+  let out = ''
+  let depth = 0
+  let index = 0
+  const newline = () => `\n${indent.repeat(depth)}`
+  while (index < source.length) {
+    const char = source[index]
+    if (char === '"') {
+      const end = readString(source, index, '"', true)
+      out += source.slice(index, end)
+      index = end
+      continue
+    }
+    if (char === '{' || char === '[') {
+      const close = char === '{' ? '}' : ']'
+      // 空对象/空数组保持一行（`{}` 折成两行只会让参数块更长）
+      let next = index + 1
+      while (next < source.length && /\s/.test(source[next])) next += 1
+      if (source[next] === close) {
+        out += char + close
+        index = next + 1
+        continue
+      }
+      depth += 1
+      out += char + newline()
+      index += 1
+      continue
+    }
+    if (char === '}' || char === ']') {
+      depth = Math.max(0, depth - 1)
+      out += newline() + char
+      index += 1
+      continue
+    }
+    if (char === ',') {
+      out += `,${newline()}`
+      index += 1
+      continue
+    }
+    if (char === ':') {
+      out += ': '
+      index += 1
+      continue
+    }
+    if (/\s/.test(char)) {
+      index += 1
+      continue
+    }
+    let end = index
+    while (end < source.length && !/[\s{}[\],:]/.test(source[end])) end += 1
+    out += source.slice(index, end)
+    index = end
+  }
+  return out
+}
+
+/**
+ * 展示用的文本规范化。
+ *
+ * JSON 一律按 2 空格重排：工具输出里的 JSON 通常是单行（MCP 返回值、`--json` 模式），
+ * 原样折行会变成一坨看不出结构的长串。先 `JSON.parse` 只是校验合法性——流式输出还没
+ * 闭括号、被截断的输出都退回原文，展示层不该因为内容不合法而丢掉东西。
+ */
+export function formatForDisplay(text, language) {
+  const source = String(text ?? '')
+  if (!source || normalizeLanguage(language) !== 'json') return source
+  try {
+    JSON.parse(source)
+  } catch {
+    return source
+  }
+  return prettyJson(source)
 }
 
 /** 着色后的片段；`text` 拼起来必须与输入完全一致。 */
@@ -187,7 +269,13 @@ function scanShellLine(line, tokens) {
       pushToken(tokens, 'comment', line.slice(index))
       return
     }
-    if (char === "'" || char === '"') {
+    if (char === '"') {
+      // 双引号里 `$VAR` 仍然会展开，单独上色；单引号是字面量，整段当字符串。
+      index = scanShellDoubleQuoted(line, index, tokens)
+      expectCommand = false
+      continue
+    }
+    if (char === "'") {
       const end = readString(line, index, char)
       pushToken(tokens, 'string', line.slice(index, end))
       index = end
@@ -195,7 +283,8 @@ function scanShellLine(line, tokens) {
       continue
     }
     if (char === '$') {
-      const match = /^\$(?:\{[^}]*\}|[A-Za-z_]\w*|\d|[?#@$!*-])/.exec(line.slice(index))
+      SHELL_VARIABLE.lastIndex = index
+      const match = SHELL_VARIABLE.exec(line)
       if (match) {
         pushToken(tokens, 'variable', match[0])
         index += match[0].length
@@ -208,16 +297,18 @@ function scanShellLine(line, tokens) {
       expectCommand = true
       continue
     }
-    const operator = SHELL_OPERATORS.find((value) => line.startsWith(value, index))
+    SHELL_OPERATOR.lastIndex = index
+    const operator = SHELL_OPERATOR.exec(line)
     if (operator) {
-      pushToken(tokens, 'operator', operator)
-      index += operator.length
+      pushToken(tokens, 'operator', operator[0])
+      index += operator[0].length
       expectCommand = true
       continue
     }
     let end = index
-    while (end < line.length && !/[\s'"$#]/.test(line[end])) {
-      if (SHELL_OPERATORS.some((value) => line.startsWith(value, end))) break
+    while (end < line.length && !SHELL_BREAK.test(line[end])) {
+      SHELL_OPERATOR.lastIndex = end
+      if (SHELL_OPERATOR.test(line)) break
       end += 1
     }
     if (end === index) end = index + 1
@@ -232,6 +323,37 @@ function scanShellLine(line, tokens) {
     }
     index = end
   }
+}
+
+/** 双引号字符串：字符串片段与 `$VAR` 交替上色，返回闭合引号之后的位置。 */
+function scanShellDoubleQuoted(line, start, tokens) {
+  let index = start + 1
+  let chunk = start
+  while (index < line.length) {
+    const char = line[index]
+    if (char === '\\') {
+      index += 2
+      continue
+    }
+    if (char === '"') {
+      index += 1
+      break
+    }
+    if (char === '$') {
+      SHELL_VARIABLE.lastIndex = index
+      const match = SHELL_VARIABLE.exec(line)
+      if (match) {
+        pushToken(tokens, 'string', line.slice(chunk, index))
+        pushToken(tokens, 'variable', match[0])
+        index += match[0].length
+        chunk = index
+        continue
+      }
+    }
+    index += 1
+  }
+  pushToken(tokens, 'string', line.slice(chunk, index))
+  return index
 }
 
 function scanDiffLine(line, tokens) {

@@ -132,6 +132,7 @@ export function BtwDrawer({
   renderAnswer,
   renderQuestion,
   onPreviewImage,
+  onOpenDocument,
   onNotice,
   onClose
 }) {
@@ -657,7 +658,11 @@ export function BtwDrawer({
           )
         : null}
       {activityTool ? (
-        <ToolDetailDialog tool={activityTool} onClose={() => setActivityDetail(null)} />
+        <ToolDetailDialog
+          tool={activityTool}
+          onOpenInEditor={onOpenDocument}
+          onClose={() => setActivityDetail(null)}
+        />
       ) : null}
     </aside>
   )

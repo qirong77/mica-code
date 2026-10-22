@@ -46,6 +46,12 @@ import {
 } from './git-decorations'
 import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
+import {
+  editorOptionsForTab,
+  isDocumentKey,
+  planDocumentOpen,
+  uniqueDocumentTitle
+} from './files-document'
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），空编辑器水印直接引用它。
 import brandMark from '../../../resources/icon.svg?url&no-inline'
 
@@ -112,6 +118,8 @@ function relativeParts(rootPath, filePath) {
 }
 
 function parentName(path) {
+  // 虚拟文档（工具输出预览）不在任何目录里，没有「父文件夹」可言
+  if (isDocumentKey(path)) return ''
   const parts = String(path || '')
     .replaceAll('\\', '/')
     .split('/')
@@ -554,26 +562,46 @@ export const FilesView = forwardRef(function FilesView(
   const closeGitDiff = useCallback(() => setGitSelectedFile(null), [])
 
   /**
-   * 源代码管理行内悬浮出来的三个操作（对应 VS Code 的同名按钮）。放弃更改不可逆
-   * ——未跟踪文件会被删掉、已跟踪文件会被恢复——所以先确认。做完统一刷新 Git 数据，
-   * 让「暂存的更改 / 更改」两段立刻跟着变。
+   * Git 面板的行内操作（对应 VS Code 的同名按钮）。单文件（行内悬浮按钮）和一组文件
+   * （分组表头、比较树里的目录行）走同一条路径：放弃更改不可逆——未跟踪文件会被删掉、
+   * 已跟踪文件会被恢复——所以先确认，且确认框里点名到具体文件。做完统一刷新 Git 数据，
+   * 让「暂存的更改 / 更改」与比较树立刻跟着变。
    */
   const gitFileAction = useCallback(
-    async (kind, file) => {
-      if (!gitCwd || !file?.path) return
+    async (kind, target) => {
+      const list = (Array.isArray(target) ? target : [target]).filter((file) => file?.path)
+      if (!gitCwd || !list.length) return
       if (kind === 'discard') {
-        const undo = file.status === 'added' ? '这个文件会被删除' : '这个文件会恢复成已保存的版本'
-        const ok = window.confirm(`确定放弃“${file.path}”的更改吗？\n${undo}，且无法撤销。`)
+        const names = list.slice(0, 6).map((file) => file.path)
+        const rest = list.length - names.length
+        const question =
+          list.length === 1
+            ? `确定放弃“${names[0]}”的更改吗？`
+            : `确定放弃这 ${list.length} 个文件的更改吗？\n${names.join('\n')}${
+                rest > 0 ? `\n…以及其他 ${rest} 个文件` : ''
+              }`
+        const undo = list.some((file) => file.status === 'added' || file.untracked)
+          ? '未跟踪的文件会被删除，已跟踪的文件会恢复成上次保存的版本'
+          : '文件会恢复成上次保存的版本'
+        const ok = window.confirm(`${question}\n${undo}，且无法撤销。`)
         if (!ok) return
       }
-      const result = await window.mica.git[kind](gitCwd, file.path)
-      if (result?.error) {
+      let failure = null
+      for (const file of list) {
+        const result = await window.mica.git[kind](gitCwd, file.path)
+        if (result?.error) {
+          failure = result.error
+          break
+        }
+      }
+      if (failure) {
         // 走短暂提示（跟其它操作失败一致）：非 transient 的消息会整块盖住编辑器分栏
         // 且一直留着，看起来像「文件页面不能用了」。
-        showMessage(`Git 操作失败：${result.error}`, true, true)
+        showMessage(`Git 操作失败：${failure}`, true, true)
         return
       }
-      if (kind === 'discard' && gitSelectedFile?.path === file.path) setGitSelectedFile(null)
+      if (kind === 'discard' && list.some((file) => file.path === gitSelectedFile?.path))
+        setGitSelectedFile(null)
       await onRefreshGit?.()
     },
     [gitCwd, gitSelectedFile, onRefreshGit, showMessage]
@@ -646,6 +674,8 @@ export const FilesView = forwardRef(function FilesView(
         return
       }
       editorRef.current?.setModel(tab.model)
+      // editor 是唯一实例，只读状态跟着页签走：虚拟文档（工具输出预览）不可编辑。
+      editorRef.current?.updateOptions(editorOptionsForTab(tab))
       if (tab.viewState) editorRef.current?.restoreViewState(tab.viewState)
       showMessage('')
       requestAnimationFrame(() => {
@@ -665,6 +695,61 @@ export const FilesView = forwardRef(function FilesView(
     editorRef.current.revealPositionInCenter({ lineNumber, column })
     editorRef.current.focus()
   }, [])
+
+  /**
+   * 打开一段内存文本（工具调用详情里的参数/输出）。
+   *
+   * 复用同一个 editor 实例而不是另建一个：monaco 的 model 是按 URI 注册的全局资源，
+   * 每个弹窗各建一个 editor 既贵又会撞 URI。这里走「一个 editor + 多个 model」——
+   * 与打开磁盘文件完全同一条路径，只是 model 内容来自内存、页签标记为只读。
+   *
+   * `id` 是记忆点：同一个工具调用再点一次会复用原页签并刷新内容（模型 URI 不能重复）。
+   */
+  const openDocument = useCallback(
+    async ({ id, title, content, language = 'plaintext' }) => {
+      const { key, reuse } = planDocumentOpen(tabsRef.current, id || title)
+      setGitPreview(false)
+      // eslint-disable-next-line no-use-before-define -- 回调打开时 setter 早已定义
+      setMobileTreeVisible(false)
+      if (reuse) {
+        if (reuse.model.getValue() !== content) reuse.model.setValue(content ?? '')
+        activateFile(key)
+        return
+      }
+      const previous = tabsRef.current.find((tab) => tab.path === activeRef.current)
+      if (previous?.model) previous.viewState = editorRef.current?.saveViewState()
+      setActivePath(key)
+      editorRef.current?.setModel(null)
+      editorRef.current?.updateOptions({ readOnly: true })
+      // 首屏这一步才真正装载 monaco（与打开文件同一个装载器）
+      const monaco = await ensureEditor()
+      // 装载是异步的：等它的时候同一个文档可能已经被另一次点击建好了
+      const { reuse: stale } = planDocumentOpen(tabsRef.current, id || title)
+      if (stale) {
+        if (stale.model.getValue() !== content) stale.model.setValue(content ?? '')
+        activateFile(key)
+        return
+      }
+      const model = monaco.editor.createModel(content ?? '', language, monaco.Uri.parse(key))
+      const tab = {
+        path: key,
+        name: uniqueDocumentTitle(tabsRef.current, title, key),
+        model,
+        subscription: null,
+        viewState: null,
+        savedVersion: model.getAlternativeVersionId(),
+        diskVersion: null,
+        dirty: false,
+        loading: false,
+        saving: false,
+        readOnly: true,
+        virtual: true
+      }
+      setTabs((items) => [...items, tab])
+      activateFile(key)
+    },
+    [activateFile, ensureEditor, setActivePath, setTabs]
+  )
 
   const openFile = useCallback(
     async (path, position = null) => {
@@ -760,7 +845,7 @@ export const FilesView = forwardRef(function FilesView(
 
   const saveActive = useCallback(async () => {
     const tab = tabsRef.current.find((item) => item.path === activeRef.current)
-    if (!tab?.model || !tab.dirty || tab.loading || tab.saving) return
+    if (!tab?.model || tab.readOnly || !tab.dirty || tab.loading || tab.saving) return
     const content = tab.model.getValue()
     const savedVersion = tab.model.getAlternativeVersionId()
     tab.saving = true
@@ -1367,7 +1452,12 @@ export const FilesView = forwardRef(function FilesView(
   )
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
-  const breadcrumbs = activeTab ? relativeParts(tree.root, activeTab.path) : []
+  // 虚拟文档（工具输出预览）不在工作区里，面包屑就是它自己的标题
+  const breadcrumbs = !activeTab
+    ? []
+    : activeTab.virtual
+      ? [activeTab.name]
+      : relativeParts(tree.root, activeTab.path)
   const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
   const isGitTree = activePanel === 'git-tree'
   const sourceControlDiff = useMemo(() => {
@@ -1405,6 +1495,7 @@ export const FilesView = forwardRef(function FilesView(
     ref,
     () => ({
       openFile,
+      openDocument,
       closeActive() {
         if (showDiff) {
           if (isGitTree) review.close(selectedDiff.path)
@@ -1426,6 +1517,7 @@ export const FilesView = forwardRef(function FilesView(
     [
       closeFile,
       openFile,
+      openDocument,
       reloadAfterGitChange,
       showDiff,
       isGitTree,
@@ -1520,6 +1612,7 @@ export const FilesView = forwardRef(function FilesView(
             onOpenFile={openGitFile}
             onRevealFile={revealGitFile}
             onCopyPath={copyGitPath}
+            onDiscard={(files) => gitFileAction('discard', files)}
           />
         ) : activePanel === 'git' ? (
           <GitPanel
@@ -1885,7 +1978,13 @@ export const FilesView = forwardRef(function FilesView(
                 </span>
               ))}
               <span className="ml-auto shrink-0">
-                {activeTab.saving ? '正在保存…' : activeTab.dirty ? '未保存' : ''}
+                {activeTab.saving
+                  ? '正在保存…'
+                  : activeTab.dirty
+                    ? '未保存'
+                    : activeTab.readOnly
+                      ? '只读'
+                      : ''}
               </span>
             </div>
           )}

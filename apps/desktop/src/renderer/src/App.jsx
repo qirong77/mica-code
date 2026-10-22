@@ -743,7 +743,8 @@ export default function App() {
     const pending = pendingFileOpenRef.current
     if (!pending) return
     pendingFileOpenRef.current = null
-    filesRef.current?.openFile(pending.path, pending.position)
+    if (pending.document) void filesRef.current?.openDocument(pending.document)
+    else filesRef.current?.openFile(pending.path, pending.position)
   }, [filesReady, view])
   // 底部终端面板：展开状态跟着会话走——按对话节点 id 记在界面状态里（默认收起），切到
   // 另一个会话时看到的是那个会话自己的样子，而不是上一个会话展开着的那一屏；高度是全局的
@@ -2095,6 +2096,19 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
+  // 工具调用详情里的「在编辑器中打开」：内容来自内存（工具参数/输出），不是工作区文件。
+  // 走同一个 FilesView 实例与 openFile 的迟挂载兜底，只是把文档本身排队带过去。
+  const openDocumentInView = useCallback((document) => {
+    if (!document) return
+    setFilesMounted(true)
+    setView('files')
+    const files = filesRef.current
+    if (files) {
+      void files.openDocument(document)
+      return
+    }
+    pendingFileOpenRef.current = { document }
+  }, [])
   // 顶栏的文件夹按钮：把这台运行时上的 `/files` 页面开成独立窗口 —— 那一页只画文件树与
   // 编辑器，没有左侧会话列表也没有「返回对话」，主窗口因此留在对话里，两者可以并排看。
   // 外壳把同源的 `/files` 开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
@@ -2646,6 +2660,7 @@ export default function App() {
                 loops={loops}
                 onSessionBound={setSessionId}
                 onOpenFile={openChatFile}
+                onOpenDocument={openDocumentInView}
                 onNewSession={createChatSession}
                 onResumeSession={openSession}
                 onOpenTerminal={openChatTerminal}

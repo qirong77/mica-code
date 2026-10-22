@@ -353,6 +353,24 @@ function RowTrailing({ status, code, additions, deletions, uncommitted, uncommit
   )
 }
 
+/** 行内悬浮操作按钮：文件行与分组表头共用同一尺寸和悬浮底色（VS Code 的 20px 方形按钮）。 */
+function RowActionButton({ label, Icon, run }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className="grid size-5 shrink-0 place-items-center rounded-sm text-white/55 hover:bg-white/[.08] hover:text-white"
+      onClick={(event) => {
+        event.stopPropagation()
+        run()
+      }}
+    >
+      <Icon size={14} />
+    </button>
+  )
+}
+
 /**
  * 文件行：与 VS Code 的源代码管理一致——文件图标 + 名字（普通前景色）、目录路径
  * 暗色跟在后面且空间不够时先被截断、状态字母贴右缘；鼠标悬浮时在字母左边浮出
@@ -442,19 +460,7 @@ function GitFileRow({
       {actions.length > 0 && (
         <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
           {actions.map(({ key, label, Icon, run }) => (
-            <button
-              key={key}
-              type="button"
-              title={label}
-              aria-label={label}
-              className="grid size-5 shrink-0 place-items-center rounded-sm text-white/55 hover:bg-white/[.08] hover:text-white"
-              onClick={(event) => {
-                event.stopPropagation()
-                run()
-              }}
-            >
-              <Icon size={14} />
-            </button>
+            <RowActionButton key={key} label={label} Icon={Icon} run={run} />
           ))}
         </span>
       )}
@@ -523,26 +529,60 @@ export function GitPanel({
             .filter((section) => section.key === 'changes' || section.files.length)
             .map((section) => (
               <Fragment key={section.key}>
-                <button
-                  type="button"
-                  aria-expanded={!collapsed.has(section.key)}
-                  className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70 hover:bg-list-hover`}
-                  onClick={() =>
-                    setCollapsed((current) => {
-                      const next = new Set(current)
-                      if (next.has(section.key)) next.delete(section.key)
-                      else next.add(section.key)
-                      return next
-                    })
-                  }
-                >
-                  <IconChevronRight
-                    size={14}
-                    className={collapsed.has(section.key) ? '' : 'rotate-90'}
-                  />
-                  <span className="min-w-0 flex-1">{section.label}</span>
-                  <span className="text-[11px] tabular-nums">{section.files.length}</span>
-                </button>
+                {/* 分组表头也是一「行」：折叠加整组操作。左边整块负责折叠，右侧悬浮出整组按钮
+                    （放弃所有更改 / 全部暂存、全部取消暂存），与 VS Code 的分组表头一致。 */}
+                <div className={`${ROW_BASE} group/section hover:bg-list-hover`}>
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed.has(section.key)}
+                    className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70"
+                    onClick={() =>
+                      setCollapsed((current) => {
+                        const next = new Set(current)
+                        if (next.has(section.key)) next.delete(section.key)
+                        else next.add(section.key)
+                        return next
+                      })
+                    }
+                  >
+                    <IconChevronRight
+                      size={14}
+                      className={collapsed.has(section.key) ? '' : 'rotate-90'}
+                    />
+                    <span className="min-w-0 flex-1">{section.label}</span>
+                    <span className="text-[11px] tabular-nums">{section.files.length}</span>
+                  </button>
+                  {section.files.length > 0 && (
+                    <span className="ml-1 hidden shrink-0 items-center pr-1.5 group-focus-within/section:flex group-hover/section:flex">
+                      {section.key === 'changes' ? (
+                        <>
+                          {onDiscard && (
+                            <RowActionButton
+                              label="放弃所有更改"
+                              Icon={IconArrowBackUp}
+                              run={() => onDiscard(section.files)}
+                            />
+                          )}
+                          {onStage && (
+                            <RowActionButton
+                              label="全部暂存"
+                              Icon={IconPlus}
+                              run={() => onStage(section.files)}
+                            />
+                          )}
+                        </>
+                      ) : (
+                        onUnstage && (
+                          <RowActionButton
+                            label="全部取消暂存"
+                            Icon={IconMinus}
+                            run={() => onUnstage(section.files)}
+                          />
+                        )
+                      )}
+                    </span>
+                  )}
+                </div>
                 {!collapsed.has(section.key) &&
                   section.files.map((file) => (
                     <GitFileRow

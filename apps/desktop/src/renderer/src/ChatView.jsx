@@ -2272,6 +2272,7 @@ export function ChatView({
   loops = [],
   onSessionBound,
   onOpenFile,
+  onOpenDocument,
   onNewSession,
   onResumeSession,
   onOpenTerminal,
@@ -2284,6 +2285,7 @@ export function ChatView({
   const cwdRef = useLatest(cwd)
   const onSessionBoundRef = useLatest(onSessionBound)
   const onOpenFileRef = useLatest(onOpenFile)
+  const onOpenDocumentRef = useLatest(onOpenDocument)
   const onNewSessionRef = useLatest(onNewSession)
   const onResumeSessionRef = useLatest(onResumeSession)
   const onOpenTerminalRef = useLatest(onOpenTerminal)
@@ -5285,9 +5287,7 @@ export function ChatView({
             <span className="chat-status-cached">)</span>
           </span>
         )}
-        {running && (
-          <RunElapsedLabel runStartedAt={runStartedAt} />
-        )}
+        {running && <RunElapsedLabel runStartedAt={runStartedAt} />}
       </div>
     </div>
   )
@@ -5299,6 +5299,8 @@ export function ChatView({
     (path, position) => onOpenFileRef.current?.(resolveChatPath(path, cwdRef.current), position),
     []
   )
+  // 工具详情里的「在编辑器中打开」：内容在内存里，不需要按 cwd 解析路径。
+  const openToolDocument = useCallback((document) => onOpenDocumentRef.current?.(document), [])
   // 必须稳定：内联箭头每次渲染都换新引用，会让 MessageRow 的 memo 全部失效。
   const handleCommandAction = useCallback((item) => {
     if (item.action !== 'terminal') return
@@ -5871,6 +5873,7 @@ export function ChatView({
         {activityDetailMessage?.kind === 'tool' && (
           <ToolDetailDialog
             tool={activityDetailMessage.tool}
+            onOpenInEditor={openToolDocument}
             onClose={() => setActivityDetailId(null)}
           />
         )}
@@ -5907,6 +5910,7 @@ export function ChatView({
             renderAnswer={renderBtwAnswer}
             renderQuestion={renderBtwQuestion}
             onPreviewImage={pathActions.preview}
+            onOpenDocument={openToolDocument}
             onNotice={appendNotice}
             onClose={() => setBtwOpen(false)}
           />
