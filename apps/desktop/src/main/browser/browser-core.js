@@ -150,6 +150,31 @@ export function windowRestoreAction(plan) {
   return plan.visible ? null : 'hide'
 }
 
+/**
+ * 临时露出期间要不要把窗口压成透明。
+ *
+ * 只 `showInactive` 再 `hide` 会让窗口在每次操作时闪一下（截图、点击、输入连着来就是一串闪烁）。
+ * 把透明度压到 0 再显示，对 Chromium 来说它仍是「可见窗口」（合成器照常出帧、原生输入照常
+ * 生效），对用户则完全看不到。给 `MICA_BROWSER_REVEAL_OPACITY=0` 留了退回开关：设成 0 时
+ * 保持旧行为，窗口会真的露出来。
+ */
+export function windowRevealDimmed(plan, env = {}) {
+  if (!plan) return false
+  return String(env.MICA_BROWSER_REVEAL_OPACITY ?? '1') !== '0'
+}
+
+/**
+ * 逻辑可见状态是否需要广播变更。
+ *
+ * 临时露出会把窗口真的显示出来，但那不是用户点出来的「可见」：直接照窗口事件广播会让顶栏
+ * 图标跟着每次操作闪一下。这里只在逻辑状态真的变了时才返回事件名。
+ */
+export function visibilityEventName(logicalVisible, physicalVisible) {
+  const next = Boolean(physicalVisible)
+  if (next === Boolean(logicalVisible)) return null
+  return next ? 'shown' : 'hidden'
+}
+
 export function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback

@@ -36,6 +36,7 @@ import TerminalKeyBar from './TerminalKeyBar'
 import { currentServerUrl, openServerTarget, serverLabel } from './servers'
 import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { copyText } from './transport'
+import { useQuickPickAnchor } from './quick-pick-anchor'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -98,12 +99,14 @@ function recentChatCwd() {
   return typeof value === 'string' ? value : ''
 }
 
-function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
+function CwdModal({ cwd, invalid, recent, onClose, onApply, anchorRef = null }) {
   const [value, setValue] = useState(cwd || '')
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef(null)
+  // 面板贴在底栏的目录按钮上方展开（右下角），与左下角的分支切换一致。
+  const anchorStyle = useQuickPickAnchor(anchorRef, { align: 'end' })
   useEffect(() => {
     const onKey = (event) => {
       if (event.key === 'Escape') onClose()
@@ -149,7 +152,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
   // （样式在 app.css 的「快速选择（quick pick）」一节）。
   return (
     <div
-      className="quick-pick-overlay z-[11000]"
+      className={`quick-pick-overlay z-[11000]${anchorStyle ? ' is-anchored' : ''}`}
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
       <section
@@ -157,6 +160,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply }) {
         aria-modal="true"
         aria-label="切换项目目录"
         className="quick-pick-panel"
+        style={anchorStyle || undefined}
       >
         <div className="quick-pick-head">
           {/* 目录可能上百个，光靠滚动找不动：这行搜索在列表内过滤 + 重排，
@@ -736,6 +740,7 @@ export default function App() {
     setFilesReady((prev) => (node ? true : prev))
   }, [])
   const branchButtonRef = useRef(null)
+  const cwdButtonRef = useRef(null)
   const contentRef = useRef(null)
   // 地址栏里的页面级状态只在首次渲染读一次：`sessionId` 是启动时要落到的会话。
   // 之后是单向同步（App → 地址栏）。
@@ -2828,6 +2833,7 @@ export default function App() {
             ) : null}
             {activeCwd && (
               <button
+                ref={cwdButtonRef}
                 type="button"
                 title={
                   cwdValid
@@ -2880,6 +2886,8 @@ export default function App() {
           canOperate={canChangeBranch}
           onChanged={branchChanged}
           onClose={closeBranchPicker}
+          // 移动端软键盘会改变可视高度，贴按钮定位容易算出屏幕外；窄屏仍用居中面板。
+          anchorRef={isMobile ? null : branchButtonRef}
         />
       )}
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}
@@ -2888,6 +2896,7 @@ export default function App() {
           cwd={terminalCwd(activeId) || git.cwd || ''}
           invalid={!cwdValid}
           recent={recentCwds}
+          anchorRef={isMobile ? null : cwdButtonRef}
           onClose={() => setCwdModalOpen(false)}
           onApply={(dir) => {
             setCwdModalOpen(false)

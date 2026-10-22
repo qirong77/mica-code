@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconCheck, IconGitBranch, IconGitFork, IconPlus, IconTag } from '@tabler/icons-react'
 import { formatTracking, relativeDateZh } from './git-refs'
+import { useQuickPickAnchor } from './quick-pick-anchor'
 
 const actions = [
   { id: 'create', label: '创建新分支…', icon: IconPlus },
@@ -32,7 +33,7 @@ function RefRowBody({ item }) {
   )
 }
 
-export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
+export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anchorRef = null }) {
   const [refs, setRefs] = useState({ branches: [], tags: [] })
   const [mode, setMode] = useState('main')
   const [query, setQuery] = useState('')
@@ -40,6 +41,8 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // 面板贴着底栏的分支按钮往上长：鼠标不用从按钮跑到屏幕顶部再跑回来。
+  const anchorStyle = useQuickPickAnchor(anchorRef)
   const inputRef = useRef(null)
   const selectedRef = useRef(null)
   const requestRef = useRef(0)
@@ -170,10 +173,16 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose }) {
 
   return (
     <div
-      className="quick-pick-overlay z-[10000]"
+      className={`quick-pick-overlay z-[10000]${anchorStyle ? ' is-anchored' : ''}`}
       onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}
     >
-      <section role="dialog" aria-modal="true" aria-label={title} className="quick-pick-panel">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="quick-pick-panel"
+        style={anchorStyle || undefined}
+      >
         <div className="quick-pick-head">
           <input
             ref={inputRef}

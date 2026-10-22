@@ -10,15 +10,16 @@ import { formatLogElapsed, toolCallText, toolDurationMs } from './chat-tool-disp
  * `ChatView.jsx`（那是循环依赖），所以这些展示件必须抽出来，而不是各写一份。
  *
  * 两条硬约束：
- * - 每个条目**只占一行**。终端那边（`mica-ui/agentTurnLogItems.tsx`）同理，超长就裁成
- *   省略号，不再往下铺工具输出——多行日志把对话区挤没了。
- * - 想看详情就点这一行：完整入参/输出在 `chat-tool-detail.jsx` 的弹窗里，`onOpen`
- *   由调用方决定弹哪个（主对话与 btw 各持一份状态，避免互相干扰）。
+ * - **工具行只占一行**：超长就裁成省略号，不再往下铺工具输出——多行日志把对话区挤没了。
+ *   终端那边（`mica-ui/agentTurnLogItems.tsx`）同一套规则。
+ * - 思考照旧整段折行（它不是日志行，是这一轮想了什么）；工具行想看详情就点开，
+ *   完整入参/输出在 `chat-tool-detail.jsx` 的弹窗里，`onOpen` 由调用方决定弹哪个
+ *   （主对话与 btw 各持一份状态，避免互相干扰）。
  *
  * 只用 `.chat-turn-log-*` 那套类，容器（`.chat-turn-log` / `.chat-btw-activity`）由调用方给。
  */
 
-/** 行文案：多行命令/思考先收成一行，超长部分交给 CSS 的 text-overflow。 */
+/** 工具行文案：多行命令先收成一行，超长部分交给 CSS 的 text-overflow。 */
 function singleLine(text) {
   return String(text ?? '')
     .replace(/\s+/g, ' ')
@@ -31,29 +32,10 @@ function toolStatusClass(tool) {
   return 'chat-turn-log-complete'
 }
 
-/**
- * 思考过程：一行暗色斜体摘要，点开看全文。
- *
- * 思考是流式的，`text` 每来一段就换一次内容；行上不做任何请求，只是把新文本塞进去。
- */
-export function ReasoningRow({ text, onOpen }) {
-  const line = singleLine(text)
-  if (!line) return null
-  return (
-    <div className="chat-turn-log-thinking">
-      <button
-        type="button"
-        className="chat-turn-log-row"
-        title={`${line}\n\n点击查看完整思考`}
-        onClick={() => onOpen?.()}
-      >
-        <span className="chat-turn-log-icon chat-turn-log-icon-reasoning" aria-hidden="true">
-          💭
-        </span>
-        <span className="chat-turn-log-display chat-turn-log-thinking-text">{line}</span>
-      </button>
-    </div>
-  )
+/** 思考过程的一整段（`.chat-turn-log-thinking` 自己负责边框与折行）。 */
+export function ReasoningRow({ text }) {
+  if (!text) return null
+  return <div className="chat-turn-log-thinking">{text}</div>
 }
 
 /**

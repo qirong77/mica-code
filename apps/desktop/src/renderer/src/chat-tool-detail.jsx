@@ -115,18 +115,3 @@ export function ToolDetailDialog({ tool, onClose }) {
     </ModalShell>
   )
 }
-
-/** 思考行的详情：完整推理文本（行上只显示一行摘要）。 */
-export function ReasoningDetailDialog({ text, onClose }) {
-  return (
-    <ModalShell
-      title="思考"
-      icon="💭"
-      className="chat-modal-reasoning"
-      onClose={onClose}
-      meta={<ModalMeta items={[`${text.length} 字`]} />}
-    >
-      <div className="chat-modal-prose">{text}</div>
-    </ModalShell>
-  )
-}

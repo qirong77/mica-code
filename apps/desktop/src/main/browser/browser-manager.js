@@ -18,10 +18,10 @@ import {
   tabSummary,
   timeoutError,
   truncateOutput,
-  windowRestoreAction,
-  windowRevealPlan
+  visibilityEventName
 } from './browser-core.js'
 import { chromeDataUrl, parseChromeMessage } from './browser-chrome.js'
+import { createRevealController } from './browser-reveal.js'
 
 /**
  * 受控浏览器窗口的管理器：浏览器窗口、标签页（每个标签页一个 WebContentsView）、
@@ -44,6 +44,8 @@ const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
 const MAX_NETWORK_BODY = 4000
 const SCREENSHOT_TIMEOUT_MS = 20000
+/** 一串连续操作（点击 → 输入 → 截图）共用同一次临时露出，空闲这么久之后才真正收起来 */
+const REVEAL_IDLE_MS = 1500
 
 /**
  * 隐藏窗口里的原生输入会被丢掉：Chromium 的鼠标/键盘事件挂在有显示面的 widget 上，
@@ -136,6 +138,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   const browsers = new Map()
   let sequence = 0
   let permissionsInstalled = false
+  const reveal = createRevealController({ idleMs: REVEAL_IDLE_MS })
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
 
@@ -150,6 +153,14 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     } catch (error) {
       console.error('[mica-browser] 广播浏览器状态失败:', error)
     }
+  }
+
+  /** 逻辑可见状态（顶栏图标看的就是它）：只在真的变化时广播，避免多余的界面刷新 */
+  function applyVisibility(record, visible) {
+    const event = visibilityEventName(record.visible, visible)
+    if (!event) return
+    record.visible = Boolean(visible)
+    emit(event)
   }
 
   function browserList() {
@@ -298,6 +309,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     })
 
     win.on('closed', () => {
+      reveal.flush(win)
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
@@ -305,14 +317,8 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     })
 
     win.on('resize', () => layout(record))
-    win.on('show', () => {
-      record.visible = true
-      emit('shown')
-    })
-    win.on('hide', () => {
-      record.visible = false
-      emit('hidden')
-    })
+    // 逻辑可见状态只由 showBrowser / hideBrowser 改：窗口的 show/hide 事件也会被临时露出
+    // 触发，跟着它广播会让顶栏图标在每次操作时闪一下
 
     win.webContents.on('console-message', (details) => {
       const message = parseChromeMessage(details?.message)
@@ -597,26 +603,19 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   }
 
   /**
-   * 操作前临时把窗口露出来。隐藏/最小化的窗口没有显示面，合成器不产帧、原生输入也会被丢掉；
-   * 用 showInactive 是为了不抢走用户正在打字的焦点。返回的现场交给 restoreWindow 复原。
+   * 依赖显示面的操作前临时露出窗口，细节见 browser-reveal.js：
+   * 显示但不透明、一串操作共用一次露出、空闲后收起。
    */
-  function revealWindow(record) {
-    if (record.win.isDestroyed()) return null
-    const plan = windowRevealPlan({
-      visible: record.win.isVisible(),
-      minimized: record.win.isMinimized()
-    })
-    if (!plan) return null
-    if (plan.minimized) record.win.restore()
-    else record.win.showInactive()
-    return plan
+  function beginReveal(record) {
+    return reveal.begin(record.win)
   }
 
-  function restoreWindow(record, plan) {
-    const action = windowRestoreAction(plan)
-    if (!action || record.win.isDestroyed()) return
-    if (action === 'minimize') record.win.minimize()
-    else record.win.hide()
+  function endReveal(record) {
+    reveal.end(record.win)
+  }
+
+  function flushReveal(record) {
+    reveal.flush(record.win)
   }
 
   /** 窗口从隐藏变可见后渲染器要恢复出帧；不等这一帧就截，拿到的可能是空白或冻结的旧帧 */
@@ -634,17 +633,17 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   }
 
   /**
-   * 在「窗口真的显示着」的前提下跑一次操作，结束后恢复原状态。
+   * 在「窗口真的显示着」的前提下跑一次操作，结束后按需恢复原状态（见 beginReveal）。
    *
    * 受影响的操作都是同一类：没有显示面时原生输入被丢掉（只能退回页面内合成事件）、
    * 合成器不出帧（截图拿到旧帧甚至不返回）、rAF 驱动的页面整页冻结。所以这些操作
-   * 一律先 showInactive 露出来、必要时把目标标签页挂上窗口，做完再 hide/还原。
+   * 一律先临时露出窗口、必要时把目标标签页挂上窗口，做完再收起来。
    * `run(via)` 拿到这次该走哪条路：能显示就是 'native'，恢复不了才退回 'in-page'。
    */
   async function withShownWindow(record, tab, run) {
     const previous = activeTab(record)
     const switched = !previous || previous.id !== tab.id
-    const plan = revealWindow(record)
+    const plan = beginReveal(record)
     const native = Boolean(plan) || switched || inputMode(record) === 'native'
     try {
       if (switched) activateTabIn(record, tab.id)
@@ -652,7 +651,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       return await run(native ? 'native' : 'in-page')
     } finally {
       if (switched && previous && record.tabs.includes(previous)) activateTabIn(record, previous.id)
-      restoreWindow(record, plan)
+      endReveal(record)
     }
   }
 
@@ -687,7 +686,10 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
    * 只有窗口已销毁、恢复不了显示面时才会落到 'in-page'。
    */
   function inputMode(record) {
-    return record.visible && !record.win.isDestroyed() ? 'native' : 'in-page'
+    // 按窗口的真实状态判断，而不是逻辑上的「用户让它可见」：临时露出期间窗口是显示着的，
+    // 原生输入同样有效
+    if (record.win.isDestroyed()) return 'in-page'
+    return record.win.isVisible() && !record.win.isMinimized() ? 'native' : 'in-page'
   }
 
   async function synthetic(tab, command) {
@@ -723,6 +725,8 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   function showBrowser(id, { focus = true } = {}) {
     const record = requireBrowser(id)
     if (record.win.isDestroyed()) throw new BrowserRequestError('窗口已销毁')
+    // 真要露给用户看：先把临时露出收干净，否则窗口会停在上一次的透明度上
+    flushReveal(record)
     if (record.win.isMinimized()) record.win.restore()
     if (focus) {
       record.win.show()
@@ -731,16 +735,15 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       // agent 让它「可见」不该抢走用户正在打字的焦点
       record.win.showInactive()
     }
-    record.visible = true
-    emit('shown')
+    applyVisibility(record, true)
     return record
   }
 
   function hideBrowser(id) {
     const record = requireBrowser(id)
+    flushReveal(record)
     if (!record.win.isDestroyed() && record.win.isVisible()) record.win.hide()
-    record.visible = false
-    emit('hidden')
+    applyVisibility(record, false)
     return record
   }
 

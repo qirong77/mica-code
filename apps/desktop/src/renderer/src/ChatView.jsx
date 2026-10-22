@@ -48,7 +48,7 @@ import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
-import { ReasoningDetailDialog, ToolDetailDialog } from './chat-tool-detail'
+import { ToolDetailDialog } from './chat-tool-detail'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 
 function formatTokens(value) {
@@ -803,7 +803,7 @@ function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingI
   )
 }
 
-function WaitTasksDock({ tasks, now = Date.now() }) {
+function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
   if (!tasks.length) return null
   return (
     <section className="chat-task-dock chat-wait-dock" aria-label="等待中的条件">
@@ -811,7 +811,12 @@ function WaitTasksDock({ tasks, now = Date.now() }) {
         const age = formatLogElapsed(Math.max(0, now - (Date.parse(task.startedAt) || now)))
         return (
           <div className="chat-task-row" key={task.id}>
-            <span className="chat-task-summary-row" title={waitTaskTooltip(task)}>
+            <button
+              type="button"
+              className="chat-task-summary-row chat-task-openable"
+              title={waitTaskTooltip(task)}
+              onClick={() => onOpen?.(task)}
+            >
               <span className="chat-task-kind">⏳ {waitTaskKindLabel(task.kind)}</span>
               <span className="chat-task-status chat-task-status-waiting">
                 {task.status === 'parked' ? '已登记' : '等待中'}
@@ -821,7 +826,7 @@ function WaitTasksDock({ tasks, now = Date.now() }) {
               <span className="chat-task-description">
                 {compactLine(waitTaskSummary(task), 180)}
               </span>
-            </span>
+            </button>
           </div>
         )
       })}
@@ -1101,6 +1106,55 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
         </pre>
       ) : (
         <div className="chat-modal-note">（暂无输出）</div>
+      )}
+    </TaskDetailModal>
+  )
+}
+
+// wait_for 的等待记录只活在 app-server 进程里，快照里就是全部信息（条件标签、
+// 原因、已轮询次数、最近一次观察），所以详情不需要额外的 host 请求；dock 每秒
+// 收到新快照，弹窗用同一份数据跟着刷新。
+function WaitTaskModal({ task, now, onClose }) {
+  const elapsed = taskElapsedMs(task, now)
+  const polls = Number(task.polls)
+  const label = String(task.label || '').trim() || '等待条件'
+  const detail = String(task.detail || '').trim()
+  return (
+    <TaskDetailModal
+      icon="⏳"
+      title={waitTaskKindLabel(task.kind)}
+      subtitle={compactLine(waitTaskSummary(task), 90)}
+      meta={
+        <ModalMeta
+          items={[
+            task.status === 'parked' ? '已登记' : '等待中',
+            elapsed != null ? (
+              <span className="tabular-nums">已等 {formatLogElapsed(elapsed)}</span>
+            ) : null,
+            Number.isFinite(polls) && polls > 0 ? `已轮询 ${polls} 次` : null,
+            task.id
+          ]}
+        />
+      }
+      onClose={onClose}
+    >
+      <ModalSection title="条件">
+        <pre className="chat-modal-pre">{textOf(label)}</pre>
+      </ModalSection>
+      {task.reason && (
+        <ModalSection title="为什么等">
+          <div className="chat-modal-prose">{textOf(task.reason)}</div>
+        </ModalSection>
+      )}
+      <ModalSection title={task.status === 'parked' ? '最近一次观察' : '最近一次检查'}>
+        {detail ? (
+          <pre className="chat-modal-pre">{textOf(detail)}</pre>
+        ) : (
+          <div className="chat-modal-note">（还没有观测结果）</div>
+        )}
+      </ModalSection>
+      {task.status === 'parked' && (
+        <div className="chat-modal-note">这条等待是后台登记的，条件没人推进时不会自己结束。</div>
       )}
     </TaskDetailModal>
   )
@@ -1435,7 +1489,7 @@ export function currentTurnActivityMessages(messages, turnId) {
 
 function TurnLogItemView({ message, now, onOpen }) {
   if (message.kind === 'reasoning') {
-    return <ReasoningRow text={message.text} onOpen={() => onOpen?.(message)} />
+    return <ReasoningRow text={message.text} />
   }
   return <ToolActivityRow tool={message.tool} now={now} onOpen={() => onOpen?.(message)} />
 }
@@ -5423,7 +5477,11 @@ export function ChatView({
             onKill={killBackgroundTask}
             killingId={killingTaskId}
           />
-          <WaitTasksDock tasks={waitTasks} now={taskNow} />
+          <WaitTasksDock
+            tasks={waitTasks}
+            now={taskNow}
+            onOpen={(task) => openTaskDetail('wait', task)}
+          />
           <QueueDock
             items={queuedDisplayItems}
             onRecall={recallQueued}
@@ -5770,15 +5828,18 @@ export function ChatView({
             onKill={killBackgroundTask}
           />
         )}
+        {taskDetail?.kind === 'wait' && (
+          <WaitTaskModal
+            // 等待记录每秒重推一次：能查到就用最新的那份，查不到（刚结束/被回收）
+            // 就用点开时的快照，弹窗不会突然空白。
+            task={waitTasks.find((item) => item.id === taskDetail.task.id) || taskDetail.task}
+            now={taskNow}
+            onClose={() => setTaskDetail(null)}
+          />
+        )}
         {activityDetailMessage?.kind === 'tool' && (
           <ToolDetailDialog
             tool={activityDetailMessage.tool}
-            onClose={() => setActivityDetailId(null)}
-          />
-        )}
-        {activityDetailMessage?.kind === 'reasoning' && (
-          <ReasoningDetailDialog
-            text={activityDetailMessage.text || ''}
             onClose={() => setActivityDetailId(null)}
           />
         )}

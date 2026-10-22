@@ -43,8 +43,8 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
   function ThinkingLogItem() {
     return (
       <Box>
-        <Text dimColor wrap="truncate-end">
-          {singleLine(text)}
+        <Text dimColor wrap="wrap">
+          {text}
         </Text>
       </Box>
     );
@@ -58,7 +58,7 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
  * 终端没有第二块可点开的面板，所以这行就是全部信息：超长文案交给 Ink 的
  * `truncate-end` 按当前列宽裁成省略号，工具输出不再往下铺（要读输出请用
  * `read_task_output` / 网页端）。换行必须先压成空格：`truncate-end` 只裁宽度，
- * 多行命令会照样铺成多行。
+ * 多行命令会照样铺成多行。思考不在此列——它照旧整段折行。
  */
 export function createToolCallLogItem({
   id,
@@ -105,7 +105,7 @@ export function createToolCallLogItem({
   return { id, component: completed ? CompletedToolCallLogItem : RunningToolCallLogItem };
 }
 
-/** 多行文本压成一行：回合日志的每个条目只允许占一行。 */
+/** 多行文本压成一行：工具调用那行只允许占一行（思考不压缩，照旧折行）。 */
 function singleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }

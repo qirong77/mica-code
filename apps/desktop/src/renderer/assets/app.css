@@ -1650,21 +1650,35 @@ body.is-resizing.is-resizing-terminal {
 }
 
 /*
- * 思考与工具行：**一条一行**，点开看详情（`chat-tool-detail.jsx`）。
+ * 工具行：**一条一行**，点开看详情（`chat-tool-detail.jsx`）。
  *
  * 回合日志是「这一轮刚才发生了什么」的目录，不是阅读面：多行日志会把对话区挤到
- * 看不见，之前的「整段折行 + 折叠输出」正是这样。所以这里一律 nowrap + 省略号，
+ * 看不见，之前的「整段折行 + 折叠输出」正是这样。所以工具行一律 nowrap + 省略号，
  * 内容完整性由弹窗负责。终端（`mica-ui/agentTurnLogItems.tsx`）是同一套规则。
+ *
+ * 思考是例外：它不是日志行，而是这一轮在想的什么，照旧整段折行。
  */
-.chat-turn-log-thinking,
-.chat-turn-log-tool {
+.chat-turn-log-thinking {
   min-width: 0;
+  margin: 1px 0 7px;
+  border-left: 2px solid color-mix(in srgb, var(--color-info) 24%, transparent);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--color-info) 6%, transparent);
+  padding: 3px 9px;
+  color: var(--color-fg-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-turn-log-tool {
+  position: relative;
+  min-width: 0;
+  padding-left: 0;
 }
 
 .chat-turn-log-tool + .chat-turn-log-tool,
-.chat-turn-log-thinking + .chat-turn-log-tool,
-.chat-turn-log-tool + .chat-turn-log-thinking {
-  margin-top: 1px;
+.chat-turn-log-thinking + .chat-turn-log-tool {
+  margin-top: 3px;
 }
 
 /* 整行就是按钮：点哪里都能打开详情，hover 给一层浅底标出可点范围 */
@@ -1712,11 +1726,6 @@ body.is-resizing.is-resizing-terminal {
   /* 多行命令/思考压成一行（文案里的换行由 chat-tool-views 的 singleLine 先抹平） */
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-turn-log-thinking .chat-turn-log-display {
-  color: var(--color-fg-faint);
-  font-style: italic;
 }
 
 .chat-turn-log-running .chat-turn-log-display,
@@ -2669,10 +2678,6 @@ body.is-resizing.is-resizing-terminal {
 .chat-modal-task,
 .chat-modal-tool {
   max-width: 860px;
-}
-
-.chat-modal-reasoning {
-  max-width: 720px;
 }
 
 .chat-modal-header {
@@ -3992,8 +3997,10 @@ body.is-resizing-btw {
 
 /* ------------------------------------------------------ 快速选择（quick pick）
    分支切换（左下角）、项目目录切换与「快速打开」共用这一套 VS Code 外观：
-   顶部居中的窄面板、方角、单行 22px 的紧凑行、选中行整行高亮。三个面板都
-   用这里的类名，改尺寸只改一处，不要在各组件里各写一套。 */
+   窄面板、方角、单行 22px 的紧凑行、选中行整行高亮。三个面板都用这里的类名，
+   改尺寸只改一处，不要在各组件里各写一套。
+   区别只在位置：「快速打开」是键盘唤起的，停在顶部居中；底栏两个按钮打开的
+   面板用 `.is-anchored` 贴着按钮往上长。 */
 .quick-pick-overlay {
   position: fixed;
   inset: 0;
@@ -4003,6 +4010,18 @@ body.is-resizing-btw {
   padding: clamp(28px, 7vh, 84px) 16px 24px;
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* 底栏的按钮（分支、目录）打开的 quick pick 贴着按钮往上长，不再居中：
+   鼠标从按钮到面板只有几像素，选中后回车也还在原处。覆盖层仍铺满窗口接管
+   外部点击关闭，面板按 JS 量出的按钮位置绝对定位（见 quick-pick-anchor.js）。 */
+.quick-pick-overlay.is-anchored {
+  display: block;
+  padding: 0;
+}
+
+.quick-pick-overlay.is-anchored .quick-pick-panel {
+  position: absolute;
 }
 
 .quick-pick-panel {
@@ -4078,7 +4097,9 @@ body.is-resizing-btw {
     'icon main tail'
     'icon detail detail';
   align-items: center;
-  padding-block: 4px;
+  /* 分支/commit 两行同一件事，行距收在 1.3：再宽行与行之间就分不清归属了。 */
+  padding-block: 2px;
+  line-height: 1.3;
 }
 
 .quick-pick-row.is-selected {
@@ -4093,7 +4114,7 @@ body.is-resizing-btw {
 
 .quick-pick-row.is-multiline > .quick-pick-row-icon {
   align-self: start;
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
 .quick-pick-row-main {
@@ -4139,7 +4160,6 @@ body.is-resizing-btw {
 .quick-pick-row-detail {
   grid-area: detail;
   overflow: hidden;
-  margin-top: 1px;
   color: var(--color-fg-faint);
   font-size: 11px;
   text-overflow: ellipsis;

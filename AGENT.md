@@ -384,7 +384,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **自动链接与全角标点**：唯一规则在 `mica-common/autolink.ts.splitAutolinkPunctuation`，自动链接在首个全角标点处截断且校验显示文本，显式 Markdown 链接原样保留。
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
-- 回合日志的思考/工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；`TurnLogItem` memo，计时更新仅影响运行行。
+- 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；思考照旧整段折行，不是日志行。`TurnLogItem` memo，计时更新仅影响运行行。
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
 - 模型/loop 面板统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。
 - 电脑隐藏发送/排队按钮，移动端保留；停止只用 danger、排队只用 warn，上传保持中性。loop 徽标自带 tick，不在 ChatView 或侧栏全树计时。
@@ -426,7 +426,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 主进程通过 Unix socket 提供服务，`MICA_BROWSER_SOCKET` 交运行时桥；agent 访问本运行时 `/remote/control`，不另开 TCP 服务。
 - `browserOwnerEnv()` 注入 `MICA_BROWSER_OWNER` / `MICA_BROWSER_URL`，owner 唯一决定会话归属；纯 Web 宿主无服务时正常降级。
 - 窗口默认隐藏，关窗只 hide，销毁须专用 close API；同一 `persist:mica-browser` 分区共享持久 Cookie，权限拒绝，window.open 转同窗新标签。
-- 截图用 CDP `Page.captureScreenshot`。依赖显示面的操作（截图、click、type、keys、scroll）统一走 `withShownWindow`：先 `showInactive` 露出窗口、必要时挂上目标标签页并等首帧，做完按原状态 hide/minimize 复原（不抢焦点、不改 `visible` 状态）。隐藏窗口原生输入会被丢弃、合成器不出帧，因此合成事件路径只作为恢复不了显示面时的兜底，via 报告实际走的那条。
+- 截图用 CDP `Page.captureScreenshot`。依赖显示面的操作（截图、click、type、keys、scroll）统一走 `withShownWindow` + `browser-reveal.js` 的露出控制器：先 `setOpacity(0)` 再 `showInactive`（窗口对 Chromium 是可见的、对用户完全不可见，避免每次操作闪一下），期间 `setIgnoreMouseEvents(true)` 让点击穿透；必要时挂上目标标签页并等首帧；一串操作共用同一次露出，空闲 1.5s 后才收起并恢复透明度（`MICA_BROWSER_REVEAL_OPACITY=0` 退回可见地露出）。逻辑 `visible` 只由 `showBrowser` / `hideBrowser` 改，窗口 show/hide 事件不参与，顶栏图标不会跟着闪。隐藏窗口原生输入会被丢弃、合成器不出帧，因此合成事件路径只作为恢复不了显示面时的兜底，via 报告实际走的那条。
 - `app.whenReady()` 前设置 `disable-backgrounding-occluded-windows` 保持隐藏窗口 rAF/可见性；进程级开关 `MICA_BROWSER_UNTHROTTLE=0` 可关闭。
 - 服务保持 Origin/Host 守卫，无 CORS，非 GET 要求 JSON；Cookie 导出文件 0600，写失败只报告。
 - 顶栏图标显示/隐藏窗口，销毁二次确认；未归属窗口变暗显示。Browser Control 设置页永远可打开，无能力时给说明，仅展示文档入口，不管理窗口。
@@ -488,7 +488,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - Ink stdin 到 `parse-keypress.ts` 前保留 Buffer，不提前 setEncoding；增量 UTF-8 与 C1 规范化在解析层处理。
 - Alt 键两种编码都支持，stdin tokenizer 保持 `metaEscape: true`，避免把 Option+↑ 拆成 Escape 清空输入。
 - 编辑撤销/重做历史保存在组件 ref，新编辑清 redo；displayContent 只改展示，不改发给 agent 的内容。
-- 回合日志（`agentTurnLogItems.tsx`）每条只占一行：文案与思考先压成单行，再用 `wrap="truncate-end"` 按列宽裁省略号；工具输出不进终端日志。
+- 回合日志（`agentTurnLogItems.tsx`）的工具行只占一行：文案先压成单行，再用 `wrap="truncate-end"` 按列宽裁省略号；工具输出不进终端日志。思考照旧 `wrap="wrap"` 整段折行。
 
 ### 配置页与主题
 

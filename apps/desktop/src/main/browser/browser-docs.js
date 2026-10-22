@@ -235,7 +235,8 @@ export const BROWSER_ENDPOINTS = [
     id: 'screenshot',
     method: 'GET',
     path: '/browser/tabs/:id/screenshot',
-    summary: '截图（窗口隐藏时会先显示出来再截，截完恢复隐藏；整页截图传 fullPage=true）',
+    // 隐藏窗口没有显示面：截图期间会临时把窗口显示出来（透明度 0，用户看不到），截完收起
+    summary: '截图（窗口隐藏时会临时显示出来再截，截完恢复隐藏；整页截图传 fullPage=true）',
     params: [
       { name: 'fullPage', in: 'query', required: false, description: 'true 时截整页' },
       {
