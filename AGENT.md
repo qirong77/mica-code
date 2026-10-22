@@ -567,3 +567,57 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 见到整页空白/黑屏先查渲染期异常（未初始化的 `const`、抛错的组件），不要先怀疑数据；`ErrorBoundary` 的兜底页会带出真实错误与堆栈。
 
 交付前按实际影响复查：依赖方向、busy guard、队列 owner、retry/abort 去重、lease、snapshot/UI 恢复、用量归属、工具 readOnly、MCP 清理、desktop 三层边界、构建产物与文档同步。
+
+## 17. 对外文档与演示素材
+
+### 文档分工
+
+| 位置                   | 读者             | 写什么                                                   |
+| ---------------------- | ---------------- | -------------------------------------------------------- |
+| `README.md`            | 使用者           | 定位、核心优势、评测、快速开始、能力一览、集成入口、索引 |
+| `docs/`                | 集成方、维护者   | 稳定的设计文档；`docs/README.md` 是索引与写作约定        |
+| `apps/website/src`     | 使用者           | 官网首页与 docs 页，随 `main` 自动部署到 GitHub Pages    |
+| `blogs/`               | 想了解实现的读者 | 开发记录，保留写作时的技术栈描述，不回填新结论           |
+| `packages/*/README.md` | 包的使用者       | 单包 API、边界、目录结构                                 |
+
+- README 分区顺序固定：定位 → 核心优势 → 评测 → 快速开始 → 能力一览（内置命令 / 工具与扩展 / 桌面 App）→ 集成与自动化 → 文档 → 开发。新增内容优先并进已有分区，不追加新的一级标题。
+- 命令表必须与代码一致：`ALLOW_DURING_TURN_COMMANDS`（`apps/cli/src/plugins/commands/index.ts`）与 `plugins/command-*.ts` 里的 `allowDuringTurn`。新增、删除、改名命令时同步 README、`apps/website/src/pages/docs/commands.astro`、`packages/mica-builtin-commands/README.md` 三处。
+- 配置字段、CLI 参数、环境变量的口径以 `packages/mica-config` 与 `apps/cli/src/cli/args.ts` 为准；README 只写使用者会用到的字段，内部参数留给 AGENT.md。
+- 文档里不写实现细节（内部函数名、锁文件布局、事件名），那些留在本文件与 `docs/`。
+
+### 演示截图
+
+截图必须可复现，所以不用真实模型，也不手截窗口：
+
+1. 起脚本化 provider：`node scripts/demo-mock-provider.mjs 8898`。它按「最后一句用户消息里的关键词」选脚本，产出固定的「思考 → 工具 → 工具 → 总结」形态，并给出接近真实的用量。
+2. 用隔离的 demo home：`temp/demo/home/config.json` 里把 provider 指向上一步的地址，`temp/` 已被忽略，不会污染真实 `~/.mica`。
+
+   ```json
+   {
+     "providers": [
+       {
+         "id": "demo",
+         "name": "Mica Demo",
+         "api_base": "http://127.0.0.1:8898/v1",
+         "protocol": "openai_responses",
+         "models": ["mica-demo"],
+         "api_key": "demo"
+       }
+     ],
+     "model": "demo/mica-demo"
+   }
+   ```
+
+3. 起运行时：`MICA_HOME=<demo> MICA_DESKTOP_USER_DATA=<demo-userdata> MICA_DESKTOP_PORT=8899 node apps/desktop/out/server/index.mjs --port 8899 --no-share`（需要在 `apps/desktop` 里先 `npm run build:server`）。
+4. 造会话：`POST /api/invoke`，`{"channel":"chat:start","payload":{"id":"<nodeId>","prompt":"…","cwd":"…","model":"demo/mica-demo"}}`。要截「回合日志」就必须在 turn 运行中截：`payload.id` 必须是页面当前的 node id（在 `uiState.workspace.nodes` 里），否则页面收不到 run 事件。脚本化的 `run_shell` 走真实命令（如 `bun run typecheck`），天然会持续几秒，够截。
+5. 截图：受控浏览器 `POST /remote/control/browser/browsers`（`{url,label}`）→ `GET /remote/control/browser/tabs/<id>/screenshot?raw=true`。窗口默认 1180×800、2x DPR，页面可视区出图 2360×1460，再 `sips -Z 1800` 收到 1800×1113。
+
+- 产物固定三个：`images/app-chat.png`（头图）、`images/app-turn-log.png`、`images/eval-benchmark.svg`；官网副本放 `apps/website/public/screenshots/`，改名或替换时同步 `apps/website/src/pages/index.astro` 的引用。
+- 截图里的内容只用示例数据，不放真实会话、真实 key、真实私有仓库路径。
+- 只有完成态回合会在重开后保留正文，工具行只属于当前 turn：要展示工具/待办就必须在运行中截。
+
+### 评测图
+
+- 口径写在图片旁边的正文里（图本身不带标题）：9 个任务、464 项人工检查、模型统一 DeepSeek Flash、每格取 4 次运行的中位数、`base` 为未改动仓库。
+- 数字来自本地 `frontier-harness-eval-benchmark` 的 `data/runs`，取中位数后手工写进 SVG（1180×316，自带浅底，保证 GitHub 深色主题下可读）。改数字时同步 README 结论段与官网首页 `#benchmark` 区块。
+- 不做「看起来更好」的裁剪：通过数、缓存命中率、耗时、轮次四项都放图里，结论按实际差距写（正确率同档、缓存最高、轮次偏多）。

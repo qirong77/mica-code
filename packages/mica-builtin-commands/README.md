@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 提供全部产品内置命令实现：`/cd`、`/clear`、`/compact`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。
+- 提供全部产品内置命令实现：`/btw`、`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。
 - 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。

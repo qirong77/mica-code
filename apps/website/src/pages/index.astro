@@ -74,16 +74,37 @@ const heroTerm = `$ mica
     </div>
   </section>
 
+  <!-- 评测 -->
+  <section class="section" id="benchmark">
+    <div class="container">
+      <div class="section-title">
+        <div class="kicker">Benchmark</div>
+        <h2>同样的题，五个 agent 各跑一遍</h2>
+        <p>9 个真实仓库的 bugfix / 特性任务、464 项人工检查，模型统一 DeepSeek Flash，每格取 4 次运行的中位数</p>
+      </div>
+      <figure class="screenshot" style="background:#fdfdfd">
+        <img src={`${base}screenshots/eval-benchmark.svg`} alt="五个 coding agent 的通过率、缓存命中率、耗时与轮次对比" loading="lazy" />
+      </figure>
+      <p class="benchmark-note">
+        五者通过数只差 1.1 个百分点（457–462 项），正确率同档；Mica 的输入侧缓存命中率最高（99.1%），
+        总耗时 86.2 分钟居中，轮次比 Codex / Claude Code 多。
+      </p>
+    </div>
+  </section>
+
   <!-- 截图 -->
   <section class="section">
     <div class="container">
       <div class="section-title">
         <div class="kicker">In action</div>
-        <h2>终端里的样子</h2>
-        <p>信息密度高、键盘优先，多 agent 与后台任务一眼可见</p>
+        <h2>终端与桌面的样子</h2>
+        <p>同一套 turn 循环、同一份会话：TUI 里键盘优先，桌面上多页签与可视化面板</p>
       </div>
       <figure class="screenshot">
-        <img src={`${base}screenshots/terminal.png`} alt="Mica Code 使用过程截图" loading="lazy" />
+        <img src={`${base}screenshots/chat.png`} alt="Mica Code 桌面端对话截图" loading="lazy" />
+      </figure>
+      <figure class="screenshot" style="margin-top:24px">
+        <img src={`${base}screenshots/turn-log.png`} alt="Mica Code 回合日志与待办截图" loading="lazy" />
       </figure>
     </div>
   </section>

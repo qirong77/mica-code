@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 316" width="1180" height="316" role="img" aria-label="FrontierHarness 本地评测：五个 agent 在同样 9 个任务、464 项检查上的通过率、缓存命中率、耗时与轮次对比">
+<rect x="0" y="0" width="1180" height="316" rx="14" fill="#fdfdfd"/>
+<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Helvetica Neue',Arial,sans-serif">
+<text x="40" y="44" font-size="11.5" fill="#6b7280" letter-spacing="0.06em">通过检查项</text>
+<text x="760" y="44" font-size="11.5" fill="#6b7280" text-anchor="end">缓存命中率</text>
+<text x="930" y="44" font-size="11.5" fill="#6b7280" text-anchor="end">总耗时</text>
+<text x="1060" y="44" font-size="11.5" fill="#6b7280" text-anchor="end">总轮次</text>
+<text x="40" y="77" font-size="13" font-weight="400" fill="#6b7280">Codex</text>
+<rect x="220" y="62" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="62" width="298.7" height="18" rx="4" fill="#94a3b8"/>
+<text x="532" y="76" font-size="12" font-weight="400" fill="#6b7280">462/464 · 99.6%</text>
+<text x="760" y="76" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">98.5%</text>
+<text x="930" y="76" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">103.7 分钟</text>
+<text x="1060" y="76" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">823</text>
+<text x="40" y="115" font-size="13" font-weight="700" fill="#111827">Mica Code</text>
+<rect x="220" y="100" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="100" width="297.1" height="18" rx="4" fill="#38bdf8"/>
+<text x="532" y="114" font-size="12" font-weight="700" fill="#111827">459.5/464 · 99.0%</text>
+<text x="760" y="114" font-size="12.5" fill="#111827" font-weight="700" text-anchor="end">99.1%</text>
+<text x="930" y="114" font-size="12.5" fill="#111827" font-weight="700" text-anchor="end">86.2 分钟</text>
+<text x="1060" y="114" font-size="12.5" fill="#111827" font-weight="700" text-anchor="end">957</text>
+<text x="40" y="153" font-size="13" font-weight="400" fill="#6b7280">MiniMax Code</text>
+<rect x="220" y="138" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="138" width="297.1" height="18" rx="4" fill="#94a3b8"/>
+<text x="532" y="152" font-size="12" font-weight="400" fill="#6b7280">459.5/464 · 99.0%</text>
+<text x="760" y="152" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">96.2%</text>
+<text x="930" y="152" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">144.1 分钟</text>
+<text x="1060" y="152" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">1610</text>
+<text x="40" y="191" font-size="13" font-weight="400" fill="#6b7280">DSH Standard</text>
+<rect x="220" y="176" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="176" width="296.1" height="18" rx="4" fill="#94a3b8"/>
+<text x="532" y="190" font-size="12" font-weight="400" fill="#6b7280">458/464 · 98.7%</text>
+<text x="760" y="190" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">98.7%</text>
+<text x="930" y="190" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">83.7 分钟</text>
+<text x="1060" y="190" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">779</text>
+<text x="40" y="229" font-size="13" font-weight="400" fill="#6b7280">Claude Code</text>
+<rect x="220" y="214" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="214" width="295.5" height="18" rx="4" fill="#94a3b8"/>
+<text x="532" y="228" font-size="12" font-weight="400" fill="#6b7280">457/464 · 98.5%</text>
+<text x="760" y="228" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">98.9%</text>
+<text x="930" y="228" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">83.2 分钟</text>
+<text x="1060" y="228" font-size="12.5" fill="#6b7280" font-weight="400" text-anchor="end">752</text>
+<line x1="40" y1="240" x2="1140" y2="240" stroke="rgba(148,163,184,0.20)" stroke-width="1"/>
+<text x="40" y="270" font-size="13" font-weight="400" fill="#6b7280">base · 未改动的仓库</text>
+<rect x="220" y="255" width="300" height="18" rx="4" fill="rgba(148,163,184,0.20)"/>
+<rect x="220" y="255" width="58.8" height="18" rx="4" fill="#cbd5e1"/>
+<text x="532" y="269" font-size="12" fill="#6b7280">91/464 · 19.6%</text>
+</g></svg>

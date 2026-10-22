@@ -16,9 +16,9 @@
   --yellow: #facc15;
   --red: #f87171;
   --purple: #c084fc;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --radius: 10px;
   --maxw: 1080px;
 }
@@ -240,9 +240,7 @@ blockquote {
 .hero {
   padding: 84px 0 64px;
   text-align: center;
-  background:
-    radial-gradient(ellipse 70% 50% at 50% -10%, rgba(56, 189, 248, 0.13), transparent),
-    var(--bg);
+  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(56, 189, 248, 0.13), transparent), var(--bg);
 }
 
 .hero-logo {
@@ -418,7 +416,9 @@ blockquote {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 24px;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .card:hover {
@@ -457,6 +457,15 @@ blockquote {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.benchmark-note {
+  max-width: 900px;
+  margin: 18px auto 0;
+  color: var(--text-dim);
+  text-align: center;
+  font-size: 0.94rem;
+  line-height: 1.7;
 }
 
 /* ---------- 页脚 ---------- */

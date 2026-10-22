@@ -3,10 +3,11 @@ import DocLayout from '../../layouts/DocLayout.astro';
 
 const stack = [
   { name: 'Bun + TypeScript + React + Ink', desc: '终端 TUI 与运行时底座：CLI 启动、turn loop、模型 provider、UI 状态分层管理。' },
-  { name: 'packages/ 可复用包', desc: 'agent 抽象、工具 registry、MCP、UI、runtime 协议、session、config、commands、skills、plugin 等按职责拆分为独立包。' },
-  { name: 'apps/cli/ 应用装配层', desc: '负责应用级 wiring、生命周期和跨包编排：Application、LocalRuntimeController、多 agent session 管理。' },
-  { name: 'packages/mica-builtin-commands 官方插件', desc: '产品命令与内置插件：commands 命令实现、plugins 插件装配（Todo、MCP、message queue、文件 mention）、startup 启动扩展。' },
-  { name: 'mica-code-app', desc: '终端风格的桌面 Web 渲染，通过 app-server 协议驱动 mica 子进程。' },
+  { name: 'apps/cli/', desc: '应用装配层：Application 生命周期、LocalRuntimeController、多 agent session 管理、headless 执行器与 Codex 协议投影。' },
+  { name: 'packages/', desc: '可复用能力：agent 抽象、工具 registry、MCP、Ink UI、runtime 协议、session、config、commands、skills、plugin，以及桌面端共享的 web-shared / config-ui / file-mentions。' },
+  { name: 'packages/mica-builtin-commands', desc: '官方插件：产品命令实现（commands/）、运行期插件装配（plugins/）、启动扩展（startup/）。' },
+  { name: 'apps/desktop/', desc: '桌面端：Electron 外壳 + 自包含 Node 运行时（HTTP + SSE）托管 renderer，页面同时给浏览器和移动端用。' },
+  { name: 'apps/config-web/', desc: '配置页的浏览器宿主，与桌面端 SettingsView 复用同一份 packages/mica-config-ui。' },
 ];
 
 const base = import.meta.env.BASE_URL;
@@ -22,8 +23,9 @@ const base = import.meta.env.BASE_URL;
 
   <h2>设计理念</h2>
   <ul>
-    <li><strong>append-only 会话历史</strong>：默认追加消息、工具调用与输出，只有上下文压力明显时在明确的阶段边界 compact——这是 96%+ 缓存命中率的基础。</li>
-    <li><strong>稳定 prompt 前缀</strong>：system prompt 的构建路径按 live cwd 解析，skills 在 system prompt 里只放索引，完整内容按需读取。</li>
+    <li><strong>append-only 会话历史</strong>：默认追加消息、工具调用与输出，只有在明确的阶段边界才 compact——这是缓存命中率的来源。</li>
+    <li><strong>稳定 prompt 前缀</strong>：system prompt 按 live cwd 解析，skills 在 system prompt 里只放索引，完整内容按需读取；切角色、切模型、压缩都在 turn 边界上做。</li>
+    <li><strong>一套 turn 循环，三种入口</strong>：交互 TUI、桌面端 app-server、<code>mica exec</code> 共用同一个执行核心与插件层，行为不会分叉。</li>
     <li><strong>分层边界</strong>：底层包不依赖上层。agent 抽象不碰 UI，UI 不直接调 provider，session 只做持久化，MCP 只管生命周期、远端工具注册统一走工具 registry。</li>
   </ul>
 
@@ -43,34 +45,46 @@ const base = import.meta.env.BASE_URL;
   </table>
 
   <h2>源码版图</h2>
-  <pre><code>src/
-  index.ts                  CLI 入口：模式分派、全局错误钩子、Application 启停
-  cli/                      run / models / exec / compact / commit / app-server 入口
-  app/                      Application 生命周期、LocalRuntimeController turn loop、UI bridge
-  agents/                   终端内多 agent session 与后台 subagent 管理
-  runtime/                  Rewind checkpoint、ToolLog、Headless turn 执行器、Codex 投影
-  session/                  session 保存、恢复、重命名与 UI restore
-  tools/                    Agent 工具的 subagent 生命周期
+  <pre><code>apps/
+  cli/src/
+    index.ts               CLI 入口：模式分派、全局错误钩子、Application 启停
+    cli/                   run / models / exec / compact / commit / app-server 入口
+    app/                   Application 生命周期、LocalRuntimeController turn loop、UI bridge
+    agents/                终端内多 agent session 与后台 subagent 管理
+    runtime/               Rewind checkpoint、Headless turn 执行器、Codex 事件投影
+    session/               session 保存、恢复、重命名与 UI restore
+    tools/                 Agent 工具的 subagent 生命周期
+  desktop/src/
+    main/                  Electron 容器；受控浏览器与终端控制是仅有的两个业务例外
+    server/                自包含 Node 运行时：renderer 托管、/api/invoke、SSE /api/events
+    host/                  chat、terminal、files、git、stats、config、loop 等业务
+    renderer/              React 页面（桌面 + 移动 + 分享视图 + 独立文件窗口）
+  config-web/              配置页浏览器宿主
+  website/                 Astro 官网
 
 packages/
-  mica-agent                provider adapter 与 prompt 构建（provider-neutral）
-  mica-tools                唯一工具 registry：内置工具 + MCP 工具接入
-  mica-mcp                  MCP 配置读取、连接管理、远端工具适配
-  mica-ui                   Ink 终端 UI 组件和状态 store
-  mica-runtime              runtime 协议、事件、状态原语（Codex 协议 / ThreadEvent JSONL）
-  mica-session              会话快照本地保存、读取和列表
-  mica-config               本地配置、storage、模型列表、on-demand Models.dev 查找
-  mica-commands             通用斜杠命令注册与分发
-  mica-builtin-commands     Mica Code 内置产品命令
-  mica-context              上下文管理（compact）
-  mica-skills               skills 扫描、解析和缓存
-  mica-plugin               插件生命周期、hooks、service container
-  mica-common               跨包共享底层工具
-  mica-pty                  PTY 测试驱动 + 内置 PTY 工具
+  mica-agent               provider adapter 与 prompt 构建（provider-neutral）
+  mica-runtime             runtime 协议、事件、状态原语（Codex 协议 / ThreadEvent JSONL）
+  mica-tools               唯一工具 registry：内置工具 + MCP 工具接入
+  mica-mcp                 MCP 配置读取、连接管理、远端工具适配
+  mica-ui                  Ink 终端 UI 组件和状态 store
+  mica-session             会话快照、索引、跨进程 turn lease
+  mica-config              本地配置、品牌路径、模型规则
+  mica-context             上下文压缩（CompactionService）
+  mica-commands            通用斜杠命令注册与分发
+  mica-builtin-commands    产品命令、运行期插件、启动扩展
+  mica-skills              skills 扫描、解析与缓存
+  mica-plugin              插件生命周期、hooks、service container
+  mica-common              跨端纯逻辑（loop 参数、引用、自动链接、消息定位）
+  mica-pty                 PTY 驱动与 Node helper
+  mica-file-mentions       CLI / 桌面共用的 @ 文件补全
+  mica-web-shared          桌面 renderer / 运行时共享的展示与状态约定
+  mica-config-ui           配置页唯一实现
 </code></pre>
 
   <h2>Turn loop 与缓存</h2>
   <p>普通输入的关键路径：trim 输入 → 命令分发 → busy 检查与排队（单槽队列，支持 after_iteration / after_turn）→ turn 开始捕获 rewind checkpoint → <code>agent.run</code> 迭代执行工具 → 每轮迭代保存可恢复 checkpoint → 成功后写入 assistant message 并保存 completed 快照。turn 级错误最多重试 5 次，每次间隔 10 秒；只有可安全重放（只读工具阶段）的错误才自动重试。</p>
+  <p>写 session 的每个 turn 都要先拿到跨进程 turn lease（<code>sessions/.turn-locks/&lt;id&gt;.lock</code>），拿不到就拒绝启动这一轮；lease 必须在 <code>turn:after</code> 之前释放，否则插件提交的下一轮会被自己的旧锁挡住。</p>
   <p>Abort 语义：<code>AgentRuntime.abort()</code> 递增 runId、abort controller；provider 流迭代结束后必须再检查一次 abort，避免把被中止的请求提交成空的 assistant 消息。UI 展示的真相来自 <code>TerminalAgentSession.uiState.conversationMessages</code>，而不是从 provider history 重新推断。</p>
 
   <h2>多 Agent 与 Rewind</h2>
@@ -80,11 +94,14 @@ packages/
     <li>subagent 的逐条模型请求深拷贝进 <code>subagentUsageHistory</code>，随会话快照落盘，供 Stats 对账。</li>
   </ul>
 
+  <h2>桌面端</h2>
+  <p>桌面端不是一个独立实现：<code>src/server</code> 起一个自包含 Node 运行时（托管 renderer，<code>POST /api/invoke</code> 调用能力，SSE <code>/api/events</code> 推事件），Electron 外壳只负责窗口与两个主进程能力（受控浏览器、终端控制）。因此浏览器打开同一个地址就是完整功能，只是没有外壳菜单。</p>
+
   <h2>验证</h2>
   <ul>
-    <li>单元 / 集成测试：<code>bun run test</code>（Vitest）。</li>
-    <li>类型检查：<code>bunx tsc --noEmit</code>。</li>
-    <li>构建：<code>bun run build</code> 产出无外部运行时依赖的单二进制 <code>dist/mica</code>。</li>
+    <li>单元 / 集成测试：<code>bun run test -- &lt;路径&gt;</code>（Vitest），桌面端在 <code>apps/desktop</code> 用 <code>npm test</code>（bun test）。</li>
+    <li>类型检查：<code>bun run typecheck</code>；桌面端另有 <code>npx eslint src/</code>。</li>
+    <li>构建：<code>bun run build</code> 产出无外部运行时依赖的单二进制 <code>dist/mica</code>；<code>npm run build:app</code> 打桌面端。</li>
     <li>真实用户流冒烟：通过 <code>packages/mica-pty</code> 驱动 <code>dist/mica</code> 覆盖安装、命令面板、多 agent、resume 等端到端场景。</li>
   </ul>
 </DocLayout>
