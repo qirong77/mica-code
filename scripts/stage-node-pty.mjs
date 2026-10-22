@@ -7,7 +7,10 @@
 //
 // 因此：
 // - darwin / win32 发布包：复制 prebuilds/{platform}-{arch}（pty.node + spawn-helper）
-// - linux 发布包：复制安装时编译的 build/Release/{pty.node,spawn-helper}
+// - linux 发布包：复制安装时编译的 build/Release/pty.node
+//
+// spawn-helper 只有 darwin 需要：node-pty 的 binding.gyp 把它的 target 放在
+// `OS=="mac"` 分支里，Linux 走 pty.fork，第五个 helper 参数被忽略。
 import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -28,15 +31,13 @@ export function stageNodePty({ source = 'node_modules/node-pty', dest, platform,
   if (platform === 'linux') {
     // CI 在对应架构 runner 上 bun install 时编译的原生产物
     const releaseDir = join(source, 'build', 'Release');
-    for (const file of ['pty.node', 'spawn-helper']) {
-      const src = join(releaseDir, file);
-      if (!existsSync(src)) {
-        throw new Error(
-          `node-pty 缺少编译产物 ${src}。linux 发布包需要先在对应架构 runner 上 bun install 编译 node-pty（trustedDependencies）。`,
-        );
-      }
-      cpSync(src, join(dest, 'build', 'Release', file));
+    const nativeModule = join(releaseDir, 'pty.node');
+    if (!existsSync(nativeModule)) {
+      throw new Error(
+        `node-pty 缺少编译产物 ${nativeModule}。linux 发布包需要先在对应架构 runner 上 bun install 编译 node-pty（trustedDependencies）。`,
+      );
     }
+    cpSync(nativeModule, join(dest, 'build', 'Release', 'pty.node'));
     return dest;
   }
 

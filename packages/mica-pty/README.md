@@ -79,7 +79,10 @@ pty_* 工具 (packages/mica-tools/pty/)
 node-pty 是 C++ 原生模块，无法打进 `bun build --compile` 的单文件二进制，因此发布包（GitHub Release 的 `mica-code-{platform}-{cpu}.tar.gz`）除 `mica` 二进制外还携带精简后的 `node_modules/node-pty`：
 
 - darwin / win32：npm 包自带的 `prebuilds/{platform}-{arch}`（`pty.node` + `spawn-helper`）；
-- linux：构建机（对应架构 runner）上 `bun install` 时编译的 `build/Release/{pty.node,spawn-helper}`。
+- linux：构建机（对应架构 runner）上 `bun install` 时编译的 `build/Release/pty.node`。
+
+`spawn-helper` 只有 macOS 需要：node-pty 的 `binding.gyp` 把它的构建 target 放在
+`OS=="mac"` 分支里，Linux 直接走 `pty.fork`，传进去的 helper 路径会被忽略。
 
 安装脚本（`scripts/install.sh` 与 `scripts/install.mjs`）把两者解压到 `~/.local/lib/mica/`，`~/.local/bin/mica` 只是 launcher。运行时 manager 从二进制目录向上即可找到 node-pty，**不再依赖用户机器上的 node_modules**。打包逻辑见 `scripts/package-release.mjs` 与 `scripts/stage-node-pty.mjs`。
 
