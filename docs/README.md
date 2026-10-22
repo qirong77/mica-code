@@ -22,11 +22,11 @@ Mica Code 的文档分四处，各管一件事，互相不重复：
 
 README 与官网用的图都在仓库里，可以直接重新生成：
 
-| 文件                        | 用途                                                  |
-| --------------------------- | ----------------------------------------------------- |
-| `images/app-chat.png`       | README 头图：桌面端一问一答 + 状态栏用量              |
-| `images/app-turn-log.png`   | 回合日志、待办与工具执行                              |
-| `images/eval-benchmark.svg` | 五个 agent 的同题对比（口径与数据来源见 README 该节） |
+| 文件                        | 用途                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `images/app-chat.png`       | README 头图：桌面端一问一答 + 状态栏用量                                                             |
+| `images/app-turn-log.png`   | 回合日志、待办与工具执行                                                                             |
+| `images/eval-benchmark.svg` | 五个 agent 的同题对比，由 `bun scripts/generate-eval-chart.mjs` 生成（口径与数据来源见 README 该节） |
 
 截图不是手截的：用 `scripts/demo-mock-provider.mjs` 起一个脚本化 provider，在隔离的 `MICA_HOME` 里跑出固定形态的对话，再用受控浏览器按固定窗口尺寸截图。完整步骤见 [AGENT.md](../AGENT.md) 的「对外文档与演示素材」一节。
 

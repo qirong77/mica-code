@@ -618,6 +618,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### 评测图
 
-- 口径写在图片旁边的正文里（图本身不带标题）：9 个任务、464 项人工检查、模型统一 DeepSeek Flash、每格取 4 次运行的中位数、`base` 为未改动仓库。
-- 数字来自本地 `frontier-harness-eval-benchmark` 的 `data/runs`，取中位数后手工写进 SVG（1180×316，自带浅底，保证 GitHub 深色主题下可读）。改数字时同步 README 结论段与官网首页 `#benchmark` 区块。
+- 口径写在图片旁边的正文里（图本身不带标题）：9 个任务、464 项人工检查、模型统一 DeepSeek Flash、每格取 4 次运行的中位数。
+- 数字来自本地 `frontier-harness-eval-benchmark` 的 `data/runs` 取中位数，图表由 `bun scripts/generate-eval-chart.mjs` 生成（1180×276，自带浅底，保证 GitHub 深色主题下可读），不要手改 SVG。改数字时同步 README 结论段与官网首页 `#benchmark` 区块。
+- 通过率一列用 95%–100% 的放大坐标并在图内标注，满格线性画出来五条几乎一样长；未通过项数同时写在轴下方。
 - 不做「看起来更好」的裁剪：通过数、缓存命中率、耗时、轮次四项都放图里，结论按实际差距写（正确率同档、缓存最高、轮次偏多）。
