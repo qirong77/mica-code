@@ -11,6 +11,7 @@
 - 读取最近会话列表：`store.list(limit)`。
 - 加载指定会话：`store.load(id)`。
 - 保存会话快照：`store.save(session)`。
+- 列出正在运行的会话：`listSessionTurnLocks()`（读 `sessions/.turn-locks`，按持有进程是否存活判定）。
 
 ## 使用入口
 
@@ -24,6 +25,8 @@ const sessions = store.list(10);
 ## 设计约束
 
 - 本包只负责会话文件存储，不直接调用 provider 或渲染 UI。
+- `listSessionTurnLocks()` 只读 `sessions/.turn-locks/<id>.lock` 的 `pid` 与 session 文件头部 4 KiB（`title`/`cwd`/`turnState`/`model`），不解析完整快照：会话文件可达几十 MB。
+- turn 锁是「某个进程正在跑这一轮」的唯一跨进程事实来源；空闲实例不持锁，因此不在列表里。
 - 会话 ID 和路径需要做安全处理，避免越权读取任意文件。
 - 保存内容应是可序列化快照，便于后续 resume、fork 或 session graph 扩展。
 - `turnState` 记录最近一轮是 `running`、`completed`、`aborted` 还是 `error`；旧会话缺少该字段时按 `completed` 读取。
@@ -35,4 +38,5 @@ const sessions = store.list(10);
 ## 目录说明
 
 - `sessionStore.ts`：会话类型、文件存储实现、ID 创建和路径安全处理。
+- `liveSessions.ts`：运行中会话枚举（turn 锁持有者 + session 头部元数据）。
 - `index.ts`：公共 API 聚合导出。

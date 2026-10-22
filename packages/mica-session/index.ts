@@ -1,4 +1,5 @@
 import { micaSessionStore } from './sessionStore.js';
+import { listSessionTurnLocks } from './liveSessions.js';
 
 /** 会话持久化入口，负责保存、恢复、列出和删除 agent runtime 快照。 */
 export const micaSession = {
@@ -6,8 +7,11 @@ export const micaSession = {
   createStore: micaSessionStore.createStore,
   createId: micaSessionStore.createId,
   acquireTurnLease: micaSessionStore.acquireTurnLease,
+  listTurnLocks: listSessionTurnLocks,
   SessionStore: micaSessionStore.SessionStore,
 };
+
+export { isProcessAlive, listSessionTurnLocks, readFileHead } from './liveSessions.js';
 
 export type {
   PersistedRuntimeSnapshot,
@@ -18,3 +22,5 @@ export type {
   SessionSummary,
   SessionTurnLease,
 } from './sessionStore.js';
+
+export type { ListSessionTurnLocksOptions, SessionTurnLock } from './liveSessions.js';

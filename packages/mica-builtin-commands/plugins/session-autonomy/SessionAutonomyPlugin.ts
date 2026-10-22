@@ -1,9 +1,18 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
-import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '@packages/mica-builtin-commands/index.js';
+import type {
+  CommandAgent,
+  CommandRuntimeServices,
+  CommandSessionController,
+} from '@packages/mica-builtin-commands/index.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
 import { micaContext } from '@packages/mica-context/index.js';
-import { ToolSessionCompact, ToolSessionInfo, type PendingSessionOp } from './SessionAutonomyTools.js';
+import {
+  ToolSessionCompact,
+  ToolSessionInfo,
+  ToolSessionPeers,
+  type PendingSessionOp,
+} from './SessionAutonomyTools.js';
 
 const PLUGIN_ID = 'builtin.session-autonomy';
 
@@ -12,6 +21,7 @@ const SESSION_AUTONOMY_GUIDANCE = `# 会话自治（Session Autonomy）
 你可以通过以下工具观察和管理当前会话：
 - session_info：查看会话状态与元信息，决策前先观察。
 - session_compact：上下文占用较高（例如 >70%）时压缩历史（preview 可先看估算）。
+- session_peers：查看正在运行的其他 Mica 实例及其 session 文件路径；怀疑工作区被别的会话改动时用它排查。
 
 写操作在当前对话轮结束后生效；操作结果会在对话中收到通知。`;
 
@@ -49,7 +59,11 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
 
   const toolDeps = { services, queueOp };
 
-  const registrations = [new ToolSessionInfo(toolDeps), new ToolSessionCompact(toolDeps)].map((tool) => {
+  const registrations = [
+    new ToolSessionInfo(toolDeps),
+    new ToolSessionCompact(toolDeps),
+    new ToolSessionPeers(toolDeps),
+  ].map((tool) => {
     if (!ctx.tools) throw new Error('session-autonomy requires ctx.tools');
     const registration = ctx.tools.register(tool, { primaryAgentOnly: true });
     ctx.onDispose(() => registration.dispose());
@@ -71,11 +85,15 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
         try {
           await applyOp(services, agent, sessionController, sessionId, op);
         } catch (error) {
-          services.showNotice(`会话自治操作失败: ${error instanceof Error ? error.message : String(error)}`, sessionId, {
-            variant: 'error',
-            command: 'session-autonomy',
-            status: 'error',
-          });
+          services.showNotice(
+            `会话自治操作失败: ${error instanceof Error ? error.message : String(error)}`,
+            sessionId,
+            {
+              variant: 'error',
+              command: 'session-autonomy',
+              status: 'error',
+            },
+          );
         }
       }
     })().finally(() => {

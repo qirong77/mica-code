@@ -257,7 +257,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 轮询必须监听 signal 并立即返回 aborted；`readOnly: false`，避免并发等待拖住只读批次与重试重放。
 - 超时返回 timeout + wait_id，可带同一 id 续等；超时记录不能丢弃或从 dock 消失。`reason` 仅展示，优先显示于条件标签。
 - app-server 每秒投影 `listActiveWaits()` 为 `mica/waitTasks/updated`；改字段同步工具测试、两端图标与 dock/详情展示。
-- `session_*` 工具仅主 agent 可用。`session_info` 只读；`session_compact` 执行时只登记，completed 的 `turn:after`（priority 50）应用，必须早于 message-queue（100）。`turn:before`（10）await 在途应用。
+- `session_*` 工具仅主 agent 可用。`session_info`、`session_peers` 只读；`session_peers` 经 `mica-session/listSessionTurnLocks()` 按 `sessions/.turn-locks` 持有进程存活枚举运行中实例，只读锁与 session 文件头部，输出 session 文件路径与读法（先 `conversationMessages`，不整读几十 MB 快照）；`session_compact` 执行时只登记，completed 的 `turn:after`（priority 50）应用，必须早于 message-queue（100）。`turn:before`（10）await 在途应用。
 
 ### MCP、联网与 Skills
 
