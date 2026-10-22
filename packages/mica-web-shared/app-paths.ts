@@ -7,6 +7,8 @@
  * - `/share` —— 分享视图：`/share?session=<id>` 打开某条会话，`/share` 本身是分享链接列表
  * - `/terminal-control` —— 终端控制窗口的页面（独立入口 `terminal.html`，窗口由 Electron
  *   主进程创建，页面通过同源 `/remote/terminal/*` 读写真实终端）
+ * - `/files` —— 独立文件窗口的页面（独立入口 `files.html`）：只有文件树与编辑器，没有
+ *   会话列表；由顶栏的文件夹按钮经 `window.open` 打开，外壳把同源的这个页面开成窗口
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
  *   见 apps/desktop/src/host/browser-control-proxy.js）
  * - `/api/*` —— 运行时能力（invoke / events / env / image）
@@ -23,6 +25,12 @@ export const SHARE_BASE_PATH = '/share';
 
 /** 终端控制窗口的页面路径：主进程窗口加载运行时上的这个地址。 */
 export const TERMINAL_PAGE_PATH = '/terminal-control';
+
+/**
+ * 独立文件窗口的页面路径。dev 下页面由 Vite 直接提供（`/files.html`），运行时上走这个
+ * 不带扩展名的地址；两者是同一个入口（renderer 的 `files-window.jsx`）。
+ */
+export const FILES_PAGE_PATH = '/files';
 
 /**
  * 终端服务的代理前缀：主进程的终端服务挂在 Unix socket 上，运行时在 `/remote/terminal`
@@ -63,6 +71,11 @@ export function isSharePath(pathname: unknown): boolean {
 /** 是不是终端控制窗口的页面。 */
 export function isTerminalPagePath(pathname: unknown): boolean {
   return normalizePathname(pathname) === TERMINAL_PAGE_PATH;
+}
+
+/** 是不是独立文件窗口的页面。 */
+export function isFilesPagePath(pathname: unknown): boolean {
+  return normalizePathname(pathname) === FILES_PAGE_PATH;
 }
 
 /** 是不是应用页面（根路径或它下面的子路径，以及 `/mica-web` 这个显式名字）。 */

@@ -2,10 +2,12 @@
  * `window.open` 的目标判定：哪些目标该由外壳开成「应用窗口」，以及重复打开时怎么认出
  * 「同一个窗口」。
  *
- * 页面里需要独立窗口的视图（顶栏的文件夹 → 同一个应用页面加 `?view=files`）走的就是
- * `window.open(自己的地址 + 参数)`：外壳把它当成一次「再开一个窗口」（与切换服务器同一个
- * 动作），而不是当成外链丢给系统浏览器。纯逻辑留在这里，`main/index.js` 只用结果。
+ * 页面里需要独立窗口的视图（顶栏的文件夹 → 运行时的 `/files` 页面）走的就是
+ * `window.open(自己的 origin + 页面路径)`：外壳把它当成一次「再开一个窗口」（与切换服务器
+ * 同一个动作），而不是当成外链丢给系统浏览器。纯逻辑留在这里，`main/index.js` 只用结果。
  */
+
+import { APP_BASE_PATH, FILES_PAGE_PATH } from '@packages/mica-web-shared/app-paths.js'
 
 function parseUrl(value) {
   try {
@@ -24,21 +26,36 @@ function pathnameOf(value) {
 }
 
 /**
- * `target` 是不是 `origins` 里某台运行时上、与 `page` 同一个页面的地址。
- *
- * 只认「同源 + 同一个页面路径」：查询串换成别的（`?view=`、`?session=`）仍旧是同一个
- * 应用页面，而 `/terminal-control`、`/remote/*` 这些别的路径不是——它们不该被开成一个
- * 装着应用界面的窗口。
+ * 页面身份：剥掉 `/mica-web` 这类服务前缀与 dev 的 `.html` 后缀，`index.html` 就是根，
+ * 于是「同一个页面」在 dev（`/files.html`）与运行时（`/files`）里是同一个值。
  */
-export function isAppPageTarget(target, { origins = [], page = '/' } = {}) {
+export function appPagePath(value) {
+  let path = pathnameOf(value)
+  for (const base of [APP_BASE_PATH]) {
+    if (path === base) path = '/'
+    else if (path.startsWith(`${base}/`)) path = path.slice(base.length)
+  }
+  if (path === '/index.html' || path === '/index') return '/'
+  if (path === '/files.html') return FILES_PAGE_PATH
+  return path
+}
+
+/**
+ * 哪些页面可以由页面自己开成窗口。只列「应用页面」：主界面与独立文件窗口。终端控制窗口、
+ * `/remote/*` 这些不是页面自己的入口，落到这里只会被当成外链。
+ */
+export const APP_PAGE_PATHS = ['/', FILES_PAGE_PATH]
+
+/** `target` 是不是 `origins` 里某台运行时上的一个应用页面（查询串不参与判定）。 */
+export function isAppPageTarget(target, { origins = [] } = {}) {
   const url = parseUrl(target)
   if (!url) return false
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
   if (!origins.some((origin) => origin && origin === url.origin)) return false
-  return pathnameOf(url) === pathnameOf(page)
+  return APP_PAGE_PATHS.includes(appPagePath(url))
 }
 
-/** 同一个窗口的判定键：忽略 hash 与尾部斜杠，查询串参与比较。 */
+/** 同一个窗口的判定键：忽略 hash 与尾部斜杠，查询串参与比较（不同目录是不同的窗口内容）。 */
 export function appPageKey(value) {
   const url = parseUrl(value)
   if (!url) return ''

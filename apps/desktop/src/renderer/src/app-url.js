@@ -13,26 +13,27 @@
 export const SESSION_PARAM = 'session'
 
 /**
- * 主区视图。它平时是「这一屏自己的」界面状态，但独立窗口要靠地址说清自己开的是哪一屏：
- * 顶栏的文件夹按钮把同一个应用页面以 `?view=files` 开成新窗口（`main/index.js` 把同源
- * 页面开成应用窗口），那个窗口刷新后还得停在文件视图。
+ * 独立文件窗口的页面：顶栏的文件夹按钮把文件视图开成一个**只有文件树与编辑器**的窗口
+ * （见 `detachedFilesUrl`），主窗口因此留在对话里。运行时上它挂在 `/files`，dev 下页面
+ * 由 Vite 直接提供、走 `/files.html`；两者是同一个入口（`files-window.jsx`）。
  */
-export const VIEW_PARAM = 'view'
+export const FILES_PAGE_PATH = '/files'
+export const FILES_PAGE_FILE = '/files.html'
 
-/** 合法的主区视图，与 App.jsx 里 `view` 的取值保持一致。 */
-export const APP_VIEWS = ['chat', 'files', 'stats', 'settings']
-
-/** 地址里的 `view` 认得出就返回视图名，认不出返回 null（手写进去的内容不参与渲染）。 */
-export function normalizeAppView(value) {
-  const text = String(value ?? '').trim()
-  return APP_VIEWS.includes(text) ? text : null
-}
+/** 独立窗口要显示哪个目录。 */
+export const CWD_PARAM = 'cwd'
 
 /** 从 `window.location.search` 读出页面级状态；参数缺失或非法一律回落默认值。 */
 export function readAppUrl(search) {
   const params = new URLSearchParams(String(search || ''))
   const sessionId = (params.get(SESSION_PARAM) || '').trim()
-  return { sessionId: sessionId || null, view: normalizeAppView(params.get(VIEW_PARAM)) }
+  return { sessionId: sessionId || null }
+}
+
+/** 文件窗口的地址参数：要显示的工作目录（缺省为空，由页面自己提示选一个会话）。 */
+export function readFilesUrl(search) {
+  const params = new URLSearchParams(String(search || ''))
+  return { cwd: (params.get(CWD_PARAM) || '').trim() || null }
 }
 
 function parseUrl(href) {
@@ -44,21 +45,35 @@ function parseUrl(href) {
 }
 
 /**
- * 当前地址 + 新状态：只动传进来的那两个参数，其余（`?layout=` 之类）原样保留——
+ * 当前地址 + 新状态：只动 session 参数，其余（`?layout=` 之类）原样保留——
  * 那些是页面自己的调试开关，不该因为切换会话被顺手抹掉。
- * 传 `null` 表示「没有这个状态」，把参数删掉；不传（`undefined`）表示这次不改它。
+ * `sessionId` 为空表示「没有打开的会话」，把这个参数删掉。
  */
-export function urlWithState(href, { sessionId, view } = {}) {
+export function urlWithState(href, { sessionId = null } = {}) {
   const url = parseUrl(href)
   if (!url) return null
-  if (sessionId !== undefined) {
-    if (sessionId) url.searchParams.set(SESSION_PARAM, sessionId)
-    else url.searchParams.delete(SESSION_PARAM)
-  }
-  if (view !== undefined) {
-    if (view) url.searchParams.set(VIEW_PARAM, view)
-    else url.searchParams.delete(VIEW_PARAM)
-  }
+  if (sessionId) url.searchParams.set(SESSION_PARAM, sessionId)
+  else url.searchParams.delete(SESSION_PARAM)
+  return url.toString()
+}
+
+/**
+ * 独立文件窗口的地址：同一个 origin 上的文件页（dev 是 `files.html`，运行时是 `/files`），
+ * 带上要显示的目录。目录放在查询串里，窗口刷新后仍然打开同一个目录；没有目录时也开得出来，
+ * 页面会提示先选一个会话。
+ *
+ * 不能用 `location.href` 直接换参数：那是主应用页面，另开出来的窗口会连左栏一起带上。
+ */
+export function detachedFilesUrl(href, cwd) {
+  const url = parseUrl(href)
+  if (!url) return null
+  // dev 下主页面是 Vite 的 `/index.html`，独立页也得走 `/files.html`；运行时是 `/files`。
+  const dev = url.pathname.toLowerCase().endsWith('.html')
+  url.pathname = dev ? FILES_PAGE_FILE : FILES_PAGE_PATH
+  url.search = ''
+  url.hash = ''
+  const dir = String(cwd || '').trim()
+  if (dir) url.searchParams.set(CWD_PARAM, dir)
   return url.toString()
 }
 

@@ -1,32 +1,27 @@
 import { describe, expect, it } from 'bun:test'
-import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import {
+  detachedFilesUrl,
+  readAppUrl,
+  readFilesUrl,
+  sessionShareUrl,
+  urlWithState
+} from './app-url'
 
 describe('readAppUrl', () => {
   it('reads the open session', () => {
-    expect(readAppUrl('?session=abc')).toEqual({ sessionId: 'abc', view: null })
+    expect(readAppUrl('?session=abc')).toEqual({ sessionId: 'abc' })
   })
 
   it('falls back when the param is missing or blank', () => {
-    expect(readAppUrl('')).toEqual({ sessionId: null, view: null })
-    expect(readAppUrl(undefined)).toEqual({ sessionId: null, view: null })
-    expect(readAppUrl('?session=')).toEqual({ sessionId: null, view: null })
-    expect(readAppUrl('?session=%20')).toEqual({ sessionId: null, view: null })
+    expect(readAppUrl('')).toEqual({ sessionId: null })
+    expect(readAppUrl(undefined)).toEqual({ sessionId: null })
+    expect(readAppUrl('?session=')).toEqual({ sessionId: null })
+    expect(readAppUrl('?session=%20')).toEqual({ sessionId: null })
   })
 
   it('ignores anything a visitor might add by hand', () => {
     // 页面自己带进来的参数不具备任何含义，服务端才是判定方
-    expect(readAppUrl('?session=abc&share=1')).toEqual({ sessionId: 'abc', view: null })
-  })
-
-  it('reads the view pinned by a detached window', () => {
-    // 顶栏文件夹开出来的那个窗口：地址里带着 `?view=files`
-    expect(readAppUrl('?session=abc&view=files')).toEqual({ sessionId: 'abc', view: 'files' })
-  })
-
-  it('drops a view it does not know', () => {
-    expect(readAppUrl('?view=nope').view).toBeNull()
-    expect(readAppUrl('?view=').view).toBeNull()
-    expect(readAppUrl('?view=Files').view).toBeNull()
+    expect(readAppUrl('?session=abc&share=1')).toEqual({ sessionId: 'abc' })
   })
 })
 
@@ -49,25 +44,54 @@ describe('urlWithState', () => {
     )
   })
 
-  it('writes and drops the view', () => {
-    expect(urlWithState('http://h:1/?session=a', { view: 'files' })).toBe(
-      'http://h:1/?session=a&view=files'
-    )
-    expect(urlWithState('http://h:1/?session=a&view=files', { view: null })).toBe(
-      'http://h:1/?session=a'
+  it('returns null for an unparsable href', () => {
+    expect(urlWithState('not a url', { sessionId: 'a' })).toBeNull()
+  })
+})
+
+describe('detachedFilesUrl', () => {
+  it('points at the runtime files page and carries the cwd', () => {
+    expect(detachedFilesUrl('http://127.0.0.1:8787/?session=a', '/work/proj')).toBe(
+      'http://127.0.0.1:8787/files?cwd=%2Fwork%2Fproj'
     )
   })
 
-  it('leaves the params it was not asked about alone', () => {
-    // 切会话不该抹掉 `?view=`，反过来说文件窗口刷新视图也不该丢掉会话
-    expect(urlWithState('http://h:1/?view=files', { sessionId: 'a' })).toBe(
-      'http://h:1/?view=files&session=a'
+  it('uses the dev page when the main page is served by Vite', () => {
+    // dev 下主页面是 Vite 的 /index.html，独立页也就得走 /files.html
+    expect(detachedFilesUrl('http://localhost:5173/index.html?session=a', '/work')).toBe(
+      'http://localhost:5173/files.html?cwd=%2Fwork'
     )
-    expect(urlWithState('http://h:1/?session=a', {})).toBe('http://h:1/?session=a')
+  })
+
+  it('drops the main page params, so the window is not asked to open a chat', () => {
+    expect(detachedFilesUrl('http://h:1/?session=a&layout=mobile#x', null)).toBe('http://h:1/files')
+  })
+
+  it('keeps a remote origin, so the window talks to the same runtime', () => {
+    expect(detachedFilesUrl('http://192.168.1.23:8787/?session=a', '/w')).toStartWith(
+      'http://192.168.1.23:8787/files?'
+    )
   })
 
   it('returns null for an unparsable href', () => {
-    expect(urlWithState('not a url', { sessionId: 'a' })).toBeNull()
+    expect(detachedFilesUrl('not a url', '/w')).toBeNull()
+  })
+})
+
+describe('readFilesUrl', () => {
+  it('reads the directory to show', () => {
+    expect(readFilesUrl('?cwd=%2Fwork%2Fproj')).toEqual({ cwd: '/work/proj' })
+  })
+
+  it('falls back to an empty directory', () => {
+    expect(readFilesUrl('')).toEqual({ cwd: null })
+    expect(readFilesUrl('?cwd=')).toEqual({ cwd: null })
+    expect(readFilesUrl('?cwd=%20')).toEqual({ cwd: null })
+  })
+
+  it('survives the round trip from detachedFilesUrl', () => {
+    const url = detachedFilesUrl('http://h:1/?session=a', '/work/proj')
+    expect(readFilesUrl(new URL(url).search)).toEqual({ cwd: '/work/proj' })
   })
 })
 

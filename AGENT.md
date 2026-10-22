@@ -326,13 +326,13 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 回声按键和值在 store 的 `applyRemote` 入口认领一次；组件不得各自 `claimUiStateEcho`。卸载时 flush。
 - 草稿按 nodeId 订阅字符串；App 用引用稳定的 `draftMarkers`，不把整张 drafts 表读入组件渲染。
 - 同一 session 在所有页面是同一 node、run、终端。`dedupeSessionNodes` 合并重复页签并优先保留运行节点；不增加跨页签认领、观察者心跳或所有权转移机制。
-- 主区视图 `layout.view` 跨窗口共享；由 `?view=` 打开的独立窗口（顶栏文件夹走 `window.open(url, 'mica-files')`，外壳在 `main/app-page-target.js` 判定后开应用窗口）视图只属于自己：不写回 `layout`、不跟随其它窗口，并镜像到地址栏。
+- 独立文件窗口是单独的页面入口 `/files`（dev 为 `files.html`，`renderer/src/files-window.jsx`）：只渲染 FilesView，没有会话列表与「返回对话」。顶栏文件夹按钮走 `window.open(detachedFilesUrl(...), 'mica-files')`，外壳在 `main/app-page-target.js` 判定为自家应用页面后开应用窗口；目录经 `?cwd=` 传递，该页用自己的 `useGitWorkspace` 读同一批 git 能力与共享的 `gitCompareBase`。
 - 仅另一个进程由 turn lease 拦截；`remoteRunning` 显示只读提示并每 3s 复查，解锁后重拉历史。
 
 ### 路由、分享与访问
 
 - 默认 `0.0.0.0:8787`，**运行时无认证，所有客户端拥有完整宿主能力**；README 必须保留风险说明。
-- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/terminal-control` 为终端窗口页面，`/api/*` 为能力，`/remote/control/*` 为浏览器代理，`/remote/terminal/*` 为终端代理。地址约定只用 `mica-web-shared/app-paths.ts`。
+- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/files` 为独立文件窗口页面，`/terminal-control` 为终端窗口页面，`/api/*` 为能力，`/remote/control/*` 为浏览器代理，`/remote/terminal/*` 为终端代理。地址约定只用 `mica-web-shared/app-paths.ts`。
 - `shareView` 仅影响呈现，不是权限边界；不新增访客授权。资源路由先 `toAssetPath()` 去前缀。
 - `--share-port` 只保留兼容开关语义；`--no-share` / `MICA_DESKTOP_SHARE_PORT=0` 只关闭 `/share`。端口占用可随机回退，从 ready JSON 获取实际地址。
 - `access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding；同站忽略端口以支持 Vite 代理，允许代理域名通过 `MICA_DESKTOP_ALLOWED_HOSTS` 配置。

@@ -1,56 +1,84 @@
 import { describe, expect, it } from 'bun:test'
-import { appPageKey, isAppPageTarget } from './app-page-target.js'
+import { APP_PAGE_PATHS, appPageKey, appPagePath, isAppPageTarget } from './app-page-target.js'
 
 describe('isAppPageTarget', () => {
   const origins = ['http://127.0.0.1:8787']
 
-  it('accepts the same page with a different query string', () => {
-    // 页面点文件夹就是这个形状：同一个应用页面 + `?view=files`
+  it('accepts the files page the folder button opens', () => {
+    // 顶栏的文件夹就是 `window.open('/files?cwd=…')`：它得由外壳开成应用窗口
+    expect(isAppPageTarget('http://127.0.0.1:8787/files?cwd=%2Fw', { origins })).toBe(true)
+  })
+
+  it('accepts the main page with any query string', () => {
+    expect(isAppPageTarget('http://127.0.0.1:8787/?session=a', { origins })).toBe(true)
+    expect(isAppPageTarget('http://127.0.0.1:8787/mica-web', { origins })).toBe(true)
+  })
+
+  it('accepts the dev page served by Vite', () => {
     expect(
-      isAppPageTarget('http://127.0.0.1:8787/?session=a&view=files', { origins, page: '/' })
-    ).toBe(true)
-    expect(
-      isAppPageTarget('http://127.0.0.1:8787/mica-web?view=files', {
-        origins,
-        page: 'http://127.0.0.1:8787/mica-web?session=a'
+      isAppPageTarget('http://localhost:5173/files.html?cwd=%2Fw', {
+        origins: ['http://localhost:5173']
       })
     ).toBe(true)
   })
 
-  it('rejects another path on the same server', () => {
-    // 终端控制窗口、受控浏览器的代理端点不是「应用页面」
-    expect(
-      isAppPageTarget('http://127.0.0.1:8787/terminal-control?session=a', { origins, page: '/' })
-    ).toBe(false)
-    expect(
-      isAppPageTarget('http://127.0.0.1:8787/remote/control/tabs', { origins, page: '/' })
-    ).toBe(false)
+  it('rejects paths that are not application pages', () => {
+    // 终端控制窗口有自己的入口，受控浏览器的代理端点也不是页面
+    expect(isAppPageTarget('http://127.0.0.1:8787/terminal-control', { origins })).toBe(false)
+    expect(isAppPageTarget('http://127.0.0.1:8787/remote/control/tabs', { origins })).toBe(false)
+    expect(isAppPageTarget('http://127.0.0.1:8787/api/invoke', { origins })).toBe(false)
   })
 
   it('rejects another server', () => {
-    expect(isAppPageTarget('http://127.0.0.1:8899/?view=files', { origins, page: '/' })).toBe(false)
+    expect(isAppPageTarget('http://127.0.0.1:8899/files', { origins })).toBe(false)
   })
 
   it('rejects anything that is not an http(s) address', () => {
-    expect(isAppPageTarget('', { origins, page: '/' })).toBe(false)
-    expect(isAppPageTarget('not a url', { origins, page: '/' })).toBe(false)
-    expect(isAppPageTarget('file:///tmp/x.html', { origins, page: '/' })).toBe(false)
-    expect(isAppPageTarget(undefined, { origins, page: '/' })).toBe(false)
+    expect(isAppPageTarget('', { origins })).toBe(false)
+    expect(isAppPageTarget('not a url', { origins })).toBe(false)
+    expect(isAppPageTarget('file:///tmp/x.html', { origins })).toBe(false)
+    expect(isAppPageTarget(undefined, { origins })).toBe(false)
   })
 
   it('treats a missing origin list as "nothing matches"', () => {
-    expect(isAppPageTarget('http://127.0.0.1:8787/?view=files', { page: '/' })).toBe(false)
+    expect(isAppPageTarget('http://127.0.0.1:8787/files')).toBe(false)
+  })
+})
+
+describe('appPagePath', () => {
+  it('treats the dev page and the runtime route as the same page', () => {
+    expect(appPagePath('/files.html')).toBe('/files')
+    expect(appPagePath('http://h:1/files?cwd=%2Fw')).toBe('/files')
+  })
+
+  it('collapses the service prefix and the index page', () => {
+    expect(appPagePath('/mica-web')).toBe('/')
+    expect(appPagePath('/mica-web/')).toBe('/')
+    expect(appPagePath('/index.html')).toBe('/')
+    expect(appPagePath('/')).toBe('/')
+  })
+
+  it('leaves other paths alone', () => {
+    expect(appPagePath('/terminal-control')).toBe('/terminal-control')
+    expect(appPagePath('/share')).toBe('/share')
+  })
+
+  it('knows exactly which pages can be opened as windows', () => {
+    expect(APP_PAGE_PATHS).toContain('/')
+    expect(APP_PAGE_PATHS).toContain('/files')
   })
 })
 
 describe('appPageKey', () => {
   it('ignores the hash and a trailing slash', () => {
-    expect(appPageKey('http://h:1/?view=files#x')).toBe('http://h:1/?view=files')
+    expect(appPageKey('http://h:1/files?cwd=%2Fw#x')).toBe('http://h:1/files?cwd=%2Fw')
     expect(appPageKey('http://h:1/mica-web/')).toBe(appPageKey('http://h:1/mica-web'))
   })
 
-  it('keeps the query, so two views stay different windows', () => {
-    expect(appPageKey('http://h:1/?view=files')).not.toBe(appPageKey('http://h:1/?view=chat'))
+  it('keeps the query, so two directories stay different window contents', () => {
+    expect(appPageKey('http://h:1/files?cwd=%2Fa')).not.toBe(
+      appPageKey('http://h:1/files?cwd=%2Fb')
+    )
   })
 
   it('returns an empty key for an unparsable address', () => {

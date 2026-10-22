@@ -45,6 +45,7 @@ import {
 } from '../host/terminal-control-proxy.js'
 import {
   SHARE_BASE_PATH,
+  isFilesPagePath,
   isSharePath,
   isTerminalPagePath,
   toAssetPath
@@ -622,6 +623,11 @@ function createRequestHandler({
         // 页面通过同源 /remote/terminal/* 读写终端，所以窗口只需要运行时地址。
         if (isTerminalPagePath(url.pathname)) {
           return await serveStatic(req, res, rendererRoot, '/terminal.html')
+        }
+        // 独立文件窗口的页面：又一个独立入口（files.html），页面里只有文件树与编辑器。
+        // 它和主应用共用同一份产物目录与同一台运行时（`/api/*` 照旧可用）。
+        if (isFilesPagePath(url.pathname)) {
+          return await serveStatic(req, res, rendererRoot, '/files.html')
         }
         // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
         // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会

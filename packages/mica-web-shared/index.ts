@@ -5,10 +5,12 @@
 export { relativeTimeShort } from './time.js';
 export {
   APP_BASE_PATH,
+  FILES_PAGE_PATH,
   SHARE_BASE_PATH,
   TERMINAL_CONTROL_PREFIX,
   TERMINAL_PAGE_PATH,
   isAppPath,
+  isFilesPagePath,
   isSharePath,
   isTerminalPagePath,
   isUnderBasePath,

@@ -335,15 +335,15 @@ function findServerWindow(origin) {
 
 /**
  * 页面自己开窗口（`window.open`）：目标落在同一台运行时的应用页面上时，由外壳开一个
- * 应用窗口——顶栏的文件夹就是这么把文件视图开成独立窗口的（`?view=files`），主窗口因此
- * 能留在对话里。同名窗口已经开着就把那个窗口端到前面并换到新地址，重复点按钮不会攒出
- * 一堆窗口。返回 `false` 表示不是这种目标，调用方仍按外链处理。
+ * 应用窗口——顶栏的文件夹就是这么把 `/files` 开成独立文件窗口的（那一页只有文件树与
+ * 编辑器，没有会话列表），主窗口因此能留在对话里。同名窗口已经开着就把那个窗口端到前面
+ * 并换到新地址（比如换了个目录），重复点按钮不会攒出一堆窗口。返回 `false` 表示不是这种
+ * 目标，调用方仍按外链处理。
  */
 function openAppPageWindow(state, target, frameName = '') {
   if (!state || state.win.isDestroyed()) return false
   const origins = [state.server, originOf(localPageUrl)]
-  const page = state.win.webContents.getURL()
-  if (!isAppPageTarget(target, { origins, page })) return false
+  if (!isAppPageTarget(target, { origins })) return false
   const name = String(frameName || '').trim()
   const key = appPageKey(target)
   const existing = [...windows].find((item) => {

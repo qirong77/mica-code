@@ -20,6 +20,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
+        // 共享包与页面同一套别名：主进程也要读地址约定（app-paths.ts），不能各写一份
+        '@packages': resolve('../../packages'),
         // 终端窗口要加载的页面路径与运行时路由同源：直接用共享包里的常量，
         // 不再在主进程里抄一份 '/terminal-control'
         '@mica-app-paths': resolve('../../packages/mica-web-shared/app-paths.ts')
@@ -46,11 +48,12 @@ export default defineConfig({
       }
     },
     build: {
-      // 两个页面入口：主应用与终端控制窗口（后者由 Electron 主进程加载，
-      // 通过运行时的 /terminal-control 路由提供）。
+      // 三个页面入口：主应用、独立文件窗口（顶栏文件夹开出来的，运行时按 /files 提供）
+      // 与终端控制窗口（由 Electron 主进程加载，运行时按 /terminal-control 提供）。
       rollupOptions: {
         input: {
           index: resolve('src/renderer/index.html'),
+          files: resolve('src/renderer/files.html'),
           terminal: resolve('src/renderer/terminal.html')
         }
       },

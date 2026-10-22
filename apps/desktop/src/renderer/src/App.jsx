@@ -34,7 +34,8 @@ import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
 import TerminalKeyBar from './TerminalKeyBar'
 import { currentServerUrl, isElectronShell, openServerTarget, serverLabel } from './servers'
-import { normalizeAppView, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
 import { useQuickPickAnchor } from './quick-pick-anchor'
 
@@ -375,69 +376,6 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
   )
 }
 
-function TextPrompt({ prompt, onClose }) {
-  const [value, setValue] = useState(prompt.initial)
-  const inputRef = useRef(null)
-  useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
-  }, [])
-  const submit = () => onClose(value.trim())
-  return (
-    <div
-      className="fixed inset-0 z-[11000] grid place-items-center bg-black/45 backdrop-blur-[4px] no-drag"
-      onClick={(event) => event.target === event.currentTarget && onClose(null)}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        className="w-[min(420px,calc(100vw-32px))] rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl"
-      >
-        <h2 className="mb-1.5 text-sm font-semibold text-white/95">{prompt.title}</h2>
-        {prompt.hint && <p className="mb-3 text-xs leading-5 text-white/45">{prompt.hint}</p>}
-        <input
-          ref={inputRef}
-          value={value}
-          spellCheck={false}
-          className="mb-3 h-8 w-full rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-[13px] text-white focus:border-white/30"
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'w') {
-              event.preventDefault()
-              onClose(null)
-              return
-            }
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              submit()
-            }
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              onClose(null)
-            }
-          }}
-        />
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="h-7 min-w-16 rounded-sm px-3 text-xs text-white/65 hover:bg-white/[.06] hover:text-white"
-            onClick={() => onClose(null)}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className="h-7 min-w-16 rounded-sm border border-line bg-white/[.06] px-3 text-xs text-white hover:bg-white/10"
-            onClick={submit}
-          >
-            确定
-          </button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 function useNotifications(activeId, onSessionId, canBindSessionId) {
   const [states, setStates] = useState({})
   const statesRef = useLatest(states)
@@ -661,11 +599,6 @@ function storedLayout() {
   return value && typeof value === 'object' ? value : {}
 }
 
-/** 存下来的主区视图（`layout.view`），认不出来的一律当成对话。 */
-function savedView() {
-  return normalizeAppView(storedLayout().view) || 'chat'
-}
-
 function savedSidebarWidth() {
   const value = Number(storedLayout().sidebarWidth)
   return Number.isFinite(value) && value >= MIN_SIDEBAR_WIDTH && value <= MAX_SIDEBAR_WIDTH
@@ -754,9 +687,6 @@ export default function App() {
   // 之后是单向同步（App → 地址栏）。
   const [urlState] = useState(() => readAppUrl(window.location.search))
   const urlSessionRef = useRef(urlState.sessionId)
-  // 地址里指定了视图的窗口（顶栏文件夹开出来的那个）视图只属于这一屏：不写回共享布局，
-  // 也不跟着别的窗口切。否则文件窗口一打开就会把主窗口也推到文件视图上，等于白开。
-  const pinnedView = urlState.view
   // 界面状态在渲染前已经从运行时取回（main.jsx 的 ensureUiState），所以第一帧就是上一次
   // 退出时的样子：直接用取回的工作区播种，不再有「先画空界面再加载」的过程。
   const [bootstrap] = useState(
@@ -790,17 +720,17 @@ export default function App() {
   const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
   const [selectedId, setSelectedId] = useState(bootstrap.selectedId)
   const selectedIdRef = useLatest(selectedId)
-  // 主区视图：chat | files | stats | settings。对话里的路径链接仍然就地打开文件视图；
-  // 顶栏的文件夹按钮则把文件视图开成独立窗口（见 openFilesWindow），主窗口留在对话里。
-  // 终端是主区底部可收起的下拉面板（见 terminalOpen），不占这一层视图。
+  // 主区视图：chat | files | stats | settings。对话里的路径链接与顶栏的文件夹按钮都落到
+  // 这一层（后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
   const [view, setView] = useState(() => {
-    if (pinnedView) return pinnedView
     // 分享页只从对话开始（布局是跨页面共享的，别把分享者那边的视图带过来）
     if (shareView) return 'chat'
-    return savedView()
+    return storedLayout().view === 'stats' ||
+      storedLayout().view === 'settings' ||
+      storedLayout().view === 'files'
+      ? storedLayout().view
+      : 'chat'
   })
-  // 独立窗口写回布局时带上的那个 view：它只是替共享布局守住原值，不代表这一屏在看什么。
-  const sharedViewRef = useRef(pinnedView ? savedView() : null)
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -1225,10 +1155,9 @@ export default function App() {
       sidebarWidth,
       sidebarCollapsed,
       terminalHeight,
-      // 独立窗口不覆盖别人的视图：把自己那一屏的 files 写回共享布局，主窗口会跟着切走。
-      view: pinnedView ? sharedViewRef.current : view
+      view
     })
-  }, [pinnedView, sidebarCollapsed, sidebarWidth, terminalHeight, view])
+  }, [sidebarCollapsed, sidebarWidth, terminalHeight, view])
 
   useEffect(() => {
     if (!remoteLayout) return
@@ -1236,11 +1165,14 @@ export default function App() {
     if (typeof remoteLayout.sidebarCollapsed === 'boolean')
       setSidebarCollapsed(remoteLayout.sidebarCollapsed)
     if (Number.isFinite(remoteLayout.terminalHeight)) setTerminalHeight(remoteLayout.terminalHeight)
-    const next = normalizeAppView(remoteLayout.view)
-    if (!next) return
-    if (pinnedView) sharedViewRef.current = next
-    else setView(next)
-  }, [pinnedView, remoteLayout])
+    if (
+      remoteLayout.view === 'chat' ||
+      remoteLayout.view === 'files' ||
+      remoteLayout.view === 'stats' ||
+      remoteLayout.view === 'settings'
+    )
+      setView(remoteLayout.view)
+  }, [remoteLayout])
 
   const terminalCwd = useCallback(
     (id) => {
@@ -2106,13 +2038,6 @@ export default function App() {
     if (next && next !== window.location.href)
       window.history.replaceState(window.history.state, '', next)
   }, [activeSessionId])
-  // 独立窗口的视图也写进地址栏：刷新还停在同一屏，地址传出去打开的是同一个窗口。
-  useEffect(() => {
-    if (!pinnedView) return
-    const next = urlWithState(window.location.href, { view })
-    if (next && next !== window.location.href)
-      window.history.replaceState(window.history.state, '', next)
-  }, [pinnedView, view])
   // 地址栏里指定的会话在启动时打开/切过去（分享链接的落地点）。等会话清单回来再动手，
   // 才能拿标题与工作目录开页签；清单里没有这条（已被删）时仍按 id 打开，让会话那侧报错。
   useEffect(() => {
@@ -2170,12 +2095,12 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
-  // 顶栏的文件夹按钮：把这台运行时上的同一个应用页面以 `?view=files` 开成独立窗口，
-  // 主区因此留在对话里（与内嵌的文件视图相比，文件树和对话可以并排看）。
-  // 外壳把同源应用页面开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
+  // 顶栏的文件夹按钮：把这台运行时上的 `/files` 页面开成独立窗口 —— 那一页只画文件树与
+  // 编辑器，没有左侧会话列表也没有「返回对话」，主窗口因此留在对话里，两者可以并排看。
+  // 外壳把同源的 `/files` 开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
   // 就是一个新窗口；`FILES_WINDOW_NAME` 让它复用同一个窗口，重复点只是把它端到前面。
   const openFilesWindow = useCallback(() => {
-    const url = urlWithState(window.location.href, { view: 'files' })
+    const url = detachedFilesUrl(window.location.href, activeCwd)
     if (!url) return
     const opened = window.open(url, FILES_WINDOW_NAME, 'popup=yes,width=1200,height=860')
     if (opened) {
@@ -2187,10 +2112,10 @@ export default function App() {
       return
     }
     // 外壳里 window.open 恒返回 null（窗口由主进程开），只有浏览器才谈得上被拦截
-    if (isElectronShell()) return
+    if (isElectronShell(navigator.userAgent)) return
     setView('files')
     showToast('新窗口被浏览器拦截，已在当前窗口打开文件', true)
-  }, [showToast])
+  }, [activeCwd, showToast])
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
   useEffect(() => {
     const handler = (event) => {
