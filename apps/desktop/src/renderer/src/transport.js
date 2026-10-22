@@ -174,7 +174,6 @@ function createWebApi(env) {
     shareEnabled: env.shareEnabled !== false,
     platform: env.platform,
     homeDir: env.homeDir,
-    runShellLogConfig: env.runShellLogConfig,
     windowsBuildNumber: env.windowsBuildNumber,
 
     terminal: {

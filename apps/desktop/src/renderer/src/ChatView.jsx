@@ -47,6 +47,8 @@ import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
+import { ReasoningDetailDialog, ToolDetailDialog } from './chat-tool-detail'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 
 function formatTokens(value) {
@@ -463,12 +465,6 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    const onKeyDown = (event) => event.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-
-  useEffect(() => {
     let cancelled = false
     if (!sessionId) {
       setError('No active session')
@@ -490,34 +486,19 @@ function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
   }, [sessionId])
 
   return (
-    <div
-      className="chat-ctx-modal-overlay no-drag"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div className="chat-ctx-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="chat-ctx-modal-header">
-          <span>上下文占用</span>
-          <button type="button" onClick={onClose} aria-label="关闭">
-            Esc ✕
-          </button>
-        </div>
-        <div className="chat-ctx-modal-body">
-          {error ? (
-            <div className="chat-ctx-modal-empty">{error}</div>
-          ) : !detail ? (
-            <div className="chat-ctx-modal-empty">加载中…</div>
-          ) : (
-            <ContextUsageSection
-              context={detail.context}
-              messages={detail.messages}
-              contextWindowSize={contextWindowSize || detail.contextWindowSize}
-            />
-          )}
-        </div>
-      </div>
-    </div>
+    <ModalShell title="上下文占用" onClose={onClose}>
+      {error ? (
+        <div className="chat-modal-empty">{error}</div>
+      ) : !detail ? (
+        <div className="chat-modal-empty">加载中…</div>
+      ) : (
+        <ContextUsageSection
+          context={detail.context}
+          messages={detail.messages}
+          contextWindowSize={contextWindowSize || detail.contextWindowSize}
+        />
+      )}
+    </ModalShell>
   )
 }
 
@@ -921,49 +902,44 @@ function useStickToBottom(watch) {
   return { bodyRef, onBodyScroll }
 }
 
-function TaskDetailModal({ title, actions, onClose, bodyRef, onBodyScroll, children }) {
-  useEffect(() => {
-    const onKeyDown = (event) => event.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-
+function TaskDetailModal({
+  title,
+  icon,
+  subtitle,
+  meta,
+  actions,
+  onClose,
+  bodyRef,
+  onBodyScroll,
+  children
+}) {
   return (
-    <div
-      className="chat-ctx-modal-overlay no-drag"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={(event) => event.target === event.currentTarget && onClose()}
+    <ModalShell
+      title={title}
+      icon={icon}
+      subtitle={subtitle}
+      meta={meta}
+      actions={actions}
+      onClose={onClose}
+      bodyRef={bodyRef}
+      onBodyScroll={onBodyScroll}
+      className="chat-modal-task"
     >
-      <div className="chat-ctx-modal chat-task-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="chat-ctx-modal-header">
-          <span className="chat-task-modal-title">{title}</span>
-          <div className="chat-task-modal-header-actions">
-            {actions}
-            <button type="button" onClick={onClose} aria-label="关闭">
-              Esc ✕
-            </button>
-          </div>
-        </div>
-        <div ref={bodyRef} className="chat-ctx-modal-body" onScroll={onBodyScroll}>
-          {children}
-        </div>
-      </div>
-    </div>
+      {children}
+    </ModalShell>
   )
 }
 
 function SubagentTimelineStep({ step }) {
   if (step.kind === 'thinking') {
-    return <div className="chat-task-modal-thinking">{step.text}</div>
+    return <div className="chat-modal-prose is-dim">{step.text}</div>
   }
   if (step.kind === 'text') {
     return <Markdown text={step.text} />
   }
   if (step.kind === 'tool') {
     return (
-      <details className="chat-task-modal-step">
+      <details className="chat-modal-step">
         <summary>
           {step.toolName} {compactLine(step.text, 90)}
         </summary>
@@ -972,7 +948,7 @@ function SubagentTimelineStep({ step }) {
     )
   }
   return (
-    <details className="chat-task-modal-step">
+    <details className="chat-modal-step">
       <summary>{step.toolName} 结果</summary>
       <pre>{step.text}</pre>
     </details>
@@ -1011,69 +987,53 @@ function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
 
   return (
     <TaskDetailModal
-      title={`🤖 ${task.subagentType || 'subagent'} · ${compactLine(task.description, 60)}`}
+      icon="🤖"
+      title={task.subagentType || 'subagent'}
+      subtitle={compactLine(task.description, 90)}
+      meta={
+        <ModalMeta
+          items={[
+            subagentStatusLabel(task.status),
+            elapsed != null ? (
+              <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
+            ) : null,
+            task.model,
+            task.effort,
+            usage
+              ? `in ${formatTokens(usage.inputTokens)} · out ${formatTokens(usage.outputTokens)} · cached ${formatTokens(usage.cachedInputTokens)} · ${usage.records} req`
+              : null,
+            task.taskId
+          ]}
+        />
+      }
       onClose={onClose}
       bodyRef={bodyRef}
       onBodyScroll={onBodyScroll}
       actions={
         running ? (
-          <button type="button" disabled={stopping} onClick={stop}>
+          <button type="button" className="chat-modal-danger" disabled={stopping} onClick={stop}>
             停止
           </button>
         ) : null
       }
     >
-      {error && <div className="chat-task-modal-muted">{error}</div>}
-      <div className="chat-ctx-modal-summary">
-        <span>{subagentStatusLabel(task.status)}</span>
-        {elapsed != null && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
-          </>
-        )}
-        {task.model && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span>{task.model}</span>
-          </>
-        )}
-        {task.effort && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span>{task.effort}</span>
-          </>
-        )}
-        <span className="chat-ctx-modal-sep">·</span>
-        <span>{task.taskId}</span>
-      </div>
-      {usage && (
-        <div className="chat-ctx-modal-summary">
-          <span className="tabular-nums">
-            {usage.records} requests · in {formatTokens(usage.inputTokens)} · out{' '}
-            {formatTokens(usage.outputTokens)} · cached {formatTokens(usage.cachedInputTokens)} ·
-            total {formatTokens(usage.totalTokens)}
-          </span>
-        </div>
-      )}
+      {error && <div className="chat-modal-note is-warn">{error}</div>}
       {task.prompt && (
-        <details className="chat-task-modal-step">
+        <details className="chat-modal-step">
           <summary>任务提示词</summary>
-          <pre className="chat-task-modal-pre">{textOf(task.prompt)}</pre>
+          <pre className="chat-modal-pre">{textOf(task.prompt)}</pre>
         </details>
       )}
-      {task.timelineTruncated && <div className="chat-task-modal-muted">较早的步骤已省略。</div>}
+      {task.timelineTruncated && <div className="chat-modal-note">较早的步骤已省略。</div>}
       {steps.map((step) => (
         <SubagentTimelineStep key={step.key} step={step} />
       ))}
-      {!running && <div className="chat-task-modal-muted">{subagentStatusLabel(task.status)}</div>}
       {task.result && (
-        <div className="chat-task-modal-result">
-          <div className="chat-task-modal-muted">结果</div>
+        <ModalSection title="结果">
           <Markdown text={textOf(task.result)} />
-        </div>
+        </ModalSection>
       )}
-      {task.error && <div className="chat-task-modal-error">{textOf(task.error)}</div>}
+      {task.error && <div className="chat-modal-error">{textOf(task.error)}</div>}
     </TaskDetailModal>
   )
 }
@@ -1096,7 +1056,23 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
 
   return (
     <TaskDetailModal
-      title={`$ (${shellBaseName(task.shell)}) · ${task.id}`}
+      icon="$"
+      title={task.id}
+      subtitle={shellBaseName(task.shell)}
+      meta={
+        <ModalMeta
+          items={[
+            backgroundTaskStatusLabel(task.status),
+            elapsed != null ? (
+              <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
+            ) : null,
+            task.exitCode != null ? `exit ${task.exitCode}` : null,
+            task.signal,
+            detail ? <span className="tabular-nums">{taskOutputWindowLabel(detail)}</span> : null,
+            <span title={task.cwd}>{compactLine(task.cwd, 60)}</span>
+          ]}
+        />
+      }
       onClose={onClose}
       bodyRef={bodyRef}
       onBodyScroll={onBodyScroll}
@@ -1104,7 +1080,7 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
         running ? (
           <button
             type="button"
-            className="chat-task-modal-danger"
+            className="chat-modal-danger"
             disabled={!onKill}
             onClick={() => onKill(task)}
           >
@@ -1113,43 +1089,18 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
         ) : null
       }
     >
-      {error && <div className="chat-task-modal-muted">{error}</div>}
-      <div className="chat-ctx-modal-summary">
-        <span>{backgroundTaskStatusLabel(task.status)}</span>
-        {elapsed != null && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
-          </>
-        )}
-        {task.exitCode != null && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span className="tabular-nums">exit {task.exitCode}</span>
-          </>
-        )}
-        {task.signal && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span>{task.signal}</span>
-          </>
-        )}
-        {detail && (
-          <>
-            <span className="chat-ctx-modal-sep">·</span>
-            <span className="tabular-nums">{taskOutputWindowLabel(detail)}</span>
-          </>
-        )}
-        <span className="chat-ctx-modal-sep">·</span>
-        <span className="chat-task-modal-muted" title={task.cwd}>
-          {compactLine(task.cwd, 60)}
-        </span>
-      </div>
-      <div className="chat-task-modal-muted">{task.command}</div>
+      {error && <div className="chat-modal-note is-warn">{error}</div>}
+      {task.command ? (
+        <pre className="chat-modal-pre">
+          <PathText text={task.command} />
+        </pre>
+      ) : null}
       {content ? (
-        <pre className="chat-task-modal-output">{content}</pre>
+        <pre className="chat-modal-pre">
+          <PathText text={content} />
+        </pre>
       ) : (
-        <div className="chat-ctx-modal-empty">（暂无输出）</div>
+        <div className="chat-modal-note">（暂无输出）</div>
       )}
     </TaskDetailModal>
   )
@@ -1482,21 +1433,24 @@ export function currentTurnActivityMessages(messages, turnId) {
   return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
 }
 
-function TurnLogItemView({ message, now }) {
-  if (message.kind === 'reasoning') return <ReasoningRow text={message.text} />
-  return <ToolActivityRow tool={message.tool} now={now} />
+function TurnLogItemView({ message, now, onOpen }) {
+  if (message.kind === 'reasoning') {
+    return <ReasoningRow text={message.text} onOpen={() => onOpen?.(message)} />
+  }
+  return <ToolActivityRow tool={message.tool} now={now} onOpen={() => onOpen?.(message)} />
 }
 
 // 回合日志每 250ms 随 chat-status-line 一起重渲染，已完成的行没必要跟着 `now` 重算
 // （多行输出展开后一次重渲染就是几千个节点）。
 const TurnLogItem = memo(TurnLogItemView, (previous, next) => {
   if (previous.message !== next.message) return false
+  if (previous.onOpen !== next.onOpen) return false
   const status = next.message?.tool?.status
   const settled = status && !['pending', 'running'].includes(status)
   return settled ? true : previous.now === next.now
 })
 
-function TurnLogDock({ messages, now = Date.now() }) {
+function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
   const scrollRef = useRef(null)
   // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
   const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
@@ -1563,7 +1517,7 @@ function TurnLogDock({ messages, now = Date.now() }) {
         }}
       >
         {messages.map((message) => (
-          <TurnLogItem key={message.id} message={message} now={now} />
+          <TurnLogItem key={message.id} message={message} now={now} onOpen={onOpenActivity} />
         ))}
       </div>
       <div
@@ -2290,6 +2244,8 @@ export function ChatView({
   const [taskNow, setTaskNow] = useState(() => Date.now())
   // 点开的任务详情弹窗（单槽位）：{ kind: 'subagent' | 'background', task } | null
   const [taskDetail, setTaskDetail] = useState(null)
+  // 点开的回合日志详情（单槽位）：存消息 id 而不是快照，行还在流式更新时弹窗跟着刷新。
+  const [activityDetailId, setActivityDetailId] = useState(null)
   // 输入框右侧时钟图标点开的定时任务面板
   const [loopOpen, setLoopOpen] = useState(false)
   // By The Way（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
@@ -2558,6 +2514,9 @@ export function ChatView({
   )
 
   const openTaskDetail = useCallback((kind, task) => setTaskDetail({ kind, task }), [])
+  // 回合日志的点开动作也必须是引用稳定的：TurnLogItem 是 memo 的，闭包一变，
+  // 已经跑完的行就会跟着 250ms 计时器重渲染。
+  const openActivityDetail = useCallback((message) => setActivityDetailId(message?.id ?? null), [])
 
   /**
    * 启动（或替换）当前会话的定时循环——输入条时钟面板（唯一入口）走这条链路。
@@ -4853,6 +4812,10 @@ export function ChatView({
     [activityTurnId, messages]
   )
   const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
+  // 点开详情时按 id 取当下的那条消息：工具还在跑的时候，输出是流式长出来的。
+  const activityDetailMessage = activityDetailId
+    ? messages.find((message) => message.id === activityDetailId) || null
+    : null
   const runningToolNames = useMemo(
     () =>
       turnActivityMessages
@@ -5379,7 +5342,11 @@ export function ChatView({
                 />
               )
             })}
-            <TurnLogDock messages={visibleTurnLogMessages} now={Date.now()} />
+            <TurnLogDock
+              messages={visibleTurnLogMessages}
+              now={Date.now()}
+              onOpenActivity={openActivityDetail}
+            />
           </div>
         </div>
 
@@ -5801,6 +5768,18 @@ export function ChatView({
             task={taskDetail.task}
             onClose={() => setTaskDetail(null)}
             onKill={killBackgroundTask}
+          />
+        )}
+        {activityDetailMessage?.kind === 'tool' && (
+          <ToolDetailDialog
+            tool={activityDetailMessage.tool}
+            onClose={() => setActivityDetailId(null)}
+          />
+        )}
+        {activityDetailMessage?.kind === 'reasoning' && (
+          <ReasoningDetailDialog
+            text={activityDetailMessage.text || ''}
+            onClose={() => setActivityDetailId(null)}
           />
         )}
         {contextMenu && (

@@ -103,7 +103,6 @@ function startDemoStream(startedAtMs: number): () => void {
           id: `stream-tool-${tick}`,
           toolName: event.toolName,
           displayText: event.summary,
-          output: event.output,
           elapsedMs: 350 + (tick % 5) * 180,
         }),
       );

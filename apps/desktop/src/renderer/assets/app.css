@@ -77,6 +77,14 @@
 @layer base {
   :root {
     color-scheme: dark;
+
+    /* 对话区的字体：定义在根上而不是 `.chat-view`，因为详情弹窗与右键菜单都
+       portal 到 body（要躲开对话区的 overflow 裁剪），拿不到 `.chat-view` 上的
+       局部变量——放到根上两份都能解析。 */
+    --chat-text-size: 13px;
+    --chat-font:
+      'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas,
+      'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
   }
   * {
     box-sizing: border-box;
@@ -349,10 +357,6 @@ body.is-resizing.is-resizing-terminal {
   --chat-surface-bar: var(--color-panel);
   --chat-surface-log: var(--color-panel);
   --chat-row-marker-width: 18px;
-  --chat-text-size: 13px;
-  --chat-font:
-    'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', monospace;
 }
 
 .chat-scroll {
@@ -1645,36 +1649,42 @@ body.is-resizing.is-resizing-terminal {
   background: rgb(255 255 255 / 4%);
 }
 
-.chat-turn-log-thinking {
-  min-width: 0;
-  margin: 1px 0 7px;
-  border-left: 2px solid color-mix(in srgb, var(--color-info) 24%, transparent);
-  border-radius: 0 4px 4px 0;
-  background: color-mix(in srgb, var(--color-info) 6%, transparent);
-  padding: 3px 9px;
-  color: var(--color-fg-muted);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
+/*
+ * 思考与工具行：**一条一行**，点开看详情（`chat-tool-detail.jsx`）。
+ *
+ * 回合日志是「这一轮刚才发生了什么」的目录，不是阅读面：多行日志会把对话区挤到
+ * 看不见，之前的「整段折行 + 折叠输出」正是这样。所以这里一律 nowrap + 省略号，
+ * 内容完整性由弹窗负责。终端（`mica-ui/agentTurnLogItems.tsx`）是同一套规则。
+ */
+.chat-turn-log-thinking,
 .chat-turn-log-tool {
-  position: relative;
   min-width: 0;
-  padding-left: 0;
 }
 
 .chat-turn-log-tool + .chat-turn-log-tool,
-.chat-turn-log-thinking + .chat-turn-log-tool {
-  margin-top: 3px;
+.chat-turn-log-thinking + .chat-turn-log-tool,
+.chat-turn-log-tool + .chat-turn-log-thinking {
+  margin-top: 1px;
 }
 
-.chat-turn-log-tool-row {
+/* 整行就是按钮：点哪里都能打开详情，hover 给一层浅底标出可点范围 */
+.chat-turn-log-row {
   display: flex;
+  width: 100%;
   min-width: 0;
-  /* 工具调用文案在网页上整段折行（不再按终端列宽截断），图标/耗时对齐首行 */
-  align-items: flex-start;
-  gap: 5px;
-  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  padding: 1px 6px 1px 3px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-turn-log-row:hover {
+  background: rgb(255 255 255 / 5%);
 }
 
 .chat-turn-log-spinner,
@@ -1682,7 +1692,6 @@ body.is-resizing.is-resizing-terminal {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  padding-top: 2px;
 }
 
 .chat-turn-log-spinner {
@@ -1690,17 +1699,24 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-turn-log-icon {
-  width: 16px;
-  opacity: 0.82;
+  width: 15px;
+  opacity: 0.8;
+  font-size: 10px;
 }
 
 .chat-turn-log-display {
   min-width: 0;
   flex: 1 1 auto;
+  overflow: hidden;
   color: var(--color-fg-muted);
-  /* 多行 shell 命令靠 pre-wrap 保留换行，长单行靠 anywhere 折行 */
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  /* 多行命令/思考压成一行（文案里的换行由 chat-tool-views 的 singleLine 先抹平） */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-turn-log-thinking .chat-turn-log-display {
+  color: var(--color-fg-faint);
+  font-style: italic;
 }
 
 .chat-turn-log-running .chat-turn-log-display,
@@ -1710,52 +1726,8 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-turn-log-duration {
   flex: 0 0 auto;
-  padding-top: 2px;
   color: var(--color-fg-faint);
   font-variant-numeric: tabular-nums;
-}
-
-/* 工具输出：默认给尾部若干行，展开后给全部（见 ToolOutputBlock） */
-.chat-turn-log-output-block {
-  min-width: 0;
-  margin-top: 1px;
-}
-
-.chat-turn-log-more {
-  display: block;
-  width: calc(100% - 7px);
-  margin-left: 7px;
-  border-left: 1px solid rgb(255 255 255 / 9%);
-  background: none;
-  padding: 1px 0 1px 8px;
-  color: var(--color-info);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-turn-log-more:hover {
-  color: var(--color-fg);
-  text-decoration: underline;
-}
-
-.chat-turn-log-output-capped {
-  color: var(--color-warn);
-}
-
-.chat-turn-log-output {
-  display: flex;
-  min-width: 0;
-  border-left: 1px solid rgb(255 255 255 / 9%);
-  margin-left: 7px;
-  padding-left: 8px;
-  color: var(--color-fg-dim);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.chat-turn-log-output > span {
-  display: none;
 }
 
 .chat-turn-log-error .chat-turn-log-display,
@@ -2457,91 +2429,6 @@ body.is-resizing.is-resizing-terminal {
   cursor: default;
 }
 
-.chat-ctx-modal.chat-task-modal {
-  max-width: 720px;
-}
-
-.chat-task-modal-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-task-modal-header-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-}
-
-.chat-ctx-modal-header .chat-task-modal-danger {
-  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-line));
-  color: var(--color-danger);
-}
-
-.chat-ctx-modal-header .chat-task-modal-danger:hover {
-  color: var(--color-danger-soft);
-}
-
-.chat-task-modal-thinking {
-  margin: 0 0 6px;
-  color: var(--color-fg-faint);
-  font-style: italic;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.chat-task-modal-step {
-  margin: 0 0 6px;
-}
-
-.chat-task-modal-step > summary {
-  color: var(--color-fg-faint);
-  cursor: pointer;
-  word-break: break-word;
-}
-
-.chat-task-modal-step > summary:hover {
-  color: var(--color-fg-strong);
-}
-
-.chat-task-modal-step pre,
-.chat-task-modal-pre,
-.chat-task-modal-output {
-  margin: 4px 0 0;
-  max-height: 40vh;
-  overflow: auto;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: var(--color-canvas);
-  padding: 6px 8px;
-  font-family: var(--chat-font);
-  font-size: 11.5px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* 后台输出交给弹窗主体滚动，不再套第二层滚动条。 */
-.chat-task-modal-output {
-  max-height: none;
-}
-
-.chat-task-modal-result {
-  margin-top: 8px;
-}
-
-.chat-task-modal-error {
-  margin-top: 8px;
-  color: var(--color-danger);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.chat-task-modal-muted {
-  color: var(--color-fg-faint);
-}
-
 .chat-status-line,
 .chat-composer {
   width: 100%;
@@ -2650,8 +2537,9 @@ body.is-resizing.is-resizing-terminal {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgb(0 0 0 / 78%);
-  padding: 24px;
+  background: rgb(0 0 0 / 72%);
+  padding: clamp(16px, 5vh, 56px) 24px;
+  backdrop-filter: blur(1.5px);
 }
 
 .chat-image-preview {
@@ -2675,16 +2563,18 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-image-preview button {
   min-height: 26px;
-  border-radius: 4px;
-  background: rgb(255 255 255 / 8%);
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  background: var(--color-panel);
   padding: 0 12px;
-  color: rgb(255 255 255 / 68%);
-  font-size: 11px;
+  color: var(--color-fg-soft);
+  font-size: 11.5px;
 }
 
 .chat-image-preview button:hover {
-  background: rgb(255 255 255 / 14%);
-  color: white;
+  border-color: var(--color-line-strong);
+  background: var(--color-active);
+  color: var(--color-fg-max);
 }
 
 .chat-image-preview-actions {
@@ -2733,55 +2623,330 @@ body.is-resizing.is-resizing-terminal {
   opacity: 0.62;
 }
 
+/*
+ * 详情弹窗（`chat-modal.jsx`）：上下文占用、子代理、后台任务、工具调用、思考共用一套壳。
+ *
+ * 之前每个弹窗各写一份 overlay / header / body，圆角、内边距、关闭按钮和字号都不一样，
+ * 看起来像几个产品。现在只有这一份：
+ *   head  固定（图标 + 标题 + 副标题 + 动作 + 关闭）
+ *   meta  固定（状态、耗时、id 这类一行摘要）
+ *   body  唯一滚动层（滚动条全局隐藏，见文件顶部）
+ * 正文段落用 `.chat-modal-section` + `.chat-modal-pre`，不要再给某个弹窗单开样式。
+ */
 .chat-modal-overlay {
   position: fixed;
-  z-index: 20;
+  z-index: 10000;
   inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 58%);
+  padding: clamp(16px, 5vh, 56px) 24px;
+  backdrop-filter: blur(1.5px);
 }
 
 .chat-modal {
-  width: min(420px, calc(100% - 48px));
+  display: flex;
+  width: 100%;
+  max-width: 780px;
+  /* 窄屏时靠这条才能缩到视口以内：flex item 的 min-width: auto 会撑到内容的最小宽度，
+     代码块里一条长路径就足以把弹窗顶出屏幕。 */
+  min-width: 0;
+  max-height: 100%;
+  flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 10px;
   background: var(--color-panel);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
-  color: rgb(255 255 255 / 60%);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 58%);
+  color: var(--color-fg-soft);
   font-family: var(--chat-font);
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* 主对话里的任务/工具详情比上下文面板宽一点：它们要显示代码和命令 */
+.chat-modal-task,
+.chat-modal-tool {
+  max-width: 860px;
+}
+
+.chat-modal-reasoning {
+  max-width: 720px;
 }
 
 .chat-modal-header {
   display: flex;
-  min-height: 34px;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid rgb(255 255 255 / 8%);
-  padding: 0 10px;
-  color: rgb(255 255 255 / 55%);
-  font-weight: 600;
+  gap: 10px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel-hi);
+  padding: 9px 12px 9px 16px;
 }
 
-.chat-modal-header button {
+.chat-modal-mark {
   display: grid;
   width: 22px;
   height: 22px;
+  flex: none;
   place-items: center;
-  border-radius: 3px;
-  color: rgb(255 255 255 / 30%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 6%);
+  font-size: 12px;
 }
 
-.chat-modal-header button:hover {
-  background: rgb(255 255 255 / 6%);
-  color: rgb(255 255 255 / 68%);
+.chat-modal-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-modal-title {
+  overflow: hidden;
+  color: var(--color-fg-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-modal-subtitle {
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-modal-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-modal-actions button {
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  background: var(--color-panel);
+  padding: 0 9px;
+  color: var(--color-fg-soft);
+  font-size: 11.5px;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.chat-modal-actions button:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: var(--color-active);
+  color: var(--color-fg-max);
+}
+
+.chat-modal-actions button:disabled {
+  opacity: 0.5;
+}
+
+/* 方形图标按钮（关闭）：不带文字就不给文字按钮的内边距 */
+.chat-modal-actions button.chat-modal-close {
+  display: grid;
+  width: 24px;
+  place-items: center;
+  border-color: transparent;
+  background: none;
+  padding: 0;
+  color: var(--color-fg-faint);
+}
+
+.chat-modal-actions button.chat-modal-close:hover:not(:disabled) {
+  background: rgb(255 255 255 / 8%);
+  color: var(--color-fg-max);
+}
+
+.chat-modal-actions button.chat-modal-danger {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line));
+  color: var(--color-danger);
+}
+
+.chat-modal-actions button.chat-modal-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 14%, var(--color-panel));
+  color: var(--color-danger-soft);
+}
+
+.chat-modal-meta {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-line) 62%, transparent);
+  background: color-mix(in srgb, var(--color-canvas) 45%, var(--color-panel));
+  padding: 6px 16px;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+}
+
+.chat-modal-meta-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.chat-modal-sep {
+  margin: 0 6px;
+  color: var(--color-fg-ghost);
+}
+
+.chat-modal-status {
+  font-weight: 600;
+}
+
+.chat-modal-status.is-running {
+  color: var(--color-teal);
+}
+
+.chat-modal-status.is-error {
+  color: var(--color-danger);
+}
+
+.chat-modal-status.is-done {
+  color: var(--color-success-soft);
 }
 
 .chat-modal-body {
-  padding: 12px;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 16px 14px;
+  overscroll-behavior: contain;
+}
+
+.chat-modal-section {
+  margin-top: 14px;
+}
+
+.chat-modal-section:first-child {
+  margin-top: 0;
+}
+
+.chat-modal-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+  color: var(--color-fg-faint);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-modal-section-extra {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chat-modal-section-extra button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 1px 5px;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.chat-modal-section-extra button:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--color-fg);
+}
+
+/* 参数 / 输出 / 命令：内容面（canvas）里的一块代码面，不再各自加一层边框阴影 */
+.chat-modal-pre,
+.chat-modal-step pre {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-canvas);
+  padding: 8px 10px;
+  color: var(--color-fg-soft);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  /* anywhere（而不是 break-word）才参与最小宽度计算：否则一条长路径就能把弹窗撑宽 */
+  overflow-wrap: anywhere;
+}
+
+/* 参数里可能是整个 patch/JSON，允许它自己滚；输出交给弹窗主体，避免双层滚动条 */
+.chat-modal-pre-params {
+  max-height: 32vh;
+  overflow: auto;
+}
+
+.chat-modal-prose {
+  color: var(--color-fg-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-modal-prose.is-dim {
+  margin-bottom: 6px;
+  color: var(--color-fg-faint);
+  font-style: italic;
+}
+
+.chat-modal-note {
+  margin-top: 4px;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+
+.chat-modal-note.is-warn {
+  color: var(--color-warn);
+}
+
+.chat-modal-error {
+  margin-top: 10px;
+  color: var(--color-danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-modal-empty {
+  padding: 36px 8px;
+  text-align: center;
+  color: var(--color-fg-faint);
+}
+
+.chat-modal-step {
+  margin: 0 0 8px;
+}
+
+.chat-modal-step > summary {
+  color: var(--color-fg-faint);
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.chat-modal-step > summary:hover {
+  color: var(--color-fg-strong);
+}
+
+.chat-modal-step pre {
+  margin-top: 5px;
 }
 
 .chat-status-context-trigger {
@@ -2790,79 +2955,6 @@ body.is-resizing.is-resizing-terminal {
 }
 .chat-status-context-trigger:hover {
   color: rgb(255 255 255 / 72%);
-}
-.chat-ctx-modal-overlay {
-  position: fixed;
-  z-index: 10000;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(0 0 0 / 60%);
-  padding: 24px;
-}
-.chat-ctx-modal {
-  display: flex;
-  width: 100%;
-  max-width: 860px;
-  max-height: 88vh;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-panel);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
-  font-family: var(--chat-font);
-  font-size: var(--chat-text-size);
-}
-.chat-ctx-modal-header {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--color-line);
-  padding: 0 14px;
-  color: rgb(255 255 255 / 55%);
-  font-weight: 600;
-  font-size: 12px;
-}
-.chat-ctx-modal-header button {
-  flex-shrink: 0;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: var(--color-panel-hi);
-  padding: 2px 8px;
-  color: var(--color-fg-soft);
-  font-size: 11px;
-  transition: color 0.15s;
-}
-.chat-ctx-modal-header button:hover {
-  color: var(--color-fg-strong);
-}
-.chat-ctx-modal-body {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 10px 14px;
-}
-.chat-ctx-modal-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 0 8px;
-  color: var(--color-fg-faint);
-  font-size: 10px;
-}
-.chat-ctx-modal-sep {
-  color: rgb(255 255 255 / 15%);
-}
-.chat-ctx-modal-empty {
-  padding: 32px 10px;
-  text-align: center;
-  color: var(--color-fg-faint);
-  font-size: 11px;
 }
 .chat-context-bar {
   height: 5px;
@@ -3583,9 +3675,9 @@ body.is-resizing-btw {
   line-height: 1.45;
 }
 
-/* 日志里的思考块自己有一层底色，嵌进这条细线里会显得双层描边 */
-.chat-btw-activity .chat-turn-log-thinking {
-  margin-top: 0;
+/* 抽屉更窄，行首再收一点，免得图标离左边那条细线太远 */
+.chat-btw-activity .chat-turn-log-row {
+  padding-left: 1px;
 }
 
 /* 正在流式输出的正文末尾那颗光标：它不是输入框，只是「还在写」的信号。

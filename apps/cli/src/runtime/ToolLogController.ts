@@ -90,7 +90,8 @@ export class ToolLogController {
     );
   }
 
-  completeToolCall({ name, result, id }: { name: string; result: string; id?: string }) {
+  // 终端只展示一行调用摘要，结果文本不再进日志（网页端才需要它做详情）。
+  completeToolCall({ name, id }: { name: string; result: string; id?: string }) {
     this.endThinkingSegment();
     const toolKey = id ?? this.findFirstActiveToolKey(name);
     const activeTool = toolKey ? this.activeToolCalls.get(toolKey) : undefined;
@@ -106,7 +107,6 @@ export class ToolLogController {
         toolName: name,
         displayText,
         completed: true,
-        output: result.slice(0, 2000),
         startTime,
         elapsedMs: Date.now() - startTime,
       }),

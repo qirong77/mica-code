@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   TOOL_OUTPUT_MAX_CHARS,
-  collapsedOutput,
   toolCallText,
   toolDisplayName,
+  toolDurationMs,
   toolOutput,
   toolSummary
 } from './chat-tool-display'
@@ -65,28 +65,14 @@ describe('toolOutput', () => {
   })
 })
 
-describe('collapsedOutput', () => {
-  it('keeps the tail of long output', () => {
-    const output = Array.from({ length: 25 }, (_, index) => `line-${index}`).join('\n')
-    const collapsed = collapsedOutput(toolOutput({ tool: 'run_shell', output }))
-    expect(collapsed.lines).toEqual([
-      'line-15',
-      'line-16',
-      'line-17',
-      'line-18',
-      'line-19',
-      'line-20',
-      'line-21',
-      'line-22',
-      'line-23',
-      'line-24'
-    ])
-    expect(collapsed.hidden).toBe(15)
+describe('toolDurationMs', () => {
+  it('uses the finish time for settled calls', () => {
+    const tool = { status: 'completed', startedAt: 1_000, finishedAt: 3_500 }
+    expect(toolDurationMs(tool, 90_000)).toBe(2_500)
   })
 
-  it('keeps short output untouched', () => {
-    const collapsed = collapsedOutput(toolOutput({ tool: 'run_shell', output: 'a\nb' }))
-    expect(collapsed).toEqual({ lines: ['a', 'b'], hidden: 0, capped: false })
-    expect(collapsedOutput(null)).toBeNull()
+  it('uses now for the running call', () => {
+    const tool = { status: 'running', startedAt: 1_000 }
+    expect(toolDurationMs(tool, 4_000)).toBe(3_000)
   })
 })

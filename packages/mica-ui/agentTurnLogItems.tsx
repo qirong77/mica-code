@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';
 import { formatElapsed } from './utils/format.js';
 
-export const RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS = runtimeEnv.ui.runShellVerboseLogThresholdMs;
-const MAX_RUN_SHELL_LOG_LINES = runtimeEnv.ui.runShellLogMaxLines;
 const DEFAULT_TOOL_ICONS = new Map<string, string>(
   Object.entries({
     read_file: '📖',
@@ -46,8 +43,8 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
   function ThinkingLogItem() {
     return (
       <Box>
-        <Text dimColor wrap="wrap">
-          {text}
+        <Text dimColor wrap="truncate-end">
+          {singleLine(text)}
         </Text>
       </Box>
     );
@@ -55,12 +52,19 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
   return { id, component: ThinkingLogItem };
 }
 
+/**
+ * 回合日志里一行工具调用：状态图标 + 文案 + 耗时，永远只占一行。
+ *
+ * 终端没有第二块可点开的面板，所以这行就是全部信息：超长文案交给 Ink 的
+ * `truncate-end` 按当前列宽裁成省略号，工具输出不再往下铺（要读输出请用
+ * `read_task_output` / 网页端）。换行必须先压成空格：`truncate-end` 只裁宽度，
+ * 多行命令会照样铺成多行。
+ */
 export function createToolCallLogItem({
   id,
   toolName,
   displayText,
   completed = true,
-  output = '',
   startTime = Date.now(),
   elapsedMs,
 }: {
@@ -68,23 +72,18 @@ export function createToolCallLogItem({
   toolName: string;
   displayText: string;
   completed?: boolean;
-  output?: string;
   startTime?: number;
   elapsedMs?: number;
 }): MicaUiAgentTurnLogItem {
   const completedElapsedMs = elapsedMs ?? Math.max(0, Date.now() - startTime);
+  const line = singleLine(displayText);
 
   function CompletedToolCallLogItem() {
-    const capped = getVisibleOutputLines({ toolName, output, elapsedMs: completedElapsedMs });
-
     return (
-      <Box flexDirection="column">
-        <Box flexDirection="row">
-          <Text dimColor>{getToolIcon(toolName)} </Text>
-          <Text dimColor>{displayText}</Text>
-          <Text dimColor> ({formatElapsed(completedElapsedMs)})</Text>
-        </Box>
-        <ToolOutputLines lines={capped} />
+      <Box>
+        <Text dimColor wrap="truncate-end">
+          {`${getToolIcon(toolName)} ${line} (${formatElapsed(completedElapsedMs)})`}
+        </Text>
       </Box>
     );
   }
@@ -93,17 +92,12 @@ export function createToolCallLogItem({
     const spinner = useSpinner();
     const now = useNow();
     const elapsed = elapsedMs ?? Math.max(0, now - startTime);
-    const capped = getVisibleOutputLines({ toolName, output, elapsedMs: elapsed });
 
     return (
-      <Box flexDirection="column">
-        <Box flexDirection="row">
-          <Text dimColor>{spinner} </Text>
-          <Text dimColor>{getToolIcon(toolName)} </Text>
-          <Text dimColor>{displayText}</Text>
-          <Text dimColor> {formatElapsed(elapsed)}</Text>
-        </Box>
-        <ToolOutputLines lines={capped} />
+      <Box>
+        <Text dimColor wrap="truncate-end">
+          {`${spinner} ${getToolIcon(toolName)} ${line} ${formatElapsed(elapsed)}`}
+        </Text>
       </Box>
     );
   }
@@ -111,46 +105,9 @@ export function createToolCallLogItem({
   return { id, component: completed ? CompletedToolCallLogItem : RunningToolCallLogItem };
 }
 
-function getVisibleOutputLines({
-  toolName,
-  output,
-  elapsedMs,
-}: {
-  toolName: string;
-  output: string;
-  elapsedMs: number;
-}): string[] {
-  const outputLines = shouldShowToolOutput({ toolName, output, elapsedMs })
-    ? output.replace(/\n$/, '').split('\n')
-    : [];
-  return outputLines.length > MAX_RUN_SHELL_LOG_LINES ? outputLines.slice(-MAX_RUN_SHELL_LOG_LINES) : outputLines;
-}
-
-function ToolOutputLines({ lines }: { lines: string[] }) {
-  if (lines.length === 0) return null;
-
-  return (
-    <Box flexDirection="column">
-      {lines.map((line, i) => (
-        <Text key={i} dimColor>
-          {'  │ '}
-          {line}
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
-export function shouldShowToolOutput({
-  toolName,
-  output,
-  elapsedMs,
-}: {
-  toolName: string;
-  output: string;
-  elapsedMs: number;
-}): boolean {
-  return toolName === 'run_shell' && Boolean(output) && elapsedMs > RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS;
+/** 多行文本压成一行：回合日志的每个条目只允许占一行。 */
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 export function getToolIcon(name: string): string {

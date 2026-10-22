@@ -19,6 +19,7 @@ import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import { ReasoningDetailDialog, ToolDetailDialog } from './chat-tool-detail'
 import {
   btwContextMenuItems,
   btwContextLabel,
@@ -152,6 +153,15 @@ export function BtwDrawer({
   const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
   const [now, setNow] = useState(() => Date.now())
+  // 点开的思考/工具详情：只存「哪一条 entry 的哪个工具」，host 每 80ms 换一份快照，
+  // 存对象会停在点开那一刻。
+  const [activityDetail, setActivityDetail] = useState(null)
+  const activityOwner = activityDetail
+    ? entries.find((item) => item.id === activityDetail.entryId) || null
+    : null
+  const activityTool = activityDetail?.toolId
+    ? activityOwner?.tools?.find((tool) => tool.id === activityDetail.toolId) || null
+    : null
 
   /**
    * 拖动左边缘改宽度。
@@ -479,9 +489,17 @@ export function BtwDrawer({
                     {/* 思考与工具行：与主对话的回合日志同一套组件与样式（btw 也是个运行实例） */}
                     {entry.thinking || entry.tools?.length ? (
                       <div className="chat-btw-activity">
-                        <ReasoningRow text={entry.thinking} />
+                        <ReasoningRow
+                          text={entry.thinking}
+                          onOpen={() => setActivityDetail({ entryId: entry.id, thinking: true })}
+                        />
                         {(entry.tools || []).map((tool) => (
-                          <ToolActivityRow key={tool.id} tool={tool} now={now} />
+                          <ToolActivityRow
+                            key={tool.id}
+                            tool={tool}
+                            now={now}
+                            onOpen={() => setActivityDetail({ entryId: entry.id, toolId: tool.id })}
+                          />
                         ))}
                       </div>
                     ) : null}
@@ -641,6 +659,15 @@ export function BtwDrawer({
             document.body
           )
         : null}
+      {activityTool ? (
+        <ToolDetailDialog tool={activityTool} onClose={() => setActivityDetail(null)} />
+      ) : null}
+      {activityDetail?.thinking && activityOwner?.thinking ? (
+        <ReasoningDetailDialog
+          text={activityOwner.thinking}
+          onClose={() => setActivityDetail(null)}
+        />
+      ) : null}
     </aside>
   )
 }

@@ -606,12 +606,7 @@ function createRequestHandler({
               windowsBuildNumber:
                 process.platform === 'win32'
                   ? Number.parseInt(osRelease().split('.')[2], 10) || null
-                  : null,
-              runShellLogConfig: {
-                verboseThresholdMs:
-                  Number.parseInt(process.env.MICA_RUN_SHELL_VERBOSE_LOG_THRESHOLD_MS, 10) || 10000,
-                maxLines: Number.parseInt(process.env.MICA_RUN_SHELL_LOG_MAX_LINES, 10) || 10
-              }
+                  : null
             })
           }
         }

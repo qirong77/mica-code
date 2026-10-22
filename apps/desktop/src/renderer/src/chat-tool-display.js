@@ -3,14 +3,12 @@
 // 终端只有一行、宽度固定，所以 CLI 的 `displayText` 会被按终端列宽截断
 // （packages/mica-tools/utils/display.ts）。网页没有这个约束，但 app-server 的
 // stdout 是管道、拿不到列宽，历史实现一律按 80 列截断——这就是 `cd /Users/... && LINKCORE_GOME...`
-// 的来源。这里负责把展示文案还原成完整形态，并按「折叠尾行 / 展开全部」的粒度
-// 组织输出，长命令与长输出在网页上都不再被砍掉。
+// 的来源。这里保留完整形态：回合日志的行自己用 CSS 裁成一行省略号，完整文案与
+// 完整输出都在点开的详情弹窗里（`chat-tool-detail.jsx`）。
 
 import { toolLabel } from '@packages/mica-web-shared'
 
-/** 折叠状态下展示的输出行数（与 CLI 的 MICA_RUN_SHELL_LOG_MAX_LINES 默认值一致）。 */
-export const TOOL_OUTPUT_COLLAPSED_LINES = 10
-/** 展开后最多渲染多少行 / 多少字符，避免一条 256KB 的命令输出拖垮 DOM。 */
+/** 详情弹窗最多渲染多少行 / 多少字符，避免一条 256KB 的命令输出拖垮 DOM。 */
 export const TOOL_OUTPUT_MAX_LINES = 5000
 export const TOOL_OUTPUT_MAX_CHARS = 200_000
 
@@ -121,21 +119,23 @@ export function toolOutput(tool) {
   return { lines, capped }
 }
 
-/**
- * 折叠视图：只给尾部若干行（命令输出最有价值的是结尾），并告知被藏了多少行。
- */
-export function collapsedOutput(toolOutputValue, maxLines = TOOL_OUTPUT_COLLAPSED_LINES) {
-  if (!toolOutputValue) return null
-  const { lines, capped } = toolOutputValue
-  if (lines.length <= maxLines && !capped) return { lines, hidden: 0, capped }
-  return { lines: lines.slice(-maxLines), hidden: Math.max(0, lines.length - maxLines), capped }
-}
-
 /** 超过一分钟换成「m s」：工具行与状态行都用它显示耗时。 */
 export function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms < 1000) return ''
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
+}
+
+/**
+ * 一次工具调用已经花掉的时间。
+ *
+ * 进行中的行用当下的 `now` 现算，完成的行用 `finishedAt`——与 ChatView 的
+ * TurnLogItem memo 判定一致，否则已完成的行会跟着 250ms 计时器一起重渲染。
+ */
+export function toolDurationMs(tool, now = Date.now()) {
+  const running = ['pending', 'running'].includes(tool?.status)
+  const end = running ? now : tool?.finishedAt || tool?.updatedAt || now
+  return Math.max(0, end - (tool?.startedAt || tool?.updatedAt || now))
 }
 
 /** 回合日志/状态行里一行的耗时（不到一秒显示毫秒）。 */

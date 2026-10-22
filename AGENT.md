@@ -39,10 +39,13 @@ npm install
 npm run dev               # 构建运行时后启动 Electron + Vite
 npm test                  # 此项目使用 bun test，覆盖 host / renderer / main
 npx eslint src/
-npm run build             # Electron 外壳 + Web 运行时
+npm run build             # 先构建仓库根 CLI（bun run build），再 Electron 外壳 + Web 运行时
 npm run start:web         # 运行已构建的 Web 运行时
 npm run serve:web         # 构建后运行 Web 运行时
 ```
+
+`build:app` 之前会先执行 `build:cli`（`cd ../.. && bun run build`）：desktop 通过
+`resolveMicaExecutable()` 使用 `~/.local/bin/mica`，不刷新 CLI 就会连到旧二进制。
 
 验证 host 改动时使用独立端口，例如 `MICA_DESKTOP_PORT=8899 npm run dev`。
 外壳会复用默认端口上已有的运行时，窗口可能因此连到旧代码。
@@ -381,7 +384,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **自动链接与全角标点**：唯一规则在 `mica-common/autolink.ts.splitAutolinkPunctuation`，自动链接在首个全角标点处截断且校验显示文本，显式 Markdown 链接原样保留。
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
-- 工具日志完整折行，输出可展开并封顶 5000 行 / 20 万字符；`TurnLogItem` memo，计时更新仅影响运行行。
+- 回合日志的思考/工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；`TurnLogItem` memo，计时更新仅影响运行行。
+- 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
 - 模型/loop 面板统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。
 - 电脑隐藏发送/排队按钮，移动端保留；停止只用 danger、排队只用 warn，上传保持中性。loop 徽标自带 tick，不在 ChatView 或侧栏全树计时。
 - 后台任务/子代理 dock 仅列运行项，详情通过 host 查询，结束后保留最终结果；查询/终止不改变 turn 生命周期，终止后台任务须确认。
@@ -484,6 +488,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - Ink stdin 到 `parse-keypress.ts` 前保留 Buffer，不提前 setEncoding；增量 UTF-8 与 C1 规范化在解析层处理。
 - Alt 键两种编码都支持，stdin tokenizer 保持 `metaEscape: true`，避免把 Option+↑ 拆成 Escape 清空输入。
 - 编辑撤销/重做历史保存在组件 ref，新编辑清 redo；displayContent 只改展示，不改发给 agent 的内容。
+- 回合日志（`agentTurnLogItems.tsx`）每条只占一行：文案与思考先压成单行，再用 `wrap="truncate-end"` 按列宽裁省略号；工具输出不进终端日志。
 
 ### 配置页与主题
 
