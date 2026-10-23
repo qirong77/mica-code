@@ -64,6 +64,16 @@
   box-sizing: border-box;
 }
 
+/* 内嵌变体：把这份样式当成「一段内容」放进别的容器（桌面端会话设置弹窗）用。
+   只保留配色、字体与控件规则，去掉整页容器自己的尺寸与底色。 */
+.mica-config-ui.is-embed {
+  width: auto;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  background: transparent;
+}
+
 /* 页面级的根高度链（html/body/#root）不在这里：桌面端把这份样式当视图加载，那条链会以
    「无层级、同优先级、后加载」的身份把应用自己的 `#root` 高度顶掉（移动端的键盘避让就
    靠它，见 apps/desktop/README.md）；谁整页托管这份页面，谁在自己那边写（浏览器宿主见
@@ -413,6 +423,8 @@
     background: color-mix(in srgb, var(--red) 10%, transparent);
     color: var(--red);
     font-size: var(--text-body);
+    /* 服务端校验错误是分行的（[error] 路径 / 说明 / 建议），保留换行才读得懂 */
+    white-space: pre-line;
   }
 
   .editor-only,
@@ -700,20 +712,10 @@
     gap: 16px;
   }
 
-  .session-toolbar,
-  .session-summary {
-    padding: 12px 14px;
-  }
-
-  .session-summary-title {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
+  /* 会话切换条：只承载选择器，压到最薄，别和下面的摘要卡抢注意力 */
   .session-toolbar {
     display: block;
+    padding: 8px 10px;
   }
 
   .session-selector {
@@ -725,9 +727,12 @@
   }
 
   .session-selector-label {
+    padding-left: 2px;
     color: var(--text-faint);
-    font-size: 12px;
+    font-size: var(--text-micro);
     font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .session-picker {
@@ -737,23 +742,24 @@
 
   .session-picker-trigger {
     width: 100%;
-    height: 38px;
+    height: 34px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
+    padding: 0 9px;
+    border: 1px solid var(--line-soft);
     border-radius: 4px;
     outline: none;
-    background: var(--panel);
+    background: var(--panel-muted);
     color: var(--text);
     cursor: pointer;
     text-align: left;
   }
 
   .session-picker-trigger:hover {
-    background: var(--panel-muted);
+    border-color: var(--line);
+    background: var(--panel-hover);
   }
 
   .session-picker-trigger:focus-visible,
@@ -785,8 +791,11 @@
 
   .session-picker-value > span {
     flex: 0 0 auto;
+    margin-left: auto;
+    padding-left: 10px;
     color: var(--text-faint);
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
   }
 
   .session-picker-chevron {
@@ -919,25 +928,83 @@
 
   .session-summary {
     display: grid;
-    gap: 14px;
+    gap: 16px;
+    padding: 14px 16px;
+  }
+
+  .session-summary-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .session-summary-title {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
   }
 
   .session-summary-title h3 {
     overflow: hidden;
-    margin: 0 0 4px;
-    font-size: 15px;
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-title);
+    font-weight: 650;
+    line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .session-summary-title > div:first-child {
-    min-width: 0;
-  }
-
-  .session-summary-title > div:first-child > span {
+  .session-summary-id {
+    overflow: hidden;
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-micro);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 摘要用的定义网格：标签在值上方，行间只留发丝分隔线，长路径自己换行 */
+  .session-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    margin: 0;
+  }
+
+  .session-meta-fact {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    min-width: 0;
+    padding: 11px 16px 11px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .session-meta-wide {
+    grid-column: 1 / -1;
+  }
+
+  .session-meta dt {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .session-meta dd {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-aux);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .session-meta-mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
   }
 
   .role-layout {
@@ -975,8 +1042,8 @@
     gap: 8px;
     /* 不设 0 时 auto 列宽会把每一项都撑到最长条目的 min-content，长名字只会把整列挤出容器。 */
     min-width: 0;
-    min-height: 38px;
-    padding: 6px 9px;
+    min-height: 40px;
+    padding: 7px 9px;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
     background: transparent;
@@ -988,24 +1055,64 @@
       color 100ms ease;
   }
 
-  .role-list-item:hover,
-  .role-list-item-active {
-    border-color: var(--line);
-    background: var(--panel-muted);
+  .role-list-item:hover {
+    background: rgb(255 255 255 / 3%);
     color: var(--text);
   }
 
-  .role-list-item-active {
-    box-shadow: inset 2px 0 0 var(--line-strong);
+  /* 选中态靠更亮的底 + 边框表示，不用左侧竖条：那条读起来像「加粗的侧边框」。 */
+  .role-list-item-active,
+  .role-list-item-active:hover {
+    border-color: var(--line);
+    background: var(--panel-hover);
+    color: var(--text);
   }
 
-  .role-list-item > span:first-child {
+  /* 两行结构：名字 + 一行说明（技能描述 / 连接目标）。只用名字时中段会空掉半行高度。 */
+  .role-list-item-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .role-list-item-name {
     min-width: 0;
     overflow: hidden;
     font-size: var(--text-body);
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .role-list-item-sub {
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* MCP 列表的状态点：一行只留一个颜色信号，状态原文在右侧详情头部 */
+  .role-list-item-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--text-faint);
+  }
+
+  .role-list-item-dot-green {
+    background: var(--green);
+  }
+
+  .role-list-item-dot-red {
+    background: var(--red);
+  }
+
+  .role-list-item-dot-blue {
+    background: var(--blue);
   }
 
   .role-editor-pane {
@@ -1045,7 +1152,7 @@
   .conversation-layout,
   .conversation-timeline {
     display: grid;
-    gap: 16px;
+    gap: 8px;
   }
 
   .conversation-overview {
@@ -1092,9 +1199,9 @@
 
   .conversation-timeline::before {
     position: absolute;
-    top: 20px;
-    bottom: 20px;
-    left: 17px;
+    top: 16px;
+    bottom: 16px;
+    left: 13px;
     width: 1px;
     background: var(--line);
     content: '';
@@ -1103,8 +1210,8 @@
   .conversation-item {
     position: relative;
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
     align-items: start;
   }
 
@@ -1112,15 +1219,15 @@
     z-index: 1;
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--panel);
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--text-micro);
+    font-weight: 600;
   }
 
   .conversation-item-user .conversation-sequence {
@@ -1136,6 +1243,7 @@
   .conversation-card {
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--radius-md);
   }
 
   .conversation-card-header {
@@ -1143,8 +1251,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 12px;
-    background: var(--panel-muted);
+    min-height: 28px;
+    padding: 3px 10px;
+    background: transparent;
     cursor: pointer;
     list-style: none;
     user-select: none;
@@ -1159,7 +1268,7 @@
   }
 
   .conversation-card-header:hover {
-    background: rgb(255 255 255 / 4%);
+    background: var(--panel-muted);
   }
 
   .conversation-card-header:focus-visible {
@@ -1169,7 +1278,7 @@
 
   .conversation-card-title {
     display: grid;
-    grid-template-columns: 82px minmax(0, 1fr);
+    grid-template-columns: 68px minmax(0, 1fr);
     flex: 1 1 auto;
     min-width: 0;
     align-items: center;
@@ -1177,11 +1286,16 @@
   }
 
   .conversation-card-title > .ui-tag {
-    width: 82px;
-    justify-content: center;
+    width: 68px;
+    min-height: 20px;
+    justify-content: flex-start;
+    padding: 0 6px;
+    border-color: transparent;
+    background: transparent;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--text-micro);
   }
 
   .conversation-card-summary {
@@ -1786,11 +1900,6 @@
       min-height: 360px;
     }
 
-    .session-summary-title {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
     .session-selector {
       grid-template-columns: 1fr;
       gap: 5px;
@@ -1798,6 +1907,27 @@
 
     .session-picker-popover {
       min-width: 0;
+    }
+
+    .session-summary {
+      padding: 12px 14px;
+    }
+
+    .session-meta {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .control-fact {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+
+    .control-endpoint-summary {
+      grid-template-columns: minmax(0, 1fr) 14px;
+      grid-template-areas:
+        'path chevron'
+        'desc desc';
+      gap: 4px 10px;
     }
 
     .conversation-overview > div {
@@ -2108,44 +2238,6 @@
     box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
   }
 
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .status-item {
-    display: grid;
-    align-content: center;
-    justify-items: start;
-    gap: 8px;
-    min-height: 72px;
-    min-width: 0;
-    padding: 12px 16px;
-    border-right: 1px solid var(--line-soft);
-  }
-
-  .status-item:last-child {
-    border-right: 0;
-  }
-
-  .status-label {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .status-code {
-    color: var(--text);
-    font-size: var(--text-aux);
-    font-family: var(--font-mono);
-  }
-
   .machine-list {
     display: grid;
   }
@@ -2235,18 +2327,6 @@
       grid-template-columns: 1fr;
     }
 
-    .status-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .status-item:nth-child(2n) {
-      border-right: 0;
-    }
-
-    .status-item:nth-child(n + 3) {
-      border-top: 1px solid var(--line-soft);
-    }
-
     .machine-row {
       grid-template-columns: 8px minmax(0, 1fr);
     }
@@ -2266,26 +2346,36 @@
 
   .session-tabs {
     display: flex;
-    gap: 4px;
+    gap: 20px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    padding: 8px 10px 0;
+    padding: 0 16px;
     border-bottom: 1px solid var(--line);
-    background: var(--panel-muted);
   }
 
   .session-tab {
+    position: relative;
     flex: 0 0 auto;
-    padding: 8px 14px;
-    border: 1px solid transparent;
-    border-bottom: 0;
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    padding: 11px 0;
+    border: 0;
     background: transparent;
     color: var(--text-soft);
     font-size: var(--text-aux);
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     transition: color 100ms ease;
+  }
+
+  .session-tab::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 120ms ease;
   }
 
   .session-tab:hover {
@@ -2293,9 +2383,12 @@
   }
 
   .session-tab-active {
-    border-color: var(--line);
-    background: var(--panel);
     color: var(--text);
+    font-weight: 600;
+  }
+
+  .session-tab-active::after {
+    background: var(--text);
   }
 
   .session-tab-dirty {
@@ -2307,6 +2400,13 @@
 
   .session-tab-body {
     padding: 14px;
+  }
+
+  /* 标签页本身已是一张卡，里面的分区不要再套一层边框（双层描边看起来像没对齐的嵌套卡片）。 */
+  .session-tab-body .simple-card {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   /* Conversation pane (paged) */
@@ -2415,11 +2515,13 @@
   }
 
   .context-total-card-main {
-    background: rgb(255 255 255 / 2%);
+    /* 总计只是同一行里的一个数：靠更亮的数字和标签区分，不加底色块免得看起来像残留的嵌套卡片。 */
+    background: transparent;
   }
 
   .context-total-card-main strong {
     color: var(--text);
+    font-size: var(--text-title);
   }
 
   .context-stacked-bar {
@@ -2846,29 +2948,123 @@
     padding: 16px;
   }
 
-  .auto-compact-card-head {
+  .auto-compact-card-head,
+  .config-card-head {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
 
+  .auto-compact-head-copy,
+  .config-head-copy,
+  .control-head-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .auto-compact-head-copy h2,
+  .config-head-copy h2,
+  .control-head-copy h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-subhead);
+    font-weight: 600;
+  }
+
+  .auto-compact-head-copy p,
+  .config-head-copy p,
+  .control-head-copy p {
+    margin: 0;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    line-height: 1.55;
+  }
+
+  /* 开关：原生 checkbox 藏起来，滑块自己画，避免橙色系统控件混进 Darcula 配色 */
   .auto-compact-switch {
     display: inline-flex;
     flex: none;
     align-items: center;
     gap: 8px;
     color: var(--text);
-    font-size: var(--text-body);
+    font-size: var(--text-aux);
     font-weight: 500;
     cursor: pointer;
   }
 
-  .auto-compact-switch input {
-    width: 15px;
-    height: 15px;
-    accent-color: var(--accent);
+  .auto-compact-switch-label {
+    color: var(--text-soft);
+  }
+
+  .ui-switch {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+  }
+
+  .ui-switch input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .ui-switch-track {
+    display: inline-flex;
+    align-items: center;
+    width: 30px;
+    height: 17px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-muted);
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .ui-switch-knob {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    background: var(--text-faint);
+    transition:
+      transform 130ms ease,
+      background 120ms ease;
+  }
+
+  .ui-switch input:checked + .ui-switch-track {
+    border-color: color-mix(in srgb, var(--green) 45%, transparent);
+    background: color-mix(in srgb, var(--green) 22%, transparent);
+  }
+
+  .ui-switch input:checked + .ui-switch-track .ui-switch-knob {
+    transform: translateX(13px);
+    background: var(--green);
+  }
+
+  /* 禁用只掉颜色与指针，轨道尺寸与位置不变 */
+  .ui-switch.is-disabled {
+    cursor: default;
+  }
+
+  .ui-switch.is-disabled input {
+    cursor: default;
+  }
+
+  .ui-switch.is-disabled .ui-switch-track {
+    opacity: 0.45;
+  }
+
+  .ui-switch input:focus-visible + .ui-switch-track {
+    outline: 1px solid var(--text-faint);
+    outline-offset: 2px;
   }
 
   .auto-compact-fields {
@@ -2877,12 +3073,147 @@
     gap: 12px;
   }
 
+  /* 字段编辑器（设置页与会话弹窗共用）：标签在左、控件在右的行列表。
+     之前是等宽网格，五个数字框摊满整行、眼睛要在列间横跳。 */
+  .auto-compact-editor {
+    display: grid;
+    gap: 0;
+  }
+
+  .auto-compact-enable {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 0 4px;
+  }
+
+  .auto-compact-enable-label {
+    color: var(--text);
+    font-size: var(--text-aux);
+    cursor: pointer;
+  }
+
+  .auto-compact-enable-hint {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .auto-compact-rows {
+    display: grid;
+    gap: 0;
+  }
+
+  .auto-compact-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 38px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .auto-compact-label {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+  }
+
+  .auto-compact-default {
+    flex: none;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  .auto-compact-steppers {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .auto-compact-step,
+  .auto-compact-reset {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .auto-compact-step:hover:not(:disabled),
+  .auto-compact-reset:hover:not(:disabled) {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  /* 禁用只掉颜色，尺寸与边框不动，行高不会跟着跳 */
+  .auto-compact-step:disabled,
+  .auto-compact-reset:disabled {
+    border-color: var(--line-soft);
+    color: var(--text-faint);
+    cursor: default;
+  }
+
+  .auto-compact-input {
+    width: 62px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--text-aux);
+    text-align: right;
+  }
+
+  .auto-compact-input:focus {
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
+  .auto-compact-unit {
+    min-width: 24px;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+  }
+
   .auto-compact-footer {
     display: flex;
     /* 桌面端的设置页挤在中间一列里（见 AGENT.md），窄到放不下时整块折行而不是把按钮压成竖排 */
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px 12px;
+  }
+
+  /* 规则说明分条：整段长文本读起来像免责声明，拆成三条才扫得动 */
+  .auto-compact-rules,
+  .config-rules {
+    flex: 1 1 260px;
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 16px;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.6;
   }
 
   .auto-compact-note {
@@ -2896,6 +3227,7 @@
 
   .auto-compact-footer > .ui-button {
     flex: none;
+    align-self: flex-end;
     margin-left: auto;
     white-space: nowrap;
   }
@@ -2940,6 +3272,408 @@
     line-height: 1.5;
   }
 
+  /* Config：按字段编辑 config.json（providers / searxngUrl），整份 JSON 收在折叠面板里 */
+  .config-stack {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+  }
+
+  .config-card {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .config-provider-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  /* 卡片里的空态不需要自己再画一圈边框，也不用 240px 那么高 */
+  .config-card > .ui-empty-wrap {
+    min-height: 120px;
+    border: 0;
+    background: transparent;
+  }
+
+  .config-provider {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg) 40%, transparent);
+  }
+
+  .config-provider-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0 8px 0 0;
+  }
+
+  /* 整条标题栏都是折叠热区；删除按钮留在外面，避免误触收起 */
+  .config-provider-toggle {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 42px;
+    padding: 0 4px 0 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .config-provider-chevron {
+    flex: none;
+    color: var(--text-faint);
+    transition: transform 120ms ease;
+  }
+
+  .config-provider.is-open .config-provider-chevron {
+    transform: rotate(90deg);
+  }
+
+  .config-provider-title {
+    flex: none;
+    min-width: 0;
+    max-width: 40%;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--text-body);
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .config-provider-protocol {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    line-height: 16px;
+  }
+
+  /* 折叠时的摘要：地址可能很长，只能在这里省略 */
+  .config-provider-meta {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .config-provider-flag {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+    border-radius: var(--radius-sm);
+    color: var(--red);
+    font-size: var(--text-micro);
+    line-height: 16px;
+  }
+
+  /* 展开体：顶部一条分隔线，字段之间 10px，比卡片之间的 12px 更紧 */
+  .config-provider-body {
+    display: grid;
+    gap: 10px;
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* 服务商卡片里的输入框比全局矮一档：一个卡片有 6 组字段，38px 会把卡片拉得很长 */
+  .config-provider .text-input {
+    height: 34px;
+  }
+
+  .config-provider .form-field {
+    gap: 6px;
+  }
+
+  .config-provider-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    align-items: start;
+  }
+
+  /* 输入框右侧叠一个图标按钮（API Key 的明文开关）：外框高度由 text-input 决定 */
+  .config-input-with-action {
+    position: relative;
+    display: block;
+  }
+
+  .config-input-with-action > .text-input {
+    padding-right: 38px;
+  }
+
+  .config-input-action {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    transform: translateY(-50%);
+    transition:
+      background 100ms ease,
+      color 100ms ease;
+  }
+
+  .config-input-action:hover {
+    background: var(--panel-hover);
+    color: var(--text);
+  }
+
+  /* 协议二选一：原生 select 的字体与内边距跟旁边的输入框对不齐，所以自绘一组按钮 */
+  .config-segmented {
+    display: inline-flex;
+    box-sizing: border-box;
+    gap: 2px;
+    justify-self: start;
+    /* 与卡片里的 text-input 等高，同一行里才不会有落差 */
+    height: 34px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel-muted);
+  }
+
+  .config-segment {
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    font-family: inherit;
+    font-size: var(--text-aux);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 100ms ease,
+      color 100ms ease;
+  }
+
+  .config-segment:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .config-segment.is-active {
+    background: var(--panel);
+    color: var(--text);
+  }
+
+  .config-segment:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .config-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .config-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    height: 24px;
+    padding: 0 4px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+  }
+
+  .config-chip-label {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .config-chip-remove {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-faint);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .config-chip-remove:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--red) 22%, transparent);
+    color: var(--red);
+  }
+
+  /* 添加模型：输入框与按钮同一行且等高，按钮不参与收缩 */
+  .config-chip-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+    /* 不加限制时输入框会横到卡片另一头，看起来像主输入框 */
+    max-width: 420px;
+  }
+
+  .config-chip-add > .ui-button {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  /* input 的 intrinsic 宽度会把这一行撑出卡片，靠 min-width: 0 才真的能收缩 */
+  .config-chip-add > .text-input {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* 字段名后面的数量：小一号，跟在标题行里不额外占高度 */
+  .config-field-count {
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 500;
+  }
+
+  .config-field-hint {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  .config-field-error {
+    color: var(--red);
+    font-size: var(--text-label);
+    font-weight: 400;
+    line-height: 1.4;
+  }
+
+  /* 窄屏：标题行只留名称和协议，地址摘要没地方放，挤一起会两边都被裁掉 */
+  @media (max-width: 720px) {
+    .config-provider-meta {
+      display: none;
+    }
+
+    .config-provider-title {
+      max-width: none;
+    }
+  }
+
+  .text-input-invalid,
+  .text-input-invalid:focus {
+    border-color: color-mix(in srgb, var(--red) 55%, var(--line));
+    background: color-mix(in srgb, var(--red) 8%, var(--panel-muted));
+  }
+
+  .config-managed-list {
+    display: grid;
+  }
+
+  .config-managed-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .config-managed-row:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .config-managed-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .config-managed-name {
+    color: var(--text);
+    font-size: var(--text-body);
+    font-weight: 500;
+  }
+
+  .config-managed-desc {
+    min-width: 0;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  .config-extra-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .config-extra-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .config-extra-key {
+    flex: none;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+  }
+
+  .config-extra-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .config-json-host {
+    height: 340px;
+    min-height: 200px;
+  }
+
   /* Browser Control / Terminal Control：服务状态 · 技能文档 · 接口文档（实例活在应用里，agent 经 HTTP 操控） */
   .control-stack {
     display: grid;
@@ -2949,16 +3683,66 @@
 
   .control-card {
     display: grid;
-    gap: 14px;
+    gap: 16px;
     padding: 16px;
   }
 
-  .control-card-head {
+  .control-card > .ui-empty-wrap {
+    min-height: 120px;
+    border: 0;
+    background: transparent;
+  }
+
+  .control-head {
     display: flex;
-    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .control-head-count {
+    flex: 0 0 auto;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 服务事实：标签列定宽、值占剩下的宽度，长地址折行而不是断在词中间 */
+  .control-facts {
+    display: grid;
+    gap: 0;
+    margin: 0;
+  }
+
+  .control-fact {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+    padding: 9px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .control-fact dt {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .control-fact dd {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-aux);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .control-fact-mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
   }
 
   .control-note {
@@ -2973,6 +3757,10 @@
     color: var(--text-soft);
   }
 
+  .control-card > .control-note + .control-note {
+    margin-top: -6px;
+  }
+
   /* 未开启时的说明：这是什么、谁提供、怎么打开（条目文案在 browserControl.ts） */
   .control-steps {
     display: grid;
@@ -2984,22 +3772,16 @@
     line-height: 1.6;
   }
 
-  .control-status-value {
-    min-width: 0;
-    color: var(--text);
-    font-size: var(--text-aux);
-    overflow-wrap: anywhere;
-  }
-
   .control-groups {
     display: grid;
-    gap: 16px;
+    gap: 18px;
   }
 
   /* Terminal Control 的会话列表：一行一个会话，标题优先、状态靠右 */
   .control-sessions {
     display: grid;
-    gap: 8px;
+    gap: 0;
+    border-top: 1px solid var(--line-soft);
   }
 
   .control-session {
@@ -3008,10 +3790,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
+    padding: 11px 2px;
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .control-session-main {
@@ -3029,6 +3809,7 @@
   .control-session-meta {
     color: var(--text-faint);
     font-size: var(--text-label);
+    font-family: var(--font-mono);
     overflow-wrap: anywhere;
   }
 
@@ -3040,53 +3821,182 @@
 
   .control-group {
     display: grid;
-    gap: 10px;
+    gap: 6px;
   }
 
   .control-group-head {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
   }
 
-  .control-endpoint-list {
+  .control-method {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+  }
+
+  .control-method-get {
+    border-color: color-mix(in srgb, var(--blue) 32%, transparent);
+    background: color-mix(in srgb, var(--blue) 10%, transparent);
+    color: var(--blue);
+  }
+
+  .control-method-post {
+    border-color: color-mix(in srgb, var(--green) 32%, transparent);
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+    color: var(--green);
+  }
+
+  .control-method-put,
+  .control-method-patch {
+    border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
+    color: var(--amber);
+  }
+
+  .control-method-delete {
+    border-color: color-mix(in srgb, var(--red) 32%, transparent);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
+    color: var(--red);
+  }
+
+  .control-group-count {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 端点是一行一个的清单：路径在前、说明在后，展开才出现参数与示例 */
+  .control-endpoints {
     display: grid;
-    gap: 8px;
+    border-top: 1px solid var(--line-soft);
   }
 
   .control-endpoint {
-    overflow: hidden;
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .control-endpoint-summary {
     display: grid;
-    gap: 3px;
-    padding: 10px 14px;
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr) 14px;
+    grid-template-areas: 'path desc chevron';
+    align-items: baseline;
+    gap: 12px;
+    padding: 8px 2px;
     cursor: pointer;
     list-style: none;
+  }
+
+  .control-endpoint-summary:hover {
+    background: rgb(255 255 255 / 2.5%);
   }
 
   .control-endpoint-summary::-webkit-details-marker {
     display: none;
   }
 
-  .control-endpoint-line {
+  .control-endpoint-path {
+    grid-area: path;
     color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
   }
 
   .control-endpoint-desc {
+    grid-area: desc;
+    overflow: hidden;
     color: var(--text-soft);
     font-size: var(--text-aux);
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .control-endpoint-chevron {
+    grid-area: chevron;
+    align-self: center;
+    color: var(--text-faint);
+    transition: transform 140ms ease;
+  }
+
+  .control-endpoint[open] .control-endpoint-chevron {
+    transform: rotate(90deg);
+  }
+
+  /* 插件页走和 Skills / MCP 相同的列表 + 详情结构：上行信息、下行源码各自滚动。 */
+  .plugin-pane {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .plugin-meta {
+    display: grid;
+    gap: 9px;
+    padding: 13px 16px 15px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .plugin-pane-tags {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .plugin-meta .simple-row {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .plugin-meta .ui-alert {
+    margin: 3px 0 0;
+  }
+
+  .plugin-code-host {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    padding: 14px 16px 16px;
+  }
+
+  .plugin-code-host .code-preview {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+
+  /* 窄屏下 role-layout 高度是 auto，`minmax(0, 1fr)` 会把源码区压成一条，给个下限。 */
+  @media (max-width: 720px) {
+    .plugin-code-host {
+      min-height: 320px;
+    }
+
+    /* 头部放不下时让标签换到下一行，而不是把绝对路径挤成四行。 */
+    .plugin-pane .editor-pane-header {
+      flex-wrap: wrap;
+    }
+
+    .plugin-pane .editor-pane-header > div:first-child {
+      flex: 1 1 100%;
+    }
+  }
+
+  .plugin-error {
+    color: var(--red);
   }
 
   .control-endpoint-body {
     display: grid;
     gap: 12px;
-    padding: 14px;
-    border-top: 1px solid var(--line);
+    padding: 4px 2px 14px;
   }
 
   .control-params {
@@ -3233,6 +4143,20 @@
     color: #1e1f22;
   }
 
+  /* 自动刷新是个开关：圆点表示当前是否在自动拉数据，标签保持稳定（不写「开/关」） */
+  .perf-auto-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-faint);
+    transition: background 120ms ease;
+  }
+
+  .perf-auto-dot-on {
+    background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+  }
+
   /* 时间线：柱高 = 主线程被占用的毫秒数，超过 100ms 变黄、500ms 变红 */
   .perf-chart {
     display: flex;
@@ -3368,4 +4292,192 @@
       grid-column: 1 / -1;
     }
   }
+}
+
+/* Capabilities：新会话默认能力 */
+.capability-page {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.capability-note {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+  line-height: 1.7;
+}
+
+.capability-note strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.capability-note code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--panel-muted);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.capability-card {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.capability-tab-count {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.capability-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.capability-count {
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+}
+
+.capability-count strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.capability-status {
+  margin-left: 6px;
+  color: var(--text-faint);
+}
+
+.capability-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 开关 / 名称 / 描述三列，描述单行省略，点开看全文 */
+.capability-row {
+  display: grid;
+  /* 名称列定宽：工具名都很短，按比例分配会让描述列离得很远 */
+  grid-template-columns: 30px minmax(120px, 200px) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  min-height: 40px;
+}
+
+.capability-row + .capability-row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.capability-row:hover {
+  background: var(--hover, rgb(255 255 255 / 3%));
+}
+
+  /* 整行可点开详情：只有滑块改启用状态，正文点击留给「看详情」 */
+  .capability-row.is-clickable {
+    cursor: pointer;
+  }
+
+.capability-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.capability-description {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.capability-description:hover {
+  background: var(--hover, rgb(255 255 255 / 6%));
+  color: var(--text-soft);
+}
+
+.capability-description-empty {
+  cursor: default;
+}
+
+.capability-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.capability-detail-title code {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-detail-meta {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.capability-detail {
+  display: grid;
+  gap: 6px;
+}
+
+.capability-detail-label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.capability-detail-text {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.capability-empty {
+  padding: 22px 16px;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
 }

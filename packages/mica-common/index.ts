@@ -21,13 +21,19 @@ import {
 } from './git.js';
 import { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 import { splitAutolinkPunctuation } from './autolink.js';
+import { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 import {
-  BTW_STATE_VERSION,
-  btwStatePath,
-  deleteBtwState,
-  readBtwState,
-  writeBtwState,
-} from './btwState.js';
+  CAPABILITY_SELECTION_VERSION,
+  capabilityCounts,
+  capabilitySelectionEquals,
+  cloneCapabilitySelection,
+  emptyCapabilitySelection,
+  isCapabilityEnabled,
+  isCapabilitySelectionEmpty,
+  normalizeCapabilitySelection,
+  setAllCapabilitiesEnabled,
+  setCapabilityEnabled,
+} from './capabilities.js';
 
 export const micaCommon = {
   DisposableStore,
@@ -58,6 +64,16 @@ export const micaCommon = {
   deleteBtwState,
   readBtwState,
   writeBtwState,
+  CAPABILITY_SELECTION_VERSION,
+  capabilityCounts,
+  capabilitySelectionEquals,
+  cloneCapabilitySelection,
+  emptyCapabilitySelection,
+  isCapabilityEnabled,
+  isCapabilitySelectionEmpty,
+  normalizeCapabilitySelection,
+  setAllCapabilitiesEnabled,
+  setCapabilityEnabled,
 };
 
 export type { Disposable } from './disposable.js';
@@ -83,3 +99,36 @@ export { splitAutolinkPunctuation } from './autolink.js';
 export type { AutolinkPunctuationSplit } from './autolink.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
+export {
+  CAPABILITY_SELECTION_VERSION,
+  capabilityCounts,
+  capabilitySelectionEquals,
+  cloneCapabilitySelection,
+  emptyCapabilitySelection,
+  isCapabilityEnabled,
+  isCapabilitySelectionEmpty,
+  normalizeCapabilitySelection,
+  setAllCapabilitiesEnabled,
+  setCapabilityEnabled,
+} from './capabilities.js';
+export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
+export {
+  AUTO_COMPACT_DEFAULTS,
+  AUTO_COMPACT_FIELD_RANGES,
+  AUTO_COMPACT_MAX_INTERVAL_MS,
+  AUTO_COMPACT_MAX_LIMIT,
+  AUTO_COMPACT_MAX_THRESHOLD_K,
+  AUTO_COMPACT_MIN_MODEL_THRESHOLD_K,
+  AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
+  AUTO_COMPACT_NUMERIC_KEYS,
+  isEmptyAutoCompactOverride,
+  normalizeAutoCompactOverride,
+  pruneAutoCompactOverride,
+  resolveAutoCompactSettings,
+} from './autoCompact.js';
+export type {
+  AutoCompactFieldRange,
+  AutoCompactNumericKey,
+  AutoCompactOverride,
+  AutoCompactSettings,
+} from './autoCompact.js';

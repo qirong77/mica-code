@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
+import { AutoCompactFields } from '../components/AutoCompactFields.js';
 import { confirmDialog } from '../components/DialogHost.js';
 import {
   autoCompactCounterTitle,
   autoCompactDraftFromSettings,
   autoCompactKindLabel,
+  autoCompactNumbersFromSettings,
   autoCompactRunLabel,
   autoCompactSettingsFromDraft,
   autoCompactStatusLabel,
@@ -134,76 +136,30 @@ export function AutoCompactPage() {
         ) : !details || !draft ? null : (
           <div className="auto-compact-stack">
             <section className="simple-card auto-compact-card">
-              <div className="auto-compact-card-head">
-                <div className="table-panel-title">
-                  <strong>规则</strong>
-                  <span>{autoCompactStatusLabel(details)}</span>
+              <header className="auto-compact-card-head">
+                <div className="auto-compact-head-copy">
+                  <h2>规则</h2>
+                  <p>{autoCompactStatusLabel(details)}</p>
                 </div>
-                <label className="auto-compact-switch">
-                  <input
-                    type="checkbox"
-                    checked={draft.enabled}
-                    onChange={(event) => setField('enabled', event.target.checked)}
-                  />
-                  启用自动压缩
-                </label>
-              </div>
+              </header>
 
-              <div className="auto-compact-fields">
-                <label className="form-field">
-                  <span>快速压缩阈值（k）</span>
-                  <input
-                    className="text-input"
-                    inputMode="numeric"
-                    value={draft.quickThresholdK}
-                    onChange={(event) => setField('quickThresholdK', digitsOnly(event.target.value))}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>快速压缩上限（次）</span>
-                  <input
-                    className="text-input"
-                    inputMode="numeric"
-                    value={draft.quickLimit}
-                    onChange={(event) => setField('quickLimit', digitsOnly(event.target.value))}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>模型压缩阈值（k）</span>
-                  <input
-                    className="text-input"
-                    inputMode="numeric"
-                    value={draft.modelThresholdK}
-                    onChange={(event) => setField('modelThresholdK', digitsOnly(event.target.value))}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>模型压缩上限（次）</span>
-                  <input
-                    className="text-input"
-                    inputMode="numeric"
-                    value={draft.modelLimit}
-                    onChange={(event) => setField('modelLimit', digitsOnly(event.target.value))}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>压缩间隔（分钟）</span>
-                  <input
-                    className="text-input"
-                    inputMode="numeric"
-                    value={draft.minIntervalMinutes}
-                    onChange={(event) => setField('minIntervalMinutes', digitsOnly(event.target.value))}
-                  />
-                </label>
-              </div>
+              {/* 与会话弹窗同一个组件：字段表、步进、单位只在这里定义一次 */}
+              <AutoCompactFields
+                draft={draft}
+                defaults={autoCompactNumbersFromSettings(details.defaults)}
+                onChange={(key, value) => setField(key, value)}
+                onToggle={(enabled) => setField('enabled', enabled)}
+              />
 
               <div className="auto-compact-footer">
-                <p className="auto-compact-note">
-                  快速压缩是本地清理（不调用模型），且总是先跑：超过它的阈值时单独清一次；只超过模型阈值时
-                  也先清一次，清完仍高于模型阈值才升级为模型压缩（LLM 摘要）。次数用尽后不再压缩，0 表示不做这一类。
-                  两次压缩之间至少间隔「压缩间隔」的分钟数（快速压缩后仍高于模型阈值而升级的那一次算同一次压缩），
-                  免得同一段上下文被反复清，0 表示不限制；阈值另有安全下限（快速 150k、模型 100k）。
-                </p>
+                <ul className="auto-compact-rules">
+                  <li>快速压缩是本地清理（不调用模型），总是先跑；清完仍高于模型阈值才升级为模型压缩（LLM 摘要）。</li>
+                  <li>次数用尽后不再压缩，0 表示不做这一类。</li>
+                  <li>
+                    两次压缩至少间隔「压缩间隔」的分钟数（升级算同一次），0 表示不限制；阈值另有安全下限（快速
+                    150k、模型 100k）。
+                  </li>
+                </ul>
                 <Button
                   onClick={() => setDraft(autoCompactDraftFromSettings(details.defaults))}
                   disabled={loading || saving}
@@ -214,19 +170,23 @@ export function AutoCompactPage() {
             </section>
 
             <section className="simple-card auto-compact-card">
-              <div className="auto-compact-card-head">
-                <div className="table-panel-title">
-                  <strong>运行计数</strong>
-                  <span>按会话记的压缩次数与省下的 token</span>
+              <header className="auto-compact-card-head">
+                <div className="auto-compact-head-copy">
+                  <h2>运行计数</h2>
+                  <p>按会话记的压缩次数与省下的 token</p>
                 </div>
-                <Button
-                  icon={<TrashIcon size={15} />}
-                  title="重置全部"
-                  disabled={details.counters.length === 0 || resetting !== null}
-                  loading={resetting === 'all'}
-                  onClick={() => void reset()}
-                />
-              </div>
+                {details.counters.length > 0 ? (
+                  <Button
+                    icon={<TrashIcon size={14} />}
+                    title="把所有会话的计数清零（不影响设置）"
+                    disabled={resetting !== null}
+                    loading={resetting === 'all'}
+                    onClick={() => void reset()}
+                  >
+                    全部重置
+                  </Button>
+                ) : null}
+              </header>
 
               {details.counters.length === 0 ? (
                 <p className="auto-compact-note">还没有会话触发过自动压缩。</p>
@@ -281,18 +241,16 @@ function CounterRow({
         </span>
       </div>
       <Button
-        icon={<TrashIcon size={15} />}
+        icon={<TrashIcon size={14} />}
         title="重置这个会话的计数"
         disabled={disabled}
         loading={resetting}
         onClick={onReset}
-      />
+      >
+        重置
+      </Button>
     </div>
   );
-}
-
-function digitsOnly(value: string): string {
-  return value.replace(/[^\d]/g, '');
 }
 
 function formatError(error: unknown): string {

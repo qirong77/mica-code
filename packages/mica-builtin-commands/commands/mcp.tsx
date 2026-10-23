@@ -32,7 +32,7 @@ function typeColor(type: string) {
   return undefined;
 }
 
-export function createMcpCommand(services: CommandRuntimeServices) {
+export function createMcpCommand(services: CommandRuntimeServices, agent?: import('../services.js').CommandAgent) {
   return {
     name: 'mcp',
     description: '列出 MCP 服务器和工具；/mcp reconnect <server> 重连指定服务',
@@ -97,6 +97,17 @@ export function createMcpCommand(services: CommandRuntimeServices) {
                           width: nameWidth,
                           color: isSelected ? micaUi.theme.colors.accent : undefined,
                           bold: isSelected,
+                        },
+                        {
+                          key: 'enabled',
+                          content: agent?.capabilitySelection
+                            ? agent.capabilitySelection.disabledMcpServers.includes(server.name)
+                              ? '已关闭'
+                              : ''
+                            : '',
+                          width: 8,
+                          flexShrink: 0,
+                          color: micaUi.theme.colors.warning,
                         },
                         {
                           key: 'status',

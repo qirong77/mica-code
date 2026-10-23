@@ -251,6 +251,29 @@ function createWebApi(env) {
       meta: (sessionId, cwd) => invoke('chat:meta', { sessionId, cwd }),
       models: () => invoke('chat:models'),
       roles: () => invoke('chat:roles'),
+      // 会话级能力（skills / tools / MCP servers）：读取目录与开关、提交选择。
+      // 选择落在会话快照里，同一会话的其他窗口通过 onCapabilitiesUpdated 同步。
+      capabilities: (id, { sessionId, cwd } = {}) =>
+        invoke('chat:capabilities', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      setCapabilities: (id, selection, { sessionId, cwd } = {}) =>
+        invoke('chat:set-capabilities', {
+          id,
+          selection,
+          sessionId: sessionId || null,
+          cwd: cwd || null
+        }),
+      onCapabilitiesUpdated: (callback) => subscribe('chat:capabilities-updated', callback),
+      // 本会话的自动压缩设置（默认值 + 会话覆盖 + 生效值）。
+      autoCompact: (id, { sessionId, cwd } = {}) =>
+        invoke('chat:auto-compact', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      setAutoCompact: (id, override, { sessionId, cwd } = {}) =>
+        invoke('chat:set-auto-compact', {
+          id,
+          override,
+          sessionId: sessionId || null,
+          cwd: cwd || null
+        }),
+      onAutoCompactUpdated: (callback) => subscribe('chat:auto-compact-updated', callback),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
       updateCwd: (sessionId, cwd) => invoke('chat:update-cwd', { sessionId, cwd }),

@@ -16,7 +16,7 @@ class McpProxyTool extends micaTools.MicaTool {
     private readonly serverName: string,
     private readonly toolName: string,
   ) {
-    super(name, description, inputSchema);
+    super(name, description, inputSchema, { source: 'mcp', mcpServer: serverName });
   }
 
   async execute(input: Record<string, unknown>, callbacks?: ToolExecuteCallbacks): Promise<string> {
@@ -110,9 +110,8 @@ async function doCallMcpTool(
 
 function createMcpToolName(serverName: string, toolName: string, usedNames: Set<string>): string {
   const hash = createHash('sha1').update(`${serverName}:${toolName}`).digest('hex').slice(0, 8);
-  const serverPart = sanitizeNamePart(serverName, 20);
-  const toolPart = sanitizeNamePart(toolName, 64);
-  const prefix = `mcp__${serverPart}__`;
+  const toolPart = micaTools.sanitizeToolNamePart(toolName, 64);
+  const prefix = micaTools.mcpToolNamePrefix(serverName);
   const maxToolLength = Math.max(1, 64 - prefix.length - hash.length - 1);
   const base = `${prefix}${toolPart.slice(0, maxToolLength)}_${hash}`;
   let candidate = base;
@@ -123,13 +122,4 @@ function createMcpToolName(serverName: string, toolName: string, usedNames: Set<
   }
   usedNames.add(candidate);
   return candidate;
-}
-
-function sanitizeNamePart(value: string, maxLength: number): string {
-  const sanitized = value
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  const fallback = sanitized || 'tool';
-  return fallback.slice(0, maxLength);
 }

@@ -143,6 +143,47 @@ export const MICA_SESSION_NOTIFICATIONS = {
 } as const;
 
 /**
+ * Mica extension notification: the host is waiting out the retry delay after a
+ * transient provider error and will re-run the same turn (the CLI's 5 attempts
+ * with a fixed 10s delay). The Codex protocol has no "retrying" state, and a
+ * Codex `error` notification would end the run on the client, so without this
+ * the desktop app sits silent for ten seconds per attempt and looks stuck —
+ * then only reports the final failure.
+ */
+export const MICA_TURN_NOTIFICATIONS = {
+  retrying: 'mica/turn/retrying',
+} as const;
+
+/**
+ * Mica extension notification: the resident host changed this session's
+ * capability selection. Other windows/tabs showing the same session refresh
+ * their panel from it; the selection is per session, not per window.
+ */
+export const MICA_CAPABILITY_NOTIFICATIONS = {
+  updated: 'mica/capabilities/updated',
+} as const;
+
+/** `MICA_CAPABILITY_NOTIFICATIONS.updated` payload. */
+export type MicaCapabilitiesSnapshot = {
+  threadId: string | null;
+  disabledSkills: string[];
+  disabledTools: string[];
+  disabledMcpServers: string[];
+};
+
+/** `MICA_TURN_NOTIFICATIONS.retrying` payload. */
+export type MicaTurnRetrying = {
+  threadId?: string;
+  turnId: string | null;
+  /** 1-based number of the attempt that is about to start. */
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  /** Message of the failure that triggered this retry. */
+  error: string;
+};
+
+/**
  * Mica extension notification: the host ran an automatic context compaction
  * (see `apps/cli/src/runtime/autoCompact.ts`) and reports the session's run
  * counters afterwards. The counters are what the desktop app's 自动压缩 panel
@@ -153,6 +194,11 @@ export const MICA_SESSION_NOTIFICATIONS = {
  */
 export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
   updated: 'mica/autoCompact/updated',
+  /**
+   * 本会话的压缩覆盖被改了（面板/CLI 改阈值、或恢复默认）。计数通知只回推
+   * 「压了几次」，设置变更必须单独一条，别的窗口才不会继续显示旧阈值。
+   */
+  overrideUpdated: 'mica/autoCompact/overrideUpdated',
 } as const;
 
 /**
@@ -397,6 +443,24 @@ export const MICA_METHODS = {
   /** Close one By The Way thread (the drawer's tab ✕). Refused while it is answering. */
   btwClose: 'mica/btw/close',
   renameSession: 'mica/session/rename',
+  /** Read the session's capability selection plus the full skill/tool/MCP catalog. */
+  capabilitiesGet: 'mica/capabilities/get',
+  /**
+   * Replace the session's capability selection (skills / tools / MCP servers).
+   * The resident host applies it and a `mica/capabilities/updated` notification
+   * tells every client that has this session open.
+   */
+  capabilitiesSet: 'mica/capabilities/set',
+  /**
+   * 读本会话的自动压缩设置：默认值（宿主上次下发的）、会话覆盖、以及合并后的
+   * 生效值。面板只负责展示和改写覆盖，不做第二套合并逻辑。
+   */
+  autoCompactGet: 'mica/autoCompact/get',
+  /**
+   * 替换本会话的压缩覆盖（只含要覆盖的键）。空对象 = 恢复默认。
+   * 设置属于会话，落盘后其他窗口经 `mica/autoCompact/overrideUpdated` 同步。
+   */
+  autoCompactSet: 'mica/autoCompact/set',
 } as const;
 
 export type MicaBtwAskParams = {

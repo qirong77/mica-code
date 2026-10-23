@@ -85,6 +85,26 @@ export function toolSummary(tool, max = 0) {
 }
 
 /**
+ * 时间线条目里的工具入参是原始 JSON 字符串；解析失败就当成没有结构化入参，
+ * 由调用方回退到原文展示，不能因为一次坏参数把整行摘要吞掉。
+ */
+export function parseToolArgs(text) {
+  const raw = typeof text === 'string' ? text.trim() : ''
+  if (!raw.startsWith('{')) return {}
+  try {
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+/** subagent 时间线里一行工具调用的摘要（与回合日志用同一套取值规则）。 */
+export function toolStepSummary(toolName, argsText) {
+  return toolSummary({ tool: toolName, input: parseToolArgs(argsText) })
+}
+
+/**
  * 回合日志里一行工具调用的主文案。
  *
  * 优先用 app-server 给的 `displayText`（它带工具语义，如 `read /tmp/a.txt :10`）；

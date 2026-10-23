@@ -19,6 +19,7 @@ import {
 } from '@packages/mica-session/index.js';
 import { getActiveContext } from '../app/activeContext.js';
 import { micaContext } from '@packages/mica-context/index.js';
+import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult =
@@ -29,6 +30,10 @@ export type SessionAgentAdapter = {
   getSnapshot(): AgentRuntimeSnapshot;
   loadSnapshot(snapshot: AgentRuntimeSnapshot): void;
   reloadConfig(resetSession?: boolean): void;
+  /** 可选：`/clear`、`/new` 之后把能力开关恢复成新会话默认值。 */
+  setCapabilities?(selection: NonNullable<AgentRuntimeSnapshot['capabilitySelection']>): unknown;
+  /** 可选：`/clear`、`/new` 之后清掉本会话的压缩覆盖。 */
+  setAutoCompactOverride?(override: NonNullable<AgentRuntimeSnapshot['autoCompactOverride']>): unknown;
   toConversationMessages(): MicaUiConversationMessage[];
 };
 
@@ -95,6 +100,13 @@ export class SessionController {
   startNewSession(): void {
     this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
+    // 能力开关属于会话，不属于 agent：新会话回到 config 里的默认值，不能沿用上一条
+    // 会话关掉的工具（否则「新开一个会话」会继承上一轮的临时限制）。
+    if (this.agent.setCapabilities) {
+      this.agent.setCapabilities(micaConfig.readCapabilityDefaults());
+    }
+    // 压缩覆盖同理：新会话不该继承上一条会话调过的阈值。
+    this.agent.setAutoCompactOverride?.({});
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
@@ -156,11 +168,7 @@ export class SessionController {
       turnState: this.currentTurnState,
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
-        displayUsage: resolveDisplayUsage(
-          options.displayUsage,
-          existing?.snapshot.displayUsage,
-          snapshot.lastUsage,
-        ),
+        displayUsage: resolveDisplayUsage(options.displayUsage, existing?.snapshot.displayUsage, snapshot.lastUsage),
       },
     };
     // If the turn-state already changed, the persisted document is definitely
@@ -361,6 +369,8 @@ function toPersistedSnapshot(
     model: snapshot.model,
     effort: snapshot.effort,
     role: snapshot.role,
+    capabilitySelection: snapshot.capabilitySelection,
+    autoCompactOverride: snapshot.autoCompactOverride,
     contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
     messages: snapshot.messages,
     conversationMessages,
@@ -380,6 +390,8 @@ function fromPersistedSnapshot(
     model: snapshot.model,
     effort: snapshot.effort,
     role,
+    capabilitySelection: snapshot.capabilitySelection,
+    autoCompactOverride: snapshot.autoCompactOverride,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
@@ -520,7 +532,8 @@ function deriveTitle(messages: MicaUiConversationMessage[]): string {
   // most recent user prompt instead of the first one.
   const lastUserMessage = messages.findLast(isTitleUserMessage);
   const text = lastUserMessage ? contentToText(lastUserMessage.content) : '';
-  const title = text.replace(/\s+/g, ' ').trim();
+  // 图片占位符（`[Image](路径)`）只属于输入原文，标题里留着会变成一串本地路径。
+  const title = stripMediaPlaceholders(text).replace(/\s+/g, ' ').trim();
   if (!title) return 'Untitled session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
 }

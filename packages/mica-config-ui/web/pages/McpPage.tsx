@@ -5,6 +5,7 @@ import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
+import { mcpStatusLabel, mcpStatusTone, mcpTypeLabel } from '../labels.js';
 import type { ConfigWebMcpDetails } from '../../src/shared/types.js';
 
 export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
@@ -184,8 +185,15 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                   disabled={saving}
                   onClick={() => void selectServer(server.name)}
                 >
-                  <span>{server.name}</span>
-                  <Tag tone={statusColor(server.status)}>{server.status}</Tag>
+                  <span className="role-list-item-copy">
+                    <span className="role-list-item-name" title={server.name}>
+                      {server.name}
+                    </span>
+                    <span className="role-list-item-sub" title={server.target}>
+                      {server.target || mcpTypeLabel(server.type)}
+                    </span>
+                  </span>
+                  <span className={`role-list-item-dot role-list-item-dot-${mcpStatusTone(server.status)}`} />
                 </button>
               ))}
             </div>
@@ -195,12 +203,16 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                   <h3>{selectedServer?.name}</h3>
                   {selectedServer ? (
                     <p className="muted-text editor-pane-subtitle">
-                      {selectedServer.type} · {selectedServer.toolCount} tools
+                      {mcpTypeLabel(selectedServer.type)} · {selectedServer.toolCount} 个工具
                       {selectedServer.error ? ` · ${selectedServer.error}` : ''}
                     </p>
                   ) : null}
                 </div>
-                {selectedServer ? <Tag tone={statusColor(selectedServer.status)}>{selectedServer.status}</Tag> : null}
+                {selectedServer ? (
+                  <Tag tone={mcpStatusTone(selectedServer.status)} dot>
+                    {mcpStatusLabel(selectedServer.status)}
+                  </Tag>
+                ) : null}
               </div>
               <div className="editor-host role-editor-host">
                 <JsonEditor
@@ -216,13 +228,6 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
       </div>
     </PageFrame>
   );
-}
-
-function statusColor(status: string): 'default' | 'green' | 'red' | 'blue' {
-  if (status === 'connected') return 'green';
-  if (status === 'failed') return 'red';
-  if (status === 'connecting') return 'blue';
-  return 'default';
 }
 
 function formatError(error: unknown): string {

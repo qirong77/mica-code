@@ -10,11 +10,11 @@ import {
   useSyncExternalStore
 } from 'react'
 import {
+  IconAdjustments,
   IconArrowDown,
   IconArrowUp,
   IconBolt,
   IconCheck,
-  IconClock,
   IconCommand,
   IconCopy,
   IconCornerUpLeft,
@@ -36,7 +36,7 @@ import {
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
+import { formatTokens as formatSharedTokens, toolIcon } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
@@ -45,7 +45,7 @@ import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
 import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
-import { formatLogElapsed } from './chat-tool-display'
+import { formatLogElapsed, parseToolArgs, toolDisplayName, toolSummary } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
@@ -87,17 +87,19 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { LoopBadge } from './LoopBadge'
-import { LoopPopover } from './LoopPopover'
+import { SessionSettingsDialog } from './SessionSettingsDialog'
 import { Popover } from './Popover'
-import { formatLoopInterval, loopForNode, loopProgressLabel } from './loop-command'
+import { formatLoopInterval, loopForNode } from './loop-command'
 import {
   backgroundTaskStatusLabel,
   buildSubagentTimeline,
   isBackgroundTaskRunning,
   isSubagentRunning,
+  sameTaskDetail,
   subagentStatusLabel,
   taskElapsedMs,
   taskOutputWindowLabel,
+  timelineSignature,
   waitTaskKindLabel,
   waitTaskSummary,
   waitTaskTooltip
@@ -838,12 +840,13 @@ function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
 function useTaskPolling({ task, isRunning, intervalMs, load }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
-  const [now, setNow] = useState(() => Date.now())
   const mountedRef = useRef(true)
   const inFlightRef = useRef(false)
 
   const poll = useCallback(async () => {
     if (inFlightRef.current) return
+    // 页面在后台时不再请求：任务记录只活在 host 里，没人看的时候刷新等于白花往返。
+    if (document.visibilityState === 'hidden') return
     inFlightRef.current = true
     try {
       const res = await load()
@@ -857,7 +860,8 @@ function useTaskPolling({ task, isRunning, intervalMs, load }) {
         setError(res.result.message || '获取详情失败')
         return
       }
-      setDetail(res.result)
+      // 内容没变就复用旧对象，避免每秒把整棵弹窗重渲染一次（见 sameTaskDetail）。
+      setDetail((previous) => (sameTaskDetail(previous, res.result) ? previous : res.result))
       setError(null)
     } catch (err) {
       if (mountedRef.current) setError(String(err?.message || err))
@@ -879,14 +883,33 @@ function useTaskPolling({ task, isRunning, intervalMs, load }) {
   useEffect(() => {
     if (!running) return undefined
     const timer = window.setInterval(poll, intervalMs)
-    const ticker = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => {
-      clearInterval(timer)
-      clearInterval(ticker)
-    }
+    return () => clearInterval(timer)
   }, [running, intervalMs, poll])
 
-  return { detail, error, running, now }
+  return { detail, error, running }
+}
+
+/**
+ * 一行自适应计时（`6m 16s`）。
+ *
+ * 以前弹窗自己拿 `now` 每 250ms/1s 重渲染整棵树，只为了让一个数字变化；
+ * 计时收进这个组件后，父级不再跟着跳。
+ */
+function ElapsedText({ task, running }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!running) {
+      setNow(Date.now())
+      return undefined
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [running])
+
+  const elapsed = taskElapsedMs(task, now)
+  if (elapsed == null) return null
+  return <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
 }
 
 function useStickToBottom(watch) {
@@ -936,50 +959,178 @@ function TaskDetailModal({
   )
 }
 
-function SubagentTimelineStep({ step }) {
-  if (step.kind === 'thinking') {
-    return <div className="chat-modal-prose is-dim">{step.text}</div>
-  }
-  if (step.kind === 'text') {
-    return <Markdown text={step.text} />
-  }
+/** 时间线默认只渲染末尾这么多步，更早的折成一行按钮（长任务动辄上百步）。 */
+const SUBAGENT_STEP_WINDOW = 24
+/** 思考默认只显示开头这么多字符，展开才渲染全文。 */
+const THINKING_PREVIEW_CHARS = 320
+
+/**
+ * 一次工具调用：默认只有一行（图标 + 工具名 + 参数摘要 + 行数），
+ * 展开才把入参和输出挂进 DOM。
+ *
+ * 之前的实现用 `<details>` 直接塞两个 `<pre>`：折叠时 DOM 里也已经有了全部
+ * 文本，120 条 × 上千字符直接把弹窗拖死。这里的 body 只在展开时存在。
+ */
+function SubagentToolStep({ step, expanded, active, onToggle }) {
+  const input = useMemo(() => parseToolArgs(step.argsText), [step.argsText])
+  const name = toolDisplayName({ tool: step.toolName, input })
+  const summary = toolSummary({ tool: step.toolName, input })
+  const resultLines = step.resultText ? step.resultText.replace(/\n+$/, '').split('\n').length : 0
+  // 最后一个还没有结果的调用就是正在跑的那一次，标成「运行中」而不是「无输出」。
+  const pending = !resultLines && active
+
+  return (
+    <div className={`chat-timeline-step chat-timeline-tool ${expanded ? 'is-open' : ''}`}>
+      <button
+        type="button"
+        className="chat-timeline-tool-row"
+        aria-expanded={expanded}
+        title={summary || name}
+        onClick={() => onToggle(step.key)}
+      >
+        <span className="chat-timeline-caret" aria-hidden="true">
+          {expanded ? '▾' : '▸'}
+        </span>
+        <span className="chat-timeline-icon" aria-hidden="true">
+          {toolIcon(step.toolName)}
+        </span>
+        <span className="chat-timeline-tool-name">{name}</span>
+        <span className="chat-timeline-tool-summary">{summary}</span>
+        <span className={`chat-timeline-tool-meta ${pending ? 'is-running' : ''}`}>
+          {resultLines ? `${resultLines} 行` : pending ? '运行中' : '无输出'}
+        </span>
+      </button>
+      {expanded ? (
+        <div className="chat-timeline-tool-body">
+          <div className="chat-timeline-block">
+            <div className="chat-timeline-block-head">参数</div>
+            <CodeView
+              className="chat-timeline-code"
+              text={step.argsText}
+              language={input && Object.keys(input).length ? 'json' : 'text'}
+              wrap
+            />
+          </div>
+          {resultLines ? (
+            <div className="chat-timeline-block">
+              <div className="chat-timeline-block-head">输出</div>
+              <CodeView className="chat-timeline-code" text={step.resultText} wrap />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** 思考：左侧一条淡色竖线，默认只给开头一段，长文才出现「展开」。 */
+function SubagentThinkingStep({ step, expanded, onToggle }) {
+  const clipped = step.text.length > THINKING_PREVIEW_CHARS
+  const text =
+    expanded || !clipped ? step.text : `${step.text.slice(0, THINKING_PREVIEW_CHARS).trimEnd()}…`
+  return (
+    <div className="chat-timeline-step chat-timeline-thinking">
+      <div className="chat-timeline-thinking-text">{text}</div>
+      {clipped ? (
+        <button type="button" className="chat-timeline-more" onClick={() => onToggle(step.key)}>
+          {expanded ? '收起思考' : '展开思考'}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function SubagentTimelineStepView({ step, expanded, active, onToggle }) {
   if (step.kind === 'tool') {
+    return <SubagentToolStep step={step} expanded={expanded} active={active} onToggle={onToggle} />
+  }
+  if (step.kind === 'thinking') {
+    return <SubagentThinkingStep step={step} expanded={expanded} onToggle={onToggle} />
+  }
+  if (step.kind === 'tool_result') {
+    // 时间线被截断后可能出现没有对应调用的孤立结果，单独给一块。
     return (
-      <details className="chat-modal-step">
-        <summary>
-          {step.toolName} {compactLine(step.text, 90)}
-        </summary>
-        <pre>{step.text}</pre>
-      </details>
+      <div className="chat-timeline-step chat-timeline-text">
+        <div className="chat-timeline-block-head">{step.toolName || '工具'} 结果</div>
+        <CodeView className="chat-timeline-code" text={step.text} wrap />
+      </div>
     )
   }
   return (
-    <details className="chat-modal-step">
-      <summary>{step.toolName} 结果</summary>
-      <pre>{step.text}</pre>
-    </details>
+    <div className="chat-timeline-step chat-timeline-text">
+      <Markdown text={step.text} />
+    </div>
   )
+}
+
+// 轮询会不断给出新的 detail 对象；只要这一步的内容没变（引用稳定）就不重渲染，
+// 流式长任务里每秒上百次 markdown 解析就是这么省下来的。
+const SubagentTimelineStep = memo(SubagentTimelineStepView)
+
+function SubagentTimeline({ steps, running, expanded, onToggle }) {
+  const [showAll, setShowAll] = useState(false)
+  const hidden = showAll ? 0 : Math.max(0, steps.length - SUBAGENT_STEP_WINDOW)
+  const visible = hidden > 0 ? steps.slice(hidden) : steps
+  const lastKey = steps.at(-1)?.key
+
+  return (
+    <div className="chat-timeline">
+      {hidden > 0 ? (
+        <button type="button" className="chat-timeline-earlier" onClick={() => setShowAll(true)}>
+          显示更早的 {hidden} 步
+        </button>
+      ) : null}
+      {visible.map((step) => (
+        <SubagentTimelineStep
+          key={step.key}
+          step={step}
+          expanded={expanded.has(step.key)}
+          active={running && step.key === lastKey}
+          onToggle={onToggle}
+        />
+      ))}
+    </div>
+  )
+}
+
+function subagentStatusClass(status) {
+  if (status === 'running') return 'is-running'
+  if (status === 'failed') return 'is-error'
+  return 'is-done'
 }
 
 // `runKey` 是持有这个 run 的节点 id（工作区只有一份，所以就是本节点的 id）：
 // 任务记录只活在 host 进程里，所以详情/停止必须打到那个 run 上。
-function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
+function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop }) {
   const load = useCallback(
     () => window.mica.chat.subagentDetail(runKey, initialTask.taskId),
     [runKey, initialTask.taskId]
   )
-  const { detail, error, running, now } = useTaskPolling({
+  const { detail, error, running } = useTaskPolling({
     task: initialTask,
     isRunning: isSubagentRunning,
-    intervalMs: 1000,
+    intervalMs: 1500,
     load
   })
   const [stopping, setStopping] = useState(false)
+  const [expanded, setExpanded] = useState(() => new Set())
   const task = detail?.task || initialTask
-  const steps = useMemo(() => buildSubagentTimeline(task), [task])
-  const { bodyRef, onBodyScroll } = useStickToBottom(task)
-  const elapsed = taskElapsedMs(task, now)
+  // 时间线是 append-only 的，用内容指纹当依赖：轮询给的数组引用每秒都新，
+  // 直接依赖它会让所有步骤跟着重建，memo 全部失效。
+  const signature = timelineSignature(task)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 指纹已经覆盖 timeline 内容
+  const steps = useMemo(() => buildSubagentTimeline(task), [signature])
+  // 只在步骤数变化时贴底：内容长高不算（否则展开一段输出就被拽回底部）。
+  const { bodyRef, onBodyScroll } = useStickToBottom(steps.length)
   const usage = task.usage
+  const toggleStep = useCallback((key) => {
+    setExpanded((previous) => {
+      const next = new Set(previous)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   const stop = async () => {
     if (stopping) return
@@ -999,16 +1150,19 @@ function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
       meta={
         <ModalMeta
           items={[
-            subagentStatusLabel(task.status),
-            elapsed != null ? (
-              <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
-            ) : null,
+            <span className={`chat-modal-status ${subagentStatusClass(task.status)}`} key="status">
+              {subagentStatusLabel(task.status)}
+            </span>,
+            <ElapsedText task={task} running={running} key="elapsed" />,
             task.model,
             task.effort,
             usage
-              ? `in ${formatTokens(usage.inputTokens)} · out ${formatTokens(usage.outputTokens)} · cached ${formatTokens(usage.cachedInputTokens)} · ${usage.records} req`
+              ? `↑${formatTokens(usage.inputTokens)} ↓${formatTokens(usage.outputTokens)} · 缓存 ${formatTokens(usage.cachedInputTokens)} · ${usage.records} 次请求`
               : null,
-            task.taskId
+            steps.length ? `${steps.length} 步` : null,
+            <span className="chat-modal-id" title={task.taskId} key="id">
+              {compactLine(task.taskId, 28)}
+            </span>
           ]}
         />
       }
@@ -1024,16 +1178,25 @@ function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
       }
     >
       {error && <div className="chat-modal-note is-warn">{error}</div>}
-      {task.prompt && (
-        <details className="chat-modal-step">
+      {task.prompt ? (
+        <details className="chat-timeline-prompt">
           <summary>任务提示词</summary>
           <pre className="chat-modal-pre">{textOf(task.prompt)}</pre>
         </details>
+      ) : null}
+      {task.timelineTruncated ? (
+        <div className="chat-modal-note">较早的步骤已被丢弃（只保留最近 120 步）。</div>
+      ) : null}
+      {steps.length ? (
+        <SubagentTimeline
+          steps={steps}
+          running={running}
+          expanded={expanded}
+          onToggle={toggleStep}
+        />
+      ) : (
+        <div className="chat-modal-empty">{running ? '正在等待第一个步骤…' : '没有步骤记录。'}</div>
       )}
-      {task.timelineTruncated && <div className="chat-modal-note">较早的步骤已省略。</div>}
-      {steps.map((step) => (
-        <SubagentTimelineStep key={step.key} step={step} />
-      ))}
       {task.result && (
         <ModalSection title="结果">
           <Markdown text={textOf(task.result)} />
@@ -1044,12 +1207,14 @@ function SubagentDetailModal({ runKey, task: initialTask, onClose, onStop }) {
   )
 }
 
-function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
+const SubagentDetailModal = memo(SubagentDetailModalView)
+
+function BackgroundTaskModalView({ runKey, task: initialTask, onClose, onKill }) {
   const load = useCallback(
     () => window.mica.chat.backgroundTaskOutput(runKey, initialTask.id, 32000),
     [runKey, initialTask.id]
   )
-  const { detail, error, running, now } = useTaskPolling({
+  const { detail, error, running } = useTaskPolling({
     task: initialTask,
     isRunning: isBackgroundTaskRunning,
     intervalMs: 1500,
@@ -1058,7 +1223,6 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
   const task = detail?.task || initialTask
   const content = detail?.content || ''
   const { bodyRef, onBodyScroll } = useStickToBottom(detail)
-  const elapsed = taskElapsedMs(task, now)
 
   return (
     <TaskDetailModal
@@ -1069,9 +1233,7 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
         <ModalMeta
           items={[
             backgroundTaskStatusLabel(task.status),
-            elapsed != null ? (
-              <span className="tabular-nums">{formatLogElapsed(elapsed)}</span>
-            ) : null,
+            <ElapsedText task={task} running={running} key="elapsed" />,
             task.exitCode != null ? `exit ${task.exitCode}` : null,
             task.signal,
             detail ? <span className="tabular-nums">{taskOutputWindowLabel(detail)}</span> : null,
@@ -1111,6 +1273,9 @@ function BackgroundTaskModal({ runKey, task: initialTask, onClose, onKill }) {
     </TaskDetailModal>
   )
 }
+
+// 输出可能有几万行，主对话每 250ms 的计时重渲染不该把它整棵树 diff 一遍。
+const BackgroundTaskModal = memo(BackgroundTaskModalView)
 
 // wait_for 的等待记录只活在 app-server 进程里，快照里就是全部信息（条件标签、
 // 原因、已轮询次数、最近一次观察），所以详情不需要额外的 host 请求；dock 每秒
@@ -1976,6 +2141,21 @@ function statusLabel(phase, toolNames = []) {
   }
 }
 
+// 重试是 host 内部行为（最多 5 次、固定 10s），没有这两段文案时，等待期间与卡死
+// 无法区分：状态行只说第几次，会话里的 notice 额外带上一次失败的原因。
+export function retryStatusLabel(retryInfo) {
+  if (!retryInfo) return ''
+  const seconds = Math.max(1, Math.round((Number(retryInfo.delayMs) || 0) / 1000))
+  return `retrying ${retryInfo.attempt}/${retryInfo.maxAttempts} · ${seconds}s`
+}
+
+export function retryNoticeText(retryInfo) {
+  if (!retryInfo) return ''
+  const seconds = Math.max(1, Math.ceil((Number(retryInfo.delayMs) || 0) / 1000))
+  const line = `请求暂时失败，将在 ${seconds}s 后自动重试（第 ${retryInfo.attempt}/${retryInfo.maxAttempts} 次）`
+  return retryInfo.error ? `${line}\n错误：${retryInfo.error}` : line
+}
+
 function modelSummary(meta) {
   if (!meta) return ''
   const model = meta.model || meta.providerId || ''
@@ -2358,8 +2538,9 @@ export function ChatView({
   const [taskDetail, setTaskDetail] = useState(null)
   // 点开的回合日志详情（单槽位）：存消息 id 而不是快照，行还在流式更新时弹窗跟着刷新。
   const [activityDetailId, setActivityDetailId] = useState(null)
-  // 输入框右侧时钟图标点开的定时任务面板
-  const [loopOpen, setLoopOpen] = useState(false)
+  // 输入框右侧齿轮点开的「会话设置」弹窗。存当前分类（能力 / 压缩 / 定时任务），
+  // null 表示关闭；三块开关都落在会话快照，不落到应用设置。
+  const [settingsSection, setSettingsSection] = useState(null)
   // By The Way（CLI 的 /btw）：线程活在 app-server 里，这里只存投影。
   // 一个会话可以有多个 tab（= 多条线程），按线程 id 存各自的快照；`btwActiveId` 是当前
   // 显示的那一个。快照整份替换，所以这里只需要一张 id → thread 的表。
@@ -2432,6 +2613,9 @@ export function ChatView({
   const [killingTaskId, setKillingTaskId] = useState(null)
   const [stopping, setStopping] = useState(false)
   const [phase, setPhase] = useState('idle')
+  // 当前 turn 正在 host 内部重试：{ attempt, maxAttempts, delayMs, error }。
+  // 只在 running 时影响状态行，收到响应（step_start/text/...）后清空。
+  const [retryInfo, setRetryInfo] = useState(null)
   const [runStartedAt, setRunStartedAt] = useState(0)
   // 最近一次 turn 的结束结果：{ state: 'completed' | 'error', durationMs }。
   // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
@@ -2622,7 +2806,30 @@ export function ChatView({
     [updateMessages]
   )
 
+  // 复用同一条 notice（按 command 认领上一次的位置）：重试每次都刷新同一条，
+  // 而不是往会话里堆 5 条。
+  const upsertNotice = useCallback(
+    (text, variant = 'info', command = '') => {
+      if (!text) return null
+      updateMessages((previous) => {
+        const index = previous.findLastIndex(
+          (message) => message.kind === 'notice' && command && message.command === command
+        )
+        if (index < 0) {
+          return [
+            ...previous,
+            { id: uid('notice'), kind: 'notice', role: 'notice', text, variant, command }
+          ]
+        }
+        return previous.map((message, i) => (i === index ? { ...message, text, variant } : message))
+      })
+    },
+    [updateMessages]
+  )
+
   const openTaskDetail = useCallback((kind, task) => setTaskDetail({ kind, task }), [])
+  // 稳定的关闭回调：任务详情是 memo 组件，内联箭头会让它每次 tick 都重渲染。
+  const closeTaskDetail = useCallback(() => setTaskDetail(null), [])
   // 回合日志的点开动作也必须是引用稳定的：TurnLogItem 是 memo 的，闭包一变，
   // 已经跑完的行就会跟着 250ms 计时器重渲染。
   const openActivityDetail = useCallback((message) => setActivityDetailId(message?.id ?? null), [])
@@ -2658,7 +2865,7 @@ export function ChatView({
   const handleLoopStart = useCallback(
     ({ intervalMs, task }) => {
       void startLoop({ intervalMs, task })
-      setLoopOpen(false)
+      setSettingsSection(null)
     },
     [startLoop]
   )
@@ -3351,15 +3558,18 @@ export function ChatView({
           setRunning(true)
           setStopping(false)
           setPhase('connecting')
+          setRetryInfo(null)
           setRunStartedAt((current) => current || timestamp)
           break
         }
         case 'reasoning':
           setPhase('thinking')
+          setRetryInfo(null)
           appendPart('reasoning', event.part?.text || '', timestamp)
           break
         case 'text':
           setPhase('streaming')
+          setRetryInfo(null)
           appendPart('text', event.part?.text || '', timestamp)
           break
         case 'tool_use': {
@@ -3402,6 +3612,7 @@ export function ChatView({
             })
           })
           setPhase('working')
+          setRetryInfo(null)
           break
         }
         case 'error':
@@ -3409,6 +3620,20 @@ export function ChatView({
           appendNotice(event.error?.data?.message || event.error?.name || '运行出错', 'error')
           setPhase('error')
           break
+        case 'retrying': {
+          // host 内部重试：状态行显示第几次，会话里留一条可复用的提示
+          // （command 固定，重试期间反复替换同一行）。
+          const retry = {
+            attempt: Number(event.attempt) || 0,
+            maxAttempts: Number(event.maxAttempts) || 0,
+            delayMs: Number(event.delayMs) || 0,
+            error: String(event.error || '')
+          }
+          setRetryInfo(retry)
+          setPhase('retrying')
+          upsertNotice(retryNoticeText(retry), 'error', '/retry')
+          break
+        }
         case 'notice':
           // Host 侧非致命降级（stale --dir、MCP 初始化失败、游离 rejection）：
           // 只提示，不改变运行状态，turn 继续。
@@ -3461,6 +3686,7 @@ export function ChatView({
           finishedRef.current = true
           setRunning(false)
           setStopping(false)
+          setRetryInfo(null)
           setPhase(event.part?.reason === 'error' ? 'error' : 'idle')
           // 运行结束后状态行左侧展示结果（对齐 CLI WorkingStatus 的 completed/error）。
           const turnStartedAt = turnStartedAtRef.current
@@ -3521,7 +3747,8 @@ export function ChatView({
       updateMessages,
       setBackgroundTasks,
       setSubagentTasks,
-      applyBtwThread
+      applyBtwThread,
+      upsertNotice
     ]
   )
   const applyEventRef = useLatest(applyEvent)
@@ -5196,7 +5423,7 @@ export function ChatView({
   const [btwWidth, setBtwWidth] = useSharedState('btwWidth', null)
   // 切到别的对话时收起定时任务与 btw 面板：两者描述的都是上一个会话。
   useEffect(() => {
-    setLoopOpen(false)
+    setSettingsSection(null)
     setBtwOpen(false)
   }, [nodeId])
 
@@ -5221,7 +5448,11 @@ export function ChatView({
         {running ? (
           <>
             <IconLoader2 size={11} className="animate-spin" />
-            <span>{statusLabel(displayPhase, runningToolNames)}</span>
+            {retryInfo ? (
+              <span className="chat-status-retry">{retryStatusLabel(retryInfo)}</span>
+            ) : (
+              <span>{statusLabel(displayPhase, runningToolNames)}</span>
+            )}
             <PhaseElapsedLabel startedAt={phaseElapsedStartedAt} />
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
@@ -5525,22 +5756,28 @@ export function ChatView({
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
           <ComposerQuoteStrip text={input} onRemove={removeQuoteFromComposer} />
-          {loopOpen && (
-            <LoopPopover
-              loop={activeLoop}
-              draft={input}
-              onStart={handleLoopStart}
-              onSetInterval={(intervalMs) =>
-                activeLoop && window.mica.loops.setInterval(nodeId, intervalMs).catch(() => {})
-              }
-              onSetTask={(task) =>
-                activeLoop && window.mica.loops.setTask(nodeId, task).catch(() => {})
-              }
-              onPause={() => window.mica.loops.setStatus(nodeId, 'paused').catch(() => {})}
-              onResume={() => window.mica.loops.setStatus(nodeId, 'active').catch(() => {})}
-              onFireNow={() => window.mica.loops.fireNow(nodeId).catch(() => {})}
-              onStop={() => window.mica.loops.stop(nodeId).catch(() => {})}
-              onClose={() => setLoopOpen(false)}
+          {settingsSection && (
+            <SessionSettingsDialog
+              nodeId={nodeId}
+              sessionId={sessionIdRef.current}
+              cwd={cwd}
+              running={running || remoteRunning}
+              section={settingsSection}
+              loopProps={{
+                loop: activeLoop,
+                running: loopRunning,
+                draft: input,
+                onStart: handleLoopStart,
+                onSetInterval: (intervalMs) =>
+                  activeLoop && window.mica.loops.setInterval(nodeId, intervalMs).catch(() => {}),
+                onSetTask: (task) =>
+                  activeLoop && window.mica.loops.setTask(nodeId, task).catch(() => {}),
+                onPause: () => window.mica.loops.setStatus(nodeId, 'paused').catch(() => {}),
+                onResume: () => window.mica.loops.setStatus(nodeId, 'active').catch(() => {}),
+                onFireNow: () => window.mica.loops.fireNow(nodeId).catch(() => {}),
+                onStop: () => window.mica.loops.stop(nodeId).catch(() => {})
+              }}
+              onClose={() => setSettingsSection(null)}
             />
           )}
           <div
@@ -5770,21 +6007,6 @@ export function ChatView({
                   <IconMessageChatbot size={13} />
                 )}
               </button>
-              <button
-                type="button"
-                className={`chat-composer-schedule ${activeLoop ? (activeLoop.status === 'active' ? 'is-active' : 'is-paused') : ''}`}
-                title={
-                  activeLoop
-                    ? `定时任务：${loopProgressLabel(activeLoop)}（点击调整）`
-                    : '设置定时任务（按间隔自动发送输入框里的内容）'
-                }
-                aria-label="定时任务"
-                aria-pressed={loopOpen}
-                data-popover-trigger="loop"
-                onClick={() => setLoopOpen((open) => !open)}
-              >
-                <IconClock size={13} />
-              </button>
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}
               {running ? (
@@ -5825,6 +6047,19 @@ export function ChatView({
                   <IconSend size={13} />
                 </button>
               ) : null}
+              {/* 会话设置固定排在动作区最右：它是常驻入口，不该跟着运行态（停止/发送）
+                  在两端浮动。 */}
+              <button
+                type="button"
+                className={`chat-composer-capabilities${settingsSection ? ' is-active' : ''}`}
+                title="会话设置：能力、自动压缩、定时任务（只影响当前会话）"
+                aria-label="会话设置"
+                aria-haspopup="dialog"
+                aria-expanded={Boolean(settingsSection)}
+                onClick={() => setSettingsSection((current) => (current ? null : 'capabilities'))}
+              >
+                <IconAdjustments size={13} />
+              </button>
             </div>
           </div>
           {imagePreview && (
@@ -5849,7 +6084,7 @@ export function ChatView({
           <SubagentDetailModal
             runKey={runKey}
             task={taskDetail.task}
-            onClose={() => setTaskDetail(null)}
+            onClose={closeTaskDetail}
             onStop={stopSubagent}
           />
         )}
@@ -5857,7 +6092,7 @@ export function ChatView({
           <BackgroundTaskModal
             runKey={runKey}
             task={taskDetail.task}
-            onClose={() => setTaskDetail(null)}
+            onClose={closeTaskDetail}
             onKill={killBackgroundTask}
           />
         )}
@@ -5867,7 +6102,7 @@ export function ChatView({
             // 就用点开时的快照，弹窗不会突然空白。
             task={waitTasks.find((item) => item.id === taskDetail.task.id) || taskDetail.task}
             now={taskNow}
-            onClose={() => setTaskDetail(null)}
+            onClose={closeTaskDetail}
           />
         )}
         {activityDetailMessage?.kind === 'tool' && (

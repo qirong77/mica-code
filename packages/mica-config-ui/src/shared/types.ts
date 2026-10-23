@@ -4,6 +4,7 @@ export type ConfigWebSection =
   | 'roles'
   | 'mcp'
   | 'skills'
+  | 'capabilities'
   | 'plugins'
   | 'autoCompact'
   | 'browserControl'
@@ -157,6 +158,19 @@ export type ConfigWebSkill = {
 export type ConfigWebSkillsDetails = {
   root: string;
   skills: ConfigWebSkill[];
+};
+
+/**
+ * 新会话的默认能力。会话自身的开关存在 session snapshot 里，这里只决定
+ * 「以后新建会话时哪些默认打开」，不会改写已经存在的会话。
+ */
+export type ConfigWebCapabilityDefaults = {
+  skills: Array<{ name: string; description: string }>;
+  tools: Array<{ name: string; description: string; source: 'builtin' | 'runtime' }>;
+  mcpServers: string[];
+  disabledSkills: string[];
+  disabledTools: string[];
+  disabledMcpServers: string[];
 };
 
 export type ConfigWebPlugin = {

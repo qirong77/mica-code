@@ -35,6 +35,7 @@ import type {
 } from '../shared/types.js';
 import type { PersistedSession } from '@packages/mica-session/index.js';
 import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
+export { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
 
 let mcpInitialized = false;
 
@@ -134,6 +135,7 @@ export function getSkillsDetails(): ConfigWebSkillsDetails {
     }),
   };
 }
+
 
 export function writeSkill(name: string, content: string): ConfigWebSkillsDetails {
   const skill = findEditableSkill(name);

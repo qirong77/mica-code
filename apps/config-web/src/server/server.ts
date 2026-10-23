@@ -242,6 +242,15 @@ async function resolveApiCall(
 
     case '/api/details/mcp':
       return method === 'GET' ? get('readMcpDetails') : METHOD_NOT_ALLOWED;
+    case '/api/details/capabilities':
+      if (method === 'GET') return get('readCapabilityDefaults')
+      if (method === 'PUT')
+        return get('writeCapabilityDefaults', {
+          disabledSkills: body.disabledSkills,
+          disabledTools: body.disabledTools,
+          disabledMcpServers: body.disabledMcpServers,
+        })
+      return METHOD_NOT_ALLOWED
     case '/api/details/skills':
       return method === 'GET' ? get('readSkillsDetails') : METHOD_NOT_ALLOWED;
     case '/api/details/roles':

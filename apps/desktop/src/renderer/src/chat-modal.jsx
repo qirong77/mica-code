@@ -1,6 +1,19 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { IconX } from '@tabler/icons-react'
+
+/**
+ * 当前打开的弹窗（后打开的在栈顶）。
+ *
+ * Esc 只关栈顶那一层：套一层的详情弹窗（会话设置 → 能力详情）以前各自监听 window，
+ * 一次 Esc 会把两层一起关掉。BTW 抽屉的 capture 监听也据此判断是否让位。
+ */
+const modalStack = []
+
+/** 有弹窗打开时，外层容器（BTW 抽屉）的 Esc 要让位给栈顶弹窗。 */
+export function isModalOpen() {
+  return modalStack.length > 0
+}
 
 /**
  * 详情弹窗的唯一外壳（上下文占用、子代理、后台任务、工具调用、思考共用）。
@@ -18,24 +31,39 @@ export function ModalShell({
   subtitle = null,
   meta = null,
   actions = null,
+  /** 表单类弹窗的底部动作区；详情弹窗不放 footer 时 body 直接贴底。 */
+  footer = null,
   onClose,
   bodyRef,
   onBodyScroll,
+  /** 套在另一个弹窗里时置 true：不叠第二层遮罩，只压暗一点点区分层级。 */
+  nested = false,
   className = '',
   children
 }) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
   useEffect(() => {
+    const entry = { close: () => closeRef.current?.() }
+    modalStack.push(entry)
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return
-      onClose?.()
+      if (modalStack[modalStack.length - 1] !== entry) return
+      event.stopPropagation()
+      entry.close()
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      const index = modalStack.indexOf(entry)
+      if (index >= 0) modalStack.splice(index, 1)
+    }
+  }, [])
 
   return createPortal(
     <div
-      className="chat-modal-overlay no-drag"
+      className={`chat-modal-overlay no-drag${nested ? ' is-nested' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label={typeof title === 'string' ? title : undefined}
@@ -46,14 +74,20 @@ export function ModalShell({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="chat-modal-header">
-          {icon ? (
-            <span className="chat-modal-mark" aria-hidden="true">
-              {icon}
-            </span>
-          ) : null}
+          {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致 */}
+          <span className={`chat-modal-mark${icon ? '' : ' is-empty'}`} aria-hidden="true">
+            {icon}
+          </span>
           <div className="chat-modal-heading">
             <span className="chat-modal-title">{title}</span>
-            {subtitle ? <span className="chat-modal-subtitle">{subtitle}</span> : null}
+            {subtitle ? (
+              <span
+                className="chat-modal-subtitle"
+                title={typeof subtitle === 'string' ? subtitle : undefined}
+              >
+                {subtitle}
+              </span>
+            ) : null}
           </div>
           <div className="chat-modal-actions">
             {actions}
@@ -72,6 +106,7 @@ export function ModalShell({
         <div ref={bodyRef} className="chat-modal-body" onScroll={onBodyScroll}>
           {children}
         </div>
+        {footer ? <footer className="chat-modal-footer">{footer}</footer> : null}
       </div>
     </div>,
     document.body

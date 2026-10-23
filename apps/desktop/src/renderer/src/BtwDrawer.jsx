@@ -18,6 +18,7 @@ import {
 import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
+import { isModalOpen } from './chat-modal'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ToolDetailDialog } from './chat-tool-detail'
 import {
@@ -334,7 +335,10 @@ export function BtwDrawer({
   const closeRef = useLatest(onClose)
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') closeRef.current?.()
+      if (event.key !== 'Escape') return
+      // 抽屉里打开的详情弹窗先接管 Esc（它自己监听在栈顶），这里让位
+      if (isModalOpen()) return
+      closeRef.current?.()
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
@@ -393,7 +397,7 @@ export function BtwDrawer({
           title="关闭（Esc）"
           onClick={() => onClose?.()}
         >
-          <IconX size={13} />
+          <IconX size={14} />
         </button>
       </header>
       {/* tab 条：一个 tab 就是 host 里的一条独立线程（自己的子代理与上下文）。

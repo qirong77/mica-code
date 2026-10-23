@@ -28,6 +28,10 @@ export default defineConfig({
         find: '@mica-config-ui/session-view',
         replacement: resolve('../../packages/mica-config-ui/src/server/sessionView.ts')
       },
+      {
+        find: '@mica-config-ui/capability-defaults',
+        replacement: resolve('../../packages/mica-config-ui/src/server/capabilityDefaults.ts')
+      },
       { find: '@packages', replacement: resolve('../../packages') }
     ]
   },

@@ -35,6 +35,7 @@ export function PerformancePage() {
   const [sortKey, setSortKey] = useState<SortKey>('cost');
   const [levelFilter, setLevelFilter] = useState<'all' | 'error' | 'warn'>('all');
   const RefreshIcon = appIcons.refresh;
+  const TrashIcon = appIcons.trash;
 
   const load = useCallback(async () => {
     setError(null);
@@ -99,15 +100,27 @@ export function PerformancePage() {
       title="Performance"
       path={details?.dir}
       actions={
-        <>
-          <Button variant={auto ? 'primary' : undefined} onClick={() => setAuto((prev) => !prev)}>
-            {auto ? '自动刷新：开' : '自动刷新：关'}
+        <div className="toolbar">
+          <Button
+            pressed={auto}
+            title={auto ? '自动刷新已开启，点击暂停' : '自动刷新已暂停，点击恢复'}
+            icon={<span className={`perf-auto-dot${auto ? ' perf-auto-dot-on' : ''}`} aria-hidden="true" />}
+            onClick={() => setAuto((prev) => !prev)}
+          >
+            自动刷新
           </Button>
           <Button icon={<RefreshIcon size={14} strokeWidth={2} />} onClick={() => void load()}>
             刷新
           </Button>
-          <Button onClick={() => void handleClear()}>清空</Button>
-        </>
+          <Button
+            variant="danger"
+            icon={<TrashIcon size={14} />}
+            title="清空本机性能日志"
+            onClick={() => void handleClear()}
+          >
+            清空
+          </Button>
+        </div>
       }
     >
       {error ? <Alert message={error} /> : null}
@@ -208,7 +221,9 @@ export function PerformancePage() {
             {events.map((item, index) => (
               <li key={`${item.at}-${item.scope}-${item.event}-${index}`} className="perf-event-row">
                 <span className="perf-time">{formatTime(item.at)}</span>
-                <Tag tone={item.level === 'error' ? 'red' : item.level === 'warn' ? 'blue' : 'default'}>{item.level}</Tag>
+                <Tag tone={item.level === 'error' ? 'red' : item.level === 'warn' ? 'blue' : 'default'}>
+                  {item.level}
+                </Tag>
                 <span className="perf-scope">{item.scope}</span>
                 <span className="perf-event">{item.event}</span>
                 <span className="perf-event-meta">{eventMeta(item)}</span>

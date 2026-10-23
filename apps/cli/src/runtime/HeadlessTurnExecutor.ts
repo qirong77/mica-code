@@ -9,6 +9,7 @@ import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import { uncommittedResponseText } from './conversationHistory.js';
+import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice } from './turnNotices.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
@@ -61,13 +62,28 @@ export type HeadlessTurnExecutorOptions = {
   /** Object surfaced to hooks as `runtime` (needs getCurrentSessionId). */
   host?: { getCurrentSessionId(): string };
   queue?: MessageQueueService;
-  /** Persisted UI conversation messages (undefined falls back to agent-derived). */
-  getConversationMessages?: () => MicaUiConversationMessage[] | undefined;
+  /**
+   * Persisted UI conversation messages (undefined falls back to
+   * agent-derived). `extra` are messages of the current turn that are not in
+   * the provider history yet (the in-flight prompt).
+   */
+  getConversationMessages?: (extra?: MicaUiConversationMessage[]) => MicaUiConversationMessage[] | undefined;
   /** Set to false to skip session persistence entirely (e.g. one-shot UI tasks). */
   save?: boolean;
   /** Turn-level retry policy override (defaults match the interactive CLI). */
   maxTurnRetries?: number;
   retryDelayMs?: number;
+  /**
+   * Session notices (retry hints, failure reasons) shown in the conversation
+   * but kept out of the provider history. Attached with the plugin layer: the
+   * plugin host owns the session-facing state.
+   */
+  notices?: HeadlessNoticeSource;
+};
+
+export type HeadlessNoticeSource = {
+  /** Rebinds to the live session (a resume rebuilds it from the session file). */
+  ensure(): TurnNoticeLog;
 };
 
 export type HeadlessAutoCompactHook = {
@@ -149,7 +165,8 @@ export class HeadlessTurnExecutor {
     hooks: HookRegistry;
     host: { getCurrentSessionId(): string };
     queue: MessageQueueService;
-    getConversationMessages: () => MicaUiConversationMessage[] | undefined;
+    getConversationMessages: (extra?: MicaUiConversationMessage[]) => MicaUiConversationMessage[] | undefined;
+    notices?: HeadlessNoticeSource;
   }): void {
     if (this.options.hooks) throw new Error('plugin layer already attached');
     this.options = { ...this.options, ...layer };
@@ -405,6 +422,11 @@ export class HeadlessTurnExecutor {
             if (this.options.hooks) {
               await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
             }
+            // Persist the hint before announcing the wait: the desktop app shows
+            // it inside the conversation, so a client that reconnects during the
+            // delay finds it in the session file instead of a frozen run.
+            this.options.notices?.ensure().upsert(createRetryNotice(error, attempt + 1, maxRetries, retryDelayMs));
+            this.saveCurrent({ allowEmpty: true, turnState: 'running' });
             onEvent({
               type: 'turn:retrying',
               input,
@@ -460,6 +482,10 @@ export class HeadlessTurnExecutor {
       runContentOr(input),
       uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
     );
+    // The turn-level error becomes part of the conversation, not just of the
+    // transient Codex `turn/completed.status=failed` payload: the desktop app
+    // used to lose it on reload. Notices stay out of the provider history.
+    this.options.notices?.ensure().upsert(createTurnErrorNotice(error));
     this.saveCurrent({ turnState: 'error' });
     if (this.options.hooks) await this.emitTurnAfter(input, 'error', Date.now() - startedAt, true);
     this.options.onEvent({
@@ -504,9 +530,13 @@ export class HeadlessTurnExecutor {
     pendingUserMessage?: MicaUiConversationMessage,
   ): void {
     if (this.options.save === false) return;
-    const hostMessages = this.options.getConversationMessages?.();
+    // The in-flight prompt goes through the host's composer: notices created
+    // for this turn must stay behind it, not in front of the user bubble.
+    const hostMessages = this.options.getConversationMessages?.(
+      pendingUserMessage ? [pendingUserMessage] : undefined,
+    );
     const conversationMessages = pendingUserMessage
-      ? [...(hostMessages ?? this.options.agent.toConversationMessages()), pendingUserMessage]
+      ? (hostMessages ?? [...this.options.agent.toConversationMessages(), pendingUserMessage])
       : hostMessages;
     this.options.sessionController.saveCurrent(conversationMessages ? { ...options, conversationMessages } : options);
   }

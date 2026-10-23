@@ -23,6 +23,7 @@ import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
+import { unwrapHostResult } from './chat-capabilities'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { isValidSessionId } from './session-delete'
@@ -1183,6 +1184,37 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
+  } else if (method === 'mica/autoCompact/overrideUpdated') {
+    // 会话级压缩覆盖变了：同一会话的其他窗口刷新面板。与能力开关同理，
+    // 这条通知不进 turn 事件缓冲。
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:auto-compact-updated', {
+        id,
+        sessionId: runSessionId(run),
+        override: params.override && typeof params.override === 'object' ? params.override : {},
+        effective:
+          params.effective && typeof params.effective === 'object' ? params.effective : null
+      })
+    }
+    return
+  } else if (method === 'mica/capabilities/updated') {
+    // 会话级能力开关变了：同一会话的其他窗口/标签页用这条快照刷新面板。
+    // 它与 turn 生命周期无关，不进事件缓冲，也不改 running / hostPending。
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:capabilities-updated', {
+        id,
+        sessionId: runSessionId(run),
+        selection: {
+          version: 1,
+          disabledSkills: Array.isArray(params.disabledSkills) ? params.disabledSkills : [],
+          disabledTools: Array.isArray(params.disabledTools) ? params.disabledTools : [],
+          disabledMcpServers: Array.isArray(params.disabledMcpServers)
+            ? params.disabledMcpServers
+            : []
+        }
+      })
+    }
+    return
   } else if (method === 'mica/sessionHistory/replaced') {
     // A session_* tool replaced the persisted history mid-host (emitted after
     // the host applied the change and saved the session file). Reload the
@@ -1682,6 +1714,33 @@ export function registerChatIpc() {
     return { run }
   }
 
+  /**
+   * 能力面板用的 host：有常驻进程就直接用，否则按需起一个。
+   *
+   * 与 By The Way 的区别是允许草稿会话（还没有 sessionId）：选择只存在内存里，
+   * 首轮保存会带上它——用户可以先关掉几个工具再开始第一条消息。
+   */
+  function ensureCapabilityRun(id, event, { sessionId, cwd } = {}) {
+    let run = runs.get(id)
+    if (run?.child?.stdin?.writable) {
+      run.sender = event.sender
+      return { run }
+    }
+    const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (targetSessionId) {
+      const unavailable = sessionBusyElsewhere(targetSessionId)
+      if (unavailable) return { error: unavailable }
+    }
+    const spawned = spawnChatHost(id, event.sender, {
+      sessionId: targetSessionId,
+      cwd: typeof cwd === 'string' ? cwd : ''
+    })
+    if (!spawned.ok) return { error: spawned.error }
+    run = runs.get(id)
+    if (!run) return { error: 'chat host 启动失败' }
+    return { run }
+  }
+
   ipcMain.handle(
     'chat:btw-ask',
     (event, { id, question, threadId, queue, sessionId, cwd } = {}) => {
@@ -1876,6 +1935,45 @@ export function registerChatIpc() {
   ipcMain.handle('chat:models', () => listModels())
 
   ipcMain.handle('chat:roles', () => listRoles())
+
+  // 会话级能力（skills / tools / MCP servers）。目录与开关都只有常驻 host 知道，
+  // 所以这里必要时按需起一个（与 By The Way 同一条路），再走一次普通请求。
+  ipcMain.handle('chat:capabilities', async (event, { id, sessionId, cwd } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    // hostTaskRequest 回的是 `{ ok, result }` 这一层信封，app-server 的载荷在
+    // `result` 里。面板要的是载荷本身，所以这里拆包——否则读到的全是 undefined，
+    // 表现为「三页签都是 0/0」。
+    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/capabilities/get', {}))
+  })
+
+  ipcMain.handle('chat:set-capabilities', async (event, { id, sessionId, cwd, selection } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(
+      await hostTaskRequest(ensured.run, 'mica/capabilities/set', { selection })
+    )
+  })
+
+  // 本会话的自动压缩设置：默认值（设置页那份）+ 会话覆盖 + 生效值一起回，
+  // 面板只负责展示与改写覆盖，合并逻辑留在 host（app-server）里。
+  ipcMain.handle('chat:auto-compact', async (event, { id, sessionId, cwd } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/autoCompact/get', {}))
+  })
+
+  ipcMain.handle('chat:set-auto-compact', async (event, { id, sessionId, cwd, override } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(
+      await hostTaskRequest(ensured.run, 'mica/autoCompact/set', { override })
+    )
+  })
 
   ipcMain.handle('chat:compact', (_event, { sessionId, mode } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return { ok: false, error: 'sessionId 缺失' }

@@ -165,6 +165,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       host,
       queue: host.queue,
       getConversationMessages: host.getConversationMessages,
+      notices: host.notices,
     });
     await host.emitRuntimeStart();
     throwIfAborted(options.signal);

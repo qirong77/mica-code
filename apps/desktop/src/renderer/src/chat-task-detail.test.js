@@ -5,9 +5,11 @@ import {
   formatBytes,
   isBackgroundTaskRunning,
   isSubagentRunning,
+  sameTaskDetail,
   subagentStatusLabel,
   taskElapsedMs,
   taskOutputWindowLabel,
+  timelineSignature,
   waitTaskKindLabel,
   waitTaskSummary,
   waitTaskTooltip
@@ -81,8 +83,14 @@ describe('buildSubagentTimeline', () => {
         { id: 'd', kind: 'tool_result', text: 'ok', toolName: 'read_file' }
       ]
     })
-    expect(steps.map((step) => step.key)).toEqual(['a:0', 'c:2', 'd:3'])
-    expect(steps[1]).toEqual({ key: 'c:2', kind: 'tool', text: '{"x":1}', toolName: 'read_file' })
+    expect(steps.map((step) => step.key)).toEqual(['a:0', 'c:2'])
+    expect(steps[1]).toEqual({
+      key: 'c:2',
+      kind: 'tool',
+      toolName: 'read_file',
+      argsText: '{"x":1}',
+      resultText: 'ok'
+    })
   })
 
   it('falls back to the index for keys and to thinking for unknown kinds', () => {
@@ -95,6 +103,79 @@ describe('buildSubagentTimeline', () => {
     expect(steps[0].key).toBe('0:0')
     expect(steps[0].kind).toBe('thinking')
     expect(steps[1]).toEqual({ key: '1:1', kind: 'text', text: 'yo', toolName: '' })
+  })
+
+  it('keeps a result as its own step when no call is waiting for it', () => {
+    const steps = buildSubagentTimeline({
+      timeline: [{ id: 'd', kind: 'tool_result', text: 'ok', toolName: 'read_file' }]
+    })
+    expect(steps).toEqual([{ key: 'd:0', kind: 'tool_result', text: 'ok', toolName: 'read_file' }])
+  })
+
+  it('does not attach a result to a call of another tool', () => {
+    const steps = buildSubagentTimeline({
+      timeline: [
+        { id: 'c', kind: 'tool', text: '{}', toolName: 'read_file' },
+        { id: 'd', kind: 'tool_result', text: 'ok', toolName: 'run_shell' }
+      ]
+    })
+    expect(steps.map((step) => step.kind)).toEqual(['tool', 'tool_result'])
+    expect(steps[0].resultText).toBe('')
+  })
+})
+
+describe('timelineSignature', () => {
+  it('ignores object identity and follows appended content', () => {
+    const base = [{ id: 'text', kind: 'text', text: 'hello' }]
+    expect(timelineSignature({ timeline: base })).toBe(timelineSignature({ timeline: [...base] }))
+    expect(timelineSignature({ timeline: base })).not.toBe(
+      timelineSignature({ timeline: [{ id: 'text', kind: 'text', text: 'hello world' }] })
+    )
+    expect(timelineSignature({})).toBe('0:::0')
+  })
+})
+
+describe('sameTaskDetail', () => {
+  const detail = (overrides = {}) => ({
+    task: { taskId: 't1', status: 'running', timeline: [{ id: 'text', kind: 'text', text: 'a' }] },
+    ...overrides
+  })
+
+  it('treats an unchanged poll result as the same detail', () => {
+    expect(sameTaskDetail(detail(), detail())).toBe(true)
+    expect(sameTaskDetail(null, null)).toBe(true)
+  })
+
+  it('detects new steps, finished state and usage growth', () => {
+    expect(
+      sameTaskDetail(detail(), {
+        task: {
+          taskId: 't1',
+          status: 'running',
+          timeline: [{ id: 'text', kind: 'text', text: 'ab' }]
+        }
+      })
+    ).toBe(false)
+    expect(
+      sameTaskDetail(detail(), {
+        task: {
+          taskId: 't1',
+          status: 'completed',
+          timeline: [{ id: 'text', kind: 'text', text: 'a' }]
+        }
+      })
+    ).toBe(false)
+    expect(
+      sameTaskDetail(
+        detail({ task: { ...detail().task, usage: { records: 1, inputTokens: 1 } } }),
+        detail({ task: { ...detail().task, usage: { records: 2, inputTokens: 1 } } })
+      )
+    ).toBe(false)
+  })
+
+  it('detects new background output', () => {
+    expect(sameTaskDetail({ content: 'a' }, { content: 'a' })).toBe(true)
+    expect(sameTaskDetail({ content: 'a' }, { content: 'ab' })).toBe(false)
   })
 })
 

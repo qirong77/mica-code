@@ -6,6 +6,7 @@ import {
   deleteMcpServer,
   deleteRole,
   deleteSkill,
+  getCapabilityDefaultsDetails,
   getMcpDetails,
   getPluginsDetails,
   getRolesDetails,
@@ -20,6 +21,7 @@ import {
   writeRole,
   writeSessionDetails,
   writeSkill,
+  writeCapabilityDefaults,
 } from './details.js';
 
 export type ConfigWebActionInput = {
@@ -60,6 +62,14 @@ export const configWebActions = {
     createRole(text(input, 'name'), optionalText(input, 'content')),
   writeRole: (input: ConfigWebActionInput) => writeRole(text(input, 'name'), text(input, 'content')),
   deleteRole: (input: ConfigWebActionInput) => deleteRole(text(input, 'name')),
+
+  readCapabilityDefaults: (_input: ConfigWebActionInput) => getCapabilityDefaultsDetails(),
+  writeCapabilityDefaults: (input: ConfigWebActionInput) =>
+    writeCapabilityDefaults({
+      disabledSkills: input.disabledSkills,
+      disabledTools: input.disabledTools,
+      disabledMcpServers: input.disabledMcpServers,
+    }),
 
   readPluginsDetails: (_input: ConfigWebActionInput) => getPluginsDetails(),
 

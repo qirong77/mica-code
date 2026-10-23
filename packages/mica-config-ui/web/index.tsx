@@ -13,3 +13,20 @@ export type { ConfigWebClient } from './api.js';
 export { setConfigWebEditor } from './editor.js';
 export type { ConfigWebEditor, ConfigWebEditorProps } from './editor.js';
 export type { ConfigWebSection } from '../src/shared/types.js';
+
+/**
+ * 会话级设置（桌面端会话设置弹窗）复用同一批控件：
+ * 自动压缩的字段编辑器、能力列表、开关。宿主把它们包在 `.mica-config-ui is-embed` 里，
+ * 就能拿到与设置页完全一致的形态，不用另写一套。
+ */
+export { AutoCompactFields } from './components/AutoCompactFields.js';
+export { CapabilityList } from './components/CapabilityList.js';
+export type { CapabilityGroupDef, CapabilityItem } from './components/CapabilityList.js';
+export { Switch as ConfigSwitch } from './components/Ui.js';
+export {
+  AUTO_COMPACT_FIELDS,
+  autoCompactDraftFromSettings,
+  autoCompactNumbersFromSettings,
+  autoCompactSettingsFromDraft,
+  type AutoCompactDraft,
+} from './autoCompact.js';

@@ -51,6 +51,33 @@ export function Alert({ message }: { message: string }) {
   return <div className="ui-alert">{message}</div>;
 }
 
+type SwitchProps = {
+  checked: boolean;
+  id?: string;
+  label: string;
+  disabled?: boolean;
+  onChange(checked: boolean): void;
+};
+
+/** 只有轨道和隐藏的 checkbox，标签由调用方的 <label> 提供。 */
+export function Switch({ checked, id, label, onChange, disabled = false }: SwitchProps) {
+  return (
+    <span className={`ui-switch${disabled ? ' is-disabled' : ''}`}>
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="ui-switch-track" aria-hidden="true">
+        <span className="ui-switch-knob" />
+      </span>
+    </span>
+  );
+}
+
 export function Empty({ description }: { description: string }) {
   return (
     <div className="ui-empty-wrap">

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Blocks,
+  Boxes,
   Braces,
   Cable,
   Check,
@@ -17,6 +18,7 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Send,
@@ -33,6 +35,7 @@ export const appIcons = {
   roles: ContactRound,
   mcp: Cable,
   skills: Sparkles,
+  capabilities: Boxes,
   plugins: Blocks,
   autoCompact: Gauge,
   browserControl: Globe,
@@ -46,6 +49,7 @@ export const appIcons = {
   folderPlus: FolderPlus,
   more: MoreHorizontal,
   refresh: RefreshCw,
+  reset: RotateCcw,
   save: Save,
   search: Search,
   send: Send,

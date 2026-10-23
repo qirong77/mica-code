@@ -7,12 +7,14 @@ import {
   unregisterRuntimeTools,
   getToolDefinitions,
   getToolCounts,
+  getToolCatalog,
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
   isToolPrimaryAgentOnly,
   observeToolExecution,
 } from './registry.js';
+import { mcpToolNamePrefix, sanitizeToolNamePart } from './toolNames.js';
 
 export const micaTools = {
   /** 将 MCP server 暴露的工具注册进统一工具 registry。 */
@@ -29,6 +31,8 @@ export const micaTools = {
   getDefinitions: getToolDefinitions,
   /** 获取当前工具数量统计。 */
   getCounts: getToolCounts,
+  /** 获取完整工具目录（含来源与所属 MCP server），供能力选择面板使用。 */
+  getCatalog: getToolCatalog,
   /** 按工具名执行工具，并返回序列化后的执行结果。 */
   execute: executeTool,
   /** 获取工具调用在 UI 日志中的展示文本。 */
@@ -39,6 +43,8 @@ export const micaTools = {
   isPrimaryAgentOnly: isToolPrimaryAgentOnly,
   /** 观察所有工具执行，用于审计、变更追踪等横切能力。 */
   observeExecution: observeToolExecution,
+  sanitizeToolNamePart,
+  mcpToolNamePrefix,
   MicaTool,
 };
 
@@ -52,8 +58,10 @@ export { ToolPtyWait } from './pty/ToolPtyWait.js';
 export { ToolPtyKill } from './pty/ToolPtyKill.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
+export type { ToolCatalogEntry } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
 export { toolResultToText } from './types.js';
+export { mcpToolNamePrefix, sanitizeToolNamePart } from './toolNames.js';
 export type {
   Tool,
   ToolImageMediaType,

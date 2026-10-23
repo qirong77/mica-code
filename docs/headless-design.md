@@ -166,6 +166,11 @@ or a replaced session history. Mica adds these as **incremental extensions**
 - `mica/sessionHistory/replaced` (`MICA_SESSION_NOTIFICATIONS`): the
   `session_compact` tool replaced the persisted history mid-host; the client
   reloads the session instead of showing a stale transcript.
+- `mica/turn/retrying` (`MICA_TURN_NOTIFICATIONS`): the host is waiting out its
+  retry delay after a transient provider error and will re-run the same turn
+  (`attempt`, `maxAttempts`, `delayMs`, `error`). It is a turn-level delta, not
+  a Codex `error` (which would end the run on the client), so the desktop app
+  can render "retrying n/5" instead of looking frozen for ten seconds.
 
 ## Mica extension requests
 

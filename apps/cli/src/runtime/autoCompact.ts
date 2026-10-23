@@ -1,4 +1,13 @@
 import { recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
+import {
+  AUTO_COMPACT_DEFAULTS,
+  AUTO_COMPACT_MAX_INTERVAL_MS,
+  AUTO_COMPACT_MAX_LIMIT,
+  AUTO_COMPACT_MAX_THRESHOLD_K,
+  AUTO_COMPACT_MIN_MODEL_THRESHOLD_K,
+  AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
+} from '@packages/mica-common/autoCompact.js';
+import type { AutoCompactSettings } from '@packages/mica-common/autoCompact.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 
@@ -38,15 +47,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
  * 桌面端每个 turn 都会显式下发设置（默认 enabled: true），所以那里是默认开启的。
  */
 
-export type AutoCompactSettings = {
-  enabled: boolean;
-  quickThresholdK: number;
-  quickLimit: number;
-  modelThresholdK: number;
-  modelLimit: number;
-  /** 两次压缩之间的最小间隔（毫秒）；0 表示不限制。 */
-  minIntervalMs: number;
-};
+export type { AutoCompactSettings };
 
 export type AutoCompactCounters = {
   quickRuns: number;
@@ -65,24 +66,16 @@ export type AutoCompactTurnParams = AutoCompactSettings & {
   lastRunAt: string | null;
 };
 
-export const AUTO_COMPACT_DEFAULTS: AutoCompactSettings = {
-  enabled: true,
-  quickThresholdK: 200,
-  quickLimit: 3,
-  modelThresholdK: 120,
-  modelLimit: 3,
-  minIntervalMs: 20 * 60 * 1000,
+// 默认值与边界只维护一份（@packages/mica-common/autoCompact），这里只做转出：
+// 面板、会话覆盖与应用侧必须认同同一组数字。
+export {
+  AUTO_COMPACT_DEFAULTS,
+  AUTO_COMPACT_MAX_INTERVAL_MS,
+  AUTO_COMPACT_MAX_LIMIT,
+  AUTO_COMPACT_MAX_THRESHOLD_K,
+  AUTO_COMPACT_MIN_MODEL_THRESHOLD_K,
+  AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
 };
-
-export const AUTO_COMPACT_MAX_THRESHOLD_K = 10_000;
-export const AUTO_COMPACT_MAX_LIMIT = 999;
-/**
- * 阈值的安全下限：低于它压缩就没有意义了（快速压缩 150k 以下基本清不出东西，
- * 模型压缩 100k 以下等于每次请求都换一份摘要），所以不把边界留给用户填。
- */
-export const AUTO_COMPACT_MIN_QUICK_THRESHOLD_K = 150;
-export const AUTO_COMPACT_MIN_MODEL_THRESHOLD_K = 100;
-export const AUTO_COMPACT_MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MAX_RUNS = 1_000_000;
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
@@ -100,8 +93,7 @@ export function emptyAutoCompactCounters(): AutoCompactCounters {
 export function normalizeAutoCompactSettings(input: unknown): AutoCompactSettings {
   const source = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   return {
-    enabled:
-      typeof source.enabled === 'boolean' ? source.enabled : AUTO_COMPACT_DEFAULTS.enabled,
+    enabled: typeof source.enabled === 'boolean' ? source.enabled : AUTO_COMPACT_DEFAULTS.enabled,
     quickThresholdK: clampInteger(
       source.quickThresholdK,
       AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
@@ -275,10 +267,7 @@ export class AutoCompactController {
       // 情形）才升级为模型压缩；已经压到阈值以下就不再花一次模型请求。快速压缩
       // 失败或没有可清理内容时 ctx 不变，这里同样按原 ctx 判定，不会因为它没生效
       // 就把这次模型压缩吞掉。
-      if (
-        ctxTokens >= this.settings.modelThresholdK * 1000 &&
-        this.counters.modelRuns < this.settings.modelLimit
-      ) {
+      if (ctxTokens >= this.settings.modelThresholdK * 1000 && this.counters.modelRuns < this.settings.modelLimit) {
         step = 'model';
       } else {
         step = null;

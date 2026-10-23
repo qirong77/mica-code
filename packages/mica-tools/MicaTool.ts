@@ -22,6 +22,10 @@ export type ToolInputSchema = {
 export type ToolInput = Record<string, unknown>;
 export type ToolSafetyOptions = {
   readOnly?: boolean;
+  /** Where the tool came from; used by the capability panel and MCP filtering. */
+  source?: 'builtin' | 'runtime' | 'mcp';
+  /** Original MCP server name when `source` is `mcp`. */
+  mcpServer?: string;
 };
 
 export abstract class MicaTool {
@@ -29,12 +33,16 @@ export abstract class MicaTool {
   description: string;
   input_schema: ToolInputSchema;
   readOnly: boolean;
+  source: 'builtin' | 'runtime' | 'mcp';
+  mcpServer?: string;
 
   constructor(name: string, description: string, input_schema: ToolInputSchema, options: ToolSafetyOptions = {}) {
     this.name = name;
     this.description = description;
     this.input_schema = input_schema;
     this.readOnly = options.readOnly ?? false;
+    this.source = options.source ?? 'builtin';
+    this.mcpServer = options.mcpServer;
   }
 
   validateInput(input: unknown): ValidationResult {

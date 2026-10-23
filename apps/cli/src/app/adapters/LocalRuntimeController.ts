@@ -1,6 +1,7 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
+import { AUTO_COMPACT_DEFAULTS, resolveAutoCompactSettings } from '@packages/mica-common/index.js';
 import { micaSession, type SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
@@ -32,6 +33,7 @@ import {
   type TerminalAgentTurnOutcome,
 } from '../../agents/terminalAgentSessions.js';
 import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
+import { AutoCompactController } from '../../runtime/autoCompact.js';
 import { uncommittedResponseText } from '../../runtime/conversationHistory.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['status', 'task', 'agents', 'new']);
@@ -70,6 +72,8 @@ export class LocalRuntimeController implements RuntimeController {
   private readonly queues = new Map<AgentRuntime, InstanceType<typeof micaRuntime.MessageQueueService>>();
   private readonly systemQueues = new Map<AgentRuntime, RuntimeInput[]>();
   private readonly sessionControllers = new Map<AgentRuntime, SessionController>();
+  /** 本会话设置了压缩覆盖时才会创建（CLI 默认不自动压缩）。 */
+  private readonly autoCompacts = new Map<AgentRuntime, AutoCompactController>();
   private readonly clearingAgents = new Set<AgentRuntime>();
   private readonly exclusiveTasks = new Map<AgentRuntime, { id: number; label: string }>();
   private readonly rewindCheckpoints = new RewindCheckpointManager();
@@ -120,6 +124,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.queues.clear();
     this.systemQueues.clear();
     this.sessionControllers.clear();
+    this.autoCompacts.clear();
     this.clearingAgents.clear();
     this.exclusiveTasks.clear();
   }
@@ -130,6 +135,7 @@ export class LocalRuntimeController implements RuntimeController {
     this.queues.delete(agent);
     this.systemQueues.delete(agent);
     this.sessionControllers.delete(agent);
+    this.autoCompacts.delete(agent);
     this.clearingAgents.delete(agent);
     this.exclusiveTasks.delete(agent);
     this.rewindCheckpoints.clear(agent);
@@ -514,6 +520,29 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
+  /**
+   * 自动压缩只在**本会话显式配置过**时启用：CLI 默认不压缩（`mica exec` 与基准
+   * driver 也都不压缩，这条边界不能因为面板的存在而悄悄改变）。设置了任意一项
+   * 之后按「默认值 + 本会话覆盖」生效，计数留在进程内（展示用，不做持久化账本）。
+   */
+  private prepareAutoCompact(agent: AgentRuntime): AutoCompactController | null {
+    const override = agent.autoCompactOverrideSelection ?? {};
+    if (Object.keys(override).length === 0) return null;
+    let controller = this.autoCompacts.get(agent);
+    if (!controller) {
+      controller = new AutoCompactController({ agent });
+      this.autoCompacts.set(agent, controller);
+    }
+    const counters = controller.getCounters();
+    controller.setParams({
+      ...resolveAutoCompactSettings(AUTO_COMPACT_DEFAULTS, override),
+      quickRuns: counters.quickRuns,
+      modelRuns: counters.modelRuns,
+      lastRunAt: counters.lastRunAt,
+    });
+    return controller;
+  }
+
   private async runTurn(
     input: RuntimeInput,
     agent: AgentRuntime,
@@ -637,9 +666,13 @@ export class LocalRuntimeController implements RuntimeController {
           }
         }
 
+        const autoCompact = attempt === 0 ? this.prepareAutoCompact(agent) : null;
         try {
           const result = await agent.run(runContent, {
             reservedRunId: attempt === 0 ? reservedRunId : undefined,
+            ...(autoCompact
+              ? { rewriteIterationMessages: (messages: unknown[]) => autoCompact.rewriteIterationMessages(messages) }
+              : {}),
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);
               return this.takeQueuedIterationInput(agent, attemptSystemInputs);

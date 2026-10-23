@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { ControlEndpointList } from '../components/ControlEndpointList.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
-import { endpointSummaryLine, groupEndpoints } from '../controlEndpoints.js';
 import {
   TERMINAL_CONTROL_DISABLED_STEPS,
   TERMINAL_URL_ENV_FALLBACK,
@@ -13,7 +13,7 @@ import {
   terminalEnvHint,
 } from '../terminalControl.js';
 import { readTerminalControlDetails } from '../api.js';
-import type { ConfigWebTerminalControlDetails } from '../../src/shared/types.js';
+import type { ConfigWebBrowserControlEndpoint, ConfigWebTerminalControlDetails } from '../../src/shared/types.js';
 
 /**
  * Terminal Control：Mica 里那套**给 AI 用的**终端。
@@ -82,8 +82,11 @@ export function TerminalControlPage() {
     }
   }
 
-  const groups = useMemo(() => groupEndpoints(details?.endpoints), [details]);
   const exampleBase = details?.envVars?.url ? `$${details.envVars.url}` : TERMINAL_URL_ENV_FALLBACK;
+  const exampleFor = useCallback(
+    (endpoint: ConfigWebBrowserControlEndpoint) => terminalCurlExample(endpoint, exampleBase),
+    [exampleBase],
+  );
 
   return (
     <PageFrame
@@ -103,22 +106,22 @@ export function TerminalControlPage() {
         ) : !details ? null : (
           <div className="control-stack">
             <section className="simple-card control-card">
-              <div className="control-card-head">
-                <div className="table-panel-title">
-                  <strong>服务状态</strong>
-                  <span>Mica 终端：每个会话都是真实 PTY，agent 用一套本机 HTTP 接口读屏、输入与等待输出。</span>
+              <header className="control-head">
+                <div className="control-head-copy">
+                  <h2>服务状态</h2>
+                  <p>Mica 终端：每个会话都是真实 PTY，agent 用一套本机 HTTP 接口读屏、输入与等待输出。</p>
                 </div>
                 <Tag tone={details.available ? 'green' : 'red'} dot>
                   {details.available ? '可用' : '不可用'}
                 </Tag>
-              </div>
+              </header>
 
-              <div className="status-grid">
-                <StatusItem label="服务地址" value={details.serviceUrl || '—'} mono />
-                <StatusItem label="版本" value={details.version ? `v${details.version}` : '—'} mono />
-                <StatusItem label="会话数" value={String(details.sessions.length)} mono />
-                <StatusItem label="技能文件" value={details.skillPath || '—'} mono />
-              </div>
+              <dl className="control-facts">
+                <Fact label="服务地址" value={details.serviceUrl || '—'} mono />
+                <Fact label="版本" value={details.version ? `v${details.version}` : '—'} />
+                <Fact label="会话" value={String(details.sessions.length)} />
+                <Fact label="技能文件" value={details.skillPath || '—'} mono />
+              </dl>
 
               {details.skillPath ? (
                 <p className="control-note">
@@ -139,13 +142,13 @@ export function TerminalControlPage() {
             </section>
 
             <section className="simple-card control-card">
-              <div className="control-card-head">
-                <div className="table-panel-title">
-                  <strong>终端会话</strong>
-                  <span>关掉窗口不会杀掉 shell：会话继续在后台跑，AI 随时可以回来接着读。</span>
+              <header className="control-head">
+                <div className="control-head-copy">
+                  <h2>终端会话</h2>
+                  <p>关掉窗口不会杀掉 shell：会话继续在后台跑，AI 随时可以回来接着读。</p>
                 </div>
-                <span className="muted-text">{details.sessions.length} 个</span>
-              </div>
+                <span className="control-head-count">{details.sessions.length} 个</span>
+              </header>
 
               {details.sessions.length === 0 ? (
                 <Empty
@@ -185,75 +188,18 @@ export function TerminalControlPage() {
             </section>
 
             <section className="simple-card control-card">
-              <div className="control-card-head">
-                <div className="table-panel-title">
-                  <strong>接口文档</strong>
-                  <span>agent 直接调用这些接口；下文的 curl 示例可以直接复制。</span>
+              <header className="control-head">
+                <div className="control-head-copy">
+                  <h2>接口文档</h2>
+                  <p>agent 直接调用这些接口；展开后可以复制 curl 示例。</p>
                 </div>
-              </div>
-
-              {groups.length === 0 ? (
-                <Empty description="暂无接口文档（需要终端服务在线）" />
-              ) : (
-                <div className="control-groups">
-                  {groups.map((group) => (
-                    <div className="control-group" key={group.method}>
-                      <div className="control-group-head">
-                        <Tag tone="blue">{group.label}</Tag>
-                        <span className="muted-text">{group.endpoints.length} 个接口</span>
-                      </div>
-                      <div className="control-endpoint-list">
-                        {group.endpoints.map((endpoint) => (
-                          <details className="simple-card control-endpoint" key={endpoint.id}>
-                            <summary className="control-endpoint-summary">
-                              <code className="control-endpoint-line">{endpointSummaryLine(endpoint)}</code>
-                              <span className="control-endpoint-desc">{endpoint.summary}</span>
-                            </summary>
-                            <div className="control-endpoint-body">
-                              {endpoint.params.length === 0 ? (
-                                <p className="muted-text">无参数</p>
-                              ) : (
-                                <div className="control-params">
-                                  {endpoint.params.map((param) => (
-                                    <div className="control-param" key={`${param.in}:${param.name}`}>
-                                      <code>{param.name}</code>
-                                      <span className="control-param-meta">
-                                        {param.in}
-                                        {param.required ? ' · 必填' : ''}
-                                      </span>
-                                      <span className="control-param-desc">{param.description}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {endpoint.returns ? (
-                                <p className="control-returns">
-                                  <span className="muted-text">返回</span> {endpoint.returns}
-                                </p>
-                              ) : null}
-                              <div className="control-example">
-                                <div className="control-example-head">
-                                  <span className="muted-text">示例</span>
-                                  <Button
-                                    onClick={() =>
-                                      void copy(endpoint.example || terminalCurlExample(endpoint, exampleBase))
-                                    }
-                                  >
-                                    复制
-                                  </Button>
-                                </div>
-                                <pre className="code-preview">
-                                  {endpoint.example || terminalCurlExample(endpoint, exampleBase)}
-                                </pre>
-                              </div>
-                            </div>
-                          </details>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              </header>
+              <ControlEndpointList
+                endpoints={details.endpoints}
+                exampleFor={exampleFor}
+                emptyDescription="暂无接口文档（需要终端服务在线）"
+                onCopy={(text) => void copy(text)}
+              />
             </section>
           </div>
         )}
@@ -262,13 +208,13 @@ export function TerminalControlPage() {
   );
 }
 
-function StatusItem({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Fact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="status-item">
-      <span className="status-label">{label}</span>
-      <span className={`control-status-value${mono ? ' status-code' : ''}`} title={value}>
+    <div className="control-fact">
+      <dt>{label}</dt>
+      <dd className={mono ? 'control-fact-mono' : undefined} title={value}>
         {value}
-      </span>
+      </dd>
     </div>
   );
 }

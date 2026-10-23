@@ -25,6 +25,7 @@ const items = [
   { key: 'roles', label: 'Roles' },
   { key: 'mcp', label: 'MCP' },
   { key: 'skills', label: 'Skills' },
+  { key: 'capabilities', label: 'Capabilities' },
   { key: 'plugins', label: 'Plugins' },
 ] satisfies Array<{ key: ConfigWebAppSection; label: string; available?: () => boolean }>;
 

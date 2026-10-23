@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, CollapsiblePanel, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { readPluginsDetails } from '../api.js';
 import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
+import { pluginStatusLabel, pluginStatusTone } from '../labels.js';
 
 export function PluginsPage() {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const RefreshIcon = appIcons.refresh;
 
   async function load() {
@@ -27,23 +29,45 @@ export function PluginsPage() {
     void load();
   }, []);
 
+  const plugins = details?.plugins ?? [];
+  const selected = plugins.find((plugin) => plugin.file === selectedFile) ?? (plugins.length > 0 ? plugins[0] : null);
+
   return (
     <PageFrame
       title="Plugins"
       path={details?.root}
       actions={<Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />}
     >
-      {error ? <Alert message={error} /> : null}
-      <div className="detail-body detail-body-stacked">
+      <div className="editor-workspace">
+        {error ? <Alert message={error} /> : null}
         {loading && !details ? (
           <div className="page-loading">正在加载 Plugins…</div>
-        ) : !details ? null : details.plugins.length === 0 ? (
+        ) : plugins.length === 0 ? (
           <Empty description="暂无文件插件" />
         ) : (
-          <div className="stacked-panels">
-            {details.plugins.map((plugin) => (
-              <PluginCard key={plugin.file} plugin={plugin} />
-            ))}
+          <div className="role-layout">
+            <div className="role-list">
+              {plugins.map((plugin) => (
+                <button
+                  key={plugin.file}
+                  type="button"
+                  className={`role-list-item ${selected?.file === plugin.file ? 'role-list-item-active' : ''}`}
+                  title={plugin.name}
+                  onClick={() => setSelectedFile(plugin.file)}
+                >
+                  <span className="role-list-item-copy">
+                    <span className="role-list-item-name" title={plugin.name}>
+                      {plugin.name}
+                    </span>
+                    <span className="role-list-item-sub" title={plugin.file}>
+                      {fileName(plugin.file)}
+                    </span>
+                  </span>
+                  <span className={`role-list-item-dot role-list-item-dot-${pluginStatusTone(plugin.status)}`} />
+                </button>
+              ))}
+            </div>
+            {selected ? <PluginDetail plugin={selected} /> : null}
           </div>
         )}
       </div>
@@ -51,45 +75,49 @@ export function PluginsPage() {
   );
 }
 
-function PluginCard({ plugin }: { plugin: ConfigWebPlugin }) {
+function PluginDetail({ plugin }: { plugin: ConfigWebPlugin }) {
   return (
-    <CollapsiblePanel
-      title={plugin.name}
-      subtitle={plugin.id}
-      meta={
-        <>
-          <Tag>{plugin.extension}</Tag>
-          <Tag tone={plugin.status === 'loaded' ? 'green' : plugin.status === 'failed' ? 'red' : 'default'}>
-            {plugin.status ?? 'unknown'}
-          </Tag>
-        </>
-      }
-    >
-      <div className="simple-list">
-        <div className="simple-row">
-          <span>File</span>
-          <strong>{plugin.file}</strong>
+    <div className="role-editor-pane plugin-pane">
+      <div className="editor-pane-header">
+        <div>
+          <h3>{plugin.name}</h3>
+          <p className="muted-text editor-pane-subtitle" title={plugin.file}>
+            {plugin.file}
+          </p>
         </div>
+        <div className="plugin-pane-tags">
+          <Tag>{plugin.extension}</Tag>
+          <Tag tone={pluginStatusTone(plugin.status)} dot>
+            {pluginStatusLabel(plugin.status)}
+          </Tag>
+        </div>
+      </div>
+      <div className="plugin-meta">
         <div className="simple-row">
-          <span>Size</span>
+          <span>大小</span>
           <strong>{formatBytes(plugin.sizeBytes)}</strong>
         </div>
         <div className="simple-row">
-          <span>Updated</span>
+          <span>更新</span>
           <strong>{formatDate(plugin.updatedAt)}</strong>
         </div>
-        <div className="simple-row">
-          <span>Error</span>
-          <strong>{plugin.error || '-'}</strong>
-        </div>
+        {plugin.error ? <Alert message={plugin.error} /> : null}
       </div>
-      {plugin.content ? (
-        <pre className="code-preview">
-          <code>{plugin.content}</code>
-        </pre>
-      ) : null}
-    </CollapsiblePanel>
+      <div className="plugin-code-host">
+        {plugin.content ? (
+          <pre className="code-preview">
+            <code>{plugin.content}</code>
+          </pre>
+        ) : (
+          <div className="muted-text">文件为空</div>
+        )}
+      </div>
+    </div>
   );
+}
+
+function fileName(file: string): string {
+  return file.split(/[\\/]/).pop() || file;
 }
 
 function formatBytes(bytes: number): string {

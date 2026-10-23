@@ -220,6 +220,10 @@
    网格列宽、侧栏自身宽度与侧栏切换按钮的定位都引用它。默认值只在首帧兜底。 */
 :root {
   --mica-sidebar-width: 260px;
+  /* 弹窗宽度只有三档：常规详情 / 代码与日志 / 单条信息 */
+  --modal-w: 780px;
+  --modal-w-wide: 860px;
+  --modal-w-narrow: 460px;
 }
 
 .pane-resizer {
@@ -1661,10 +1665,10 @@ body.is-resizing.is-resizing-terminal {
 .chat-turn-log-thinking {
   min-width: 0;
   margin: 1px 0 7px;
-  border-left: 2px solid color-mix(in srgb, var(--color-info) 24%, transparent);
-  border-radius: 0 4px 4px 0;
-  background: color-mix(in srgb, var(--color-info) 6%, transparent);
-  padding: 3px 9px;
+  /* 不用左侧竖条：淡背景即可，侧边高亮条容易被读成选中态。 */
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-info) 5%, transparent);
+  padding: 4px 9px;
   color: var(--color-fg-muted);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -2060,10 +2064,11 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-popover-close {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   flex: none;
   place-items: center;
+  padding: 0;
   border-radius: 3px;
   color: rgb(255 255 255 / 40%);
 }
@@ -2080,72 +2085,7 @@ body.is-resizing.is-resizing-terminal {
   overflow: auto;
 }
 
-.chat-popover-actions {
-  /* 文字按钮的水平内边距：它同时决定按钮文字比行缩进右偏多少，下面的负外边距跟着它走 */
-  --chat-popover-action-inset-x: 10px;
-  display: flex;
-  flex: none;
-  align-items: center;
-  /* 面板窄的时候让主按钮换到下一行，而不是把它挤成竖排文字 */
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px 12px 4px;
-}
-
-.chat-popover-actions button {
-  height: 22px;
-  padding: 0 var(--chat-popover-action-inset-x);
-  border-radius: 3px;
-  color: rgb(255 255 255 / 55%);
-  white-space: nowrap;
-}
-
-.chat-popover-actions button:hover:not(:disabled) {
-  background: rgb(255 255 255 / 10%);
-  color: #fff;
-}
-
-.chat-popover-actions button:disabled {
-  color: rgb(255 255 255 / 15%);
-}
-
-/* 方形图标按钮（暂停 / 立即执行 / 停止）：不带文字就不给文字按钮的内边距 */
-.chat-popover-actions button.chat-popover-icon {
-  display: grid;
-  width: 20px;
-  padding: 0;
-  place-items: center;
-  color: rgb(255 255 255 / 40%);
-}
-
-.chat-popover-actions button.chat-popover-danger:hover:not(:disabled) {
-  color: var(--color-danger);
-}
-
-/* 带文字的主按钮：靠右，且不参与收缩（否则「保存修改」会被压成竖排文字） */
-.chat-popover-actions button.chat-loop-create {
-  flex: none;
-  margin-left: auto;
-  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
-  color: #fff;
-}
-
-.chat-popover-actions button.chat-loop-create:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  color: #fff;
-}
-
-.chat-popover-actions button.chat-loop-create:disabled {
-  background: rgb(255 255 255 / 6%);
-  color: rgb(255 255 255 / 25%);
-}
-
-/* 模型 / 推理强度 / 角色选择器：同壳，只把行距收密一点 */
-.chat-select-palette {
-  max-height: min(240px, 40vh);
-}
-
-.chat-select-palette .chat-popover-body {
+.chat-popover-body {
   padding: 3px;
 }
 
@@ -2504,6 +2444,11 @@ body.is-resizing.is-resizing-terminal {
   color: inherit;
 }
 
+.chat-status-retry {
+  color: var(--color-warn-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-status-phase-elapsed {
   font-variant-numeric: tabular-nums;
 }
@@ -2657,7 +2602,8 @@ body.is-resizing.is-resizing-terminal {
 .chat-modal {
   display: flex;
   width: 100%;
-  max-width: 780px;
+  /* 宽度三档，别再各写一个数字：常规详情 / 代码与日志 / 单条信息 */
+  max-width: var(--modal-w);
   /* 窄屏时靠这条才能缩到视口以内：flex item 的 min-width: auto 会撑到内容的最小宽度，
      代码块里一条长路径就足以把弹窗顶出屏幕。 */
   min-width: 0;
@@ -2677,7 +2623,7 @@ body.is-resizing.is-resizing-terminal {
 /* 主对话里的任务/工具详情比上下文面板宽一点：它们要显示代码和命令 */
 .chat-modal-task,
 .chat-modal-tool {
-  max-width: 860px;
+  max-width: var(--modal-w-wide);
 }
 
 .chat-modal-header {
@@ -2701,15 +2647,63 @@ body.is-resizing.is-resizing-terminal {
   font-size: 12px;
 }
 
+/* 没有图标时只留位置，不画底色：标题左边缘在所有弹窗里对齐 */
+.chat-modal-mark.is-empty {
+  background: transparent;
+}
+
+/* 表单类弹窗的底部动作区：与正文同一个内边距，按钮靠右 */
+.chat-modal-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.chat-modal-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--color-fg-max);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.chat-modal-input:focus {
+  border-color: var(--color-line-strong);
+  outline: 1px solid rgb(255 255 255 / 12%);
+  outline-offset: 0;
+}
+
+.chat-modal-prompt {
+  max-width: var(--modal-w-narrow);
+}
+
+/* 套在另一个弹窗里：不再压暗一次背景，靠阴影与描边区分层级 */
+.chat-modal-overlay.is-nested {
+  z-index: 10010;
+  background: rgb(0 0 0 / 24%);
+  backdrop-filter: none;
+}
+
 .chat-modal-heading {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
-  flex-direction: column;
-  gap: 1px;
+  /* 标题与副标题同一行：竖排会顶高整个头部，弹窗看起来像两行标题 */
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .chat-modal-title {
+  flex: none;
   overflow: hidden;
   color: var(--color-fg-strong);
   font-size: 12.5px;
@@ -2719,6 +2713,8 @@ body.is-resizing.is-resizing-terminal {
 }
 
 .chat-modal-subtitle {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--color-fg-faint);
   font-size: 11px;
@@ -2754,14 +2750,18 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg-max);
 }
 
+/* 禁用态只掉前景色：加透明度会把边框一起变淡，按钮看起来像换了形状 */
 .chat-modal-actions button:disabled {
-  opacity: 0.5;
+  color: var(--color-fg-ghost);
+  cursor: default;
 }
 
 /* 方形图标按钮（关闭）：不带文字就不给文字按钮的内边距 */
 .chat-modal-actions button.chat-modal-close {
   display: grid;
   width: 24px;
+  height: 24px;
+  flex: none;
   place-items: center;
   border-color: transparent;
   background: none;
@@ -3036,6 +3036,214 @@ body.is-resizing.is-resizing-terminal {
   margin-top: 5px;
 }
 
+/*
+ * Subagent 时间线（`SubagentTimeline`）。
+ *
+ * 一条记录 = 一次调用 / 一段思考 / 一段正文，不再把工具入参与结果拆成两条平铺行。
+ * 工具行永远只有一行，展开才把入参和输出挂进 DOM——长任务的详情弹窗里，
+ * 「折叠但仍然渲染」正是卡顿来源。
+ */
+.chat-timeline {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-timeline-step {
+  min-width: 0;
+}
+
+.chat-timeline-earlier {
+  align-self: flex-start;
+  margin: 2px 0 8px 2px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: 5px;
+  background: none;
+  padding: 2px 9px;
+  color: var(--color-fg-faint);
+  font-family: var(--chat-font);
+  font-size: 10.5px;
+}
+
+.chat-timeline-earlier:hover {
+  border-color: var(--color-fg-ghost);
+  color: var(--color-fg-soft);
+}
+
+.chat-timeline-tool {
+  border-radius: 4px;
+}
+
+.chat-timeline-tool.is-open {
+  background: color-mix(in srgb, var(--color-canvas) 55%, transparent);
+}
+
+.chat-timeline-tool-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 3px 8px 3px 3px;
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.chat-timeline-tool-row:hover {
+  background: rgb(255 255 255 / 5%);
+  color: var(--color-fg-soft);
+}
+
+.chat-timeline-caret {
+  width: 8px;
+  flex: 0 0 8px;
+  color: var(--color-fg-faint);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+.chat-timeline-icon {
+  display: grid;
+  width: 15px;
+  flex: 0 0 15px;
+  place-items: center;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+/* 工具名与参数摘要之间的分界：名字稳定，摘要是每次调用唯一变化的部分 */
+.chat-timeline-tool-name {
+  flex: 0 0 auto;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.chat-timeline-tool-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  font-family: var(--chat-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-timeline-tool-meta {
+  flex: 0 0 auto;
+  color: var(--color-fg-ghost);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-timeline-tool-meta.is-running {
+  color: var(--color-teal);
+}
+
+.chat-timeline-tool-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  margin: 3px 0 7px 26px;
+}
+
+.chat-timeline-block {
+  min-width: 0;
+}
+
+.chat-timeline-block-head {
+  margin-bottom: 3px;
+  color: var(--color-fg-faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* 展开的入参/输出自己滚：弹窗主体是唯一滚动层，但不能被一段 500 行输出顶高 */
+.chat-timeline-code {
+  max-height: 34vh;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-canvas);
+  padding: 7px 9px;
+  color: var(--color-fg-soft);
+  font-family: var(--chat-font);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.chat-timeline-thinking {
+  margin: 5px 0;
+  /* 不用左侧竖条区分区域：靠背景与内缩的圆角块就够，侧边高亮条读起来像选中态。 */
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-info) 5%, transparent);
+  padding: 3px 9px 4px;
+  color: var(--color-fg-faint);
+  font-size: 11.5px;
+  font-style: italic;
+  line-height: 1.55;
+}
+
+.chat-timeline-thinking-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-timeline-more {
+  margin-top: 1px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: color-mix(in srgb, var(--color-info) 80%, var(--color-fg-soft));
+  font-family: var(--chat-font);
+  font-size: 10.5px;
+}
+
+.chat-timeline-more:hover {
+  color: var(--color-info);
+}
+
+.chat-timeline-text {
+  margin: 7px 0;
+}
+
+.chat-timeline-prompt {
+  margin-bottom: 10px;
+}
+
+.chat-timeline-prompt > summary {
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.chat-timeline-prompt > summary:hover {
+  color: var(--color-fg-soft);
+}
+
+.chat-timeline-prompt .chat-modal-pre {
+  margin-top: 6px;
+  max-height: 26vh;
+  overflow: auto;
+}
+
+.chat-modal-id {
+  color: var(--color-fg-ghost);
+  font-family: var(--chat-font);
+  font-size: 10px;
+}
+
 .chat-status-context-trigger {
   cursor: pointer;
   color: inherit;
@@ -3105,40 +3313,6 @@ body.is-resizing.is-resizing-terminal {
 
 .chat-rename-input:focus {
   border-color: color-mix(in srgb, var(--color-info) 55%, transparent);
-}
-
-.chat-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.chat-modal-actions button {
-  min-height: 26px;
-  border-radius: 4px;
-  padding: 0 12px;
-  background: rgb(255 255 255 / 5%);
-  color: rgb(255 255 255 / 52%);
-  font: inherit;
-}
-
-.chat-modal-actions button:hover:not(:disabled) {
-  background: rgb(255 255 255 / 9%);
-  color: rgb(255 255 255 / 78%);
-}
-
-.chat-modal-actions .chat-modal-primary {
-  background: color-mix(in srgb, var(--color-info) 22%, transparent);
-  color: color-mix(in srgb, var(--color-info) 85%, transparent);
-}
-
-.chat-modal-actions .chat-modal-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-info) 32%, transparent);
-}
-
-.chat-modal-actions button:disabled {
-  color: rgb(255 255 255 / 22%);
 }
 
 .chat-composer {
@@ -3401,32 +3575,6 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 15%);
 }
 
-/* 输入框右侧的定时任务入口：有进行中的任务时用提示色，并在右上角挂一个计数角标。 */
-.chat-composer-schedule {
-  position: relative;
-}
-
-/* 有定时循环时点亮图标：进行中走提示色，暂停走中性色（一眼能看出它还在挂着） */
-.chat-composer-schedule.is-active {
-  color: var(--color-warn);
-}
-
-.chat-composer-schedule.is-active::after,
-.chat-composer-schedule.is-paused::after {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentcolor;
-  content: '';
-}
-
-.chat-composer-schedule.is-paused {
-  color: rgb(255 255 255 / 40%);
-}
-
 /* By The Way（btw）入口：正在回答时点亮（旋转图标自带反馈，这里只给颜色）。 */
 .chat-composer-btw.is-active {
   color: var(--color-warn);
@@ -3617,10 +3765,11 @@ body.is-resizing-btw {
 
 .chat-btw-close {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   flex: none;
   place-items: center;
+  padding: 0;
   border-radius: 3px;
   color: rgb(255 255 255 / 38%);
 }
@@ -3901,84 +4050,175 @@ body.is-resizing-btw {
 
 .chat-loop-form {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 6px 4px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 6px 2px;
 }
 
 .chat-loop-field {
   display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* 字段标题：小块灰字，不参与控件对齐，避免「每隔 60 分钟 自动发送」挤成一行 */
+.chat-loop-label {
+  color: rgb(255 255 255 / 38%);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.chat-loop-row {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 4px;
-  color: rgb(255 255 255 / 45%);
+  gap: 8px;
 }
 
-.chat-loop-field input {
-  width: 62px;
-  height: 22px;
-  padding: 0 6px;
+/* 数字 + 单位是同一个控件：共用一条边框，两者行高一致才不会看着歪 */
+.chat-loop-interval {
+  display: flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px 0 2px;
   border: 1px solid var(--color-line);
+  border-radius: 5px;
   background: var(--color-canvas);
-  color: var(--color-fg);
-  font-family: var(--chat-font);
-  font-size: 10.5px;
+  transition: border-color 100ms ease;
 }
 
-.chat-loop-unit {
-  color: rgb(255 255 255 / 28%);
+.chat-loop-interval:focus-within {
+  border-color: color-mix(in srgb, var(--color-line) 35%, var(--color-accent));
 }
 
-/* 单位选择器：和数字输入同一行，跟着输入框的观感走 */
-.chat-loop-form select.chat-loop-unit {
-  height: 22px;
-  padding: 0 2px;
+.chat-loop-amount {
+  width: 44px;
+  height: 26px;
+  padding: 0 6px;
   border: 0;
   background: transparent;
-  color: rgb(255 255 255 / 55%);
-  font-family: var(--chat-font);
-  font-size: 10.5px;
-}
-
-.chat-loop-task {
-  display: block;
-  width: calc(100% - 12px);
-  min-height: 40px;
-  margin: 0 6px 6px;
-  padding: 4px 6px;
-  border: 1px solid var(--color-line);
-  background: var(--color-canvas);
   color: var(--color-fg);
   font-family: var(--chat-font);
-  font-size: 10.5px;
-  line-height: 1.45;
-  resize: vertical;
+  font-size: 11.5px;
+  text-align: right;
 }
 
-.chat-loop-hint {
+.chat-loop-amount:focus {
+  outline: none;
+}
+
+/* 原生 select 的下拉箭头各平台字号不同，会把这一行顶得高低不一：
+   关掉箭头，自己画一个，右边距按箭头宽度留出来 */
+.chat-loop-unit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chat-loop-unit select {
+  height: 26px;
+  padding: 0 16px 0 2px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 62%);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.chat-loop-unit select:focus {
+  outline: none;
+}
+
+.chat-loop-unit > svg {
+  position: absolute;
+  right: 3px;
+  color: rgb(255 255 255 / 35%);
+  pointer-events: none;
+}
+
+.chat-loop-every {
+  min-width: 0;
   overflow: hidden;
-  padding: 0 6px 2px;
-  color: rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 30%);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-loop-preview {
-  display: -webkit-box;
-  overflow: hidden;
-  padding: 0 6px 6px;
-  color: rgb(255 255 255 / 32%);
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+.chat-loop-task {
+  display: block;
+  width: 100%;
+  min-height: 58px;
+  max-height: 148px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
-.chat-loop-preview-label {
-  color: rgb(255 255 255 / 45%);
+.chat-loop-task:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-line) 35%, var(--color-accent));
+}
+
+.chat-loop-task::placeholder {
+  color: rgb(255 255 255 / 24%);
+}
+
+.chat-loop-status {
+  /* 不用 flex：中文文本会按字符换行，窄面板里「下次 12 分 40 秒」会被拆成两行残句。
+     单行 + 省略号，圆点用 inline-block 跟上文同一行。 */
+  display: block;
+  overflow: hidden;
+  margin: 0;
+  padding: 8px 6px 4px;
+  color: rgb(255 255 255 / 38%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-loop-status-sep {
+  margin: 0 4px;
+  color: rgb(255 255 255 / 18%);
+}
+
+.chat-loop-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--color-fg-ghost);
+  vertical-align: 1px;
+}
+
+.chat-loop-dot-active {
+  background: var(--color-success);
+}
+
+.chat-loop-dot-paused {
+  background: var(--color-warn);
+}
+
+.chat-loop-dot-running {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success) 26%, transparent);
 }
 
 .chat-loop-error {
-  padding: 0 6px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 6px 4px;
   color: var(--color-danger);
 }
 
@@ -4005,22 +4245,6 @@ body.is-resizing-btw {
 
 .chat-loop-item:hover {
   background: rgb(255 255 255 / 6%);
-}
-
-.chat-loop-dot {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--color-fg-ghost);
-}
-
-.chat-loop-dot-active {
-  background: var(--color-success);
-}
-
-.chat-loop-dot-paused {
-  background: var(--color-warn);
 }
 
 .chat-loop-item-main {
@@ -4406,20 +4630,6 @@ body.is-resizing-btw {
     flex: 1 1 auto;
   }
 
-  /* 浮层里的操作按钮同理：20px 在触屏上点不准 */
-  .chat-popover-actions {
-    --chat-popover-action-inset-x: 12px;
-  }
-
-  .chat-popover-actions button {
-    height: 28px;
-  }
-
-  .chat-popover-actions button.chat-popover-icon {
-    width: 28px;
-    padding: 0;
-  }
-
   /* 手机上抽屉铺满整屏（窄屏里再让出一条 45% 的对话区只剩几十像素，两边都不能用），
      所以这时不再用内边距挤压对话区，靠关闭按钮回主流程。 */
   .chat-view.chat-btw-open {
@@ -4490,5 +4700,248 @@ body.is-resizing-btw {
   .chat-dot-unread,
   .chat-btw {
     animation: none;
+  }
+}
+
+/* 输入框右侧的“本会话能力”入口：面板打开时点亮。 */
+.chat-composer-capabilities.is-active {
+  color: var(--color-warn);
+}
+
+/* 会话设置弹窗里的能力列表与压缩表单来自 packages/mica-config-ui（与设置页同一份组件），
+   样式由那边的作用域提供，这里不再复制第二套。 */
+
+/* 会话设置弹窗：左侧分类菜单 + 右侧内容，只有内容区滚动。
+   三个分类（能力 / 压缩 / 定时任务）都是会话级设置，与详情弹窗共用 `.chat-modal` 外壳。 */
+.session-settings-modal {
+  max-width: 720px;
+  /* 高度固定：切换分类（能力 / 压缩 / 定时任务）时弹窗不能跟着内容变高变矮 */
+  height: min(60dvh, 540px);
+}
+
+.session-settings-modal .chat-modal-body {
+  display: grid;
+  grid-template-columns: 142px minmax(0, 1fr);
+  /* 内容区自己滚：菜单固定在左侧，不跟着长列表一起滚走 */
+  padding: 0;
+  overflow: hidden;
+}
+
+.session-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 8px 6px;
+  border-right: 1px solid var(--color-line);
+  overflow-y: auto;
+}
+
+.session-settings-nav-item {
+  display: grid;
+  flex: none;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.session-settings-nav-item:hover {
+  background: rgb(255 255 255 / 5%);
+  color: var(--color-fg);
+}
+
+.session-settings-nav-item.is-active {
+  background: rgb(255 255 255 / 9%);
+  color: var(--color-fg-max);
+}
+
+.session-settings-nav-item svg {
+  flex: none;
+}
+
+.session-settings-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-settings-nav-meta {
+  color: var(--color-fg-faint);
+  font-family: var(--mono-font, ui-monospace, monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.session-settings-panel {
+  min-width: 0;
+  min-height: 0;
+  /* 与 `.chat-modal-body` 同一个内边距：切分类时内容列不会左右跳一格 */
+  padding: 12px 16px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.session-settings-note {
+  margin: 8px 0 0;
+  color: var(--color-fg-faint);
+  font-size: 11.5px;
+}
+
+.session-settings-error {
+  margin: 8px 0 0;
+  color: var(--color-error);
+  font-size: 11.5px;
+}
+
+/* 能力详情：复用弹窗的 head/meta/body 结构，这里只排字段 */
+.session-cap-detail-meta {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 10px;
+}
+
+.session-cap-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 11.5px;
+}
+
+.session-cap-detail-row dt {
+  flex: none;
+  width: 64px;
+  margin: 0;
+  color: var(--color-fg-faint);
+}
+
+.session-cap-detail-row dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cap-detail-switch {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  flex: none;
+  margin-left: auto;
+  overflow: visible;
+  background: transparent;
+}
+
+.session-cap-detail-switch.is-disabled {
+  opacity: 0.45;
+}
+
+.session-cap-detail-desc {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.session-settings-actions-spacer {
+  flex: 1;
+}
+
+.session-action {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-fg);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-action:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--color-fg-max);
+}
+
+/* 禁用态只掉颜色，不改尺寸与边框：按钮不能因为禁用换个形状 */
+.session-action:disabled {
+  border-color: rgb(255 255 255 / 8%);
+  color: var(--color-fg-ghost);
+  cursor: default;
+}
+
+.session-action-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-error) 60%, transparent);
+  background: color-mix(in srgb, var(--color-error) 18%, transparent);
+  color: var(--color-error);
+}
+
+.session-action-primary {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
+  color: #fff;
+}
+
+.session-action-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  color: #fff;
+}
+
+.session-action-primary:disabled {
+  border-color: rgb(255 255 255 / 8%);
+  background: transparent;
+  color: var(--color-fg-ghost);
+}
+
+@media (max-width: 767px) {
+  /* 移动端菜单转到顶部横排，内容占满剩余高度 */
+  .session-settings-modal {
+    height: min(76dvh, 640px);
+  }
+
+  .session-settings-modal .chat-modal-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .session-settings-nav {
+    flex-direction: row;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+    overflow-x: auto;
+  }
+
+  .session-settings-nav-meta {
+    display: none;
   }
 }

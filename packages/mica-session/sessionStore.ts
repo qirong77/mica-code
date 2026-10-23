@@ -13,6 +13,9 @@ import {
 import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
+import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
+import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
+import type { AutoCompactOverride } from '@packages/mica-common/autoCompact.js';
 import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortOption,
@@ -27,6 +30,17 @@ export type PersistedRuntimeSnapshot = {
   model: string;
   effort: EffortOption;
   role: string;
+  /**
+   * Per-session capability selection (skills / tools / MCP servers). Missing on
+   * older sessions means "everything enabled"; new sessions copy the config
+   * defaults here, so one session never changes another's capabilities.
+   */
+  capabilitySelection?: CapabilitySelection;
+  /**
+   * Per-session 自动压缩覆盖：只记录用户显式改过的键，其余继续跟随全局默认值。
+   * 缺失表示完全跟随默认（老会话与未改过设置的会话都走这条路径）。
+   */
+  autoCompactOverride?: AutoCompactOverride;
   /** Model context window in tokens; informational for the web console's
    *  context usage display. Optional so older snapshots parse cleanly. */
   contextWindowSize?: number;
@@ -345,10 +359,7 @@ export class SessionStore implements SessionStoreLike {
     // index once; the live turn stays responsive.
     let index = this.readIndexFromDisk();
     if (!index) {
-      index =
-        this.cachedIndex && this.indexMatchesDisk(this.cachedIndex)
-          ? this.cachedIndex
-          : this.rebuildIndex();
+      index = this.cachedIndex && this.indexMatchesDisk(this.cachedIndex) ? this.cachedIndex : this.rebuildIndex();
     }
     mutate(index);
     this.cachedIndex = index;
@@ -436,7 +447,7 @@ export function createSessionId(date = new Date()): string {
 function toSessionSummary(session: PersistedSession): SessionSummary {
   return {
     id: session.id,
-    title: session.title,
+    title: displayTitle(session.title),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     cwd: session.cwd,
@@ -449,6 +460,15 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
     hasConversation: hasConversationData(session.snapshot),
     hasUsage: (session.snapshot.usageHistory?.length ?? 0) > 0,
   };
+}
+
+/**
+ * 老会话的标题可能是从带图片的输入原样截出来的（`[Image](/Users/…/a.png) 帮我看下`），
+ * 本地路径对列表毫无意义。读取时剥掉占位符就够了，不必改写用户文件 —— 下次保存会写成干净标题。
+ */
+function displayTitle(title: string): string {
+  const stripped = stripMediaPlaceholders(title).replace(/\s+/g, ' ').trim();
+  return stripped || title;
 }
 
 function dirMtimeMs(): number {
@@ -597,10 +617,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!Array.isArray(session.snapshot.messages)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
-  if (
-    session.snapshot.subagentUsageHistory !== undefined &&
-    !Array.isArray(session.snapshot.subagentUsageHistory)
-  ) {
+  if (session.snapshot.subagentUsageHistory !== undefined && !Array.isArray(session.snapshot.subagentUsageHistory)) {
     return null;
   }
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';

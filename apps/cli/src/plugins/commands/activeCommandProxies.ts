@@ -26,11 +26,23 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     get role() {
       return current().role;
     },
+    get capabilitySelection() {
+      return current().capabilitySelection;
+    },
+    get autoCompactOverrideSelection() {
+      return current().autoCompactOverrideSelection;
+    },
     reloadConfig(resetClient?: boolean) {
       current().reloadConfig(resetClient);
     },
     setRole(roleName: string) {
       current().setRole(roleName);
+    },
+    setCapabilities(selection: Parameters<NonNullable<CommandAgent['setCapabilities']>>[0]) {
+      return current().setCapabilities(selection);
+    },
+    setAutoCompactOverride(override: Parameters<NonNullable<CommandAgent['setAutoCompactOverride']>>[0]) {
+      return current().setAutoCompactOverride(override);
     },
     buildSystemPrompt() {
       return current().buildSystemPrompt();

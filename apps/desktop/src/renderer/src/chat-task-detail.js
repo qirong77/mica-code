@@ -46,21 +46,98 @@ export function isBackgroundTaskRunning(task) {
 
 const TIMELINE_KINDS = new Set(['thinking', 'text', 'tool', 'tool_result'])
 
+/**
+ * 找最近一条还没挂上结果的工具调用。
+ *
+ * 工具的入参与结果原本是两条平铺记录（`tool` / `tool_result`），详情弹窗里
+ * 「一次调用」才是读者心里的单位，所以这里配成一步。只看最后一个候选：
+ * 流式输出里结果紧跟在调用后面，跳过中间未配对的调用反而会错配。
+ */
+function takePendingToolStep(steps, toolName) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    if (step.kind !== 'tool' || step.resultText) continue
+    if (toolName && step.toolName && step.toolName !== toolName) return null
+    return step
+  }
+  return null
+}
+
 export function buildSubagentTimeline(task) {
   const entries = Array.isArray(task?.timeline) ? task.timeline : []
   const steps = []
   entries.forEach((entry, index) => {
     const text = typeof entry?.text === 'string' ? entry.text : ''
     if (!text.trim()) return
+    const key = `${entry?.id || index}:${index}`
+    // 未知 kind 按 thinking 渲染：至少不会把工具参数当正文 markdown 打出去。
+    const kind = TIMELINE_KINDS.has(entry?.kind) ? entry.kind : 'thinking'
+    const toolName = entry?.toolName || ''
+    if (kind === 'tool') {
+      steps.push({ key, kind, toolName, argsText: text, resultText: '' })
+      return
+    }
+    if (kind === 'tool_result') {
+      const target = takePendingToolStep(steps, toolName)
+      if (target) {
+        target.resultText = text
+        return
+      }
+      // 找不到对应调用（时间线被截断过）时单独成一步，不能把输出丢掉。
+      steps.push({ key, kind, toolName, text })
+      return
+    }
     steps.push({
-      key: `${entry?.id || index}:${index}`,
-      // 未知 kind 按 thinking 渲染：至少不会把工具参数当正文 markdown 打出去。
-      kind: TIMELINE_KINDS.has(entry?.kind) ? entry.kind : 'thinking',
+      key,
+      kind,
       text,
-      toolName: entry?.toolName || ''
+      toolName
     })
   })
   return steps
+}
+
+/**
+ * 时间线内容的指纹。
+ *
+ * 详情弹窗每秒轮询一次，host 每次都会给一份新的数组与条目对象；直接用它当
+ * `useMemo` 依赖会让所有步骤每秒重建一次，`memo` 也就全部失效。时间线是
+ * append-only 的（同一 id 的增量只合并进最后一条），所以「条数 + 最后一条的
+ * id/kind/长度」变化就等价于内容变化。
+ */
+export function timelineSignature(task) {
+  const entries = Array.isArray(task?.timeline) ? task.timeline : []
+  const last = entries.at(-1)
+  return [entries.length, last?.id ?? '', last?.kind ?? '', last?.text?.length ?? 0].join(':')
+}
+
+/**
+ * 两次轮询的结果是否等价（等价就复用旧对象，让 React 直接 bail out）。
+ *
+ * 任务在跑时 detail 每秒都是新对象，但绝大多数时候内容没变：不判等的话，
+ * 弹窗连同里面所有步骤每秒重渲染一次，滚动和输入都会跟着发涩。
+ */
+export function sameTaskDetail(previous, next) {
+  if (!previous || !next) return previous === next
+  if (previous === next) return true
+  if (previous.content !== next.content) return false
+  if (previous.size !== next.size || previous.start !== next.start || previous.end !== next.end) {
+    return false
+  }
+  if (timelineSignature(previous.task) !== timelineSignature(next.task)) return false
+  const a = previous.task || {}
+  const b = next.task || {}
+  if (a.status !== b.status || a.finishedAt !== b.finishedAt) return false
+  // 结果与错误是收尾时才出现的字段，不能只靠 status 判断（失败原因可能补充得更晚）。
+  if (a.result !== b.result || a.error !== b.error) return false
+  const au = a.usage || {}
+  const bu = b.usage || {}
+  return (
+    au.records === bu.records &&
+    au.inputTokens === bu.inputTokens &&
+    au.outputTokens === bu.outputTokens &&
+    au.cachedInputTokens === bu.cachedInputTokens
+  )
 }
 
 export function taskOutputWindowLabel({ start, end, size } = {}) {

@@ -6,12 +6,7 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import { formatSessionListTime } from '@packages/mica-ui/utils/format.js';
 import type { BuiltInCommandItem } from '../commandHost.js';
 import { moveSelection, selectionDirection } from '../shared/commandInput.js';
-import type {
-  CommandAgent,
-  CommandRuntimeServices,
-  CommandSessionController,
-  SessionSummary,
-} from '../services.js';
+import type { CommandAgent, CommandRuntimeServices, CommandSessionController, SessionSummary } from '../services.js';
 
 const element = React.createElement;
 
@@ -229,14 +224,35 @@ async function resumeSession(
     services.showNotice(result.message, undefined, { command: '/resume', status: 'error' });
     return;
   }
+  const cwd = switchToSessionCwd(result.session.cwd, services);
   services.clearRewindCheckpoints?.();
   services.syncModelDisplay(agent);
   services.refreshCurrentAgentSessionUi();
   const roleMessage = result.roleFallback
     ? `; role ${result.roleFallback.missing} not found, using ${result.roleFallback.fallback}`
     : '';
-  services.showNotice(`Resumed: ${result.session.title}${roleMessage}`, undefined, {
+  services.showNotice(`Resumed: ${result.session.title}${cwd.text}${roleMessage}`, undefined, {
     command: '/resume',
-    status: roleMessage ? 'warning' : 'success',
+    status: roleMessage || cwd.failed ? 'warning' : 'success',
   });
+}
+
+/**
+ * A session owns its working directory: tools, AGENT.md, skills and the cwd
+ * written back on save all read `process.cwd()`, so resuming elsewhere would
+ * silently move the session to the launch directory.
+ */
+function switchToSessionCwd(
+  cwd: string | undefined,
+  services: CommandRuntimeServices,
+): { text: string; failed: boolean } {
+  if (!cwd || cwd === process.cwd()) return { text: '', failed: false };
+  try {
+    process.chdir(cwd);
+    services.syncAgentStatusItems?.();
+    return { text: `; cwd ${process.cwd()}`, failed: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { text: `; cwd not switched (${message})`, failed: true };
+  }
 }

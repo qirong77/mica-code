@@ -16,6 +16,8 @@ import {
   resolveModelRequestPatch,
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
+  readCapabilityDefaults,
+  updateCapabilityDefaults,
 } from './config.js';
 import { runtimeEnv } from './runtimeEnv.js';
 import {
@@ -62,6 +64,10 @@ export const micaConfig = {
   resolveChatCompletionsEffortParams,
   /** 把统一 effort 转换为 Responses 请求参数。 */
   resolveResponsesReasoningParams,
+  /** 新会话默认能力（config.json 的 capabilityDefaults）。 */
+  readCapabilityDefaults,
+  /** 保存新会话默认能力；不改动已有会话。 */
+  updateCapabilityDefaults,
   /** 运行时调参配置，只读取环境变量，不写入 config.json。 */
   runtimeEnv,
   storage: {
@@ -96,6 +102,7 @@ export {
   resolveChatCompletionsEffortParams,
   resolveResponsesReasoningParams,
 } from './config.js';
+export { readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
 export { readRuntimeEnvConfig, runtimeEnv } from './runtimeEnv.js';
 export type { RuntimeEnvConfig, RuntimeEnvSource } from './runtimeEnv.js';
 export type {

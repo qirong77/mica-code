@@ -58,6 +58,9 @@ export class Application {
     const sessionStore = micaSession.createStore();
     let startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     const missingStartupSessionId = this.options.sessionId && !startupSession ? this.options.sessionId : null;
+    // Switch before plugins/runtime start so AGENT.md, skills and tools resolve
+    // against the resumed session's directory instead of the launch cwd.
+    const startupCwdError = startupSession ? switchToSessionCwd(startupSession.cwd) : null;
     seedStartupModelDisplay(startupSession);
     this.renderInstance = await wrappedRender(
       React.createElement(ThemeProvider, { initialState: 'auto', children: React.createElement(micaUi.App) }),
@@ -206,6 +209,7 @@ export class Application {
       } else if (missingStartupSessionId) {
         showPluginMessage(`Session not found: ${missingStartupSessionId}; started a new session`, 7000);
       }
+      if (startupCwdError) showPluginMessage(startupCwdError, 7000);
 
       void micaConfig.loadMissingProviderModels().then(() => {
         if (!agent.isRunning) {
@@ -301,6 +305,17 @@ function seedStartupModelDisplay(session: PersistedSession | null): void {
     session && model ? micaConfig.getModelRule(model).contextSize : config.contextWindowSize,
   );
   micaUi.terminalInput.role.set(session?.snapshot.role ?? 'default');
+}
+
+function switchToSessionCwd(cwd: string | undefined): string | null {
+  if (!cwd || cwd === process.cwd()) return null;
+  try {
+    process.chdir(cwd);
+    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `无法切换到会话工作目录 ${cwd}：${message}`;
+  }
 }
 
 function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {

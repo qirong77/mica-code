@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import mitt from 'mitt';
 import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
+import { TurnNoticeLog } from './turnNotices.js';
+import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 
 class MockAgent {
   readonly events = mitt();
@@ -105,12 +107,22 @@ function createHarness() {
     refreshFromStore: () => null,
   };
   let idleCount = 0;
+  const noticeLog = new TurnNoticeLog(
+    () => agent.toConversationMessages() as unknown as MicaUiConversationMessage[],
+  );
   const executor = new HeadlessTurnExecutor({
     agent: agent as unknown as never,
     sessionController: sessionController as never,
     onEvent: (event) => events.push(event),
     maxTurnRetries: 2,
     retryDelayMs: 5,
+    notices: { ensure: () => noticeLog },
+    // Mirrors HeadlessPluginHost: the persisted conversation is the provider
+    // history with the notices threaded back in.
+    getConversationMessages: (extra?: Array<{ role: string; content: unknown }>) => {
+      const messages = noticeLog.compose(extra as unknown as MicaUiConversationMessage[]);
+      return messages.length > 0 ? messages : undefined;
+    },
     onIdle: () => {
       idleCount++;
     },
@@ -121,6 +133,7 @@ function createHarness() {
     events,
     executor,
     sessionId,
+    noticeLog,
     savedStates,
     savedConversations,
     getIdleCount: () => idleCount,
@@ -331,6 +344,29 @@ describe('HeadlessTurnExecutor', () => {
     executor.abort();
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'aborted' });
+  });
+
+  it('persists a retry notice in the conversation while waiting', async () => {
+    const { agent, executor, events, noticeLog, savedConversations } = createHarness();
+    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 503 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+    const saved = savedConversations.flatMap((messages) => messages ?? []);
+    expect(saved).toContainEqual(expect.objectContaining({ role: 'notice', command: '/retry' }));
+    // One slot per turn: the second attempt updates it instead of appending.
+    expect(noticeLog.size).toBe(1);
+  });
+
+  it('persists the final failure as a conversation notice', async () => {
+    const { agent, executor, savedConversations } = createHarness();
+    agent.nextErrors = [Object.assign(new Error('bad request'), { status: 400 })];
+    await executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const saved = savedConversations.flatMap((messages) => messages ?? []);
+    expect(saved).toContainEqual(
+      expect.objectContaining({ role: 'notice', command: '/error', content: '请求失败: bad request' }),
+    );
   });
 
   it('queues with after_turn mode and reports the queue position', async () => {

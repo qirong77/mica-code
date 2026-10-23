@@ -14,6 +14,7 @@ import type {
   SubmitResult,
 } from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
+import type { AutoCompactOverride, CapabilitySelection } from '@packages/mica-common/index.js';
 
 export type {
   RewindApplyRequest,
@@ -36,8 +37,13 @@ export type CommandAgent = {
   readonly currentRunId: number;
   readonly isRunning: boolean;
   readonly role: string;
+  readonly capabilitySelection?: CapabilitySelection;
+  /** 本会话的自动压缩覆盖（只含显式改过的键）；空对象表示完全跟随默认。 */
+  readonly autoCompactOverrideSelection?: AutoCompactOverride;
   reloadConfig(resetClient?: boolean): void;
   setRole(roleName: string): void;
+  setCapabilities?(selection: CapabilitySelection): CapabilitySelection;
+  setAutoCompactOverride?(override: AutoCompactOverride): AutoCompactOverride;
   buildSystemPrompt(): string;
   createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
     /**
@@ -86,7 +92,7 @@ export type SessionSummary = {
 export type ResumeSessionResult =
   | {
       ok: true;
-      session: { title: string; snapshot: { model: string } };
+      session: { title: string; cwd?: string; snapshot: { model: string } };
       roleFallback?: { missing: string; fallback: string };
     }
   | { ok: false; message: string };
@@ -94,7 +100,7 @@ export type ResumeSessionResult =
 export type CommandSessionController = {
   list(limit?: number): SessionSummary[];
   listRecent(limit?: number): SessionSummary[];
-  load?(id: string): { snapshot: { model: string } } | null;
+  load?(id: string): { cwd?: string; snapshot: { model: string } } | null;
   resume(id: string): ResumeSessionResult;
   startNewSession(): void;
   saveCurrent(options?: { allowEmpty?: boolean }): void;

@@ -110,6 +110,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 多 agent 命令使用 `createActiveAgentProxy` / `createActiveSessionControllerProxy`，不固定构造时的 agent。
 - provider/model/effort/role 切换先 busy guard、同步当前配置，再开选择器；完成后 `reloadConfig(false)`、保存 session、同步 UI。
 - role 切换重建 client 并保留历史。非空会话跨协议切换由 `applyConfigSwitchUpdate` 阻止；恢复旧会话协议不匹配时降级恢复 model/effort，不静默丢历史。
+- `/resume` 与 `--resume` 会切到会话自己的 `cwd`（目录缺失时保留当前目录并提示），因为工具、AGENT.md、skills 与保存时写回的 `session.cwd` 都读 `process.cwd()`；app-server 的 resume 仍以客户端传入的 cwd 为准。
 
 ## 5. Turn、队列与持久化
 
@@ -136,9 +137,10 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - turn 级重试最多 5 次、间隔 10s；仅当错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
 - provider 的 `withRetry` 仅在尚无文本/工具输出时重发请求（thinking 不算输出），5 次退避为 2/4/8/16/30s。
-- provider 重试经 `onRetry` 透传；TUI 原地更新单条 notice，app-server 只写 stderr。
+- provider 重试经 `onRetry` 透传；TUI 原地更新单条 notice，app-server 另发 `mica/turn/retrying` 让 desktop 显示重试状态（stderr 同步留日志）。
 - headless 与 TUI 使用相同策略；重试清 responseBuffer，重放已消费的 after_iteration 输入，等待可被 abort 立即打断。
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。
+- turn 级重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history；插入位置按创建时已提交的对话条数还原，compact 重写历史时一并清空。
 - `AgentRuntime.abort()` 递增 runId 并中止 controller。`preserveAbortedTurn` 只补未提交的消息：两个 client 使用 `turnCommitted`，不能只比较历史末尾用户文本。
 - TUI / headless 各自维护 `committedResponseBuffer`，迭代边界更新；补写只传 `uncommittedResponseText(responseBuffer, committedResponseBuffer)`。
 - 两个 provider 的流迭代结束后仍须 `throwIfQueryStopped`，防止 SDK 吞掉 AbortError 后提交空 assistant 消息。
@@ -162,6 +164,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `buildSystemPrompt()` 默认读取 `mica-agent/prompt/system.md`；自定义 role 只替换 `<system>`。
 - cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析，不在模块加载时冻结。
 - skills 仅以索引进入 system prompt。角色扫描 `$MICA_HOME/role/*.md`；内置 `default` 不可被同名用户文件覆盖。
+- **能力选择**：`AgentRuntime.setCapabilities()` 保存本会话的 skills / tools / MCP 开关；system prompt 的 skills 索引、工具定义与执行校验读同一份状态（`createClientOptions` 把会话开关与调用方 filter 取交集）。规则在 `mica-common/capabilities.ts`，只存「被关掉的名字」，新增能力默认可用。
 - 模板品牌占位符通过 `brandTemplate.ts` 的 `applyBrandTemplate` 统一展开；未知占位符保留，不硬编码品牌名。
 
 ### 模型规则
@@ -189,6 +192,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `subagentUsageHistory` 独立于主 `usageHistory`，保持 rewind 裁剪语义。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`，下一次较新的真实请求后失效。
 - fork 清空两类 usageHistory，只保留描述继承上下文的 `lastUsage`。旧会话用量副本由 `usageIdentity` / `filterOwnedUsage` 统一归属，列表与详情保持一致。
+- 会话快照带 `capabilitySelection`；`startNewSession` 恢复 config 的 `capabilityDefaults`，resume/fork 沿用快照，因此开关不会跨会话串味。
 - 无手动标题时取最后一条真实用户消息，最长 60 字符；跳过 compact 元数据与 `displayContent` 不同于 content 的插件注入消息。
 
 ### 索引、并发与删除
@@ -213,7 +217,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - `mica app-server` 是每会话常驻进程，不改为全局 daemon；stdin / stdout 使用 Codex v2 JSONL。
 - framing 在 `mica-runtime/codexProtocol.ts`，事件投影在 `runtime/CodexProjector.ts`。每个 executor turn 都有完整 `turn/started` + `turn/completed`，turnId 由 executor 事件分配，每轮重新 attach projector。
-- `mica/*` 扩展通知（queue、tasks、BTW、history、autoCompact）直接送 renderer，不进入 turn 重放缓冲。
+- `mica/*` 扩展通知（queue、tasks、BTW、history、autoCompact、capabilities、turn retrying）直接送 renderer，不进入 turn 重放缓冲（`mica/turn/retrying` 属于 turn 增量，随事件流重放）。
+- `mica/capabilities/get|set` 读写本会话能力：get 返回开关 + 完整目录，set 保存会话并广播 `mica/capabilities/updated`；运行中 set 返回 `ok:false` 而不是错误码。
+- `mica/autoCompact/get|set` 读写本会话压缩设置：get 返回默认值 / 覆盖 / 生效值，set 只存与默认值不同的键并广播 `mica/autoCompact/overrideUpdated`。默认值来自宿主每轮下发的参数，所以要放在**跨请求共享的持有对象**里（`ctx` 每个请求都是新对象）。
 - 撤回、任务详情/终止、改名、BTW 等辅助请求不启动主 turn，不改 `run.running` / `hostPending`；可在 turn 运行中调用。编辑重跑另有 busy guard。
 - 任务记录只活在 host；详情与终止走 `mica/backgroundTasks/*`、`mica/subagentTasks/*`。运行快照不含已结束任务，详情响应仍须带最终状态与退出码。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 后应用。缺失角色只 warning 并保留原角色，不为切角色重建 host。
@@ -238,6 +244,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
+- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。
 - quick commands 另由 `apps/cli/src/plugins/commands/index.ts` 注册；新增/删除时检查两条路径与 README。
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态、文件、配置或 git 的命令走 exclusive task。交互反馈用 `services.showNotice`。
 - turn 运行中是否可执行由注册时的 `allowDuringTurn` 决定，检查 quick commands 与 `plugins/command-*.ts` 两条路径；exclusive task 期间仅 status、task、agents、new。
@@ -246,6 +253,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 工具与 PTY
 
 - `mica-tools` 是唯一 registry，产品工具优先经插件 `ctx.tools.register()`；新增工具继承 `MicaTool`，声明 schema、展示、错误格式与 readOnly。
+- `getCatalog()` 暴露工具来源（builtin/runtime/mcp + mcpServer），MCP 工具名统一由 `mcpToolNamePrefix()` 生成，按 server 关闭时用它前缀匹配。
 - readOnly 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、PTY、wait_for 为 false。
 - `truncateDisplayText` 仅在 `process.stdout.columns` 存在时裁剪；app-server 管道无列宽，不按 80 列截断。
 - PTY 由懒启动 Node helper `mica-pty/src/server.mjs` 承载，Bun 首次调用动态加载 `src/manager.js`。
@@ -365,6 +373,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - host 主动启动的轮次发 `chat:run-started` 补用户行；按 clientMessageId 和末尾未回答的同文行去重，不能全局按文本去重。
 - 每次模型请求后立即转发 usage；tokens/cached/ctx 取 `tokenUsage.last`。实时 usage 不改 turnState / updatedAt，避免误判完成。
 - 阶段文案与计时都读 `statusLinePhase`；工具结束后回到 connecting。
+- `mica/turn/retrying` 让状态行显示 `retrying n/5`，并在会话里留一条 `command: '/retry'` 的可复用通知（同轮原地替换，`/error` 为最终失败）。
 - `ChatView` 保留最近 5 个实例，运行/锁定/活跃节点不淘汰；DOM 渲染顺序固定为 workspace 顺序，避免移动节点清 scrollTop。
 - 按 nodeId 保存滚动位置与贴底意图；隐藏时忽略 clientHeight=0 的滚动事件，重建后恢复。
 
@@ -380,6 +389,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 输入法组合期用 `resolveComposerSelection` 取 selectionEnd 并收起选区；blur 清组合态，不在组合期从外部 setInput。
 - 粘贴共用 `composer-paste.js`：图片字节转 `[Image](路径)`，文件插绝对路径；系统路径由 `clipboard:file-paths` 按 basename/顺序对齐，失败提示，不插错误文件路径。
 - 角色入口在输入条箭头，非 default 显示角色名，随下一次发送/编辑的 role 参数持久化。
+- 输入条右侧齿轮与时钟都打开 `SessionSettingsDialog`（`chat-modal` 外壳、左侧菜单 + 右侧内容）：会话能力（Tools / Skills / MCP 三页签复选列表，逐项切换）/ 自动压缩（数值项带 −/+/↺，标出「默认 x」）/ 定时任务（`LoopPanel`，与 CLI `/loop` 同一套语义）。齿轮开在会话能力、时钟直接开在定时任务。数据来自 host 的 `mica/capabilities/get`、`mica/autoCompact/get`，提交走对应 set。能力开关运行中只读，压缩与定时任务随时可改；同一会话的其他窗口经 `mica/capabilities/updated` / `mica/autoCompact/overrideUpdated` 同步。
 - 双击用户消息就地编辑，仅空闲且非空时提交；经 `chat:edit-message` 调截断重跑，失败保留编辑文本并 notice。
 - 引用按钮经 `mica-common/chatQuote.ts` 插入围栏文本，展示从草稿反推，删除只删对应块，发送与存储不设特殊协议。
 
@@ -393,7 +403,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
 - 代码块（聊天 markdown 与详情弹窗的参数/输出）统一由 `CodeView` + `code-highlight.js` 渲染：只做只读着色，认得的语言是 json/shell/diff/js/log，其余原样输出；token 色走 `app.css` 的 `--color-*`，不引入编辑器运行时，路径点击仍由 `PathToken` 提供。`displayText` 在显示前对 json 做缩进重排（数字与转义按原文保留，解析失败原样输出），复制带的是屏幕上那段文本。
 - 要读全文就到编辑器里看：详情弹窗的「在编辑器中打开」经 `FilesView.openDocument` 把内容作为**只读虚拟文档**（`mica-document://` 页签）塞进应用里唯一的 monaco 实例，不另建 editor。页签规则在 `files-document.js`（同 `callID:input/output` 复用同一个 model，同名标题自动加序号），只读状态在 `activateFile` 里按页签切换，打开后关掉弹窗。
-- 模型/loop 面板统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。
+- 模型选择、上下文占用这类轻量浮层统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。会话级设置（能力 / 压缩 / 定时任务）是弹窗而不是浮层，走 `SessionSettingsDialog`。
 - 电脑隐藏发送/排队按钮，移动端保留；停止只用 danger、排队只用 warn，上传保持中性。loop 徽标自带 tick，不在 ChatView 或侧栏全树计时。
 - 后台任务/子代理 dock 仅列运行项，详情通过 host 查询，结束后保留最终结果；查询/终止不改变 turn 生命周期，终止后台任务须确认。
 
@@ -406,13 +416,14 @@ npm run serve:web         # 构建后运行 Web 运行时
 - CLI 每轮前 prune-only，失败提示但不中断，经 after_turn 提交；停止移除 system prompt loop 指引。
 - desktop `host/loop-state.js` 为纯模型，`host/loops.js` 持久化 `userData/loops.json`，单定时器调度；不在页面 setInterval 重造。
 - 按 nodeId 归属，首轮拿到 sessionId 后绑定；启动即跑，忙时 skip 不计执行次数，重启仅追赶一轮。
-- 循环不改变 Pinned/Projects/Recent 归属；控制面只有输入条时钟面板，侧栏显示时钟与进度。
+- 循环不改变 Pinned/Projects/Recent 归属；控制面是输入条时钟打开的「会话设置 → 定时任务」，侧栏显示时钟与进度。
 
 ### 自动压缩
 
-- 设置和按 sessionId 计数由运行时 `host/auto-compact.js` 持有，落盘 `userData/auto-compact.json`，配置页是唯一设置入口。
-- desktop 每轮经 turn/start / editMessage 下发设置与计数，app-server 执行并回推；计数只由 host 报，宿主不再次累加。
-- 未收到 autoCompact 参数的 exec / Codex driver 不自动压缩。
+- 设置和按 sessionId 计数由运行时 `host/auto-compact.js` 持有，落盘 `userData/auto-compact.json`，配置页是唯一设置入口（**默认值**）。
+- **会话级覆盖**：`autoCompactOverride` 存在会话快照里（只记与默认值不同的键），经 `mica/autoCompact/get|set` 读写；生效值 = 默认值 + 覆盖，合并规则只在 `mica-common/autoCompact.ts`。新会话不继承上一条会话的覆盖。
+- desktop 每轮经 turn/start / editMessage 下发设置与计数，app-server 把会话覆盖叠上去再执行并回推；计数只由 host 报，宿主不再次累加。
+- 未收到 autoCompact 参数的 exec / Codex driver 不自动压缩。TUI 只在会话设置了覆盖时才启用（`LocalRuntimeController.prepareAutoCompact`），默认行为与 exec 一致。
 - 每次完整请求按 usageId 去重，先快速、仍超阈值再模型；同次升级算一次触发。默认快速 200k/3 次、模型 120k/3 次、间隔 20 分钟，安全下限 150k/100k。
 - 失败只记 note，不中断 turn；只改发给模型的历史，不改 conversationMessages。状态通知不进 turn 缓冲，不碰运行态。
 
@@ -510,7 +521,13 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 配置页与主题
 
 - `mica-config-ui` 为唯一配置页实现：config-web 用 HTTP 托管，desktop SettingsView 直接嵌入组件，数据经运行时，不改回 iframe/子进程。
+- 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`ControlEndpointList`，文案走 `labels.ts`；不在页面里另写按钮、开关、页签或枚举中文。
+- Config 页按字段编辑 `config.json`（providers / searxngUrl），整份 JSON 收在「直接编辑 JSON」折叠面板里；`mcpServers`、`capabilityDefaults` 只读展示并跳到各自页面，不在这里重复实现。
+- 服务商卡片默认折成一行摘要（名称 / 协议 / 地址 / 模型数），展开才渲染字段；有校验错误时强制展开并标「待修正」。
+- 配置页不提供 effort 开关：是否发送 reasoning 参数由模型规则按模型名判定（`model-effort-context` 从 models.dev 取 `reasoning_options`，`resolveModelRequestPatch` 生成每个模型每个协议各自的 patch，provider 上的 `supportsEffort` 只是兜底）。表单不再编辑该字段，旧配置里已有的值原样保留。
+- 表单转换的唯一实现在 `web/configDraft.ts`（纯函数、有测试）：表单只覆盖已知字段，写入时保留未知顶层键与 provider 里的未知字段，已知键按固定顺序排列，可选字段留空即删键（`models: []` 在 `validate-config` 里是错误）。
 - 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
+- Capabilities 页只改 `config.json` 的 `capabilityDefaults`（新会话默认值），不改已有会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗，不提供全开/全关；读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
 - 样式限定 `.mica-config-ui`，页面级 html/body/#root 高度链由整页宿主定义，不能覆盖 desktop 窄屏根高度。
 - 配置页新建/删除/放弃操作用 `DialogHost` 的 confirmDialog / promptDialog，不依赖原生 prompt/confirm。
 - 改配置页后运行 `bun run build:config-web`，提交生成的 `generatedStaticAssets.ts`；system prompt 与内置角色直接复用 CLI 模板，跳过用户 default.md。
@@ -518,6 +535,21 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 内容面 `#2b2b2b`、外框 `#3c3f41`、正文 `#cccccc`、分界 `#4b4b4b`；保留前景梯级，Git diff 沿用 vs-dark 默认对比色。
 - 主顶栏、侧栏占位、抽屉标题保持 h-8，对应外壳交通灯与 sheet offset 同步。
 - 默认隐藏滚动条，仅主对话与 turn 日志可见；例外同时覆盖 scrollbar-width 和 webkit display。Monaco/xterm 自绘滚动条单独关闭。
+
+### 界面审查清单（新增页面、面板、弹窗必查）
+
+这一节的条目都是实测被用户明确否掉的形态，不是风格偏好；新写界面前先对照，交付前再对照截图核对一次。
+
+- **禁用侧边条高亮**。选中/当前项不要用 `border-left` 或 `inset ... 0 0` 造一条竖直亮条，读起来像编辑器 gutter、也让行左缘错位；用背景、圆角边框和字重区分选中态。语义上的引用块（`blockquote`、`chat-quote`）与容器分隔线不在此列。
+- **一行里的控件必须等高**。原生 `<select>`、`<input type=checkbox>`、系统按钮各带自己的字号与内边距，同桌摆放一定歪：要么 `appearance: none` 自绘（箭头用绝对定位的图标），要么用共享组件。数字 + 单位这类复合控件放在同一条边框里，共用 `height` 与 `line-height`。
+- **禁用态只掉颜色**。禁用按钮保持与可用态完全相同的尺寸、边框与位置，只降前景与底色；`display:none`、改字号或换布局都会让按钮看起来「跳了一下」。
+- **同一动作区的主次按钮统一高度与对齐**。文字主按钮靠右且不参与收缩（加 `flex: none` 与 `white-space: nowrap`），图标按钮给固定宽高；不要在动作区里混入不同高度的控件。
+- **标签在控件上方，不要形容词混排**。「每隔 [60] [分钟] 自动发送」这类把说明塞进控件行会同时破坏对齐与语义；改成上层小标签 + 下层控件，右侧留一句结果说明（「每 1 小时发送一次」）。
+- **页签只有一种形态**。页面级页签统一复用 `.session-tabs` / `.session-tab` 的下划线样式，不新造胶囊、方块或圆角页签；同一产品里出现两套页签即视为缺陷。
+- **开关用共享 `Switch`**（`mica-config-ui/web/components/Ui.tsx`），不要写原生 checkbox，也不要在页面里复制一份轨道样式。
+- **枚举值不直接上屏**。`ready` / `stdio` / `user` / `bundled` 这类机器值在 `mica-config-ui/web/labels.ts` 统一映射成中文后再显示。
+- **长文本单行省略并带 `title`**。名称、描述、路径一律 `min-width: 0` + `text-overflow: ellipsis`，不能让某一列把整行撑破或被裁掉一半。
+- **说明文字只留一处**。页面顶部一段说明足够，不要把同样的灰字分散成三段；需要「改动未保存」「已连接」这类状态时放到操作行或状态列。
 
 ### 移动端
 

@@ -20,6 +20,7 @@ import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
 import { getModelRule } from './getModelRule.js';
 import { isEnvOnlyProvider, synthesizeEnvProviders } from './envProvider.js';
+import { normalizeCapabilitySelection, type CapabilitySelection } from '@packages/mica-common/capabilities.js';
 
 export {
   CONFIG_PATH,
@@ -196,4 +197,26 @@ function resolveLastUsedEffort(
   const selectedPreference = isEffortOption(preferenceEffort) ? preferenceEffort : undefined;
   const selected = selectedPreference ?? (isEffortOption(effort) ? effort : 'medium');
   return provider?.supportsEffort === false ? 'none' : selected;
+}
+
+/** 新会话默认能力：config.json 的 `capabilityDefaults`，缺失即全部启用。 */
+export function readCapabilityDefaults(): CapabilitySelection {
+  return normalizeCapabilitySelection(readPersistedConfig(CONFIG_PATH).capabilityDefaults);
+}
+
+/**
+ * 保存新会话默认能力。只影响之后创建的会话，已有会话读取自己的 snapshot，
+ * 不会被这次写入改写。
+ */
+export function updateCapabilityDefaults(selection: CapabilitySelection): CapabilitySelection {
+  const next = normalizeCapabilitySelection(selection);
+  updateConfig((config) => ({
+    ...config,
+    capabilityDefaults: {
+      disabledSkills: next.disabledSkills,
+      disabledTools: next.disabledTools,
+      disabledMcpServers: next.disabledMcpServers,
+    },
+  }));
+  return next;
 }

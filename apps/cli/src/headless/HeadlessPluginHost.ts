@@ -33,7 +33,8 @@ import {
   setupSessionAutonomy,
   TodoPlugin,
 } from '@packages/mica-builtin-commands/index.js';
-import { createHeadlessRuntimeServices, type HeadlessUiState } from './headlessRuntimeServices.js';
+import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
+import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
 
 export type HeadlessPluginHostOptions = {
@@ -60,7 +61,9 @@ export type HeadlessPluginHost = {
   queue: MessageQueueService;
   getCurrentSessionId(): string;
   /** Persisted conversation messages: provider history + plugin notices. */
-  getConversationMessages(): MicaUiConversationMessage[] | undefined;
+  getConversationMessages(extra?: MicaUiConversationMessage[]): MicaUiConversationMessage[] | undefined;
+  /** Session notices (retry hints, failures, command results), never in the provider history. */
+  notices: { ensure(): TurnNoticeLog };
   emitRuntimeStart(): Promise<void>;
   emitRuntimeStop(): Promise<void>;
   dispose(): Promise<void>;
@@ -106,13 +109,27 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   const events = new micaRuntime.RuntimeEventBus();
   const plugins = new micaPlugin.PluginManager();
   const queue = new micaRuntime.MessageQueueService();
-  const uiState: HeadlessUiState = { conversationMessages: [] };
+  // Notices live in the session file's conversationMessages, not in the
+  // provider history: they are display-only and never reach the model.
+  const noticeLog = new TurnNoticeLog(() => agent.toConversationMessages());
+  let noticesSessionId: string | null = null;
+  const notices = {
+    ensure(): TurnNoticeLog {
+      // A resumed session (or a /new) brings its own persisted notices.
+      const sessionId = sessionController.getCurrentSessionId();
+      if (sessionId !== noticesSessionId) {
+        noticesSessionId = sessionId;
+        noticeLog.restore(sessionController.load(sessionId)?.snapshot.conversationMessages);
+      }
+      return noticeLog;
+    },
+  };
 
   const runtimeServices = createHeadlessRuntimeServices({
     agent,
     sessionController,
     subagentTasks,
-    uiState,
+    notices,
     isBusy: options.isBusy,
     onHistoryApplied: options.onHistoryApplied,
     submit: options.submit,
@@ -164,13 +181,15 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   }
   plugins.register(new TodoPlugin());
 
-  // Persisted conversation = provider history + notices appended by plugins
-  // (session_compact results), matching the interactive session's uiState
-  // without rendering anything.
+  // Persisted conversation = provider history + notices threaded back into the
+  // position they were created at (see TurnNoticeLog), matching the
+  // interactive session's uiState without rendering anything.
   // An empty list must stay "unset": SessionController.saveCurrent treats an
   // empty conversation as "delete this session" unless allowEmpty is passed.
-  const getConversationMessages = (): MicaUiConversationMessage[] | undefined =>
-    uiState.conversationMessages.length > 0 ? uiState.conversationMessages : undefined;
+  const getConversationMessages = (extra?: MicaUiConversationMessage[]): MicaUiConversationMessage[] | undefined => {
+    const messages = notices.ensure().compose(extra);
+    return messages.length > 0 ? messages : undefined;
+  };
 
   const paths = createHeadlessPluginPaths();
 
@@ -239,6 +258,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     queue,
     getCurrentSessionId: () => sessionController.getCurrentSessionId(),
     getConversationMessages,
+    notices,
     async emitRuntimeStart() {
       await setupPromise;
       await hooks.emit('runtime:start', { runtime: host });

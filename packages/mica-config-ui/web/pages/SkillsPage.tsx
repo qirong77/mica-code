@@ -178,7 +178,14 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
                   disabled={saving}
                   onClick={() => void selectSkill(skill.name)}
                 >
-                  <span>{skill.name}</span>
+                  <span className="role-list-item-copy">
+                    <span className="role-list-item-name" title={skill.name}>
+                      {skill.name}
+                    </span>
+                    <span className="role-list-item-sub" title={skill.description}>
+                      {skill.description || skill.baseDir}
+                    </span>
+                  </span>
                   {skill.editable ? null : <Tag>只读</Tag>}
                 </button>
               ))}

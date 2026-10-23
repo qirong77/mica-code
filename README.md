@@ -84,7 +84,7 @@ mica
 | 回退与压缩         | `/rewind` · `/compact` · `/compact llm`  |
 | 查看任务与发起旁问 | `/task` · `/btw`                         |
 | 重复执行与提交变更 | `/loop` · `/commit`                      |
-| 配置模型与扩展     | `/config` · `/mcp` · `/skills`           |
+| 配置模型与扩展     | `/config` · `/capabilities` · `/mcp` · `/skills` |
 
 完整语法、运行期间的可用性与快捷键见 [命令与快捷键](https://qirong77.github.io/mica-code/docs/commands/)。
 

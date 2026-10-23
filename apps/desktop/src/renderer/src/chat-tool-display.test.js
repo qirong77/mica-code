@@ -1,12 +1,35 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  parseToolArgs,
   TOOL_OUTPUT_MAX_CHARS,
   toolCallText,
   toolDisplayName,
   toolDurationMs,
   toolOutput,
+  toolStepSummary,
   toolSummary
 } from './chat-tool-display'
+
+describe('parseToolArgs', () => {
+  it('parses an object argument payload', () => {
+    expect(parseToolArgs('{"file_path":"/tmp/a.txt"}')).toEqual({ file_path: '/tmp/a.txt' })
+  })
+
+  it('falls back to an empty object for partial or non-object payloads', () => {
+    expect(parseToolArgs('{"file_path":"/tmp/a.t')).toEqual({})
+    expect(parseToolArgs('[1,2]')).toEqual({})
+    expect(parseToolArgs('ls -la')).toEqual({})
+    expect(parseToolArgs(null)).toEqual({})
+  })
+})
+
+describe('toolStepSummary', () => {
+  it('reuses the call summary rules for raw JSON arguments', () => {
+    expect(toolStepSummary('read_file', '{"file_path":"/tmp/a.txt","limit":20}')).toBe('/tmp/a.txt')
+    expect(toolStepSummary('grep_search', '{"pattern":"foo","path":"src"}')).toBe('foo · src')
+    expect(toolStepSummary('read_file', '{"file_path":"/tmp/a.t')).toBe('')
+  })
+})
 
 describe('toolDisplayName', () => {
   it('labels Agent variants', () => {

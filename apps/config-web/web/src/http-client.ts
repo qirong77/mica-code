@@ -1,5 +1,6 @@
 import type { ConfigWebClient } from '@packages/mica-config-ui/web/index.js';
 import type {
+  ConfigWebCapabilityDefaults,
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
   ConfigWebConversationPage,
@@ -29,6 +30,10 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'PUT', body: { name, content } }),
     deleteMcpServer: (name) =>
       request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'DELETE', body: { name } }),
+
+    readCapabilityDefaults: () => request<ConfigWebCapabilityDefaults>('/api/details/capabilities'),
+    writeCapabilityDefaults: (input) =>
+      request<ConfigWebCapabilityDefaults>('/api/details/capabilities', { method: 'PUT', body: input }),
 
     readSkillsDetails: () => request<ConfigWebSkillsDetails>('/api/details/skills'),
     createSkill: (name, content = '') =>

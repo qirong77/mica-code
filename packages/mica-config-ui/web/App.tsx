@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DialogHost, confirmDialog } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
+import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { AutoCompactPage } from './pages/AutoCompactPage.js';
 import { BrowserControlPage } from './pages/BrowserControlPage.js';
@@ -50,7 +51,12 @@ export function App() {
       <main className="app-shell">
         <Sidebar section={section} onChange={(next) => void changeSection(next)} />
         <div className="content-shell">
-          {section === 'config' ? <ConfigPage /> : null}
+          {section === 'config' ? (
+            <ConfigPage
+              onDirtyChange={(dirty) => handleDirtyChange('config', dirty)}
+              onNavigate={(next) => void changeSection(next)}
+            />
+          ) : null}
           {section === 'autoCompact' ? <AutoCompactPage /> : null}
           {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'terminalControl' ? <TerminalControlPage /> : null}
@@ -61,6 +67,9 @@ export function App() {
           {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
           {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
           {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
+          {section === 'capabilities' ? (
+            <CapabilitiesPage onDirtyChange={(dirty) => handleDirtyChange('capabilities', dirty)} />
+          ) : null}
           {section === 'plugins' ? <PluginsPage /> : null}
         </div>
       </main>
@@ -90,6 +99,7 @@ function isSectionAvailable(candidate: string | null): boolean {
     'roles',
     'mcp',
     'skills',
+    'capabilities',
     'plugins',
   ];
   if (!known.includes(candidate as ConfigWebAppSection)) return false;

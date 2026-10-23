@@ -1,5 +1,6 @@
 import type {
   ConfigWebAutoCompactDetails,
+  ConfigWebCapabilityDefaults,
   ConfigWebAutoCompactSettings,
   ConfigWebBrowserControlDetails,
   ConfigWebContextAnalysis,
@@ -43,6 +44,13 @@ export type ConfigWebClient = {
   createRole(name: string, content?: string): Promise<ConfigWebRolesDetails>;
   writeRole(name: string, content: string): Promise<ConfigWebRolesDetails>;
   deleteRole(name: string): Promise<ConfigWebRolesDetails>;
+
+  readCapabilityDefaults(): Promise<ConfigWebCapabilityDefaults>;
+  writeCapabilityDefaults(input: {
+    disabledSkills: string[];
+    disabledTools: string[];
+    disabledMcpServers: string[];
+  }): Promise<ConfigWebCapabilityDefaults>;
 
   readPluginsDetails(): Promise<ConfigWebPluginsDetails>;
 
@@ -136,6 +144,18 @@ export function createMcpServer(name: string, content = ''): Promise<ConfigWebMc
 
 export function deleteMcpServer(name: string): Promise<ConfigWebMcpDetails> {
   return requireClient().deleteMcpServer(name);
+}
+
+export function readCapabilityDefaults(): Promise<ConfigWebCapabilityDefaults> {
+  return requireClient().readCapabilityDefaults();
+}
+
+export function writeCapabilityDefaults(input: {
+  disabledSkills: string[];
+  disabledTools: string[];
+  disabledMcpServers: string[];
+}): Promise<ConfigWebCapabilityDefaults> {
+  return requireClient().writeCapabilityDefaults(input);
 }
 
 export function readSkillsDetails(): Promise<ConfigWebSkillsDetails> {

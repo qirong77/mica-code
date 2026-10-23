@@ -61,7 +61,6 @@ export function Popover({
   headerExtra = null,
   onClose,
   closable = true,
-  actions = null,
   role = 'dialog',
   className = '',
   children
@@ -87,13 +86,12 @@ export function Popover({
         {meta ? <span className="chat-popover-sub">{meta}</span> : null}
         {closable && onClose ? (
           <button type="button" className="chat-popover-close" aria-label="关闭" onClick={onClose}>
-            <IconX size={13} />
+            <IconX size={14} />
           </button>
         ) : null}
       </header>
-      {/* body 是整个面板唯一滚动的地方（head / actions 不动）。 */}
+      {/* body 是整个面板唯一滚动的地方（head 不动）。 */}
       <div className="chat-popover-body">{children}</div>
-      {actions ? <div className="chat-popover-actions">{actions}</div> : null}
     </section>
   )
 }

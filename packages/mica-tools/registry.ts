@@ -29,6 +29,15 @@ export type RuntimeToolRegistrationOptions = {
   primaryAgentOnly?: boolean;
 };
 
+export type ToolCatalogEntry = {
+  name: string;
+  description: string;
+  source: 'builtin' | 'runtime' | 'mcp';
+  /** Original MCP server name for `source: 'mcp'` entries. */
+  mcpServer?: string;
+  readOnly: boolean;
+};
+
 export type ToolExecutionEvent = {
   name: string;
   input: ToolInput;
@@ -86,6 +95,7 @@ export function unregisterMcpTools(): void {
 }
 
 export function registerRuntimeTool(tool: MicaTool, options: RuntimeToolRegistrationOptions = {}): void {
+  if (tool.source !== 'mcp') tool.source = 'runtime';
   runtimeTools = [...runtimeTools.filter((entry) => entry !== tool), tool];
   runtimeToolOptions.set(tool, options);
 }
@@ -146,6 +156,17 @@ export function getToolCounts(): { builtin: number; runtime: number; mcp: number
     mcp: mcpTools.length,
     total: builtinTools.length + runtimeCount + mcpTools.length,
   };
+}
+
+/** Full tool directory (enabled or not) for the capability panel. */
+export function getToolCatalog(): ToolCatalogEntry[] {
+  return getAllToolsForPrompt().map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    source: tool.source,
+    mcpServer: tool.mcpServer,
+    readOnly: tool.readOnly,
+  }));
 }
 
 export async function executeTool(

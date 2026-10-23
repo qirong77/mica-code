@@ -14,6 +14,10 @@ import {
   buildConfigWebConversationItems,
   buildConfigWebContextAnalysis
 } from '@mica-config-ui/session-view'
+import {
+  getCapabilityDefaultsDetails,
+  writeCapabilityDefaults
+} from '@mica-config-ui/capability-defaults'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
@@ -382,7 +386,19 @@ function loadSession(id) {
 function readSessionTitle(path) {
   const head = readFileSync(path, 'utf-8').slice(0, 4096)
   const match = head.match(/"title"\s*:\s*("(?:\\.|[^"\\])*")/)
-  return match ? JSON.parse(match[1]) : undefined
+  return match ? cleanSessionTitle(JSON.parse(match[1])) : undefined
+}
+
+/**
+ * 老会话的标题可能从带图片的输入原样截出来（`[Image](/Users/…/a.png) 帮我看下`）。
+ * 本地路径对列表毫无意义，读取时剥掉占位符即可，不必改写用户文件。
+ */
+function cleanSessionTitle(title) {
+  const stripped = String(title ?? '')
+    .replace(/\[Image\]\([^)]*\)|\[图片\]|\[Image\]|\[image omitted[^\]]*\]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped || String(title ?? '')
 }
 
 function listRecentSessions() {
@@ -408,7 +424,7 @@ const readSessionsDetails = () => ({ root: sessionsDir(), sessions: listRecentSe
 
 const sessionUsage = (session) => ({
   id: session.id,
-  title: session.title,
+  title: cleanSessionTitle(session.title),
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
   turnState: session.turnState,
@@ -596,6 +612,14 @@ export const configWebActions = {
   createSkill: (input) => createSkill(text(input, 'name'), optionalText(input, 'content')),
   writeSkill: (input) => writeSkill(text(input, 'name'), text(input, 'content')),
   deleteSkill: (input) => deleteSkill(text(input, 'name')),
+
+  readCapabilityDefaults: () => getCapabilityDefaultsDetails(),
+  writeCapabilityDefaults: (input) =>
+    writeCapabilityDefaults({
+      disabledSkills: input?.disabledSkills,
+      disabledTools: input?.disabledTools,
+      disabledMcpServers: input?.disabledMcpServers
+    }),
 
   readPluginsDetails: () => readPluginsDetails(),
 

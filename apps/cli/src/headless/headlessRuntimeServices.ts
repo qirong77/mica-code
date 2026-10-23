@@ -4,28 +4,19 @@ import type {
   CommandSessionController,
   SubagentTaskSummary,
 } from '@packages/mica-builtin-commands/index.js';
-import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { SubmitResult } from '@packages/mica-runtime/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { toCompactedConversationDisplay } from '../plugins/commands/compactConversation.js';
-import { upsertCommandNotice } from '../plugins/commands/commandRuntimeServices.js';
-
-/**
- * Headless UI conversation state: the session file's `conversationMessages`
- * are derived from the provider history plus any plugin notices (session_*
- * results), mirroring the interactive session's uiState without Ink.
- */
-export type HeadlessUiState = {
-  conversationMessages: MicaUiConversationMessage[];
-};
+import type { TurnNoticeLog } from '../runtime/turnNotices.js';
 
 export type HeadlessRuntimeServicesOptions = {
   agent: AgentRuntime;
   sessionController: SessionController;
   subagentTasks: SubagentTaskManager;
-  uiState: HeadlessUiState;
+  /** Session notices (retry hints, failures, command results) kept out of the provider history. */
+  notices: { ensure(): TurnNoticeLog };
   isBusy: () => boolean;
   /** Called after a session_* tool replaced the persisted history (e.g. app-server notifies its client). */
   onHistoryApplied?: () => void;
@@ -38,12 +29,12 @@ export type HeadlessRuntimeServicesOptions = {
 /** Notices appended to the conversation; cleared by rewrite (like the UI). */
 export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOptions): CommandRuntimeServices {
   const { agent, sessionController, subagentTasks } = options;
-  const notices: MicaUiConversationMessage[] = [];
+  const noticeLog = (): TurnNoticeLog => options.notices.ensure();
 
   const save = (extra?: { allowEmpty?: boolean; turnState?: 'completed' | 'aborted' | 'error' | 'running' }): void => {
     sessionController.saveCurrent({
       ...extra,
-      conversationMessages: [...agent.toConversationMessages(), ...notices],
+      conversationMessages: noticeLog().compose(),
     });
   };
 
@@ -51,8 +42,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
     clearUI(_agent, targetSessionController) {
       (targetSessionController ?? sessionController).startNewSession();
       agent.clearSession();
-      notices.length = 0;
-      options.uiState.conversationMessages = [];
+      noticeLog().clear();
       save({ allowEmpty: true });
     },
     clearSubagentTasks(targetAgent) {
@@ -62,27 +52,23 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
       // No message bar in headless mode; notices are surfaced as conversation messages.
     },
     showNotice(text, _ownerSessionId, noticeOptions = {}) {
-      const message = upsertCommandNotice(notices, {
+      noticeLog().upsert({
         role: 'notice',
         content: text,
         variant: noticeOptions.variant,
         command: noticeOptions.command,
         status: noticeOptions.status,
       });
-      notices.splice(0, notices.length, ...message);
-      options.uiState.conversationMessages = [...agent.toConversationMessages(), ...notices];
       save({ allowEmpty: true });
     },
     showCommitNotice(text) {
-      const message = upsertCommandNotice(notices, {
+      noticeLog().upsert({
         role: 'notice',
         content: text,
         variant: 'commit',
         command: '/commit',
         status: 'success',
       });
-      notices.splice(0, notices.length, ...message);
-      options.uiState.conversationMessages = [...agent.toConversationMessages(), ...notices];
       save({ allowEmpty: true });
     },
     setPluginStatus() {},
@@ -202,8 +188,8 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         concreteAgent.restoreClientSnapshot(clientSnapshot);
         throw new Error('History replacement removed all usable conversation content; the original session was restored');
       }
-      notices.length = 0;
-      options.uiState.conversationMessages = compacted;
+      // Rewriting the history drops the notices with it (same as the CLI).
+      noticeLog().clear();
       concreteSessionController.saveCurrent({
         preserveTitle: true,
         conversationMessages: compacted,

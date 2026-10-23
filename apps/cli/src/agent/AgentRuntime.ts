@@ -11,7 +11,16 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
-import { micaCommon } from '@packages/mica-common/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
+import {
+  micaCommon,
+  cloneCapabilitySelection,
+  normalizeAutoCompactOverride,
+  normalizeCapabilitySelection,
+} from '@packages/mica-common/index.js';
+import type { AutoCompactOverride, CapabilitySelection } from '@packages/mica-common/index.js';
+import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
+import { mcpToolNamePrefix } from '@packages/mica-tools/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
@@ -46,6 +55,12 @@ export type AgentRuntimeSnapshot = {
   model: string;
   effort: EffortOption;
   role: string;
+  capabilitySelection?: CapabilitySelection;
+  /**
+   * Per-session 自动压缩覆盖（只含显式改过的键）。与能力开关同理：属于会话，
+   * 不写全局配置，默认值仍由调用方（桌面设置页 / AUTO_COMPACT_DEFAULTS）提供。
+   */
+  autoCompactOverride?: AutoCompactOverride;
   /** Derived model context window in tokens, used by headless/session tooling. */
   contextWindowSize?: number;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
@@ -105,6 +120,8 @@ export class AgentRuntime {
   private abortedRunCompleteUsageLength: number | null = null;
   private currentConfig: AgentRuntimeConfig;
   private currentRole = DEFAULT_ROLE_NAME;
+  private capabilities: CapabilitySelection = micaConfig.readCapabilityDefaults();
+  private autoCompactOverride: AutoCompactOverride = {};
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -126,6 +143,50 @@ export class AgentRuntime {
   get role() {
     return this.resolveCurrentRole().name;
   }
+
+  get capabilitySelection(): CapabilitySelection {
+    return cloneCapabilitySelection(this.capabilities);
+  }
+
+  /**
+   * 本会话的能力开关。只改当前 agent：工具定义、执行校验与 skills 索引都读这份
+   * 状态，其他会话与全局注册表不受影响。运行中拒绝切换，避免一轮里的工具集抖动。
+   */
+  setCapabilities(selection: CapabilitySelection): CapabilitySelection {
+    if (this.isRunning) {
+      throw new Error('Cannot change capabilities while agent is running');
+    }
+    this.capabilities = normalizeCapabilitySelection(selection);
+    return this.capabilitySelection;
+  }
+
+  /** 本会话的自动压缩覆盖；空对象表示完全跟随默认值。 */
+  get autoCompactOverrideSelection(): AutoCompactOverride {
+    return { ...this.autoCompactOverride };
+  }
+
+  /**
+   * 改本会话的压缩覆盖。只在下一个迭代边界生效（压缩在请求间隙判断），
+   * 所以运行中调用是安全的：不会打断正在跑的请求，也不会让本轮中途换阈值。
+   */
+  setAutoCompactOverride(input: unknown): AutoCompactOverride {
+    this.autoCompactOverride = normalizeAutoCompactOverride(input);
+    return this.autoCompactOverrideSelection;
+  }
+
+  /** 当前会话可用的 skills（已应用本会话开关）。 */
+  availableSkills(): Skill[] {
+    const disabled = new Set(this.capabilities.disabledSkills);
+    return micaSkills.getLoaded().filter((skill) => !disabled.has(skill.name));
+  }
+
+  private isToolEnabledByCapabilities = (name: string): boolean => {
+    if (this.capabilities.disabledTools.includes(name)) return false;
+    for (const server of this.capabilities.disabledMcpServers) {
+      if (name.startsWith(mcpToolNamePrefix(server))) return false;
+    }
+    return true;
+  };
 
   get currentRunId() {
     return this.runId;
@@ -155,7 +216,7 @@ export class AgentRuntime {
   }
 
   createClientOptions(overrides: Partial<ModelClientOptions> = {}): ModelClientOptions {
-    return mergeDefined(
+    const merged = mergeDefined(
       {
         ...createAgentClientOptions(this.currentConfig),
         systemPrompt: () => this.buildSystemPrompt(),
@@ -166,10 +227,18 @@ export class AgentRuntime {
       },
       overrides,
     );
+    // 会话能力与调用方自己的过滤（子代理类型、BTW 模式）取交集：任何一方说不
+    // 可用，工具就不会出现在本轮请求里，也不会被执行。
+    const callerFilter = overrides.toolFilter;
+    merged.toolFilter = (name) => this.isToolEnabledByCapabilities(name) && (!callerFilter || callerFilter(name));
+    return merged;
   }
 
   buildSystemPrompt(): string {
-    const prompt = micaAgent.buildSystemPrompt({ baseSystemPrompt: this.resolveCurrentRole().prompt });
+    const prompt = micaAgent.buildSystemPrompt({
+      baseSystemPrompt: this.resolveCurrentRole().prompt,
+      skills: this.availableSkills(),
+    });
     const event = this.hooks?.pipelineSync<SystemPromptBuildEvent>('system-prompt:build', { runtime: this, prompt });
     return event?.prompt ?? prompt;
   }
@@ -264,6 +333,8 @@ export class AgentRuntime {
       model: this.currentConfig.model,
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       role: this.role,
+      capabilitySelection: this.capabilitySelection,
+      autoCompactOverride: this.autoCompactOverrideSelection,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
@@ -332,6 +403,8 @@ export class AgentRuntime {
     this.runId++;
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
     this.currentRole = micaAgent.roles.get(snapshot.role)?.name ?? DEFAULT_ROLE_NAME;
+    this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.capabilities);
+    this.autoCompactOverride = normalizeAutoCompactOverride(snapshot.autoCompactOverride);
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,

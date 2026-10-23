@@ -1,5 +1,6 @@
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { sanitizeUiContent } from '@packages/mica-ui/utils/sanitizeContent.js';
+import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import { SessionController } from '../session/SessionController.js';
@@ -256,7 +257,8 @@ function deriveTitle(messages: ReturnType<AgentRuntime['toConversationMessages']
   // currently about, not what it started with.
   const lastUserMessage = messages.findLast(isTitleUserMessage);
   const text = lastUserMessage ? contentToText(lastUserMessage.content) : '';
-  const title = text.replace(/\s+/g, ' ').trim();
+  // 图片占位符（`[Image](路径)`）只是输入原文，标题里留着会变成一串本地路径。
+  const title = stripMediaPlaceholders(text).replace(/\s+/g, ' ').trim();
   if (!title) return 'New session';
   return title.length > 60 ? `${title.slice(0, 57)}...` : title;
 }

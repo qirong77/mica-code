@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { ControlEndpointList } from '../components/ControlEndpointList.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import {
   BROWSER_CONTROL_DISABLED_STEPS,
   BROWSER_URL_ENV_FALLBACK,
   browserEnvHint,
   curlExample,
-  endpointSummaryLine,
-  groupEndpoints,
 } from '../browserControl.js';
 import { readBrowserControlDetails } from '../api.js';
-import type { ConfigWebBrowserControlDetails } from '../../src/shared/types.js';
+import type { ConfigWebBrowserControlDetails, ConfigWebBrowserControlEndpoint } from '../../src/shared/types.js';
 
 /**
  * Browser Control：Mica 里那套**给 AI 用的**受控浏览器。
@@ -80,8 +79,11 @@ export function BrowserControlPage() {
     }
   }
 
-  const groups = useMemo(() => groupEndpoints(details?.endpoints), [details]);
   const exampleBase = details?.envVars?.url ? `$${details.envVars.url}` : BROWSER_URL_ENV_FALLBACK;
+  const exampleFor = useCallback(
+    (endpoint: ConfigWebBrowserControlEndpoint) => curlExample(endpoint, exampleBase),
+    [exampleBase],
+  );
 
   return (
     <PageFrame
@@ -101,22 +103,22 @@ export function BrowserControlPage() {
         ) : !details ? null : (
           <div className="control-stack">
             <section className="simple-card control-card">
-              <div className="control-card-head">
-                <div className="table-panel-title">
-                  <strong>服务状态</strong>
-                  <span>Mica 受控浏览器：窗口挂在应用里，agent 用一套本机 HTTP 接口来开、读与操控。</span>
+              <header className="control-head">
+                <div className="control-head-copy">
+                  <h2>服务状态</h2>
+                  <p>Mica 受控浏览器：窗口挂在应用里，agent 用一套本机 HTTP 接口来开、读与操控。</p>
                 </div>
                 <Tag tone={details.available ? 'green' : 'red'} dot>
                   {details.available ? '可用' : '不可用'}
                 </Tag>
-              </div>
+              </header>
 
-              <div className="status-grid">
-                <StatusItem label="服务地址" value={details.serviceUrl || '—'} mono />
-                <StatusItem label="版本" value={details.version ? `v${details.version}` : '—'} mono />
-                <StatusItem label="窗口数" value={String(details.browsers.length)} mono />
-                <StatusItem label="技能文件" value={details.skillPath || '—'} mono />
-              </div>
+              <dl className="control-facts">
+                <Fact label="服务地址" value={details.serviceUrl || '—'} mono />
+                <Fact label="版本" value={details.version ? `v${details.version}` : '—'} />
+                <Fact label="窗口" value={String(details.browsers.length)} />
+                <Fact label="技能文件" value={details.skillPath || '—'} mono />
+              </dl>
 
               {details.skillPath ? (
                 <p className="control-note">
@@ -137,73 +139,18 @@ export function BrowserControlPage() {
             </section>
 
             <section className="simple-card control-card">
-              <div className="control-card-head">
-                <div className="table-panel-title">
-                  <strong>接口文档</strong>
-                  <span>agent 直接调用这些接口；窗口本身不会改地址，下文的 curl 示例可以直接复制。</span>
+              <header className="control-head">
+                <div className="control-head-copy">
+                  <h2>接口文档</h2>
+                  <p>agent 直接调用这些接口；窗口本身不会改地址，展开后可以复制 curl 示例。</p>
                 </div>
-              </div>
-
-              {groups.length === 0 ? (
-                <Empty description="暂无接口文档（需要受控浏览器服务在线）" />
-              ) : (
-                <div className="control-groups">
-                  {groups.map((group) => (
-                    <div className="control-group" key={group.method}>
-                      <div className="control-group-head">
-                        <Tag tone="blue">{group.label}</Tag>
-                        <span className="muted-text">{group.endpoints.length} 个接口</span>
-                      </div>
-                      <div className="control-endpoint-list">
-                        {group.endpoints.map((endpoint) => (
-                          <details className="simple-card control-endpoint" key={endpoint.id}>
-                            <summary className="control-endpoint-summary">
-                              <code className="control-endpoint-line">{endpointSummaryLine(endpoint)}</code>
-                              <span className="control-endpoint-desc">{endpoint.summary}</span>
-                            </summary>
-                            <div className="control-endpoint-body">
-                              {endpoint.params.length === 0 ? (
-                                <p className="muted-text">无参数</p>
-                              ) : (
-                                <div className="control-params">
-                                  {endpoint.params.map((param) => (
-                                    <div className="control-param" key={`${param.in}:${param.name}`}>
-                                      <code>{param.name}</code>
-                                      <span className="control-param-meta">
-                                        {param.in}
-                                        {param.required ? ' · 必填' : ''}
-                                      </span>
-                                      <span className="control-param-desc">{param.description}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {endpoint.returns ? (
-                                <p className="control-returns">
-                                  <span className="muted-text">返回</span> {endpoint.returns}
-                                </p>
-                              ) : null}
-                              <div className="control-example">
-                                <div className="control-example-head">
-                                  <span className="muted-text">示例</span>
-                                  <Button
-                                    onClick={() => void copy(endpoint.example || curlExample(endpoint, exampleBase))}
-                                  >
-                                    复制
-                                  </Button>
-                                </div>
-                                <pre className="code-preview">
-                                  {endpoint.example || curlExample(endpoint, exampleBase)}
-                                </pre>
-                              </div>
-                            </div>
-                          </details>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              </header>
+              <ControlEndpointList
+                endpoints={details.endpoints}
+                exampleFor={exampleFor}
+                emptyDescription="暂无接口文档（需要受控浏览器服务在线）"
+                onCopy={(text) => void copy(text)}
+              />
             </section>
           </div>
         )}
@@ -212,13 +159,13 @@ export function BrowserControlPage() {
   );
 }
 
-function StatusItem({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Fact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="status-item">
-      <span className="status-label">{label}</span>
-      <span className={`control-status-value${mono ? ' status-code' : ''}`} title={value}>
+    <div className="control-fact">
+      <dt>{label}</dt>
+      <dd className={mono ? 'control-fact-mono' : undefined} title={value}>
         {value}
-      </span>
+      </dd>
     </div>
   );
 }

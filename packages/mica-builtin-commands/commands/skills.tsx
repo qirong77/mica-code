@@ -2,6 +2,7 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
+import type { CommandAgent } from '../services.js';
 import { handleScrollInput, moveSelection } from '../shared/commandInput.js';
 import { createCommandScrollController, ScrollableCommandDialog } from '../shared/ScrollableCommandDialog.js';
 
@@ -9,7 +10,7 @@ type SkillsState =
   | { view: 'list'; selectedIdx: number }
   | { view: 'detail'; selectedIdx: number; detailSkillIdx: number };
 
-export function createSkillsCommand() {
+export function createSkillsCommand(agent?: CommandAgent) {
   return {
     name: 'skills',
     description: '列出已安装的 skills',
@@ -63,6 +64,17 @@ export function createSkillsCommand() {
                           width: nameWidth,
                           color: isSelected ? micaUi.theme.colors.accent : undefined,
                           bold: isSelected,
+                        },
+                        {
+                          key: 'state',
+                          content: agent?.capabilitySelection
+                            ? agent.capabilitySelection.disabledSkills.includes(skill.name)
+                              ? '已关闭'
+                              : ''
+                            : '',
+                          width: 8,
+                          flexShrink: 0,
+                          color: micaUi.theme.colors.warning,
                         },
                         {
                           key: 'description',

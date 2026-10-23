@@ -323,6 +323,19 @@ export function codexNotificationToEvent(notification) {
         variant: 'warn',
         text: params.warning?.message || ''
       }
+    case 'mica/turn/retrying':
+      // The host retries a retryable provider failure inside the turn (up to 5
+      // attempts, fixed 10s apart). It is progress, not a failure: the run keeps
+      // running, so this must stay a plain delta event (no run.running change).
+      return {
+        type: 'retrying',
+        timestamp,
+        sessionID,
+        attempt: Number(params.attempt) || 0,
+        delayMs: Number(params.delayMs) || 0,
+        maxAttempts: Number(params.maxAttempts) || 0,
+        error: typeof params.error === 'string' ? params.error : ''
+      }
     case 'error':
       return {
         type: 'error',

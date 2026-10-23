@@ -1854,6 +1854,80 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
   });
 
+  itE2E('session-level auto compact override wins over the host settings', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.inputTokens = 250_000;
+    mock!.state.toolFileContent = 'z'.repeat(20_000);
+
+    const host = spawnHost('auto-compact-override');
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'auto-compact-override-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 开工前：默认值是内置默认，本会话还没有覆盖。
+    await send(host, 1, 'mica/autoCompact/get', {});
+    const initial = await waitFor(host, (m) => m.id === 1, 'autoCompact/get (initial)');
+    expect(initial.result).toMatchObject({
+      override: {},
+      defaults: { quickThresholdK: 200, quickLimit: 3 },
+    });
+
+    // 只改一项：覆盖里就只该有这一项（其余继续跟随默认值）。
+    await send(host, 2, 'mica/autoCompact/set', { override: { quickLimit: 1 } });
+    const setReply = await waitFor(host, (m) => m.id === 2, 'autoCompact/set');
+    expect(setReply.result).toMatchObject({ override: { quickLimit: 1 } });
+    const setNotification = await waitFor(
+      host,
+      (m) => m.method === 'mica/autoCompact/overrideUpdated',
+      'auto compact override notification',
+    );
+    expect(setNotification.params).toMatchObject({ override: { quickLimit: 1 } });
+
+    // 宿主下发的是「不许快速压缩」（quickLimit: 0）：会话覆盖必须赢。
+    await send(host, 3, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写一个很大的文件' }],
+      model: 'mock/mock-chat',
+      autoCompact: {
+        enabled: true,
+        quickThresholdK: 200,
+        quickLimit: 0,
+        modelThresholdK: 120,
+        modelLimit: 0,
+        quickRuns: 0,
+        modelRuns: 0,
+      },
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (override)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    const update = await waitFor(
+      host,
+      (m) => m.method === 'mica/autoCompact/updated',
+      'auto compact update (override)',
+    );
+    expect(update.params).toMatchObject({ quickRuns: 1, modelRuns: 0, lastKind: 'quick' });
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (override)', 30_000);
+
+    // 宿主这一轮下发的设置成为新的默认值，覆盖仍然单独列出、生效值跟着覆盖走。
+    await send(host, 4, 'mica/autoCompact/get', {});
+    const after = await waitFor(host, (m) => m.id === 4, 'autoCompact/get (after turn)');
+    expect(after.result).toMatchObject({
+      defaults: { quickThresholdK: 200, quickLimit: 0 },
+      override: { quickLimit: 1 },
+      effective: { quickLimit: 1, quickThresholdK: 200 },
+    });
+
+    // 覆盖随会话落盘：换一个客户端（或桌面端）打开同一会话时还是这套设置。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      snapshot?: { autoCompactOverride?: unknown };
+    };
+    expect(session.snapshot?.autoCompactOverride).toEqual({ quickLimit: 1 });
+  });
+
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

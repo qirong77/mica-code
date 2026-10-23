@@ -8,7 +8,15 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import { prepareImageForApi } from '@packages/mica-common/index.js';
+import {
+  AUTO_COMPACT_DEFAULTS,
+  normalizeAutoCompactOverride,
+  prepareImageForApi,
+  pruneAutoCompactOverride,
+  resolveAutoCompactSettings,
+} from '@packages/mica-common/index.js';
+import type { AutoCompactSettings } from '@packages/mica-common/index.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
   CODEX_ERROR_INTERNAL,
@@ -23,6 +31,8 @@ import {
   MICA_QUEUE_NOTIFICATIONS,
   MICA_SESSION_NOTIFICATIONS,
   MICA_TASK_NOTIFICATIONS,
+  MICA_TURN_NOTIFICATIONS,
+  MICA_CAPABILITY_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -36,6 +46,7 @@ import {
   type MicaQueueItem,
   type MicaSubagentTaskDetail,
   type MicaSubagentTaskItem,
+  type MicaTurnRetrying,
   type MicaWaitTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
@@ -248,6 +259,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
   let autoCompact: AutoCompactController | null = null;
+  // 跨请求共享：本进程最近一次从宿主收到的压缩设置（默认值的真相）。
+  const autoCompactDefaultSettings: { current: AutoCompactSettings } = {
+    current: { ...AUTO_COMPACT_DEFAULTS },
+  };
   let btwController: BtwThreads | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
@@ -509,6 +524,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       host: pluginHost,
       queue: pluginHost.queue,
       getConversationMessages: pluginHost.getConversationMessages,
+      notices: pluginHost.notices,
     });
     await pluginHost.emitRuntimeStart();
 
@@ -632,6 +648,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         runtimeOverride,
         executor: executor!,
         autoCompact: autoCompact!,
+        autoCompactDefaults: autoCompactDefaultSettings,
         btw: btwController,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
@@ -666,6 +683,15 @@ type HostContext = {
   executor: HeadlessTurnExecutor;
   /** Automatic context compaction state machine (settings + run counters). */
   autoCompact: AutoCompactController;
+  /**
+   * 宿主上次下发的压缩设置（桌面设置页里的全局默认值）。`mica/autoCompact/get`
+   * 用它展示「默认是多少」，会话覆盖则叠在它上面——默认值只有宿主一份，常驻 host
+   * 自己不去读配置文件。
+   *
+   * 每个请求都会新建一份 ctx，所以这里放的是**共享的**持有对象：写到它里面，
+   * 下一次请求才读得到（写成 ctx 的普通字段每次都会回落到初始值）。
+   */
+  autoCompactDefaults: { current: AutoCompactSettings };
   /** By The Way（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
   btw: BtwThreads | null;
   /** Resolves once the background MCP init finished (never rejects). */
@@ -819,8 +845,25 @@ function applyRoleOverride(ctx: HostContext, params: Record<string, unknown>): v
  * Unknown/missing field types degrade to the defaults inside the controller.
  */
 function applyAutoCompactParams(ctx: HostContext, params: Record<string, unknown>): void {
-  if (params.autoCompact === undefined) return;
-  ctx.autoCompact.setParams(params.autoCompact);
+  if (params.autoCompact === undefined) {
+    // 宿主没带设置（exec / codex-family driver）：保留「不压缩」的既有行为，
+    // 只把本会话的覆盖应用上去也没有意义，因为下游会拒绝压缩。
+    return;
+  }
+  const raw = (params.autoCompact && typeof params.autoCompact === 'object' ? params.autoCompact : {}) as Record<
+    string,
+    unknown
+  >;
+  // 宿主的这份是默认值；本会话改过的键盖在上面。计数（quickRuns/modelRuns/lastRunAt）
+  // 仍以宿主账本为准，所以只替换设置部分。
+  const base = resolveAutoCompactSettings(AUTO_COMPACT_DEFAULTS, raw);
+  ctx.autoCompactDefaults.current = base;
+  ctx.autoCompact.setParams({
+    ...resolveAutoCompactSettings(base, ctx.agent.autoCompactOverrideSelection),
+    quickRuns: raw.quickRuns,
+    modelRuns: raw.modelRuns,
+    lastRunAt: raw.lastRunAt ?? null,
+  });
 }
 
 function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
@@ -1437,6 +1480,106 @@ async function handleCodexRequest(
       ctx.writeResponse({ ok: true, title: ctx.sessionController.getCurrentTitle() ?? title });
       return;
     }
+    case MICA_METHODS.capabilitiesGet: {
+      // 本会话的能力开关 + 完整目录。目录始终是当前进程的注册表（MCP 重连后随之变化），
+      // 开关只属于这条会话，客户端不需要自己拼。
+      const selection = ctx.agent.capabilitySelection;
+      // 状态来自连接过程，配置来自 config 文件：还没开始连（服务刚起来、或者这一轮
+      // 之前从没发过消息）时状态列表是空的，但「本会话禁用哪个 server」仍然可配，
+      // 所以用配置补上缺失的名字，状态标成 configured。
+      const configuredMcp = await micaMcp.loadConfig();
+      const statusByName = new Map(micaMcp.servers.get().map((server) => [server.name, server]));
+      ctx.writeResponse({
+        ok: true,
+        selection,
+        skills: micaSkills
+          .getLoaded()
+          .map((skill) => ({ name: skill.name, description: skill.description }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        tools: micaTools
+          .getCatalog()
+          .filter((tool) => tool.source !== 'mcp')
+          .map((tool) => ({ name: tool.name, description: tool.description, source: tool.source }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        mcpServers: Object.keys(configuredMcp)
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => {
+            const status = statusByName.get(name);
+            return {
+              name,
+              status: status?.status ?? 'configured',
+              toolCount: status?.toolCount ?? 0,
+            };
+          }),
+      });
+      return;
+    }
+    case MICA_METHODS.capabilitiesSet: {
+      const raw = params.selection;
+      if (!raw || typeof raw !== 'object') {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'selection must be an object');
+        return;
+      }
+      let selection;
+      try {
+        selection = ctx.agent.setCapabilities(raw as Parameters<typeof ctx.agent.setCapabilities>[0]);
+      } catch (error) {
+        // 运行中拒绝：一轮里的工具集不能中途变化，客户端保留旧面板并在本轮结束后重试。
+        ctx.writeResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      // 选择存在会话快照里（不是 config），所以只影响这条会话；落盘后其他窗口/进程
+      // 打开同一会话也能读到。
+      // 草稿会话（还没有 id）没有可写的文件；首轮保存时会带上这份选择。
+      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
+      ctx.writeNotification(MICA_CAPABILITY_NOTIFICATIONS.updated, {
+        threadId: ctx.sessionId,
+        disabledSkills: selection.disabledSkills,
+        disabledTools: selection.disabledTools,
+        disabledMcpServers: selection.disabledMcpServers,
+      });
+      ctx.writeResponse({ ok: true, selection });
+      return;
+    }
+    case MICA_METHODS.autoCompactGet: {
+      // 三层一起回：默认值（宿主上次下发的）、本会话覆盖、以及合并后的生效值。
+      // 面板不做第二套合并逻辑，也就不会出现「面板显示的和实际跑的不一样」。
+      const override = ctx.agent.autoCompactOverrideSelection;
+      ctx.writeResponse({
+        ok: true,
+        defaults: ctx.autoCompactDefaults.current,
+        override,
+        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
+      });
+      return;
+    }
+    case MICA_METHODS.autoCompactSet: {
+      const raw = params.override;
+      if (raw === undefined) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'override must be an object');
+        return;
+      }
+      // 空对象 = 恢复默认。只存**与默认值不同**的键：默认值以后调整仍能落到这条会话上，
+      // 快照里也不会留下一堆「用户其实没改过」的值。
+      const override = ctx.agent.setAutoCompactOverride(
+        pruneAutoCompactOverride(normalizeAutoCompactOverride(raw), ctx.autoCompactDefaults.current),
+      );
+      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
+      ctx.writeNotification(MICA_AUTO_COMPACT_NOTIFICATIONS.overrideUpdated, {
+        threadId: ctx.sessionId,
+        override,
+        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
+      });
+      ctx.writeResponse({
+        ok: true,
+        override,
+        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
+      });
+      return;
+    }
     default:
       ctx.writeError(CODEX_ERROR_METHOD_NOT_FOUND, `Method not found: ${method}`);
       return;
@@ -1480,11 +1623,21 @@ function handleTurnEvent(
       // The host retries transient provider errors (same policy as the CLI).
       // Log to stderr only: a Codex `error` notification would make the desktop
       // app mark the run as failed and exit instead of waiting for the retry.
+      // The Mica extension notification below is what the app renders as
+      // "retrying n/5" — stderr never reaches it.
       console.error(
         `[mica] turn will retry (${event.attempt}/${MAX_TURN_RETRIES}) in ${Math.ceil(event.delayMs / 1000)}s: ${
           event.error ?? 'unknown error'
         }`,
       );
+      writeNotification(MICA_TURN_NOTIFICATIONS.retrying, {
+        threadId: sessionId,
+        turnId: lifecycle.getTurnId(),
+        attempt: event.attempt,
+        maxAttempts: MAX_TURN_RETRIES,
+        delayMs: event.delayMs,
+        error: event.error ?? '',
+      } satisfies MicaTurnRetrying);
       break;
     case 'turn:finish': {
       const turnId = lifecycle.getTurnId();

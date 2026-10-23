@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ModalMeta, ModalShell } from '../chat-modal'
 import { ContextUsageSection } from './ContextUsagePanel'
 import { formatTokens } from './context-usage'
 
@@ -297,129 +298,96 @@ export function SessionDetailModal({ sessionId, onClose }) {
   }, [usageHistory, subRequests])
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
+    <ModalShell
+      title={detail?.title || '会话详情'}
+      subtitle={detail?.id ? detail.id.slice(0, 12) : null}
+      onClose={onClose}
+      className="chat-modal-task"
+      meta={
+        <ModalMeta
+          items={[
+            detail?.model,
+            detail?.effort ? `effort ${detail.effort}` : null,
+            detail?.role ? `role ${detail.role}` : null,
+            detail?.turnState || null,
+            `${fmtTime(detail?.createdAt)} → ${fmtTime(detail?.updatedAt)}`,
+            detail?.cwd
+          ]}
+        />
+      }
     >
-      <div
-        className="flex max-h-[88vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[6px] border border-line bg-panel shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium text-fg-strong">
-              {detail?.title || 'Session detail'}
-            </h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-fg-faint">
-              <span className="font-mono">{detail?.id ? detail.id.slice(0, 12) : ''}</span>
-              {detail?.model && <span>{detail.model}</span>}
-              {detail?.effort && <span>effort {detail.effort}</span>}
-              {detail?.role && <span>role {detail.role}</span>}
-              <span
-                className={
-                  detail?.turnState === 'completed'
-                    ? 'text-success-soft'
-                    : detail?.turnState === 'aborted'
-                      ? 'text-warn'
-                      : 'text-danger-soft'
+      {error ? (
+        <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
+          {error}
+        </div>
+      ) : !detail ? (
+        <div className="py-10 text-center text-xs text-fg-faint">加载中…</div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          <section>
+            <h3 className={OVERLINE_CLASS}>上下文占用</h3>
+            <p className="mt-1 text-[10px] text-fg-ghost">
+              按持久化消息体的类别估算（chars/4，与 CLI 的 ctx 同口径）；点开单条可看内容与体积。
+            </p>
+            <div className="mt-2">
+              <ContextUsageSection
+                context={detail.context}
+                messages={detail.messages}
+                contextWindowSize={detail.contextWindowSize}
+              />
+            </div>
+          </section>
+
+          <section>
+            <h3 className={OVERLINE_CLASS}>请求用量</h3>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <StatCard
+                label="主 agent"
+                primary={`${usageHistory.length} req`}
+                secondary={`${formatTokens(totals.main.input)} in · ${formatTokens(totals.main.output)} out`}
+              />
+              <StatCard
+                label="sub-agents"
+                primary={`${subRequests.length} req`}
+                secondary={`${formatTokens(totals.sub.input)} in · ${formatTokens(totals.sub.output)} out`}
+              />
+              <StatCard
+                label="合计"
+                primary={formatTokens(totals.all.total)}
+                secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
+              />
+              <StatCard
+                label="缓存率"
+                primary={
+                  totals.all.input > 0
+                    ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
+                    : '—'
                 }
-              >
-                {detail?.turnState || '—'}
-              </span>
+                secondary={`${totals.all.cached.toLocaleString()} cached`}
+              />
             </div>
-            <div className="mt-0.5 truncate text-[10px] text-fg-ghost">
-              {fmtTime(detail?.createdAt)} → {fmtTime(detail?.updatedAt)}
-              {detail?.cwd ? ` · ${detail.cwd}` : ''}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            className="shrink-0 rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
-          >
-            Esc ✕
-          </button>
-        </header>
+            <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
+            <p className="mt-1 text-[10px] leading-relaxed text-fg-ghost">
+              输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
+              input，所以「输出」和「输入增长」会一起变大。
+            </p>
+          </section>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {error ? (
-            <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
-              {error}
-            </div>
-          ) : !detail ? (
-            <div className="py-10 text-center text-xs text-fg-faint">加载中…</div>
-          ) : (
-            <div className="flex flex-col gap-5">
-              <section>
-                <h3 className={OVERLINE_CLASS}>上下文占用</h3>
-                <p className="mt-1 text-[10px] text-fg-ghost">
-                  按持久化消息体的类别估算（chars/4，与 CLI 的 ctx
-                  同口径）；点开单条可看内容与体积。
-                </p>
-                <div className="mt-2">
-                  <ContextUsageSection
-                    context={detail.context}
-                    messages={detail.messages}
-                    contextWindowSize={detail.contextWindowSize}
+          {subagents.length > 0 && (
+            <section>
+              <h3 className={OVERLINE_CLASS}>Sub-agents</h3>
+              <div className="mt-2 flex flex-col gap-2">
+                {subagents.map((record) => (
+                  <SubagentCard
+                    key={record.taskId || record.initiatedByCallId || record.description}
+                    record={record}
                   />
-                </div>
-              </section>
-
-              <section>
-                <h3 className={OVERLINE_CLASS}>请求用量</h3>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <StatCard
-                    label="主 agent"
-                    primary={`${usageHistory.length} req`}
-                    secondary={`${formatTokens(totals.main.input)} in · ${formatTokens(totals.main.output)} out`}
-                  />
-                  <StatCard
-                    label="sub-agents"
-                    primary={`${subRequests.length} req`}
-                    secondary={`${formatTokens(totals.sub.input)} in · ${formatTokens(totals.sub.output)} out`}
-                  />
-                  <StatCard
-                    label="合计"
-                    primary={formatTokens(totals.all.total)}
-                    secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
-                  />
-                  <StatCard
-                    label="缓存率"
-                    primary={
-                      totals.all.input > 0
-                        ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
-                        : '—'
-                    }
-                    secondary={`${totals.all.cached.toLocaleString()} cached`}
-                  />
-                </div>
-                <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
-                <p className="mt-1 text-[10px] leading-relaxed text-fg-ghost">
-                  输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
-                  input，所以「输出」和「输入增长」会一起变大。
-                </p>
-              </section>
-
-              {subagents.length > 0 && (
-                <section>
-                  <h3 className={OVERLINE_CLASS}>Sub-agents</h3>
-                  <div className="mt-2 flex flex-col gap-2">
-                    {subagents.map((record) => (
-                      <SubagentCard
-                        key={record.taskId || record.initiatedByCallId || record.description}
-                        record={record}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
+                ))}
+              </div>
+            </section>
           )}
         </div>
-      </div>
-    </div>
+      )}
+    </ModalShell>
   )
 }

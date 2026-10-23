@@ -1,3 +1,4 @@
+import { createCapabilitiesCommand } from './commands/capabilities.js';
 import { createCommitCommand } from './commands/commit.js';
 import { createConfigCommand } from './commands/config.js';
 import { createContextCommand } from './commands/context.js';
@@ -14,6 +15,7 @@ import { AgentChangeTracker } from './git/agentChangeTracker.js';
 
 export const micaBuiltinCommands = {
   cycleNextRole,
+  createCapabilitiesCommand,
   createCommitCommand,
   createConfigCommand,
   createContextCommand,

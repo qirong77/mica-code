@@ -179,8 +179,12 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
                   disabled={saving}
                   onClick={() => void selectRole(role.name)}
                 >
-                  <span>{role.name}</span>
-                  <Tag>{role.builtIn ? 'built-in' : 'editable'}</Tag>
+                  <span className="role-list-item-copy">
+                    <span className="role-list-item-name" title={role.name}>
+                      {role.name}
+                    </span>
+                  </span>
+                  {role.builtIn ? <Tag>内置</Tag> : null}
                 </button>
               ))}
             </div>

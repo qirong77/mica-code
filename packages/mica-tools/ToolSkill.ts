@@ -52,7 +52,7 @@ export class ToolSkill extends MicaTool {
     );
   }
 
-  async execute(input: Record<string, unknown>, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: Record<string, unknown>, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const skillName = String(input.skill ?? '').trim();
     if (!skillName) return '错误：缺少 skill 名称';
 
@@ -63,6 +63,14 @@ export class ToolSkill extends MicaTool {
         .map((entry) => entry.name)
         .join(', ');
       return `未知 skill: ${skillName}\n可用的 skills: ${available || '无'}`;
+    }
+
+    // 会话可以关掉部分 skill。索引里已经没有它，但模型仍可能凭记忆点名调用，
+    // 这里按同一份开关拒绝，避免「看不见却能加载」。
+    const disabledSkills = (callbacks?.context as { agent?: { capabilitySelection?: { disabledSkills?: string[] } } })
+      ?.agent?.capabilitySelection?.disabledSkills;
+    if (disabledSkills?.includes(skill.name)) {
+      return `skill 已被当前会话关闭: ${skill.name}`;
     }
 
     return substituteArgs(skill.content, typeof input.args === 'string' ? input.args : undefined, skill);

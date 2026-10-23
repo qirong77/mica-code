@@ -249,6 +249,42 @@ describe('chat CLI arguments', () => {
     })
   })
 
+  it('maps retry progress to a non-terminal retrying event', () => {
+    expect(
+      codexNotificationToEvent({
+        method: 'mica/turn/retrying',
+        emittedAtMs: 4321,
+        params: {
+          threadId: 's1',
+          turnId: 'turn-1',
+          attempt: 2,
+          maxAttempts: 5,
+          delayMs: 10000,
+          error: 'provider 503'
+        }
+      })
+    ).toEqual({
+      type: 'retrying',
+      timestamp: 4321,
+      sessionID: 's1',
+      attempt: 2,
+      delayMs: 10000,
+      maxAttempts: 5,
+      error: 'provider 503'
+    })
+    // 字段缺失时给安全默认值，渲染层不用再判空。
+    expect(
+      codexNotificationToEvent({ method: 'mica/turn/retrying', params: { threadId: 's1' } })
+    ).toMatchObject({
+      type: 'retrying',
+      sessionID: 's1',
+      attempt: 0,
+      delayMs: 0,
+      maxAttempts: 0,
+      error: ''
+    })
+  })
+
   it('maps codex agentMessage/reasoning deltas to text/reasoning events', () => {
     expect(
       codexNotificationToEvent({

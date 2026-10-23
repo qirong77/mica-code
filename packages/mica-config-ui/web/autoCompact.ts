@@ -34,6 +34,64 @@ export type AutoCompactDraft = {
   minIntervalMinutes: string;
 };
 
+/**
+ * 五个数值项的唯一定义：标签、单位、步进、下限。
+ *
+ * 设置页与会话弹窗（同一个编辑器组件）都从这里渲染，所以「快速压缩阈值」不会在一处叫
+ * 「快速压缩上限」、另一处按「次」显示却又能填 k。上限与校验仍由下面的
+ * `autoCompactSettingsFromDraft` 兜第二次。
+ */
+export const AUTO_COMPACT_FIELDS: {
+  key: Exclude<keyof AutoCompactDraft, 'enabled'>;
+  label: string;
+  unit: string;
+  step: number;
+  min: number;
+  /** 阈值类字段按 k 展示，其余按整数展示（默认值的提示文案要用）。 */
+  formatDefault(value: number): string;
+}[] = [
+  {
+    key: 'quickThresholdK',
+    label: '快速压缩阈值',
+    unit: 'k',
+    step: 10,
+    min: AUTO_COMPACT_QUICK_THRESHOLD_MIN_K,
+    formatDefault: (value) => `${value}k`,
+  },
+  {
+    key: 'quickLimit',
+    label: '快速压缩次数上限',
+    unit: '次',
+    step: 1,
+    min: AUTO_COMPACT_LIMIT_MIN,
+    formatDefault: (value) => `${value} 次`,
+  },
+  {
+    key: 'modelThresholdK',
+    label: '模型压缩阈值',
+    unit: 'k',
+    step: 10,
+    min: AUTO_COMPACT_MODEL_THRESHOLD_MIN_K,
+    formatDefault: (value) => `${value}k`,
+  },
+  {
+    key: 'modelLimit',
+    label: '模型压缩次数上限',
+    unit: '次',
+    step: 1,
+    min: AUTO_COMPACT_LIMIT_MIN,
+    formatDefault: (value) => `${value} 次`,
+  },
+  {
+    key: 'minIntervalMinutes',
+    label: '两次压缩最小间隔',
+    unit: '分钟',
+    step: 5,
+    min: AUTO_COMPACT_INTERVAL_MINUTES_MIN,
+    formatDefault: (value) => `${value} 分钟`,
+  },
+];
+
 export type AutoCompactParseResult =
   | { ok: true; settings: ConfigWebAutoCompactSettings }
   | { ok: false; error: string };
@@ -71,6 +129,24 @@ export function autoCompactDraftFromSettings(settings: ConfigWebAutoCompactSetti
 }
 
 const INTEGER_PATTERN = /^\d+$/;
+
+/**
+ * 设置里的数值项 → 编辑器用的数字表（只保留五个数值键，用于「默认 x」提示）。
+ * `minIntervalMs` 按分钟折算，与编辑器同单位。
+ */
+export function autoCompactNumbersFromSettings(
+  settings: ConfigWebAutoCompactSettings | null | undefined,
+): Partial<Record<Exclude<keyof AutoCompactDraft, 'enabled'>, number>> {
+  if (!settings) return {};
+  const draft = autoCompactDraftFromSettings(settings);
+  return {
+    quickThresholdK: Number(draft.quickThresholdK),
+    quickLimit: Number(draft.quickLimit),
+    modelThresholdK: Number(draft.modelThresholdK),
+    modelLimit: Number(draft.modelLimit),
+    minIntervalMinutes: Number(draft.minIntervalMinutes),
+  };
+}
 
 function parseIntegerField(
   raw: unknown,

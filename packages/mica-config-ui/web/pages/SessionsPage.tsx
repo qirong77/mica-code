@@ -450,41 +450,50 @@ function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
   const status = presentStatus(session.turnState);
   return (
     <div className="session-summary simple-card">
-      <div className="session-summary-title">
-        <div>
+      <div className="session-summary-head">
+        <div className="session-summary-title">
           <h3 title={session.title}>{session.title}</h3>
-          <span>{session.id}</span>
+          <span className="session-summary-id" title={session.id}>
+            {session.id}
+          </span>
         </div>
         <div className="toolbar">
           <Tag tone={status.tone} dot>
             {status.label}
           </Tag>
-          <Tag>{session.role}</Tag>
-          <Tag>{session.turnState === 'running' ? '编辑锁定' : 'JSON 可编辑'}</Tag>
         </div>
       </div>
-      <div className="simple-list">
-        <div className="simple-row">
-          <span>Working Directory</span>
-          <strong>{session.cwd}</strong>
-        </div>
-        <div className="simple-row">
-          <span>Model</span>
-          <strong>
-            {session.providerId} · {session.model}
-          </strong>
-        </div>
-        <div className="simple-row">
-          <span>Updated</span>
-          <strong>{formatDate(session.updatedAt)}</strong>
-        </div>
-        <div className="simple-row">
-          <span>File</span>
-          <strong>
-            {formatBytes(session.fileSizeBytes)} · {session.messageCount} 条消息 · {session.usageCount} 条用量
-          </strong>
-        </div>
-      </div>
+      <dl className="session-meta">
+        <MetaFact label="Working Directory" value={session.cwd} wide mono />
+        <MetaFact label="Model" value={`${session.providerId} · ${session.model}`} />
+        <MetaFact label="Role" value={session.role} />
+        <MetaFact label="Updated" value={formatDate(session.updatedAt)} />
+        <MetaFact
+          label="File"
+          value={`${formatBytes(session.fileSizeBytes)} · ${session.messageCount} 条消息 · ${session.usageCount} 条用量`}
+        />
+      </dl>
+    </div>
+  );
+}
+
+function MetaFact({
+  label,
+  value,
+  wide = false,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+  mono?: boolean;
+}) {
+  return (
+    <div className={`session-meta-fact${wide ? ' session-meta-wide' : ''}`}>
+      <dt>{label}</dt>
+      <dd className={mono ? 'session-meta-mono' : undefined} title={value}>
+        {value}
+      </dd>
     </div>
   );
 }

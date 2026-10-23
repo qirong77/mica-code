@@ -16,7 +16,9 @@
     "forceConsistentCasingInFileNames": true,
     "paths": {
       "@packages/*": ["./packages/*"],
-      "@apps/*": ["./apps/*"]
+      "@apps/*": ["./apps/*"],
+      "@mica-config-ui/web": ["./packages/mica-config-ui/web/index.tsx"],
+      "@mica-config-ui/*": ["./packages/mica-config-ui/*"]
     },
     "types": ["node", "bun"]
   }
