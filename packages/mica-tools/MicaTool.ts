@@ -22,18 +22,21 @@ export type ToolInputSchema = {
 export type ToolInput = Record<string, unknown>;
 export type ToolSafetyOptions = {
   readOnly?: boolean;
-  /** Where the tool came from; used by the capability panel and MCP filtering. */
-  source?: 'builtin' | 'runtime' | 'mcp';
+  /** `mcp` 标出由 MCP server 提供的工具；其余一律按内置工具处理。 */
+  source?: ToolSource;
   /** Original MCP server name when `source` is `mcp`. */
   mcpServer?: string;
 };
+
+/** 目录里只有「内置」与「MCP」两类：插件在会话期注册的工具同样是产品内置能力。 */
+export type ToolSource = 'builtin' | 'mcp';
 
 export abstract class MicaTool {
   name: string;
   description: string;
   input_schema: ToolInputSchema;
   readOnly: boolean;
-  source: 'builtin' | 'runtime' | 'mcp';
+  source: ToolSource;
   mcpServer?: string;
 
   constructor(name: string, description: string, input_schema: ToolInputSchema, options: ToolSafetyOptions = {}) {

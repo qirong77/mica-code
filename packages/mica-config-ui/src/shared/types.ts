@@ -184,11 +184,10 @@ export type ConfigWebCapabilityToolParameter = {
 export type ConfigWebCapabilityTool = {
   name: string;
   description: string;
-  source: 'builtin' | 'runtime';
   readOnly: boolean;
   parameters: ConfigWebCapabilityToolParameter[];
-  /** 分组：面板按组展示与按组开关，`{ key, label, order }` 由工具目录给出。 */
-  group: { key: string; label: string; order: number };
+  /** 工具族：`null` 表示独立工具；有值时面板按组展示与按组开关。 */
+  group: { key: string; label: string } | null;
 };
 
 export type ConfigWebPlugin = {

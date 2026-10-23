@@ -163,8 +163,8 @@ or a replaced session history. Mica adds these as **incremental extensions**
   outlives a turn (background `run_shell` tasks, running subagents including
   `run_in_background`). The host emits only when the serialized snapshot changed
   and pushes a replacement whole list.
-- `mica/sessionHistory/replaced` (`MICA_SESSION_NOTIFICATIONS`): the
-  `session_compact` tool replaced the persisted history mid-host; the client
+- `mica/sessionHistory/replaced` (`MICA_SESSION_NOTIFICATIONS`): the host
+  replaced the persisted history (edit-and-rerun, compaction); the client
   reloads the session instead of showing a stale transcript.
 - `mica/turn/retrying` (`MICA_TURN_NOTIFICATIONS`): the host is waiting out its
   retry delay after a transient provider error and will re-run the same turn

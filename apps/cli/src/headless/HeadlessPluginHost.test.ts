@@ -85,9 +85,11 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
   it('registers the session-autonomy tools and TodoWrite', async () => {
     const { host } = await mount();
     const names = toolNames();
-    for (const expected of ['session_info', 'session_compact', 'session_peers', 'TodoWrite']) {
+    for (const expected of ['session_peers', 'TodoWrite']) {
       expect(names).toContain(expected);
     }
+    // session_info / session_compact were removed: the model must not see them again.
+    expect(names).not.toContain('session_info');
     await host.dispose();
   });
 
@@ -96,7 +98,6 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     const agent = host as unknown as { hooks: typeof hooks };
     const result = agent.hooks.pipelineSync('system-prompt:build', { runtime: {}, prompt: 'BASE' });
     expect(result.prompt).toContain('会话自治');
-    expect(result.prompt).toContain('session_compact');
     expect(result.prompt).toContain('session_peers');
     expect(result.prompt).toContain('BASE');
     await host.dispose();

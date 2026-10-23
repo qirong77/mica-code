@@ -16,12 +16,13 @@ import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
 import { ToolKillTask } from './ToolKillTask.js';
 import { ToolReadImage } from './ToolReadImage.js';
 import { ToolWaitFor } from './ToolWaitFor.js';
-import type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
+import type { ToolExecuteCallbacks, ToolInput, ToolSource } from './MicaTool.js';
 import { ToolPtySpawn } from './pty/ToolPtySpawn.js';
 import { ToolPtySend } from './pty/ToolPtySend.js';
 import { ToolPtyRead } from './pty/ToolPtyRead.js';
 import { ToolPtyWait } from './pty/ToolPtyWait.js';
 import { ToolPtyKill } from './pty/ToolPtyKill.js';
+import { RUNTIME_TOOL_DESCRIPTORS } from './runtimeToolDescriptors.js';
 
 export type ToolFilter = (name: string) => boolean;
 
@@ -32,21 +33,19 @@ export type RuntimeToolRegistrationOptions = {
 export type ToolCatalogEntry = {
   name: string;
   description: string;
-  source: 'builtin' | 'runtime' | 'mcp';
+  source: ToolSource;
   /** Original MCP server name for `source: 'mcp'` entries. */
   mcpServer?: string;
   readOnly: boolean;
   /** 入参摘要：能力面板的详情要能说清这个工具吃什么，不用去翻代码。 */
   parameters: ToolParameterEntry[];
-  /** 所属分组：能力面板按组展示、按组开关（pty_* 这类工具单独一行没有意义）。 */
-  group: ToolGroupEntry;
+  /** 所属工具族（共享名字前缀，如 `pty_*`）；`null` 表示独立工具，面板平铺。 */
+  group: ToolGroupEntry | null;
 };
 
 export type ToolGroupEntry = {
   key: string;
   label: string;
-  /** 面板里的组顺序：目录本身按名字排序，分组后要回到「常用 → 少见」的阅读顺序。 */
-  order: number;
 };
 
 export type ToolParameterEntry = {
@@ -57,48 +56,14 @@ export type ToolParameterEntry = {
 };
 
 /**
- * 工具分组表：能力面板按组展示与开关的唯一来源。
- *
- * 显式名字表优先（同一组的工具未必共享前缀，例如 `run_shell` 与 `kill_task`），
- * 其次按名字前缀匹配（`pty_*`、`session_*`、`loop_*` 这类插件工具族），最后落进
- * 「其他工具」。新增工具时优先补 `TOOL_NAMES` 或让名字沿用已有前缀。
+ * 工具族的显示名。只有真正同族的工具（共享名字前缀且不止一个成员，如 `pty_*`）才成组，
+ * 其余工具一律平铺——它们之间没有共同的调用语义，硬凑成「文件 / 命令」这类类别反而
+ * 让人看不出这个组到底改动了什么。新增族时在这里补中文名，缺省用前缀本身。
  */
-const TOOL_GROUPS: Record<string, ToolGroupEntry> = {
-  file: { key: 'file', label: '文件读取', order: 10 },
-  edit: { key: 'edit', label: '文件修改', order: 20 },
-  shell: { key: 'shell', label: '命令与后台任务', order: 30 },
-  pty: { key: 'pty', label: '交互终端', order: 40 },
-  web: { key: 'web', label: '联网检索', order: 50 },
-  skill: { key: 'skill', label: '技能', order: 60 },
-  session: { key: 'session', label: '会话自治', order: 70 },
-  loop: { key: 'loop', label: '定时循环', order: 80 },
-  subagent: { key: 'subagent', label: '子代理', order: 90 },
-  todo: { key: 'todo', label: '任务清单', order: 100 },
-  other: { key: 'other', label: '其他工具', order: 1000 },
-};
-
-const TOOL_NAME_GROUPS: Record<string, string> = {
-  read_file: 'file',
-  read_image: 'file',
-  list_files: 'file',
-  grep_search: 'file',
-  write_file: 'edit',
-  apply_patch: 'edit',
-  run_shell: 'shell',
-  background_tasks: 'shell',
-  read_task_output: 'shell',
-  kill_task: 'shell',
-  wait_for: 'shell',
-  web_fetch: 'web',
-  web_search: 'web',
-  pty_spawn: 'pty',
-  pty_send: 'pty',
-  pty_read: 'pty',
-  pty_wait: 'pty',
-  pty_kill: 'pty',
-  Skill: 'skill',
-  Agent: 'subagent',
-  TodoWrite: 'todo',
+const TOOL_FAMILY_LABELS: Record<string, string> = {
+  pty: '交互终端',
+  session: '会话自治',
+  loop: '定时循环',
 };
 
 export type ToolExecutionEvent = {
@@ -158,7 +123,6 @@ export function unregisterMcpTools(): void {
 }
 
 export function registerRuntimeTool(tool: MicaTool, options: RuntimeToolRegistrationOptions = {}): void {
-  if (tool.source !== 'mcp') tool.source = 'runtime';
   runtimeTools = [...runtimeTools.filter((entry) => entry !== tool), tool];
   runtimeToolOptions.set(tool, options);
 }
@@ -211,38 +175,72 @@ export function getToolDefinitions(filter?: ToolFilter): Tool[] {
     }));
 }
 
-export function getToolCounts(): { builtin: number; runtime: number; mcp: number; total: number } {
-  const runtimeCount = getActiveRuntimeTools().length;
+export function getToolCounts(): { builtin: number; mcp: number; total: number } {
+  const builtinCount = builtinTools.length + getActiveRuntimeTools().length;
   return {
-    builtin: builtinTools.length,
-    runtime: runtimeCount,
+    builtin: builtinCount,
     mcp: mcpTools.length,
-    total: builtinTools.length + runtimeCount + mcpTools.length,
+    total: builtinCount + mcpTools.length,
   };
 }
 
 /** Full tool directory (enabled or not) for the capability panel. */
 export function getToolCatalog(): ToolCatalogEntry[] {
-  return getAllToolsForPrompt().map((tool) => ({
+  const tools = getAllToolsForPrompt();
+  const registered = new Set(tools.map((tool) => tool.name));
+  const families = toolFamilies([...registered, ...orphanDescriptorNames(registered)]);
+  const entries: ToolCatalogEntry[] = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    source: tool.source,
+    source: tool.source === 'mcp' ? 'mcp' : 'builtin',
     mcpServer: tool.mcpServer,
     readOnly: tool.readOnly,
     parameters: toolParameters(tool),
-    group: toolGroup(tool.name),
+    group: families.get(tool.name) ?? null,
   }));
+  // 运行期工具只存在于跑 agent 的进程里：配置页 / 桌面设置页不加载插件，目录会缺
+  // TodoWrite 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
+  for (const descriptor of RUNTIME_TOOL_DESCRIPTORS) {
+    if (registered.has(descriptor.name)) continue;
+    entries.push({
+      ...descriptor,
+      source: 'builtin',
+      group: families.get(descriptor.name) ?? null,
+    });
+  }
+  return entries.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** 名字表 → 前缀族（`session_peers` 之类插件工具）→ 「其他工具」。 */
-function toolGroup(name: string): ToolGroupEntry {
-  const explicit = TOOL_NAME_GROUPS[name];
-  if (explicit) return TOOL_GROUPS[explicit];
-  const prefix = name.includes('_') ? name.slice(0, name.indexOf('_')) : '';
-  if (prefix && TOOL_GROUPS[prefix] && TOOL_GROUPS[prefix].key !== 'other') {
-    return TOOL_GROUPS[prefix];
+function orphanDescriptorNames(registered: Set<string>): string[] {
+  return RUNTIME_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name).filter((name) => !registered.has(name));
+}
+
+/**
+ * 识别工具族：前缀在 `TOOL_FAMILY_LABELS` 里声明过、且当前确实有 ≥2 个成员。
+ *
+ * 不按「前缀相同就算一族」自动推断：`read_file` / `read_image` / `read_task_output`
+ * 前缀相同却分属不同用途，自动成组后按组开关会连带关掉不相干的能力。所以只认显式
+ * 声明的族；其余工具（含 `run_shell`、`apply_patch`、`Agent`）一律独立成行。
+ */
+function toolFamilies(names: string[]): Map<string, ToolGroupEntry> {
+  const counts = new Map<string, number>();
+  for (const name of names) {
+    const prefix = familyPrefix(name);
+    if (prefix) counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
   }
-  return TOOL_GROUPS.other;
+  const families = new Map<string, ToolGroupEntry>();
+  for (const name of names) {
+    const prefix = familyPrefix(name);
+    const label = TOOL_FAMILY_LABELS[prefix];
+    if (!label || (counts.get(prefix) ?? 0) < 2) continue;
+    families.set(name, { key: prefix, label });
+  }
+  return families;
+}
+
+function familyPrefix(name: string): string {
+  const index = name.indexOf('_');
+  return index > 0 ? name.slice(0, index) : '';
 }
 
 /**

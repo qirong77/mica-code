@@ -6,7 +6,6 @@ import { applyGroupEnabled } from '../capabilityGroups.js';
 import { Modal } from '../components/Modal.js';
 import { readCapabilityDefaults, writeCapabilityDefaults } from '../api.js';
 import { appIcons } from '../icons.js';
-import { toolSourceLabel } from '../labels.js';
 import type { ConfigWebCapabilityDefaults } from '../../src/shared/types.js';
 
 type Group = 'skills' | 'tools' | 'mcpServers';
@@ -20,7 +19,6 @@ type Draft = {
 type Item = {
   name: string;
   description: string;
-  meta?: string;
   /** 所属工具分组；技能与 MCP 服务器没有。 */
   group?: { key: string; label: string } | null;
   /** 工具是否只读；skills / MCP server 没有这一项。 */
@@ -108,7 +106,6 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
       return details.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        meta: toolSourceLabel(tool.source),
         group: tool.group,
         readOnly: tool.readOnly,
         parameters: tool.parameters,
@@ -205,7 +202,6 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
             title={
               <span className="capability-detail-title">
                 <code>{detail.name}</code>
-                {detail.meta ? <span className="capability-detail-meta">{detail.meta}</span> : null}
               </span>
             }
             onClose={() => setDetail(null)}

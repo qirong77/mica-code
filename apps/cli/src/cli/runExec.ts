@@ -185,10 +185,9 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       if (started === 'busy-remote') throw new Error(REMOTE_TURN_MESSAGE);
       if (started === 'rejected') throw new Error('The turn was rejected (queue full or blocked)');
       await waitForIdle(executor);
-      // Drain pending plugin ops (session_compact queued by the final turn) as
-      // a fallback: the session-autonomy plugin applies it in its turn:after
-      // already, but a host that never emitted one (e.g. an aborted turn)
-      // still gets drained here.
+      // Final turn:before after the queue empties: plugins that register
+      // turn:before work also get a chance to run for one-shot hosts whose
+      // last turn never emitted a turn:after (e.g. an aborted run).
       if (host.hooks) {
         await host.hooks.emit('turn:before', {
           runtime: host,

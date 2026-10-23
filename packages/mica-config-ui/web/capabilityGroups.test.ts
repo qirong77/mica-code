@@ -38,25 +38,16 @@ describe('buildCapabilitySections', () => {
     expect(sections[0]?.items.map((item) => item.name)).toEqual(['pty_spawn', 'pty_kill']);
   });
 
-  it('orders groups by the catalog order instead of the tool-name order', () => {
-    const ordered = [
-      { name: 'apply_patch', group: { key: 'edit', label: '文件修改', order: 20 } },
-      { name: 'read_file', group: { key: 'file', label: '文件读取', order: 10 } },
-      { name: 'pty_kill', group: { key: 'pty', label: '交互终端', order: 40 } },
-    ];
-    const sections = buildCapabilitySections(ordered, () => true);
-    expect(sections.map((section) => section.key)).toEqual(['file', 'edit', 'pty']);
-  });
-
-  it('keeps ungrouped rows after the ordered groups', () => {
+  it('keeps ungrouped rows in place instead of collecting them at the end', () => {
     const mixed = [
       { name: 'alpha', group: null },
-      { name: 'read_file', group: { key: 'file', label: '文件读取', order: 10 } },
+      { name: 'pty_kill', group: { key: 'pty', label: '交互终端' } },
+      { name: 'pty_read', group: { key: 'pty', label: '交互终端' } },
       { name: 'beta', group: null },
     ];
     const sections = buildCapabilitySections(mixed, () => true);
-    expect(sections.map((section) => section.key)).toEqual(['file', null, null]);
-    expect(sections.slice(1).map((section) => section.items[0]?.name)).toEqual(['alpha', 'beta']);
+    expect(sections.map((section) => section.key)).toEqual([null, 'pty', null]);
+    expect(sections.map((section) => section.items.length)).toEqual([1, 2, 1]);
   });
 });
 

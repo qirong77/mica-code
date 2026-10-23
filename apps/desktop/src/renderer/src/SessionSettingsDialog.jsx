@@ -53,11 +53,6 @@ const MCP_STATUS_LABEL = {
   failed: '连接失败'
 }
 
-const TOOL_SOURCE_LABEL = {
-  builtin: '内置',
-  runtime: '运行期'
-}
-
 const KIND_LABEL = {
   tools: '工具',
   skills: 'Skill',
@@ -81,6 +76,10 @@ export function SessionSettingsDialog({
   const [error, setError] = useState('')
   // 保存中标志的同步副本：apply 里要立刻判重，不能等 setSaving 触发下一次渲染。
   const savingRef = useRef(false)
+  // 最近一次本地选择（连点时不依赖尚未重渲染的 state）与 host 已确认的选择
+  const selectionRef = useRef(null)
+  const confirmedRef = useRef(EMPTY_SELECTION)
+  const pendingSaveRef = useRef(null)
   // 点了哪一行就开哪一行的详情；null 表示没有详情弹窗。
   const [detail, setDetail] = useState(null)
 
@@ -101,6 +100,8 @@ export function SessionSettingsDialog({
         mcpServers: Array.isArray(capabilityResult.mcpServers) ? capabilityResult.mcpServers : []
       })
       setSelection(capabilityResult.selection || EMPTY_SELECTION)
+      selectionRef.current = capabilityResult.selection || EMPTY_SELECTION
+      confirmedRef.current = selectionRef.current
       if (compactResult?.ok) setCompact(normalizeCompact(compactResult))
       else if (compactResult?.error) setError(compactResult.error)
     } catch (loadError) {
@@ -112,34 +113,54 @@ export function SessionSettingsDialog({
     void load()
   }, [load])
 
+  // 保存串行化：连点不丢弃，攒成「最后一次选择」再发一轮请求。丢弃会让开关停在
+  // DOM 已翻转、状态没变的中间态，用户必须再点一次才生效。
+  const flushSave = useCallback(async () => {
+    if (savingRef.current) return
+    const next = pendingSaveRef.current
+    if (!next) return
+    pendingSaveRef.current = null
+    savingRef.current = true
+    setError('')
+    try {
+      const result = await window.mica.chat.setCapabilities(nodeId, next, { sessionId, cwd })
+      if (!result?.ok) {
+        pendingSaveRef.current = null
+        setSelection(confirmedRef.current)
+        selectionRef.current = confirmedRef.current
+        setError(result?.error || '保存失败')
+        return
+      }
+      const applied = result.selection || next
+      confirmedRef.current = applied
+      // 请求期间又点了几下时本地已有更新的选择，不用这次的响应盖回去
+      if (!pendingSaveRef.current) {
+        selectionRef.current = applied
+        setSelection(applied)
+      }
+    } catch (saveError) {
+      pendingSaveRef.current = null
+      setSelection(confirmedRef.current)
+      selectionRef.current = confirmedRef.current
+      setError(formatError(saveError))
+    } finally {
+      savingRef.current = false
+      if (pendingSaveRef.current) void flushSave()
+    }
+  }, [nodeId, sessionId, cwd])
+
   const apply = useCallback(
-    async (next) => {
+    (next) => {
       if (running) {
         setError('本轮正在运行，结束后再调整（避免工具集在一轮中途变化）')
         return
       }
-      // 保存中的连点直接丢弃：上一次请求还在飞，用它的响应覆盖本地选择会让开关来回跳。
-      if (savingRef.current) return
-      savingRef.current = true
-      const previous = selection
+      selectionRef.current = next
       setSelection(next)
-      setError('')
-      try {
-        const result = await window.mica.chat.setCapabilities(nodeId, next, { sessionId, cwd })
-        if (!result?.ok) {
-          setSelection(previous)
-          setError(result?.error || '保存失败')
-          return
-        }
-        setSelection(result.selection || next)
-      } catch (saveError) {
-        setSelection(previous)
-        setError(formatError(saveError))
-      } finally {
-        savingRef.current = false
-      }
+      pendingSaveRef.current = next
+      void flushSave()
     },
-    [nodeId, sessionId, cwd, running, selection]
+    [running, flushSave]
   )
 
   // 压缩设置在请求间隙生效，运行中改也不会让本轮换阈值，所以不受 running 限制。
@@ -174,19 +195,21 @@ export function SessionSettingsDialog({
   }
 
   function toggleWith(disabledKey, name, enabled) {
-    if (!selection) return
-    const current = new Set(selection[disabledKey])
+    const base = selectionRef.current
+    if (!base) return
+    const current = new Set(base[disabledKey])
     if (enabled) current.delete(name)
     else current.add(name)
-    void apply({ ...selection, [disabledKey]: [...current] })
+    void apply({ ...base, [disabledKey]: [...current] })
   }
 
   // 整组开关：一次改写组内全部成员，仍然是同一个禁用名单（能力校验按工具名逐条判定）。
   function toggleGroup(disabledKey, names, enabled) {
-    if (!selection) return
+    const base = selectionRef.current
+    if (!base) return
     void apply({
-      ...selection,
-      [disabledKey]: applyGroupEnabled(selection[disabledKey], names, enabled)
+      ...base,
+      [disabledKey]: applyGroupEnabled(base[disabledKey], names, enabled)
     })
   }
 
@@ -280,7 +303,6 @@ export function SessionSettingsDialog({
                   name: item.name,
                   description: item.description || '',
                   group: item.group,
-                  source: item.source,
                   readOnly: item.readOnly,
                   parameters: item.parameters
                 }))}
@@ -349,9 +371,6 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
   if (!item) return null
   const rows = [
     ['类型', KIND_LABEL[detail.kind] || detail.kind],
-    detail.kind === 'tools'
-      ? ['来源', TOOL_SOURCE_LABEL[item.source] || item.source || '未知']
-      : null,
     detail.kind === 'tools' && item.group ? ['分组', item.group.label] : null,
     detail.kind === 'tools' && typeof item.readOnly === 'boolean'
       ? ['读写', item.readOnly ? '只读' : '可写']

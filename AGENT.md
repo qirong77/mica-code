@@ -244,7 +244,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
-- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组与组顺序由 `mica-tools/registry.ts` 的 `ToolGroupEntry` 唯一定义（名字表 → 前缀族 → 其他工具）；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
+- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组由 `mica-tools/registry.ts` 的 `TOOL_GROUP_FAMILIES` 唯一定义：只有同名前缀的工具（`pty_*`、`loop_*`、`session_*`）成组，且至少两个成员才显示，其余工具平铺；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
+- 设置页与配置页要列出「会话里才会注册」的工具（`Agent`、`TodoWrite`、`session_peers`）时，用 `mica-tools/runtimeToolDescriptors.ts` 的 `RUNTIME_TOOL_DESCRIPTORS`；它们只在同名工具尚未注册时补进 `getCatalog()`，`apps/cli/src/tools/runtimeToolDescriptors.test.ts` 负责与真实工具的定义对账，改工具描述或入参必须同步。目录来源只有 `builtin` 与 `mcp` 两类：插件注册的工具同样按内置上报，面板不区分「运行期」。
 - quick commands 另由 `apps/cli/src/plugins/commands/index.ts` 注册；新增/删除时检查两条路径与 README。
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态、文件、配置或 git 的命令走 exclusive task。交互反馈用 `services.showNotice`。
 - turn 运行中是否可执行由注册时的 `allowDuringTurn` 决定，检查 quick commands 与 `plugins/command-*.ts` 两条路径；exclusive task 期间仅 status、task、agents、new。
@@ -266,7 +267,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 轮询必须监听 signal 并立即返回 aborted；`readOnly: false`，避免并发等待拖住只读批次与重试重放。
 - 超时返回 timeout + wait_id，可带同一 id 续等；超时记录不能丢弃或从 dock 消失。`reason` 仅展示，优先显示于条件标签。
 - app-server 每秒投影 `listActiveWaits()` 为 `mica/waitTasks/updated`；改字段同步工具测试、两端图标与 dock/详情展示。
-- `session_*` 工具仅主 agent 可用。`session_info`、`session_peers` 只读；`session_peers` 经 `mica-session/listSessionTurnLocks()` 按 `sessions/.turn-locks` 持有进程存活枚举运行中实例，只读锁与 session 文件头部，输出 session 文件路径与读法（先 `conversationMessages`，不整读几十 MB 快照）；`session_compact` 执行时只登记，completed 的 `turn:after`（priority 50）应用，必须早于 message-queue（100）。`turn:before`（10）await 在途应用。
+- `session_*` 工具仅主 agent 可用。目前只剩只读的 `session_peers`：经 `mica-session/listSessionTurnLocks()` 按 `sessions/.turn-locks` 持有进程存活枚举运行中实例，只读锁与 session 文件头部，输出 session 文件路径与读法（先 `conversationMessages`，不整读几十 MB 快照）。压缩只经 `/compact`、`mica compact` 与自动压缩，不再暴露给模型。
 
 ### MCP、联网与 Skills
 
@@ -297,7 +298,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
 | `/compact`、桌面快速压缩、`mica compact --tool-results-only` | 本地 toolResultsOnly；保留对话与轮次，不调用模型、不生成 checkpoint，可重复执行 |
 | `/compact llm`、`mica compact --session`                     | 模型摘要 checkpoint，会重写历史                                                 |
-| `--prune-only`、`session_compact`、loop 轮前压缩             | 本地清理，无可清理内容时可丢最早轮次                                            |
+| `--prune-only`、loop 轮前压缩                                | 本地清理，无可清理内容时可丢最早轮次                                            |
 
 - 默认快速压缩替换工具结果与可识别媒体，按字段语义裁剪工具参数；不插入 boundary/summary，不改对话文本。
 - tool-call arguments 必须始终是合法 JSON：只裁正文/长命令，保留路径、pattern、name、offset、短值；解析失败原样保留。
@@ -395,7 +396,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### 展示与面板
 
-- 主文本共用 `--chat-text-size`；用户块与回答保留不同底色、前景与轮次间距。消息标记贴首行，复制/引用按钮绝对定位，不撑高单行消息。
+- 主文本共用 `--chat-text-size`；用户块与回答保留不同底色、前景与轮次间距。消息标记贴首行，复制/引用按钮绝对定位，不撑高单行消息。选中对话里的文字时浮出「引用 / 复制」条（`ChatSelectionBar`，固定定位在选区上方，选区清空或滚动即收起），右键菜单不再提供引用项。
 - **自动链接与全角标点**：唯一规则在 `mica-common/autolink.ts.splitAutolinkPunctuation`，自动链接在首个全角标点处截断且校验显示文本，显式 Markdown 链接原样保留。
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
@@ -545,6 +546,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **禁用态只掉颜色**。禁用按钮保持与可用态完全相同的尺寸、边框与位置，只降前景与底色；`display:none`、改字号或换布局都会让按钮看起来「跳了一下」。
 - **同一动作区的主次按钮统一高度与对齐**。文字主按钮靠右且不参与收缩（加 `flex: none` 与 `white-space: nowrap`），图标按钮给固定宽高；不要在动作区里混入不同高度的控件。
 - **标签在控件上方，不要形容词混排**。「每隔 [60] [分钟] 自动发送」这类把说明塞进控件行会同时破坏对齐与语义；改成上层小标签 + 下层控件，右侧留一句结果说明（「每 1 小时发送一次」）。
+- **条目列表不要靠 `padding-left` 造缩进**。`display: grid` 的 `ul` 会吃掉项目符号，只剩 `padding-left` 留下的空白，正文比同级标题右移一截；符号用 `li::before` 画在符号列里，正文从符号列起排（见 `.auto-compact-rules`）。
+- **同一列的单位要给固定宽度**。`min-width` 配 `k` / `次` / `分钟` 这类不同长度的单位会把每行的步进按钮挤到不同位置；定宽后再让整组右对齐。
 - **页签只有一种形态**。页面级页签统一复用 `.session-tabs` / `.session-tab` 的下划线样式，不新造胶囊、方块或圆角页签；同一产品里出现两套页签即视为缺陷。
 - **开关用共享 `Switch`**（`mica-config-ui/web/components/Ui.tsx`），不要写原生 checkbox，也不要在页面里复制一份轨道样式。
 - **枚举值不直接上屏**。`ready` / `stdio` / `user` / `bundled` 这类机器值在 `mica-config-ui/web/labels.ts` 统一映射成中文后再显示。

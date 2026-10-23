@@ -18,8 +18,6 @@ export type CapabilityItem = {
   description: string;
   /** 所属分组；没有分组的项（技能、MCP 服务器）单独成行。 */
   group?: CapabilityGroupRef | null;
-  /** 工具来源（内置 / 运行期）；设置页与会话弹窗各自映射成中文。 */
-  source?: string;
   /** 工具是否只读。 */
   readOnly?: boolean;
   /** 工具入参；skills / MCP server 没有。 */

@@ -111,9 +111,9 @@ export type HeadlessAutoCompactHook = {
  * runtime's ordering: input:received guard on submit, turn:before +
  * prompt:build before agent.run, turn:beforePersist before the completed
  * save, turn:abort / turn:error on failures, turn:after once the turn
- * finished. Pending plugin ops (e.g. session_compact) are applied by the
- * session-autonomy plugin in turn:after; one-shot headless runs additionally
- * re-emit a final turn:before after the queue empties as a fallback.
+ * finished. One-shot headless runs additionally re-emit a final turn:before
+ * after the queue empties, so turn:before work still runs when the last turn
+ * never produced a turn:after.
  */
 export class HeadlessTurnExecutor {
   private options: HeadlessTurnExecutorOptions;

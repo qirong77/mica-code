@@ -6,7 +6,7 @@
  * `group`），客户端只负责排版与批量改写禁用名单。
  */
 
-export type CapabilityGroupRef = { key: string; label: string; order?: number };
+export type CapabilityGroupRef = { key: string; label: string };
 
 /** 分组只要求名字与可选 group，技能与 MCP 服务器没有 group，按原样单独成行。 */
 export type CapabilityGroupable = {
@@ -25,11 +25,10 @@ export type CapabilitySection<T extends CapabilityGroupable> = {
 };
 
 /**
- * 按分组键归并（不要求同组成员相邻），再按组自带的 `order` 重排。
+ * 按分组键归并（不要求同组成员相邻），顺序沿用工具名的字典序。
  *
- * 目录按工具名排序，同组成员天然被别的工具隔开（`grep_search` / `read_file` 之间夹着
- * `kill_task`），所以按 key 归并而不是只合并相邻项。组顺序由工具目录统一定义，客户端
- * 不另立一份；未分组的项（技能、MCP 服务器）排在已分组之后。
+ * 只有共享前缀的工具族（`pty_*` 等）才带 `group`，它们在字典序里本来就相邻；按 key
+ * 归并是为了不依赖目录的排序细节。独立工具（没有 `group`）就地单独成行，不聚到末尾。
  */
 export function buildCapabilitySections<T extends CapabilityGroupable>(
   items: T[],
@@ -37,7 +36,6 @@ export function buildCapabilitySections<T extends CapabilityGroupable>(
 ): CapabilitySection<T>[] {
   const sections: CapabilitySection<T>[] = [];
   const byKey = new Map<string, CapabilitySection<T>>();
-  const orders = new Map<string, number>();
   for (const item of items) {
     const group = item.group ?? null;
     if (!group) {
@@ -58,9 +56,7 @@ export function buildCapabilitySections<T extends CapabilityGroupable>(
     };
     byKey.set(group.key, section);
     sections.push(section);
-    if (typeof group.order === 'number') orders.set(group.key, group.order);
   }
-  sections.sort((a, b) => sectionOrder(a, orders) - sectionOrder(b, orders));
   for (const section of sections) {
     section.enabledCount = section.items.filter((item) => isEnabled(item.name)).length;
     section.state =
@@ -71,12 +67,6 @@ export function buildCapabilitySections<T extends CapabilityGroupable>(
           : 'partial';
   }
   return sections;
-}
-
-/** 未分组（没有 order）的段排在已分组之后，彼此保持原有相对顺序。 */
-function sectionOrder(section: { key: string | null }, orders: Map<string, number>): number {
-  if (section.key === null) return Number.MAX_SAFE_INTEGER;
-  return orders.get(section.key) ?? Number.MAX_SAFE_INTEGER - 1;
 }
 
 /** 组开关下一次点击的目标状态：全开就关，其他情况一律全开。 */

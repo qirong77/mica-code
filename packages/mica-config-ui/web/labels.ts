@@ -60,10 +60,3 @@ export function providerProtocolLabel(protocol: string | undefined): string {
   if (protocol === 'openai_responses') return 'Responses';
   return protocol || '未知';
 }
-
-/** 工具来源：`builtin` 是产品内置，`runtime` 是运行期插件注册进来的。 */
-export function toolSourceLabel(source: string | undefined): string {
-  if (source === 'builtin') return '内置';
-  if (source === 'runtime') return '运行期';
-  return source || '未知';
-}

@@ -3129,8 +3129,8 @@
   .auto-compact-default {
     flex: none;
     color: var(--text-faint);
-    font-family: var(--font-mono);
     font-size: var(--text-micro);
+    font-variant-numeric: tabular-nums;
   }
 
   .auto-compact-steppers {
@@ -3189,7 +3189,9 @@
   }
 
   .auto-compact-unit {
-    min-width: 24px;
+    /* 定宽而不是 min-width：k / 次 / 分钟 三种单位撑出的宽度不同，会让每行的 ± 位置错开 */
+    width: 30px;
+    flex: none;
     color: var(--text-faint);
     font-size: var(--text-micro);
   }
@@ -3207,13 +3209,39 @@
   .config-rules {
     flex: 1 1 260px;
     min-width: 0;
+  }
+
+  /*
+   * 条目列表（规则说明、控制页步骤）：grid 会吃掉 UA 的项目符号，只剩 padding-left
+   * 留下的空白缩进，正文比同级标题右移一截。符号改成 ::before 自己画，正文从符号列起排。
+   */
+  .auto-compact-rules,
+  .config-rules,
+  .control-steps {
     display: grid;
     gap: 4px;
     margin: 0;
-    padding-left: 16px;
+    padding: 0;
+    list-style: none;
     color: var(--text-faint);
     font-size: var(--text-aux);
     line-height: 1.6;
+  }
+
+  .auto-compact-rules > li,
+  .config-rules > li,
+  .control-steps > li {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 2px;
+  }
+
+  .auto-compact-rules > li::before,
+  .config-rules > li::before,
+  .control-steps > li::before {
+    content: '•';
+    color: var(--text-faint);
   }
 
   .auto-compact-note {
@@ -3759,17 +3787,6 @@
 
   .control-card > .control-note + .control-note {
     margin-top: -6px;
-  }
-
-  /* 未开启时的说明：这是什么、谁提供、怎么打开（条目文案在 browserControl.ts） */
-  .control-steps {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding-left: 18px;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-    line-height: 1.6;
   }
 
   .control-groups {
@@ -4494,16 +4511,6 @@
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.capability-detail-meta {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--panel-muted);
-  color: var(--text-soft);
-  font-family: var(--font-mono);
-  font-size: 11px;
 }
 
 .capability-detail {

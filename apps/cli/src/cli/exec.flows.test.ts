@@ -232,7 +232,7 @@ function createMockProvider() {
           return;
         }
         if (state.mode === 'session-tool' && state.requests.length === 1) {
-          // Ask the model to call session_info: proves the headless plugin host
+          // Ask the model to call session_peers: proves the headless plugin host
           // registered the session-autonomy tools for exec/app-server runs.
           const callId = 'call_session_1';
           const argumentsText = '{}';
@@ -246,7 +246,7 @@ function createMockProvider() {
               type: 'function_call',
               status: 'in_progress',
               call_id: callId,
-              name: 'session_info',
+              name: 'session_peers',
               arguments: '',
             },
           });
@@ -264,7 +264,7 @@ function createMockProvider() {
               type: 'function_call',
               status: 'completed',
               call_id: callId,
-              name: 'session_info',
+              name: 'session_peers',
               arguments: argumentsText,
             },
           });
@@ -774,24 +774,24 @@ suite('mica exec real-user flows (mock provider)', () => {
     expect(parseJsonl(result.stdout).some((event) => String(event.message).includes('maximum of 1 turns'))).toBe(true);
   });
 
-  itE2E('headless exec exposes the session-autonomy tools (session_info round trip)', async () => {
+  itE2E('headless exec exposes the session-autonomy tools (session_peers round trip)', async () => {
     mock!.state.mode = 'session-tool';
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
     const home = makeHome('exec-session-tool');
 
-    const result = await runCli(['exec', '--json', '查看会话信息'], { MICA_HOME: home });
+    const result = await runCli(['exec', '--json', '查看运行中的会话'], { MICA_HOME: home });
 
     expect(result.code).toBe(0);
-    // The first request carries the session_info tool definition (the headless
+    // The first request carries the session_peers tool definition (the headless
     // plugin host registered session-autonomy for exec, not just the TUI).
-    expect(JSON.stringify(mock!.state.requests[0]?.tools ?? [])).toContain('session_info');
-    // The model called session_info and the host executed it: the second
-    // request carries the tool result with real session metadata.
+    expect(JSON.stringify(mock!.state.requests[0]?.tools ?? [])).toContain('session_peers');
+    // The model called session_peers and the host executed it: the second
+    // request carries the tool result listing running instances.
     expect(mock!.state.requests).toHaveLength(2);
     const secondRequest = JSON.stringify(mock!.state.requests[1]?.input ?? []);
     expect(secondRequest).toContain('function_call_output');
-    expect(secondRequest).toContain('会话 id');
+    expect(secondRequest).toContain('Mica 会话');
     expect(parseJsonl(result.stdout).some((event) => event.type === 'turn.completed')).toBe(true);
   });
 

@@ -24,7 +24,6 @@ export async function getCapabilityDefaultsDetails(): Promise<ConfigWebCapabilit
       .map((tool) => ({
         name: tool.name,
         description: tool.description,
-        source: tool.source as 'builtin' | 'runtime',
         readOnly: tool.readOnly,
         parameters: tool.parameters,
         group: tool.group,

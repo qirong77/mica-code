@@ -18,8 +18,6 @@ export type HeadlessRuntimeServicesOptions = {
   /** Session notices (retry hints, failures, command results) kept out of the provider history. */
   notices: { ensure(): TurnNoticeLog };
   isBusy: () => boolean;
-  /** Called after a session_* tool replaced the persisted history (e.g. app-server notifies its client). */
-  onHistoryApplied?: () => void;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -153,7 +151,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         messages: snapshot.messages,
         options: compactOptions,
         summarize: async () => {
-          throw new Error('compact in headless mode must not summarize; use session_compact instead');
+          throw new Error('compact in headless mode must not summarize');
         },
       });
       await this.applySessionHistory?.(concreteAgent, targetSessionController, ownerSessionId, {
@@ -195,9 +193,6 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         conversationMessages: compacted,
       });
       return { beforeCount: historyOptions.beforeCount, afterCount: appliedMessages.length };
-    },
-    onSessionHistoryApplied() {
-      options.onHistoryApplied?.();
     },
   };
 }

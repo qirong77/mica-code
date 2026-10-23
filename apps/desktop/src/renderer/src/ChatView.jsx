@@ -1775,6 +1775,47 @@ function readTranscriptSelection() {
   return { text, role }
 }
 
+/** 选中对话文字后浮在选区上方的操作条，替代右键菜单里的「引用」。 */
+function ChatSelectionBar({ bar, onQuote, onCopy, copied }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState({ left: bar.x, top: bar.y })
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const width = ref.current.offsetWidth
+    const height = ref.current.offsetHeight
+    const left = Math.min(Math.max(8, bar.x - width / 2), window.innerWidth - width - 8)
+    const top = bar.y - height - 8 < 8 ? bar.y + height + 8 : bar.y - height - 8
+    setPos({ left, top })
+  }, [bar.x, bar.y, bar.text])
+  return (
+    <div
+      className="chat-selection-bar"
+      ref={ref}
+      style={{
+        left: pos.left,
+        top: pos.top
+      }}
+    >
+      <button
+        type="button"
+        className="chat-selection-bar-btn"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onQuote}
+      >
+        引用
+      </button>
+      <button
+        type="button"
+        className="chat-selection-bar-btn"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onCopy}
+      >
+        {copied ? '已复制' : '复制'}
+      </button>
+    </div>
+  )
+}
+
 function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
@@ -1801,14 +1842,6 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     setPos({ x: px, y: py })
   }, [menu.x, menu.y])
   const allItems = [
-    menu.selection
-      ? {
-          id: 'quote',
-          label: '引用',
-          title: '把选中的文字引用进输入框',
-          icon: IconQuote
-        }
-      : null,
     {
       id: 'compact-local',
       label: '快速压缩（本地）',
@@ -2653,6 +2686,9 @@ export function ChatView({
   // 当前候选列表属于哪一类触发字符（`@` 文件 / `/` skill），换类时先清空旧结果
   const completionKindRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null)
+  // 选中对话文字后浮出的引用/复制条：{ text, role, x, y } | null
+  const [selectionBar, setSelectionBar] = useState(null)
+  const [selectionCopied, setSelectionCopied] = useState(false)
   const [imagePreview, setImagePreview] = useState(null)
   const [contextDetail, setContextDetail] = useState(false)
   const [commitRunning, setCommitRunning] = useState(false)
@@ -3715,7 +3751,7 @@ export function ChatView({
           applyBtwThread(event.thread)
           break
         case 'session_history_replaced': {
-          // session_compact 工具在 host 侧替换了持久化历史（主进程已重新
+          // host 侧替换了持久化历史（编辑重跑、压缩；主进程已重新
           // 读取会话文件）：立即用新历史替换消息列表，而不是保留旧记录直到
           // 会话重开。流式行随替换一并丢弃（turn 已完成，紧随其后的
           // step_finish 只做收尾）。
@@ -5226,6 +5262,44 @@ export function ChatView({
     role: activeRole
   })
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  // 选中对话里的文字时浮出「引用 / 复制」条；选区清空、滚动或点到别处就收起
+  useEffect(() => {
+    let timer = null
+    const update = () => {
+      const selection = readTranscriptSelection()
+      if (!selection) {
+        setSelectionBar(null)
+        return
+      }
+      const range = window.getSelection?.()?.getRangeAt?.(0)
+      const rect = range?.getBoundingClientRect?.()
+      if (!rect || (!rect.width && !rect.height)) {
+        setSelectionBar(null)
+        return
+      }
+      setSelectionCopied(false)
+      setSelectionBar({ ...selection, x: rect.left + rect.width / 2, y: rect.top })
+    }
+    const scheduleUpdate = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(update, 60)
+    }
+    const hide = (event) => {
+      if (event?.target?.closest?.('.chat-selection-bar')) return
+      setSelectionBar(null)
+    }
+    document.addEventListener('selectionchange', scheduleUpdate)
+    document.addEventListener('pointerdown', hide, true)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('resize', hide)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      document.removeEventListener('selectionchange', scheduleUpdate)
+      document.removeEventListener('pointerdown', hide, true)
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('resize', hide)
+    }
+  }, [])
   const openChatContextMenu = useCallback(
     (event) => {
       event.preventDefault()
@@ -5234,9 +5308,7 @@ export function ChatView({
         x: event.clientX,
         y: event.clientY,
         hasSession: Boolean(sessionIdRef.current),
-        running,
-        // 右键不会折叠选区（点在选区内时），所以这里读到的就是用户刚选中的那段字
-        selection: readTranscriptSelection()
+        running
       })
     },
     [running]
@@ -5292,11 +5364,6 @@ export function ChatView({
   const runContextMenuAction = useCallback(
     async (action) => {
       setContextMenu(null)
-      if (action === 'quote') {
-        const selection = contextMenu?.selection
-        if (selection) quoteMessage(selection)
-        return
-      }
       if (action === 'compact-local' || action === 'compact-model' || action === 'clear') {
         await runSlashCommand({
           name: action === 'clear' ? 'clear' : 'compact',
@@ -5344,11 +5411,9 @@ export function ChatView({
     },
     [
       appendNotice,
-      contextMenu,
       onResumeSessionRef,
       onSessionRenamedRef,
       onShareSessionRef,
-      quoteMessage,
       runSlashCommand,
       startCommitTask
     ]
@@ -6118,6 +6183,23 @@ export function ChatView({
             onAction={runContextMenuAction}
             onClose={closeContextMenu}
             commitRunning={commitRunning}
+          />
+        )}
+        {selectionBar && (
+          <ChatSelectionBar
+            bar={selectionBar}
+            copied={selectionCopied}
+            onQuote={() => {
+              quoteMessage(selectionBar)
+              window.getSelection?.()?.removeAllRanges?.()
+              setSelectionBar(null)
+            }}
+            onCopy={() => {
+              navigator.clipboard?.writeText?.(selectionBar.text)?.then?.(
+                () => setSelectionCopied(true),
+                () => undefined
+              )
+            }}
           />
         )}
         {/* By The Way 的抽屉：挂在 `.chat-view` 直属子节点上（不是输入条里），这样它
