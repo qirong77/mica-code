@@ -244,7 +244,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
-- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组由 `mica-tools/registry.ts` 的 `TOOL_GROUP_FAMILIES` 唯一定义：只有同名前缀的工具（`pty_*`、`loop_*`、`session_*`）成组，且至少两个成员才显示，其余工具平铺；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
+- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组由 `mica-tools/registry.ts` 的 `TOOL_FAMILY_LABELS` 唯一定义：只认声明过前缀的工具（`pty_*`、`loop_*`、`session_*`、`background_tasks_list` 与 `background_tasks_kill`），且至少两个成员才显示，其余工具平铺；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
 - 设置页与配置页要列出「会话里才会注册」的工具（`Agent`、`TodoWrite`、`session_peers`）时，用 `mica-tools/runtimeToolDescriptors.ts` 的 `RUNTIME_TOOL_DESCRIPTORS`；它们只在同名工具尚未注册时补进 `getCatalog()`，`apps/cli/src/tools/runtimeToolDescriptors.test.ts` 负责与真实工具的定义对账，改工具描述或入参必须同步。目录来源只有 `builtin` 与 `mcp` 两类：插件注册的工具同样按内置上报，面板不区分「运行期」。
 - quick commands 另由 `apps/cli/src/plugins/commands/index.ts` 注册；新增/删除时检查两条路径与 README。
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态、文件、配置或 git 的命令走 exclusive task。交互反馈用 `services.showNotice`。
@@ -544,6 +544,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **禁用侧边条高亮**。选中/当前项不要用 `border-left` 或 `inset ... 0 0` 造一条竖直亮条，读起来像编辑器 gutter、也让行左缘错位；用背景、圆角边框和字重区分选中态。语义上的引用块（`blockquote`、`chat-quote`）与容器分隔线不在此列。
 - **一行里的控件必须等高**。原生 `<select>`、`<input type=checkbox>`、系统按钮各带自己的字号与内边距，同桌摆放一定歪：要么 `appearance: none` 自绘（箭头用绝对定位的图标），要么用共享组件。数字 + 单位这类复合控件放在同一条边框里，共用 `height` 与 `line-height`。
 - **禁用态只掉颜色**。禁用按钮保持与可用态完全相同的尺寸、边框与位置，只降前景与底色；`display:none`、改字号或换布局都会让按钮看起来「跳了一下」。
+- **无图标就别留图标格**。按钮模板固定渲染 14px 图标格加 `gap` 时，纯文字按钮的内容会整体偏移 10px，看起来像「文字没居中」；共享 `Button` 只在 `icon` / `loading` 存在时才输出图标格。
 - **同一动作区的主次按钮统一高度与对齐**。文字主按钮靠右且不参与收缩（加 `flex: none` 与 `white-space: nowrap`），图标按钮给固定宽高；不要在动作区里混入不同高度的控件。
 - **标签在控件上方，不要形容词混排**。「每隔 [60] [分钟] 自动发送」这类把说明塞进控件行会同时破坏对齐与语义；改成上层小标签 + 下层控件，右侧留一句结果说明（「每 1 小时发送一次」）。
 - **条目列表不要靠 `padding-left` 造缩进**。`display: grid` 的 `ul` 会吃掉项目符号，只剩 `padding-left` 留下的空白，正文比同级标题右移一截；符号用 `li::before` 画在符号列里，正文从符号列起排（见 `.auto-compact-rules`）。

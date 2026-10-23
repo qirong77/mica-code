@@ -880,9 +880,9 @@ function classifyToolActivity(name: string, argsText: string): ToolActivity {
   if (name === 'Skill') {
     return { kind: 'other', description: `Using the ${compactString(args.skill) || 'selected'} skill…` };
   }
-  if (name === 'background_tasks') return { kind: 'other', description: 'Checking background tasks…' };
+  if (name === 'background_tasks_list') return { kind: 'other', description: 'Checking background tasks…' };
   if (name === 'read_task_output') return { kind: 'other', description: 'Checking task output…' };
-  if (name === 'kill_task') return { kind: 'other', description: 'Stopping background task…' };
+  if (name === 'background_tasks_kill') return { kind: 'other', description: 'Stopping background task…' };
 
   try {
     const display = clampOneLine(micaTools.getDisplayText(name, args), 80);

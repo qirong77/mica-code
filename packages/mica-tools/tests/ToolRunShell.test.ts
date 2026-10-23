@@ -160,7 +160,7 @@ describe('ToolRunShell', () => {
         'test-agent-owner',
       );
       expect(result).toContain(`查看输出: read_task_output(task_id="${taskId}")`);
-      expect(result).toContain(`终止任务: kill_task(task_id="${taskId}")`);
+      expect(result).toContain(`终止任务: background_tasks_kill(task_id="${taskId}")`);
 
       const content = await waitForFileContains(outputPath, '[mica background task exited]');
       expect(content).toContain('[mica background task]');

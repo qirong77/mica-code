@@ -39,9 +39,13 @@ export function Button({
       autoFocus={autoFocus}
       onClick={onClick}
     >
-      <span className="ui-button-icon" aria-hidden="true">
-        {loading ? <span className="ui-button-spinner" aria-hidden="true" /> : icon}
-      </span>
+      {/* 没有图标时不渲染占位：空的 14px 图标格加 gap 会把文字挤偏中心 10px，
+          纯文字按钮（对话框的取消 / 确定）看起来就像没居中。 */}
+      {loading || icon ? (
+        <span className="ui-button-icon" aria-hidden="true">
+          {loading ? <span className="ui-button-spinner" aria-hidden="true" /> : icon}
+        </span>
+      ) : null}
       {children ? <span>{children}</span> : null}
     </button>
   );

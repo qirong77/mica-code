@@ -17,9 +17,9 @@ const DEFAULT_TOOL_ICONS = new Map<string, string>(
     Skill: '✨',
     apply_patch: '🩹',
     Agent: '🤖',
-    background_tasks: '📋',
+    background_tasks_list: '📋',
+    background_tasks_kill: '📋',
     read_task_output: '📋',
-    kill_task: '📋',
     wait_for: '⏳',
   }),
 );

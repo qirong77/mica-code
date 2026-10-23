@@ -30,7 +30,7 @@ function pad(text: string, width: number): string {
 export class ToolBackgroundTasks extends MicaTool {
   constructor() {
     super(
-      'background_tasks',
+      'background_tasks_list',
       '列出 run_shell 后台任务。',
       {
         type: 'object' as const,
@@ -65,7 +65,7 @@ export class ToolBackgroundTasks extends MicaTool {
       header,
       ...rows,
       '',
-      '使用 read_task_output(task_id="...") 查看输出；使用 kill_task(task_id="...") 终止运行中的任务。',
+      '使用 read_task_output(task_id="...") 查看输出；使用 background_tasks_kill(task_id="...") 终止运行中的任务。',
     ].join('\n');
   }
 

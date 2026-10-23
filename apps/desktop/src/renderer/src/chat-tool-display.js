@@ -61,10 +61,10 @@ export function toolSummary(tool, max = 0) {
         [input.subagent_type, input.description || input.operation].filter(Boolean).join(' · '),
         max
       )
-    case 'background_tasks':
+    case 'background_tasks_list':
       return compactLine(input.status || 'all', max)
     case 'read_task_output':
-    case 'kill_task':
+    case 'background_tasks_kill':
       return compactLine(input.task_id, max)
     case 'wait_for':
       // 续等调用只有 wait_id，新调用才有 kind 与条件字段。

@@ -15,9 +15,9 @@ const TOOL_ICONS: Record<string, string> = {
   Skill: '✨',
   Agent: '🤖',
   TodoWrite: '📝',
-  background_tasks: '📋',
+  background_tasks_list: '📋',
+  background_tasks_kill: '📋',
   read_task_output: '📋',
-  kill_task: '📋',
   wait_for: '⏳',
 };
 
@@ -39,9 +39,9 @@ const TOOL_LABELS: Record<string, string> = {
   Skill: 'Load skill',
   Agent: 'Subagent',
   TodoWrite: 'Plan',
-  background_tasks: 'Background tasks',
+  background_tasks_list: 'List tasks',
+  background_tasks_kill: 'Stop task',
   read_task_output: 'Task output',
-  kill_task: 'Stop task',
   wait_for: 'Wait for',
 };
 

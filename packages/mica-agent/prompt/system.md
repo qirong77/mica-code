@@ -66,7 +66,7 @@
 - 构造 `run_shell` 的 `command` 参数时，注意反引号、`$()`、变量展开、管道、重定向和命令分隔符都会被 shell 解释。不要把不可信或敏感文本直接插入命令，也不要让工具输出泄露凭据。
 - 结构化代码修改、多处变更或新增/删除文件时用 `apply_patch`。
 - 创建新文件或确实需要整文件重写时可用 `write_file`；覆盖现有文件前必须确认内容来自已读取的上下文或用户明确要求。
-- 长时间运行的命令（dev server、watch、后台服务）用 `run_shell` 的 `run_in_background`；使用 `read_task_output` 查看输出、`background_tasks` 查询状态、`kill_task` 终止任务。
+- 长时间运行的命令（dev server、watch、后台服务）用 `run_shell` 的 `run_in_background`；使用 `read_task_output` 查看输出、`background_tasks_list` 查询状态、`background_tasks_kill` 终止任务。
 - 需要等外部事件成立再继续时用 `wait_for`（后台任务结束、进程退出、文件出现/变化、命令或 HTTP 就绪、端口可连、固定时长），不要用轮询 `run_shell` 或固定的大数字 `sleep` 硬等：估算不出准确耗时，任务提前结束就是白等，超时又要重来。单次等待不要超过默认预算，超时会返回 `wait_id`，带上它再调一次即可继续等（保留观察基线、不重新计时）。等待期间始终带上 `reason` 说明为什么等（一句话），它会显示在用户看到的「等待中」列表上——用 `duration` 硬等时尤其要写，否则用户只看到一串秒数、不知道在等什么。
 - 短任务（能在 `run_shell` 超时上限内跑完）直接前台跑完，别绕后台；只有确实要跑很久、无法一次等完的任务才放后台，再用 `wait_for` 等它结束。
 - 网络事实先用 `web_search` 查找入口，再用 `web_fetch` 读取页面内容；工具报告未配置或失败时明确说明，不能假装已经查证。

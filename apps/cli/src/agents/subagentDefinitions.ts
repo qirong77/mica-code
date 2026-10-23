@@ -45,7 +45,7 @@ const READ_ONLY_TOOLS = [
   'read_image',
   'list_files',
   'grep_search',
-  'background_tasks',
+  'background_tasks_list',
   'read_task_output',
   'web_fetch',
   'web_search',
@@ -137,7 +137,13 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   {
     name: 'Tester',
     description: 'Verification subagent that can run tests/typecheck within owned_paths and report outcomes.',
-    allowedTools: [...READ_ONLY_TOOLS, 'run_shell', 'background_tasks', 'read_task_output', 'kill_task'],
+    allowedTools: [
+      ...READ_ONLY_TOOLS,
+      'run_shell',
+      'background_tasks_list',
+      'read_task_output',
+      'background_tasks_kill',
+    ],
     disallowedTools: ['Agent', 'write_file', 'apply_patch'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
@@ -172,7 +178,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description:
       'Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.',
     allowedTools: READ_ONLY_TOOLS,
-    disallowedTools: ['Agent', 'write_file', 'apply_patch', 'run_shell', 'kill_task'],
+    disallowedTools: ['Agent', 'write_file', 'apply_patch', 'run_shell', 'background_tasks_kill'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',

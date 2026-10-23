@@ -89,7 +89,7 @@ export class ToolRunShell extends MicaTool {
         run_in_background: {
           type: 'boolean',
           description:
-            '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。后续用 read_task_output 查看输出、background_tasks 查询状态、kill_task 终止任务。',
+            '设为 true 在后台运行命令，不等待结果。适用于 dev server、watch 模式等长时间运行的命令。后续用 read_task_output 查看输出、background_tasks_list 查询状态、background_tasks_kill 终止任务。',
         },
       },
       required: ['command'],
@@ -292,7 +292,7 @@ export class ToolRunShell extends MicaTool {
       `输出文件: ${outputPath}`,
       `输出上限: ${formatSize(MAX_BACKGROUND_OUTPUT_BYTES)}，超过后会自动终止进程。`,
       `查看输出: read_task_output(task_id="${id}")`,
-      `终止任务: kill_task(task_id="${id}")`,
+      `终止任务: background_tasks_kill(task_id="${id}")`,
     ].join('\n');
   }
 

@@ -10,7 +10,7 @@ const ALLOWED_SIGNALS = new Set<NodeJS.Signals>(['SIGTERM', 'SIGKILL', 'SIGINT']
 
 export class ToolKillTask extends MicaTool {
   constructor() {
-    super('kill_task', '终止 run_shell 启动的后台任务。', {
+    super('background_tasks_kill', '终止 run_shell 启动的后台任务。', {
       type: 'object' as const,
       properties: {
         task_id: { type: 'string', description: '后台任务 ID。' },

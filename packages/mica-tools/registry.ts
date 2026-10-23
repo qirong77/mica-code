@@ -64,6 +64,7 @@ const TOOL_FAMILY_LABELS: Record<string, string> = {
   pty: '交互终端',
   session: '会话自治',
   loop: '定时循环',
+  background_tasks: '后台任务',
 };
 
 export type ToolExecutionEvent = {
@@ -221,26 +222,26 @@ function orphanDescriptorNames(registered: Set<string>): string[] {
  * 不按「前缀相同就算一族」自动推断：`read_file` / `read_image` / `read_task_output`
  * 前缀相同却分属不同用途，自动成组后按组开关会连带关掉不相干的能力。所以只认显式
  * 声明的族；其余工具（含 `run_shell`、`apply_patch`、`Agent`）一律独立成行。
+ *
+ * 成员判定是「等于前缀」或「以前缀加下划线开头」，因此 `background_tasks_list` 与
+ * `background_tasks_kill` 归为同一族。前缀本身可以含下划线，长的优先匹配。
  */
 function toolFamilies(names: string[]): Map<string, ToolGroupEntry> {
-  const counts = new Map<string, number>();
-  for (const name of names) {
-    const prefix = familyPrefix(name);
-    if (prefix) counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
-  }
   const families = new Map<string, ToolGroupEntry>();
-  for (const name of names) {
-    const prefix = familyPrefix(name);
-    const label = TOOL_FAMILY_LABELS[prefix];
-    if (!label || (counts.get(prefix) ?? 0) < 2) continue;
-    families.set(name, { key: prefix, label });
+  const prefixes = Object.keys(TOOL_FAMILY_LABELS).sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
+    const members = names.filter((name) => belongsToFamily(name, prefix));
+    if (members.length < 2) continue;
+    for (const name of members) {
+      if (families.has(name)) continue;
+      families.set(name, { key: prefix, label: TOOL_FAMILY_LABELS[prefix] });
+    }
   }
   return families;
 }
 
-function familyPrefix(name: string): string {
-  const index = name.indexOf('_');
-  return index > 0 ? name.slice(0, index) : '';
+function belongsToFamily(name: string, prefix: string): boolean {
+  return name === prefix || name.startsWith(`${prefix}_`);
 }
 
 /**

@@ -1242,7 +1242,7 @@ async function handleCodexRequest(
     }
     case MICA_METHODS.killBackgroundTask: {
       // Mica extension: background shell tasks are owned by the host process, so
-      // the desktop can only stop one through it (mirrors the CLI kill_task tool).
+      // the desktop can only stop one through it (mirrors the CLI background_tasks_kill tool).
       const taskId = paramString(params, 'taskId');
       if (!taskId) {
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');

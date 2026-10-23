@@ -12,9 +12,23 @@ describe('tool catalog', () => {
 
   it('leaves tools without a shared prefix ungrouped', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
-    for (const name of ['run_shell', 'kill_task', 'apply_patch', 'read_file', 'web_search', 'Agent', 'Skill']) {
+    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_search', 'Agent', 'Skill']) {
       expect(byName.get(name)?.group, name).toBeNull();
     }
+  });
+
+  it('groups the background task family by the shared prefix', () => {
+    const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
+    expect(byName.get('background_tasks_list')?.group).toEqual({
+      key: 'background_tasks',
+      label: '后台任务',
+    });
+    expect(byName.get('background_tasks_kill')?.group).toEqual({
+      key: 'background_tasks',
+      label: '后台任务',
+    });
+    // 读输出没有同一个前缀，不并入这一族
+    expect(byName.get('read_task_output')?.group).toBeNull();
   });
 
   it('stays flat for prefixes that are not declared as a family', () => {
